@@ -64,6 +64,28 @@ not complete `streamText` or Urd integration tests. Reproducible artifacts are i
 `%TEMP%\urd-loop-review-ec7fbacd\`. Source evidence supports testing the managed
 loop, not declaring either loop shape qualified or smaller.
 
+### Narrow published-release integration check
+
+A separate probe used published `ai@7.0.159`, whose registry provenance identifies
+source commit [`028a025398782f4938303f48fbeee45c79af544b`](https://github.com/vercel/ai/tree/028a025398782f4938303f48fbeee45c79af544b).
+This is **not** the earlier source-review pin. Relevant installed source files
+were matched to this release. Each case used the real `streamText`, the SDK's
+mock model, one harmless counter tool and a failing save operation:
+
+| Condition | Model calls observed | Result |
+| --- | ---: | --- |
+| SDK-managed loop; save rejects in `onStepEnd` | 2 | Error swallowed; normal completion. |
+| SDK-managed loop; save rejects in next `prepareStep` | 1 | Next model call prevented; error emitted in the stream. |
+| Single-step caller; save rejects before calling SDK again | 1 | Next invocation prevented by the caller. |
+
+All assertions passed, with independent review and repeat runs. Crucially, the
+`prepareStep` failure did **not** throw during stream consumption or reject the
+finish-reason promise; consumers must inspect error events, not treat completion
+without a thrown exception as success.
+The first tool had already executed in every case. This tests a next-model gate,
+not rollback, real provider transport, restart recovery or overall Urd fitness.
+Artifacts and the dependency lockfile are in `%TEMP%\urd-release-probe-f6a94b69\`.
+
 ## Managed runtimes: legitimate alternatives, different responsibilities
 
 The inspected Copilot SDK/CLI and Codex app-server expose more than model calls:

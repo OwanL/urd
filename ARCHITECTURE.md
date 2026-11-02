@@ -401,6 +401,13 @@ and maintenance, rather than treating either custom code or an SDK as inherently
 simpler. None is selected or automatically qualified. The no-Pi requirement
 remains unchanged.
 
+**Current assistant proposal, not an agreed stack:** Use TypeScript and Vercel
+AI SDK as an initial comparison candidate, trying the SDK-managed loop against
+a small Urd-controlled loop over the same model-client layer. Prefer whichever
+meets the behaviour with less maintained code; managed vendor runtimes remain
+alternatives. [Provider research](PROVIDER-RESEARCH.md) records the evidence and
+limits. This does not select a language, SDK, storage engine or execution model.
+
 ### Begin with one backend process unless evidence justifies separation
 
 A single process for the server and agent execution is the current working

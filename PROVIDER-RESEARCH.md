@@ -2,7 +2,8 @@
 
 ## Status and limits
 
-Read-only source review on 2026-11-02, supporting [ARCHITECTURE.md](ARCHITECTURE.md).
+Source review and bounded offline checks on 2026-11-02–03, supporting
+[ARCHITECTURE.md](ARCHITECTURE.md).
 No language, SDK or provider implementation is selected. No accounts, credentials,
 login flows or model requests were exercised. This establishes documented seams,
 not working Urd integrations, account entitlement, performance or implementation
@@ -24,7 +25,7 @@ called an SDK or provider is not necessarily a model-only client.
 
 | Approach | Established capability | Work or uncertainty left to Urd |
 | --- | --- | --- |
-| Vercel AI SDK model calls | `generateText`/`streamText` support one-step calls; tool `execute` is optional. Urd can receive tool calls and own execution/continuation. Common stream/usage interfaces and provider adapters exist. | Validate each required route, request shape, usage semantics and cancellation behavior. A common interface does not supply every subscription login or make endpoints interchangeable. Its loop-running facilities were not evaluated in this first pass; they remain candidates. |
+| Vercel AI SDK model calls | `generateText`/`streamText` support one-step calls; tool `execute` is optional. Urd can receive tool calls and own execution/continuation. Common stream/usage interfaces and provider adapters exist. | Validate each required route, request shape, usage semantics and cancellation behavior. A common interface does not supply every subscription login or make endpoints interchangeable. Its loop-running facilities are compared below; complete Urd behaviour remains unqualified. |
 | Raw official vendor clients | OpenAI Responses and Anthropic Messages clients expose model calls, streams, tool-call data and cancellation without requiring their higher-level agent helpers. OpenAI supports custom base URLs and bearer credentials. | Urd owns more cross-provider normalization and compatibility handling. Some credential/refresh helpers exist, but they are not proof of a complete, entitled subscription login. |
 
 The common layer could reduce Urd-owned normalization; raw clients expose native
@@ -32,6 +33,58 @@ behavior more directly. This is a qualitative maintenance trade-off, not evidenc
 that either is smaller or faster overall. Local OpenAI-compatible servers can use
 compatible transports, but model/tool/stream support still requires validation.
 Neither approach has been qualified against Urd's complete access requirements.
+
+## Loop ownership: compare the same model-client layer
+
+An app-owned loop can reuse the **same** AI SDK adapters, streaming and tool-call
+handling as an SDK-managed loop. The comparison is repeated single-step
+`streamText` calls versus an SDK-managed multi-step call, not handwritten provider
+protocols versus a library. `ToolLoopAgent` is a wrapper over these primitives,
+not a separate model engine. No maintained-LOC advantage has been measured.
+
+An independent pinned-source review established useful control boundaries:
+
+- Observational callbacks such as `onStepEnd` are awaited, but their exceptions
+  are swallowed. A rejected persistence write there alone does not stop the loop.
+- `prepareStep` is a directly awaited control hook. Rejecting there can prevent
+  the next model call without patching the SDK. This does not undo current-step
+  tools; initially approved tools can also replay before the first `prepareStep`.
+- Both loop shapes can execute a whole tool batch inside one SDK call. Owning
+  the outer loop alone does not establish per-tool admission or cancellation.
+  The concurrency mapper's unlimited/full-batch path lacks its limited-worker
+  abort check; in-flight tools must cooperate with their abort signal.
+- A human-question tool can await an answer or omit execution and supply a result
+  in a later invocation. An ignored abort signal does not terminate a pending
+  tool promise. Later invocation requires coherent call IDs/messages; it is not
+  SDK-provided durable continuation, and approval is a different protocol.
+
+Three offline checks of pinned helper bodies confirmed observer error swallowing,
+queue/fast-path abort differences and cooperative tool cancellation. These are
+not complete `streamText` or Urd integration tests. Reproducible artifacts are in
+`%TEMP%\urd-loop-review-ec7fbacd\`. Source evidence supports testing the managed
+loop, not declaring either loop shape qualified or smaller.
+
+## Managed runtimes: legitimate alternatives, different responsibilities
+
+The inspected Copilot SDK/CLI and Codex app-server expose more than model calls:
+they own execution, compaction and persisted conversation state. Public contracts
+expose readable history apart from compacted context, suffix removal, interruption,
+custom-tool seams and deletion. Some APIs are experimental; required provider
+routes, helper inspection, cleanup and recovery still need qualification.
+
+Reusing their transcript stores could avoid duplicating full history in Urd.
+Urd still needs its shared client backend, bucket policy, durable assignments and
+results, and application lifecycle/retention rules. Runtime reuse trades avoided
+implementation for integration and vendor-policy coupling; it is not rejected
+merely because the runtime owns the loop.
+
+History pagination needs separate scrutiny. At the newer Codex pin below,
+projected paginated history queries SQLite rather than replaying the full rollout;
+legacy mode still replays it, and cold model resume is a separate read path.
+Returned rows are bounded, not necessarily all physical IO or lineage checks.
+Copilot exposes backward pages, including inactive journals, but its public SDK
+source does not establish the closed runtime's underlying read/parse work.
+Neither finding establishes click-to-content latency or Urd's exploratory scale.
 
 ## ChatGPT subscription access: a public model API path
 
@@ -89,11 +142,13 @@ Pinned source snapshots:
 - Vercel AI SDK [`ad09bc1c55e9c2ad224d17008013a32e79b8ea82`](https://github.com/vercel/ai/tree/ad09bc1c55e9c2ad224d17008013a32e79b8ea82): [tool execution and loop controls](https://github.com/vercel/ai/blob/ad09bc1c55e9c2ad224d17008013a32e79b8ea82/content/docs/03-ai-sdk-core/15-tools-and-tool-calling.mdx), [streaming implementation](https://github.com/vercel/ai/blob/ad09bc1c55e9c2ad224d17008013a32e79b8ea82/packages/ai/src/generate-text/stream-text.ts), [OpenAI-compatible adapter](https://github.com/vercel/ai/tree/ad09bc1c55e9c2ad224d17008013a32e79b8ea82/packages/openai-compatible).
 - OpenAI Node SDK [`aab204589e6a512883aa4d1e63dcfafbb4490f62`](https://github.com/openai/openai-node/tree/aab204589e6a512883aa4d1e63dcfafbb4490f62): [client options and transport](https://github.com/openai/openai-node/blob/aab204589e6a512883aa4d1e63dcfafbb4490f62/src/client.ts), [Responses](https://github.com/openai/openai-node/blob/aab204589e6a512883aa4d1e63dcfafbb4490f62/src/resources/responses/responses.ts).
 - Anthropic TypeScript SDK [`cb5fba419808e3844fa6407e59577ab7ba346b79`](https://github.com/anthropics/anthropic-sdk-typescript/tree/cb5fba419808e3844fa6407e59577ab7ba346b79): [Messages](https://github.com/anthropics/anthropic-sdk-typescript/blob/cb5fba419808e3844fa6407e59577ab7ba346b79/src/resources/messages/messages.ts), [OAuth refresh helper](https://github.com/anthropics/anthropic-sdk-typescript/blob/cb5fba419808e3844fa6407e59577ab7ba346b79/src/lib/credentials/user-oauth.ts).
-- GitHub Copilot SDK [`68de1a7afe4bc9e7435d185825043bd9dc9c47cf`](https://github.com/github/copilot-sdk/blob/68de1a7afe4bc9e7435d185825043bd9dc9c47cf/README.md): architecture, runtime ownership, authentication and BYOK distinctions.
+- AI SDK control paths (same `ad09bc1c` pin): [observer notification](https://github.com/vercel/ai/blob/ad09bc1c55e9c2ad224d17008013a32e79b8ea82/packages/ai/src/util/notify.ts), [tool concurrency](https://github.com/vercel/ai/blob/ad09bc1c55e9c2ad224d17008013a32e79b8ea82/packages/ai/src/generate-text/tool-call-concurrency.ts), and [tool execution](https://github.com/vercel/ai/blob/ad09bc1c55e9c2ad224d17008013a32e79b8ea82/packages/provider-utils/src/types/execute-tool.ts). Step/control ordering is in the streaming implementation above.
+- GitHub Copilot SDK [`68de1a7afe4bc9e7435d185825043bd9dc9c47cf`](https://github.com/github/copilot-sdk/blob/68de1a7afe4bc9e7435d185825043bd9dc9c47cf/README.md): architecture/auth; [persistence](https://github.com/github/copilot-sdk/blob/68de1a7afe4bc9e7435d185825043bd9dc9c47cf/docs/features/session-persistence.md), [steering/queues](https://github.com/github/copilot-sdk/blob/68de1a7afe4bc9e7435d185825043bd9dc9c47cf/docs/features/steering-and-queueing.md), and [RPC contracts](https://github.com/github/copilot-sdk/blob/68de1a7afe4bc9e7435d185825043bd9dc9c47cf/nodejs/src/generated/rpc.ts).
+- Codex [`3026a8e54e0f48c4d8074cd700f35b0697abc329`](https://github.com/openai/codex/tree/3026a8e54e0f48c4d8074cd700f35b0697abc329): [app-server contracts](https://github.com/openai/codex/blob/3026a8e54e0f48c4d8074cd700f35b0697abc329/codex-rs/app-server/README.md), [page handler](https://github.com/openai/codex/blob/3026a8e54e0f48c4d8074cd700f35b0697abc329/codex-rs/app-server/src/request_processors/thread_processor.rs), [paged queries](https://github.com/openai/codex/blob/3026a8e54e0f48c4d8074cd700f35b0697abc329/codex-rs/thread-store/src/local/thread_history/segment_paging.rs), and [model-context reconstruction](https://github.com/openai/codex/blob/3026a8e54e0f48c4d8074cd700f35b0697abc329/codex-rs/thread-store/src/local/model_context.rs). This is a separate, later snapshot than the initial storage comparison.
 - Crush [`d391cee20d1942794aec5ea6faff07170444211f`](https://github.com/charmbracelet/crush/blob/d391cee20d1942794aec5ea6faff07170444211f/internal/oauth/copilot/oauth.go): independent Copilot OAuth/token-exchange implementation.
 - Pie `cc82abb0f317f31341d3a6f12aa1545f6be1fbea`: `harness/model-providers/management/pi-auth.ts`; `harness/pi/packages/ai/src/utils/oauth/{openai-codex,github-copilot}.ts`; `harness/pi/packages/ai/src/api/openai-codex-responses.ts`. Local provider source, not a live account/activation check.
 
-Live official documentation inspected on the review date:
+Live official documentation inspected on 2026-11-02:
 
 - OpenAI [Sign in with ChatGPT overview](https://developers.openai.com/siwc/token-sharing-open-source.md), [sign-in](https://developers.openai.com/siwc/token-sharing-open-source/sign-in.md), [models and inference](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference.md), [preview limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations.md), [token reference](https://developers.openai.com/siwc/token-sharing-open-source/token-reference.md).
 - Ollama [OpenAI compatibility](https://docs.ollama.com/api/openai-compatibility).

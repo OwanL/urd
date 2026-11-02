@@ -107,6 +107,27 @@ The first tool had already executed in every case. This tests a next-model gate,
 not rollback, real provider transport, restart recovery or overall Urd fitness.
 Artifacts and the dependency lockfile are in `%TEMP%\urd-release-probe-f6a94b69\`.
 
+### Narrow steering capability check
+
+A further offline probe on the same published `ai@7.0.159` release compared both
+loop shapes with three mock model requests and serial tool execution. During the
+first tool, the app queued a direction and set a gate. The second tool's wrapper
+ran, but the app gate returned a synthetic result without starting its effect.
+Both later model requests contained the direction exactly once as a user message,
+with matching, ordered call/result pairs. Assertions and a repeat run passed.
+
+The managed case used `experimental_createSteering` / `experimental_steering`;
+a non-destructive `prepareStep` message override preserved the direction into the
+following request. The single-step caller maintained its own queue and appended
+messages explicitly. **Both required app-supplied admission gating:** serial
+execution did not itself cancel the second tool. The managed API is experimental;
+its availability is not a stability or maintenance-cost guarantee.
+
+Artifacts: `%TEMP%\urd-steering-capability-probe-20261103-7c91d1b0\` (`probe.mjs`,
+`results.json`, `report.md`). This is a hypothetical capability test, not an agreed
+Urd steering policy, cancellation of already-started effects, real provider/UI
+integration, durable continuation, a LOC/performance comparison or a loop choice.
+
 ## Managed runtimes: researched, excluded as Urd's foundation
 
 The inspected Copilot SDK/CLI and Codex app-server expose more than model calls:

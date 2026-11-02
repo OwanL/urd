@@ -46,8 +46,9 @@ hosted identity service, not the name of that protocol.
 For example, `openid-client` documents authorization-code/PKCE, device authorization
 and refresh-token flows. It is a JavaScript candidate, not a language or library
 selection. Auth0 Token Vault also manages third-party access/refresh tokens and
-token exchange, but introduces a hosted identity/token service. Requesting an
-OAuth library does not itself approve that service dependency.
+token exchange, but introduces a hosted identity/token service. The owner chose
+direct provider sign-in with locally managed credentials, not a required hosted
+identity/token broker. This does not select an OAuth library or credential store.
 
 Neither a generic OAuth client nor token storage establishes that a consumer AI
 subscription permits Urd to call a model API. Provider registration, scopes,

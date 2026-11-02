@@ -259,6 +259,11 @@ authentication alone does not establish subscription access to a model API.
 Connecting to a local server does not mean building Urd's own model runner.
 Exact provider coverage and connection management still need qualification.
 
+**Provider sign-in is direct, with locally managed credentials.** Reuse focused
+libraries without introducing a required hosted identity/token broker such as
+Auth0 Token Vault. The credential store and authentication of remote UI clients
+remain separate, unresolved choices.
+
 Removing Pi includes replacing its provider/auth interfaces, not only its agent
 loop. Compare independent libraries and focused adapters before choosing this
 layer; do not assume an SDK for API-key requests also handles subscription

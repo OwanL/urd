@@ -152,8 +152,11 @@ their backend. Access from another device over LAN or Tailscale does not turn it
 into a multi-user hosting platform.
 
 Shared hosting, tenancy and cross-user permission systems are outside this scope.
-Protecting credentials and remote access still matters; authentication mechanics
-remain open. This decision does not select process topology or storage.
+Protecting credentials and remote access still matters. Provider sign-in is
+direct, with credentials managed locally; it must not depend on a separate Urd
+account or hosted identity/token broker. Credential storage and remote-client
+authentication mechanics remain open. This does not select process topology or
+storage.
 
 ### Share the backend across user interfaces
 

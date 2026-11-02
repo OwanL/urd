@@ -178,7 +178,16 @@ as redundant.
 sustained parallel work. Both use the retained bucket-based creation policy.
 This does not require separate agent engines, storage implementations or class
 hierarchies. Sharing their underlying representation remains a proposal, and
-exact cancellation, retention and ownership rules still need review.
+exact cancellation, retention and ownership rules still need review except for
+the creator-cleanup boundary below.
+
+**Creator cleanup after human steering:** Keep Pie's behaviour. Direct human
+steering does not remove the creator agent's authority to close its worker; an
+idle human-steered session remains eligible for parent cleanup. Retain the
+running-session skip by default and instructions to collect results and check
+human use before closing. Do not add a hard takeover/protection rule merely
+because the user has spoken in the child chat. Urd's final-closure policy still
+applies; this does not inherit Pie's normal-session history retention.
 
 ### Keep conversation history linear
 

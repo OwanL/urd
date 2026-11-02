@@ -225,11 +225,12 @@ infrastructure. The provisional process model remains provisional.
 analytics provides useful outcomes beyond basic session metrics; do not carry
 its full capture/query machinery forward merely for parity.
 
-**Evidence needed:** Investigate Pie's actual canonical analytics in a separate
-read-only workstream. Look for actionable insights, not merely interesting counts
-or charts. For each finding, identify the decision it could support, the coverage
-and uncertainty, and the minimum data needed to obtain it. Distinguish facts from
-causal claims, and identify questions the recorded data cannot answer.
+**Evidence standard:** Look for actionable insights from real data, not merely
+interesting counts or charts. For each finding, identify the decision it could
+support, coverage and uncertainty, and the minimum data needed. Distinguish facts
+from causal claims and identify questions the records cannot answer. The initial
+bounded read-only investigation is complete; its findings and limits are recorded
+under [analytics investigation](#analytics-investigation-observed-value-and-limits).
 
 Use that evidence to decide what Urd keeps, simplifies or drops. The exact scope
 beyond basic metrics remains open; no richer feature has yet been retained or
@@ -248,6 +249,18 @@ This concerns closing a session, not closing a UI client: the agreed background
 backend behaviour remains unchanged. Exact deletion timing and retention of shared
 assignment/result facts remain open; closing a session does not silently reverse
 the earlier decision to remember saved coordination records across restarts.
+
+### Keep tool input/output inspection on hover
+
+**Decision:** Hovering a tool call to see its input and output is sufficient for
+now. Keep that straightforward interaction; no additional inspection screen or
+separate debugging feature has been requested.
+
+The reference is Pie's existing hover interaction. Do not interpret this as
+approval for a new capture/analytics system, or as a decision to remove useful
+information from the existing view. Exact capture and representation mechanics
+remain implementation questions; there is no need to make the owner decide them
+through competing technical labels for this same interaction.
 
 ## Working hypotheses, not settled commitments
 
@@ -330,6 +343,37 @@ and arguments before execution, and the final tool content confirmed consumed
 by a successful provider response. It is not an original-HTTP-byte capture or a
 complete model-request log. Keep this session-debugging capability distinct from
 historical analytics and from ordinary formatted tool cards when reviewing value.
+
+### Analytics investigation: observed value and limits
+
+A separate read-only investigation examined the owner's canonical Pie analytics,
+followed by independent review and a small local diagnostic check. Aggregate
+figures came from one snapshot of a multi-week dataset; missing usage/outcomes
+and unclassified test/development activity limit the conclusions.
+
+- Counts of tool outcomes, model calls by purpose and measured retry waits gave
+  leads for investigating failures, delegated workload and pauses. They did not
+  establish waste, model quality, successful task delivery or a concrete fix.
+- File-change counts represented attempted, unverified edits. Queried pruning
+  and initial-context observations lacked size-effect measurements; they did
+  not establish whether those features helped. That is missing evidence, not
+  proof that the features are useless.
+- A deliberately small sample of 12 retained failed shell-command results was
+  checked. Local text-pattern classification found a few ordinary file/permission
+  diagnostics, but established no root cause or justified improvement. It was not
+  a representative sample or an evaluation of every rich-detail use.
+
+**Assessment, not a finalized analytics scope:** The investigation supports
+simple usage and diagnostic summaries as candidates. It has not demonstrated a
+need to inherit Pie's broad file/activity tracking, permanent detailed payloads
+or general historical-query machinery. Keep open-session tool inspection separate
+from that question. Retention of small summaries after closure remains to be
+agreed; no data engine or detailed capture protocol is selected by these findings.
+
+The report, queries and sanitized evidence remain in the owned local investigation
+directory `%TEMP%\urd-analytics-investigation-jLnBHj\`; private runtime data and
+raw tool bodies have not been copied into this repository. These are bounded
+research observations, not production acceptance or a full analytics value audit.
 
 ### Source anchors
 

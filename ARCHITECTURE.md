@@ -160,8 +160,8 @@ fallback for a user-selected model in their own chat.
 Creation-time selection and in-run retries are distinct paths to inspect, not
 proof that Pie implements both delegation forms identically. Detailed eligibility,
 retry and selection mechanics still need review; retaining the useful workflow
-does not approve every current implementation detail or require a new spending-
-approval system.
+does not approve every current implementation detail or require a new
+spending-approval system.
 
 ### Retain bounded subagents and independent agent-created sessions
 
@@ -293,7 +293,10 @@ authentication and token management rather than rebuilding those mechanisms.
 This does not select a library or promise every model/vendor combination;
 authentication alone does not establish subscription access to a model API.
 Connecting to a local server does not mean building Urd's own model runner.
-Exact provider coverage and connection management still need qualification.
+**Claude is API-access-only:** retain API-key access, not Claude consumer-plan
+subscription integration. Other popular subscription routes still need their own
+qualification; this exception does not remove the wider subscription requirement.
+Remaining provider coverage and connection management are unresolved.
 
 **Provider sign-in is direct, with locally managed credentials.** Reuse focused
 libraries without introducing a required hosted identity/token broker such as

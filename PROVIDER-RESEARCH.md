@@ -157,7 +157,7 @@ still need an integration. The docs describe access and deployment conditions;
 this review does not establish Urd registration or any account's entitlement.
 Live documentation is not version-pinned and must be rechecked before implementation.
 
-## Claude subscriptions: direct-access coverage needs a decision
+## Claude: API access only
 
 Anthropic's live legal/compliance documentation, inspected on 2026-11-03, says
 third-party developers may not offer Claude.ai login in their own applications
@@ -171,10 +171,11 @@ a library that runs that binary, with its agent loop and context management—no
 a standalone model client. Do not silently introduce this separate agent-runtime
 integration as though an OAuth library supplied direct subscription access.
 
-Urd's popular-subscription goal does not establish an approved direct Claude
-subscription route. Whether to target Claude API access without consumer-plan
-access is an owner coverage decision, not settled by this finding. Recheck these
-live provider conditions before implementation; they are not version-pinned.
+**Owner decision:** Keep Claude API access only; do not target Claude consumer-plan
+subscription integration. This specific coverage decision does not remove the
+requirement to support other popular subscriptions or qualify their routes by
+itself. Recheck live provider conditions before implementation; the documentation
+is not version-pinned.
 
 ## Copilot subscription access: distinguish the SDK from a raw client
 

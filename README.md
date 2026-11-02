@@ -103,9 +103,10 @@ Prefer purpose-built systems over a general framework for arbitrary harnesses.
 Less generalisation and less customisation infrastructure are intentional;
 deep customisability comes from access to the source instead.
 
-Ideas and useful logic may be borrowed from other harnesses. First-party
-ownership does not require inventing every algorithm or rejecting focused
-libraries. It means Urd owns its architecture and behaviour. Ownership of the
+Ideas and useful logic may be borrowed from other harnesses. **Selected snippets
+of Pi logic may be considered case by case; this is not approval to adopt a Pi
+package.** First-party ownership does not require inventing every algorithm or
+rejecting focused libraries. It means Urd owns its architecture and behaviour. Ownership of the
 model/tool execution cycle remains open for comparison and owner alignment;
 "first-party" must not be used as shorthand for a mandatory custom loop.
 Specific language, library and framework choices remain open.

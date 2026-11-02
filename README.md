@@ -144,6 +144,17 @@ Standalone Windows and VS Code clients remain planned. This orders delivery,
 not the eventual product scope, and does not select a language, UI toolkit,
 provider library or storage technology.
 
+### Single-user, local-first workspace
+
+**Urd is a single-user, local-first application, not a shared multi-user service.**
+Each user runs their own copy; their browser, desktop and VS Code clients access
+their backend. Access from another device over LAN or Tailscale does not turn it
+into a multi-user hosting platform.
+
+Shared hosting, tenancy and cross-user permission systems are outside this scope.
+Protecting credentials and remote access still matters; authentication mechanics
+remain open. This decision does not select process topology or storage.
+
 ### Share the backend across user interfaces
 
 **The backend does the work; the UI is an interface into it.** Browser, desktop
@@ -253,7 +264,7 @@ The following remain deliberately unresolved:
 - Source/build packaging, the custom-build workflow and release/update mechanics.
 - Persistence, restart/recovery, backend discovery and duplicate-start handling.
 - Background-app controls, tray integration, startup-at-login and shutdown rules.
-- Network access and authentication boundaries for LAN/Tailscale use.
+- Network access and authentication boundaries for single-user LAN/Tailscale use.
 - Detailed implementation sequencing and expansion beyond Windows.
 - Behavioural acceptance evidence and practical measures of reduced maintenance
   and publication complexity.

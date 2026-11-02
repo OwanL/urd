@@ -79,14 +79,14 @@ span multiple decisions, and the inventory can grow as Pie is inspected.
 | UI and transport | Shared frontend, host integrations, views, commands, streaming, synchronization, paging and reconnection. |
 | Analytics and configuration | Accounting, observability, privacy, user settings and separation from execution-critical state. |
 | Lifecycle and delivery | Backend startup/discovery, background controls, updates, source customisation, development builds and packaging. |
-| Access and trust | Local/remote access, credentials and permission boundaries without assuming multi-user hosting or sandbox isolation. |
+| Access and trust | Single-user local/remote access, credentials and permission boundaries; shared multi-user hosting is excluded, and sandbox isolation must not be assumed. |
 | Verification and performance | Behavioural acceptance, representative workloads, failure testing and dependency/complexity costs. |
 
 ## Agreed architectural decisions
 
 The existing strategic decisions remain in the README: a Urd-specific harness
-without Pi or another complete agent runtime as its foundation; a shared backend
-with multiple UI clients; background operation
+without Pi or another complete agent runtime as its foundation; single-user,
+local-first deployment; a shared backend with multiple UI clients; background operation
 after UI closure; source-based customisation; Windows-first delivery; and no
 Pie data-compatibility requirement. More detailed decisions will be recorded
 here as the review progresses. Keeping LOC down is also a strict project

@@ -40,9 +40,11 @@ product simpler. Urd must avoid recreating the same machinery under new names.
 
 ## What carries forward from Pie
 
-**Pie's core systems, guidance and settled workflows are the product baseline.**
-Do not treat this project as an exercise in choosing an unrelated minimal agent
-product or re-deciding whether Pie's core capabilities belong.
+**Pie's core systems, guidance and settled workflows are the product baseline,
+not a mandatory parity checklist.** Urd is not an unrelated minimal agent
+product, but individual features may be questioned, simplified, replaced or
+removed when they do not earn their complexity and maintenance cost. Unused
+features are candidates for review, not automatic requirements.
 
 Current Pie responsibilities include:
 
@@ -56,15 +58,31 @@ Current Pie responsibilities include:
 
 This list is an orientation, not an exhaustive parity checklist or a selection
 of Urd implementations. Inspect the relevant current Pie behaviour, owning
-contracts and guidance before rebuilding each area. Preserve intent and useful
-behaviour, not accidental file layouts, process boundaries or abstractions.
-Obsolete systems and abandoned approaches are not part of the inheritance.
+contracts and guidance before deciding each area's future. Distinguish the
+value of a capability from the cost of its current implementation: unnecessary
+machinery may be replaceable without losing the useful behaviour. Record
+intentional feature removals and their rationale rather than losing them as
+incidental implementation cuts. Obsolete systems and abandoned approaches are
+not part of the desired inheritance.
 
 Software development is the initial focus, not a requirement to make all agent
 work inherently about code. There is no separate general-purpose product to
 build alongside the development-focused one.
 
 ## Decisions and rationale
+
+### Keeping lines of code down is a strict requirement
+
+**Urd must keep its codebase small. This is a strict requirement, not an
+optional preference.** Pie grew too large in both code and complexity; Urd must
+not repeat that outcome. Features, abstractions, dependencies and supporting
+infrastructure must justify the code and maintenance burden they introduce.
+
+Prefer the smallest clear implementation that meets the agreed behaviour.
+Reduce machinery, duplication and unnecessary generality rather than compressing
+formatting or hiding complexity. Code-size costs must inform design decisions,
+not be considered only after a large system has been built. No numerical cap
+for the entire repository has been selected.
 
 ### Own a first-party harness; remove Pi
 
@@ -146,8 +164,10 @@ mean storage-format continuity. Existing Pie data is not Urd's to modify.
 ## Guidance for future development
 
 - **Inspect before asking the owner to re-specify Pie.** Its settled core
-  systems and guidance are the starting point. Questions should resolve real
-  ambiguity or a proposed departure, not reopen established product features.
+  systems and guidance are the starting point. Use concrete evidence and
+  scenarios to question a feature's value; do not ask the owner to reconstruct
+  behaviour that can be understood from the repository. Lack of evidence of
+  use is not proof that a feature is unused.
 - **Distinguish product continuity from implementation inheritance.** A fresh
   implementation is required; retaining obsolete architecture is not. Conversely,
   removing a core capability is a product decision, not an incidental MVP cut.
@@ -155,10 +175,12 @@ mean storage-format continuity. Existing Pie data is not Urd's to modify.
   Urd's actual requirements, not hypothetical consumers or arbitrary extension
   scenarios. Source access is the escape hatch for deep customisation.
 - **Stage the work without silently shrinking the destination.** Delivery
-  milestones may be incremental; they do not redefine the agreed product.
+  milestones may be incremental; changes to the destination require an
+  explicit feature decision, not an accidental omission.
 - **Demonstrate improvement rather than assuming it.** Preserve useful behaviour
-  while making the code easier to understand, change, build and publish. A new
-  repository or a lower line count alone is not evidence of success.
+  while making the code easier to understand, change, build and publish. Keeping
+  LOC down is mandatory, but a lower count alone does not prove correctness or
+  maintainability. Do not justify code growth merely by calling it architecture.
 - **Keep personal material separate from product defaults.** Pie's maintainer
   settings are not automatically Urd defaults. Do not import unrelated local
   configuration or live data as part of the rebuild.
@@ -183,6 +205,13 @@ The reference commit identifies the inspection, not an agreed frozen parity
 baseline. Historical plans, superseded designs and unqualified work must not be
 mistaken for settled, working behaviour. Pie's implementation documents are
 reference evidence, not Urd architectural contracts.
+
+## Architecture and feature review
+
+[ARCHITECTURE.md](ARCHITECTURE.md) records the continuing feature review,
+architectural decisions and unresolved design questions. This README owns the
+project's purpose and strategic constraints; the architecture document owns the
+more detailed decisions as they are made.
 
 ## Open design work
 

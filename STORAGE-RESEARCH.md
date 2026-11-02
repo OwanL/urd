@@ -36,6 +36,42 @@ or simultaneous-provider-request guarantees. Numeric latency targets remain
 open. Recovery mechanics should satisfy practical continuation rather than
 inflate the project with stronger guarantees the owner has not requested.
 
+## Data lifetimes for the next comparison
+
+This inventory derives from the decisions in [ARCHITECTURE.md](ARCHITECTURE.md)
+and [README.md](README.md); it is not a schema, a new retention policy or evidence
+that discovery is complete. Logical ownership does not select a storage layout.
+
+| Data family | Established boundary | Still unresolved |
+| --- | --- | --- |
+| Readable history | Available through compaction until chat closure; edits replace the later suffix. | Representation, mutation races and interrupted-edit handling. |
+| Model context | May be compacted/reduced without replacing the original readable conversation. | Derivation, caching, invalidation and raw-result recall mechanics. |
+| Helper/independent history | Bounded helper messages/tool calls remain inspectable until containing-chat closure; independent chats retain their own histories. | Internal representation and detailed cancellation/lifetime interactions. |
+| Assignments/shared results | Survive restart; facts still needed by another open session survive one participant's closure. | State transitions, tracking consumers/references and eventual cleanup. |
+| Scheduled follow-ups | Survive restart and run automatically when due for open sessions; do not resurrect closed sessions or blindly replay uncertain work. | Delivery and recovery mechanics. |
+| Drafts/pending attachments | Simplest ownership; separate client drafts are the working default, with no required cross-client hand-off. | Storage, upload ownership and reload persistence. |
+| Tool/attachment detail | Support agreed inspection and retained shared results; no new full-raw-capture guarantee follows from this inventory. | Capture fidelity, payload layout and cleanup ownership. |
+| Usage summaries | Compact summaries remain after closure, not conversation/full tool logs. | Exact fields, duration and cleanup timing. |
+| Credentials/configuration | Direct provider sign-in and locally managed credentials; configure Urd afresh, not through a Pie importer. | Credential/configuration stores and remote-client authentication. |
+
+Compare designs using cross-lifetime operations, not append speed alone:
+
+1. Close a chat containing a finished helper while another open chat still needs
+   a shared assignment/result. Exercise detail cleanup without losing that fact.
+2. Restart with a known-undispatched due follow-up for an open chat and a closed
+   target. Preserve assignments/results without reopening the closed target or
+   treating uncertain execution as permission to replay.
+3. Replace an earlier prompt after compaction and tool/helper activity, then load
+   visible history cold. Check derived context does not reintroduce the removed
+   suffix; do not treat history replacement as rollback of external effects.
+4. Snooze, restart and restore an open chat, contrasting its retained history with
+   the final-closure cleanup path.
+
+Measure latency and memory numerically even though no hard acceptance thresholds
+are selected. Storage read/parse timings are not click-to-visible-content timings.
+Representative data volumes, payload ownership and end-to-end behaviour still
+need qualification before selecting storage.
+
 ## Evidence and reference versions
 
 Inspected on 2026-11-02. Source findings are not benchmarks or proof of delivered

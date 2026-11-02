@@ -24,6 +24,13 @@ conflicting requirements or meaningful changes/removals. Bring evidence, explain
 the practical consequence in plain terms and recommend an answer. Feature value
 remains open to challenge, but questioning it must earn the interruption.
 
+**Recorded answers are constraints, not a reapproval checklist.** During alignment
+audits, challenge assistant-added assumptions and actual contradictions. Do not
+re-ask settled questions merely to reconfirm them. Reopening needs material new
+evidence or an owner request to revisit that specific decision, not merely a
+general request for an alignment audit. Explain the conflict, record answers as
+they are given and consult them before asking again.
+
 During this architecture review, use the main conversation for orchestration and
 owner alignment, with bounded independent investigations running separately.
 Research workers provide evidence and trade-offs, not implementation commitments.

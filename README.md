@@ -207,10 +207,12 @@ remain open.
 
 ### Start fresh; do not carry data compatibility
 
-**Urd does not need compatibility with existing Pie sessions or settings, and
-has no migration requirement.** It may define its own data model without a
-legacy reader, compatibility layer or importer. Product continuity does not
-mean storage-format continuity. Existing Pie data is not Urd's to modify.
+**Urd is a complete fresh start.** Configure it afresh rather than importing Pie
+conversations, settings or saved sign-ins. There is no Pie migration or data
+compatibility requirement: define Urd's own data model without a legacy reader,
+compatibility layer or built-in importer. Product continuity does not mean
+storage-format continuity. Existing Pie data is not Urd's to modify. This does
+not authorise discarding Urd's own data during future upgrades.
 
 ## Guidance for future development
 
@@ -242,6 +244,12 @@ mean storage-format continuity. Existing Pie data is not Urd's to modify.
   configuration or live data as part of the rebuild.
 - **Respect the distinction between decisions and proposals.** This document
   does not silently select technologies, protocols or storage formats.
+- **Do not repeatedly ask for settled decisions.** Read and apply the recorded
+  answers. An alignment audit should expose assistant assumptions, contradictions
+  or new consequential trade-offs, not make the owner repeat approved direction.
+  Reopen a decision only for material new evidence or an owner request to revisit
+  that specific decision. A general alignment audit is not permission to re-ask
+  every settled choice. Explain the conflict rather than requesting generic reapproval.
 
 The repository currently contains a GNU AGPL v3 license; see [LICENSE](LICENSE).
 

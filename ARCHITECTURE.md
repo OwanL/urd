@@ -16,6 +16,14 @@ about Pie and recommendations do not select an implementation by themselves.
 
 ## Review method
 
+**Protect the owner's attention.** Preserve clearly useful, settled Pie
+capabilities by default; do not turn the inventory into a checklist of requests
+to reapprove obvious basics. Investigate routine implementation choices
+independently. Ask only about genuinely ambiguous, consequential trade-offs,
+conflicting requirements or meaningful changes/removals. Bring evidence, explain
+the practical consequence in plain terms and recommend an answer. Feature value
+remains open to challenge, but questioning it must earn the interruption.
+
 For each area, establish:
 
 1. **Value:** the user or agent outcome, evidence of use and the cost of losing
@@ -315,6 +323,13 @@ approval for a new capture/analytics system, or as a decision to remove useful
 information from the existing view. Exact capture and representation mechanics
 remain implementation questions; there is no need to make the owner decide them
 through competing technical labels for this same interaction.
+
+Finished bounded helpers also keep inspectable messages and tool calls until
+the containing chat closes, rather than retaining only their final report.
+This is useful baseline inspection, not another feature requiring confirmation.
+Load child detail when requested instead of copying full nested histories into
+ordinary tab updates. Independent agent sessions follow their own close policy;
+explicit history edits still replace the removed conversation as agreed above.
 
 ### Keep both website automation and desktop control
 

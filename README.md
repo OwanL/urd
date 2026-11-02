@@ -176,6 +176,11 @@ mean storage-format continuity. Existing Pie data is not Urd's to modify.
   scenarios to question a feature's value; do not ask the owner to reconstruct
   behaviour that can be understood from the repository. Lack of evidence of
   use is not proof that a feature is unused.
+- **Reserve owner questions for real trade-offs.** Preserve clearly useful,
+  settled behaviour without requesting feature-by-feature reapproval. Research
+  routine technical choices independently; ask only about consequential
+  ambiguity, conflicting requirements or meaningful product changes. Explain
+  the practical trade-off in plain terms and recommend an answer.
 - **Distinguish product continuity from implementation inheritance.** A fresh
   implementation is required; retaining obsolete architecture is not. Conversely,
   removing a core capability is a product decision, not an incidental MVP cut.

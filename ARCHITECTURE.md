@@ -177,6 +177,42 @@ together. Active streaming and background work must also be included when
 checking responsiveness. This requirement does not select a storage engine or
 approve a particular cache, paging or rendering framework.
 
+### Practical crash recovery: coherent continuation, not exact loss budgets
+
+**Decision:** Losing a reasonable amount of recent progress on a backend crash
+is acceptable, provided the saved session remains coherent and can be continued
+after restart. Losing a tool call that was still being drafted is an acceptable
+example. The requirement is usable continuation, not preservation of every token
+or a fixed maximum number of seconds of lost work.
+
+Do not turn this into an elaborate crash-recovery framework or require the owner
+to specify every persistence barrier. Choose straightforward implementation
+mechanics against the practical requirement. No mandatory per-token checkpoint,
+exact write-ahead protocol or whole-machine power-loss guarantee has been chosen.
+
+Remembering saved assignments/results remains required. A missing tool result
+does not prove an external action never happened; recovery must not blindly
+repeat potentially completed effects just to make the transcript look complete.
+
+### Scale to substantial fan-out without treating estimates as limits
+
+**Direction:** Support as many agents as is practical while remaining performant.
+The owner's speculative sizing examples are up to 10 user-managed sessions,
+each spawning approximately four bounded subagents or four independent sessions
+that can themselves each run approximately four subagents.
+
+Useful exploratory scenarios are therefore roughly **50 live agents** for direct
+fan-out, and **210 live agents** for the deeper example (10 + 40 + 160). These
+are workload examples, not hard caps, guaranteed capacities or a promise that
+all agents issue provider requests simultaneously. Waiting, actively generating
+and tool-executing agents impose different resource demands; saved/idle history
+is another dimension entirely.
+
+Evaluate memory, request admission, storage and UI responsiveness under fan-out.
+Do not introduce an arbitrary global agent limit from these estimates, or assume
+that supporting many contexts requires a process per agent or distributed
+infrastructure. The provisional process model remains provisional.
+
 ## Working hypotheses, not settled commitments
 
 ### Begin with one backend process unless evidence justifies separation

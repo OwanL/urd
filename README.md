@@ -84,6 +84,14 @@ formatting or hiding complexity. Code-size costs must inform design decisions,
 not be considered only after a large system has been built. No numerical cap
 for the entire repository has been selected.
 
+### Responsiveness and scale are fundamental
+
+The UI must remain responsive throughout the application, including minimal
+delay between clicking a session tab and seeing its contents. Substantial agent
+fan-out must not make interaction sluggish. Support as much work as is practical
+without treating speculative workload examples as hard limits. Concrete sizing
+scenarios and performance investigations belong in [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ### Own a first-party harness; remove Pi
 
 **Pi will not be a dependency or runtime coupling.** Urd's harness will be

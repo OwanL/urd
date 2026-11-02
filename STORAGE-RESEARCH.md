@@ -23,12 +23,18 @@ must be evaluated separately.
   permission to repeat external side effects.
 - Minimal delay from clicking a session tab to seeing usable content, with a
   responsive UI throughout the application.
+- Reasonable loss of recent progress on a backend crash is acceptable; the saved
+  session must remain coherent and continuable after restart. Exact token/time
+  loss budgets and elaborate recovery machinery are not requirements.
 - Strict code-size restraint, a first-party harness and Windows-first delivery.
 - No Pie data compatibility or migration requirement.
 
 Large histories, tool results, multiple active agents and cold sessions belong
-in the evaluation. Exact scale, latency targets and durability guarantees are
-not yet settled.
+in the evaluation. The owner's speculative fan-out examples suggest roughly
+50 and 210 live-agent contexts as useful exploratory workloads, not hard limits
+or simultaneous-provider-request guarantees. Numeric latency targets remain
+open. Recovery mechanics should satisfy practical continuation rather than
+inflate the project with stronger guarantees the owner has not requested.
 
 ## Evidence and reference versions
 
@@ -251,14 +257,109 @@ production reader with partial-write recovery. All operations were serial and
 synchronous. Memory observations are too approximate for a comparative memory
 budget. The reference harnesses themselves were not benchmarked.
 
+## Minimal store-operations comparison
+
+A second, separate probe compared small first-party implementations of the
+operations Urd needs, rather than isolated transcript reads:
+
+- **Files:** one JSONL conversation per session, plus canonical JSON session and
+  task metadata loaded into memory. Recent windows scan backwards; appends update
+  the log and atomically replace the summary file; edits replace the affected
+  conversation file. Reopening reconciles summaries against log tails.
+- **SQLite:** indexed session, message and task tables, retained statements and
+  transactions for conversation-plus-summary changes, using WAL/NORMAL.
+
+Both used Node 24.18.0 / SQLite 3.53.1 on the same machine as the first probe.
+Fixtures had 50 or 210 session identities with 12 approximately 1 KiB messages
+and one assignment per identity, plus a separate 50,000-record long history.
+These represent **storage requests from many identities, not live agent load**.
+Task participants and conversation records are deliberately simplified; this is
+not a complete execution, permissions or tool-call schema.
+
+Selected median milliseconds for the 210-identity fixture:
+
+| Operation | Samples | Files | SQLite |
+| --- | --- | --- | --- |
+| Read recent window | 20 | 0.17 | 0.07 |
+| Append message and update summary | 20 | 1.91 | 0.23 |
+| Update assignment/result | 20 | 1.59 | 0.13 |
+| Replace suffix of a 12-record history | 20 | 3.42 | 0.63 |
+| Reopen store, list sessions, read recent window | 10 | 42.98 | 1.22 |
+
+Warm operations exclude construction/preparation. The reopen row includes those
+costs but not Node startup; filesystem caches were uncontrolled and likely warm.
+Samples were serial and alternated between stores. In the separate 50,000-record
+history, newest-window reads took approximately 0.26 ms for files and 0.10 ms
+for SQLite. Long-history **edits** were not timed.
+
+### What the prototype adds to the comparison
+
+Both bounded read paths remain fast. In these implementations, the more material
+differences were metadata updates and reopening: the file implementation rewrites
+shared JSON metadata and inspects session tails, while SQLite updates indexed
+rows and coordinates related changes in a transaction.
+
+The formatted prototypes contain 251 and 205 physical lines respectively,
+including blanks; test/fixture/measurement code is separate. Those counts are
+not production-size estimates or proof of maintenance superiority. The useful
+comparison is the machinery each design needs: custom file publication, tail
+repair and summary reconciliation versus schema/indexes, transactions and a
+database runtime. Built-in SQLite required no npm dependency in this experiment;
+the dependency and packaging cost for Urd's eventual runtime is not yet measured.
+
+The file design is not an optimized lower bound. Per-session metadata, batched
+summary writes, sparse offsets or segmented logs could change its costs; they
+were not benchmarked. Conversely, there is no reason yet to adopt Codex-style
+dual canonical-log/read-projection machinery merely because Codex uses it.
+
+### Correctness and evidence limits
+
+Tests compared ordered message windows, summaries, task queries/results,
+suffix replacement and reopen/continue across the implementations. Controlled
+child-exit probes also verified:
+
+- A complete JSONL append before summary publication is reconciled on reopen;
+  the following append receives a new sequence number.
+- An incomplete final JSONL line is discarded while earlier records remain
+  readable and further appends work.
+- An uncommitted SQLite metadata change is rolled back on reopen.
+
+These are storage-level checks, not proof that an actual agent can recover from
+every interrupted tool interaction. No live tools or model requests were run.
+No concurrent writers, power-loss tests, large attachments or end-to-end UI
+were covered. Post-review recovery checks passed on the benchmark's Node 24.18.0
+runtime; timings were not remeasured for formatting and recovery-only fixes.
+
+The temporary sources and results are in
+`%TEMP%\urd-store-operations-esszfN\`. About 120 MiB of synthetic artifacts were
+created. As with the first probe, these local artifacts are not durable release
+acceptance evidence or application implementation.
+
+## Current recommendation, not an agreed choice
+
+**Use SQLite as the leading candidate for structured session and coordination
+state, with ordinary files available for large artifacts.** This is not based on
+claiming SQLite uniquely solves tab latency: bounded file reads also performed
+well. The stronger argument is avoiding custom indexes and cross-file consistency
+machinery as metadata, edits and persistent assignments are added.
+
+Prefer a narrow first-party storage owner over an ORM, event-sourcing platform
+or interchangeable-backend framework unless a concrete requirement justifies it.
+Do not depend on Pi Durable or copy another harness's entire storage architecture.
+This recommendation does not fix the schema, driver, process placement or final
+artifact policy, and has not been accepted as a storage decision.
+
 ## Remaining decision evidence
 
 Before selecting storage, resolve or test:
 
-1. Required durability at accepted prompts, tool dispatch/results, completed
-   answers and assignment results; treatment of unfinished streaming text.
-2. A representative session count, history-size distribution and active-agent
-   workload, including model-context construction as well as browsing.
+1. The simplest persistence/recovery mechanics that leave a coherent,
+   continuable saved session after a crash while permitting recent progress loss;
+   do not invent strict per-token durability or loss-time budgets.
+2. History-size distributions and active/waiting proportions within the
+   speculative 50/210-context examples, including model-context construction
+   as well as browsing. Storage requests from that many identities are not
+   themselves a benchmark of that many live agents.
 3. Append, edit/truncate and assignment-update behaviour under equivalent
    durability requirements, including interrupted writes and uncertain effects.
 4. Metadata listing/search, paging cursors and large-payload lifetime.

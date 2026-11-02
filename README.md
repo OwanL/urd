@@ -126,6 +126,16 @@ contribution are not requirements. Urd is not responsible for preserving or
 merging arbitrary source edits through upgrades. The exact packaging, editing
 location and update mechanics still need design.
 
+### Deliver the browser client first
+
+**The browser is the first usable Urd interface.** Continue developing Urd from
+Pie until Urd is ready for normal use; there is no need to rush self-hosted
+development or cut essential behaviour merely to switch tools early.
+
+Standalone Windows and VS Code clients remain planned. This orders delivery,
+not the eventual product scope, and does not select a language, UI toolkit,
+provider library or storage technology.
+
 ### Share the backend across user interfaces
 
 **The backend does the work; the UI is an interface into it.** Browser, desktop
@@ -235,7 +245,7 @@ The following remain deliberately unresolved:
 - Persistence, restart/recovery, backend discovery and duplicate-start handling.
 - Background-app controls, tray integration, startup-at-login and shutdown rules.
 - Network access and authentication boundaries for LAN/Tailscale use.
-- Implementation sequencing, the first UI surface and expansion beyond Windows.
+- Detailed implementation sequencing and expansion beyond Windows.
 - Behavioural acceptance evidence and practical measures of reduced maintenance
   and publication complexity.
 

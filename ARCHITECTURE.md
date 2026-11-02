@@ -84,6 +84,14 @@ Pie data-compatibility requirement. More detailed decisions will be recorded
 here as the review progresses. Keeping LOC down is also a strict project
 requirement; see the README's code-size constraint.
 
+### Browser-first delivery; develop from Pie until Urd is ready
+
+**Decision:** Target the browser for the first usable Urd client. Pie remains
+the development environment until Urd is ready for normal use. This removes
+pressure to add desktop/editor integration immediately or cut essential features
+just to begin developing Urd from itself. Desktop and VS Code clients remain
+part of the destination; implementation technologies remain undecided.
+
 ### Independent client navigation: conditional on minimal cost
 
 **Decision:** Independent client navigation is worthwhile if it adds no more

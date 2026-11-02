@@ -124,8 +124,13 @@ renderers; Urd need not inherit that choice if independence is cheap.
 **Status:** The cost condition has not been demonstrated. Do not present
 independent navigation as unconditional scope or invent a cost estimate. When
 implementing, compare the minimal designs without building a configurable
-framework simply to support both. Draft ownership is a separate, unresolved
-question.
+framework simply to support both.
+
+**Unsent drafts:** Choose whichever ownership is simplest. Separate drafts per
+client are the preferred working default, not an unconditional requirement.
+Cross-client hand-off of unfinished text/attachments is not required, and neither
+is a choice of draft modes. Avoid synchronisation/conflict machinery merely to
+share drafts. This does not select draft storage or reload persistence.
 
 ### Preserve bucket-based model selection for agent-created work
 

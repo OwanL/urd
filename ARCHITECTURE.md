@@ -215,9 +215,12 @@ after restart. Losing a tool call that was still being drafted is an acceptable
 example. The requirement is usable continuation, not preservation of every token
 or a fixed maximum number of seconds of lost work.
 
-Do not turn this into an elaborate crash-recovery framework or require the owner
-to specify every persistence barrier. Choose straightforward implementation
-mechanics against the practical requirement. No mandatory per-token checkpoint,
+A fatal shared-runtime crash may interrupt all active agents together. The owner
+accepts that risk in favour of a simple, lightweight design; it is not a reason
+to require per-agent isolation or complex crash supervision. Avoid crashes and
+contain ordinary errors, but do not build an elaborate recovery framework or
+require the owner to specify every persistence barrier. Choose straightforward
+implementation mechanics against the practical requirement. No mandatory per-token checkpoint,
 exact write-ahead protocol or whole-machine power-loss guarantee has been chosen.
 
 Remembering saved assignments/results remains required. A missing tool result
@@ -431,7 +434,9 @@ A single process for the server and agent execution is the current working
 default, **not a locked architecture decision**. It could remove routine
 coordinator/worker IPC and cross-process ownership machinery. Ordinary
 provider/tool failures must still be contained to their operation; a fatal
-process failure would interrupt all active sessions.
+process failure would interrupt all active sessions. The owner accepts that shared
+fatal-failure risk rather than requiring complex isolation/recovery machinery.
+This accepts a trade-off, not the process topology itself.
 
 Revisit the boundary when actual isolation, blocking work or performance needs
 justify it. External commands and selected integrations can still run in their

@@ -38,6 +38,12 @@ frameworks. A class, worker process or interface is a possible implementation
 mechanism, not a feature in itself. Do not create abstraction layers merely to
 mirror this review structure.
 
+Broader feature, data and operational discovery must inform costly foundational
+choices. A narrow prototype can strengthen a candidate without making the project
+ready to select it. Focus owner questions on meaningful product trade-offs, not
+on specifying routine implementation details or unnecessarily strict edge-case
+guarantees.
+
 ## Review coverage
 
 These topics are pending review, not a committed subsystem layout. Each may
@@ -248,9 +254,12 @@ research. Plain files/JSONL, SQLite and any hybrid must be evaluated rather than
 adopted because they are familiar or sound attractive in isolation. Session
 click-to-content latency is a primary criterion in this investigation.
 
-The source comparison and local experiment are recorded in
+The source comparison and local experiments are recorded in
 [STORAGE-RESEARCH.md](STORAGE-RESEARCH.md); findings there are evidence, not an
-architecture commitment.
+architecture commitment. After reviewing them, the owner considers SQLite
+promising but explicitly does **not** select it even as the working storage
+direction yet. Broader discovery of features, data needs and system boundaries
+must precede that commitment; narrow benchmarks are not sufficient.
 
 This is a fundamental, costly-to-reverse decision. The confirmed references are
 upstream Pi's coding agent, **Pi Durable** (the first-party upstream package,
@@ -264,6 +273,65 @@ LOC and ongoing maintenance. Performance conclusions need representative
 workloads; neither another project's choice nor an isolated microbenchmark
 establishes what is best for Urd. The research must inform a decision, not
 silently turn a candidate into the architecture.
+
+## Feature discovery: first pass
+
+These observations describe inspected Pie source, not agreed Urd scope or proof
+of live usage. Paths below are relative to the Pie checkout identified in the
+reference section. This is not yet a complete dependency or lifecycle audit.
+
+| Capability found in Pie | Data and responsibility worth reviewing for Urd |
+| --- | --- |
+| Compose, submit while busy, edit pending/earlier messages, interrupt | Conversation changes, queued input, drafts and pending attachments have different lifetimes today. Composer drafts/attachments are host runtime state; do not automatically copy that ownership into multi-client Urd. |
+| Questions and attention | Inline `ask_user` cards, prompt responses, waiting markers, sounds and window attention. Pending prompts are live state today; decide the useful offscreen-agent experience before designing its transport. |
+| Session organization | Tabs, pins/groups, snooze and restore, manual titles and optional model-generated titles. These are separate conveniences, not one indivisible session-management feature. |
+| Transcript and execution inspection | Paged history, expandable tool inputs/results, lazy child details and model-produced/model-received inspection. Exact execution detail can have very different size and retention needs from the visible conversation. |
+| Guidance and discovery | Context documents, append guidance, named agents/roles and skills; main/child composition and resource precedence. Separate authored resources from the live prompt assembled from them. |
+| Tool/skill selection | Optional model-scored catalog filtering, caches and recovery. Fresh defaults are off with no scorer selected; that does not establish whether the owner uses it. Recovery currently discloses hidden tools for a wrapper rather than mutating the frozen native catalog. |
+| Result reduction and history compaction | Deterministic output rewriting with raw recall is distinct from catalog selection and from summarizing old conversation. Result reduction is enabled in checked-in defaults and excludes `read`; the mechanisms have different data and fidelity needs. |
+| Files, shell, web, MCP, browser and desktop tools | Different dependency and effect boundaries: Pi-supplied core tools, Pie's warm-shell override/fallback, managed web/MCP packages, browser automation and Windows desktop integration. Dropping Pi does not make these integrations free. |
+| Delegation, coordination and deferred work | Both retained delegation forms use the agent engine. Notes, assignments/results, waits, cooperative resource leases and durable wakeups are additional capabilities to review separately; wakeups currently target persisted sessions, not bounded in-memory subagents. |
+| Cost and performance visibility | Session usage/estimated cost and speed indicators, plus aggregate charts. An estimate is not necessarily an invoice; incomplete observations must not silently become zero. |
+| Historical analytics and queries | Automatic fresh capture includes provider settlements, executions, tools/file facets, activity spans and capability/feature observations, with separately addressed detail. Agent queries extend well beyond the small UI counters. Their value and scope are not settled for Urd. |
+| Privacy, retention and deletion | Pie's private-session close deletes associated history/analytics; normal closure/expiry includes a separate gated policy. Source implementation is not proof that the gate is active, and neither policy has been selected for Urd. |
+
+### Source anchors
+
+- Interaction and inspection: `application/lib/protocol/webview.ts`,
+  `application/frontend/composer/`, `application/frontend/transcript/`,
+  `application/frontend/session-tabs/`,
+  `application/backend/composition/completion-attention.ts`, and
+  `docs/contracts/STATE_CONTRACT.md`.
+- Questions, titles and deferred work: `harness/tools/ask-user/`,
+  `docs/contracts/SESSION-TITLES.md`, `docs/contracts/DEFERRED-TRIGGERS.md`, and
+  `docs/contracts/AGENT-SESSION-CONTROL.md`.
+- Guidance/tools: `harness/agent-instructions/README.md`,
+  `harness/tools/README.md`, `harness/tools/catalog/index.ts`,
+  `harness/tools/warm-bash/README.md`, and
+  `harness/tools/package-integrations/web-access/README.md`.
+- Context controls: `harness/tool-and-skill-selection/README.md`,
+  `harness/tool-and-skill-selection/settings/config.ts`,
+  `harness/tools/invoke-tool/recovery.ts`,
+  `harness/tools/result-processing/README.md`, and `settings.defaults.json`.
+- Analytics: `docs/contracts/ANALYTICS_IMPLEMENTATION_CONTRACT.md`,
+  `harness/agent-instructions/skills/query-analytics/SKILL.md`,
+  `application/frontend/analytics/`, and
+  `application/backend/analytics-views/`.
+
+### Consequences for the review, not implementation decisions
+
+- Do not infer a feature is unused because it is optional or disabled by default.
+  Ask about the outcome the owner values after establishing what the source does.
+- Separate capability from machinery. Useful historical queries do not require
+  copying Pie's recorder/helper/process topology; useful shell execution does
+  not automatically require its warm pool and SDK fallback.
+- Keep the three context controls distinct. Removing an optional selection
+  prepass would not inherently remove tool discovery, result recall or compaction.
+- Inspect actual feature data needs before selecting storage: prompts/drafts,
+  assignments, raw model/tool detail, historical accounting and private deletion
+  do not all have the same owner or lifetime.
+- Provider adapters/admission, startup/delivery, full cross-client lifecycles and
+  detailed data volumes remain incomplete discovery areas.
 
 ## Reference observations
 

@@ -335,13 +335,19 @@ The temporary sources and results are in
 created. As with the first probe, these local artifacts are not durable release
 acceptance evidence or application implementation.
 
-## Current recommendation, not an agreed choice
+## Candidate assessment; choice remains open
 
-**Use SQLite as the leading candidate for structured session and coordination
-state, with ordinary files available for large artifacts.** This is not based on
-claiming SQLite uniquely solves tab latency: bounded file reads also performed
-well. The stronger argument is avoiding custom indexes and cross-file consistency
-machinery as metadata, edits and persistent assignments are added.
+**The owner considers SQLite promising but has explicitly declined to select it
+as the working design yet.** Broader feature and architecture discovery is needed
+before a fundamental storage commitment. These narrow probes do not replace that
+discovery or establish the requirements of the whole application.
+
+The research recommendation was SQLite for structured session and coordination
+state, with files available for large artifacts. Its case is not uniquely fast
+tab loading—bounded file reads also performed well—but potentially avoiding
+custom indexes and cross-file consistency machinery as metadata, edits and
+persistent assignments are added. That remains a candidate argument, not a
+selected direction.
 
 Prefer a narrow first-party storage owner over an ORM, event-sourcing platform
 or interchangeable-backend framework unless a concrete requirement justifies it.

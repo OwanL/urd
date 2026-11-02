@@ -130,9 +130,16 @@ system. Build and reload is a valid fallback, not a design failure.
 
 **Users own their modifications.** They may maintain a fork, contribute a pull
 request, keep local edits or do nothing. Git use, publishing a fork and upstream
-contribution are not requirements. Urd is not responsible for preserving or
-merging arbitrary source edits through upgrades. The exact packaging, editing
-location and update mechanics still need design.
+contribution are not requirements. Users and their agents manage upgrades and
+customisations as they choose; Urd is not responsible for preserving or merging
+arbitrary source edits through upgrades.
+
+**No automatic updater is being designed for now.** A possible future approach
+is to notify the user that an update exists and suggest asking their agent to
+upgrade Urd, rather than applying it automatically. The user and their agent
+understand their modifications; Urd should not assume it can reconcile them.
+This notification approach is a proposal, not a committed feature. Source/build
+packaging and the editing location remain open.
 
 ### Deliver the browser client first
 
@@ -264,7 +271,7 @@ more detailed decisions as they are made.
 The following remain deliberately unresolved:
 
 - Concrete module boundaries, execution model, language and library choices.
-- Source/build packaging, the custom-build workflow and release/update mechanics.
+- Source/build packaging, the custom-build workflow and releases; automatic updating is deferred.
 - Persistence, restart/recovery, backend discovery and duplicate-start handling.
 - Background-app controls, tray integration, startup-at-login and shutdown rules.
 - Network access and authentication boundaries for single-user LAN/Tailscale use.

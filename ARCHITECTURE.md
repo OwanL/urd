@@ -78,7 +78,7 @@ span multiple decisions, and the inventory can grow as Pie is inspected.
 | Deferred work | Timers, wakeups, event triggers, cancellation and restart expectations. |
 | UI and transport | Shared frontend, host integrations, views, commands, streaming, synchronization, paging and reconnection. |
 | Analytics and configuration | Accounting, observability, privacy, user settings and separation from execution-critical state. |
-| Lifecycle and delivery | Backend startup/discovery, background controls, updates, source customisation, development builds and packaging. |
+| Lifecycle and delivery | Backend startup/discovery, background controls, source customisation, development builds and packaging. Automatic updating is deferred; agent-guided upgrades remain user-managed. |
 | Access and trust | Single-user local/remote access, credentials and permission boundaries; shared multi-user hosting is excluded, and sandbox isolation must not be assumed. |
 | Verification and performance | Behavioural acceptance, representative workloads, failure testing and dependency/complexity costs. |
 

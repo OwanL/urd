@@ -24,6 +24,13 @@ conflicting requirements or meaningful changes/removals. Bring evidence, explain
 the practical consequence in plain terms and recommend an answer. Feature value
 remains open to challenge, but questioning it must earn the interruption.
 
+During this architecture review, use the main conversation for orchestration and
+owner alignment, with bounded independent investigations running separately.
+Research workers provide evidence and trade-offs, not implementation commitments.
+Distinguish owner requirements from assistant inferences: a broad requirement
+must not silently become a more restrictive architectural rule. Consequential
+choices need alignment before being recorded as agreed.
+
 For each area, establish:
 
 1. **Value:** the user or agent outcome, evidence of use and the cost of losing
@@ -379,6 +386,20 @@ delayed follow-ups, not automatic inheritance of Pie's broader combinations of
 timer, user-input, session-finished and command-polling conditions.
 
 ## Working hypotheses, not settled commitments
+
+### Model/tool loop ownership is open
+
+The provider research initially treated Urd owning the model → tool execution →
+model cycle as a requirement. **That was an assistant inference, not an agreed
+owner decision, and has been withdrawn.** A first-party harness with no Pi
+dependency does not by itself settle who implements or runs this cycle.
+
+Compare a custom loop, a reusable loop library and managed agent-runtime
+integration against the required product behaviour. Consider actual control,
+data/lifecycle ownership, provider coverage, first-party adapter/workaround code
+and maintenance, rather than treating either custom code or an SDK as inherently
+simpler. None is selected or automatically qualified. The no-Pi requirement
+remains unchanged.
 
 ### Begin with one backend process unless evidence justifies separation
 

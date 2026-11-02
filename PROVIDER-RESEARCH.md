@@ -9,17 +9,22 @@ not working Urd integrations, account entitlement, performance or implementation
 LOC. The SDK comparison is a bounded TypeScript-oriented sample, not a language
 comparison or an exhaustive library survey.
 
-Urd requires subscription sign-in, API keys and local-server connections while
-owning its agent loop and avoiding Pi dependencies. Separate four responsibilities:
-model transport, authentication, conversation/tool execution, and presentation.
-A library can help with the first without owning the latter two. A package called
-an SDK or provider is not necessarily a model-only client.
+Urd requires subscription sign-in, API keys and local-server connections, a
+lightweight first-party harness and no Pi dependency. **Ownership of the model/tool
+loop is open.** This study initially assumed Urd must own that loop; the assumption
+was not owner-approved and has been withdrawn. Its model-client findings remain
+useful, but they do not settle runtime ownership.
+
+Separate model transport, authentication, conversation/tool execution, and
+presentation. A library can help with transport without owning execution or UI;
+reusing a loop is another candidate, not automatically forbidden. A package
+called an SDK or provider is not necessarily a model-only client.
 
 ## Two model-client approaches
 
 | Approach | Established capability | Work or uncertainty left to Urd |
 | --- | --- | --- |
-| Vercel AI SDK model calls | `generateText`/`streamText` support one-step calls; tool `execute` is optional. Urd can receive tool calls and own execution/continuation. Common stream/usage interfaces and provider adapters exist. | Validate each required route, request shape, usage semantics and cancellation behavior. A common interface does not supply every subscription login or make endpoints interchangeable. Its own agent/tool-loop facilities need not become Urd's runtime. |
+| Vercel AI SDK model calls | `generateText`/`streamText` support one-step calls; tool `execute` is optional. Urd can receive tool calls and own execution/continuation. Common stream/usage interfaces and provider adapters exist. | Validate each required route, request shape, usage semantics and cancellation behavior. A common interface does not supply every subscription login or make endpoints interchangeable. Its loop-running facilities were not evaluated in this first pass; they remain candidates. |
 | Raw official vendor clients | OpenAI Responses and Anthropic Messages clients expose model calls, streams, tool-call data and cancellation without requiring their higher-level agent helpers. OpenAI supports custom base URLs and bearer credentials. | Urd owns more cross-provider normalization and compatibility handling. Some credential/refresh helpers exist, but they are not proof of a complete, entitled subscription login. |
 
 The common layer could reduce Urd-owned normalization; raw clients expose native
@@ -60,8 +65,9 @@ Live documentation is not version-pinned and must be rechecked before implementa
 GitHub's documented Copilot SDK runs the Copilot CLI agent runtime over JSON-RPC.
 It handles planning and tool invocation; standard usage uses a Copilot subscription,
 while BYOK is a separate API-key path. It is **not** a drop-in model transport for
-Urd's first-party loop merely because it is called an SDK. Choosing it as the
-agent runtime would need a deliberate reconsideration of harness ownership.
+an app-owned loop merely because it is called an SDK. Using its runtime is a
+separate architectural candidate: assess the control and lifecycle it would own,
+rather than assuming that all SDKs are interchangeable or that reuse is forbidden.
 
 Pi and the inspected independent Crush implementation show another mechanism:
 GitHub OAuth/device authentication followed by a Copilot token exchange. Pi also
@@ -71,9 +77,10 @@ or blanket provider permission. No standalone public Copilot inference contract
 was established by this bounded review; that is a remaining research/qualification
 gap, not a claim that such an integration is impossible or forbidden.
 
-Do not remove Copilot or import another agent engine merely to close this gap.
-First assess a focused model/auth adapter and its maintenance burden against the
-existing product requirements. No provider test calls or sign-ups are implied.
+Compare a focused model/auth adapter with SDK/runtime integration explicitly,
+including required behaviour, lifecycle coupling and the code Urd would maintain.
+Preserve the product access requirements during that comparison. No option is
+selected, and no provider test calls or sign-ups are implied.
 
 ## Sources
 

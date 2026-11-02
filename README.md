@@ -105,8 +105,10 @@ deep customisability comes from access to the source instead.
 
 Ideas and useful logic may be borrowed from other harnesses. First-party
 ownership does not require inventing every algorithm or rejecting focused
-libraries. It means Urd owns its architecture and behaviour. Specific language,
-library and framework choices remain open.
+libraries. It means Urd owns its architecture and behaviour. Ownership of the
+model/tool execution cycle remains open for comparison and owner alignment;
+"first-party" must not be used as shorthand for a mandatory custom loop.
+Specific language, library and framework choices remain open.
 
 ### Bundle source with published builds
 

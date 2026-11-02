@@ -219,6 +219,24 @@ Do not introduce an arbitrary global agent limit from these estimates, or assume
 that supporting many contexts requires a process per agent or distributed
 infrastructure. The provisional process model remains provisional.
 
+### Minimize analytics; retain richer capture only for demonstrated value
+
+**Direction:** Keep analytics lean. The owner is not convinced that Pie's richer
+analytics provides useful outcomes beyond basic session metrics; do not carry
+its full capture/query machinery forward merely for parity.
+
+**Evidence needed:** Investigate Pie's actual canonical analytics in a separate
+read-only workstream. Look for actionable insights, not merely interesting counts
+or charts. For each finding, identify the decision it could support, the coverage
+and uncertainty, and the minimum data needed to obtain it. Distinguish facts from
+causal claims, and identify questions the recorded data cannot answer.
+
+Use that evidence to decide what Urd keeps, simplifies or drops. The exact scope
+beyond basic metrics remains open; no richer feature has yet been retained or
+removed on the strength of its source implementation alone. This investigation
+does not select storage technology or authorize copying Pie's analytics process
+topology.
+
 ## Working hypotheses, not settled commitments
 
 ### Begin with one backend process unless evidence justifies separation

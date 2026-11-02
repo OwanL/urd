@@ -166,7 +166,8 @@ The long-term destinations are:
 - **VS Code sidebar.**
 
 These boundaries must be considered from the outset, but all surfaces need not
-ship initially. The first surface and subsequent delivery order remain open.
+ship initially. Browser delivery comes first; the subsequent order of desktop
+and VS Code delivery remains open.
 **A TUI is not required and is outside the intended scope.** This does not
 prohibit ordinary launch, build or maintenance commands.
 

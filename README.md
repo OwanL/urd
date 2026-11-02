@@ -174,6 +174,9 @@ operating separate agent runtimes for each surface.
 Native desktop and VS Code clients should connect to an existing backend or
 start it when absent. Closing a UI leaves the backend running; stopping the
 backend is an explicit user action, not a consequence of a client disconnecting.
+Already-authorised agent work and scheduled follow-ups continue even when no UI
+is visible; this can consume model usage and change files. Closing a session is
+a separate, final action, not the same as closing a client.
 This permits switching interfaces without tying ongoing work to whichever UI
 happened to start it.
 

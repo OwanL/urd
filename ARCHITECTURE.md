@@ -219,11 +219,17 @@ Do not introduce an arbitrary global agent limit from these estimates, or assume
 that supporting many contexts requires a process per agent or distributed
 infrastructure. The provisional process model remains provisional.
 
-### Minimize analytics; retain richer capture only for demonstrated value
+### Keep small usage summaries after closure
 
-**Direction:** Keep analytics lean. The owner is not convinced that Pie's richer
-analytics provides useful outcomes beyond basic session metrics; do not carry
-its full capture/query machinery forward merely for parity.
+**Decision:** After a session closes, keep only a compact usage summary, such as
+tokens, estimated cost, time and errors. Do not retain the conversation or full
+tool outputs as historical analytics. This preserves small totals and simple
+comparisons without carrying forward Pie's broad capture/query machinery.
+
+Keep analytics lean while a session is open too. The retained tool input/output
+hover view does not require a separate historical analytics system. Results
+still needed by another session remain available to that session; this policy
+does not discard shared coordination facts that still serve live work.
 
 **Evidence standard:** Look for actionable insights from real data, not merely
 interesting counts or charts. For each finding, identify the decision it could
@@ -232,18 +238,18 @@ from causal claims and identify questions the records cannot answer. The initial
 bounded read-only investigation is complete; its findings and limits are recorded
 under [analytics investigation](#analytics-investigation-observed-value-and-limits).
 
-Use that evidence to decide what Urd keeps, simplifies or drops. The exact scope
-beyond basic metrics remains open; no richer feature has yet been retained or
-removed on the strength of its source implementation alone. This investigation
-does not select storage technology or authorize copying Pie's analytics process
-topology.
+More detailed tracking would need a concrete use that justifies its cost; do
+not retain it merely for parity. Exact summary fields, retention duration and
+cleanup timing remain implementation/design work. This decision does not select
+storage technology or authorize copying Pie's analytics process topology.
 
 ### Closed sessions are finished, not a resumable archive
 
 **Direction:** A closed session can be treated as finished and no longer needed.
 Do not add a readable/resumable archive merely because the storage design could
-support one. Whether any data outlives closure depends on the demonstrated value
-of analytics or another explicit requirement, not default indefinite retention.
+support one. The agreed post-closure record is a small usage summary, not the
+conversation or full tool outputs. Any further retention needs another explicit
+requirement, not a default assumption that all history lives indefinitely.
 
 This concerns closing a session, not closing a UI client: the agreed background
 backend behaviour remains unchanged. Exact deletion timing and retention of shared
@@ -335,7 +341,7 @@ reference section. This is not yet a complete dependency or lifecycle audit.
 | Files, shell, web, MCP, browser and desktop tools | Different dependency and effect boundaries: Pi-supplied core tools, Pie's warm-shell override/fallback, managed web/MCP packages, browser automation and Windows desktop integration. Dropping Pi does not make these integrations free. |
 | Delegation, coordination and deferred work | Both retained delegation forms use the agent engine. Notes, assignments/results, waits, cooperative resource leases and durable wakeups are additional capabilities to review separately; wakeups currently target persisted sessions, not bounded in-memory subagents. |
 | Cost and performance visibility | Session usage/estimated cost and speed indicators, plus aggregate charts. An estimate is not necessarily an invoice; incomplete observations must not silently become zero. |
-| Historical analytics and queries | Automatic fresh capture includes provider settlements, executions, tools/file facets, activity spans and capability/feature observations, with separately addressed detail. Agent queries extend well beyond the small UI counters. Their value and scope are not settled for Urd. |
+| Historical analytics and queries | Automatic fresh capture includes provider settlements, executions, tools/file facets, activity spans and capability/feature observations, with separately addressed detail. Agent queries extend well beyond the small UI counters. Urd's agreed post-closure scope is much smaller: compact usage summaries, not detailed history. |
 | Privacy, retention and deletion | Pie's private-session close deletes associated history/analytics; normal closure/expiry includes a separate gated policy. Source implementation is not proof that the gate is active, and neither policy has been selected for Urd. |
 
 Pie's model-exchange inspector concerns a tool call: provider-normalized name
@@ -363,12 +369,12 @@ and unclassified test/development activity limit the conclusions.
   diagnostics, but established no root cause or justified improvement. It was not
   a representative sample or an evaluation of every rich-detail use.
 
-**Assessment, not a finalized analytics scope:** The investigation supports
-simple usage and diagnostic summaries as candidates. It has not demonstrated a
-need to inherit Pie's broad file/activity tracking, permanent detailed payloads
-or general historical-query machinery. Keep open-session tool inspection separate
-from that question. Retention of small summaries after closure remains to be
-agreed; no data engine or detailed capture protocol is selected by these findings.
+**Outcome:** The owner chose small usage summaries after closure, without
+retaining conversations or full tool outputs. This investigation did not
+demonstrate a need to inherit Pie's broad file/activity tracking, permanent
+detailed payloads or general historical-query machinery. That is not proof that
+all richer analysis is useless. Keep open-session tool inspection separate; no
+data engine or detailed capture protocol is selected by these findings.
 
 The report, queries and sanitized evidence remain in the owned local investigation
 directory `%TEMP%\urd-analytics-investigation-jLnBHj\`; private runtime data and
@@ -388,7 +394,8 @@ research observations, not production acceptance or a full analytics value audit
 - Guidance/tools: `harness/agent-instructions/README.md`,
   `harness/tools/README.md`, `harness/tools/catalog/index.ts`,
   `harness/tools/warm-bash/README.md`, and
-  `harness/tools/package-integrations/web-access/README.md`.
+  `harness/tools/package-integrations/web-access/README.md`,
+  `docs/operations/PLAYWRIGHT.md`, and `docs/operations/COMPUTER-USE.md`.
 - Context controls: `harness/tool-and-skill-selection/README.md`,
   `harness/tool-and-skill-selection/settings/config.ts`,
   `harness/tools/invoke-tool/recovery.ts`,

@@ -157,6 +157,25 @@ still need an integration. The docs describe access and deployment conditions;
 this review does not establish Urd registration or any account's entitlement.
 Live documentation is not version-pinned and must be rechecked before implementation.
 
+## Claude subscriptions: direct-access coverage needs a decision
+
+Anthropic's live legal/compliance documentation, inspected on 2026-11-03, says
+third-party developers may not offer Claude.ai login in their own applications
+or route users' Free/Pro/Max/Ultra subscription credentials. It directs developers
+toward API keys or supported cloud providers. This is a provider-policy finding,
+not a live test of technical reachability or a blanket statement about OAuth.
+
+The documentation separately permits end users to sign in to an unmodified
+Claude Code binary under its stated conditions. The Agent SDK overview describes
+a library that runs that binary, with its agent loop and context management—not
+a standalone model client. Do not silently introduce this separate agent-runtime
+integration as though an OAuth library supplied direct subscription access.
+
+Urd's popular-subscription goal does not establish an approved direct Claude
+subscription route. Whether to target Claude API access without consumer-plan
+access is an owner coverage decision, not settled by this finding. Recheck these
+live provider conditions before implementation; they are not version-pinned.
+
 ## Copilot subscription access: distinguish the SDK from a raw client
 
 GitHub's documented Copilot SDK runs the Copilot CLI agent runtime over JSON-RPC.
@@ -202,3 +221,5 @@ Authentication documentation inspected on 2026-11-03:
 
 - [openid-client](https://github.com/panva/openid-client): supported OAuth/OIDC flows and token operations.
 - [Auth0 Token Vault](https://auth0.com/docs/secure/tokens/token-vault): hosted third-party token storage and exchange; not proof of AI subscription entitlement.
+- Anthropic [legal and compliance](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use): restrictions on third-party subscription credential use and conditions for unmodified Claude Code.
+- Anthropic [Agent SDK overview](https://platform.claude.com/docs/en/agent-sdk/overview): binary/agent-loop ownership versus the direct API client SDK.

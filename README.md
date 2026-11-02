@@ -169,7 +169,9 @@ storage.
 
 **The backend does the work; the UI is an interface into it.** Browser, desktop
 and VS Code clients access the same backend and agent sessions rather than
-operating separate agent runtimes for each surface.
+operating separate agent runtimes for each surface. File, shell and computer-control
+operations target the backend machine, not a remote UI device; connecting
+a client does not move the workspace or execution onto that client.
 
 Native desktop and VS Code clients should connect to an existing backend or
 start it when absent. Closing a UI leaves the backend running; stopping the

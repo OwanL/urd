@@ -256,6 +256,19 @@ backend behaviour remains unchanged. Exact deletion timing and retention of shar
 assignment/result facts remain open; closing a session does not silently reverse
 the earlier decision to remember saved coordination records across restarts.
 
+### Keep session snoozing
+
+**Decision:** Keep snoozing; the owner finds it useful. An idle chat can be hidden
+until later, then its tab returns. Snoozing is not closing: preserve the session
+and its original readable history rather than applying closed-session cleanup.
+
+Keep the distinction from both stopping work and scheduled agent follow-ups.
+Snooze does not pause a running job, and restoring a tab does not itself start AI
+work or take focus. Preserve the useful restart/early-restore behavior without
+assuming Pie's exact presets, storage or admission machinery must be copied.
+Interactions with pending work and follow-ups need a clear lifecycle rule; do not
+silently bypass the existing idle-only safeguard.
+
 ### Keep original chat history until the session closes
 
 **Decision:** Original messages remain readable while a session is open, even

@@ -14,7 +14,10 @@ Urd requires subscription sign-in, API keys and local-server connections, a
 lightweight first-party harness and no Pi dependency. **Ownership of the model/tool
 loop is open.** This study initially assumed Urd must own that loop; the assumption
 was not owner-approved and has been withdrawn. Its model-client findings remain
-useful, but they do not settle runtime ownership.
+useful, but they do not select a loop implementation. Subsequent owner alignment
+excluded complete agent runtimes as Urd's foundation: build a lightweight harness
+for Urd's needs, based on Pie's product direction. Focused libraries remain
+eligible; the full-runtime comparisons below are historical research.
 
 Separate model transport, authentication, conversation/tool execution, and
 presentation. A library can help with transport without owning execution or UI;
@@ -86,7 +89,7 @@ The first tool had already executed in every case. This tests a next-model gate,
 not rollback, real provider transport, restart recovery or overall Urd fitness.
 Artifacts and the dependency lockfile are in `%TEMP%\urd-release-probe-f6a94b69\`.
 
-## Managed runtimes: legitimate alternatives, different responsibilities
+## Managed runtimes: researched, excluded as Urd's foundation
 
 The inspected Copilot SDK/CLI and Codex app-server expose more than model calls:
 they own execution, compaction and persisted conversation state. Public contracts
@@ -94,11 +97,12 @@ expose readable history apart from compacted context, suffix removal, interrupti
 custom-tool seams and deletion. Some APIs are experimental; required provider
 routes, helper inspection, cleanup and recovery still need qualification.
 
-Reusing their transcript stores could avoid duplicating full history in Urd.
-Urd still needs its shared client backend, bucket policy, durable assignments and
-results, and application lifecycle/retention rules. Runtime reuse trades avoided
-implementation for integration and vendor-policy coupling; it is not rejected
-merely because the runtime owns the loop.
+The research considered whether reusing their transcript stores could avoid
+history implementation in Urd. The owner has since rejected building Urd on a
+complete agent runtime. Potential first-party LOC savings do not override the
+direction to build Urd's own lightweight harness. This is an architectural scope
+decision, not a finding that these runtimes cannot work or that focused libraries
+must not run a model/tool loop.
 
 History pagination needs separate scrutiny. At the newer Codex pin below,
 projected paginated history queries SQLite rather than replaying the full rollout;
@@ -140,9 +144,9 @@ Live documentation is not version-pinned and must be rechecked before implementa
 GitHub's documented Copilot SDK runs the Copilot CLI agent runtime over JSON-RPC.
 It handles planning and tool invocation; standard usage uses a Copilot subscription,
 while BYOK is a separate API-key path. It is **not** a drop-in model transport for
-an app-owned loop merely because it is called an SDK. Using its runtime is a
-separate architectural candidate: assess the control and lifecycle it would own,
-rather than assuming that all SDKs are interchangeable or that reuse is forbidden.
+an app-owned loop merely because it is called an SDK. Its complete agent runtime
+is excluded as Urd's foundation; do not treat it as a focused model client or
+silently introduce that runtime to obtain subscription access.
 
 Pi and the inspected independent Crush implementation show another mechanism:
 GitHub OAuth/device authentication followed by a Copilot token exchange. Pi also
@@ -152,10 +156,11 @@ or blanket provider permission. No standalone public Copilot inference contract
 was established by this bounded review; that is a remaining research/qualification
 gap, not a claim that such an integration is impossible or forbidden.
 
-Compare a focused model/auth adapter with SDK/runtime integration explicitly,
-including required behaviour, lifecycle coupling and the code Urd would maintain.
-Preserve the product access requirements during that comparison. No option is
-selected, and no provider test calls or sign-ups are implied.
+Qualify focused model/auth adapter options without dropping the agreed access
+categories. Exact Copilot coverage remains open. If a required access route
+conflicts with the harness boundary, bring that trade-off to the owner rather
+than silently changing either requirement. No adapter is selected, and no
+provider test calls or sign-ups are implied.
 
 ## Sources
 

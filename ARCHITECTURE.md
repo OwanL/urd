@@ -84,8 +84,9 @@ span multiple decisions, and the inventory can grow as Pie is inspected.
 
 ## Agreed architectural decisions
 
-The existing strategic decisions remain in the README: a first-party harness
-without Pi; a shared backend with multiple UI clients; background operation
+The existing strategic decisions remain in the README: a Urd-specific harness
+without Pi or another complete agent runtime as its foundation; a shared backend
+with multiple UI clients; background operation
 after UI closure; source-based customisation; Windows-first delivery; and no
 Pie data-compatibility requirement. More detailed decisions will be recorded
 here as the review progresses. Keeping LOC down is also a strict project
@@ -394,19 +395,25 @@ model cycle as a requirement. **That was an assistant inference, not an agreed
 owner decision, and has been withdrawn.** A first-party harness with no Pi
 dependency does not by itself settle who implements or runs this cycle.
 
-Compare a custom loop, a reusable loop library and managed agent-runtime
-integration against the required product behaviour. Consider actual control,
-data/lifecycle ownership, provider coverage, first-party adapter/workaround code
-and maintenance, rather than treating either custom code or an SDK as inherently
-simpler. None is selected or automatically qualified. The no-Pi requirement
-remains unchanged.
+Compare a Urd-controlled loop with a reusable loop library against the required
+product behaviour. Consider actual control, data/lifecycle ownership, provider
+coverage, first-party adapter/workaround code and maintenance, rather than treating
+either custom code or an SDK as inherently simpler. Neither is selected or
+automatically qualified.
+
+The owner has excluded complete agent runtimes such as Copilot CLI and Codex
+app-server as Urd's foundation. Build Urd's lightweight harness for its own needs,
+not a wrapper around another agent application. This does not require hand-writing
+shared model-client or loop mechanics; focused libraries remain eligible. The
+no-Pi dependency direction, with case-by-case snippet reuse, remains unchanged.
 
 **Current assistant proposal, not an agreed stack:** Use TypeScript and Vercel
 AI SDK as an initial comparison candidate, trying the SDK-managed loop against
 a small Urd-controlled loop over the same model-client layer. Prefer whichever
-meets the behaviour with less maintained code; managed vendor runtimes remain
-alternatives. [Provider research](PROVIDER-RESEARCH.md) records the evidence and
-limits. This does not select a language, SDK, storage engine or execution model.
+meets the behaviour with less maintained code within Urd's own harness.
+[Provider research](PROVIDER-RESEARCH.md) records the evidence and limits;
+its complete-runtime comparisons are historical research, not current candidates.
+This does not select a language, SDK, storage engine or execution model.
 
 ### Begin with one backend process unless evidence justifies separation
 

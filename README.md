@@ -99,6 +99,11 @@ mostly bespoke, lightweight and aligned with what Pie offers. Core capabilities
 belong in its design rather than being bolted onto another application's
 extension seams.
 
+**Do not replace Pi with another complete agent application's runtime.** Copilot
+CLI and Codex app-server are not Urd foundation candidates. Build the lightweight
+harness around Urd's needs and Pie's product direction, rather than turning Urd
+into a wrapper around another agent application. Focused libraries remain eligible.
+
 Prefer purpose-built systems over a general framework for arbitrary harnesses.
 Less generalisation and less customisation infrastructure are intentional;
 deep customisability comes from access to the source instead.

@@ -256,6 +256,21 @@ backend behaviour remains unchanged. Exact deletion timing and retention of shar
 assignment/result facts remain open; closing a session does not silently reverse
 the earlier decision to remember saved coordination records across restarts.
 
+### Keep original chat history until the session closes
+
+**Decision:** Original messages remain readable while a session is open, even
+after older conversation has been summarized for the AI. Context compaction
+changes what the model works from; it does not erase the user's readable history.
+
+These are different views of the session, not a requirement to duplicate every
+message. Opening or switching a tab must not require loading the entire original
+history; older content can be fetched as needed. This requirement informs future
+storage/read-path comparisons without selecting a data engine.
+
+An explicit edit to an earlier prompt still replaces the later conversation as
+already agreed. At closure, the small-usage-summary retention policy applies;
+compaction does not create a separate permanent archive.
+
 ### Keep tool input/output inspection on hover
 
 **Decision:** Hovering a tool call to see its input and output is sufficient for

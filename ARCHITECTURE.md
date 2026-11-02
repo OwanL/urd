@@ -237,6 +237,18 @@ removed on the strength of its source implementation alone. This investigation
 does not select storage technology or authorize copying Pie's analytics process
 topology.
 
+### Closed sessions are finished, not a resumable archive
+
+**Direction:** A closed session can be treated as finished and no longer needed.
+Do not add a readable/resumable archive merely because the storage design could
+support one. Whether any data outlives closure depends on the demonstrated value
+of analytics or another explicit requirement, not default indefinite retention.
+
+This concerns closing a session, not closing a UI client: the agreed background
+backend behaviour remains unchanged. Exact deletion timing and retention of shared
+assignment/result facts remain open; closing a session does not silently reverse
+the earlier decision to remember saved coordination records across restarts.
+
 ## Working hypotheses, not settled commitments
 
 ### Begin with one backend process unless evidence justifies separation
@@ -312,6 +324,12 @@ reference section. This is not yet a complete dependency or lifecycle audit.
 | Cost and performance visibility | Session usage/estimated cost and speed indicators, plus aggregate charts. An estimate is not necessarily an invoice; incomplete observations must not silently become zero. |
 | Historical analytics and queries | Automatic fresh capture includes provider settlements, executions, tools/file facets, activity spans and capability/feature observations, with separately addressed detail. Agent queries extend well beyond the small UI counters. Their value and scope are not settled for Urd. |
 | Privacy, retention and deletion | Pie's private-session close deletes associated history/analytics; normal closure/expiry includes a separate gated policy. Source implementation is not proof that the gate is active, and neither policy has been selected for Urd. |
+
+Pie's model-exchange inspector concerns a tool call: provider-normalized name
+and arguments before execution, and the final tool content confirmed consumed
+by a successful provider response. It is not an original-HTTP-byte capture or a
+complete model-request log. Keep this session-debugging capability distinct from
+historical analytics and from ordinary formatted tool cards when reviewing value.
 
 ### Source anchors
 

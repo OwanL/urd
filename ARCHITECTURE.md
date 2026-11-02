@@ -268,6 +268,20 @@ information from the existing view. Exact capture and representation mechanics
 remain implementation questions; there is no need to make the owner decide them
 through competing technical labels for this same interaction.
 
+### Keep both website automation and desktop control
+
+**Decision:** Keep both capabilities; they serve different jobs.
+
+- Website automation can operate and inspect pages in a separate browser without
+  taking over the user's mouse.
+- Desktop control can operate applications, browser controls outside the page,
+  file dialogs and other Windows UI that website automation cannot reach.
+
+This retains useful outcomes, not Pie's specific libraries, packaging or process
+adapters. Their dependencies and implementation cost still need review. Preserve
+agreement with the user before visible desktop interaction unless the request
+already includes it; retaining the feature is not blanket permission to use it.
+
 ## Working hypotheses, not settled commitments
 
 ### Begin with one backend process unless evidence justifies separation

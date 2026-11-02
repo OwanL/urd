@@ -246,6 +246,13 @@ layer; do not assume an SDK for API-key requests also handles subscription
 sign-in. First-party harness ownership does not require hand-writing all provider
 code, and these requirements do not select a language or SDK.
 
+[Provider research](PROVIDER-RESEARCH.md) compares model-client approaches and
+subscription integration seams. Current OpenAI documentation offers a public
+ChatGPT-plan Responses API flow; Pi's existing Codex route is not the only option.
+GitHub's documented Copilot SDK instead embeds its agent runtime, so it must not
+be mistaken for a neutral model client. These are source findings, not qualified
+Urd integrations or a reason to select a library prematurely.
+
 ### Keep small usage summaries after closure
 
 **Decision:** After a session closes, keep only a compact usage summary, such as

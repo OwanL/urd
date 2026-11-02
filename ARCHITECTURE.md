@@ -219,6 +219,25 @@ Do not introduce an arbitrary global agent limit from these estimates, or assume
 that supporting many contexts requires a process per agent or distributed
 infrastructure. The provisional process model remains provisional.
 
+### Keep subscription, API-key and local-model access
+
+**Decision:** Retain all three model-access methods:
+
+- Subscription sign-in, such as ChatGPT or GitHub Copilot access.
+- Provider API keys.
+- Connections to local model servers, such as Ollama.
+
+This selects access categories, not a provider library or a promise of every
+model/vendor combination. Connecting to a local server does not mean building
+Urd's own model runner. Exact provider coverage and connection management still
+need review.
+
+Removing Pi includes replacing its provider/auth interfaces, not only its agent
+loop. Compare independent libraries and focused adapters before choosing this
+layer; do not assume an SDK for API-key requests also handles subscription
+sign-in. First-party harness ownership does not require hand-writing all provider
+code, and these requirements do not select a language or SDK.
+
 ### Keep small usage summaries after closure
 
 **Decision:** After a session closes, keep only a compact usage summary, such as
@@ -252,9 +271,10 @@ conversation or full tool outputs. Any further retention needs another explicit
 requirement, not a default assumption that all history lives indefinitely.
 
 This concerns closing a session, not closing a UI client: the agreed background
-backend behaviour remains unchanged. Exact deletion timing and retention of shared
-assignment/result facts remain open; closing a session does not silently reverse
-the earlier decision to remember saved coordination records across restarts.
+backend behaviour remains unchanged. Assignment/result facts still needed by
+another open session remain available; closing one session does not discard them
+or reverse their agreed persistence across restarts. Exact cleanup timing,
+including when shared facts are no longer needed, remains to be designed.
 
 ### Keep session snoozing
 

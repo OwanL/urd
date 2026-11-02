@@ -143,9 +143,20 @@ support are distinct from choosing an exact model.
 
 **Rationale:** Preserve the current selection workflow rather than expand its
 interface during the rebuild. Internal session representation remains a separate
-design question. Provider eligibility, fallback and selection internals still
-need their own review; retaining buckets does not approve every current
-implementation detail.
+design question.
+
+**Automatic fallback:** Preserve Pie's enabled-provider/bucket selection and
+fallback workflow for delegated work: bounded subagents and independent delegated
+sessions. Switching within that configured policy does not require repeated
+approval, including when it selects an already-enabled metered provider. Do not
+silently widen the allowed provider pool. This decision does not choose automatic
+fallback for a user-selected model in their own chat.
+
+Creation-time selection and in-run retries are distinct paths to inspect, not
+proof that Pie implements both delegation forms identically. Detailed eligibility,
+retry and selection mechanics still need review; retaining the useful workflow
+does not approve every current implementation detail or require a new spending-
+approval system.
 
 ### Retain bounded subagents and independent agent-created sessions
 

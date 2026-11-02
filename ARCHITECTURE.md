@@ -127,6 +127,56 @@ This does not require separate agent engines, storage implementations or class
 hierarchies. Sharing their underlying representation remains a proposal, and
 exact cancellation, retention and ownership rules still need review.
 
+### Keep conversation history linear
+
+**Decision:** A session has a linear conversation, not a tree of revisitable
+alternative branches. Editing an earlier prompt replaces the later conversation,
+as Pie currently does. Do not inherit Pi's conversation-tree machinery for
+branch-navigation functionality Urd has not chosen to offer.
+
+**Rationale:** Simple ordered history is sufficient for the intended workflow
+and reduces the state that storage, context construction and recovery must
+interpret. In Pie, the UI does not expose branch navigation, and the edit path
+rewrites the saved transcript before submitting the replacement prompt.
+
+**Boundary:** Editing or removing conversation records does not undo filesystem,
+network or other external effects already performed by tools. Exact mutation,
+concurrency and interrupted-edit rules remain to be designed.
+
+### Retain assignments and results across backend restarts
+
+**Decision:** Persist assignment records and their results, not only conversation
+history. The records must retain enough identity, participant and status
+information to establish which work was requested and what outcome was recorded.
+
+**Rationale:** Sustained agent coordination should not lose its basic facts when
+the backend restarts. Pie's coordinator-lifetime task registry does lose that
+evidence; Urd will deliberately improve this behaviour.
+
+**Boundary:** Remembering work is not the same as resuming execution. Stored
+assignments are not permission to automatically repeat tool side effects.
+Recovery must distinguish recorded results from unfinished or uncertain work;
+the exact state transitions and resume controls remain to be designed. This is
+not a commitment to a general workflow-replay engine.
+
+### Responsiveness is a product-wide requirement
+
+**Decision:** Urd must feel responsive throughout its UI. In particular,
+clicking a session tab must reveal its actual text/content with minimal delay.
+Session-load latency is a primary design criterion, not secondary polish.
+
+**Measurement boundary:** Measure click-to-usable-visible-content, not merely
+click-to-acknowledgement or click-to-loading-indicator. Distinguish warm sessions,
+cold sessions and startup, and include long histories and large tool results.
+Separate storage retrieval, decoding/projection, transport and rendering costs
+so a fast query is not mistaken for a fast user experience. Numeric targets and
+representative workload sizes still need to be established.
+
+**Consequence:** Storage, data representation and UI delivery must be evaluated
+together. Active streaming and background work must also be included when
+checking responsiveness. This requirement does not select a storage engine or
+approve a particular cache, paging or rendering framework.
+
 ## Working hypotheses, not settled commitments
 
 ### Begin with one backend process unless evidence justifies separation
@@ -153,6 +203,31 @@ Pie already uses its agent engine for both forms. A Urd simplification must
 therefore target real lifecycle, persistence or inspection duplication rather
 than assume Pie has two unrelated engines. Visible tabs, inherited context,
 child permissions and lifetime remain separate concerns.
+
+### Storage technology requires comparative investigation
+
+**No storage technology has been selected.** SQLite plus file-backed large
+payloads was suggested, but the owner explicitly deferred the decision pending
+research. Plain files/JSONL, SQLite and any hybrid must be evaluated rather than
+adopted because they are familiar or sound attractive in isolation. Session
+click-to-content latency is a primary criterion in this investigation.
+
+The source comparison and local experiment are recorded in
+[STORAGE-RESEARCH.md](STORAGE-RESEARCH.md); findings there are evidence, not an
+architecture commitment.
+
+This is a fundamental, costly-to-reverse decision. The confirmed references are
+upstream Pi's coding agent, **Pi Durable** (the first-party upstream package,
+not a third-party Pi fork), **DeepSeek Harness**, Codex and Claude Code.
+Distinguish inspectable source, documented behaviour and unsupported inference.
+
+Compare streaming writes, history loading, edits/truncation, concurrent work,
+assignment/result persistence, crash consistency, large payloads and indexing.
+Include memory/startup costs, dependencies, distribution burden, implementation
+LOC and ongoing maintenance. Performance conclusions need representative
+workloads; neither another project's choice nor an isolated microbenchmark
+establishes what is best for Urd. The research must inform a decision, not
+silently turn a candidate into the architecture.
 
 ## Reference observations
 

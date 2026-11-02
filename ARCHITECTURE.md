@@ -295,11 +295,13 @@ storage technology or authorize copying Pie's analytics process topology.
 
 ### Closed sessions are finished, not a resumable archive
 
-**Direction:** A closed session can be treated as finished and no longer needed.
-Do not add a readable/resumable archive merely because the storage design could
-support one. The agreed post-closure record is a small usage summary, not the
-conversation or full tool outputs. Any further retention needs another explicit
-requirement, not a default assumption that all history lives indefinitely.
+**Decision:** Closure is final. Losing the closed session's conversation and tool
+history is intentional, not merely hiding its tab; it is not retained for reopening.
+Use snooze when returning later is intended. Do not add a readable/resumable
+archive merely because storage could support one. The agreed post-closure record
+is a small usage summary, not the conversation or full tool outputs. Any further
+retention needs another explicit requirement, not a default assumption that all
+history lives indefinitely.
 
 This concerns closing a session, not closing a UI client: the agreed background
 backend behaviour remains unchanged. Assignment/result facts still needed by

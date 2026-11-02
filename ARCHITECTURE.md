@@ -251,10 +251,13 @@ infrastructure. The provisional process model remains provisional.
 - Provider API keys.
 - Connections to local model servers, such as Ollama.
 
-This selects access categories, not a provider library or a promise of every
-model/vendor combination. Connecting to a local server does not mean building
-Urd's own model runner. Exact provider coverage and connection management still
-need review.
+**Popular subscription support is intended scope**, not merely one arbitrary
+vendor to satisfy the sign-in category. Prefer existing libraries for standard
+authentication and token management rather than rebuilding those mechanisms.
+This does not select a library or promise every model/vendor combination;
+authentication alone does not establish subscription access to a model API.
+Connecting to a local server does not mean building Urd's own model runner.
+Exact provider coverage and connection management still need qualification.
 
 Removing Pi includes replacing its provider/auth interfaces, not only its agent
 loop. Compare independent libraries and focused adapters before choosing this

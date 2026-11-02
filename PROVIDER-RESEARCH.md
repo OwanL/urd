@@ -37,6 +37,23 @@ that either is smaller or faster overall. Local OpenAI-compatible servers can us
 compatible transports, but model/tool/stream support still requires validation.
 Neither approach has been qualified against Urd's complete access requirements.
 
+## Authentication libraries are not subscription entitlements
+
+The owner wants popular subscription support and prefers library reuse for
+authentication/token management. OAuth is an authorization protocol; Auth0 is a
+hosted identity service, not the name of that protocol.
+
+For example, `openid-client` documents authorization-code/PKCE, device authorization
+and refresh-token flows. It is a JavaScript candidate, not a language or library
+selection. Auth0 Token Vault also manages third-party access/refresh tokens and
+token exchange, but introduces a hosted identity/token service. Requesting an
+OAuth library does not itself approve that service dependency.
+
+Neither a generic OAuth client nor token storage establishes that a consumer AI
+subscription permits Urd to call a model API. Provider registration, scopes,
+entitlement, endpoints and request shaping still need qualification; a focused
+provider adapter may supply that work without a complete agent runtime.
+
 ## Loop ownership: compare the same model-client layer
 
 An app-owned loop can reuse the **same** AI SDK adapters, streaming and tool-call
@@ -179,3 +196,8 @@ Live official documentation inspected on 2026-11-02:
 
 - OpenAI [Sign in with ChatGPT overview](https://developers.openai.com/siwc/token-sharing-open-source.md), [sign-in](https://developers.openai.com/siwc/token-sharing-open-source/sign-in.md), [models and inference](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference.md), [preview limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations.md), [token reference](https://developers.openai.com/siwc/token-sharing-open-source/token-reference.md).
 - Ollama [OpenAI compatibility](https://docs.ollama.com/api/openai-compatibility).
+
+Authentication documentation inspected on 2026-11-03:
+
+- [openid-client](https://github.com/panva/openid-client): supported OAuth/OIDC flows and token operations.
+- [Auth0 Token Vault](https://auth0.com/docs/secure/tokens/token-vault): hosted third-party token storage and exchange; not proof of AI subscription entitlement.

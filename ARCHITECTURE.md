@@ -369,6 +369,24 @@ assuming Pie's exact presets, storage or admission machinery must be copied.
 Interactions with pending work and follow-ups need a clear lifecycle rule; do not
 silently bypass the existing idle-only safeguard.
 
+### Keep AI-based tool and skill pruning, with protected core capabilities
+
+**Decision:** Retain Pie's AI-based tool/skill catalog pruning. The owner reports
+that it has been a great success. Do not replace it with only a small fixed core
+and on-demand discovery; that replacement proposal was rejected.
+
+Core/pinned/always-keep tools and skills remain available and are **excluded from
+the candidate catalog before it is sent to the pruner**, not merely restored
+afterward. Pie already implements this boundary and also enforces the protections
+when applying selection results. Preserve useful discovery/recovery alongside
+pruning; it is not a replacement for the retained selector.
+
+Availability of skill metadata is distinct from automatically loading every full
+skill body. Catalog pruning is also distinct from shortening tool results and
+summarising conversation history. Do not conflate these controls or infer net
+latency/token savings from the owner's positive experience. Retain the useful
+behaviour without automatically copying all cache, retry and lifecycle machinery.
+
 ### Keep original chat history until the session closes
 
 **Decision:** Original messages remain readable while a session is open, even
@@ -533,7 +551,7 @@ reference section. This is not yet a complete dependency or lifecycle audit.
 | Transcript and execution inspection | Paged history, expandable tool inputs/results, lazy child details and model-produced/model-received inspection. Exact execution detail can have very different size and retention needs from the visible conversation. |
 | Guidance and discovery | Context documents, append guidance, named agents/roles and skills; main/child composition and resource precedence. Separate authored resources from the live prompt assembled from them. |
 | Provider accounts and model access | API keys, supported subscription logins and local/OpenAI-compatible endpoints are distinct access needs. Much provider/auth behavior comes from `pi-ai`, behind Pie-owned management interfaces; removing Pi includes replacing those seams. API protocol families are not the same thing as login methods. Provider coverage and replacement libraries remain to be reviewed. |
-| Tool/skill selection | Optional model-scored catalog filtering, caches and recovery. Fresh defaults are off with no scorer selected; that does not establish whether the owner uses it. Recovery currently discloses hidden tools for a wrapper rather than mutating the frozen native catalog. |
+| Tool/skill selection | The owner confirms successful use and explicitly retains AI-based catalog pruning with protected core entries. Checked-in defaults are not usage evidence. Pie's recovery discloses hidden tools for a wrapper rather than mutating the frozen native catalog; that implementation constraint is not automatically Urd's. |
 | Result reduction and history compaction | Deterministic output rewriting with raw recall is distinct from catalog selection and from summarizing old conversation. Result reduction is enabled in checked-in defaults and excludes `read`; the mechanisms have different data and fidelity needs. |
 | Files, shell, web, MCP, browser and desktop tools | Different dependency and effect boundaries: Pi-supplied core tools, Pie's warm-shell override/fallback, managed web/MCP packages, browser automation and Windows desktop integration. Dropping Pi does not make these integrations free. |
 | Delegation, coordination and deferred work | Both retained delegation forms use the agent engine. Notes, assignments/results, waits, cooperative resource leases and durable wakeups are additional capabilities to review separately; wakeups currently target persisted sessions, not bounded in-memory subagents. |
@@ -599,6 +617,9 @@ research observations, not production acceptance or a full analytics value audit
   `harness/pi/packages/ai/src/utils/oauth/index.ts`.
 - Context controls: `harness/tool-and-skill-selection/README.md`,
   `harness/tool-and-skill-selection/settings/config.ts`,
+  `harness/tool-and-skill-selection/lifecycle/register.ts`,
+  `harness/agent-instructions/skill-selection/skill-policy.ts`,
+  `harness/tools/selection/tool-policy.ts`,
   `harness/tools/invoke-tool/recovery.ts`,
   `harness/tools/result-processing/README.md`, and `settings.defaults.json`.
 - Analytics: `docs/contracts/ANALYTICS_IMPLEMENTATION_CONTRACT.md`,
@@ -613,8 +634,9 @@ research observations, not production acceptance or a full analytics value audit
 - Separate capability from machinery. Useful historical queries do not require
   copying Pie's recorder/helper/process topology; useful shell execution does
   not automatically require its warm pool and SDK fallback.
-- Keep the three context controls distinct. Removing an optional selection
-  prepass would not inherently remove tool discovery, result recall or compaction.
+- Keep the three context controls distinct. AI-based catalog pruning is now
+  explicitly retained; simplify its implementation without silently replacing it
+  with discovery alone or conflating it with result reduction and compaction.
 - Inspect actual feature data needs before selecting storage: prompts/drafts,
   assignments, raw model/tool detail, historical accounting and private deletion
   do not all have the same owner or lifetime.

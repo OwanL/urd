@@ -297,6 +297,24 @@ adapters. Their dependencies and implementation cost still need review. Preserve
 agreement with the user before visible desktop interaction unless the request
 already includes it; retaining the feature is not blanket permission to use it.
 
+### Scheduled follow-ups survive restart and run automatically
+
+**Decision:** Remember scheduled follow-ups across backend restarts and run them
+automatically when due, without requiring the user to resume them manually.
+Preserve their intended deadlines; a follow-up that became due while the backend
+was stopped can run after it returns. No follow-up is dispatched while the
+backend is off.
+
+This applies to sessions that are still open. A follow-up targeting a closed
+session must be cancelled/discarded rather than reopening that session. Do not
+copy Pie's ability to restore a closed timer target after restart.
+
+This is an explicit future request, such as checking a build later, not permission
+to blindly replay unfinished commands or duplicate a delivery whose outcome is
+uncertain. Delivery/recovery mechanics remain to be designed. Approval covers
+delayed follow-ups, not automatic inheritance of Pie's broader combinations of
+timer, user-input, session-finished and command-polling conditions.
+
 ## Working hypotheses, not settled commitments
 
 ### Begin with one backend process unless evidence justifies separation
@@ -362,9 +380,10 @@ reference section. This is not yet a complete dependency or lifecycle audit.
 | --- | --- |
 | Compose, submit while busy, edit pending/earlier messages, interrupt | Conversation changes, queued input, drafts and pending attachments have different lifetimes today. Composer drafts/attachments are host runtime state; do not automatically copy that ownership into multi-client Urd. |
 | Questions and attention | Inline `ask_user` cards, prompt responses, waiting markers, sounds and window attention. Pending prompts are live state today; decide the useful offscreen-agent experience before designing its transport. |
-| Session organization | Tabs, pins/groups, snooze and restore, manual titles and optional model-generated titles. These are separate conveniences, not one indivisible session-management feature. |
+| Session organization | Tabs, pins/groups, snooze and restore, manual titles and optional model-generated titles. Snooze hides an idle chat and restores its tab later; it does not pause running work. These are separate conveniences, not one indivisible session-management feature. |
 | Transcript and execution inspection | Paged history, expandable tool inputs/results, lazy child details and model-produced/model-received inspection. Exact execution detail can have very different size and retention needs from the visible conversation. |
 | Guidance and discovery | Context documents, append guidance, named agents/roles and skills; main/child composition and resource precedence. Separate authored resources from the live prompt assembled from them. |
+| Provider accounts and model access | API keys, supported subscription logins and local/OpenAI-compatible endpoints are distinct access needs. Much provider/auth behavior comes from `pi-ai`, behind Pie-owned management interfaces; removing Pi includes replacing those seams. API protocol families are not the same thing as login methods. Provider coverage and replacement libraries remain to be reviewed. |
 | Tool/skill selection | Optional model-scored catalog filtering, caches and recovery. Fresh defaults are off with no scorer selected; that does not establish whether the owner uses it. Recovery currently discloses hidden tools for a wrapper rather than mutating the frozen native catalog. |
 | Result reduction and history compaction | Deterministic output rewriting with raw recall is distinct from catalog selection and from summarizing old conversation. Result reduction is enabled in checked-in defaults and excludes `read`; the mechanisms have different data and fidelity needs. |
 | Files, shell, web, MCP, browser and desktop tools | Different dependency and effect boundaries: Pi-supplied core tools, Pie's warm-shell override/fallback, managed web/MCP packages, browser automation and Windows desktop integration. Dropping Pi does not make these integrations free. |
@@ -425,6 +444,10 @@ research observations, not production acceptance or a full analytics value audit
   `harness/tools/warm-bash/README.md`, and
   `harness/tools/package-integrations/web-access/README.md`,
   `docs/operations/PLAYWRIGHT.md`, and `docs/operations/COMPUTER-USE.md`.
+- Provider/auth boundaries: `harness/model-providers/management/auth-port.ts`,
+  `harness/model-providers/management/pi-auth.ts`,
+  `harness/model-providers/management/contracts.ts`, `models.yaml`, and
+  `harness/pi/packages/ai/src/utils/oauth/index.ts`.
 - Context controls: `harness/tool-and-skill-selection/README.md`,
   `harness/tool-and-skill-selection/settings/config.ts`,
   `harness/tools/invoke-tool/recovery.ts`,

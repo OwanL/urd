@@ -169,8 +169,9 @@ and reduces the state that storage, context construction and recovery must
 interpret. In Pie, the UI does not expose branch navigation, and the edit path
 rewrites the saved transcript before submitting the replacement prompt.
 
-**Boundary:** Editing or removing conversation records does not undo filesystem,
-network or other external effects already performed by tools. Exact mutation,
+**Boundary:** This is history replacement only, not rollback. Editing or removing
+conversation records does not undo filesystem, network or other external effects
+already performed by tools. Exact mutation,
 concurrency and interrupted-edit rules remain to be designed.
 
 ### Retain assignments and results across backend restarts

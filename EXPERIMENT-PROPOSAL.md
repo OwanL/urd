@@ -78,8 +78,10 @@ framework or desktop automation. Defer this check rather than letting it expand.
 - Use a small shared fixture/check script, ordinary build/run commands and existing
   OS process tools. No benchmark framework, dashboard, orchestration service or UI.
 - Record a fresh-process run and three in-process repetitions using fresh input
-  state; label them separately. Alternate candidates and measure serially on the
-  same machine. Fresh process is not cold disk cache. Preserve raw readings and
+  state; label them separately. Following the agreed serial-session workflow, use
+  a disclosed fixed language order and measure on the same machine. This is not
+  counterbalanced ordering; retain order/background-load caveats. Fresh process
+  is not cold disk cache. Preserve raw readings and
   ranges; use no percentile claims or artificial overall score. A few repetitions
   do not establish steady-state JIT performance.
 - Observe process memory at baseline, with parsed data, after mutation and after

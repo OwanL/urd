@@ -426,6 +426,32 @@ summarising conversation history. Do not conflate these controls or infer net
 latency/token savings from the owner's positive experience. Retain the useful
 behaviour without automatically copying all cache, retry and lifecycle machinery.
 
+### Preserve model-visible prefixes during ordinary continuation and discovery
+
+**Direction (2026-11-03):** Preserve already-sent model-visible content during
+ordinary continuation and dynamic capability discovery so Urd does not needlessly
+invalidate provider prompt caches. Append-only conversation storage alone is not
+sufficient: system instructions, tool definitions/order and provider serialization
+also affect the cached prefix. This concerns cache eligibility, not guaranteed hits
+or savings. Explicit history edits and compaction remain supported; exact reset
+boundaries still need design, not a blanket immutable-session rule.
+
+Pie freezes its native catalog and appends recovered tool descriptions, routing
+calls through a fixed wrapper; see `docs/plans/IMMUTABLE-MODEL-CONTEXT.md` in Pie.
+That is evidence of a working design path, not a requirement to copy the wrapper
+or proof that all providers require it. Claude now documents beta
+[mid-conversation tool definitions](https://platform.claude.com/docs/en/build-with-claude/mid-conversation-system-messages)
+that can append tools without rewriting the earlier prefix, subject to provider
+restrictions. This is documented capability, not a qualified Urd integration.
+
+Shared model interfaces and optional loop libraries must be evaluated for stable
+request construction, dynamic discovery and lossless handling of necessary
+provider-specific content. A common interface must not erase these controls.
+Check actual serialized request sequences before claiming compatibility; real
+cache reuse needs provider evidence. No wrapper, native-discovery protocol or
+model library is selected here, and cached descriptions must not override current
+execution permissions.
+
 ### Keep original chat history until the session closes
 
 **Decision:** Original messages remain readable while a session is open, even

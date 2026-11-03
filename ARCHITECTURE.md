@@ -469,6 +469,23 @@ cache reuse needs provider evidence. No wrapper, native-discovery protocol or
 model library is selected here, and cached descriptions must not override current
 execution permissions.
 
+**Follow-up alignment (2026-11-03):** The [cache investigation](CACHE-RESEARCH.md)
+supports the original concern: changing early tool definitions generally loses
+prefix reuse across the later conversation, not necessarily the earlier unchanged
+prefix or the old cache entry itself. Urd-specific savings remain unmeasured.
+Continue dynamic tool discovery design and use its requirements to inform
+model-layer selection.
+
+The owner prefers native calls over a generic invocation wrapper and considers
+OpenAI/Anthropic-specific handling reasonable. Explore one Urd discovery/execution
+model with provider-specific exposure: native appended definitions where supported,
+and an explicit fallback elsewhere. Ordinary tool-list updates with cache cost and
+a stable wrapper remain alternatives, not selected policies. Preserve the retained
+AI-based catalog pruning and protected core tools; discovery complements them.
+Compare adapter code, model reliability and cache impact, including tool-capable
+local models. [Model-interface research](MODEL-INTERFACE-RESEARCH.md) records current
+SDK/adapter gaps; neither `IChatClient` nor its optional loop is selected yet.
+
 ### Keep original chat history until the session closes
 
 **Decision:** Original messages remain readable while a session is open, even

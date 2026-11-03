@@ -256,11 +256,12 @@ Packaging must be assessed separately from language choice:
 
 ## What to investigate next
 
-The revised [small-operation experiment proposal](EXPERIMENT-PROPOSAL.md) covers
-TypeScript, Python, Kotlin, Rust, Go and C# from the first round, with Bun/Deno
-runtime checks. It proposes basic CLI data operations and source changes, not a
-miniature Urd. The larger integration scenarios below are deferred; the proposal
-is not approval to execute or a replacement for later integration qualification.
+The approved [small-operation experiment proposal](EXPERIMENT-PROPOSAL.md) covers
+TypeScript, Python, Kotlin, Rust, Go and C#, with Bun/Deno runtime checks. Its
+[Windows first-round observations](EXPERIMENT-RESULTS.md) are recorded separately:
+basic CLI data operations and source changes, not a miniature Urd. The larger
+integration scenarios below remain deferred; these results do not replace later
+integration or three-OS qualification.
 
 **Recommended test order, not a new stack commitment:** First audit the intended
 Windows → macOS → Linux path for each leading stack's dependencies, hosts,

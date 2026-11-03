@@ -1,9 +1,10 @@
 # Small-operation technology experiments — revised proposal
 
-Status: approved for execution with the controls below. This replaces the earlier
+Status: approved and executed for the Windows first round on 2026-11-03; see
+[observations and limits](EXPERIMENT-RESULTS.md). This replaces the earlier
 session/UI/model-loop proposal, which was too application-shaped and too narrow
 in its initial candidates. Two bounded design passes informed this revision.
-Experiment execution has not started; environment preparation comes first.
+The planned macOS/Linux executions and optional process check remain unexecuted.
 
 ## Execution controls agreed with the owner
 

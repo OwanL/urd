@@ -455,6 +455,18 @@ timer, user-input, session-finished and command-polling conditions.
 
 ## Working hypotheses, not settled commitments
 
+### Language/runtime needs resource and local-build evidence
+
+No language or runtime is selected. The owner requires low harness CPU/memory
+cost within reason, balanced with installation, library reuse and maintenance.
+Source-bundled customisation must work on users' own machines; prebuilt-release
+convenience does not establish that the source-build workflow is acceptable.
+
+[Foundation research](FOUNDATION-RESEARCH.md) compares other applications,
+TypeScript/Node/Bun, Go, C#/.NET and Rust, including local build prerequisites and
+a proposed qualification sequence. Its shortlist is a research recommendation,
+not approval of a stack. Runtime/resource and build-cost measurements remain open.
+
 ### Model/tool loop ownership is open
 
 The provider research initially treated Urd owning the model → tool execution →

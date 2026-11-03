@@ -92,6 +92,14 @@ fan-out must not make interaction sluggish. Support as much work as is practical
 without treating speculative workload examples as hard limits. Concrete sizing
 scenarios and performance investigations belong in [ARCHITECTURE.md](ARCHITECTURE.md).
 
+### Keep the harness's own resource overhead low
+
+The backend, agent runtime and model/tool loop should use as little CPU and
+memory as is reasonable: agents' routine work already competes for the user's
+machine resources. Balance this with ease of installation, library availability
+and long-term maintenance. Low first-party LOC is not proof of low total resource
+cost. Compare actual workloads and dependencies, not language stereotypes.
+
 ### Own a first-party harness; remove Pi
 
 **Pi will not be a dependency or runtime coupling.** Urd's harness will be
@@ -121,6 +129,13 @@ Specific language, library and framework choices remain open.
 Users should have the source needed to change the application, including its
 guidance, UI and runtime capabilities. Do not recreate an elaborate extension
 or override platform merely to make those source changes possible.
+
+**Customisation and builds must work on the user's own machine.** Evaluate that
+workflow as a product capability, separately from installing a prebuilt release:
+required toolchains, dependency setup, local build/test steps and activation all
+matter. A source archive alone is not a complete customisation workflow. Whether
+build tools or dependency caches ship with the source remains open; a hosted build
+service must not be required for local customisation.
 
 **Editing source, then building and reloading, is an acceptable normal workflow.**
 Make the developer and user experience as smooth as is feasible without adding

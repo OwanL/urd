@@ -215,6 +215,14 @@ The long-term destinations are:
 These boundaries must be considered from the outset, but all surfaces need not
 ship initially. Browser delivery comes first; the subsequent order of desktop
 and VS Code delivery remains open.
+
+**Minimise duplication across interfaces.** Prefer sharing UI components,
+presentation/state logic and backend behaviour across browser, desktop and
+VS Code instead of maintaining three independent implementations. Small,
+explicit host-specific adapters are acceptable where needed. Evaluate actual
+code reuse, not just whether surfaces use the same language; this requirement
+does not select a UI toolkit or desktop host.
+
 **A TUI is not required and is outside the intended scope.** This does not
 prohibit ordinary launch, build or maintenance commands.
 

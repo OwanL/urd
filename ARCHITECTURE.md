@@ -549,17 +549,77 @@ justify it. External commands and selected integrations can still run in their
 own processes. Keeping the option open is not a reason to implement both
 execution models or add speculative process-abstraction layers now.
 
-### Shared representation for ordinary and delegated sessions
+### Session structure and communication: brainstorming checkpoint
 
-Using a common session representation for conversation, settings and execution,
-with explicit delegation relationships and lifetime rules, is a proposal only.
-It has not been agreed. This question concerns internal data structures, not
-which LLM serves a task; bucket-based model selection does not answer it.
+**Discussion recorded 2026-11-03; no topology or closure policy selected.** The
+owner sees ordinary chats, bounded subagents and delegated sessions as variations
+on a shared session concept. Pie already shares its agent engine; simplification
+must address actual lifecycle, persistence or inspection complexity, not assume
+Pie has unrelated engines.
 
-Pie already uses its agent engine for both forms. A Urd simplification must
-therefore target real lifecycle, persistence or inspection duplication rather
-than assume Pie has two unrelated engines. Visible tabs, inherited context,
-child permissions and lifetime remain separate concerns.
+**Owner's pain points:** Delegated sessions crowd personal session navigation,
+and agents can take too long to close workers after finishing with them. Consider
+presentation and predictable cleanup separately from shared execution machinery.
+The owner is exploring parent/child structure and simpler relative communication
+instead of much of the existing delegated-session communication indexing.
+
+Ideas discussed include returning a child's stable ID from creation, addressing
+children by that ID and resolving a special `parent` address. Exact tool names,
+address syntax and indexing are not selected. A single-parent structure is a tree
+(or forest); a DAG allows multiple parents and needs different addressing and
+ownership rules. Cyclic ownership would complicate cleanup. Creation provenance,
+lifetime ownership, collaboration and UI grouping need not be the same relation.
+
+The owner initially proposed waiting for title generation before returning child
+identity. The assistant recommended allocating identity independently of mutable
+titles and waiting for registration/addressability instead; title generation can
+fail or finish later. Keep this distinction in the next lifecycle design review,
+not as an already specified creation protocol.
+
+The owner's tentative preference is to keep bounded subagents as simple task-in/
+result-out helpers; sharing session representation does not require giving them
+delegated sessions' ongoing messaging interface. Parent/child addressing also does not replace durable assignment/result
+facts or define delivery guarantees. Those facts must still survive restart as
+already agreed.
+
+Assistant proposals, not decisions: a flat registry with explicit ownership and
+separate collaboration links; delegated workers grouped under their originating
+chat, potentially detachable; finished assignments distinguished from closed
+workers. Whether parent closure ends running children, whether workers can have
+multiple lifetime owners, and how cross-family collaboration works remain open.
+Existing creator-cleanup authority after human steering remains agreed; speaking
+to a worker does not by itself establish a new ownership rule.
+
+### Model-call reuse and composition: design alignment
+
+**Alignment recorded 2026-11-03:** Reuse common model-request mechanics for agent
+work and auxiliary LLM calls such as title generation and compaction. Prefer
+composition: title generation uses model I/O rather than inheriting from it.
+`ModelIo` and `TitleGeneration` are illustrative names, not approved class APIs.
+The caller should be able to express generation and a simple fallback clearly;
+a failed title can fall back to a bounded excerpt of the first prompt.
+
+Keep model invocation, the model/tool execution cycle and session state/lifetime
+as distinct responsibilities. This does not require three framework layers or
+make every auxiliary call a session. Reuse error/retry/fallback mechanisms while
+keeping operation-specific policies explicit: a missing title is tolerable,
+failed compaction must preserve usable context, and delegated fallback approval
+must not silently apply to a user's selected chat model. Cancellation should not
+be swallowed as a missing title; request retries must not replay completed tools.
+
+Design only enough class structure to establish responsibilities, state ownership,
+lifetimes and important failure behaviour. Use concrete flows to test the design
+before specifying every method, interface or subclass. Prefer focused libraries
+and .NET facilities for routine mechanics rather than recreating them beneath
+custom wrappers. A small class with one useful operation can be sufficient.
+
+The existing [C# discovery](GO-DOTNET-DISCOVERY.md) supplies candidates, not selected
+dependencies: ASP.NET Core for hosting, `Microsoft.Extensions.AI` and provider
+adapters for model I/O, its optional `FunctionInvokingChatClient` for loop reuse,
+the official MCP client SDK and Playwright .NET. Evaluate the owned integration
+code and behaviour each saves. Provider access, library compatibility and
+packaging still need qualification; neither a full agent framework nor a custom
+loop is selected by this alignment.
 
 ### Storage technology requires comparative investigation
 

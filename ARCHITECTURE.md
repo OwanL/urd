@@ -480,6 +480,10 @@ convenience does not establish that the source-build workflow is acceptable.
 TypeScript/Node/Bun, Go, C#/.NET and Rust, including local build prerequisites and
 a proposed qualification sequence. Its shortlist is a research recommendation,
 not approval of a stack. Runtime/resource and build-cost measurements remain open.
+[Focused Go/C# discovery](GO-DOTNET-DISCOVERY.md) subsequently established small
+streaming/tool/control paths using real loop libraries and fake models in both
+languages. These are feasibility observations, not provider, packaging, resource
+or cross-platform qualification, and do not select either stack.
 
 ### Model/tool loop ownership is open
 

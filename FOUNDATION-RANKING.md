@@ -263,6 +263,14 @@ basic CLI data operations and source changes, not a miniature Urd. The larger
 integration scenarios below remain deferred; these results do not replace later
 integration or three-OS qualification.
 
+A subsequent [Go/C# discovery round](GO-DOTNET-DISCOVERY.md) checked concrete
+libraries and ran matched fake-model streaming/tool/cancellation probes against
+Fantasy and Microsoft.Extensions.AI. Both passed; Fantasy offers a direct
+step-control hook, while the .NET probe used public middleware composition.
+The report also corrects README-only assumptions about Fantasy image input and
+the official Anthropic C# adapter. It does not select a stack or establish a
+resource winner, real-provider compatibility or three-OS qualification.
+
 **Recommended test order, not a new stack commitment:** First audit the intended
 Windows → macOS → Linux path for each leading stack's dependencies, hosts,
 packaging and local builds. Do this before selection; the Windows-first fixtures

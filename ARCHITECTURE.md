@@ -99,13 +99,38 @@ and no Pie data-compatibility requirement. More detailed decisions will be recor
 here as the review progresses. Keeping LOC down is also a strict project
 requirement; see the README's code-size constraint.
 
+### C# backend and class design
+
+**Decision (2026-11-03):** Use C# on .NET for the backend. The owner's rationale
+is readability when strong class structures are designed deliberately. Backend
+language comparison is settled; earlier shortlist recommendations are historical.
+
+**Design direction:** Plan classes around Urd's needs, with clear responsibilities,
+state ownership, relationships and lifecycle rules. Resolve those concerns before
+committing to concrete class names or hierarchies. Strong structure means an
+understandable model, not maximising class count, inheritance or abstraction layers;
+the strict code-size requirement remains in force.
+
+**Planned design work:** For each area reviewed, identify its core concepts and
+behaviour, which classes own state and enforce rules, and how they collaborate.
+Check the proposed structure against representative flows, including cancellation,
+restart and closure where relevant. Record a concise class/responsibility sketch
+as the design becomes concrete; introduce interfaces and shared abstractions when
+actual boundaries or reuse justify them, not as a framework imposed in advance.
+No concrete class layout is approved by this decision.
+
+**Still open:** .NET version, server framework, provider and loop libraries,
+loop ownership, storage, process topology, UI technology and desktop host.
+The language choice does not qualify performance, provider coverage, packaging
+or cross-platform behaviour; investigate those within the chosen backend direction.
+
 ### Browser-first delivery; develop from Pie until Urd is ready
 
 **Decision:** Target the browser for the first usable Urd client. Pie remains
 the development environment until Urd is ready for normal use. This removes
 pressure to add desktop/editor integration immediately or cut essential features
 just to begin developing Urd from itself. Desktop and VS Code clients remain
-part of the destination; implementation technologies remain undecided.
+part of the destination; client implementation technologies remain undecided.
 
 ### Operating-system rollout: Windows, then macOS, then Linux
 
@@ -469,21 +494,19 @@ timer, user-input, session-finished and command-polling conditions.
 
 ## Working hypotheses, not settled commitments
 
-### Language/runtime needs resource and local-build evidence
+### C#/.NET still needs resource and local-build evidence
 
-No language or runtime is selected. The owner requires low harness CPU/memory
-cost within reason, balanced with installation, library reuse and maintenance.
-Source-bundled customisation must work on users' own machines; prebuilt-release
-convenience does not establish that the source-build workflow is acceptable.
+The backend language is settled above. Low harness CPU/memory cost, installation,
+library reuse and maintenance remain requirements. Source-bundled customisation
+must work on users' own machines; prebuilt-release convenience does not establish
+that the source-build workflow is acceptable.
 
-[Foundation research](FOUNDATION-RESEARCH.md) compares other applications,
-TypeScript/Node/Bun, Go, C#/.NET and Rust, including local build prerequisites and
-a proposed qualification sequence. Its shortlist is a research recommendation,
-not approval of a stack. Runtime/resource and build-cost measurements remain open.
-[Focused Go/C# discovery](GO-DOTNET-DISCOVERY.md) subsequently established small
-streaming/tool/control paths using real loop libraries and fake models in both
-languages. These are feasibility observations, not provider, packaging, resource
-or cross-platform qualification, and do not select either stack.
+[Foundation research](FOUNDATION-RESEARCH.md) preserves the earlier language
+comparison and local-build considerations; its shortlist is now historical.
+[Focused Go/C# discovery](GO-DOTNET-DISCOVERY.md) established small streaming/tool/
+control paths using real loop libraries and fake models in both languages. These
+remain feasibility observations, not provider, packaging, resource or cross-platform
+qualification. Further qualification should focus on the selected C#/.NET backend.
 
 ### Model/tool loop ownership is open
 
@@ -504,13 +527,12 @@ not a wrapper around another agent application. This does not require hand-writi
 shared model-client or loop mechanics; focused libraries remain eligible. The
 no-Pi dependency direction, with case-by-case snippet reuse, remains unchanged.
 
-**Current assistant proposal, not an agreed stack:** Use TypeScript and Vercel
-AI SDK as an initial comparison candidate, trying the SDK-managed loop against
-a small Urd-controlled loop over the same model-client layer. Prefer whichever
-meets the behaviour with less maintained code within Urd's own harness.
-[Provider research](PROVIDER-RESEARCH.md) records the evidence and limits;
-its complete-runtime comparisons are historical research, not current candidates.
-This does not select a language, SDK, storage engine or execution model.
+The earlier TypeScript/Vercel AI SDK comparison proposal is superseded by the
+C# backend decision. Compare reusable loop libraries and a Urd-controlled loop
+within that direction, preferring the approach that meets the behaviour with
+less maintained code. [Provider research](PROVIDER-RESEARCH.md) preserves the
+earlier evidence and limits; its complete-runtime comparisons are historical
+research, not current candidates. No loop library or ownership model is selected.
 
 ### Begin with one backend process unless evidence justifies separation
 

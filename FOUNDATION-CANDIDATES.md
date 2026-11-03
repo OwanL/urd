@@ -1,5 +1,9 @@
 # Foundation candidate inventory
 
+> **Subsequent decision (2026-11-03):** C#/.NET is selected for the backend.
+> Backend language alternatives below are historical; listing other technologies
+> does not select them. See [the agreed decision](ARCHITECTURE.md#c-backend-and-class-design).
+
 ## Purpose and scope
 
 An expanded, **unranked research list**, requested on 2026-11-03. This is an

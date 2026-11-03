@@ -1,10 +1,16 @@
 # Provider integration research
 
+> **Subsequent decision (2026-11-03):** C#/.NET is selected for the backend.
+> The TypeScript-oriented comparison below is prior research, not the current
+> implementation direction. Provider libraries and loop ownership remain open.
+> See [the agreed decision](ARCHITECTURE.md#c-backend-and-class-design).
+
 ## Status and limits
 
 Source review and bounded offline checks on 2026-11-02–03, supporting
 [ARCHITECTURE.md](ARCHITECTURE.md).
-No language, SDK or provider implementation is selected. No accounts, credentials,
+This investigation selected no language, SDK or provider implementation.
+No accounts, credentials,
 login flows or model requests were exercised. This establishes documented seams,
 not working Urd integrations, account entitlement, performance or implementation
 LOC. The SDK comparison is a bounded TypeScript-oriented sample, not a language

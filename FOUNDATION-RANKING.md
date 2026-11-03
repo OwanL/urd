@@ -1,5 +1,9 @@
 # First-pass foundation ranking
 
+> **Subsequent decision (2026-11-03):** C#/.NET is selected for the backend.
+> This ranking is historical research, not a continuing backend selection process.
+> See [the agreed decision](ARCHITECTURE.md#c-backend-and-class-design).
+
 ## Status and requirements sufficiency
 
 Research date: 2026-11-03. Seven parallel investigations covered JS runtimes,

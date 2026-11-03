@@ -122,7 +122,25 @@ package.** First-party ownership does not require inventing every algorithm or
 rejecting focused libraries. It means Urd owns its architecture and behaviour. Ownership of the
 model/tool execution cycle remains open for comparison and owner alignment;
 "first-party" must not be used as shorthand for a mandatory custom loop.
-Specific language, library and framework choices remain open.
+The backend language is C# on .NET, as agreed below. Library and framework
+choices remain open.
+
+### C# backend with deliberate class design
+
+**The backend will use C# on .NET.** The owner selected it on 2026-11-03,
+valuing how readable C# can be with well-designed class structures. This is a
+settled choice, not another shortlist recommendation.
+
+Plan a strong class structure around Urd's actual responsibilities, state
+ownership and lifecycles. The goal is code that is easy to read and change,
+not a large hierarchy or layers for their own sake. The strict small-codebase
+requirement still applies. [ARCHITECTURE.md](ARCHITECTURE.md#c-backend-and-class-design)
+records the design work this calls for.
+
+This selects the backend language/runtime family, not a .NET version, server
+framework, provider/loop library, storage engine, UI toolkit or desktop host.
+Resource use, portability and local source builds still require verification;
+the choice is not a claim that C# won those measurements.
 
 ### Bundle source with published builds
 
@@ -314,7 +332,8 @@ more detailed decisions as they are made.
 
 The following remain deliberately unresolved:
 
-- Concrete module boundaries, execution model, language and library choices.
+- Concrete class/module boundaries, execution model and library choices within
+  the selected C#/.NET backend; frontend technology remains open.
 - Source/build packaging, the custom-build workflow and releases; automatic updating is deferred.
 - Persistence, restart/recovery, backend discovery and duplicate-start handling.
 - Background-app controls, tray integration, startup-at-login and shutdown rules.

@@ -1,10 +1,15 @@
 # Foundation research: runtime cost and local customisation
 
+> **Subsequent decision (2026-11-03):** C#/.NET is selected for the backend.
+> Language shortlists and recommendations below are historical, not open direction.
+> See [the agreed decision](ARCHITECTURE.md#c-backend-and-class-design).
+
 ## Status and decision boundary
 
-Research on 2026-11-03; **no language, runtime, SDK, storage or UI toolkit is
-selected**. The earlier TypeScript recommendation remains provisional. This
-screen combines delegated primary-source investigations with follow-up checks;
+Research on 2026-11-03, before the C# backend decision; no language, runtime,
+SDK, storage or UI toolkit was selected by this investigation. The then-provisional
+TypeScript recommendation is now superseded. This screen combines delegated
+primary-source investigations with follow-up checks;
 it is not a benchmark, implementation-cost measurement or compatibility guarantee.
 No toolchains were installed, applications built, provider accounts used or model
 requests made for this investigation.

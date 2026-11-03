@@ -1,8 +1,13 @@
 # Go and C#/.NET: focused discovery
 
+> **Subsequent decision (2026-11-03):** The owner selected C#/.NET for the backend,
+> valuing readability with deliberate class design. The comparison and finalist
+> recommendation below are historical; qualification gaps remain relevant.
+> See [the agreed decision](ARCHITECTURE.md#c-backend-and-class-design).
+
 Research and Windows probes: **2026-11-03**. This advances the comparison in
-[FOUNDATION-RANKING.md](FOUNDATION-RANKING.md); **no stack, storage, UI or loop
-ownership is selected**. The owner requested research and small experiments.
+[FOUNDATION-RANKING.md](FOUNDATION-RANKING.md); this investigation selected no
+stack, storage, UI or loop ownership. The owner requested research and small experiments.
 [README.md](README.md) and [ARCHITECTURE.md](ARCHITECTURE.md) remain authoritative.
 
 ## Bottom line
@@ -22,7 +27,7 @@ resource, maintained-LOC or productivity winner.
   source-customisation workflow remain more consequential than empty-server
   benchmarks. A portable runtime is not a qualified three-OS application.
 
-**Recommendation, not decision:** retain both as finalists. A slight Go
+**Historical recommendation, superseded by the C# decision:** retain both as finalists. A slight Go
 preference for backend/build simplicity remains reasonable, but do not select
 it on presumed memory savings or presumed .NET complexity. C# is a genuine
 alternative, not merely a Windows fallback. Qualify provider adapters and

@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <RootNamespace>Urd.TranscriptHarness.ReferenceStore</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\contracts\Urd.TranscriptHarness.Contracts\Urd.TranscriptHarness.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

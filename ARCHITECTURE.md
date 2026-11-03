@@ -141,6 +141,23 @@ locked choice. .NET version, endpoint/event protocol, authentication, packaging
 and process topology remain open. Agent work must retain its own lifetime rather
 than being cancelled by an HTTP request or client disconnect.
 
+### MCP client library and revisiting library choices
+
+**Decision (2026-11-04):** Use the official C# MCP SDK's
+`ModelContextProtocol.Core` for MCP client protocol and transport mechanics.
+[The research](MCP-LIBRARY-RESEARCH.md) found no evidence-based blocker; qualify
+required servers and transports during implementation. Its MEAI abstractions
+dependency does not select `IChatClient`, a model/tool loop or model exposure policy.
+Urd retains connection lifetime, credentials, permissions and discovery/exposure
+responsibilities. The inspected package version is not a locked dependency version.
+
+**General library-selection policy:** These are implementation directions, not
+irreversible commitments. If a selected library proves cumbersome, unreliable or
+requires disproportionate integration code, reconsider it and compare an alternative
+approach against concrete evidence. Do not force Urd's design around a poor fit or
+build interchangeable-backend frameworks merely to anticipate replacement. This
+policy applies to selected libraries/frameworks generally, including ASP.NET Core.
+
 ### Browser-first delivery; develop from Pie until Urd is ready
 
 **Decision:** Target the browser for the first usable Urd client. Pie remains
@@ -680,11 +697,11 @@ before specifying every method, interface or subclass. Prefer focused libraries
 and .NET facilities for routine mechanics rather than recreating them beneath
 custom wrappers. A small class with one useful operation can be sufficient.
 
-ASP.NET Core hosting is now selected above. The existing
-[C# discovery](GO-DOTNET-DISCOVERY.md) supplies remaining candidates, not selected
-dependencies: `Microsoft.Extensions.AI` and provider adapters for model I/O,
-its optional `FunctionInvokingChatClient` for loop reuse,
-the official MCP client SDK and Playwright .NET. Evaluate the owned integration
+ASP.NET Core hosting and the official MCP client SDK are now selected above.
+The existing [C# discovery](GO-DOTNET-DISCOVERY.md) supplies remaining candidates,
+not selected dependencies: `Microsoft.Extensions.AI` and provider adapters for
+model I/O, its optional `FunctionInvokingChatClient` for loop reuse, and
+Playwright .NET. Evaluate the owned integration
 code and behaviour each saves. Provider access, library compatibility and
 packaging still need qualification; neither a full agent framework nor a custom
 loop is selected by this alignment.

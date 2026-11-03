@@ -1,6 +1,12 @@
 # Official MCP C# client SDK fit for Urd
 
-**Research-only recommendation (2026-11-04).** The official C# SDK is a sensible default for MCP client protocol and transport mechanics. I found no evidence-based reason to reject it. This is not a dependency selection or an architecture decision: Urd's model interface, loop, storage, process/session topology, and dynamic-discovery exposure remain open. No package was installed and no MCP server was contacted.
+**Subsequent owner decision (2026-11-04):** Select `ModelContextProtocol.Core`,
+subject to reconsideration if implementation reveals a poor fit. See
+[the decision and general library-selection policy](ARCHITECTURE.md#mcp-client-library-and-revisiting-library-choices).
+The research below records the evidence available at selection, not completed
+integration qualification or a dependency-version lock.
+
+**Original research recommendation (2026-11-04).** The official C# SDK is a sensible default for MCP client protocol and transport mechanics. I found no evidence-based reason to reject it. This is not a dependency selection or an architecture decision: Urd's model interface, loop, storage, process/session topology, and dynamic-discovery exposure remain open. No package was installed and no MCP server was contacted.
 
 ## Verdict
 

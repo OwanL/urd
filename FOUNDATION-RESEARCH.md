@@ -14,6 +14,11 @@ requests made for this investigation.
 those Node-based checks do not qualify Bun, Go, Rust or .NET, or establish a runtime
 performance winner. [STORAGE-RESEARCH.md](STORAGE-RESEARCH.md) remains undecided.
 
+The subsequently expanded [candidate inventory](FOUNDATION-CANDIDATES.md) lists
+additional languages, runtimes, frameworks and packaging approaches without
+ranking them. The proposed research order below does not restrict that inventory;
+the added candidates have not yet received equivalent investigation or scoring.
+
 ## What a good fit must satisfy
 
 - Keep Urd's own CPU and memory overhead low within reason, leaving resources for

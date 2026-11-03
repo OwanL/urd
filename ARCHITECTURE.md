@@ -706,6 +706,18 @@ code and behaviour each saves. Provider access, library compatibility and
 packaging still need qualification; neither a full agent framework nor a custom
 loop is selected by this alignment.
 
+### Image attachments: files with stored references
+
+**Direction (2026-11-04):** Keep retained image bytes as files in Urd's managed
+attachment directory, with references and metadata in persisted message records.
+Prefer stable attachment identities mapped to relative paths rather than absolute
+paths scattered through history. Retained attachments should not depend on an
+original external file remaining in place. Resolve references when serving the UI,
+building provider requests or supplying paths to tools; a local path alone does
+not expose image content to a remote model. Clean up files only when retained
+references no longer need them, including references from other sessions.
+This selects neither the transcript database nor a general large-artifact policy.
+
 ### Storage technology requires comparative investigation
 
 **No storage technology has been selected.** SQLite plus file-backed large

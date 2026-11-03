@@ -1,141 +1,108 @@
-# Lightweight foundation experiments — proposal
+# Small-operation technology experiments — revised proposal
 
-Status: proposed, not approved for execution. Prepared after three bounded design
-reviews of workload coverage, maintenance/portability, and experiment scope.
-No prototypes, installations or benchmarks were performed for this proposal.
+Status: proposed, not approved for execution. This replaces the earlier session/
+UI/model-loop proposal, which was too application-shaped and too narrow in its
+initial candidates. Two bounded design passes informed this revision. No tests,
+installations or benchmarks have been run for it.
 
-## Aim and limits
+## Scope: small command-line programs, all six languages
 
-Obtain useful heuristics about ordinary Urd work, not a benchmark suite or a
-miniature production Urd. Compare equivalent observable behaviour, retain raw
-observations, and explain costs rather than manufacture an overall score.
-The existing [finalist measurement contract](FOUNDATION-RESEARCH.md#bounded-measurement-contract-for-finalists)
-is the deeper follow-up, not the instrumentation requirement for this first pass.
+Include **TypeScript/Node, Python, Kotlin/JVM, Rust, Go and C#/.NET JIT in the first
+round**. Run the same TS source under **Bun and Deno** too, recording compatibility
+changes and runtime-specific preparation. Do not reserve languages for a later
+round based on the previous shortlist.
 
-**Recommended first batch:** TypeScript/Node + Hono + AI SDK; Go + standard HTTP
-or Chi + Fantasy; C#/.NET JIT + Minimal APIs + Microsoft.Extensions.AI. These
-contrast implementation/toolchain approaches, not proven winners. Try Bun and
-Deno against the same TS implementation as cheap compatibility checks; record
-necessary changes rather than silently substituting dependencies.
+Each gets a small console program using ordinary file/collection/JSON facilities
+and, where needed, one normal JSON library. No HTTP framework, model SDK, browser,
+agent loop, sessions, database or fake provider. This compares concrete runtime/
+library configurations, not every framework in an ecosystem. Pin and disclose
+versions and typed-record versus generic-JSON representation choices.
 
-Python/PydanticAI, Kotlin/JVM and Rust remain challengers. Reuse the frozen tasks
-for a second batch where results leave them plausible; omission from the first
-batch is not evidence against them. No final technology choice should be made
-merely because three candidates were implemented first. UI frameworks, desktop
-hosts, storage engines and backend languages are not a Cartesian test matrix.
+## Core exercises
 
-## Four tasks
-
-| Task | Small representative exercise | Observe |
+| Exercise | Equivalent work | Useful observations |
 | --- | --- | --- |
-| **1. Open and switch sessions** | Start backend, show session list, open newest 50 messages, fetch an older page, switch sessions and inspect one large tool result. Use histories of 100 and 10,000 roughly 1 KiB records plus one 256 KiB result. | Startup-to-ready; first and repeated click-to-rendered-content; backend CPU/memory and loaded-data behaviour. |
-| **2. Run, delegate and interrupt work** | One streamed turn requests a tool, executes it and streams a final answer through the chosen model library. Then one parent launches four bounded mock helpers. Observe independent progress; cancel one running tool, cancel another before tool admission, disconnect/reconnect the client, finish work and explicitly close test contexts. | Streaming gaps; cancellation-to-child-exit; CPU/memory at idle, during work and after quiescence; amount of coordination/glue. |
-| **3. Make a maintenance change** | After the baseline works, add an optional per-tool deadline, propagate it from the request to execution, use the cancellation path and report a timeout result. Test normal completion and timeout without disturbing siblings. Rebuild and restart. | Changed files/owned code, tests needed, source/build friction, retries and active effort; whether cancellation logic was reusable. |
-| **4. Check the OS path** | For each stack, list actual runtime/native dependencies and Windows/macOS/Linux build, packaging and integration paths. Run the probe on Windows. For up to two informative candidates, repeat source build and non-GUI tasks on actual macOS, then Linux, when hosts are available. | Executed versus documented support, platform-specific changes, prerequisites and missing capabilities. No invented portability score. |
+| **Read, parse and query** | Read the same UTF-8 JSONL file; parse its complete records; select the latest 50 and find specified IDs. | Fresh-process cost, read/parse/query time, CPU and memory with data loaded. |
+| **Append, remove and save** | Append a fixed batch in memory and to a fresh copy of the input file; remove a specified set of IDs in memory; serialize survivors to a new file and reload it. Preserve ordering and all surviving fields. | Collection/mutation costs, serialization and ordinary file I/O; memory before/after releasing references. |
+| **Make a source change** | Add an optional group filter and summary to the query command, preserving its old behaviour when the option is absent; add two small checks, rebuild/check and rerun. | Files/code changed, dependencies, edit/test/build steps and friction. This is a change to the experiment, not a Urd feature implementation. |
 
-The fixture sizes are convenient synthetic inputs, not production requirements.
-Use 1 context first, then 50 open contexts with only four active streams. Report
-what is actually hydrated; a session index is not 50 loaded model contexts. Make
-the contexts' data independently identifiable. Defer 210 contexts until smaller
-runs reveal a useful question; never equate 210 identities with 210 active agents.
+Use only two deterministic fixture sizes initially: roughly **1 MiB and 20 MiB**
+(e.g. 1,000 and 20,000 records near 1 KiB each; record actual counts/bytes). Include
+text with some Unicode, IDs, groups, nested metadata and a few optional fields.
+These are convenient test inputs, not Urd workload or capacity commitments.
 
-For task 1, use fixed pre-sliced JSON history pages as **test inputs**, not a chosen
-storage architecture. Do not implement a database or load the whole history just
-to retrieve a page. This checks hydration, decoding and presentation, not storage
-engine performance or realistic persistence. Model input uses a fixed bounded
-context, separately from the readable history. No summarising model is needed.
+Separate the append operation from the removal rewrite: JSONL append and whole-file
+rewrite are different workloads. A successful write/reload is not a crash-durability
+claim. Fresh copies prevent runs accumulating data. All mutation stays inside the
+experiment's owned temporary directory; no application/user data is used.
 
-For task 2, use a local canned provider-format stream compatible with the selected
-libraries, not live accounts. Include tool arguments/results, not just string
-concatenation. One paced replay represents normal I/O waiting; one small no-delay
-replay exposes processing overhead. Neither establishes maximum throughput.
-Use one harmless owned subprocess fixture that emits output and waits. Common
-fixture helpers are test infrastructure, not implied production dependencies.
-No full process-tree manager, scheduler or durable delegation system is required.
+Match logical results, not byte-identical JSON whitespace/key order. One short
+shared generator/checker verifies counts, selected IDs, order and preserved data
+against expected output. Timed results count only after correctness is checked.
+Keep read, parse, mutation and write observations separate where easy, and also
+report total elapsed time; do not build instrumentation merely to separate them.
+No custom parser, regex substitute, database/index design or hand-tuned data layout.
 
-Minimal behavioural checks: ordered/session-isolated output; tool/result linkage;
-no effect from a tool cancelled before admission; running child really exits;
-siblings continue; client disconnect does not stop authorised work; no late result
-duplicates after cancellation/timeout. These are validity checks, not a complete
-Urd acceptance suite. Cancelling work does not undo effects already performed.
+## One optional non-data check
 
-## Minimal shared scaffolding
+If the core exercises remain small, run the **same harmless child command** from
+each program, read its output and terminate it after a readiness signal. This
+samples a relevant OS/I/O boundary without building Urd's tool system. Record
+child-exit behaviour and cancellation delay, separating helper cost from parent
+cost. Use one shared helper, not a child written in each candidate language whose
+startup would confound the comparison. No process-tree manager, concurrency
+framework or desktop automation. Defer this check rather than letting it expand.
 
-- One deterministic data generator and local fake-provider/helper fixture.
-- One small plain browser page shared by all backends: session selection, message
-  view, result inspection and run/cancel controls. It does not select a UI toolkit.
-- A handful of behavioural checks and an existing OS process sampler. Use simple
-  scripts/commands and CSV or JSON observations, not a runner framework or dashboard.
-- Same fixtures, requests and expected outcomes; idiomatic libraries/implementations
-  may differ. Do not impose identical internal allocation or concurrency strategies.
+## Lightweight measurement and maintenance notes
 
-Source and build development can be delegated in parallel with separate owned
-directories/ports. Measurements run serially on the same machine; record background
-load and rerun conspicuous noise rather than stopping unrelated applications.
-Use pinned versions and ordinary production/release settings, without bespoke tuning.
-Record one fresh-process run and three repeated runs per scenario, alternating
-candidate order. Preserve each value and report median/range where useful, not
-percentiles or statistical significance from this tiny sample. Fresh process does
-not mean cold filesystem cache. Label DOM/frame timings as paint approximations
-where used; backend response time is not visible-content time.
+- Use a small shared fixture/check script, ordinary build/run commands and existing
+  OS process tools. No benchmark framework, dashboard, orchestration service or UI.
+- Record a fresh-process run and three in-process repetitions using fresh input
+  state; label them separately. Alternate candidates and measure serially on the
+  same machine. Fresh process is not cold disk cache. Preserve raw readings and
+  ranges; use no percentile claims or artificial overall score. A few repetitions
+  do not establish steady-state JIT performance.
+- Observe process memory at baseline, with parsed data, after mutation and after
+  references are released with a short fixed wait. Use the same OS metrics within
+  an OS (e.g. private committed memory and working set on Windows). Do not compare
+  language-specific heap counters as total RAM or force GC in the baseline.
+  Allocator/GC retention after the wait neither proves a leak nor predicts Urd.
+- Separate program execution from compilation and downloads. Record prerequisites,
+  first build with dependencies available, no-change repeat and rebuild/check after
+  the source edit. For interpreted modes, record the actual check/run workflow;
+  do not invent a build step. Use ordinary release settings, not dev servers or
+  bespoke optimisations. Artifact size without required runtimes is not install size.
+- Note owned code, checks, generated files and dependencies separately. Effort and
+  retries are rough anecdotes affected by agent familiarity, not language scores.
+  Review equivalent work before attributing a striking difference to technology.
 
-Record backend CPU time, OS private committed memory/working set where available,
-peak and post-quiescence readings. Label metrics exactly and keep browser/tool/
-driver processes separate; do not sum shared working sets as unique physical RAM.
-Keep the fake provider outside application totals and identify fixture helpers.
-A production-required helper still counts as an application cost. Runtime-specific
-GC/allocation tracing is follow-up only if it explains an important difference.
+## Windows → macOS → Linux
 
-## Maintenance and portability evidence
+Keep **every candidate** in the platform matrix. Execute on Windows first, then
+macOS and Linux when machines/toolchains are available. Repeat the same small
+build/run/source-change exercise, not a port of an application. Label each result
+**executed**, **documented only** or **blocked/unavailable**. A cross-compiled binary
+is not execution evidence. Record exact OS/toolchain environments; do not generalise
+one Linux environment to all distributions or desktop/display systems.
 
-Count application, test, shared-scaffold and generated code separately. Describe
-direct dependencies and required native/runtime helpers; package counts alone are
-not maintenance scores. Record initial setup/build and incremental edit/test/build
-steps separately from downloads. An existing developer machine is not proof of a
-clean-machine install. If setup fails or would need significant machine changes,
-record the blocker and seek approval rather than modifying the machine implicitly.
+No machine installations, remote infrastructure provisioning or paid services are
+implicitly authorised. Missing access/toolchains are reported, not used to silently
+drop a language. Desktop hosting, OS permissions, credentials and full integration
+portability remain separate later questions; console success cannot qualify them.
 
-Effort/retries are anecdotes influenced by the agent, tooling and familiarity;
-record those conditions. Neither a short implementation nor a slow first attempt
-proves long-term maintenance cost. Independent review should check that shortcuts
-did not make one implementation's task easier.
+## Scope limits and output
 
-OS evidence labels: **executed**, **documented only**, **blocked/unavailable**.
-A Mac browser using a Windows backend or a cross-compiled binary is not a macOS
-backend test. Headless CI can establish build/non-GUI behaviour, not interactive
-permissions or desktop automation. Minimum OS versions, Linux distributions and
-X11/Wayland coverage remain open; record tested environments without generalising.
-Audit credentials, process cancellation, background controls, browser drivers and
-desktop automation paths early, but do not implement every OS adapter in this pass.
+Suggested stop-and-report caps, not promised durations: **30 minutes for shared
+scaffolding; 60 minutes per language including the source change; 15 minutes for
+each additional TS runtime attempt**. Record downloads/setup waits separately and
+pause blocked work rather than spending hours solving environment issues. Apply
+the same small-attempt principle to additional OS runs. A timebox limit is not a
+technology failure, and near-ties remain ties.
 
-## Budget, stop rules and next steps
-
-Suggested caps for approval, **not duration estimates or performance budgets**:
-
-- Shared scaffolding: at most two hours of active implementation effort; if it
-  needs a general runner, extensive abstractions or a dashboard, simplify instead.
-- Each initial stack: at most three hours of active implementation/checking,
-  including the small maintenance change. Pause and report unfinished work at the
-  cap; do not spend days tuning or solving an ecosystem issue silently.
-- Each TS runtime variant: one short compatibility attempt (up to 30 minutes),
-  not a fork/rewrite. Timeout or failure is unqualified evidence, not elimination.
-- Additional OS execution: up to one hour per candidate/OS with an available host;
-  missing machines, permissions or toolchains are reported, not worked around by
-  unapproved infrastructure provisioning. Downloads/waits remain visible, and
-  blocked work is paused rather than allowed an unlimited calendar-time extension.
-
-Defer real provider sign-in, paid calls, full compaction/restart/retention rules,
-installer/signing implementation, Linux distro matrices, soak tests and UI/host
-combinations. Existing storage probes inform later work; do not duplicate them.
-
-Before final selection, separately check one shared view in VS Code and a small
-number of cross-platform desktop hosts, plus the chosen browser/MCP and desktop
-integration paths. Those cannot be inferred from this backend exercise. Do not
-multiply this first batch by UI toolkit/host combinations.
-
-Deliver one compact comparison table plus reproducible commands, pinned versions,
-raw samples and caveats. Large repeated differences or demonstrated integration
-costs guide the next check; small/noisy differences remain ties. A failed fixture
-requires diagnosis before blaming the stack. Timebox exhaustion is a cost signal,
-not proof of incompatibility. Present results and propose the next small batch;
-do not automatically expand the experiment or select the foundation.
+Return one compact comparison table, simple reproduction commands, raw observations
+and caveats. These are heuristics for data handling, runtime overhead, local edits
+and basic portability—not UI responsiveness, production storage, agent fan-out,
+provider compatibility or long-term maintenance predictions. Results should identify
+which tiny follow-up is worth doing, not select Urd's foundation by JSON speed.
+The fuller [foundation measurement plan](FOUNDATION-RESEARCH.md#bounded-measurement-contract-for-finalists)
+remains deferred; none of its larger scenarios is part of this first round.

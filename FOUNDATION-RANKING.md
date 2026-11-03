@@ -256,9 +256,11 @@ Packaging must be assessed separately from language choice:
 
 ## What to investigate next
 
-The subsequent [lightweight experiment proposal](EXPERIMENT-PROPOSAL.md) scopes a
-small heuristic first batch for owner review; it is not approval to execute or a
-replacement for later integration qualification.
+The revised [small-operation experiment proposal](EXPERIMENT-PROPOSAL.md) covers
+TypeScript, Python, Kotlin, Rust, Go and C# from the first round, with Bun/Deno
+runtime checks. It proposes basic CLI data operations and source changes, not a
+miniature Urd. The larger integration scenarios below are deferred; the proposal
+is not approval to execute or a replacement for later integration qualification.
 
 **Recommended test order, not a new stack commitment:** First audit the intended
 Windows → macOS → Linux path for each leading stack's dependencies, hosts,

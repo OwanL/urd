@@ -119,10 +119,27 @@ as the design becomes concrete; introduce interfaces and shared abstractions whe
 actual boundaries or reuse justify them, not as a framework imposed in advance.
 No concrete class layout is approved by this decision.
 
-**Still open:** .NET version, server framework, provider and loop libraries,
+**Still open:** .NET version, provider and loop libraries,
 loop ownership, storage, process topology, UI technology and desktop host.
 The language choice does not qualify performance, provider coverage, packaging
 or cross-platform behaviour; investigate those within the chosen backend direction.
+
+### ASP.NET Core hosting and HTTP
+
+**Decision (2026-11-03):** Use ASP.NET Core with its standard Kestrel server for
+backend hosting and HTTP. The hosting comparison is settled; see
+[the research](HOSTING-RESEARCH.md) for alternatives and evidence.
+
+The owner's acceptance criterion is working behaviour, not Microsoft's support
+commitment for a particular deployment. The macOS production-hosting policy note
+is not evidence that LAN/Tailscale connections fail and must not be treated as a
+selection blocker. Verify the actual supported Urd workflows on each OS; remote
+access on macOS remains intended scope. No macOS runtime test has been performed.
+
+Minimal APIs remain the recommended initial endpoint approach, not a separately
+locked choice. .NET version, endpoint/event protocol, authentication, packaging
+and process topology remain open. Agent work must retain its own lifetime rather
+than being cancelled by an HTTP request or client disconnect.
 
 ### Browser-first delivery; develop from Pie until Urd is ready
 
@@ -639,9 +656,10 @@ before specifying every method, interface or subclass. Prefer focused libraries
 and .NET facilities for routine mechanics rather than recreating them beneath
 custom wrappers. A small class with one useful operation can be sufficient.
 
-The existing [C# discovery](GO-DOTNET-DISCOVERY.md) supplies candidates, not selected
-dependencies: ASP.NET Core for hosting, `Microsoft.Extensions.AI` and provider
-adapters for model I/O, its optional `FunctionInvokingChatClient` for loop reuse,
+ASP.NET Core hosting is now selected above. The existing
+[C# discovery](GO-DOTNET-DISCOVERY.md) supplies remaining candidates, not selected
+dependencies: `Microsoft.Extensions.AI` and provider adapters for model I/O,
+its optional `FunctionInvokingChatClient` for loop reuse,
 the official MCP client SDK and Playwright .NET. Evaluate the owned integration
 code and behaviour each saves. Provider access, library compatibility and
 packaging still need qualification; neither a full agent framework nor a custom

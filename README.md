@@ -122,8 +122,8 @@ package.** First-party ownership does not require inventing every algorithm or
 rejecting focused libraries. It means Urd owns its architecture and behaviour. Ownership of the
 model/tool execution cycle remains open for comparison and owner alignment;
 "first-party" must not be used as shorthand for a mandatory custom loop.
-The backend language is C# on .NET, as agreed below. Library and framework
-choices remain open.
+The backend uses C# on .NET with ASP.NET Core hosting, as agreed below.
+Other library and framework choices remain open.
 
 ### C# backend with deliberate class design
 
@@ -137,10 +137,15 @@ not a large hierarchy or layers for their own sake. The strict small-codebase
 requirement still applies. [ARCHITECTURE.md](ARCHITECTURE.md#c-backend-and-class-design)
 records the design work this calls for.
 
-This selects the backend language/runtime family, not a .NET version, server
-framework, provider/loop library, storage engine, UI toolkit or desktop host.
-Resource use, portability and local source builds still require verification;
-the choice is not a claim that C# won those measurements.
+**ASP.NET Core is the selected backend hosting/HTTP framework**, using its
+standard Kestrel server. The owner confirmed this on 2026-11-03 after alternatives
+were investigated. Microsoft's macOS support-policy caveat is not a demonstrated
+functional limitation or a reason to block the choice; macOS LAN/Tailscale access
+remains intended scope and requires normal functional verification.
+
+.NET version, endpoint style, provider/loop libraries, storage, UI toolkit and
+desktop host remain open. Resource use, portability and local source builds still
+require verification; these choices are not claims of measured superiority.
 
 ### Bundle source with published builds
 

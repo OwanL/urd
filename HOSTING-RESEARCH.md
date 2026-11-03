@@ -1,12 +1,12 @@
 # C#/.NET HTTP hosting research
 
-**Research date:** 2026-11-03. **Status: no hosting choice approved.** C#/.NET is settled; the server framework, .NET version, process topology, access/authentication and packaging remain open. This report compares hosting and HTTP options only; it does not qualify model/provider libraries or select an architecture.
+**Research date:** 2026-11-03. **Subsequent decision: ASP.NET Core/Kestrel selected.** The owner accepted the hosting choice after this investigation; see [ARCHITECTURE.md](ARCHITECTURE.md#aspnet-core-hosting-and-http). The comparison below is research history, not an open hosting selection. Minimal APIs remain a recommendation; .NET version, process topology, access/authentication and packaging remain open.
 
 ## Recommendation for the next qualification step
 
 Use **ASP.NET Core on Kestrel with Minimal APIs** as the baseline to evaluate first, without adding MVC or a third-party endpoint layer unless a concrete requirement earns it. This is a recommendation for a low-cost comparison baseline, **not an approved implementation choice**. Microsoft recommends Minimal APIs for new projects, citing simpler syntax, less boilerplate, easier testing and better performance; those are Microsoft's general claims, not Urd measurements. Kestrel is the standard cross-platform ASP.NET Core server. This path provides routing, middleware, streamed responses, server-sent events (SSE), WebSockets and in-process hosted services without introducing a separate HTTP server dependency. [Microsoft: API choices](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/apis?view=aspnetcore-10.0) · [Kestrel](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/servers/kestrel?view=aspnetcore-10.0) · [Minimal API responses](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/minimal-apis/responses?view=aspnetcore-10.0) · [Hosted services](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/host/hosted-services?view=aspnetcore-10.0)
 
-**Material qualification risk:** Microsoft's Kestrel guidance says macOS is supported for development, CI and local services *without external access*, but not production server workloads. Urd intends macOS support and clients may connect over LAN/Tailscale. A running Kestrel process is not the same as Microsoft-supported external hosting; this mismatch must be resolved before treating the baseline as qualified for macOS remote access.
+**Support-policy caveat, not a demonstrated functional blocker:** Microsoft's Kestrel guidance says macOS is supported for development, CI and local services *without external access*, but not production server workloads. This does not establish that Kestrel prevents LAN/Tailscale connections. The owner explicitly does not treat the vendor support boundary as a selection blocker; working Urd behaviour is the criterion. Normal macOS functional testing remains necessary, and no such test was performed here. The initial report overstated the policy note's significance.
 
 ### What the baseline buys, and what it does not establish
 
@@ -47,9 +47,9 @@ For qualification, compare a normal JIT build first. Native AOT is optional, add
 
 ## Still open; not decided by this research
 
-- Whether Microsoft's macOS support boundary is acceptable for Urd's intended LAN/Tailscale access, and the supported OS/version matrix.
+- Supported OS/version matrix and functional verification of Urd's intended macOS LAN/Tailscale access. The owner has accepted the vendor support-policy caveat.
 - HTTP endpoint/event shape, TLS and remote-client authentication; background/tray process topology and UI-disconnect behavior.
-- .NET target version, hosting stack, whether any API layer earns its dependency, and framework-dependent versus self-contained release packaging.
+- .NET target version, endpoint style, whether any API layer earns its dependency, and framework-dependent versus self-contained release packaging.
 - Actual whole-process resource use, sustained agent fan-out, startup, and build/test experience on Windows, macOS and Linux. None was benchmarked or qualified here.
 
 **Evidence limits:** This was primary-source documentation/repository research, not an implementation trial. Project benchmark/throughput statements above are vendor claims, not comparable measurements. Cross-platform target frameworks and source links are not proof of every-OS runtime support. The prior [Go/.NET discovery](GO-DOTNET-DISCOVERY.md) likewise did not test HTTP servers or establish app-level resource or packaging results.

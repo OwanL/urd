@@ -486,6 +486,13 @@ Compare adapter code, model reliability and cache impact, including tool-capable
 local models. [Model-interface research](MODEL-INTERFACE-RESEARCH.md) records current
 SDK/adapter gaps; neither `IChatClient` nor its optional loop is selected yet.
 
+**Owner decision: defer model-interface selection (2026-11-03).** Keep
+`IChatClient` as a candidate, not an adopted dependency or mandatory design boundary.
+The [discovery design investigation](DISCOVERY-DESIGN.md) found adapter and restart
+representation gaps, not a fundamental rejection. Revisit once concrete execution,
+discovery and persistence needs make the integration cost clearer. Continue designing
+those responsibilities without assuming MEAI's types are Urd's domain or storage model.
+
 ### Keep original chat history until the session closes
 
 **Decision:** Original messages remain readable while a session is open, even

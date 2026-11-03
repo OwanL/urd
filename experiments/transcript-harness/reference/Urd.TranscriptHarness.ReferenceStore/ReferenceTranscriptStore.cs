@@ -114,16 +114,15 @@ public sealed class ReferenceTranscriptStore : ITranscriptStore, IStoreStatistic
             throw new InvalidOperationException(
                 $"Session {sessionId} already has active draft {active}; only one draft per session");
         }
-        if (!string.IsNullOrEmpty(chunk))
+        // Register the stream even for an empty batch so stream identity is
+        // observable before the first non-empty batch.
+        if (!_drafts.TryGetValue(streamId, out var draft))
         {
-            if (!_drafts.TryGetValue(streamId, out var draft))
-            {
-                draft = (sessionId, new StringBuilder());
-                _drafts[streamId] = draft;
-                _sessionDrafts[sessionId] = streamId;
-            }
-            draft.Text.Append(chunk);
+            draft = (sessionId, new StringBuilder());
+            _drafts[streamId] = draft;
+            _sessionDrafts[sessionId] = streamId;
         }
+        draft.Text.Append(chunk);
     }
 
     public long FinalizeStream(string sessionId, string streamId, MessageRecord finalMessage)

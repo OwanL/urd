@@ -39,6 +39,7 @@ public sealed record TraceListSessions : TraceOp;
 public sealed record TraceOpenRecent(string SessionId, int Count) : TraceOp;
 public sealed record TracePageOlder(string SessionId, long Before, int Count) : TraceOp;
 public sealed record TraceReadRange(string SessionId, long From, long To) : TraceOp;
+public sealed record TraceWindowPreview(string SessionId, int Count, int PreviewChars) : TraceOp;
 public sealed record TraceFetchToolResult(string SessionId, long Ordinal, int PartIndex) : TraceOp;
 public sealed record TraceCheckpoint : TraceOp;
 
@@ -61,6 +62,7 @@ public static class TraceOps
     public const string OpenRecent = "openRecent";
     public const string PageOlder = "pageOlder";
     public const string ReadRange = "readRange";
+    public const string WindowPreview = "windowPreview";
     public const string FetchToolResult = "fetchToolResult";
     public const string Checkpoint = "checkpoint";
     public const string CrashMarker = "crashMarker";
@@ -146,7 +148,7 @@ public static class TraceGenerator
             }
         }
 
-        // 4. Reads across the whole set.
+        // 4. Reads across the whole set (plus timed hover/preview samples).
         ops.Add(new TraceListSessions());
         foreach (var sessionId in sessionIds)
         {
@@ -154,6 +156,7 @@ public static class TraceGenerator
             ops.Add(new TraceOpenRecent(sessionId, 50));
             if (count > 40) ops.Add(new TracePageOlder(sessionId, Math.Max(10, count / 2), 20));
             if (count > 9) ops.Add(new TraceReadRange(sessionId, 1, 9));
+            if (count > 0) ops.Add(new TraceWindowPreview(sessionId, (int)Math.Min(20, count), 24));
         }
         ops.Add(new TraceCheckpoint());
 
@@ -188,21 +191,28 @@ public static class TraceGenerator
         {
             new TextPart(TextOfrng(rng, 250 + rng.Next(900))),
         };
+        var toolResultPartIndices = new List<int>();
 
         if (smallTexts.TryDequeue(out var small))
         {
+            var resultIndex = parts.Count + 1; // call then result
             parts.Add(new ToolCallPart($"call-{sessionId}-{ordinal}-s", "probe", "{\"depth\":1}"));
             parts.Add(new ToolResultPart($"call-{sessionId}-{ordinal}-s", small));
+            toolResultPartIndices.Add(resultIndex);
         }
         if (mediumTexts != null && mediumTexts.TryDequeue(out var medium))
         {
+            var resultIndex = parts.Count + 1;
             parts.Add(new ToolCallPart($"call-{sessionId}-{ordinal}-m", "scan", "{}"));
             parts.Add(new ToolResultPart($"call-{sessionId}-{ordinal}-m", medium));
+            toolResultPartIndices.Add(resultIndex);
         }
         if (largeTexts != null && largeTexts.TryDequeue(out var large))
         {
+            var resultIndex = parts.Count + 1;
             parts.Add(new ToolCallPart($"call-{sessionId}-{ordinal}-l", "bulkread", "{}"));
             parts.Add(new ToolResultPart($"call-{sessionId}-{ordinal}-l", large));
+            toolResultPartIndices.Add(resultIndex);
         }
         if (ordinal % 8 == 3 && attachments.Count > 0)
         {
@@ -226,6 +236,13 @@ public static class TraceGenerator
         {
             ops.Add(new TraceAppend(sessionId, message));
             ModelOps.AppendMessage(model, sessionId, message);
+        }
+
+        // Timed hover samples right after the message is appended, when the
+        // model still holds exactly the content the store just received.
+        foreach (var partIndex in toolResultPartIndices)
+        {
+            ops.Add(new TraceFetchToolResult(sessionId, ordinal, partIndex));
         }
 
         if (appendsSinceMarker % 25 == 0)

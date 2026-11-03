@@ -195,9 +195,9 @@ public sealed class IpcStoreAdapter : ITranscriptStore
                 ? new StoreStatistics(response.GetProperty("managedAllocatedBytes").GetInt64())
                 : null;
         }
-        catch (InvalidOperationException)
+        catch (InvalidOperationException ex) when (ex.Message.Contains("Store does not implement IStoreStatistics"))
         {
-            return null; // store does not implement IStoreStatistics
+            return null; // store has no IStoreStatistics; other failures propagate
         }
     }
 
@@ -215,7 +215,11 @@ public sealed class IpcStoreAdapter : ITranscriptStore
     {
         try
         {
-            if (!_host.HasExited) FlushInput();
+            if (!_host.HasExited)
+            {
+                FlushInput();
+                if (!_host.WaitForExit(5_000)) _host.Kill(entireProcessTree: true);
+            }
         }
         finally
         {

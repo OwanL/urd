@@ -79,12 +79,22 @@ public static class Program
 
         var model = new OracleModel();
         var executor = new TraceExecutor(adapter, model);
-        executor.Replay(generated.Ops);
-        // Final full verification (streamed content, full logical equality).
-        Oracle.VerifyAll(adapter, model);
 
+        // "Before" statistics are a spawn-time sample, not a post-run re-read.
         var statsBefore = adapter.QueryStatistics();
+
+        executor.Replay(generated.Ops);
+
+        // Trace-workload resource peak: read/reset BEFORE oracle verification so
+        // comparison reads never pollute the engine's workload figure
+        // (STORAGE-EXPERIMENT.md measurement rules).
         var resources = sampler.ReadAndReset();
+
+        // Final full verification (streamed content, full logical equality);
+        // sampled separately as verification cost.
+        Oracle.VerifyAll(adapter, model);
+        var verifyResources = sampler.ReadAndReset();
+
         var statsAfter = adapter.QueryStatistics();
         sampler.Dispose();
         adapter.Close();
@@ -112,6 +122,8 @@ public static class Program
             statsAfter?.ManagedAllocatedBytes,
             resources.Length > 0 ? resources.Max(s => s.PrivateBytes) : 0,
             resources.Length > 0 ? resources.Max(s => s.WorkingSetBytes) : 0,
+            verifyResources.Length > 0 ? verifyResources.Max(s => s.PrivateBytes) : 0,
+            verifyResources.Length > 0 ? verifyResources.Max(s => s.WorkingSetBytes) : 0,
             footprint.TotalBytes,
             footprint.FileCount,
             WarningsList(warnings, scale)
@@ -172,14 +184,6 @@ public static class Program
         File.WriteAllText(path, sb.ToString(), new UTF8Encoding(false));
     }
 
-    private static string LocateHostExecutable()
-    {
-        var exe = Path.Combine(AppContext.BaseDirectory, "Urd.TranscriptHarness.StoreHost.exe");
-        if (!File.Exists(exe)) exe = Path.Combine(AppContext.BaseDirectory, "Urd.TranscriptHarness.StoreHost");
-        return File.Exists(exe)
-            ? exe
-            : throw new HarnessError($"Store host executable not found next to runner at {AppContext.BaseDirectory}");
-    }
 
     private static string? Arg(string[] args, string name)
     {
@@ -278,6 +282,12 @@ public static class TraceAudit
             w.WriteString("sessionId", o.SessionId);
             w.WriteNumber("from", o.From);
             w.WriteNumber("to", o.To);
+        }),
+        TraceWindowPreview o => Wrap("windowPreview", w =>
+        {
+            w.WriteString("sessionId", o.SessionId);
+            w.WriteNumber("count", o.Count);
+            w.WriteNumber("previewChars", o.PreviewChars);
         }),
         TraceFetchToolResult o => Wrap("fetchToolResult", w =>
         {

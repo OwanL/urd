@@ -19,6 +19,8 @@ public sealed record RunSummary(
     long? ManagedAllocatedBytesAfter,
     long PrivateBytesPeak,
     long WorkingSetPeak,
+    long VerifyPrivateBytesPeak,
+    long VerifyWorkingSetPeak,
     long StoreFootprintBytes,
     int StoreFootprintFiles,
     string[] Warnings);
@@ -127,6 +129,19 @@ public sealed class TraceExecutor(ITranscriptStore client, OracleModel model)
                 var actual = Timed(TraceOps.ReadRange, _readLatency, () => client.ReadRange(o.SessionId, o.From, o.To));
                 Oracle.CompareWindow(actual, ModelOps.WindowOf(model, o.SessionId, o.From, o.To),
                     $"readRange({o.SessionId}, [{o.From},{o.To}))");
+                break;
+            }
+
+            case TraceWindowPreview o:
+            {
+                var actual = Timed(TraceOps.WindowPreview, _readLatency,
+                    () => client.OpenRecentPreview(o.SessionId, o.Count, o.PreviewChars));
+                if (!model.Sessions.TryGetValue(o.SessionId, out var expectedList))
+                {
+                    throw new HarnessVerificationError($"op {index}: WindowPreview of absent session {o.SessionId}");
+                }
+                var expectedFrom = Math.Max(0, expectedList.Count - o.Count);
+                Oracle.ComparePreviewWindow(actual, expectedList, expectedFrom, o.PreviewChars, o.SessionId);
                 break;
             }
 

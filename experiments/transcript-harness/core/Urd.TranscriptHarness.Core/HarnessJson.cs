@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Urd.TranscriptHarness.Contracts;
 
 namespace Urd.TranscriptHarness.Core;
@@ -15,6 +16,7 @@ public static class HarnessJson
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         IncludeFields = false,
+        Converters = { new JsonStringEnumConverter() },
     };
 
     public static void WritePart(Utf8JsonWriter w, MessagePart part)

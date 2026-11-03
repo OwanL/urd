@@ -44,9 +44,14 @@ verified by the oracle:
   stream; a different `streamId` while one is active is an error; nothing
   partial is ever served. `FinalizeStream` marks completion and inserts the
   final message. (Explicitly so stores cannot defer all writes to finalize and
-  win streaming comparisons by buffering.)
-- **`FetchToolResult`** is the only full-content tool-result read path
-  (hover/inspection).
+  win streaming comparisons by buffering.) Note: the logical oracle cannot
+  observe WHEN a batch's content was written — batch write policy is enforced
+  through adapter timing/behavior interpretation and adapter-declared policy,
+  not logical verification.
+- **`FetchToolResult`** is the targeted single-result full-content read path
+  (hover/inspection); range reads may still return full content as ordinary
+  message payload, and UI list views should read through the preview window
+  below.
 - **`OpenRecentPreview(sessionId, count, previewChars)`** is the bounded
   metadata/preview window for chat-list/inspector reads: per part it returns
   kind, full-content character length, toolCallId, and a preview capped at

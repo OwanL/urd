@@ -59,11 +59,13 @@ public interface ITranscriptStore : IDisposable
     /// Bounded metadata/preview window for chat UI and inspector list views.
     /// Newest <paramref name="count"/> messages, oldest first, WITHOUT full
     /// payloads: per part the store reports kind, full-content character length
-    /// and toolCallId if any, plus a preview string that must not exceed
-    /// <paramref name="previewChars"/> characters. Returning full payload text
-    /// (in particular full ToolResultPart.Content) is a contract violation.
-    /// Large-result layouts must be demonstrable through this method plus
-    /// FetchToolResult, never by materializing full ranges.
+    /// and toolCallId if any, plus a preview string capped at
+    /// <paramref name="previewChars"/> characters and taken from the content's
+    /// LEADING prefix (the oracle compares exact prefixes). Returning full
+    /// payload text (in particular full ToolResultPart.Content) is a contract
+    /// violation. Large-result layouts must be demonstrable through this method
+    /// plus <see cref="FetchToolResult"/> (the targeted single-result fetch),
+    /// not by serving range reads to UI list views.
     /// </summary>
     WindowPreview OpenRecentPreview(string sessionId, int count, int previewChars);
 

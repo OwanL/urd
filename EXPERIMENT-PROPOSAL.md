@@ -1,9 +1,29 @@
 # Small-operation technology experiments — revised proposal
 
-Status: proposed, not approved for execution. This replaces the earlier session/
-UI/model-loop proposal, which was too application-shaped and too narrow in its
-initial candidates. Two bounded design passes informed this revision. No tests,
-installations or benchmarks have been run for it.
+Status: approved for execution with the controls below. This replaces the earlier
+session/UI/model-loop proposal, which was too application-shaped and too narrow
+in its initial candidates. Two bounded design passes informed this revision.
+Experiment execution has not started; environment preparation comes first.
+
+## Execution controls agreed with the owner
+
+- One fresh delegated session per language, running the complete exercises in
+  sequence. Run these sessions serially, not in parallel. Additional TS runtime
+  checks also run serially.
+- Use the same model and reasoning for every experiment: GPT-6.1 Sol, medium
+  reasoning. Resolve and verify the provider/model identity before assignment;
+  do not silently substitute another model or use automatic fallback.
+- Prepare and pin every candidate's toolchain and dependencies before the first
+  experiment. Pre-fetch packages and verify a minimal build/check can run without
+  downloads. Use the same small readiness check, not a prebuilt solution to the
+  measured tasks. Environment setup is an untimed prerequisite, not a scored task.
+- Exclude installation, downloads and dependency-repair waits from comparative
+  implementation/build/runtime metrics. Pause and log unexpected dependency gaps
+  rather than charging network/setup delays to a candidate. Keep interruption
+  timestamps separately so wall-clock and adjusted timings remain auditable.
+- Record assignment/start, correct baseline, execution/check completion, source
+  change verified and finish milestones. Distinguish model/implementation elapsed
+  time, local build/check time and program execution time; retain raw timestamps.
 
 ## Scope: small command-line programs, all six languages
 

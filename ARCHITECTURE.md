@@ -94,8 +94,8 @@ span multiple decisions, and the inventory can grow as Pie is inspected.
 The existing strategic decisions remain in the README: a Urd-specific harness
 without Pi or another complete agent runtime as its foundation; single-user,
 local-first deployment; a shared backend with multiple UI clients; background operation
-after UI closure; source-based customisation; Windows-first delivery; and no
-Pie data-compatibility requirement. More detailed decisions will be recorded
+after UI closure; source-based customisation; Windows → macOS → Linux delivery;
+and no Pie data-compatibility requirement. More detailed decisions will be recorded
 here as the review progresses. Keeping LOC down is also a strict project
 requirement; see the README's code-size constraint.
 
@@ -106,6 +106,20 @@ the development environment until Urd is ready for normal use. This removes
 pressure to add desktop/editor integration immediately or cut essential features
 just to begin developing Urd from itself. Desktop and VS Code clients remain
 part of the destination; implementation technologies remain undecided.
+
+### Operating-system rollout: Windows, then macOS, then Linux
+
+**Decision:** Plan for all three operating systems in that order. This is distinct
+from delivering browser, desktop and VS Code clients incrementally. Platform
+versions, Linux environments, timing and detailed feature parity remain open.
+
+Evaluate portability of the complete stack, not only its language/runtime:
+backend and UI reuse, desktop hosts, credentials, shell/process management,
+background controls, browser/desktop automation, packaging and local source builds.
+OS-specific APIs are legitimate integration points, not evidence that the shared
+core must be platform-specific. The first foundation ranking was Windows-centric;
+its existing scores do not qualify the full rollout. See
+[the portability correction](FOUNDATION-RANKING.md#portability-correction-windows--macos--linux).
 
 ### Independent client navigation: conditional on minimal cost
 

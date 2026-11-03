@@ -12,7 +12,8 @@ built, accounts accessed or resource benchmarks run in this round.
 **We have enough requirements to rank structural fit, not enough evidence to
 choose a final winner.** [README.md](README.md) and [ARCHITECTURE.md](ARCHITECTURE.md)
 cover the important direction: small maintained code, low resource overhead,
-Windows/browser-first delivery, one shared backend with independent client
+browser-first delivery with an OS rollout of Windows → macOS → Linux,
+one shared backend with independent client
 lifetimes, source-bundled local customisation, provider access, delegation,
 pruning, history/lifecycle rules, browser automation and desktop control.
 Minimising duplication across browser, desktop and VS Code is now explicit.
@@ -28,9 +29,58 @@ were grouped and representative combinations checked; **not every named package
 received equal-depth investigation or an individual score**. An unverified option
 is not automatically unsuitable.
 
+## Portability correction: Windows → macOS → Linux
+
+The owner clarified this intended rollout after the initial ranking. The initial
+screen treated other OS targets as unspecified and overemphasised Windows fit.
+**Existing score profiles and bands are a Windows-first baseline, not a completed
+three-OS ranking.** Cross-platform runtime support alone cannot qualify the full
+application. No numerical re-scoring has been invented without that investigation.
+
+Consequences for the comparison:
+
+- **C#/.NET remains a cross-platform backend candidate.** Do not confuse .NET
+  runtime coverage with Windows-only WPF/WebView2 hosts or UI Automation APIs.
+  MAUI's official targets include macOS via Mac Catalyst but not Linux; it does
+  not by itself cover the intended desktop rollout. A shared web UI with another
+  host remains possible without replacing the .NET backend.
+- **Electron and Tauri document Windows/macOS/Linux desktop targets.** That gives
+  them a relevant coverage advantage over a Windows-only host, not an automatic
+  resource or maintenance win. Tauri uses different platform webviews; renderer
+  behaviour and platform build prerequisites still need checking. Wails,
+  Neutralino and other hosts need the same complete-stack comparison.
+- **A thin WebView2-only host is a Windows-stage option, not the whole desktop
+  strategy.** Count later host adapters or replacement work explicitly. Native
+  Windows integration should not receive unqualified long-term-fit credit.
+- **Reassess every backend's dependency graph**, including native modules, browser
+  drivers, credentials, shell/process cancellation, tray/background controls and
+  desktop automation. A browser UI on a Mac connected to a Windows backend is
+  not evidence that Urd runs on macOS; execution remains on the backend machine.
+- **Assess release and source-build paths on each OS**, including macOS signing/
+  notarisation and permission workflows where relevant, and Linux distribution,
+  packaging and X11/Wayland differences. These are qualification topics, not newly
+  selected distribution policies or promises of identical automation permissions.
+
+The shared-UI recommendation still stands. The leading backend group remains a
+set of candidates, but its ordering and host recommendations need reassessment
+against all three OS targets before selection. Add platform-specific glue,
+replacement work and ongoing test/build costs to O/C/I/M; S must consider reuse
+across operating systems as well as interface surfaces. R remains unknown.
+This requires early portability investigation, not implementing all OS support now.
+
+Sources: [.NET overview](https://learn.microsoft.com/en-us/dotnet/core/introduction),
+[WPF](https://learn.microsoft.com/en-us/dotnet/desktop/wpf/overview/),
+[WebView2 distribution](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/distribution),
+[MAUI supported platforms](https://learn.microsoft.com/en-us/dotnet/maui/supported-platforms),
+[Electron introduction](https://www.electronjs.org/docs/latest/),
+[Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) and
+[platform webviews](https://v2.tauri.app/reference/webview-versions/).
+
 ## Method: score profiles, then ranked bands
 
-Scores are provisional ordinal judgments, not measurements:
+Scores below are provisional ordinal judgments from the initial Windows-first
+screen, not measurements or revised three-OS scores. Future assessment must extend
+these axes to the full rollout described above:
 
 | Axis | What is assessed |
 | --- | --- |
@@ -164,7 +214,7 @@ Lustre is a client-rendering option, not simply another server-driven UI.
 | Electron | JS/TS host/tooling aligned with a TS application | Bundled Chromium/Node architecture; renderer/preload/main-process boundaries and background lifetime. |
 | Tauri | Rust host around shared web assets | Rust build prerequisites, platform webview and command bridge; may align with a Rust backend. |
 | Wails | Go host around shared web assets | Go/native bindings and host lifecycle; may align with a Go backend. |
-| WebView2 with a thin host | Direct Windows web hosting; can align with a .NET backend | A host still has to be built; Windows runtime distribution, messaging and future OS host choices. |
+| WebView2 with a thin host | Direct Windows web hosting; can align with a .NET backend | Windows-stage host only, not the macOS/Linux strategy; count additional host implementations, distribution and messaging. |
 | Neutralinojs | Another webview shell with a native API bridge | Actual packaging, native capabilities, local-build path and bridge fit need checking. |
 
 No host is a proven RAM winner. The right ordering depends partly on the selected
@@ -206,7 +256,10 @@ Packaging must be assessed separately from language choice:
 
 ## What to investigate next
 
-**Recommended test order, not a new stack commitment:**
+**Recommended test order, not a new stack commitment:** First audit the intended
+Windows → macOS → Linux path for each leading stack's dependencies, hosts,
+packaging and local builds. Do this before selection; the Windows-first fixtures
+below cannot establish three-OS suitability.
 
 1. Prove one representative session view can be shared across browser, VS Code
    webview and one desktop host. Include streaming, paged history, tool inspection,

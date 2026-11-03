@@ -162,9 +162,10 @@ packaging and the editing location remain open.
 Pie until Urd is ready for normal use; there is no need to rush self-hosted
 development or cut essential behaviour merely to switch tools early.
 
-Standalone Windows and VS Code clients remain planned. This orders delivery,
-not the eventual product scope, and does not select a language, UI toolkit,
-provider library or storage technology.
+Standalone desktop and VS Code clients remain planned; their relative delivery
+order remains open. Browser-first identifies the first usable interface, not the
+eventual product scope. The separate OS rollout is Windows → macOS → Linux;
+neither sequence selects a language, UI toolkit, provider library or storage technology.
 
 ### Single-user, local-first workspace
 
@@ -226,9 +227,16 @@ does not select a UI toolkit or desktop host.
 **A TUI is not required and is outside the intended scope.** This does not
 prohibit ordinary launch, build or maintenance commands.
 
-**Windows first.** Windows is the first supported operating system, not a
-permanent Windows-only product constraint. Other OS commitments and timing
-remain open.
+**Operating-system rollout: Windows → macOS → Linux.** These are intended
+supported platforms in that order, not merely unspecified future possibilities.
+This OS sequence is separate from the browser/desktop/VS Code delivery sequence.
+Timing, minimum OS versions, Linux distributions/display environments and detailed
+feature parity remain open; all three need not ship initially.
+
+Foundation choices must account for the full rollout: shared backend/UI code,
+OS-specific integrations, release packaging and users' local source-build workflows.
+A convenient Windows implementation is not sufficient evidence of long-term fit.
+Keep platform-specific work explicit without building speculative abstractions.
 
 ### Start fresh; do not carry data compatibility
 
@@ -311,7 +319,7 @@ The following remain deliberately unresolved:
 - Persistence, restart/recovery, backend discovery and duplicate-start handling.
 - Background-app controls, tray integration, startup-at-login and shutdown rules.
 - Network access and authentication boundaries for single-user LAN/Tailscale use.
-- Detailed implementation sequencing and expansion beyond Windows.
+- Detailed implementation sequencing and timing within the Windows → macOS → Linux rollout; supported OS versions, Linux environments and platform feature parity.
 - Behavioural acceptance evidence and practical measures of reduced maintenance
   and publication complexity.
 

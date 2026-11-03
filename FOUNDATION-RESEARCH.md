@@ -211,9 +211,16 @@ remain possible but must preserve the agreed browser capability.
 sufficient basis for commitment. Go is a serious alternative, not a bare-HTTP
 rewrite.** Bun deserves explicit investigation because its build-CLI packaging
 could fit the source-customisation goal unusually well. Node remains the JS
-compatibility baseline. C# is a credible Windows-oriented alternative; Rust is
-credible when measured resource/control benefits justify its local-build and
-integration costs. No RAM winner has been established.
+compatibility baseline. C#/.NET is a credible cross-platform backend candidate;
+its Windows integration options do not establish portable desktop-host or tool
+coverage. Rust is credible when measured resource/control benefits justify its
+local-build and integration costs. No RAM winner has been established.
+
+**Scope correction:** The intended OS rollout is Windows → macOS → Linux, not
+Windows with unspecified later platforms. This report's initial qualification
+order was Windows-centric. Before selection, assess the full stack's macOS/Linux
+integrations, packaging and local source builds; see the
+[ranking portability correction](FOUNDATION-RANKING.md#portability-correction-windows--macos--linux).
 
 Proposed next sequence:
 

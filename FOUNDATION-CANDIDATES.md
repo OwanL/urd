@@ -150,9 +150,10 @@ release from its supplied source.
 ## Boundaries for the next stage
 
 This list intentionally contains overlapping and potentially unsuitable options.
-No numerical scoring, compatibility checks or comparative pros/cons have been
-performed for the expanded inventory. The next stage can investigate candidates,
-assemble coherent stacks and then score them against the agreed requirements.
+This inventory itself remains unranked. A subsequent
+[first-pass ranking](FOUNDATION-RANKING.md) now groups candidate stacks, records
+provisional fit profiles and compares cross-surface reuse. It is not equal-depth
+qualification of every named package, a resource benchmark or a stack selection.
 
 Storage remains in [STORAGE-RESEARCH.md](STORAGE-RESEARCH.md), and provider access
 in [PROVIDER-RESEARCH.md](PROVIDER-RESEARCH.md). This inventory does not reopen

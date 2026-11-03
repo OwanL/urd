@@ -16,8 +16,10 @@ performance winner. [STORAGE-RESEARCH.md](STORAGE-RESEARCH.md) remains undecided
 
 The subsequently expanded [candidate inventory](FOUNDATION-CANDIDATES.md) lists
 additional languages, runtimes, frameworks and packaging approaches without
-ranking them. The proposed research order below does not restrict that inventory;
-the added candidates have not yet received equivalent investigation or scoring.
+ranking them. The proposed research order below does not restrict that inventory.
+A subsequent [first-pass ranking](FOUNDATION-RANKING.md) compares broader candidate
+families and shared-interface approaches; coverage is not equal-depth for every
+package, and no resource measurements or stack selection have been made.
 
 ## What a good fit must satisfy
 

@@ -52,8 +52,8 @@ public sealed class SqliteRowsTranscriptStore : ITranscriptStore, IStoreStatisti
     /// <summary>
     /// Leading-prefix character cap stored in parts_meta.preview. Preview
     /// requests with previewChars &le; this cap are answered purely from
-    /// parts_meta; larger requests fall back to decoding the single part's
-    /// content (documented; the bounded-metadata path is the designed default).
+    /// parts_meta; larger requests may decode the flagged message's entire
+    /// envelope (documented; the bounded-metadata path is the designed default).
     /// </summary>
     internal const int PreviewStoredPrefix = 256;
 
@@ -155,26 +155,20 @@ public sealed class SqliteRowsTranscriptStore : ITranscriptStore, IStoreStatisti
 
     public WindowPreview OpenRecentPreview(string sessionId, int count, int previewChars)
     {
-        // Unknown and empty sessions read as an empty window (absence is not an
-        // error; reference-store parity).
-        var total = MessageCountOf(sessionId);
-        if (count <= 0 || total == 0)
-        {
-            return new WindowPreview(sessionId, 0, []);
-        }
-        var from = Math.Max(0, total - count);
+        if (count <= 0) return new WindowPreview(sessionId, 0, []);
 
-        // Bounded metadata read: ONLY parts_meta is touched on the default
-        // path; large parts_json payloads are never opened. Roles come from the
-        // message header column only, never from payloads.
+        // Hold one read snapshot through any fallback, including after the
+        // metadata reader reaches DONE. Deferred: do not reserve the writer lock.
+        using var tx = Db.BeginTransaction(deferred: true);
+        // Message-led LEFT JOIN retains headers with no parts. Neither the
+        // window nor its cursor needs a separate count or any payload JSON.
         using var command = Command(
-            "SELECT pm.ordinal, m.role, pm.kind, pm.content_chars, pm.tool_call_id, pm.preview, pm.bounded " +
-            "FROM parts_meta pm " +
-            "JOIN messages m ON m.session_id = pm.session_id AND m.ordinal = pm.ordinal " +
-            "JOIN (" +
+            "SELECT m.ordinal, m.role, pm.kind, pm.content_chars, pm.tool_call_id, pm.preview, pm.bounded " +
+            "FROM (" +
             "  SELECT ordinal FROM messages WHERE session_id = @s ORDER BY ordinal DESC LIMIT @n" +
-            ") win ON win.ordinal = pm.ordinal " +
-            "WHERE pm.session_id = @s ORDER BY pm.ordinal, pm.part_index");
+            ") win JOIN messages m ON m.session_id = @s AND m.ordinal = win.ordinal " +
+            "LEFT JOIN parts_meta pm ON pm.session_id = m.session_id AND pm.ordinal = m.ordinal " +
+            "ORDER BY m.ordinal, pm.part_index", tx);
         command.Parameters.AddWithValue("@s", sessionId);
         command.Parameters.AddWithValue("@n", (long)count);
         using var reader = command.ExecuteReader();
@@ -189,13 +183,13 @@ public sealed class SqliteRowsTranscriptStore : ITranscriptStore, IStoreStatisti
             if (activeOrdinal < 0) return;
             if (currentFallbacks.Count > 0)
             {
-                var messageParts = PartsCodec.FromJson(RequirePartsJson(sessionId, activeOrdinal));
+                var messageParts = PartsCodec.FromJson(RequirePartsJson(sessionId, activeOrdinal, tx));
                 foreach (var index in currentFallbacks)
                 {
                     var content = PartsCodec.ContentOf(messageParts[index]);
                     parts[index] = parts[index] with
                     {
-                        Preview = content[..Math.Min(content.Length, Math.Max(previewChars, 0))],
+                        Preview = PreviewText.Prefix(content, previewChars),
                     };
                 }
             }
@@ -212,29 +206,31 @@ public sealed class SqliteRowsTranscriptStore : ITranscriptStore, IStoreStatisti
                 parts = [];
                 currentFallbacks = [];
             }
+            if (reader.IsDBNull(2)) continue; // zero-part message: keep its header
             var kind = reader.GetString(2);
             var contentChars = reader.GetInt64(3);
             var toolCallId = reader.IsDBNull(4) ? null : reader.GetString(4);
             var preview = reader.GetString(5);
             var bounded = reader.GetBoolean(6);
             string text;
-            if (bounded && previewChars > preview.Length)
+            if (bounded && previewChars > PreviewStoredPrefix)
             {
-                // Requested window longer than the stored prefix: fall back to
-                // decoding THIS part's content (see README: the fallback is the
-                // only preview path that touches payload text; the common path
-                // never does).
+                // A Unicode-safe stored prefix can be one code unit shorter
+                // than the cap; that must not trigger payload reads at <= cap.
+                // Larger requests decode this message's entire envelope once.
                 currentFallbacks.Add(parts.Count);
                 text = string.Empty; // filled in when the message completes
             }
             else
             {
-                text = preview[..Math.Min(preview.Length, Math.Max(previewChars, 0))];
+                text = PreviewText.Prefix(preview, previewChars);
             }
             parts.Add(new PartPreview(kind, contentChars, toolCallId, text));
         }
         CompleteCurrent();
-        return new WindowPreview(sessionId, from, items);
+        reader.Close();
+        tx.Commit();
+        return new WindowPreview(sessionId, items.Count == 0 ? 0 : items[0].Ordinal, items);
     }
 
     public string FetchToolResult(string sessionId, long ordinal, int partIndex)
@@ -537,7 +533,7 @@ public sealed class SqliteRowsTranscriptStore : ITranscriptStore, IStoreStatisti
         {
             var (kind, toolCallId) = PartsCodec.MetaOf(message.Parts[i]);
             var content = PartsCodec.ContentOf(message.Parts[i]);
-            var cut = Math.Min(content.Length, PreviewStoredPrefix);
+            var preview = PreviewText.Prefix(content, PreviewStoredPrefix);
             using var insertMeta = Command(
                 "INSERT INTO parts_meta(session_id, ordinal, part_index, kind, content_chars, tool_call_id, preview, bounded) " +
                 "VALUES(@s, @ord, @i, @kind, @chars, @id, @preview, @bounded)", tx);
@@ -547,8 +543,8 @@ public sealed class SqliteRowsTranscriptStore : ITranscriptStore, IStoreStatisti
             insertMeta.Parameters.AddWithValue("@kind", kind);
             insertMeta.Parameters.AddWithValue("@chars", content.Length);
             insertMeta.Parameters.AddWithValue("@id", (object?)toolCallId ?? DBNull.Value);
-            insertMeta.Parameters.AddWithValue("@preview", cut > 0 ? content[..cut] : string.Empty);
-            insertMeta.Parameters.AddWithValue("@bounded", content.Length > PreviewStoredPrefix ? 1 : 0);
+            insertMeta.Parameters.AddWithValue("@preview", preview);
+            insertMeta.Parameters.AddWithValue("@bounded", content.Length > preview.Length ? 1 : 0);
             insertMeta.ExecuteNonQuery();
         }
         return ordinal;
@@ -596,10 +592,10 @@ public sealed class SqliteRowsTranscriptStore : ITranscriptStore, IStoreStatisti
         return [.. messages];
     }
 
-    private string RequirePartsJson(string sessionId, long ordinal)
+    private string RequirePartsJson(string sessionId, long ordinal, SqliteTransaction? tx = null)
     {
         using var command = Command(
-            "SELECT parts_json FROM messages WHERE session_id = @s AND ordinal = @ord");
+            "SELECT parts_json FROM messages WHERE session_id = @s AND ordinal = @ord", tx);
         command.Parameters.AddWithValue("@s", sessionId);
         command.Parameters.AddWithValue("@ord", ordinal);
         var result = command.ExecuteScalar();

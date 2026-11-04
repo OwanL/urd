@@ -233,3 +233,52 @@ writer contention, disk-full/I/O-error injection, kill during COMMIT, power loss
 macOS/Linux execution, file-backed attachment lifecycle or browser performance
 qualification. The artifacts are disposable local evidence, not permanent
 release acceptance assets.
+
+## Preview fix follow-up — 2026-11-04
+
+The three preview defects above are fixed in the **experimental sqlite-rows
+adapter**, not promoted into a production store:
+
+- The message-led LEFT JOIN retains zero-part headers; the cursor comes from
+  the actual window. A deferred read transaction holds one snapshot through
+  metadata and >256 fallback reads, including after the metadata reader ends.
+- Prefixes are now the **longest leading prefix** within the requested UTF-16
+  code-unit cap without splitting a valid surrogate pair. Length/cap units did
+  not change; this is not grapheme truncation. Shared contract helper, reference
+  and oracle agree, with independent expected-string tests and real shared JSON
+  codec round trips. Other adapter implementations were not changed/qualified.
+- Requests ≤256 remain payload-free even when the safe stored prefix is only
+  255. Larger requests can still decode an entire flagged message envelope.
+
+Executable evidence is under the owned OS-temp sibling `sqlite-fixes-98a6`
+(`$F`) beside `$V` above. Same .NET/SQLite toolchain; serial single-worker Release
+builds, no new package dependencies. Commands and output are in each run folder:
+
+| Run | Result |
+| --- | --- |
+| `$F/baseline.ps1`, unmodified source | 9 focused tests, 23 shared selftests, 634-op/10-checkpoint SQLite smoke, clean/abrupt reopen passed. |
+| `$F/regressions-before/baseline.ps1`, new tests before implementation | Existing 9 passed; all 5 new preview test groups failed on the unchanged adapter. |
+| `$F/after/baseline.ps1`, fixed source | All 14 focused tests and 23 shared selftests passed; 634-op/10-checkpoint SQLite smoke and clean/abrupt reopen passed. |
+| `$F/concurrency/probes.ps1 -RunName after-1` | Original concurrent-read workload only: 328 messages, 320 draft batches, two readers, 697 reader iterations, **zero cursor mismatches**, exact final content and integrity check passed. |
+
+As before, use fresh run/fixture directories, and acquire/start
+`urd:heavy-local-work` before builds/tests. Low free RAM (~0.69–0.84 GB at these
+runs) kept this to small fixtures; no Stage1 replay or benchmark sweep. The
+permanent regressions use reader-local TEMP views/functions to commit a real
+second WAL connection during reads: append/truncate, replacement and deletion.
+They are deterministic (no sleeps), do not alter the persistent schema or add
+production hooks, and assert the writer committed before checking the snapshot.
+Unicode tests cover stored/caller/fallback caps, all four part kinds, reopen and
+transport. A payload-column observation function verifies metadata laziness.
+Independent read-only acceptance review checked the source, regressions and
+recorded runs, found no supported blocking issue, and approved this scoped fix;
+the reviewer did not independently execute tests.
+
+**Remaining limits:** old already-corrupted stored prefixes are not repaired;
+use fresh experimental fixtures. No schema migration or lifecycle rules were
+added. The audit found separate `PageOlder`/`ReadRange` existence/count/window
+snapshot races under concurrent edits; these remain outside this preview-only
+patch and were reported to the coordinator. The shared host smoke is serial;
+the rerun is not contention/soak/fairness evidence. Abrupt reopen still does not
+prove a kill during COMMIT or power-loss safety. No production-readiness claim,
+new owner decision or wider adapter qualification follows from these fixes.

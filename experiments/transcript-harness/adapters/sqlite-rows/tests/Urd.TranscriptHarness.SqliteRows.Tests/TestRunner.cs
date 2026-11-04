@@ -8,7 +8,7 @@ namespace Urd.TranscriptHarness.SqliteRows.Tests;
 // (contract level); the IPC/child-process path is exercised by the shared
 // runner smoke with --store-assembly. Fixtures live in OS temp only.
 
-public static class TestRunner
+public static partial class TestRunner
 {
     private static int _failures;
     private static int _passed;
@@ -18,6 +18,11 @@ public static class TestRunner
         Run("round trip + non-ASCII content", RoundTripNonAscii);
         Run("bounded preview metadata (never full payload)", BoundedPreview);
         Run("preview fallback beyond stored prefix", PreviewFallbackBeyondStoredPrefix);
+        Run("preview cursor/window snapshot across writer commits", PreviewWindowSnapshot);
+        Run("preview fallback snapshot across edits/deletion", PreviewFallbackSnapshot);
+        Run("preview retains zero-part message headers", PreviewZeroParts);
+        Run("Unicode preview boundaries, reopen, reference/oracle/wire parity", PreviewUnicode);
+        Run("stored-boundary preview stays payload-free", PreviewMetadataOnly);
         Run("streaming batches + finalize + per-batch persistence", StreamingBatches);
         Run("suffix edits: renumber, truncate, out-of-range, full replace, empty session", SuffixEdits);
         Run("assignments + delete policies", AssignmentsAndDeletes);

@@ -58,13 +58,14 @@ public interface ITranscriptStore : IDisposable
     /// <summary>
     /// Bounded metadata/preview window for chat UI and inspector list views.
     /// Newest <paramref name="count"/> messages, oldest first, WITHOUT full
-    /// payloads: per part the store reports kind, full-content character length
-    /// and toolCallId if any, plus a preview string capped at
-    /// <paramref name="previewChars"/> characters and taken from the content's
-    /// LEADING prefix (the oracle compares exact prefixes). Returning full
-    /// payload text (in particular full ToolResultPart.Content) is a contract
-    /// violation. Large-result layouts must be demonstrable through this method
-    /// plus <see cref="FetchToolResult"/> (the targeted single-result fetch),
+    /// payloads: per part the store reports kind, full-content UTF-16 code-unit
+    /// length and toolCallId if any, plus the longest LEADING prefix of at most
+    /// max(0, <paramref name="previewChars"/>) UTF-16 code units that does not split
+    /// a valid surrogate pair (see <see cref="PreviewText.Prefix"/>). This is not
+    /// a grapheme-cluster cap. The oracle compares exact prefixes. Returning
+    /// payload text beyond this cap is a contract violation. Large-result layouts
+    /// must be demonstrable through this method plus <see cref="FetchToolResult"/>
+    /// (the targeted single-result fetch),
     /// not by serving range reads to UI list views.
     /// </summary>
     WindowPreview OpenRecentPreview(string sessionId, int count, int previewChars);
@@ -118,6 +119,21 @@ public sealed record MessagePreview(long Ordinal, string Role, IReadOnlyList<Par
 
 /// <summary>One part's metadata without full content; <see cref="Preview"/> is at most previewChars long.</summary>
 public sealed record PartPreview(string Kind, long ContentChars, string? ToolCallId, string Preview);
+
+/// <summary>Shared bounded-prefix rule; valid UTF-16 input stays valid across storage/JSON transport.</summary>
+public static class PreviewText
+{
+    public static string Prefix(string content, int maxChars)
+    {
+        var length = Math.Clamp(maxChars, 0, content.Length);
+        if (length > 0 && length < content.Length &&
+            char.IsHighSurrogate(content[length - 1]) && char.IsLowSurrogate(content[length]))
+        {
+            length--;
+        }
+        return content[..length];
+    }
+}
 
 /// <summary>Optional capability for adapters able to report their own managed allocations.</summary>
 public interface IStoreStatistics

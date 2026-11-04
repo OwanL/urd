@@ -19,7 +19,13 @@
     <Reference Include="Urd.TranscriptHarness.Adapter.SqliteRows">
       <HintPath>..\..\Urd.TranscriptHarness.Adapter.SqliteRows\bin\Release\net10.0\Urd.TranscriptHarness.Adapter.SqliteRows.dll</HintPath>
     </Reference>
-    <!-- For the draft-persistence peek only: consume the SAME SQLite binding
+    <Reference Include="Urd.TranscriptHarness.Core">
+      <HintPath>..\..\..\..\core\Urd.TranscriptHarness.Core\bin\Release\net10.0\Urd.TranscriptHarness.Core.dll</HintPath>
+    </Reference>
+    <Reference Include="Urd.TranscriptHarness.ReferenceStore">
+      <HintPath>..\..\..\..\reference\Urd.TranscriptHarness.ReferenceStore\bin\Release\net10.0\Urd.TranscriptHarness.ReferenceStore.dll</HintPath>
+    </Reference>
+    <!-- For owned-schema test probes: consume the SAME SQLite binding
          copy the adapter restores, so no extra package reference appears here. -->
     <Reference Include="Microsoft.Data.Sqlite">
       <HintPath>..\..\Urd.TranscriptHarness.Adapter.SqliteRows\bin\Release\net10.0\Microsoft.Data.Sqlite.dll</HintPath>

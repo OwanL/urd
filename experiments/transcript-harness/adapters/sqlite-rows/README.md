@@ -34,17 +34,22 @@ baseline). There are no content-block rows: message rows are what differ from
 family 2, where large text is separately addressable block storage.
 
 **Preview metadata design (explicit).** `parts_meta` is derived from the
-envelope at write time. `OpenRecentPreview` is answered with a single join over
-`parts_meta` + the message header (`role` column only): it never opens
-`parts_json`, so a preview never decodes a large payload. Each preview row
-carries a C#-exact leading prefix capped at `PreviewStoredPrefix = 256`
-characters (UTF-16 code units, matching the oracle's string slicing). A
-request with `previewChars` above the stored cap falls back to decoding the
-single flagged part's envelope content — the only preview path that touches
-payload text (documented bound: it reads the flagged message row only, and
-smoke uses ≤ 24 chars so the metadata path covers the harness workload).
-`windowPreview` allocation peaks in a smoke run stay in the tens-of-kilobytes
-range even with 64 KiB tool results in the window.
+envelope at write time. `OpenRecentPreview` selects the latest message headers
+and LEFT JOINs metadata, retaining messages with zero parts. Its cursor comes
+from the returned window, not a separate count. A short deferred read transaction
+keeps metadata and any fallback reads in one snapshot across concurrent commits.
+
+Prefixes use the shared `PreviewText.Prefix` rule: the **longest leading prefix**
+of at most `max(0, previewChars)` UTF-16 code units without splitting a valid
+surrogate pair. `ContentChars` still counts UTF-16 code units, not Unicode scalars
+or grapheme clusters. At a split pair the prefix is one code unit shorter; it
+never inserts a replacement character for valid input.
+
+Stored prefixes are capped at `PreviewStoredPrefix = 256`. Requests ≤256 use
+only metadata and message headers, **never `parts_json`**, even when the stored
+prefix is 255 because of a boundary pair. Larger requests can decode each flagged
+message's **entire JSON envelope once**, not merely the requested part; they are
+not payload-byte-bounded. Smoke uses ≤24, so it takes the metadata path.
 
 **Edit mechanics.** `ReplaceSuffix(k, new)`: one committed transaction —
 `DELETE FROM messages/parts_meta WHERE session=? AND ordinal>=k` then
@@ -97,31 +102,15 @@ assignment history — no dangling OPEN references can remain.
 - `ListSessionsMeta` is ordered by `session_id` (SQLite BINARY order); the
   shared verification re-sorts logically, so store order is not a contract.
 
-## Shared-contract inconsistency to report (not silently resolved)
+## Shared-contract notes
 
-Found while comparing against the reference store and the oracle:
-
-1. **`ReadRange` end-bound: reference store throws, oracle model clamps.**
-   `OracleModel.WindowOf` clamps `toExclusive` to the session count, but the
-   reference store throws `Range … outside count` for `to > count`. `PageOlder`
-   is clamped in BOTH, so the two read methods are internally inconsistent in
-   the reference. The trace never exercises either edge (generator only issues
-   `ReadRange(1, 9)` when `count > 9`), so no run fails — but a future trace
-   edit could expose it. This adapter mirrors the reference store's behaviour
-   (throw) and leaves the CONTRACT untouched; the owner should pick one
-   reading and align oracle + reference + adapters.
-2. **`PageOlder` far-future `before`: reference clamps, executor's expectation
-   clamps differently** (`Math.Clamp(before - count, 0, preCount)` gives an
-   empty expected window where the reference returns the last `count`
-   messages). Same status: unreachable in current traces, unresolved in the
-   contract, reported only.
-3. **Cross-session stream-id reuse**: the reference store silently accumulates
-   a batch into another session's draft when a stream id is reused while
-   active (its `_drafts` lookup does not bind to the session). This adapter
-   rejects that case. Trace never reuses stream ids, so no run diverges.
-
-These are recorded verbatim in the assignment result; the contract/README text
-is treated as the authority and was NOT changed.
+The earlier `ReadRange`/`PageOlder` mismatch reports are stale: the shared executor
+now enforces strict range bounds and clamps `before` before subtraction.
+Cross-session active stream-ID reuse still differs: the reference store can
+accumulate a batch into another session's draft; this adapter rejects it. Current
+traces avoid that collision. The 2026-11-04 preview follow-up clarified Unicode
+prefix semantics in the shared contract/reference/oracle; other adapters have
+not been updated or qualified at split-surrogate boundaries.
 
 ## Build and use
 
@@ -164,18 +153,24 @@ host needed no changes for this adapter.
 
 - `synchronous=NORMAL` in WAL mode is the documented OS-flush configuration;
   durability beyond process crash (power loss) is NOT claimed or tested here.
-- Preview fallback for `previewChars > 256` decodes the single flagged part's
-  content (bounded to that part; full-payload-free elsewhere). A future
-  variant could raise the stored cap instead.
+- Preview fallback for `previewChars > 256` decodes the entire flagged message
+  envelope. Only the default ≤256 path is payload-free.
+- Existing experimental databases with already-corrupted stored prefixes are
+  not repaired by this change; use fresh fixtures. No migration was added.
 - Lone surrogates in content are representable in C# strings but not safely in
   the JSON envelope (System.Text.Json behavior); harness-generated content is
   valid UTF-16, so this is a documented limitation, not a trace-visible gap.
 - No schema version table yet (Stage 0); reopen assumes the same layout. A
   `meta` table for schema versioning is trivial to add if the programme wants
   in-place evolution.
-- Concurrency: the store host is a single writer/reader per process; SQLite
-  would serialize multiple processes too (WAL), but that is not exercised by
-  the harness contract at this milestone.
+- The shared host/trace is serial. Focused preview regressions inject commits
+  through a second WAL connection using reader-local TEMP views/functions;
+  no sleeps or production hooks. They cover append/truncate, replacement and
+  deletion during reads, including fallback after the metadata reader is done.
+  This is snapshot correctness evidence, not a load/fairness/soak benchmark.
+- `PageOlder` and `ReadRange` still make separate existence/count/window reads
+  without a shared snapshot. Concurrent edits can invalidate their bounds;
+  these full-read races are outside this preview-only fix.
 - Windows-only at this stage (programme contract; RID-specific natives are
   restored for other OSes but unexercised).
 
@@ -183,5 +178,7 @@ host needed no changes for this adapter.
 
 - `Microsoft.Data.Sqlite` 10.0.14 (transitive `SQLitePCLRaw.*` 2.1.13; bundled
   native `e_sqlite3` loaded from the adapter's `runtimes/win-x64/native`).
-- No other packages. Tests consume the pre-built adapter + contracts DLLs by
-  HintPath (no shared-project builds) and the same SQLite binding copy.
+- No other packages. Tests consume pre-built adapter, contracts, reference and
+  core DLLs by HintPath (no shared-project builds) and the same SQLite binding.
+  Unicode regressions check independent expected strings, reopen, the real
+  shared JSON codec and oracle, plus the payload-free stored-boundary path.

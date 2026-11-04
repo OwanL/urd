@@ -287,8 +287,8 @@ public static class Oracle
                         $"Preview part metadata mismatch in {sessionId}@{item.Ordinal}[{j}]: " +
                         $"{actualPart.Kind}/{actualPart.ContentChars}/{actualPart.ToolCallId ?? "-"} != {kind}/{content.Length}/{toolCallId ?? "-"}");
                 }
-                var cappedPreview = content[..Math.Min(content.Length, previewChars)];
-                if (actualPart.Preview.Length > previewChars || !string.Equals(actualPart.Preview, cappedPreview, StringComparison.Ordinal))
+                var cappedPreview = PreviewText.Prefix(content, previewChars);
+                if (actualPart.Preview.Length > Math.Max(0, previewChars) || !string.Equals(actualPart.Preview, cappedPreview, StringComparison.Ordinal))
                 {
                     throw new HarnessVerificationError(
                         $"Preview text mismatch in {sessionId}@{item.Ordinal}[{j}] (len {actualPart.Preview.Length}, must not exceed {previewChars})");

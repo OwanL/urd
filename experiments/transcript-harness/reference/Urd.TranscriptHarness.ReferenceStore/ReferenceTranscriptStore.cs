@@ -84,7 +84,7 @@ public sealed class ReferenceTranscriptStore : ITranscriptStore, IStoreStatistic
                 _ => ("unknown", string.Empty, (string?)null),
             };
             parts.Add(new PartPreview(
-                kind, content.Length, toolCallId, content[..Math.Min(content.Length, Math.Max(previewChars, 0))]));
+                kind, content.Length, toolCallId, PreviewText.Prefix(content, previewChars)));
         }
         return new MessagePreview(ordinal, message.Role, parts);
     }

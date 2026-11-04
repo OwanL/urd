@@ -31,10 +31,10 @@ The owner participated before the structure was settled:
   with their containing chat. For independent workers, the owner said probably
   not, or possibly yes with an active-child warning; concrete UI is needed before
   choosing. Human steering does not itself transfer ownership, as already agreed.
-- **File/project layout deliberately deferred.** After reviewing the derived
-  example in §5, the owner said it was too early to choose. Neither one backend
-  project nor a Core/Server split is approved. This report must not be used as
-  permission to generate that layout.
+- **Project boundary selected after staged review; finer layout remains open.**
+  The owner initially deferred the folder/project example as premature. After
+  responsibility alignment, step 2 selected a revisable Core/Server split (§5).
+  This is not approval of a complete file map or permission to scaffold it.
 
 ## 1. Three kinds of ownership
 
@@ -116,7 +116,8 @@ means one main execution, not a ban on concurrent title generation. This support
 a narrow shared base rather than another coordination helper **as a starting
 point**, not frozen methods, mandatory lifecycle hooks or a prohibition on later
 composition. Manager APIs, broader base scope and project/file layout are not
-approved by this answer; implementation evidence may change the split.
+approved by this answer; implementation evidence may change the split. The
+subsequent project-boundary decision is recorded separately in §5.
 
 Auxiliary cancellation belongs to its caller: a title's naming attempt/session,
 or the context operation invoking compaction/pruning. Context-changing work
@@ -213,40 +214,55 @@ A small durable dispatch marker/transaction can conservatively leave ambiguous
 work for resolution. This is not a promise of exactly-once external effects,
 a workflow-replay engine, per-token fsync, or a specified loss-time budget.
 
-## 5. File/project proposal — reviewed, deliberately NOT selected
+## 5. Core/Server project boundary — selected, revisable
 
-The following example shows how responsibilities *could* map to files. The owner
-considered choosing the overall split too early; derive the real structure from
-validated flows, and bring it back before scaffolding production code.
+**Step 2 owner choice (2026-11-04): “Yes — Core + Server”.** This followed a
+request to discuss the single-project trade-off, not a silent promotion of the
+previously deferred example. The concrete distinction: a single backend project
+allows session code to take an ASP.NET `HttpContext` unless review/tests reject it;
+a Core project without that dependency rejects the coupling at compile time.
+The owner chose the narrow enforced boundary after discussion. The step 1 request
+to keep the design open to implementation-time changes still applies.
+
+**Selected:** `Urd.Server → Urd.Core`, never the reverse. Core contains session,
+execution and storage logic without an ASP.NET dependency; Server owns hosting,
+HTTP entrypoints and composition. This adds one project/reference and a boundary
+API, **not** a published SDK, interfaces for every class, additional processes or
+frozen methods. Both projects can evolve together. One project remains simpler
+plumbing, but is not the selected starting point.
+
+**Coarse source mapping below remains a working proposal**, not approval of every
+filename, frontend structure or test-project arrangement:
 
 ```text
-src/Urd.Backend/                 illustrative single C# project
-  Sessions/                     SessionBase, PrimarySession, SubagentSession,
-                                SessionExecution, SessionManager, TitleGenerator
-  Context/                      HistoryCompactor
-  Capabilities/                 CatalogPruner
-  Models/                       IChatClient adapters/configuration
-  Tools/                        ToolExecutor and actual tools
-  Storage/                      SessionStore and managed attachments
-  Api/                          commands, bounded reads, subscriptions
-src/Urd.Web/                    illustrative UI project location
-tests/Urd.Backend.Tests/        owning behaviour/flow tests
+src/Urd.Core/
+  Sessions/                   SessionBase, PrimarySession, SessionExecution,
+                              SessionManager — implemented behaviour, not stubs
+  Storage/                    SessionStore and required durable facts
+src/Urd.Server/               host entry/composition and actual HTTP handling
+src/Urd.Web/                  shared TypeScript/Preact UI; UI-specific test source
+                              (internal organization/tooling still open)
+tests/Urd.Backend.Tests/      proposed shared backend behaviour/SQLite-flow tests
+experiments/                  existing research harness, unchanged
 ```
 
-`Api → session coordinator/objects → execution → IChatClient/ToolExecutor`;
-session mutations use `SessionStore`. Execution reports through a guarded callback
-rather than receiving unrestricted history writes. Read-only API projections may
-query the store without creating an execution. Storage and provider clients do
-not depend on HTTP or the frontend; only the composition root wires them together.
+For the known first primary-session flow, add only files with actual behaviour.
+`SubagentSession`, title/compaction/pruning and provider/tool collaborators enter
+when their feature needs code; do not pre-create empty future folders/classes.
+This does not remove retained capabilities. Nor does splitting production code
+require a test project per assembly or a frontend copy of the C# class hierarchy.
 
-**Alternatives:** one backend project with explicit folders minimizes initial
-wiring; `Urd.Core` + `Urd.Server` enforces HTTP separation at compile time but adds
-assembly/public-interface boundaries. Neither implies a process per session.
-No empty folder/class generation, generic repositories, mandatory event bus,
-base-class hook framework or duplicated frontend session hierarchy is justified.
-Browser Design's owner-approved TypeScript/Preact direction settles neither
-backend project boundaries nor frontend classes/state ownership/folders; those
-remain provisional, not a mirrored backend class hierarchy.
+Within Core, sessions coordinate execution and guarded store writes; execution
+uses `IChatClient`/actual tool execution, never unrestricted history mutation.
+Read-only history queries can use the store without starting an execution.
+Server wires dependencies; session/storage code does not consume HTTP or UI state.
+Transport, endpoint style, CSS, frontend state and build tools remain open.
+
+No existing research/user file or harness is moved or migrated. Step 3 must scope
+SDK/build/package/formatting policy and commands deliberately: new root settings
+must not silently change experimental pins or behaviour. Conventions, tooling,
+package pins and detailed file/test placement await that review. This decision
+authorizes **no scaffold, source generation, build or installation**.
 
 ## 6. Acceptance sequence and remaining gates
 
@@ -283,8 +299,9 @@ provider terminal semantics or native-context fidelity.
   early with the chosen route; neither a common interface nor retries solve it.
 - How much behaviour truly belongs in `SessionBase`: test both kinds before
   expanding the base. Keep the working hierarchy small, not “set in stone” APIs.
-- Overall module/project/filesystem structure: owner review remains open. A
-  working class sketch is not approval of a production solution layout.
+- Core/Server is the selected working project boundary (§5); detailed module/file
+  mapping, shared build-policy scope and test placement still need review. Neither
+  the class sketch nor project choice authorizes production scaffolding.
 
 Routine method names, lock primitives, batching intervals and file subdivision
 can follow evidence; they need not become a design questionnaire. The disposable

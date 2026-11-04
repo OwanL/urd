@@ -95,8 +95,27 @@ runs and explicit verdict suppression.
 
 ## Fixture tiers and provenance
 
-- Current milestone: **smoke scale only** (few sessions, kilobyte-scale text).
-  No huge fixtures are generated, and no real session content is read.
+- Current milestone: **smoke scale by default** (few sessions, kilobyte-scale text)
+  plus the opt-in **Stage1 tier** (below). No huge fixtures are generated, and
+  no real session content is read.
+- **Stage1 tier (`smoke --tier stage1`)**: two named sessions with UTF-8
+  CONTENT byte budgets — `session-large-20m` (~20 MiB) and `session-large-1m`
+  (~1 MiB), matching the local census median/p90 — plus smoke-scale small
+  sessions in one store. Every Stage1 tool result is bounded to ≤ 256 KiB
+  UTF-8 bytes (`Stage1ResultCapBytes`, configurable for downsized self-tests).
+  The tier then runs 8 repeated common-workload cycles over the large session:
+  append (16 KiB-bounded result) + recent/preview/page/range reads + targeted
+  fetch, with a bounded TAIL-ONLY suffix edit every second cycle (reads always
+  precede edits; the built fixture is never erased before large reads, and the
+  tail edit never reaches into the built budget region). Deterministic default
+  seed 4242 (`--seed` still overrides); no benchmark runs automatically.
+- **Recorded byte totals are measured actuals, not guessed characters:**
+  generator output carries per-Stage1-session build-phase UTF-8 content bytes
+  (the budget actuals, recorded in the report notes and trace stats) plus a
+  final end-state total across all sessions. Budgets are met within one
+  bounded message (~≤ 4 KiB overshoot at most; the final undershoot is a few
+  bytes); the actual figure is always the recorded one. End-state differs from
+  build totals because cycle appends/edits are workload, not budget.
 - Planned later tiers: standard (~20 MiB large transcript plus small sessions,
   10k–100k-record histories, tool results from kilobytes to several hundred KiB,
   mixed with many small sessions in one store instance) and a configurable
@@ -111,6 +130,18 @@ runs and explicit verdict suppression.
   copies, temp only, never committed) and can only be imported later under the
   approved metadata-only/owner-approved task; the synthetic deterministic
   generator is always the fallback and exists first.
+- **Fixture compressibility (no conclusions without measurements):**
+  `TextOfrng` draws uniformly from a 43-symbol alphabet (letters, digits,
+  space, newline, umlauts, em-dash, CJK). A uniform symbol stream has order-0
+  entropy ≈ log2(43) ≈ 5.4 bits/char — ABOVE typical English order-0 entropy
+  (~4.1–4.7 bits/char) — so a plain context-free compressor generally
+  compresses this fixture LESS than English-like text; the earlier claim that
+  this fixture is "more compressible than English" was wrong and is retracted.
+  The alphabet makes UTF-8 bytes longer than string length (~14 % of chars are
+  3-byte, ~5 % 2-byte), so recorded byte figures are UTF-8 counts, not chars.
+  No adapter implements compression, making cross-candidate footprint
+  comparisons internally fair, but NO compression conclusion of any kind may
+  be drawn from these fixtures without direct measurements.
 
 ## Measurement rules
 

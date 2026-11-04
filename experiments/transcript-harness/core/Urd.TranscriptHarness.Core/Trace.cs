@@ -22,6 +22,18 @@ public sealed record ScaleConfig
     public int MediumResultCount { get; init; } = 4;
     public int LargeResultKB { get; init; } = 256;
     public int ImageFileCount { get; init; } = 6;
+    /// <summary>Named sessions with a UTF-8 CONTENT byte budget (Stage1 tier;
+    /// empty for the smoke default). The budget applies to content GENERATED
+    /// during the build phase; cycle appends/edits afterwards are part of the
+    /// workload but not the budget accounting (actuals are recorded — see
+    /// <see cref="GeneratedTrace.SessionContentBytes"/>).</summary>
+    public IReadOnlyList<Stage1SessionBudget> LargeSessions { get; init; } = [];
+    /// <summary>Stage1 repeated common-workload cycles over the first large
+    /// session (0 = off, smoke default).</summary>
+    public int RepeatCycles { get; init; } = 0;
+    /// <summary>Stage1 tool-result byte cap (UTF-8). Default 256 KiB; a
+    /// downsized value lets self-tests exercise many-message budget builds.</summary>
+    public int Stage1ResultCapBytes { get; init; } = 256 * 1024;
     public string Notes { get; init; } = "smoke tier (small by design; large tiers are config-only)";
 }
 
@@ -70,7 +82,19 @@ public static class TraceOps
 
 public sealed record AttachmentFixture(string ImageId, string RelativePath, int ByteCount);
 
-public sealed record GeneratedTrace(IReadOnlyList<TraceOp> Ops, IReadOnlyList<AttachmentFixture> Attachments);
+/// <summary>One Stage1 named session with a UTF-8 content byte budget.</summary>
+public sealed record Stage1SessionBudget(string SessionId, long Utf8Bytes);
+
+public sealed record GeneratedTrace(
+    IReadOnlyList<TraceOp> Ops,
+    IReadOnlyList<AttachmentFixture> Attachments,
+    /// <summary>Actual UTF-8 content bytes GENERATED for each Stage1 large
+    /// session during its budget build (before cycle appends/edits); only
+    /// Stage1 sessions appear here. Recorded actuals, never guessed chars.</summary>
+    IReadOnlyDictionary<string, long> SessionContentBytes,
+    /// <summary>Final logical content bytes of the whole model after all
+    /// trace ops (post edits) — the end-state figure, separate from budgets.</summary>
+    long TotalContentBytes);
 
 public static class TraceGenerator
 {
@@ -160,6 +184,110 @@ public static class TraceGenerator
         }
         ops.Add(new TraceCheckpoint());
 
+        // 4b. Stage1 tier (only when configured); smoke default stays identical:
+        //     this block runs before the final delete section but never names
+        //     the small prefix sessions, so sections 3/5 behaviour is unchanged.
+        //     Every Stage1 tool result is bounded to ≤ 256 KiB UTF-8 bytes and
+        //     the per-session budget is met with recorded actuals. Large reads
+        //     always precede any suffix edit (the fixture is never erased
+        //     before exercising large reads).
+        var stage1Bytes = new Dictionary<string, long>();
+        if (config.Stage1ResultCapBytes <= 0)
+        {
+            throw new HarnessError("Stage1ResultCapBytes must be positive");
+        }
+        if (config.LargeSessions.Count > 0)
+        {
+            foreach (var budget in config.LargeSessions)
+            {
+                var consumed = 0L;
+                while (consumed < budget.Utf8Bytes)
+                {
+                    var ordinal = model.Count(budget.SessionId);
+                    var textPart = new TextPart(TextOfrng(rng, 250 + rng.Next(900)));
+                    var call = new ToolCallPart($"call-{budget.SessionId}-{ordinal}-b", "bulkread", "{}");
+                    var overhead = ContentUtf8Bytes(textPart) + ContentUtf8Bytes(call);
+                    var remaining = budget.Utf8Bytes - consumed;
+                    var resultTarget = Math.Clamp(remaining - overhead, 1, config.Stage1ResultCapBytes);
+                    var result = new ToolResultPart(call.ToolCallId, BoundedText(rng, resultTarget));
+                    var message = new MessageRecord(ordinal % 2 == 0 ? "user" : "assistant",
+                        [textPart, call, result]);
+                    ops.Add(new TraceAppend(budget.SessionId, message));
+                    ModelOps.AppendMessage(model, budget.SessionId, message);
+                    consumed += ContentUtf8Bytes([textPart, call, result]);
+                }
+                stage1Bytes[budget.SessionId] = consumed;
+                ops.Add(new TraceCheckpoint());
+            }
+            // Repeated common workload cycles over the first large session:
+            // append a bounded result message, then read paths (recent/preview/
+            // page/range/targeted fetch), and a BOUNDED tail-only suffix edit
+            // every second cycle — replacing only cycle-appended messages so
+            // the built fixture stays intact for every later large read.
+            if (config.RepeatCycles > 0)
+            {
+                var bigSessionId = config.LargeSessions[0].SessionId;
+                var cycleStart = model.Count(bigSessionId);
+                for (var cycle = 0; cycle < config.RepeatCycles; cycle++)
+                {
+                    var count = model.Count(bigSessionId);
+                    ops.Add(new TraceOpenRecent(bigSessionId, 50));
+                    ops.Add(new TraceWindowPreview(bigSessionId, Math.Min(20, (int)count), 24));
+                    if (count > 40) ops.Add(new TracePageOlder(bigSessionId, Math.Max(10, count / 2), 20));
+                    if (count > 9) ops.Add(new TraceReadRange(bigSessionId, 1, 9));
+                    var ordinal = model.Count(bigSessionId);
+                    // Cycle messages carry a modest bounded result so the
+                    // targeted fetch exercises a non-trivial read without
+                    // multiplying the whole budget.
+                    var call = new ToolCallPart($"call-cycle-{cycle}", "scan", "{}");
+                    var cycleResultTarget = Math.Min(16 * 1024, config.Stage1ResultCapBytes);
+                    var cycleMessage = new MessageRecord(ordinal % 2 == 0 ? "user" : "assistant",
+                    [
+                        new TextPart(TextOfrng(rng, 250 + rng.Next(900))),
+                        call,
+                        new ToolResultPart(call.ToolCallId, BoundedText(rng, cycleResultTarget)),
+                    ]);
+                    ops.Add(new TraceAppend(bigSessionId, cycleMessage));
+                    ModelOps.AppendMessage(model, bigSessionId, cycleMessage);
+                    ops.Add(new TraceFetchToolResult(bigSessionId, ordinal, 2));
+                    if (cycle % 2 == 1)
+                    {
+                        var from = Math.Max(cycleStart, model.Count(bigSessionId) - 2);
+                        var replacement = new MessageRecord[]
+                        {
+                            new("user", [new TextPart(TextOfrng(rng, 1600))]),
+                            new("assistant", [new TextPart(TextOfrng(rng, 1400))]),
+                        };
+                        ops.Add(new TraceReplaceSuffix(bigSessionId, from, replacement));
+                        ModelOps.ReplaceSuffix(model, bigSessionId, from, replacement);
+                    }
+                }
+                ops.Add(new TraceCheckpoint());
+                if (config.LargeSessions.Count > 1)
+                {
+                    // One bounded read pass + tail-only edit over the second
+                    // named (≈1 MiB) session; same read-before-edit ordering.
+                    var midSessionId = config.LargeSessions[1].SessionId;
+                    var midCount = model.Count(midSessionId);
+                    ops.Add(new TraceOpenRecent(midSessionId, 50));
+                    ops.Add(new TraceWindowPreview(midSessionId, Math.Min(20, (int)midCount), 24));
+                    if (midCount > 40) ops.Add(new TracePageOlder(midSessionId, Math.Max(10, midCount / 2), 20));
+                    if (midCount > 9) ops.Add(new TraceReadRange(midSessionId, 1, 9));
+                    ops.Add(new TraceCheckpoint());
+                    if (midCount >= 6)
+                    {
+                        var from = model.Count(midSessionId) - 3;
+                        var replacement = new MessageRecord[]
+                        {
+                            new("user", [new TextPart(TextOfrng(rng, 900))]),
+                        };
+                        ops.Add(new TraceReplaceSuffix(midSessionId, from, replacement));
+                        ModelOps.ReplaceSuffix(model, midSessionId, from, replacement);
+                    }
+                }
+            }
+        }
+
         // 5. Final-closure deletes under the settled-only invariant, then reads.
         for (var d = 0; d < deleteTargets.Count; d++)
         {
@@ -177,7 +305,21 @@ public static class TraceGenerator
         ops.Add(new TraceListSessions());
         ops.Add(new TraceCheckpoint());
 
-        return new GeneratedTrace(ops, attachments);
+        // Final logical content bytes per session, measured on the oracle's
+        // end state (post edits) — UTF-8 bytes of every part's content.
+        // Stage1 large sessions instead record their budget-build actuals
+        // (consumed during generation, before cycle appends/edits): those are
+        // the recorded fixture totals the budget describes.
+        var finalSessionBytes = new Dictionary<string, long>();
+        foreach (var (session, messages) in model.Sessions)
+        {
+            finalSessionBytes[session] = messages.Sum(MessageContentUtf8Bytes);
+        }
+        foreach (var (session, buildBytes) in stage1Bytes)
+        {
+            finalSessionBytes[session] = buildBytes;
+        }
+        return new GeneratedTrace(ops, attachments, finalSessionBytes, finalSessionBytes.Values.Sum());
     }
 
     private static List<TraceOp> MessageOps(
@@ -253,6 +395,40 @@ public static class TraceGenerator
     }
 
     private static Queue<T> MakeQueue<T>(int count, Func<T> make) => new(Enumerable.Range(0, count).Select(_ => make()));
+
+    /// <summary>Per-part content in UTF-8 bytes (the recorded unit: actual
+    /// generated payload bytes, not characters). Image parts count by their
+    /// stable relative-path reference; the fixture bytes live on disk.</summary>
+    private static long ContentUtf8Bytes(MessagePart part) => part switch
+    {
+        TextPart text => Encoding.UTF8.GetByteCount(text.Content),
+        ToolCallPart call => Encoding.UTF8.GetByteCount(call.ArgsJson),
+        ToolResultPart result => Encoding.UTF8.GetByteCount(result.Content),
+        ImagePart image => Encoding.UTF8.GetByteCount(image.RelativePath),
+        _ => throw new HarnessError($"Unknown part type {part.GetType().Name}"),
+    };
+
+    private static long ContentUtf8Bytes(IReadOnlyList<MessagePart> parts) => parts.Sum(ContentUtf8Bytes);
+
+    private static long MessageContentUtf8Bytes(OracleModel.ExpectedMessage message) => ContentUtf8Bytes(message.Parts);
+
+    /// <summary>
+    /// Stage1 bounded tool-result text: UTF-8 byte count of the returned text
+    /// is at most <paramref name="byteTarget"/> (never above), measured on the
+    /// actual returned string. The alphabet's multi-byte symbols make UTF-8
+    /// bytes longer than the string length, so the trim is proportional and
+    /// slicing stays safe (the alphabet holds no surrogate pairs).
+    /// </summary>
+    private static string BoundedText(Random rng, long byteTarget)
+    {
+        var text = TextOfrng(rng, (int)Math.Min(int.MaxValue, Math.Max(1, byteTarget) * 3));
+        var bytes = Encoding.UTF8.GetByteCount(text);
+        return bytes <= byteTarget ? text : text[..(int)(text.Length * byteTarget / bytes)];
+    }
+
+    /// <summary>Stage1 tool-result byte cap: every generated result stays
+    /// under <see cref="ScaleConfig.Stage1ResultCapBytes"/> (default 256 KiB).</summary>
+    public const int Stage1ResultCapBytes = 256 * 1024;
 
     private static IEnumerable<string> ChunksOf(string text, int pieces)
     {

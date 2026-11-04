@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <RootNamespace>Urd.TranscriptHarness.Adapter.SqliteExternal</RootNamespace>
+    <!-- The store host loads this assembly by path (Assembly.LoadFrom) from
+         another project's output directory; dependencies must be copied and
+         resolvable from this assembly's own bin directory. -->
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.14" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\contracts\Urd.TranscriptHarness.Contracts\Urd.TranscriptHarness.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

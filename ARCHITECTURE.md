@@ -119,7 +119,7 @@ as the design becomes concrete; introduce interfaces and shared abstractions whe
 actual boundaries or reuse justify them, not as a framework imposed in advance.
 No concrete class layout is approved by this decision.
 
-**Still open:** .NET version, provider and loop libraries,
+**Still open:** .NET version, provider-specific integrations and loop libraries,
 loop ownership, storage, process topology, UI technology and desktop host.
 The language choice does not qualify performance, provider coverage, packaging
 or cross-platform behaviour; investigate those within the chosen backend direction.
@@ -147,7 +147,8 @@ than being cancelled by an HTTP request or client disconnect.
 `ModelContextProtocol.Core` for MCP client protocol and transport mechanics.
 [The research](MCP-LIBRARY-RESEARCH.md) found no evidence-based blocker; qualify
 required servers and transports during implementation. Its MEAI abstractions
-dependency does not select `IChatClient`, a model/tool loop or model exposure policy.
+dependency does not select a model/tool loop or model exposure policy; the
+separate `IChatClient` decision is recorded below.
 Urd retains connection lifetime, credentials, permissions and discovery/exposure
 responsibilities. The inspected package version is not a locked dependency version.
 
@@ -501,14 +502,24 @@ a stable wrapper remain alternatives, not selected policies. Preserve the retain
 AI-based catalog pruning and protected core tools; discovery complements them.
 Compare adapter code, model reliability and cache impact, including tool-capable
 local models. [Model-interface research](MODEL-INTERFACE-RESEARCH.md) records current
-SDK/adapter gaps; neither `IChatClient` nor its optional loop is selected yet.
+SDK/adapter gaps.
 
-**Owner decision: defer model-interface selection (2026-11-03).** Keep
-`IChatClient` as a candidate, not an adopted dependency or mandatory design boundary.
-The [discovery design investigation](DISCOVERY-DESIGN.md) found adapter and restart
-representation gaps, not a fundamental rejection. Revisit once concrete execution,
-discovery and persistence needs make the integration cost clearer. Continue designing
-those responsibilities without assuming MEAI's types are Urd's domain or storage model.
+**Owner decision (2026-11-04): adopt `Microsoft.Extensions.AI.Abstractions` and
+its `IChatClient` as Urd's shared model request/response interface.** This is the
+chosen chat-library boundary for provider calls, not a requirement to force
+provider-specific features through lossy representations. Urd may use thin
+provider-specific adapters or retain native request/response data where needed.
+The implementation can be reconsidered if concrete integration proves cumbersome
+or a poor fit, under the general library-selection policy above. The researched
+package version is not locked.
+
+This decision does **not** select the full `Microsoft.Extensions.AI` package,
+`FunctionInvokingChatClient`, any optional model/tool loop, provider-specific
+SDKs/adapters, authentication flows, or model-exposure policy. Those remain
+separate decisions. The [discovery design investigation](DISCOVERY-DESIGN.md)
+records provider-specific adapter and restart-representation gaps; address them
+while implementing the selected interface, without treating them as a reason to
+silently broaden this selection.
 
 ### Keep original chat history until the session closes
 
@@ -612,7 +623,8 @@ shared model-client or loop mechanics; focused libraries remain eligible. The
 no-Pi dependency direction, with case-by-case snippet reuse, remains unchanged.
 
 The earlier TypeScript/Vercel AI SDK comparison proposal is superseded by the
-C# backend decision. Compare reusable loop libraries and a Urd-controlled loop
+C# backend decision. The selected `IChatClient` is a request/response interface,
+not a loop choice. Compare reusable loop libraries and a Urd-controlled loop
 within that direction, preferring the approach that meets the behaviour with
 less maintained code. [Provider research](PROVIDER-RESEARCH.md) preserves the
 earlier evidence and limits; its complete-runtime comparisons are historical

@@ -343,8 +343,10 @@ more detailed decisions as they are made.
 
 The following remain deliberately unresolved:
 
-- Concrete class/module boundaries, execution model and library choices within
-  the selected C#/.NET backend; frontend technology remains open.
+- Concrete class/module boundaries, execution model, provider integrations and
+  model/tool-loop ownership/libraries within the selected C#/.NET backend; frontend
+  technology remains open. The shared `IChatClient` interface is selected; its
+  package version and provider-specific adapters are not.
 - Source/build packaging, the custom-build workflow and releases; automatic updating is deferred.
 - Persistence, restart/recovery, backend discovery and duplicate-start handling.
 - Background-app controls, tray integration, startup-at-login and shutdown rules.

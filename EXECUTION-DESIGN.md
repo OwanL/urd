@@ -130,9 +130,45 @@ by the local fixture do not prove that every field is accepted by OpenAI.
 **Critical integration rule:** successful enumeration, HTTP 200, tool-item completion
 or parsed arguments alone must not authorize execution. Check the chosen route's
 positive completion and failures before dispatch. Both loops need this; a generic
-loop does not repair a lossy adapter. The two fixtures separately validate a raw
-native guard and matched loop-level failure guards; **native adapter + guard + real
-tool loop in one composed test is still outstanding**.
+loop does not repair a lossy adapter. The original fixtures validated the native
+guard and loop separately. The bounded composed follow-up below closes that
+specific local integration gap, not production or live-provider qualification.
+
+### Composed follow-up: adapter → guarded Urd loop → SQLite → continuation
+
+**2026-11-04: 47 assertions passed across five scenarios / six local HTTP requests.**
+This newly authorized disposable experiment links the **unchanged prior `UrdLoop.cs`**,
+uses the real pinned Responses `IChatClient` adapter, and invokes a harmless counted
+`AIFunction`. Same SDK/runtime/MEAI/OpenAI pins as above; `Microsoft.Data.Sqlite`
+**10.0.14**. No live endpoint, real credentials, model use or production scaffold.
+
+| Flow | Verified result |
+| --- | --- |
+| Successful call, persisted reload, continuation | First execution commits the actual tool result and deliberately stops before another model request. A fresh loop/adapter loads only SQLite history and issues request two. Exactly one tool effect; historical call/result not reexecuted. Final assistant text/message ID also committed and reopened. |
+| Native fidelity across that reload | Full initial input prefix, appended definition payload/developer role, native `at_1` / `rs_1` / `fc_1` IDs, encrypted reasoning, item order, call/result pairing and decoded counted result survive. Executable registry entries do not duplicate the appended definitions in top-level tools. All six requests retain the tested plan-route flags. |
+| Failed / incomplete / clean EOF | Each real adapter projection contains the complete-looking parsed call. The native positive-terminal guard rejects it before the actual loop dispatches: zero effects, one request, no recorded authorized call or claimed result. |
+| Recording failure after successful effect | Injected exception after the SQLite result UPDATE but before COMMIT rolls back that transaction. One effect, no second request. Reopen retains the earlier unresolved-call marker, not a result receipt; the continuation loader refuses to run or replay it. Emitting a tool result was not treated as durability. |
+
+**Test-only persistence:** one `test_envelope` row stores whole-history message JSON,
+indexed native JSON and a ready/unresolved marker atomically in SQLite, with WAL /
+`synchronous=NORMAL`. Connections are non-pooled and closed before reopen. This
+reuses the earlier raw-item capture/reconstruction logic, **not** the in-progress
+SQLite adapter or its message-row/preview implementation. The marker is deliberately
+conservative: it cannot tell whether an external effect happened. This is not a
+selected session schema/API, exactly-once guarantee, automatic recovery policy,
+process-kill test or power-loss qualification. The execution recreation is explicit
+and in-process, not a backend restart. The fixture buffers the provider response
+before publishing it; production streaming UX/cancellation remains unqualified.
+
+Evidence root: `%TEMP%\urd-foundation-streams-6268b517\composed-execution-c997bc2e\`.
+After acquiring **and starting** `urd:heavy-local-work`, run its `verify.ps1 -LeaseId
+'<actual-started-lease>'`; it restores offline from retained read-only caches into
+its own cache, then builds/runs sequentially without build servers. `run.log`,
+`build.log`, and `runs/20261104-082705-641/` retain the passing transcript, captured
+HTTP/SSE and five databases. Final build: zero warnings/errors; pre-build free RAM
+555 MiB. Owned process check was empty before releasing the lease. Independent
+read-only acceptance review of source, wire captures, logs and these claims is
+recorded with the fixture; it is not an independent runtime rerun.
 
 ## Control and responsibility seam — proposal, not a new class layout
 
@@ -218,12 +254,11 @@ Source SHA-256: loop `Program.cs`
 adapter `Program.cs`
 `8995b14fbbc910c2d2c60c59c294daf1eb301b6b16a65ab201d4e7737759cdf3`.
 
-**Smallest next step, after the integrated structure is approved:** one composed
-Urd-cycle + guarded Responses adapter + harmless tool test, retaining native items
-through the selected SQLite record owner. Cover successful continuation, failed
-native terminal and recording failure after effect, without a UI or live account.
-Then qualify one explicitly approved real-provider round trip; no account action
-is implicitly authorized here.
+**Next gate, after the integrated structure is approved:** qualify this composition
+against the actual session/record owner, including stale-run and final-record
+lifecycle rules. The follow-up above closes the local adapter/loop/SQLite-envelope
+seam only; it does not choose or implement that owner. A real-provider round trip
+still requires explicit approval; no account action is implicitly authorized here.
 
 Remaining: actual wrapper exposure/model reliability, native provider acceptance,
 namespace calls, images, multiple/interleaved calls, network errors/cancellation,

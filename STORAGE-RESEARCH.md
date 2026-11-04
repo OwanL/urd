@@ -2,8 +2,12 @@
 
 ## Status
 
-**Investigation, not a storage decision.** [ARCHITECTURE.md](ARCHITECTURE.md)
-owns the agreed requirements. Neither SQLite, JSONL nor a hybrid has been chosen.
+**Investigation record; the storage decision it informed is now made.**
+[ARCHITECTURE.md](ARCHITECTURE.md) owns the agreed requirements and, as of
+2026-11-04, the selection: one shared SQLite database for transcripts, session
+metadata and assignments, with file-backed attachments. Sections below written
+before that date describe the pre-decision comparison; they remain as evidence,
+not as a claim that storage is still open.
 
 The reference set is upstream Pi's coding agent, **Pi Durable** (the first-party
 upstream package), DeepSeek Harness, Codex and Claude Code. Third-party Pi
@@ -371,29 +375,31 @@ The temporary sources and results are in
 created. As with the first probe, these local artifacts are not durable release
 acceptance evidence or application implementation.
 
-## Candidate assessment; choice remains open
+## Candidate assessment — superseded by the 2026-11-04 selection
 
-**The owner considers SQLite promising but has explicitly declined to select it
-as the working design yet.** Broader feature and architecture discovery is needed
-before a fundamental storage commitment. These narrow probes do not replace that
-discovery or establish the requirements of the whole application.
+**The owner selected shared SQLite as the working storage design on
+2026-11-04**; the selection, rejected alternatives and revisit conditions are
+recorded in [ARCHITECTURE.md](ARCHITECTURE.md). The assessment below is the
+evidence that led there, kept as written at the time.
 
 The research recommendation was SQLite for structured session and coordination
 state, with files available for large artifacts. Its case is not uniquely fast
 tab loading—bounded file reads also performed well—but potentially avoiding
 custom indexes and cross-file consistency machinery as metadata, edits and
-persistent assignments are added. That remains a candidate argument, not a
-selected direction.
+persistent assignments are added.
 
-Prefer a narrow first-party storage owner over an ORM, event-sourcing platform
-or interchangeable-backend framework unless a concrete requirement justifies it.
-Do not depend on Pi Durable or copy another harness's entire storage architecture.
-This recommendation does not fix the schema, driver, process placement or final
-artifact policy, and has not been accepted as a storage decision.
+A narrow first-party storage owner remains preferred over an ORM,
+event-sourcing platform or interchangeable-backend framework unless a concrete
+requirement justifies it. Do not depend on Pi Durable or copy another harness's
+entire storage architecture. Schema, driver, process placement and final
+artifact policy are ordinary design work under the recorded decision.
 
 ## Remaining decision evidence
 
-Before selecting storage, resolve or test:
+The items below are no longer pre-selection gates; they are adopted into the
+decision's revisit conditions and the experiment programme's remaining
+validation stages. Before treating the selection as fully validated, resolve
+or test:
 
 1. The simplest persistence/recovery mechanics that leave a coherent,
    continuable saved session after a crash while permitting recent progress loss;
@@ -408,6 +414,7 @@ Before selecting storage, resolve or test:
 5. End-to-end UI timing under active streaming, not only storage query latency.
 6. The smallest viable implementation and its dependencies/packaging cost.
 
-A decision should state its workload and guarantees, the alternatives rejected,
-and what evidence would justify revisiting it. Avoid either premature commitment
-or maintaining multiple production backends merely to postpone the decision.
+The decision recorded on 2026-11-04 states its workload and guarantees,
+the alternatives rejected, and the evidence that would justify revisiting it.
+Do not respond to the settled engine question by maintaining multiple
+production backends.

@@ -715,36 +715,69 @@ paths scattered through history. Retained attachments should not depend on an
 original external file remaining in place. Resolve references when serving the UI,
 building provider requests or supplying paths to tools; a local path alone does
 not expose image content to a remote model. Clean up files only when retained
-references no longer need them, including references from other sessions.
-This selects neither the transcript database nor a general large-artifact policy.
+references no longer need them, including references from other sessions. The transcript database itself is
+selected in the storage section below; a general large-artifact policy beyond
+attachments is not selected.
 
-### Storage technology requires comparative investigation
+### Session storage: shared SQLite
 
-**No storage technology has been selected.** SQLite plus file-backed large
-payloads was suggested, but the owner explicitly deferred the decision pending
-research. Plain files/JSONL, SQLite and any hybrid must be evaluated rather than
-adopted because they are familiar or sound attractive in isolation. Session
-click-to-content latency is a primary criterion in this investigation.
+**Decision (2026-11-04):** Use **one shared SQLite database** as the store for
+transcripts, session metadata and assignment/result records. The working layout
+is message rows with a derived bounded-preview metadata table (the harness
+family-1 shape); large image/binary artifacts remain files with stored
+references per the attachment direction above, not blobs in the database.
+Default durability is WAL with OS-flush acknowledgement (e.g.
+`synchronous=NORMAL`): records handed to the OS survive process crash and
+reopen; a bounded loss of recent acknowledged work on crash is acceptable per
+the recovery decision, and no fsync-per-token machinery is added without a
+measured requirement.
 
-The source comparison and local experiments are recorded in
-[STORAGE-RESEARCH.md](STORAGE-RESEARCH.md); findings there are evidence, not an
-architecture commitment. After reviewing them, the owner considers SQLite
-promising but explicitly does **not** select it even as the working storage
-direction yet. Broader discovery of features, data needs and system boundaries
-must precede that commitment; narrow benchmarks are not sufficient.
+**Workload and guarantees.** The store must serve click-to-visible newest-window
+reads, paged navigation, model-context range reads, incremental appends and
+per-batch streaming writes, suffix-replacing edits, persistent assignments
+across restarts, final-closure deletion and many-session fan-out — under a
+single backend process. Guaranteed: every acknowledged record replays
+identically after reopen; a record is absent or complete, never partially
+applied; edits replace history only and never roll back external effects;
+recovery does not invent, reorder or duplicate records.
 
-This is a fundamental, costly-to-reverse decision. The confirmed references are
-upstream Pi's coding agent, **Pi Durable** (the first-party upstream package,
-not a third-party Pi fork), **DeepSeek Harness**, Codex and Claude Code.
-Distinguish inspectable source, documented behaviour and unsupported inference.
+**Rejected alternatives** (evidence in [STORAGE-RESEARCH.md](STORAGE-RESEARCH.md),
+[STORAGE-EXPERIMENT.md](STORAGE-EXPERIMENT.md), the binding review and harness
+run records):
 
-Compare streaming writes, history loading, edits/truncation, concurrent work,
-assignment/result persistence, crash consistency, large payloads and indexing.
-Include memory/startup costs, dependencies, distribution burden, implementation
-LOC and ongoing maintenance. Performance conclusions need representative
-workloads; neither another project's choice nor an isolated microbenchmark
-establishes what is best for Urd. The research must inform a decision, not
-silently turn a candidate into the architecture.
+- *Pure JSONL/files and segmented binary logs:* bounded reads tie with SQLite,
+  but metadata, assignment, edit and reopen operations were 5–35× slower in the
+  store-operations probe, and each needs a custom index plus reconciliation and
+  tail-repair machinery — the JSONL prototype embedded SQLite for coordination
+  anyway, at higher code cost.
+- *SQLite plus external payload files as the primary layout:* two-store
+  atomicity risk for ordinary transcript writes; file spill stays only for the
+  attachment policy above.
+- *Per-session SQLite files:* no cross-file atomicity with the coordination
+  database, and session deletion becomes a filesystem operation over multiple
+  files.
+- *LMDB:* un-versioned (0.x) wrapper, a fresh on-disk format break, and Windows
+  map-size pre-reservation, with no measured advantage.
+- *RocksDB:* qualified and the closest measured rival, but a ~13 MB native
+  asset plus higher dependency/LOC cost without a decisive win at Stage 1.
+- *LiteDB:* attractive size and fully managed, but the stable line is unmoved
+  since mid-2024, v5 offers no transaction object, and its culture-based index
+  collation already caused one correctness incident in the harness.
+- *Tsavorite standalone:* not qualified (no official embeddable package).
+- *ORMs, event-sourcing platforms and interchangeable-backend frameworks:*
+  rejected up front; Urd uses a narrow first-party storage owner.
+
+**Consequences and revisit conditions.** The experiment programme's remaining
+stages continue as *validation* evidence — the full Stage 1 matrix and Stage 2
+concurrency/interruption/soak runs — not as selection. Revisit the internal
+layout (rows → content blocks) only if measured large-result read behaviour
+justifies a same-engine change. Revisit the engine itself only on demonstrated
+pathology: unbounded WAL/vacuum cost at the largest fixture tiers, or a
+concurrency failure under multiple active writers in Stage 2. Internal schema,
+driver pinning and process placement remain ordinary design work, not new
+decisions. Prior sections of [STORAGE-RESEARCH.md](STORAGE-RESEARCH.md) and
+[STORAGE-EXPERIMENT.md](STORAGE-EXPERIMENT.md) that describe storage as
+unselected are historical as of this date.
 
 ## Feature discovery: first pass
 

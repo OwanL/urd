@@ -2,14 +2,16 @@
 
 ## Status
 
-**Agreed experiment programme, not a storage decision.** The owner approved
+**Agreed experiment programme; the storage selection it fed is now recorded in
+[ARCHITECTURE.md](ARCHITECTURE.md) (2026-11-04).** The owner approved
 broad transcript-storage experimentation on 2026-11-04 after reviewing
-[STORAGE-RESEARCH.md](STORAGE-RESEARCH.md); SQLite was considered promising but
-remaining deliberately **unselected**. This document owns the contract for that
-experimentation: candidate families, shared harness, correctness oracle,
-measurement rules and staged advancement. It records design sketches required
-before any implementation. It does not commit Urd to a storage technology,
-schema or durability level.
+[STORAGE-RESEARCH.md](STORAGE-RESEARCH.md), with SQLite considered promising but
+deliberately unselected at that point; the selection followed later the same
+day after the Stage 0 harness round (see the amendment below). This document
+still owns the contract for experimentation: candidate families, shared harness,
+correctness oracle, measurement rules and staged advancement. It records the
+design sketches the programme required before implementation. The selection
+itself is not made here.
 
 Delegated work for all experiment stages uses **Ollama for every role,
 including review; there is no Codex or other fallback**. This is a standing
@@ -20,6 +22,13 @@ family sketches were corrected against source/binding evidence, the oracle and
 kill semantics were tightened, and setup-gate wording was simplified. SQLite,
 LMDB and RocksDB probes passed Windows basic operations; LiteDB remains
 provisional (no probe); Tsavorite standalone is not qualified.
+
+**Amended 2026-11-04 (selection):** the owner selected shared SQLite as the
+session store; the decision and its revisit conditions live in
+[ARCHITECTURE.md](ARCHITECTURE.md). This programme's remaining stages continue
+unchanged in method, but their role is now **validation** of that selection
+(full Stage 1 matrix, Stage 2 concurrency/interruption/soak), which the
+decision's revisit conditions explicitly anticipate.
 
 ## Purpose and boundaries
 
@@ -360,7 +369,7 @@ until an owner-approved import task completes under this spec.
   part of the shared runner work under programme approval; exact fixture tier
   sizes and trace scales are confirmed when the harness-owner milestone records
   them.
-- The whole programme produces evidence, not the storage decision; selection
-  remains the owner's, made against [ARCHITECTURE.md](ARCHITECTURE.md)'s
-  requirement that decisions state workload, guarantees, rejected alternatives
-  and revisit conditions.
+- The programme now validates a recorded selection; revisit conditions are
+  owned by the decision section of [ARCHITECTURE.md](ARCHITECTURE.md),
+  including the triggers (WAL/vacuum cost at the largest tiers, Stage 2
+  concurrency pathology) that would reopen the engine question.

@@ -3,30 +3,36 @@
 > Research date 2026-11-03. Scope: MEAI as a **shared model interface and optional
 > tool loop** for Urd's C#/.NET backend — what it owns, what escapes it must have,
 > and how it interacts with Urd's cache-preserving context direction and dynamic
-> tool discovery. This document selects no implementation and selects no discovery
-> design. It complements, and does not edit, the primary docs.
+> tool discovery. Pinned findings below retain their original evidence limits;
+> direction and qualification status were integrated on 2026-11-04.
 
-> **Subsequent decision (2026-11-04):** `Microsoft.Extensions.AI.Abstractions`
-> and `IChatClient` are selected in [ARCHITECTURE.md](ARCHITECTURE.md).
-> Recommendations below are historical where they describe that interface as
-> unselected; loop ownership and provider-specific adapters remain open.
-> [Provider qualification](PROVIDER-QUALIFICATION.md) records newer route limits
-> and the corrected distinction between Ollama server support and adapter fidelity.
+> **Current direction:** `Microsoft.Extensions.AI.Abstractions` and `IChatClient`
+> are selected in [ARCHITECTURE.md](ARCHITECTURE.md). The owner accepts a configured
+> request-only client directly for session execution and auxiliary operations,
+> without a mandatory Urd facade ([Session Design](SESSION-DESIGN.md)). A narrow
+> Urd-owned cycle is the provisional direction. Discovery uses qualified native
+> appended definitions, otherwise a stable invocation wrapper present from the
+> initial catalog for recovered tools. [Execution Design](EXECUTION-DESIGN.md)
+> records the owner decisions and bounded fixture evidence; [Provider qualification](PROVIDER-QUALIFICATION.md)
+> owns route limits. Neither live-provider nor durable/composed execution is qualified.
 
 ## Status and evidence classes
 
-Bounded read-only research. **No live model requests, accounts, credentials,
-machine changes or repository code changes** were involved. Evidence classes used
-below:
+The original research was bounded and read-only. **No live model requests,
+accounts, credentials, machine changes or repository code changes** were involved.
+Later local execution evidence is linked, not claimed as part of that research.
+Evidence classes used below:
 
 - **source-supported** — inspected in pinned package source (version+commit stated).
 - **offline-tested** — additionally exercised in a small offline fixture (JSON only,
   no network), artifacts in `%TEMP%\urd-meai-roundtrip\`.
 - **provider-doc-supported** — current official provider documentation; not version-
   pinned, recheck before implementation.
-- **not provider-tested** — nothing here has run against a real provider. Urd's
-  existing fake-model probes (GO-DOTNET-DISCOVERY) likewise remain evidence of
-  API feasibility, not provider qualification.
+- **not provider-tested** — nothing here has run against a real provider. Earlier
+  fake-model probes and the newer matched loop/local HTTP/SSE + file-reload checks
+  in [Execution Design](EXECUTION-DESIGN.md#what-was-actually-exercised) establish
+  bounded mechanics, not provider acceptance, durable recovery or a composed
+  native-adapter + guarded tool-loop qualification.
 
 ## Pins
 
@@ -88,7 +94,9 @@ package does exactly one substantial orchestration thing (the function loop) and
 opt-in. The real risks for Urd are (a) subtle behaviors like last-iteration tool
 stripping that Urd would have to audit rather than trust, and (b) DI/builder
 conventions if Urd adopted a larger MEAI surface than it needs. Both are reasons
-to adopt the interface but defer/compare the loop, not reasons to avoid Abstractions.
+to keep the selected interface separate from the loop, not reasons to avoid
+Abstractions. The later matched comparison and owner preference favour a narrow
+Urd-owned cycle; see [current direction](#4-current-direction-and-remaining-qualification).
 
 ## 2. Provider adapter fidelity: what is mapped, what is dropped, what escapes exist
 
@@ -100,7 +108,7 @@ Key per-adapter findings:
 | --- | --- | --- | --- | --- |
 | Reasoning surface | Non-standard `reasoning_content` (DeepSeek/vLLM-style) only | `ReasoningResponseItem`; `EncryptedContent` → `ProtectedData`; item id in `AdditionalProperties["reasoningItemId"]` | `ThinkingBlock` → `TextReasoningContent{ProtectedData=signature}`; redacted thinking preserved | `Message.Thinking` → `TextReasoningContent` |
 | Reasoning replay | **Dropped** (no API slot) | Replayed incl. encrypted/id for store=false replay | Replayed (thinking/signature, redacted) | **Dropped by the inspected adapter**; current Ollama guidance supports replaying `thinking` (see [correction](PROVIDER-QUALIFICATION.md#reuse-only-where-it-helps)) |
-| Tool identity round-trip | CallId/Name/args preserved | preserved | preserved | **Call ids invented per replay** (Ollama has none) |
+| Tool identity round-trip | CallId/Name/args preserved | CallId/Name/args preserved; streamed native function-item ID needs raw event capture (below) | preserved | **Call ids invented per replay** (Ollama has none) |
 | Raw escape hatch | request Patch / policies | unknown ResponseItems → `AIContent{RawRepresentation=item}`, replayed **verbatim at position** | raw `ToolUnion` passthrough; per-block `RawRepresentation is ContentBlockParam` replay; `RawRepresentationFactory` → `MessageCreateParams` | `RawRepresentationFactory` → `ChatRequest` |
 | Cache controls | n/a | caller-set | `anthropic:cache_control` AdditionalProperties helper; tool-def cache breakpoint; **not on thinking blocks** | none |
 | Notable drops/defaults | reasoning effort via ChatOptions only | adapter never forces store/stream/include; caller sets plan-route flags | temperature/top_p/top_k/seed/penalties unmapped (raw params only); **MaxTokens defaults to 1024**; unknown content in messages silently dropped | unknown roles/content dropped; no PDF/audio-in; per-model tool support |
@@ -126,7 +134,11 @@ beta-header/AdditionalProperties convention** (source-supported).
   Responses adapter always streams and lets the caller set `store:false`, `include`
   encrypted reasoning, function-only tools via raw options. The adapter does **not**
   force plan-route-required flags; Urd owns them via `RawRepresentationFactory`.
-  Source-supported; **provider qualification pending** (no live calls).
+  The plan route requires namespaces or `additional_tools` for function exposure
+  and forbids `tool_search`, including client-executed search. Source-supported
+  plus newer local scripted adapter evidence; **provider qualification pending**
+  (no live calls). [Provider qualification](PROVIDER-QUALIFICATION.md#first-route-exact-auth--request--tool-continuation)
+  owns the current request restrictions.
 - **Copilot**: no adapter exists anywhere in MEAI/OpenAI/Anthropic/OllamaSharp, and
   there is no public raw inference contract; Urd would own a thin custom transport
   (device-flow + token exchange → bearer). Source-supported absence.
@@ -136,7 +148,7 @@ beta-header/AdditionalProperties convention** (source-supported).
 
 ## 3. Dynamic tool discovery and stable prefixes
 
-### Provider-native discovery exists; the plain tools list is the portable path
+### Provider-native discovery exists; the selected fallback is a stable wrapper
 
 - **OpenAI Responses** ([tool-search guide](https://developers.openai.com/api/docs/guides/tools-tool-search),
   provider-doc-supported): `tool_search` tool with hosted or **client-executed**
@@ -148,7 +160,9 @@ beta-header/AdditionalProperties convention** (source-supported).
   lists top-level `tools` changes (names/descriptions/schemas/ordering) among
   cache-breaking settings and recommends append-style updates; `additional_tools`
   items cannot carry explicit cache breakpoints. Item position must be preserved
-  when round-tripping.
+  when round-tripping. This describes the general API, **not ChatGPT-plan access**:
+  that route forbids `tool_search`; its permitted appended-definition path is
+  `additional_tools`.
 - **Claude** ([mid-conversation system messages and tool changes](https://platform.claude.com/docs/en/build-with-claude/mid-conversation-system-messages),
   provider-doc-supported): mid-conversation `role:"system"` messages are **stable**
   (no beta header). Mid-conversation tool changes need beta
@@ -158,15 +172,19 @@ beta-header/AdditionalProperties convention** (source-supported).
   start) live in mid-conversation system-message content; at least one non-deferred
   initial tool avoids a one-time full cache miss; placement restrictions apply; cache
   order is `tools` → `system` → `messages`.
-- **Ollama/others**: no equivalent dynamic-discovery API; the only path is updating
-  the ordinary tools list (cache consequences unmeasured/undocumented — flagged).
+- **Ollama/others**: the inspected evidence does not qualify an equivalent
+  appended-definition route through the selected provider/adapter combination.
+  This is not a blanket claim that Ollama cannot support native tools or future
+  discovery mechanisms. Ordinary tools-list changes have unmeasured cache effects
+  here and are not Urd's selected recovery fallback.
 
-So the tradeoff is structural: **updating the ordinary tools list everywhere** is
-portable and simple but rewrites the top-level tool block — documented cache-invalidating
-prefix on OpenAI and Anthropic; **provider-native append mechanisms** preserve the
-cached prefix but are bespoke per provider, partially beta, and absent on others.
-Per owner steering: no wrapper-vs-native overhead claims are made — **neither is
-measured** here; and nothing below depends on choosing between them yet.
+The tradeoff is structural: ordinary tools-list updates rewrite the top-level
+block — documented as cache-invalidating on OpenAI and Anthropic. Qualified native
+appends avoid that rewrite but are provider/adapter-specific and sometimes beta.
+Urd's current direction is **qualified native appends with no invocation wrapper,
+otherwise a stable wrapper included from the initial catalog**, with recovered-tool
+exposure appended to context. The fallback is not ordinary-list updates. Neither
+wrapper overhead/reliability nor Urd cache savings is measured here.
 
 ### What the pinned SDK/adapters can and cannot carry today
 
@@ -178,11 +196,15 @@ measured** here; and nothing below depends on choosing between them yet.
   verbatim at position, and the offline fixture confirms unknown item kinds —
   including an `additional_tools` item — deserialize, preserve their type and payload,
   reserialize **byte-identically**, and re-parse via the SDK's public
-  `ModelReaderWriter` path. So raw-carried OpenAI native discovery blocks are
-  feasible **today** through `RawRepresentation`, without a wrapper — but they are a
-  raw/undocumented-in-SDK escape hatch, Urd constructs and validates the JSON itself,
-  and the adapter class is `[Experimental]`.
-  Fixture artifacts: `%TEMP%\urd-meai-roundtrip\` (`Program.cs`, results in run log).
+  `ModelReaderWriter` path. This establishes SDK raw-item construction, not
+  streaming/persistence fidelity or provider acceptance. The later local adapter
+  fixture carried ordered `additional_tools` using an assistant-role MEAI carrier
+  while preserving the native developer role; developer-role raw content dropped
+  in its negative control. This is an experimental/raw escape hatch requiring
+  owned reconstruction, not a qualified native discovery integration. Its
+  `tool_search_output` was codec stress only, invalid as a ChatGPT-plan example.
+  Original fixture artifacts: `%TEMP%\urd-meai-roundtrip\` (`Program.cs`, run log);
+  newer evidence: [Execution Design](EXECUTION-DESIGN.md#real-adapter--local-httpsse--file-reload-seven-requests-passed).
 - **Claude (source-supported):** Anthropic SDK **13.4.0** ships typed models for the
   beta (tool_addition/tool_definition, `AnthropicBeta.InlineTools2026_09_15`) only in
   its **Beta** namespace, plus a helper runner that explicitly does *not* add the
@@ -203,10 +225,22 @@ measured** here; and nothing below depends on choosing between them yet.
   re-serializes function-call arguments from a dictionary (byte form may drift).
   Pinning byte-stable tool definitions requires the raw passthrough, not ordinary
   declared tools.
-- **Persistence caveat:** MEAI's `RawRepresentation` is `[JsonIgnore]`; the
-  Abstractions `ChatMessage` JSON surface does not preserve raw provider blobs. If
-  Urd persists model-visible items for restart continuation, raw provider items must
-  be reconstructed from Urd's own records (Urd owns storage design regardless).
+- **Streaming identity and terminal caveats:** in the newer pinned Responses
+  adapter fixture, `FunctionCallContent` preserved call ID/name/parsed arguments
+  but lost the native function-item ID/raw representation. Capture
+  `StreamingResponseOutputItemDoneUpdate.Item` before discarding/coalescing updates
+  and retain/reconstruct the native item. Complete-looking calls can survive
+  failed/incomplete/EOF streams with no generic finish reason or exception;
+  explicit SSE errors can be `ErrorContent`. Require positive route-native terminal
+  completion before dispatch, not merely successful enumeration or parsed arguments.
+- **Persistence caveat:** MEAI's `RawRepresentation` is `[JsonIgnore]`; default
+  `ChatMessage` JSON loses raw provider items. The newer fixture restored native
+  IDs/payload/order through indexed reconstruction after file reload; encrypted
+  reasoning and reasoning-item ID already survive ordinary JSON via `ProtectedData`
+  and `AdditionalProperties`. This is not atomic SQLite storage or crash recovery.
+  See [Execution Design's adapter evidence](EXECUTION-DESIGN.md#real-adapter--local-httpsse--file-reload-seven-requests-passed)
+  for the checks and remaining composed-test gap; Urd's record owner must preserve
+  the necessary native data.
 - **MCP:** `McpClient.ListToolsAsync` returns `McpClientTool : AIFunction` carrying
   the full protocol definition (`ProtocolTool`), with a public constructor to reuse a
   captured definition without re-listing; no SDK-internal listing cache. Descriptors
@@ -224,17 +258,20 @@ No. Three distinct layers produce the constraint, and they differ in what they f
    mechanisms. This layer exists with or without Pi.
 2. **SDK representation (MEAI-specific):** the adapters rebuild typed requests per
    call and do not model mid-conversation tool blocks (Claude beta), so using those
-   native mechanisms needs the raw escape hatch (OpenAI, works) or a custom adapter
-   (Claude). This layer is MEAI's, fixable by adapter choice, not a provider fact.
-3. **Harness dispatch (Pie's choice, not forced):** the fixed `invoke_tool({name})
+   native mechanisms needs the raw escape hatch (OpenAI, locally exercised with
+   caveats above) or a custom adapter (Claude). This layer is MEAI's, fixable by
+   adapter choice, not a provider fact.
+3. **Harness dispatch (Pie's choice, not forced):** the fixed `invoke_tool({name})`
    wrapper and append-only disclosure descriptors are Pie's design for permission
    ceilings, recovery and audit — one execution pipeline, two identities. It is how
    Pie avoided *needing* per-provider native discovery at all. It is not required by
    provider APIs, MEAI, or Urd's cache direction; a wrapper overhead concern or a
    native-discovery benefit is **not measured** by this research. Urd can keep native
-   tool execution common while letting adapters handle exposure — inline native
-   addition where supported, or ordinary tools-list updates elsewhere with an
-   explicit, measured cache tradeoff.
+   tool execution common while letting adapters handle exposure — qualified native
+   additions, otherwise a stable initial-catalog wrapper for recovered tools.
+   Both routes resolve current permissions and implementations; historical
+   exposure is not authority. The invocation wrapper is a model-visible tool,
+   **not** the extra model-client facade the owner declined to require.
 
 Pie's IMMUTABLE-MODEL-CONTEXT plan (reference: `C:/dev/repos/pie/docs/plans/IMMUTABLE-MODEL-CONTEXT.md`,
 commit `cc82abb0…`; source-supported, offline-tested, provider-cache measurements
@@ -242,53 +279,54 @@ unqualified) remains the working design path Urd's architecture references, and 
 notably — it achieves prefix stability *without* any provider-native discovery beta,
 because its `tools` array never changes mid-conversation.
 
-## 4. Recommended decision (for owner decision; research recommendation, not a selection)
+## 4. Current direction and remaining qualification
 
-Among the three candidate shapes the owner framed (adopt abstractions only / adopt
-abstractions plus the optional loop / custom alternative), this research recommends
-**the abstractions-only shape as the working direction for owner consideration**:
-adopt MEAI Abstractions (provider adapters behind `IChatClient`) as the shared model
-interface, treat `Microsoft.Extensions.AI` middleware as strictly optional, and keep
-loop ownership open with `FunctionInvokingChatClient` as one candidate to compare
-against a Urd-owned loop on Urd's actual behaviors (per-tool admission, steering,
-durable history, prefix stability). This is the option that best answers the owner's
-"too much logic" worry: the interface is small and loop-free; adopting the
-Abstractions does not lock in the loop or session state ownership, and every provider
-concern inspected has a documented escape hatch — though several need Urd-side care
-(plan-route flags via raw options, Anthropic sampling params, MaxTokens default,
-silent content drops, synthetic Ollama ids). Urd's architecture record leaves
-model interfaces and loop ownership open; this recommendation is research input, not
-a recorded decision, and it has no implementation-selection standing until the owner
-aligns and the qualification gates below produce live evidence.
+The original abstractions-only recommendation is now resolved: **MEAI Abstractions
+and `IChatClient` are selected**. The owner accepts direct use of a configured,
+request-only `IChatClient` by session execution and title/compaction/pruning
+operations; no additional Urd client facade is mandatory. Request configuration
+and provider fidelity do not themselves supply a tool loop or durable session.
+[Session Design](SESSION-DESIGN.md) owns that integration, not this research.
 
-**Do not build Urd's discovery design on provider-native beta features.** Keep the
-portable path — updating the ordinary tools list with stable definitions — as the
-common route, treat provider-native appends (OpenAI additional_tools/tool_search;
-Claude inline-tools beta) as optional per-adapter cache-preservation capabilities
-with an explicit cost/benefit to be measured, and never let a shared interface force
-a wrapper or obscure actual request changes. If Claude-grade cache preservation on
-discovery proves valuable before a custom adapter, that is the specific trigger for
-a small Urd-owned `IChatClient` adapter around `IAnthropicClient`; otherwise accept
-documented cache misses on tools-list updates until measured.
+**A narrow Urd-owned cycle is the provisional direction**, after the owner rejected
+adding the optional function-loop dependency for about **20 lines saved in the
+incomplete disposable comparison**. This is not a production implementation or
+maintenance-cost estimate, nor evidence that `FunctionInvokingChatClient` cannot
+meet Urd's needs. [Execution Design](EXECUTION-DESIGN.md#recommendation-and-owner-decisions)
+records the comparison and decision; reconsider if real implementation recreates
+substantial library machinery.
 
-**Concrete Urd blockers / qualification gates (next steps, none live-tested yet):**
+**Discovery direction supersedes this research's ordinary-tools-list fallback:**
+use qualified provider **and adapter** native appended definitions and omit the
+invocation wrapper from the initial catalog in that case. Otherwise include a
+stable invocation wrapper **from the start** for recovered tools, disclosing their
+definitions through appended context rather than changing the ordinary list.
+Retain AI catalog pruning, excluding protected core/pinned tools and skills before
+selection, and current implementation/permission checks on both routes. Initially
+selected native tools need not all become wrapper calls. This model-visible
+invocation tool is unrelated to a model-client facade. Neither a universal discovery
+framework nor a Claude beta adapter is approved by this direction.
 
-1. Scripted local HTTP/SSE adapter tests (offline, fake transport): OpenAI Responses
-   route — store:false + include encrypted reasoning round-trip, tool_search /
-   additional_tools raw items end-to-end through the adapter; Anthropic —
-   mid-conversation system messages, byte-stable raw tools, schema-narrowing impact.
-   *Offline-tested today: only the SDK unknown-item JSON round-trip fixture.*
-2. Qualify the ChatGPT-plan Responses contract live (registration, entitlement,
-   plan-route flags, streaming failure semantics) — requires owner-approved account
-   use; distinct from and not covered here.
-3. Measure the tools-list-update vs native-append cache tradeoff per provider
-   (including whether Ollama-style local servers care) before selecting a discovery
-   design; provider-doc claims alone do not establish Urd's savings.
-4. Copilot raw transport remains its own qualification gap (no public contract).
-5. If the MEAI loop is compared: audit last-iteration tool stripping, iteration cap
-   behavior, approval handshake and cancellation against Urd's admission/steering
-   requirements; a mixed pipeline (other middleware) can also alter options mid-call
-   and must be within Urd's prefix-freeze control.
+**Evidence and remaining gates:**
+
+- [Execution Design](EXECUTION-DESIGN.md#what-was-actually-exercised) now records
+  matched fake-loop checks and scripted local HTTP/SSE + file-reload evidence for
+  the real pinned Responses adapter. The old "SDK JSON only" status is superseded;
+  fixture details and reproduction belong there, not duplicated here.
+- A composed native adapter + terminal guard + Urd cycle + harmless tool test
+  through the selected SQLite record owner remains outstanding. Separate fixture
+  successes do not establish composed correctness, atomic persistence or recovery.
+- Live ChatGPT-plan registration/entitlement/inference/tool continuation still
+  requires explicit owner approval. `tool_search` is not permitted on that route;
+  additional-tools fixture acceptance is not provider acceptance.
+- Claude inline-tool fidelity and Ollama server/model/adapter behavior remain
+  unqualified; Copilot still has a separate authorization/support-contract gap.
+  [Provider qualification](PROVIDER-QUALIFICATION.md) owns those route gates.
+- Wrapper reliability/cost, native provider acceptance and actual cache savings
+  remain unmeasured. Ordinary-list updates are an alternative, not the selected
+  fallback, and no automatic retry/fallback or tool replay is authorized.
+
+No API, class layout or production scaffold is selected by this integration.
 
 ## Sources
 

@@ -119,9 +119,11 @@ deep customisability comes from access to the source instead.
 Ideas and useful logic may be borrowed from other harnesses. **Selected snippets
 of Pi logic may be considered case by case; this is not approval to adopt a Pi
 package.** First-party ownership does not require inventing every algorithm or
-rejecting focused libraries. It means Urd owns its architecture and behaviour. Ownership of the
-model/tool execution cycle remains open for comparison and owner alignment;
-"first-party" must not be used as shorthand for a mandatory custom loop.
+rejecting focused libraries. It means Urd owns its architecture and behaviour.
+A narrow Urd-owned model/tool cycle is now the provisional direction after
+[focused comparison and owner alignment](EXECUTION-DESIGN.md); "first-party"
+alone was not a requirement to write one. Revisit the choice if real integration
+changes the code/dependency trade-off.
 The backend uses C# on .NET with ASP.NET Core hosting and the official C# MCP
 client SDK (`ModelContextProtocol.Core`). Other library and framework choices
 remain open.
@@ -136,7 +138,10 @@ Plan a strong class structure around Urd's actual responsibilities, state
 ownership and lifecycles. The goal is code that is easy to read and change,
 not a large hierarchy or layers for their own sake. The strict small-codebase
 requirement still applies. [ARCHITECTURE.md](ARCHITECTURE.md#c-backend-and-class-design)
-records the design work this calls for.
+records the design work this calls for. The [owner-reviewed session sketch](SESSION-DESIGN.md)
+uses `SessionBase`, `PrimarySession` and `SubagentSession` as its working structure.
+Class responsibilities must drive file layout; exact APIs, base-class scope and
+the project/folder split are not approved for production scaffolding.
 
 **ASP.NET Core is the selected backend hosting/HTTP framework**, using its
 standard Kestrel server. The owner confirmed this on 2026-11-03 after alternatives
@@ -149,11 +154,12 @@ is cumbersome or a poor fit, consider an alternative rather than forcing Urd aro
 it. The [MCP decision and selection policy](ARCHITECTURE.md#mcp-client-library-and-revisiting-library-choices)
 record this direction.
 
-The shared model interface (`IChatClient`) and shared SQLite storage are selected;
-see [ARCHITECTURE.md](ARCHITECTURE.md). .NET version, endpoint style,
-provider-specific adapters, loop ownership/libraries, UI toolkit and desktop host
-remain open. Resource use, portability and local source builds still require
-verification; selected technologies are not claims of measured superiority.
+The shared model interface (`IChatClient`), shared SQLite storage and
+TypeScript/Preact frontend are selected; see [ARCHITECTURE.md](ARCHITECTURE.md).
+.NET version, endpoint style, provider-specific adapters and desktop host remain
+open; the provisional loop direction still needs production qualification.
+Resource use, portability and local source builds require verification; selected
+technologies are not claims of measured superiority.
 
 ### Bundle source with published builds
 
@@ -196,7 +202,13 @@ development or cut essential behaviour merely to switch tools early.
 Standalone desktop and VS Code clients remain planned; their relative delivery
 order remains open. Browser-first identifies the first usable interface, not the
 eventual product scope. The separate OS rollout is Windows → macOS → Linux;
-neither sequence selects a language, UI toolkit, provider library or storage technology.
+these delivery sequences are distinct from the technology selections.
+
+**Use TypeScript + Preact for the shared UI.** The owner selected this direction
+on 2026-11-04: ordinary browser components and presentation logic should be reusable
+in later desktop/VS Code hosts. [Browser design](BROWSER-DESIGN.md) records the
+trade-off and bounded synthetic evidence. CSS/build tooling, transport, client-state
+classes, file layout and desktop host remain open; a prototype is not their approval.
 
 ### Single-user, local-first workspace
 
@@ -253,7 +265,7 @@ presentation/state logic and backend behaviour across browser, desktop and
 VS Code instead of maintaining three independent implementations. Small,
 explicit host-specific adapters are acceptable where needed. Evaluate actual
 code reuse, not just whether surfaces use the same language; this requirement
-does not select a UI toolkit or desktop host.
+does not select a desktop host or prove that host adapters already work.
 
 **A TUI is not required and is outside the intended scope.** This does not
 prohibit ordinary launch, build or maintenance commands.
@@ -343,19 +355,26 @@ more detailed decisions as they are made.
 
 Focused qualification evidence, distinct from architecture approval:
 
-- [SQLite validation](SQLITE-VALIDATION.md): bounded concurrency/recovery checks,
-  preview defects and the gap between the experimental contract and production data.
-- [Provider qualification](PROVIDER-QUALIFICATION.md): documented access routes,
-  authentication/adapter constraints and untested live-account requirements.
+- [Session design](SESSION-DESIGN.md): working class/ownership sketch, lifecycle
+  walkthrough and explicitly deferred layout/independent-worker closure gates.
+- [Execution design](EXECUTION-DESIGN.md): provisional Urd-owned cycle, discovery
+  policy and fake-loop/scripted-adapter evidence—not live-provider qualification.
+- [Browser design](BROWSER-DESIGN.md): TypeScript/Preact selection, bounded synthetic
+  UI evidence and unresolved client structure/integration.
+- [SQLite validation](SQLITE-VALIDATION.md): concurrency/recovery evidence,
+  preview correctness follow-ups and production data-contract gaps.
+- [Provider qualification](PROVIDER-QUALIFICATION.md): access routes,
+  authentication/adapter qualification and remaining live-account requirements.
 
 ## Open design work
 
 The following remain deliberately unresolved:
 
-- Concrete class/module boundaries, execution model, provider integrations and
-  model/tool-loop ownership/libraries within the selected C#/.NET backend; frontend
-  technology remains open. The shared `IChatClient` interface is selected; its
-  package version and provider-specific adapters are not.
+- Final class/module/project boundaries and execution topology within the working
+  session sketch; independent-worker closure; production qualification of the
+  provisional Urd-owned cycle. No production scaffold is approved.
+- Provider integrations and package pins around selected `IChatClient`; client-state
+  structure, transport and tooling around selected TypeScript/Preact.
 - Source/build packaging, the custom-build workflow and releases; automatic updating is deferred.
 - Persistence implementation/schema evolution and restart/recovery within the
   selected shared SQLite design; backend discovery and duplicate-start handling.

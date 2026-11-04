@@ -126,11 +126,12 @@ Use concrete flows and small sketches to discuss meaningful alternatives; parall
 investigations and experimental code do not approve a production scaffold or
 project/folder split.
 
-**Still open:** .NET version, provider-specific integrations and loop libraries,
-loop ownership, process topology, UI technology and desktop host. Shared SQLite
-storage and the `IChatClient` model interface are selected in their sections below.
-The language choice does not qualify performance, provider coverage, packaging
-or cross-platform behaviour; investigate those within the chosen backend direction.
+The [working session sketch](SESSION-DESIGN.md) below records subsequent owner
+input; it does not approve final APIs, base-class scope or a production project
+layout. **Still open:** .NET version, provider-specific integrations, execution
+topology and desktop host. Shared SQLite, `IChatClient` and TypeScript/Preact are
+selected below; the narrow Urd-owned loop is provisional. These directions do not
+qualify performance, provider coverage, packaging or cross-platform behaviour.
 
 ### ASP.NET Core hosting and HTTP
 
@@ -173,7 +174,23 @@ policy applies to selected libraries/frameworks generally, including ASP.NET Cor
 the development environment until Urd is ready for normal use. This removes
 pressure to add desktop/editor integration immediately or cut essential features
 just to begin developing Urd from itself. Desktop and VS Code clients remain
-part of the destination; client implementation technologies remain undecided.
+part of the destination; desktop host and host-specific integration remain open.
+
+### TypeScript and Preact for the shared UI
+
+**Decision (2026-11-04):** Use TypeScript + Preact. After discussing the trade-off,
+the owner answered “Yes, proceed with it.” Prefer ordinary browser components and
+presentation logic reusable in later desktop/VS Code hosts, without inheriting
+Pie's host-owned state or runtime machinery. This adds a Node source-build toolchain
+alongside .NET; prebuilt UI assets do not require a Node application server.
+
+[Browser design](BROWSER-DESIGN.md) records a bounded synthetic transcript/streaming
+experiment and a small Blazor contrast, not a production performance comparison.
+Real SQLite/agents, rich rendering, network access and host reuse remain unqualified.
+**Not selected:** CSS/build tooling or pins, transport, desktop host, client-state
+classes/responsibilities or project/folder layout. The proposed client-state split
+was not clear to the owner and remains explicitly provisional; review a concrete
+example rather than interpreting non-objection as approval.
 
 ### Operating-system rollout: Windows, then macOS, then Linux
 
@@ -203,10 +220,12 @@ the same underlying backend and sessions.
 or a second execution backend. Pie currently mirrors selection across its
 renderers; Urd need not inherit that choice if independence is cheap.
 
-**Status:** The cost condition has not been demonstrated. Do not present
-independent navigation as unconditional scope or invent a cost estimate. When
-implementing, compare the minimal designs without building a configurable
-framework simply to support both.
+**Evidence, not a waived gate:** [Browser design](BROWSER-DESIGN.md#independent-navigation-cost-condition)
+compared executable independent/mirrored variants: a normalized conservative
+10 added lines demonstrated the condition for that synthetic prototype. Recheck
+the complete production integration against the **100 incremental LOC** condition;
+independence is not unconditional scope. Do not build configurable modes merely
+to support both.
 
 **Unsent drafts:** Choose whichever ownership is simplest. Separate drafts per
 client are the preferred working default, not an unconditional requirement.
@@ -258,10 +277,10 @@ as redundant.
 
 **Rationale:** They serve different work patterns: focused assistance versus
 sustained parallel work. Both use the retained bucket-based creation policy.
-This does not require separate agent engines, storage implementations or class
-hierarchies. Sharing their underlying representation remains a proposal, and
-exact cancellation, retention and ownership rules still need review except for
-the creator-cleanup boundary below.
+This does not require separate agent engines or storage implementations. The
+working `SessionBase`/`PrimarySession`/`SubagentSession` sketch below shares core
+logic, without freezing APIs or every cancellation/ownership rule. The
+creator-cleanup boundary below remains agreed.
 
 **Creator cleanup after human steering:** Keep Pie's behaviour. Direct human
 steering does not remove the creator agent's authority to close its worker; an
@@ -497,8 +516,8 @@ Shared model interfaces and optional loop libraries must be evaluated for stable
 request construction, dynamic discovery and lossless handling of necessary
 provider-specific content. A common interface must not erase these controls.
 Check actual serialized request sequences before claiming compatibility; real
-cache reuse needs provider evidence. No wrapper, native-discovery protocol or
-model library is selected here, and cached descriptions must not override current
+cache reuse needs provider evidence. The later interface and exposure decisions
+below do not qualify every route. Cached descriptions must not override current
 execution permissions.
 
 **Follow-up alignment (2026-11-03):** The [cache investigation](CACHE-RESEARCH.md)
@@ -508,15 +527,20 @@ prefix or the old cache entry itself. Urd-specific savings remain unmeasured.
 Continue dynamic tool discovery design and use its requirements to inform
 model-layer selection.
 
-The owner prefers native calls over a generic invocation wrapper and considers
-OpenAI/Anthropic-specific handling reasonable. Explore one Urd discovery/execution
-model with provider-specific exposure: native appended definitions where supported,
-and an explicit fallback elsewhere. Ordinary tool-list updates with cache cost and
-a stable wrapper remain alternatives, not selected policies. Preserve the retained
-AI-based catalog pruning and protected core tools; discovery complements them.
-Compare adapter code, model reliability and cache impact, including tool-capable
-local models. [Model-interface research](MODEL-INTERFACE-RESEARCH.md) records current
-SDK/adapter gaps.
+**Owner alignment (2026-11-04): qualified native additions, otherwise an initial
+stable wrapper.** Where the provider **and adapter** support qualified native
+appended definitions, use them and omit the invocation wrapper from the initial
+catalog. Otherwise include a stable wrapper from the start and disclose recovered
+tools through appended context. Ordinary tool-list updates remain an alternative,
+**not the selected fallback**. Initially selected native/core tools need not all
+be wrapped. Both paths retain AI pruning/protected core entries and the same
+current-permission execution path; preserve outer call and resolved tool identities.
+
+This supersedes the earlier open fallback comparison, not the qualification gates.
+Wrapper reliability, native-provider acceptance and cache savings remain unmeasured;
+no generic discovery framework or particular beta adapter is approved. See
+[execution evidence](EXECUTION-DESIGN.md) and [discovery design](DISCOVERY-DESIGN.md).
+This tool-invocation wrapper is distinct from a model-client facade.
 
 **Owner decision (2026-11-04): adopt `Microsoft.Extensions.AI.Abstractions` and
 its `IChatClient` as Urd's shared model request/response interface.** This is the
@@ -527,13 +551,12 @@ The implementation can be reconsidered if concrete integration proves cumbersome
 or a poor fit, under the general library-selection policy above. The researched
 package version is not locked.
 
-This decision does **not** select the full `Microsoft.Extensions.AI` package,
-`FunctionInvokingChatClient`, any optional model/tool loop, provider-specific
-SDKs/adapters, authentication flows, or model-exposure policy. Those remain
-separate decisions. The [discovery design investigation](DISCOVERY-DESIGN.md)
-records provider-specific adapter and restart-representation gaps; address them
-while implementing the selected interface, without treating them as a reason to
-silently broaden this selection.
+This interface decision does **not** select the full `Microsoft.Extensions.AI`
+package, `FunctionInvokingChatClient`, provider-specific SDKs/adapters or
+authentication flows. The separate provisional loop direction and exposure policy
+are recorded here; neither follows automatically from `IChatClient`. The
+[discovery design](DISCOVERY-DESIGN.md) records adapter/restart-representation gaps;
+address them without silently broadening the interface selection.
 
 ### Keep original chat history until the session closes
 
@@ -617,32 +640,29 @@ control paths using real loop libraries and fake models in both languages. These
 remain feasibility observations, not provider, packaging, resource or cross-platform
 qualification. Further qualification should focus on the selected C#/.NET backend.
 
-### Model/tool loop ownership is open
+### Provisional direction: a narrow Urd-owned model/tool cycle
 
-The provider research initially treated Urd owning the model → tool execution →
-model cycle as a requirement. **That was an assistant inference, not an agreed
-owner decision, and has been withdrawn.** A first-party harness with no Pi
-dependency does not by itself settle who implements or runs this cycle.
+**Owner alignment (2026-11-04):** Prefer a small Urd-owned cycle over `IChatClient`
+rather than adding full MEAI for `FunctionInvokingChatClient` now. In the bounded
+comparison the library saved only **20 owned probe lines**; the owner considered
+that insufficient reason for the dependency. This is **not a production LOC or
+maintenance estimate**. Reconsider if real integration recreates substantial
+library machinery; reuse focused libraries and Abstractions helpers where useful.
 
-Compare a Urd-controlled loop with a reusable loop library against the required
-product behaviour. Consider actual control, data/lifecycle ownership, provider
-coverage, first-party adapter/workaround code and maintenance, rather than treating
-either custom code or an SDK as inherently simpler. Neither is selected or
-automatically qualified.
+[Execution design](EXECUTION-DESIGN.md) records matched fake-model control tests
+and a separate real-adapter/local scripted HTTP/SSE + file-reload fixture. They
+establish bounded cancellation, effect/recording separation and adapter-fidelity
+facts, **not** live-provider acceptance, SQLite durability or a composed native
+adapter + guarded tool-loop qualification. Positive provider-terminal evidence
+must precede tool dispatch; complete-looking arguments, HTTP success or stream EOF
+alone are insufficient. Persistence/native-item handling remains Urd-owned.
 
-The owner has excluded complete agent runtimes such as Copilot CLI and Codex
-app-server as Urd's foundation. Build Urd's lightweight harness for its own needs,
-not a wrapper around another agent application. This does not require hand-writing
-shared model-client or loop mechanics; focused libraries remain eligible. The
-no-Pi dependency direction, with case-by-case snippet reuse, remains unchanged.
-
-The earlier TypeScript/Vercel AI SDK comparison proposal is superseded by the
-C# backend decision. The selected `IChatClient` is a request/response interface,
-not a loop choice. Compare reusable loop libraries and a Urd-controlled loop
-within that direction, preferring the approach that meets the behaviour with
-less maintained code. [Provider research](PROVIDER-RESEARCH.md) preserves the
-earlier evidence and limits; its complete-runtime comparisons are historical
-research, not current candidates. No loop library or ownership model is selected.
+Use one execution path for both session kinds, not per-provider/session-type loop
+subclasses. This provisional direction is not a final API or scaffold approval.
+Earlier research's mandatory-custom-loop assumption was an assistant inference;
+current direction follows comparison and owner preference, not “first-party” alone.
+No Pi or complete Codex/Copilot agent runtime is introduced; package pins and
+provider integrations remain separate qualifications.
 
 ### Begin with one backend process unless evidence justifies separation
 
@@ -659,55 +679,55 @@ justify it. External commands and selected integrations can still run in their
 own processes. Keeping the option open is not a reason to implement both
 execution models or add speculative process-abstraction layers now.
 
-### Session structure and communication: brainstorming checkpoint
+### Session structure and communication: owner-reviewed working sketch
 
-**Discussion recorded 2026-11-03; no topology or closure policy selected.** The
-owner sees ordinary chats, bounded subagents and delegated sessions as variations
-on a shared session concept. Pie already shares its agent engine; simplification
-must address actual lifecycle, persistence or inspection complexity, not assume
-Pie has unrelated engines.
+**Alignment (2026-11-04), not frozen APIs:** the owner roughly accepted a small
+shared session hierarchy and explicitly selected `PrimarySession` after rejecting
+`ChatSession`/`ConversationSession`. `SubagentSession` was considered clear;
+`SessionBase` or visibly explicit base naming was preferred. The working sketch is:
 
-**Owner's pain points:** Delegated sessions crowd personal session navigation,
-and agents can take too long to close workers after finishing with them. Consider
-presentation and predictable cleanup separately from shared execution machinery.
-The owner is exploring parent/child structure and simpler relative communication
-instead of much of the existing delegated-session communication indexing.
+```text
+abstract SessionBase
+├── PrimarySession       ongoing, whether human- or agent-created
+└── SubagentSession      bounded task → result
+```
 
-Ideas discussed include returning a child's stable ID from creation, addressing
-children by that ID and resolving a special `parent` address. Exact tool names,
-address syntax and indexing are not selected. A single-parent structure is a tree
-(or forest); a DAG allows multiple parents and needs different addressing and
-ownership rules. Cyclic ownership would complicate cleanup. Creation provenance,
-lifetime ownership, collaboration and UI grouping need not be the same relation.
+Both share core execution/history rules without separate engines. A composed
+`SessionExecution` represents temporary active work; its name/API and exact base
+scope remain provisional. Titles, compaction and pruning use shared model I/O,
+not additional full-session subtypes. [Session design](SESSION-DESIGN.md) owns the
+responsibility/lifetime walkthrough and acceptance proposals. It separates durable
+history/assignment facts, live execution and client presentation; finished work,
+explicit task results and final closure are not interchangeable.
 
-The owner initially proposed waiting for title generation before returning child
-identity. The assistant recommended allocating identity independently of mutable
-titles and waiting for registration/addressability instead; title generation can
-fail or finish later. Keep this distinction in the next lifecycle design review,
-not as an already specified creation protocol.
+**Relationships and closure:** creator provenance/cleanup authority, bounded
+caller/containing chat, assignment requester/worker and UI grouping have different
+meanings. Human steering does not change session type or transfer creator authority.
+Bounded children close with their containing chat. **Independent-primary closure
+remains open:** the owner suggested survival or a warning before cascading closure,
+but needs concrete UI before choosing. Do not encode creator as implicit lifetime
+cascade or discard results still needed by another open session.
 
-The owner's tentative preference is to keep bounded subagents as simple task-in/
-result-out helpers; sharing session representation does not require giving them
-delegated sessions' ongoing messaging interface. Parent/child addressing also does not replace durable assignment/result
-facts or define delivery guarantees. Those facts must still survive restart as
-already agreed.
-
-Assistant proposals, not decisions: a flat registry with explicit ownership and
-separate collaboration links; delegated workers grouped under their originating
-chat, potentially detachable; finished assignments distinguished from closed
-workers. Whether parent closure ends running children, whether workers can have
-multiple lifetime owners, and how cross-family collaboration works remain open.
-Existing creator-cleanup authority after human steering remains agreed; speaking
-to a worker does not by itself establish a new ownership rule.
+Delegated-worker clutter and slow cleanup remain the motivations. Grouping,
+detachment, relative `parent` addressing and exact creation/delivery APIs are not
+selected. Stable IDs independent of mutable titles are recommended in the sketch,
+not a requirement to wait for title inference. Parent/child addressing cannot
+replace durable assignment/results. File/project layout was shown and deliberately
+deferred as too early: derive it from validated responsibilities and seek owner
+review before production scaffolding, rather than treating the example as agreed.
 
 ### Model-call reuse and composition: design alignment
 
 **Alignment recorded 2026-11-03:** Reuse common model-request mechanics for agent
 work and auxiliary LLM calls such as title generation and compaction. Prefer
 composition: title generation uses model I/O rather than inheriting from it.
-`ModelIo` and `TitleGeneration` are illustrative names, not approved class APIs.
-The caller should be able to express generation and a simple fallback clearly;
-a failed title can fall back to a bounded excerpt of the first prompt.
+**Follow-up alignment (2026-11-04):** use the configured request-only `IChatClient`
+directly for shared execution and auxiliary operations where it fits. The owner
+accepted this after rejecting an unclear `ModelRequestExecutor` name; no mandatory
+`ModelClient` facade replaces it. Thin provider adapters can implement the selected
+interface as needed. `TitleGenerator`, `HistoryCompactor` and `CatalogPruner` are
+working operation names, not approved APIs or full session types. A failed title
+can fall back to a bounded excerpt of the first prompt.
 
 Keep model invocation, the model/tool execution cycle and session state/lifetime
 as distinct responsibilities. This does not require three framework layers or
@@ -723,14 +743,13 @@ before specifying every method, interface or subclass. Prefer focused libraries
 and .NET facilities for routine mechanics rather than recreating them beneath
 custom wrappers. A small class with one useful operation can be sufficient.
 
-ASP.NET Core hosting and the official MCP client SDK are now selected above.
-The existing [C# discovery](GO-DOTNET-DISCOVERY.md) supplies remaining candidates,
-not selected dependencies: `Microsoft.Extensions.AI` and provider adapters for
-model I/O, its optional `FunctionInvokingChatClient` for loop reuse, and
-Playwright .NET. Evaluate the owned integration
-code and behaviour each saves. Provider access, library compatibility and
-packaging still need qualification; neither a full agent framework nor a custom
-loop is selected by this alignment.
+Shared client use does not mean a process-wide serial executor or shared mutable
+request state. Provider fidelity, caller-specific retry/fallback policy and
+cancellation still need qualification; auxiliary calls do not acquire the tool
+loop. The provisional cycle direction above is separate from this composition
+boundary. [Execution design](EXECUTION-DESIGN.md) records evidence and remaining
+gates; the older [C# discovery](GO-DOTNET-DISCOVERY.md) remains historical candidate
+evidence, not a wider package selection.
 
 ### Image attachments: files with stored references
 
@@ -806,10 +825,10 @@ decisions. Prior sections of [STORAGE-RESEARCH.md](STORAGE-RESEARCH.md) and
 unselected are historical as of this date.
 
 [First-slice SQLite validation](SQLITE-VALIDATION.md) subsequently exercised
-bounded concurrent activity and signalled process-kill boundaries. Its conditional
-go supports the engine choice, not promotion of the experimental adapter/contract
-unchanged: preview correctness, production lifecycle rules and schema evolution
-still need work. These checks do not qualify power loss, sustained contention,
+bounded concurrent activity and signalled process-kill boundaries. That report
+tracks preview findings/fix follow-ups and remaining production lifecycle/schema
+gaps. Its conditional go supports the engine choice, not promotion of the reduced
+experimental contract. These checks do not qualify power loss, sustained contention,
 attachment cleanup or end-to-end UI latency.
 
 ## Feature discovery: first pass

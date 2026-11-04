@@ -44,7 +44,7 @@ specific mechanics, not live-provider acceptance or cache savings.
 
 | Route | Native path and established evidence | Fallback / remaining qualification |
 | --- | --- | --- |
-| **OpenAI Responses** | `additional_tools` can represent appended client-executable definitions. OpenAI .NET 2.14.0 lacks public typed support; MEAI 10.11.0 uses raw unknown items. The newer [execution fixture](EXECUTION-DESIGN.md) exercised the real adapter against scripted local HTTP/SSE and file reload, preserving ordered exposure with explicit native reconstruction. | Responses adapter remains experimental. Streaming native function-item IDs and terminal status need explicit handling; default message JSON loses raw representation. Native acceptance and the composed adapter + guarded loop + SQLite path remain unqualified. Use the initial wrapper on routes without qualified native support. |
+| **OpenAI Responses** | `additional_tools` can represent appended client-executable definitions. OpenAI .NET 2.14.0 lacks public typed support; MEAI 10.11.0 uses raw unknown items. The [composed execution fixture](EXECUTION-DESIGN.md#composed-follow-up-adapter--guarded-urd-loop--sqlite--continuation) exercises the real adapter/terminal guard/loop/tool with ordered native reconstruction through SQLite test-envelope reload. | Experimental adapter; native IDs, terminal status and raw persistence need explicit handling. Actual session-store integration, process-kill recovery, production streaming and native provider acceptance remain unqualified. Use the initial wrapper on routes without qualified native support. |
 | **Anthropic / Claude** | Provider documents inline `tool_addition`/`tool_definition` beta blocks, subject to model/placement restrictions. SDK 13.4.0 has typed beta models, but its ordinary `AsIChatClient` adapter drops those blocks despite preserving mid-conversation system text. | Native append needs separate adapter qualification; no Claude beta adapter is approved here. Stable wrapper is the selected fallback, not ordinary-list updates. |
 | **OllamaSharp / local models** | The inspected 5.5.0 adapter maps ordinary function declarations; no native append equivalent was established for that route. Actual tool support, thinking replay and call identity require server/model/adapter testing. | Include the stable wrapper initially for recovered tools where function calling works. Wrapper reliability is untested; do not generalize this adapter finding to every local/OpenAI-compatible server. |
 | **Other routes** | Native appends require exact provider+adapter evidence; none is implied by implementing `IChatClient`. | Initial-wrapper fallback also needs tool/model qualification; unsupported tool calling is not repaired by a wrapper. |
@@ -92,12 +92,15 @@ coherent continuation, not exact token retention or a workflow-replay engine.
 - **Adapter fidelity:** verify ordered native definitions/items and call/result IDs
   through real adapter serialization. Require native successful completion before
   effects; test failed/incomplete/truncated streams with complete-looking calls.
-- **Durable continuation:** compose the guarded adapter and Urd cycle with SQLite;
-  restore exposure/results without side-effect replay. The existing file-reload
-  fixture and simulated recording failure are not SQLite crash evidence.
-- **Revocation/reset:** preserve historical definitions while rejecting stale
-  execution. Define provider/model-switch and compaction reset boundaries without
-  accidental late-wrapper insertion or blind retries.
+- **Durable continuation:** the composed SQLite whole-history test envelope now
+  restores exposure/results without tool replay and blocks continuation when an
+  injected precommit failure leaves an unresolved effect. Qualify the actual
+  session/record owner; in-process reload is not process-kill recovery or production
+  streaming evidence.
+- **Revocation/reset:** [MCP SDK tests](MCP-QUALIFICATION.md) exercise local current-
+  authority checks with immutable exposure and fake stdio peers; production catalog
+  freshness and concurrent changes remain unqualified. Define provider/model-switch
+  and compaction reset boundaries without late-wrapper insertion or blind retries.
 - **Still open:** discovery source/trigger, definition lifecycle, concrete adapter
   choices, permission/approval mechanics, uncertain-call resolution and persistence
   details. Native/wrapper cache economics require real-provider evidence; no live
@@ -105,9 +108,11 @@ coherent continuation, not exact token retention or a workflow-replay engine.
 
 ## Evidence anchors
 
-- [Execution design](EXECUTION-DESIGN.md): exact owner fallback wording, provisional
-  loop direction, matched fake-loop and scripted HTTP/SSE/file-reload evidence,
-  plus the outstanding composed and live-provider gates.
+- [Execution design](EXECUTION-DESIGN.md): owner fallback wording, provisional loop
+  and composed adapter/guard/SQLite test-envelope evidence; actual session-store
+  integration and live-provider gates remain open.
+- [MCP qualification](MCP-QUALIFICATION.md): actual SDK, fake stdio peers and explicit
+  2025 handshake—not default 2026 negotiation/fallback or model reliability.
 - [Session design](SESSION-DESIGN.md): direct request-only client composition and
   durable/live/client ownership; class and file layout approval limits.
 - [Model-interface research](MODEL-INTERFACE-RESEARCH.md): pinned MEAI 10.11.0,

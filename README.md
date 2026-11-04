@@ -355,16 +355,21 @@ more detailed decisions as they are made.
 
 Focused qualification evidence, distinct from architecture approval:
 
-- [Session design](SESSION-DESIGN.md): working class/ownership sketch, lifecycle
-  walkthrough and explicitly deferred layout/independent-worker closure gates.
-- [Execution design](EXECUTION-DESIGN.md): provisional Urd-owned cycle, discovery
-  policy and fake-loop/scripted-adapter evidence—not live-provider qualification.
+- [Session design](SESSION-DESIGN.md): working sketch and guarded lifecycle/
+  process-exit evidence; hierarchy, layout and independent-worker closure remain open.
+- [Execution design](EXECUTION-DESIGN.md): provisional cycle and composed native
+  adapter/guard/loop/SQLite test-envelope evidence—not actual session-store,
+  process-kill, production-streaming or live-provider qualification.
 - [Browser design](BROWSER-DESIGN.md): TypeScript/Preact selection, bounded synthetic
   UI evidence and unresolved client structure/integration.
-- [SQLite validation](SQLITE-VALIDATION.md): concurrency/recovery evidence,
-  preview correctness follow-ups and production data-contract gaps.
-- [Provider qualification](PROVIDER-QUALIFICATION.md): access routes,
-  authentication/adapter qualification and remaining live-account requirements.
+- [SQLite validation](SQLITE-VALIDATION.md): concurrency/recovery evidence and
+  three experimental preview fixes; separate range-read races remain.
+- [Provider qualification](PROVIDER-QUALIFICATION.md): route limits and offline
+  candidate OAuth/refresh evidence—not production auth or live-account qualification.
+- [Backend lifecycle](BACKEND-LIFECYCLE.md): Windows attach/start/stop mechanics;
+  portable locking, packaged daemon, authentication and topology remain unselected.
+- [MCP qualification](MCP-QUALIFICATION.md): real SDK with fake stdio peers and an
+  explicit 2025 handshake; default 2026 negotiation/fallback remains untested.
 
 ## Open design work
 

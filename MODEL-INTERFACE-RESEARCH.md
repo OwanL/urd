@@ -14,7 +14,8 @@
 > appended definitions, otherwise a stable invocation wrapper present from the
 > initial catalog for recovered tools. [Execution Design](EXECUTION-DESIGN.md)
 > records the owner decisions and bounded fixture evidence; [Provider qualification](PROVIDER-QUALIFICATION.md)
-> owns route limits. Neither live-provider nor durable/composed execution is qualified.
+> owns route limits. Local adapter/loop/SQLite test-envelope composition is now
+> exercised; actual session-store integration and live access remain unqualified.
 
 ## Status and evidence classes
 
@@ -28,11 +29,11 @@ Evidence classes used below:
   no network), artifacts in `%TEMP%\urd-meai-roundtrip\`.
 - **provider-doc-supported** — current official provider documentation; not version-
   pinned, recheck before implementation.
-- **not provider-tested** — nothing here has run against a real provider. Earlier
-  fake-model probes and the newer matched loop/local HTTP/SSE + file-reload checks
-  in [Execution Design](EXECUTION-DESIGN.md#what-was-actually-exercised) establish
-  bounded mechanics, not provider acceptance, durable recovery or a composed
-  native-adapter + guarded tool-loop qualification.
+- **not provider-tested** — nothing here has run against a real provider.
+  [Execution Design](EXECUTION-DESIGN.md#what-was-actually-exercised) adds local
+  HTTP/SSE adapter checks and composed guarded-loop/SQLite test-envelope reload.
+  These are bounded mechanics, not provider acceptance, actual session-store
+  integration, process-kill recovery or production streaming qualification.
 
 ## Pins
 
@@ -237,15 +238,19 @@ wrapper overhead/reliability nor Urd cache savings is measured here.
   `ChatMessage` JSON loses raw provider items. The newer fixture restored native
   IDs/payload/order through indexed reconstruction after file reload; encrypted
   reasoning and reasoning-item ID already survive ordinary JSON via `ProtectedData`
-  and `AdditionalProperties`. This is not atomic SQLite storage or crash recovery.
-  See [Execution Design's adapter evidence](EXECUTION-DESIGN.md#real-adapter--local-httpsse--file-reload-seven-requests-passed)
-  for the checks and remaining composed-test gap; Urd's record owner must preserve
-  the necessary native data.
+  and `AdditionalProperties`. The later
+  [composed fixture](EXECUTION-DESIGN.md#composed-follow-up-adapter--guarded-urd-loop--sqlite--continuation)
+  adds atomic whole-history test-envelope storage/reload in SQLite, not the actual
+  session/message-row owner or process-kill recovery. That owner still needs to
+  preserve the necessary native data.
 - **MCP:** `McpClient.ListToolsAsync` returns `McpClientTool : AIFunction` carrying
   the full protocol definition (`ProtocolTool`), with a public constructor to reuse a
   captured definition without re-listing; no SDK-internal listing cache. Descriptors
   vs native appends are Urd's choice (source-supported,
   [McpClientTool.cs](https://github.com/modelcontextprotocol/csharp-sdk/blob/61420937cbef3eab895cafc8a89418811fb71f54/src/ModelContextProtocol.Core/Client/McpClientTool.cs)).
+  [Later SDK tests](MCP-QUALIFICATION.md) confirm that retained handles still invoke
+  removed tools unless Urd checks current authority. Fake stdio peers used an
+  explicit 2025 handshake, not default 2026 negotiation/fallback.
 
 ### Was Pie/Pi's wrapper the only cause of the prefix constraints?
 
@@ -309,13 +314,14 @@ framework nor a Claude beta adapter is approved by this direction.
 
 **Evidence and remaining gates:**
 
-- [Execution Design](EXECUTION-DESIGN.md#what-was-actually-exercised) now records
-  matched fake-loop checks and scripted local HTTP/SSE + file-reload evidence for
-  the real pinned Responses adapter. The old "SDK JSON only" status is superseded;
+- [Execution Design](EXECUTION-DESIGN.md#what-was-actually-exercised) now includes
+  composed real-adapter/terminal-guard/Urd-cycle/harmless-tool continuation through
+  a SQLite whole-history test envelope. Actual session/record-owner integration,
+  process-kill recovery and production streaming/cancellation remain outstanding;
   fixture details and reproduction belong there, not duplicated here.
-- A composed native adapter + terminal guard + Urd cycle + harmless tool test
-  through the selected SQLite record owner remains outstanding. Separate fixture
-  successes do not establish composed correctness, atomic persistence or recovery.
+- [Offline OAuth/refresh checks](PROVIDER-QUALIFICATION.md#offline-auth-follow-up--2026-11-04)
+  establish candidate mechanics, including scope-preserving refresh—not production
+  auth selection, live access or credential-storage/race qualification.
 - Live ChatGPT-plan registration/entitlement/inference/tool continuation still
   requires explicit owner approval. `tool_search` is not permitted on that route;
   additional-tools fixture acceptance is not provider acceptance.

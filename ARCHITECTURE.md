@@ -160,6 +160,10 @@ dependency does not select a model/tool loop or model exposure policy; the
 separate `IChatClient` decision is recorded below.
 Urd retains connection lifetime, credentials, permissions and discovery/exposure
 responsibilities. The inspected package version is not a locked dependency version.
+[Bounded SDK qualification](MCP-QUALIFICATION.md) exercises real Core 2.3.1 with
+fake stdio peers: explicit 2025 handshake, result/error fidelity, current-authority
+checks and local cancellation/disposal. Default 2026 negotiation/fallback,
+real-server interoperability and production lifetime integration remain untested.
 
 **General library-selection policy:** These are implementation directions, not
 irreversible commitments. If a selected library proves cumbersome, unreliable or
@@ -421,7 +425,10 @@ Urd integrations or a reason to select a library prematurely.
 route/authentication findings. ChatGPT-plan Responses is a recommended first
 integration, with Ollama also acceptable to the owner; no live sign-in, entitlement
 or inference/tool round trip has been qualified. Its plan-route restrictions must
-not be inferred from generic API-key Responses capabilities.
+not be inferred from generic API-key Responses capabilities. The report now includes
+[offline candidate OAuth/refresh evidence](PROVIDER-QUALIFICATION.md#offline-auth-follow-up--2026-11-04),
+not production dependency approval; live access, refresh identity/races, credential
+storage and revocation remain separate gates.
 
 ### Keep small usage summaries after closure
 
@@ -649,13 +656,14 @@ that insufficient reason for the dependency. This is **not a production LOC or
 maintenance estimate**. Reconsider if real integration recreates substantial
 library machinery; reuse focused libraries and Abstractions helpers where useful.
 
-[Execution design](EXECUTION-DESIGN.md) records matched fake-model control tests
-and a separate real-adapter/local scripted HTTP/SSE + file-reload fixture. They
-establish bounded cancellation, effect/recording separation and adapter-fidelity
-facts, **not** live-provider acceptance, SQLite durability or a composed native
-adapter + guarded tool-loop qualification. Positive provider-terminal evidence
-must precede tool dispatch; complete-looking arguments, HTTP success or stream EOF
-alone are insufficient. Persistence/native-item handling remains Urd-owned.
+[Execution design](EXECUTION-DESIGN.md) now also exercises the real Responses
+adapter + terminal guard + Urd loop + harmless tool through SQLite reload and
+continuation. This closes the bounded local composition gap using a **whole-history
+test envelope**, not the actual session/message-row owner. Process-kill recovery,
+production streaming/cancellation and live-provider acceptance remain unqualified.
+Positive provider-terminal evidence must precede tool dispatch; complete-looking
+arguments, HTTP success or stream EOF alone are insufficient. Persistence/native-item
+handling remains Urd-owned.
 
 Use one execution path for both session kinds, not per-provider/session-type loop
 subclasses. This provisional direction is not a final API or scaffold approval.
@@ -679,6 +687,11 @@ justify it. External commands and selected integrations can still run in their
 own processes. Keeping the option open is not a reason to implement both
 execution models or add speculative process-abstraction layers now.
 
+[Backend lifecycle evidence](BACKEND-LIFECYCLE.md) exercises competing launchers,
+verified attachment, stale discovery and owned-process exit on Windows. It does
+not select portable locking, packaged daemon lifetime, authentication, shutdown
+policy or topology; one backend remains a working default.
+
 ### Session structure and communication: owner-reviewed working sketch
 
 **Alignment (2026-11-04), not frozen APIs:** the owner roughly accepted a small
@@ -699,6 +712,10 @@ not additional full-session subtypes. [Session design](SESSION-DESIGN.md) owns t
 responsibility/lifetime walkthrough and acceptance proposals. It separates durable
 history/assignment facts, live execution and client presentation; finished work,
 explicit task results and final closure are not interchangeable.
+[Disposable flow tests](SESSION-DESIGN.md#7-disposable-session-flow-qualification)
+now exercise guarded admission/Stop, edit/close and retained assignment results,
+including owned-child exit/reopen. They do not validate the hierarchy, bounded-child
+lifecycle, HTTP/client integration or composition with the native execution fixture.
 
 **Relationships and closure:** creator provenance/cleanup authority, bounded
 caller/containing chat, assignment requester/worker and UI grouping have different
@@ -825,11 +842,14 @@ decisions. Prior sections of [STORAGE-RESEARCH.md](STORAGE-RESEARCH.md) and
 unselected are historical as of this date.
 
 [First-slice SQLite validation](SQLITE-VALIDATION.md) subsequently exercised
-bounded concurrent activity and signalled process-kill boundaries. That report
-tracks preview findings/fix follow-ups and remaining production lifecycle/schema
-gaps. Its conditional go supports the engine choice, not promotion of the reduced
-experimental contract. These checks do not qualify power loss, sustained contention,
-attachment cleanup or end-to-end UI latency.
+bounded concurrent activity and signalled process-kill boundaries. Its
+[preview follow-up](SQLITE-VALIDATION.md#preview-fix-follow-up--2026-11-04) fixes
+snapshot consistency, empty-message visibility and Unicode boundaries in the
+experimental adapter; separate `PageOlder`/`ReadRange` snapshot races remain.
+Its conditional go supports the engine choice, not promotion of the reduced
+experimental contract or closure of production lifecycle/schema gaps. These checks
+do not qualify power loss, sustained contention, attachment cleanup or end-to-end
+UI latency.
 
 ## Feature discovery: first pass
 

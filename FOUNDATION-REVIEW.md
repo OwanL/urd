@@ -1,4 +1,4 @@
-# Foundation review: decisions for the next session
+# Foundation review: owner outcomes and next step
 
 **2026-11-04 evidence, with subsequent owner-review outcomes marked below.**
 Recommendations remain proposals; no production implementation is authorized.
@@ -16,7 +16,7 @@ technology, Core/Server, source-distribution and retained-feature decisions stan
 | **Source customization worked without Git.** Extract/build, edit/add/delete backend/UI/guidance, redistribute, extract/rebuild produced the expected visible changes and carried source. | Conventional packaging can support the desired workflow without a self-rebuilding application. Keep ordinary builds separate from distribution checks. | [Source/build evidence](REPO-FOUNDATIONS.md#what-the-round-trip-established): 12 grouped checks. A post-capture edit did not affect staged output/source; copying during edits was **not** qualified. Warm Windows tools/caches, not fresh-machine/offline/other-OS proof. |
 | **Durable intent and retained content have different lifetimes.** A due request known not to have started differs from a possibly executed command; a needed shared result differs from its worker's transcript. | Preserve automatic due work without replaying uncertain effects. Worker closure must not delete another open chat's result/attachment—or retain the entire closed transcript to save one result. | [Durability/reference ledger](DURABLE-BOUNDARIES-EVIDENCE.md): source-grounded failure analysis, **no new runtime test**. Includes attachment publication/deletion races and compact final usage. |
 
-## Current owner review
+## Owner-review outcomes
 
 **1. Setup/custom-copy direction agreed; build baseline partly aligned.** The owner
 accepted automatic acquisition of missing project-declared build tools where
@@ -55,12 +55,13 @@ remain separate work; do not infer unauthenticated LAN or a client-enrollment fl
 A remote browser's provider callback returns to that device's loopback, not the
 backend. Provider login is not client authentication to Urd.
 
-The existing first-slice proposal remains two chats/two browser clients with fake
-model streaming, SQLite history, reconnect and settled Stop. It proposes rejecting
-new Send while busy rather than silently queueing; steering is deferred, not removed.
-Approve or adjust that bounded scope before implementation. These experiments did
-**not** implement or qualify that integrated slice, select HTTP/SSE over SignalR,
-or approve fine layout/APIs/schema.
+The first-checkpoint draft remains two chats/two browser clients with fake-model
+streaming, SQLite history, reconnect and settled Stop. Its idle-only Send restriction
+was **not approved**; the owner found the staging question unclear. Developer
+checkpoint sequencing belongs in concrete engineering planning, not another abstract
+owner question. Normal-use steering and follow-up input stay retained. The overall
+implementation scope and structure still need alignment before code; neither the
+draft nor the experiments approve transport, fine layout, APIs or schema.
 
 ## Wider decisions remain visible—not all gates for the first slice
 
@@ -73,13 +74,16 @@ or approve fine layout/APIs/schema.
   the simplest implementation. No per-chat Reload UI, watcher, frozen-forever policy
   or busy-admission rule is approved; ordinary prefix stability, readable history and
   current permission enforcement remain distinct.
-- **Before uncertain-effect recovery:** consider explicit move-on with an action
-  still marked unknown versus blocking that chat until reconciliation. Never infer
-  automatic replay. This needs a concrete user flow, not a new persistence engine.
+- **Uncertain-effect recovery:** the owner delegated “whatever is simplest”, not
+  approval of detailed controls. Working recommendation: after old work actually stops,
+  retain the missing result as unknown, never auto-replay, and allow a fresh instruction
+  without a reconciliation-only lock or wizard. Stop/settlement, stale-write and
+  ambiguous-Send-receipt safeguards remain; this is not evidence of the old outcome.
 - **Before real retained data:** qualify shared attachment cleanup, coherent bounded
-  history reads and summary finalization. Storage wording currently mixes allowable
-  recent loss with identical acknowledged replay; clarify provisional progress,
-  committed records and crash class without inventing stronger durability promises.
+  history reads and summary finalization. Shared storage wording now distinguishes
+  provisional output from returned committed database transactions for process crash;
+  system crash/power loss is outside that guarantee. No durability upgrade, numerical
+  loss budget, file atomicity or exactly-once effect guarantee was introduced.
 - **Before normal background use:** offscreen attention, discoverable stop/shutdown,
   credential-store availability and startup-at-login need concrete treatment.
   Independent-worker closure still needs meaningful UI context, not another abstract mock.
@@ -88,6 +92,15 @@ or approve fine layout/APIs/schema.
   No live-provider entitlement/cache, portable credential-store, packaged-daemon
   or substantial-agent-capacity claim was established overnight.
 
-The four focused reports were independently reviewed within their stated limits.
-Research recommendations do not override the owner or turn fixtures into production
-architecture. No live accounts/private data, global setup, push or activation was used.
+## Next step
+
+This owner-review round is complete. Prepare one small, concrete application/class
+and file-layout plan around the selected Core/Server boundary and a visible browser
+flow. Keep setup/checkpoint sequencing and routine implementation choices simple;
+do not reopen the abstract reload, recovery or idle-only questionnaire. Align the
+meaningful structure and implementation scope with the owner before writing code.
+
+The four stream reports and shared integration were independently reviewed within
+their stated limits. Research recommendations do not turn fixtures into production
+architecture. This round added no application code, new runtime tests, live account
+use, global setup, push or activation.

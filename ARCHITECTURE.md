@@ -777,6 +777,23 @@ Core owns session/execution/storage logic without ASP.NET; Server owns hosting,
 HTTP entrypoints and composition. Fine file/folder layout and exact APIs remain
 unapproved, and the coarse example does not authorize production scaffolding.
 
+**Recovery review — delegated simplicity, not an owner-selected interface:** after
+unclear examples, the owner said “whatever is simplest”. The revisable working
+recommendation is to retain an uncertain effect as unknown, never automatically
+replay it, and allow a fresh instruction once old owned work has actually stopped.
+Do not add a reconciliation-only chat lock or wizard. This was not separately
+confirmed by the owner; exact controls remain implementation work. Stop/settlement,
+stale-write fences and reconciliation of ambiguous Send receipts still apply.
+A new instruction does not prove the old effect succeeded or authorize repeating it.
+
+**First-checkpoint sequencing remains engineering planning.** The owner did not
+approve the proposed idle-only Send restriction for the fake-model checkpoint;
+normal-use steering and follow-up input remain retained. Do not turn that test-stage
+detail into another owner questionnaire or a product feature cut. Choose the bounded
+checkpoint within a concrete, structurally aligned implementation plan, not by
+promoting the draft or fixtures into implementation permission. See
+[the scoped review](SESSION-DESIGN.md#8-resumed-inputrecovery-review--2026-11-05).
+
 ### Model-call reuse and composition: design alignment
 
 **Alignment recorded 2026-11-03:** Reuse common model-request mechanics for agent
@@ -832,20 +849,26 @@ transcripts, session metadata and assignment/result records. The working layout
 is message rows with a derived bounded-preview metadata table (the harness
 family-1 shape); large image/binary artifacts remain files with stored
 references per the attachment direction above, not blobs in the database.
-Default durability is WAL with OS-flush acknowledgement (e.g.
-`synchronous=NORMAL`): records handed to the OS survive process crash and
-reopen; a bounded loss of recent acknowledged work on crash is acceptable per
-the recovery decision, and no fsync-per-token machinery is added without a
-measured requirement.
+Default durability remains WAL with `synchronous=NORMAL` as the working setting.
+**Clarification of the existing process-crash contract, not a new owner requirement:**
+database transactions whose commits have returned survive process crash/reopen;
+live output not yet committed can be lost. This distinguishes saved database state
+from provisional progress rather than promising preservation of every streamed token.
+System crash or power loss is outside that guarantee: see
+[SQLite's synchronous documentation](https://www.sqlite.org/pragma.html#pragma_synchronous).
+No per-token fsync, numerical loss budget, attachment-file atomicity or exactly-once
+external effects follow; these words do not qualify every failure mode.
 
 **Workload and guarantees.** The store must serve click-to-visible newest-window
 reads, paged navigation, model-context range reads, incremental appends and
 per-batch streaming writes, suffix-replacing edits, persistent assignments
 across restarts, final-closure deletion and many-session fan-out — under a
-single backend process. Guaranteed: every acknowledged record replays
-identically after reopen; a record is absent or complete, never partially
-applied; edits replace history only and never roll back external effects;
-recovery does not invent, reorder or duplicate records.
+single backend process. For the process-crash/reopen boundary above, committed
+database state reopens intact: a transactional record is absent or complete,
+never partially applied. Live delivery alone is not a commit acknowledgement.
+Edits replace history only and never roll back external effects; recovery does
+not invent, reorder or duplicate records. A missing acknowledgement does not
+prove that a transaction failed or that retrying it is safe.
 
 **Rejected alternatives** (evidence in [STORAGE-RESEARCH.md](STORAGE-RESEARCH.md),
 [STORAGE-EXPERIMENT.md](STORAGE-EXPERIMENT.md), the binding review and harness

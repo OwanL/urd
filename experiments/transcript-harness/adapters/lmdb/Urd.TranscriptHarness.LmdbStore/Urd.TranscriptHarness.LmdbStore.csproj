@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <RootNamespace>Urd.TranscriptHarness.LmdbStore</RootNamespace>
+    <!-- Family-4 adapter is a plugin loaded by path (Assembly.LoadFrom) from the
+         shared store host's output directory; runtime assets (managed deps and
+         the bundled native lmdb.dll) must be copied and resolvable from this
+         assembly's own bin directory. Adapter-owned settings only; adding this
+         adapter never edits shared host files. -->
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="LightningDB" Version="0.23.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\contracts\Urd.TranscriptHarness.Contracts\Urd.TranscriptHarness.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

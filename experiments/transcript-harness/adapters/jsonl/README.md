@@ -49,8 +49,10 @@ No shared harness, runner, or solution files are edited.
 ## Durability ordering and ack tier: OsFlush
 
 - Commit ordering per mutation: JSONL line(s) are written and `Flush()`ed (OS
-  buffer cache — **no fsync**, no `WriteThrough`, and .NET exposes no
-  random-access flush) FIRST; the SQLite index transaction SECOND; the
+  buffer cache — **no fsync**; the .NET flush-to-disk option
+  (`FileStream.Flush(flushToDisk: true)`) exists and is deliberately not used,
+  so OsFlush is a chosen, declared tier rather than a forced one) FIRST; the
+  SQLite index transaction SECOND; the
   mutation is acknowledged only after the transaction commits.
 - The SQLite side runs on all defaults (`journal_mode=DELETE` rollback journal,
   `synchronous=FULL`), so the transaction commit fsyncs its journal — but the

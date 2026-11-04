@@ -311,6 +311,47 @@ public sealed class JsonlStoreTests
     }
 
     [Fact]
+    public void Unindexed_tail_from_a_failed_write_does_not_poison_a_later_write_same_instance()
+    {
+        var dir = NewDir("tail-poison");
+        var model = new OracleModel();
+        string jsonlPath;
+        using (var store = Open(dir))
+        {
+            for (var i = 0; i < 3; i++)
+            {
+                ModelOps.AppendMessage(model, "s", Text("user", $"acked-{i}"));
+                store.AppendMessage("s", Text("user", $"acked-{i}"));
+            }
+            jsonlPath = Path.Combine(dir, "sessions", SessionDirs.DirName("s"), "messages-0.jsonl");
+            var indexed = new FileInfo(jsonlPath).Length;
+            // Simulate an interrupted data stage INSIDE this open instance:
+            // unindexed bytes beyond the published pointer (what a failed/rolled-back
+            // append or finalize leaves in the file).
+            File.AppendAllText(jsonlPath, new string('J', 240) + '\n');
+            // A successful write afterwards must seek to the published pointer,
+            // overwrite the failed tail, and never widen the indexed region.
+            ModelOps.AppendMessage(model, "s", Text("user", "after-failure"));
+            var reported = store.AppendMessage("s", Text("user", "after-failure"));
+            Assert.Equal(3, reported);
+            Oracle.VerifyAll(store, model);
+            // Failure-and-success both visible: indexed content is intact, tail garbage is not served.
+            Assert.Equal(Describe(ModelOps.WindowOf(model, "s", 0, null)), Describe(store.OpenRecent("s", 10)));
+            Assert.Equal(4, store.ListSessionsMeta().Single().MessageCount);
+        }
+        var lengthBeforeReopen = new FileInfo(jsonlPath).Length;
+        using (var reopened = Open(dir))
+        {
+            // Open truncates the unindexed remainder the short overwrite left behind;
+            // the staged garbage was far longer than the replacement line.
+            var lengthAfterReopen = new FileInfo(jsonlPath).Length;
+            Assert.True(lengthAfterReopen < lengthBeforeReopen, "unindexed tail must be truncated");
+            Oracle.VerifyAll(reopened, model);
+        }
+        Directory.Delete(dir, recursive: true);
+    }
+
+    [Fact]
     public void Describe_declares_layout_tier_and_costs_honestly()
     {
         using var store = Open(NewDir("describe"));
@@ -318,6 +359,10 @@ public sealed class JsonlStoreTests
         Assert.Equal("JsonlOffsetIndex", descriptor.StoreName);
         Assert.Equal(AckTier.OsFlush, descriptor.AckTier);
         Assert.Contains("no fsync", descriptor.SettingsNote, StringComparison.OrdinalIgnoreCase);
+        // The inaccurate capability claim from the first revision must stay gone:
+        // flush-to-disk exists in .NET; OsFlush is chosen, not forced.
+        Assert.DoesNotContain("no random-access", descriptor.SettingsNote, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("flushToDisk", descriptor.SettingsNote, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("fsync", descriptor.Notes, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("SQLite", descriptor.SettingsNote);
         foreach (var declared in new[] { "generation rewrite", "no cross-file", "orphan", "RequireSettled", "CancelOpen" })

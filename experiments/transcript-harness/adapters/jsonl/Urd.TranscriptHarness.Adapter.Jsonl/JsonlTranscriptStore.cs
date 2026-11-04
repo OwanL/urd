@@ -17,8 +17,9 @@ namespace Urd.TranscriptHarness.Adapter.JsonlStore;
 ///
 /// Durability ordering (declared): the message line is written and flushed to
 /// OS buffers BEFORE the SQLite index transaction; a mutation is acknowledged
-/// only once the index transaction commits. The tier is OsFlush — bounded by
-/// the weakest stage: the JSONL data hand-off is OS-buffered (no fsync), even
+/// only once the index transaction commits. The tier OsFlush is chosen, not
+/// forced: the JSONL data hand-off is OS-buffered (no fsync attempted; the
+/// .NET flush-to-disk option exists and is deliberately not used), even
 /// though SQLite commits with its default journal mode and synchronous
 /// settings. A process kill therefore leaves either the before-state or the
 /// after-state: unindexed file tails are truncated during Open (recovery by
@@ -47,8 +48,9 @@ public sealed class JsonlTranscriptStore : ITranscriptStore
     public StoreDescriptor Describe() => new(
         StoreName,
         AckTier.OsFlush,
-        "JSONL message lines: FileStream.Write + Flush() only (OS buffer cache, NO fsync; no FileOptions.WriteThrough; " +
-        "no random-access-flush API exists for .NET streams). SQLite index: Microsoft.Data.Sqlite 10.0.14 with all defaults " +
+        "JSONL message lines: FileStream.Write + Flush() only (OS buffer cache, NO fsync). OsFlush is chosen, not forced: " +
+        "the flush-to-disk option (FileStream.Flush(flushToDisk: true)) exists in .NET and is deliberately NOT used here, " +
+        "so no fsync claim is made. SQLite index: Microsoft.Data.Sqlite 10.0.14 with all defaults " +
         "(journal_mode=DELETE rollback journal, synchronous=FULL), so each index transaction commit fsyncs its own journal; " +
         "the declared ack tier is still OsFlush because the JSONL data stage is the weakest link and is never fsynced. " +
         "Commit ordering per mutation: JSONL line(s) written and flushed FIRST, SQLite index transaction SECOND, " +

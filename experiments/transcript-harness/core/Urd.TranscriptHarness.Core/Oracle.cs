@@ -70,6 +70,12 @@ public static class ModelOps
     }
 
     /// <summary>Expected logical window [from, toExclusive).</summary>
+    /// <summary>
+    /// Expected window for a range read. Note: the clamping here is for building
+    /// expectations of clamping-style reads (openRecent, PageOlder); ReadRange is a
+    /// strict-bounds op and TraceExecutor validates trace arguments against the
+    /// strict contract before consulting this method.
+    /// </summary>
     public static MessageRecord[] WindowOf(OracleModel model, string sessionId, long from, long? toExclusive)
     {
         var list = model.Sessions.TryGetValue(sessionId, out var value)

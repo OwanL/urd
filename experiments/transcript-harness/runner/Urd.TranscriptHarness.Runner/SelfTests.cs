@@ -42,6 +42,7 @@ public static class SelfTests
         Check("preview window rules (metadata-only, bounded)", PreviewWindowRules);
         Check("suffix edit renumbering and truncation", SuffixEditRules);
         Check("delete/assignment invariants", DeleteInvariants);
+        Check("range/page boundary semantics on reference store", RangePageBoundaries);
         Check("child lifecycle: ready/ack/read/close", HostLifecycle);
         Check("host method timing and allocation recorded separately", HostMetricSeparation);
         Check("plugin loads via resolver with external dependency", PluginResolverLoad);
@@ -107,6 +108,50 @@ public static class SelfTests
     }
 
     private static void FaultDetected(Action<FaultFlags> enable) => FaultDetection(enable);
+
+    /// <summary>
+    /// Frozen boundary semantics, exercised directly against the reference store:
+    /// ReadRange strict bounds (valid succeeds, violations throw, unknown session
+    /// is empty), and PageOlder clamp-before-subtract (before &gt; count yields the
+    /// tail window; before &lt; 0 yields empty).
+    /// </summary>
+    private static void RangePageBoundaries()
+    {
+        using var store = new ReferenceTranscriptStore();
+        store.Open("unused-root", "unused-attachments");
+        for (var i = 0; i < 5; i++)
+        {
+            store.AppendMessage("s", MessageOf("user", $"m{i}"));
+        }
+        if (store.ReadRange("s", 2, 5).Length != 3) throw new HarnessError("range [2,5) expected 3 records");
+        if (store.ReadRange("absent", 0, 3).Length != 0) throw new HarnessError("unknown session range must be empty");
+        foreach (var (from, to) in new[] { (0L, 6L), (3L, 1L), (-1L, 3L) })
+        {
+            try
+            {
+                store.ReadRange("s", from, to);
+                throw new HarnessError($"range [{from},{to}) must throw (strict bounds)");
+            }
+            catch (InvalidOperationException)
+            {
+                // Expected for every listed violation.
+            }
+        }
+        // PageOlder: clamp-before-subtract.
+        var tail = store.PageOlder("s", beforeOrdinal: 9, count: 3);
+        if (tail.Length != 3 || MessageText(tail[0]) != "m2")
+        {
+            throw new HarnessError("PageOlder(before>count) must clamp before then subtract");
+        }
+        if (store.PageOlder("s", beforeOrdinal: 9, count: 12).Length != 5)
+        {
+            throw new HarnessError("PageOlder over-wide window must return all records");
+        }
+        if (store.PageOlder("s", beforeOrdinal: 0, count: 3).Length != 0)
+        {
+            throw new HarnessError("PageOlder(before=0) must be empty");
+        }
+    }
 
     // A store that silently drops a deleted-then-recreated history (i.e. loses
     // records entirely) would look like this client: sessions missing entirely.

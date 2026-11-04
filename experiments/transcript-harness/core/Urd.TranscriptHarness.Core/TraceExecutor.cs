@@ -120,14 +120,26 @@ public sealed class TraceExecutor(ITranscriptStore client, OracleModel model)
             {
                 var actual = Timed(TraceOps.PageOlder, _readLatency, () => client.PageOlder(o.SessionId, o.Before, o.Count));
                 var preCount = RequireCount(o.SessionId);
-                var from = Math.Clamp(o.Before - o.Count, 0, preCount);
-                Oracle.CompareWindow(actual, ModelOps.WindowOf(model, o.SessionId, from, Math.Min(o.Before, preCount)),
+                // Frozen semantics clamp `before` to the count FIRST, then subtract:
+                //   to = clamp(before, 0, count); from = max(0, to - count).
+                var to = Math.Clamp(o.Before, 0, preCount);
+                var from = Math.Max(0, to - o.Count);
+                Oracle.CompareWindow(actual, ModelOps.WindowOf(model, o.SessionId, from, to),
                     $"pageOlder({o.SessionId}, before={o.Before}, n={o.Count})");
                 break;
             }
 
             case TraceReadRange o:
             {
+                // Contract: ReadRange bounds are strict — 0 <= from <= to <= count;
+                // the reference store throws on violation. Traces must only generate
+                // valid windows; a violation is a generator bug, not a clamp case.
+                var preCount = RequireCount(o.SessionId);
+                if (o.From < 0 || o.To < o.From || o.To > preCount)
+                {
+                    throw new HarnessVerificationError(
+                        $"op {index}: readRange({o.SessionId}, [{o.From},{o.To})) outside count={preCount}; strict contract bounds");
+                }
                 var actual = Timed(TraceOps.ReadRange, _readLatency, () => client.ReadRange(o.SessionId, o.From, o.To));
                 Oracle.CompareWindow(actual, ModelOps.WindowOf(model, o.SessionId, o.From, o.To),
                     $"readRange({o.SessionId}, [{o.From},{o.To}))");

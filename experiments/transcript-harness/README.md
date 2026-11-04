@@ -36,6 +36,12 @@ verified by the oracle:
 - **Reads on unknown or empty sessions return an empty window** (absence is not
   an error). Mutations create their target session; `DeleteSession` must name a
   real one.
+- **Range read bounds are strict:** `ReadRange`/window reads require
+  `0 <= from <= to <= count` for a known session; a violation is an
+  `InvalidOperationException` (adapter error), not a silent clamp. Unknown
+  sessions return empty. `PageOlder(before, n)` clamps `before` to the count
+  FIRST, then subtracts (`to = clamp(before, 0, count); from = max(0, to - n)`),
+  so `before > count` yields the tail window, not an empty one.
 - **Deletes final-closure** under the assignment invariant: `RequireSettled`
   must fail while any assignment targeting the session is open;
   `CancelOpen` settles them as part of the same logical operation. Dangling
@@ -48,7 +54,11 @@ verified by the oracle:
   win streaming comparisons by buffering.) Note: the logical oracle cannot
   observe WHEN a batch's content was written — batch write policy is enforced
   through adapter timing/behavior interpretation and adapter-declared policy,
-  not logical verification.
+  not logical verification. Draft-stream identity is per-session unique; until a
+  general cross-session stream test exists, the trace generator only uses
+  globally unique stream IDs, so collisions across sessions are untested and
+  stores must not rely on global stream-ID uniqueness beyond their own state
+  partitioning.
 - **`FetchToolResult`** is the targeted single-result full-content read path
   (hover/inspection); range reads may still return full content as ordinary
   message payload, and UI list views should read through the preview window

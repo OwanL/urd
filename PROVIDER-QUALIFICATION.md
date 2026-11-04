@@ -286,6 +286,44 @@ platform secret protection. No real endpoints for authentication/inference, pers
 configuration, credentials, browser or model calls were used. No owner decision is
 pending; production auth structure and live-account approval remain separate gates.
 
+### Scope-preserving refresh seam — subsequent offline check
+
+**Pass: the scope-loss seam above has a supported lower-level path.** Five added
+cases use `HttpClient.RequestRefreshTokenAsync(RefreshTokenRequest)` from the
+already-present **Duende.IdentityModel 8.1.0**, returning `TokenResponse` rather
+than OidcClient's reduced result. No new dependency or custom OAuth exchange.
+
+- Explicitly narrowed response scopes survive and disable plan use. Omitted
+  response scope retains the **known refresh grant**, tested with both full and
+  initially narrowed grants; it never substitutes requested login scopes.
+  [RFC 6749 §§5.1/6](https://www.rfc-editor.org/rfc/rfc6749.html#section-6)
+  defines this default: omitted request scope means originally granted scope;
+  omitted response scope means that requested/default scope. A narrowed access
+  token alone does not redefine the refresh-token grant. This tests standards
+  semantics, not a claim that OpenAI actually omits response scope.
+- Rotated tokens and `expires_in` survive; in-memory replacement/expiry projection
+  and using the replacement on the next refresh pass.
+- Terminal **HTTP 400 / `invalid_grant` / Protocol** remains distinct from
+  **HTTP 503 / Http**, including its `temporarily_unavailable` JSON body and
+  `Retry-After`. HTTP errors expose the reason phrase via `Error`; use
+  `TryGet("error")` for the structured body. Test caller glue requests
+  reauthorization for the former and preserves credentials for the latter;
+  no retry engine or durable store was built.
+
+**Recommendation:** reuse remains viable with OidcClient for code-flow mechanics
+and the lower-level response for scope-preserving refresh; this gap no longer
+blocks the candidate. This is not production dependency approval. Raw refresh
+transport does **not** validate returned ID tokens; refresh identity rules and
+all previously listed live-account, race, storage and revocation gaps remain.
+Malformed/empty scope responses, absent replacement token, transport exceptions,
+cancellation and retry timing were not added to this check.
+
+Same temporary evidence directory: original 35-case artifacts retained in
+`initial/`; current executable/logs show **40/40 passed**, build **0 warnings/errors**.
+Independent read-only acceptance review approved the new assertions and claims;
+see `review-refresh.md`. No live endpoints, credentials or browser. Source pin:
+[`47a77f2dbda08f418ec95af04fc75529768dc1e2`](https://github.com/DuendeSoftware/foss/blob/47a77f2dbda08f418ec95af04fc75529768dc1e2/identity-model/src/IdentityModel/Client/HttpClientTokenRequestExtensions.cs).
+
 ## Sources
 
 All live documents accessed 2026-11-04; pinned source links fix the inspected code.

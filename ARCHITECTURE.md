@@ -126,6 +126,15 @@ Use concrete flows and small sketches to discuss meaningful alternatives; parall
 investigations and experimental code do not approve a production scaffold or
 project/folder split.
 
+**Owner correction (2026-11-05):** the owner rejected the proposed directory sketch
+organized mainly as `app/Urd.Core`, `Urd.Server`, `Urd.Web` and tests, asking to
+separate Urd's major components/parts according to separation of concerns. Make
+functional responsibilities and dependencies explicit before mapping folders;
+project names alone are not that design. This does not select one assembly/process
+per component or specifically reverse the existing Core/Server dependency boundary.
+The revised [component map](APPLICATION-PLAN.md#1-major-components-and-their-ownership)
+is a proposal for discussion, not approved structure or permission to scaffold.
+
 The [working session sketch](SESSION-DESIGN.md) below records subsequent owner
 input, including the selected, revisable Core/Server boundary; it does not approve
 final APIs, broader base-class scope, fine file/folder layout or a production scaffold.

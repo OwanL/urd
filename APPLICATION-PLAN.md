@@ -1,21 +1,40 @@
-# Application plan — concrete proposal for owner review
+# Application plan — component-led proposal for owner review
 
-2026-11-05. **Planning, not implementation approval.** This joins the completed
-[foundation review](FOUNDATION-REVIEW.md) into one small application structure.
-Keep the selected Core/Server boundary and existing session alignment; the new
-layout, client split, transport and setup mechanics below remain revisable proposals.
-The goal is readable C# and straightforward source customization, not a framework.
+2026-11-05. **Planning, not implementation approval.** The owner rejected the
+project-first `app/Urd.Core`, `Urd.Server`, `Urd.Web`, tests sketch: “I dont like it,
+i say we separate the major components and parts of urd, per separation of concerns
+prinsiples”. The directory proposal is withdrawn, not approved by silence.
 
-## 1. Responsibilities first
+Organize around Urd's responsibilities, then map classes and folders. The component
+map below is a revised recommendation, not a newly selected hierarchy or a project
+per component. The existing Core-without-ASP.NET/Server dependency boundary and narrow
+session alignment still stand; the owner has not specifically reversed them.
+The [foundation review](FOUNDATION-REVIEW.md) retains the other scoped outcomes.
 
-```text
-Browser: components + local drafts/views
-    │ requests / live view updates
-Server: local request checks + thin handlers + composition
-    │ ordinary C# calls; no HTTP objects cross this boundary
-Core: session handles → temporary execution → IChatClient
-                    ↘ guarded SQLite writes / bounded history reads
-```
+## 1. Major components and their ownership
+
+| Proposed component | Owns | Must not absorb |
+| --- | --- | --- |
+| **Agent runtime** | Sessions, temporary execution, context preparation and coordination/deferred work. Internal parts have their own owners, not one runtime manager. | HTTP/UI state, provider-specific protocols or direct SQL spread through the agent loop. |
+| **Tools and integrations** | Tool catalog/dispatch, current validation/permissions, built-in implementations and MCP integration. | Session lifecycle or provider request loops. Session-control tools enter Runtime's ordinary command path, not database shortcuts. |
+| **Providers** | Model catalog/access, provider adapters, provider sign-in/credentials and request-only `IChatClient` construction. | Agent sessions or another mandatory model-client facade. Runtime context policy remains separate from provider-specific representation. |
+| **Persistence** | Shared SQLite access, coherent history/coordination transactions and managed attachment storage. | Agent scheduling, transport or a generic interchangeable-storage framework. Retention policy comes from the owning domain; storage enforces it. |
+| **Application host** | Startup/shutdown, configuration wiring, data-instance ownership, browser API/access checks and composition. | Agent business rules or frontend state. This is the ASP.NET-dependent boundary. |
+| **User interface** | Shared Preact components, navigation/drafts, bounded read models and backend connection. | Agent execution, durable truth or a frontend session-class hierarchy. |
+
+These boundaries apply to the intended application, not only the first fake reply.
+Implement only needed parts as capabilities arrive; do not pre-create empty folders.
+Runtime's **Sessions**, **Execution**, **Context** and **Coordination** are explicit
+subcomponents, not extra session subclasses. Tool invocation uses the current dispatch
+path; provider exposure does not grant execution permission. Context still owns
+prefix/history distinctions and its policy does not move into provider adapters.
+
+Dependency direction: UI calls the host; the host composes/calls the runtime and
+other components. Runtime uses provider requests, tool dispatch and persistence.
+Transport cannot leak into those components. Coordination tools call guarded runtime
+commands; separating folders does not permit a second admission/write path.
+
+### Existing class alignment within that map
 
 | Owner | What it does; what it must not become |
 | --- | --- |
@@ -32,37 +51,27 @@ implementation with that capability, not an empty placeholder now. Titles, compa
 and pruning remain operations sharing `IChatClient`, not additional session types.
 Small records stay with their owner until real sharing warrants a separate file.
 
-## 2. Proposed file layout
+## 2. Map components to files after responsibility alignment
 
-Use the existing checkout or extracted custom copy as the writable root. One `app/`
-subtree scopes production SDK/build rules without changing the research harness.
+The previous directory tree is withdrawn. Do not translate the new component table
+straight into six projects, processes or service interfaces. Logical components,
+physical folders and compile-time dependency boundaries are different decisions.
+The selected ASP.NET-free Core boundary can contain explicit functional components;
+additional assembly splits need a concrete enforcement/reuse benefit.
 
-```text
-copy-root/
-  app/
-    Urd.Core/
-      Sessions/             SessionBase, PrimarySession, SessionExecution,
-                            SessionManager — one file per substantive class
-      Storage/              SessionStore and its durable records
-    Urd.Server/             Program, SessionEndpoints, LocalBrowserAccess,
-                            BackendInstance (data ownership/startup)
-    Urd.Web/                App.tsx, Transcript.tsx, workspace-state.ts, backend.ts
-    Urd.Backend.Tests/      shared behavior/SQLite tests and fake-model support
-    global.json            .NET SDK authority
-    .node-version          Node authority; use that distribution's bundled npm
-    ...                    only actually needed solution/build configuration
-  urd.ps1                  thin Windows command entry; anchors paths to this root
-  experiments/             existing research, unchanged and outside app policies
-  builds/                  generated application/distribution outputs
-  .tools/                  acquired tools; not distributed source
-  data/                    this copy's persistent data; never cleaned or packaged
-```
+The next directory proposal should make those components and their substantive
+classes visible instead of presenting Core as an undifferentiated bucket. Folder
+names, exact nesting and test placement remain open. Tests should follow behavior
+owners without automatically adding a test project per component.
 
-The root also retains its documentation/license. Web tests can sit beside their
-modules; there is no test assembly per class or new shared-contract project.
-Compared with root-level `src/` and `tests/`, `app/` adds a directory but keeps one
-SDK/MSBuild policy boundary around production and its tests. Names are not fixed.
-No existing research is moved. No future empty provider/tool/host folders are added.
+Keep the agreed custom-copy requirements: source, generated builds and persistent
+data together in a user-chosen writable root; data outside generated/distribution
+inputs and preserved by rebuild/clean. Scope production SDK/build rules away from
+existing experiments, without moving the research or imposing new root-wide policy.
+The proposed setup still has one SDK pin (`global.json`) and one Node pin (for
+example `.node-version`, with bundled npm); their paths follow the revised layout.
+A thin Windows command entry, `.tools/` and `builds/` remain setup proposals, not
+owner-selected directory names or physical packaging.
 
 ## 3. A concrete interaction
 
@@ -104,7 +113,7 @@ Built Vite assets are served by Kestrel; no separate Node application server is 
 
 Use .NET 10 LTS, Vite and the preferred npm route. Choose supported compatible pins
 as engineering work, not from the tools installed on this machine. Read version
-pins from the scoped files above, not duplicate script constants. Acquire missing
+pins from the eventual scoped version files, not duplicate script constants. Acquire missing
 declared SDK/Node payloads into versioned `.tools/` using official distributions;
 validate completion/version and use explicit executables with child-only environment.
 No global PATH changes, automatic app updates or custom tool-manager framework.
@@ -153,10 +162,11 @@ enter as subsequent working capabilities, not abandoned features. There is no cl
 that the fake-model checkpoint is ready for normal use. Detailed schema/method names,
 lock primitives and test sequencing are implementation work, not owner questionnaires.
 
-**Owner discussion:** review this concrete application split and source-copy workflow
-before treating the new structure as agreed. Existing Core/Server and session choices
-are not being reopened. A structural agreement is distinct from authorization to
-write production code; the latter must have a clear bounded scope.
+**Owner discussion:** first align the functional components and their responsibilities,
+then show the class/directory mapping. The earlier request to approve the project-first
+layout and begin implementation is superseded by this correction. Existing Core/Server
+and session choices are not automatically reopened. Neither agreement with separation
+of concerns nor this revised recommendation authorizes production code.
 
 **Evidence:** [Session](SESSION-DESIGN.md), [Browser](BROWSER-DESIGN.md),
 [Build](REPO-FOUNDATIONS.md), [backend lifecycle](BACKEND-LIFECYCLE.md) and the

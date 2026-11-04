@@ -205,6 +205,44 @@ Independent source/evidence review recomputed medians and verified the variant
 diffs; no supported blocker for these limited claims. Browser outcomes were not
 independently rerun by that reviewer. All owned browser/server processes stopped.
 
+## Closure interaction sketch — policy still open
+
+A disposable follow-up explored two actions, without implementing backend closure:
+
+- **Close chat:** stop/close the containing chat and its bounded helper; keep the
+  independent worker chats reachable in their existing tabs.
+- **Close chat and workers…:** explicitly name the affected chats, warn about a
+  running worker, focus Cancel by default, and show pending closure until stop
+  and cleanup are confirmed. This is not an approved automatic cascade rule.
+
+The example deliberately separates creator **Checkout** from assignment requester
+**Release**. Release stays open and retains UI audit's recorded result, not its
+entire worker conversation. Stopping API review without a result is not displayed
+as successful assignment completion. Group scope, provenance display, navigation
+placement and the exact controls are illustrative—not new lifecycle authority.
+
+**Owner outcome:** the first policy-card diagrams were rejected as poor UI. The
+revised compact tab/menu/dialog example was at most a possible pattern; the owner
+again criticised its UI and warned against overfitting before a real UI exists.
+Neither independent-worker survival nor warning-then-cascade was selected. Keep
+that policy open; stop refining this mockup and revisit through a real UI slice.
+This does not reopen the selected frontend stack or settle classes/folders.
+
+Verification: strict TypeScript checking and bundling passed. Headless interaction
+checks covered ordinary-close survivors, safe Cancel, pending tabs remaining
+visible, explicit simulated cleanup acknowledgement, and retained requester
+results. Independent image review caught a missing visible family-close entry
+point; an actual menu capture resolved that presentation gap. **This verifies
+only a synthetic interaction**, not real stopping, deletion, authority, result
+retention, keyboard accessibility or production UI quality. No backend commands
+or production scaffold were added.
+
+Local source and evidence:
+`C:\Users\OwanLazic\AppData\Local\Temp\urd-foundation-streams-6268b517\browser-closure-33d8ad0d\v2\`:
+`RUN.md`, `ui.tsx`, `choice.png`, `after-close.png`, `dialog.png`,
+`family-pending.png`, `after-family.png`. The three focused images were shown
+inline to the owner. All owned browser/server processes were stopped.
+
 ## Integration interfaces, not final wire protocol
 
 - Session summaries and backend capability/status flags remain authoritative.

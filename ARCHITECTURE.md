@@ -145,8 +145,12 @@ the code that discovers/loads/assembles it are separate concerns. This does not 
 existing user/project guidance into that location, choose exact paths, or settle
 reload timing. Configuration, context/catalog management, coordination/deferred work,
 usage/accounting and source customization must also stay visible in the wider design.
-The [expanded concern inventory](APPLICATION-PLAN.md#1-concern-inventory-before-grouping)
-is preparation for that discussion, not approved structure or permission to scaffold.
+After agreeing with this broader direction, the owner requested a new design.
+The resulting [application proposal](APPLICATION-PLAN.md) maps concerns to owners,
+class collaborations and a functional source layout. It keeps editable guidance
+separate and expresses the existing Core/Server boundary without a catch-all Core
+source directory. This is a proposal for review, not approved structure or permission
+to scaffold; the owner's request to propose a design does not authorize code.
 
 The [working session sketch](SESSION-DESIGN.md) below records subsequent owner
 input, including the selected, revisable Core/Server boundary; it does not approve

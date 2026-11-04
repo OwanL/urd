@@ -99,9 +99,11 @@ in [the application plan](APPLICATION-PLAN.md). The owner rejected the project-f
 directory sketch and found its six-component replacement incomplete. Start from the
 full set of concerns, using Pie as a reference: distinguish tools, harness execution,
 supporting systems and editable guidance, alongside UI, hosting, history/persistence
-and the other documented areas. Develop ownership before class/file layout; a first
-checkpoint does not define the whole product. No repeated reload/recovery/idle-only
-questionnaire or production permission follows from completed research.
+and the other documented areas. At the owner's request, the current plan now proposes
+specific ownership, class collaborations and a matching directory layout; review
+those together. A first checkpoint does not define the whole product. No repeated
+reload/recovery/idle-only questionnaire or production permission follows from the
+completed research or the request for a design.
 
 The four stream reports and shared integration were independently reviewed within
 their stated limits. Research recommendations do not turn fixtures into production

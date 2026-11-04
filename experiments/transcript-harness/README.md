@@ -6,11 +6,12 @@ frozen adapter contract. Programme background lives in
 review in [../../STORAGE-BINDING-REVIEW.md](../../STORAGE-BINDING-REVIEW.md));
 this README documents the harness code in `experiments/transcript-harness/`.
 
-Status: **Stage 0 smoke + self-tests complete; no real storage engine adapter
-yet.** The only shipped adapter is the in-memory reference store, used to prove
-the runner mechanics, generation, protocol and oracle. No result derived from it
-may be treated as evidence about any real storage family, and nothing here
-claims durability.
+Status: **Stage 0 qualification in progress; no comparative performance verdict.**
+SQLite rows, LiteDB, LMDB and RocksDB adapters are implemented under `adapters/`
+and have passed focused tests and shared smoke workloads. Additional layouts
+remain in development. The in-memory reference store proves runner mechanics,
+not persistence. Abrupt-exit validation is not proof of mid-write atomicity or
+power-loss durability; see the validation limitations below.
 
 ## Layout
 

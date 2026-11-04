@@ -135,8 +135,8 @@ that the general API-key Responses API lacks those features [O5].
   A missing ID token is accepted by the generic flow. Supply maintained JWT/JWKS
   validation, require the token, enforce nonce/identity/scopes, validate state on
   error callbacks, and handle issued-ID/resource parameters. Do not write crypto
-  or weaken OpenAI's validation contract to fit defaults. This is source evidence,
-  not an executed authentication-library qualification.
+  or weaken OpenAI's validation contract to fit defaults. The offline follow-up
+  below now exercises these mechanics; it does not qualify live authentication.
 - **Copilot:** independent source exchanges a GitHub OAuth token using
   `GET https://api.github.com/copilot_internal/v2/token`, bearer auth, for a
   short-lived Copilot token. “Refresh” repeats that exchange; its so-called
@@ -186,8 +186,9 @@ These are behaviors, **not proposed classes or filesystem boundaries**:
 
 ## Verification and next qualification sequence
 
-**This stream performed read-only public documentation/source checks.** It made
-no authenticated requests and ran no live/local model, credential probe or build.
+**Initial research performed read-only public documentation/source checks.** It
+made no authenticated requests and ran no live/local model, credential probe or build.
+The separately authorized offline follow-up below adds synthetic executable evidence.
 Independent source checks covered Copilot, API-key/local routes and the focused
 OAuth candidate. Direct OpenAI docs and public OIDC discovery were read; they
 establish endpoints/contracts, not deployment or account eligibility.
@@ -204,10 +205,11 @@ OpenAI acceptance or entitlement. Final fixture evidence belongs in
 
 1. **Before login:** finish fixture coverage for the restricted plan request,
    ordered native items, malformed/failed/incomplete/truncated streams, cancellation
-   and restart reconstruction. Add a small synthetic OAuth fixture for dynamic
-   client-ID exchange, signed-token validation failures, denial/missing scope,
-   same-account refresh races, replacement persistence and revocation failure.
-   This is the smallest next implementation experiment, not an auth framework.
+   and restart reconstruction. Synthetic OAuth dynamic client-ID exchange,
+   signed-token validation failures and denial/missing scope checks are now
+   covered by the offline follow-up below. Same-account refresh
+   races, replacement persistence and revocation failure remain untested. These
+   are bounded qualification steps, not an auth framework.
 2. **Owner-approved account test:** fresh Urd-only registration, verify identity
    and scopes, then retrieve that account's catalog. Ask specifically before
    launching sign-in or storing credentials. Do not read existing Pie tokens.
@@ -235,9 +237,60 @@ and bounded failure handling. Copilot support remains its own gap. There is no
 outstanding owner question in this session and no production work is authorized
 by this report.
 
+## Offline auth follow-up — 2026-11-04
+
+**Authorized:** the owner's “Yes—start both” covered this bounded fake-provider
+experiment, not live sign-in or a production dependency choice. **Result: candidate
+mechanics fit with explicit glue; defaults alone do not meet the route contract.**
+
+Ran the real **Duende.IdentityModel.OidcClient 7.1.1** package plus maintained
+**Microsoft.IdentityModel.JsonWebTokens 8.23.0** (Microsoft's active 8.x line;
+MIT, source `8b16f418b3d587416d293e9ba34c5d310781cdb3` [L4]). Windows x64, .NET SDK
+10.0.403/runtime 10.0.14. The 35-case executable uses an in-process
+`HttpMessageHandler` for fake discovery, authorization, token and JWKS endpoints
+on reserved `.invalid` domains; no socket-backed handler exists. Per-case RSA-2048
+keys are generated/disposed in memory. Real Duende constructs authorization/code
+requests, fetches discovery/JWKS and invokes the supplied validator; Microsoft's
+JWT library verifies signatures/issuer/audience/lifetime using those public keys.
+No crypto implementation or production auth classes were introduced.
+
+| Executed check | Finding / necessary glue |
+| --- | --- |
+| New and returning registration | `dynamic_agent_client` authorization → issued ID in code POST and ID-token audience works by changing **isolated attempt options** before `ProcessResponseAsync`. Without handoff, the fake rejects exchange. Reject missing/placeholder issued IDs and returning-ID substitution before exchange; returning callback may omit ID. |
+| PKCE and parameters | Real S256 challenge matches generated verifier; fake token endpoint rejects altered verifier. Exact redirect URI/resource, form encoding and absence of client secret/Authorization header checked. Returning authorization omits the registration name hint. |
+| State, including denial | Wrong/missing state rejected before exchange; valid denial exchanges no code. Control confirms Duende checks success state but returns `access_denied` without checking denial state. Pre-check **all** callbacks before using error or issued ID. |
+| Required signed identity | Valid signed token succeeds. Unsigned/wrong-key, wrong issuer/audience, expired/no-expiry, wrong/missing nonce and missing subject are rejected. Maintained JWT validation handles crypto and standard claims; attempt-bound nonce/subject checks are explicit. Missing ID token needs a separate presence gate: even `RequireIdentityTokenSignature=true` does not require a token or invoke the validator when absent. |
+| Unsafe-default controls | Executed controls accept missing/unsigned ID tokens and a wrong nonce; authorization generates no nonce by default. Supply a fresh nonce and validator rather than treating generic OAuth success as verified OIDC identity. |
+| Granted scopes | Missing plan/invoke scope, absent token-response scope, callback-only scope and substring lookalikes leave valid identity **signed in, plan use disabled**. Check exact token-response grants; never infer access from requested/callback scopes or silently fall back to API billing. |
+| Small refresh check | Issued ID/resource, omitted scope, rotated access/refresh tokens, returned expiry, next use of replacement and stale-token `invalid_grant` all exercised. **New seam:** `RefreshTokenAsync` returns neither granted scope nor raw `TokenResponse`, even when fake refresh narrows scope. Use a scope-preserving lower-level Duende refresh response (plus applicable validation) or another verified seam; do not silently retain obsolete grants. That alternative was not implemented here. |
+
+**Evidence:** `C:\Users\OwanLazic\AppData\Local\Temp\urd-foundation-streams-6268b517\offline-auth-b3a39851\`
+contains `Program.cs`, `AuthProbe.csproj`, `packages.lock.json`, `results.json`,
+`build.log`, `run.log`, reproduction notes and pinned/public source snapshots.
+Final build: **0 warnings/errors; 35/35 cases passed**, including controls that
+intentionally demonstrate unsafe defaults. Fixtures/logs are temporary local
+artifacts, not committed regression infrastructure. Independent acceptance review
+covers fixture assertions and the distinction between library behavior and glue.
+
+**Recommendation:** retain this as a viable candidate, not a selected dependency.
+The code-flow handoff is not a blocker; required glue is explicit callback ordering,
+per-attempt ID/nonce state, maintained signature/claim validation, mandatory identity
+and granted-scope gating. Refresh scope propagation needs attention before adoption.
+The bounded fixture is not an estimate of production implementation cost.
+
+**Not established:** real OpenAI registration, actual signing algorithms/key rollover,
+JWKS cache/network failures, account/model entitlement or inference; browser/loopback
+listener behavior, concurrent sign-ins, refresh serialization/races, durable atomic
+replacement, refresh ID-token handling, revocation, cancellation/retry policy or
+platform secret protection. No real endpoints for authentication/inference, personal
+configuration, credentials, browser or model calls were used. No owner decision is
+pending; production auth structure and live-account approval remain separate gates.
+
 ## Sources
 
 All live documents accessed 2026-11-04; pinned source links fix the inspected code.
+
+- **L4:** Microsoft [JWT 8.23.0 package/source metadata](https://api.nuget.org/v3-flatcontainer/microsoft.identitymodel.jsonwebtokens/8.23.0/microsoft.identitymodel.jsonwebtokens.nuspec), [8.x support status](https://github.com/AzureAD/azure-activedirectory-identitymodel-extensions-for-dotnet#versions).
 
 - **O1:** OpenAI [OSS/local overview](https://developers.openai.com/siwc/token-sharing-open-source), [registration/sign-in](https://developers.openai.com/siwc/token-sharing-open-source/sign-in).
 - **O2:** [Accounts, refresh, revocation and credential handling](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions), [token lifetimes](https://developers.openai.com/siwc/token-sharing-open-source/token-reference).

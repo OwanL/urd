@@ -9,10 +9,12 @@ namespace Urd.TranscriptHarness.Core;
 /// real reopen behaviour.
 /// 1. clean-reopen: graceful close, fresh host process over the same store
 ///    root, then FULL content verification against the baseline model.
-/// 2. kill-reopen: process kill with one unacknowledged mutation in flight;
-///    after reopen the session must equal the baseline or the
-///    baseline-plus-inflight end state — never partial content. The verdict is
-///    by content comparison, never by the child merely exiting.
+/// 2. kill-reopen: abrupt process exit (SIGKILL-style) with one unacknowledged
+///    append sent but not awaited; after reopen the session must equal the
+///    baseline or the baseline-plus-inflight end state — never partial content.
+///    This is a content-checked recovery observation for that scenario only:
+///    it never proves mid-operation/torn-write atomicity, and the verdict is
+///    never by the child merely exiting.
 /// </summary>
 /// <remarks>
 /// Adapters declaring <see cref="AckTier.MemoryOnly"/> cannot be judged for
@@ -94,28 +96,31 @@ public static class ValidateRunner
             reopen.Dispose();
         }
 
-        // ---- Check 2: kill with one mutation in flight, accept before/after. ----
+        // ---- Check 2: abrupt exit with an unacknowledged append in flight. ----
+        // A request is sent without awaiting its ack, then the host process is
+        // killed after a fixed grace period that lets the op land (or not)
+        // nondeterministically. The evidence this produces is content-checked
+        // recovery after an abrupt exit with one unacknowledged request — not
+        // a mid-operation or torn-write atomicity proof.
         var killer = IpcStoreAdapter.Spawn(launch);
+        notes.Add(
+            "kill check: content-checked recovery after abrupt process exit with one unacknowledged request; " +
+            "does not prove mid-operation/torn-write atomicity");
         string? resolution = null;
         var killVerified = false;
         try
         {
             killer.SendRaw(RawAppend(sessionId, "inflight-marker-<kill>"));
-            Thread.Sleep(120); // let the unacknowledged op land (or not) nondeterministically
+            Thread.Sleep(120); // fixed grace period so the unacknowledged op lands (or not) nondeterministically
             killer.KillNow();
             killer.Process.WaitForExit();
             killer.Dispose();
 
-            // Candidate end state: baseline plus the in-flight append.
-            var withInflight = new OracleModel();
-            foreach (var kv in baseline.Sessions)
-            {
-                foreach (var expectedMessage in kv.Value)
-                {
-                    ModelOps.AppendMessage(withInflight, kv.Key, new MessageRecord(expectedMessage.Role, expectedMessage.Parts));
-                }
-            }
-            ModelOps.AppendMessage(withInflight, sessionId, Message(20000, "inflight-marker-<kill>"));
+            // Candidate end state: the full baseline model plus the in-flight
+            // append. Built by a shared helper so every expected baseline record
+            // (sessions AND assignment records) is preserved — omitting any
+            // subset would silently stop verifying that part of the store.
+            var withInflight = ExpectedAfterKill(baseline, sessionId, Message(20000, "inflight-marker-<kill>"));
 
             var reopenAfterKill = IpcStoreAdapter.Spawn(launch);
             try
@@ -166,6 +171,30 @@ public static class ValidateRunner
             killVerified,
             resolution,
             notes);
+    }
+
+    /// <summary>
+    /// Expected after-state for the kill check: a full copy of the baseline
+    /// model (sessions AND assignment records) plus the unacknowledged
+    /// in-flight append. Shared by the runner and self-tests so the after-state
+    /// verification always carries every baseline expectation with it.
+    /// </summary>
+    public static OracleModel ExpectedAfterKill(OracleModel baseline, string sessionId, MessageRecord inflightMessage)
+    {
+        var after = new OracleModel();
+        foreach (var kv in baseline.Sessions)
+        {
+            foreach (var expectedMessage in kv.Value)
+            {
+                ModelOps.AppendMessage(after, kv.Key, new MessageRecord(expectedMessage.Role, expectedMessage.Parts));
+            }
+        }
+        foreach (var assignment in baseline.Assignments.Values)
+        {
+            ModelOps.CreateAssignment(after, assignment with { });
+        }
+        ModelOps.AppendMessage(after, sessionId, inflightMessage);
+        return after;
     }
 
     private static Exception? TryVerifyAll(IpcStoreAdapter client, OracleModel model)

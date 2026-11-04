@@ -48,6 +48,7 @@ public static class SelfTests
         Check("plugin loads via resolver with external dependency", PluginResolverLoad);
         Check("validate runner mechanics (memory-only path)", ValidateMechanics);
         Check("kill mechanics (mechanics only; no durability interpretation)", KillMechanics);
+        Check("validate after-state keeps assignment verdicts (regression)", ExpectedAfterKeepsAssignmentVerdicts);
 
         if (failures.Count > 0)
         {
@@ -413,6 +414,60 @@ public static class SelfTests
         }
     }
 
+    /// <summary>
+    /// Regression: the kill-check expected-after model must carry the baseline
+    /// settled assignment, so a reopened store that lost or altered it FAILS
+    /// the after-state branch instead of silently skipping assignment checks.
+    /// </summary>
+    private static void ExpectedAfterKeepsAssignmentVerdicts()
+    {
+        var baseline = new OracleModel();
+        ModelOps.AppendMessage(baseline, "s", MessageOf("user", "acked-1"));
+        ModelOps.AppendMessage(baseline, "s", MessageOf("assistant", "acked-2"));
+        ModelOps.CreateAssignment(baseline, new AssignmentRecord("asg-1", "s", "work", AssignmentStatus.Settled, "done"));
+
+        var expectedAfter = ValidateRunner.ExpectedAfterKill(baseline, "s", MessageOf("user", "inflight"));
+        if (expectedAfter.Count("s") != 3 ||
+            expectedAfter.Assignments.Count != 1 ||
+            !expectedAfter.Assignments.TryGetValue("asg-1", out var carried) ||
+            carried.Status != AssignmentStatus.Settled ||
+            !string.Equals(carried.ResultText, "done", StringComparison.Ordinal) ||
+            carried.TargetSessionId != "s")
+        {
+            throw new HarnessError("expected-after model dropped expected baseline data (sessions or assignment)");
+        }
+
+        using var store = new ReferenceTranscriptStore();
+        store.Open("unused-root", "unused-attachments");
+        store.AppendMessage("s", MessageOf("user", "acked-1"));
+        store.AppendMessage("s", MessageOf("assistant", "acked-2"));
+        store.AppendMessage("s", MessageOf("user", "inflight"));
+        store.CreateAssignment(new AssignmentRecord("asg-1", "s", "work", AssignmentStatus.Settled, "done"));
+        store.SettleAssignment(new SettleAssignmentRequest("asg-1", "done"));
+
+        // The honest store passes the after-state verdict.
+        Oracle.VerifyAll(store, expectedAfter);
+
+        // A store whose settled assignment was lost or altered must fail.
+        foreach (var (status, resultText) in new[]
+        {
+            (AssignmentStatus.Open, "done"), // persistence of the settled status was lost
+            (AssignmentStatus.Settled, "altered"), // persistence of the result text was lost
+        })
+        {
+            using var faulted = new AssignmentFaultClient(store, status, resultText);
+            try
+            {
+                Oracle.VerifyAll(faulted, expectedAfter);
+                throw new HarnessError($"{status}/{resultText} settled assignment passed after-state verification");
+            }
+            catch (HarnessVerificationError)
+            {
+                // Expected: the after-state branch detects assignment persistence faults.
+            }
+        }
+    }
+
     private static string LocatePluginAssembly()
     {
         var dllName = "Urd.TranscriptHarness.Plugin.TestPlugin.dll";
@@ -563,6 +618,35 @@ internal sealed class FaultyClient(ITranscriptStore inner, FaultFlags faults) : 
         return [.. list];
     }
 
+    public void Dispose()
+    {
+        // The inner store's lifetime is owned by the self-test wrapper, not here.
+    }
+}
+
+/// <summary>Delegating client whose GetAssignment deliberately disagrees with the store, to confirm the after-state model still catches it.</summary>
+internal sealed class AssignmentFaultClient(ITranscriptStore inner, AssignmentStatus overrideStatus, string overrideResultText) : ITranscriptStore
+{
+    public StoreDescriptor Describe() => inner.Describe();
+    public void Open(string storeRoot, string attachmentRoot) => inner.Open(storeRoot, attachmentRoot);
+    public SessionMeta[] ListSessionsMeta() => inner.ListSessionsMeta();
+    public MessageRecord[] OpenRecent(string sessionId, int count) => inner.OpenRecent(sessionId, count);
+    public MessageRecord[] PageOlder(string sessionId, long beforeOrdinal, int count) => inner.PageOlder(sessionId, beforeOrdinal, count);
+    public MessageRecord[] ReadRange(string sessionId, long fromOrdinal, long toOrdinalExclusive) => inner.ReadRange(sessionId, fromOrdinal, toOrdinalExclusive);
+    public WindowPreview OpenRecentPreview(string sessionId, int count, int previewChars) => inner.OpenRecentPreview(sessionId, count, previewChars);
+    public string FetchToolResult(string sessionId, long ordinal, int partIndex) => inner.FetchToolResult(sessionId, ordinal, partIndex);
+    public long AppendMessage(string sessionId, MessageRecord message) => inner.AppendMessage(sessionId, message);
+    public void StreamDraft(string sessionId, string streamId, string chunk) => inner.StreamDraft(sessionId, streamId, chunk);
+    public long FinalizeStream(string sessionId, string streamId, MessageRecord finalMessage) => inner.FinalizeStream(sessionId, streamId, finalMessage);
+    public long ReplaceSuffix(string sessionId, long fromOrdinal, IReadOnlyList<MessageRecord> newMessages) => inner.ReplaceSuffix(sessionId, fromOrdinal, newMessages);
+    public void CreateAssignment(AssignmentRecord assignment) => inner.CreateAssignment(assignment);
+    public void SettleAssignment(SettleAssignmentRequest request) => inner.SettleAssignment(request);
+    public AssignmentRecord GetAssignment(string assignmentId) => inner.GetAssignment(assignmentId) with
+    {
+        Status = overrideStatus,
+        ResultText = overrideResultText,
+    };
+    public void DeleteSession(string sessionId, DeletePolicy policy) => inner.DeleteSession(sessionId, policy);
     public void Dispose()
     {
         // The inner store's lifetime is owned by the self-test wrapper, not here.

@@ -81,8 +81,10 @@ preview-window rules (metadata-only + bounded), suffix-edit renumbering and
 truncation, delete/assignment invariants, child-process lifecycle
 (ready/ack/read/close), host-method timing/allocation recording, plugin load
 via AssemblyDependencyResolver with an external dependency, validate-runner
-mechanics, and kill mechanics. All pass against the reference adapter and the
-resolver-test plugin.
+mechanics, kill mechanics, and a regression asserting the kill check's
+expected-after model keeps assignment verdicts (a reopened store that lost or
+altered its settled assignment fails). All pass against the reference adapter
+and the resolver-test plugin.
 
 **Kill tests against memory-only stores validate harness mechanics only.** The
 content-based crash-acceptance path exists in code (`Oracle.VerifyAfterCrash`,
@@ -177,11 +179,15 @@ contract (no contract changes, no extra store API), then:
 
 1. **clean-reopen**: graceful close, fresh host process over the same store
    root, FULL content verification against the baseline model;
-2. **kill-reopen**: process kill with one unacknowledged append in flight;
-   after reopen the session content must equal the baseline or
-   baseline-plus-inflight end state — resolved by content comparison, never by
-   the child merely exiting (this is the crash-acceptance path deferred from
-   Stage 0, first exercised with the persistent adapters).
+2. **kill-reopen**: abrupt process exit with one unacknowledged append sent
+   (not awaited) before the kill; after reopen the session content must equal
+   the baseline or baseline-plus-inflight end state — resolved by content
+   comparison, never by the child merely exiting (the crash-acceptance path
+   from Stage 0, first exercised with the persistent adapters). Honesty
+   caveat, recorded in the report notes too: this is content-checked
+   recovery after an abrupt exit with one unacknowledged request — it does
+   not prove mid-operation or torn-write atomicity, and no fault-injection
+   engine is claimed; the check works by comparing real reopened content.
 
 Adapters declaring `AckTier.MemoryOnly` (reference store, test plugin) fall
 back to structural-coherence-only checks with explicit suppression of all

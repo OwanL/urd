@@ -1,6 +1,6 @@
 # Repository foundations: source customization and stage-3 review
 
-**2026-11-04 — owner direction plus proposals, not scaffold approval.**
+**2026-11-05 — owner direction plus proposals, not scaffold approval.**
 [README](README.md) owns product intent; [Session Design](SESSION-DESIGN.md)
 records the selected, revisable Core-without-ASP.NET / Server → Core boundary.
 This review does not change those responsibilities or select frontend internals.
@@ -22,11 +22,48 @@ builds; custom packages carry modified source too. Exact answer: **“Yes—reco
 The question excluded repackaging on every compile, SDK/cache bundling and selection
 of an upgrade/activation system. None of those were approved.
 
-**Not selected:** archive versus unpacked files, executable embedding, editable
-source location, setup automation, package manager, bundler, runtime versions,
-test runner, CI, distribution formats or activation mechanics. Earlier npm/Vite/
-plain-CLI recommendations and restrictions on extra tooling remain proposals,
-not accepted constraints. Stage 3's tooling baseline is therefore still open.
+**Setup direction (2026-11-05):** build commands may acquire missing
+project-declared build tools automatically where practical. After a concrete
+comparison of Build fetching missing developer tools versus stopping and requiring
+Setup, the owner answered: **“Yeah automatic where possible, we could probably
+have some scripts and stuff to make this easier”.** Small convenience scripts fit
+that direction; it does not authorize a bespoke tool manager or implementation.
+The explanation excluded automatically updating Urd or replacing unrelated machine
+programs. Dependency restore remains distinct from tool acquisition; no offline,
+zero-prerequisite or fully automatic cross-platform setup guarantee follows.
+
+**Custom-build data direction (2026-11-05):** a newly customized build starts
+with separate data rather than immediately opening normal Urd chats/settings.
+Exact answer: **“separate data, it is the users responsibility to do with what
+they please with the data, perhaps we keep the data next to source? or builds or
+similar”.** Users control what they do with their data. On the focused follow-up,
+the owner selected **“Keep each copy together”**: a user-chosen writable folder
+contains that customized copy's source, generated builds and separate persistent
+data. The illustrative `source/`, `builds/`, `data/` names are not fixed layout.
+Data stays outside generated output and source-package inputs: clean/rebuild must
+leave it intact, and distributions must exclude it. This is separation between
+customized copies, not a new empty dataset on every rebuild of the same copy.
+
+This direction concerns launching a custom build, not compiling it; it does not
+select ordinary installed-release data paths, credential portability, migrations,
+backup or activation mechanics. Keeping files together is not a guarantee that
+saved sign-ins work after moving to another machine. User ownership is not
+permission for build/clean/package commands to erase or redistribute data.
+
+**Tooling alignment (2026-11-05):** after requesting independent reviews and
+then discussing alternatives, the owner said: **“I think the biggest question is
+npm vs pnpm, the others such as vite are clear cut in my opinion, vite is good,
+and we should probably opt for the more sure .net 10 wouldnt you agree”.**
+Use **.NET 10 LTS and Vite** as the revisable working choices. Following a concrete
+npm/pnpm setup comparison, the owner answered **“Lean toward npm”**. Record npm
+as the preferred route, not an unconditional or irreversible manager selection.
+The earlier proposed .NET/Node/pnpm/Vite bundle was not approved as a whole.
+
+**Still open:** Node version, exact SDK/package pins, tool-acquisition mechanism,
+physical source/distribution format, exact source/data paths, SDK/cache shipping
+and activation mechanics. Test runners, formatters and CI remain engineering work,
+not individual owner votes. No production configuration, scripts or scaffold are
+authorized by this review.
 
 ## Research recommendation — conventional source distribution
 
@@ -124,13 +161,16 @@ source. This establishes isolation **after capture**, not atomic copying during 
 Input hashes/inventories checked this known recipe; they are not proof of arbitrary
 compiler consumption, protection from intermediate edits or a provenance framework.
 
-### Toolchain implications and recommendation — still revisable
+### Overnight tooling candidate and observed limitations
 
-Prefer a coherent candidate of **.NET 10 LTS CLI + Node 26 LTS + strict TS/Vite + pnpm**,
-with locked restores, simple discoverable commands and a distinct distribution check.
-The rationale is [.NET](https://dotnet.microsoft.com/en-us/platform/support/policy/dotnet-core)/[Node](https://nodejs.org/en/about/previous-releases)
-support lifetimes and per-project customizer setup, not installed software or toy timings. Keep the existing fake-model/real-SQLite/browser
-strategy; this trial did **not** select a test runner, formatter, task framework or CI.
+Before the resumed owner review, the recommendation was **.NET 10 LTS CLI +
+Node 26 LTS + strict TS/Vite + pnpm**, with locked restores, simple commands and
+a distinct distribution check. Its rationale was
+[.NET](https://dotnet.microsoft.com/en-us/platform/support/policy/dotnet-core)/[Node](https://nodejs.org/en/about/previous-releases)
+support lifetimes and per-project setup, not installed software or toy timings.
+The npm preference above supersedes that package-manager recommendation; Node 26
+was not selected. The trial did **not** select a test runner, formatter, task
+framework or CI.
 
 The trial exposed useful qualifications rather than a zero-setup promise:
 
@@ -150,12 +190,14 @@ The trial exposed useful qualifications rather than a zero-setup promise:
   used the native executable directly and never ran setup or modified global PATH/profiles.
   pnpm does not provide the .NET SDK bootstrap.
 
-**Strongest alternative:** .NET CLI + Vite with **npm and separately provisioned Node**.
-It has fewer package-manager/runtime policies and a conventional locked `npm ci`
-workflow, but requires an explicit answer for per-copy Node versions/clean setup.
-That alternative is documentation-supported, not a duplicate measured stack. Choose
-on the desired setup/download/maintenance experience; a successful pnpm fixture is
-not approval of its defaults, and another global version manager is not automatically needed.
+**Alternative examined:** .NET CLI + Vite with **npm and separately provisioned
+Node**, now the preferred route following owner review. It has fewer
+package-manager/runtime policies and a conventional locked `npm ci` workflow;
+Node acquisition/selection belongs to the setup recipe rather than npm. Automatic
+setup scripts are allowed, so this route need not impose manual Node management.
+It remains documentation-supported, not a duplicate measured stack. A successful
+pnpm fixture is not proof of comparative simplicity, and neither route inherently
+requires another global version manager.
 
 **Limits and evidence location:** existing Windows SDK/runtime, Chrome and Playwright
 were reused. Official native pnpm (~24 MB compressed), Node (~41 MB compressed) and
@@ -169,8 +211,70 @@ TEMP directory; passing `runs/2026-11-04T11-08-38-679Z/RESULT.json`. Fixture cod
 part of this repository. Independent method/scope review found no blocking issue;
 owned processes were stopped after verification.
 
-Next: owner review of this coherent workflow versus its alternative; preserve the
-open packaging/SDK-cache/activation answers above. Access/onboarding, background
-controls, actual shared-host UI reuse, provider credential portability, configuration
-ownership and other-OS releases remain broader platform gaps—not solved by this trial.
-No production scaffold is authorized here.
+## Resumed review: comparison, limits and smallest handoff
+
+At the owner's request, three isolated read-only reviewers examined toolchain
+trade-offs, the no-Git setup/customization workflow, and test/configuration
+proportionality. They found the candidate reasonable but **not a clear-cut pnpm
+win**, no blocking need for another product decision, and no case for additional
+test/task frameworks. They did not run new builds or verify production behavior.
+
+The concrete gaps were automatic bootstrap (the trial reused .NET and required
+pnpm before the carried recipe), actual persistent-data isolation, and production
+input/configuration scope. Source-folder independence and private-data canaries
+are not proof of independent application data. Routine runner/pin choices should
+not become another owner questionnaire.
+
+A subsequent narrow official-documentation check clarified the npm/pnpm comparison:
+
+- [npm `devEngines`](https://docs.npmjs.com/cli/v11/configuring-npm/package-json#devengines)
+  checks tooling requirements with `warn`, `error` or `ignore`; it does not acquire
+  Node. npm comes with Node, leaving acquisition/selection to the setup recipe.
+- [pnpm `devEngines.runtime`](https://pnpm.io/package_json#devenginesruntime)
+  can acquire declared Node, record its exact version/checksum in the lockfile and
+  run scripts with that runtime. This is genuine reusable functionality; shared
+  dependency storage is another benefit. It still needs its own bootstrap and
+  does not provision .NET.
+- [pnpm's installation guide](https://pnpm.io/installation) describes a native
+  executable without a Node prerequisite, but currently recommends npm installation
+  on Windows because standalone installation can encounter Defender blocks. The
+  executable worked in the trial: this is a setup qualification, not a demonstrated
+  failure or a reason to require disabling protections. The `globalShims` setting
+  controls project-aware global commands; its scope alone does not establish that
+  ordinary local builds change global PATH.
+
+**Current recommendation:** prefer npm if a small .NET/Node setup recipe can meet
+the accepted automatic-acquisition/copy-isolation behavior. Revisit pnpm if that
+recipe becomes disproportionate or its runtime/dependency facilities demonstrably
+reduce maintenance. No npm-versus-pnpm clean-setup, size, speed or code-cost
+comparison has established a winner. Vite and .NET 10 alignment does not select
+Node 26 or preserve the fixture's exact pins.
+
+**Smallest next step:** a short Windows-first customization command/setup plan,
+not another broad survey or a production scaffold. It should connect:
+
+1. One documented entry path from distributed source without Git: locate/acquire
+   declared tools where practical, invoke them for that copy without replacing
+   unrelated machine versions, and restore locked dependencies. Specify one
+   version authority per tool and bounded command/configuration scope; do not
+   silently apply production root policies to the existing experiments.
+2. Fast edit/check/build, with launch distinct from compilation. Launch uses that
+   copy's persistent data outside generated output. Rebuild/clean preserves it;
+   another customized copy starts separately. This is not an activation or
+   data-migration system.
+3. A separate distribution operation using matching editable inputs, recipe and
+   instructions, including additions/deletions without Git and excluding data,
+   credentials, outputs and prior packages. Physical format and capture mechanism
+   remain open; the trial did not qualify capture during active edits.
+4. The proposed compiler/type checks and fake-model/real-SQLite behavior tests,
+   followed separately by one built-browser/backend smoke and a distribution
+   roundtrip. Reuse production paths as they exist, not a parallel test-only app.
+   Add focused acceptance for copy-data independence, clean/rebuild preservation
+   and package exclusion; do not mistake existing canaries for those guarantees.
+
+Any executable follow-up needs a separately scoped handoff targeting the missing
+bootstrap/data boundaries rather than repeating the already demonstrated roundtrip.
+Fresh-machine and different-version copies remain unqualified; other-OS setup must
+be verified in the Windows → macOS → Linux rollout. SDK/cache bundling, ordinary
+installed-release data, credential portability and switching to an existing dataset
+remain consequential delivery questions, not all gates for the first technical slice.

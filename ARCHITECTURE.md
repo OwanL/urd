@@ -181,6 +181,11 @@ pressure to add desktop/editor integration immediately or cut essential features
 just to begin developing Urd from itself. Desktop and VS Code clients remain
 part of the destination; desktop host and host-specific integration remain open.
 
+**Subsequent owner alignment:** deliver normal-use browser access on the backend
+machine first, then LAN, then Tailscale. This selects access sequencing, not
+transport, authentication, client bootstrap or provider onboarding. It is distinct
+from a smaller fake-model technical slice and does not waive local access protection.
+
 ### TypeScript and Preact for the shared UI
 
 **Decision (2026-11-04):** Use TypeScript + Preact. After discussing the trade-off,
@@ -511,6 +516,13 @@ sufficient: system instructions, tool definitions/order and provider serializati
 also affect the cached prefix. This concerns cache eligibility, not guaranteed hits
 or savings. Explicit history edits and compaction remain supported; exact reset
 boundaries still need design, not a blanket immutable-session rule.
+
+**Subsequent owner alignment:** an explicitly chosen idle model/provider switch
+need not block for confirmation merely because the old provider's private reasoning
+cannot transfer. This does not permit losing visible messages, tool results or
+attachments, replaying tools, automatic provider fallback or widening billing scope.
+No particular warning UI or running-turn change rule was selected. See
+[discovery design](DISCOVERY-DESIGN.md) for the scoped owner answer.
 
 Pie freezes its native catalog and appends recovered tool descriptions, routing
 calls through a fixed wrapper; see `docs/plans/IMMUTABLE-MODEL-CONTEXT.md` in Pie.

@@ -182,6 +182,20 @@ matter. A source archive alone is not a complete customisation workflow. Whether
 build tools or dependency caches ship with the source remains open; a hosted build
 service must not be required for local customisation.
 
+**Acquire missing project-declared build tools automatically where practical.**
+Small convenience scripts are welcome. This selects a setup direction, not particular
+tools, versions or an acquisition mechanism; it does not mean automatically updating
+Urd or replacing unrelated machine programs. Offline builds and bundled SDKs/caches
+are not promised.
+
+**Keep each customized copy together, with separate persistent data by default.**
+Use a user-chosen writable folder containing that copy's source, generated builds
+and data; exact subfolder names remain open. Data sits outside generated outputs
+and source/distribution inputs and survives clean/rebuild. Rebuilding the same copy
+does not reset its data. Users manage their data; this does not select ordinary
+installed-release paths, credential portability, migrations or activation mechanics.
+See the scoped [owner outcomes](REPO-FOUNDATIONS.md#owner-outcome).
+
 **Editing source, then building and reloading, is an acceptable normal workflow.**
 Make the developer and user experience as smooth as is feasible without adding
 substantial complexity. Consider hot reload for both UI and backend where it
@@ -199,7 +213,8 @@ is to notify the user that an update exists and suggest asking their agent to
 upgrade Urd, rather than applying it automatically. The user and their agent
 understand their modifications; Urd should not assume it can reconcile them.
 This notification approach is a proposal, not a committed feature. Physical source/build
-packaging and the editing location remain open.
+packaging, exact custom-copy subpaths and ordinary installed-release editing
+locations remain open.
 
 ### Deliver the browser client first
 
@@ -211,6 +226,11 @@ Standalone desktop and VS Code clients remain planned; their relative delivery
 order remains open. Browser-first identifies the first usable interface, not the
 eventual product scope. The separate OS rollout is Windows → macOS → Linux;
 these delivery sequences are distinct from the technology selections.
+
+**Browser access delivery order: same-machine first, then LAN, then Tailscale.**
+The owner selected this sequence for normal use; it is separate from the smaller
+fake-model technical slice. Authentication, client bootstrap, provider onboarding
+and transport remain unselected; local-first does not waive access protection.
 
 **Use TypeScript + Preact for the shared UI.** The owner selected this direction
 on 2026-11-04: ordinary browser components and presentation logic should be reusable
@@ -391,7 +411,8 @@ The following remain deliberately unresolved:
   provisional Urd-owned cycle. No production scaffold is approved.
 - Provider integrations and package pins around selected `IChatClient`; client-state
   structure, transport and tooling around selected TypeScript/Preact.
-- Source/build packaging, the custom-build workflow and releases; automatic updating is deferred.
+- Detailed source/build packaging, custom-build setup/activation mechanisms and releases;
+  automatic application updating is deferred.
 - Persistence implementation/schema evolution and restart/recovery within the
   selected shared SQLite design; backend discovery and duplicate-start handling.
 - Background-app controls, tray integration, startup-at-login and shutdown rules.

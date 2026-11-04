@@ -1,6 +1,7 @@
 # Foundation review: decisions for the next session
 
-**2026-11-04 · Recommendations and evidence, not new decisions.**
+**2026-11-04 evidence, with subsequent owner-review outcomes marked below.**
+Recommendations remain proposals; no production implementation is authorized.
 
 The full README/ARCHITECTURE was reviewed before choosing four investigations.
 No Urd implementation, production configuration or scaffold was added. Existing
@@ -15,15 +16,22 @@ technology, Core/Server, source-distribution and retained-feature decisions stan
 | **Source customization worked without Git.** Extract/build, edit/add/delete backend/UI/guidance, redistribute, extract/rebuild produced the expected visible changes and carried source. | Conventional packaging can support the desired workflow without a self-rebuilding application. Keep ordinary builds separate from distribution checks. | [Source/build evidence](REPO-FOUNDATIONS.md#what-the-round-trip-established): 12 grouped checks. A post-capture edit did not affect staged output/source; copying during edits was **not** qualified. Warm Windows tools/caches, not fresh-machine/offline/other-OS proof. |
 | **Durable intent and retained content have different lifetimes.** A due request known not to have started differs from a possibly executed command; a needed shared result differs from its worker's transcript. | Preserve automatic due work without replaying uncertain effects. Worker closure must not delete another open chat's result/attachment—or retain the entire closed transcript to save one result. | [Durability/reference ledger](DURABLE-BOUNDARIES-EVIDENCE.md): source-grounded failure analysis, **no new runtime test**. Includes attachment publication/deletion races and compact final usage. |
 
-## Recommended next conversation
+## Current owner review
 
-**1. Agree a customization workflow, not a package-manager popularity vote.**
+**1. Setup/custom-copy direction agreed; toolchain remains open.** The owner
+accepted automatic acquisition of missing project-declared build tools where
+practical, with small convenience scripts. Customized copies default to separate
+persistent data and keep source, builds and data together in a user-chosen writable
+folder. Data survives clean/rebuild and stays outside source/distribution inputs;
+exact paths, ordinary installed-release policy, sign-in portability and activation
+are not selected. [Recorded answers](REPO-FOUNDATIONS.md#owner-outcome).
+
 Recommend .NET 10 LTS CLI, Node 26 LTS, strict TypeScript/Vite and pnpm as a
 **revisable candidate**. Project-managed Node is useful for customized copies;
 it also means ordinary commands may download a missing runtime. The trial found
 that a simple fail-fast configuration did not select the already-restored runtime,
-and pnpm's global-shim setting was not project-configurable. These details need
-an explicit setup policy, not hidden machine changes.
+and pnpm's global-shim setting was not project-configurable. Acquisition mechanics
+still need qualification; the new direction does not permit hidden machine changes.
 
 Strong alternative: the same .NET/Vite approach with npm and separately provisioned
 Node—fewer manager/runtime policies, more explicit version/setup responsibility.
@@ -32,12 +40,13 @@ format, SDK/cache shipping and activation remain open. Test strategy remains
 fake-model + real-SQLite behavior tests and one built-UI/backend smoke; selecting
 routine runners/formatters need not become another owner voting exercise.
 
-**2. Agree the first slice's practical scope.** Recommend same-machine/same-origin
-browser access and backend-machine provider onboarding initially, with LAN/Tailscale
-still planned. Remote access immediately is the meaningful alternative: useful
-sooner, but adds connection trust, client enrollment and real-device qualification.
-A remote browser's provider callback returns to that device's loopback, not the
-backend. Provider login is not client authentication to Urd.
+**2. Access sequence agreed; first-slice details remain under review.** The owner
+selected same-machine browser use first, then LAN, then Tailscale. Same-origin
+hosting and backend-machine provider onboarding remain recommendations, not answers
+inferred from that sequence. Remote stages still need connection trust, client
+enrollment and real-device qualification. A remote browser's provider callback
+returns to that device's loopback, not the backend. Provider login is not client
+authentication to Urd.
 
 The existing first-slice proposal remains two chats/two browser clients with fake
 model streaming, SQLite history, reconnect and settled Stop. It proposes rejecting
@@ -51,6 +60,9 @@ or approve fine layout/APIs/schema.
 - **Before live context/reset behavior:** decide how explicit model/guidance changes
   take effect and when capability selection refreshes; preserve readable originals
   and current permissions. Context reset and reselection are different operations.
+  The owner has accepted continuing an explicit idle provider switch without a
+  blocking confirmation solely for nontransferable private reasoning; no permission
+  to lose visible content or replay tools follows.
 - **Before uncertain-effect recovery:** consider explicit move-on with an action
   still marked unknown versus blocking that chat until reconciliation. Never infer
   automatic replay. This needs a concrete user flow, not a new persistence engine.

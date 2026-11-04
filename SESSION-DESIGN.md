@@ -104,6 +104,20 @@ CatalogPruner ──────┘
   replay completed tools. Stateful request/context data must not leak between
   concurrent consumers of a shared client.
 
+**First-slice responsibility alignment (2026-11-04):** The owner first asked to
+“Discuss the boundary first.” After a concrete send/edit/Stop walkthrough, they
+answered: **“Makes sense. of course we should keep things open, i am sure things
+may change at implementation time”.** The working boundary puts identity/current
+execution, admission/Stop coordination and stale-update rejection in `SessionBase`;
+`SessionExecution` owns temporary task/cancellation/model-tool work, while
+`SessionStore` owns atomic durable writes and revision checks. Editing, assignment
+and caller-specific policies stay with the appropriate concrete kind. “One run”
+means one main execution, not a ban on concurrent title generation. This supports
+a narrow shared base rather than another coordination helper **as a starting
+point**, not frozen methods, mandatory lifecycle hooks or a prohibition on later
+composition. Manager APIs, broader base scope and project/file layout are not
+approved by this answer; implementation evidence may change the split.
+
 Auxiliary cancellation belongs to its caller: a title's naming attempt/session,
 or the context operation invoking compaction/pruning. Context-changing work
 participates in session admission/busy state; a concurrent title only publishes

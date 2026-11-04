@@ -94,11 +94,12 @@ draft nor the experiments approve transport, fine layout, APIs or schema.
 
 ## Next step
 
-This owner-review round is complete. Prepare one small, concrete application/class
-and file-layout plan around the selected Core/Server boundary and a visible browser
-flow. Keep setup/checkpoint sequencing and routine implementation choices simple;
-do not reopen the abstract reload, recovery or idle-only questionnaire. Align the
-meaningful structure and implementation scope with the owner before writing code.
+The evidence/owner-review round is complete; application planning continues in
+[the concrete application plan](APPLICATION-PLAN.md). It connects the class/file
+layout, browser flow and Windows-first setup, with recommendations distinguished
+from existing selections. Review the new structure and bounded implementation scope,
+not another abstract reload, recovery, idle-only or routine-tooling questionnaire.
+No production implementation permission is inferred from completed research.
 
 The four stream reports and shared integration were independently reviewed within
 their stated limits. Research recommendations do not turn fixtures into production

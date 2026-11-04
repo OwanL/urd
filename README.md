@@ -361,6 +361,9 @@ architectural decisions and unresolved design questions. This README owns the
 project's purpose and strategic constraints; the architecture document owns the
 more detailed decisions as they are made.
 
+[Foundation review](FOUNDATION-REVIEW.md) gathers the latest evidence and practical
+choices for the next owner-led discussion. Its recommendations are not new decisions.
+
 Focused qualification evidence, distinct from architecture approval:
 
 - [Session design](SESSION-DESIGN.md): working sketch and guarded lifecycle/

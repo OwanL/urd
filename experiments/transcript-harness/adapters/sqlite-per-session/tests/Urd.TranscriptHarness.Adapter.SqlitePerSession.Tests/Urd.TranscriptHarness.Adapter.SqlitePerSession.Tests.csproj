@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Urd.TranscriptHarness.Adapter.SqlitePerSession.Tests</RootNamespace>
+    <!-- Consumes PRE-BUILT shared contracts and the pre-built adapters via
+         HintPath so it never triggers a shared-project build
+         (-p:BuildProjectReferences=false stays possible everywhere). -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="Urd.TranscriptHarness.Contracts">
+      <HintPath>$(MSBuildThisFileDirectory)..\..\..\..\contracts\Urd.TranscriptHarness.Contracts\bin\Release\net10.0\Urd.TranscriptHarness.Contracts.dll</HintPath>
+    </Reference>
+    <Reference Include="Urd.TranscriptHarness.Adapter.SqliteRows">
+      <HintPath>C:\dev\repos\urd\experiments\transcript-harness\adapters\sqlite-rows\Urd.TranscriptHarness.Adapter.SqliteRows\bin\Release\net10.0\Urd.TranscriptHarness.Adapter.SqliteRows.dll</HintPath>
+    </Reference>
+    <Reference Include="Urd.TranscriptHarness.Adapter.SqlitePerSession">
+      <HintPath>$(MSBuildThisFileDirectory)..\..\Urd.TranscriptHarness.Adapter.SqlitePerSession\bin\Release\net10.0\Urd.TranscriptHarness.Adapter.SqlitePerSession.dll</HintPath>
+    </Reference>
+    <!-- For coordination-db peeks only: reuse the same Microsoft.Data.Sqlite
+         copy the adapter restores, so no extra package reference appears. -->
+    <Reference Include="Microsoft.Data.Sqlite">
+      <HintPath>$(MSBuildThisFileDirectory)..\..\Urd.TranscriptHarness.Adapter.SqlitePerSession\bin\Release\net10.0\Microsoft.Data.Sqlite.dll</HintPath>
+    </Reference>
+    <!-- Copied adapter DLLs need deps.json + native runtimes beside them for
+         AssemblyDependencyResolver wiring. -->
+    <None Include="$(MSBuildThisFileDirectory)..\..\Urd.TranscriptHarness.Adapter.SqlitePerSession\bin\Release\net10.0\Urd.TranscriptHarness.Adapter.SqlitePerSession.deps.json"
+          CopyToOutputDirectory="PreserveNewest" Link="Urd.TranscriptHarness.Adapter.SqlitePerSession.deps.json" />
+    <None Include="$(MSBuildThisFileDirectory)..\..\Urd.TranscriptHarness.Adapter.SqlitePerSession\bin\Release\net10.0\runtimes\**\*.*"
+          CopyToOutputDirectory="PreserveNewest" Link="runtimes\%(RecursiveDir)%(Filename)%(Extension)" />
+    <None Include="$(MSBuildThisFileDirectory)..\..\..\sqlite-rows\Urd.TranscriptHarness.Adapter.SqliteRows\bin\Release\net10.0\Urd.TranscriptHarness.Adapter.SqliteRows.deps.json"
+          CopyToOutputDirectory="PreserveNewest" Link="Urd.TranscriptHarness.Adapter.SqliteRows.deps.json" />
+  </ItemGroup>
+
+</Project>

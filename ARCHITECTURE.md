@@ -541,12 +541,13 @@ attachments, replaying tools, automatic provider fallback or widening billing sc
 No particular warning UI or running-turn change rule was selected. See
 [discovery design](DISCOVERY-DESIGN.md) for the scoped owner answer.
 
-**Project-instruction edits:** new chats read current instructions; existing chats
-keep their loaded project instructions until explicit Reload. Reload deliberately
-changes working context and can break cache reuse, without rewriting original chat
-history or delaying current permission enforcement. This does not select file
-watchers, a Reload API/UI or running-turn admission, or make all session context
-immutable.
+**Project-instruction loading:** the owner first preferred ignoring edits until
+explicit reload, then deferred exact loading/reload behavior to the simplest
+implementation once the trade-off is concrete. Reload remains a simple candidate,
+not a newly mandated per-chat feature or fixed scope. No watcher, live-loading
+subsystem or frozen-forever session policy was approved. Ordinary prefix stability,
+readable originals, deliberate context changes and current permission enforcement
+remain distinct constraints; see [discovery design](DISCOVERY-DESIGN.md).
 
 Pie freezes its native catalog and appends recovered tool descriptions, routing
 calls through a fixed wrapper; see `docs/plans/IMMUTABLE-MODEL-CONTEXT.md` in Pie.

@@ -68,10 +68,11 @@ or approve fine layout/APIs/schema.
   and capability-selection refresh; preserve readable originals and current permissions.
   Context reset and reselection are different operations. The owner accepted continuing
   an explicit idle provider switch without blocking confirmation solely for nontransferable
-  private reasoning, not losing visible content or replaying tools. Project-instruction
-  edits require explicit Reload in existing chats; new chats read current instructions.
-  Reload is a deliberate working-context/cache boundary, not original-history rewriting,
-  deferred permission enforcement or approval of watcher/UI/busy-admission mechanics.
+  private reasoning, not losing visible content or replaying tools. The owner first
+  favored explicit instruction reload, then deferred exact loading/reload behavior to
+  the simplest implementation. No per-chat Reload UI, watcher, frozen-forever policy
+  or busy-admission rule is approved; ordinary prefix stability, readable history and
+  current permission enforcement remain distinct.
 - **Before uncertain-effect recovery:** consider explicit move-on with an action
   still marked unknown versus blocking that chat until reconciliation. Never infer
   automatic replay. This needs a concrete user flow, not a new persistence engine.

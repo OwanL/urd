@@ -46,6 +46,147 @@ mock or survey every JS framework. The Blazor subset is **not a fair framework
 performance/LOC comparison**. Existing research had advanced a shared TS/DOM UI
 and reserved Blazor; it had not ranked individual JS component libraries.
 
+## Resumed client/access review — 2026-11-05
+
+### Owner outcome: local first, without a new sign-in system
+
+The question explicitly separated the fake-model **technical slice** from the
+first **normal-use browser milestone**. Asked whether that milestone needs another
+device, the owner answered: **“Yes. local first, then lan, tailscale comes later”.**
+The access delivery order is therefore **same-machine → LAN → Tailscale**. This
+stages retained remote support; it does not remove shared clients, backend-local
+execution, later desktop/editor clients or the Windows → macOS → Linux rollout.
+
+An initial suggestion to approve/remember each browser was **not accepted**. The
+owner challenged IP/MAC identity and then the unnecessary account/sign-in framing:
+**“Urd account? who said anything about accounts, i was thinking we just keep things
+simple, same as pie”.** No Urd account was ever a requirement. After inspecting
+Pie's actual source, the revised question was whether to preserve its open-and-use
+local flow while trusting programs already running on the PC. The owner answered:
+
+> Keep it simple. We did a lot of research with pie, and trusted authenticated
+> localhost was chosen for a reason. We can later remedy this with tailscale,
+> this gives users an authenticated remote medium if they so wish, but that comes later
+
+**Scoped decision:** start the backend → open its local UI → use it, without a new
+account, browser-pairing ceremony or remembered-browser authorization system.
+Local programs are trusted. No IP/MAC identification or browser fingerprinting is
+selected. Preserve loopback-only exposure and browser request checks; do not turn
+simplicity into accepting arbitrary browser-origin commands.
+
+**Terminology was clarified in the discussion:** Pie's inspected path has no client
+credential. Loopback plus request checks establishes local trust, **not client
+authentication**; the quoted word “authenticated” is not evidence of an auth layer.
+Tailscale can later provide authenticated connectivity, but no tailnet-wide trust,
+proxy identity policy, application credential or deployment was selected. LAN's
+access policy still needs its own scoped review; Pie's unauthenticated LAN mode
+was not automatically adopted.
+
+Provider login remains separate. In this same-machine milestone, the backend and
+provider-onboarding browser are on the same PC; credentials remain backend-local.
+There is no new Urd account and no approval of a provider route, credential store,
+remote callback workaround or live account operation. A phone using an already
+configured backend is distinct from signing that backend into a provider remotely.
+
+### Pie baseline inspected, rather than assumed
+
+Read-only source inspection at Pie `cc82abb0f317f31341d3a6f12aa1545f6be1fbea`:
+
+- `application/hosts/browser/settings.ts` and `http/browser-server.ts`: default
+  loopback listener; plain local UI URL, no browser credential issuance/handoff.
+- `application/hosts/browser/network-access/policy.ts`: peer/Host checks and exact
+  served-Origin validation on WebSocket upgrade. Missing, null and foreign
+  WebSocket origins fail. Native local programs can supply those headers.
+- `application/hosts/browser/http/browser-server.ts` (`handleHttpRequest`,
+  `handleUpgrade`): HTTP serves bodyless GET/HEAD assets and health, **not** generic
+  chat commands/history; state and commands use the admitted WebSocket. Its HTTP
+  checks alone are therefore not a ready-made policy for Urd's proposed HTTP API.
+- `application/frontend/transport/client-transport.ts`: the browser connects to
+  `/ws`; VS Code uses its webview message bridge. Renderer IDs/generations fence
+  delivery, not authentication. Later hosts do not require a browser-cookie design.
+- Pie `README.md`, **Run the standalone localhost UI**: explicit LAN opt-in,
+  documented unauthenticated/unencrypted access and no automatic firewall change.
+
+This establishes source behavior, not the current installed build or a new runtime
+security test. Preserve the useful local UX, not Pie's renderer/coordinator machinery.
+
+### Smallest candidate wire and host boundary
+
+**Proposal, not approved classes, APIs, protocol or scaffold:** serve the initial
+UI and backend API at one loopback origin. Keep three responsibility owners:
+
+| Owner | Minimum responsibility |
+| --- | --- |
+| Core | Authoritative session/history and domain admission; accepted execution outlives every client request. No ASP.NET dependency. |
+| Server | Listener/browser request admission; bounded query/command/update mapping; client-subscription cleanup. Do not duplicate session policy. |
+| Each UI | Selection, drafts, bounded cached views, reader position and connection freshness. No frontend copy of the backend session hierarchy. |
+
+Concrete flow: select A → show its bounded cached view, if any, as stale → obtain
+current saved history/status and separately identified provisional output → switch
+to B without stopping A → reconnect by reading current truth. Late A responses
+cannot select A or overwrite B. Reconnection does not replay commands; unknown
+acknowledgements remain unresolved until reconciled. Busy-Send and recovery policy
+belong to [Session Design](SESSION-DESIGN.md), not a new client-side rule here.
+
+HTTP queries/commands plus one bounded view stream remains a reasonable candidate.
+Fresh snapshots and bounded coalesced updates avoid a durable event-replay system;
+coherent snapshot/subscription capture and saved/live correlation still need real
+integration. **HTTP/SSE, header/fetch and WebSocket/SignalR are not selected.**
+The access decision does not require a client credential merely to use SSE, nor
+make native EventSource the default because it worked in a fixture.
+
+Before choosing transport, make browser admission explicit for **reads, commands
+and streams**. A changed HTTP surface must preserve the intended foreign-browser
+boundary, not blindly copy Pie's WebSocket-Origin predicate: HTTP reads/streams may
+omit Origin, while form/no-cors requests can cause effects despite unreadable replies.
+Keep mutations out of GET and reject disallowed requests before effects. One small
+engineering option is requiring a non-secret request header on API calls and denying
+foreign preflights; this is a browser-request gate, not a credential, but native
+EventSource cannot supply it and fetch needs stream/reconnect handling. Exact-origin
+WebSocket admission is another candidate with its own connection handling. Qualify
+the chosen path rather than adding both, pairing machinery or a general auth platform.
+
+Later desktop/editor work should add only actual host needs—backend connection,
+resource URLs and host actions—around the same components and presentation logic.
+No desktop host, generic adapter framework or new file tree is needed now. Connecting
+from any surface does not move file/shell execution onto that client. Backend
+selection must also respect custom copies' separately owned data; being on the same
+PC does not imply that two copies should attach to one backend/data instance.
+
+### Evidence limits and bounded next step
+
+[Overnight access evidence](ACCESS-BOUNDARY-EVIDENCE.md) used injected synthetic
+credentials, one-event streams and Windows/headless Chromium. It established
+cookie port-sharing, native EventSource's header limitation and the no-CORS effect
+counterexample—not onboarding, sustained reconnect, LAN/Tailscale or production
+access qualification. Its explicit-client-credential recommendation was a proposal;
+**this owner round instead chose trusted-local simplicity for the local milestone**.
+Cookies/native SSE and token/header fetch retain real engineering costs if later
+needed, but neither their fixture success nor the old recommendation selects them.
+
+The existing TEMP `FIRST-SLICE-CLIENT-CONTRACT.md` and
+`FIRST-SLICE-IMPLEMENTATION-PLAN.md` remain candidate integration details. Their old
+review-sequencing language does not supersede the resumed parallel discussion.
+The proposed technical slice is still two chats/two browser clients, fake-model
+streaming, real SQLite history, switching/reconnect and explicit settled Stop—not
+normal-use readiness. Independent navigation retains the production ≤100 incremental
+LOC condition. Client-state/API/fine layout remain revisable; this review grants no
+source/config/scaffold or executable-experiment authorization.
+
+**Next:** integrate Lifecycle's scoped input/recovery outcome, then specify and
+qualify one transport-appropriate local request boundary once the technical slice
+is approved. Include foreign/missing/null origin cases, hostile Host, no-cors mutation
+controls and stream/read disclosure alongside actual two-client reconciliation.
+Check server effects as well as browser errors; do not claim local-program isolation.
+Later normal-use gates include real provider onboarding/storage and backend controls;
+LAN/device testing, Tailscale identity/deployment and actual desktop/editor reuse
+remain staged work, not prerequisites to this fake-model slice.
+
+**Review verification:** a focused independent review checked the new decision/
+proposal boundaries against Urd authority, overnight evidence and the cited Pie
+source; no actionable blocker. This round performed document/source review only:
+no new build, browser test, live account, network deployment or runtime security claim.
+
 ## Local responsibilities — provisional, not approved structure
 
 A proposed small split, with names illustrative:
@@ -263,7 +404,7 @@ inline to the owner. All owned browser/server processes were stopped.
 - HTTP/stream cancellation disposes the client's read/subscription, **not accepted
   agent work**. Stop is an explicit command. Execution's tool-effect outcome and
   result-recording outcome must remain distinguishable.
-- Tokens stay backend-side. Provider Access identified ChatGPT's loopback callback
+- Provider tokens stay backend-side. Provider Access identified ChatGPT's loopback callback
   as backend-machine onboarding: remote-client sign-in is a separate unqualified
   workflow, not permission to expose tokens or substitute a LAN redirect URI.
 

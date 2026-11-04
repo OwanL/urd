@@ -177,7 +177,8 @@ complete-looking arguments alone can survive a failed/incomplete/truncated respo
 ## 4. Walkthrough: where the sketch must hold
 
 These are proposed mechanics checked against recorded requirements, not claims
-of working Urd behaviour.
+of working Urd behaviour. The bounded executable follow-up in §7 tests a subset;
+it does not qualify this entire walkthrough.
 
 | Flow | Ownership and consequential boundary |
 | --- | --- |
@@ -272,10 +273,63 @@ provider terminal semantics or native-context fidelity.
   working class sketch is not approval of a production solution layout.
 
 Routine method names, lock primitives, batching intervals and file subdivision
-can follow evidence; they need not become a design questionnaire. The smallest
-next step is an owner-aligned, disposable flow test of the reviewed session split
-using a fake model and the SQLite facts above, then derive the production project
-layout. This assignment does not authorize that production scaffold.
+can follow evidence; they need not become a design questionnaire. The disposable
+flow test below supplies bounded evidence, not approval to derive/scaffold a
+production layout automatically. The base scope, untested flows and owner-facing
+structural gates above remain.
+
+## 7. Disposable session-flow qualification
+
+**Follow-up, 2026-11-04:** Three focused flow groups passed in a temp-only C#
+fixture using request-only `IChatClient` (Abstractions 10.11.0), a deterministic
+fake model and real Microsoft.Data.Sqlite 10.0.14 transactions. These are fixture
+pins, not new dependency selections. Two serial runs—DLL-hosted and apphost—each
+passed **42 assertions** (34 parent, 1 exiting child, 7 recovery child); the build
+had zero warnings/errors. Independent source and final evidence review were used.
+
+| Flow group | Established within the fixture |
+| --- | --- |
+| **Admission / stream / Stop** | One accepted run; a second admission rejected by both live handle and SQLite facts. Cancelling the synthetic browser reader left the model running and later output recorded. Stop remained “stopping” while fake model cleanup deliberately waited at a barrier; new admission and late output stayed blocked until it settled. A new run then worked; the old execution ID could not append. |
+| **Earlier edit / close / restart** | Edit blocked admission, awaited the old execution, then atomically replaced the suffix and advanced history identity. Delayed callbacks could neither append nor publish; an injected precommit failure rolled back both history and revision. A wrong history revision failed even with the current run ID. Direct session close awaited owned work and removed history; stale append/admission could not resurrect the ID. |
+| **Explicit assignment result** | A requester distinct from the named creator assigned work. Stream completion left no result; explicit resume advanced the accepted revision. Wrong-worker/stale finishes rejected; identical finishes returned retained evidence and conflicting finishes rejected. Closing the worker removed its conversation but retained the result for the other open requester, including after process restart. |
+
+The parent launched its **own** child, which committed an accepted input/partial
+output while the fake request remained active, then exited with code 17 without
+graceful settlement. A fresh child reopened the database: committed edits/results
+and closed identity survived; the active marker became explicitly interrupted,
+old execution callbacks rejected and **zero model requests restarted**. This is
+process-exit/reopen evidence after returned commits, **not** a crash during a
+SQLite transaction, power-loss test or exactly-once external-effect guarantee.
+
+**What the split helped—and did not settle:** A temporary execution could own model
+cancellation independently of the reader, while narrow guarded commands and
+intent-specific transactions protected durable facts. No extra model-client
+facade, event bus or workflow engine was needed. The complexity did not disappear:
+Stop/edit must coordinate settlement **without waiting under the mutation guard**;
+history revision, execution ID and accepted assignment revision protect different
+things. Checking only a cancellation token or only an in-memory base object is
+insufficient. These tests do **not** place those guards in an approved `SessionBase`
+API, select a lock primitive, instantiate both session kinds or validate inheritance.
+Do not widen/freeze the base from this single-handle experiment.
+
+**Deliberate limits:** One synthetic reader, no HTTP/reconnect protocol or stale
+client-cache/UI clearing; no tool/native-envelope transport, bounded-child cascade,
+independent-parent closure, simultaneous multi-process admission, attachments,
+notification delivery, follow-ups, compaction or retention GC. Small commits per
+synthetic chunk, closed tombstones and an interrupted admission gate are test
+mechanisms—not selected batching, schema, permanent tombstone retention or resume
+UX. Parent closure remains an owner gate; this test closes only an explicitly
+addressed individual session. No new product or structural decision was made.
+[Composed execution](EXECUTION-DESIGN.md) separately qualifies bounded native/tool
+recording mechanics; combining that with these session guards remains untested.
+
+**Reproduction/evidence:**
+`%TEMP%/urd-foundation-streams-6268b517/session-flows-d0914b79/` retains source,
+`README.md` commands, `build.log`, both run logs and database evidence. Runs used a
+started exclusive `urd:heavy-local-work` lease, cached SDK/packages, no compiler
+server and only owned sequential children. Children exited and no fixture process
+remained; generated build output was removed after review. No live model/network
+call, production source/schema, installation or activation was involved.
 
 ## Evidence and limits
 
@@ -302,9 +356,9 @@ bounded owning source only. Useful Pie anchors (paths in the Pie repository):
   `harness/model-providers/title-generation/title-generator.ts`: shared candidate
   generation, direct model I/O and late-result guards, not a title session.
 
-This stream ran **no application build, provider request, crash test or benchmark**.
-It performed a design walkthrough and source/contract review, with a bounded
-read-only scout for interaction evidence and a separate naming brainstorm.
-Executable storage evidence is in `SQLITE-VALIDATION.md`; execution/browser
-experiments belong to their respective reports. Those establish bounded facts,
-not that this class design is implemented, performant or fully qualified.
+The **original design pass** ran no application build, provider request, crash
+test or benchmark. It performed a walkthrough and source/contract review, with a
+bounded read-only scout and naming brainstorm. The later temp-only executable
+follow-up is separately scoped in §7. Storage, execution and browser evidence
+remain in their respective reports. These establish bounded facts, not that the
+production class design is implemented, performant or fully qualified.

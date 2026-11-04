@@ -131,17 +131,14 @@ runs and explicit verdict suppression.
   approved metadata-only/owner-approved task; the synthetic deterministic
   generator is always the fallback and exists first.
 - **Fixture compressibility (no conclusions without measurements):**
-  `TextOfrng` draws uniformly from a 43-symbol alphabet (letters, digits,
-  space, newline, umlauts, em-dash, CJK). A uniform symbol stream has order-0
-  entropy ≈ log2(43) ≈ 5.4 bits/char — ABOVE typical English order-0 entropy
-  (~4.1–4.7 bits/char) — so a plain context-free compressor generally
-  compresses this fixture LESS than English-like text; the earlier claim that
-  this fixture is "more compressible than English" was wrong and is retracted.
-  The alphabet makes UTF-8 bytes longer than string length (~14 % of chars are
-  3-byte, ~5 % 2-byte), so recorded byte figures are UTF-8 counts, not chars.
-  No adapter implements compression, making cross-candidate footprint
-  comparisons internally fair, but NO compression conclusion of any kind may
-  be drawn from these fixtures without direct measurements.
+  `TextOfrng` draws uniformly from a small synthetic alphabet (letters,
+  digits, whitespace, a few multi-byte symbols). That distribution is
+  synthetic — NOT English-like and NOT a compression probe; it supports no
+  compressibility claim and no compression extrapolation or conclusion of any
+  kind without direct measurements. Alphabet symbols include multi-byte
+  UTF-8 characters, so recorded byte figures are UTF-8 counts, not string
+  lengths. No adapter implements compression, so cross-candidate footprint
+  comparisons stay internally fair.
 
 ## Measurement rules
 

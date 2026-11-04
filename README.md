@@ -158,8 +158,8 @@ record this direction.
 
 The shared model interface (`IChatClient`), shared SQLite storage and
 TypeScript/Preact frontend are selected; see [ARCHITECTURE.md](ARCHITECTURE.md).
-.NET version, endpoint style, provider-specific adapters and desktop host remain
-open; the provisional loop direction still needs production qualification.
+Exact SDK/Node versions, endpoint style, provider-specific adapters and desktop
+host remain open; the provisional loop direction still needs production qualification.
 Resource use, portability and local source builds require verification; selected
 technologies are not claims of measured superiority.
 
@@ -187,6 +187,11 @@ Small convenience scripts are welcome. This selects a setup direction, not parti
 tools, versions or an acquisition mechanism; it does not mean automatically updating
 Urd or replacing unrelated machine programs. Offline builds and bundled SDKs/caches
 are not promised.
+
+**Build-tool direction:** the owner aligned with .NET 10 LTS and Vite, and said
+“Lean toward npm”. npm is the preferred, revisable route—not unconditional approval
+of the full build baseline. Node version, exact pins and setup mechanisms remain
+open; automatic .NET/Node acquisition still needs qualification.
 
 **Keep each customized copy together, with separate persistent data by default.**
 Use a user-chosen writable folder containing that copy's source, generated builds
@@ -229,14 +234,22 @@ these delivery sequences are distinct from the technology selections.
 
 **Browser access delivery order: same-machine first, then LAN, then Tailscale.**
 The owner selected this sequence for normal use; it is separate from the smaller
-fake-model technical slice. Authentication, client bootstrap, provider onboarding
-and transport remain unselected; local-first does not waive access protection.
+fake-model technical slice. Remote access trust, startup/discovery, provider
+onboarding and transport remain unselected.
+
+**Local browser access should be open-and-use, as in Pie.** Trust programs already
+running on the backend PC; do not introduce a Urd account, pairing or remembered-browser
+approval system. Use loopback and strict browser-request checks appropriate to the
+transport. This is a trusted-local policy, not authentication of individual clients
+or trust in arbitrary web origins. LAN protection and later Tailscale integration
+remain separate design work.
 
 **Use TypeScript + Preact for the shared UI.** The owner selected this direction
 on 2026-11-04: ordinary browser components and presentation logic should be reusable
 in later desktop/VS Code hosts. [Browser design](BROWSER-DESIGN.md) records the
-trade-off and bounded synthetic evidence. CSS/build tooling, transport, client-state
-classes, file layout and desktop host remain open; a prototype is not their approval.
+trade-off and bounded synthetic evidence. CSS, remaining build-tooling details,
+transport, client-state classes, file layout and desktop host remain open;
+a prototype is not their approval.
 
 ### Single-user, local-first workspace
 
@@ -398,7 +411,7 @@ Focused qualification evidence, distinct from architecture approval:
 - [Provider qualification](PROVIDER-QUALIFICATION.md): route limits and offline
   candidate OAuth/refresh evidence—not production auth or live-account qualification.
 - [Backend lifecycle](BACKEND-LIFECYCLE.md): Windows attach/start/stop mechanics;
-  portable locking, packaged daemon, authentication and topology remain unselected.
+  portable locking, packaged daemon, remote authentication and topology remain unselected.
 - [MCP qualification](MCP-QUALIFICATION.md): real SDK with fake stdio peers and an
   explicit 2025 handshake; default 2026 negotiation/fallback remains untested.
 

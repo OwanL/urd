@@ -129,7 +129,11 @@ project/folder split.
 The [working session sketch](SESSION-DESIGN.md) below records subsequent owner
 input, including the selected, revisable Core/Server boundary; it does not approve
 final APIs, broader base-class scope, fine file/folder layout or a production scaffold.
-**Still open:** .NET version, provider-specific integrations, execution
+
+**Subsequent owner alignment:** .NET 10 LTS is the backend version direction,
+not an exact SDK pin or approval of the complete build baseline.
+
+**Still open:** exact .NET SDK pin, provider-specific integrations, execution
 topology and desktop host. Shared SQLite, `IChatClient` and TypeScript/Preact are
 selected below; the narrow Urd-owned loop is provisional. These directions do not
 qualify performance, provider coverage, packaging or cross-platform behaviour.
@@ -147,7 +151,7 @@ selection blocker. Verify the actual supported Urd workflows on each OS; remote
 access on macOS remains intended scope. No macOS runtime test has been performed.
 
 Minimal APIs remain the recommended initial endpoint approach, not a separately
-locked choice. .NET version, endpoint/event protocol, authentication, packaging
+locked choice. Exact .NET SDK pin, endpoint/event protocol, remote access policy, packaging
 and process topology remain open. Agent work must retain its own lifetime rather
 than being cancelled by an HTTP request or client disconnect.
 
@@ -182,9 +186,17 @@ just to begin developing Urd from itself. Desktop and VS Code clients remain
 part of the destination; desktop host and host-specific integration remain open.
 
 **Subsequent owner alignment:** deliver normal-use browser access on the backend
-machine first, then LAN, then Tailscale. This selects access sequencing, not
-transport, authentication, client bootstrap or provider onboarding. It is distinct
-from a smaller fake-model technical slice and does not waive local access protection.
+machine first, then LAN, then Tailscale. This sequence alone did not select
+transport, client bootstrap or provider onboarding and is distinct from the smaller
+fake-model technical slice.
+
+**Local access direction:** keep Pie-like open-and-use access, with programs already
+running on the backend PC trusted. No Urd account, pairing or remembered-browser
+approval system. Use loopback and strict, transport-appropriate browser-request
+checks; this is local trust, not individual-client authentication or permission for
+arbitrary web origins. Exact request checks and transport remain engineering design;
+unauthenticated LAN or application trust in a future Tailscale/proxy setup is not
+selected. See [browser design](BROWSER-DESIGN.md).
 
 ### TypeScript and Preact for the shared UI
 
@@ -197,9 +209,14 @@ alongside .NET; prebuilt UI assets do not require a Node application server.
 [Browser design](BROWSER-DESIGN.md) records a bounded synthetic transcript/streaming
 experiment and a small Blazor contrast, not a production performance comparison.
 Real SQLite/agents, rich rendering, network access and host reuse remain unqualified.
-**Not selected:** CSS/build tooling or pins, transport, desktop host, client-state
-classes/responsibilities or project/folder layout. The proposed client-state split
-was not clear to the owner and remains explicitly provisional; review a concrete
+**Subsequent owner alignment:** Vite for frontend builds; npm is the preferred,
+revisable package-manager route after “Lean toward npm”, not an unconditional
+full-baseline selection. Node version, exact pins and setup mechanisms remain open;
+see [repository foundations](REPO-FOUNDATIONS.md).
+
+**Not selected:** CSS, remaining build-tooling details/pins, transport, desktop host,
+client-state classes/responsibilities or project/folder layout. The proposed client-state
+split was not clear to the owner and remains explicitly provisional; review a concrete
 example rather than interpreting non-objection as approval.
 
 ### Operating-system rollout: Windows, then macOS, then Linux
@@ -523,6 +540,13 @@ cannot transfer. This does not permit losing visible messages, tool results or
 attachments, replaying tools, automatic provider fallback or widening billing scope.
 No particular warning UI or running-turn change rule was selected. See
 [discovery design](DISCOVERY-DESIGN.md) for the scoped owner answer.
+
+**Project-instruction edits:** new chats read current instructions; existing chats
+keep their loaded project instructions until explicit Reload. Reload deliberately
+changes working context and can break cache reuse, without rewriting original chat
+history or delaying current permission enforcement. This does not select file
+watchers, a Reload API/UI or running-turn admission, or make all session context
+immutable.
 
 Pie freezes its native catalog and appends recovered tool descriptions, routing
 calls through a fixed wrapper; see `docs/plans/IMMUTABLE-MODEL-CONTEXT.md` in Pie.

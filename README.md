@@ -395,9 +395,9 @@ project's purpose and strategic constraints; the architecture document owns the
 more detailed decisions as they are made.
 
 [Foundation review](FOUNDATION-REVIEW.md) gathers the latest evidence and scoped
-owner outcomes. [Application plan](APPLICATION-PLAN.md) joins them into a concrete
-class/file-layout, browser-flow and setup proposal for review—not implementation
-permission or new decisions.
+owner outcomes. [Application plan](APPLICATION-PLAN.md) develops the broader concern
+and ownership map before class/file layout, alongside proposed browser/setup flows.
+Its working groupings are not implementation permission or new decisions.
 
 Focused qualification evidence, distinct from architecture approval:
 

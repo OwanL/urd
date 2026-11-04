@@ -94,12 +94,14 @@ draft nor the experiments approve transport, fine layout, APIs or schema.
 
 ## Next step
 
-The evidence/owner-review round is complete; application planning continues in
-[the concrete application plan](APPLICATION-PLAN.md). It connects the class/file
-layout, browser flow and Windows-first setup, with recommendations distinguished
-from existing selections. Review the new structure and bounded implementation scope,
-not another abstract reload, recovery, idle-only or routine-tooling questionnaire.
-No production implementation permission is inferred from completed research.
+The evidence/owner-review round is complete; owner-led application planning continues
+in [the application plan](APPLICATION-PLAN.md). The owner rejected the project-first
+directory sketch and found its six-component replacement incomplete. Start from the
+full set of concerns, using Pie as a reference: distinguish tools, harness execution,
+supporting systems and editable guidance, alongside UI, hosting, history/persistence
+and the other documented areas. Develop ownership before class/file layout; a first
+checkpoint does not define the whole product. No repeated reload/recovery/idle-only
+questionnaire or production permission follows from completed research.
 
 The four stream reports and shared integration were independently reviewed within
 their stated limits. Research recommendations do not turn fixtures into production

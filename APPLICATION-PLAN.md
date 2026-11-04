@@ -1,40 +1,67 @@
-# Application plan — component-led proposal for owner review
+# Application plan — concerns before component layout
 
 2026-11-05. **Planning, not implementation approval.** The owner rejected the
-project-first `app/Urd.Core`, `Urd.Server`, `Urd.Web`, tests sketch: “I dont like it,
-i say we separate the major components and parts of urd, per separation of concerns
-prinsiples”. The directory proposal is withdrawn, not approved by silence.
+project-first directory sketch, then found the six-component replacement incomplete.
+Both compressed the application prematurely. Start from Urd's documented concerns
+and useful Pie responsibilities, not the needs of a first fake-model checkpoint.
 
-Organize around Urd's responsibilities, then map classes and folders. The component
-map below is a revised recommendation, not a newly selected hierarchy or a project
-per component. The existing Core-without-ASP.NET/Server dependency boundary and narrow
-session alignment still stand; the owner has not specifically reversed them.
-The [foundation review](FOUNDATION-REVIEW.md) retains the other scoped outcomes.
+The owner's nonexhaustive anchors are **agent tools; harness-related systems (such
+as provider management); the agent harness; editable agent guidance; UI; hosting;
+and persistence/transcript management**. In particular, bundled system prompts,
+skills and similar authored guidance need a centralized, user-editable home.
+Exact directory names, nesting and project splits remain open. The selected
+ASP.NET-free Core/Server dependency boundary and narrow session alignment remain;
+this correction is not production permission. See the [foundation review](FOUNDATION-REVIEW.md).
 
-## 1. Major components and their ownership
+## 1. Concern inventory before grouping
 
-| Proposed component | Owns | Must not absorb |
-| --- | --- | --- |
-| **Agent runtime** | Sessions, temporary execution, context preparation and coordination/deferred work. Internal parts have their own owners, not one runtime manager. | HTTP/UI state, provider-specific protocols or direct SQL spread through the agent loop. |
-| **Tools and integrations** | Tool catalog/dispatch, current validation/permissions, built-in implementations and MCP integration. | Session lifecycle or provider request loops. Session-control tools enter Runtime's ordinary command path, not database shortcuts. |
-| **Providers** | Model catalog/access, provider adapters, provider sign-in/credentials and request-only `IChatClient` construction. | Agent sessions or another mandatory model-client facade. Runtime context policy remains separate from provider-specific representation. |
-| **Persistence** | Shared SQLite access, coherent history/coordination transactions and managed attachment storage. | Agent scheduling, transport or a generic interchangeable-storage framework. Retention policy comes from the owning domain; storage enforces it. |
-| **Application host** | Startup/shutdown, configuration wiring, data-instance ownership, browser API/access checks and composition. | Agent business rules or frontend state. This is the ASP.NET-dependent boundary. |
-| **User interface** | Shared Preact components, navigation/drafts, bounded read models and backend connection. | Agent execution, durable truth or a frontend session-class hierarchy. |
+Working distinction: **harness execution** is session/run machinery; **harness
+systems** are named services that support it, not a replacement catch-all Core.
+**Agent tools** expose operations on those owners. **Guidance** is authored content;
+its loading/discovery/assembly is code with separate responsibilities. This sharpens
+the owner's distinction without claiming the final placement of every class.
 
-These boundaries apply to the intended application, not only the first fake reply.
-Implement only needed parts as capabilities arrive; do not pre-create empty folders.
-Runtime's **Sessions**, **Execution**, **Context** and **Coordination** are explicit
-subcomponents, not extra session subclasses. Tool invocation uses the current dispatch
-path; provider exposure does not grant execution permission. Context still owns
-prefix/history distinctions and its policy does not move into provider adapters.
+The following inventory expands the existing [review coverage](ARCHITECTURE.md#review-coverage).
+Rows are not automatically folders, assemblies or mandatory parity requirements.
+Settled behavior remains in the owning reports; open mechanisms remain open.
 
-Dependency direction: UI calls the host; the host composes/calls the runtime and
-other components. Runtime uses provider requests, tool dispatch and persistence.
-Transport cannot leak into those components. Coordination tools call guarded runtime
-commands; separating folders does not permit a second admission/write path.
+| Concern to make visible | Responsibility and important boundary |
+| --- | --- |
+| **Agent tools** | Agent-callable contracts, implementations and command entry points: files/shell, web/browser/desktop, session operations and user questions. An entry point does not acquire its own independent lifecycle/state store. |
+| **Tool/integration infrastructure** | Catalog/registration, current validation/permission checks, execution safety and MCP/package connectivity. Exposure to a model is not authority to execute. No general plugin framework follows. |
+| **Agent harness** | Session identity/lifetimes, admitted input, temporary runs, model/tool cycle, streaming, cancellation and settlement. Not provider onboarding, UI state or a catch-all manager. |
+| **Provider/model management** | Accounts/credentials, connection/model catalogs, adapters, bucket selection, capabilities, request limits/retry/fallback and pricing support. Use shared request-level `IChatClient`, not a second session engine. |
+| **Authored agent guidance** | Central editable bundled system/helper prompts, named-agent definitions and skills/resources. Content is distinct from loader code; existing user/project guidance stays in its own scope. Names and formats beyond the stated Markdown direction remain proposals. |
+| **Resource discovery and catalog selection** | Locate/compose guidance and discover agents/skills/tools; protect required entries, select/prune exposure and recover hidden capabilities. Loader precedence and when edits apply must follow their own decisions, not the folder sketch. |
+| **Model-context management** | Already-sent prefix/history fidelity, compaction, tool-result reduction/recall and provider-specific representation. These are distinct mechanisms, not a single generic pruning service or the visible transcript. |
+| **Coordination and deferred work** | Delegation, messages, assignments/results/waits and durable follow-ups, with distinct identities/lifetimes. Cooperative resource coordination is also a review concern, not an inherited Pie lease implementation or generic scheduler requirement. |
+| **Persistence and transcript management** | Shared SQLite, original readable history, coherent bounded reads/edits, durable coordination facts and truthful interrupted-work recovery. Includes attachment references/lifetimes and managed bytes; no generic storage framework or new atomicity guarantee. |
+| **Configuration and policy** | User/session settings, provider/model preferences and capability choices. This is more than host wiring; exact files, precedence and storage are not selected by this inventory. |
+| **Accounting and diagnostics** | Usage, estimated costs, timing/errors and useful operational visibility, with explicit privacy/retention. Retain the selected lean usage summaries, not Pie's full historical analytics machinery. |
+| **User interface and interaction** | Conversation/workspace views, drafts/navigation, tool/detail inspection, questions/attention and fresh bounded client views. Does not own agent execution or durable truth. |
+| **Hosting and access** | Process/backend lifetime, composition, startup/discovery/stop, browser API/transport and local/remote trust. Does not own provider credentials or agent business rules merely because it exposes endpoints. |
+| **Customization, build and delivery** | Editable source/guidance, declared tools, local checks/builds, custom-copy data and matching-source distribution/activation. A product workflow with ownership, not incidental scripts. Automatic updating remains deferred. |
 
-### Existing class alignment within that map
+Verification, low LOC/resource overhead, responsiveness and privacy constrain all
+these areas; they do not each require a runtime subsystem. Do not create placeholders
+for every row. The inventory can grow and grouping must follow concrete collaborations.
+
+### Pie reference, not a transplanted architecture
+
+Read-only source survey at Pie checkout `cc82abb0f317f31341d3a6f12aa1545f6be1fbea`:
+`harness/tools/`, `harness/model-providers/`, `harness/agent-instructions/`,
+`harness/tool-and-skill-selection/`, `harness/agent-processes/`, `harness/session-storage/`,
+`analytics/`, and `application/{backend,frontend,hosts}/` give concrete owners to examine.
+Pie's Architecture ownership section and those owners' contracts are references,
+not evidence about installed behavior or approval to copy their implementation.
+
+Useful responsibilities and selected logic may transfer; Pie dependency/extension
+seams, process-worker topology, JSONL storage, host-owned draft/navigation policy and
+VS Code/artifact-delivery machinery are not defaults to import. Urd's selected SQLite,
+first-party harness and other explicit decisions govern; remaining choices stay open.
+No full Pie parity checklist is implied.
+
+### Existing class alignment, not a complete application model
 
 | Owner | What it does; what it must not become |
 | --- | --- |
@@ -53,16 +80,18 @@ Small records stay with their owner until real sharing warrants a separate file.
 
 ## 2. Map components to files after responsibility alignment
 
-The previous directory tree is withdrawn. Do not translate the new component table
-straight into six projects, processes or service interfaces. Logical components,
+The previous directory tree is withdrawn. Do not translate the concern inventory
+straight into projects, processes or service interfaces. Logical components,
 physical folders and compile-time dependency boundaries are different decisions.
 The selected ASP.NET-free Core boundary can contain explicit functional components;
 additional assembly splits need a concrete enforcement/reuse benefit.
 
-The next directory proposal should make those components and their substantive
-classes visible instead of presenting Core as an undifferentiated bucket. Folder
-names, exact nesting and test placement remain open. Tests should follow behavior
-owners without automatically adding a test project per component.
+Before the next directory proposal, map each concern to a named owner and trace a
+few real collaborations: editing bundled guidance, selecting/authenticating a provider,
+running a tool and completing delegated work. Keep agent-tool adapters separate from
+the services they invoke, authored guidance separate from its loader, and visible
+transcripts separate from model context. Folder names, nesting and test placement
+follow that ownership; no automatic test project per component.
 
 Keep the agreed custom-copy requirements: source, generated builds and persistent
 data together in a user-chosen writable root; data outside generated/distribution
@@ -162,11 +191,11 @@ enter as subsequent working capabilities, not abandoned features. There is no cl
 that the fake-model checkpoint is ready for normal use. Detailed schema/method names,
 lock primitives and test sequencing are implementation work, not owner questionnaires.
 
-**Owner discussion:** first align the functional components and their responsibilities,
-then show the class/directory mapping. The earlier request to approve the project-first
-layout and begin implementation is superseded by this correction. Existing Core/Server
-and session choices are not automatically reopened. Neither agreement with separation
-of concerns nor this revised recommendation authorizes production code.
+**Owner discussion:** the six-way map was incomplete, not a finished structure awaiting
+a yes/no vote. Develop the full concern/ownership map with the owner, using Pie where
+helpful; then show the class/directory mapping. The earlier implementation-approval ask
+remains withdrawn. Existing Core/Server and session choices are not automatically
+reopened, and agreement with this direction is not production-code authorization.
 
 **Evidence:** [Session](SESSION-DESIGN.md), [Browser](BROWSER-DESIGN.md),
 [Build](REPO-FOUNDATIONS.md), [backend lifecycle](BACKEND-LIFECYCLE.md) and the

@@ -132,8 +132,21 @@ separate Urd's major components/parts according to separation of concerns. Make
 functional responsibilities and dependencies explicit before mapping folders;
 project names alone are not that design. This does not select one assembly/process
 per component or specifically reverse the existing Core/Server dependency boundary.
-The revised [component map](APPLICATION-PLAN.md#1-major-components-and-their-ownership)
-is a proposal for discussion, not approved structure or permission to scaffold.
+The subsequent six-way map was also incomplete. The owner explicitly distinguished
+agent tools, harness-supporting systems (such as provider management), the harness
+itself, editable agent guidance, UI, hosting and persistence/transcript management,
+and said the list could continue. These are organizing concerns, not a closed
+hierarchy or one project each. Borrow useful organization/responsibilities from Pie,
+not its historical coupling or every feature/mechanism.
+
+**Guidance authoring direction:** provide a centralized, user-editable place for
+bundled Markdown system prompts, skills and similar guidance. Authored content and
+the code that discovers/loads/assembles it are separate concerns. This does not move
+existing user/project guidance into that location, choose exact paths, or settle
+reload timing. Configuration, context/catalog management, coordination/deferred work,
+usage/accounting and source customization must also stay visible in the wider design.
+The [expanded concern inventory](APPLICATION-PLAN.md#1-concern-inventory-before-grouping)
+is preparation for that discussion, not approved structure or permission to scaffold.
 
 The [working session sketch](SESSION-DESIGN.md) below records subsequent owner
 input, including the selected, revisable Core/Server boundary; it does not approve

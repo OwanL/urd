@@ -198,6 +198,97 @@ public sealed class SegLogStoreTests
     }
 
     [Fact]
+    public void ReplaceSuffix_down_to_zero_then_append_or_finalize_works_in_place_and_after_reopen()
+    {
+        // Reviewer probe: Publish used head.Count==0 to choose INSERT, so an
+        // EXISTING pointer row at count 0 (ReplaceSuffix(…, 0, …)) made the
+        // next append/finalize fail UNIQUE session_ptr.name. Deciding on row
+        // existence (head null) fixes both paths, same instance and reopened.
+        var model = new OracleModel();
+        var dir = NewDir("zero");
+        using (var store = Open(dir, segmentTarget: 400))
+        {
+            for (var i = 0; i < 3; i++)
+            {
+                ModelOps.AppendMessage(model, "s", Text("user", $"m{i}-" + new string('x', 80)));
+                store.AppendMessage("s", Text("user", $"m{i}-" + new string('x', 80)));
+            }
+            Assert.Equal(0, store.ReplaceSuffix("s", 0, []));
+            ModelOps.ReplaceSuffix(model, "s", 0, []);
+            Assert.Equal(0, store.ListSessionsMeta().Single(m => m.SessionId == "s").MessageCount);
+            Oracle.VerifyAll(store, model); // empty session, pointer row still exists
+            // Same-instance: UPDATE branch (not INSERT) on the count-0 row.
+            Assert.Equal(
+                ModelOps.AppendMessage(model, "s", Text("user", "after-empty")),
+                store.AppendMessage("s", Text("user", "after-empty")));
+            Oracle.VerifyAll(store, model);
+            // Same-instance finalize on the count-0 row (stream never existed).
+            store.StreamDraft("s", "stream-z", "batch");
+            model.ActiveDrafts.Add("stream-z");
+            var zmsg = Text("user", "finalize-on-zero");
+            Assert.Equal(
+                ModelOps.FinalizeStream(model, "s", "stream-z", zmsg),
+                store.FinalizeStream("s", "stream-z", zmsg));
+            Oracle.VerifyAll(store, model);
+            // Back to count 0, then reopen and drive both operations again.
+            Assert.Equal(0, store.ReplaceSuffix("s", 0, []));
+            ModelOps.ReplaceSuffix(model, "s", 0, []);
+            Oracle.VerifyAll(store, model);
+        }
+        using (var reopened = Open(dir, 400))
+        {
+            Assert.Equal(
+                ModelOps.AppendMessage(model, "s", Text("user", "reopened-after-empty")),
+                reopened.AppendMessage("s", Text("user", "reopened-after-empty")));
+            reopened.StreamDraft("s", "stream-z2", "batch");
+            model.ActiveDrafts.Add("stream-z2");
+            var z2 = Text("user", "reopened-finalize");
+            Assert.Equal(
+                ModelOps.FinalizeStream(model, "s", "stream-z2", z2),
+                reopened.FinalizeStream("s", "stream-z2", z2));
+            Oracle.VerifyAll(reopened, model);
+        }
+        Directory.Delete(dir, recursive: true);
+    }
+
+    [Fact]
+    public void Open_truncates_the_active_slot_tail_even_at_zero_count()
+    {
+        // Reviewer probe: with a count-0 pointer row (or a fresh oversize slot)
+        // there are no referenced rows, so the per-segment recovery loop did
+        // not touch the active file and an unindexed tail survived Open.
+        // NOTE: ReplaceSuffix(…, 0, …) keeps cur_end at the old indexed end
+        // (the deleted message's payload bytes remain as declared garbage);
+        var dir = NewDir("zero-tail");
+        var model = new OracleModel();
+        string activePath;
+        long cleanEnd;
+        using (var store = Open(dir, segmentTarget: 300))
+        {
+            ModelOps.AppendMessage(model, "s", Text("user", "one-" + new string('a', 80)));
+            store.AppendMessage("s", Text("user", "one-" + new string('a', 80)));
+            Assert.Equal(0, store.ReplaceSuffix("s", 0, [])); // pointer row stays, count 0, rows gone
+            ModelOps.ReplaceSuffix(model, "s", 0, []);
+            activePath = SegmentPath(dir, "s", 0);
+            cleanEnd = new FileInfo(activePath).Length; // indexed end (cur_end) incl. retained garbage below it
+        }
+        // Simulate an interrupted data stage: unindexed bytes beyond cur_end.
+        File.AppendAllText(activePath, new string('J', 77));
+        Assert.Equal(cleanEnd + 77, new FileInfo(activePath).Length);
+        using (var reopened = Open(dir, segmentTarget: 300))
+        {
+            Assert.Equal(cleanEnd, new FileInfo(activePath).Length); // truncated to the authoritative cur_end
+            Oracle.VerifyAll(reopened, model);
+            // The session still appends normally through the same pointer row.
+            Assert.Equal(
+                ModelOps.AppendMessage(model, "s", Text("user", "after-zero-tail")),
+                reopened.AppendMessage("s", Text("user", "after-zero-tail")));
+            Oracle.VerifyAll(reopened, model);
+        }
+        Directory.Delete(dir, recursive: true);
+    }
+
+    [Fact]
     public void ReplaceSuffix_appends_without_rewriting_and_reassigns_dense_ordinals()
     {
         var dir = NewDir("suffix");

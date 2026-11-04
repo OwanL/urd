@@ -53,7 +53,10 @@ garbage is never served and never mistaken for state.
 Recovery runs at `Open` and is index-authoritative (recovery by content):
 
 - The ACTIVE segment's unindexed tail — an interrupted, unacknowledged data
-  stage — is truncated to the active indexed end. More generally, EVERY
+  stage — is truncated to the authoritative append position (`cur_end`). This
+  is enforced even when the index count is zero (e.g. after a suffix edit down
+  to an empty session, or a fresh oversized-record slot where `cur_end` = 0); a
+  file shorter than `cur_end` is corruption. More generally, EVERY
   referenced segment is truncated to its furthest indexed byte: never below
   it, and referenced bytes are never touched. Recovery is by content — the
   index is authoritative, never the raw file length.

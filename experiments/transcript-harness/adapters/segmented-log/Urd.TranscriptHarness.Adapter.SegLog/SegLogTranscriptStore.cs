@@ -41,8 +41,10 @@ namespace Urd.TranscriptHarness.Adapter.SegLog;
 /// Recovery (declared, at Open):
 /// <list type="bullet">
 /// <item>The active segment's unindexed tail (an interrupted, unacknowledged
-/// data stage) is truncated to the active indexed end; recovery is by
-/// content — the index is authoritative, never the raw file length.</item>
+/// data stage) is truncated to the authoritative append position — enforced
+/// even when the index count is zero (e.g. after a suffix edit down to an
+/// empty session, or a fresh oversized-record slot); recovery is by content,
+/// the index is authoritative, never the raw file length.</item>
 /// <item>Wholly unreferenced segments (ids beyond the active pointer) are
 /// deleted; the pointer advances only with an acknowledged index transaction,
 /// so such bytes can never be pointed at again.</item>
@@ -537,25 +539,31 @@ public sealed class SegLogTranscriptStore : ITranscriptStore
 
     /// <summary>
     /// Publishes an acknowledged record in ONE index transaction: the pointer
-    /// row, the count, and (finalize) marker/batch deletion. The session
-    /// pointer values in <paramref name="head"/> are authoritative from here.
+    /// row, the count, and (finalize) marker/batch deletion. The advanced
+    /// pointer in <paramref name="published"/> is authoritative from here.
+    /// Insert-vs-update is decided on the pointer row's EXISTENCE (queried
+    /// inside the transaction), never on count: ReplaceSuffix(…, 0, …) gives
+    /// an <i>existing</i> row at count 0, and the next append/finalize must
+    /// UPDATE it instead of INSERTing a duplicate name.
     /// </summary>
-    private void Publish(string sessionId, SessionPtr head, MessageRow row, string? finalizeStream)
+    private void Publish(string sessionId, SessionPtr published, MessageRow row, string? finalizeStream)
     {
         using var transaction = Begin();
         try
         {
             InsertPointerRow(sessionId, row.Ordinal, row);
-            if (head.Count == 0)
+            var exists = Query("SELECT 1 FROM session_ptr WHERE name = $n", ("$n", sessionId))
+                .ExecuteReader().Read();
+            if (!exists)
             {
-                // No acknowledged messages yet: the pointer row does not exist.
+                // The pointer row does not exist yet (session's first record).
                 Execute("INSERT INTO session_ptr(name, count, cur_seg, cur_end) VALUES ($n, 1, $g, $e)",
-                    ("$n", sessionId), ("$g", head.CurSegment), ("$e", head.CurEnd));
+                    ("$n", sessionId), ("$g", published.CurSegment), ("$e", published.CurEnd));
             }
             else
             {
                 Execute("UPDATE session_ptr SET count = $c, cur_seg = $g, cur_end = $e WHERE name = $n",
-                    ("$c", head.Count + 1), ("$g", head.CurSegment), ("$e", head.CurEnd), ("$n", sessionId));
+                    ("$c", published.Count + 1), ("$g", published.CurSegment), ("$e", published.CurEnd), ("$n", sessionId));
             }
             if (finalizeStream is not null)
             {
@@ -631,7 +639,28 @@ public sealed class SegLogTranscriptStore : ITranscriptStore
                     stream.Flush();
                 }
             }
-            _ = curEnd; // the active end is enforced by the segment checks above
+            // The ACTIVE slot is enforced by cur_end directly, even when the
+            // count is zero (no references): a pointer row can legitimately
+            // exist at count 0 (after ReplaceSuffix(…, 0, …)), and a fresh
+            // oversize slot holds cur_end = 0. If an unacknowledged data stage
+            // left unindexed tail bytes there, they are truncated to the
+            // authoritative cur_end; a file shorter than cur_end is corruption.
+            var activePath = Path.Combine(dir, SegmentFileName(curSegment));
+            if (File.Exists(activePath))
+            {
+                using var activeStream = new FileStream(activePath, FileMode.Open, FileAccess.ReadWrite, FileShare.Read);
+                if (activeStream.Length < curEnd)
+                {
+                    throw new InvalidOperationException(
+                        $"Active segment shorter than the append position ({activeStream.Length} < {curEnd}) " +
+                        $"for {session}/{SegmentFileName(curSegment)}");
+                }
+                if (activeStream.Length > curEnd)
+                {
+                    activeStream.SetLength(curEnd);
+                    activeStream.Flush();
+                }
+            }
             // Wholly unreferenced segments beyond the active pointer can never
             // be pointed at again (the pointer advances only with an
             // acknowledged index transaction): safely deletable.

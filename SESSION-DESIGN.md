@@ -266,13 +266,20 @@ authorizes **no scaffold, source generation, build or installation**.
 
 ## 6. Acceptance sequence and remaining gates
 
-**First vertical-slice acceptance:** create a primary with stable identity;
-submit/stream through a deterministic `IChatClient`; save/reopen a bounded recent
-window; switch another session while streaming; disconnect/reconnect without
-cancelling or duplicating work; Stop settles before another execution starts.
-Then exercise pending/earlier edits with delayed stale callbacks. Use a real
-qualified provider separately; a fake client proves control flow, not entitlement,
-provider terminal semantics or native-context fidelity.
+**Proposed first technical checkpoint, not normal-use product scope:** create
+primaries with stable identities; submit/stream through a deterministic
+`IChatClient`; save/reopen a bounded recent window; switch another session while
+streaming; disconnect/reconnect without cancelling or duplicating work; Stop
+settles before another execution starts. The smaller two-chat/two-client draft
+excludes real providers/tools, delegation and edit/close UI. Its idle-only new
+Send restriction remains **unselected** after the owner review in §8; steering
+and follow-up input remain normal-use behavior, not deleted features.
+
+Pending/earlier edits with delayed stale callbacks are a subsequent acceptance
+step, not a reason to expand this first checkpoint. Use a real qualified provider
+separately; a fake client proves control flow, not entitlement, provider terminal
+semantics or native-context fidelity. Neither this sequence nor the existing
+disposable fixtures authorizes production implementation.
 
 **Foundation follow-ons before shipping the corresponding features:**
 
@@ -361,6 +368,73 @@ started exclusive `urd:heavy-local-work` lease, cached SDK/packages, no compiler
 server and only owned sequential children. Children exited and no fixture process
 remained; generated build output was removed after review. No live model/network
 call, production source/schema, installation or activation was involved.
+
+## 8. Resumed input/recovery review — 2026-11-05
+
+**Owner outcome: prefer simplicity, not a selected recovery interface.** The
+scenario was a publish command that had stopped, followed by a backend crash
+before its result was saved; the service could not confirm whether publication
+succeeded. The owner twice said the question was unclear, finally answering
+**“I still dont really understand, whatever is simplest”.** Do not turn this
+into claimed informed approval of either offered move-on/blocking control.
+
+The **revisable working recommendation under that delegation** is: once old
+owned work has actually stopped, keep the missing effect result marked unknown,
+never automatically replay it, and permit a fresh instruction. Do not add a
+chat-wide reconciliation-only lock or recovery wizard. Continuing does not mark
+the old command successful, undo its effects or authorize repeating it. Exact
+controls and model-context representation remain implementation work; this
+review did not qualify them. The recommendation was stated to the owner, not
+separately confirmed by them.
+
+This is not permission to ignore possibly live work or ambiguous admission:
+Stop/settlement and stale-write fences still apply. If a Send acknowledgement is
+lost, the old request may still be accepted; retain/reconcile its identity rather
+than minting another request or declaring rejection. Existing receipt lookup must
+remain available while busy. A missing tool result and an unknown Send receipt
+are different problems, not one universal retry button.
+
+**First-checkpoint staging remains a proposal.** Asked whether Send could be
+unavailable during a reply in the first internal fake-model test, the owner said
+**“I still dont understand what you are trying to do”.** No idle-only approval
+followed. The stream explained that developer checkpoint sequencing is not a
+change to the finished product and withdrew the request to make that engineering
+detail an owner choice. The §6 checkpoint is preparation, not a selected minimum
+usable product or permission to scaffold it. If idle-only admission is used for
+that checkpoint, reject new input before acceptance and preserve the draft;
+never accept-and-drop or silently queue it. Normal-use mid-response input stays
+retained, with preflight follow-up versus safe-boundary steering distinguished.
+
+The proposed fake-text restart check keeps saved partial output explicitly
+interrupted, loses only provisional output under the proposed process-crash
+interpretation below, and makes no automatic model request. Deliberate new input
+must not re-admit the old input. This narrower check does not decide all recovery
+controls or weaken **automatic due work proven not to have started**. Existing
+snooze safeguards, shared-result retention and final closed-history deletion stand.
+Independent-worker closure still needs meaningful UI context; it does not block
+this unrelated primary-chat checkpoint. No new closure mock is proposed.
+
+**Storage wording proposal for coordinator integration, not new authority:**
+clarify the current acknowledged-loss/identical-replay tension by distinguishing
+live provisional output from returned committed database records. Candidate
+wording: “For process crash/reopen, committed database records replay completely
+and in order; live output not yet committed may be lost. Machine/system crash
+or power loss is outside that process-crash guarantee.” This does not promise
+attachment-file atomicity, exactly-once effects, per-token fsync, a loss-time
+budget or qualification of every failure mode. It proposes no durability upgrade;
+shared authority remains unchanged until the coordinator reconciles its wording.
+
+**Evidence/limits:** reread the retained input/Stop/continuation behavior in Pie's
+`STATE_CONTRACT.md` (Execution Ordering and Queued Follow-ups), the existing §7
+fixture, Execution Design's recorded-effect/result-write failure and
+[DURABLE-BOUNDARIES-EVIDENCE.md](DURABLE-BOUNDARIES-EVIDENCE.md), plus the TEMP
+first-slice implementation/storage proposals. The results are existing bounded
+evidence and source-grounded reasoning, not new execution. No probes rerun,
+scheduler/cleanup/session code, schema, account access or build was added.
+Client/coordinator were told both the simplicity delegation and the unanswered
+staging question; peer notification is not approval. Focused independent read-only
+review found no consequential correctness or authority issue in this follow-up.
+No new runtime qualification is claimed.
 
 ## Evidence and limits
 

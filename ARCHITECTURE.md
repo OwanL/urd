@@ -119,8 +119,16 @@ as the design becomes concrete; introduce interfaces and shared abstractions whe
 actual boundaries or reuse justify them, not as a framework imposed in advance.
 No concrete class layout is approved by this decision.
 
+**Owner alignment (2026-11-04):** Involve the owner in overall application,
+class and file structure before treating a design as agreed. Class responsibilities
+and relationships should drive the filesystem layout, not the other way around.
+Use concrete flows and small sketches to discuss meaningful alternatives; parallel
+investigations and experimental code do not approve a production scaffold or
+project/folder split.
+
 **Still open:** .NET version, provider-specific integrations and loop libraries,
-loop ownership, storage, process topology, UI technology and desktop host.
+loop ownership, process topology, UI technology and desktop host. Shared SQLite
+storage and the `IChatClient` model interface are selected in their sections below.
 The language choice does not qualify performance, provider coverage, packaging
 or cross-platform behaviour; investigate those within the chosen backend direction.
 
@@ -389,6 +397,12 @@ ChatGPT-plan Responses API flow; Pi's existing Codex route is not the only optio
 GitHub's documented Copilot SDK instead embeds its agent runtime, so it must not
 be mistaken for a neutral model client. These are source findings, not qualified
 Urd integrations or a reason to select a library prematurely.
+
+[Provider qualification](PROVIDER-QUALIFICATION.md) records the later focused
+route/authentication findings. ChatGPT-plan Responses is a recommended first
+integration, with Ollama also acceptable to the owner; no live sign-in, entitlement
+or inference/tool round trip has been qualified. Its plan-route restrictions must
+not be inferred from generic API-key Responses capabilities.
 
 ### Keep small usage summaries after closure
 
@@ -790,6 +804,13 @@ driver pinning and process placement remain ordinary design work, not new
 decisions. Prior sections of [STORAGE-RESEARCH.md](STORAGE-RESEARCH.md) and
 [STORAGE-EXPERIMENT.md](STORAGE-EXPERIMENT.md) that describe storage as
 unselected are historical as of this date.
+
+[First-slice SQLite validation](SQLITE-VALIDATION.md) subsequently exercised
+bounded concurrent activity and signalled process-kill boundaries. Its conditional
+go supports the engine choice, not promotion of the experimental adapter/contract
+unchanged: preview correctness, production lifecycle rules and schema evolution
+still need work. These checks do not qualify power loss, sustained contention,
+attachment cleanup or end-to-end UI latency.
 
 ## Feature discovery: first pass
 

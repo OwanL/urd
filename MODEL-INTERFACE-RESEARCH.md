@@ -6,6 +6,13 @@
 > tool discovery. This document selects no implementation and selects no discovery
 > design. It complements, and does not edit, the primary docs.
 
+> **Subsequent decision (2026-11-04):** `Microsoft.Extensions.AI.Abstractions`
+> and `IChatClient` are selected in [ARCHITECTURE.md](ARCHITECTURE.md).
+> Recommendations below are historical where they describe that interface as
+> unselected; loop ownership and provider-specific adapters remain open.
+> [Provider qualification](PROVIDER-QUALIFICATION.md) records newer route limits
+> and the corrected distinction between Ollama server support and adapter fidelity.
+
 ## Status and evidence classes
 
 Bounded read-only research. **No live model requests, accounts, credentials,
@@ -92,7 +99,7 @@ Key per-adapter findings:
 | Concern | OpenAI Chat Completions | OpenAI Responses (experimental) | Anthropic 13.4.0 | OllamaSharp 5.5.0 |
 | --- | --- | --- | --- | --- |
 | Reasoning surface | Non-standard `reasoning_content` (DeepSeek/vLLM-style) only | `ReasoningResponseItem`; `EncryptedContent` → `ProtectedData`; item id in `AdditionalProperties["reasoningItemId"]` | `ThinkingBlock` → `TextReasoningContent{ProtectedData=signature}`; redacted thinking preserved | `Message.Thinking` → `TextReasoningContent` |
-| Reasoning replay | **Dropped** (no API slot) | Replayed incl. encrypted/id for store=false replay | Replayed (thinking/signature, redacted) | **Dropped** (no Ollama input slot) |
+| Reasoning replay | **Dropped** (no API slot) | Replayed incl. encrypted/id for store=false replay | Replayed (thinking/signature, redacted) | **Dropped by the inspected adapter**; current Ollama guidance supports replaying `thinking` (see [correction](PROVIDER-QUALIFICATION.md#reuse-only-where-it-helps)) |
 | Tool identity round-trip | CallId/Name/args preserved | preserved | preserved | **Call ids invented per replay** (Ollama has none) |
 | Raw escape hatch | request Patch / policies | unknown ResponseItems → `AIContent{RawRepresentation=item}`, replayed **verbatim at position** | raw `ToolUnion` passthrough; per-block `RawRepresentation is ContentBlockParam` replay; `RawRepresentationFactory` → `MessageCreateParams` | `RawRepresentationFactory` → `ChatRequest` |
 | Cache controls | n/a | caller-set | `anthropic:cache_control` AdditionalProperties helper; tool-def cache breakpoint; **not on thinking blocks** | none |

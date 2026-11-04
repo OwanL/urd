@@ -149,9 +149,11 @@ is cumbersome or a poor fit, consider an alternative rather than forcing Urd aro
 it. The [MCP decision and selection policy](ARCHITECTURE.md#mcp-client-library-and-revisiting-library-choices)
 record this direction.
 
-.NET version, endpoint style, provider/loop libraries, storage, UI toolkit and
-desktop host remain open. Resource use, portability and local source builds still
-require verification; these choices are not claims of measured superiority.
+The shared model interface (`IChatClient`) and shared SQLite storage are selected;
+see [ARCHITECTURE.md](ARCHITECTURE.md). .NET version, endpoint style,
+provider-specific adapters, loop ownership/libraries, UI toolkit and desktop host
+remain open. Resource use, portability and local source builds still require
+verification; selected technologies are not claims of measured superiority.
 
 ### Bundle source with published builds
 
@@ -339,6 +341,13 @@ architectural decisions and unresolved design questions. This README owns the
 project's purpose and strategic constraints; the architecture document owns the
 more detailed decisions as they are made.
 
+Focused qualification evidence, distinct from architecture approval:
+
+- [SQLite validation](SQLITE-VALIDATION.md): bounded concurrency/recovery checks,
+  preview defects and the gap between the experimental contract and production data.
+- [Provider qualification](PROVIDER-QUALIFICATION.md): documented access routes,
+  authentication/adapter constraints and untested live-account requirements.
+
 ## Open design work
 
 The following remain deliberately unresolved:
@@ -348,7 +357,8 @@ The following remain deliberately unresolved:
   technology remains open. The shared `IChatClient` interface is selected; its
   package version and provider-specific adapters are not.
 - Source/build packaging, the custom-build workflow and releases; automatic updating is deferred.
-- Persistence, restart/recovery, backend discovery and duplicate-start handling.
+- Persistence implementation/schema evolution and restart/recovery within the
+  selected shared SQLite design; backend discovery and duplicate-start handling.
 - Background-app controls, tray integration, startup-at-login and shutdown rules.
 - Network access and authentication boundaries for single-user LAN/Tailscale use.
 - Detailed implementation sequencing and timing within the Windows → macOS → Linux rollout; supported OS versions, Linux environments and platform feature parity.

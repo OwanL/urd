@@ -140,8 +140,10 @@ not a large hierarchy or layers for their own sake. The strict small-codebase
 requirement still applies. [ARCHITECTURE.md](ARCHITECTURE.md#c-backend-and-class-design)
 records the design work this calls for. The [owner-reviewed session sketch](SESSION-DESIGN.md)
 uses `SessionBase`, `PrimarySession` and `SubagentSession` as its working structure.
-Class responsibilities must drive file layout; exact APIs, base-class scope and
-the project/folder split are not approved for production scaffolding.
+Class responsibilities must drive file layout. The selected, revisable boundary is
+[`Urd.Server → Urd.Core`](SESSION-DESIGN.md#5-coreserver-project-boundary--selected-revisable):
+Core owns session/execution/storage logic without ASP.NET. Exact APIs, broader
+base-class scope and fine file/folder layout remain unapproved; no production scaffold is approved.
 
 **ASP.NET Core is the selected backend hosting/HTTP framework**, using its
 standard Kestrel server. The owner confirmed this on 2026-11-03 after alternatives
@@ -167,6 +169,12 @@ Users should have the source needed to change the application, including its
 guidance, UI and runtime capabilities. Do not recreate an elaborate extension
 or override platform merely to make those source changes possible.
 
+**Matching editable source and build instructions travel with distributable
+builds, including modified source in custom packages.** The accepted
+[source-distribution direction](REPO-FOUNDATIONS.md#owner-outcome) does not require
+repackaging on every compile or select a physical archive/folder/embedding format,
+SDK/cache bundling, tooling or activation mechanics.
+
 **Customisation and builds must work on the user's own machine.** Evaluate that
 workflow as a product capability, separately from installing a prebuilt release:
 required toolchains, dependency setup, local build/test steps and activation all
@@ -190,7 +198,7 @@ arbitrary source edits through upgrades.
 is to notify the user that an update exists and suggest asking their agent to
 upgrade Urd, rather than applying it automatically. The user and their agent
 understand their modifications; Urd should not assume it can reconcile them.
-This notification approach is a proposal, not a committed feature. Source/build
+This notification approach is a proposal, not a committed feature. Physical source/build
 packaging and the editing location remain open.
 
 ### Deliver the browser client first
@@ -356,7 +364,7 @@ more detailed decisions as they are made.
 Focused qualification evidence, distinct from architecture approval:
 
 - [Session design](SESSION-DESIGN.md): working sketch and guarded lifecycle/
-  process-exit evidence; hierarchy, layout and independent-worker closure remain open.
+  process-exit evidence; final hierarchy, fine layout and independent-worker closure remain open.
 - [Execution design](EXECUTION-DESIGN.md): provisional cycle and composed native
   adapter/guard/loop/SQLite test-envelope evidence—not actual session-store,
   process-kill, production-streaming or live-provider qualification.
@@ -375,8 +383,8 @@ Focused qualification evidence, distinct from architecture approval:
 
 The following remain deliberately unresolved:
 
-- Final class/module/project boundaries and execution topology within the working
-  session sketch; independent-worker closure; production qualification of the
+- Fine class/module/file layout and execution topology within the selected,
+  revisable Core/Server boundary; independent-worker closure; production qualification of the
   provisional Urd-owned cycle. No production scaffold is approved.
 - Provider integrations and package pins around selected `IChatClient`; client-state
   structure, transport and tooling around selected TypeScript/Preact.

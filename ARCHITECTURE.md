@@ -127,8 +127,9 @@ investigations and experimental code do not approve a production scaffold or
 project/folder split.
 
 The [working session sketch](SESSION-DESIGN.md) below records subsequent owner
-input; it does not approve final APIs, base-class scope or a production project
-layout. **Still open:** .NET version, provider-specific integrations, execution
+input, including the selected, revisable Core/Server boundary; it does not approve
+final APIs, broader base-class scope, fine file/folder layout or a production scaffold.
+**Still open:** .NET version, provider-specific integrations, execution
 topology and desktop host. Shared SQLite, `IChatClient` and TypeScript/Preact are
 selected below; the narrow Urd-owned loop is provisional. These directions do not
 qualify performance, provider coverage, packaging or cross-platform behaviour.
@@ -638,7 +639,11 @@ timer, user-input, session-finished and command-polling conditions.
 The backend language is settled above. Low harness CPU/memory cost, installation,
 library reuse and maintenance remain requirements. Source-bundled customisation
 must work on users' own machines; prebuilt-release convenience does not establish
-that the source-build workflow is acceptable.
+that the source-build workflow is acceptable. The accepted
+[source-distribution direction](REPO-FOUNDATIONS.md#owner-outcome) requires matching
+editable source and build instructions with distributable builds, including modified
+source in custom packages. It does not require repackaging every compile or select
+physical packaging, SDK/cache bundling, tooling or activation mechanics.
 
 [Foundation research](FOUNDATION-RESEARCH.md) preserves the earlier language
 comparison and local-build considerations; its shortlist is now historical.
@@ -729,9 +734,11 @@ Delegated-worker clutter and slow cleanup remain the motivations. Grouping,
 detachment, relative `parent` addressing and exact creation/delivery APIs are not
 selected. Stable IDs independent of mutable titles are recommended in the sketch,
 not a requirement to wait for title inference. Parent/child addressing cannot
-replace durable assignment/results. File/project layout was shown and deliberately
-deferred as too early: derive it from validated responsibilities and seek owner
-review before production scaffolding, rather than treating the example as agreed.
+replace durable assignment/results. After the initial layout deferral, the owner
+selected the revisable [`Urd.Server → Urd.Core` boundary](SESSION-DESIGN.md#5-coreserver-project-boundary--selected-revisable):
+Core owns session/execution/storage logic without ASP.NET; Server owns hosting,
+HTTP entrypoints and composition. Fine file/folder layout and exact APIs remain
+unapproved, and the coarse example does not authorize production scaffolding.
 
 ### Model-call reuse and composition: design alignment
 

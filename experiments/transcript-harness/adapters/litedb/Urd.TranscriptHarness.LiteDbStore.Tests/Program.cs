@@ -30,6 +30,7 @@ internal static class Program
             ReplaceSuffix(root);      // suffix replacement, truncation, bounds
             BoundsAndUnknownSessions(root);
             Assignments(root);
+            CollationIdents(root);      // case/delimiter/prefix session id isolation
             Statistics(root);
         }
         finally
@@ -248,6 +249,57 @@ internal static class Program
         Check(store.Sample().ManagedAllocatedBytes > 0, "statistics sample reports managed allocation");
         Check(store.Describe().StoreName is { Length: > 0 }, "descriptor reports store name");
     }
+
+    private static void CollationIdents(string root)
+    {
+        // Regression: LiteDB v5's default culture collation (en-NZ/IgnoreCase)
+        // made distinct session ids collide in the unique _id index (case
+        // differences, embedded separator characters) and could leak keys
+        // across prefix-ambiguous ids in ranges. The adapter now enforces
+        // byte-ordinal collation at Open, so all of these behave like the
+        // reference.
+        var ids = new[] { "CaseA", "casea", "CASEA", "ab", "a\u001Fb", "session-1", "session-10", "session-11" };
+        var storeRoot = Path.Combine(root, "idents");
+        using (var store = Open(storeRoot))
+        {
+            foreach (var id in ids)
+            {
+                store.AppendMessage(id, new MessageRecord("user", [new TextPart($"content-of-{id}")]));
+                store.AppendMessage(id, new MessageRecord("assistant", [new TextPart($"reply-{id}")]));
+                var metas = store.ListSessionsMeta().ToDictionary(m => m.SessionId, m => m.MessageCount, StringComparer.Ordinal);
+                Check(metas.TryGetValue(id, out var count) && count == 2, $"collation distinct id survives write {ToLabel(id)}", count.ToString());
+            }
+            Check(store.ListSessionsMeta().Length == ids.Length, $"collation all {ids.Length} sessions indexed");
+        }
+
+        // Reopen must keep the persisted ordinal collation and full isolation.
+        using (var store = Open(storeRoot))
+        {
+            foreach (var id in ids)
+            {
+                var range = store.ReadRange(id, 0, 2);
+                Check(range.Length == 2
+                    && range[0].Role == "user"
+                    && ((TextPart)range[0].Parts[0]).Content == $"content-of-{id}"
+                    && ((TextPart)range[1].Parts[0]).Content == $"reply-{id}",
+                    $"collation isolated range after reopen {ToLabel(id)}", range.Length.ToString());
+                Check(store.OpenRecent(id, 1).Length == 1, $"collation open recent {ToLabel(id)}");
+            }
+            // Cross-session spot checks: no range of one id returns another's content.
+            var rangeA = store.ReadRange("CaseA", 0, 2);
+            Check(rangeA.All(r => ((TextPart)r.Parts[0]).Content.Contains("of-CaseA") || ((TextPart)r.Parts[0]).Content.Contains("reply-CaseA")),
+                "collation case-differing siblings isolated");
+            var rangeDelim = store.ReadRange("ab", 0, 2);
+            Check(!rangeDelim.Any(r => ((TextPart)r.Parts[0]).Content.Contains("a\u001Fb")),
+                "collation delimiter-bearing sibling not leaked into plain id");
+            store.DeleteSession("CaseA", DeletePolicy.RequireSettled);
+            var metasAfterDelete = store.ListSessionsMeta().ToDictionary(m => m.SessionId, StringComparer.Ordinal);
+            Check(!metasAfterDelete.ContainsKey("CaseA") && metasAfterDelete.ContainsKey("casea"),
+                "collation deleted sibling stays deleted");
+        }
+    }
+
+    private static string ToLabel(string id) => id.Replace("\u001F", "<sep>");
 
     // ----- helpers -----
 

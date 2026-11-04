@@ -27,10 +27,18 @@ Ordered keyspace: fixed-width D19 ordinals make lexicographic order equal
 numeric order for a session’s own keys, so every (session, ordinal) window is
 a B-Tree range scan on the primary index. LiteDB v5 sorts string indexes with
 its default culture collation (`en-NZ/IgnoreCase`), which does not agree with
-ordinal bytes and leaks keys across sessions whose ids are ordinal prefixes of
-one another — so every range scan/delete therefore also carries an
-`S = sessionId` equality filter, making session isolation collation-independent.
-Previews use
+ordinal bytes: distinct session ids that only differ in case — or in embedded
+separator/control characters (e.g. `ab` vs `a\x1Fb`) — collide in the unique
+`_id` index (insert rejected), and prefix-ambiguous ids (`session-1` vs
+`session-10`) leak keys across ranges. The adapter therefore enforces the
+engine's byte-ordinal collation at `Open` (`RebuildOptions` with
+`Collation.Binary`; the `COLLATION` pragma is read-only once created, so the
+first open of an existing non-ordinal database performs a one-time
+content-preserving rebuild that recollates all indexes, and later opens see
+the persisted pragma and skip it). Under byte-ordinal collation the key
+design is exact: distinct session ids never produce collation-equal keys and
+ranges never cross sessions. As belt-and-braces, every range scan and range
+delete also carries an `S = sessionId` equality filter. Previews use
 a write-time stored prefix (cap 4096 chars/part) and never decode `blk`
 documents; the harness oracle requests 24 chars. Range/`OpenRecent` reads may
 decode full content per reference semantics.

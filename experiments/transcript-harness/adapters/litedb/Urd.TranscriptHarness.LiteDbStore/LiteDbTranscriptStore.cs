@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Reflection;
 using LiteDB;
+using LiteDB.Engine;
 using Urd.TranscriptHarness.Contracts;
 
 namespace Urd.TranscriptHarness.LiteDbStore;
@@ -97,6 +98,7 @@ public sealed class LiteDbTranscriptStore : ITranscriptStore, IStoreStatistics
             SerializeNullValues = true,
         };
         _db = new LiteDatabase($"Filename={Path.Combine(storeRoot, "transcripts.db")};Connection=direct", mapper);
+        EnforceOrdinalCollation();
         _msgs = _db.GetCollection<MsgDoc>("msg");
         _blks = _db.GetCollection<BlkDoc>("blk");
         _drafts = _db.GetCollection<DraftDoc>("draft");
@@ -105,6 +107,27 @@ public sealed class LiteDbTranscriptStore : ITranscriptStore, IStoreStatistics
         _drafts.EnsureIndex(x => x.S);
         _drafts.EnsureIndex(x => x.I);
         _asgs.EnsureIndex(x => x.T);
+    }
+
+    /// <summary>Forces byte-ordinal collation on the database. LiteDB v5 sorts
+    /// string indexes with a culture collation (default en-NZ/IgnoreCase),
+    /// which: (a) rejects inserts of distinct keys that only differ in case or
+    /// in embedded separator characters (duplicate _id within the unique
+    /// primary index), (b) can leak keys across prefix-ambiguous session ids in
+    /// range queries. The pragma is read-only once created, so a one-time
+    /// rebuild (recollates all data, no content change) is applied whenever the
+    /// stored collation is not already ordinal; later opens see the persisted
+    /// pragma and skip the rebuild.</summary>
+    private void EnforceOrdinalCollation()
+    {
+        var current = _db!.Pragma("COLLATION").AsString;
+        if (current == Collation.Binary.ToString()) return;
+        _db.Rebuild(new RebuildOptions { Collation = Collation.Binary });
+        var enforced = _db.Pragma("COLLATION").AsString;
+        if (enforced != Collation.Binary.ToString())
+        {
+            throw new InvalidOperationException($"LiteDB did not apply ordinal collation (rebuild produced '{enforced}')");
+        }
     }
 
     public SessionMeta[] ListSessionsMeta() =>

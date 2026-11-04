@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Urd.TranscriptHarness.Contracts;
@@ -9,9 +10,18 @@ namespace Urd.TranscriptHarness.Core;
 /// one JSON-line response per request to stdout, plus a "ready" event at
 /// startup and a "fatal" event instead of dying silently. Stdout stays clean
 /// for the protocol; unexpected errors surface as fatal, never as log noise.
+///
+/// Every successful response carries "t" (store-method elapsed microseconds)
+/// and, when the store implements IStoreStatistics, "a" (managed allocation
+/// delta). Both are measured strictly around the store method call: request
+/// JSON parsing and response JSON serialization are excluded, so the parent
+/// can separate host-method cost from its own RPC-side latency.
 /// </summary>
 public sealed class HostServer(ITranscriptStore store, IStoreStatistics? statistics, TextReader input, TextWriter output)
 {
+    private long _opMicros;
+    private long? _opAllocBytes;
+
     public void Serve()
     {
         try
@@ -27,7 +37,7 @@ public sealed class HostServer(ITranscriptStore store, IStoreStatistics? statist
         }
         catch (Exception ex)
         {
-            EmitEvent(Protocol.Fatal, $"{{\"message\":{System.Text.Json.JsonSerializer.Serialize(ex.Message)}}}");
+            EmitEvent(Protocol.Fatal, $"{{\"message\":{JsonSerializer.Serialize(ex.Message)}}}");
             throw;
         }
     }
@@ -37,32 +47,40 @@ public sealed class HostServer(ITranscriptStore store, IStoreStatistics? statist
         var id = root.GetProperty("i").GetInt64();
         try
         {
+            var op = root.GetProperty("op").GetString()!;
             using var buffer = new MemoryStream();
             using (var writer = new Utf8JsonWriter(buffer))
             {
-                Dispatch(writer, root.GetProperty("op").GetString()!, root.GetProperty("p"));
+                Dispatch(writer, op, root.GetProperty("p"));
             }
             var result = JsonDocument.Parse(buffer.ToArray()).RootElement.Clone();
-            EmitResponse(id, null, result);
-            return root.GetProperty("op").GetString() == ProtocolOps.Close;
+            EmitResponse(id, null, result, _opMicros, _opAllocBytes);
+            return op == ProtocolOps.Close;
         }
         catch (Exception ex)
         {
-            EmitResponse(id, ex.Message, null);
+            EmitResponse(id, ex.Message, null, null, null);
             return false;
         }
     }
 
     private void Dispatch(Utf8JsonWriter w, string op, JsonElement p)
     {
+        _opMicros = 0;
+        _opAllocBytes = null;
         switch (op)
         {
             case ProtocolOps.Open:
-                store.Open(p.GetProperty("root").GetString()!, p.GetProperty("attachmentRoot").GetString()!);
+            {
+                var storeRoot = p.GetProperty("root").GetString()!;
+                var attachmentRoot = p.GetProperty("attachmentRoot").GetString()!;
+                StoreTimed(() => store.Open(storeRoot, attachmentRoot));
                 w.WriteStartObject(); w.WriteEndObject();
                 break;
+            }
             case ProtocolOps.Describe:
-                var descriptor = store.Describe();
+            {
+                var descriptor = StoreTimed(store.Describe);
                 w.WriteStartObject();
                 w.WriteString("storeName", descriptor.StoreName);
                 w.WriteString("ackTier", descriptor.AckTier.ToString());
@@ -70,75 +88,128 @@ public sealed class HostServer(ITranscriptStore store, IStoreStatistics? statist
                 w.WriteString("notes", descriptor.Notes);
                 w.WriteEndObject();
                 break;
+            }
             case ProtocolOps.ListSessions:
-                HarnessJson.WriteSessionMetas(w, store.ListSessionsMeta());
+            {
+                var metas = StoreTimed(store.ListSessionsMeta);
+                HarnessJson.WriteSessionMetas(w, metas);
                 break;
+            }
             case ProtocolOps.OpenRecent:
-                HarnessJson.WriteMessages(w, store.OpenRecent(p.GetProperty("sessionId").GetString()!, p.GetProperty("count").GetInt32()));
+            {
+                var sessionId = p.GetProperty("sessionId").GetString()!;
+                var count = p.GetProperty("count").GetInt32();
+                HarnessJson.WriteMessages(w, StoreTimed(() => store.OpenRecent(sessionId, count)));
                 break;
+            }
             case ProtocolOps.PageOlder:
-                HarnessJson.WriteMessages(w, store.PageOlder(
-                    p.GetProperty("sessionId").GetString()!, p.GetProperty("before").GetInt64(), p.GetProperty("count").GetInt32()));
+            {
+                var sessionId = p.GetProperty("sessionId").GetString()!;
+                var before = p.GetProperty("before").GetInt64();
+                var count = p.GetProperty("count").GetInt32();
+                HarnessJson.WriteMessages(w, StoreTimed(() => store.PageOlder(sessionId, before, count)));
                 break;
+            }
             case ProtocolOps.ReadRange:
-                HarnessJson.WriteMessages(w, store.ReadRange(
-                    p.GetProperty("sessionId").GetString()!, p.GetProperty("from").GetInt64(), p.GetProperty("to").GetInt64()));
+            {
+                var sessionId = p.GetProperty("sessionId").GetString()!;
+                var from = p.GetProperty("from").GetInt64();
+                var to = p.GetProperty("to").GetInt64();
+                HarnessJson.WriteMessages(w, StoreTimed(() => store.ReadRange(sessionId, from, to)));
                 break;
+            }
             case ProtocolOps.WindowPreview:
-                HarnessJson.WriteWindowPreview(w, store.OpenRecentPreview(
-                    p.GetProperty("sessionId").GetString()!, p.GetProperty("count").GetInt32(), p.GetProperty("previewChars").GetInt32()));
+            {
+                var sessionId = p.GetProperty("sessionId").GetString()!;
+                var count = p.GetProperty("count").GetInt32();
+                var previewChars = p.GetProperty("previewChars").GetInt32();
+                HarnessJson.WriteWindowPreview(w, StoreTimed(() => store.OpenRecentPreview(sessionId, count, previewChars)));
                 break;
+            }
             case ProtocolOps.FetchToolResult:
+            {
+                var sessionId = p.GetProperty("sessionId").GetString()!;
+                var ordinal = p.GetProperty("ordinal").GetInt64();
+                var partIndex = p.GetProperty("partIndex").GetInt32();
+                var content = StoreTimed(() => store.FetchToolResult(sessionId, ordinal, partIndex));
                 w.WriteStartObject();
-                w.WriteString("content", store.FetchToolResult(
-                    p.GetProperty("sessionId").GetString()!, p.GetProperty("ordinal").GetInt64(), p.GetProperty("partIndex").GetInt32()));
+                w.WriteString("content", content);
                 w.WriteEndObject();
                 break;
+            }
             case ProtocolOps.Append:
+            {
+                var sessionId = p.GetProperty("sessionId").GetString()!;
+                var message = HarnessJson.ReadMessage(p.GetProperty("message"));
+                var ordinal = StoreTimed(() => store.AppendMessage(sessionId, message));
                 w.WriteStartObject();
-                w.WriteNumber("ordinal", store.AppendMessage(
-                    p.GetProperty("sessionId").GetString()!, HarnessJson.ReadMessage(p.GetProperty("message"))));
+                w.WriteNumber("ordinal", ordinal);
                 w.WriteEndObject();
                 break;
+            }
             case ProtocolOps.StreamDraft:
-                store.StreamDraft(p.GetProperty("sessionId").GetString()!, p.GetProperty("streamId").GetString()!, p.GetProperty("chunk").GetString()!);
+            {
+                var sessionId = p.GetProperty("sessionId").GetString()!;
+                var streamId = p.GetProperty("streamId").GetString()!;
+                var chunk = p.GetProperty("chunk").GetString()!;
+                StoreTimed(() => store.StreamDraft(sessionId, streamId, chunk));
                 w.WriteStartObject(); w.WriteEndObject();
                 break;
+            }
             case ProtocolOps.Finalize:
+            {
+                var sessionId = p.GetProperty("sessionId").GetString()!;
+                var streamId = p.GetProperty("streamId").GetString()!;
+                var message = HarnessJson.ReadMessage(p.GetProperty("message"));
+                var ordinal = StoreTimed(() => store.FinalizeStream(sessionId, streamId, message));
                 w.WriteStartObject();
-                w.WriteNumber("ordinal", store.FinalizeStream(
-                    p.GetProperty("sessionId").GetString()!, p.GetProperty("streamId").GetString()!, HarnessJson.ReadMessage(p.GetProperty("message"))));
+                w.WriteNumber("ordinal", ordinal);
                 w.WriteEndObject();
                 break;
+            }
             case ProtocolOps.ReplaceSuffix:
+            {
+                var sessionId = p.GetProperty("sessionId").GetString()!;
+                var from = p.GetProperty("from").GetInt64();
+                var messages = HarnessJson.ReadMessages(p.GetProperty("messages"));
+                var count = StoreTimed(() => store.ReplaceSuffix(sessionId, from, messages));
                 w.WriteStartObject();
-                w.WriteNumber("count", store.ReplaceSuffix(
-                    p.GetProperty("sessionId").GetString()!,
-                    p.GetProperty("from").GetInt64(),
-                    HarnessJson.ReadMessages(p.GetProperty("messages"))));
+                w.WriteNumber("count", count);
                 w.WriteEndObject();
                 break;
+            }
             case ProtocolOps.CreateAssignment:
-                store.CreateAssignment(HarnessJson.ReadAssignment(p.GetProperty("assignment")));
+            {
+                var assignment = HarnessJson.ReadAssignment(p.GetProperty("assignment"));
+                StoreTimed(() => store.CreateAssignment(assignment));
                 w.WriteStartObject(); w.WriteEndObject();
                 break;
+            }
             case ProtocolOps.Settle:
-                store.SettleAssignment(new SettleAssignmentRequest(
-                    p.GetProperty("assignmentId").GetString()!, p.GetProperty("resultText").GetString()!));
+            {
+                var request = new SettleAssignmentRequest(
+                    p.GetProperty("assignmentId").GetString()!, p.GetProperty("resultText").GetString()!);
+                StoreTimed(() => store.SettleAssignment(request));
                 w.WriteStartObject(); w.WriteEndObject();
                 break;
+            }
             case ProtocolOps.GetAssignment:
-                HarnessJson.WriteAssignment(w, store.GetAssignment(p.GetProperty("assignmentId").GetString()!));
+            {
+                var assignmentId = p.GetProperty("assignmentId").GetString()!;
+                HarnessJson.WriteAssignment(w, StoreTimed(() => store.GetAssignment(assignmentId)));
                 break;
+            }
             case ProtocolOps.DeleteSession:
-                store.DeleteSession(
-                    p.GetProperty("sessionId").GetString()!,
-                    Enum.Parse<DeletePolicy>(p.GetProperty("policy").GetString()!));
+            {
+                var sessionId = p.GetProperty("sessionId").GetString()!;
+                var policy = Enum.Parse<DeletePolicy>(p.GetProperty("policy").GetString()!);
+                StoreTimed(() => store.DeleteSession(sessionId, policy));
                 w.WriteStartObject(); w.WriteEndObject();
                 break;
+            }
             case ProtocolOps.Statistics:
                 if (statistics == null) throw new InvalidOperationException("Store does not implement IStoreStatistics");
-                var stats = statistics.Sample();
+                var stats = StoreTimed(statistics.Sample);
                 w.WriteStartObject();
                 w.WriteNumber("managedAllocatedBytes", stats.ManagedAllocatedBytes);
                 w.WriteEndObject();
@@ -151,7 +222,28 @@ public sealed class HostServer(ITranscriptStore store, IStoreStatistics? statist
         }
     }
 
-    private void EmitResponse(long id, string? error, JsonElement? result)
+    private void StoreTimed(Action call)
+    {
+        StoreTimed<object?>(() =>
+        {
+            call();
+            return null;
+        });
+    }
+
+    private T StoreTimed<T>(Func<T> call)
+    {
+        long beforeAlloc = 0;
+        if (statistics is not null) beforeAlloc = GC.GetTotalAllocatedBytes(precise: true);
+        var stopwatch = Stopwatch.StartNew();
+        var result = call();
+        stopwatch.Stop();
+        _opMicros = stopwatch.Elapsed.Ticks * 1_000_000L / TimeSpan.TicksPerSecond;
+        if (statistics is not null) _opAllocBytes = GC.GetTotalAllocatedBytes(precise: true) - beforeAlloc;
+        return result;
+    }
+
+    private void EmitResponse(long id, string? error, JsonElement? result, long? micros, long? allocBytes)
     {
         using var buffer = new MemoryStream();
         using (var writer = new Utf8JsonWriter(buffer))
@@ -159,6 +251,8 @@ public sealed class HostServer(ITranscriptStore store, IStoreStatistics? statist
             writer.WriteStartObject();
             writer.WriteNumber("i", id);
             if (error != null) writer.WriteString("e", error); else writer.WriteNull("e");
+            if (micros is { } t) writer.WriteNumber("t", t); else writer.WriteNull("t");
+            if (allocBytes is { } a) writer.WriteNumber("a", a); else writer.WriteNull("a");
             if (result is { } r) writer.WritePropertyName("r"); else writer.WriteNull("r");
             if (result is { } value) value.WriteTo(writer);
             writer.WriteEndObject();

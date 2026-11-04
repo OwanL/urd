@@ -14,6 +14,8 @@ public sealed class IpcStoreAdapter : ITranscriptStore
 {
     private readonly Process _host;
     private long _nextId = 1;
+    private readonly Dictionary<string, List<double>> _hostLatency = [];
+    private readonly Dictionary<string, List<double>> _hostAllocBytes = [];
 
     private IpcStoreAdapter(Process host) => _host = host;
 
@@ -58,13 +60,13 @@ public sealed class IpcStoreAdapter : ITranscriptStore
 
     public StoreDescriptor Describe()
     {
-        var id = Send(ProtocolOps.Describe, static _ => { });
-        var element = AwaitResponse(id);
-        return new StoreDescriptor(
-            element.GetProperty("storeName").GetString()!,
-            Enum.Parse<AckTier>(element.GetProperty("ackTier").GetString()!),
-            element.GetProperty("settingsNote").GetString()!,
-            element.GetProperty("notes").GetString()!);
+        var result = Call(ProtocolOps.Describe, static e =>
+            new StoreDescriptor(
+                e.GetProperty("storeName").GetString()!,
+                Enum.Parse<AckTier>(e.GetProperty("ackTier").GetString()!),
+                e.GetProperty("settingsNote").GetString()!,
+                e.GetProperty("notes").GetString()!));
+        return result;
     }
 
     public sealed record StoreHostLaunch(string HostExecutable, string? StoreAssembly, string StoreType, string StoreRoot, string AttachmentRoot);
@@ -190,10 +192,9 @@ public sealed class IpcStoreAdapter : ITranscriptStore
     {
         try
         {
-            var id = Send(ProtocolOps.Statistics, static _ => { });
-            return TryRead(id, out var response)
-                ? new StoreStatistics(response.GetProperty("managedAllocatedBytes").GetInt64())
-                : null;
+            var wrapper = AwaitResponse(Send(ProtocolOps.Statistics, static _ => { }));
+            RecordHostMetrics(ProtocolOps.Statistics, wrapper);
+            return new StoreStatistics(wrapper.GetProperty("r").GetProperty("managedAllocatedBytes").GetInt64());
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("Store does not implement IStoreStatistics"))
         {
@@ -205,14 +206,18 @@ public sealed class IpcStoreAdapter : ITranscriptStore
     public void Close()
     {
         var id = Send(ProtocolOps.Close, static _ => { });
-        TryRead(id, out _);
+        AwaitResponse(id);
         FlushInput();
         if (!_host.WaitForExit(10_000)) _host.Kill(entireProcessTree: true);
         _host.WaitForExit();
     }
 
+    private bool _disposed;
+
     public void Dispose()
     {
+        if (_disposed) return; // idempotent: several close/kill paths share this
+        _disposed = true;
         try
         {
             if (!_host.HasExited)
@@ -260,14 +265,47 @@ public sealed class IpcStoreAdapter : ITranscriptStore
     private T Call<T, TArg>(string op, Action<Utf8JsonWriter, TArg> writeParams, TArg arg, Func<JsonElement, T> readResult)
     {
         var id = Send(op, w => writeParams(w, arg));
-        return readResult(AwaitResponse(id));
+        var wrapper = AwaitResponse(id);
+        RecordHostMetrics(op, wrapper);
+        return readResult(ResultOf(wrapper));
     }
 
     private T Call<T>(string op, Func<JsonElement, T> readResult)
     {
         var id = Send(op, static _ => { });
-        return readResult(AwaitResponse(id));
+        var wrapper = AwaitResponse(id);
+        RecordHostMetrics(op, wrapper);
+        return readResult(ResultOf(wrapper));
     }
+
+    /// <summary>Records host-side store-method timing/allocation carried by the response wrapper.</summary>
+    private void RecordHostMetrics(string op, JsonElement wrapper)
+    {
+        if (wrapper.TryGetProperty("t", out var t) && t.ValueKind == JsonValueKind.Number)
+        {
+            Add(_hostLatency, op, Math.Max(0, t.GetDouble() / 1000.0)); // µs → ms
+        }
+        if (wrapper.TryGetProperty("a", out var a) && a.ValueKind == JsonValueKind.Number)
+        {
+            Add(_hostAllocBytes, op, Math.Max(0, a.GetDouble()));
+        }
+    }
+
+    private static void Add(Dictionary<string, List<double>> table, string key, double sample)
+    {
+        if (!table.TryGetValue(key, out var list))
+        {
+            list = [];
+            table[key] = list;
+        }
+        list.Add(sample);
+    }
+
+    public IReadOnlyDictionary<string, NamedStats> HostLatency =>
+        _hostLatency.ToDictionary(kv => kv.Key, kv => Stats.Summarize(kv.Value));
+
+    public IReadOnlyDictionary<string, NamedStats> HostAllocationBytes =>
+        _hostAllocBytes.ToDictionary(kv => kv.Key, kv => Stats.Summarize(kv.Value));
 
     private long Send(string op, Action<Utf8JsonWriter> writeParams)
     {
@@ -287,24 +325,15 @@ public sealed class IpcStoreAdapter : ITranscriptStore
         return _nextId - 1;
     }
 
+    /// <summary>Returns the full response wrapper element (with "t"/"a" beside "r").</summary>
     private JsonElement AwaitResponse(long id)
-    {
-        if (!TryRead(id, out var response))
-        {
-            throw new HarnessError($"No response for request {id} (host may have died)");
-        }
-        return response;
-    }
-
-    private bool TryRead(long id, out JsonElement result)
     {
         while (true)
         {
             var line = _host.StandardOutput.ReadLine();
             if (line is null)
             {
-                result = default;
-                return false;
+                throw new HarnessError($"No response for request {id} (host may have died)");
             }
             var element = JsonDocument.Parse(line).RootElement;
             if (element.TryGetProperty("ev", out var ev))
@@ -321,9 +350,13 @@ public sealed class IpcStoreAdapter : ITranscriptStore
             {
                 throw new InvalidOperationException($"op failed on store host: {error.GetString()}");
             }
-            var r = element.GetProperty("r");
-            result = r.ValueKind == JsonValueKind.Null ? JsonSerializer.SerializeToElement(new { }) : r.Clone();
-            return true;
+            return element.Clone();
         }
+    }
+
+    private static JsonElement ResultOf(JsonElement wrapper)
+    {
+        var r = wrapper.GetProperty("r");
+        return r.ValueKind == JsonValueKind.Null ? JsonSerializer.SerializeToElement(new { }) : r.Clone();
     }
 }

@@ -14,6 +14,8 @@ public sealed record RunSummary(
     int OpCount,
     Dictionary<string, NamedStats> ReadLatency,
     Dictionary<string, NamedStats> MutationLatency,
+    Dictionary<string, NamedStats> HostLatency,
+    Dictionary<string, NamedStats> HostAllocatedBytes,
     long Checkpoints,
     long? ManagedAllocatedBytesBefore,
     long? ManagedAllocatedBytesAfter,

@@ -19,8 +19,9 @@ claims durability.
 | `contracts/` | Urd.TranscriptHarness.Contracts | Frozen adapter contract (`ITranscriptStore`, `IStoreStatistics`, record/policy types). |
 | `core/` | Urd.TranscriptHarness.Core | Deterministic trace generator, oracle model + verification, trace executor, JSON codec, IPC protocol + host server, child-process adapter, stats, path helpers. |
 | `reference/` | Urd.TranscriptHarness.ReferenceStore | In-memory reference adapter (correctness baseline; `AckTier.MemoryOnly`, never durability evidence). |
-| `host/` | Urd.TranscriptHarness.StoreHost | Store-host child process. Loads the default built-in reference store or any adapter by explicit `--store-assembly` + `--store-type`; adding an adapter never edits shared host files. |
-| `runner/` | Urd.TranscriptHarness.Runner | Shared runner CLI: `selftest`, `smoke`. Owns traces, verification and measurement. |
+| `host/` | Urd.TranscriptHarness.StoreHost | Store-host child process. Loads the default built-in reference store or any adapter by explicit `--store-assembly` + `--store-type` (AssemblyDependencyResolver, see "Plugin loading"); adding an adapter never edits shared host files. |
+| `runner/` | Urd.TranscriptHarness.Runner | Shared runner CLI: `selftest`, `smoke`, `validate`. Owns traces, verification and measurement. |
+| `testplugin/` | Urd.TranscriptHarness.Plugin.TestPlugin | Harness-owned resolver-test adapter (Newtonsoft.Json snapshot store, MemoryOnly). Not a storage candidate; never storage evidence. |
 
 ## Contract (frozen for this milestone)
 
@@ -68,13 +69,16 @@ order, altered content, wrong counts, dropped records, wrong tool-result
 content, lost sessions), full catalog round trip, streaming/finalize rules,
 preview-window rules (metadata-only + bounded), suffix-edit renumbering and
 truncation, delete/assignment invariants, child-process lifecycle
-(ready/ack/read/close), and kill mechanics. All pass against the reference
-adapter.
+(ready/ack/read/close), host-method timing/allocation recording, plugin load
+via AssemblyDependencyResolver with an external dependency, validate-runner
+mechanics, and kill mechanics. All pass against the reference adapter and the
+resolver-test plugin.
 
-**Kill tests against the memory-only reference store validate harness mechanics
-only.** Crash acceptance by before/after content comparison activates with the
-first real persistent adapter (see `Oracle.VerifyAfterCrash`, which reports false
-and structural-coherence-only for `AckTier.MemoryOnly`).
+**Kill tests against memory-only stores validate harness mechanics only.** The
+content-based crash-acceptance path exists in code (`Oracle.VerifyAfterCrash`,
+and the runner's `validate` command) and activates its verdicts with the first
+real persistent adapter; MemoryOnly adapters get structural-coherence-only
+runs and explicit verdict suppression.
 
 ## Fixture tiers and provenance
 
@@ -99,24 +103,34 @@ and structural-coherence-only for `AckTier.MemoryOnly`).
 
 - Latency: named statistics only (min/p10/median/p90/max + sample count) —
   no invented percentiles, no aggregate score.
+- **Host method vs RPC separation:** every successful store-host response
+  carries `t` (store-method elapsed µs) and, when the adapter implements
+  `IStoreStatistics`, `a` (managed allocation delta). Both are measured strictly
+  around the store method call — request parsing and response JSON
+  serialization are excluded. The report carries parent-side RPC latency and
+  host-side `hostLatency`/`hostAllocatedBytes` as separate sections (they
+  aggregate all calls including verification, and are labelled accordingly).
 - Memory/resources reported separately, never merged: managed allocations
   (`IStoreStatistics` where present), child private bytes and working set
-  (sampled), store disk footprint (bytes + file count).
+  (sampled), store disk footprint (bytes + file count). Replay resource peaks
+  include interleaved oracle checkpoint verification (checkpoints run inside
+  `Replay`); the final verification pass is sampled separately. No figure
+  claims to exclude oracle work from the whole run.
 - Adapter LOC vs harness LOC reported separately, alongside dependency and
-  install-footprint cost; small-code compliance is measured, not asserted.
+  install-footprint cost, once adapters exist (measured, not asserted).
 - Stdout summaries are convenience output; the machine-readable evidence is the
   run's `report.json` in the owned temp run directory
   (`%TEMP%/urd-transcript-harness/run-<timestamp>-<id>/`).
 
 ## Commands
 
-.NET 10 SDK (verified with 10.0.403). Restore is scoped (no package feeds
-required in this milestone).
+.NET 10 SDK (verified with 10.0.403). Restore is scoped (official feeds only).
 
 ```shell
 dotnet build experiments/transcript-harness/Urd.TranscriptHarness.sln -c Release
 dotnet run --project experiments/transcript-harness/runner/Urd.TranscriptHarness.Runner -c Release -- selftest
 dotnet run --project experiments/transcript-harness/runner/Urd.TranscriptHarness.Runner -c Release -- smoke
+dotnet run --project experiments/transcript-harness/runner/Urd.TranscriptHarness.Runner -c Release -- validate --store-assembly <dll> --store-type <FullTypeName>
 ```
 
 `smoke` accepts overrides: `--seed`, `--sessions`, `--messages-min`,
@@ -125,9 +139,48 @@ dotnet run --project experiments/transcript-harness/runner/Urd.TranscriptHarness
 and `--temp-root <dir>`. Large tiers are configuration-only; nothing huge is
 generated by default.
 
+## Plugin loading (adapters)
+
+`validate` and `smoke` load adapters by explicit path + type only:
+`--store-assembly <dll> --store-type <FullTypeName>`. The store host uses an
+AssemblyDependencyResolver-backed AssemblyLoadContext per adapter:
+
+- package dependencies (managed and native) resolve from the adapter's
+  `.deps.json` sidecar;
+- **shared Contracts types must unify with the host's own loaded instance** —
+  the loader refuses to load a second `Urd.TranscriptHarness.Contracts` copy;
+- the context is an explicit-path loader for known adapters, not a plugin
+  framework: no discovery, no isolation from the host, no sandboxing.
+
+Adapter csproj requirement (coordination note for adapter owners): set
+`<EnableDynamicLoading>true</EnableDynamicLoading>` (or equivalent
+`CopyLocalLockFileAssemblies`) so package/native assets and `.deps.json` are
+placed beside the adapter DLL. The resolver-test plugin (`testplugin/`, an
+in-memory store persisting Newtonsoft.Json snapshots) proves dependency
+resolution and shared type identity; the first real adapter (SQLite rows)
+validates native-asset resolution.
+
+## Persistence validation (`validate`)
+
+`validate` runs a small deterministic acked-prefix workload over the frozen
+contract (no contract changes, no extra store API), then:
+
+1. **clean-reopen**: graceful close, fresh host process over the same store
+   root, FULL content verification against the baseline model;
+2. **kill-reopen**: process kill with one unacknowledged append in flight;
+   after reopen the session content must equal the baseline or
+   baseline-plus-inflight end state — resolved by content comparison, never by
+   the child merely exiting (this is the crash-acceptance path deferred from
+   Stage 0, first exercised with the persistent adapters).
+
+Adapters declaring `AckTier.MemoryOnly` (reference store, test plugin) fall
+back to structural-coherence-only checks with explicit suppression of all
+persistence verdicts: their runs are mechanics information, never durable
+evidence.
+
 ## Deferred until real adapters
 
-- Kill/crash acceptance verdicts by content comparison (persistent tiers only).
 - Attachment files with multiple large-image references per session.
 - Cleanup-action footprints (vacuum/compaction timings).
 - Stage 1 samples with a shared default OS-flush ack tier across candidates.
+- Full benchmark/concurrency suites and large data tiers (parent-serialized).

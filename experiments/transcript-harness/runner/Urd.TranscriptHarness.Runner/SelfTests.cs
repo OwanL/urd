@@ -43,6 +43,9 @@ public static class SelfTests
         Check("suffix edit renumbering and truncation", SuffixEditRules);
         Check("delete/assignment invariants", DeleteInvariants);
         Check("child lifecycle: ready/ack/read/close", HostLifecycle);
+        Check("host method timing and allocation recorded separately", HostMetricSeparation);
+        Check("plugin loads via resolver with external dependency", PluginResolverLoad);
+        Check("validate runner mechanics (memory-only path)", ValidateMechanics);
         Check("kill mechanics (mechanics only; no durability interpretation)", KillMechanics);
 
         if (failures.Count > 0)
@@ -278,6 +281,14 @@ public static class SelfTests
         {
             throw new HarnessError("protocol round trip mismatch");
         }
+        if (!adapter.HostLatency.ContainsKey("append") || !adapter.HostLatency.ContainsKey("openRecent"))
+        {
+            throw new HarnessError("host method latency was not recorded separately from RPC");
+        }
+        if (!adapter.HostAllocationBytes.ContainsKey("append"))
+        {
+            throw new HarnessError("host allocation deltas were not recorded");
+        }
         adapter.Close();
         adapter.Process.WaitForExit();
         if (adapter.Process.ExitCode != 0)
@@ -285,6 +296,99 @@ public static class SelfTests
             throw new HarnessError($"clean close ended with exit code {adapter.Process.ExitCode}");
         }
     }
+
+    private static void HostMetricSeparation()
+    {
+        var tempRoot = CreateSelfTestDir("metrics");
+        using var adapter = SpawnReferenceHost(tempRoot);
+        var message = MessageOf("user", "timed op");
+        adapter.AppendMessage("s", message);
+        adapter.OpenRecent("s", 10);
+        adapter.AppendMessage("s", MessageOf("assistant", "timed op 2"));
+
+        var hostLatency = adapter.HostLatency["append"];
+        if (hostLatency.Count < 2) throw new HarnessError("host latency samples missing");
+        if (hostLatency.Min < 0 || hostLatency.Max > 1000)
+        {
+            throw new HarnessError($"host append latency implausible: {hostLatency.Min}..{hostLatency.Max}ms");
+        }
+        var alloc = adapter.HostAllocationBytes["append"];
+        if (alloc.Count < 2 || alloc.Min <= 0)
+        {
+            throw new HarnessError("host append allocation delta missing or non-positive");
+        }
+        adapter.Close();
+    }
+
+    private static void PluginResolverLoad()
+    {
+        var pluginPath = LocatePluginAssembly();
+        var tempRoot = CreateSelfTestDir("plugin");
+        using var adapter = IpcStoreAdapter.Spawn(GetPluginLaunch(tempRoot, pluginPath));
+        var descriptor = adapter.Describe();
+        if (!descriptor.StoreName.Contains("TestPlugin") || !descriptor.StoreName.Contains("Newtonsoft"))
+        {
+            throw new HarnessError($"plugin descriptor unexpected: {descriptor.StoreName}");
+        }
+        adapter.AppendMessage("s", MessageOf("user", "through plugin"));
+        adapter.AppendMessage("s", MessageOf("assistant", "second record"));
+        var read = adapter.ReadRange("s", 0, 2);
+        if (read.Length != 2 || MessageText(read[0]) != "through plugin")
+        {
+            throw new HarnessError("plugin content round trip failed");
+        }
+        if (!adapter.HostLatency.ContainsKey("append") || !adapter.HostLatency.ContainsKey("readRange"))
+        {
+            throw new HarnessError("plugin host did not report per-op host-method latency");
+        }
+        // Plugin does not implement IStoreStatistics, so no allocation channel exists —
+        // latency must still arrive.
+        adapter.Close();
+        adapter.Process.WaitForExit();
+        if (adapter.Process.ExitCode != 0)
+        {
+            throw new HarnessError($"plugin close ended with exit code {adapter.Process.ExitCode}");
+        }
+    }
+
+    private static void ValidateMechanics()
+    {
+        // Memory-only plugin: full persistence verdicts must be suppressed;
+        // the mechanics path (spawn, acked workload, close/reopen/kill/reopen)
+        // must still run without errors and without content claims.
+        var pluginPath = LocatePluginAssembly();
+        var tempRoot = CreateSelfTestDir("validate");
+        var launch = GetPluginLaunch(Path.Combine(tempRoot, "store"), pluginPath);
+        var outcome = ValidateRunner.Run(launch, 9);
+        if (outcome.Tier != AckTier.MemoryOnly) throw new HarnessError("plugin tier unexpected");
+        if (outcome.DurableJudgementPossible) throw new HarnessError("memory-only adapter claimed durability judgement");
+        if (outcome.CleanReopenVerified || outcome.KillReopenVerified)
+        {
+            throw new HarnessError("memory-only validate claimed persistence verification");
+        }
+    }
+
+    private static string LocatePluginAssembly()
+    {
+        var dllName = "Urd.TranscriptHarness.Plugin.TestPlugin.dll";
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null)
+        {
+            var candidate = Path.Combine(dir.FullName, "testplugin", "Urd.TranscriptHarness.Plugin.TestPlugin", "bin",
+                "Release", "net10.0", dllName);
+            if (File.Exists(candidate)) return candidate;
+            dir = dir.Parent;
+        }
+        throw new HarnessError($"test plugin assembly not found; build testplugin first ({dllName})");
+    }
+
+    private static IpcStoreAdapter.StoreHostLaunch GetPluginLaunch(string storeRoot, string pluginPath) =>
+        new(
+            HarnessPaths.LocateHostExecutable(),
+            pluginPath,
+            "Urd.TranscriptHarness.Plugin.TestPlugin.NewtonsoftInMemoryStore",
+            storeRoot,
+            storeRoot + "-attachments");
 
     private static void KillMechanics()
     {

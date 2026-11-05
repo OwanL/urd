@@ -1,8 +1,10 @@
-# Code shape — proposed review guidelines
+# Code shape — working engineering guidance
 
-2026-11-05. **Draft for owner review.** These are recommendations, not approved size
-limits, a lint configuration or permission to implement the pending class proposal.
-The owner has required initial design review; the quantitative suggestions remain open.
+2026-11-05. Maintained by the agents/coordinator, **not an owner-review deliverable**.
+The owner reviews concrete code, class/member/method designs and architectural trade-offs.
+These are soft engineering review signals, not hard size limits, a lint configuration
+or permission to implement a pending design proposal. Adjust them through engineering
+judgment rather than escalating routine standards questions to the owner.
 
 ## What matters more than size
 
@@ -47,9 +49,15 @@ requirements or justify adding unneeded abstractions.
 
 Each small pack shows responsibilities/lifetimes, key fields and signatures, dependency
 and ownership direction, mutation/persistence boundaries, an example flow, and explicit
-trade-offs. Do not specify every private helper in advance or invent classes for UI
-hooks/scripts. The first [Core proposal](initial-core-design.md) starts this process;
-UI/hosting and build/startup boundaries follow without reopening the directory tree.
+trade-offs. Another agent reviews the proposed design for correctness, cohesion, missing
+operations and unnecessary abstractions; the author fixes supported issues. The
+coordinator checks integration before presenting the resulting code/API shape to the
+owner. Do not expose unreviewed drafts as ready for approval or ask the owner to audit
+these guidelines. Implementation also needs tests and independent code review.
+
+Do not specify every private helper in advance or invent classes for UI hooks/scripts.
+The first [Core proposal](scratch/initial-core-design.md) starts this process; UI/hosting
+and build/startup boundaries follow without reopening the directory tree.
 
 Approval is scoped. After the initial base is accepted, agents should extend its
 conventions and tests; ask again for meaningful boundary/behavior changes, not routine

@@ -141,9 +141,12 @@ lifetimes, owned state, important operations and dependency/transaction boundari
 The rough layout remains accepted; exact new APIs remain proposals until reviewed.
 
 Start with the [Core class proposal](docs/scratch/initial-core-design.md), then review
-UI/hosting and build/startup boundaries. [Code-shape guidelines](docs/scratch/code-shape-guidelines.md)
-propose soft review signals, not hard line/member limits. [AGENTS.md](AGENTS.md) records
-the owner-review workflow so later agents do not infer approval from a draft.
+UI/hosting and build/startup boundaries. Each workstream must obtain independent
+agent review and fix supported issues before the coordinator brings its concrete
+code/class/method proposal to the owner. The owner reviews architectural shape and
+code, not engineering guidelines or process documents. [Code-shape guidance](docs/code-shape-guidelines.md)
+is maintained by the agents/coordinator; its size signals are not hard limits.
+[AGENTS.md](AGENTS.md) records this workflow. Peer-review acceptance is not owner approval.
 
 An approved pack permits its scoped implementation, not unrelated features or external
 actions. Once the initial base is accepted, follow its conventions and use implementation

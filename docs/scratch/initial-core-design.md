@@ -1,11 +1,13 @@
 # Initial Core class design — internal integration reference
-2026-11-05. **Only the first two bites recorded below are owner-approved; all other
+2026-11-05. **Only the first three bites recorded below are owner-approved; all other
 API/state shape remains proposed, not implementation permission.**
 Checkpoint only: Windows local browser app, deterministic request-only `IChatClient`,
 two primary chats/two clients, real SQLite, mid-response input, addressed Stop/settlement
-and restart/reconnect without replay. No approval of the whole checkpoint, schema or transport.
-The Core workstream owns this draft only. Present one bite inline at a time, not this
-whole document or a five-type pack; approval never extends to unpresented members.
+and restart/reconnect without replay. No approval of the whole checkpoint,
+transcript/lifecycle schema or transport.
+The Core workstream implements only the three approved identity/registry/storage bites.
+Present one bite inline at a time, not this whole document or a five-type pack; approval
+never extends to unpresented members.
 
 ## Owner-approved first bite — creation/lookup only
 The owner approved `SessionManager` creation/lookup after discussion: one canonical live
@@ -17,8 +19,9 @@ The registry stores base references; the typed primary operations construct/retu
 primary and reject a non-primary target rather than treating it as one. This does not
 approve delegation subtypes/relationships or a generic public lookup API.
 
-**Still proposed:** manager dependencies/constructor, initialization, listing, shutdown,
-SQL schema/storage wiring and every execution/Stop/view/storage-lifecycle member below.
+**Still proposed:** model-client dependencies, initialization beyond identity storage,
+listing, shutdown and every execution/Stop/view/storage-lifecycle member below, except
+the narrow identity persistence and manager/store wiring approved in the third bite.
 No other workstream or full Core-draft approval follows.
 
 ## Owner-approved second bite — identity/construction only
@@ -44,10 +47,10 @@ reasonable for the proposed full coordinator, but premature for this identity-on
 review. Keep dependencies explicit when needed; do not introduce a parameter bag,
 service locator or factory merely to shorten a signature. This revised bite is now
 approved; the wider store/client constructor signatures below are still proposals.
-Immutable already-loaded identity/revision is approved, not its SQL representation or
-storage ownership/wiring.
+Immutable already-loaded identity/revision was approved here; its narrow durable
+representation and storage ownership/wiring were subsequently approved in the third bite.
 
-### Next single bite — proposed concrete identity persistence
+## Owner-approved third bite — concrete identity persistence
 ```csharp
 sealed class SessionStore : IDisposable {
     public static SessionStore Open(string databasePath);
@@ -66,12 +69,13 @@ only—no execution, messages or recovery.
 Independent review of the owner's quality question found the boundary sound, and
 recommended this small lifecycle improvement over public construction plus a separate
 initialization call. It avoids exposing an uninitialized store and centralizes failure
-cleanup, without introducing another factory type. This revision is still proposed;
-the owner's question was not approval.
+cleanup, without introducing another factory type. The quality question was not approval;
+the owner subsequently approved the improvement explicitly: **“aPPROVED, LOOKS GOOD WITH
+IMPROVEMENT”**. Approval includes direct `SessionManager(SessionStore store)` wiring;
+manager borrows the caller-owned store. Constructors remain no-I/O.
 
-**Internal implementation assessment, not another owner bite:** approval of this boundary
-and direct wiring of the shared concrete store into `SessionManager(SessionStore store)`
-would permit one cohesive registry/identity implementation with real SQLite tests. The
+**Scoped implementation:** this approved boundary and direct concrete store wiring permit
+one cohesive registry/identity implementation with real SQLite tests. The
 caller explicitly opens/disposes the store; session constructors still take only metadata.
 No mock interface, separate factory type, client dependency or full host shutdown design is needed.
 Minimal Core/test project metadata and normal .NET 10/package/test-runner selection,
@@ -79,9 +83,24 @@ private SQL/helpers, schema-version marker/newer-schema rejection and resource c
 are routine engineering within that scope, not repeated owner votes. Tests can cover
 committed create/reopen/read, missing lookup without insertion, concurrent canonical
 lookup and constructor/no-execution behavior using isolated temporary databases.
-No remaining material design dependency is identified for that identity-only slice if
-this storage boundary/wiring is approved. This does not authorize implementation now,
-other build/startup proposals, acquisition/global changes or lifecycle schema expansion.
+No remaining material design dependency is identified for this identity-only slice.
+It does not authorize other build/startup proposals, acquisition/global changes or
+lifecycle schema expansion; build/test metadata is coordinated separately.
+
+**Implementation evidence (identity slice only):** Core now has the concrete registry,
+metadata-only handles and SQLite store under `source/backend/harness/`. Session metadata
+is assembly-internal; the abstract base constructor is `private protected` so only Core
+subtypes consume it, without publishing a metadata API. Schema version 1 contains only
+session ID/history revision; unversioned nonempty and unsupported-version databases reject.
+Eight real temporary-SQLite tests passed in Release on .NET 10, with no warnings/errors:
+commit/reopen, missing lookup/no insertion, concurrent canonical create/cold lookup,
+metadata hydration after store disposal, duplicate insertion rollback, newer-version
+rejection/resource release, unversioned-data preservation and disposed-store errors.
+This is normal close/reopen evidence, not process-kill/power-loss or broader app qualification.
+Independent implementation acceptance review found no supported blockers. Parent
+verification also passed locked restore (lockfile hashes unchanged) and all eight Release
+tests, including public-manager creation followed by store reopen and a fresh manager's
+canonical lookup. No messages/executions, model calls or hosting were added.
 
 ## Existing constraints, not new decisions
 - [Architecture](../../ARCHITECTURE.md): shared SQLite, message rows/bounded previews,
@@ -327,8 +346,8 @@ run ID and completed/cancelled/failed/interrupted outcome, not merely a cancelle
 
 ## Owner review gates / limits
 - Only manager creation/lookup with its flat base-reference registry/lookup-creation guard,
-  plus identity-only session construction, are approved as recorded above. Concrete storage
-  remains the next proposal. The wider five responsibilities/members, guarded driver/
+  plus identity-only session construction and narrow concrete identity persistence/store
+  wiring, are approved as recorded above. The wider five responsibilities/members, guarded driver/
   transaction split, same-run queued input, commit-before-publish and bounded replacement
   views remain proposals.
 - Eviction/context/view costs need evidence; UI caps are not context caps/latency targets.

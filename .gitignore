@@ -1,0 +1,6 @@
+/source/**/bin/
+/source/**/obj/
+/source/**/TestResults/
+/.tools/
+/builds/
+/data/

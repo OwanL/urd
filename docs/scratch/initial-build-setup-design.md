@@ -1,7 +1,10 @@
 # Initial build/setup design — owner review proposal
-2026-11-05. **NEW proposed command/configuration shape; not implementation approval.**
-Windows-first checkpoint: actual Core + Server + built Preact UI, deterministic
-request-only model and real SQLite. No scripts, projects, downloads or builds yet.
+2026-11-05. **The full command/configuration workflow remains proposed, not approved.**
+Minimal Core/test metadata is implemented for the approved identity slice; see
+[backend development](../backend-development.md) for actual pins and verified commands.
+The wider Windows-first checkpoint below (Core + Server + built Preact UI and a
+deterministic request-only model) remains proposed. No Server/UI or bootstrap scripts
+are implemented; the current baseline keeps its few package pins in the projects.
 
 ## Existing direction and scope
 - [Application plan](../../APPLICATION-PLAN.md): component-led source; `scripts/`

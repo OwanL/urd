@@ -34,8 +34,10 @@
   behavior decisions. Read the relevant contracts before changing their invariants.
 - [Code-shape guidelines](docs/code-shape-guidelines.md) are internal engineering
   guidance with soft review signals, not an owner-approval item or numeric CI gate.
-  The [initial Core proposal](docs/scratch/initial-core-design.md) remains a design
-  proposal; peer-review acceptance is not owner approval.
+  The [Core design record](docs/scratch/initial-core-design.md) records scoped owner
+  approvals and implementation evidence; its wider sketch remains proposed.
+  Peer-review acceptance is not owner approval. For the implemented identity slice,
+  use the [backend development instructions](docs/backend-development.md).
 - Core remains ASP.NET-free; Server depends on Core. Do not copy historical experiment
   APIs into production or add empty future feature/type scaffolding.
 - Keep long-lived docs flat under `docs/` when migrated; `docs/scratch/` is for shared

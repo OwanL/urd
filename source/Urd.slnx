@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="backend/Urd.Core.csproj" />
+  <Project Path="tests/Urd.Backend.Tests/Urd.Backend.Tests.csproj" />
+</Solution>

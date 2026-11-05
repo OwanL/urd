@@ -9,6 +9,12 @@ excluding general-purpose agent work.
 
 ## Status and authority
 
+The first implemented slice is the ASP.NET-free Core session identity registry and
+SQLite store: create, canonical lookup and reopen. See [backend build/test instructions](docs/backend-development.md).
+There is no runnable Server/UI or model execution yet; wider designs remain subject
+to bite-sized owner review. The [Core design record](docs/scratch/initial-core-design.md)
+distinguishes the approved slice from future proposals.
+
 This document records agreed direction and its rationale. It is a foundation
 for future design and development, not a detailed implementation specification.
 Unresolved choices and proposals are identified explicitly; they are not
@@ -142,8 +148,9 @@ records the design work this calls for. The [owner-reviewed session sketch](SESS
 uses `SessionBase`, `PrimarySession` and `SubagentSession` as its working structure.
 Class responsibilities must drive file layout. The selected, revisable boundary is
 [`Urd.Server → Urd.Core`](SESSION-DESIGN.md#5-coreserver-project-boundary--selected-revisable):
-Core owns session/execution/storage logic without ASP.NET. Exact APIs, broader
-base-class scope and fine file/folder layout remain unapproved; no production scaffold is approved.
+Core owns session/execution/storage logic without ASP.NET. APIs and base-class
+responsibilities outside the approved identity slice remain proposed. Scoped approvals
+and implementation evidence are recorded in the [Core design record](docs/scratch/initial-core-design.md).
 
 **ASP.NET Core is the selected backend hosting/HTTP framework**, using its
 standard Kestrel server. The owner confirmed this on 2026-11-03 after alternatives

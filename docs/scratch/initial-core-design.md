@@ -50,24 +50,30 @@ storage ownership/wiring.
 ### Next single bite — proposed concrete identity persistence
 ```csharp
 sealed class SessionStore : IDisposable {
-    public SessionStore(string databasePath);
-    public void OpenAndInitialize();
+    public static SessionStore Open(string databasePath);
     internal SessionRecord CreatePrimary(Guid sessionId);
     internal SessionRecord? ReadSession(Guid sessionId);
     public void Dispose();
 }
 ```
-Constructor records the path only. `OpenAndInitialize` opens real SQLite (WAL/NORMAL),
-validates the schema version and initializes identity storage. Create commits before
-returning immutable identity/revision; missing read returns null, never inserts. Caller
-owns/disposes the store after registry calls finish; manager borrows it. This is identity
-persistence only—no execution, messages or recovery.
+`Open` opens real SQLite (WAL/NORMAL), validates the schema version and initializes
+identity storage before returning a ready store; it closes acquired resources on failure.
+The constructor is private and performs no I/O. Create commits before returning immutable
+identity/revision; missing read returns null, never inserts. Caller owns/disposes the
+store after registry calls finish; manager borrows it. This is identity persistence
+only—no execution, messages or recovery.
+
+Independent review of the owner's quality question found the boundary sound, and
+recommended this small lifecycle improvement over public construction plus a separate
+initialization call. It avoids exposing an uninitialized store and centralizes failure
+cleanup, without introducing another factory type. This revision is still proposed;
+the owner's question was not approval.
 
 **Internal implementation assessment, not another owner bite:** approval of this boundary
 and direct wiring of the shared concrete store into `SessionManager(SessionStore store)`
 would permit one cohesive registry/identity implementation with real SQLite tests. The
 caller explicitly opens/disposes the store; session constructors still take only metadata.
-No mock interface, factory, client dependency or full host shutdown design is needed.
+No mock interface, separate factory type, client dependency or full host shutdown design is needed.
 Minimal Core/test project metadata and normal .NET 10/package/test-runner selection,
 private SQL/helpers, schema-version marker/newer-schema rejection and resource cleanup
 are routine engineering within that scope, not repeated owner votes. Tests can cover
@@ -220,7 +226,8 @@ connection or transaction across model work/observation. Calls are synchronous/b
 private readonly SqliteConnection _writer;
 private readonly object _writeGate;
 private readonly string _connectionString;
-public SessionStore(string databasePath);
+private SessionStore(SqliteConnection writer);
+public static SessionStore Open(string databasePath);
 internal void InitializeAndRecover();
 internal SessionRecord CreatePrimary(Guid sessionId);
 internal SessionRecord? ReadSession(Guid sessionId);

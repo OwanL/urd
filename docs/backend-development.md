@@ -1,7 +1,49 @@
 # Backend development
 
-The first implemented slice is the session registry/identity and SQLite store.
-Core remains an ASP.NET-free .NET library; there is no runnable Server or UI yet.
+The current Core checkpoint includes session identity, durable user-Send decisions and
+fake-text execution through real SQLite. Core remains an ASP.NET-free .NET library;
+there is no runnable Server or UI yet.
+
+## Checkpoint scope
+
+- `SessionManager(store, chatClient)` passes the same borrowed dependencies to canonical
+  session handles. Constructors start no work. The caller owns both resources.
+- Acceptance and run identity commit together. Exact retries return the original decision;
+  neither lookup nor retained acceptance starts work. Refusal fences delayed originals.
+- `SessionBase` owns admission and database writes; temporary `SessionExecution` owns
+  streaming, bounded UTF-8 batches and Stop. Replacement requires cleanup and saved settlement.
+- This development increment admits one input per active run. A different busy input gets
+  a durable Capacity/Stopping refusal, not a queue slot. Mid-response delivery is not implemented.
+- Stop/settlement helpers are internal. Public shutdown, observers, HTTP/UI, tool/native-context
+  fidelity and real-provider qualification remain pending. An admission receipt is not completion.
+- Normal terminal close/reopen is tested without replay. Nonterminal rows survive reopening
+  and block new admission; startup interruption/recovery is **not** implemented.
+
+Locked restore and the Release suite pass **35/35** tests, with no build warnings/errors.
+Coverage includes shared-client concurrent chats, exact retry/reopen, transactional rollback,
+UTF-8 batching, positive terminal evidence, held cleanup and persistence-failure fencing.
+This is a Core review checkpoint, not the browser-to-Core milestone or a complete hosting API.
+
+## Review order
+
+Paths below are relative to the repository. Read the small data records alongside their owners.
+
+1. [SessionManager.cs](../source/backend/harness/sessions/SessionManager.cs) — canonical handles
+   and borrowed dependencies; [SessionRecord.cs](../source/backend/harness/sessions/SessionRecord.cs).
+2. [SessionBase.cs](../source/backend/harness/sessions/SessionBase.cs) and
+   [PrimarySession.cs](../source/backend/harness/sessions/PrimarySession.cs) — admission/driver ownership;
+   [InputCommand.cs](../source/backend/harness/sessions/InputCommand.cs) and
+   [InputReceipt.cs](../source/backend/harness/sessions/InputReceipt.cs).
+3. [SessionExecution.cs](../source/backend/harness/execution/SessionExecution.cs) — streaming,
+   buffering, cancellation and cleanup; [ExecutionContracts.cs](../source/backend/harness/execution/ExecutionContracts.cs).
+4. [SessionStore.cs](../source/backend/harness/storage/SessionStore.cs) — opening/migration/receipts;
+   [SessionStore.Execution.cs](../source/backend/harness/storage/SessionStore.Execution.cs) — atomic run/request/output facts.
+5. [SessionManagerFlowTests.cs](../source/tests/Urd.Backend.Tests/SessionManagerFlowTests.cs), then
+   [SessionExecutionTests.cs](../source/tests/Urd.Backend.Tests/SessionExecutionTests.cs) — whole Core flow and lifecycle failures.
+6. [InputReceiptTests.cs](../source/tests/Urd.Backend.Tests/InputReceiptTests.cs),
+   [ExecutionStorageTests.cs](../source/tests/Urd.Backend.Tests/ExecutionStorageTests.cs) and
+   [SessionIdentityTests.cs](../source/tests/Urd.Backend.Tests/SessionIdentityTests.cs) — storage/registry invariants;
+   [TemporaryDatabase.cs](../source/tests/Urd.Backend.Tests/TemporaryDatabase.cs) supplies isolated test data.
 
 ## Prerequisite and commands
 
@@ -29,7 +71,9 @@ Test also builds Core/tests with nullable checking and compiler warnings as erro
 The command avoids persistent build/compiler servers and limits build parallelism.
 
 `Microsoft.Data.Sqlite` **10.0.14** follows the stable .NET 10 provider line and
-includes its SQLite native bundle. Tests use xUnit **2.9.3**'s ordinary `[Fact]` /
+includes its SQLite native bundle. `Microsoft.Extensions.AI.Abstractions` **10.11.0** supplies
+only the request interface/data types; no provider adapter or middleware is installed.
+Tests use xUnit **2.9.3**'s ordinary `[Fact]` /
 `Assert` API, runner **4.0.1** (supports xUnit v2 and .NET 8+) and Microsoft.NET.Test.Sdk
 **18.11.0** (.NET 8+ assets). Versions live only at their project references; lockfiles
 retain the transitive graph and content hashes. No central version layer is needed yet.

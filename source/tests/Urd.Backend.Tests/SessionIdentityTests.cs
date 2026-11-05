@@ -7,24 +7,28 @@ namespace Urd.Backend.Tests;
 
 public sealed class SessionIdentityTests
 {
+    private static ScriptedChatClient IdentityClient()
+        => new(_ => throw new InvalidOperationException("Identity operations must not start a request."));
+
     [Fact]
     public async Task CommittedIdentitySurvivesReopen()
     {
         using var database = new TemporaryDatabase();
+        using var client = IdentityClient();
         PrimarySession created;
         using (SessionStore store = SessionStore.Open(database.Path))
         {
-            var manager = new SessionManager(store);
+            var manager = new SessionManager(store, client);
             created = await manager.CreatePrimaryAsync();
             Assert.NotEqual(Guid.Empty, created.Id);
             Assert.Equal(0L, created.HistoryRevision);
             Assert.Equal(created.Id, store.ReadSession(created.Id)!.Id);
         }
 
-        Assert.Equal(1L, database.Scalar("PRAGMA user_version;"));
+        Assert.Equal(2L, database.Scalar("PRAGMA user_version;"));
         Assert.Equal("wal", database.Scalar("PRAGMA journal_mode;"));
         using SessionStore reopened = SessionStore.Open(database.Path);
-        var reopenedManager = new SessionManager(reopened);
+        var reopenedManager = new SessionManager(reopened, client);
         PrimarySession loaded = await reopenedManager.GetPrimaryAsync(created.Id);
         Assert.Equal(created.Id, loaded.Id);
         Assert.Equal(created.HistoryRevision, loaded.HistoryRevision);
@@ -37,7 +41,8 @@ public sealed class SessionIdentityTests
     {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
-        var manager = new SessionManager(store);
+        using var client = IdentityClient();
+        var manager = new SessionManager(store, client);
         Guid missing = Guid.NewGuid();
         await Assert.ThrowsAsync<KeyNotFoundException>(() => manager.GetPrimaryAsync(missing));
         Assert.Null(store.ReadSession(missing));
@@ -55,7 +60,8 @@ public sealed class SessionIdentityTests
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
         SessionRecord saved = store.CreatePrimary(Guid.NewGuid());
-        var manager = new SessionManager(store);
+        using var client = IdentityClient();
+        var manager = new SessionManager(store, client);
         var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Task<(PrimarySession Created, PrimarySession Loaded)>[] tasks = Enumerable.Range(0, 8)
             .Select(_ => Task.Run(async () =>
@@ -90,14 +96,19 @@ public sealed class SessionIdentityTests
 
         database.Execute("UPDATE sessions SET history_revision = 7;");
         SessionRecord loaded;
+        SessionStore borrowedStore;
         using (SessionStore store = SessionStore.Open(database.Path))
         {
+            borrowedStore = store;
             loaded = store.ReadSession(id)!;
         }
 
-        var session = new PrimarySession(loaded);
+        using var client = IdentityClient();
+        var session = new PrimarySession(loaded, borrowedStore, client);
         Assert.Equal(id, session.Id);
         Assert.Equal(7L, session.HistoryRevision);
+        Assert.Equal(0, client.Calls);
+        Assert.Equal(0, client.DisposeCalls);
         Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM sessions;"));
     }
 
@@ -122,14 +133,14 @@ public sealed class SessionIdentityTests
             store.CreatePrimary(Guid.NewGuid());
         }
 
-        database.Execute("PRAGMA user_version = 2;");
+        database.Execute("PRAGMA user_version = 3;");
         Assert.Throws<NotSupportedException>(() => SessionStore.Open(database.Path));
         using (FileStream file = File.Open(database.Path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
         {
             Assert.True(file.Length > 0);
         }
 
-        Assert.Equal(2L, database.Scalar("PRAGMA user_version;"));
+        Assert.Equal(3L, database.Scalar("PRAGMA user_version;"));
         Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM sessions;"));
     }
 

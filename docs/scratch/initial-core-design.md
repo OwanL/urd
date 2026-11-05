@@ -6,9 +6,10 @@ Checkpoint only: Windows local browser app, deterministic request-only `IChatCli
 two primary chats/two clients, real SQLite, mid-response input, addressed Stop/settlement
 and restart/reconnect without replay. No approval of the whole checkpoint,
 transcript/lifecycle schema or transport.
-Only the three identity/registry/storage bites are implemented. The fourth and fifth
-approvals still need remaining integration reviewed before a usable Send path; no
-accepting stubs may stand in for that integration.
+The identity foundation and first fake-text Send/execution increment are implemented;
+see the current implementation section below. Acceptance has real durable work behind it,
+not a stub. Busy-input queuing, startup recovery, public hosting/lifecycle APIs and the
+broader browser checkpoint remain unimplemented.
 Present one bite inline at a time, not this whole document or a five-type pack; approval
 never extends to unpresented members.
 
@@ -22,8 +23,8 @@ The registry stores base references; the typed primary operations construct/retu
 primary and reject a non-primary target rather than treating it as one. This does not
 approve delegation subtypes/relationships or a generic public lookup API.
 
-**Still proposed:** model-client dependencies, initialization beyond identity storage,
-listing, shutdown and every execution/Stop/view/storage-lifecycle member below, except
+**Still proposed:** provider selection, startup recovery, listing, shutdown and the
+broader execution/Stop/view/storage-lifecycle members below, except
 the narrow identity persistence/manager wiring in the third bite, user-Send reliability
 contract in the fourth and SessionExecution boundary in the fifth. No other workstream
 or full Core-draft approval follows.
@@ -50,7 +51,8 @@ The owner questioned the three-input constructor. Independent review found the i
 reasonable for the proposed full coordinator, but premature for this identity-only
 review. Keep dependencies explicit when needed; do not introduce a parameter bag,
 service locator or factory merely to shorten a signature. This revised bite is now
-approved; the wider store/client constructor signatures below are still proposals.
+approved for identity-only work. Store/client dependencies are now used by the approved
+execution increment and direct-wiring clarification below, without changing the no-I/O rule.
 Immutable already-loaded identity/revision was approved here; its narrow durable
 representation and storage ownership/wiring were subsequently approved in the third bite.
 
@@ -91,8 +93,8 @@ No remaining material design dependency is identified for this identity-only sli
 It does not authorize other build/startup proposals, acquisition/global changes or
 lifecycle schema expansion; build/test metadata is coordinated separately.
 
-**Implementation evidence (identity slice only):** Core now has the concrete registry,
-metadata-only handles and SQLite store under `source/backend/harness/`. Session metadata
+**Historical implementation evidence (identity milestone):** the first slice introduced
+the concrete registry, metadata-only handles and SQLite store under `source/backend/harness/`. Session metadata
 is assembly-internal; the abstract base constructor is `private protected` so only Core
 subtypes consume it, without publishing a metadata API. Schema version 1 contains only
 session ID/history revision; unversioned nonempty and unsupported-version databases reject.
@@ -125,7 +127,8 @@ this checkpoint. These semantics and entrypoints are approved, not the full DTO/
 queue/disposition/driver design or UI/HTTP implementation below. Review those dependencies
 before implementing an acceptance path; do not add a placeholder that accepts but cannot
 execute. The subsequently approved constructor/execution ownership scope is recorded
-in the fifth bite below; remaining integration is still proposed.
+in the fifth bite below. The narrow fake-text integration is now implemented as described
+below; broader queue, context and hosting contracts remain proposed.
 
 ## Owner-approved fifth bite — SessionExecution lifetime boundary
 The owner answered **“yeah seems reasonable i think”** to the presented `internal sealed`
@@ -139,6 +142,41 @@ never the borrowed client. This is scoped approval, not implementation evidence 
 of unpresented queue/schema/HTTP/composition contracts. Private helpers, fields and batching
 mechanics within this boundary are engineering choices, not additional owner-review bites.
 The owner asked to record the decision and parallelize work, expressing dissatisfaction with pace.
+
+## Current implementation — first fake-text Core checkpoint
+
+The owner subsequently confirmed the obvious shared-client choice and requested the actual
+class structure rather than another approval gate around reuse. Dependency plumbing stays
+inside the existing classes:
+```text
+SessionManager(store, client)
+  -> PrimarySession(record, store, client) : SessionBase
+     -> SessionExecution(runId, session, client)
+```
+Manager and sessions borrow the caller's store/client. SessionBase retains database authority;
+execution calls its owner back rather than writing SQLite. No client factory, service locator,
+optional-client mode or new behavioral layer was added. This is routine integration of the
+approved behavior, not approval of unrelated composition/hosting contracts.
+
+The implemented path commits an exact first decision and, for acceptance, its run in one
+transaction. It claims before requesting, persists bounded UTF-8 output, requires positive
+terminal evidence and settles only after cleanup. Retained decisions precede new admission
+checks; lookup/retry/hydration cannot restart accepted work. Schema version 2 transactionally
+migrates identity version 1 and adds only this increment's decision/run/request/output facts;
+it is not the final transcript/view/queue schema.
+
+Independent code reviews passed. Parent locked restore and Release build/tests passed **35/35**,
+including two canonical chats concurrently sharing one borrowed client, exact retries and
+normal terminal reopen without replay, deferred-commit/migration rollback, Unicode batching,
+held cleanup/Stop and storage-write failure fencing. Tests use disposable SQLite and fake
+clients only. See the [development/review map](../backend-development.md#review-order).
+
+This staging policy permits one input per active run and durably refuses a different busy
+input; it does not implement the approved eventual mid-response delivery behavior. Stop/wait
+helpers are internal, not a public hosting/shutdown API. Old nonterminal rows stay fenced
+across reopen; startup recovery is not implemented. UI/HTTP, native-context fidelity, tools
+and real-provider qualification remain outside this checkpoint. The owner requested notification
+at tested milestones for their own file-by-file, line-by-line review before more layers accumulate.
 
 ## Existing constraints, not new decisions
 - [Architecture](../../ARCHITECTURE.md): shared SQLite, message rows/bounded previews,
@@ -437,8 +475,9 @@ Accepted never means model success, and later interruption never changes it to R
 ## Owner review gates / limits
 - Approved scopes are manager creation/lookup, identity-only construction, narrow concrete
   identity persistence/store wiring, fourth user-Send reliability and fifth SessionExecution
-  lifetime/ownership boundary above. Only the first three bites are implemented.
-  Unpresented public contracts, queue policy, transcript schema, commit-before-publish and
+  lifetime/ownership boundary above, with the direct borrowed-dependency wiring clarified
+  above. The current narrow fake-text increment is implemented, not the whole checkpoint.
+  Unpresented public contracts, queue policy, full transcript schema, commit-before-publish and
   bounded replacement views remain proposals; routine private helpers need no extra vote;
   fourth/fifth approval does not authorize the whole Send pipeline or accepting stubs.
 - Eviction/context/view costs need evidence; UI caps are not context caps/latency targets.

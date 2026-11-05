@@ -161,13 +161,17 @@ code is authorized merely by writing these proposals.
 
 ### Near-term sequence — each new operation still needs its own approval
 
-The identity/registry/SQLite slice is implemented; prioritize a working integrated path,
-not more broad technology comparisons or a larger complete specification:
-1. User-Send reliability and `SessionExecution` ownership are approved in the Core record.
-   Resolve remaining composition/persistence boundaries without re-reviewing routine
-   helpers. Prepare independent Core/storage and UI/hosting/build work in parallel, with
-   disjoint ownership; implement approved scope without waiting for unrelated proposals.
-   Shutdown preserves caller-owned storage. This is not whole-Core approval.
+The identity foundation and first fake-text Core Send/execution increment are implemented;
+prioritize a working integrated path, not more broad technology comparisons or a larger
+complete specification:
+1. The Core checkpoint now commits input decisions/run association, streams through a
+   borrowed client and saves terminal state after cleanup. Two chats share a client without
+   serializing model work; retained acceptance does not replay after normal reopen.
+   This staging increment refuses distinct busy input rather than queuing it; startup
+   recovery and public shutdown/observer contracts are still pending. See the
+   [backend review map](docs/backend-development.md#review-order) before expanding it.
+   Keep independent Core/storage and UI/hosting/build work parallel with disjoint ownership;
+   routine dependency wiring is not another approval gate. This is not whole-Core approval.
 2. Order the necessary small Core and hosting/UI bites toward one built browser → Core →
    SQLite fake-model response, then extend that same path to two clients/chats, input while
    busy, addressed Stop/settlement and reopen without replay. Do not add a parallel demo

@@ -1,3 +1,4 @@
+using Microsoft.Extensions.AI;
 using Urd.Core.Storage;
 
 namespace Urd.Core.Sessions;
@@ -5,13 +6,16 @@ namespace Urd.Core.Sessions;
 public sealed class SessionManager
 {
     private readonly SessionStore _store;
+    private readonly IChatClient _chatClient;
     private readonly SemaphoreSlim _registryGate = new(1, 1);
     private readonly Dictionary<Guid, SessionBase> _sessions = new();
 
-    public SessionManager(SessionStore store)
+    public SessionManager(SessionStore store, IChatClient chatClient)
     {
         ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(chatClient);
         _store = store;
+        _chatClient = chatClient;
     }
 
     public async Task<PrimarySession> CreatePrimaryAsync()
@@ -20,7 +24,7 @@ public sealed class SessionManager
         try
         {
             SessionRecord record = _store.CreatePrimary(Guid.NewGuid());
-            var session = new PrimarySession(record);
+            var session = new PrimarySession(record, _store, _chatClient);
             _sessions.Add(session.Id, session);
             return session;
         }
@@ -43,7 +47,7 @@ public sealed class SessionManager
 
             SessionRecord record = _store.ReadSession(sessionId)
                 ?? throw new KeyNotFoundException($"Session '{sessionId}' does not exist.");
-            var session = new PrimarySession(record);
+            var session = new PrimarySession(record, _store, _chatClient);
             _sessions.Add(session.Id, session);
             return session;
         }

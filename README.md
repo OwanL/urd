@@ -395,16 +395,13 @@ project's purpose and strategic constraints; the architecture document owns the
 more detailed decisions as they are made.
 
 [Foundation review](FOUNDATION-REVIEW.md) gathers the latest evidence and scoped
-owner outcomes. The [application layout proposal](APPLICATION-PLAN.md) was rejected
-as too vague and is withdrawn. [Structure research](STRUCTURE-RESEARCH.md) records
-subsequent primary-source investigation, competing organizational approaches and
-candidate class/state owners. The owner accepts broader harness nesting but rejects
-`agent-content/` and vague collaboration/follow-up labels. The
-[revised partial tree](STRUCTURE-RESEARCH.md#8-naming-and-harness-grouping) uses consistent
-guidance terminology and concrete session responsibilities, with harness storage and
-usage accounting proposed. Less-developed application areas are explicitly TBD, not
-omitted or treated as finished; existing decisions remain. Exact names, the complete
-layout and implementation are not approved.
+owner outcomes. The [application plan](APPLICATION-PLAN.md) now records the accepted
+rough structure, deliberately open to correction during implementation, plus proposed
+centralized documentation and repository-support areas. [Structure research](STRUCTURE-RESEARCH.md)
+retains the source investigation and reasoning behind it; the earlier project-first
+and `systems/` layouts are superseded. Less-developed application areas remain explicitly
+TBD, not omitted or treated as finished. Existing decisions remain; rough-layout
+acceptance does not authorize production implementation or claim a completed docs move.
 
 Focused qualification evidence, distinct from architecture approval:
 

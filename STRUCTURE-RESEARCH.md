@@ -1,15 +1,15 @@
 # Structure research and alternatives
 
-2026-11-05. **Research and brainstorming, not a selected layout.** The owner rejected
-[the preceding proposal](APPLICATION-PLAN.md): “Systems is far too vague. Do some
-actual research and brainstorming.” That proposal is withdrawn. Established session,
-provider, storage and client decisions still stand; no production code is authorized.
+2026-11-05. **Research behind the current rough structure.** The owner rejected the
+old `systems/` proposal (commit `1f0eda5`): “Systems is far too vague. Do some actual
+research and brainstorming.” This document records that investigation and the later
+naming/grouping refinements. The [application plan](APPLICATION-PLAN.md) now owns the
+accepted rough baseline, explicitly open to correction during implementation.
 
-**Subsequent owner feedback:** broader harness nesting is accepted, but `agent-content/`
-and vague session-area labels are rejected. Use consistent guidance/instruction terms,
-consider storage and accounting within the harness, and mark less-developed application
-areas TBD rather than imply completeness. See [the revised partial proposal](#8-naming-and-harness-grouping).
-The responsibility map is not a requirement for one peer folder per row.
+Broader harness nesting, consistent guidance terminology and concrete session areas
+replace the rejected grouping. Less-developed application areas remain TBD. The
+responsibility map below is not a folder/project per row or a frozen class design;
+research evidence and rough-layout acceptance do not authorize production code.
 
 ## 1. What was wrong with the proposal
 
@@ -121,7 +121,8 @@ avoiding mandatory abstractions transfers; Urd need not adopt the entire request
 shape. C could earn its cost with an actual independent embedding requirement later.
 
 **Working preference: A, using B's change-locality discipline inside a domain.**
-This is a research recommendation, not an approved module list or directory layout.
+This was the research recommendation; subsequent rough-layout alignment is recorded
+in the [application plan](APPLICATION-PLAN.md), not a frozen module/class contract.
 The existing Core/Server compile boundary survives all three comparisons; neither
 A nor the word “module” implies another assembly, process or plugin boundary.
 A clarifies state ownership; it has **not demonstrated fewer files, fewer changed
@@ -248,8 +249,11 @@ production scaffolding, new provider/account calls or activation.
 “collaboration” and “follow-ups” also fail to explain their purpose. The owner expects
 usage accounting to sit within the harness, considers either placement of session
 storage arguable, and warns against mistaking harness detail for a complete application
-design. Less-developed areas may be marked TBD. Exact replacement names and the full
-layout remain proposals; there is no production implementation authorization.
+design. Less-developed areas may be marked TBD. The owner subsequently accepted the
+revised rough structure as a decent starting point, explicitly open to correction
+during implementation, and requested centralized repository directories such as docs.
+The current [working baseline](APPLICATION-PLAN.md) records that alignment; production
+implementation still needs an explicit scoped task.
 
 **Revised proposal:** use `harness` for the broader agent machinery and `execution`
 for the narrow model/tool loop. Keep named responsibilities inside that grouping;
@@ -258,7 +262,7 @@ Provider accounts and MCP connections retain their appropriate shared lifetimes.
 
 Use **`guidance/`** for the editable collection and **`guidance-loading/`** for code that
 discovers, resolves and reads it. An equivalent consistent pair is `instructions/`
-and `instruction-loading/`; the proposal below uses guidance throughout. The authored
+and `instruction-loading/`; the working layout uses guidance consistently. The authored
 home holds bundled defaults, not just overrides, and does not absorb existing user/project
 instruction files or select loading/reload timing.
 
@@ -270,40 +274,9 @@ are subareas of `sessions/`, not new services or separate commit paths. Any reta
 cooperative-resource support remains an explicit open placement concern; this naming
 change does not silently remove it or turn assignments into a general resource manager.
 
-```text
-urd/
-├─ guidance/                          editable bundled prompts, agents and skills
-│  ├─ prompts/
-│  ├─ agents/
-│  └─ skills/
-├─ source/
-│  ├─ backend/
-│  │  ├─ harness/
-│  │  │  ├─ sessions/                 registry, lifecycle and session commands
-│  │  │  │  ├─ messaging/
-│  │  │  │  ├─ assignments/
-│  │  │  │  └─ wakeups/
-│  │  │  ├─ execution/                model/tool loop, cancellation and waits
-│  │  │  ├─ context/                  assembly, selection, compaction and recall
-│  │  │  ├─ guidance-loading/         scoped discovery and reading
-│  │  │  ├─ tools/                    catalog, checked invocation, implementations
-│  │  │  ├─ providers/                catalog, accounts, adapters, request policy
-│  │  │  ├─ mcp/                      connection/discovery/protocol ownership
-│  │  │  ├─ storage/                  session history, attachments, durable records
-│  │  │  └─ usage/                    usage accounting, pricing and summaries
-│  │  └─ Urd.Core.csproj
-│  ├─ ui/                             internal structure TBD
-│  ├─ hosting/                        internal structure TBD
-│  │  └─ server/
-│  │     └─ Urd.Server.csproj
-│  ├─ tests/                          broader organization TBD
-│  └─ Urd.slnx
-├─ development/                       setup/build/distribution structure TBD
-├─ experiments/
-├─ data/
-├─ builds/
-└─ .tools/
-```
+The canonical [working layout](APPLICATION-PLAN.md#working-layout) now lives in the
+application plan, including centralized documentation and repository-support areas.
+Keep the rationale here rather than maintaining a second diverging tree.
 
 **Storage recommendation:** session transcripts, model-context records, assignment
 facts and managed attachments have harness-specific meaning, so keep their storage
@@ -338,4 +311,4 @@ Its Core project uses ordinary SDK inclusion within that subtree; the Server pro
 references it. This avoids the withdrawn explicit file-inclusion workaround. Subareas
 from the preceding sketch still apply where useful, but empty folders are not a
 scaffolding checklist. Physical packaging, exact tool pins and acquisition mechanics
-remain open; this is a proposed source map, not a new build/data behavior contract.
+remain open; the accepted rough source map is not a new build/data behavior contract.

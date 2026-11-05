@@ -170,13 +170,20 @@ harness; session storage placement is acknowledged as arguable. The owner warns 
 harness detail must not masquerade as a complete application design: less-developed
 areas can be marked TBD.
 
-The [revised partial tree](STRUCTURE-RESEARCH.md#8-naming-and-harness-grouping) proposes
-`guidance/` with `guidance-loading/`, session messaging/assignments/wakeups, and harness
-storage/usage. These exact names and storage placement remain recommendations, not
-settled class or persistence contracts. UI, hosting, other application-level concerns
-and development/delivery structure remain explicitly TBD where not worked out; existing
-technology and behavioral decisions still stand. Component state ownership, shared
-lifetimes and the Core/Server boundary are unchanged. No production code is authorized.
+**Rough-structure acceptance (2026-11-05):** the owner accepts the resulting tree as a
+decent starting point, explicitly open to correction during implementation, and asks
+for centralized repository areas similar to Pie, particularly `docs/`. The
+[application plan](APPLICATION-PLAN.md) is now the canonical working layout: guidance
+with matching loader terminology, session messaging/assignments/wakeups, and harness
+storage/usage. The previous project-first and `systems/` designs remain superseded.
+Documentation categories and a conditional shared-assets home are proposed additions,
+not a completed file migration. Routine naming/nesting corrections can follow real
+implementation needs; this is not a frozen class, project or persistence contract.
+
+UI, hosting, other application-level concerns and development/delivery internals remain
+explicitly TBD where not worked out; existing technology and behavioral decisions
+still stand. Component state ownership, shared lifetimes and the Core/Server boundary
+are unchanged. Rough-layout approval is not authorization for a production scaffold.
 
 The [working session sketch](SESSION-DESIGN.md) below records subsequent owner
 input, including the selected, revisable Core/Server boundary; it does not approve

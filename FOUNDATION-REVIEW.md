@@ -94,15 +94,15 @@ draft nor the experiments approve transport, fine layout, APIs or schema.
 
 ## Next step
 
-The evidence/owner-review round is complete; owner-led application planning continues.
-The owner rejected the project-first sketch, found its six-component replacement
-incomplete, and rejected the later `systems/` grouping as too vague. The
-[application plan](APPLICATION-PLAN.md) is now explicitly withdrawn. The next
-[source research and brainstorming](STRUCTURE-RESEARCH.md) examine real owners and
-lifetimes in Pie, OpenCode and Codex, compare organizational alternatives, and test
-candidate domain/class boundaries against concrete changes. Those are proposals,
-not a selected replacement tree. A first checkpoint does not define the whole product;
-completed research grants neither new runtime policy nor production-code permission.
+The evidence/owner-review round is complete. After rejecting the project-first and
+`systems/` layouts, the owner requested [source-backed research](STRUCTURE-RESEARCH.md)
+and refined the naming and harness nesting. The resulting [application plan](APPLICATION-PLAN.md)
+is now accepted as a rough starting structure, explicitly revisable during implementation.
+The owner also requests centralized repository areas such as `docs/`; detailed doc
+categories and shared assets are proposed, not already migrated. Non-harness internals
+remain TBD where not designed. Use this baseline to scope subsequent work rather than
+keep refining speculative folders. Existing behavioral/technology decisions stand;
+rough-layout acceptance does not itself grant production-code permission.
 
 The four stream reports and shared integration were independently reviewed within
 their stated limits. Research recommendations do not turn fixtures into production

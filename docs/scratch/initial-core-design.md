@@ -1,9 +1,47 @@
-# Initial Core class design — owner review proposal
-2026-11-05. **NEW proposed API/state shape; not approved and not implementation permission.**
+# Initial Core class design — internal integration reference
+2026-11-05. **Only the first bite recorded below is owner-approved; all other API/state
+shape remains proposed, not implementation permission.**
 Checkpoint only: Windows local browser app, deterministic request-only `IChatClient`,
 two primary chats/two clients, real SQLite, mid-response input, addressed Stop/settlement
-and restart/reconnect without replay. No code, builds, schema or transport approval.
-The Core workstream owns this draft only; implementation remains gated on owner review.
+and restart/reconnect without replay. No approval of the whole checkpoint, schema or transport.
+The Core workstream owns this draft only. Present one bite inline at a time, not this
+whole document or a five-type pack; approval never extends to unpresented members.
+
+## Owner-approved first bite — creation/lookup only
+The owner approved `SessionManager` creation/lookup after discussion: one canonical live
+object per session ID; a flat kind-neutral `Dictionary<Guid, SessionBase>`; a
+`SemaphoreSlim` serializing lookup/creation only, never model work. The presented typed
+operations are `CreatePrimaryAsync()` and `GetPrimaryAsync(Guid sessionId)`, returning
+`PrimarySession`. Lookup of a missing ID neither creates a record nor starts execution.
+The registry stores base references; the typed primary operations construct/return a
+primary and reject a non-primary target rather than treating it as one. This does not
+approve delegation subtypes/relationships or a generic public lookup API.
+
+**Still proposed:** manager dependencies/constructor, initialization, listing, shutdown,
+store/record contracts and every execution/Stop/view/storage-lifecycle member below.
+No other workstream or full Core-draft approval follows.
+
+**Implementation dependency assessment:** the approved registry operations need concrete
+handle construction and durable create/read contracts not yet approved. Implementing
+only a dictionary/gate would require throwaway records, storage stubs or an unapproved
+support boundary; no application scaffold is justified yet. Approve adjacent bites first.
+
+### Next single bite — proposed identity/construction fragment
+```csharp
+abstract class SessionBase {
+    public Guid Id { get; }
+    protected SessionBase(SessionRecord record, SessionStore store, IChatClient chatClient);
+}
+sealed class PrimarySession : SessionBase {
+    internal PrimarySession(SessionRecord record, SessionStore store, IChatClient chatClient)
+        : base(record, store, chatClient) { }
+}
+```
+Construction copies stored identity/revision and retains collaborators; no I/O or work
+starts. Manager constructs a concrete primary and registers it as `SessionBase`.
+Architectural choice: keep shared identity/construction in the abstract base, with a
+concrete primary, rather than a generic session object/factory. This fragment does not
+approve store methods, execution, or the base's remaining members.
 
 ## Existing constraints, not new decisions
 - [Architecture](../../ARCHITECTURE.md): shared SQLite, message rows/bounded previews,
@@ -17,7 +55,7 @@ The Core workstream owns this draft only; implementation remains gated on owner 
   Send receipts reconcile, not replay. Original history remains readable.
 - [SQLite validation](../../SQLITE-VALIDATION.md): coherent cursors, Unicode-safe previews,
   lifecycle/revision fences and schema versioning; archived APIs are not promoted.
-## Five substantial types: responsibility, lifetime, members
+## Internal five-type integration sketch — not an owner-review pack
 Fragments are declarations only, not compilable definitions. Named command/results are
 immutable data, not behavioral classes. `Guid` identifies session/run/input/output;
 `long` history revision fences replacement; `long` view version orders live views.
@@ -30,7 +68,7 @@ registered until shutdown for this two-chat checkpoint; no eviction scheme.
 private readonly SessionStore _store;
 private readonly IChatClient _chatClient;
 private readonly SemaphoreSlim _registryGate;
-private readonly Dictionary<Guid, PrimarySession> _sessions;
+private readonly Dictionary<Guid, SessionBase> _sessions;
 private bool _accepting;
 public SessionManager(SessionStore store, IChatClient chatClient);
 public Task InitializeAsync();
@@ -39,6 +77,9 @@ public Task<PrimarySession> GetPrimaryAsync(Guid sessionId);
 public Task<SessionSummaryPage> ListPrimaryAsync(Guid? afterSessionId, ReadLimits limits);
 public Task ShutdownAsync(CancellationToken waitCancellation);
 ```
+Approved registry storage is flat and kind-neutral; `CreatePrimaryAsync`/`GetPrimaryAsync`
+are typed primary entrypoints, not a primary-only registry. The registry gate covers
+lookup/creation, never model execution. All following lifecycle mechanics remain proposed.
 Startup versions storage/reconciles nonterminal runs before serving: **zero requests
 restart**. Registry serialization guarantees one handle/ID; lookup never creates IDs.
 Create/uncached lookup passes the single `CreatePrimary`/`ReadSession` result into the
@@ -244,8 +285,10 @@ run ID and completed/cancelled/failed/interrupted outcome, not merely a cancelle
    due-never-dispatched follow-ups or authorize replay of missing external-effect results.
 
 ## Owner review gates / limits
-- NEW choices: five responsibilities/members, guarded driver/transaction split, same-run
-  queued input, commit-before-publish and bounded replacement views. Not approved.
+- Only manager creation/lookup and its flat base-reference registry/lookup-creation guard
+  are approved as recorded above. The wider five responsibilities/members, guarded driver/
+  transaction split, same-run queued input, commit-before-publish and bounded replacement
+  views remain proposals.
 - Eviction/context/view costs need evidence; UI caps are not context caps/latency targets.
   Transport/browser gate/wire DTOs need a separate pack; navigation retains its ≤100 LOC gate.
 - Unconfirmed cleanup/DB outcomes stay visible. Providers/tools, edits/closure and their

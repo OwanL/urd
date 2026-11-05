@@ -1,12 +1,14 @@
 # Initial Core class design — internal integration reference
-2026-11-05. **The three identity bites and fourth user-Send reliability contract below
-are owner-approved. Other API/state shape remains proposed, not implementation permission.**
+2026-11-05. **The three identity bites, fourth user-Send reliability contract and fifth
+SessionExecution lifetime boundary below are owner-approved. Other API/state shape
+remains proposed, not implementation permission.**
 Checkpoint only: Windows local browser app, deterministic request-only `IChatClient`,
 two primary chats/two clients, real SQLite, mid-response input, addressed Stop/settlement
 and restart/reconnect without replay. No approval of the whole checkpoint,
 transcript/lifecycle schema or transport.
-Only the three identity/registry/storage bites are implemented. The fourth contract
-still needs its execution/persistence integration reviewed before a usable Send path.
+Only the three identity/registry/storage bites are implemented. The fourth and fifth
+approvals still need remaining integration reviewed before a usable Send path; no
+accepting stubs may stand in for that integration.
 Present one bite inline at a time, not this whole document or a five-type pack; approval
 never extends to unpresented members.
 
@@ -22,8 +24,9 @@ approve delegation subtypes/relationships or a generic public lookup API.
 
 **Still proposed:** model-client dependencies, initialization beyond identity storage,
 listing, shutdown and every execution/Stop/view/storage-lifecycle member below, except
-the narrow identity persistence/manager wiring in the third bite and user-Send reliability
-contract in the fourth. No other workstream or full Core-draft approval follows.
+the narrow identity persistence/manager wiring in the third bite, user-Send reliability
+contract in the fourth and SessionExecution boundary in the fifth. No other workstream
+or full Core-draft approval follows.
 
 ## Owner-approved second bite — identity/construction only
 The owner answered **“good”** to the revised identity-only construction proposal:
@@ -121,7 +124,21 @@ only checks receipts. Retain bounded original commands/receipts, including refus
 this checkpoint. These semantics and entrypoints are approved, not the full DTO/schema,
 queue/disposition/driver design or UI/HTTP implementation below. Review those dependencies
 before implementing an acceptance path; do not add a placeholder that accepts but cannot
-execute. Constructors and execution ownership remain their own proposed bite.
+execute. The subsequently approved constructor/execution ownership scope is recorded
+in the fifth bite below; remaining integration is still proposed.
+
+## Owner-approved fifth bite — SessionExecution lifetime boundary
+The owner answered **“yeah seems reasonable i think”** to the presented `internal sealed`
+`SessionExecution`; section 4 below holds its declarations (`RunId`, constructor and
+`RunAsync`/`RequestCancellation`/`ReleaseAfterSettlement`). It is temporary active work;
+the chat persists. Construction starts no work. SessionBase starts/observes the task and
+owns admission/DB writes; execution owns the model stream, Stop signal and bounded output
+buffer, batching updates rather than per-token writes. Browser disconnect does not cancel.
+Replacement waits for actual cleanup and saved final state. Release only owned resources,
+never the borrowed client. This is scoped approval, not implementation evidence or approval
+of unpresented queue/schema/HTTP/composition contracts. Private helpers, fields and batching
+mechanics within this boundary are engineering choices, not additional owner-review bites.
+The owner asked to record the decision and parallelize work, expressing dissatisfaction with pace.
 
 ## Existing constraints, not new decisions
 - [Architecture](../../ARCHITECTURE.md): shared SQLite, message rows/bounded previews,
@@ -241,7 +258,7 @@ Stopping durably refuses new valid input before acceptance, with no run/message
 creation, and leaves its draft client-owned; existing decisions remain readable.
 No pending-edit, suffix-edit, snooze or final-close API is implied or removed here.
 
-### 4. `SessionExecution` — next proposed bite: temporary owned async work
+### 4. `SessionExecution` — fifth-approved temporary owned async work boundary
 Owns requests, bounded output buffer and cancellation, not admission or transcript storage.
 One per active run; no thread/process per session or global request queue. Constructor
 initializes inert state only, never starts work. SessionBase creates/observes the sole
@@ -262,8 +279,10 @@ internal void ReleaseAfterSettlement();
 A returned invocation has quiesced its model/enumerator, timer and append work; it is
 not durable settlement. Owner rechecks pending input and either drives the same retained
 object again, sequentially, or persists settlement. No direct store access; owner retains
-claim/record/outcome/publication authority. These owner obligations are part of this
-proposed lifetime boundary, not approval of every SessionBase member or schema hook.
+claim/record/outcome/publication authority. The fifth approval covers the lifetime and
+ownership boundary, not every SessionBase public contract or storage rule. Private pump,
+reinvocation and timer mechanics are revisable implementation choices within that boundary;
+substantive ownership, concurrency or persistence changes still need review.
 Uses its Stop token, never HTTP/observer tokens. Claims input through owner, constructs
 request-local MEAI messages and records through owner. Completion does not close chat.
 A successful request requires positive terminal-success evidence (explicit in the fake
@@ -417,10 +436,11 @@ Accepted never means model success, and later interruption never changes it to R
 
 ## Owner review gates / limits
 - Approved scopes are manager creation/lookup, identity-only construction, narrow concrete
-  identity persistence/store wiring, and the fourth user-Send reliability contract above.
-  The wider five responsibilities/members, guarded driver/transaction split, same-run
-  queued input, transcript schema, commit-before-publish and bounded replacement views
-  remain proposals; fourth-bite approval does not authorize the whole Send pipeline.
+  identity persistence/store wiring, fourth user-Send reliability and fifth SessionExecution
+  lifetime/ownership boundary above. Only the first three bites are implemented.
+  Unpresented public contracts, queue policy, transcript schema, commit-before-publish and
+  bounded replacement views remain proposals; routine private helpers need no extra vote;
+  fourth/fifth approval does not authorize the whole Send pipeline or accepting stubs.
 - Eviction/context/view costs need evidence; UI caps are not context caps/latency targets.
   Transport/browser gate/wire DTOs need a separate pack; navigation retains its ≤100 LOC gate.
 - Unconfirmed cleanup/DB outcomes stay visible. Providers/tools, edits/closure and their

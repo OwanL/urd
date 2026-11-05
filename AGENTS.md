@@ -23,6 +23,10 @@
 - Once the initial base is accepted, follow its conventions. Revisit substantive
   ownership, public-contract, lifetime or concurrency/persistence changes with the
   owner; ordinary implementation details do not need method-by-method approval.
+- The owner requests faster, parallel execution. Run independent scoped preparation,
+  implementation and review concurrently with disjoint file ownership. Serialize only
+  real dependencies/shared resources; one approval wait must not stall other authorized
+  work. Do not add approval stops for routine helpers or tests within approved scope.
 - Size guidance is a review aid, not a quota or automatic refactoring mandate. Never
   split cohesive state/invariants or introduce wrappers merely to meet a line count.
   UI functions/hooks and scripts need clear ownership too, not artificial C# classes.

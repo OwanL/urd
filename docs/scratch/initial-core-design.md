@@ -30,18 +30,24 @@ support boundary; no application scaffold is justified yet. Approve adjacent bit
 ```csharp
 abstract class SessionBase {
     public Guid Id { get; }
-    protected SessionBase(SessionRecord record, SessionStore store, IChatClient chatClient);
+    protected SessionBase(SessionRecord record);
 }
 sealed class PrimarySession : SessionBase {
-    internal PrimarySession(SessionRecord record, SessionStore store, IChatClient chatClient)
-        : base(record, store, chatClient) { }
+    internal PrimarySession(SessionRecord record) : base(record) { }
 }
 ```
-Construction copies stored identity/revision and retains collaborators; no I/O or work
-starts. Manager constructs a concrete primary and registers it as `SessionBase`.
-Architectural choice: keep shared identity/construction in the abstract base, with a
-concrete primary, rather than a generic session object/factory. This fragment does not
-approve store methods, execution, or the base's remaining members.
+Construction copies already-loaded identity/revision; no I/O or work starts. Manager
+constructs a concrete primary and registers it as `SessionBase`. This bite is identity
+construction only, not approval of persistence/execution coordination. Store/client
+collaborators in the wider sketch below remain future proposals to review with the
+behaviors requiring them; this smaller current shape is not a permanent prohibition
+on those dependencies or a decision to move their responsibilities elsewhere.
+
+The owner questioned the three-input constructor. Independent review found the inputs
+reasonable for the proposed full coordinator, but premature for this identity-only
+review. Keep dependencies explicit when needed; do not introduce a parameter bag,
+service locator or factory merely to shorten a signature. This revised bite is pending
+owner approval; no additional application code is authorized.
 
 ## Existing constraints, not new decisions
 - [Architecture](../../ARCHITECTURE.md): shared SQLite, message rows/bounded previews,

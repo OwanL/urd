@@ -66,12 +66,12 @@ or a diagnosed fence. Poll scheduling/HTTP cancellation and browser rendering ar
 
 Paths below are relative to the repository. Read the small data records alongside their owners.
 
-1. [SessionManager.cs](../source/backend/harness/sessions/SessionManager.cs) — canonical handles
-   and borrowed dependencies; [SessionRecord.cs](../source/backend/harness/sessions/SessionRecord.cs).
+1. [SessionManager.cs](../source/backend/harness/sessions/SessionManager.cs) — canonical handles,
+   borrowed dependencies and the `SessionRecord` identity data used to create/load handles.
 2. [SessionBase.cs](../source/backend/harness/sessions/SessionBase.cs) and
    [PrimarySession.cs](../source/backend/harness/sessions/PrimarySession.cs) — admission/driver ownership;
-   [InputCommand.cs](../source/backend/harness/sessions/InputCommand.cs) and
-   [InputReceipt.cs](../source/backend/harness/sessions/InputReceipt.cs).
+   [InputContracts.cs](../source/backend/harness/sessions/InputContracts.cs) groups the input command,
+   receipt and decision/refusal enums.
 3. [SessionExecution.cs](../source/backend/harness/execution/SessionExecution.cs) — streaming,
    buffering, cancellation and cleanup. [ExecutionContracts.cs](../source/backend/harness/execution/ExecutionContracts.cs)
    keeps the related data types together: `LlmRequest`, `LlmResponseChunk`,

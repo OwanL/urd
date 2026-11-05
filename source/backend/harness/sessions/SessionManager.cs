@@ -3,6 +3,8 @@ using Urd.Core.Storage;
 
 namespace Urd.Core.Sessions;
 
+internal sealed record SessionRecord(Guid Id, long HistoryRevision);
+
 public sealed class SessionManager
 {
     private readonly SessionStore _store;

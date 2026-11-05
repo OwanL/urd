@@ -1,6 +1,6 @@
 # Initial Core class design — internal integration reference
-2026-11-05. **Only the first bite recorded below is owner-approved; all other API/state
-shape remains proposed, not implementation permission.**
+2026-11-05. **Only the first two bites recorded below are owner-approved; all other
+API/state shape remains proposed, not implementation permission.**
 Checkpoint only: Windows local browser app, deterministic request-only `IChatClient`,
 two primary chats/two clients, real SQLite, mid-response input, addressed Stop/settlement
 and restart/reconnect without replay. No approval of the whole checkpoint, schema or transport.
@@ -18,15 +18,11 @@ primary and reject a non-primary target rather than treating it as one. This doe
 approve delegation subtypes/relationships or a generic public lookup API.
 
 **Still proposed:** manager dependencies/constructor, initialization, listing, shutdown,
-store/record contracts and every execution/Stop/view/storage-lifecycle member below.
+SQL schema/storage wiring and every execution/Stop/view/storage-lifecycle member below.
 No other workstream or full Core-draft approval follows.
 
-**Implementation dependency assessment:** the approved registry operations need concrete
-handle construction and durable create/read contracts not yet approved. Implementing
-only a dictionary/gate would require throwaway records, storage stubs or an unapproved
-support boundary; no application scaffold is justified yet. Approve adjacent bites first.
-
-### Next single bite — proposed identity/construction fragment
+## Owner-approved second bite — identity/construction only
+The owner answered **“good”** to the revised identity-only construction proposal:
 ```csharp
 abstract class SessionBase {
     public Guid Id { get; }
@@ -46,8 +42,40 @@ on those dependencies or a decision to move their responsibilities elsewhere.
 The owner questioned the three-input constructor. Independent review found the inputs
 reasonable for the proposed full coordinator, but premature for this identity-only
 review. Keep dependencies explicit when needed; do not introduce a parameter bag,
-service locator or factory merely to shorten a signature. This revised bite is pending
-owner approval; no additional application code is authorized.
+service locator or factory merely to shorten a signature. This revised bite is now
+approved; the wider store/client constructor signatures below are still proposals.
+Immutable already-loaded identity/revision is approved, not its SQL representation or
+storage ownership/wiring.
+
+### Next single bite — proposed concrete identity persistence
+```csharp
+sealed class SessionStore : IDisposable {
+    public SessionStore(string databasePath);
+    public void OpenAndInitialize();
+    internal SessionRecord CreatePrimary(Guid sessionId);
+    internal SessionRecord? ReadSession(Guid sessionId);
+    public void Dispose();
+}
+```
+Constructor records the path only. `OpenAndInitialize` opens real SQLite (WAL/NORMAL),
+validates the schema version and initializes identity storage. Create commits before
+returning immutable identity/revision; missing read returns null, never inserts. Caller
+owns/disposes the store after registry calls finish; manager borrows it. This is identity
+persistence only—no execution, messages or recovery.
+
+**Internal implementation assessment, not another owner bite:** approval of this boundary
+and direct wiring of the shared concrete store into `SessionManager(SessionStore store)`
+would permit one cohesive registry/identity implementation with real SQLite tests. The
+caller explicitly opens/disposes the store; session constructors still take only metadata.
+No mock interface, factory, client dependency or full host shutdown design is needed.
+Minimal Core/test project metadata and normal .NET 10/package/test-runner selection,
+private SQL/helpers, schema-version marker/newer-schema rejection and resource cleanup
+are routine engineering within that scope, not repeated owner votes. Tests can cover
+committed create/reopen/read, missing lookup without insertion, concurrent canonical
+lookup and constructor/no-execution behavior using isolated temporary databases.
+No remaining material design dependency is identified for that identity-only slice if
+this storage boundary/wiring is approved. This does not authorize implementation now,
+other build/startup proposals, acquisition/global changes or lifecycle schema expansion.
 
 ## Existing constraints, not new decisions
 - [Architecture](../../ARCHITECTURE.md): shared SQLite, message rows/bounded previews,
@@ -195,7 +223,7 @@ private readonly string _connectionString;
 public SessionStore(string databasePath);
 internal void InitializeAndRecover();
 internal SessionRecord CreatePrimary(Guid sessionId);
-internal SessionRecord ReadSession(Guid sessionId);
+internal SessionRecord? ReadSession(Guid sessionId);
 internal SessionSummaryPage ListPrimary(Guid? afterSessionId, ReadLimits limits);
 internal InputReceipt AdmitInput(Guid sessionId, long historyRevision, InputCommand command);
 internal InputReceipt? ReadInputReceipt(Guid sessionId, Guid inputId);
@@ -208,7 +236,7 @@ internal SessionView ReadView(Guid sessionId, ViewLimits limits);
 internal HistoryPage ReadHistory(Guid sessionId, HistoryCursor cursor, ReadLimits limits);
 internal RowContentPage ReadRowContent(Guid sessionId, RowContentCursor cursor);
 internal RunSettlement? ReadSettlement(Guid sessionId, Guid runId);
-internal void Dispose();
+public void Dispose();
 ```
 ## Coordinated input → stream → Stop → recovery flow
 `InputReceipt`: input/run IDs, disposition, request/terminal status. `RunSettlement`:
@@ -291,8 +319,9 @@ run ID and completed/cancelled/failed/interrupted outcome, not merely a cancelle
    due-never-dispatched follow-ups or authorize replay of missing external-effect results.
 
 ## Owner review gates / limits
-- Only manager creation/lookup and its flat base-reference registry/lookup-creation guard
-  are approved as recorded above. The wider five responsibilities/members, guarded driver/
+- Only manager creation/lookup with its flat base-reference registry/lookup-creation guard,
+  plus identity-only session construction, are approved as recorded above. Concrete storage
+  remains the next proposal. The wider five responsibilities/members, guarded driver/
   transaction split, same-run queued input, commit-before-publish and bounded replacement
   views remain proposals.
 - Eviction/context/view costs need evidence; UI caps are not context caps/latency targets.

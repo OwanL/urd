@@ -8,8 +8,10 @@ This is the current layout reference. It replaces the rejected project-first and
 `systems/` proposals; [structure research](STRUCTURE-RESEARCH.md) retains their lessons
 and source evidence. Acceptance of this starting structure does not freeze helper
 names, mandate empty scaffolding, complete the TBD areas or authorize production code.
-The documentation categories and conditional shared-assets home below are planning
-recommendations; existing files have not been relocated as part of this update.
+The owner prefers flat documentation, optionally `docs/scratch/`, and drops
+`experiments/` from the target layout. Use `scripts/` rather than the vague
+`development/` label for executable automation. The shared-assets home remains
+conditional. Existing files have not been relocated or deleted by this planning update.
 
 ## Working layout
 
@@ -17,13 +19,9 @@ recommendations; existing files have not been relocated as part of this update.
 urd/
 ├─ README.md                          concise project entry point
 ├─ LICENSE
-├─ docs/                              long-lived project documentation
+├─ docs/                              flat documentation, with clear filenames
 │  ├─ README.md                       documentation index
-│  ├─ architecture/                   current decisions, boundaries and design
-│  ├─ development/                    setup, building, testing and contributing
-│  ├─ user-guide/                     using and customizing Urd
-│  ├─ research/                       investigations, comparisons and evidence
-│  └─ plans/                          working plans and unfinished proposals
+│  └─ scratch/                        optional provisional project drafts
 ├─ guidance/                          editable runtime guidance, not project docs
 │  ├─ prompts/
 │  ├─ agents/
@@ -50,9 +48,8 @@ urd/
 │  │     └─ Urd.Server.csproj
 │  ├─ tests/                          broader test organization TBD
 │  └─ Urd.slnx
-├─ development/                       setup/check/build/package automation; detail TBD
+├─ scripts/                           setup/check/build/package scripts; detail TBD
 ├─ assets/                            only if shared branding/icons actually need a home
-├─ experiments/                       existing executable research
 ├─ data/                              persistent copy data
 ├─ builds/                            generated distribution outputs
 └─ .tools/                            acquired development tools
@@ -66,28 +63,32 @@ required. One backend test project can cover multiple owners; UI tests may stay 
 
 ## Centralized repository areas
 
-- **`docs/`** is the main human/developer documentation home. Keep the root README
-  short and link to its index. Current architecture, proposed plans and research
-  evidence must retain their distinct authority; moving a report does not turn it
-  into an approved design. Component READMEs can stay beside the code they explain.
+- **`docs/`** stays flat: architecture, setup, usage, research and plans use clear
+  filenames rather than category directories. Keep the root README short and link
+  to the docs index. Document status/content distinguishes decisions, proposals and
+  evidence; a file's location does not promote its authority. Component READMEs may
+  remain beside their code.
+- **`docs/scratch/`** is optional for provisional project drafts worth sharing.
+  It is not a dumping ground for generated logs, downloads or disposable experiments;
+  temporary agent working notes/artifacts still belong in owned OS-temp locations.
 - **`guidance/`** contains editable prompts, named-agent definitions and skills used
   by the harness. `harness/guidance-loading/` is the corresponding loader code.
   This does not absorb existing user/project guidance or settle loading/reload timing.
-- **`development/`** contains executable setup/build/check/distribution tooling;
-  **`docs/development/`** explains how to use and maintain it. Do not create a second
-  competing root `scripts/` home just to mirror Pie's directory names.
+- **`scripts/`** contains executable setup/build/check/distribution scripts. Their
+  documentation lives as ordinary files directly under `docs/`; no second automation
+  directory or general-purpose development bucket is needed.
 - **`assets/`** is conditional: shared branding/icons used by multiple surfaces or
   packaging can live here. UI-only assets stay with UI; managed session attachments
   are persistent data, not repository assets. Do not create an empty directory now.
 - **`source/tests/`** is the baseline's centralized home for cross-component backend tests,
   inside the production build-policy scope. A second root test directory is unnecessary.
-- **`experiments/`** keeps executable research and its local READMEs. Long-lived
-  findings belong in `docs/research/`, without moving experimental source into docs.
+- **No `experiments/` in the target layout.** Preserve useful findings as flat docs;
+  do not move experimental projects into `docs/scratch/`. Existing research code is
+  untouched by this layout update. Removing that code is a separate cleanup, including
+  any references needed to interpret or reproduce the recorded evidence.
 
-Pie provides a useful reference: its tracked root separates documentation, scripts
-and tests, and its docs distinguish architecture, contracts, operations, plans and
-research. Borrow the separation of purposes, not every directory or another tooling
-system. No changes to Pie are involved.
+Borrow Pie's separation of documentation, automation and runtime guidance, not its
+full directory hierarchy. No changes to Pie are involved.
 
 Existing root design/research reports should move under `docs/` as a coordinated,
 link-checked documentation reorganization. Preserve report evidence and authority;

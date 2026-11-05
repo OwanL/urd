@@ -98,9 +98,10 @@ The evidence/owner-review round is complete. After rejecting the project-first a
 `systems/` layouts, the owner requested [source-backed research](STRUCTURE-RESEARCH.md)
 and refined the naming and harness nesting. The resulting [application plan](APPLICATION-PLAN.md)
 is now accepted as a rough starting structure, explicitly revisable during implementation.
-The owner also requests centralized repository areas such as `docs/`; detailed doc
-categories and shared assets are proposed, not already migrated. Non-harness internals
-remain TBD where not designed. Use this baseline to scope subsequent work rather than
+The owner also requests centralized, flat `docs/` with an optional scratch area.
+The working layout uses `scripts/` for automation and omits `experiments/`; no existing
+research code has been deleted or docs migrated. Non-harness internals remain TBD
+where not designed. Use this baseline to scope subsequent work rather than
 keep refining speculative folders. Existing behavioral/technology decisions stand;
 rough-layout acceptance does not itself grant production-code permission.
 

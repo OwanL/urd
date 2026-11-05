@@ -163,9 +163,9 @@ code is authorized merely by writing these proposals.
 
 The identity/registry/SQLite slice is implemented; prioritize a working integrated path,
 not more broad technology comparisons or a larger complete specification:
-1. Review input admission/receipt recovery as one cohesive operation; keep shutdown
-   ownership aligned with the caller-owned store. These are pending contract corrections,
-   not authority to implement the whole Core sketch.
+1. User-Send receipt/retry semantics are now approved in the Core record. Next review the
+   active-work owner and necessary persistence integration before implementing that path;
+   shutdown preserves caller-owned storage. This is not whole-Core approval.
 2. Order the necessary small Core and hosting/UI bites toward one built browser → Core →
    SQLite fake-model response, then extend that same path to two clients/chats, input while
    busy, addressed Stop/settlement and reopen without replay. Do not add a parallel demo

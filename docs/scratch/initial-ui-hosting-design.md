@@ -207,10 +207,12 @@ was rejected. Only a matched retained receipt resolves unknown admission. Wire e
 preserve identity but are not durable evidence. Core owns the decision transaction.
 
 ## Integrated contracts, two trade-offs and verification gate
-- Core range reads, nullable receipts, LastSettlement and input limits remain proposals.
+- Core range reads, LastSettlement and exact input limits remain proposals; nullable
+  receipt lookup and its unknown-absence semantics are part of the fourth approval.
   The revised durable Accepted/Refused contract plus explicit original-command retry
-  addresses the unknown-Send gap; it still needs owner review and production-path tests.
-  JSON casing/cursor encoding are ordinary wire/check work, not another API framework.
+  addresses the unknown-Send gap. That user-Send behavior is now owner-approved in the
+  Core record; UI/hosting APIs and implementation remain proposed, with production-path
+  tests still required. JSON casing/cursor encoding do not need another API framework.
 - Shared startup proposal: `--data-root <absolute path> --port <port or 0>`; Hosting
   validates/locks/recovers/reports actual origin, Build invokes/stages Server + `wwwroot`.
 - Trade-off 1: HTTP + fetch SSE keeps commands/receipts simple; costs bounded framing

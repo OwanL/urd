@@ -1,11 +1,12 @@
 # Initial Core class design — internal integration reference
-2026-11-05. **Only the first three bites recorded below are owner-approved; all other
-API/state shape remains proposed, not implementation permission.**
+2026-11-05. **The three identity bites and fourth user-Send reliability contract below
+are owner-approved. Other API/state shape remains proposed, not implementation permission.**
 Checkpoint only: Windows local browser app, deterministic request-only `IChatClient`,
 two primary chats/two clients, real SQLite, mid-response input, addressed Stop/settlement
 and restart/reconnect without replay. No approval of the whole checkpoint,
 transcript/lifecycle schema or transport.
-The Core workstream implements only the three approved identity/registry/storage bites.
+Only the three identity/registry/storage bites are implemented. The fourth contract
+still needs its execution/persistence integration reviewed before a usable Send path.
 Present one bite inline at a time, not this whole document or a five-type pack; approval
 never extends to unpresented members.
 
@@ -21,8 +22,8 @@ approve delegation subtypes/relationships or a generic public lookup API.
 
 **Still proposed:** model-client dependencies, initialization beyond identity storage,
 listing, shutdown and every execution/Stop/view/storage-lifecycle member below, except
-the narrow identity persistence and manager/store wiring approved in the third bite.
-No other workstream or full Core-draft approval follows.
+the narrow identity persistence/manager wiring in the third bite and user-Send reliability
+contract in the fourth. No other workstream or full Core-draft approval follows.
 
 ## Owner-approved second bite — identity/construction only
 The owner answered **“good”** to the revised identity-only construction proposal:
@@ -101,6 +102,26 @@ Independent implementation acceptance review found no supported blockers. Parent
 verification also passed locked restore (lockfile hashes unchanged) and all eight Release
 tests, including public-manager creation followed by store reopen and a fresh manager's
 canonical lookup. No messages/executions, model calls or hosting were added.
+
+## Owner-approved fourth bite — user-Send reliability contract
+The owner answered **“seems reasonable”** after the inline proposal and clarification:
+this is reliability of incoming user instructions, including input during a response;
+not transcript management, generated assistant replies, or agent-to-agent coordination.
+```csharp
+// PrimarySession
+public Task<InputReceipt> SubmitAsync(InputCommand command);
+// SessionBase
+public Task<InputReceipt?> GetInputReceiptAsync(Guid inputId);
+```
+Record a stable first Accepted/Refused decision before returning a definitive receipt.
+A refused ID cannot later accept a delayed original; returning an old acceptance never
+starts execution again. Lookup absence remains unknown. Explicit Retry original Send
+uses the unchanged ID/text/revision and may admit previously unaccepted work; reconnect
+only checks receipts. Retain bounded original commands/receipts, including refusals, for
+this checkpoint. These semantics and entrypoints are approved, not the full DTO/schema,
+queue/disposition/driver design or UI/HTTP implementation below. Review those dependencies
+before implementing an acceptance path; do not add a placeholder that accepts but cannot
+execute. Constructors and execution ownership remain their own proposed bite.
 
 ## Existing constraints, not new decisions
 - [Architecture](../../ARCHITECTURE.md): shared SQLite, message rows/bounded previews,
@@ -220,20 +241,29 @@ Stopping durably refuses new valid input before acceptance, with no run/message
 creation, and leaves its draft client-owned; existing decisions remain readable.
 No pending-edit, suffix-edit, snooze or final-close API is implied or removed here.
 
-### 4. `SessionExecution` — temporary owned async work for one run
-Owns requests, bounded output buffer and cancellation, not admission. One per active
-run; no thread/process per session or global request queue.
+### 4. `SessionExecution` — next proposed bite: temporary owned async work
+Owns requests, bounded output buffer and cancellation, not admission or transcript storage.
+One per active run; no thread/process per session or global request queue. Constructor
+initializes inert state only, never starts work. SessionBase creates/observes the sole
+execution driver; no overlapping `RunAsync` calls or fire-and-forget cleanup.
 ```csharp
-public Guid RunId { get; }
+internal Guid RunId { get; }
 private readonly SessionBase _owner;
-private readonly IChatClient _chatClient;
+private readonly IChatClient _chatClient; // borrowed
 private readonly CancellationTokenSource _stop;
 private readonly StringBuilder _outputBatch;
+private int _batchUtf8Bytes;
+private PeriodicTimer? _flushTimer; // activated during RunAsync, not construction
 internal SessionExecution(Guid runId, SessionBase owner, IChatClient chatClient);
 internal Task<ExecutionOutcome> RunAsync();
 internal void RequestCancellation();
 internal void ReleaseAfterSettlement();
 ```
+A returned invocation has quiesced its model/enumerator, timer and append work; it is
+not durable settlement. Owner rechecks pending input and either drives the same retained
+object again, sequentially, or persists settlement. No direct store access; owner retains
+claim/record/outcome/publication authority. These owner obligations are part of this
+proposed lifetime boundary, not approval of every SessionBase member or schema hook.
 Uses its Stop token, never HTTP/observer tokens. Claims input through owner, constructs
 request-local MEAI messages and records through owner. Completion does not close chat.
 A successful request requires positive terminal-success evidence (explicit in the fake
@@ -243,7 +273,9 @@ its own terminal outcome through `CompleteRequestAsync` before any continuation 
 run settlement; output-item completion alone is not request success. Tools remain out of
 this checkpoint.
 Awaits owned cleanup before returning; noncooperation leaves Stop **stopping**, blocking
-replacement. Cancellation/release are idempotent; release resources only after settlement.
+replacement. Cancellation/release are idempotent and safe against stale/racing calls.
+Release owned resources only after invocation exit and confirmed durable settlement;
+ambiguous settlement keeps admission fenced. Never dispose the borrowed client.
 
 ### 5. `SessionStore` — database lifetime; intent-specific transactions
 Owns SQL/schema, serialized writer and short independent readers; no shared concurrent
@@ -278,7 +310,8 @@ is immutable **Accepted or Refused**: refusal has a reason and no admitted run; 
 has its original run/disposition and separately evolving request/terminal evidence.
 Accepted never means model success, and later interruption never changes it to Refused.
 `RunSettlement` retains run ID and completed/cancelled/failed/interrupted outcome.
-1. **Decide input — revised proposal, pending owner review:** `InputCommand` carries
+1. **Decide input — reliability contract approved; queue/schema details still proposed:**
+   `InputCommand` carries
    stable input ID, expected history revision and text. For an existing session and valid
    command, one guarded store transaction resolves the ID or commits its first decision:
    - Existing ID with identical text **and original revision** returns retained evidence
@@ -320,11 +353,20 @@ Accepted never means model success, and later interruption never changes it to R
    request outcome plus associated input receipts independently of run settlement. Identical
    completion returns retained evidence; conflicting/stale completion rejects. A stopping
    run cannot newly record success, but may record failed/cancelled cleanup outcomes.
-   NEW simplicity proposal: commit each bounded fake output chunk **before** publication;
-   no provisional UI tail for this checkpoint. `OutputBatch` has request/output IDs, batch
-   index, text and output-item final marker; append checks request/run/revision/stopping
-   and expected next index. Slice oversized chunks; backpressure enumeration on writes.
-   No per-token fsync promise.
+   NEW batching proposal: execution coalesces source updates into scalar-safe batches
+   within **16 KiB UTF-8**, flushing on size, short elapsed-time deadline or normal request
+   end. Start the deadline when the buffer becomes nonempty; tiny updates never postpone
+   it. The timer can flush while the next source update is awaited. Commit each flushed
+   batch, not each provider chunk, **before** publication; no provisional UI tail here.
+   `OutputBatch` has request/output IDs, batch index, text and output-item final marker;
+   append checks request/run/revision/stopping and expected next index. Slice oversized
+   updates without exceeding the buffer cap; writes apply backpressure. Retain at most
+   one pending source read and one timer wait: a timer win does not start a second read.
+   Serialize/await appends and observe losing wait tasks; request cleanup quiesces timer,
+   enumerator and in-flight append before returning, outside the session guard. Stop
+   cannot force a flush past the stopping fence; unpublished tail is not durable output.
+   No exact timing/latency or per-token fsync promise. This reduces publication pressure,
+   not proof of bounded view-construction/guard costs; measure those on the integrated path.
 3. **Observe:** under `_gate`, register observer and capture its initial view together.
    `ReadView` reads metadata, window and cursor in one short SQLite read snapshot.
    Subsequent mutations commit before publishing replacement views under the same guard.
@@ -374,11 +416,11 @@ Accepted never means model success, and later interruption never changes it to R
    due-never-dispatched follow-ups or authorize replay of missing external-effect results.
 
 ## Owner review gates / limits
-- Only manager creation/lookup with its flat base-reference registry/lookup-creation guard,
-  plus identity-only session construction and narrow concrete identity persistence/store
-  wiring, are approved as recorded above. The wider five responsibilities/members, guarded driver/
-  transaction split, same-run queued input, commit-before-publish and bounded replacement
-  views remain proposals.
+- Approved scopes are manager creation/lookup, identity-only construction, narrow concrete
+  identity persistence/store wiring, and the fourth user-Send reliability contract above.
+  The wider five responsibilities/members, guarded driver/transaction split, same-run
+  queued input, transcript schema, commit-before-publish and bounded replacement views
+  remain proposals; fourth-bite approval does not authorize the whole Send pipeline.
 - Eviction/context/view costs need evidence; UI caps are not context caps/latency targets.
   Transport/browser gate/wire DTOs need a separate pack; navigation retains its ≤100 LOC gate.
 - Unconfirmed cleanup/DB outcomes stay visible. Providers/tools, edits/closure and their

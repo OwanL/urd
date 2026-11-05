@@ -156,6 +156,18 @@ are proposals, not new decisions. Do not merely rename or flatten a catch-all bu
 prove that changes have understandable owners. The selected Core/Server boundary
 remains; no final structure or production scaffold is approved.
 
+**Subsequent structure feedback (2026-11-05):** the owner finds the later component-led
+tree broadly acceptable structurally, but requests clearer names and grouping. In
+particular, `guidance/` versus `agent-instructions/` does not distinguish authored
+content from loader code clearly; “agent instructions” is not the preferred top-level
+name for the editable Markdown/skills collection either. Model context, agent tools
+and similar responsibilities belong under the broader harness, rather than requiring
+peer folders beside it. Use `execution` for the narrow model/tool loop. The
+[revised tree and naming candidates](STRUCTURE-RESEARCH.md#8-naming-and-harness-grouping)
+propose `agent-content/`, `instruction-loading/` and broader harness nesting. Those
+exact names and the full nesting remain proposals; component state ownership, shared
+lifetimes and the Core/Server boundary are unchanged. No production code is authorized.
+
 The [working session sketch](SESSION-DESIGN.md) below records subsequent owner
 input, including the selected, revisable Core/Server boundary; it does not approve
 final APIs, broader base-class scope, fine file/folder layout or a production scaffold.

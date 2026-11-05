@@ -398,7 +398,10 @@ more detailed decisions as they are made.
 owner outcomes. The [application layout proposal](APPLICATION-PLAN.md) was rejected
 as too vague and is withdrawn. [Structure research](STRUCTURE-RESEARCH.md) records
 subsequent primary-source investigation, competing organizational approaches and
-candidate class/state owners. No replacement layout or implementation is approved.
+candidate class/state owners. The owner broadly accepts the later tree's structure,
+but requests clearer content-versus-loader names and nesting context/tools under the
+harness. Its [revised tree](STRUCTURE-RESEARCH.md#8-naming-and-harness-grouping) remains
+a proposal; exact names, the complete layout and implementation are not approved.
 
 Focused qualification evidence, distinct from architecture approval:
 

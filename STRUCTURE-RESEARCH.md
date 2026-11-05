@@ -5,6 +5,12 @@
 actual research and brainstorming.” That proposal is withdrawn. Established session,
 provider, storage and client decisions still stand; no production code is authorized.
 
+**Subsequent owner feedback:** the later component-led tree is broadly acceptable
+structurally, but needs clearer names and harness nesting. In particular, model context
+and agent tools are harness responsibilities, not necessarily its peers. See
+[the revised naming and grouping proposal](#8-naming-and-harness-grouping) below.
+The responsibility map is not a requirement for one peer folder per row.
+
 ## 1. What was wrong with the proposal
 
 Removing the `systems/` directory would not be enough:
@@ -105,7 +111,7 @@ were outside the seven-file investigation. Its folder names do not certify good 
 
 | Candidate | Main unit of organization | Strength | Cost/problem for Urd |
 | --- | --- | --- | --- |
-| **A. Explicit domain modules** | Providers, instructions, tools, model context, collaboration, follow-ups, history, etc.; host/UI remain distinct. | A maintainer can locate the owner of a behavior. Shared state/rules have one place. Can remain one backend library. | More visible peers. Some changes necessarily cross domains; an input feature can touch UI, endpoint and session command. Must not replace `systems` with another umbrella. |
+| **A. Explicit domain modules** | Providers, instructions, tools, model context, collaboration, follow-ups, history, etc.; host/UI remain distinct. | A maintainer can locate the owner of a behavior. Shared state/rules have one place. Can remain one backend library. | More visible peers. Some changes necessarily cross domains; an input feature can touch UI, endpoint and session command. Must not replace `systems` with another unexplained catch-all. |
 | **B. End-to-end feature slices** | “Connect provider”, “send message”, “delegate work” groups each workflow's changes across its UI/API/domain/data owners. | Very good locality for adding a user-facing workflow; avoids ceremonial controller→service→repository layers. Can respect the existing language/project boundaries. | Urd's UI and agent tools invoke the same long-lived state machine. Per-request slices must still share that authority, not duplicate admission/state policy in each handler. Useful within domains, not my whole-product default. |
 | **C. Reusable harness library plus workspace application** | General execution/tool/provider/guidance package; app owns workspace/history/cooperation/clients. | Strong reuse boundary; straightforward headless embedding and separate consumers. | Urd is one specific product, not an arbitrary harness framework. Designing public extension/lifecycle contracts now risks recreating Pi's seams and generic Core bucket. Extra machinery lacks a demonstrated consumer. |
 
@@ -125,9 +131,9 @@ locations or fewer lines than B**. Those costs need real implementation evidence
 
 | Concrete owner | State/decision it hides | Deliberately outside it |
 | --- | --- | --- |
-| **Agent execution (harness)** | Live session identity/admission and current execution; pending input, cancellation and settlement. Preserve the two session kinds. | Account management, HTTP and a global container of all collaborators. |
+| **Sessions and execution** | Live session identity/admission and current execution; pending input, cancellation and settlement. Preserve the two session kinds. | Account management, HTTP and a global container of all collaborators. |
 | **Model providers** | Model/catalog identities, accounts/credential access, provider adapters and request policy. Distinguish catalog, account and request collaborators internally. | Session input policy; caller-specific title/compaction/pruning behavior. |
-| **Agent instructions** | Scoped prompt/skill/named-agent discovery and reading, definition provenance. | Authored content itself; attachments; runtime agents; what a particular model has already seen. |
+| **Instruction loading** | Scoped prompt/skill/named-agent discovery and reading, definition provenance. | Authored content itself; attachments; runtime agents; what a particular model has already seen. |
 | **Tools** | Concrete tool definitions/implementations, registration and one current-authority invocation path. Simple tools implement their operation directly; application tools enter their domain's commands. | Owning the session/assignment behind a tool; model-context history; starting native runtimes just to list metadata. |
 | **MCP connections** | Server configuration/connection lifetime, SDK protocol calls and discovery changes; exports tool registrations to Tools. | Model relevance selection or an agent loop. Separate logical owner; may be a small area beside tool integration rather than another top-level project. |
 | **Model context** | The per-session working representation, selected/loaded exposure, compaction and reduction/recall orchestration. Session guards govern applying changes; provider adapters own native representations. | Original transcript authority or tool permission. Tools/instructions own eligibility and definitions; context consumes them rather than building duplicate source catalogs. |
@@ -139,7 +145,7 @@ locations or fewer lines than B**. Those costs need real implementation evidence
 | **Hosting** | Process lifetime, composition, access/transport and platform entry. | Provider/session policy or source-build orchestration. |
 | **Development & delivery** | Declared tools, source/build/data separation, checks and the customization/distribution workflow. | Runtime session state or an automatic update platform. |
 
-Central editable Markdown remains a separate authored-content home. “Agent instructions”
+Central editable Markdown remains a separate authored-content home. “Instruction loading”
 above describes code, not a second content directory. Loading/reload timing remains deferred.
 
 Questions/answers should start as an **execution-owned interaction** with UI presentation,
@@ -228,13 +234,77 @@ follow-up dispatch from collaboration; name instruction discovery precisely; kee
 usage distinct from generic diagnostics; distribute policy ownership instead of
 centralizing it in Configuration. Existing selected behavior is not being redesigned.
 
-The remaining physical choice is how much of this small domain map earns a peer folder
-versus a clearly named subarea. MCP placement and Context's physical placement beside or
-inside the harness are reasonable alternatives; actual responsibilities above matter
-more than one nesting level. The common database is not a reason to merge all domains;
-nor is domain separation a reason to invent many repositories or assemblies.
+Logical owners need not be peer folders or separate projects. The later owner feedback
+below resolves the direction for harness grouping, not all remaining placement/naming.
+The common database is not a reason to merge all domains; nor is domain separation a
+reason to invent many repositories or assemblies. This research does not authorize
+production scaffolding, new provider/account calls or activation.
 
-The class sketches above make those cuts concrete enough to discuss without another
-premature directory tree. Test their clarity and coupling first; then map the owners
-to files and choose ordinary project wiring. This research does not authorize production
-scaffolding, new provider/account calls or activation.
+## 8. Naming and harness grouping
+
+**Owner direction:** the subsequent tree was “okay structure wise”, but `guidance/`
+and `agent-instructions/` did not clearly distinguish editable content from code.
+“Agent instructions” was also not considered a better name for the top-level editable
+Markdown/skills collection. Model context, agent tools and similar responsibilities
+should be nested under the harness. This is broad structural alignment plus a request
+for refinement, not approval of every proposed name or production implementation.
+
+**Revised proposal:** use `harness` for the broader agent machinery and `execution`
+for the narrow model/tool loop. Keep named responsibilities inside that grouping;
+do not turn the grouping into a single Harness manager or execution-owned service bag.
+Provider accounts and MCP connections retain their appropriate shared lifetimes.
+
+For the authored collection, prefer **`agent-content/`**: it names the editable material
+rather than a process. **`instruction-loading/`** names the code that discovers, resolves
+and reads scoped content. `agent-kit/` is a friendlier but less literal alternative;
+`prompts/` alone is too narrow for skills and named-agent definitions. These names remain
+proposals. The authored home holds bundled defaults, not just overrides, and does not
+absorb existing user/project instruction files or select their loading/reload timing.
+
+```text
+urd/
+├─ agent-content/                     editable bundled content
+│  ├─ prompts/
+│  ├─ agents/
+│  └─ skills/
+├─ source/
+│  ├─ backend/
+│  │  ├─ harness/
+│  │  │  ├─ sessions/
+│  │  │  ├─ execution/                model/tool loop, cancellation and waits
+│  │  │  ├─ context/                  assembly, selection, compaction and recall
+│  │  │  ├─ instruction-loading/      scoped discovery and reading
+│  │  │  ├─ tools/                    catalog, checked invocation, implementations
+│  │  │  ├─ providers/                catalog, accounts, adapters, request policy
+│  │  │  ├─ mcp/                      connection/discovery/protocol ownership
+│  │  │  ├─ collaboration/            messages, assignments, results and waits
+│  │  │  └─ follow-ups/               triggers and scheduled delivery
+│  │  ├─ session-storage/             history, attachments and atomic store writes
+│  │  ├─ usage/                       retained usage, pricing and summaries
+│  │  └─ Urd.Core.csproj
+│  ├─ ui/
+│  ├─ hosting/
+│  │  └─ server/
+│  │     └─ Urd.Server.csproj
+│  ├─ tests/
+│  └─ Urd.slnx
+├─ development/
+├─ experiments/
+├─ data/
+├─ builds/
+└─ .tools/
+```
+
+Nesting providers, MCP, collaboration and follow-ups under the harness is the proposed
+extension of the owner's examples, not a claim that each was individually approved.
+Storage and retained usage/reporting remain application-level peers in this proposal.
+No broader class authority follows from filesystem nesting: Context does not grant
+tool permission; tools do not own the assignments behind their commands; grouping
+MCP with agent machinery does not give each run its own MCP connection lifecycle.
+
+`backend/` is the ASP.NET-free compilation boundary, not a replacement domain bucket.
+Its Core project uses ordinary SDK inclusion within that subtree; the Server project
+references it. This avoids the withdrawn explicit file-inclusion workaround. Subareas
+from the preceding sketch still apply where useful, but empty folders are not a
+scaffolding checklist. Physical packaging, exact tool pins and acquisition mechanics
+remain open; this is a proposed source map, not a new build/data behavior contract.

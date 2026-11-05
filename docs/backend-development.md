@@ -19,7 +19,8 @@ there is no runnable Server or UI yet.
 - Normal terminal close/reopen is tested without replay. Nonterminal rows survive reopening
   and block new admission; startup interruption/recovery is **not** implemented.
 
-Locked restore and the Release suite pass **35/35** tests, with no build warnings/errors.
+At Core checkpoint `06c1c3d`, locked restore and the Release suite passed **35/35** tests,
+with no build warnings/errors.
 Coverage includes shared-client concurrent chats, exact retry/reopen, transactional rollback,
 UTF-8 batching, positive terminal evidence, held cleanup and persistence-failure fencing.
 This is a Core review checkpoint, not the browser-to-Core milestone or a complete hosting API.
@@ -38,8 +39,10 @@ Paths below are relative to the repository. Read the small data records alongsid
    buffering, cancellation and cleanup; [ExecutionContracts.cs](../source/backend/harness/execution/ExecutionContracts.cs).
 4. [SessionStore.cs](../source/backend/harness/storage/SessionStore.cs) — opening/migration/receipts;
    [SessionStore.Execution.cs](../source/backend/harness/storage/SessionStore.Execution.cs) — atomic run/request/output facts.
-5. [SessionManagerFlowTests.cs](../source/tests/Urd.Backend.Tests/SessionManagerFlowTests.cs), then
-   [SessionExecutionTests.cs](../source/tests/Urd.Backend.Tests/SessionExecutionTests.cs) — whole Core flow and lifecycle failures.
+5. [SessionManagerFlowTests.cs](../source/tests/Urd.Backend.Tests/SessionManagerFlowTests.cs),
+   [SessionConcurrencyTests.cs](../source/tests/Urd.Backend.Tests/SessionConcurrencyTests.cs) and
+   [SessionExecutionTests.cs](../source/tests/Urd.Backend.Tests/SessionExecutionTests.cs) — whole Core flow,
+   concurrent retries, cancelled waiters and lifecycle failures.
 6. [InputReceiptTests.cs](../source/tests/Urd.Backend.Tests/InputReceiptTests.cs),
    [ExecutionStorageTests.cs](../source/tests/Urd.Backend.Tests/ExecutionStorageTests.cs) and
    [SessionIdentityTests.cs](../source/tests/Urd.Backend.Tests/SessionIdentityTests.cs) — storage/registry invariants;

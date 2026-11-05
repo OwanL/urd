@@ -141,7 +141,8 @@ lifetimes, owned state, important operations and dependency/transaction boundari
 The rough layout remains accepted; exact new APIs remain proposals until reviewed.
 
 Start with the [Core class proposal](docs/scratch/initial-core-design.md), then review
-UI/hosting and build/startup boundaries. Each workstream must obtain independent
+the [UI/hosting proposal](docs/scratch/initial-ui-hosting-design.md) and
+[build/startup proposal](docs/scratch/initial-build-setup-design.md). Each workstream must obtain independent
 agent review and fix supported issues before the coordinator brings its concrete
 code/class/method proposal to the owner. The owner reviews architectural shape and
 code, not engineering guidelines or process documents. [Code-shape guidance](docs/code-shape-guidelines.md)

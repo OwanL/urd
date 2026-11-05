@@ -3,6 +3,7 @@
 Checkpoint only: Windows local browser app, deterministic request-only `IChatClient`,
 two primary chats/two clients, real SQLite, mid-response input, addressed Stop/settlement
 and restart/reconnect without replay. No code, builds, schema or transport approval.
+The Core workstream owns this draft only; implementation remains gated on owner review.
 
 ## Existing constraints, not new decisions
 - [Architecture](../../ARCHITECTURE.md): shared SQLite, message rows/bounded previews,
@@ -69,13 +70,15 @@ private readonly Dictionary<Guid, (ViewLimits Limits, Channel<SessionView> Updat
 protected SessionBase(SessionRecord record, SessionStore store, IChatClient chatClient);
 public IAsyncEnumerable<SessionView> ObserveAsync(ViewLimits limits, CancellationToken observationCancellation);
 public Task<HistoryPage> ReadHistoryAsync(HistoryCursor cursor, ReadLimits limits);
-public Task<InputReceipt> GetInputReceiptAsync(Guid inputId);
+public Task<RowContentPage> ReadRowContentAsync(RowContentCursor cursor);
+public Task<InputReceipt?> GetInputReceiptAsync(Guid inputId);
 public Task<StopReceipt> RequestStopAsync(Guid runId);
 public Task<RunSettlement> WaitForSettlementAsync(Guid runId, CancellationToken waitCancellation);
 protected Task<InputReceipt> AdmitInputAsync(InputCommand command);
 internal Task FenceAdmissionAsync();
 internal Task<RequestPlan?> ClaimNextRequestAsync(Guid runId);
 internal Task<bool> RecordOutputAsync(Guid runId, OutputBatch batch);
+internal Task<bool> CompleteRequestAsync(Guid runId, RequestCompletion completion);
 private Task DriveExecutionAsync(SessionExecution execution);
 private Task<bool> TrySettleAsync(Guid runId, ExecutionOutcome outcome);
 private SessionView CaptureView(ViewLimits limits);
@@ -94,7 +97,8 @@ after `RunAsync` returned, the single owner driver invokes and awaits `RunAsync`
 the same retained execution/run, never concurrently or under the guard; release follows
 terminal settlement only.
 Stop/error terminalizes undelivered input honestly.
-An ambiguous terminal commit keeps admission fenced pending reconciliation; no false idle.
+An ambiguous request/run terminal commit prevents continuation and keeps admission fenced
+pending reconciliation; no false idle.
 ### 3. `PrimarySession : SessionBase` — ongoing primary input policy
 Handle lifetime; no extra mutable fields. Chooses ordinary-input policy, not another lock.
 ```csharp
@@ -127,7 +131,10 @@ Uses its Stop token, never HTTP/observer tokens. Claims input through owner, con
 request-local MEAI messages and records through owner. Completion does not close chat.
 A successful request requires positive terminal-success evidence (explicit in the fake
 client), not clean enumeration, complete-looking text or absence of an exception; missing,
-failed or incomplete terminal evidence cannot yield success. Tools remain out of this checkpoint.
+failed or incomplete terminal evidence cannot yield success. Each claimed request records
+its own terminal outcome through `CompleteRequestAsync` before any continuation or normal
+run settlement; output-item completion alone is not request success. Tools remain out of
+this checkpoint.
 Awaits owned cleanup before returning; noncooperation leaves Stop **stopping**, blocking
 replacement. Cancellation/release are idempotent; release resources only after settlement.
 
@@ -144,13 +151,15 @@ internal SessionRecord CreatePrimary(Guid sessionId);
 internal SessionRecord ReadSession(Guid sessionId);
 internal SessionSummaryPage ListPrimary(Guid? afterSessionId, ReadLimits limits);
 internal InputReceipt AdmitInput(Guid sessionId, long historyRevision, InputCommand command);
-internal InputReceipt ReadInputReceipt(Guid sessionId, Guid inputId);
+internal InputReceipt? ReadInputReceipt(Guid sessionId, Guid inputId);
 internal RequestPlan? ClaimNextRequest(Guid sessionId, Guid runId, long historyRevision);
 internal WriteReceipt AppendOutput(Guid sessionId, Guid runId, long historyRevision, OutputBatch batch);
+internal WriteReceipt CompleteRequest(Guid sessionId, Guid runId, long historyRevision, RequestCompletion completion);
 internal StopReceipt RequestStop(Guid sessionId, Guid runId);
 internal SettlementAttempt TrySettle(Guid sessionId, Guid runId, ExecutionOutcome outcome);
 internal SessionView ReadView(Guid sessionId, ViewLimits limits);
 internal HistoryPage ReadHistory(Guid sessionId, HistoryCursor cursor, ReadLimits limits);
+internal RowContentPage ReadRowContent(Guid sessionId, RowContentCursor cursor);
 internal RunSettlement? ReadSettlement(Guid sessionId, Guid runId);
 internal void Dispose();
 ```
@@ -160,34 +169,77 @@ run ID and completed/cancelled/failed/interrupted outcome, not merely a cancelle
 1. **Accept:** `InputCommand` carries stable input ID, expected history revision and text.
    Under the handle guard, admission atomically stores input/receipt, its steering or
    follow-up disposition and run association (creating the active run only if idle).
-   Same ID/same content returns retained evidence; conflicting reuse rejects. Receipt
-   lookup precedes busy rejection and remains usable while busy. Lost acknowledgement:
-   retain that ID and query; unavailable/ambiguous storage means unknown, never rejection.
+   Same ID/same content returns retained evidence; conflicting reuse rejects. Existing-ID
+   resolution precedes new-work capacity, revision and busy rejection and remains usable
+   while busy. Core enforces at most **16 KiB UTF-8/input** and **eight nonterminal accepted
+   inputs/session**, including claimed inputs awaiting request outcome. Admission checks
+   these under the guard and repeats the capacity check in its transaction. Oversize or
+   capacity rejects explicitly before acceptance, with no input/run write; the client keeps
+   its draft. These are engineering defaults, not transport-only validation or history caps.
+   Receipt lookup returns retained evidence or `null` after a successful snapshot proves
+   absence there. Missing session is distinct; unavailable/uncertain storage never returns
+   `null` as a fallback. Absence is not rejection evidence for an earlier still-in-flight
+   Send, nor authority to replay it. Lost acknowledgement: retain that ID and query;
+   unavailable/ambiguous storage means unknown, never rejection.
 2. **Deliver/record:** request claim atomically records which queued inputs belong to
    that request. Claiming is not proof of provider receipt/consumption or a completed
    answer; the receipt must retain the request outcome rather than imply success.
-   `RequestPlan` carries run/revision, input IDs and ordered model input, not UI state.
+   `RequestPlan` carries request/run IDs, revision, input IDs and ordered model input,
+   not UI state. `RequestCompletion` carries that request ID and succeeded/failed/cancelled
+   outcome; success requires the validated positive terminal evidence above, even for an
+   empty response. Its guarded transaction checks request/run/revision and commits the
+   request outcome plus associated input receipts independently of run settlement. Identical
+   completion returns retained evidence; conflicting/stale completion rejects. A stopping
+   run cannot newly record success, but may record failed/cancelled cleanup outcomes.
    NEW simplicity proposal: commit each bounded fake output chunk **before** publication;
-   no provisional UI tail for this checkpoint. `OutputBatch` has output ID, batch index,
-   text and final marker; append checks run/revision/stopping and expected next index.
-   Slice oversized chunks; backpressure enumeration on writes. No per-token fsync promise.
+   no provisional UI tail for this checkpoint. `OutputBatch` has request/output IDs, batch
+   index, text and output-item final marker; append checks request/run/revision/stopping
+   and expected next index. Slice oversized chunks; backpressure enumeration on writes.
+   No per-token fsync promise.
 3. **Observe:** under `_gate`, register observer and capture its initial view together.
    `ReadView` reads metadata, window and cursor in one short SQLite read snapshot.
    Subsequent mutations commit before publishing replacement views under the same guard.
    Capacity-one channels replace pending views: no delta-gap recovery or slow-client
    growth. `SessionView` has handle epoch/view version, revision, row cursor, run/Stop
-   status, pending-input previews and committed output IDs/offsets. Row, preview, pending
-   and total-byte caps apply; lazy history reads use one snapshot and revisioned cursors.
+   status, pending-input previews and committed output IDs/offsets, plus nullable
+   `LastSettlement` (run ID/outcome) even when no run is active. It is the latest retained
+   terminal run, survives recovery and remains distinct from any newer active run.
+   Row, preview, pending and total-byte caps apply; lazy history reads use one snapshot
+   and revisioned cursors.
    NEW defaults: 60 rows, 256 UTF-16 units/preview (surrogate-safe), 64 KiB/view or history
    page, 16 KiB/output batch. Truncation indicates more content, never loses identity.
    Reader disposal unregisters only itself. Reconnect starts a fresh view, not event replay.
+   `ReadHistory` remains a row/preview window; full original text uses the one lazy content
+   query below rather than lifting preview caps.
+
+   **Bounded row content:** immutable `RowContentCursor(RowId, HistoryRevision, Utf8Offset)`
+   starts at offset zero using the stable row ID/revision from a view/history item.
+   `RowContentPage` returns that identity/revision, `FromUtf8Offset`, decoded `Text`,
+   `NextCursor`, `AvailableThroughUtf8Offset`, `HasMore` and `IsFinal`. Each call reads one
+   short snapshot and returns at most **16 KiB UTF-8 text**, ending on a Unicode scalar
+   boundary. Offsets count original unescaped UTF-8 bytes; invalid/interior-scalar offsets
+   or offsets beyond that snapshot's available tail reject. No normalization or replacement
+   characters are introduced. A cursor at the tail returns empty text without advancing.
+   `HasMore` means unread bytes in this snapshot; `IsFinal` means the row will not grow.
+   `NextCursor` is always returned, including at a nonfinal tail: reuse it after a newer
+   view advertises appended bytes. Appending preserves row identity/revision/cursors;
+   suffix replacement changes history revision and rejects stale cursors explicitly,
+   never silently retargeting an ordinal. Missing row/session is distinct from invalidation.
+   Metadata and bounded byte range are read in the same snapshot. Store must seek directly
+   into persisted row text/bounded output segments (indexed segment/byte offsets and
+   incremental BLOB reads, or equivalent bounded range access), decoding only this range
+   plus at most one scalar of lookahead. Never deserialize a whole message envelope,
+   scan/materialize an arbitrarily large body, or read all preceding segments then truncate.
+   This constrains message-row content access, not a new store/service or finalized schema;
+   accepted input and output batches already have the 16 KiB UTF-8 bound.
 4. **Stop/settle:** `RequestStop(runId)` durably fences that run, cancels its undelivered
    inputs, then signals its token outside the guard. Receipt says stopping or retained
    settlement; stale/unknown run IDs never stop a newer run. Wait cancellation cancels
    only the wait. Settlement is persisted only after cleanup; no overlapping replacement.
-5. **Restart:** versioned transactional upgrades reject newer schemas. Recovery marks
-   prior active runs, partial output and undelivered accepted input interrupted, retaining
-   receipt identities and committed order; none is automatically redelivered. Reconnect
+5. **Restart:** versioned transactional upgrades reject newer schemas. Recovery preserves
+   committed request outcomes/receipts, marks prior active runs and nonterminal requests,
+   partial output and undelivered accepted input interrupted, retaining receipt identities
+   and committed order; none is automatically redelivered. Reconnect
    queries unresolved receipts before any deliberate new Send. This does not decide future
    due-never-dispatched follow-ups or authorize replay of missing external-effect results.
 

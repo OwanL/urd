@@ -158,3 +158,21 @@ evidence to improve routine names/helpers. Raise substantive responsibility, lif
 public-contract, concurrency or persistence changes before treating them as settled;
 do not turn every private method into a repeated approval question. No application
 code is authorized merely by writing these proposals.
+
+### Near-term sequence — each new operation still needs its own approval
+
+The identity/registry/SQLite slice is implemented; prioritize a working integrated path,
+not more broad technology comparisons or a larger complete specification:
+1. Review input admission/receipt recovery as one cohesive operation; keep shutdown
+   ownership aligned with the caller-owned store. These are pending contract corrections,
+   not authority to implement the whole Core sketch.
+2. Order the necessary small Core and hosting/UI bites toward one built browser → Core →
+   SQLite fake-model response, then extend that same path to two clients/chats, input while
+   busy, addressed Stop/settlement and reopen without replay. Do not add a parallel demo
+   implementation or defer integration until every proposed component is finished.
+3. Exercise tiny output chunks and a slow observer on that path: measure commit/view/read
+   counts, guard occupancy, click-to-visible content and memory under background work.
+   Include one source-edit/build/reload check; use observations to choose practical budgets.
+4. As transcript/context ownership arrives, port decisive already-sent-result fidelity
+   and positive-terminal regressions into ordinary production-path tests. Qualify those
+   before calling a provider path usable; live-account use remains separately authorized.

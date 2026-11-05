@@ -149,9 +149,12 @@ Each page is one read snapshot, not a cross-page snapshot; count, preview and by
 apply (defaults: 60 items, 256 UTF-16 units/preview, 64 KiB/page, surrogate-safe).
 Shutdown fences registry access, then calls every handle's `FenceAdmissionAsync` before
 requesting Stop/awaiting runs. Cached handles cannot bypass this per-session fence.
-Cancelled shutdown waits leave resources live. Server first gates/drains external queries
-and subscriptions; manager closes storage only after settlement. Server then disposes its
-configured client. Exclusive database ownership is a host precondition, not a lease API.
+Manager borrows the store/client and never disposes either. The composing Server/caller
+gates new external access and drains admitted handlers, queries, subscriptions and read
+operations; it disposes store/client only after that drain and manager quiescence,
+including owned execution settlement. Cancelled, failed or timed-out waits prove neither
+condition: keep resources live, never dispose underneath work. Exclusive database
+ownership is a host precondition, not a lease API.
 
 ### 2. `SessionBase` (abstract) — canonical live session handle
 Owns identity/run, guard, stale-write checks and bounded observation. Database facts
@@ -187,7 +190,10 @@ NEW proposed hydration: constructors copy ID/revision from the stored `SessionRe
 with no I/O or background work. Post-recovery handles start without execution/settlement
 waiter and with fresh view epoch/version; retained run/settlement facts remain store-readable.
 Only the handle mutates session/run state under `_gate`; SQL repeats ID/revision/lifecycle
-checks. Admission also checks `_accepting`; shutdown fences it under that same guard.
+checks. Admission resolves a retained command decision before checking `_accepting`
+for new work; shutdown fences new acceptance under that same guard. While an admitted
+Submit handler can still use the live store, the fence can produce a durable refusal,
+not accepted work. Host refusal before Core is only an unavailable attempt.
 Execution has no store access. `DriveExecutionAsync` owns/observes the pump and failures.
 Never await model work, settlement or subscribers under the guard. Once resources are
 quiescent, `TrySettleAsync` rechecks pending input transactionally: normal outcome plus
@@ -210,7 +216,8 @@ an answer to the first prompt; input after the initial request claim is **steeri
 consumed at the next safe model-response boundary, never by changing an in-flight request.
 Follow-ups receive their own response; queued steering preserves acceptance order.
 For this text-only checkpoint a safe boundary is a completed, recorded model response.
-Stopping rejects new input before acceptance and leaves its draft client-owned.
+Stopping durably refuses new valid input before acceptance, with no run/message
+creation, and leaves its draft client-owned; existing decisions remain readable.
 No pending-edit, suffix-edit, snooze or final-close API is implied or removed here.
 
 ### 4. `SessionExecution` — temporary owned async work for one run
@@ -251,7 +258,7 @@ internal void InitializeAndRecover();
 internal SessionRecord CreatePrimary(Guid sessionId);
 internal SessionRecord? ReadSession(Guid sessionId);
 internal SessionSummaryPage ListPrimary(Guid? afterSessionId, ReadLimits limits);
-internal InputReceipt AdmitInput(Guid sessionId, long historyRevision, InputCommand command);
+internal (InputReceipt Receipt, bool NewlyAccepted) AdmitInput(Guid sessionId, long historyRevision, InputCommand command);
 internal InputReceipt? ReadInputReceipt(Guid sessionId, Guid inputId);
 internal RequestPlan? ClaimNextRequest(Guid sessionId, Guid runId, long historyRevision);
 internal WriteReceipt AppendOutput(Guid sessionId, Guid runId, long historyRevision, OutputBatch batch);
@@ -265,23 +272,44 @@ internal RunSettlement? ReadSettlement(Guid sessionId, Guid runId);
 public void Dispose();
 ```
 ## Coordinated input → stream → Stop → recovery flow
-`InputReceipt`: input/run IDs, disposition, request/terminal status. `RunSettlement`:
-run ID and completed/cancelled/failed/interrupted outcome, not merely a cancelled token.
-1. **Accept:** `InputCommand` carries stable input ID, expected history revision and text.
-   Under the handle guard, admission atomically stores input/receipt, its steering or
-   follow-up disposition and run association (creating the active run only if idle).
-   Same ID/same content returns retained evidence; conflicting reuse rejects. Existing-ID
-   resolution precedes new-work capacity, revision and busy rejection and remains usable
-   while busy. Core enforces at most **16 KiB UTF-8/input** and **eight nonterminal accepted
-   inputs/session**, including claimed inputs awaiting request outcome. Admission checks
-   these under the guard and repeats the capacity check in its transaction. Oversize or
-   capacity rejects explicitly before acceptance, with no input/run write; the client keeps
-   its draft. These are engineering defaults, not transport-only validation or history caps.
-   Receipt lookup returns retained evidence or `null` after a successful snapshot proves
-   absence there. Missing session is distinct; unavailable/uncertain storage never returns
-   `null` as a fallback. Absence is not rejection evidence for an earlier still-in-flight
-   Send, nor authority to replay it. Lost acknowledgement: retain that ID and query;
-   unavailable/ambiguous storage means unknown, never rejection.
+`InputReceipt` correlates session/input ID and the exact original command (expected
+history revision and bounded decoded text, without normalization). Its admission decision
+is immutable **Accepted or Refused**: refusal has a reason and no admitted run; acceptance
+has its original run/disposition and separately evolving request/terminal evidence.
+Accepted never means model success, and later interruption never changes it to Refused.
+`RunSettlement` retains run ID and completed/cancelled/failed/interrupted outcome.
+1. **Decide input — revised proposal, pending owner review:** `InputCommand` carries
+   stable input ID, expected history revision and text. For an existing session and valid
+   command, one guarded store transaction resolves the ID or commits its first decision:
+   - Existing ID with identical text **and original revision** returns retained evidence
+     before today's capacity/revision/stopping checks. Conflicting reuse is an attempt
+     error, never an overwrite or a refusal of the original command.
+   - New acceptance commits input/receipt, steering/follow-up disposition and run association
+     together (creating the active run only if idle). Only `NewlyAccepted`, not merely a
+     returned Accepted receipt, may trigger new execution work. The flag is internal,
+     per-call evidence, not part of the durable decision or public receipt.
+   - New capacity/stale-revision/stopping refusal commits its receipt and matching command
+     before returning. No accepted input/message/run or model work is created; a delayed
+     original must return this same refusal even after capacity becomes available.
+   Core enforces **16 KiB UTF-8/input** and **eight nonterminal accepted inputs/session**,
+   including claimed inputs awaiting outcome; admission repeats the capacity check in its
+   transaction. Refused IDs do not consume those accepted-work slots. Receipt/matching
+   payloads survive reopen and are not expired in this checkpoint: bounded per command,
+   but disk grows with decided IDs. This is not a permanent product retention policy;
+   revisit matching/retention before history edits or final closure are introduced.
+   Missing session, malformed/oversize command, conflicting reuse, host rejection before
+   Core, or unavailable/ambiguous storage is not a durable refusal of an unknown original.
+   Receipt lookup returns retained evidence or `null` only after successful snapshot
+   absence; null cannot exclude an older in-flight attempt. An explicit user retry may
+   submit previously unaccepted work, but must reuse the exact original command. A matched
+   committed decision resolves uncertainty; no HTTP status or missing receipt substitutes
+   for it. No automatic resubmission on reconnect, changed-revision retry or new ID for an
+   unresolved Send. After confirmed refusal, a deliberate fresh Send may use a new ID.
+   Eventual tests use the real admission owner: loss before admission; acceptance/refusal
+   commit with lost reply and reopen; retry refused before delayed original arrives;
+   revision change before versus after a decision; identical/conflicting concurrent calls.
+   Assert retained decisions, no accepted work for a refused ID, and no restart from a
+   returned old acceptance. No executable qualification of this new proposal yet.
 2. **Deliver/record:** request claim atomically records which queued inputs belong to
    that request. Claiming is not proof of provider receipt/consumption or a completed
    answer; the receipt must retain the request outcome rather than imply success.
@@ -338,7 +366,8 @@ run ID and completed/cancelled/failed/interrupted outcome, not merely a cancelle
    settlement; stale/unknown run IDs never stop a newer run. Wait cancellation cancels
    only the wait. Settlement is persisted only after cleanup; no overlapping replacement.
 5. **Restart:** versioned transactional upgrades reject newer schemas. Recovery preserves
-   committed request outcomes/receipts, marks prior active runs and nonterminal requests,
+   both accepted/refused admission decisions and their command matching data, alongside
+   committed request outcomes/receipts; it marks prior active runs and nonterminal requests,
    partial output and undelivered accepted input interrupted, retaining receipt identities
    and committed order; none is automatically redelivered. Reconnect
    queries unresolved receipts before any deliberate new Send. This does not decide future

@@ -14,7 +14,7 @@ One mounted workspace per browser; no frontend session-kind hierarchy or state l
 ```tsx
 function Workspace({ backend }: { backend: Backend }): JSX.Element;
 function Transcript({ view, content, reader, onOlder, onReadContent, onReaderChange }: TranscriptProps): JSX.Element;
-function Composer({ draft, pending, stopping, onChange, onSend, onStop }: ComposerProps): JSX.Element;
+function Composer({ draft, pending, stopping, onChange, onSend, onRetryUnknown, onStop }: ComposerProps): JSX.Element;
 ```
 `Workspace` composes chat navigation, explicit New chat, addressed connection/error
 status, transcript and composer; it calls one hook below. An empty list shows New chat.
@@ -23,7 +23,9 @@ reader intent/anchor survives switching in the hook. It never starts/stops execu
 `Composer` renders Core dispositions (follow-up/steering, request outcome), not guessed
 “delivered” ticks. Send stays usable during a response; stopping rejects before acceptance.
 A submitted draft version clears only on confirmed acceptance; later typing survives.
-Rejected text stays editable; unresolved submission is shown separately, never auto-retried.
+Refused input leaves the current draft untouched, never restoring old text over later
+edits. An unresolved submission has an explicit Retry original Send action, never an
+automatic retry; explain that it may submit work that was not previously accepted.
 No close/worker controls: independent-worker closure remains an unresolved later policy.
 
 ## 2. `useWorkspace(backend)` — per-browser navigation and bounded bookkeeping
@@ -40,7 +42,8 @@ function useWorkspace(backend: Backend): {
   creation: 'ready' | 'creating' | 'unknown'; createChat(): Promise<void>;
   drafts: Map<ChatId, Draft>; pending: Map<ChatId, PendingSend[]>;
   select(id: ChatId): void; setDraft(id: ChatId, text: string): void;
-  send(id: ChatId): Promise<void>; stop(id: ChatId, runId: string): Promise<void>;
+  send(id: ChatId): Promise<void>; retryUnknown(id: ChatId, inputId: string): Promise<void>;
+  stop(id: ChatId, runId: string): Promise<void>;
   loadOlder(id: ChatId): Promise<void>;
   loadRowContent(id: ChatId, cursor: RowContentCursor): Promise<void>;
   setReader(id: ChatId, reader: Reader): void;
@@ -86,12 +89,19 @@ store them in tab-scoped `sessionStorage` before sending (bounded, versioned JSO
 cross-client sync. Reload restores them; tab closure may lose unsent drafts. This is
 not durable acceptance evidence. Max 16 KiB UTF-8/draft, eight unresolved sends/chat;
 when full disable new Send with an explanation rather than evict unknown identities.
-Confirmed inputs leave this set; Core separately caps eight nonterminal accepted inputs
-per session transactionally (including claimed ones). Capacity rejection keeps the draft.
-No automatic retry after missing receipt, EOF or timeout. Reconnect looks up every
-unknown input ID; accepted clears only its submitted draft version, rejected preserves
-it, absent/ambiguous stays unknown pending deliberate resolution. Never mint a new ID
-for the same uncertain Send. A later deliberate instruction is not replay of that Send.
+`retryUnknown` uses the saved command and existing submit endpoint: never changes ID,
+text or expected revision, and never allocates another pending slot. It remains available
+when new Send is disabled by that cap or stopping; serialize retries for the same ID.
+Follow the [Core admission-decision contract](initial-core-design.md): clear an unresolved
+slot only on a durable receipt matching session/input ID, original text and revision.
+Accepted clears only its submitted draft version; Refused leaves the current draft
+untouched. Conflict, malformed response, generic 409/503, timeout or absence is not such
+proof and keeps the original unknown. After confirmed refusal, a deliberate fresh Send
+uses a new ID; it is not a retry of the refused command.
+Reconnect only reads receipts; no mutation retries after missing receipt, EOF or timeout.
+Restore and reconcile all saved unknown IDs without bypassing their matching checks.
+Core's eight nonterminal accepted-input slots are separate from this unresolved UI cap;
+refusal consumes neither accepted work capacity nor an unresolved slot once confirmed.
 
 ## 3. `Backend` — small HTTP client module, not a host framework
 ```ts
@@ -159,11 +169,10 @@ UTF-8 before Core admission. GET has no mutation effects. Reject before reading 
 state or accepting commands. SPA fallback never masks unknown `/api` routes.
 This blocks ordinary foreign browser access, not native/local programs (trusted).
 No account, pairing, browser fingerprint, secret URL, cookie or LAN listener.
-On host shutdown gate new API admissions; abort observations, drain admitted handlers
-(including commands), then await `SessionManager.ShutdownAsync`. Request tokens never
-own accepted work.
-If shutdown wait expires, resources remain live; do not dispose store/client under work.
-Manager owns store closure after settlement; Server disposes its client only afterward.
+Server owns store/client disposal and follows [Core's caller-owned shutdown rule](initial-core-design.md):
+gate new API admissions, abort/drain observations and admitted handlers/reads, and await
+manager quiescence before disposal. Incomplete waits leave resources live as specified
+there; request tokens never own accepted work.
 
 ## 5. `SessionEndpoints` — one thin route group and wire records
 ```csharp
@@ -187,17 +196,21 @@ Only observation gets HTTP cancellation. Existing uncancellable Core reads finis
 boundedly; HTTP abort discards their replies. Accepted Send/Stop continues after abort.
 Stop returns admission/status promptly, not a request held until cleanup. Views show
 settlement; no endpoint calls `WaitForSettlementAsync` merely to keep a browser alive.
-Map malformed requests/limits to 400/413, missing session/row IDs to 404, revision,
-stopping/capacity/conflict to 409, storage uncertainty to unknown/unavailable (503).
-Successful absent input receipt is 200/null, never 404/503; it cannot prove an earlier
-in-flight Send was rejected. Core resolves duplicate IDs before capacity/revision checks.
-Wire errors preserve input/run identity; failed transport or ambiguous 5xx never clears
-a draft. Core owns duplicate-ID checks, input ordering, Stop fencing and transactions.
+Submit returns 200 with the matched durable `InputReceipt` for **both** Accepted and
+Refused; HTTP success means the admission decision was recorded, not that work ran.
+Capacity/stale-revision/stopping reasons belong to that Refused receipt. Conflicting ID
+reuse is a per-attempt 409, never a new decision for the original ID. Map malformed
+requests/limits to 400/413, missing session/row to 404, other revision conflicts to 409,
+and unavailable/ambiguous storage or pre-admission host refusal to 503.
+Successful absent receipt is 200/null, never 404/503; it cannot prove an earlier Send
+was rejected. Only a matched retained receipt resolves unknown admission. Wire errors
+preserve identity but are not durable evidence. Core owns the decision transaction.
 
 ## Integrated contracts, two trade-offs and verification gate
-- Core range reads, nullable receipts, LastSettlement and input limits above resolve the
-  earlier gaps. JSON casing/cursor encoding/error mapping are ordinary wire/check work,
-  not unresolved architecture or another API framework.
+- Core range reads, nullable receipts, LastSettlement and input limits remain proposals.
+  The revised durable Accepted/Refused contract plus explicit original-command retry
+  addresses the unknown-Send gap; it still needs owner review and production-path tests.
+  JSON casing/cursor encoding are ordinary wire/check work, not another API framework.
 - Shared startup proposal: `--data-root <absolute path> --port <port or 0>`; Hosting
   validates/locks/recovers/reports actual origin, Build invokes/stages Server + `wwwroot`.
 - Trade-off 1: HTTP + fetch SSE keeps commands/receipts simple; costs bounded framing
@@ -207,7 +220,9 @@ a draft. Core owns duplicate-ID checks, input ordering, Stop fencing and transac
 After approval: built-browser/Kestrel/SQLite tests exercise A/B in two clients, drafts,
 rapid switching/stale frames, lazy Unicode content paging/tail/revision/budget/anchor
 checks, preflight follow-up and busy steering,
-held-cleanup Stop, lost acknowledgements, reload/restart without model/command replay,
+held-cleanup Stop, lost acknowledgements before/after admission decisions, refused retry
+before delayed original, changed revision, mismatching receipts, retry at the full unresolved
+cap, preserved later typing, and reload/restart without model/command replay,
 all clients detached while work continues, oversized frames and slow-reader disposal.
 Acceptance: a followed response streams visibly beyond 256 units without clicks, under
 rolling bounds/one read per row; pausing/selection stops automatic reads and preserves anchors.
@@ -215,7 +230,6 @@ Gate tests cover foreign/missing/null Origin, hostile Host/port/peer, missing ma
 foreign preflight and no-cors POST, read/stream disclosure; assert server effects too.
 Recheck independent-navigation ≤100 incremental production LOC; no mirrored-mode option.
 This document is design only: no build, probe, package acquisition or runtime claim.
-Earlier reviews fixed creation/public-asset admission. Narrow independent integration
-review found no contract/flow blockers in lazy content, receipts/settlement/caps or startup;
-a further narrow review approved click-free follow streaming with bounds/reader intent.
-Reviews were document-only, not runtime verification or owner approval.
+Earlier reviews covered creation/browser admission, lazy content and follow behavior.
+The later Astra critique found the unknown-Send gap and shutdown ownership drift addressed
+in these revisions. Design review is not runtime verification or owner approval.

@@ -131,8 +131,23 @@ and installed-release activation/data policy remain open where those records say
 Matching source still accompanies distributables; custom-copy data remains separate
 from generated/cleaned/packaged outputs. This tree does not qualify those workflows.
 
-Use implementation evidence to improve names, nesting and small helper boundaries;
-do not hold another broad layout vote for routine corrections. Update the relevant
-docs with substantive changes, and raise material changes to agreed responsibilities,
-runtime behavior or dependency direction before treating them as settled. Future
-implementation still needs an explicit bounded task; this update is documentation only.
+## Initial implementation: owner design review first
+
+The owner subsequently requests a stronger initial design gate: agents propose the
+important structures for review before implementing them, including class members and
+method signatures where useful. Review small, concrete packs, not another complete
+folder hierarchy or an exhaustive design of every helper. Show responsibilities,
+lifetimes, owned state, important operations and dependency/transaction boundaries.
+The rough layout remains accepted; exact new APIs remain proposals until reviewed.
+
+Start with the [Core class proposal](docs/scratch/initial-core-design.md), then review
+UI/hosting and build/startup boundaries. [Code-shape guidelines](docs/scratch/code-shape-guidelines.md)
+propose soft review signals, not hard line/member limits. [AGENTS.md](AGENTS.md) records
+the owner-review workflow so later agents do not infer approval from a draft.
+
+An approved pack permits its scoped implementation, not unrelated features or external
+actions. Once the initial base is accepted, follow its conventions and use implementation
+evidence to improve routine names/helpers. Raise substantive responsibility, lifetime,
+public-contract, concurrency or persistence changes before treating them as settled;
+do not turn every private method into a repeated approval question. No application
+code is authorized merely by writing these proposals.

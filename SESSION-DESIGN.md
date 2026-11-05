@@ -313,11 +313,14 @@ disposable fixtures authorizes production implementation.
   mapping, shared build-policy scope and test placement still need review. Neither
   the class sketch nor project choice authorizes production scaffolding.
 
-Routine method names, lock primitives, batching intervals and file subdivision
-can follow evidence; they need not become a design questionnaire. The disposable
-flow test below supplies bounded evidence, not approval to derive/scaffold a
-production layout automatically. The base scope, untested flows and owner-facing
-structural gates above remain.
+**2026-11-05 process update:** the owner wants the first class structures, important
+members and method signatures proposed for review before implementation; see the
+[initial design gate](APPLICATION-PLAN.md#initial-implementation-owner-design-review-first).
+This supersedes treating all initial API details as delegated implementation work.
+After the relevant structure is accepted, routine helpers, local names, lock primitives
+and batching details can follow evidence without a method-by-method questionnaire.
+The disposable flow test below is bounded evidence, not approval to derive/scaffold
+a production layout automatically. The base scope and untested flows remain open.
 
 ## 7. Disposable session-flow qualification
 

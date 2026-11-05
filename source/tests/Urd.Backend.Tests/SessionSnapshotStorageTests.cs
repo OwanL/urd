@@ -79,7 +79,7 @@ public sealed class SessionSnapshotStorageTests
         Assert.False(snapshot.HasOlderMessages);
         Assert.Equal(active, snapshot.UnsettledRunId);
         Assert.True(snapshot.StopRequested);
-        Assert.Equal(new RunSettlement(terminal, ExecutionOutcome.Failed), snapshot.LastSettlement);
+        Assert.Equal(new ExecutionResult(terminal, ExecutionOutcome.Failed), snapshot.LastSettlement);
         Assert.Null(reopened.ReadSettlement(session, active)); // Reading never recovers or settles it.
     }
 
@@ -90,7 +90,7 @@ public sealed class SessionSnapshotStorageTests
         using SessionStore store = SessionStore.Open(database.Path);
         Guid session = store.CreatePrimary(Guid.NewGuid()).Id, run = Guid.NewGuid(), output = Guid.NewGuid();
         store.AdmitInput(session, 0, new(Guid.NewGuid(), 0, new string('a', 255) + "🙂\0tail"), true, run);
-        RequestPlan request = store.ClaimNextRequest(session, run, 0)!;
+        LlmRequest request = store.ClaimNextRequest(session, run, 0)!;
         Assert.Single(store.ReadSnapshot(session).Messages); // Claim alone has no assistant row.
         store.AppendOutput(session, run, 0, new(request.RequestId, output, 0, new string('é', 300), false));
         store.AppendOutput(session, run, 0, new(request.RequestId, output, 1, "", true));
@@ -113,7 +113,7 @@ public sealed class SessionSnapshotStorageTests
         store.TrySettle(session, run, ExecutionOutcome.Completed);
         StoredSessionSnapshot settled = store.ReadSnapshot(session);
         Assert.Null(settled.UnsettledRunId);
-        Assert.Equal(new RunSettlement(run, ExecutionOutcome.Completed), settled.LastSettlement);
+        Assert.Equal(new ExecutionResult(run, ExecutionOutcome.Completed), settled.LastSettlement);
         Assert.All(settled.Messages, message => Assert.Equal(ExecutionOutcome.Completed, message.Settlement));
         Assert.Null(assistant.Settlement); // The earlier detached snapshot does not change.
     }

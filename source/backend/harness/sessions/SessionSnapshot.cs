@@ -5,7 +5,7 @@ namespace Urd.Core.Sessions;
 /// <summary>A bounded committed view, combined with the live session's admission fence.</summary>
 public sealed record SessionSnapshot(
     Guid SessionId, long HistoryRevision, bool AdmissionFenced,
-    Guid? UnsettledRunId, bool StopRequested, RunSettlement? LastSettlement,
+    Guid? UnsettledRunId, bool StopRequested, ExecutionResult? LastSettlement,
     IReadOnlyList<MessagePreview> Messages, bool HasOlderMessages);
 
 public sealed record MessagePreview(

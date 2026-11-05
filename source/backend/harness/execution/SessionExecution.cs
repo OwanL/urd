@@ -111,7 +111,7 @@ internal sealed class SessionExecution
         {
             while (!_stop.IsCancellationRequested)
             {
-                RequestPlan? request = await _owner.ClaimNextRequestAsync(RunId).ConfigureAwait(false);
+                LlmRequest? request = await _owner.ClaimNextRequestAsync(RunId).ConfigureAwait(false);
                 if (request is null)
                 {
                     return _stop.IsCancellationRequested ? ExecutionOutcome.Cancelled : ExecutionOutcome.Completed;
@@ -147,7 +147,7 @@ internal sealed class SessionExecution
         }
     }
 
-    private async Task<ExecutionOutcome> RunRequestAsync(RequestPlan request)
+    private async Task<ExecutionOutcome> RunRequestAsync(LlmRequest request)
     {
         _requestId = request.RequestId;
         _outputId = Guid.NewGuid();
@@ -184,12 +184,12 @@ internal sealed class SessionExecution
             error = modelError.Message;
         }
 
-        bool recorded = await _owner.CompleteRequestAsync(RunId, new RequestCompletion(request.RequestId, outcome, error))
+        bool recorded = await _owner.CompleteRequestAsync(RunId, new LlmRequestOutcome(request.RequestId, outcome, error))
             .ConfigureAwait(false);
         return recorded ? outcome : ExecutionOutcome.Cancelled;
     }
 
-    private async Task StreamRequestAsync(RequestPlan request)
+    private async Task StreamRequestAsync(LlmRequest request)
     {
         using var requestStop = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
         IAsyncEnumerator<ChatResponseUpdate>? source = null;
@@ -356,7 +356,7 @@ internal sealed class SessionExecution
         try
         {
             recorded = await _owner.RecordOutputAsync(RunId,
-                new OutputBatch(_requestId, _outputId, _batchIndex, _outputBatch.ToString(), isFinal)).ConfigureAwait(false);
+                new LlmResponseChunk(_requestId, _outputId, _batchIndex, _outputBatch.ToString(), isFinal)).ConfigureAwait(false);
         }
         catch (Exception error)
         {

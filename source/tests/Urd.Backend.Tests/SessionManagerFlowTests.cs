@@ -62,7 +62,7 @@ public sealed class SessionManagerFlowTests
             }
             Assert.Equal(2, client.Calls);
             release.TrySetResult();
-            RunSettlement[] settlements = await Task.WhenAll(runs.Select(run =>
+            ExecutionResult[] settlements = await Task.WhenAll(runs.Select(run =>
                 run.Session.WaitForSettlementAsync(run.RunId))).WaitAsync(timeout);
             Assert.All(settlements, settlement => Assert.Equal(ExecutionOutcome.Completed, settlement.Outcome));
             runs.Clear();

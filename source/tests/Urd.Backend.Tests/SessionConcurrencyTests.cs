@@ -57,7 +57,7 @@ public sealed class SessionConcurrencyTests
             Assert.False(session.WaitForSettlementAsync(runId).IsCompleted);
 
             modelRelease.TrySetResult();
-            RunSettlement[] settlements = await Task.WhenAll(receipts.Select(receipt =>
+            ExecutionResult[] settlements = await Task.WhenAll(receipts.Select(receipt =>
                 session.WaitForSettlementAsync(receipt.RunId!.Value))).WaitAsync(Timeout);
             Assert.Equal(settlements[0], settlements[1]);
             Assert.Equal(ExecutionOutcome.Completed, settlements[0].Outcome);
@@ -112,7 +112,7 @@ public sealed class SessionConcurrencyTests
             Guid runId = Assert.IsType<Guid>(ownedRun);
             await modelEntered.Task.WaitAsync(Timeout);
 
-            Task<RunSettlement> cancelledWait = session.WaitForSettlementAsync(runId, waitCancellation.Token);
+            Task<ExecutionResult> cancelledWait = session.WaitForSettlementAsync(runId, waitCancellation.Token);
             Assert.False(cancelledWait.IsCompleted);
             waitCancellation.Cancel();
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelledWait.WaitAsync(Timeout));

@@ -99,7 +99,7 @@ public sealed class SessionReadFlowTests
             SessionSnapshot settled = await session.ReadSnapshotAsync();
             Assert.Null(settled.UnsettledRunId);
             Assert.False(settled.AdmissionFenced);
-            Assert.Equal(new RunSettlement(runId, ExecutionOutcome.Completed), settled.LastSettlement);
+            Assert.Equal(new ExecutionResult(runId, ExecutionOutcome.Completed), settled.LastSettlement);
             Assert.All(settled.Messages, row => Assert.Equal(ExecutionOutcome.Completed, row.Settlement));
             Assert.Equal(1, client.Calls);
             Assert.Equal(0, client.DisposeCalls);
@@ -129,7 +129,7 @@ public sealed class SessionReadFlowTests
             sessionId = original.CreatePrimary(Guid.NewGuid()).Id;
             cleanId = original.CreatePrimary(Guid.NewGuid()).Id;
             original.AdmitInput(sessionId, 0, new(Guid.NewGuid(), 0, "retained input"), true, runId);
-            RequestPlan request = original.ClaimNextRequest(sessionId, runId, 0)!;
+            LlmRequest request = original.ClaimNextRequest(sessionId, runId, 0)!;
             Assert.True(original.AppendOutput(sessionId, runId, 0, new(request.RequestId, outputId, 0, "partial\0🙂", false)));
         }
 

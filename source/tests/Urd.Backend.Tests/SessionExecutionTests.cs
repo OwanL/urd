@@ -22,7 +22,7 @@ public sealed class SessionExecutionTests
         await using var fixture = new ExecutionFixture(client);
         Guid runId = await fixture.SubmitAsync("go");
 
-        RunSettlement settlement = await fixture.Session.WaitForSettlementAsync(runId).WaitAsync(Timeout);
+        ExecutionResult settlement = await fixture.Session.WaitForSettlementAsync(runId).WaitAsync(Timeout);
         Assert.Equal(ExecutionOutcome.Completed, settlement.Outcome);
         List<(byte[] Bytes, bool Final)> output = ReadOutput(fixture.Database);
         Assert.NotEmpty(output);

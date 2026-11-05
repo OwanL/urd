@@ -286,7 +286,7 @@ public sealed class RowContentTests
         Guid session = store.CreatePrimary(Guid.NewGuid()).Id, run = Guid.NewGuid();
         var command = new InputCommand(Guid.NewGuid(), 0, input);
         Assert.True(store.AdmitInput(session, 0, command, true, run).NewlyAccepted);
-        RequestPlan request = store.ClaimNextRequest(session, run, 0)!;
+        LlmRequest request = store.ClaimNextRequest(session, run, 0)!;
         return new(session, run, request.RequestId,
             new(run, command.InputId, MessageRole.User, 0),
             new(run, Guid.NewGuid(), MessageRole.Assistant, 0));

@@ -171,6 +171,26 @@ This does not approve UI/HTTP implementation, older-history navigation, busy-inp
 startup recovery, public host shutdown or provider/native-context work. Read-path
 implementation evidence is recorded in the backend development document after verification.
 
+## Owner-approved record naming cleanup
+
+During the Core source review, the owner approved these names individually and selected
+`Llm` consistently for our model-facing data types (the interim `ChatRequest` therefore
+became `LlmRequest`). The records remain cohesive data, not methods or new services:
+
+| Previous name | Approved name | Meaning |
+| --- | --- | --- |
+| `RunSettlement` | `ExecutionResult` | Saved whole-run terminal result, published after owned work and cleanup finish. |
+| `RequestPlan` | `LlmRequest` | Claimed request identity and prepared messages, supplied to execution through its session. |
+| `OutputBatch` | `LlmResponseChunk` | Buffered LLM response text submitted to the session for persistence. |
+| `RequestCompletion` | `LlmRequestOutcome` | Final local request-attempt outcome, not live/provider status or a saved acknowledgement. |
+
+The owner prefers these related types together in `execution/ExecutionContracts.cs`,
+not one file per type or another directory. A file-purpose note and short producer/consumer
+comments make their roles clear. `ExecutionOutcome` keeps its name and enum values.
+Chunk members use `ResponseId` and `ChunkIndex` instead of `OutputId` and `BatchIndex`.
+SDK symbols such as `IChatClient` and `ChatMessage` keep their names. This cleanup changes no behavior, schema,
+ownership, cancellation or settlement guarantees; it is not approval of broader API work.
+
 ## Current implementation — first fake-text Core checkpoint
 
 The owner subsequently confirmed the obvious shared-client choice and requested the actual
@@ -225,9 +245,11 @@ at tested milestones for their own file-by-file, line-by-line review before more
 - [SQLite validation](../../SQLITE-VALIDATION.md): coherent cursors, Unicode-safe previews,
   lifecycle/revision fences and schema versioning; archived APIs are not promoted.
 ## Internal five-type integration sketch — not an owner-review pack
-Fragments are declarations only, not compilable definitions. Named command/results are
-immutable data, not behavioral classes. `Guid` identifies session/run/input/output;
-`long` history revision fences replacement; `long` view version orders live views.
+Fragments are declarations only, not compilable definitions. Names follow the approved
+cleanup above; the wider member lists and behavior below remain proposals, not the current
+implemented API. Named command/results are immutable data, not behavioral classes.
+`Guid` identifies session/run/input/output; `long` history revision fences replacement;
+`long` view version orders live views.
 No future-kind, tool, provider/login/context or assignment classes or inheritance hooks.
 
 ### 1. `SessionManager` — one registry per backend/database lifetime
@@ -278,7 +300,7 @@ private long _historyRevision, _viewVersion;
 private readonly Guid _viewEpoch;
 private bool _accepting;
 private SessionExecution? _execution;
-private TaskCompletionSource<RunSettlement>? _settlement;
+private TaskCompletionSource<ExecutionResult>? _settlement;
 private readonly Dictionary<Guid, (ViewLimits Limits, Channel<SessionView> Updates)> _observers;
 protected SessionBase(SessionRecord record, SessionStore store, IChatClient chatClient);
 public IAsyncEnumerable<SessionView> ObserveAsync(ViewLimits limits, CancellationToken observationCancellation);
@@ -286,12 +308,12 @@ public Task<HistoryPage> ReadHistoryAsync(HistoryCursor cursor, ReadLimits limit
 public Task<RowContentPage> ReadRowContentAsync(RowContentCursor cursor);
 public Task<InputReceipt?> GetInputReceiptAsync(Guid inputId);
 public Task<StopReceipt> RequestStopAsync(Guid runId);
-public Task<RunSettlement> WaitForSettlementAsync(Guid runId, CancellationToken waitCancellation);
+public Task<ExecutionResult> WaitForSettlementAsync(Guid runId, CancellationToken waitCancellation);
 protected Task<InputReceipt> AdmitInputAsync(InputCommand command);
 internal Task FenceAdmissionAsync();
-internal Task<RequestPlan?> ClaimNextRequestAsync(Guid runId);
-internal Task<bool> RecordOutputAsync(Guid runId, OutputBatch batch);
-internal Task<bool> CompleteRequestAsync(Guid runId, RequestCompletion completion);
+internal Task<LlmRequest?> ClaimNextRequestAsync(Guid runId);
+internal Task<bool> RecordOutputAsync(Guid runId, LlmResponseChunk batch);
+internal Task<bool> CompleteRequestAsync(Guid runId, LlmRequestOutcome completion);
 private Task DriveExecutionAsync(SessionExecution execution);
 private Task<bool> TrySettleAsync(Guid runId, ExecutionOutcome outcome);
 private SessionView CaptureView(ViewLimits limits);
@@ -383,15 +405,15 @@ internal SessionRecord? ReadSession(Guid sessionId);
 internal SessionSummaryPage ListPrimary(Guid? afterSessionId, ReadLimits limits);
 internal (InputReceipt Receipt, bool NewlyAccepted) AdmitInput(Guid sessionId, long historyRevision, InputCommand command);
 internal InputReceipt? ReadInputReceipt(Guid sessionId, Guid inputId);
-internal RequestPlan? ClaimNextRequest(Guid sessionId, Guid runId, long historyRevision);
-internal WriteReceipt AppendOutput(Guid sessionId, Guid runId, long historyRevision, OutputBatch batch);
-internal WriteReceipt CompleteRequest(Guid sessionId, Guid runId, long historyRevision, RequestCompletion completion);
+internal LlmRequest? ClaimNextRequest(Guid sessionId, Guid runId, long historyRevision);
+internal WriteReceipt AppendOutput(Guid sessionId, Guid runId, long historyRevision, LlmResponseChunk batch);
+internal WriteReceipt CompleteRequest(Guid sessionId, Guid runId, long historyRevision, LlmRequestOutcome completion);
 internal StopReceipt RequestStop(Guid sessionId, Guid runId);
 internal SettlementAttempt TrySettle(Guid sessionId, Guid runId, ExecutionOutcome outcome);
 internal SessionView ReadView(Guid sessionId, ViewLimits limits);
 internal HistoryPage ReadHistory(Guid sessionId, HistoryCursor cursor, ReadLimits limits);
 internal RowContentPage ReadRowContent(Guid sessionId, RowContentCursor cursor);
-internal RunSettlement? ReadSettlement(Guid sessionId, Guid runId);
+internal ExecutionResult? ReadSettlement(Guid sessionId, Guid runId);
 public void Dispose();
 ```
 ## Coordinated input → stream → Stop → recovery flow
@@ -400,7 +422,7 @@ history revision and bounded decoded text, without normalization). Its admission
 is immutable **Accepted or Refused**: refusal has a reason and no admitted run; acceptance
 has its original run/disposition and separately evolving request/terminal evidence.
 Accepted never means model success, and later interruption never changes it to Refused.
-`RunSettlement` retains run ID and completed/cancelled/failed/interrupted outcome.
+`ExecutionResult` retains run ID and completed/cancelled/failed/interrupted outcome.
 1. **Decide input — reliability contract approved; queue/schema details still proposed:**
    `InputCommand` carries
    stable input ID, expected history revision and text. For an existing session and valid
@@ -437,8 +459,8 @@ Accepted never means model success, and later interruption never changes it to R
 2. **Deliver/record:** request claim atomically records which queued inputs belong to
    that request. Claiming is not proof of provider receipt/consumption or a completed
    answer; the receipt must retain the request outcome rather than imply success.
-   `RequestPlan` carries request/run IDs, revision, input IDs and ordered model input,
-   not UI state. `RequestCompletion` carries that request ID and succeeded/failed/cancelled
+   `LlmRequest` carries request/run IDs, revision, input IDs and ordered model input,
+   not UI state. `LlmRequestOutcome` carries that request ID and succeeded/failed/cancelled
    outcome; success requires the validated positive terminal evidence above, even for an
    empty response. Its guarded transaction checks request/run/revision and commits the
    request outcome plus associated input receipts independently of run settlement. Identical
@@ -449,7 +471,7 @@ Accepted never means model success, and later interruption never changes it to R
    end. Start the deadline when the buffer becomes nonempty; tiny updates never postpone
    it. The timer can flush while the next source update is awaited. Commit each flushed
    batch, not each provider chunk, **before** publication; no provisional UI tail here.
-   `OutputBatch` has request/output IDs, batch index, text and output-item final marker;
+   `LlmResponseChunk` has request/response IDs, chunk index, text and response final marker;
    append checks request/run/revision/stopping and expected next index. Slice oversized
    updates without exceeding the buffer cap; writes apply backpressure. Retain at most
    one pending source read and one timer wait: a timer win does not start a second read.

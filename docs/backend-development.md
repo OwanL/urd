@@ -35,7 +35,8 @@ This is a Core review checkpoint, not the browser-to-Core milestone or a complet
 ## Read contract and incremental review order
 
 1. [SessionSnapshot.cs](../source/backend/harness/sessions/SessionSnapshot.cs) — detached records;
-   existing `RunSettlement`/`ExecutionOutcome` are public, not duplicated.
+   shared `ExecutionResult`/`ExecutionOutcome` in
+   [ExecutionContracts.cs](../source/backend/harness/execution/ExecutionContracts.cs) are public, not duplicated.
 2. [SessionBase.cs](../source/backend/harness/sessions/SessionBase.cs) — the two public read methods
    take the existing guard; snapshots merge the live admission fence with one committed view.
 3. [SessionStore.Snapshots.cs](../source/backend/harness/storage/SessionStore.Snapshots.cs), then
@@ -72,7 +73,10 @@ Paths below are relative to the repository. Read the small data records alongsid
    [InputCommand.cs](../source/backend/harness/sessions/InputCommand.cs) and
    [InputReceipt.cs](../source/backend/harness/sessions/InputReceipt.cs).
 3. [SessionExecution.cs](../source/backend/harness/execution/SessionExecution.cs) — streaming,
-   buffering, cancellation and cleanup; [ExecutionContracts.cs](../source/backend/harness/execution/ExecutionContracts.cs).
+   buffering, cancellation and cleanup. [ExecutionContracts.cs](../source/backend/harness/execution/ExecutionContracts.cs)
+   keeps the related data types together: `LlmRequest`, `LlmResponseChunk`,
+   `LlmRequestOutcome`, saved whole-run `ExecutionResult`, and `ExecutionOutcome`.
+   Their comments identify the producer/consumer roles and lifecycle guarantees.
 4. [SessionStore.cs](../source/backend/harness/storage/SessionStore.cs) — opening/migration/receipts;
    [SessionStore.Execution.cs](../source/backend/harness/storage/SessionStore.Execution.cs) — atomic run/request/output facts.
 5. [SessionManagerFlowTests.cs](../source/tests/Urd.Backend.Tests/SessionManagerFlowTests.cs),

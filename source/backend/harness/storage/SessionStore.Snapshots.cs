@@ -6,7 +6,7 @@ namespace Urd.Core.Storage;
 
 internal sealed record StoredSessionSnapshot(
     long HistoryRevision, Guid? UnsettledRunId, bool StopRequested,
-    RunSettlement? LastSettlement, IReadOnlyList<MessagePreview> Messages, bool HasOlderMessages);
+    ExecutionResult? LastSettlement, IReadOnlyList<MessagePreview> Messages, bool HasOlderMessages);
 
 public sealed partial class SessionStore
 {
@@ -64,7 +64,7 @@ public sealed partial class SessionStore
                 }
             }
 
-            RunSettlement? lastSettlement = null;
+            ExecutionResult? lastSettlement = null;
             using (SqliteCommand terminalRead = ExecutionCommand(transaction, SnapshotSettlementSql, ("$session", sessionId)))
             using (SqliteDataReader reader = terminalRead.ExecuteReader())
             {

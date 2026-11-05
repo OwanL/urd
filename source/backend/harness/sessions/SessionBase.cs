@@ -12,7 +12,7 @@ public abstract class SessionBase
     private readonly SemaphoreSlim _gate = new(1, 1);
     private bool _accepting = true;
     private SessionExecution? _execution;
-    private TaskCompletionSource<RunSettlement>? _settlement;
+    private TaskCompletionSource<ExecutionResult>? _settlement;
     private Task? _driver;
 
     private protected SessionBase(SessionRecord record, SessionStore store, IChatClient chatClient)
@@ -86,7 +86,7 @@ public abstract class SessionBase
                 // The store committed the input and its run together. Only this call
                 // may start work; a retained Accepted receipt is never a start signal.
                 var execution = new SessionExecution(receipt.RunId!.Value, this, _chatClient);
-                var settlement = new TaskCompletionSource<RunSettlement>(TaskCreationOptions.RunContinuationsAsynchronously);
+                var settlement = new TaskCompletionSource<ExecutionResult>(TaskCreationOptions.RunContinuationsAsynchronously);
                 start = new(TaskCreationOptions.RunContinuationsAsynchronously);
                 _execution = execution;
                 _settlement = settlement;
@@ -133,9 +133,9 @@ public abstract class SessionBase
         execution?.RequestCancellation();
     }
 
-    internal async Task<RunSettlement> WaitForSettlementAsync(Guid runId, CancellationToken waitCancellation = default)
+    internal async Task<ExecutionResult> WaitForSettlementAsync(Guid runId, CancellationToken waitCancellation = default)
     {
-        Task<RunSettlement> wait;
+        Task<ExecutionResult> wait;
         Task? driver;
         await _gate.WaitAsync(waitCancellation).ConfigureAwait(false);
         try
@@ -160,7 +160,7 @@ public abstract class SessionBase
         return await wait.WaitAsync(waitCancellation).ConfigureAwait(false);
     }
 
-    internal async Task<RequestPlan?> ClaimNextRequestAsync(Guid runId)
+    internal async Task<LlmRequest?> ClaimNextRequestAsync(Guid runId)
     {
         await _gate.WaitAsync().ConfigureAwait(false);
         try
@@ -175,7 +175,7 @@ public abstract class SessionBase
         }
     }
 
-    internal async Task<bool> RecordOutputAsync(Guid runId, OutputBatch batch)
+    internal async Task<bool> RecordOutputAsync(Guid runId, LlmResponseChunk batch)
     {
         await _gate.WaitAsync().ConfigureAwait(false);
         try
@@ -188,7 +188,7 @@ public abstract class SessionBase
         }
     }
 
-    internal async Task<bool> CompleteRequestAsync(Guid runId, RequestCompletion completion)
+    internal async Task<bool> CompleteRequestAsync(Guid runId, LlmRequestOutcome completion)
     {
         await _gate.WaitAsync().ConfigureAwait(false);
         try
@@ -203,7 +203,7 @@ public abstract class SessionBase
 
     private async Task DriveExecutionAsync(
         SessionExecution execution,
-        TaskCompletionSource<RunSettlement> settlement,
+        TaskCompletionSource<ExecutionResult> settlement,
         Task start)
     {
         try
@@ -217,7 +217,7 @@ public abstract class SessionBase
                 await _gate.WaitAsync().ConfigureAwait(false);
                 try
                 {
-                    RunSettlement? saved = _store.TrySettle(Id, execution.RunId, outcome);
+                    ExecutionResult? saved = _store.TrySettle(Id, execution.RunId, outcome);
                     if (saved is null)
                     {
                         continue;

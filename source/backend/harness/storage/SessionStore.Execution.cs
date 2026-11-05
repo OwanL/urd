@@ -73,7 +73,7 @@ public sealed partial class SessionStore
         }
     }
 
-    internal RequestPlan? ClaimNextRequest(Guid sessionId, Guid runId, long historyRevision)
+    internal LlmRequest? ClaimNextRequest(Guid sessionId, Guid runId, long historyRevision)
     {
         lock (_gate)
         {
@@ -96,16 +96,16 @@ public sealed partial class SessionStore
 
             IReadOnlyList<ChatMessage> messages = ReadRequestContext(transaction, sessionId, runId, historyRevision);
             transaction.Commit();
-            return new RequestPlan(requestId, messages);
+            return new LlmRequest(requestId, messages);
         }
     }
 
-    internal bool AppendOutput(Guid sessionId, Guid runId, long historyRevision, OutputBatch batch)
+    internal bool AppendOutput(Guid sessionId, Guid runId, long historyRevision, LlmResponseChunk batch)
     {
         ArgumentNullException.ThrowIfNull(batch);
         ArgumentNullException.ThrowIfNull(batch.Text);
-        ArgumentOutOfRangeException.ThrowIfNegative(batch.BatchIndex);
-        if (batch.RequestId == Guid.Empty || batch.OutputId == Guid.Empty || StrictUtf8.GetByteCount(batch.Text) > MaximumOutputBytes)
+        ArgumentOutOfRangeException.ThrowIfNegative(batch.ChunkIndex);
+        if (batch.RequestId == Guid.Empty || batch.ResponseId == Guid.Empty || StrictUtf8.GetByteCount(batch.Text) > MaximumOutputBytes)
         {
             throw new ArgumentException("Output requires identities and at most 16 KiB of valid UTF-8 text.", nameof(batch));
         }
@@ -124,7 +124,7 @@ public sealed partial class SessionStore
                         WHERE r.run_id = $run AND r.session_id = $session AND r.history_revision = $revision
                             AND s.history_revision = $revision AND r.stopping = 0 AND r.outcome IS NULL);
                 """, ("$session", sessionId), ("$run", runId), ("$revision", historyRevision),
-                ("$request", batch.RequestId), ("$output", batch.OutputId), ("$index", batch.BatchIndex), ("$final", batch.IsFinal ? 1 : 0));
+                ("$request", batch.RequestId), ("$output", batch.ResponseId), ("$index", batch.ChunkIndex), ("$final", batch.IsFinal ? 1 : 0));
             if (advance.ExecuteNonQuery() == 0)
             {
                 return false;
@@ -133,7 +133,7 @@ public sealed partial class SessionStore
             using SqliteCommand append = ExecutionCommand(transaction, """
                 INSERT INTO execution_output (request_id, batch_index, text_utf8, is_final)
                 VALUES ($request, $index, $text, $final);
-                """, ("$request", batch.RequestId), ("$index", batch.BatchIndex),
+                """, ("$request", batch.RequestId), ("$index", batch.ChunkIndex),
                 ("$text", StrictUtf8.GetBytes(batch.Text)), ("$final", batch.IsFinal ? 1 : 0));
             append.ExecuteNonQuery();
             transaction.Commit();
@@ -141,7 +141,7 @@ public sealed partial class SessionStore
         }
     }
 
-    internal bool CompleteRequest(Guid sessionId, Guid runId, long historyRevision, RequestCompletion completion)
+    internal bool CompleteRequest(Guid sessionId, Guid runId, long historyRevision, LlmRequestOutcome completion)
     {
         ArgumentNullException.ThrowIfNull(completion);
         if (!Enum.IsDefined(completion.Outcome))
@@ -202,7 +202,7 @@ public sealed partial class SessionStore
     }
 
     // The caller has joined all owned work before entering this transaction.
-    internal RunSettlement? TrySettle(Guid sessionId, Guid runId, ExecutionOutcome outcome)
+    internal ExecutionResult? TrySettle(Guid sessionId, Guid runId, ExecutionOutcome outcome)
     {
         if (!Enum.IsDefined(outcome))
         {
@@ -257,7 +257,7 @@ public sealed partial class SessionStore
         }
     }
 
-    internal RunSettlement? ReadSettlement(Guid sessionId, Guid runId)
+    internal ExecutionResult? ReadSettlement(Guid sessionId, Guid runId)
     {
         lock (_gate)
         {

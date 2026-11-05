@@ -162,10 +162,20 @@ particular, `guidance/` versus `agent-instructions/` does not distinguish author
 content from loader code clearly; “agent instructions” is not the preferred top-level
 name for the editable Markdown/skills collection either. Model context, agent tools
 and similar responsibilities belong under the broader harness, rather than requiring
-peer folders beside it. Use `execution` for the narrow model/tool loop. The
-[revised tree and naming candidates](STRUCTURE-RESEARCH.md#8-naming-and-harness-grouping)
-propose `agent-content/`, `instruction-loading/` and broader harness nesting. Those
-exact names and the full nesting remain proposals; component state ownership, shared
+peer folders beside it. Use `execution` for the narrow model/tool loop. The owner
+subsequently accepted this nesting, rejected `agent-content/` as misleading, and prefers
+“guidance”, “instructions” or similar with matching loader terminology. “Collaboration”
+and “follow-ups” also need concrete names. Usage accounting is expected within the
+harness; session storage placement is acknowledged as arguable. The owner warns that
+harness detail must not masquerade as a complete application design: less-developed
+areas can be marked TBD.
+
+The [revised partial tree](STRUCTURE-RESEARCH.md#8-naming-and-harness-grouping) proposes
+`guidance/` with `guidance-loading/`, session messaging/assignments/wakeups, and harness
+storage/usage. These exact names and storage placement remain recommendations, not
+settled class or persistence contracts. UI, hosting, other application-level concerns
+and development/delivery structure remain explicitly TBD where not worked out; existing
+technology and behavioral decisions still stand. Component state ownership, shared
 lifetimes and the Core/Server boundary are unchanged. No production code is authorized.
 
 The [working session sketch](SESSION-DESIGN.md) below records subsequent owner

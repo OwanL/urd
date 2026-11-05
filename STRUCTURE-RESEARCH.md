@@ -5,10 +5,10 @@
 actual research and brainstorming.” That proposal is withdrawn. Established session,
 provider, storage and client decisions still stand; no production code is authorized.
 
-**Subsequent owner feedback:** the later component-led tree is broadly acceptable
-structurally, but needs clearer names and harness nesting. In particular, model context
-and agent tools are harness responsibilities, not necessarily its peers. See
-[the revised naming and grouping proposal](#8-naming-and-harness-grouping) below.
+**Subsequent owner feedback:** broader harness nesting is accepted, but `agent-content/`
+and vague session-area labels are rejected. Use consistent guidance/instruction terms,
+consider storage and accounting within the harness, and mark less-developed application
+areas TBD rather than imply completeness. See [the revised partial proposal](#8-naming-and-harness-grouping).
 The responsibility map is not a requirement for one peer folder per row.
 
 ## 1. What was wrong with the proposal
@@ -47,7 +47,7 @@ not whichever code later occupies their default branches.
 | `harness/tools/catalog/index.ts`: `PIE_TOOLS`, `pieToolsForContext` | Metadata-only inventory; implementation owns schema/guidance. Context eligibility is not active visibility. Listing does not initialize browser/native tool runtimes. | Tool definitions and invocation belong to tools, but inventories should not start costly execution resources. |
 | `harness/tools/request-capability/index.ts`: `createRequestCapabilityTool`, `RequestCapabilityPorts` | Stateless entry point receives selection state through explicit ports. Current tool recovery calls an installed `invoke_tool` controller rather than widening the frozen native catalog. | Recovery is a tool entry point into context/exposure ownership, not a second selection store. Do not copy Pi discovery adapters or create a generic capability framework. |
 | `harness/agent-instructions/agent-discovery/agents.ts`: `discoverAgents` | Scoped definition discovery resolves bundled/user/project candidates and whole named-agent replacements. It does not create a live agent. | Authored agent definitions are instruction/profile data, not session subclasses. Exact Urd loading behavior remains deferred. |
-| `harness/agent-processes/coordinator/session-tasks.ts`: `SessionTaskRegistry.assign`, `amend`, `started`, `settled` | Explicit requester/worker/revision/result state; registry expressly has coordinator lifetime, no disk persistence/replay/scheduling. | Keep collaboration distinct from deferred triggers. Preserve useful concepts, not Pie's volatile storage mechanics: Urd's selected durable facts differ. |
+| `harness/agent-processes/coordinator/session-tasks.ts`: `SessionTaskRegistry.assign`, `amend`, `started`, `settled` | Explicit requester/worker/revision/result state; registry expressly has coordinator lifetime, no disk persistence/replay/scheduling. | Keep messages/assignments distinct from deferred triggers. Preserve useful concepts, not Pie's volatile storage mechanics: Urd's selected durable facts differ. |
 
 The tools/selection READMEs were useful navigation, not sufficient behavioral evidence:
 the selector README's recovery description still discusses native activation, whereas
@@ -111,7 +111,7 @@ were outside the seven-file investigation. Its folder names do not certify good 
 
 | Candidate | Main unit of organization | Strength | Cost/problem for Urd |
 | --- | --- | --- | --- |
-| **A. Explicit domain modules** | Providers, instructions, tools, model context, collaboration, follow-ups, history, etc.; host/UI remain distinct. | A maintainer can locate the owner of a behavior. Shared state/rules have one place. Can remain one backend library. | More visible peers. Some changes necessarily cross domains; an input feature can touch UI, endpoint and session command. Must not replace `systems` with another unexplained catch-all. |
+| **A. Explicit domain modules** | Providers, guidance, tools, model context, session messages/assignments, wakeups, history, etc.; host/UI remain distinct. | A maintainer can locate the owner of a behavior. Shared state/rules have one place. Can remain one backend library. | More visible peers. Some changes necessarily cross domains; an input feature can touch UI, endpoint and session command. Must not replace `systems` with another unexplained catch-all. |
 | **B. End-to-end feature slices** | “Connect provider”, “send message”, “delegate work” groups each workflow's changes across its UI/API/domain/data owners. | Very good locality for adding a user-facing workflow; avoids ceremonial controller→service→repository layers. Can respect the existing language/project boundaries. | Urd's UI and agent tools invoke the same long-lived state machine. Per-request slices must still share that authority, not duplicate admission/state policy in each handler. Useful within domains, not my whole-product default. |
 | **C. Reusable harness library plus workspace application** | General execution/tool/provider/guidance package; app owns workspace/history/cooperation/clients. | Strong reuse boundary; straightforward headless embedding and separate consumers. | Urd is one specific product, not an arbitrary harness framework. Designing public extension/lifecycle contracts now risks recreating Pi's seams and generic Core bucket. Extra machinery lacks a demonstrated consumer. |
 
@@ -133,19 +133,19 @@ locations or fewer lines than B**. Those costs need real implementation evidence
 | --- | --- | --- |
 | **Sessions and execution** | Live session identity/admission and current execution; pending input, cancellation and settlement. Preserve the two session kinds. | Account management, HTTP and a global container of all collaborators. |
 | **Model providers** | Model/catalog identities, accounts/credential access, provider adapters and request policy. Distinguish catalog, account and request collaborators internally. | Session input policy; caller-specific title/compaction/pruning behavior. |
-| **Instruction loading** | Scoped prompt/skill/named-agent discovery and reading, definition provenance. | Authored content itself; attachments; runtime agents; what a particular model has already seen. |
+| **Guidance loading** | Scoped prompt/skill/named-agent discovery and reading, definition provenance. | Authored content itself; attachments; runtime agents; what a particular model has already seen. |
 | **Tools** | Concrete tool definitions/implementations, registration and one current-authority invocation path. Simple tools implement their operation directly; application tools enter their domain's commands. | Owning the session/assignment behind a tool; model-context history; starting native runtimes just to list metadata. |
 | **MCP connections** | Server configuration/connection lifetime, SDK protocol calls and discovery changes; exports tool registrations to Tools. | Model relevance selection or an agent loop. Separate logical owner; may be a small area beside tool integration rather than another top-level project. |
 | **Model context** | The per-session working representation, selected/loaded exposure, compaction and reduction/recall orchestration. Session guards govern applying changes; provider adapters own native representations. | Original transcript authority or tool permission. Tools/instructions own eligibility and definitions; context consumes them rather than building duplicate source catalogs. |
-| **Agent collaboration** | Messages, assignments, explicit results, waits and any retained cooperative-resource support, with distinct lifetimes. | Live-session registry ownership; future trigger dispatch; inferring a result from idle status. |
-| **Scheduled follow-ups** | Recorded trigger/target/delivery state and dispatch into ordinary session admission. | A general replay/workflow engine or a second way to start a busy worker. |
+| **Inter-session messaging and assignments** | Messages, assignments, explicit results, waits and any retained cooperative-resource support, with distinct lifetimes. | Live-session registry ownership; future trigger dispatch; inferring a result from idle status. |
+| **Session wakeups** | Recorded trigger/target/delivery state and dispatch into ordinary session admission. | A general replay/workflow engine or a second way to start a busy worker. |
 | **Session history & storage** | Original history, durable context/session/work records, bounded queries, attachments and atomic intent-specific writes. | Current execution state, automatic replay, or deleting originals because context was compacted. Keep the selected `SessionStore` authority; do not add a wrapper per table. |
 | **Usage** | Observed request usage, price provenance/estimates and retained summaries. | Agent control, full conversation retention or a new generic telemetry platform. |
 | **User interface** | Views, drafts/navigation, provider/settings screens, pending questions and bounded caches. | Lifetime of a pending agent question or accepted backend work. |
 | **Hosting** | Process lifetime, composition, access/transport and platform entry. | Provider/session policy or source-build orchestration. |
 | **Development & delivery** | Declared tools, source/build/data separation, checks and the customization/distribution workflow. | Runtime session state or an automatic update platform. |
 
-Central editable Markdown remains a separate authored-content home. “Instruction loading”
+Central editable Markdown remains a separate authored-content home. “Guidance loading”
 above describes code, not a second content directory. Loading/reload timing remains deferred.
 
 Questions/answers should start as an **execution-owned interaction** with UI presentation,
@@ -167,9 +167,9 @@ cross-domain work rather than claiming every change fits inside one folder.
 | Add a provider/auth route | Providers; generic provider UI/host surfaces only where new interaction requires it; Context for genuinely new native representation qualification. | Editing the agent loop for every provider, or refreshing credentials merely to list model metadata. |
 | Add a file tool | Tools implementation plus explicit registration; its schema/guidance stay with it. | Another service class just to wrap file I/O, or changes to execution/context/HTTP plumbing for an ordinary tool. |
 | Disconnect or incompatibly redefine an MCP tool | MCP updates availability/registrations; Tools checks current authority and compatible identity. Context retains historical disclosure. | Rewriting past definitions/history or silently rebinding an old exposed definition to an incompatible implementation. Exact compatibility checks still need qualification. |
-| Change a prompt or skill | Authored file; Instructions reads at the selected loading boundary; Context controls future assembly/append. | Rebuilding provider code, retroactively replacing a loaded skill result or quietly introducing a watcher. |
+| Change a prompt or skill | Authored file; the guidance loader reads at the selected loading boundary; Context controls future assembly/append. | Rebuilding provider code, retroactively replacing a loaded skill result or quietly introducing a watcher. |
 | Change selection/compaction | Context policy plus relevant tool/instruction eligibility; provider-specific encodings remain in adapters. | A second permission catalog, compaction deleting originals, or an auxiliary “session” per model call. |
-| Accept an assignment / fire a follow-up | Collaboration or Follow-ups enters the same execution admission path and SessionStore transaction as ordinary input. | Independent busy checks/starts, or splitting the correlated durable acceptance into separately committed module writes. |
+| Accept an assignment / fire a wakeup | Assignment or wakeup handling enters the same execution admission path and SessionStore transaction as ordinary input. | Independent busy checks/starts, or splitting the correlated durable acceptance into separately committed module writes. |
 | Close a chat but retain selected totals | Session close policy, History/Storage cleanup and Usage retention. | Hard-coded “delete all rows with session ID” or retaining the full transcript solely for billing. |
 
 Shared transactions are allowed. Module boundaries must not force asynchronous messages
@@ -198,7 +198,7 @@ or import OpenCode's cross-process locking framework.
 
 ```text
 SessionBase owns current ContextState + 0..1 SessionExecution
-  ContextBuilder / CatalogPruner read InstructionCatalog + ToolCatalog
+  ContextBuilder / CatalogPruner read GuidanceCatalog + ToolCatalog
   Context changes/results publish through the session guard + SessionStore
 
 SessionExecution uses IChatClient and ToolExecutor
@@ -207,7 +207,7 @@ SessionExecution uses IChatClient and ToolExecutor
   Recovery tool  -> guarded context/exposure operation
 ```
 
-`InstructionCatalog` owns available scoped definitions; `ToolCatalog` owns current
+`GuidanceCatalog` owns available scoped definitions; `ToolCatalog` owns current
 registrations; `ContextState` records what this session has selected/loaded/sent.
 These are not three interchangeable mutable inventories. Catalog selection cannot
 grant tool permission, and recovery cannot mutate a second independent context store.
@@ -216,7 +216,7 @@ belong to the execution; the host/UI route answers to that identified wait.
 
 ```text
 Session tool or UI command -> AssignmentCoordinator -> PrimarySession admission
-Trigger fires             -> FollowUpDispatcher    -> PrimarySession admission
+Trigger fires             -> WakeupDispatcher      -> PrimarySession admission
                                                       -> atomic SessionStore intent
 ```
 
@@ -230,7 +230,7 @@ assignment/result meaning. No new base classes or command-bus framework are impl
 
 This is more than flattening `systems/`: move model-facing selection to Context; keep
 registration/execution with Tools; make MCP connection lifetime explicit; separate
-follow-up dispatch from collaboration; name instruction discovery precisely; keep
+trigger dispatch from messaging/assignments; name guidance discovery precisely; keep
 usage distinct from generic diagnostics; distribute policy ownership instead of
 centralizing it in Configuration. Existing selected behavior is not being redesigned.
 
@@ -242,65 +242,96 @@ production scaffolding, new provider/account calls or activation.
 
 ## 8. Naming and harness grouping
 
-**Owner direction:** the subsequent tree was “okay structure wise”, but `guidance/`
-and `agent-instructions/` did not clearly distinguish editable content from code.
-“Agent instructions” was also not considered a better name for the top-level editable
-Markdown/skills collection. Model context, agent tools and similar responsibilities
-should be nested under the harness. This is broad structural alignment plus a request
-for refinement, not approval of every proposed name or production implementation.
+**Owner direction:** broader harness nesting is accepted as sensible. The proposed
+`agent-content/` name is rejected as misleading; the owner prefers “guidance”,
+“instructions” or similar, with consistent terminology for the loader code. The labels
+“collaboration” and “follow-ups” also fail to explain their purpose. The owner expects
+usage accounting to sit within the harness, considers either placement of session
+storage arguable, and warns against mistaking harness detail for a complete application
+design. Less-developed areas may be marked TBD. Exact replacement names and the full
+layout remain proposals; there is no production implementation authorization.
 
 **Revised proposal:** use `harness` for the broader agent machinery and `execution`
 for the narrow model/tool loop. Keep named responsibilities inside that grouping;
 do not turn the grouping into a single Harness manager or execution-owned service bag.
 Provider accounts and MCP connections retain their appropriate shared lifetimes.
 
-For the authored collection, prefer **`agent-content/`**: it names the editable material
-rather than a process. **`instruction-loading/`** names the code that discovers, resolves
-and reads scoped content. `agent-kit/` is a friendlier but less literal alternative;
-`prompts/` alone is too narrow for skills and named-agent definitions. These names remain
-proposals. The authored home holds bundled defaults, not just overrides, and does not
-absorb existing user/project instruction files or select their loading/reload timing.
+Use **`guidance/`** for the editable collection and **`guidance-loading/`** for code that
+discovers, resolves and reads it. An equivalent consistent pair is `instructions/`
+and `instruction-loading/`; the proposal below uses guidance throughout. The authored
+home holds bundled defaults, not just overrides, and does not absorb existing user/project
+instruction files or select loading/reload timing.
+
+Replace “collaboration” with its concrete responsibilities: **session messaging**
+(notes/input between sessions) and **assignments** (requester/worker, delegated work,
+explicit result and waits). Replace “follow-ups” with **session wakeups** (timer,
+event or condition triggers delivering recorded input to a target session). These
+are subareas of `sessions/`, not new services or separate commit paths. Any retained
+cooperative-resource support remains an explicit open placement concern; this naming
+change does not silently remove it or turn assignments into a general resource manager.
 
 ```text
 urd/
-├─ agent-content/                     editable bundled content
+├─ guidance/                          editable bundled prompts, agents and skills
 │  ├─ prompts/
 │  ├─ agents/
 │  └─ skills/
 ├─ source/
 │  ├─ backend/
 │  │  ├─ harness/
-│  │  │  ├─ sessions/
+│  │  │  ├─ sessions/                 registry, lifecycle and session commands
+│  │  │  │  ├─ messaging/
+│  │  │  │  ├─ assignments/
+│  │  │  │  └─ wakeups/
 │  │  │  ├─ execution/                model/tool loop, cancellation and waits
 │  │  │  ├─ context/                  assembly, selection, compaction and recall
-│  │  │  ├─ instruction-loading/      scoped discovery and reading
+│  │  │  ├─ guidance-loading/         scoped discovery and reading
 │  │  │  ├─ tools/                    catalog, checked invocation, implementations
 │  │  │  ├─ providers/                catalog, accounts, adapters, request policy
 │  │  │  ├─ mcp/                      connection/discovery/protocol ownership
-│  │  │  ├─ collaboration/            messages, assignments, results and waits
-│  │  │  └─ follow-ups/               triggers and scheduled delivery
-│  │  ├─ session-storage/             history, attachments and atomic store writes
-│  │  ├─ usage/                       retained usage, pricing and summaries
+│  │  │  ├─ storage/                  session history, attachments, durable records
+│  │  │  └─ usage/                    usage accounting, pricing and summaries
 │  │  └─ Urd.Core.csproj
-│  ├─ ui/
-│  ├─ hosting/
+│  ├─ ui/                             internal structure TBD
+│  ├─ hosting/                        internal structure TBD
 │  │  └─ server/
 │  │     └─ Urd.Server.csproj
-│  ├─ tests/
+│  ├─ tests/                          broader organization TBD
 │  └─ Urd.slnx
-├─ development/
+├─ development/                       setup/build/distribution structure TBD
 ├─ experiments/
 ├─ data/
 ├─ builds/
 └─ .tools/
 ```
 
-Nesting providers, MCP, collaboration and follow-ups under the harness is the proposed
-extension of the owner's examples, not a claim that each was individually approved.
-Storage and retained usage/reporting remain application-level peers in this proposal.
+**Storage recommendation:** session transcripts, model-context records, assignment
+facts and managed attachments have harness-specific meaning, so keep their storage
+with the harness. A case for separate general persistence exists if other application
+areas need it, but that does not yet justify a generic storage subsystem. Sharing
+low-level database mechanics later need not move session semantics or split the
+selected atomic `SessionStore` authority. Credential storage policy remains open.
+
+**Usage recommendation:** model-call usage and cost accounting belong to the harness;
+UI reporting consumes those facts rather than owning their collection or retention.
+Moving the folder does not tie retained totals to a live session's lifetime.
+
 No broader class authority follows from filesystem nesting: Context does not grant
 tool permission; tools do not own the assignments behind their commands; grouping
 MCP with agent machinery does not give each run its own MCP connection lifecycle.
+Likewise a wakeup dispatcher spans targets; it is not owned by one session execution.
+
+**Coverage limit — partial application design, not a completed architecture:**
+
+- UI and hosting: internal components and their collaboration remain TBD.
+- Other application-level backend responsibilities: inventory and boundaries remain
+  TBD. The absence of drawn folders is not a decision that the harness owns everything.
+- Application settings/preferences, platform integration, setup/build/distribution:
+  detailed ownership and file layout remain TBD. Do not add a generic configuration
+  manager or placeholder service merely to fill the diagram.
+- This does not reopen established choices (including Preact/TypeScript, ASP.NET,
+  Core/Server, local-access requirements and source-with-distributables), erase earlier
+  planning, or defer their requirements. TBD describes unfinished structural design.
 
 `backend/` is the ASP.NET-free compilation boundary, not a replacement domain bucket.
 Its Core project uses ordinary SDK inclusion within that subtree; the Server project

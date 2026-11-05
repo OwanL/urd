@@ -398,10 +398,13 @@ more detailed decisions as they are made.
 owner outcomes. The [application layout proposal](APPLICATION-PLAN.md) was rejected
 as too vague and is withdrawn. [Structure research](STRUCTURE-RESEARCH.md) records
 subsequent primary-source investigation, competing organizational approaches and
-candidate class/state owners. The owner broadly accepts the later tree's structure,
-but requests clearer content-versus-loader names and nesting context/tools under the
-harness. Its [revised tree](STRUCTURE-RESEARCH.md#8-naming-and-harness-grouping) remains
-a proposal; exact names, the complete layout and implementation are not approved.
+candidate class/state owners. The owner accepts broader harness nesting but rejects
+`agent-content/` and vague collaboration/follow-up labels. The
+[revised partial tree](STRUCTURE-RESEARCH.md#8-naming-and-harness-grouping) uses consistent
+guidance terminology and concrete session responsibilities, with harness storage and
+usage accounting proposed. Less-developed application areas are explicitly TBD, not
+omitted or treated as finished; existing decisions remain. Exact names, the complete
+layout and implementation are not approved.
 
 Focused qualification evidence, distinct from architecture approval:
 

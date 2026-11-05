@@ -5,10 +5,13 @@
 - The owner wants to review the initial application structure before production
   implementation, down to important class members and method signatures where useful.
   The rough directory tree is accepted and revisable; it is not approval of every API.
-- Work in small review packs, normally 3–5 key types or an equivalent UI/script unit.
-  Show responsibility, lifetime, owned state, important signatures, dependencies,
-  mutation/concurrency/persistence boundaries and a few concrete behavior examples.
-  Distinguish existing decisions, new proposals and unresolved trade-offs.
+- Present bite-sized proposals case by case: normally one class or one cohesive
+  operation, not a multi-type pack. Show the relevant members/signatures inline, a
+  short reason and the architectural choice at hand. Wait for the owner's response
+  before presenting the next bite; approval covers only the presented scope.
+  Full workstream drafts remain internal integration references, not required owner
+  reading or whole-document approval requests. Check wider lifetimes, dependencies
+  and concurrency/persistence boundaries internally before presenting each bite.
 - Before presenting a design to the owner, get independent review by another agent
   and correct supported issues. The coordinator checks cross-stream consistency and
   presents concrete code/class/method shapes and meaningful trade-offs, not raw drafts.

@@ -135,21 +135,24 @@ from generated/cleaned/packaged outputs. This tree does not qualify those workfl
 
 The owner subsequently requests a stronger initial design gate: agents propose the
 important structures for review before implementing them, including class members and
-method signatures where useful. Review small, concrete packs, not another complete
-folder hierarchy or an exhaustive design of every helper. Show responsibilities,
-lifetimes, owned state, important operations and dependency/transaction boundaries.
+method signatures where useful. Present bite-sized proposals case by case, normally
+one class or cohesive operation: relevant code/members inline, a short reason and the
+architectural choice at hand. Wait for the owner's response before the next bite.
+Review wider lifetimes, state, dependencies and transaction boundaries internally.
 The rough layout remains accepted; exact new APIs remain proposals until reviewed.
 
-Start with the [Core class proposal](docs/scratch/initial-core-design.md), then review
-the [UI/hosting proposal](docs/scratch/initial-ui-hosting-design.md) and
-[build/startup proposal](docs/scratch/initial-build-setup-design.md). Each workstream must obtain independent
+The [Core draft](docs/scratch/initial-core-design.md),
+[UI/hosting draft](docs/scratch/initial-ui-hosting-design.md) and
+[build/startup draft](docs/scratch/initial-build-setup-design.md) are internal integration
+references, not required owner reading or whole-document approval requests.
+Each workstream must obtain independent
 agent review and fix supported issues before the coordinator brings its concrete
 code/class/method proposal to the owner. The owner reviews architectural shape and
 code, not engineering guidelines or process documents. [Code-shape guidance](docs/code-shape-guidelines.md)
 is maintained by the agents/coordinator; its size signals are not hard limits.
 [AGENTS.md](AGENTS.md) records this workflow. Peer-review acceptance is not owner approval.
 
-An approved pack permits its scoped implementation, not unrelated features or external
+An approved bite permits only its presented scope, not the rest of a draft, unrelated features or external
 actions. Once the initial base is accepted, follow its conventions and use implementation
 evidence to improve routine names/helpers. Raise substantive responsibility, lifetime,
 public-contract, concurrency or persistence changes before treating them as settled;

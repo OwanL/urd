@@ -47,9 +47,12 @@ requirements or justify adding unneeded abstractions.
 
 ## Initial review format
 
-Each small pack shows responsibilities/lifetimes, key fields and signatures, dependency
-and ownership direction, mutation/persistence boundaries, an example flow, and explicit
-trade-offs. Another agent reviews the proposed design for correctness, cohesion, missing
+Present one bite at a time: normally one class or cohesive operation, its relevant
+members/signatures inline, a short reason and the architectural choice at hand. Wait
+for the owner's response before presenting the next bite. Larger workstream drafts
+are internal references, not required reading or whole-document approval requests.
+Internally check lifetimes, state/dependency ownership, mutation/persistence boundaries
+and concrete flows. Another agent reviews the proposed design for correctness, cohesion, missing
 operations and unnecessary abstractions; the author fixes supported issues. The
 coordinator checks integration before presenting the resulting code/API shape to the
 owner. Do not expose unreviewed drafts as ready for approval or ask the owner to audit

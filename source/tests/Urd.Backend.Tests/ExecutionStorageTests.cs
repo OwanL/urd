@@ -94,6 +94,36 @@ public sealed class ExecutionStorageTests
         Assert.Equal(4L, database.Scalar("SELECT COUNT(*) FROM input_decisions;"));
     }
 
+    [Theory]
+    [InlineData(false, false, 0, 1, InputRefusalReason.Stopping)]
+    [InlineData(true, true, 0, 1, InputRefusalReason.Stopping)]
+    [InlineData(true, false, 0, 1, InputRefusalReason.StaleRevision)]
+    [InlineData(true, false, 1, 0, InputRefusalReason.StaleRevision)]
+    [InlineData(true, false, 0, 0, InputRefusalReason.Capacity)]
+    public void NewInputRefusalUsesStoppingThenRevisionThenCapacityPriority(
+        bool admissionEnabled, bool stopRequested, long handleRevision,
+        long expectedRevision, InputRefusalReason expectedReason)
+    {
+        using var database = new TemporaryDatabase();
+        using SessionStore store = SessionStore.Open(database.Path);
+        Guid session = store.CreatePrimary(Guid.NewGuid()).Id, run = Guid.NewGuid();
+        store.AdmitInput(session, 0, new(Guid.NewGuid(), 0, "accepted"), true, run);
+        if (stopRequested)
+        {
+            store.RequestStop(session, run);
+        }
+
+        var input = new InputCommand(Guid.NewGuid(), expectedRevision, "new input");
+        var decision = store.AdmitInput(session, handleRevision, input, admissionEnabled, Guid.NewGuid());
+
+        Assert.Equal(InputDecision.Refused, decision.Receipt.Decision);
+        Assert.Equal(expectedReason, decision.Receipt.RefusalReason);
+        Assert.False(decision.NewlyAccepted);
+        Assert.Null(decision.Receipt.RunId);
+        Assert.Equal(decision.Receipt, store.ReadInputReceipt(session, input.InputId));
+        Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM execution_runs;"));
+    }
+
     [Fact]
     public void ClaimIsPersistedOnceAndReopenDoesNotReplayActiveInput()
     {

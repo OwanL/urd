@@ -20,7 +20,7 @@ public sealed class SessionExecutionTests
         string text = new string('a', 16 * 1024 - 1) + "😀" + new string('b', 40_000) + "\0終";
         var client = new ScriptedChatClient(token => TextResponse(text, token));
         await using var fixture = new ExecutionFixture(client);
-        Guid runId = await fixture.SubmitAsync("go");
+        Guid runId = await fixture.StartRunAsync("go");
 
         ExecutionResult settlement = await fixture.Session.WaitForSettlementAsync(runId).WaitAsync(Timeout);
         Assert.Equal(ExecutionOutcome.Completed, settlement.Outcome);
@@ -42,7 +42,7 @@ public sealed class SessionExecutionTests
         var release = Signal();
         var client = new ScriptedChatClient(token => PausedResponse(waiting, release, token));
         await using var fixture = new ExecutionFixture(client);
-        Guid runId = await fixture.SubmitAsync("go");
+        Guid runId = await fixture.StartRunAsync("go");
         try
         {
             await waiting.Task.WaitAsync(Timeout);
@@ -70,7 +70,7 @@ public sealed class SessionExecutionTests
     {
         var client = new ScriptedChatClient(token => FailedResponse(failure, token));
         await using var fixture = new ExecutionFixture(client);
-        Guid runId = await fixture.SubmitAsync("go");
+        Guid runId = await fixture.StartRunAsync("go");
 
         Assert.Equal(ExecutionOutcome.Failed,
             (await fixture.Session.WaitForSettlementAsync(runId).WaitAsync(Timeout)).Outcome);
@@ -91,7 +91,7 @@ public sealed class SessionExecutionTests
             ? HeldCleanupResponse(waiting, cleanupEntered, cleanupRelease, token)
             : CompleteResponse(token));
         await using var fixture = new ExecutionFixture(client);
-        Guid runId = await fixture.SubmitAsync("first");
+        Guid runId = await fixture.StartRunAsync("first");
         try
         {
             await waiting.Task.WaitAsync(Timeout);
@@ -99,7 +99,7 @@ public sealed class SessionExecutionTests
             await fixture.Session.RequestStopAsync(runId);
             await cleanupEntered.Task.WaitAsync(Timeout);
             Assert.False(fixture.Session.WaitForSettlementAsync(runId).IsCompleted);
-            InputReceipt refused = await fixture.Session.SubmitAsync(new InputCommand(Guid.NewGuid(), 0, "too early"));
+            InputReceipt refused = await fixture.Session.SubmitUserInputAsync(new InputCommand(Guid.NewGuid(), 0, "too early"));
             Assert.Equal(InputDecision.Refused, refused.Decision);
             Assert.Equal(InputRefusalReason.Stopping, refused.RefusalReason);
             Assert.Null(refused.RunId);
@@ -112,7 +112,7 @@ public sealed class SessionExecutionTests
 
         Assert.Equal(ExecutionOutcome.Cancelled,
             (await fixture.Session.WaitForSettlementAsync(runId).WaitAsync(Timeout)).Outcome);
-        Guid replacement = await fixture.SubmitAsync("second");
+        Guid replacement = await fixture.StartRunAsync("second");
         Assert.NotEqual(runId, replacement);
         Assert.Equal(ExecutionOutcome.Completed,
             (await fixture.Session.WaitForSettlementAsync(replacement).WaitAsync(Timeout)).Outcome);
@@ -136,7 +136,7 @@ public sealed class SessionExecutionTests
                 CREATE TRIGGER reject_output BEFORE INSERT ON execution_output
                 BEGIN SELECT RAISE(ABORT, 'Injected output write failure'); END;
                 """);
-            InputReceipt receipt = await session.SubmitAsync(command);
+            InputReceipt receipt = await session.SubmitUserInputAsync(command);
             runId = receipt.RunId;
             Assert.Equal(InputDecision.Accepted, receipt.Decision);
             Guid acceptedRun = Assert.IsType<Guid>(runId);
@@ -154,7 +154,7 @@ public sealed class SessionExecutionTests
             Assert.Equal(DBNull.Value, database.Scalar("SELECT outcome FROM execution_runs;"));
             Assert.Equal(DBNull.Value, database.Scalar("SELECT outcome FROM execution_requests;"));
             Assert.Empty(ReadOutput(database));
-            InputReceipt refused = await session.SubmitAsync(new InputCommand(Guid.NewGuid(), 0, "replacement"));
+            InputReceipt refused = await session.SubmitUserInputAsync(new InputCommand(Guid.NewGuid(), 0, "replacement"));
             Assert.Equal(InputDecision.Refused, refused.Decision);
             Assert.Equal(InputRefusalReason.Stopping, refused.RefusalReason);
             Assert.Null(refused.RunId);
@@ -328,9 +328,9 @@ public sealed class SessionExecutionTests
         internal TemporaryDatabase Database { get; }
         internal PrimarySession Session { get; }
 
-        internal async Task<Guid> SubmitAsync(string text)
+        internal async Task<Guid> StartRunAsync(string text)
         {
-            InputReceipt receipt = await Session.SubmitAsync(new InputCommand(Guid.NewGuid(), 0, text));
+            InputReceipt receipt = await Session.SubmitUserInputAsync(new InputCommand(Guid.NewGuid(), 0, text));
             Assert.Equal(InputDecision.Accepted, receipt.Decision);
             Guid runId = Assert.IsType<Guid>(receipt.RunId);
             _runs.Add(runId);

@@ -49,7 +49,7 @@ public sealed class SessionSnapshotStorageTests
         {
             Assert.Equal(ExecutionOutcome.Completed, message.Settlement);
             Assert.False(message.Truncated);
-            Assert.Equal(new RowContentCursor(message.Message, 1, 0), message.AvailableThrough);
+            Assert.Equal(new MessageContentCursor(message.Message, 1, 0), message.AvailableThrough);
             Assert.Equal(message.Message.Role == MessageRole.Assistant, message.FinalOutputCommitted);
         });
         Assert.Throws<NotSupportedException>(() => ((IList<MessagePreview>)snapshot.Messages).Clear());
@@ -103,7 +103,7 @@ public sealed class SessionSnapshotStorageTests
         Assert.True(input.Truncated);
         Assert.Equal(new string('é', 256), assistant.Preview);
         Assert.True(assistant.Truncated);
-        Assert.Equal(new RowContentCursor(assistant.Message, 2, 0), assistant.AvailableThrough);
+        Assert.Equal(new MessageContentCursor(assistant.Message, 2, 0), assistant.AvailableThrough);
         Assert.True(assistant.FinalOutputCommitted);
         Assert.Null(assistant.Settlement);
         Assert.Null(input.Settlement);

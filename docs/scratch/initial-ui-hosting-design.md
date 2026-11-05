@@ -45,7 +45,7 @@ type PendingSend = { inputId: string; draftVersion: number; text: string;
   expectedRevision: number; status: 'sending' | 'unknown' };
 type Reader = { follow: boolean; anchor?: { rowId: string; offsetPx: number } };
 type CachedChat = { view: SessionView; older: HistoryPage[]; reader: Reader;
-  content: Map<string, RowContentPage[]>; freshness: 'stale' | 'fresh'; generation: number };
+  content: Map<string, MessageContentPage[]>; freshness: 'stale' | 'fresh'; generation: number };
 function useWorkspace(backend: Backend): {
   selectedId?: ChatId; summaries: SessionSummary[]; chats: Map<ChatId, CachedChat>;
   creation: 'ready' | 'creating' | 'unknown'; createChat(): Promise<void>;
@@ -54,7 +54,7 @@ function useWorkspace(backend: Backend): {
   send(id: ChatId): Promise<void>; retryUnknown(id: ChatId, inputId: string): Promise<void>;
   stop(id: ChatId, runId: string): Promise<void>;
   loadOlder(id: ChatId): Promise<void>;
-  loadRowContent(id: ChatId, cursor: RowContentCursor): Promise<void>;
+  loadMessageContent(id: ChatId, cursor: MessageContentCursor): Promise<void>;
   setReader(id: ChatId, reader: Reader): void;
 };
 ```
@@ -74,8 +74,8 @@ Keep at most two chat caches, 120 rows/chat and 256 KiB decoded text total, incl
 lazy content pages/rendered text. Eviction preserves anchors or explicitly reports a
 released window; no hidden uncapped body/DOM cache. Views/history retain Core's 60 rows,
 256 UTF-16-unit surrogate-safe previews and 64 KiB cap; truncation opens lazy content.
-`onReadContent` calls `loadRowContent` → `backend.rowContent` → the one Core range read.
-Start `RowContentCursor(rowId, historyRevision, utf8Offset=0)`; pages carry identity,
+`onReadContent` calls `loadMessageContent` → `backend.messageContent` → the one Core range read.
+Start `MessageContentCursor(rowId, historyRevision, utf8Offset=0)`; pages carry identity,
 revision, fromUtf8Offset/text/nextCursor/availableThroughUtf8Offset/hasMore/isFinal.
 Each page is ≤16 KiB original UTF-8, scalar-safe; offsets are byte positions, not JS
 string indices. Append preserves cursors; replacement rejects stale revision explicitly.
@@ -118,7 +118,7 @@ const backend: Backend = {
   list(after?: string, signal?: AbortSignal): Promise<SessionSummaryPage>,
   create(): Promise<{ sessionId: ChatId }>,
   history(id: ChatId, cursor: HistoryCursor, signal: AbortSignal): Promise<HistoryPage>,
-  rowContent(id: ChatId, cursor: RowContentCursor, signal: AbortSignal): Promise<RowContentPage>,
+  messageContent(id: ChatId, cursor: MessageContentCursor, signal: AbortSignal): Promise<MessageContentPage>,
   observe(id: ChatId, signal: AbortSignal): AsyncIterable<SessionView>,
   submit(id: ChatId, command: InputCommand): Promise<InputReceipt>,
   receipt(id: ChatId, inputId: string, signal: AbortSignal): Promise<InputReceipt | null>,
@@ -196,9 +196,9 @@ No endpoint base classes, command bus, per-route service or second session regis
 | GET `/sessions?after=...` | `manager.ListPrimaryAsync(after, limits)` |
 | POST `/sessions` | `manager.CreatePrimaryAsync()`; return stable ID |
 | GET `/sessions/{id}/history?cursor=...` | `GetPrimaryAsync(id)` → `ReadHistoryAsync(cursor, limits)` |
-| GET `/sessions/{id}/content?cursor=...` | `GetPrimaryAsync(id)` → `ReadRowContentAsync(cursor)` |
+| GET `/sessions/{id}/content?cursor=...` | `GetPrimaryAsync(id)` → `ReadMessageContentAsync(cursor)` |
 | GET `/sessions/{id}/view` (SSE) | `GetPrimaryAsync(id)` → `ObserveAsync(limits, http.RequestAborted)` |
-| POST `/sessions/{id}/inputs` | `GetPrimaryAsync(id)` → `SubmitAsync(command)` |
+| POST `/sessions/{id}/inputs` | `GetPrimaryAsync(id)` → `SubmitUserInputAsync(command)` |
 | GET `/sessions/{id}/inputs/{inputId}` | `GetPrimaryAsync(id)` → `GetInputReceiptAsync(inputId)` |
 | POST `/sessions/{id}/runs/{runId}/stop` | `GetPrimaryAsync(id)` → `RequestStopAsync(runId)` |
 Only observation gets HTTP cancellation. Existing uncancellable Core reads finish

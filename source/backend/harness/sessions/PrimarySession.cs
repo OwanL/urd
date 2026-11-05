@@ -10,5 +10,6 @@ public sealed class PrimarySession : SessionBase
     {
     }
 
-    public Task<InputReceipt> SubmitAsync(InputCommand command) => AdmitInputAsync(command);
+    /// <summary>Submits incoming user input for a durable acceptance/refusal decision, without awaiting the model answer.</summary>
+    public Task<InputReceipt> SubmitUserInputAsync(InputCommand input) => AdmitInputAsync(input);
 }

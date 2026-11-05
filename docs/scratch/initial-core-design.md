@@ -113,8 +113,8 @@ The owner answered **“seems reasonable”** after the inline proposal and clar
 this is reliability of incoming user instructions, including input during a response;
 not transcript management, generated assistant replies, or agent-to-agent coordination.
 ```csharp
-// PrimarySession
-public Task<InputReceipt> SubmitAsync(InputCommand command);
+// PrimarySession (name clarified in the later readability pass)
+public Task<InputReceipt> SubmitUserInputAsync(InputCommand input);
 // SessionBase
 public Task<InputReceipt?> GetInputReceiptAsync(Guid inputId);
 ```
@@ -149,7 +149,7 @@ After the read proposal and explanation, the owner approved this surface on 2026
 The decision covers these read-only members on existing `SessionBase`:
 ```csharp
 public Task<SessionSnapshot> ReadSnapshotAsync(CancellationToken readCancellation = default);
-public Task<RowContentPage> ReadRowContentAsync(RowContentCursor cursor,
+public Task<MessageContentPage> ReadMessageContentAsync(MessageContentCursor cursor,
     CancellationToken readCancellation = default);
 ```
 Snapshots combine committed recent-message previews/revision/run facts with the live
@@ -191,6 +191,16 @@ Chunk members use `ResponseId` and `ChunkIndex` instead of `OutputId` and `Batch
 SDK symbols such as `IChatClient` and `ChatMessage` keep their names. This cleanup changes no behavior, schema,
 ownership, cancellation or settlement guarantees; it is not approval of broader API work.
 
+## Clear-cut readability corrections
+
+The owner subsequently authorized clear-cut readability fixes without further per-name
+approval. The user-input entry point is now `SubmitUserInputAsync`; bounded message reads
+use `ReadMessageContentAsync`, `MessageContentCursor` and `MessageContentPage`. Declarations
+above and the wider sketches below use the current vocabulary; existing behavior and the
+unapproved status of wider proposals remain unchanged. Storage decisions now use named
+facts and explicit precedence rather than compressed predicates. Refusal-state meaning
+(including the broader-than-stopping use of `Stopping`) is not silently changed here.
+
 ## Current implementation — first fake-text Core checkpoint
 
 The owner subsequently confirmed the obvious shared-client choice and requested the actual
@@ -219,7 +229,7 @@ separately; read cancellation never owns model cancellation. No subscriptions or
 state were introduced. Snapshot previews and body slices stay bounded before materialization.
 
 Independent component and integration reviews passed. Parent locked restore and Release
-build/tests pass **61/61**, with no build warnings/errors. Tests cover shared-client chats,
+build/tests pass **66/66** after the readability pass, with no build warnings/errors. Tests cover shared-client chats,
 exact retries/reopen, commit/migration rollback, Unicode/NUL paging, held cleanup after
 final output, persisted and live fences, and indexed recent-window selection over large
 mixed histories. Tests use disposable SQLite and fake clients only; no browser/polling
@@ -305,7 +315,7 @@ private readonly Dictionary<Guid, (ViewLimits Limits, Channel<SessionView> Updat
 protected SessionBase(SessionRecord record, SessionStore store, IChatClient chatClient);
 public IAsyncEnumerable<SessionView> ObserveAsync(ViewLimits limits, CancellationToken observationCancellation);
 public Task<HistoryPage> ReadHistoryAsync(HistoryCursor cursor, ReadLimits limits);
-public Task<RowContentPage> ReadRowContentAsync(RowContentCursor cursor);
+public Task<MessageContentPage> ReadMessageContentAsync(MessageContentCursor cursor);
 public Task<InputReceipt?> GetInputReceiptAsync(Guid inputId);
 public Task<StopReceipt> RequestStopAsync(Guid runId);
 public Task<ExecutionResult> WaitForSettlementAsync(Guid runId, CancellationToken waitCancellation);
@@ -341,7 +351,7 @@ pending reconciliation; no false idle.
 Handle lifetime; no extra mutable fields. Chooses ordinary-input policy, not another lock.
 ```csharp
 internal PrimarySession(SessionRecord record, SessionStore store, IChatClient chatClient);
-public Task<InputReceipt> SubmitAsync(InputCommand command);
+public Task<InputReceipt> SubmitUserInputAsync(InputCommand input);
 ```
 Input admitted idle starts a run. Busy preflight input is a **follow-up**, preserving
 an answer to the first prompt; input after the initial request claim is **steering**,
@@ -412,7 +422,7 @@ internal StopReceipt RequestStop(Guid sessionId, Guid runId);
 internal SettlementAttempt TrySettle(Guid sessionId, Guid runId, ExecutionOutcome outcome);
 internal SessionView ReadView(Guid sessionId, ViewLimits limits);
 internal HistoryPage ReadHistory(Guid sessionId, HistoryCursor cursor, ReadLimits limits);
-internal RowContentPage ReadRowContent(Guid sessionId, RowContentCursor cursor);
+internal MessageContentPage ReadMessageContent(Guid sessionId, MessageContentCursor cursor);
 internal ExecutionResult? ReadSettlement(Guid sessionId, Guid runId);
 public void Dispose();
 ```
@@ -496,9 +506,9 @@ Accepted never means model success, and later interruption never changes it to R
    `ReadHistory` remains a row/preview window; full original text uses the one lazy content
    query below rather than lifting preview caps.
 
-   **Bounded row content:** immutable `RowContentCursor(RowId, HistoryRevision, Utf8Offset)`
+   **Bounded message content:** immutable `MessageContentCursor(RowId, HistoryRevision, Utf8Offset)`
    starts at offset zero using the stable row ID/revision from a view/history item.
-   `RowContentPage` returns that identity/revision, `FromUtf8Offset`, decoded `Text`,
+   `MessageContentPage` returns that identity/revision, `FromUtf8Offset`, decoded `Text`,
    `NextCursor`, `AvailableThroughUtf8Offset`, `HasMore` and `IsFinal`. Each call reads one
    short snapshot and returns at most **16 KiB UTF-8 text**, ending on a Unicode scalar
    boundary. Offsets count original unescaped UTF-8 bytes; invalid/interior-scalar offsets

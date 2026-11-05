@@ -8,8 +8,9 @@ there is no runnable Server or UI yet.
 
 - `SessionManager(store, chatClient)` passes the same borrowed dependencies to canonical
   session handles. Constructors start no work. The caller owns both resources.
-- Acceptance and run identity commit together. Exact retries return the original decision;
-  neither lookup nor retained acceptance starts work. Refusal fences delayed originals.
+- `PrimarySession.SubmitUserInputAsync(input)` returns a durable acceptance/refusal receipt,
+  not an LLM answer. Acceptance and run identity commit together. Exact retries return
+  the original decision; neither lookup nor retained acceptance starts work. Refusal fences delayed originals.
 - `SessionBase` owns admission and database writes; temporary `SessionExecution` owns
   streaming, bounded UTF-8 batches and Stop. Replacement requires cleanup and saved settlement.
 - This development increment admits one input per active run. A different busy input gets
@@ -25,11 +26,14 @@ At Core checkpoint `06c1c3d`, locked restore and the Release suite passed **35/3
 with no build warnings/errors.
 Coverage includes shared-client concurrent chats, exact retry/reopen, transactional rollback,
 UTF-8 batching, positive terminal evidence, held cleanup and persistence-failure fencing.
-The approved read increment passes **61/61** Release tests after locked restore, with no
+The approved read increment passed **61/61** Release tests after locked restore, with no
 build warnings/errors. Coverage adds scalar-safe full-content paging, committed tail following,
 final output during held cleanup, reopened/faulted fences, exact recent-window boundaries,
 indexed selection over 9,000 mixed-history runs, and atomic version-2-to-3 migration/rollback.
-These are fake-client/Core checks, not browser polling, load or real-provider qualification.
+The subsequent naming/decision-readability pass passes **66/66** Release tests after
+locked restore, including five cases covering overlapping admission-refusal conditions.
+Behavior and schema are unchanged. These are fake-client/Core checks, not browser polling,
+load or real-provider qualification.
 This is a Core review checkpoint, not the browser-to-Core milestone or a complete hosting API.
 
 ## Read contract and incremental review order
@@ -44,7 +48,7 @@ This is a Core review checkpoint, not the browser-to-Core milestone or a complet
    in short read transactions. [SessionStore.cs](../source/backend/harness/storage/SessionStore.cs)
    adds two indexes in schema version 3, preserving version 0/1/2 migrations.
 4. [SessionReadFlowTests.cs](../source/tests/Urd.Backend.Tests/SessionReadFlowTests.cs),
-   [RowContentTests.cs](../source/tests/Urd.Backend.Tests/RowContentTests.cs), and
+   [MessageContentTests.cs](../source/tests/Urd.Backend.Tests/MessageContentTests.cs), and
    [SessionSnapshotStorageTests.cs](../source/tests/Urd.Backend.Tests/SessionSnapshotStorageTests.cs).
 
 Snapshots return at most 60 recent current-revision messages, each preview at most 256 UTF-16
@@ -52,8 +56,8 @@ units without splitting a scalar (under 64 KiB aggregate preview UTF-8). `HasOld
 labels omission; older-history navigation is not implemented. Latest settlement and unsettled
 run/Stop facts are queried independently of the recent window.
 
-Start a body read at `new RowContentCursor(messageRef, 0, 0)`. Each page returns at most
-16 KiB of original UTF-8 and examines at most 16 immutable segments. Follow `Next` while
+Call `ReadMessageContentAsync` with `new MessageContentCursor(messageRef, 0, 0)`.
+Each page returns at most 16 KiB of original UTF-8 and examines at most 16 immutable segments. Follow `Next` while
 `HasMore`; a false value means the current committed tail, not necessarily final output.
 Poll snapshots and resume from that tail only when availability changes. Segment-local byte
 offsets preserve Unicode and embedded NUL; stale revisions throw `HistoryRevisionConflictException`.

@@ -96,5 +96,8 @@ and build/startup boundaries follow without reopening the directory tree.
 
 Approval is scoped. After the initial base is accepted, agents should extend its
 conventions and tests; ask again for meaningful boundary/behavior changes, not routine
-names or local refactoring. Codebase context helps, but is not a substitute for a short
-shared guide and review of the actual implementation.
+names or local refactoring. The owner explicitly authorizes clear-cut readability fixes,
+including names on existing public members whose meaning stays unchanged; do not seek
+another vote for each such correction. Ambiguous state meanings are not mechanical renames.
+Codebase context helps, but is not a substitute for a short shared guide and review of the
+actual implementation.

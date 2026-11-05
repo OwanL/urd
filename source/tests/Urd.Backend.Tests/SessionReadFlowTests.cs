@@ -45,7 +45,7 @@ public sealed class SessionReadFlowTests
             Assert.Empty(idle.Messages);
             Assert.Equal(0, client.Calls);
 
-            InputReceipt receipt = await session.SubmitAsync(new(Guid.NewGuid(), 0, input));
+            InputReceipt receipt = await session.SubmitUserInputAsync(new(Guid.NewGuid(), 0, input));
             ownedRun = receipt.RunId;
             Guid runId = Assert.IsType<Guid>(ownedRun);
             await sourceWaiting.Task.WaitAsync(Timeout);
@@ -60,7 +60,7 @@ public sealed class SessionReadFlowTests
             var first = await ReadAvailableAsync(session, new(assistant.Message, 0, 0));
             Assert.Equal(output[..1024], first.Text);
             Assert.False(first.Last.IsClosed);
-            RowContentPage tail = await session.ReadRowContentAsync(first.Last.Next);
+            MessageContentPage tail = await session.ReadMessageContentAsync(first.Last.Next);
             Assert.Empty(tail.Text);
             Assert.Equal(first.Last.Next, tail.Next);
             Assert.False(tail.HasMore);
@@ -71,7 +71,7 @@ public sealed class SessionReadFlowTests
                 await Assert.ThrowsAnyAsync<OperationCanceledException>(
                     () => session.ReadSnapshotAsync(cancelledRead.Token));
                 await Assert.ThrowsAnyAsync<OperationCanceledException>(
-                    () => session.ReadRowContentAsync(tail.Next, cancelledRead.Token));
+                    () => session.ReadMessageContentAsync(tail.Next, cancelledRead.Token));
             }
             Assert.False(modelToken.IsCancellationRequested);
             Assert.False(session.WaitForSettlementAsync(runId).IsCompleted);
@@ -160,15 +160,15 @@ public sealed class SessionReadFlowTests
         Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM execution_requests;"));
     }
 
-    private static async Task<(string Text, RowContentPage Last)> ReadAvailableAsync(
-        PrimarySession session, RowContentCursor cursor)
+    private static async Task<(string Text, MessageContentPage Last)> ReadAvailableAsync(
+        PrimarySession session, MessageContentCursor cursor)
     {
         using var deadline = new CancellationTokenSource(Timeout);
         var text = new StringBuilder();
-        RowContentPage page;
+        MessageContentPage page;
         do
         {
-            page = await session.ReadRowContentAsync(cursor, deadline.Token).WaitAsync(deadline.Token);
+            page = await session.ReadMessageContentAsync(cursor, deadline.Token).WaitAsync(deadline.Token);
             Assert.Equal(cursor, page.From);
             Assert.InRange(Encoding.UTF8.GetByteCount(page.Text), 0, 16 * 1024);
             if (page.HasMore)

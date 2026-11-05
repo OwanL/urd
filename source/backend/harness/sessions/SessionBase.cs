@@ -60,13 +60,13 @@ public abstract class SessionBase
         }
     }
 
-    public async Task<RowContentPage> ReadRowContentAsync(
-        RowContentCursor cursor, CancellationToken readCancellation = default)
+    public async Task<MessageContentPage> ReadMessageContentAsync(
+        MessageContentCursor cursor, CancellationToken readCancellation = default)
     {
         await _gate.WaitAsync(readCancellation).ConfigureAwait(false);
         try
         {
-            return _store.ReadRowContent(Id, cursor);
+            return _store.ReadMessageContent(Id, cursor);
         }
         finally
         {

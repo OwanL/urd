@@ -157,7 +157,10 @@ actions. Once the initial base is accepted, follow its conventions and use imple
 evidence to improve routine names/helpers. Raise substantive responsibility, lifetime,
 public-contract, concurrency or persistence changes before treating them as settled;
 do not turn every private method into a repeated approval question. No application
-code is authorized merely by writing these proposals.
+code is authorized merely by writing these proposals. The owner subsequently authorized
+clear-cut naming/readability corrections without per-name approval, including existing
+public members with unchanged meaning. This does not approve new features or resolve
+ambiguous state/ownership semantics; those remain substantive decisions.
 
 ### Near-term sequence — each new operation still needs its own approval
 

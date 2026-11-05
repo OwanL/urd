@@ -25,6 +25,11 @@
   owner; ordinary implementation details do not need method-by-method approval.
   Passing approved borrowed dependencies through existing classes is routine wiring,
   not another vote on obvious reuse. Show actual class relationships when discussing design.
+- The owner authorizes clear-cut naming/readability fixes without per-name approval,
+  including existing public members when their meaning is unchanged. Verify callers,
+  behavior and documentation, and coordinate files with active agents. Ambiguous state
+  meanings and substantive behavioral/ownership changes still require a decision;
+  do not conceal them inside a naming cleanup.
 - The owner requests faster, parallel execution. Run independent scoped preparation,
   implementation and review concurrently with disjoint file ownership. Serialize only
   real dependencies/shared resources; one approval wait must not stall other authorized

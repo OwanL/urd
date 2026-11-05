@@ -42,10 +42,23 @@ public sealed partial class SessionStore
             long actualRevision = (long)revisionValue;
             using SqliteCommand activeRead = ExecutionCommand(transaction,
                 "SELECT stopping FROM execution_runs WHERE session_id = $session AND outcome IS NULL;", ("$session", sessionId));
-            object? active = activeRead.ExecuteScalar();
-            InputRefusalReason? refusal = !accepting || active is 1L ? InputRefusalReason.Stopping
-                : actualRevision != historyRevision || command.ExpectedHistoryRevision != actualRevision ? InputRefusalReason.StaleRevision
-                : active is not null ? InputRefusalReason.Capacity : null;
+            object? activeRunStopFlag = activeRead.ExecuteScalar();
+            bool hasActiveRun = activeRunStopFlag is not null;
+            bool activeRunIsStopping = activeRunStopFlag is 1L;
+            InputRefusalReason? refusal = null;
+            if (!accepting || activeRunIsStopping)
+            {
+                refusal = InputRefusalReason.Stopping;
+            }
+            else if (actualRevision != historyRevision || command.ExpectedHistoryRevision != actualRevision)
+            {
+                refusal = InputRefusalReason.StaleRevision;
+            }
+            else if (hasActiveRun)
+            {
+                refusal = InputRefusalReason.Capacity;
+            }
+
             InputReceipt receipt;
             if (refusal is { } reason)
             {
@@ -173,10 +186,25 @@ public sealed partial class SessionStore
                         && (reader.IsDBNull(1) ? null : reader.GetString(1)) == completion.Error;
                 }
 
-                if (!reader.IsDBNull(4) || (completion.Outcome == ExecutionOutcome.Completed
-                    && (reader.GetInt32(3) != 0 || reader.GetInt32(2) == 0)))
+                bool runIsSettled = !reader.IsDBNull(4);
+                if (runIsSettled)
                 {
                     return false;
+                }
+
+                if (completion.Outcome == ExecutionOutcome.Completed)
+                {
+                    bool stopRequested = reader.GetInt32(3) != 0;
+                    if (stopRequested)
+                    {
+                        return false;
+                    }
+
+                    bool hasFinalOutput = reader.GetInt32(2) != 0;
+                    if (!hasFinalOutput)
+                    {
+                        return false;
+                    }
                 }
             }
 
@@ -202,11 +230,11 @@ public sealed partial class SessionStore
     }
 
     // The caller has joined all owned work before entering this transaction.
-    internal ExecutionResult? TrySettle(Guid sessionId, Guid runId, ExecutionOutcome outcome)
+    internal ExecutionResult? TrySettle(Guid sessionId, Guid runId, ExecutionOutcome driverOutcome)
     {
-        if (!Enum.IsDefined(outcome))
+        if (!Enum.IsDefined(driverOutcome))
         {
-            throw new ArgumentOutOfRangeException(nameof(outcome));
+            throw new ArgumentOutOfRangeException(nameof(driverOutcome));
         }
 
         lock (_gate)
@@ -218,6 +246,7 @@ public sealed partial class SessionStore
                 LEFT JOIN execution_requests q ON q.run_id = r.run_id
                 WHERE r.session_id = $session AND r.run_id = $run;
                 """, ("$session", sessionId), ("$run", runId));
+            ExecutionOutcome settledOutcome = driverOutcome;
             using (SqliteDataReader reader = read.ExecuteReader())
             {
                 if (!reader.Read())
@@ -232,9 +261,9 @@ public sealed partial class SessionStore
 
                 if (reader.GetInt32(1) != 0)
                 {
-                    outcome = ExecutionOutcome.Cancelled;
+                    settledOutcome = ExecutionOutcome.Cancelled;
                 }
-                else if (outcome == ExecutionOutcome.Completed)
+                else if (driverOutcome == ExecutionOutcome.Completed)
                 {
                     // Invocation exit or text alone never manufactures request success.
                     if (reader.IsDBNull(2))
@@ -242,7 +271,7 @@ public sealed partial class SessionStore
                         return null;
                     }
 
-                    outcome = (ExecutionOutcome)reader.GetInt32(2);
+                    settledOutcome = (ExecutionOutcome)reader.GetInt32(2);
                 }
             }
 
@@ -250,10 +279,10 @@ public sealed partial class SessionStore
                 UPDATE execution_requests SET outcome = $outcome
                 WHERE run_id = $run AND outcome IS NULL;
                 UPDATE execution_runs SET outcome = $outcome WHERE session_id = $session AND run_id = $run;
-                """, ("$session", sessionId), ("$run", runId), ("$outcome", (int)outcome));
+                """, ("$session", sessionId), ("$run", runId), ("$outcome", (int)settledOutcome));
             settle.ExecuteNonQuery();
             transaction.Commit();
-            return new(runId, outcome);
+            return new(runId, settledOutcome);
         }
     }
 

@@ -40,7 +40,7 @@ public sealed class SessionManagerFlowTests
             for (int i = 0; i < sessions.Length; i++)
             {
                 Assert.Same(sessions[i], await manager.GetPrimaryAsync(sessions[i].Id));
-                receipts[i] = await sessions[i].SubmitAsync(commands[i]);
+                receipts[i] = await sessions[i].SubmitUserInputAsync(commands[i]);
                 if (receipts[i].RunId is { } runId)
                     runs.Add((sessions[i], runId));
                 Assert.Equal(InputDecision.Accepted, receipts[i].Decision);
@@ -55,7 +55,7 @@ public sealed class SessionManagerFlowTests
             for (int i = 0; i < sessions.Length; i++)
             {
                 Assert.Equal(receipts[i], await sessions[i].GetInputReceiptAsync(inputId));
-                InputReceipt retry = await sessions[i].SubmitAsync(commands[i]);
+                InputReceipt retry = await sessions[i].SubmitUserInputAsync(commands[i]);
                 if (retry.RunId is { } runId && runId != receipts[i].RunId)
                     runs.Add((sessions[i], runId));
                 Assert.Equal(receipts[i], retry);
@@ -77,7 +77,7 @@ public sealed class SessionManagerFlowTests
                 Assert.NotSame(sessions[i], loaded);
                 Assert.Same(loaded, await reopenedManager.GetPrimaryAsync(loaded.Id));
                 Assert.Equal(receipts[i], await loaded.GetInputReceiptAsync(inputId));
-                InputReceipt retry = await loaded.SubmitAsync(commands[i]);
+                InputReceipt retry = await loaded.SubmitUserInputAsync(commands[i]);
                 if (retry.RunId is { } runId)
                     runs.Add((loaded, runId));
                 Assert.Equal(receipts[i], retry);

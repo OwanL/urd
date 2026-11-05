@@ -6,7 +6,7 @@ using Xunit;
 
 namespace Urd.Backend.Tests;
 
-public sealed class RowContentTests
+public sealed class MessageContentTests
 {
     [Fact]
     public void FullInputAndMultiPageOutputPreserveUnicodeNulAndScalarBoundaries()
@@ -20,7 +20,7 @@ public sealed class RowContentTests
         Append(store, run, 0, first);
         Append(store, run, 1, second, final: true);
 
-        RowContentPage user = store.ReadRowContent(run.Session, new(run.User, 0, 0));
+        MessageContentPage user = store.ReadMessageContent(run.Session, new(run.User, 0, 0));
         Assert.Equal(input, user.Text);
         Assert.True(user.Text.Length > 256);
         Assert.True(user.IsClosed);
@@ -28,7 +28,7 @@ public sealed class RowContentTests
         Assert.False(user.HasMore);
         Assert.Equal(new(run.User, 1, 0), user.Next);
 
-        RowContentPage page = store.ReadRowContent(run.Session, new(run.Assistant, 0, 0));
+        MessageContentPage page = store.ReadMessageContent(run.Session, new(run.Assistant, 0, 0));
         Assert.Equal(first, page.Text); // The next four-byte scalar cannot fit the remaining byte.
         Assert.InRange(Encoding.UTF8.GetByteCount(page.Text), 1, 16384);
         Assert.Equal(new(run.Assistant, 1, 0), page.Next);
@@ -38,7 +38,7 @@ public sealed class RowContentTests
         Assert.True(page.FinalOutputCommitted);
         Assert.Null(store.ReadSettlement(run.Session, run.Run)); // Final bytes are not settlement.
 
-        RowContentPage remainder = store.ReadRowContent(run.Session, page.Next);
+        MessageContentPage remainder = store.ReadMessageContent(run.Session, page.Next);
         Assert.Equal(second, remainder.Text);
         Assert.InRange(Encoding.UTF8.GetByteCount(remainder.Text), 1, 16384);
         Assert.Equal(first + second, page.Text + remainder.Text);
@@ -57,12 +57,12 @@ public sealed class RowContentTests
         Append(store, run, 0, block);
         Append(store, run, 1, "tail", final: true);
 
-        RowContentPage first = store.ReadRowContent(run.Session, new(run.Assistant, 0, 0));
+        MessageContentPage first = store.ReadMessageContent(run.Session, new(run.Assistant, 0, 0));
         Assert.Equal(16384, Encoding.UTF8.GetByteCount(first.Text));
         Assert.Equal(block, first.Text);
         Assert.Equal(new(run.Assistant, 1, 0), first.Next);
         Assert.True(first.HasMore);
-        RowContentPage next = store.ReadRowContent(run.Session, first.Next);
+        MessageContentPage next = store.ReadMessageContent(run.Session, first.Next);
         Assert.Equal("tail", next.Text);
         Assert.False(next.HasMore);
     }
@@ -84,10 +84,10 @@ public sealed class RowContentTests
         Assert.Equal(text[..Math.Min(256, text.Length)], preview.Preview);
         Assert.Equal(utf16Units > 256, preview.Truncated);
         Assert.True(preview.FinalOutputCommitted);
-        RowContentPage body = store.ReadRowContent(run.Session, new(run.Assistant, 0, 0));
+        MessageContentPage body = store.ReadMessageContent(run.Session, new(run.Assistant, 0, 0));
         Assert.Equal(text, body.Text);
         Assert.False(body.HasMore);
-        Assert.Equal(new RowContentCursor(run.Assistant, 2, 0), body.Next);
+        Assert.Equal(new MessageContentCursor(run.Assistant, 2, 0), body.Next);
         Assert.Equal(body.AvailableThrough, body.Next);
         Assert.True(body.FinalOutputCommitted);
         Assert.Null(store.ReadSettlement(run.Session, run.Run));
@@ -105,11 +105,11 @@ public sealed class RowContentTests
         }
 
         Append(store, run, 16, "visible", final: true);
-        RowContentPage first = store.ReadRowContent(run.Session, new(run.Assistant, 0, 0));
+        MessageContentPage first = store.ReadMessageContent(run.Session, new(run.Assistant, 0, 0));
         Assert.Equal("", first.Text);
         Assert.Equal(new(run.Assistant, 16, 0), first.Next);
         Assert.True(first.HasMore);
-        RowContentPage next = store.ReadRowContent(run.Session, first.Next);
+        MessageContentPage next = store.ReadMessageContent(run.Session, first.Next);
         Assert.Equal("visible", next.Text);
         Assert.Equal(new(run.Assistant, 17, 0), next.Next);
         Assert.False(next.HasMore);
@@ -122,19 +122,19 @@ public sealed class RowContentTests
         using SessionStore store = SessionStore.Open(database.Path);
         TestRun run = StartRun(store);
         Append(store, run, 0, "partial\0🙂");
-        RowContentPage initial = store.ReadRowContent(run.Session, new(run.Assistant, 0, 0));
+        MessageContentPage initial = store.ReadMessageContent(run.Session, new(run.Assistant, 0, 0));
         Assert.False(initial.HasMore);
         Assert.False(initial.IsClosed);
         Assert.False(initial.FinalOutputCommitted);
 
-        RowContentPage tail = store.ReadRowContent(run.Session, initial.Next);
+        MessageContentPage tail = store.ReadMessageContent(run.Session, initial.Next);
         Assert.Equal("", tail.Text);
         Assert.Equal(tail.From, tail.Next);
         Assert.False(tail.HasMore);
         Assert.False(tail.IsClosed);
 
         Append(store, run, 1, "", final: true);
-        RowContentPage final = store.ReadRowContent(run.Session, tail.Next);
+        MessageContentPage final = store.ReadMessageContent(run.Session, tail.Next);
         Assert.Equal("", final.Text);
         Assert.Equal(new(run.Assistant, 2, 0), final.Next);
         Assert.Equal(final.AvailableThrough, final.Next);
@@ -142,7 +142,7 @@ public sealed class RowContentTests
         Assert.True(final.FinalOutputCommitted);
         Assert.False(final.HasMore);
         Assert.Null(store.ReadSettlement(run.Session, run.Run));
-        RowContentPage finalTail = store.ReadRowContent(run.Session, final.Next);
+        MessageContentPage finalTail = store.ReadMessageContent(run.Session, final.Next);
         Assert.Equal(final.Next, finalTail.Next);
         Assert.Equal("", finalTail.Text);
     }
@@ -153,14 +153,14 @@ public sealed class RowContentTests
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
         TestRun run = StartRun(store, "");
-        Assert.Throws<KeyNotFoundException>(() => store.ReadRowContent(run.Session, new(run.Assistant, 0, 0)));
-        RowContentPage input = store.ReadRowContent(run.Session, new(run.User, 0, 0));
+        Assert.Throws<KeyNotFoundException>(() => store.ReadMessageContent(run.Session, new(run.Assistant, 0, 0)));
+        MessageContentPage input = store.ReadMessageContent(run.Session, new(run.User, 0, 0));
         Assert.Equal("", input.Text);
         Assert.Equal(new(run.User, 1, 0), input.Next);
         Assert.True(input.IsClosed);
 
         Append(store, run, 0, "", final: true);
-        RowContentPage output = store.ReadRowContent(run.Session, new(run.Assistant, 0, 0));
+        MessageContentPage output = store.ReadMessageContent(run.Session, new(run.Assistant, 0, 0));
         Assert.Equal("", output.Text);
         Assert.Equal(new(run.Assistant, 1, 0), output.Next);
         Assert.True(output.FinalOutputCommitted);
@@ -174,21 +174,21 @@ public sealed class RowContentTests
         using SessionStore store = SessionStore.Open(database.Path);
         TestRun run = StartRun(store);
         Append(store, run, 0, "a🙂\0é", final: true);
-        RowContentPage suffix = store.ReadRowContent(run.Session, new(run.Assistant, 0, 1));
+        MessageContentPage suffix = store.ReadMessageContent(run.Session, new(run.Assistant, 0, 1));
         Assert.Equal("🙂\0é", suffix.Text);
         Assert.Equal(new(run.Assistant, 1, 0), suffix.Next);
-        RowContentPage atEnd = store.ReadRowContent(run.Session, new(run.Assistant, 0, 8));
+        MessageContentPage atEnd = store.ReadMessageContent(run.Session, new(run.Assistant, 0, 8));
         Assert.Equal("", atEnd.Text);
         Assert.Equal(suffix.Next, atEnd.Next);
 
-        foreach (RowContentCursor invalid in new RowContentCursor[]
+        foreach (MessageContentCursor invalid in new MessageContentCursor[]
         {
             new(run.Assistant, -1, 0), new(run.Assistant, 0, -1), new(run.Assistant, 0, 2),
             new(run.Assistant, 0, 9), new(run.Assistant, 1, 1), new(run.Assistant, 2, 0),
             new(run.Assistant, 0, 16385)
         })
         {
-            Assert.ThrowsAny<ArgumentException>(() => store.ReadRowContent(run.Session, invalid));
+            Assert.ThrowsAny<ArgumentException>(() => store.ReadMessageContent(run.Session, invalid));
         }
     }
 
@@ -200,8 +200,8 @@ public sealed class RowContentTests
         TestRun run = StartRun(store);
         Append(store, run, 0, "owned");
         Guid otherSession = store.CreatePrimary(Guid.NewGuid()).Id;
-        Assert.Throws<KeyNotFoundException>(() => store.ReadRowContent(otherSession, new(run.Assistant, 0, 0)));
-        Assert.Throws<KeyNotFoundException>(() => store.ReadRowContent(Guid.NewGuid(), new(run.Assistant, 0, 0)));
+        Assert.Throws<KeyNotFoundException>(() => store.ReadMessageContent(otherSession, new(run.Assistant, 0, 0)));
+        Assert.Throws<KeyNotFoundException>(() => store.ReadMessageContent(Guid.NewGuid(), new(run.Assistant, 0, 0)));
         foreach (MessageRef missing in new MessageRef[]
         {
             run.Assistant with { RunId = Guid.NewGuid() },
@@ -210,19 +210,19 @@ public sealed class RowContentTests
             run.User with { Role = MessageRole.Assistant }
         })
         {
-            Assert.Throws<KeyNotFoundException>(() => store.ReadRowContent(run.Session, new(missing, 0, 0)));
+            Assert.Throws<KeyNotFoundException>(() => store.ReadMessageContent(run.Session, new(missing, 0, 0)));
         }
 
-        Assert.Throws<ArgumentException>(() => store.ReadRowContent(run.Session,
+        Assert.Throws<ArgumentException>(() => store.ReadMessageContent(run.Session,
             new(run.User with { Role = (MessageRole)42 }, 0, 0)));
-        Assert.Throws<ArgumentException>(() => store.ReadRowContent(run.Session,
+        Assert.Throws<ArgumentException>(() => store.ReadMessageContent(run.Session,
             new(run.User with { MessageId = Guid.Empty }, 0, 0)));
         database.Execute("UPDATE sessions SET history_revision = 1;");
         HistoryRevisionConflictException conflict = Assert.Throws<HistoryRevisionConflictException>(
-            () => store.ReadRowContent(run.Session, new(run.Assistant, 0, 0)));
+            () => store.ReadMessageContent(run.Session, new(run.Assistant, 0, 0)));
         Assert.Equal(0, conflict.ExpectedRevision);
         Assert.Equal(1, conflict.ActualRevision);
-        Assert.Throws<KeyNotFoundException>(() => store.ReadRowContent(run.Session,
+        Assert.Throws<KeyNotFoundException>(() => store.ReadMessageContent(run.Session,
             new(run.Assistant with { HistoryRevision = 1 }, 0, 0)));
     }
 
@@ -234,13 +234,13 @@ public sealed class RowContentTests
         TestRun run = StartRun(store);
         Append(store, run, 0, "partial");
         store.RequestStop(run.Session, run.Run);
-        RowContentPage stopped = store.ReadRowContent(run.Session, new(run.Assistant, 0, 0));
+        MessageContentPage stopped = store.ReadMessageContent(run.Session, new(run.Assistant, 0, 0));
         Assert.Equal("partial", stopped.Text);
         Assert.True(stopped.IsClosed);
         Assert.False(stopped.FinalOutputCommitted);
         Assert.Null(store.ReadSettlement(run.Session, run.Run));
         Assert.Equal(ExecutionOutcome.Cancelled, store.TrySettle(run.Session, run.Run, ExecutionOutcome.Cancelled)!.Outcome);
-        Assert.True(store.ReadRowContent(run.Session, stopped.Next).IsClosed);
+        Assert.True(store.ReadMessageContent(run.Session, stopped.Next).IsClosed);
     }
 
     [Fact]
@@ -255,13 +255,13 @@ public sealed class RowContentTests
         }
 
         using SessionStore reopened = SessionStore.Open(database.Path);
-        RowContentPage orphan = reopened.ReadRowContent(run.Session, new(run.Assistant, 0, 0));
+        MessageContentPage orphan = reopened.ReadMessageContent(run.Session, new(run.Assistant, 0, 0));
         Assert.Equal("retained partial", orphan.Text);
         Assert.False(orphan.IsClosed);
         Assert.False(orphan.FinalOutputCommitted);
         Assert.True(reopened.CompleteRequest(run.Session, run.Run, 0,
             new(run.Request, ExecutionOutcome.Failed, "failed")));
-        RowContentPage requestClosed = reopened.ReadRowContent(run.Session, orphan.Next);
+        MessageContentPage requestClosed = reopened.ReadMessageContent(run.Session, orphan.Next);
         Assert.True(requestClosed.IsClosed);
         Assert.False(requestClosed.FinalOutputCommitted);
         Assert.Null(reopened.ReadSettlement(run.Session, run.Run));
@@ -276,9 +276,9 @@ public sealed class RowContentTests
         TestRun run = StartRun(store);
         Append(store, run, 0, "valid");
         database.Execute("UPDATE execution_output SET text_utf8 = X'80';");
-        Assert.Throws<InvalidDataException>(() => store.ReadRowContent(run.Session, new(run.Assistant, 0, 0)));
+        Assert.Throws<InvalidDataException>(() => store.ReadMessageContent(run.Session, new(run.Assistant, 0, 0)));
         database.Execute("DELETE FROM execution_output;");
-        Assert.Throws<InvalidDataException>(() => store.ReadRowContent(run.Session, new(run.Assistant, 0, 0)));
+        Assert.Throws<InvalidDataException>(() => store.ReadMessageContent(run.Session, new(run.Assistant, 0, 0)));
     }
 
     private static TestRun StartRun(SessionStore store, string input = "input")

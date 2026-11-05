@@ -7,20 +7,20 @@ namespace Urd.Core.Storage;
 
 public sealed partial class SessionStore
 {
-    internal RowContentPage ReadRowContent(Guid sessionId, RowContentCursor cursor)
+    internal MessageContentPage ReadMessageContent(Guid sessionId, MessageContentCursor cursor)
     {
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             using SqliteTransaction transaction = _connection.BeginTransaction(deferred: true);
-            RowContentPage page = ReadRowContent(transaction, sessionId, cursor, MaximumOutputBytes, int.MaxValue, 16);
+            MessageContentPage page = ReadMessageContent(transaction, sessionId, cursor, MaximumOutputBytes, int.MaxValue, 16);
             transaction.Commit();
             return page;
         }
     }
 
     // Also used by the snapshot projection inside its existing read transaction.
-    private RowContentPage ReadRowContent(SqliteTransaction transaction, Guid sessionId, RowContentCursor cursor,
+    private MessageContentPage ReadMessageContent(SqliteTransaction transaction, Guid sessionId, MessageContentCursor cursor,
         int maximumUtf8Bytes, int maximumUtf16Units, int maximumSegments)
     {
         ArgumentNullException.ThrowIfNull(cursor);
@@ -182,8 +182,8 @@ public sealed partial class SessionStore
             offset = 0;
         }
 
-        var next = new RowContentCursor(message, segment, offset);
-        var available = new RowContentCursor(message, segmentCount, 0);
+        var next = new MessageContentCursor(message, segment, offset);
+        var available = new MessageContentCursor(message, segmentCount, 0);
         return new(cursor, text.ToString(), next, available, segment < segmentCount, closed, finalOutput);
     }
 }

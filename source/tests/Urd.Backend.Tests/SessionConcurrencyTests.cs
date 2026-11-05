@@ -37,7 +37,7 @@ public sealed class SessionConcurrencyTests
             if (Interlocked.Increment(ref waiting) == 2)
                 ready.TrySetResult();
             await start.Task;
-            return await session.SubmitAsync(command);
+            return await session.SubmitUserInputAsync(command);
         })).ToArray();
         try
         {
@@ -106,7 +106,7 @@ public sealed class SessionConcurrencyTests
         using var waitCancellation = new CancellationTokenSource();
         try
         {
-            InputReceipt receipt = await session.SubmitAsync(new InputCommand(Guid.NewGuid(), 0, "go"));
+            InputReceipt receipt = await session.SubmitUserInputAsync(new InputCommand(Guid.NewGuid(), 0, "go"));
             ownedRun = receipt.RunId;
             Assert.Equal(InputDecision.Accepted, receipt.Decision);
             Guid runId = Assert.IsType<Guid>(ownedRun);

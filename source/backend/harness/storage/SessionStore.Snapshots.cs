@@ -101,7 +101,7 @@ public sealed partial class SessionStore
             for (int index = Math.Min(candidates.Count, SnapshotMessageLimit) - 1; index >= 0; index--)
             {
                 (MessageRef message, ExecutionOutcome? settlement) = candidates[index];
-                RowContentPage prefix = ReadRowContent(transaction, sessionId, new(message, 0, 0),
+                MessageContentPage prefix = ReadMessageContent(transaction, sessionId, new(message, 0, 0),
                     maximumUtf8Bytes: 16384, maximumUtf16Units: 256, maximumSegments: 16);
                 messages.Add(new(message, prefix.Text, prefix.HasMore, prefix.AvailableThrough,
                     prefix.FinalOutputCommitted, settlement));

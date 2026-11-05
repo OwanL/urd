@@ -10,7 +10,7 @@ public sealed record SessionSnapshot(
 
 public sealed record MessagePreview(
     MessageRef Message, string Preview, bool Truncated,
-    RowContentCursor AvailableThrough, bool FinalOutputCommitted,
+    MessageContentCursor AvailableThrough, bool FinalOutputCommitted,
     ExecutionOutcome? Settlement);
 
 public sealed record MessageRef(
@@ -19,12 +19,12 @@ public sealed record MessageRef(
 public enum MessageRole { User, Assistant }
 
 /// <summary>Original UTF-8 byte offset within an immutable persisted segment.</summary>
-public sealed record RowContentCursor(MessageRef Message, long SegmentIndex, int Utf8Offset);
+public sealed record MessageContentCursor(MessageRef Message, long SegmentIndex, int Utf8Offset);
 
 /// <summary>Closure concerns message bytes, not successful execution or cleanup.</summary>
-public sealed record RowContentPage(
-    RowContentCursor From, string Text, RowContentCursor Next,
-    RowContentCursor AvailableThrough, bool HasMore,
+public sealed record MessageContentPage(
+    MessageContentCursor From, string Text, MessageContentCursor Next,
+    MessageContentCursor AvailableThrough, bool HasMore,
     bool IsClosed, bool FinalOutputCommitted);
 
 public sealed class HistoryRevisionConflictException(long expectedRevision, long actualRevision)

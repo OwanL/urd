@@ -231,8 +231,10 @@ API, **not** a published SDK, interfaces for every class, additional processes o
 frozen methods. Both projects can evolve together. One project remains simpler
 plumbing, but is not the selected starting point.
 
-**Coarse source mapping below remains a working proposal**, not approval of every
-filename, frontend structure or test-project arrangement:
+**Historical coarse source mapping:** the later [application plan](APPLICATION-PLAN.md)
+now owns the rough layout, and [experimental source has been archived](README.md#experimental-source-archive).
+The earlier sketch below did not approve every filename, frontend structure or
+test-project arrangement:
 
 ```text
 src/Urd.Core/
@@ -258,7 +260,8 @@ Read-only history queries can use the store without starting an execution.
 Server wires dependencies; session/storage code does not consume HTTP or UI state.
 Transport, endpoint style, CSS, frontend state and build tools remain open.
 
-No existing research/user file or harness is moved or migrated. Step 3 must scope
+That structure decision did not authorize moving existing research/user files or the
+harness; the later owner-authorized experimental archive is recorded above. Step 3 must scope
 SDK/build/package/formatting policy and commands deliberately: new root settings
 must not silently change experimental pins or behaviour. Conventions, tooling,
 package pins and detailed file/test placement await that review. This decision

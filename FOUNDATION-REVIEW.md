@@ -99,9 +99,10 @@ The evidence/owner-review round is complete. After rejecting the project-first a
 and refined the naming and harness nesting. The resulting [application plan](APPLICATION-PLAN.md)
 is now accepted as a rough starting structure, explicitly revisable during implementation.
 The owner also requests centralized, flat `docs/` with an optional scratch area.
-The working layout uses `scripts/` for automation and omits `experiments/`; no existing
-research code has been deleted or docs migrated. Non-harness internals remain TBD
-where not designed. Use this baseline to scope subsequent work rather than
+The working layout uses `scripts/` for automation and omits `experiments/`. The
+experimental tree has since been [preserved in machine-local scratch](README.md#experimental-source-archive)
+with owner authorization; documentation remains in place. Non-harness internals remain
+TBD where not designed. Use this baseline to scope subsequent work rather than
 keep refining speculative folders. Existing behavioral/technology decisions stand;
 rough-layout acceptance does not itself grant production-code permission.
 

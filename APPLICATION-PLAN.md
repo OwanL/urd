@@ -11,7 +11,9 @@ names, mandate empty scaffolding, complete the TBD areas or authorize production
 The owner prefers flat documentation, optionally `docs/scratch/`, and drops
 `experiments/` from the target layout. Use `scripts/` rather than the vague
 `development/` label for executable automation. The shared-assets home remains
-conditional. Existing files have not been relocated or deleted by this planning update.
+conditional. The owner subsequently authorized moving the experimental tree to
+machine-local scratch; [the archive note](README.md#experimental-source-archive)
+records the verified relocation. Documentation has not yet been reorganized.
 
 ## Working layout
 
@@ -82,10 +84,10 @@ required. One backend test project can cover multiple owners; UI tests may stay 
   are persistent data, not repository assets. Do not create an empty directory now.
 - **`source/tests/`** is the baseline's centralized home for cross-component backend tests,
   inside the production build-policy scope. A second root test directory is unnecessary.
-- **No `experiments/` in the target layout.** Preserve useful findings as flat docs;
-  do not move experimental projects into `docs/scratch/`. Existing research code is
-  untouched by this layout update. Removing that code is a separate cleanup, including
-  any references needed to interpret or reproduce the recorded evidence.
+- **No `experiments/` in the target layout.** The existing tree has been preserved
+  outside the checkout in machine-local scratch with verified file hashes and Git
+  provenance. Findings remain documented; historical paths and reproduction commands
+  need their archived context. Experimental projects do not belong in `docs/scratch/`.
 
 Borrow Pie's separation of documentation, automation and runtime guidance, not its
 full directory hierarchy. No changes to Pie are involved.

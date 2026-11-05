@@ -370,6 +370,22 @@ not authorise discarding Urd's own data during future upgrades.
 
 The repository currently contains a GNU AGPL v3 license; see [LICENSE](LICENSE).
 
+## Experimental source archive
+
+On 2026-11-05, the owner authorized moving the complete `experiments/` tree,
+including ignored/generated files, to machine-local scratch:
+`C:\dev\scratch\urd-3333d086\experiments`. Every file's SHA-256, size and relative
+path, and the full directory set, were verified across the move. The adjacent
+`ARCHIVE-NOTE.md` and manifests record provenance; copied root documents there are
+historical snapshots, not a second current documentation home.
+
+The 85 tracked source files remain recoverable from Git commit
+`888aff0c7a98e7b0107b305b663bd64978e97b56`. Historical `experiments/...` paths in
+reports refer to that former repository tree; preserve any older tested revision
+specified by an individual report. Scratch is disposable, and generated outputs
+are not backed up by Git. No post-move build/runtime qualification is claimed;
+some archived commands and absolute references still assume the old location.
+
 ## Reference material
 
 Reference inspection used Pie commit

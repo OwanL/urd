@@ -178,10 +178,12 @@ with matching loader terminology, session messaging/assignments/wakeups, and har
 storage/usage. The previous project-first and `systems/` designs remain superseded.
 The owner subsequently requests flat `docs/`, optionally `docs/scratch/`, rejects
 `development/` as vague and drops `experiments/` from the target layout. The baseline
-uses `scripts/` for executable automation; shared assets remain conditional. These
-are layout changes, not a completed migration or deletion of existing research code.
-Routine naming/nesting corrections can follow real implementation needs; this is not
-a frozen class, project or persistence contract.
+uses `scripts/` for executable automation; shared assets remain conditional. The
+owner subsequently authorized moving the existing experimental tree to machine-local
+scratch; [the verified archive](README.md#experimental-source-archive) preserves its
+files and provenance. Documentation remains in place. Routine naming/nesting corrections
+can follow real implementation needs; this is not a frozen class, project or persistence
+contract.
 
 UI, hosting, other application-level concerns and development/delivery internals remain
 explicitly TBD where not worked out; existing technology and behavioral decisions

@@ -198,6 +198,10 @@ demonstrated.
 
 ### Code ownership and boundaries
 
+These are the historical experiment programme rules. The experimental source was
+subsequently [archived outside the checkout](README.md#experimental-source-archive)
+with owner authorization; the paths below describe its former repository location.
+
 - A single harness-owner session owns `experiments/transcript-harness/` —
   runner, generator, oracle, instrumentation and the adapter interface — once a
   shared-code milestone is approved. Owner steering for shared code goes through

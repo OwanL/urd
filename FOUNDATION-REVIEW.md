@@ -94,16 +94,15 @@ draft nor the experiments approve transport, fine layout, APIs or schema.
 
 ## Next step
 
-The evidence/owner-review round is complete; owner-led application planning continues
-in [the application plan](APPLICATION-PLAN.md). The owner rejected the project-first
-directory sketch and found its six-component replacement incomplete. Start from the
-full set of concerns, using Pie as a reference: distinguish tools, harness execution,
-supporting systems and editable guidance, alongside UI, hosting, history/persistence
-and the other documented areas. At the owner's request, the current plan now proposes
-specific ownership, class collaborations and a matching directory layout; review
-those together. A first checkpoint does not define the whole product. No repeated
-reload/recovery/idle-only questionnaire or production permission follows from the
-completed research or the request for a design.
+The evidence/owner-review round is complete; owner-led application planning continues.
+The owner rejected the project-first sketch, found its six-component replacement
+incomplete, and rejected the later `systems/` grouping as too vague. The
+[application plan](APPLICATION-PLAN.md) is now explicitly withdrawn. The next
+[source research and brainstorming](STRUCTURE-RESEARCH.md) examine real owners and
+lifetimes in Pie, OpenCode and Codex, compare organizational alternatives, and test
+candidate domain/class boundaries against concrete changes. Those are proposals,
+not a selected replacement tree. A first checkpoint does not define the whole product;
+completed research grants neither new runtime policy nor production-code permission.
 
 The four stream reports and shared integration were independently reviewed within
 their stated limits. Research recommendations do not turn fixtures into production

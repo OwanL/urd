@@ -395,9 +395,10 @@ project's purpose and strategic constraints; the architecture document owns the
 more detailed decisions as they are made.
 
 [Foundation review](FOUNDATION-REVIEW.md) gathers the latest evidence and scoped
-owner outcomes. [Application plan](APPLICATION-PLAN.md) proposes functional ownership,
-class relationships and a matching concern-based source layout, alongside browser
-and setup constraints. The proposal is not implementation permission or new decisions.
+owner outcomes. The [application layout proposal](APPLICATION-PLAN.md) was rejected
+as too vague and is withdrawn. [Structure research](STRUCTURE-RESEARCH.md) records
+subsequent primary-source investigation, competing organizational approaches and
+candidate class/state owners. No replacement layout or implementation is approved.
 
 Focused qualification evidence, distinct from architecture approval:
 

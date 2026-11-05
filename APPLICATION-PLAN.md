@@ -1,6 +1,11 @@
-# Application design proposal
+# Withdrawn application design proposal
 
-2026-11-05. **Proposed design, not an approved layout or permission to implement.**
+**Rejected by the owner on 2026-11-05:** `systems/` is too vague. This document
+preserves the rejected proposal for context; its grouping and project-layout workaround
+are not the current recommendation. See [source research and alternatives](STRUCTURE-RESEARCH.md)
+for the subsequent investigation and brainstorming. No replacement layout is approved.
+
+Original proposal, 2026-11-05. **Not an approved layout or permission to implement.**
 The owner asked for a new design after expanding the concern inventory. This covers
 Urd as a product, not just its first runnable checkpoint. It borrows useful Pie
 responsibilities without its Pi coupling, extension seams or process architecture.

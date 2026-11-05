@@ -29,6 +29,20 @@ judgment rather than escalating routine standards questions to the owner.
    structure. Review the initial implementation against the approved design; document
    material departures instead of allowing the first draft to become accidental policy.
 
+## Naming and discoverability
+
+- Name data types for the values or facts they represent, rather than phrases that
+  read as instructions. Operations belong in method names. A cohesive record is
+  justified by keeping related data together; unclear naming alone is not a reason
+  to replace it with a parameter list.
+- Use `Llm` for Urd-owned data types describing language-model requests, responses
+  or their outcomes, so their source or target is explicit. Avoid ambiguous `Chat`
+  or `Output` labels for those concepts. Keep external SDK names such as `IChatClient`
+  and `ChatMessage` unchanged; session/run concepts retain their own vocabulary.
+- File placement and short boundary comments should make purpose, producer/consumer
+  roles and important lifecycle guarantees apparent. Do not cram the whole contract
+  into a long identifier or require a separate glossary to understand a declaration.
+
 ## Size signals — prompts for review, not targets
 
 | Signal | Review question |

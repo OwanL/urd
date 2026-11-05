@@ -6,7 +6,7 @@ namespace Urd.Core.Storage;
 
 public sealed partial class SessionStore : IDisposable
 {
-    private const int SchemaVersion = 2;
+    private const int SchemaVersion = 3;
     private const int MaximumInputBytes = 16 * 1024;
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private readonly SqliteConnection _connection;
@@ -288,6 +288,18 @@ public sealed partial class SessionStore : IDisposable
         }
 
         EnsureExecutionSchema(connection, transaction, create: version < 2);
+        if (version < 3)
+        {
+            command.CommandText = """
+                CREATE INDEX execution_runs_history_order
+                    ON execution_runs(session_id, history_revision, ordinal DESC);
+                CREATE INDEX execution_runs_terminal_order
+                    ON execution_runs(session_id, ordinal DESC) WHERE outcome IS NOT NULL;
+                PRAGMA user_version = 3;
+                """;
+            command.ExecuteNonQuery();
+        }
+
         transaction.Commit();
     }
 }

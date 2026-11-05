@@ -1,7 +1,7 @@
 # Backend development
 
-The current Core checkpoint includes session identity, durable user-Send decisions and
-fake-text execution through real SQLite. Core remains an ASP.NET-free .NET library;
+The current Core checkpoint includes session identity, durable user-Send decisions,
+fake-text execution and bounded snapshot/content reads through real SQLite. Core remains an ASP.NET-free .NET library;
 there is no runnable Server or UI yet.
 
 ## Checkpoint scope
@@ -14,7 +14,9 @@ there is no runnable Server or UI yet.
   streaming, bounded UTF-8 batches and Stop. Replacement requires cleanup and saved settlement.
 - This development increment admits one input per active run. A different busy input gets
   a durable Capacity/Stopping refusal, not a queue slot. Mid-response delivery is not implemented.
-- Stop/settlement helpers are internal. Public shutdown, observers, HTTP/UI, tool/native-context
+- Public snapshot/content reads expose committed state without starting work; cancelled reads
+  do not cancel execution. Reopened orphan runs and live persistence faults are reported as fenced.
+- Stop/settlement helpers are internal. Public shutdown, push subscriptions, HTTP/UI, tool/native-context
   fidelity and real-provider qualification remain pending. An admission receipt is not completion.
 - Normal terminal close/reopen is tested without replay. Nonterminal rows survive reopening
   and block new admission; startup interruption/recovery is **not** implemented.
@@ -23,7 +25,41 @@ At Core checkpoint `06c1c3d`, locked restore and the Release suite passed **35/3
 with no build warnings/errors.
 Coverage includes shared-client concurrent chats, exact retry/reopen, transactional rollback,
 UTF-8 batching, positive terminal evidence, held cleanup and persistence-failure fencing.
+The approved read increment passes **61/61** Release tests after locked restore, with no
+build warnings/errors. Coverage adds scalar-safe full-content paging, committed tail following,
+final output during held cleanup, reopened/faulted fences, exact recent-window boundaries,
+indexed selection over 9,000 mixed-history runs, and atomic version-2-to-3 migration/rollback.
+These are fake-client/Core checks, not browser polling, load or real-provider qualification.
 This is a Core review checkpoint, not the browser-to-Core milestone or a complete hosting API.
+
+## Read contract and incremental review order
+
+1. [SessionSnapshot.cs](../source/backend/harness/sessions/SessionSnapshot.cs) — detached records;
+   existing `RunSettlement`/`ExecutionOutcome` are public, not duplicated.
+2. [SessionBase.cs](../source/backend/harness/sessions/SessionBase.cs) — the two public read methods
+   take the existing guard; snapshots merge the live admission fence with one committed view.
+3. [SessionStore.Snapshots.cs](../source/backend/harness/storage/SessionStore.Snapshots.cs), then
+   [SessionStore.Content.cs](../source/backend/harness/storage/SessionStore.Content.cs) — bounded queries
+   in short read transactions. [SessionStore.cs](../source/backend/harness/storage/SessionStore.cs)
+   adds two indexes in schema version 3, preserving version 0/1/2 migrations.
+4. [SessionReadFlowTests.cs](../source/tests/Urd.Backend.Tests/SessionReadFlowTests.cs),
+   [RowContentTests.cs](../source/tests/Urd.Backend.Tests/RowContentTests.cs), and
+   [SessionSnapshotStorageTests.cs](../source/tests/Urd.Backend.Tests/SessionSnapshotStorageTests.cs).
+
+Snapshots return at most 60 recent current-revision messages, each preview at most 256 UTF-16
+units without splitting a scalar (under 64 KiB aggregate preview UTF-8). `HasOlderMessages`
+labels omission; older-history navigation is not implemented. Latest settlement and unsettled
+run/Stop facts are queried independently of the recent window.
+
+Start a body read at `new RowContentCursor(messageRef, 0, 0)`. Each page returns at most
+16 KiB of original UTF-8 and examines at most 16 immutable segments. Follow `Next` while
+`HasMore`; a false value means the current committed tail, not necessarily final output.
+Poll snapshots and resume from that tail only when availability changes. Segment-local byte
+offsets preserve Unicode and embedded NUL; stale revisions throw `HistoryRevisionConflictException`.
+`Truncated` means the preview did not reach the committed segment endpoint within its budget.
+`IsClosed` concerns further bytes; `FinalOutputCommitted` is a saved final marker. Neither
+means successful run settlement or finished cleanup. Continue status reads until settlement
+or a diagnosed fence. Poll scheduling/HTTP cancellation and browser rendering are not built yet.
 
 ## Review order
 

@@ -145,6 +145,12 @@ public sealed class SessionExecutionTests
                 () => session.WaitForSettlementAsync(acceptedRun).WaitAsync(Timeout));
             Assert.Equal(19, Assert.IsType<SqliteException>(failure.GetBaseException()).SqliteErrorCode);
             Assert.True(await cleaned.Task.WaitAsync(Timeout));
+            SessionSnapshot snapshot = await session.ReadSnapshotAsync();
+            Assert.True(snapshot.AdmissionFenced);
+            Assert.Equal(acceptedRun, snapshot.UnsettledRunId);
+            Assert.Null(snapshot.LastSettlement);
+            Assert.Single(snapshot.Messages, row => row.Message.Role == MessageRole.User);
+            Assert.DoesNotContain(snapshot.Messages, row => row.Message.Role == MessageRole.Assistant);
             Assert.Equal(DBNull.Value, database.Scalar("SELECT outcome FROM execution_runs;"));
             Assert.Equal(DBNull.Value, database.Scalar("SELECT outcome FROM execution_requests;"));
             Assert.Empty(ReadOutput(database));

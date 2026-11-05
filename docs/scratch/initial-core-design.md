@@ -1,13 +1,13 @@
 # Initial Core class design — internal integration reference
-2026-11-05. **The three identity bites, fourth user-Send reliability contract and fifth
-SessionExecution lifetime boundary below are owner-approved. Other API/state shape
-remains proposed, not implementation permission.**
+2026-11-05. **The three identity bites, fourth user-Send reliability contract, fifth
+SessionExecution lifetime boundary and sixth coherent read surface below are owner-approved.
+Other API/state shape remains proposed, not implementation permission.**
 Checkpoint only: Windows local browser app, deterministic request-only `IChatClient`,
 two primary chats/two clients, real SQLite, mid-response input, addressed Stop/settlement
 and restart/reconnect without replay. No approval of the whole checkpoint,
 transcript/lifecycle schema or transport.
-The identity foundation and first fake-text Send/execution increment are implemented;
-see the current implementation section below. Acceptance has real durable work behind it,
+The identity foundation, first fake-text Send/execution increment and bounded reads are
+implemented; see the current implementation section below. Acceptance has real durable work behind it,
 not a stub. Busy-input queuing, startup recovery, public hosting/lifecycle APIs and the
 broader browser checkpoint remain unimplemented.
 Present one bite inline at a time, not this whole document or a five-type pack; approval
@@ -143,6 +143,34 @@ of unpresented queue/schema/HTTP/composition contracts. Private helpers, fields 
 mechanics within this boundary are engineering choices, not additional owner-review bites.
 The owner asked to record the decision and parallelize work, expressing dissatisfaction with pace.
 
+## Sixth bite — owner-approved coherent read surface
+
+After the read proposal and explanation, the owner approved this surface on 2026-11-05.
+The decision covers these read-only members on existing `SessionBase`:
+```csharp
+public Task<SessionSnapshot> ReadSnapshotAsync(CancellationToken readCancellation = default);
+public Task<RowContentPage> ReadRowContentAsync(RowContentCursor cursor,
+    CancellationToken readCancellation = default);
+```
+Snapshots combine committed recent-message previews/revision/run facts with the live
+owner's admission fence under one guard and database snapshot. Full input/output text is
+read in bounded scalar-safe UTF-8 pages, not repeatedly copied into every snapshot.
+Following an answer must read beyond its preview automatically, without extra clicks.
+Reads start no work; cancellation only cancels the caller's guard wait, never execution.
+Final output, byte closure, durable settlement and a fenced/unsettled run remain distinct.
+
+The owner accepted **snapshot polling for the first browser increment**, rather than
+owned push subscriptions now: fewer lifetime/parser/publication mechanics, at the cost
+of repeated reads and refresh delay. Existing subscription/epoch/version and global-byte
+cursor sketches below are superseded for this increment, not additional approved APIs.
+The implementation uses flat message references and segment-local UTF-8 cursors over
+immutable batches, plus the existing settlement record/enum rather than duplicate facts.
+Private supporting queries, indexes/migration and tests are part of this approval.
+
+This does not approve UI/HTTP implementation, older-history navigation, busy-input queuing,
+startup recovery, public host shutdown or provider/native-context work. Read-path
+implementation evidence is recorded in the backend development document after verification.
+
 ## Current implementation — first fake-text Core checkpoint
 
 The owner subsequently confirmed the obvious shared-client choice and requested the actual
@@ -161,15 +189,21 @@ approved behavior, not approval of unrelated composition/hosting contracts.
 The implemented path commits an exact first decision and, for acceptance, its run in one
 transaction. It claims before requesting, persists bounded UTF-8 output, requires positive
 terminal evidence and settles only after cleanup. Retained decisions precede new admission
-checks; lookup/retry/hydration cannot restart accepted work. Schema version 2 transactionally
-migrates identity version 1 and adds only this increment's decision/run/request/output facts;
-it is not the final transcript/view/queue schema.
+checks; lookup/retry/hydration cannot restart accepted work. Schema version 2 added the
+narrow decision/run/request/output facts; version 3 adds only the indexed read paths and
+preserves migration from versions 0/1/2. This is not the final transcript/view/queue schema.
 
-Independent code reviews passed. Parent locked restore and Release build/tests passed **35/35**,
-including two canonical chats concurrently sharing one borrowed client, exact retries and
-normal terminal reopen without replay, deferred-commit/migration rollback, Unicode batching,
-held cleanup/Stop and storage-write failure fencing. Tests use disposable SQLite and fake
-clients only. See the [development/review map](../backend-development.md#review-order).
+The sixth bite adds coherent bounded snapshots and full-content pages over immutable
+input/output segments. It exposes committed availability, final bytes and settlement
+separately; read cancellation never owns model cancellation. No subscriptions or HTTP
+state were introduced. Snapshot previews and body slices stay bounded before materialization.
+
+Independent component and integration reviews passed. Parent locked restore and Release
+build/tests pass **61/61**, with no build warnings/errors. Tests cover shared-client chats,
+exact retries/reopen, commit/migration rollback, Unicode/NUL paging, held cleanup after
+final output, persisted and live fences, and indexed recent-window selection over large
+mixed histories. Tests use disposable SQLite and fake clients only; no browser/polling
+performance claim. See the [read review map](../backend-development.md#read-contract-and-incremental-review-order).
 
 This staging policy permits one input per active run and durably refuses a different busy
 input; it does not implement the approved eventual mid-response delivery behavior. Stop/wait

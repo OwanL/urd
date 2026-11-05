@@ -175,7 +175,7 @@ public sealed class InputReceiptTests
             Assert.Null(store.ReadInputReceipt(sessionId, Guid.NewGuid()));
         }
 
-        Assert.Equal(2L, database.Scalar("PRAGMA user_version;"));
+        Assert.Equal(3L, database.Scalar("PRAGMA user_version;"));
         using SessionStore reopened = SessionStore.Open(database.Path);
         Assert.Equal(7L, reopened.ReadSession(sessionId)!.HistoryRevision);
     }

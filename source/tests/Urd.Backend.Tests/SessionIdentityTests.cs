@@ -25,7 +25,7 @@ public sealed class SessionIdentityTests
             Assert.Equal(created.Id, store.ReadSession(created.Id)!.Id);
         }
 
-        Assert.Equal(2L, database.Scalar("PRAGMA user_version;"));
+        Assert.Equal(3L, database.Scalar("PRAGMA user_version;"));
         Assert.Equal("wal", database.Scalar("PRAGMA journal_mode;"));
         using SessionStore reopened = SessionStore.Open(database.Path);
         var reopenedManager = new SessionManager(reopened, client);
@@ -133,14 +133,14 @@ public sealed class SessionIdentityTests
             store.CreatePrimary(Guid.NewGuid());
         }
 
-        database.Execute("PRAGMA user_version = 3;");
+        database.Execute("PRAGMA user_version = 4;");
         Assert.Throws<NotSupportedException>(() => SessionStore.Open(database.Path));
         using (FileStream file = File.Open(database.Path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
         {
             Assert.True(file.Length > 0);
         }
 
-        Assert.Equal(3L, database.Scalar("PRAGMA user_version;"));
+        Assert.Equal(4L, database.Scalar("PRAGMA user_version;"));
         Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM sessions;"));
     }
 

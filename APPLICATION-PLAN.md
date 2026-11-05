@@ -161,15 +161,18 @@ code is authorized merely by writing these proposals.
 
 ### Near-term sequence — each new operation still needs its own approval
 
-The identity foundation and first fake-text Core Send/execution increment are implemented;
-prioritize a working integrated path, not more broad technology comparisons or a larger
-complete specification:
+The identity foundation, first fake-text Core Send/execution increment and approved bounded
+read surface are implemented. Prioritize a working integrated path, not more broad technology
+comparisons or a larger complete specification:
 1. The Core checkpoint now commits input decisions/run association, streams through a
    borrowed client and saves terminal state after cleanup. Two chats share a client without
    serializing model work; retained acceptance does not replay after normal reopen.
+   Coherent snapshots and full-content pages now expose committed state without replay;
+   final output remains distinct from settled work. The owner selected snapshot polling
+   for the first browser increment; browser wiring itself is not implemented yet.
    This staging increment refuses distinct busy input rather than queuing it; startup
-   recovery and public shutdown/observer contracts are still pending. See the
-   [backend review map](docs/backend-development.md#review-order) before expanding it.
+   recovery, public shutdown and push subscriptions remain pending. See the
+   [read review map](docs/backend-development.md#read-contract-and-incremental-review-order) before expanding it.
    Keep independent Core/storage and UI/hosting/build work parallel with disjoint ownership;
    routine dependency wiring is not another approval gate. This is not whole-Core approval.
 2. Order the necessary small Core and hosting/UI bites toward one built browser → Core →

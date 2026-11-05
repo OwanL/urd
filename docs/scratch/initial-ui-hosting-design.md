@@ -1,5 +1,14 @@
 # Initial UI / hosting design — owner review proposal
-2026-11-05. **NEW proposed code shapes; no implementation approval.**
+2026-11-05. **UI/hosting code shapes remain proposed.**
+
+**Approved read-boundary update:** the owner approved Core snapshot/content reads and
+snapshot polling for the first browser increment; see the sixth bite in the
+[Core record](initial-core-design.md#sixth-bite--owner-approved-coherent-read-surface).
+The earlier SSE/subscription/epoch-version and global-byte cursor sketches below are
+superseded for that increment, not extra approved APIs. Use the actual snapshot plus
+segment-local content cursor contract when implementing the browser; keep automatic
+bounded follow beyond previews, coherent revisions and independent work lifetimes.
+Other UI/hosting operations and implementation still require their scoped review.
 Checkpoint: built Preact UI + ASP.NET server, two primary chats/two browsers,
 deterministic request-only `IChatClient`, real SQLite, mid-response input, Stop,
 history/reconnect/restart without replay. No providers/tools, LAN or desktop scaffold.

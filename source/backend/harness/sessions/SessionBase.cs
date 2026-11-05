@@ -43,6 +43,37 @@ public abstract class SessionBase
         }
     }
 
+    public async Task<SessionSnapshot> ReadSnapshotAsync(CancellationToken readCancellation = default)
+    {
+        await _gate.WaitAsync(readCancellation).ConfigureAwait(false);
+        try
+        {
+            StoredSessionSnapshot stored = _store.ReadSnapshot(Id);
+            bool fenced = !_accepting || stored.HistoryRevision != HistoryRevision
+                || (stored.UnsettledRunId is { } runId && _execution?.RunId != runId);
+            return new(Id, stored.HistoryRevision, fenced, stored.UnsettledRunId,
+                stored.StopRequested, stored.LastSettlement, stored.Messages, stored.HasOlderMessages);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<RowContentPage> ReadRowContentAsync(
+        RowContentCursor cursor, CancellationToken readCancellation = default)
+    {
+        await _gate.WaitAsync(readCancellation).ConfigureAwait(false);
+        try
+        {
+            return _store.ReadRowContent(Id, cursor);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
     private protected async Task<InputReceipt> AdmitInputAsync(InputCommand command)
     {
         TaskCompletionSource? start = null;

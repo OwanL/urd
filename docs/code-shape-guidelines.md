@@ -31,6 +31,19 @@ judgment rather than escalating routine standards questions to the owner.
 
 ## Naming and discoverability
 
+- Read operation names at their call sites: identify the action and its subject.
+  The receiver supplies context, not a missing purpose. A reader should not need to
+  open a method body to discover what is submitted, recorded, stopped or returned.
+  Do not lengthen names that are already unambiguous in context.
+- Names must describe the actual effect and completion guarantee. Submitting input
+  is not accepting it; acceptance is not successful execution; saving final text is
+  not finishing cleanup. Keep these distinctions visible without encoding the whole
+  contract in a method name.
+- Name flags and intermediate values for the facts they represent, including units
+  where relevant. Do not use one label for different lifecycle states, or hide a
+  semantic mismatch behind a friendlier name. Important conditions should read from
+  named facts rather than unexplained numeric reader positions or nested ternaries;
+  keep decision priority and transaction boundaries visible.
 - Name data types for the values or facts they represent, rather than phrases that
   read as instructions. Operations belong in method names. A cohesive record is
   justified by keeping related data together; unclear naming alone is not a reason
@@ -69,7 +82,9 @@ members/signatures inline, a short reason and the architectural choice at hand. 
 for the owner's response before presenting the next bite. Larger workstream drafts
 are internal references, not required reading or whole-document approval requests.
 Internally check lifetimes, state/dependency ownership, mutation/persistence boundaries
-and concrete flows. Another agent reviews the proposed design for correctness, cohesion, missing
+and concrete flows. Review readability from callers through ordinary and failure paths;
+passing tests does not establish that a new reader can understand and safely change the code.
+Another agent reviews the proposed design for correctness, cohesion, missing
 operations and unnecessary abstractions; the author fixes supported issues. The
 coordinator checks integration before presenting the resulting code/API shape to the
 owner. Do not expose unreviewed drafts as ready for approval or ask the owner to audit

@@ -1,16 +1,16 @@
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.AI;
+using Urd.Backend.Tests.Support;
 using Urd.Core.Execution;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
 using Xunit;
+using static Urd.Backend.Tests.Support.TestAsync;
 
-namespace Urd.Backend.Tests;
+namespace Urd.Backend.Tests.Sessions;
 
 public sealed class SessionConcurrencyTests
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
-
     [Fact]
     public async Task ConcurrentExactSubmissionsShareOneDurableReceiptRunAndModelRequest()
     {
@@ -41,10 +41,10 @@ public sealed class SessionConcurrencyTests
         })).ToArray();
         try
         {
-            await ready.Task.WaitAsync(Timeout);
+            await ready.Task.WaitAsync(TestTimeout);
             start.TrySetResult();
-            InputReceipt[] receipts = await Task.WhenAll(submissions).WaitAsync(Timeout);
-            await modelEntered.Task.WaitAsync(Timeout);
+            InputReceipt[] receipts = await Task.WhenAll(submissions).WaitAsync(TestTimeout);
+            await modelEntered.Task.WaitAsync(TestTimeout);
 
             Assert.Equal(InputDecision.Accepted, receipts[0].Decision);
             Guid runId = Assert.IsType<Guid>(receipts[0].RunId);
@@ -58,7 +58,7 @@ public sealed class SessionConcurrencyTests
 
             modelRelease.TrySetResult();
             ExecutionResult[] settlements = await Task.WhenAll(receipts.Select(receipt =>
-                session.WaitForSettlementAsync(receipt.RunId!.Value))).WaitAsync(Timeout);
+                session.WaitForSettlementAsync(receipt.RunId!.Value))).WaitAsync(TestTimeout);
             Assert.Equal(settlements[0], settlements[1]);
             Assert.Equal(ExecutionOutcome.Completed, settlements[0].Outcome);
             Assert.Equal(1, client.Calls);
@@ -69,12 +69,12 @@ public sealed class SessionConcurrencyTests
             start.TrySetResult();
             modelRelease.TrySetResult();
             // Join all callers before discovering runs, then drain owned work before disposal.
-            InputReceipt[] receipts = await Task.WhenAll(submissions).WaitAsync(Timeout);
+            InputReceipt[] receipts = await Task.WhenAll(submissions).WaitAsync(TestTimeout);
             foreach (Guid runId in receipts.Where(receipt => receipt.RunId.HasValue)
                          .Select(receipt => receipt.RunId!.Value).Distinct())
             {
                 await session.RequestStopAsync(runId);
-                await session.WaitForSettlementAsync(runId).WaitAsync(Timeout);
+                await session.WaitForSettlementAsync(runId).WaitAsync(TestTimeout);
             }
             store.Dispose();
             client.Dispose();
@@ -110,12 +110,12 @@ public sealed class SessionConcurrencyTests
             ownedRun = receipt.RunId;
             Assert.Equal(InputDecision.Accepted, receipt.Decision);
             Guid runId = Assert.IsType<Guid>(ownedRun);
-            await modelEntered.Task.WaitAsync(Timeout);
+            await modelEntered.Task.WaitAsync(TestTimeout);
 
             Task<ExecutionResult> cancelledWait = session.WaitForSettlementAsync(runId, waitCancellation.Token);
             Assert.False(cancelledWait.IsCompleted);
             waitCancellation.Cancel();
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelledWait.WaitAsync(Timeout));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelledWait.WaitAsync(TestTimeout));
             Assert.False(modelToken.IsCancellationRequested);
             Assert.False(session.WaitForSettlementAsync(runId).IsCompleted);
             Assert.Equal(0L, database.Scalar("SELECT stopping FROM execution_runs;"));
@@ -124,7 +124,7 @@ public sealed class SessionConcurrencyTests
 
             modelRelease.TrySetResult();
             Assert.Equal(ExecutionOutcome.Completed,
-                (await session.WaitForSettlementAsync(runId).WaitAsync(Timeout)).Outcome);
+                (await session.WaitForSettlementAsync(runId).WaitAsync(TestTimeout)).Outcome);
             Assert.Equal((long)ExecutionOutcome.Completed, database.Scalar("SELECT outcome FROM execution_runs;"));
             Assert.Equal((long)ExecutionOutcome.Completed, database.Scalar("SELECT outcome FROM execution_requests;"));
             Assert.Equal("completed after release",
@@ -138,13 +138,11 @@ public sealed class SessionConcurrencyTests
             if (ownedRun is { } runId)
             {
                 await session.RequestStopAsync(runId);
-                await session.WaitForSettlementAsync(runId).WaitAsync(Timeout);
+                await session.WaitForSettlementAsync(runId).WaitAsync(TestTimeout);
             }
             store.Dispose();
             client.Dispose();
             database.Dispose();
         }
     }
-
-    private static TaskCompletionSource Signal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
 }

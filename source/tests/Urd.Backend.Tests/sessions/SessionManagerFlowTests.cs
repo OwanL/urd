@@ -1,11 +1,12 @@
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.AI;
+using Urd.Backend.Tests.Support;
 using Urd.Core.Execution;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
 using Xunit;
 
-namespace Urd.Backend.Tests;
+namespace Urd.Backend.Tests.Sessions;
 
 public sealed class SessionManagerFlowTests
 {

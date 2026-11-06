@@ -1,7 +1,8 @@
 using Microsoft.Data.Sqlite;
 
-namespace Urd.Backend.Tests;
+namespace Urd.Backend.Tests.Support;
 
+// Isolated SQLite file in a temp directory, with raw SQL helpers for test setup and checks.
 internal sealed class TemporaryDatabase : IDisposable
 {
     private readonly string _directory = System.IO.Path.Combine(

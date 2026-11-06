@@ -55,9 +55,9 @@ This is a Core review checkpoint, not the browser-to-Core milestone or a complet
    [MessageContentReader.cs](../source/backend/harness/storage/MessageContentReader.cs) — bounded queries
    in short read transactions. [DatabaseSchema.cs](../source/backend/harness/storage/DatabaseSchema.cs)
    adds two indexes in schema version 3, preserving version 0/1/2 migrations.
-4. [SessionReadFlowTests.cs](../source/tests/Urd.Backend.Tests/SessionReadFlowTests.cs),
-   [MessageContentTests.cs](../source/tests/Urd.Backend.Tests/MessageContentTests.cs), and
-   [SessionSnapshotStorageTests.cs](../source/tests/Urd.Backend.Tests/SessionSnapshotStorageTests.cs).
+4. [SessionReadFlowTests.cs](../source/tests/Urd.Backend.Tests/sessions/SessionReadFlowTests.cs),
+   [MessageContentTests.cs](../source/tests/Urd.Backend.Tests/storage/MessageContentTests.cs), and
+   [SessionSnapshotStorageTests.cs](../source/tests/Urd.Backend.Tests/storage/SessionSnapshotStorageTests.cs).
 
 Snapshots return at most 60 recent current-revision messages, each preview at most 256 UTF-16
 units without splitting a scalar (under 64 KiB aggregate preview UTF-8). `HasOlderMessages`
@@ -98,14 +98,17 @@ small data records alongside their owners.
    [InputStorage.cs](../source/backend/harness/storage/InputStorage.cs) (receipts),
    [RunStorage.cs](../source/backend/harness/storage/RunStorage.cs) and
    [OutputStorage.cs](../source/backend/harness/storage/OutputStorage.cs) — atomic run/request/output facts.
-5. [SessionManagerFlowTests.cs](../source/tests/Urd.Backend.Tests/SessionManagerFlowTests.cs),
-   [SessionConcurrencyTests.cs](../source/tests/Urd.Backend.Tests/SessionConcurrencyTests.cs) and
-   [SessionExecutionTests.cs](../source/tests/Urd.Backend.Tests/SessionExecutionTests.cs) — whole Core flow,
+5. [SessionManagerFlowTests.cs](../source/tests/Urd.Backend.Tests/sessions/SessionManagerFlowTests.cs),
+   [SessionConcurrencyTests.cs](../source/tests/Urd.Backend.Tests/sessions/SessionConcurrencyTests.cs),
+   [LlmResponseWriterTests.cs](../source/tests/Urd.Backend.Tests/execution/LlmResponseWriterTests.cs) and
+   [SessionExecutionTests.cs](../source/tests/Urd.Backend.Tests/execution/SessionExecutionTests.cs) — whole Core flow,
    concurrent retries, cancelled waiters and lifecycle failures.
-6. [InputReceiptTests.cs](../source/tests/Urd.Backend.Tests/InputReceiptTests.cs),
-   [ExecutionStorageTests.cs](../source/tests/Urd.Backend.Tests/ExecutionStorageTests.cs) and
-   [SessionIdentityTests.cs](../source/tests/Urd.Backend.Tests/SessionIdentityTests.cs) — storage/registry invariants;
-   [TemporaryDatabase.cs](../source/tests/Urd.Backend.Tests/TemporaryDatabase.cs) supplies isolated test data.
+6. [InputReceiptTests.cs](../source/tests/Urd.Backend.Tests/storage/InputReceiptTests.cs),
+   [ExecutionStorageTests.cs](../source/tests/Urd.Backend.Tests/storage/ExecutionStorageTests.cs) and
+   [SessionIdentityTests.cs](../source/tests/Urd.Backend.Tests/sessions/SessionIdentityTests.cs) — storage/registry invariants;
+   [TemporaryDatabase.cs](../source/tests/Urd.Backend.Tests/support/TemporaryDatabase.cs) supplies isolated test data.
+   `support/` also holds the scripted model client, response scripts and execution fixture;
+   test folders mirror the source folders.
 
 ## Prerequisite and commands
 

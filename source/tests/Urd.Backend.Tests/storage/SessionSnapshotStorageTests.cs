@@ -1,11 +1,12 @@
 using System.Text;
 using Microsoft.Data.Sqlite;
+using Urd.Backend.Tests.Support;
 using Urd.Core.Execution;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
 using Xunit;
 
-namespace Urd.Backend.Tests;
+namespace Urd.Backend.Tests.Storage;
 
 public sealed class SessionSnapshotStorageTests
 {

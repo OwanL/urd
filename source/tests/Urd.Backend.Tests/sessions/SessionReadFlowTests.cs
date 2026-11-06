@@ -1,17 +1,17 @@
 using System.Runtime.CompilerServices;
 using System.Text;
 using Microsoft.Extensions.AI;
+using Urd.Backend.Tests.Support;
 using Urd.Core.Execution;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
 using Xunit;
+using static Urd.Backend.Tests.Support.TestAsync;
 
-namespace Urd.Backend.Tests;
+namespace Urd.Backend.Tests.Sessions;
 
 public sealed class SessionReadFlowTests
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
-
     [Fact]
     public async Task ReadsFollowFullCommittedContentWithoutOwningWorkOrConfusingFinalTextWithSettlement()
     {
@@ -48,7 +48,7 @@ public sealed class SessionReadFlowTests
             InputReceipt receipt = await session.SubmitUserInputAsync(new(Guid.NewGuid(), 0, input));
             ownedRun = receipt.RunId;
             Guid runId = Assert.IsType<Guid>(ownedRun);
-            await sourceWaiting.Task.WaitAsync(Timeout);
+            await sourceWaiting.Task.WaitAsync(TestTimeout);
             SessionSnapshot initial = await WaitForOutputAsync(session);
             Assert.Equal(runId, initial.UnsettledRunId);
             Assert.False(initial.AdmissionFenced);
@@ -78,7 +78,7 @@ public sealed class SessionReadFlowTests
             Assert.Equal(1, client.Calls);
 
             sourceRelease.TrySetResult();
-            await cleanupEntered.Task.WaitAsync(Timeout);
+            await cleanupEntered.Task.WaitAsync(TestTimeout);
             SessionSnapshot held = await session.ReadSnapshotAsync();
             MessagePreview finalText = Assert.Single(held.Messages, row => row.Message.Role == MessageRole.Assistant);
             Assert.Equal(assistant.Message, finalText.Message);
@@ -95,7 +95,7 @@ public sealed class SessionReadFlowTests
             Assert.True(remainder.Last.FinalOutputCommitted);
 
             cleanupRelease.TrySetResult();
-            await session.WaitForSettlementAsync(runId).WaitAsync(Timeout);
+            await session.WaitForSettlementAsync(runId).WaitAsync(TestTimeout);
             SessionSnapshot settled = await session.ReadSnapshotAsync();
             Assert.Null(settled.UnsettledRunId);
             Assert.False(settled.AdmissionFenced);
@@ -111,7 +111,7 @@ public sealed class SessionReadFlowTests
             if (ownedRun is { } runId)
             {
                 await session.RequestStopAsync(runId);
-                await session.WaitForSettlementAsync(runId).WaitAsync(Timeout);
+                await session.WaitForSettlementAsync(runId).WaitAsync(TestTimeout);
             }
             store.Dispose();
             client.Dispose();
@@ -163,7 +163,7 @@ public sealed class SessionReadFlowTests
     private static async Task<(string Text, MessageContentPage Last)> ReadAvailableAsync(
         PrimarySession session, MessageContentCursor cursor)
     {
-        using var deadline = new CancellationTokenSource(Timeout);
+        using var deadline = new CancellationTokenSource(TestTimeout);
         var text = new StringBuilder();
         MessageContentPage page;
         do
@@ -181,7 +181,7 @@ public sealed class SessionReadFlowTests
 
     private static async Task<SessionSnapshot> WaitForOutputAsync(PrimarySession session)
     {
-        using var deadline = new CancellationTokenSource(Timeout);
+        using var deadline = new CancellationTokenSource(TestTimeout);
         while (true)
         {
             SessionSnapshot snapshot = await session.ReadSnapshotAsync(deadline.Token);
@@ -200,7 +200,6 @@ public sealed class SessionReadFlowTests
     }
 
     private static ChatResponseUpdate Text(string text) => new() { Contents = [new TextContent(text)] };
-    private static TaskCompletionSource Signal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private sealed class HeldDisposal(IAsyncEnumerable<ChatResponseUpdate> source,
         TaskCompletionSource entered, Task release) : IAsyncEnumerable<ChatResponseUpdate>

@@ -50,16 +50,16 @@ public sealed class ExecutionStorageTests {
         using (SessionStore store = SessionStore.Open(database.Path)) {
             store.Sessions.CreatePrimary(session);
             receipt = store.Inputs.Admit(session, 0, input, true, run).Receipt;
-            store.Runs.RequestStop(session, run);
-            Assert.Equal(ExecutionOutcome.Cancelled, store.Runs.TrySettle(session, run, ExecutionOutcome.Completed)!.Outcome);
+            Assert.Equal(ExecutionOutcome.Failed, store.Runs.TrySettle(session, run, ExecutionOutcome.Failed)!.Outcome);
         }
 
-        database.Execute("UPDATE sessions SET history_revision = 7;");
         using SessionStore reopened = SessionStore.Open(database.Path);
+        // Settlement alone must prevent a claim: no Stop, revision mismatch or prior request can mask it.
+        Assert.Null(reopened.Runs.ClaimNextRequest(session, run, 0));
+        database.Execute("UPDATE sessions SET history_revision = 7;");
         var retry = reopened.Inputs.Admit(session, 7, input, false, Guid.Empty);
         Assert.Equal(receipt, retry.Receipt);
         Assert.False(retry.NewlyAccepted);
-        Assert.Null(reopened.Runs.ClaimNextRequest(session, run, 7));
         Assert.Throws<InvalidOperationException>(() => reopened.Inputs.Admit(session, 7, input with { Text = "changed" }, false, Guid.NewGuid()));
         Assert.Throws<InvalidOperationException>(() => reopened.Inputs.Admit(session, 7, input with { ExpectedHistoryRevision = 7 }, false, Guid.NewGuid()));
         Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM execution_runs;"));

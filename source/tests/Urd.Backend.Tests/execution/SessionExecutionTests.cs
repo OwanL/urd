@@ -267,8 +267,9 @@ public sealed class SessionExecutionTests {
                 try {
                     await session.WaitForSettlementAsync(acceptedRun).WaitAsync(TestTimeout);
                 } catch (Exception failure) when (failure is not TimeoutException &&
-                      FlattenFailures(failure).Any(error => error.Message == EnumeratorDisposalFailureMessage)) {
-                    // Expected injected cleanup failure after the enumerator has exited.
+                      FlattenFailures(failure).All(error => error is SqliteException { SqliteErrorCode: 19 } ||
+                          error.Message == CancellationCallbackFailureMessage || error.Message == EnumeratorDisposalFailureMessage)) {
+                    // Known injected teardown failures must not hide an earlier assertion failure.
                 }
             }
 

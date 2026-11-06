@@ -7,6 +7,7 @@ using static Urd.Backend.Tests.Support.TestAsync;
 
 namespace Urd.Backend.Tests.Storage;
 
+// Durable input decisions: exact retries, conflicting originals, rollback and version-one migration.
 public sealed class InputReceiptTests {
     [Fact]
     public void RefusalSurvivesLostReplyReopenAndChangedConditions() {

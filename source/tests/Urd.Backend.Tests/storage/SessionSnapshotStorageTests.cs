@@ -8,6 +8,7 @@ using Xunit;
 
 namespace Urd.Backend.Tests.Storage;
 
+// Snapshot projection: bounded indexed window, lifecycle facts and version-two migration.
 public sealed class SessionSnapshotStorageTests {
     [Fact]
     public void EmptyMissingAndDisposedReadsDoNotInventState() {

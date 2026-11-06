@@ -27,8 +27,8 @@ public abstract class SessionBase {
 
     internal long HistoryRevision { get; }
 
-    public async Task<InputReceipt?> GetInputReceiptAsync(Guid inputId) {
-        using var held = await _lock.AcquireAsync();
+    public async Task<InputReceipt?> GetInputReceiptAsync(Guid inputId, CancellationToken cancellation = default) {
+        using var held = await _lock.AcquireAsync(cancellation);
         return _store.Inputs.ReadReceipt(Id, inputId);
     }
 

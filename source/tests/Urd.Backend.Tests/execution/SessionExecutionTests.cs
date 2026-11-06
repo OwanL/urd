@@ -342,7 +342,7 @@ public sealed class SessionExecutionTests {
         token.Register(() => throw new InvalidOperationException(CancellationCallbackFailureMessage));
         try {
             yield return Text(new string('x', 16 * 1024));
-            await Task.Delay(System.Threading.Timeout.InfiniteTimeSpan, token);
+            await Task.Delay(Timeout.InfiniteTimeSpan, token);
         } finally {
             disposed.TrySetResult();
 #pragma warning disable CA2219 // Deliberately simulate a provider whose enumerator disposal throws.
@@ -355,7 +355,7 @@ public sealed class SessionExecutionTests {
         [EnumeratorCancellation] CancellationToken token) {
         try {
             yield return Text("working");
-            await Task.Delay(System.Threading.Timeout.InfiniteTimeSpan, token);
+            await Task.Delay(Timeout.InfiniteTimeSpan, token);
         } finally {
             cleaned.TrySetResult(token.IsCancellationRequested);
         }
@@ -435,7 +435,7 @@ public sealed class SessionExecutionTests {
         try {
             yield return Text("working");
             waiting.TrySetResult();
-            await Task.Delay(System.Threading.Timeout.InfiniteTimeSpan, token);
+            await Task.Delay(Timeout.InfiniteTimeSpan, token);
         } finally {
             cleanupEntered.TrySetResult();
             await cleanupRelease.Task;

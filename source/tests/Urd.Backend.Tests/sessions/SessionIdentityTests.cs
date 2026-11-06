@@ -7,6 +7,7 @@ using static Urd.Backend.Tests.Support.TestAsync;
 
 namespace Urd.Backend.Tests.Sessions;
 
+// Durable session identity: reopen, canonical handles, schema refusal and disposal errors.
 public sealed class SessionIdentityTests {
     private static ScriptedChatClient IdentityClient()
         => new(_ => throw new InvalidOperationException("Identity operations must not start a request."));

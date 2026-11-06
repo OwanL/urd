@@ -7,21 +7,21 @@ internal sealed class TemporaryDatabase : IDisposable {
     private readonly string _directory = System.IO.Path.Combine(
         System.IO.Path.GetTempPath(), $"urd-identity-tests-{Guid.NewGuid():N}");
 
-    public TemporaryDatabase() {
+    internal TemporaryDatabase() {
         Directory.CreateDirectory(_directory);
         Path = System.IO.Path.Combine(_directory, "urd.sqlite");
     }
 
-    public string Path { get; }
+    internal string Path { get; }
 
-    public void Execute(string sql) {
+    internal void Execute(string sql) {
         using SqliteConnection connection = OpenConnection();
         using SqliteCommand command = connection.CreateCommand();
         command.CommandText = sql;
         command.ExecuteNonQuery();
     }
 
-    public object? Scalar(string sql) {
+    internal object? Scalar(string sql) {
         using SqliteConnection connection = OpenConnection();
         using SqliteCommand command = connection.CreateCommand();
         command.CommandText = sql;

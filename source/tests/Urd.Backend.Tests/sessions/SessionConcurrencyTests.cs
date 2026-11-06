@@ -9,6 +9,7 @@ using static Urd.Backend.Tests.Support.TestAsync;
 
 namespace Urd.Backend.Tests.Sessions;
 
+// Concurrent session access: cancelled lock waiters, shared exact retries and isolated waits.
 public sealed class SessionConcurrencyTests {
     [Fact]
     public async Task CancelledLockWaiterDoesNotReleaseAnotherOwnersLock() {

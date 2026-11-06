@@ -9,6 +9,7 @@ using static Urd.Backend.Tests.Support.TestAsync;
 
 namespace Urd.Backend.Tests.Sessions;
 
+// Two-session manager flow through reopen: one shared client, receipts and retained retries.
 public sealed class SessionManagerFlowTests {
     [Fact]
     public async Task SharedClientStreamsAcrossCanonicalChatsAndRetainedRetriesNeverRestartWork() {

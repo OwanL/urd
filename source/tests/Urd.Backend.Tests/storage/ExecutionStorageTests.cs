@@ -8,6 +8,7 @@ using Xunit;
 
 namespace Urd.Backend.Tests.Storage;
 
+// Transactional run and output gates: commit rollback, revision fences, retries and settlement.
 public sealed class ExecutionStorageTests {
     [Fact]
     public void AcceptanceAndRunRollbackTogetherOnCommitFailure() {

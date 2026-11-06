@@ -11,6 +11,7 @@ using static Urd.Backend.Tests.Support.TestAsync;
 
 namespace Urd.Backend.Tests.Sessions;
 
+// Committed snapshot and content reads during held execution and from reopened orphan runs.
 public sealed class SessionReadFlowTests {
     [Fact]
     public async Task ReadsFollowFullCommittedContentWithoutOwningWorkOrConfusingFinalTextWithSettlement() {

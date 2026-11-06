@@ -7,6 +7,7 @@ using Xunit;
 
 namespace Urd.Backend.Tests.Storage;
 
+// Bounded scalar-safe content paging: cursors, empty segments and completion facts.
 public sealed class MessageContentTests {
     [Fact]
     public void FullInputAndMultiPageOutputPreserveUnicodeNulAndScalarBoundaries() {

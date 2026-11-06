@@ -128,9 +128,8 @@ public sealed class SessionExecutionTests {
             // Reach saved request completion, not merely the iterator's finally block,
             // while the run still owns the blocked cancellation callback.
             using (var deadline = new CancellationTokenSource(TestTimeout)) {
-                while (fixture.Database.Scalar("SELECT outcome FROM execution_requests;") is DBNull) {
+                while (fixture.Database.Scalar("SELECT outcome FROM execution_requests;") is DBNull)
                     await Task.Delay(10, deadline.Token);
-                }
             }
 
             secondStop = session.RequestStopAsync(runId);
@@ -442,13 +441,11 @@ public sealed class SessionExecutionTests {
     }
 
     private static IEnumerable<Exception> FlattenFailures(Exception failure) {
-        if (failure is AggregateException aggregate) {
+        if (failure is AggregateException aggregate)
             return aggregate.InnerExceptions.SelectMany(FlattenFailures);
-        }
 
-        if (failure.InnerException is { } inner) {
+        if (failure.InnerException is { } inner)
             return FlattenFailures(inner);
-        }
 
         return [failure];
     }

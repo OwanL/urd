@@ -62,9 +62,8 @@ internal sealed class LlmResponseWriter {
             ? Rune.TryCreate(high, codeUnit, out character)
             : Rune.TryCreate(codeUnit, out character);
         _pendingHighSurrogate = null;
-        if (!valid) {
+        if (!valid)
             throw new InvalidDataException("The LLM response contains invalid Unicode.");
-        }
 
         return true;
     }
@@ -76,14 +75,12 @@ internal sealed class LlmResponseWriter {
     }
 
     private async Task SaveChunkAsync(bool isFinal) {
-        if (isFinal && _pendingHighSurrogate is not null) {
+        if (isFinal && _pendingHighSurrogate is not null)
             throw new InvalidDataException("The LLM response ends with an incomplete Unicode scalar.");
-        }
 
         FlushDelay = null;
-        if (_chunkUtf8Bytes == 0 && !isFinal) {
+        if (_chunkUtf8Bytes == 0 && !isFinal)
             return;
-        }
 
         await _saveChunkAsync(new LlmResponseChunk(_requestId, _responseId, _chunkIndex, _chunk.ToString(), isFinal));
         _chunkIndex++;

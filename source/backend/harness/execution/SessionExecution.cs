@@ -34,9 +34,8 @@ internal sealed class SessionExecution : IDisposable {
     internal async Task<ExecutionOutcome> RunAsync() {
         LlmRequest? request = await _session.ClaimNextRequestAsync(RunId);
         if (request is null) {
-            if (_stop.IsCancellationRequested) {
+            if (_stop.IsCancellationRequested)
                 return ExecutionOutcome.Cancelled;
-            }
 
             throw new InvalidOperationException("The run has no request to send and was not stopped.");
         }
@@ -73,18 +72,16 @@ internal sealed class SessionExecution : IDisposable {
 
                 bool hasUpdate = await pendingRead;
                 pendingRead = null;
-                if (!hasUpdate) {
+                if (!hasUpdate)
                     break;
-                }
 
                 stop.ThrowIfCancellationRequested();
                 stopReceived = await WriteUpdateAsync(updates.Current, writer, stopReceived);
             }
 
             stop.ThrowIfCancellationRequested();
-            if (!stopReceived) {
+            if (!stopReceived)
                 throw new InvalidDataException("The response ended without a stop finish reason.");
-            }
 
             await writer.FinishResponseAsync();
         } catch (Exception exception) {
@@ -96,9 +93,8 @@ internal sealed class SessionExecution : IDisposable {
     }
 
     private static async Task<bool> IsFlushDueFirstAsync(Task? flushDelay, Task<bool> pendingRead) {
-        if (flushDelay is null) {
+        if (flushDelay is null)
             return false;
-        }
 
         return flushDelay.IsCompleted || await Task.WhenAny(pendingRead, flushDelay) == flushDelay;
     }
@@ -107,37 +103,31 @@ internal sealed class SessionExecution : IDisposable {
     private static async Task<bool> WriteUpdateAsync(ChatResponseUpdate update,
         LlmResponseWriter writer, bool stopReceived) {
         foreach (AIContent content in update.Contents) {
-            if (content is UsageContent) {
+            if (content is UsageContent)
                 continue;
-            }
 
-            if (content is not TextContent text) {
+            if (content is not TextContent text)
                 throw new InvalidDataException("The response contained content other than text.");
-            }
 
-            if (stopReceived && text.Text.Length != 0) {
+            if (stopReceived && text.Text.Length != 0)
                 throw new InvalidDataException("The response contained text after its stop finish reason.");
-            }
 
             await writer.AppendTextAsync(text.Text);
         }
 
-        if (update.FinishReason is null) {
+        if (update.FinishReason is null)
             return stopReceived;
-        }
 
-        if (update.FinishReason != ChatFinishReason.Stop) {
+        if (update.FinishReason != ChatFinishReason.Stop)
             throw new InvalidDataException("The response finished without a stop finish reason.");
-        }
 
         return true;
     }
 
     private LlmRequestOutcome ToRequestOutcome(Guid requestId, Exception? failure) {
         // A failed save is a session failure, not a failed model request.
-        if (failure is OutputSaveException) {
+        if (failure is OutputSaveException)
             ExceptionDispatchInfo.Throw(failure);
-        }
 
         bool stopped = _stop.IsCancellationRequested;
         ExecutionOutcome outcome = failure switch {
@@ -159,9 +149,8 @@ internal sealed class SessionExecution : IDisposable {
             throw new OutputSaveException(exception);
         }
 
-        if (!saved) {
+        if (!saved)
             throw new OutputRejectedException();
-        }
     }
 
     // Attempts every step even when an earlier one fails. A cleanup failure leaves the
@@ -176,9 +165,8 @@ internal sealed class SessionExecution : IDisposable {
         }
 
         Exception? updatesFailure = updates is null ? null : await CaptureFailureAsync(updates.DisposeAsync);
-        if (cancelFailure is null && updatesFailure is null) {
+        if (cancelFailure is null && updatesFailure is null)
             return;
-        }
 
         Exception?[] failures = [requestFailure, cancelFailure, updatesFailure];
         throw new AggregateException("The request could not be cleaned up.", failures.OfType<Exception>());

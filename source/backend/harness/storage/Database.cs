@@ -15,9 +15,8 @@ internal sealed class Database(SqliteConnection connection) : IDisposable {
 
     internal T WithoutTransaction<T>(Func<T> operation) {
         lock (_gate) {
-            if (_disposed) {
+            if (_disposed)
                 throw new ObjectDisposedException(typeof(SessionStore).FullName);
-            }
 
             return operation();
         }
@@ -37,9 +36,8 @@ internal sealed class Database(SqliteConnection connection) : IDisposable {
 
     public void Dispose() {
         lock (_gate) {
-            if (_disposed) {
+            if (_disposed)
                 return;
-            }
 
             connection.Dispose();
             _disposed = true;

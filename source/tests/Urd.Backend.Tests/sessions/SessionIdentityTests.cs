@@ -78,9 +78,8 @@ public sealed class SessionIdentityTests {
         Assert.All(results, result => Assert.Same(results[0].Loaded, result.Loaded));
         Assert.Equal(saved.Id, results[0].Loaded.Id);
         Assert.Equal(9L, database.Scalar("SELECT COUNT(*) FROM sessions;"));
-        foreach (var (created, _) in results) {
+        foreach (var (created, _) in results)
             Assert.Same(created, await manager.GetPrimaryAsync(created.Id));
-        }
     }
 
     [Fact]

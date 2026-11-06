@@ -73,9 +73,8 @@ public abstract class SessionBase {
             WriteToStore(() => _store.Runs.RequestStop(Id, runId));
 
             // Checked under the lock, so a stale run ID cannot stop a replacement run.
-            if (IsCurrentRun(runId)) {
+            if (IsCurrentRun(runId))
                 stopCallbacks = _execution!.StopAsync();
-            }
         }
 
         // Stop callbacks may call back into this session, so never await them under the lock.

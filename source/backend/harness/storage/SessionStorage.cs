@@ -6,9 +6,8 @@ namespace Urd.Core.Storage;
 // Creates and reads durable session identities and history revisions.
 internal sealed class SessionStorage(Database database) {
     internal SessionRecord CreatePrimary(Guid sessionId) {
-        if (sessionId == Guid.Empty) {
+        if (sessionId == Guid.Empty)
             throw new ArgumentException("Session ID cannot be empty.", nameof(sessionId));
-        }
 
         return database.Write(transaction => {
             using SqliteCommand command = database.Command(transaction, """

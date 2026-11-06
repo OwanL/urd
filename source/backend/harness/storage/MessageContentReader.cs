@@ -58,13 +58,11 @@ internal sealed class MessageContentReader {
         using SqliteCommand revision = _database.Command(transaction,
             "SELECT history_revision FROM sessions WHERE session_id = $session;", ("$session", sessionId));
         object? value = revision.ExecuteScalar();
-        if (value is null) {
+        if (value is null)
             throw new KeyNotFoundException($"Session '{sessionId}' does not exist.");
-        }
 
-        if ((long)value != historyRevision) {
+        if ((long)value != historyRevision)
             throw new HistoryRevisionConflictException(historyRevision, (long)value);
-        }
     }
 
     private MessageMetadata ReadMetadata(SqliteTransaction transaction, Guid sessionId, MessageRef message) {
@@ -77,9 +75,8 @@ internal sealed class MessageContentReader {
             ("$session", sessionId),
             ("$run", message.RunId));
         using SqliteDataReader reader = metadata.ExecuteReader();
-        if (!reader.Read() || reader.GetInt64(0) != message.HistoryRevision) {
+        if (!reader.Read() || reader.GetInt64(0) != message.HistoryRevision)
             throw new KeyNotFoundException("The message does not belong to this session history.");
-        }
 
         Guid inputId = reader.GetGuid(1);
         Guid? requestId = reader.IsDBNull(4) ? null : reader.GetGuid(4);
@@ -89,18 +86,16 @@ internal sealed class MessageContentReader {
     }
 
     private static MessageMetadata InputMetadata(MessageRef message, Guid inputId, Guid? requestId) {
-        if (inputId != message.MessageId) {
+        if (inputId != message.MessageId)
             throw new KeyNotFoundException("The input message does not belong to this run.");
-        }
 
         return new(inputId, requestId, SegmentCount: 1, IsClosed: true, FinalOutputCommitted: false);
     }
 
     private static MessageMetadata OutputMetadata(SqliteDataReader reader, MessageRef message,
         Guid inputId, Guid? requestId) {
-        if (reader.IsDBNull(5) || reader.GetGuid(5) != message.MessageId) {
+        if (reader.IsDBNull(5) || reader.GetGuid(5) != message.MessageId)
             throw new KeyNotFoundException("The output message does not belong to this run.");
-        }
 
         long segmentCount = reader.GetInt64(6);
         bool finalOutputCommitted = reader.GetInt32(7) != 0;
@@ -108,17 +103,15 @@ internal sealed class MessageContentReader {
         bool runSettled = !reader.IsDBNull(3);
         bool requestEnded = !reader.IsDBNull(8);
         bool isClosed = finalOutputCommitted || stopRequested || runSettled || requestEnded;
-        if (requestId is null || segmentCount <= 0) {
+        if (requestId is null || segmentCount <= 0)
             throw new InvalidDataException("An output message has no committed segments.");
-        }
 
         return new(inputId, requestId, segmentCount, isClosed, finalOutputCommitted);
     }
 
     private static void ValidateCommittedTail(MessageContentCursor cursor, long segmentCount) {
-        if (cursor.SegmentIndex > segmentCount || (cursor.SegmentIndex == segmentCount && cursor.Utf8Offset != 0)) {
+        if (cursor.SegmentIndex > segmentCount || (cursor.SegmentIndex == segmentCount && cursor.Utf8Offset != 0))
             throw new ArgumentException("The cursor is beyond the committed message tail.", nameof(cursor));
-        }
     }
 
     private MessageContentPage ReadSegments(SqliteTransaction transaction, Guid sessionId, MessageContentCursor cursor,
@@ -177,23 +170,19 @@ internal sealed class MessageContentReader {
                 ("$offset", offset),
                 ("$count", prefixBytes));
         using SqliteDataReader reader = segmentRead.ExecuteReader();
-        if (!reader.Read()) {
+        if (!reader.Read())
             throw new InvalidDataException("A committed message segment is missing.");
-        }
 
         long length = reader.GetInt64(0);
-        if (length > StorageText.MaximumBytes) {
+        if (length > StorageText.MaximumBytes)
             throw new InvalidDataException("A message segment exceeds the storage limit.");
-        }
 
-        if (offset > length) {
+        if (offset > length)
             throw new ArgumentException("The cursor offset is beyond its segment.", nameof(cursor));
-        }
 
         byte[] prefix = (byte[])reader.GetValue(1);
-        if (offset != 0 && prefix.Length != 0 && (prefix[0] & 0xc0) == 0x80) {
+        if (offset != 0 && prefix.Length != 0 && (prefix[0] & 0xc0) == 0x80)
             throw new ArgumentException("The cursor must begin at a UTF-8 scalar boundary.", nameof(cursor));
-        }
 
         return (length, prefix);
     }
@@ -202,13 +191,11 @@ internal sealed class MessageContentReader {
         int consumed = 0;
         Span<char> scalar = stackalloc char[2];
         while (consumed < prefix.Length && text.Length < maximumUtf16Units && consumed < maximumUtf8Bytes) {
-            if (Rune.DecodeFromUtf8(prefix.AsSpan(consumed), out Rune rune, out int size) != OperationStatus.Done) {
+            if (Rune.DecodeFromUtf8(prefix.AsSpan(consumed), out Rune rune, out int size) != OperationStatus.Done)
                 throw new InvalidDataException("A message segment contains invalid UTF-8.");
-            }
 
-            if (size > maximumUtf8Bytes - consumed || rune.Utf16SequenceLength > maximumUtf16Units - text.Length) {
+            if (size > maximumUtf8Bytes - consumed || rune.Utf16SequenceLength > maximumUtf16Units - text.Length)
                 break;
-            }
 
             int units = rune.EncodeToUtf16(scalar);
             text.Append(scalar[..units]);

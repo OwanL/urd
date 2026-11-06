@@ -102,9 +102,8 @@ public sealed class ExecutionStorageTests {
         using SessionStore store = SessionStore.Open(database.Path);
         Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, run = Guid.NewGuid();
         store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "accepted"), true, run);
-        if (stopRequested) {
+        if (stopRequested)
             store.Runs.RequestStop(session, run);
-        }
 
         var input = new InputCommand(Guid.NewGuid(), expectedRevision, "new input");
         var admissionResult = store.Inputs.Admit(session, handleRevision, input, admissionEnabled, Guid.NewGuid());

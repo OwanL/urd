@@ -41,9 +41,8 @@ internal sealed class SnapshotReader {
     }
 
     internal StoredSessionSnapshot Read(Guid sessionId) {
-        if (sessionId == Guid.Empty) {
+        if (sessionId == Guid.Empty)
             throw new ArgumentException("Session ID cannot be empty.", nameof(sessionId));
-        }
 
         return _database.Read(transaction => Read(transaction, sessionId));
     }
@@ -62,9 +61,8 @@ internal sealed class SnapshotReader {
     private long ReadHistoryRevision(SqliteTransaction transaction, Guid sessionId) {
         using SqliteCommand revisionRead = _database.Command(transaction,
             "SELECT history_revision FROM sessions WHERE session_id = $session;", ("$session", sessionId));
-        if (revisionRead.ExecuteScalar() is not long historyRevision) {
+        if (revisionRead.ExecuteScalar() is not long historyRevision)
             throw new KeyNotFoundException($"Session {sessionId} does not exist.");
-        }
 
         return historyRevision;
     }
@@ -93,13 +91,11 @@ internal sealed class SnapshotReader {
         while (candidates.Count <= SnapshotMessageLimit && reader.Read()) {
             Guid runId = reader.GetGuid(0);
             ExecutionOutcome? outcome = reader.IsDBNull(2) ? null : (ExecutionOutcome)reader.GetInt32(2);
-            if (!reader.IsDBNull(3)) {
+            if (!reader.IsDBNull(3))
                 candidates.Add((new(runId, reader.GetGuid(3), MessageRole.Assistant, historyRevision), outcome));
-            }
 
-            if (candidates.Count <= SnapshotMessageLimit) {
+            if (candidates.Count <= SnapshotMessageLimit)
                 candidates.Add((new(runId, reader.GetGuid(1), MessageRole.User, historyRevision), outcome));
-            }
         }
 
         return candidates;

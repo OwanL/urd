@@ -12,9 +12,8 @@ internal static class DatabaseSchema {
         command.ExecuteNonQuery();
         InitializeSchema(connection);
         command.CommandText = "PRAGMA journal_mode = WAL;";
-        if (!string.Equals(command.ExecuteScalar() as string, "wal", StringComparison.OrdinalIgnoreCase)) {
+        if (!string.Equals(command.ExecuteScalar() as string, "wal", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("The session database could not enable WAL mode.");
-        }
 
         command.CommandText = "PRAGMA synchronous = NORMAL;";
         command.ExecuteNonQuery();
@@ -56,9 +55,8 @@ internal static class DatabaseSchema {
         }
 
         command.CommandText = "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*');";
-        if ((long)command.ExecuteScalar()! != 0) {
+        if ((long)command.ExecuteScalar()! != 0)
             throw new NotSupportedException("An unversioned, nonempty database cannot be initialized as a session store.");
-        }
 
         command.CommandText = """
             CREATE TABLE sessions (

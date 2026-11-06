@@ -30,9 +30,8 @@ internal sealed class OutputStorage(Database database) {
                 ("$output", batch.ResponseId),
                 ("$index", batch.ChunkIndex),
                 ("$final", batch.IsFinal ? 1 : 0));
-            if (advance.ExecuteNonQuery() == 0) {
+            if (advance.ExecuteNonQuery() == 0)
                 return false;
-            }
 
             using SqliteCommand append = database.Command(transaction, """
                 INSERT INTO execution_output (request_id, batch_index, text_utf8, is_final)
@@ -48,9 +47,8 @@ internal sealed class OutputStorage(Database database) {
     }
 
     internal bool CompleteRequest(Guid sessionId, Guid runId, long historyRevision, LlmRequestOutcome completion) {
-        if (!Enum.IsDefined(completion.Outcome)) {
+        if (!Enum.IsDefined(completion.Outcome))
             throw new ArgumentOutOfRangeException(nameof(completion));
-        }
 
         return database.Write(transaction => CompleteRequest(transaction, sessionId, runId, historyRevision, completion));
     }
@@ -69,9 +67,8 @@ internal sealed class OutputStorage(Database database) {
             ("$revision", historyRevision),
             ("$request", completion.RequestId)))
         using (SqliteDataReader reader = read.ExecuteReader()) {
-            if (!reader.Read()) {
+            if (!reader.Read())
                 return false;
-            }
 
             // An exact retry succeeds without rewriting the original evidence, even after settlement.
             if (!reader.IsDBNull(0)) {
@@ -79,16 +76,14 @@ internal sealed class OutputStorage(Database database) {
                     && (reader.IsDBNull(1) ? null : reader.GetString(1)) == completion.Error;
             }
 
-            if (!reader.IsDBNull(4)) {
+            if (!reader.IsDBNull(4))
                 return false;
-            }
 
             if (completion.Outcome == ExecutionOutcome.Completed) {
                 bool stopRequested = reader.GetInt32(3) != 0;
                 bool hasFinalOutput = reader.GetInt32(2) != 0;
-                if (stopRequested || !hasFinalOutput) {
+                if (stopRequested || !hasFinalOutput)
                     return false;
-                }
             }
         }
 

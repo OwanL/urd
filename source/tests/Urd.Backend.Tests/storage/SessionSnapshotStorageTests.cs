@@ -232,9 +232,8 @@ public sealed class SessionSnapshotStorageTests {
         command.Parameters.AddWithValue("$revision", revision);
         using SqliteDataReader reader = command.ExecuteReader();
         var steps = new List<string>();
-        while (reader.Read()) {
+        while (reader.Read())
             steps.Add(reader.GetString(3));
-        }
 
         return steps.ToArray();
     }

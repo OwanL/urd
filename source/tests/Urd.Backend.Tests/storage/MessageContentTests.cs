@@ -95,9 +95,8 @@ public sealed class MessageContentTests {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
         TestRun run = StartRun(store);
-        for (int index = 0; index < 16; index++) {
+        for (int index = 0; index < 16; index++)
             Append(store, run, index, "");
-        }
 
         Append(store, run, 16, "visible", final: true);
         MessageContentPage first = store.Content.Read(run.Session, new(run.Assistant, 0, 0));

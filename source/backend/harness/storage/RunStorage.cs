@@ -23,9 +23,8 @@ internal sealed class RunStorage(Database database) {
                 ("$run", runId),
                 ("$revision", historyRevision),
                 ("$request", requestId));
-            if (claim.ExecuteNonQuery() == 0) {
+            if (claim.ExecuteNonQuery() == 0)
                 return null;
-            }
 
             IReadOnlyList<ChatMessage> messages = ReadRequestContext(transaction, sessionId, runId, historyRevision);
             return new LlmRequest(requestId, messages);
@@ -44,9 +43,8 @@ internal sealed class RunStorage(Database database) {
 
     // The caller has joined all owned work before entering this transaction.
     internal ExecutionResult? TrySettle(Guid sessionId, Guid runId, ExecutionOutcome driverOutcome) {
-        if (!Enum.IsDefined(driverOutcome)) {
+        if (!Enum.IsDefined(driverOutcome))
             throw new ArgumentOutOfRangeException(nameof(driverOutcome));
-        }
 
         return database.Write<ExecutionResult?>(transaction => {
             using SqliteCommand read = database.Command(transaction, """
@@ -57,13 +55,11 @@ internal sealed class RunStorage(Database database) {
                 ("$session", sessionId),
                 ("$run", runId));
             Settlement? settlement = DecideSettlement(read, driverOutcome);
-            if (settlement is null) {
+            if (settlement is null)
                 return null;
-            }
 
-            if (settlement.AlreadySettled) {
+            if (settlement.AlreadySettled)
                 return new(runId, settlement.Outcome);
-            }
 
             using SqliteCommand settle = database.Command(transaction, """
                 UPDATE execution_requests SET outcome = $outcome
@@ -91,21 +87,17 @@ internal sealed class RunStorage(Database database) {
 
     private static Settlement? DecideSettlement(SqliteCommand read, ExecutionOutcome driverOutcome) {
         using SqliteDataReader reader = read.ExecuteReader();
-        if (!reader.Read()) {
+        if (!reader.Read())
             return null;
-        }
 
-        if (!reader.IsDBNull(0)) {
+        if (!reader.IsDBNull(0))
             return new((ExecutionOutcome)reader.GetInt32(0), AlreadySettled: true);
-        }
 
-        if (reader.GetInt32(1) != 0) {
+        if (reader.GetInt32(1) != 0)
             return new(ExecutionOutcome.Cancelled, AlreadySettled: false);
-        }
 
-        if (driverOutcome != ExecutionOutcome.Completed) {
+        if (driverOutcome != ExecutionOutcome.Completed)
             return new(driverOutcome, AlreadySettled: false);
-        }
 
         // Invocation exit or text alone never manufactures request success.
         return reader.IsDBNull(2)
@@ -150,9 +142,8 @@ internal sealed class RunStorage(Database database) {
     }
 
     private static void AddAssistant(List<ChatMessage> messages, StringBuilder? assistant) {
-        if (assistant is not null) {
+        if (assistant is not null)
             messages.Add(new(ChatRole.Assistant, assistant.ToString()));
-        }
     }
 
     // Distinguishes retained settlement from a new outcome to persist.

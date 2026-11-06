@@ -209,9 +209,8 @@ public sealed class LlmResponseWriterTests {
         [EnumeratorCancellation] CancellationToken token) {
         await Task.CompletedTask;
         token.ThrowIfCancellationRequested();
-        if (text.Length != 0) {
+        if (text.Length != 0)
             yield return Text(text);
-        }
 
         yield return new() { FinishReason = ChatFinishReason.Stop };
     }

@@ -25,9 +25,8 @@ public sealed class SessionManager {
 
     public async Task<PrimarySession> GetPrimaryAsync(Guid sessionId) {
         using var held = await _lock.AcquireAsync();
-        if (_sessions.TryGetValue(sessionId, out PrimarySession? cached)) {
+        if (_sessions.TryGetValue(sessionId, out PrimarySession? cached))
             return cached;
-        }
 
         SessionRecord record = _store.Sessions.Read(sessionId)
             ?? throw new KeyNotFoundException($"Session '{sessionId}' does not exist.");

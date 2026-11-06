@@ -25,9 +25,8 @@ internal sealed class InputStorage(Database database) {
                 return (refused, false);
             }
 
-            if (proposedRunId == Guid.Empty) {
+            if (proposedRunId == Guid.Empty)
                 throw new ArgumentException("Run ID cannot be empty.", nameof(proposedRunId));
-            }
 
             var accepted = new InputReceipt(sessionId, command, InputDecision.Accepted, null, proposedRunId);
             InsertReceipt(transaction, accepted);
@@ -54,9 +53,8 @@ internal sealed class InputStorage(Database database) {
                 return retained;
             }
 
-            if (!Enum.IsDefined(reason)) {
+            if (!Enum.IsDefined(reason))
                 throw new ArgumentOutOfRangeException(nameof(reason));
-            }
 
             var receipt = new InputReceipt(sessionId, command, InputDecision.Refused, reason, null);
             InsertReceipt(transaction, receipt);
@@ -75,9 +73,8 @@ internal sealed class InputStorage(Database database) {
             ("$session", sessionId),
             ("$input", inputId));
         using SqliteDataReader reader = command.ExecuteReader();
-        if (!reader.Read()) {
+        if (!reader.Read())
             return null;
-        }
 
         var original = new InputCommand(
             inputId, reader.GetInt64(0), StorageText.StrictUtf8.GetString((byte[])reader.GetValue(1)));
@@ -91,9 +88,8 @@ internal sealed class InputStorage(Database database) {
         using SqliteCommand read = database.Command(transaction,
             "SELECT history_revision FROM sessions WHERE session_id = $session;", ("$session", sessionId));
         object? value = read.ExecuteScalar();
-        if (value is null) {
+        if (value is null)
             throw new KeyNotFoundException($"Session {sessionId} does not exist.");
-        }
 
         return (long)value;
     }
@@ -104,13 +100,11 @@ internal sealed class InputStorage(Database database) {
             "SELECT stopping FROM execution_runs WHERE session_id = $session AND outcome IS NULL;",
             ("$session", sessionId));
         object? stopFlag = read.ExecuteScalar();
-        if (!accepting || stopFlag is 1L) {
+        if (!accepting || stopFlag is 1L)
             return InputRefusalReason.Stopping;
-        }
 
-        if (actualRevision != historyRevision || command.ExpectedHistoryRevision != actualRevision) {
+        if (actualRevision != historyRevision || command.ExpectedHistoryRevision != actualRevision)
             return InputRefusalReason.StaleRevision;
-        }
 
         return stopFlag is not null ? InputRefusalReason.Capacity : null;
     }
@@ -130,27 +124,23 @@ internal sealed class InputStorage(Database database) {
             ("$decision", (int)receipt.Decision),
             ("$run", receipt.RunId),
             ("$reason", receipt.RefusalReason is { } reason ? (int)reason : null));
-        if (insert.ExecuteNonQuery() == 0) {
+        if (insert.ExecuteNonQuery() == 0)
             throw new KeyNotFoundException($"Session {receipt.SessionId} does not exist.");
-        }
     }
 
     private static void EnsureSameCommand(InputReceipt retained, InputCommand command) {
-        if (retained.Command != command) {
+        if (retained.Command != command)
             throw new InvalidOperationException("The input ID already belongs to a different original command.");
-        }
     }
 
     private static void Validate(Guid sessionId, InputCommand command) {
         // Commands come from public session APIs.
         ArgumentNullException.ThrowIfNull(command);
-        if (sessionId == Guid.Empty) {
+        if (sessionId == Guid.Empty)
             throw new ArgumentException("Session ID cannot be empty.", nameof(sessionId));
-        }
 
-        if (command.InputId == Guid.Empty) {
+        if (command.InputId == Guid.Empty)
             throw new ArgumentException("Input ID cannot be empty.", nameof(command));
-        }
 
         ArgumentOutOfRangeException.ThrowIfNegative(command.ExpectedHistoryRevision);
         if (StorageText.StrictUtf8.GetByteCount(command.Text) > StorageText.MaximumBytes) {

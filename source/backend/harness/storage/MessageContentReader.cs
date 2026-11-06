@@ -89,7 +89,7 @@ internal sealed class MessageContentReader {
             throw new KeyNotFoundException("The input message does not belong to this run.");
         }
 
-        return new(inputId, requestId, 1, true, false);
+        return new(inputId, requestId, SegmentCount: 1, IsClosed: true, FinalOutputCommitted: false);
     }
 
     private static MessageMetadata OutputMetadata(SqliteDataReader reader, MessageRef message,
@@ -100,7 +100,10 @@ internal sealed class MessageContentReader {
 
         long segmentCount = reader.GetInt64(6);
         bool finalOutputCommitted = reader.GetInt32(7) != 0;
-        bool isClosed = finalOutputCommitted || reader.GetInt32(2) != 0 || !reader.IsDBNull(3) || !reader.IsDBNull(8);
+        bool stopRequested = reader.GetInt32(2) != 0;
+        bool runSettled = !reader.IsDBNull(3);
+        bool requestEnded = !reader.IsDBNull(8);
+        bool isClosed = finalOutputCommitted || stopRequested || runSettled || requestEnded;
         if (requestId is null || segmentCount <= 0) {
             throw new InvalidDataException("An output message has no committed segments.");
         }
@@ -118,16 +121,23 @@ internal sealed class MessageContentReader {
         MessageMetadata metadata, int maximumUtf8Bytes, int maximumUtf16Units, int maximumSegments) {
         var text = new StringBuilder();
         long segment = cursor.SegmentIndex;
-        int offset = cursor.Utf8Offset, utf8Bytes = 0;
+        int offset = cursor.Utf8Offset;
+        int utf8Bytes = 0;
         for (int examined = 0; segment < metadata.SegmentCount && examined < maximumSegments; examined++) {
             // Exhausted text budgets still permit length probes to normalize empty final segments.
             // These probes share the same segment budget.
-            bool textBudgetExhausted = utf8Bytes == maximumUtf8Bytes || text.Length == maximumUtf16Units;
+            int remainingBytes = maximumUtf8Bytes - utf8Bytes;
+            int remainingUnits = maximumUtf16Units - text.Length;
+            bool textBudgetExhausted = remainingBytes == 0 || remainingUnits == 0;
+            // A UTF-16 unit needs at most three UTF-8 bytes. Three lookahead bytes
+            // let the decoder finish a scalar that starts at the budget boundary.
             int prefixBytes = textBudgetExhausted ? 0 : (int)Math.Min(StorageText.MaximumBytes,
-                Math.Min(maximumUtf8Bytes - utf8Bytes, (long)(maximumUtf16Units - text.Length) * 3) + 3);
+                Math.Min(remainingBytes, (long)remainingUnits * 3) + 3);
             (long length, byte[] prefix) = ReadSegment(transaction, sessionId, cursor, metadata,
                 segment, offset, prefixBytes);
-            offset += AppendPrefix(prefix, text, ref utf8Bytes, maximumUtf8Bytes, maximumUtf16Units);
+            int appendedBytes = AppendPrefix(prefix, text, remainingBytes, maximumUtf16Units);
+            offset += appendedBytes;
+            utf8Bytes += appendedBytes;
             if (offset != length) {
                 break; // A byte/scalar/UTF-16 budget ended within this immutable segment.
             }
@@ -184,22 +194,20 @@ internal sealed class MessageContentReader {
         return (length, prefix);
     }
 
-    private static int AppendPrefix(byte[] prefix, StringBuilder text, ref int utf8Bytes,
-        int maximumUtf8Bytes, int maximumUtf16Units) {
+    private static int AppendPrefix(byte[] prefix, StringBuilder text, int maximumUtf8Bytes, int maximumUtf16Units) {
         int consumed = 0;
         Span<char> scalar = stackalloc char[2];
-        while (consumed < prefix.Length && text.Length < maximumUtf16Units && utf8Bytes < maximumUtf8Bytes) {
+        while (consumed < prefix.Length && text.Length < maximumUtf16Units && consumed < maximumUtf8Bytes) {
             if (Rune.DecodeFromUtf8(prefix.AsSpan(consumed), out Rune rune, out int size) != OperationStatus.Done) {
                 throw new InvalidDataException("A message segment contains invalid UTF-8.");
             }
 
-            if (size > maximumUtf8Bytes - utf8Bytes || rune.Utf16SequenceLength > maximumUtf16Units - text.Length) {
+            if (size > maximumUtf8Bytes - consumed || rune.Utf16SequenceLength > maximumUtf16Units - text.Length) {
                 break;
             }
 
             int units = rune.EncodeToUtf16(scalar);
             text.Append(scalar[..units]);
-            utf8Bytes += size;
             consumed += size;
         }
 

@@ -15,7 +15,7 @@ there is no runnable Server or UI yet.
   It invokes each `SessionExecution` once, outside that guard. Execution owns the model stream and
   Stop source; a request-local `LlmResponseWriter` owns bounded UTF-8 batches and their flush deadline.
 - Stop starts asynchronous cancellation under the guard, then joins callbacks outside it.
-  Replacement requires stream/timer cleanup, successful callback completion and saved settlement.
+  Replacement requires stream cleanup, successful callback completion and saved settlement.
   Callback failures or an unexpected missing claim/settlement fence the run; they do not retry it.
 - This development increment admits one input per active run. A different busy input gets
   a durable Capacity/Stopping refusal, not a queue slot. Mid-response delivery is not implemented.
@@ -41,6 +41,10 @@ The owner-approved execution redesign passes **73/73** Release tests after locke
 with no build warnings/errors. Added coverage exercises invalid/incomplete Unicode, empty and
 exact-size final chunks, reentrant/held cancellation callbacks, repeated and stale Stops,
 and callback-failure fencing. The redesign changes internal lifetime coordination, not schema.
+The readability review passes **86/86** Release tests after locked restore. Added cases cover
+unsupported content, updates after Stop, trailing usage, repeated high surrogates and immutable
+completion retries after settlement. SQL, transactions and lifecycle ownership remain unchanged;
+clearer diagnostic wording from the earlier refactor is retained for new failures.
 These are fake-client/Core checks, not browser polling, load or real-provider qualification.
 This is a Core review checkpoint, not the browser-to-Core milestone or a complete hosting API.
 

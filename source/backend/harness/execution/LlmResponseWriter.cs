@@ -17,13 +17,13 @@ internal sealed class LlmResponseWriter {
     private long _chunkIndex;
     private char? _pendingHighSurrogate;
 
+    // Completes when the oldest unsaved text is due; null while nothing is waiting.
+    internal Task? FlushDelay { get; private set; }
+
     internal LlmResponseWriter(Guid requestId, Func<LlmResponseChunk, Task> saveChunkAsync) {
         _requestId = requestId;
         _saveChunkAsync = saveChunkAsync;
     }
-
-    // Completes when the oldest unsaved text is due; null while nothing is waiting.
-    internal Task? FlushDelay { get; private set; }
 
     internal async Task AppendTextAsync(string text) {
         foreach (char codeUnit in text) {
@@ -41,21 +41,22 @@ internal sealed class LlmResponseWriter {
     // Returns false while waiting for the second half of a surrogate pair,
     // which may arrive in a later update.
     private bool TryCompleteCharacter(char codeUnit, out Rune character) {
-        if (_pendingHighSurrogate is { } high) {
-            _pendingHighSurrogate = null;
-            return Rune.TryCreate(high, codeUnit, out character) ? true : throw InvalidUnicode();
-        }
-
-        if (char.IsHighSurrogate(codeUnit)) {
+        if (_pendingHighSurrogate is null && char.IsHighSurrogate(codeUnit)) {
             _pendingHighSurrogate = codeUnit;
             character = default;
             return false;
         }
 
-        return Rune.TryCreate(codeUnit, out character) ? true : throw InvalidUnicode();
-    }
+        bool valid = _pendingHighSurrogate is { } high
+            ? Rune.TryCreate(high, codeUnit, out character)
+            : Rune.TryCreate(codeUnit, out character);
+        _pendingHighSurrogate = null;
+        if (!valid) {
+            throw new InvalidDataException("The LLM response contains invalid Unicode.");
+        }
 
-    private static InvalidDataException InvalidUnicode() => new("The LLM response contains invalid Unicode.");
+        return true;
+    }
 
     private async Task AppendCharacterAsync(Rune character) {
         int utf8Bytes = character.Utf8SequenceLength;
@@ -64,7 +65,8 @@ internal sealed class LlmResponseWriter {
         }
 
         Span<char> utf16 = stackalloc char[2];
-        _chunk.Append(utf16[..character.EncodeToUtf16(utf16)]);
+        int length = character.EncodeToUtf16(utf16);
+        _chunk.Append(utf16[..length]);
         _chunkUtf8Bytes += utf8Bytes;
 
         if (_chunkUtf8Bytes == ChunkByteLimit) {

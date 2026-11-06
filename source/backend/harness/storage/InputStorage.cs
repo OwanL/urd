@@ -81,18 +81,21 @@ internal sealed class InputStorage(Database database) {
 
         var original = new InputCommand(
             inputId, reader.GetInt64(0), StorageText.StrictUtf8.GetString((byte[])reader.GetValue(1)));
-        return new InputReceipt(sessionId, original, (InputDecision)reader.GetInt32(2),
-            reader.IsDBNull(4) ? null : (InputRefusalReason)reader.GetInt32(4),
-            reader.IsDBNull(3) ? null : reader.GetGuid(3));
+        return new InputReceipt(sessionId, original,
+            Decision: (InputDecision)reader.GetInt32(2),
+            RefusalReason: reader.IsDBNull(4) ? null : (InputRefusalReason)reader.GetInt32(4),
+            RunId: reader.IsDBNull(3) ? null : reader.GetGuid(3));
     }
 
     private long ReadRevision(SqliteTransaction transaction, Guid sessionId) {
         using SqliteCommand read = database.Command(transaction,
             "SELECT history_revision FROM sessions WHERE session_id = $session;", ("$session", sessionId));
         object? value = read.ExecuteScalar();
-        return value is null
-            ? throw new KeyNotFoundException($"Session {sessionId} does not exist.")
-            : (long)value;
+        if (value is null) {
+            throw new KeyNotFoundException($"Session {sessionId} does not exist.");
+        }
+
+        return (long)value;
     }
 
     private InputRefusalReason? DecideRefusal(SqliteTransaction transaction, Guid sessionId, long actualRevision,

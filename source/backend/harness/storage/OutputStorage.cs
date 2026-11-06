@@ -52,26 +52,12 @@ internal sealed class OutputStorage(Database database) {
             throw new ArgumentOutOfRangeException(nameof(completion));
         }
 
-        return database.Write(transaction => {
-            bool? retained = ReadCompletion(transaction, sessionId, runId, historyRevision, completion);
-            if (retained is { } result) {
-                return result;
-            }
-
-            using SqliteCommand update = database.Command(transaction,
-                "UPDATE execution_requests SET outcome = $outcome, error = $error WHERE request_id = $request;",
-                ("$outcome", (int)completion.Outcome),
-                ("$error", completion.Error),
-                ("$request", completion.RequestId));
-            update.ExecuteNonQuery();
-            return true;
-        });
+        return database.Write(transaction => CompleteRequest(transaction, sessionId, runId, historyRevision, completion));
     }
 
-    // Null means the request is still eligible for its first completion write.
-    private bool? ReadCompletion(SqliteTransaction transaction, Guid sessionId, Guid runId,
+    private bool CompleteRequest(SqliteTransaction transaction, Guid sessionId, Guid runId,
         long historyRevision, LlmRequestOutcome completion) {
-        using SqliteCommand read = database.Command(transaction, """
+        using (SqliteCommand read = database.Command(transaction, """
             SELECT q.outcome, q.error, q.output_final, r.stopping, r.outcome
             FROM execution_requests q JOIN execution_runs r ON r.run_id = q.run_id
             JOIN sessions s ON s.session_id = r.session_id
@@ -81,27 +67,37 @@ internal sealed class OutputStorage(Database database) {
             ("$session", sessionId),
             ("$run", runId),
             ("$revision", historyRevision),
+            ("$request", completion.RequestId)))
+        using (SqliteDataReader reader = read.ExecuteReader()) {
+            if (!reader.Read()) {
+                return false;
+            }
+
+            // An exact retry succeeds without rewriting the original evidence, even after settlement.
+            if (!reader.IsDBNull(0)) {
+                return (ExecutionOutcome)reader.GetInt32(0) == completion.Outcome
+                    && (reader.IsDBNull(1) ? null : reader.GetString(1)) == completion.Error;
+            }
+
+            if (!reader.IsDBNull(4)) {
+                return false;
+            }
+
+            if (completion.Outcome == ExecutionOutcome.Completed) {
+                bool stopRequested = reader.GetInt32(3) != 0;
+                bool hasFinalOutput = reader.GetInt32(2) != 0;
+                if (stopRequested || !hasFinalOutput) {
+                    return false;
+                }
+            }
+        }
+
+        using SqliteCommand update = database.Command(transaction,
+            "UPDATE execution_requests SET outcome = $outcome, error = $error WHERE request_id = $request;",
+            ("$outcome", (int)completion.Outcome),
+            ("$error", completion.Error),
             ("$request", completion.RequestId));
-        using SqliteDataReader reader = read.ExecuteReader();
-        if (!reader.Read()) {
-            return false;
-        }
-
-        if (!reader.IsDBNull(0)) {
-            return (ExecutionOutcome)reader.GetInt32(0) == completion.Outcome
-                && (reader.IsDBNull(1) ? null : reader.GetString(1)) == completion.Error;
-        }
-
-        if (!reader.IsDBNull(4)) {
-            return false;
-        }
-
-        if (completion.Outcome != ExecutionOutcome.Completed) {
-            return null;
-        }
-
-        bool stopRequested = reader.GetInt32(3) != 0;
-        bool hasFinalOutput = reader.GetInt32(2) != 0;
-        return stopRequested || !hasFinalOutput ? false : null;
+        update.ExecuteNonQuery();
+        return true;
     }
 }

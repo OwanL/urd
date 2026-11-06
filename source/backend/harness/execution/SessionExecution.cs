@@ -34,9 +34,11 @@ internal sealed class SessionExecution : IDisposable {
     internal async Task<ExecutionOutcome> RunAsync() {
         LlmRequest? request = await _session.ClaimNextRequestAsync(RunId);
         if (request is null) {
-            return _stop.IsCancellationRequested
-                ? ExecutionOutcome.Cancelled
-                : throw new InvalidOperationException("The run has no request to send and was not stopped.");
+            if (_stop.IsCancellationRequested) {
+                return ExecutionOutcome.Cancelled;
+            }
+
+            throw new InvalidOperationException("The run has no request to send and was not stopped.");
         }
 
         // Disposing this source waits for its running cancellation callbacks,
@@ -59,7 +61,7 @@ internal sealed class SessionExecution : IDisposable {
                 .GetStreamingResponseAsync(request.Messages, cancellationToken: requestStop.Token)
                 .GetAsyncEnumerator(requestStop.Token);
 
-            bool finished = false;
+            bool stopReceived = false;
             while (true) {
                 pendingRead ??= updates.MoveNextAsync().AsTask();
                 if (await IsFlushDueFirstAsync(writer.FlushDelay, pendingRead)) {
@@ -76,11 +78,11 @@ internal sealed class SessionExecution : IDisposable {
                 }
 
                 stop.ThrowIfCancellationRequested();
-                finished = await WriteUpdateAsync(updates.Current, writer, finished);
+                stopReceived = await WriteUpdateAsync(updates.Current, writer, stopReceived);
             }
 
             stop.ThrowIfCancellationRequested();
-            if (!finished) {
+            if (!stopReceived) {
                 throw new InvalidDataException("The response ended without a stop finish reason.");
             }
 
@@ -101,9 +103,9 @@ internal sealed class SessionExecution : IDisposable {
         return flushDelay.IsCompleted || await Task.WhenAny(pendingRead, flushDelay) == flushDelay;
     }
 
-    // Returns whether the response has finished, including this update.
+    // A Stop marker closes text; enumeration and cleanup must still finish successfully.
     private static async Task<bool> WriteUpdateAsync(ChatResponseUpdate update,
-        LlmResponseWriter writer, bool finished) {
+        LlmResponseWriter writer, bool stopReceived) {
         foreach (AIContent content in update.Contents) {
             if (content is UsageContent) {
                 continue;
@@ -113,7 +115,7 @@ internal sealed class SessionExecution : IDisposable {
                 throw new InvalidDataException("The response contained content other than text.");
             }
 
-            if (finished && text.Text.Length != 0) {
+            if (stopReceived && text.Text.Length != 0) {
                 throw new InvalidDataException("The response contained text after its stop finish reason.");
             }
 
@@ -121,12 +123,14 @@ internal sealed class SessionExecution : IDisposable {
         }
 
         if (update.FinishReason is null) {
-            return finished;
+            return stopReceived;
         }
 
-        return update.FinishReason == ChatFinishReason.Stop
-            ? true
-            : throw new InvalidDataException("The response finished without a stop finish reason.");
+        if (update.FinishReason != ChatFinishReason.Stop) {
+            throw new InvalidDataException("The response finished without a stop finish reason.");
+        }
+
+        return true;
     }
 
     private LlmRequestOutcome ToRequestOutcome(Guid requestId, Exception? failure) {

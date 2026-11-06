@@ -8,7 +8,7 @@ public sealed class SessionManager {
     private readonly SessionStore _store;
     private readonly IChatClient _chatClient;
     private readonly AsyncLock _lock = new();
-    private readonly Dictionary<Guid, SessionBase> _sessions = new();
+    private readonly Dictionary<Guid, PrimarySession> _sessions = new();
 
     public SessionManager(SessionStore store, IChatClient chatClient) {
         ArgumentNullException.ThrowIfNull(store);
@@ -25,9 +25,8 @@ public sealed class SessionManager {
 
     public async Task<PrimarySession> GetPrimaryAsync(Guid sessionId) {
         using var held = await _lock.AcquireAsync();
-        if (_sessions.TryGetValue(sessionId, out SessionBase? cached)) {
-            return cached as PrimarySession
-                ?? throw new InvalidOperationException($"Session '{sessionId}' is not a primary session.");
+        if (_sessions.TryGetValue(sessionId, out PrimarySession? cached)) {
+            return cached;
         }
 
         SessionRecord record = _store.Sessions.Read(sessionId)

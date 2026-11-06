@@ -29,6 +29,10 @@ judgment rather than escalating routine standards questions to the owner.
    structure. Review the initial implementation against the approved design; document
    material departures instead of allowing the first draft to become accidental policy.
 
+The owner's [chess engine](https://github.com/OwanL/chess-swing) is a rough readability
+reference: concrete domain names, direct operations and cohesive classes. Borrow that clarity,
+not its language-specific patterns or class hierarchy. Shorter code is not automatically clearer.
+
 ## Naming and discoverability
 
 - Read operation names at their call sites: identify the action and its subject.

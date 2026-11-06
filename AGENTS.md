@@ -1,70 +1,11 @@
-# Urd agent guide
-
-## Current phase: owner-reviewed initial design
-
-- The owner wants to review the initial application structure before production
-  implementation, down to important class members and method signatures where useful.
-  The rough directory tree is accepted and revisable; it is not approval of every API.
-- Present bite-sized proposals case by case: normally one class or one cohesive
-  operation, not a multi-type pack. Show the relevant members/signatures inline, a
-  short reason and the architectural choice at hand. Wait for the owner's response
-  before presenting the next bite; approval covers only the presented scope.
-  Full workstream drafts remain internal integration references, not required owner
-  reading or whole-document approval requests. Check wider lifetimes, dependencies
-  and concurrency/persistence boundaries internally before presenting each bite.
-- Before presenting a design to the owner, get independent review by another agent
-  and correct supported issues. The coordinator checks cross-stream consistency and
-  presents concrete code/class/method shapes and meaningful trade-offs, not raw drafts.
-  Engineering standards, obvious defect filtering and guideline maintenance belong to
-  the agents/coordinator; do not ask the owner to review process or guideline documents.
-- Do not implement a proposed slice before owner approval. Approval applies to the
-  described scope, not the whole application or unrelated live-provider/global-machine
-  actions. Do not repeatedly seek permission for routine helpers within approved work.
-- Once the initial base is accepted, follow its conventions. Revisit substantive
-  ownership, public-contract, lifetime or concurrency/persistence changes with the
-  owner; ordinary implementation details do not need method-by-method approval.
-  Passing approved borrowed dependencies through existing classes is routine wiring,
-  not another vote on obvious reuse. Show actual class relationships when discussing design.
-- The owner authorizes clear-cut naming/readability fixes without per-name approval,
-  including existing public members when their meaning is unchanged. Verify callers,
-  behavior and documentation, and coordinate files with active agents. Ambiguous state
-  meanings and substantive behavioral/ownership changes still require a decision;
-  do not conceal them inside a naming cleanup.
-- The owner requests faster, parallel execution. Run independent scoped preparation,
-  implementation and review concurrently with disjoint file ownership. Serialize only
-  real dependencies/shared resources; one approval wait must not stall other authorized
-  work. Do not add approval stops for routine helpers or tests within approved scope.
-- At coherent, tested milestones, notify the owner that code is ready for their
-  file-by-file, line-by-line review. Provide the exact commit, a short reading order
-  and known gaps before adding layers that make the underlying design harder to inspect.
-- Size guidance is a review aid, not a quota or automatic refactoring mandate. Never
-  split cohesive state/invariants or introduce wrappers merely to meet a line count.
-  UI functions/hooks and scripts need clear ownership too, not artificial C# classes.
-
-## References and boundaries
-
-- [Application plan](APPLICATION-PLAN.md): current rough layout and design-review gate.
-- [Session design](SESSION-DESIGN.md) and [execution design](EXECUTION-DESIGN.md): scoped
-  behavior decisions. Read the relevant contracts before changing their invariants.
-- [Code-shape guidelines](docs/code-shape-guidelines.md) are internal engineering
-  guidance with soft review signals, not an owner-approval item or numeric CI gate.
-  The [Core design record](docs/scratch/initial-core-design.md) records scoped owner
-  approvals and implementation evidence; its wider sketch remains proposed.
-  Peer-review acceptance is not owner approval. For the implemented identity slice,
-  use the [backend development instructions](docs/backend-development.md).
-- Core remains ASP.NET-free; Server depends on Core. Do not copy historical experiment
-  APIs into production or add empty future feature/type scaffolding.
-- Keep long-lived docs flat under `docs/` when migrated; `docs/scratch/` is for shared
-  project drafts. Disposable agent logs/fixtures belong in owned OS-temp locations.
-- Experiments were moved to machine-local scratch; see the README archive note.
-  Preserve unrelated files and data. Tests must not use personal sessions/credentials.
 
 # style guide
 
-- Use plain `//` code comments, across multiple lines when needed, rather than XML
-  documentation comments (`///`, `<summary>`).
-- Explain purpose, ownership, important guarantees and non-obvious behavior; do not
-  repeat what names or code already make clear.
-- Keep comments concise, next to the relevant code and accurate as the code changes.
-- Use XML documentation only when an API needs generated reference docs or consumer
-  IntelliSense. Being `public` alone is not a reason.
+- Use plain code documentation, avoid xml docs.
+- Code should self documenting, for example, am I able to understand what code does by reading it? ie Session.create() reads quite nicely, where HarnessServiceExecutor.instantiateAsync() means almost nothing to a user without prior knowlege.
+- Prefer low levels of scope nesting. Deeply nested code is hard to read and reason about.
+- Use same-line opening braces in C# (K&R style).
+- Omit braces for short, clear single-statement bodies; keep them when nesting, comments or multiline bodies make grouping clearer.
+- One type per file, except small data-only types (records, enums) of one concept, which share a file named for that concept.
+- Code should be performant. Urd needs to have a low memory overhead, and be snappy, and quick.
+- Follow existing codebase conventions. Ground yourself in this before writing any code.

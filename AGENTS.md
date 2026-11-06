@@ -58,3 +58,13 @@
   project drafts. Disposable agent logs/fixtures belong in owned OS-temp locations.
 - Experiments were moved to machine-local scratch; see the README archive note.
   Preserve unrelated files and data. Tests must not use personal sessions/credentials.
+
+# style guide
+
+- Use plain `//` code comments, across multiple lines when needed, rather than XML
+  documentation comments (`///`, `<summary>`).
+- Explain purpose, ownership, important guarantees and non-obvious behavior; do not
+  repeat what names or code already make clear.
+- Keep comments concise, next to the relevant code and accurate as the code changes.
+- Use XML documentation only when an API needs generated reference docs or consumer
+  IntelliSense. Being `public` alone is not a reason.

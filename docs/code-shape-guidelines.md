@@ -35,6 +35,9 @@ not its language-specific patterns or class hierarchy. Shorter code is not autom
 
 ## Naming and discoverability
 
+- Make each snippet understandable locally through its names and structure. The owner
+  reaffirmed this priority during the incremental quality review: code should document
+  itself, rather than depend on a tour of the surrounding system.
 - Read operation names at their call sites: identify the action and its subject.
   The receiver supplies context, not a missing purpose. A reader should not need to
   open a method body to discover what is submitted, recorded, stopped or returned.
@@ -124,3 +127,10 @@ including names on existing public members whose meaning stays unchanged; do not
 another vote for each such correction. Ambiguous state meanings are not mechanical renames.
 Codebase context helps, but is not a substitute for a short shared guide and review of the
 actual implementation.
+
+For the current unattended quality-review rounds, the owner authorizes broader changes to
+existing code, not just behavior-preserving renames. Agents may challenge the plan, obtain
+independent review, implement and verify small improvements without presenting each bite
+for approval. This is not permission to implement unrelated proposed features or rewrite
+the application. Concrete readability gains, behavioral evidence and small reviewable
+commits remain required; repeated rounds are not a reason to manufacture changes.

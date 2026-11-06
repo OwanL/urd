@@ -52,9 +52,9 @@ judgment rather than escalating routine standards questions to the owner.
   or their outcomes, so their source or target is explicit. Avoid ambiguous `Chat`
   or `Output` labels for those concepts. Keep external SDK names such as `IChatClient`
   and `ChatMessage` unchanged; session/run concepts retain their own vocabulary.
-- Give each type its own file named after the type, so it can be found by name.
-  Keep related types together through their directory, not by grouping them in one file.
-  Start each file with a one-line comment saying what the type is.
+- Give each class its own file. Small data-only types (records, enums) of one concept
+  share a file named for that concept, such as `Input.cs` or `Messages.cs`. Give each
+  type a one-line comment saying what it is.
 - File placement and short boundary comments should make purpose, producer/consumer
   roles and important lifecycle guarantees apparent. Do not cram the whole contract
   into a long identifier or require a separate glossary to understand a declaration.

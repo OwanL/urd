@@ -187,7 +187,7 @@ became `LlmRequest`). The records remain cohesive data, not methods or new servi
 | `RequestCompletion` | `LlmRequestOutcome` | Final local request-attempt outcome, not live/provider status or a saved acknowledgement. |
 
 These types first lived together in `execution/ExecutionContracts.cs`; the later style pass
-moved each into its own file in `execution/`. A file-purpose note and short producer/consumer
+regrouped them by concept into `execution/LlmRequest.cs` and `execution/ExecutionResult.cs`. A file-purpose note and short producer/consumer
 comments make their roles clear. `ExecutionOutcome` keeps its name and enum values.
 Chunk members use `ResponseId` and `ChunkIndex` instead of `OutputId` and `BatchIndex`.
 SDK symbols such as `IChatClient` and `ChatMessage` keep their names. This cleanup changes no behavior, schema,

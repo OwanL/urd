@@ -46,9 +46,10 @@ This is a Core review checkpoint, not the browser-to-Core milestone or a complet
 
 ## Read contract and incremental review order
 
-1. [SessionSnapshot.cs](../source/backend/harness/sessions/SessionSnapshot.cs) and its neighbouring
-   message records (`MessagePreview`, `MessageRef`, `MessageContentCursor`, `MessageContentPage`) —
-   detached records; shared `ExecutionResult`/`ExecutionOutcome` in `execution/` are public, not duplicated.
+1. [SessionSnapshot.cs](../source/backend/harness/sessions/SessionSnapshot.cs) and
+   [Messages.cs](../source/backend/harness/sessions/Messages.cs) — detached records; shared
+   `ExecutionResult`/`ExecutionOutcome` in [ExecutionResult.cs](../source/backend/harness/execution/ExecutionResult.cs)
+   are public, not duplicated.
 2. [SessionBase.cs](../source/backend/harness/sessions/SessionBase.cs) — the two public read methods
    take the existing guard; snapshots merge the live admission fence with one committed view.
 3. [SnapshotReader.cs](../source/backend/harness/storage/SnapshotReader.cs), then
@@ -76,21 +77,22 @@ or a diagnosed fence. Poll scheduling/HTTP cancellation and browser rendering ar
 
 ## Review order
 
-Paths below are relative to the repository. Each type has its own file named after it; read the
-small data records alongside their owners.
+Paths below are relative to the repository. Classes have their own files; small data records and enums
+share a file per concept. Read them alongside their owners.
 
 1. [SessionManager.cs](../source/backend/harness/sessions/SessionManager.cs) — canonical handles,
    borrowed dependencies and the `SessionRecord` identity data used to create/load handles.
 2. [SessionBase.cs](../source/backend/harness/sessions/SessionBase.cs) and
    [PrimarySession.cs](../source/backend/harness/sessions/PrimarySession.cs) — admission/driver ownership;
-   `InputCommand`, `InputReceipt`, `InputDecision` and `InputRefusalReason` sit beside them;
+   [Input.cs](../source/backend/harness/sessions/Input.cs) holds the input command, receipt and enums;
    [AsyncLock.cs](../source/backend/harness/sessions/AsyncLock.cs) is the shared async lock.
 3. [SessionExecution.cs](../source/backend/harness/execution/SessionExecution.cs) — one invocation,
    response streaming, cancellation and cleanup; then
    [LlmResponseWriter.cs](../source/backend/harness/execution/LlmResponseWriter.cs) — request-local
-   Unicode-safe chunking and flush timing. The data types `LlmRequest`, `LlmResponseChunk`,
-   `LlmRequestOutcome`, saved whole-run `ExecutionResult`, and `ExecutionOutcome` sit beside them;
-   their header comments identify producer/consumer roles and lifecycle guarantees.
+   Unicode-safe chunking and flush timing. [LlmRequest.cs](../source/backend/harness/execution/LlmRequest.cs) holds
+   `LlmRequest`, `LlmResponseChunk` and `LlmRequestOutcome`; [ExecutionResult.cs](../source/backend/harness/execution/ExecutionResult.cs)
+   holds the saved whole-run `ExecutionResult` and `ExecutionOutcome`. Their comments identify
+   producer/consumer roles and lifecycle guarantees.
 4. [SessionStore.cs](../source/backend/harness/storage/SessionStore.cs) — opens the database and exposes
    focused parts: [Database.cs](../source/backend/harness/storage/Database.cs) (connection, lock,
    transactions), [DatabaseSchema.cs](../source/backend/harness/storage/DatabaseSchema.cs) (migrations),

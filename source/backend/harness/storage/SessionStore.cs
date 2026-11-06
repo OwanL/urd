@@ -74,7 +74,7 @@ public sealed partial class SessionStore : IDisposable
             using (SqliteDataReader reader = command.ExecuteReader())
             {
                 reader.Read();
-                record = ReadRecord(reader);
+                record = ReadSessionRecord(reader);
             }
 
             transaction.Commit();
@@ -91,7 +91,7 @@ public sealed partial class SessionStore : IDisposable
             command.CommandText = "SELECT session_id, history_revision FROM sessions WHERE session_id = $id;";
             command.Parameters.AddWithValue("$id", sessionId.ToString("D"));
             using SqliteDataReader reader = command.ExecuteReader();
-            return reader.Read() ? ReadRecord(reader) : null;
+            return reader.Read() ? ReadSessionRecord(reader) : null;
         }
     }
 
@@ -130,7 +130,7 @@ public sealed partial class SessionStore : IDisposable
         }
     }
 
-    // The admission owner supplies the same transaction as its run/work writes.
+    // The caller supplies the transaction for this insert.
     // This helper intentionally neither begins nor commits a transaction.
     private void InsertInputReceipt(SqliteTransaction transaction, InputReceipt receipt)
     {
@@ -219,7 +219,7 @@ public sealed partial class SessionStore : IDisposable
         }
     }
 
-    private static SessionRecord ReadRecord(SqliteDataReader reader)
+    private static SessionRecord ReadSessionRecord(SqliteDataReader reader)
         => new(reader.GetGuid(0), reader.GetInt64(1));
 
     private static void InitializeSchema(SqliteConnection connection)

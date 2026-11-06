@@ -67,9 +67,9 @@ public sealed class SessionExecutionTests
     [InlineData("length")]
     [InlineData("exception")]
     [InlineData("exception-after-stop")]
-    public async Task RequiresPositiveTerminalEvidenceAndAnOtherwiseSuccessfulRequest(string failure)
+    public async Task RequiresPositiveTerminalEvidenceAndAnOtherwiseSuccessfulRequest(string failureScenario)
     {
-        var client = new ScriptedChatClient(token => FailedResponse(failure, token));
+        var client = new ScriptedChatClient(token => FailedResponse(failureScenario, token));
         await using var fixture = new ExecutionFixture(client);
         Guid runId = await fixture.StartRunAsync("go");
 
@@ -501,23 +501,23 @@ public sealed class SessionExecutionTests
         }
     }
 
-    private static async IAsyncEnumerable<ChatResponseUpdate> FailedResponse(string failure,
+    private static async IAsyncEnumerable<ChatResponseUpdate> FailedResponse(string failureScenario,
         [EnumeratorCancellation] CancellationToken token)
     {
         await Task.CompletedTask;
         token.ThrowIfCancellationRequested();
         yield return Text("partial");
-        if (failure == "length")
+        if (failureScenario == "length")
         {
             yield return new() { FinishReason = ChatFinishReason.Length };
         }
 
-        if (failure == "exception-after-stop")
+        if (failureScenario == "exception-after-stop")
         {
             yield return new() { FinishReason = ChatFinishReason.Stop };
         }
 
-        if (failure.StartsWith("exception", StringComparison.Ordinal))
+        if (failureScenario.StartsWith("exception", StringComparison.Ordinal))
         {
             throw new InvalidOperationException("Scripted request failure.");
         }

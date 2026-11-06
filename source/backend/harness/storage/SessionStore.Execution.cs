@@ -10,7 +10,7 @@ public sealed partial class SessionStore
 {
     private const int MaximumOutputBytes = 16 * 1024;
 
-    // This first fake-text increment admits one input per run, not a follow-up queue.
+    // The current text workflow admits one input per run; there is no follow-up queue.
     internal (InputReceipt Receipt, bool NewlyAccepted) AdmitInput(
         Guid sessionId, long historyRevision, InputCommand command, bool accepting, Guid proposedRunId)
     {
@@ -31,7 +31,7 @@ public sealed partial class SessionStore
                 return (retained, false);
             }
 
-            using SqliteCommand revisionRead = ExecutionCommand(transaction,
+            using SqliteCommand revisionRead = CreateCommand(transaction,
                 "SELECT history_revision FROM sessions WHERE session_id = $session;", ("$session", sessionId));
             object? revisionValue = revisionRead.ExecuteScalar();
             if (revisionValue is null)
@@ -40,7 +40,7 @@ public sealed partial class SessionStore
             }
 
             long actualRevision = (long)revisionValue;
-            using SqliteCommand activeRead = ExecutionCommand(transaction,
+            using SqliteCommand activeRead = CreateCommand(transaction,
                 "SELECT stopping FROM execution_runs WHERE session_id = $session AND outcome IS NULL;", ("$session", sessionId));
             object? activeRunStopFlag = activeRead.ExecuteScalar();
             bool hasActiveRun = activeRunStopFlag is not null;
@@ -74,7 +74,7 @@ public sealed partial class SessionStore
 
                 receipt = new(sessionId, command, InputDecision.Accepted, null, proposedRunId);
                 InsertInputReceipt(transaction, receipt);
-                using SqliteCommand insert = ExecutionCommand(transaction, """
+                using SqliteCommand insert = CreateCommand(transaction, """
                     INSERT INTO execution_runs (session_id, run_id, history_revision, input_id)
                     VALUES ($session, $run, $revision, $input);
                     """, ("$session", sessionId), ("$run", proposedRunId), ("$revision", actualRevision), ("$input", command.InputId));
@@ -93,7 +93,7 @@ public sealed partial class SessionStore
             ObjectDisposedException.ThrowIf(_disposed, this);
             using SqliteTransaction transaction = _connection.BeginTransaction();
             Guid requestId = Guid.NewGuid();
-            using SqliteCommand claim = ExecutionCommand(transaction, """
+            using SqliteCommand claim = CreateCommand(transaction, """
                 INSERT INTO execution_requests (request_id, run_id)
                 SELECT $request, r.run_id FROM execution_runs r
                 JOIN sessions s ON s.session_id = r.session_id
@@ -127,7 +127,7 @@ public sealed partial class SessionStore
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             using SqliteTransaction transaction = _connection.BeginTransaction();
-            using SqliteCommand advance = ExecutionCommand(transaction, """
+            using SqliteCommand advance = CreateCommand(transaction, """
                 UPDATE execution_requests SET next_batch_index = next_batch_index + 1,
                     output_id = $output, output_final = $final
                 WHERE request_id = $request AND run_id = $run AND outcome IS NULL
@@ -143,7 +143,7 @@ public sealed partial class SessionStore
                 return false;
             }
 
-            using SqliteCommand append = ExecutionCommand(transaction, """
+            using SqliteCommand append = CreateCommand(transaction, """
                 INSERT INTO execution_output (request_id, batch_index, text_utf8, is_final)
                 VALUES ($request, $index, $text, $final);
                 """, ("$request", batch.RequestId), ("$index", batch.ChunkIndex),
@@ -166,7 +166,7 @@ public sealed partial class SessionStore
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             using SqliteTransaction transaction = _connection.BeginTransaction();
-            using SqliteCommand read = ExecutionCommand(transaction, """
+            using SqliteCommand read = CreateCommand(transaction, """
                 SELECT q.outcome, q.error, q.output_final, r.stopping, r.outcome
                 FROM execution_requests q JOIN execution_runs r ON r.run_id = q.run_id
                 JOIN sessions s ON s.session_id = r.session_id
@@ -208,7 +208,7 @@ public sealed partial class SessionStore
                 }
             }
 
-            using SqliteCommand update = ExecutionCommand(transaction,
+            using SqliteCommand update = CreateCommand(transaction,
                 "UPDATE execution_requests SET outcome = $outcome, error = $error WHERE request_id = $request;",
                 ("$outcome", (int)completion.Outcome), ("$error", completion.Error), ("$request", completion.RequestId));
             update.ExecuteNonQuery();
@@ -222,7 +222,7 @@ public sealed partial class SessionStore
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            using SqliteCommand command = ExecutionCommand(null,
+            using SqliteCommand command = CreateCommand(null,
                 "UPDATE execution_runs SET stopping = 1 WHERE session_id = $session AND run_id = $run AND outcome IS NULL;",
                 ("$session", sessionId), ("$run", runId));
             command.ExecuteNonQuery();
@@ -241,7 +241,7 @@ public sealed partial class SessionStore
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             using SqliteTransaction transaction = _connection.BeginTransaction();
-            using SqliteCommand read = ExecutionCommand(transaction, """
+            using SqliteCommand read = CreateCommand(transaction, """
                 SELECT r.outcome, r.stopping, q.outcome FROM execution_runs r
                 LEFT JOIN execution_requests q ON q.run_id = r.run_id
                 WHERE r.session_id = $session AND r.run_id = $run;
@@ -275,7 +275,7 @@ public sealed partial class SessionStore
                 }
             }
 
-            using SqliteCommand settle = ExecutionCommand(transaction, """
+            using SqliteCommand settle = CreateCommand(transaction, """
                 UPDATE execution_requests SET outcome = $outcome
                 WHERE run_id = $run AND outcome IS NULL;
                 UPDATE execution_runs SET outcome = $outcome WHERE session_id = $session AND run_id = $run;
@@ -291,7 +291,7 @@ public sealed partial class SessionStore
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            using SqliteCommand read = ExecutionCommand(null,
+            using SqliteCommand read = CreateCommand(null,
                 "SELECT outcome FROM execution_runs WHERE session_id = $session AND run_id = $run;",
                 ("$session", sessionId), ("$run", runId));
             object? outcome = read.ExecuteScalar();
@@ -304,16 +304,16 @@ public sealed partial class SessionStore
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            using SqliteCommand read = ExecutionCommand(null,
+            using SqliteCommand read = CreateCommand(null,
                 "SELECT EXISTS(SELECT 1 FROM execution_runs WHERE session_id = $session AND run_id = $run);",
                 ("$session", sessionId), ("$run", runId));
             return (long)read.ExecuteScalar()! != 0;
         }
     }
 
-    private IReadOnlyList<ChatMessage> ReadRequestContext(SqliteTransaction transaction, Guid sessionId, Guid runId, long revision)
+    private IReadOnlyList<ChatMessage> ReadRequestContext(SqliteTransaction transaction, Guid sessionId, Guid runId, long historyRevision)
     {
-        using SqliteCommand read = ExecutionCommand(transaction, """
+        using SqliteCommand read = CreateCommand(transaction, """
             SELECT r.ordinal, 0 AS role_order, 0 AS batch_index, i.original_text_utf8
             FROM execution_runs r JOIN input_decisions i ON i.session_id = r.session_id AND i.input_id = r.input_id
             WHERE r.session_id = $session AND r.history_revision = $revision
@@ -325,7 +325,7 @@ public sealed partial class SessionStore
             WHERE r.session_id = $session AND r.history_revision = $revision
                 AND r.ordinal <= (SELECT ordinal FROM execution_runs WHERE run_id = $run)
             ORDER BY 1, 2, 3;
-            """, ("$session", sessionId), ("$run", runId), ("$revision", revision));
+            """, ("$session", sessionId), ("$run", runId), ("$revision", historyRevision));
         using SqliteDataReader reader = read.ExecuteReader();
         var messages = new List<ChatMessage>();
         StringBuilder? assistant = null;
@@ -356,7 +356,7 @@ public sealed partial class SessionStore
         return messages.AsReadOnly();
     }
 
-    private SqliteCommand ExecutionCommand(SqliteTransaction? transaction, string sql, params (string Name, object? Value)[] parameters)
+    private SqliteCommand CreateCommand(SqliteTransaction? transaction, string sql, params (string Name, object? Value)[] parameters)
     {
         SqliteCommand command = _connection.CreateCommand();
         command.Transaction = transaction;

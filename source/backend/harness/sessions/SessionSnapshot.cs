@@ -2,7 +2,7 @@ using Urd.Core.Execution;
 
 namespace Urd.Core.Sessions;
 
-/// <summary>A bounded committed view, combined with the live session's admission fence.</summary>
+// Bounded committed view, combined with the live session's admission fence.
 public sealed record SessionSnapshot(
     Guid SessionId, long HistoryRevision, bool AdmissionFenced,
     Guid? UnsettledRunId, bool StopRequested, ExecutionResult? LastSettlement,
@@ -18,10 +18,10 @@ public sealed record MessageRef(
 
 public enum MessageRole { User, Assistant }
 
-/// <summary>Original UTF-8 byte offset within an immutable persisted segment.</summary>
+// Original UTF-8 byte offset within an immutable persisted segment.
 public sealed record MessageContentCursor(MessageRef Message, long SegmentIndex, int Utf8Offset);
 
-/// <summary>Closure concerns message bytes, not successful execution or cleanup.</summary>
+// IsClosed means no more message bytes can arrive, not that execution or cleanup succeeded.
 public sealed record MessageContentPage(
     MessageContentCursor From, string Text, MessageContentCursor Next,
     MessageContentCursor AvailableThrough, bool HasMore,

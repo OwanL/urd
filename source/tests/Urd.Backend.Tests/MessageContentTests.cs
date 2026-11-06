@@ -15,10 +15,10 @@ public sealed class MessageContentTests
         using SessionStore store = SessionStore.Open(database.Path);
         string input = string.Concat(Enumerable.Repeat("🙂\0é", 2000));
         TestRun run = StartRun(store, input);
-        string first = new('a', 16383);
-        string second = "🙂\0é" + new string('z', 16376);
-        Append(store, run, 0, first);
-        Append(store, run, 1, second, final: true);
+        string firstSegment = new('a', 16383);
+        string secondSegment = "🙂\0é" + new string('z', 16376);
+        Append(store, run, 0, firstSegment);
+        Append(store, run, 1, secondSegment, final: true);
 
         MessageContentPage user = store.ReadMessageContent(run.Session, new(run.User, 0, 0));
         Assert.Equal(input, user.Text);
@@ -29,7 +29,7 @@ public sealed class MessageContentTests
         Assert.Equal(new(run.User, 1, 0), user.Next);
 
         MessageContentPage page = store.ReadMessageContent(run.Session, new(run.Assistant, 0, 0));
-        Assert.Equal(first, page.Text); // The next four-byte scalar cannot fit the remaining byte.
+        Assert.Equal(firstSegment, page.Text); // The next four-byte scalar cannot fit the remaining byte.
         Assert.InRange(Encoding.UTF8.GetByteCount(page.Text), 1, 16384);
         Assert.Equal(new(run.Assistant, 1, 0), page.Next);
         Assert.Equal(new(run.Assistant, 2, 0), page.AvailableThrough);
@@ -39,9 +39,9 @@ public sealed class MessageContentTests
         Assert.Null(store.ReadSettlement(run.Session, run.Run)); // Final bytes are not settlement.
 
         MessageContentPage remainder = store.ReadMessageContent(run.Session, page.Next);
-        Assert.Equal(second, remainder.Text);
+        Assert.Equal(secondSegment, remainder.Text);
         Assert.InRange(Encoding.UTF8.GetByteCount(remainder.Text), 1, 16384);
-        Assert.Equal(first + second, page.Text + remainder.Text);
+        Assert.Equal(firstSegment + secondSegment, page.Text + remainder.Text);
         Assert.Equal(remainder.AvailableThrough, remainder.Next);
         Assert.False(remainder.HasMore);
         Assert.Equal(2L, database.Scalar("SELECT COUNT(*) FROM execution_output;"));

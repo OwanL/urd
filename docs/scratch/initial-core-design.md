@@ -400,7 +400,7 @@ SessionBase invokes `RunAsync` once outside its guard and observes all cleanup.
 internal Guid RunId { get; }
 private readonly SessionBase _owner;
 private readonly IChatClient _chatClient; // borrowed
-private readonly CancellationTokenSource _stop;
+private readonly CancellationTokenSource _runStop;
 private Task? _cancellationCallbacks;
 internal SessionExecution(Guid runId, SessionBase owner, IChatClient chatClient);
 internal Task<ExecutionOutcome> RunAsync();

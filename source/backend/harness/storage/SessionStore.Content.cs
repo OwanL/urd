@@ -42,7 +42,7 @@ public sealed partial class SessionStore
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumSegments);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(maximumSegments, 16);
 
-        using (SqliteCommand revision = ExecutionCommand(transaction,
+        using (SqliteCommand revision = CreateCommand(transaction,
             "SELECT history_revision FROM sessions WHERE session_id = $session;", ("$session", sessionId)))
         {
             object? value = revision.ExecuteScalar();
@@ -60,8 +60,8 @@ public sealed partial class SessionStore
         Guid inputId;
         Guid? requestId;
         long segmentCount;
-        bool finalOutput, closed;
-        using (SqliteCommand metadata = ExecutionCommand(transaction, """
+        bool finalOutputCommitted, isClosed;
+        using (SqliteCommand metadata = CreateCommand(transaction, """
             SELECT r.history_revision, r.input_id, r.stopping, r.outcome,
                 q.request_id, q.output_id, q.next_batch_index, q.output_final, q.outcome
             FROM execution_runs r LEFT JOIN execution_requests q ON q.run_id = r.run_id
@@ -84,8 +84,8 @@ public sealed partial class SessionStore
                 }
 
                 segmentCount = 1;
-                finalOutput = false;
-                closed = true;
+                finalOutputCommitted = false;
+                isClosed = true;
             }
             else
             {
@@ -95,8 +95,8 @@ public sealed partial class SessionStore
                 }
 
                 segmentCount = reader.GetInt64(6);
-                finalOutput = reader.GetInt32(7) != 0;
-                closed = finalOutput || reader.GetInt32(2) != 0 || !reader.IsDBNull(3) || !reader.IsDBNull(8);
+                finalOutputCommitted = reader.GetInt32(7) != 0;
+                isClosed = finalOutputCommitted || reader.GetInt32(2) != 0 || !reader.IsDBNull(3) || !reader.IsDBNull(8);
                 if (requestId is null || segmentCount <= 0)
                 {
                     throw new InvalidDataException("An output message has no committed segments.");
@@ -121,16 +121,16 @@ public sealed partial class SessionStore
             int prefixBytes = textBudgetExhausted ? 0 : (int)Math.Min(MaximumOutputBytes,
                 Math.Min(maximumUtf8Bytes - utf8Bytes, (long)(maximumUtf16Units - text.Length) * 3) + 3);
             // SQLite substr of an empty BLOB returns NULL; retain its empty-byte meaning.
-            using SqliteCommand body = message.Role == MessageRole.User
-                ? ExecutionCommand(transaction, """
+            using SqliteCommand segmentRead = message.Role == MessageRole.User
+                ? CreateCommand(transaction, """
                     SELECT length(original_text_utf8), coalesce(substr(original_text_utf8, $offset + 1, $count), X'')
                     FROM input_decisions WHERE session_id = $session AND input_id = $input AND decision = 1;
                     """, ("$session", sessionId), ("$input", inputId), ("$offset", offset), ("$count", prefixBytes))
-                : ExecutionCommand(transaction, """
+                : CreateCommand(transaction, """
                     SELECT length(text_utf8), coalesce(substr(text_utf8, $offset + 1, $count), X'')
                     FROM execution_output WHERE request_id = $request AND batch_index = $segment;
                     """, ("$request", requestId), ("$segment", segment), ("$offset", offset), ("$count", prefixBytes));
-            using SqliteDataReader reader = body.ExecuteReader();
+            using SqliteDataReader reader = segmentRead.ExecuteReader();
             if (!reader.Read())
             {
                 throw new InvalidDataException("A committed message segment is missing.");
@@ -183,7 +183,7 @@ public sealed partial class SessionStore
         }
 
         var next = new MessageContentCursor(message, segment, offset);
-        var available = new MessageContentCursor(message, segmentCount, 0);
-        return new(cursor, text.ToString(), next, available, segment < segmentCount, closed, finalOutput);
+        var availableThrough = new MessageContentCursor(message, segmentCount, 0);
+        return new(cursor, text.ToString(), next, availableThrough, segment < segmentCount, isClosed, finalOutputCommitted);
     }
 }

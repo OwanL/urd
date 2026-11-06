@@ -7,7 +7,7 @@ internal sealed class SessionExecution
 {
     private readonly SessionBase _owner;
     private readonly IChatClient _chatClient; // Borrowed; the composing owner controls its lifetime.
-    private readonly CancellationTokenSource _stop = new();
+    private readonly CancellationTokenSource _runStop = new();
     private Task? _cancellationCallbacks;
 
     internal SessionExecution(Guid runId, SessionBase owner, IChatClient chatClient)
@@ -22,13 +22,13 @@ internal sealed class SessionExecution
     internal Guid RunId { get; }
 
     // Lifecycle members are called only by SessionBase while it holds the session guard.
-    internal Task RequestCancellationAsync() => _cancellationCallbacks ??= _stop.CancelAsync();
+    internal Task RequestCancellationAsync() => _cancellationCallbacks ??= _runStop.CancelAsync();
 
     internal Task CancellationCompletion => _cancellationCallbacks ?? Task.CompletedTask;
 
     // The owner calls this only after RunAsync and cancellation callbacks have finished
     // and the durable run settlement has been saved.
-    internal void ReleaseAfterSettlement() => _stop.Dispose();
+    internal void ReleaseAfterSettlement() => _runStop.Dispose();
 
     // The sole owner invokes this once, outside the session guard.
     internal async Task<ExecutionOutcome> RunAsync()
@@ -36,7 +36,7 @@ internal sealed class SessionExecution
         LlmRequest? request = await _owner.ClaimNextRequestAsync(RunId).ConfigureAwait(false);
         if (request is null)
         {
-            return _stop.IsCancellationRequested
+            return _runStop.IsCancellationRequested
                 ? ExecutionOutcome.Cancelled
                 : throw new InvalidOperationException("The active run had no claimable request and was not stopped.");
         }
@@ -46,14 +46,14 @@ internal sealed class SessionExecution
 
     private async Task<ExecutionOutcome> ExecuteRequestAsync(LlmRequest request)
     {
-        using var requestStop = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
-        var writer = new LlmResponseWriter(request.RequestId, WriteResponseChunkAsync, _stop.Token);
+        using var requestStop = CancellationTokenSource.CreateLinkedTokenSource(_runStop.Token);
+        var writer = new LlmResponseWriter(request.RequestId, WriteResponseChunkAsync, _runStop.Token);
         ExecutionOutcome outcome;
         string? error = null;
         try
         {
             await StreamResponseAsync(request, requestStop, writer).ConfigureAwait(false);
-            outcome = _stop.IsCancellationRequested ? ExecutionOutcome.Cancelled : ExecutionOutcome.Completed;
+            outcome = _runStop.IsCancellationRequested ? ExecutionOutcome.Cancelled : ExecutionOutcome.Completed;
         }
         catch (OwnerOperationException)
         {
@@ -67,7 +67,7 @@ internal sealed class SessionExecution
         {
             outcome = ExecutionOutcome.Cancelled;
         }
-        catch (OperationCanceledException) when (_stop.IsCancellationRequested)
+        catch (OperationCanceledException) when (_runStop.IsCancellationRequested)
         {
             outcome = ExecutionOutcome.Cancelled;
         }
@@ -86,42 +86,42 @@ internal sealed class SessionExecution
         CancellationTokenSource requestStop, LlmResponseWriter writer)
     {
         IAsyncEnumerator<ChatResponseUpdate>? source = null;
-        Task<bool>? next = null;
+        Task<bool>? pendingRead = null;
         Exception? primaryFailure = null;
         try
         {
-            _stop.Token.ThrowIfCancellationRequested();
+            _runStop.Token.ThrowIfCancellationRequested();
             source = _chatClient.GetStreamingResponseAsync(request.Messages, cancellationToken: requestStop.Token)
                 .GetAsyncEnumerator(requestStop.Token);
-            bool terminalSuccess = false;
+            bool sawStopFinishReason = false;
             while (true)
             {
-                next ??= source.MoveNextAsync().AsTask();
+                pendingRead ??= source.MoveNextAsync().AsTask();
                 Task? flushDelay = writer.FlushDelay;
                 if (flushDelay is { IsCompleted: true }
                     || (flushDelay is not null
-                        && await Task.WhenAny(next, flushDelay).ConfigureAwait(false) == flushDelay))
+                        && await Task.WhenAny(pendingRead, flushDelay).ConfigureAwait(false) == flushDelay))
                 {
-                    _stop.Token.ThrowIfCancellationRequested();
+                    _runStop.Token.ThrowIfCancellationRequested();
                     await writer.FlushAsync().ConfigureAwait(false);
-                    continue; // Retain the SAME pending read when the flush delay wins.
+                    continue; // Retain the same pending read when the flush delay wins.
                 }
 
-                Task<bool> ready = next;
-                next = null;
-                if (!await ready.ConfigureAwait(false))
+                Task<bool> readTask = pendingRead;
+                pendingRead = null;
+                if (!await readTask.ConfigureAwait(false))
                 {
                     break;
                 }
 
-                _stop.Token.ThrowIfCancellationRequested();
+                _runStop.Token.ThrowIfCancellationRequested();
                 ChatResponseUpdate update = source.Current;
                 foreach (AIContent content in update.Contents)
                 {
                     switch (content)
                     {
                         case TextContent text:
-                            if (terminalSuccess && text.Text.Length != 0)
+                            if (sawStopFinishReason && text.Text.Length != 0)
                             {
                                 throw new InvalidDataException("Text arrived after the terminal response marker.");
                             }
@@ -142,12 +142,12 @@ internal sealed class SessionExecution
                         throw new InvalidDataException("The fake-text request did not finish successfully.");
                     }
 
-                    terminalSuccess = true;
+                    sawStopFinishReason = true;
                 }
             }
 
-            _stop.Token.ThrowIfCancellationRequested();
-            if (!terminalSuccess)
+            _runStop.Token.ThrowIfCancellationRequested();
+            if (!sawStopFinishReason)
             {
                 throw new InvalidDataException("The fake-text response lacks terminal success.");
             }
@@ -163,7 +163,7 @@ internal sealed class SessionExecution
         {
             try
             {
-                await CleanupResponseAsync(requestStop, source, next, writer).ConfigureAwait(false);
+                await CleanupResponseAsync(requestStop, source, pendingRead, writer).ConfigureAwait(false);
             }
             catch (Exception cleanupFailure)
             {
@@ -194,7 +194,7 @@ internal sealed class SessionExecution
     }
 
     private static async Task CleanupResponseAsync(CancellationTokenSource requestStop,
-        IAsyncEnumerator<ChatResponseUpdate>? source, Task<bool>? next, LlmResponseWriter writer)
+        IAsyncEnumerator<ChatResponseUpdate>? source, Task<bool>? pendingRead, LlmResponseWriter writer)
     {
         Exception? cleanupFailure = null;
         try
@@ -206,11 +206,11 @@ internal sealed class SessionExecution
             cleanupFailure = cancellationFailure;
         }
 
-        if (next is not null)
+        if (pendingRead is not null)
         {
             try
             {
-                await next.ConfigureAwait(false);
+                await pendingRead.ConfigureAwait(false);
             }
             catch (Exception)
             {
@@ -227,7 +227,7 @@ internal sealed class SessionExecution
         }
         catch (Exception disposalFailure)
         {
-            cleanupFailure = Combine(cleanupFailure, disposalFailure);
+            cleanupFailure = CombineFailures(cleanupFailure, disposalFailure);
         }
 
         try
@@ -236,7 +236,7 @@ internal sealed class SessionExecution
         }
         catch (Exception disposalFailure)
         {
-            cleanupFailure = Combine(cleanupFailure, disposalFailure);
+            cleanupFailure = CombineFailures(cleanupFailure, disposalFailure);
         }
 
         if (cleanupFailure is not null)
@@ -245,7 +245,7 @@ internal sealed class SessionExecution
         }
     }
 
-    private static Exception Combine(Exception? existing, Exception additional) =>
+    private static Exception CombineFailures(Exception? existing, Exception additional) =>
         existing is null ? additional : new AggregateException(existing, additional);
 
     private sealed class FencedExecutionException : Exception { }

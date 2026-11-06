@@ -3,7 +3,7 @@ using System.Text;
 
 namespace Urd.Core.Execution;
 
-/// <summary>Buffers one LLM response and persists it as size- or time-bounded chunks.</summary>
+// Batches this response by byte size and elapsed time before persisting chunks.
 internal sealed class LlmResponseWriter : IAsyncDisposable
 {
     private const int BatchByteLimit = 16 * 1024;

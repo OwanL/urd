@@ -47,14 +47,14 @@ public sealed partial class SessionStore
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             using SqliteTransaction transaction = _connection.BeginTransaction(deferred: true);
-            using SqliteCommand revisionRead = ExecutionCommand(transaction,
+            using SqliteCommand revisionRead = CreateCommand(transaction,
                 "SELECT history_revision FROM sessions WHERE session_id = $session;", ("$session", sessionId));
-            long revision = revisionRead.ExecuteScalar() is long value
+            long historyRevision = revisionRead.ExecuteScalar() is long value
                 ? value : throw new KeyNotFoundException($"Session {sessionId} does not exist.");
 
             Guid? unsettledRun = null;
             bool stopRequested = false;
-            using (SqliteCommand activeRead = ExecutionCommand(transaction, SnapshotUnsettledSql, ("$session", sessionId)))
+            using (SqliteCommand activeRead = CreateCommand(transaction, SnapshotUnsettledSql, ("$session", sessionId)))
             using (SqliteDataReader reader = activeRead.ExecuteReader())
             {
                 if (reader.Read())
@@ -65,7 +65,7 @@ public sealed partial class SessionStore
             }
 
             ExecutionResult? lastSettlement = null;
-            using (SqliteCommand terminalRead = ExecutionCommand(transaction, SnapshotSettlementSql, ("$session", sessionId)))
+            using (SqliteCommand terminalRead = CreateCommand(transaction, SnapshotSettlementSql, ("$session", sessionId)))
             using (SqliteDataReader reader = terminalRead.ExecuteReader())
             {
                 if (reader.Read())
@@ -76,8 +76,8 @@ public sealed partial class SessionStore
 
             // Newest first, with assistant after input in chronological order.
             var candidates = new List<(MessageRef Message, ExecutionOutcome? Settlement)>();
-            using (SqliteCommand runsRead = ExecutionCommand(transaction, SnapshotRunsSql,
-                ("$session", sessionId), ("$revision", revision)))
+            using (SqliteCommand runsRead = CreateCommand(transaction, SnapshotRunsSql,
+                ("$session", sessionId), ("$revision", historyRevision)))
             using (SqliteDataReader reader = runsRead.ExecuteReader())
             {
                 while (candidates.Count <= SnapshotMessageLimit && reader.Read())
@@ -86,12 +86,12 @@ public sealed partial class SessionStore
                     ExecutionOutcome? outcome = reader.IsDBNull(2) ? null : (ExecutionOutcome)reader.GetInt32(2);
                     if (!reader.IsDBNull(3))
                     {
-                        candidates.Add((new(run, reader.GetGuid(3), MessageRole.Assistant, revision), outcome));
+                        candidates.Add((new(run, reader.GetGuid(3), MessageRole.Assistant, historyRevision), outcome));
                     }
 
                     if (candidates.Count <= SnapshotMessageLimit)
                     {
-                        candidates.Add((new(run, reader.GetGuid(1), MessageRole.User, revision), outcome));
+                        candidates.Add((new(run, reader.GetGuid(1), MessageRole.User, historyRevision), outcome));
                     }
                 }
             }
@@ -108,7 +108,7 @@ public sealed partial class SessionStore
             }
 
             transaction.Commit();
-            return new(revision, unsettledRun, stopRequested, lastSettlement, messages.AsReadOnly(), hasOlder);
+            return new(historyRevision, unsettledRun, stopRequested, lastSettlement, messages.AsReadOnly(), hasOlder);
         }
     }
 }

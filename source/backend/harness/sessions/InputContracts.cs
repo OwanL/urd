@@ -1,6 +1,6 @@
 namespace Urd.Core.Sessions;
 
-/// <summary>The original decoded input. Retries must preserve every member unchanged.</summary>
+// Original decoded input. Retries must preserve every member unchanged.
 public sealed record InputCommand(Guid InputId, long ExpectedHistoryRevision, string Text);
 
 public enum InputRefusalReason
@@ -16,10 +16,8 @@ public enum InputDecision
     Refused = 2
 }
 
-/// <summary>
-/// The first durable decision for the exact original command. Acceptance associates
-/// input with a run; it is not evidence of a model request or successful answer.
-/// </summary>
+// First saved decision for the exact original command. Acceptance associates input
+// with a run; it does not mean a model request has started or an answer has succeeded.
 public sealed record InputReceipt(
     Guid SessionId,
     InputCommand Command,

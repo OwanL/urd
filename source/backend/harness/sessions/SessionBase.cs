@@ -76,7 +76,7 @@ public abstract class SessionBase
 
     private protected async Task<InputReceipt> AdmitInputAsync(InputCommand command)
     {
-        TaskCompletionSource? start = null;
+        TaskCompletionSource? admissionReady = null;
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
@@ -87,25 +87,25 @@ public abstract class SessionBase
                 // may start work; a retained Accepted receipt is never a start signal.
                 var execution = new SessionExecution(receipt.RunId!.Value, this, _chatClient);
                 var settlement = new TaskCompletionSource<ExecutionResult>(TaskCreationOptions.RunContinuationsAsynchronously);
-                start = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                admissionReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
                 _execution = execution;
                 _settlement = settlement;
-                _driver = DriveExecutionAsync(execution, settlement, start.Task);
+                _driver = DriveExecutionAsync(execution, settlement, admissionReady.Task);
             }
 
             return receipt;
         }
         catch (SqliteException)
         {
-            // A failed write is not negative evidence. Keep new admission fenced
-            // rather than guessing whether an input/run commit took effect.
+            // A failed write may still have committed. Refuse new input rather
+            // than guessing whether the input and run were saved.
             _accepting = false;
             throw;
         }
         finally
         {
             _gate.Release();
-            start?.TrySetResult();
+            admissionReady?.TrySetResult();
         }
     }
 
@@ -207,13 +207,13 @@ public abstract class SessionBase
     private async Task DriveExecutionAsync(
         SessionExecution execution,
         TaskCompletionSource<ExecutionResult> settlement,
-        Task start)
+        Task admissionReady)
     {
         try
         {
             // Admission publishes ownership under the guard before opening this
             // barrier. The driver is the sole invocation owner.
-            await start.ConfigureAwait(false);
+            await admissionReady.ConfigureAwait(false);
             ExecutionOutcome outcome = await execution.RunAsync().ConfigureAwait(false);
 
             Task cancellationCallbacks;

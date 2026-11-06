@@ -5,7 +5,7 @@ namespace Urd.Core.Execution;
 // LLM input, buffered reply text, request outcomes and saved execution results.
 // SessionBase coordinates the handoffs between SessionExecution and SessionStore.
 
-/// <summary>How a local LLM request attempt or an entire session execution ended.</summary>
+// Outcome of a local LLM request attempt or a whole session execution.
 public enum ExecutionOutcome
 {
     Completed,
@@ -13,26 +13,19 @@ public enum ExecutionOutcome
     Failed
 }
 
-/// <summary>
-/// Final result of a session execution, saved before SessionBase returns it to
-/// waiters or includes it in a snapshot. Owned work and cleanup have finished.
-/// </summary>
+// Saved execution result, published only after owned work and cleanup finish.
 public sealed record ExecutionResult(
     Guid RunId,
     ExecutionOutcome Outcome);
 
-/// <summary>
-/// Input prepared by SessionStore for one LLM request. SessionBase supplies it to
-/// SessionExecution for IChatClient after the request claim is committed.
-/// </summary>
+// Input for one LLM request, prepared by SessionStore and supplied through
+// SessionBase only after the request claim is committed.
 internal sealed record LlmRequest(
     Guid RequestId,
     IReadOnlyList<ChatMessage> Messages);
 
-/// <summary>
-/// LLM reply text buffered by SessionExecution and sent to SessionBase to save.
-/// IsFinal marks the end of the text, not the execution; the last chunk may be empty.
-/// </summary>
+// Buffered response text sent through SessionBase for persistence.
+// IsFinal closes the text, not the execution; the final chunk may be empty.
 internal sealed record LlmResponseChunk(
     Guid RequestId,
     Guid ResponseId,
@@ -40,10 +33,8 @@ internal sealed record LlmResponseChunk(
     string Text,
     bool IsFinal);
 
-/// <summary>
-/// How one LLM request attempt ended, reported by SessionExecution to SessionBase.
-/// This is our final outcome, not live provider status; SessionBase still has to save it.
-/// </summary>
+// Local outcome of one LLM request attempt, not live provider status.
+// SessionExecution reports it to SessionBase, which still has to save it.
 internal sealed record LlmRequestOutcome(
     Guid RequestId,
     ExecutionOutcome Outcome,

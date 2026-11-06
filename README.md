@@ -9,11 +9,12 @@ excluding general-purpose agent work.
 
 ## Status and authority
 
-The first implemented slice is the ASP.NET-free Core session identity registry and
-SQLite store: create, canonical lookup and reopen. See [backend build/test instructions](docs/backend-development.md).
-There is no runnable Server/UI or model execution yet; wider designs remain subject
-to bite-sized owner review. The [Core design record](docs/scratch/initial-core-design.md)
-distinguishes the approved slice from future proposals.
+The ASP.NET-free Core implements session identity, durable user-input decisions,
+fake-text execution, and bounded session snapshots plus paged message-content reads
+through SQLite. See [backend build/test instructions](docs/backend-development.md).
+There is no runnable Server/UI or real-provider integration yet; wider designs remain
+subject to bite-sized owner review. The [Core design record](docs/scratch/initial-core-design.md)
+distinguishes the approved slices from future proposals.
 
 This document records agreed direction and its rationale. It is a foundation
 for future design and development, not a detailed implementation specification.

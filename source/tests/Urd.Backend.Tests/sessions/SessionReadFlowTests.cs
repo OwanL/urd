@@ -149,8 +149,8 @@ public sealed class SessionReadFlowTests {
         Assert.True(stale.AdmissionFenced);
         Assert.Null(stale.UnsettledRunId);
         Assert.Equal(0, client.Calls);
-        Assert.Equal(DBNull.Value, database.Scalar("SELECT outcome FROM execution_runs;"));
-        Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM execution_requests;"));
+        Assert.Null(Assert.Single(StoredRuns.Read(database)).Outcome);
+        Assert.Single(StoredRuns.ReadRequests(database));
     }
 
     private static async Task<(string Text, MessageContentPage Last)> ReadAvailableAsync(

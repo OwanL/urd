@@ -67,7 +67,7 @@ public sealed class SessionSnapshotStorageTests {
             store.Runs.RequestStop(session, active);
         }
 
-        database.Execute("UPDATE sessions SET history_revision = 9;");
+        database.ForceHistoryRevision(9);
         using SessionStore reopened = SessionStore.Open(database.Path);
         StoredSessionSnapshot snapshot = reopened.Snapshots.Read(session);
         Assert.Equal(9, snapshot.HistoryRevision);
@@ -182,7 +182,7 @@ public sealed class SessionSnapshotStorageTests {
 
         MakeVersionTwo(database);
         using SessionStore migrated = SessionStore.Open(database.Path);
-        Assert.Equal(3L, database.Scalar("PRAGMA user_version;"));
+        Assert.Equal(3L, database.Scalar("PRAGMA user_version;")); // raw-sql: the migrated schema version is the subject under test
         Assert.Equal("refused\0🙂", migrated.Inputs.ReadReceipt(session, refused)!.Command.Text);
         StoredSessionSnapshot snapshot = migrated.Snapshots.Read(session);
         Assert.Equal(new[] { "accepted\0🙂", "partial\0🙂" }, snapshot.Messages.Select(message => message.Preview));
@@ -191,8 +191,8 @@ public sealed class SessionSnapshotStorageTests {
         Assert.Null(snapshot.LastSettlement);
         Assert.False(snapshot.Messages[1].FinalOutputCommitted);
         Assert.Equal(output, snapshot.Messages[1].Message.MessageId);
-        Assert.Equal(request.ToString("D"), database.Scalar("SELECT request_id FROM execution_requests;"));
-        Assert.Equal(2L, database.Scalar("SELECT COUNT(*) FROM sqlite_schema WHERE name IN ('execution_runs_history_order', 'execution_runs_terminal_order') AND type = 'index';"));
+        Assert.Equal(request, Assert.Single(StoredRuns.ReadRequests(database)).RequestId);
+        Assert.Equal(2L, database.Scalar("SELECT COUNT(*) FROM sqlite_schema WHERE name IN ('execution_runs_history_order', 'execution_runs_terminal_order') AND type = 'index';")); // raw-sql: migrated indexes are schema structure under test
     }
 
     [Fact]
@@ -207,12 +207,12 @@ public sealed class SessionSnapshotStorageTests {
         MakeVersionTwo(database);
         database.Execute("CREATE TABLE execution_runs_terminal_order (value TEXT); INSERT INTO execution_runs_terminal_order VALUES ('retained');");
         Assert.Throws<SqliteException>(() => SessionStore.Open(database.Path));
-        Assert.Equal(2L, database.Scalar("PRAGMA user_version;"));
-        Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM sqlite_schema WHERE name = 'execution_runs_history_order';"));
-        Assert.Equal("retained", database.Scalar("SELECT value FROM execution_runs_terminal_order;"));
-        Assert.Equal(2L, database.Scalar("SELECT COUNT(*) FROM execution_runs;"));
-        Assert.Equal(2L, database.Scalar("SELECT COUNT(*) FROM execution_requests;"));
-        Assert.Equal(2L, database.Scalar("SELECT COUNT(*) FROM execution_output;"));
+        Assert.Equal(2L, database.Scalar("PRAGMA user_version;")); // raw-sql: rolled-back schema version is the subject under test
+        Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM sqlite_schema WHERE name = 'execution_runs_history_order';")); // raw-sql: rolled-back index is schema structure under test
+        Assert.Equal("retained", database.Scalar("SELECT value FROM execution_runs_terminal_order;")); // raw-sql: fixture witness table must survive the rollback
+        Assert.Equal(2, StoredRuns.Read(database).Count);
+        Assert.Equal(2, StoredRuns.ReadRequests(database).Count);
+        Assert.Equal(2, StoredOutput.Read(database).Count);
         database.Execute("DROP TABLE execution_runs_terminal_order;");
         using SessionStore retried = SessionStore.Open(database.Path);
         Assert.Equal(4, retried.Snapshots.Read(session).Messages.Count);

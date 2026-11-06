@@ -72,9 +72,9 @@ public sealed class SessionConcurrencyTests {
             Guid runId = Assert.IsType<Guid>(receipts[0].RunId);
             Assert.Equal(receipts[0], receipts[1]);
             Assert.Equal(receipts[0], await session.GetInputReceiptAsync(command.InputId));
-            Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM input_decisions;"));
-            Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM execution_runs;"));
-            Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM execution_requests;"));
+            Assert.Single(StoredInputs.Read(database));
+            Assert.Single(StoredRuns.Read(database));
+            Assert.Single(StoredRuns.ReadRequests(database));
             Assert.Equal(1, client.Calls);
             Assert.False(session.WaitForSettlementAsync(runId).IsCompleted);
 
@@ -84,7 +84,7 @@ public sealed class SessionConcurrencyTests {
             Assert.Equal(settlements[0], settlements[1]);
             Assert.Equal(ExecutionOutcome.Completed, settlements[0].Outcome);
             Assert.Equal(1, client.Calls);
-            Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM execution_requests;"));
+            Assert.Single(StoredRuns.ReadRequests(database));
         } finally {
             start.TrySetResult();
             modelRelease.TrySetResult();
@@ -134,17 +134,17 @@ public sealed class SessionConcurrencyTests {
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelledWait.WaitAsync(TestTimeout));
             Assert.False(modelToken.IsCancellationRequested);
             Assert.False(session.WaitForSettlementAsync(runId).IsCompleted);
-            Assert.Equal(0L, database.Scalar("SELECT stopping FROM execution_runs;"));
-            Assert.Equal(DBNull.Value, database.Scalar("SELECT outcome FROM execution_runs;"));
-            Assert.Equal(DBNull.Value, database.Scalar("SELECT outcome FROM execution_requests;"));
+            StoredRun unsettled = Assert.Single(StoredRuns.Read(database));
+            Assert.False(unsettled.Stopping);
+            Assert.Null(unsettled.Outcome);
+            Assert.Null(Assert.Single(StoredRuns.ReadRequests(database)).Outcome);
 
             modelRelease.TrySetResult();
             Assert.Equal(ExecutionOutcome.Completed,
                 (await session.WaitForSettlementAsync(runId).WaitAsync(TestTimeout)).Outcome);
-            Assert.Equal((long)ExecutionOutcome.Completed, database.Scalar("SELECT outcome FROM execution_runs;"));
-            Assert.Equal((long)ExecutionOutcome.Completed, database.Scalar("SELECT outcome FROM execution_requests;"));
-            Assert.Equal("completed after release",
-                database.Scalar("SELECT group_concat(CAST(text_utf8 AS TEXT), '' ORDER BY batch_index) FROM execution_output;"));
+            Assert.Equal(ExecutionOutcome.Completed, Assert.Single(StoredRuns.Read(database)).Outcome);
+            Assert.Equal(ExecutionOutcome.Completed, Assert.Single(StoredRuns.ReadRequests(database)).Outcome);
+            Assert.Equal("completed after release", StoredOutput.ReadText(database));
             Assert.Equal(1, client.Calls);
             Assert.Equal(0, client.DisposeCalls);
         } finally {

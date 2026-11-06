@@ -27,19 +27,18 @@ public sealed class ExecutionStorageTests {
             """);
         Assert.Throws<SqliteException>(() => store.Inputs.Admit(session, 0, input, true, run));
         Assert.Null(store.Inputs.ReadReceipt(session, input.InputId));
-        Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM input_decisions;"));
-        Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM execution_runs;"));
-        Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM test_child;"));
+        Assert.Empty(StoredInputs.Read(database));
+        Assert.Empty(StoredRuns.Read(database));
+        Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM test_child;")); // raw-sql: test_child is a fixture-owned rollback witness
 
         database.Execute("DROP TRIGGER fail_run;");
         var admitted = store.Inputs.Admit(session, 0, input, true, run);
         Assert.True(admitted.NewlyAccepted);
         Assert.Equal(run, admitted.Receipt.RunId);
-        Assert.Equal(run.ToString("D"), database.Scalar("SELECT run_id FROM execution_runs;"));
-        Assert.Equal(1L, database.Scalar("""
-            SELECT COUNT(*) FROM input_decisions i JOIN execution_runs r
-            ON r.session_id = i.session_id AND r.input_id = i.input_id AND r.run_id = i.run_id;
-            """));
+        StoredRun stored = Assert.Single(StoredRuns.Read(database));
+        Assert.Equal(run, stored.RunId);
+        Assert.Equal(session, stored.SessionId);
+        Assert.Equal(input.InputId, stored.InputId);
     }
 
     [Fact]
@@ -57,13 +56,13 @@ public sealed class ExecutionStorageTests {
         using SessionStore reopened = SessionStore.Open(database.Path);
         // Settlement alone must prevent a claim: no Stop, revision mismatch or prior request can mask it.
         Assert.Null(reopened.Runs.ClaimNextRequest(session, run, 0));
-        database.Execute("UPDATE sessions SET history_revision = 7;");
+        database.ForceHistoryRevision(7);
         var retry = reopened.Inputs.Admit(session, 7, input, false, Guid.Empty);
         Assert.Equal(receipt, retry.Receipt);
         Assert.False(retry.NewlyAccepted);
         Assert.Throws<InvalidOperationException>(() => reopened.Inputs.Admit(session, 7, input with { Text = "changed" }, false, Guid.NewGuid()));
         Assert.Throws<InvalidOperationException>(() => reopened.Inputs.Admit(session, 7, input with { ExpectedHistoryRevision = 7 }, false, Guid.NewGuid()));
-        Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM execution_runs;"));
+        Assert.Single(StoredRuns.Read(database));
     }
 
     [Fact]
@@ -86,8 +85,8 @@ public sealed class ExecutionStorageTests {
         store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "next accepted"), true, nextRun);
         LlmRequest next = store.Runs.ClaimNextRequest(session, nextRun, 0)!;
         Assert.Equal(new[] { "accepted", "next accepted" }, next.Messages.Select(message => message.Text));
-        Assert.Equal(2L, database.Scalar("SELECT COUNT(*) FROM execution_runs;"));
-        Assert.Equal(4L, database.Scalar("SELECT COUNT(*) FROM input_decisions;"));
+        Assert.Equal(2, StoredRuns.Read(database).Count);
+        Assert.Equal(4, StoredInputs.Read(database).Count);
     }
 
     [Theory]
@@ -114,7 +113,7 @@ public sealed class ExecutionStorageTests {
         Assert.False(admissionResult.NewlyAccepted);
         Assert.Null(admissionResult.Receipt.RunId);
         Assert.Equal(admissionResult.Receipt, store.Inputs.ReadReceipt(session, input.InputId));
-        Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM execution_runs;"));
+        Assert.Single(StoredRuns.Read(database));
     }
 
     [Fact]
@@ -134,7 +133,7 @@ public sealed class ExecutionStorageTests {
         using SessionStore reopened = SessionStore.Open(database.Path);
         Assert.Null(reopened.Runs.ClaimNextRequest(session, run, 0));
         Assert.Null(reopened.Runs.ReadSettlement(session, run));
-        Assert.Equal(requestId.ToString("D"), database.Scalar("SELECT request_id FROM execution_requests;"));
+        Assert.Equal(requestId, Assert.Single(StoredRuns.ReadRequests(database)).RequestId);
         Assert.Equal(InputRefusalReason.Capacity,
             reopened.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "not replay or replacement"), true, Guid.NewGuid()).Receipt.RefusalReason);
     }
@@ -168,8 +167,9 @@ public sealed class ExecutionStorageTests {
         LlmRequest next = store.Runs.ClaimNextRequest(session, nextRun, 0)!;
         Assert.Equal(new[] { ChatRole.User, ChatRole.Assistant, ChatRole.User }, next.Messages.Select(message => message.Role));
         Assert.Equal(new[] { "first \0 input", "part🙂\0 final", "second" }, next.Messages.Select(message => message.Text));
-        Assert.Equal(2L, database.Scalar("SELECT COUNT(*) FROM execution_output;"));
-        Assert.Equal(0L, database.Scalar("SELECT outcome FROM execution_requests WHERE run_id = '" + run.ToString("D") + "';"));
+        Assert.Equal(2, StoredOutput.Read(database).Count);
+        Assert.Equal(ExecutionOutcome.Completed,
+            Assert.Single(StoredRuns.ReadRequests(database), request => request.RunId == run).Outcome);
     }
 
     [Theory]
@@ -200,7 +200,7 @@ public sealed class ExecutionStorageTests {
         Assert.False(store.Output.CompleteRequest(session, Guid.NewGuid(), 0, completion));
         Assert.False(store.Output.CompleteRequest(session, run, 1, completion));
         Assert.False(store.Output.CompleteRequest(session, run, 0, completion with { RequestId = Guid.NewGuid() }));
-        Assert.Equal((long)outcome, database.Scalar("SELECT outcome FROM execution_requests;"));
+        Assert.Equal(outcome, Assert.Single(StoredRuns.ReadRequests(database)).Outcome);
     }
 
     [Fact]
@@ -215,12 +215,12 @@ public sealed class ExecutionStorageTests {
         var chunk = new LlmResponseChunk(request.RequestId, Guid.NewGuid(), 0, "late", true);
         Assert.False(store.Output.Append(session, Guid.NewGuid(), 0, chunk));
         Assert.False(store.Output.Append(session, run, 1, chunk));
-        database.Execute("UPDATE sessions SET history_revision = 1;");
+        database.ForceHistoryRevision(1);
         Assert.False(store.Output.Append(session, run, 0, chunk));
         Assert.False(store.Output.CompleteRequest(session, run, 0, new(request.RequestId, ExecutionOutcome.Failed)));
         Assert.Equal(InputRefusalReason.StaleRevision,
             store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "stale"), true, Guid.NewGuid()).Receipt.RefusalReason);
-        Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM execution_output;"));
+        Assert.Empty(StoredOutput.Read(database));
     }
 
     [Fact]
@@ -263,7 +263,7 @@ public sealed class ExecutionStorageTests {
         Assert.False(store.Output.CompleteRequest(session, run, 0, new(request.RequestId, ExecutionOutcome.Failed, "different")));
         Assert.False(store.Output.Append(session, run, 0, chunk with { ChunkIndex = 1 }));
         Assert.Equal(ExecutionOutcome.Failed, store.Runs.TrySettle(session, run, ExecutionOutcome.Completed)!.Outcome);
-        Assert.Equal("actual error", database.Scalar("SELECT error FROM execution_requests;"));
-        Assert.Equal(16384L, database.Scalar("SELECT length(text_utf8) FROM execution_output;"));
+        Assert.Equal("actual error", Assert.Single(StoredRuns.ReadRequests(database)).Error);
+        Assert.Equal(16384, Assert.Single(StoredOutput.Read(database)).Bytes.Length);
     }
 }

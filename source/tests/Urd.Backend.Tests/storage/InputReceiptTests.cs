@@ -20,7 +20,7 @@ public sealed class InputReceiptTests {
             store.Inputs.RecordRefusal(sessionId, command, InputRefusalReason.Capacity);
         }
 
-        database.Execute("UPDATE sessions SET history_revision = 9;");
+        database.ForceHistoryRevision(9);
         using SessionStore reopened = SessionStore.Open(database.Path);
         InputReceipt receipt = reopened.Inputs.ReadReceipt(sessionId, command.InputId)!;
         Assert.Equal(sessionId, receipt.SessionId);
@@ -29,7 +29,7 @@ public sealed class InputReceiptTests {
         Assert.Null(receipt.RunId);
         Assert.Equal(InputRefusalReason.Capacity, receipt.RefusalReason);
         Assert.Equal(receipt, reopened.Inputs.RecordRefusal(sessionId, command, InputRefusalReason.Stopping));
-        Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM input_decisions;"));
+        Assert.Single(StoredInputs.Read(database));
         Assert.Equal(9L, reopened.Sessions.Read(sessionId)!.HistoryRevision);
     }
 
@@ -44,7 +44,7 @@ public sealed class InputReceiptTests {
         Assert.Equal(retryReceipt, store.Inputs.RecordRefusal(sessionId, command, InputRefusalReason.Capacity));
         Assert.Equal(retryReceipt, store.Inputs.ReadReceipt(sessionId, command.InputId));
         Assert.Equal(0L, store.Sessions.Read(sessionId)!.HistoryRevision);
-        Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM input_decisions;"));
+        Assert.Single(StoredInputs.Read(database));
     }
 
     [Fact]
@@ -68,7 +68,7 @@ public sealed class InputReceiptTests {
         }
 
         Assert.Equal(original, store.Inputs.ReadReceipt(sessionId, command.InputId));
-        Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM input_decisions;"));
+        Assert.Single(StoredInputs.Read(database));
     }
 
     [Fact]
@@ -83,7 +83,7 @@ public sealed class InputReceiptTests {
         Assert.Null(store.Inputs.ReadReceipt(Guid.NewGuid(), command.InputId));
         InputReceipt secondReceipt = store.Inputs.RecordRefusal(second, command with { Text = "second session" }, InputRefusalReason.Stopping);
         Assert.NotEqual(firstReceipt, secondReceipt);
-        Assert.Equal(2L, database.Scalar("SELECT COUNT(*) FROM input_decisions;"));
+        Assert.Equal(2, StoredInputs.Read(database).Count);
     }
 
     [Fact]
@@ -109,11 +109,11 @@ public sealed class InputReceiptTests {
         Assert.Equal(19, error.SqliteErrorCode);
         Assert.Null(store.Inputs.ReadReceipt(sessionId, command.InputId));
         Assert.Equal(0L, store.Sessions.Read(sessionId)!.HistoryRevision);
-        Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM test_child;"));
+        Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM test_child;")); // raw-sql: test_child is a fixture-owned rollback witness
         database.Execute("DROP TRIGGER fail_decision;");
         InputReceipt receipt = store.Inputs.RecordRefusal(sessionId, command, InputRefusalReason.Stopping);
         Assert.Equal(InputRefusalReason.Stopping, receipt.RefusalReason);
-        Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM input_decisions;"));
+        Assert.Single(StoredInputs.Read(database));
     }
 
     [Fact]
@@ -142,7 +142,7 @@ public sealed class InputReceiptTests {
         Assert.ThrowsAny<ArgumentException>(() => store.Inputs.RecordRefusal(sessionId, command with { Text = "\ud800" }, InputRefusalReason.Capacity));
         Assert.Throws<ArgumentException>(() => store.Inputs.RecordRefusal(sessionId, command with { Text = new string('é', 8193) }, InputRefusalReason.Capacity));
         Assert.Throws<ArgumentOutOfRangeException>(() => store.Inputs.RecordRefusal(sessionId, command, (InputRefusalReason)99));
-        Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM input_decisions;"));
+        Assert.Empty(StoredInputs.Read(database));
 
         InputReceipt boundary = store.Inputs.RecordRefusal(sessionId, command with { Text = new string('é', 8192) }, InputRefusalReason.Capacity);
         Assert.Equal(8192, boundary.Command.Text.Length);
@@ -166,7 +166,7 @@ public sealed class InputReceiptTests {
             Assert.Null(store.Inputs.ReadReceipt(sessionId, Guid.NewGuid()));
         }
 
-        Assert.Equal(3L, database.Scalar("PRAGMA user_version;"));
+        Assert.Equal(3L, database.Scalar("PRAGMA user_version;")); // raw-sql: the migrated schema version is the subject under test
         using SessionStore reopened = SessionStore.Open(database.Path);
         Assert.Equal(7L, reopened.Sessions.Read(sessionId)!.HistoryRevision);
     }
@@ -186,10 +186,10 @@ public sealed class InputReceiptTests {
             """);
 
         Assert.Throws<SqliteException>(() => SessionStore.Open(database.Path));
-        Assert.Equal(1L, database.Scalar("PRAGMA user_version;"));
-        Assert.Equal(7L, database.Scalar("SELECT history_revision FROM sessions;"));
-        Assert.Equal("retained", database.Scalar("SELECT unrelated FROM execution_runs;"));
-        Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM sqlite_schema WHERE name = 'input_decisions';"));
+        Assert.Equal(1L, database.Scalar("PRAGMA user_version;")); // raw-sql: rolled-back schema version is the subject under test
+        Assert.Equal(7L, database.Scalar("SELECT history_revision FROM sessions;")); // raw-sql: pre-migration identity must survive the rollback
+        Assert.Equal("retained", database.Scalar("SELECT unrelated FROM execution_runs;")); // raw-sql: fixture witness row must survive the rollback
+        Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM sqlite_schema WHERE name = 'input_decisions';")); // raw-sql: the rolled-back schema must not expose the new table
     }
 
     [Fact]
@@ -207,6 +207,6 @@ public sealed class InputReceiptTests {
         start.SetResult();
         InputReceipt[] receipts = await Task.WhenAll(tasks);
         Assert.Equal(receipts[0], receipts[1]);
-        Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM input_decisions;"));
+        Assert.Single(StoredInputs.Read(database));
     }
 }

@@ -25,8 +25,8 @@ public sealed class SessionIdentityTests {
             Assert.Equal(created.Id, store.Sessions.Read(created.Id)!.Id);
         }
 
-        Assert.Equal(3L, database.Scalar("PRAGMA user_version;"));
-        Assert.Equal("wal", database.Scalar("PRAGMA journal_mode;"));
+        Assert.Equal(3L, database.Scalar("PRAGMA user_version;")); // raw-sql: applied schema version is the subject under test
+        Assert.Equal("wal", database.Scalar("PRAGMA journal_mode;")); // raw-sql: journal mode is database configuration under test
         using SessionStore reopened = SessionStore.Open(database.Path);
         var reopenedManager = new SessionManager(reopened, client);
         PrimarySession loaded = await reopenedManager.GetPrimaryAsync(created.Id);
@@ -45,12 +45,12 @@ public sealed class SessionIdentityTests {
         Guid missing = Guid.NewGuid();
         await Assert.ThrowsAsync<KeyNotFoundException>(() => manager.GetPrimaryAsync(missing));
         Assert.Null(store.Sessions.Read(missing));
-        Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM sessions;"));
+        Assert.Empty(StoredSessions.Read(database));
 
         PrimarySession created = await manager.CreatePrimaryAsync();
         Assert.Same(created, await manager.GetPrimaryAsync(created.Id));
         Assert.Equal(created.Id, store.Sessions.Read(created.Id)!.Id);
-        Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM sessions;"));
+        Assert.Single(StoredSessions.Read(database));
     }
 
     [Fact]
@@ -78,7 +78,7 @@ public sealed class SessionIdentityTests {
         Assert.Equal(8, results.Select(result => result.Created.Id).Distinct().Count());
         Assert.All(results, result => Assert.Same(results[0].Loaded, result.Loaded));
         Assert.Equal(saved.Id, results[0].Loaded.Id);
-        Assert.Equal(9L, database.Scalar("SELECT COUNT(*) FROM sessions;"));
+        Assert.Equal(9, StoredSessions.Read(database).Count);
         foreach (var (created, _) in results)
             Assert.Same(created, await manager.GetPrimaryAsync(created.Id));
     }
@@ -91,7 +91,7 @@ public sealed class SessionIdentityTests {
             store.Sessions.CreatePrimary(id);
         }
 
-        database.Execute("UPDATE sessions SET history_revision = 7;");
+        database.ForceHistoryRevision(7);
         SessionRecord loaded;
         SessionStore borrowedStore;
         using (SessionStore store = SessionStore.Open(database.Path)) {
@@ -105,7 +105,7 @@ public sealed class SessionIdentityTests {
         Assert.Equal(7L, session.HistoryRevision);
         Assert.Equal(0, client.Calls);
         Assert.Equal(0, client.DisposeCalls);
-        Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM sessions;"));
+        Assert.Single(StoredSessions.Read(database));
     }
 
     [Fact]
@@ -116,7 +116,7 @@ public sealed class SessionIdentityTests {
         SqliteException error = Assert.Throws<SqliteException>(() => store.Sessions.CreatePrimary(saved.Id));
         Assert.Equal(19, error.SqliteErrorCode);
         Assert.Equal(saved, store.Sessions.Read(saved.Id));
-        Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM sessions;"));
+        Assert.Single(StoredSessions.Read(database));
     }
 
     [Fact]
@@ -132,8 +132,8 @@ public sealed class SessionIdentityTests {
             Assert.True(file.Length > 0);
         }
 
-        Assert.Equal(4L, database.Scalar("PRAGMA user_version;"));
-        Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM sessions;"));
+        Assert.Equal(4L, database.Scalar("PRAGMA user_version;")); // raw-sql: rejecting a newer schema must not rewrite it
+        Assert.Single(StoredSessions.Read(database));
     }
 
     [Fact]
@@ -141,9 +141,9 @@ public sealed class SessionIdentityTests {
         using var database = new TemporaryDatabase();
         database.Execute("CREATE TABLE unrelated (value TEXT); INSERT INTO unrelated VALUES ('retained');");
         Assert.Throws<NotSupportedException>(() => SessionStore.Open(database.Path));
-        Assert.Equal(0L, database.Scalar("PRAGMA user_version;"));
-        Assert.Equal("retained", database.Scalar("SELECT value FROM unrelated;"));
-        Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM sqlite_schema WHERE name = 'sessions';"));
+        Assert.Equal(0L, database.Scalar("PRAGMA user_version;")); // raw-sql: a foreign database must stay unversioned
+        Assert.Equal("retained", database.Scalar("SELECT value FROM unrelated;")); // raw-sql: foreign rows must be untouched
+        Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM sqlite_schema WHERE name = 'sessions';")); // raw-sql: no schema may be created
     }
 
     [Fact]

@@ -44,7 +44,7 @@ public sealed class MessageContentTests {
         Assert.Equal(firstSegment + secondSegment, page.Text + remainder.Text);
         Assert.Equal(remainder.AvailableThrough, remainder.Next);
         Assert.False(remainder.HasMore);
-        Assert.Equal(2L, database.Scalar("SELECT COUNT(*) FROM execution_output;"));
+        Assert.Equal(2, StoredOutput.Read(database).Count);
     }
 
     [Fact]
@@ -204,7 +204,7 @@ public sealed class MessageContentTests {
             new(run.User with { Role = (MessageRole)42 }, 0, 0)));
         Assert.Throws<ArgumentException>(() => store.Content.Read(run.Session,
             new(run.User with { MessageId = Guid.Empty }, 0, 0)));
-        database.Execute("UPDATE sessions SET history_revision = 1;");
+        database.ForceHistoryRevision(1);
         HistoryRevisionConflictException conflict = Assert.Throws<HistoryRevisionConflictException>(
             () => store.Content.Read(run.Session, new(run.Assistant, 0, 0)));
         Assert.Equal(0, conflict.ExpectedRevision);

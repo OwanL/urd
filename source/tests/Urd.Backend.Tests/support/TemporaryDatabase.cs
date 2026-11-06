@@ -28,12 +28,20 @@ internal sealed class TemporaryDatabase : IDisposable {
         return command.ExecuteScalar();
     }
 
+    // Opens a read-only connection for the shared Stored* evidence readers.
+    internal SqliteConnection OpenReadOnlyConnection() => OpenConnection(SqliteOpenMode.ReadOnly);
+
+    // Simulates history advanced by a peer store, for stale-revision fencing tests.
+    internal void ForceHistoryRevision(long revision) =>
+        Execute($"UPDATE sessions SET history_revision = {revision};");
+
     public void Dispose() => Directory.Delete(_directory, recursive: true);
 
-    private SqliteConnection OpenConnection() {
+    private SqliteConnection OpenConnection(SqliteOpenMode mode = SqliteOpenMode.ReadWriteCreate) {
         var connection = new SqliteConnection(new SqliteConnectionStringBuilder {
             DataSource = Path,
-            Pooling = false
+            Pooling = false,
+            Mode = mode
         }.ToString());
         try {
             connection.Open();

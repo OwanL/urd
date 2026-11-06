@@ -31,7 +31,7 @@ public sealed class SessionExecutionTests {
 
         Assert.Equal(ExecutionOutcome.Failed,
             (await fixture.Session.WaitForSettlementAsync(runId).WaitAsync(TestTimeout)).Outcome);
-        Assert.Equal((long)ExecutionOutcome.Failed, fixture.Database.Scalar("SELECT outcome FROM execution_requests;"));
+        Assert.Equal(ExecutionOutcome.Failed, Assert.Single(StoredRuns.ReadRequests(fixture.Database)).Outcome);
         Assert.All(StoredOutput.Read(fixture.Database), row => Assert.False(row.Final));
         Assert.Equal(1, client.Calls);
         Assert.Equal(0, client.DisposeCalls);
@@ -128,7 +128,7 @@ public sealed class SessionExecutionTests {
             // Reach saved request completion, not merely the iterator's finally block,
             // while the run still owns the blocked cancellation callback.
             using (var deadline = new CancellationTokenSource(TestTimeout)) {
-                while (fixture.Database.Scalar("SELECT outcome FROM execution_requests;") is DBNull)
+                while (Assert.Single(StoredRuns.ReadRequests(fixture.Database)).Outcome is null)
                     await Task.Delay(10, deadline.Token);
             }
 
@@ -190,12 +190,12 @@ public sealed class SessionExecutionTests {
             Assert.True(snapshot.AdmissionFenced);
             Assert.Equal(acceptedRun, snapshot.UnsettledRunId);
             Assert.Null(snapshot.LastSettlement);
-            Assert.Equal(DBNull.Value, database.Scalar("SELECT outcome FROM execution_runs;"));
+            Assert.Null(Assert.Single(StoredRuns.Read(database)).Outcome);
             InputReceipt refused = await session.SubmitUserInputAsync(
                 new InputCommand(Guid.NewGuid(), 0, "replacement"));
             Assert.Equal(InputDecision.Refused, refused.Decision);
             Assert.Equal(InputRefusalReason.Stopping, refused.RefusalReason);
-            Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM execution_runs;"));
+            Assert.Single(StoredRuns.Read(database));
         } finally {
             if (runId is { } acceptedRun) {
                 if (requestEntered.Task.IsCompletedSuccessfully) {
@@ -245,8 +245,8 @@ public sealed class SessionExecutionTests {
             Assert.True(snapshot.AdmissionFenced);
             Assert.Equal(acceptedRun, snapshot.UnsettledRunId);
             Assert.Null(snapshot.LastSettlement);
-            Assert.Equal(DBNull.Value, database.Scalar("SELECT outcome FROM execution_runs;"));
-            Assert.Equal(DBNull.Value, database.Scalar("SELECT outcome FROM execution_requests;"));
+            Assert.Null(Assert.Single(StoredRuns.Read(database)).Outcome);
+            Assert.Null(Assert.Single(StoredRuns.ReadRequests(database)).Outcome);
             InputReceipt refused = await session.SubmitUserInputAsync(
                 new InputCommand(Guid.NewGuid(), 0, "replacement"));
             Assert.Equal(InputDecision.Refused, refused.Decision);
@@ -308,14 +308,14 @@ public sealed class SessionExecutionTests {
             Assert.Null(snapshot.LastSettlement);
             Assert.Single(snapshot.Messages, row => row.Message.Role == MessageRole.User);
             Assert.DoesNotContain(snapshot.Messages, row => row.Message.Role == MessageRole.Assistant);
-            Assert.Equal(DBNull.Value, database.Scalar("SELECT outcome FROM execution_runs;"));
-            Assert.Equal(DBNull.Value, database.Scalar("SELECT outcome FROM execution_requests;"));
+            Assert.Null(Assert.Single(StoredRuns.Read(database)).Outcome);
+            Assert.Null(Assert.Single(StoredRuns.ReadRequests(database)).Outcome);
             Assert.Empty(StoredOutput.Read(database));
             InputReceipt refused = await session.SubmitUserInputAsync(new InputCommand(Guid.NewGuid(), 0, "replacement"));
             Assert.Equal(InputDecision.Refused, refused.Decision);
             Assert.Equal(InputRefusalReason.Stopping, refused.RefusalReason);
             Assert.Null(refused.RunId);
-            Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM execution_runs;"));
+            Assert.Single(StoredRuns.Read(database));
             Assert.Equal(1, client.Calls);
             Assert.Equal(0, client.DisposeCalls);
         } finally {

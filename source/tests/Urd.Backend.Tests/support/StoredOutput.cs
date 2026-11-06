@@ -14,12 +14,7 @@ internal static class StoredOutput {
 
     internal static List<(Guid RequestId, Guid ResponseId, long ChunkIndex, byte[] Bytes, bool Final)>
         Read(TemporaryDatabase database) {
-        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder {
-            DataSource = database.Path,
-            Mode = SqliteOpenMode.ReadOnly,
-            Pooling = false
-        }.ToString());
-        connection.Open();
+        using SqliteConnection connection = database.OpenReadOnlyConnection();
         using SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
             SELECT o.request_id, q.output_id, o.batch_index, o.text_utf8, o.is_final

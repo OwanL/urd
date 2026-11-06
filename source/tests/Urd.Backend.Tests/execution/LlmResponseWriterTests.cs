@@ -118,8 +118,7 @@ public sealed class LlmResponseWriterTests {
         Assert.Equal(ExecutionOutcome.Completed,
             (await fixture.Session.WaitForSettlementAsync(runId).WaitAsync(TestTimeout)).Outcome);
         var output = StoredOutput.Read(fixture.Database);
-        Guid requestId = Guid.Parse(Assert.IsType<string>(fixture.Database.Scalar(
-            "SELECT request_id FROM execution_requests;")));
+        Guid requestId = Assert.Single(StoredRuns.ReadRequests(fixture.Database)).RequestId;
         Assert.NotEmpty(output);
         Guid responseId = output[0].ResponseId;
 

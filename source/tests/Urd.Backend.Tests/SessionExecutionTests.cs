@@ -36,6 +36,35 @@ public sealed class SessionExecutionTests
         Assert.Equal("go", client.LastRequest.Last().Text);
     }
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task PreservesSupplementaryScalarAcrossUpdateBoundaries(bool splitScalar, bool overflowBoundary)
+    {
+        const int maxChunkBytes = 16 * 1024;
+        string prefix = new string('a', overflowBoundary ? maxChunkBytes - 3 : maxChunkBytes - 4);
+        const string scalar = "😀";
+        const string suffix = "é終\0";
+        string text = prefix + scalar + suffix;
+        string[] updates = splitScalar
+            ? [prefix, scalar[..1], string.Empty, scalar[1..], suffix]
+            : [prefix + scalar + suffix];
+        var client = new ScriptedChatClient(token => TextUpdatesResponse(updates, token));
+        await using var fixture = new ExecutionFixture(client);
+        Guid runId = await fixture.StartRunAsync("go");
+
+        Assert.Equal(ExecutionOutcome.Completed,
+            (await fixture.Session.WaitForSettlementAsync(runId).WaitAsync(Timeout)).Outcome);
+        List<(byte[] Bytes, bool Final)> output = ReadOutput(fixture.Database);
+        Assert.NotEmpty(output);
+        Assert.All(output, row => Assert.InRange(row.Bytes.Length, 0, maxChunkBytes));
+        Assert.Equal(text, string.Concat(output.Select(row => StrictUtf8.GetString(row.Bytes))));
+        Assert.Single(output, row => row.Final);
+        Assert.True(output[^1].Final);
+    }
+
     [Fact]
     public async Task FlushesDeadlineWhileTheSingleNextSourceReadIsPaused()
     {
@@ -129,7 +158,8 @@ public sealed class SessionExecutionTests
     {
         // Attribute strings use UTF-8 metadata, so construct the lone surrogate at runtime.
         string firstUpdate = ((char)firstCodeUnit).ToString();
-        var client = new ScriptedChatClient(token => InvalidUnicodeResponse(firstUpdate, secondUpdate, token));
+        string[] updates = secondUpdate is null ? [firstUpdate] : [firstUpdate, secondUpdate];
+        var client = new ScriptedChatClient(token => TextUpdatesResponse(updates, token));
         await using var fixture = new ExecutionFixture(client);
         Guid runId = await fixture.StartRunAsync("go");
 
@@ -425,15 +455,14 @@ public sealed class SessionExecutionTests
         yield return new() { FinishReason = ChatFinishReason.Stop };
     }
 
-    private static async IAsyncEnumerable<ChatResponseUpdate> InvalidUnicodeResponse(string firstUpdate,
-        string? secondUpdate, [EnumeratorCancellation] CancellationToken token)
+    private static async IAsyncEnumerable<ChatResponseUpdate> TextUpdatesResponse(IEnumerable<string> updates,
+        [EnumeratorCancellation] CancellationToken token)
     {
         await Task.CompletedTask;
-        token.ThrowIfCancellationRequested();
-        yield return Text(firstUpdate);
-        if (secondUpdate is not null)
+        foreach (string update in updates)
         {
-            yield return Text(secondUpdate);
+            token.ThrowIfCancellationRequested();
+            yield return Text(update);
         }
 
         yield return new() { FinishReason = ChatFinishReason.Stop };

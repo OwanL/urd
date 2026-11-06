@@ -126,7 +126,7 @@ internal sealed class SessionExecution
                                 throw new InvalidDataException("Text arrived after the terminal response marker.");
                             }
 
-                            await writer.AppendAsync(text.Text).ConfigureAwait(false);
+                            await writer.AppendTextAsync(text.Text).ConfigureAwait(false);
                             break;
                         case UsageContent:
                             break;
@@ -152,7 +152,7 @@ internal sealed class SessionExecution
                 throw new InvalidDataException("The fake-text response lacks terminal success.");
             }
 
-            await writer.CompleteAsync().ConfigureAwait(false);
+            await writer.FinishResponseAsync().ConfigureAwait(false);
         }
         catch (Exception failure)
         {

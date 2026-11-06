@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Text;
 
 namespace Urd.Core.Execution;
@@ -6,109 +5,70 @@ namespace Urd.Core.Execution;
 // Batches this response by byte size and elapsed time before persisting chunks.
 internal sealed class LlmResponseWriter : IAsyncDisposable
 {
-    private const int BatchByteLimit = 16 * 1024;
+    private const int ChunkByteLimit = 16 * 1024;
     private static readonly TimeSpan FlushInterval = TimeSpan.FromMilliseconds(100);
 
     private readonly Guid _requestId;
     private readonly Guid _responseId = Guid.NewGuid();
-    private readonly Func<LlmResponseChunk, Task> _writeChunkAsync;
+    private readonly Func<LlmResponseChunk, Task> _saveChunkAsync;
     private readonly CancellationToken _cancellationToken;
+
     private readonly StringBuilder _buffer = new();
     private int _bufferUtf8Bytes;
     private char? _pendingHighSurrogate;
     private long _chunkIndex;
+
     private CancellationTokenSource? _flushDelayCancellation;
     private Task? _flushDelay;
     private bool _disposed;
 
-    internal LlmResponseWriter(Guid requestId, Func<LlmResponseChunk, Task> writeChunkAsync,
+    internal LlmResponseWriter(Guid requestId, Func<LlmResponseChunk, Task> saveChunkAsync,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(writeChunkAsync);
+        ArgumentNullException.ThrowIfNull(saveChunkAsync);
         _requestId = requestId;
-        _writeChunkAsync = writeChunkAsync;
+        _saveChunkAsync = saveChunkAsync;
         _cancellationToken = cancellationToken;
     }
 
     internal Task? FlushDelay => _flushDelay;
 
-    internal async Task AppendAsync(string text)
+    internal async Task AppendTextAsync(string text)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(text);
 
-        int offset = 0;
-        if (_pendingHighSurrogate is { } high && text.Length != 0)
+        foreach (char codeUnit in text)
         {
-            if (!Rune.TryCreate(high, text[0], out Rune pair))
+            Rune character;
+            if (_pendingHighSurrogate is { } high)
+            {
+                if (!Rune.TryCreate(high, codeUnit, out character))
+                {
+                    throw new InvalidDataException("The LLM response contains invalid Unicode.");
+                }
+
+                _pendingHighSurrogate = null;
+            }
+            else if (char.IsHighSurrogate(codeUnit))
+            {
+                // The matching low surrogate may arrive in a later update.
+                _pendingHighSurrogate = codeUnit;
+                continue;
+            }
+            else if (!Rune.TryCreate(codeUnit, out character))
             {
                 throw new InvalidDataException("The LLM response contains invalid Unicode.");
             }
 
-            if (_bufferUtf8Bytes + pair.Utf8SequenceLength > BatchByteLimit)
-            {
-                await FlushAsync().ConfigureAwait(false);
-            }
-
-            _buffer.Append(high).Append(text[0]);
-            _bufferUtf8Bytes += pair.Utf8SequenceLength;
-            _pendingHighSurrogate = null;
-            StartFlushDelay();
-            if (_bufferUtf8Bytes == BatchByteLimit)
-            {
-                await FlushAsync().ConfigureAwait(false);
-            }
-
-            offset = 1;
-        }
-
-        while (offset < text.Length)
-        {
-            if (char.IsHighSurrogate(text[offset]) && offset == text.Length - 1)
-            {
-                _pendingHighSurrogate = text[offset];
-                break;
-            }
-
-            if (Rune.DecodeFromUtf16(text.AsSpan(offset), out Rune rune, out int consumed) != OperationStatus.Done)
-            {
-                throw new InvalidDataException("The LLM response contains invalid Unicode.");
-            }
-
-            if (_bufferUtf8Bytes + rune.Utf8SequenceLength > BatchByteLimit)
-            {
-                await FlushAsync().ConfigureAwait(false);
-            }
-
-            _buffer.Append(text.AsSpan(offset, consumed));
-            _bufferUtf8Bytes += rune.Utf8SequenceLength;
-            offset += consumed;
-            StartFlushDelay();
-            if (_bufferUtf8Bytes == BatchByteLimit)
-            {
-                await FlushAsync().ConfigureAwait(false);
-            }
+            await BufferCharacterAsync(character).ConfigureAwait(false);
         }
     }
 
-    internal async Task FlushAsync()
-    {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        await StopFlushDelayAsync().ConfigureAwait(false);
-        await PublishChunkAsync(isFinal: false).ConfigureAwait(false);
-    }
+    internal Task FlushAsync() => WriteChunkAsync(isFinal: false);
 
-    internal async Task CompleteAsync()
-    {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        await StopFlushDelayAsync().ConfigureAwait(false);
-        if (_pendingHighSurrogate is not null)
-        {
-            throw new InvalidDataException("The LLM response ends with an incomplete Unicode scalar.");
-        }
-
-        await PublishChunkAsync(isFinal: true).ConfigureAwait(false);
-    }
+    // Closes the response text, not the request or execution.
+    internal Task FinishResponseAsync() => WriteChunkAsync(isFinal: true);
 
     public async ValueTask DisposeAsync()
     {
@@ -118,10 +78,57 @@ internal sealed class LlmResponseWriter : IAsyncDisposable
         }
 
         _disposed = true;
-        await StopFlushDelayAsync().ConfigureAwait(false);
+        await CancelFlushDelayAsync().ConfigureAwait(false);
     }
 
-    private void StartFlushDelay()
+    private async Task BufferCharacterAsync(Rune character)
+    {
+        int utf8Bytes = character.Utf8SequenceLength;
+        if (_bufferUtf8Bytes + utf8Bytes > ChunkByteLimit)
+        {
+            await FlushAsync().ConfigureAwait(false);
+        }
+
+        Span<char> utf16 = stackalloc char[2];
+        int length = character.EncodeToUtf16(utf16);
+        _buffer.Append(utf16[..length]);
+        _bufferUtf8Bytes += utf8Bytes;
+
+        if (_bufferUtf8Bytes == ChunkByteLimit)
+        {
+            await FlushAsync().ConfigureAwait(false);
+        }
+        else
+        {
+            ScheduleFlush();
+        }
+    }
+
+    private async Task WriteChunkAsync(bool isFinal)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        await CancelFlushDelayAsync().ConfigureAwait(false);
+        if (isFinal && _pendingHighSurrogate is not null)
+        {
+            throw new InvalidDataException("The LLM response ends with an incomplete Unicode scalar.");
+        }
+
+        _cancellationToken.ThrowIfCancellationRequested();
+        if (_bufferUtf8Bytes == 0 && !isFinal)
+        {
+            return;
+        }
+
+        var chunk = new LlmResponseChunk(_requestId, _responseId, _chunkIndex, _buffer.ToString(), isFinal);
+        await _saveChunkAsync(chunk).ConfigureAwait(false);
+
+        _chunkIndex++;
+        _buffer.Clear();
+        _bufferUtf8Bytes = 0;
+    }
+
+    // Later text must not postpone the first buffered character's deadline.
+    private void ScheduleFlush()
     {
         if (_flushDelay is not null)
         {
@@ -132,7 +139,7 @@ internal sealed class LlmResponseWriter : IAsyncDisposable
         _flushDelay = Task.Delay(FlushInterval, _flushDelayCancellation.Token);
     }
 
-    private async Task StopFlushDelayAsync()
+    private async Task CancelFlushDelayAsync()
     {
         if (_flushDelay is not { } delay)
         {
@@ -157,21 +164,5 @@ internal sealed class LlmResponseWriter : IAsyncDisposable
             _flushDelay = null;
             _flushDelayCancellation = null;
         }
-    }
-
-    private async Task PublishChunkAsync(bool isFinal)
-    {
-        _cancellationToken.ThrowIfCancellationRequested();
-        if (_bufferUtf8Bytes == 0 && !isFinal)
-        {
-            return;
-        }
-
-        var chunk = new LlmResponseChunk(_requestId, _responseId, _chunkIndex, _buffer.ToString(), isFinal);
-        await _writeChunkAsync(chunk).ConfigureAwait(false);
-
-        _chunkIndex++;
-        _buffer.Clear();
-        _bufferUtf8Bytes = 0;
     }
 }

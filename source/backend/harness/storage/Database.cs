@@ -13,10 +13,10 @@ internal sealed class Database(SqliteConnection connection) : IDisposable {
     internal T Read<T>(Func<SqliteTransaction, T> operation)
         => Transact(operation, deferred: true);
 
-    internal T WithoutTransaction<T>(Func<T> operation) {
+    // Runs the operation under the gate, refusing work after disposal.
+    internal T Guarded<T>(Func<T> operation) {
         lock (_gate) {
-            ObjectDisposedException.ThrowIf(_disposed, typeof(SessionStore));
-
+            ObjectDisposedException.ThrowIf(_disposed, this);
             return operation();
         }
     }
@@ -44,7 +44,7 @@ internal sealed class Database(SqliteConnection connection) : IDisposable {
     }
 
     private T Transact<T>(Func<SqliteTransaction, T> operation, bool deferred) {
-        return WithoutTransaction(() => {
+        return Guarded(() => {
             using SqliteTransaction transaction = connection.BeginTransaction(deferred);
             T result = operation(transaction);
             transaction.Commit();

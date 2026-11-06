@@ -33,7 +33,7 @@ internal sealed class RunStorage(Database database) {
     }
 
     internal void RequestStop(Guid sessionId, Guid runId) {
-        database.WithoutTransaction(() => {
+        database.Guarded(() => {
             using SqliteCommand command = database.Command(null,
                 "UPDATE execution_runs SET stopping = 1 WHERE session_id = $session AND run_id = $run AND outcome IS NULL;",
                 ("$session", sessionId),
@@ -76,7 +76,7 @@ internal sealed class RunStorage(Database database) {
     }
 
     internal ExecutionResult? ReadSettlement(Guid sessionId, Guid runId) {
-        return database.WithoutTransaction<ExecutionResult?>(() => {
+        return database.Guarded<ExecutionResult?>(() => {
             using SqliteCommand read = database.Command(null,
                 "SELECT outcome FROM execution_runs WHERE session_id = $session AND run_id = $run;",
                 ("$session", sessionId),

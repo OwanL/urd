@@ -21,7 +21,7 @@ internal sealed class SessionStorage(Database database) {
     }
 
     internal SessionRecord? Read(Guid sessionId) {
-        return database.WithoutTransaction<SessionRecord?>(() => {
+        return database.Guarded<SessionRecord?>(() => {
             using SqliteCommand command = database.Command(null,
                 "SELECT session_id, history_revision FROM sessions WHERE session_id = $id;", ("$id", sessionId));
             using SqliteDataReader reader = command.ExecuteReader();

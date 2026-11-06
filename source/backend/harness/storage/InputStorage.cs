@@ -67,7 +67,7 @@ internal sealed class InputStorage(Database database) {
     }
 
     internal InputReceipt? ReadReceipt(Guid sessionId, Guid inputId)
-        => database.WithoutTransaction(() => ReadReceipt(sessionId, inputId, transaction: null));
+        => database.Guarded(() => ReadReceipt(sessionId, inputId, transaction: null));
 
     private InputReceipt? ReadReceipt(Guid sessionId, Guid inputId, SqliteTransaction? transaction) {
         using SqliteCommand command = database.Command(transaction, """

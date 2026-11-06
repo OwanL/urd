@@ -141,7 +141,7 @@ $env:MSBUILDDISABLENODEREUSE = '1'
 Normal restore is locked and must not change the committed `packages.lock.json`
 files. A mismatch fails instead of silently upgrading. Restore needs public NuGet
 access or already cached packages; it does not require personal credentials.
-Test also builds Core/tests with nullable checking and compiler warnings as errors.
+Test also builds Core/tests with nullable checking and the code-quality gate below.
 The command avoids persistent build/compiler servers and limits build parallelism.
 
 `Microsoft.Data.Sqlite` **10.0.14** follows the stable .NET 10 provider line and
@@ -149,8 +149,10 @@ includes its SQLite native bundle. `Microsoft.Extensions.AI.Abstractions` **10.1
 only the request interface/data types; no provider adapter or middleware is installed.
 Tests use xUnit **2.9.3**'s ordinary `[Fact]` /
 `Assert` API, runner **4.0.1** (supports xUnit v2 and .NET 8+) and Microsoft.NET.Test.Sdk
-**18.11.0** (.NET 8+ assets). Versions live only at their project references; lockfiles
-retain the transitive graph and content hashes. No central version layer is needed yet.
+**18.11.0** (.NET 8+ assets). SonarAnalyzer.CSharp **10.35.0.4138** is shared through
+`source/Directory.Build.props` with `PrivateAssets="all"`; it is a build-time dependency,
+not part of the application API/runtime dependency graph. Versions live at these package
+references; lockfiles retain the transitive graph and content hashes.
 
 For an intentional reviewed dependency update only, edit the project reference and
 regenerate both locks from `source/` with:
@@ -162,6 +164,38 @@ regenerate both locks from `source/` with:
 
 Review the lock changes and run tests before committing. Do not disable locked mode
 for ordinary builds. SDK maintenance is a separate explicit `global.json` edit.
+
+## Code-quality gate
+
+Ordinary `dotnet build` and `dotnet test` commands enforce the gate in both Core and
+its tests, in Debug and Release. No separate lint command, IDE extension, Sonar server
+or cloud upload is required. `dotnet test --no-build` deliberately skips compilation
+and therefore is not a quality-gate check.
+
+- `source/Directory.Build.props` selects the .NET 10 recommended analyzer rules,
+  enables build-time code-style analysis, and loads the pinned Sonar analyzer.
+  Compiler/analyzer warnings are errors: a finding stops compilation before tests run.
+- `.editorconfig` promotes unused private members, unread private members, dead
+  assignments and unused non-public parameters to warnings. Other IDE style rules
+  retain their default severities; formatting preferences are not blanket build errors.
+- Sonar's enabled-by-default rules catch additional bug and smell patterns. Disabled
+  rules and suggestions do not become errors merely because warnings-as-errors is on.
+  This is a concrete rule set, not a promise to detect every smell or prove correctness.
+
+Fix findings rather than disabling analysis or lowering severity to make a build pass.
+An intentional exception must name the specific rule, explain the actual invariant or
+false positive, and cover the smallest practical scope. There is no blanket existing-code
+baseline. Current local exceptions preserve private execution signals, deferred validation
+of captured input arguments, the async lock's managed-only semaphore use, and deliberately
+failing provider cleanup in a test. CA1861 alone is disabled for test sources so expected
+arrays stay beside their assertions rather than becoming shared fixture fields; production
+keeps that rule. Revisit exceptions when their surrounding behavior changes.
+
+Analyzer upgrades are reviewed dependency changes: update the shared reference and both
+locks, triage new diagnostics, then run tests. Verify the gate itself with deliberately bad
+code in an isolated copy: builds and tests must exit unsuccessfully with the expected rule
+IDs, and clean code must pass again after removing the probe. Passing tests or analyzers
+still does not replace review of ownership, concurrency, SQL or error handling.
 
 ## Outputs and data
 

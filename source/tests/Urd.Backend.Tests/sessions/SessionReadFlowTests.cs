@@ -63,7 +63,7 @@ public sealed class SessionReadFlowTests {
             Assert.False(tail.HasMore);
 
             using (var cancelledRead = new CancellationTokenSource()) {
-                cancelledRead.Cancel();
+                await cancelledRead.CancelAsync();
                 await Assert.ThrowsAnyAsync<OperationCanceledException>(
                     () => session.ReadSnapshotAsync(cancelledRead.Token));
                 await Assert.ThrowsAnyAsync<OperationCanceledException>(

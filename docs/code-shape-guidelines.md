@@ -72,12 +72,14 @@ not its language-specific patterns or class hierarchy. Shorter code is not autom
 | Constructor needs more than roughly **5 collaborators** | Does this object really coordinate all of them, or is it absorbing another owner's work? |
 | Several unrelated mutable-state groups or a broad public surface | Can we explain one owner/invariant for each? Are callers being handed internal controls? |
 
-There is **no minimum size, fixed member count or automatic failure threshold**.
-Comments, data literals, generated code and test fixtures need judgment, not identical
-line-count treatment. Do not create parameter/state bags solely to beat a count.
-Small classes are fine; a justified larger class/method can also be the better design.
-No CI size gate is proposed. These suggestions do not override accepted behavioral
-requirements or justify adding unneeded abstractions.
+These size signals are **not automatic failure thresholds**. Comments, data literals,
+generated code and test fixtures need judgment, not identical line-count treatment.
+Do not create parameter/state bags solely to beat a count. Small classes are fine;
+a justified larger class/method can also be the better design. No file-size gate is
+proposed. The separate [code-quality gate](backend-development.md#code-quality-gate)
+enforces selected analyzer rules during builds and tests; its findings need real fixes
+or narrow, documented exceptions, not code reshuffling to beat a metric. Neither these
+signals nor analyzer rules override accepted behavioral requirements.
 
 ## Initial review format
 

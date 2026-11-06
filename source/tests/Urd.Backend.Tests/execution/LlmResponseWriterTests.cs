@@ -27,7 +27,7 @@ public sealed class LlmResponseWriterTests {
         Assert.True(output.Count < 100, "Tiny source updates must not each cause a durable append.");
         Assert.Equal(1, client.Calls);
         Assert.Equal(0, client.DisposeCalls);
-        Assert.Equal("go", client.LastRequest.Last().Text);
+        Assert.Equal("go", client.LastRequest[^1].Text);
     }
 
     [Theory]

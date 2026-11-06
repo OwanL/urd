@@ -181,8 +181,10 @@ internal sealed class SessionExecution : IDisposable {
         }
     }
 
+#pragma warning disable S3871 // Private driver signals, not public exception contracts.
     // The session no longer accepts output from this run.
     private sealed class OutputRejectedException : Exception;
 
     private sealed class OutputSaveException(Exception inner) : Exception("Saving response output failed.", inner);
+#pragma warning restore S3871
 }

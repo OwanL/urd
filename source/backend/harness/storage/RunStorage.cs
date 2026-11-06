@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Text;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.AI;
@@ -104,7 +105,7 @@ internal sealed class RunStorage(Database database) {
             ? null : new((ExecutionOutcome)reader.GetInt32(2), AlreadySettled: false);
     }
 
-    private IReadOnlyList<ChatMessage> ReadRequestContext(
+    private ReadOnlyCollection<ChatMessage> ReadRequestContext(
         SqliteTransaction transaction, Guid sessionId, Guid runId, long historyRevision) {
         using SqliteCommand read = database.Command(transaction, """
             SELECT r.ordinal, 0 AS role_order, 0 AS batch_index, i.original_text_utf8

@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using Microsoft.Data.Sqlite;
 using Urd.Core.Execution;
 using Urd.Core.Sessions;
@@ -101,7 +102,7 @@ internal sealed class SnapshotReader {
         return candidates;
     }
 
-    private IReadOnlyList<MessagePreview> ReadPreviews(SqliteTransaction transaction, Guid sessionId,
+    private ReadOnlyCollection<MessagePreview> ReadPreviews(SqliteTransaction transaction, Guid sessionId,
         List<(MessageRef Message, ExecutionOutcome? Settlement)> candidates) {
         int messageCount = Math.Min(candidates.Count, SnapshotMessageLimit);
         var messages = new List<MessagePreview>(messageCount);

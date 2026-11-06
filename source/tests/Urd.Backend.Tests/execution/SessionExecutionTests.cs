@@ -260,6 +260,7 @@ public sealed class SessionExecutionTests {
                     await session.RequestStopAsync(acceptedRun).WaitAsync(TestTimeout);
                 } catch (Exception failure) when (failure is not TimeoutException &&
                       FlattenFailures(failure).Any(error => error.Message == CancellationCallbackFailureMessage)) {
+                    // Expected injected callback failure; timeouts must still prevent disposal.
                 }
 
                 await disposed.Task.WaitAsync(TestTimeout);
@@ -267,6 +268,7 @@ public sealed class SessionExecutionTests {
                     await session.WaitForSettlementAsync(acceptedRun).WaitAsync(TestTimeout);
                 } catch (Exception failure) when (failure is not TimeoutException &&
                       FlattenFailures(failure).Any(error => error.Message == EnumeratorDisposalFailureMessage)) {
+                    // Expected injected cleanup failure after the enumerator has exited.
                 }
             }
 
@@ -342,7 +344,9 @@ public sealed class SessionExecutionTests {
             await Task.Delay(System.Threading.Timeout.InfiniteTimeSpan, token);
         } finally {
             disposed.TrySetResult();
+#pragma warning disable CA2219 // Deliberately simulate a provider whose enumerator disposal throws.
             throw new InvalidOperationException(EnumeratorDisposalFailureMessage);
+#pragma warning restore CA2219
         }
     }
 
@@ -364,9 +368,11 @@ public sealed class SessionExecutionTests {
         // Do not dispose this registration in the iterator: enumerator cleanup must be
         // able to finish while the callback deliberately waits for its release barrier.
         token.Register(() => {
-            SessionSnapshot snapshot = session.ReadSnapshotAsync().WaitAsync(TestTimeout).GetAwaiter().GetResult();
+            // Stop has already cancelled token; these reads/waits must exercise the live callback.
+            SessionSnapshot snapshot = session.ReadSnapshotAsync(CancellationToken.None)
+                .WaitAsync(TestTimeout, CancellationToken.None).GetAwaiter().GetResult();
             callbackSnapshot.TrySetResult(snapshot);
-            callbackRelease.Task.WaitAsync(TestTimeout).GetAwaiter().GetResult();
+            callbackRelease.Task.WaitAsync(TestTimeout, CancellationToken.None).GetAwaiter().GetResult();
         });
 
         try {
@@ -395,35 +401,30 @@ public sealed class SessionExecutionTests {
         }
     }
 
-    private static async IAsyncEnumerable<ChatResponseUpdate> FailedResponse(string failureScenario,
-        [EnumeratorCancellation] CancellationToken token) {
-        await Task.CompletedTask;
-        token.ThrowIfCancellationRequested();
-        yield return Text("partial");
-        switch (failureScenario) {
-            case "eof":
-                yield break;
-            case "length":
-                yield return new() { FinishReason = ChatFinishReason.Length };
-                break;
-            case "exception":
+    private static IAsyncEnumerable<ChatResponseUpdate> FailedResponse(string failureScenario, CancellationToken token) {
+        // Reject unknown test cases before they can masquerade as a scripted stream failure.
+        var stop = new ChatResponseUpdate { FinishReason = ChatFinishReason.Stop };
+        var length = new ChatResponseUpdate { FinishReason = ChatFinishReason.Length };
+        (ChatResponseUpdate[] Updates, bool ThrowAfterUpdates) script = failureScenario switch {
+            "eof" => ([], false),
+            "length" => ([length], false),
+            "exception" => ([], true),
+            "exception-after-stop" => ([stop], true),
+            "non-text" => ([new() { Contents = [new FunctionCallContent("call", "unsupported", null)] }], false),
+            "text-after-stop" => ([stop, Text("late text")], false),
+            "length-after-stop" => ([stop, length], false),
+            _ => throw new ArgumentOutOfRangeException(nameof(failureScenario))
+        };
+        return RespondAsync(token);
+
+        async IAsyncEnumerable<ChatResponseUpdate> RespondAsync([EnumeratorCancellation] CancellationToken cancellation) {
+            await Task.CompletedTask;
+            cancellation.ThrowIfCancellationRequested();
+            yield return Text("partial");
+            foreach (ChatResponseUpdate update in script.Updates)
+                yield return update;
+            if (script.ThrowAfterUpdates)
                 throw new InvalidOperationException("Scripted request failure.");
-            case "exception-after-stop":
-                yield return new() { FinishReason = ChatFinishReason.Stop };
-                throw new InvalidOperationException("Scripted request failure.");
-            case "non-text":
-                yield return new() { Contents = [new FunctionCallContent("call", "unsupported", null)] };
-                break;
-            case "text-after-stop":
-                yield return new() { FinishReason = ChatFinishReason.Stop };
-                yield return Text("late text");
-                break;
-            case "length-after-stop":
-                yield return new() { FinishReason = ChatFinishReason.Stop };
-                yield return new() { FinishReason = ChatFinishReason.Length };
-                break;
-            default:
-                throw new ArgumentOutOfRangeException(nameof(failureScenario));
         }
     }
 

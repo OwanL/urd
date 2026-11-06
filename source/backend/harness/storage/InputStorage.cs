@@ -25,8 +25,10 @@ internal sealed class InputStorage(Database database) {
                 return (refused, false);
             }
 
+#pragma warning disable S3928 // Captured method argument; validation must follow retained decisions.
             if (proposedRunId == Guid.Empty)
                 throw new ArgumentException("Run ID cannot be empty.", nameof(proposedRunId));
+#pragma warning restore S3928
 
             var accepted = new InputReceipt(sessionId, command, InputDecision.Accepted, null, proposedRunId);
             InsertReceipt(transaction, accepted);
@@ -53,8 +55,10 @@ internal sealed class InputStorage(Database database) {
                 return retained;
             }
 
+#pragma warning disable S3928 // Captured method argument; an exact retry retains its original reason.
             if (!Enum.IsDefined(reason))
                 throw new ArgumentOutOfRangeException(nameof(reason));
+#pragma warning restore S3928
 
             var receipt = new InputReceipt(sessionId, command, InputDecision.Refused, reason, null);
             InsertReceipt(transaction, receipt);

@@ -23,8 +23,9 @@ public sealed class SessionConcurrencyTests {
         using (await guard.AcquireAsync()) {
             waiting = EnterAsync();
             using var cancellation = new CancellationTokenSource();
-            Task<AsyncLock.Handle> cancelled = guard.AcquireAsync(cancellation.Token).AsTask();
-            cancellation.Cancel();
+            ValueTask<AsyncLock.Handle> cancelledAcquisition = guard.AcquireAsync(cancellation.Token);
+            Task<AsyncLock.Handle> cancelled = cancelledAcquisition.AsTask();
+            await cancellation.CancelAsync();
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelled.WaitAsync(TestTimeout));
             Assert.False(entered.Task.IsCompleted);
             Assert.False(waiting.IsCompleted);
@@ -128,7 +129,7 @@ public sealed class SessionConcurrencyTests {
 
             Task<ExecutionResult> cancelledWait = session.WaitForSettlementAsync(runId, waitCancellation.Token);
             Assert.False(cancelledWait.IsCompleted);
-            waitCancellation.Cancel();
+            await waitCancellation.CancelAsync();
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelledWait.WaitAsync(TestTimeout));
             Assert.False(modelToken.IsCancellationRequested);
             Assert.False(session.WaitForSettlementAsync(runId).IsCompleted);

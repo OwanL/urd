@@ -25,7 +25,6 @@ internal sealed class LlmResponseWriter : IAsyncDisposable
     internal LlmResponseWriter(Guid requestId, Func<LlmResponseChunk, Task> saveChunkAsync,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(saveChunkAsync);
         _requestId = requestId;
         _saveChunkAsync = saveChunkAsync;
         _cancellationToken = cancellationToken;
@@ -36,32 +35,12 @@ internal sealed class LlmResponseWriter : IAsyncDisposable
     internal async Task AppendTextAsync(string text)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        ArgumentNullException.ThrowIfNull(text);
-
         foreach (char codeUnit in text)
         {
-            Rune character;
-            if (_pendingHighSurrogate is { } high)
+            if (TryCompleteCharacter(codeUnit, out Rune character))
             {
-                if (!Rune.TryCreate(high, codeUnit, out character))
-                {
-                    throw new InvalidDataException("The LLM response contains invalid Unicode.");
-                }
-
-                _pendingHighSurrogate = null;
+                await BufferCharacterAsync(character);
             }
-            else if (char.IsHighSurrogate(codeUnit))
-            {
-                // The matching low surrogate may arrive in a later update.
-                _pendingHighSurrogate = codeUnit;
-                continue;
-            }
-            else if (!Rune.TryCreate(codeUnit, out character))
-            {
-                throw new InvalidDataException("The LLM response contains invalid Unicode.");
-            }
-
-            await BufferCharacterAsync(character).ConfigureAwait(false);
         }
     }
 
@@ -78,15 +57,37 @@ internal sealed class LlmResponseWriter : IAsyncDisposable
         }
 
         _disposed = true;
-        await CancelFlushDelayAsync().ConfigureAwait(false);
+        await CancelFlushDelayAsync();
     }
+
+    // Returns false while waiting for the second half of a surrogate pair,
+    // which may arrive in a later update.
+    private bool TryCompleteCharacter(char codeUnit, out Rune character)
+    {
+        if (_pendingHighSurrogate is { } high)
+        {
+            _pendingHighSurrogate = null;
+            return Rune.TryCreate(high, codeUnit, out character) ? true : throw InvalidUnicode();
+        }
+
+        if (char.IsHighSurrogate(codeUnit))
+        {
+            _pendingHighSurrogate = codeUnit;
+            character = default;
+            return false;
+        }
+
+        return Rune.TryCreate(codeUnit, out character) ? true : throw InvalidUnicode();
+    }
+
+    private static InvalidDataException InvalidUnicode() => new("The LLM response contains invalid Unicode.");
 
     private async Task BufferCharacterAsync(Rune character)
     {
         int utf8Bytes = character.Utf8SequenceLength;
         if (_bufferUtf8Bytes + utf8Bytes > ChunkByteLimit)
         {
-            await FlushAsync().ConfigureAwait(false);
+            await FlushAsync();
         }
 
         Span<char> utf16 = stackalloc char[2];
@@ -96,7 +97,7 @@ internal sealed class LlmResponseWriter : IAsyncDisposable
 
         if (_bufferUtf8Bytes == ChunkByteLimit)
         {
-            await FlushAsync().ConfigureAwait(false);
+            await FlushAsync();
         }
         else
         {
@@ -107,7 +108,7 @@ internal sealed class LlmResponseWriter : IAsyncDisposable
     private async Task WriteChunkAsync(bool isFinal)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        await CancelFlushDelayAsync().ConfigureAwait(false);
+        await CancelFlushDelayAsync();
         if (isFinal && _pendingHighSurrogate is not null)
         {
             throw new InvalidDataException("The LLM response ends with an incomplete Unicode scalar.");
@@ -120,7 +121,7 @@ internal sealed class LlmResponseWriter : IAsyncDisposable
         }
 
         var chunk = new LlmResponseChunk(_requestId, _responseId, _chunkIndex, _buffer.ToString(), isFinal);
-        await _saveChunkAsync(chunk).ConfigureAwait(false);
+        await _saveChunkAsync(chunk);
 
         _chunkIndex++;
         _buffer.Clear();
@@ -146,23 +147,10 @@ internal sealed class LlmResponseWriter : IAsyncDisposable
             return;
         }
 
-        CancellationTokenSource cancellation = _flushDelayCancellation!;
-        try
-        {
-            cancellation.Cancel();
-            try
-            {
-                await delay.ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
-            {
-            }
-        }
-        finally
-        {
-            cancellation.Dispose();
-            _flushDelay = null;
-            _flushDelayCancellation = null;
-        }
+        using CancellationTokenSource cancellation = _flushDelayCancellation!;
+        _flushDelay = null;
+        _flushDelayCancellation = null;
+        cancellation.Cancel();
+        await delay.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
     }
 }

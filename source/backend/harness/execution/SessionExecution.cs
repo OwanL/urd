@@ -4,111 +4,120 @@ using Urd.Core.Sessions;
 
 namespace Urd.Core.Execution;
 
-internal sealed class SessionExecution
+// Sends one run's request to the model and streams the response into the session.
+// The session owns locking and storage; this class owns the model call and its cleanup.
+internal sealed class SessionExecution : IDisposable
 {
-    private readonly SessionBase _owner;
-    private readonly IChatClient _chatClient; // Borrowed; the composing owner controls its lifetime.
-    private readonly CancellationTokenSource _runStop = new();
-    private Task? _cancellationCallbacks;
+    private readonly SessionBase _session;
+    private readonly IChatClient _chatClient; // Borrowed from the session; never disposed here.
+    private readonly CancellationTokenSource _stop = new();
+    private Task? _stopCallbacks;
 
-    internal SessionExecution(Guid runId, SessionBase owner, IChatClient chatClient)
+    internal SessionExecution(Guid runId, SessionBase session, IChatClient chatClient)
     {
-        ArgumentNullException.ThrowIfNull(owner);
-        ArgumentNullException.ThrowIfNull(chatClient);
         RunId = runId;
-        _owner = owner;
+        _session = session;
         _chatClient = chatClient;
     }
 
     internal Guid RunId { get; }
 
-    // Lifecycle members are called only by SessionBase while it holds the session guard.
-    internal Task RequestCancellationAsync() => _cancellationCallbacks ??= _runStop.CancelAsync();
+    // Completes once every callback registered on the stop token has finished.
+    internal Task StopCallbacks => _stopCallbacks ?? Task.CompletedTask;
 
-    internal Task CancellationCompletion => _cancellationCallbacks ?? Task.CompletedTask;
+    // Called by the session while it holds its lock. Repeated calls share one task.
+    internal Task StopAsync() => _stopCallbacks ??= _stop.CancelAsync();
 
-    // The owner calls this only after RunAsync and cancellation callbacks have finished
-    // and the durable run settlement has been saved.
-    internal void ReleaseAfterSettlement() => _runStop.Dispose();
+    // Called by the session only after RunAsync and StopCallbacks have finished
+    // and the run's result has been saved.
+    public void Dispose() => _stop.Dispose();
 
-    // The sole owner invokes this once, outside the session guard.
+    // Called once by the session, outside its lock.
     internal async Task<ExecutionOutcome> RunAsync()
     {
-        LlmRequest? request = await _owner.ClaimNextRequestAsync(RunId).ConfigureAwait(false);
+        LlmRequest? request = await _session.ClaimNextRequestAsync(RunId);
         if (request is null)
         {
-            return _runStop.IsCancellationRequested
+            return _stop.IsCancellationRequested
                 ? ExecutionOutcome.Cancelled
-                : throw new InvalidOperationException("The active run had no claimable request and was not stopped.");
+                : throw new InvalidOperationException("The run has no request to send and was not stopped.");
         }
 
-        // Disposing the linked source can wait for a running cancellation callback.
-        // Keep it alive until after request completion has been recorded.
-        using var requestStop = CancellationTokenSource.CreateLinkedTokenSource(_runStop.Token);
-        var writer = new LlmResponseWriter(request.RequestId, WriteResponseChunkAsync, _runStop.Token);
-        LlmRequestOutcome completion = await StreamResponseAsync(request, requestStop, writer).ConfigureAwait(false);
-        bool recorded = await _owner.CompleteRequestAsync(RunId, completion).ConfigureAwait(false);
-        return recorded ? completion.Outcome : ExecutionOutcome.Cancelled;
+        // Disposing this source waits for its running cancellation callbacks,
+        // so keep it alive until the request outcome has been saved.
+        using var requestStop = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
+        LlmRequestOutcome outcome = await SendRequestAsync(request, requestStop);
+        bool saved = await _session.CompleteRequestAsync(RunId, outcome);
+        return saved ? outcome.Outcome : ExecutionOutcome.Cancelled;
     }
 
-    private async Task<LlmRequestOutcome> StreamResponseAsync(LlmRequest request,
-        CancellationTokenSource requestStop, LlmResponseWriter writer)
+    private async Task<LlmRequestOutcome> SendRequestAsync(LlmRequest request, CancellationTokenSource requestStop)
     {
-        IAsyncEnumerator<ChatResponseUpdate>? source = null;
+        var writer = new LlmResponseWriter(request.RequestId, SaveChunkAsync, _stop.Token);
+        IAsyncEnumerator<ChatResponseUpdate>? updates = null;
         Task<bool>? pendingRead = null;
-        Exception? primaryFailure = null;
+        Exception? failure = null;
         try
         {
-            _runStop.Token.ThrowIfCancellationRequested();
-            source = _chatClient.GetStreamingResponseAsync(request.Messages, cancellationToken: requestStop.Token)
+            CancellationToken stop = _stop.Token;
+            stop.ThrowIfCancellationRequested();
+            updates = _chatClient
+                .GetStreamingResponseAsync(request.Messages, cancellationToken: requestStop.Token)
                 .GetAsyncEnumerator(requestStop.Token);
-            bool sawStopFinishReason = false;
+
+            bool finished = false;
             while (true)
             {
-                pendingRead ??= source.MoveNextAsync().AsTask();
-                Task? flushDelay = writer.FlushDelay;
-                if (flushDelay is { IsCompleted: true }
-                    || (flushDelay is not null
-                        && await Task.WhenAny(pendingRead, flushDelay).ConfigureAwait(false) == flushDelay))
+                pendingRead ??= updates.MoveNextAsync().AsTask();
+                if (await IsFlushDueFirstAsync(writer.FlushDelay, pendingRead))
                 {
-                    _runStop.Token.ThrowIfCancellationRequested();
-                    await writer.FlushAsync().ConfigureAwait(false);
-                    continue; // Retain the same pending read when the flush delay wins.
+                    // Keep the pending read; it is awaited on the next pass.
+                    stop.ThrowIfCancellationRequested();
+                    await writer.FlushAsync();
+                    continue;
                 }
 
-                Task<bool> readTask = pendingRead;
+                bool hasUpdate = await pendingRead;
                 pendingRead = null;
-                if (!await readTask.ConfigureAwait(false))
+                if (!hasUpdate)
                 {
                     break;
                 }
 
-                _runStop.Token.ThrowIfCancellationRequested();
-                sawStopFinishReason = await AppendUpdateAsync(source.Current, writer, sawStopFinishReason)
-                    .ConfigureAwait(false);
+                stop.ThrowIfCancellationRequested();
+                finished = await WriteUpdateAsync(updates.Current, writer, finished);
             }
 
-            _runStop.Token.ThrowIfCancellationRequested();
-            if (!sawStopFinishReason)
+            stop.ThrowIfCancellationRequested();
+            if (!finished)
             {
-                throw new InvalidDataException("The fake-text response lacks terminal success.");
+                throw new InvalidDataException("The response ended without a stop finish reason.");
             }
 
-            await writer.FinishResponseAsync().ConfigureAwait(false);
+            await writer.FinishResponseAsync();
         }
-        catch (Exception failure)
+        catch (Exception exception)
         {
-            primaryFailure = failure;
+            failure = exception;
         }
 
-        // Cleanup always runs before classifying the response. Its failures must reach
-        // the owner, not become an ordinary failed request that permits settlement.
-        await CleanupResponseAsync(requestStop, source, pendingRead, writer, primaryFailure).ConfigureAwait(false);
-        return GetRequestOutcome(request.RequestId, primaryFailure);
+        await CleanUpAsync(requestStop, pendingRead, updates, writer, failure);
+        return ToRequestOutcome(request.RequestId, failure);
     }
 
-    private static async Task<bool> AppendUpdateAsync(ChatResponseUpdate update,
-        LlmResponseWriter writer, bool sawStopFinishReason)
+    private static async Task<bool> IsFlushDueFirstAsync(Task? flushDelay, Task<bool> pendingRead)
+    {
+        if (flushDelay is null)
+        {
+            return false;
+        }
+
+        return flushDelay.IsCompleted || await Task.WhenAny(pendingRead, flushDelay) == flushDelay;
+    }
+
+    // Returns whether the response has finished, including this update.
+    private static async Task<bool> WriteUpdateAsync(ChatResponseUpdate update,
+        LlmResponseWriter writer, bool finished)
     {
         foreach (AIContent content in update.Contents)
         {
@@ -119,103 +128,105 @@ internal sealed class SessionExecution
 
             if (content is not TextContent text)
             {
-                throw new InvalidDataException("The fake-text execution received non-text or error content.");
+                throw new InvalidDataException("The response contained content other than text.");
             }
 
-            if (sawStopFinishReason && text.Text.Length != 0)
+            if (finished && text.Text.Length != 0)
             {
-                throw new InvalidDataException("Text arrived after the terminal response marker.");
+                throw new InvalidDataException("The response contained text after its stop finish reason.");
             }
 
-            await writer.AppendTextAsync(text.Text).ConfigureAwait(false);
+            await writer.AppendTextAsync(text.Text);
         }
 
         if (update.FinishReason is null)
         {
-            return sawStopFinishReason;
+            return finished;
         }
 
-        if (update.FinishReason != ChatFinishReason.Stop)
-        {
-            throw new InvalidDataException("The fake-text request did not finish successfully.");
-        }
-
-        return true;
+        return update.FinishReason == ChatFinishReason.Stop
+            ? true
+            : throw new InvalidDataException("The response finished without a stop finish reason.");
     }
 
-    private LlmRequestOutcome GetRequestOutcome(Guid requestId, Exception? failure)
+    private LlmRequestOutcome ToRequestOutcome(Guid requestId, Exception? failure)
     {
-        if (failure is OwnerOperationException)
+        // A failed save is a session failure, not a failed model request.
+        if (failure is OutputSaveException)
         {
             ExceptionDispatchInfo.Throw(failure);
         }
 
+        bool stopped = _stop.IsCancellationRequested;
         ExecutionOutcome outcome = failure switch
         {
-            null => _runStop.IsCancellationRequested ? ExecutionOutcome.Cancelled : ExecutionOutcome.Completed,
-            FencedExecutionException => ExecutionOutcome.Cancelled,
-            OperationCanceledException when _runStop.IsCancellationRequested => ExecutionOutcome.Cancelled,
+            null when stopped => ExecutionOutcome.Cancelled,
+            null => ExecutionOutcome.Completed,
+            OutputRejectedException => ExecutionOutcome.Cancelled,
+            OperationCanceledException when stopped => ExecutionOutcome.Cancelled,
             _ => ExecutionOutcome.Failed
         };
-        return new(requestId, outcome, outcome == ExecutionOutcome.Failed ? failure!.Message : null);
+        string? error = outcome == ExecutionOutcome.Failed ? failure!.Message : null;
+        return new(requestId, outcome, error);
     }
 
-    private async Task WriteResponseChunkAsync(LlmResponseChunk chunk)
+    private async Task SaveChunkAsync(LlmResponseChunk chunk)
     {
-        bool recorded;
+        bool saved;
         try
         {
-            recorded = await _owner.RecordOutputAsync(RunId, chunk).ConfigureAwait(false);
+            saved = await _session.RecordOutputAsync(RunId, chunk);
         }
-        catch (Exception error)
+        catch (Exception exception)
         {
-            throw new OwnerOperationException(error);
+            throw new OutputSaveException(exception);
         }
 
-        if (!recorded)
+        if (!saved)
         {
-            throw new FencedExecutionException();
+            throw new OutputRejectedException();
         }
     }
 
-    private static async Task CleanupResponseAsync(CancellationTokenSource requestStop,
-        IAsyncEnumerator<ChatResponseUpdate>? source, Task<bool>? pendingRead,
-        LlmResponseWriter writer, Exception? primaryFailure)
+    // Attempts every step even when an earlier one fails. A cleanup failure leaves the
+    // run unsettled, so it is thrown to the session instead of becoming a failed request.
+    private static async Task CleanUpAsync(CancellationTokenSource requestStop, Task<bool>? pendingRead,
+        IAsyncEnumerator<ChatResponseUpdate>? updates, LlmResponseWriter writer, Exception? requestFailure)
     {
-        Exception? cancellationFailure = await CaptureCleanupFailureAsync(() => new ValueTask(requestStop.CancelAsync()))
-            .ConfigureAwait(false);
+        Exception? cancelFailure = await CaptureFailureAsync(async () => await requestStop.CancelAsync());
         if (pendingRead is not null)
         {
-            // The abandoned read may fail on cancellation. Join it before disposing
-            // its enumerator, but do not treat its failure as a cleanup failure.
-            _ = await CaptureCleanupFailureAsync(() => new ValueTask(pendingRead)).ConfigureAwait(false);
+            // A read abandoned by cancellation is expected to fail. Wait for it anyway,
+            // because the enumerator must be idle before it is disposed.
+            _ = await CaptureFailureAsync(async () => await pendingRead);
         }
 
-        Exception? sourceFailure = source is null ? null
-            : await CaptureCleanupFailureAsync(source.DisposeAsync).ConfigureAwait(false);
-        Exception? writerFailure = await CaptureCleanupFailureAsync(writer.DisposeAsync).ConfigureAwait(false);
-        if (cancellationFailure is null && sourceFailure is null && writerFailure is null)
+        Exception? updatesFailure = updates is null ? null : await CaptureFailureAsync(updates.DisposeAsync);
+        Exception? writerFailure = await CaptureFailureAsync(writer.DisposeAsync);
+        if (cancelFailure is null && updatesFailure is null && writerFailure is null)
         {
             return;
         }
 
-        throw new AggregateException("Execution cleanup could not be confirmed.",
-            new[] { primaryFailure, cancellationFailure, sourceFailure, writerFailure }.OfType<Exception>());
+        Exception?[] failures = [requestFailure, cancelFailure, updatesFailure, writerFailure];
+        throw new AggregateException("The request could not be cleaned up.", failures.OfType<Exception>());
     }
 
-    private static async Task<Exception?> CaptureCleanupFailureAsync(Func<ValueTask> cleanup)
+    private static async Task<Exception?> CaptureFailureAsync(Func<ValueTask> action)
     {
         try
         {
-            await cleanup().ConfigureAwait(false);
+            await action();
             return null;
         }
-        catch (Exception failure)
+        catch (Exception exception)
         {
-            return failure;
+            return exception;
         }
     }
 
-    private sealed class FencedExecutionException : Exception { }
-    private sealed class OwnerOperationException(Exception inner) : Exception("Recording output failed.", inner) { }
+    // The session no longer accepts output from this run.
+    private sealed class OutputRejectedException : Exception;
+
+    private sealed class OutputSaveException(Exception inner) : Exception("Saving response output failed.", inner);
 }

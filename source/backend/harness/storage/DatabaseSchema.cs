@@ -101,9 +101,19 @@ internal static class DatabaseSchema {
     private static void EnsureExecutionSchema(SqliteConnection connection, SqliteTransaction transaction, bool create) {
         using SqliteCommand command = connection.CreateCommand();
         command.Transaction = transaction;
+        if (!create) {
+            command.CommandText = """
+                SELECT ordinal, session_id, run_id, history_revision, input_id, stopping, outcome FROM execution_runs LIMIT 0;
+                SELECT request_id, run_id, output_id, next_batch_index, output_final, outcome, error FROM execution_requests LIMIT 0;
+                SELECT request_id, batch_index, text_utf8, is_final FROM execution_output LIMIT 0;
+                """;
+            command.ExecuteNonQuery();
+            return;
+        }
+
         // Storage columns call one response's chunks "batches": output_id is its response
         // identity and next_batch_index/batch_index are its chunk index.
-        command.CommandText = create ? """
+        command.CommandText = """
             CREATE TABLE execution_runs (
                 ordinal INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id TEXT NOT NULL REFERENCES sessions(session_id),
@@ -132,10 +142,6 @@ internal static class DatabaseSchema {
                 is_final INTEGER NOT NULL CHECK (is_final IN (0, 1)),
                 PRIMARY KEY (request_id, batch_index)
             ) STRICT;
-            """ : """
-            SELECT ordinal, session_id, run_id, history_revision, input_id, stopping, outcome FROM execution_runs LIMIT 0;
-            SELECT request_id, run_id, output_id, next_batch_index, output_final, outcome, error FROM execution_requests LIMIT 0;
-            SELECT request_id, batch_index, text_utf8, is_final FROM execution_output LIMIT 0;
             """;
         command.ExecuteNonQuery();
     }

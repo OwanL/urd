@@ -46,14 +46,14 @@ This is a Core review checkpoint, not the browser-to-Core milestone or a complet
 
 ## Read contract and incremental review order
 
-1. [SessionSnapshot.cs](../source/backend/harness/sessions/SessionSnapshot.cs) — detached records;
-   shared `ExecutionResult`/`ExecutionOutcome` in
-   [ExecutionContracts.cs](../source/backend/harness/execution/ExecutionContracts.cs) are public, not duplicated.
+1. [SessionSnapshot.cs](../source/backend/harness/sessions/SessionSnapshot.cs) and its neighbouring
+   message records (`MessagePreview`, `MessageRef`, `MessageContentCursor`, `MessageContentPage`) —
+   detached records; shared `ExecutionResult`/`ExecutionOutcome` in `execution/` are public, not duplicated.
 2. [SessionBase.cs](../source/backend/harness/sessions/SessionBase.cs) — the two public read methods
    take the existing guard; snapshots merge the live admission fence with one committed view.
-3. [SessionStore.Snapshots.cs](../source/backend/harness/storage/SessionStore.Snapshots.cs), then
-   [SessionStore.Content.cs](../source/backend/harness/storage/SessionStore.Content.cs) — bounded queries
-   in short read transactions. [SessionStore.cs](../source/backend/harness/storage/SessionStore.cs)
+3. [SnapshotReader.cs](../source/backend/harness/storage/SnapshotReader.cs), then
+   [MessageContentReader.cs](../source/backend/harness/storage/MessageContentReader.cs) — bounded queries
+   in short read transactions. [DatabaseSchema.cs](../source/backend/harness/storage/DatabaseSchema.cs)
    adds two indexes in schema version 3, preserving version 0/1/2 migrations.
 4. [SessionReadFlowTests.cs](../source/tests/Urd.Backend.Tests/SessionReadFlowTests.cs),
    [MessageContentTests.cs](../source/tests/Urd.Backend.Tests/MessageContentTests.cs), and
@@ -76,23 +76,28 @@ or a diagnosed fence. Poll scheduling/HTTP cancellation and browser rendering ar
 
 ## Review order
 
-Paths below are relative to the repository. Read the small data records alongside their owners.
+Paths below are relative to the repository. Each type has its own file named after it; read the
+small data records alongside their owners.
 
 1. [SessionManager.cs](../source/backend/harness/sessions/SessionManager.cs) — canonical handles,
    borrowed dependencies and the `SessionRecord` identity data used to create/load handles.
 2. [SessionBase.cs](../source/backend/harness/sessions/SessionBase.cs) and
    [PrimarySession.cs](../source/backend/harness/sessions/PrimarySession.cs) — admission/driver ownership;
-   [InputContracts.cs](../source/backend/harness/sessions/InputContracts.cs) groups the input command,
-   receipt and decision/refusal enums.
+   `InputCommand`, `InputReceipt`, `InputDecision` and `InputRefusalReason` sit beside them;
+   [AsyncLock.cs](../source/backend/harness/sessions/AsyncLock.cs) is the shared async lock.
 3. [SessionExecution.cs](../source/backend/harness/execution/SessionExecution.cs) — one invocation,
    response streaming, cancellation and cleanup; then
    [LlmResponseWriter.cs](../source/backend/harness/execution/LlmResponseWriter.cs) — request-local
-   Unicode-safe chunking and flush timing. [ExecutionContracts.cs](../source/backend/harness/execution/ExecutionContracts.cs)
-   keeps the related data types together: `LlmRequest`, `LlmResponseChunk`,
-   `LlmRequestOutcome`, saved whole-run `ExecutionResult`, and `ExecutionOutcome`.
-   Their comments identify the producer/consumer roles and lifecycle guarantees.
-4. [SessionStore.cs](../source/backend/harness/storage/SessionStore.cs) — opening/migration/receipts;
-   [SessionStore.Execution.cs](../source/backend/harness/storage/SessionStore.Execution.cs) — atomic run/request/output facts.
+   Unicode-safe chunking and flush timing. The data types `LlmRequest`, `LlmResponseChunk`,
+   `LlmRequestOutcome`, saved whole-run `ExecutionResult`, and `ExecutionOutcome` sit beside them;
+   their header comments identify producer/consumer roles and lifecycle guarantees.
+4. [SessionStore.cs](../source/backend/harness/storage/SessionStore.cs) — opens the database and exposes
+   focused parts: [Database.cs](../source/backend/harness/storage/Database.cs) (connection, lock,
+   transactions), [DatabaseSchema.cs](../source/backend/harness/storage/DatabaseSchema.cs) (migrations),
+   [SessionStorage.cs](../source/backend/harness/storage/SessionStorage.cs),
+   [InputStorage.cs](../source/backend/harness/storage/InputStorage.cs) (receipts),
+   [RunStorage.cs](../source/backend/harness/storage/RunStorage.cs) and
+   [OutputStorage.cs](../source/backend/harness/storage/OutputStorage.cs) — atomic run/request/output facts.
 5. [SessionManagerFlowTests.cs](../source/tests/Urd.Backend.Tests/SessionManagerFlowTests.cs),
    [SessionConcurrencyTests.cs](../source/tests/Urd.Backend.Tests/SessionConcurrencyTests.cs) and
    [SessionExecutionTests.cs](../source/tests/Urd.Backend.Tests/SessionExecutionTests.cs) — whole Core flow,

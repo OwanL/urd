@@ -209,7 +209,14 @@ still does not replace review of ownership, concurrency, SQL or error handling.
 
 Prefer improving an existing behavioral case over adding overlapping tests or fixture
 machinery. Assert observable outcomes and durable state, not private helper calls or
-incidental execution order. Coverage helps find untested paths; it is not a quality score
+incidental execution order. Assertions on durable state read through the shared `support/`
+readers (`StoredRuns`, `StoredInputs`, `StoredOutput`, `StoredSessions`), not ad-hoc SQL, so schema evolution
+touches one reader instead of every test. Raw `Scalar(...)` observation inside a `*Tests.cs`
+file needs a same-line `// raw-sql:` justification, which the pre-commit hook enforces on
+staged files; schema-migration checks and fixture-owned witness tables are the expected
+exceptions. Forging state the API would never produce (stale revisions, corrupt bytes,
+rollback witnesses) stays in arrangement code, shared where repeated (for example
+`TemporaryDatabase.ForceHistoryRevision`). Coverage helps find untested paths; it is not a quality score
 or a percentage target. For critical invariants, use small semantic mutations in an
 isolated copy and verify that tests—not compiler/analyzer errors—reject the broken
 behavior. Keep waits bounded and cleanup safe; teardown must not mask the original
@@ -232,7 +239,9 @@ installation or CI is involved. Other platforms need their native Gitleaks binar
 
 Commits scan **staged changes**, not the working copy or full history, using the standard
 rules in `.gitleaks.toml`. Findings are redacted; findings, scanner errors and a missing
-scanner block the commit. Commits do not download tools or run builds/tests. Re-run the
+scanner block the commit. Commits do not download tools or run builds/tests. The hook also rejects staged `*Tests.cs`
+changes whose raw SQL observation lacks a `// raw-sql:` justification (see Test
+effectiveness). Re-run the
 installer if the managed scanner is missing; review the version and checksum together
 when upgrading it. Investigate findings rather than bypassing the check or adding a
 blanket allowlist. Hooks are a local guardrail, not access control or proof that no secret

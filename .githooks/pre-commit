@@ -1,6 +1,24 @@
 #!/bin/sh
 set -eu
 repo=$(git rev-parse --show-toplevel) || exit $?
+
+# Test-evidence rule: durable-state assertions read through the shared support
+# readers (StoredRuns/StoredInputs/StoredOutput/StoredSessions). Raw Scalar() observation in a
+# test file is allowed only with a same-line '// raw-sql:' justification.
+for file in $(git diff --staged --diff-filter=ACMR --name-only -- 'source/tests' || true); do
+    case $file in
+        *Tests.cs) ;;
+        *) continue ;;
+    esac
+    unmarked=$(git show ":$file" | grep -n '\.Scalar("' | grep -v '// raw-sql:' || true)
+    if [ -n "$unmarked" ]; then
+        echo "Staged $file observes state with unjustified raw SQL:" >&2
+        echo "$unmarked" >&2
+        echo "Assert through the support Stored* readers, or add a same-line '// raw-sql:' justification." >&2
+        exit 1
+    fi
+done
+
 scanner="$repo/.tools/gitleaks/gitleaks"
 [ -x "$scanner" ] || scanner="$scanner.exe"
 if [ ! -x "$scanner" ]; then

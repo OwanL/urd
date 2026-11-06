@@ -11,8 +11,12 @@ there is no runnable Server or UI yet.
 - `PrimarySession.SubmitUserInputAsync(input)` returns a durable acceptance/refusal receipt,
   not an LLM answer. Acceptance and run identity commit together. Exact retries return
   the original decision; neither lookup nor retained acceptance starts work. Refusal fences delayed originals.
-- `SessionBase` owns admission and database writes; temporary `SessionExecution` owns
-  streaming, bounded UTF-8 batches and Stop. Replacement requires cleanup and saved settlement.
+- `SessionBase` owns admission, database writes and lifecycle coordination under its existing guard.
+  It invokes each `SessionExecution` once, outside that guard. Execution owns the model stream and
+  Stop source; a request-local `LlmResponseWriter` owns bounded UTF-8 batches and their flush timer.
+- Stop starts asynchronous cancellation under the guard, then joins callbacks outside it.
+  Replacement requires stream/timer cleanup, successful callback completion and saved settlement.
+  Callback failures or an unexpected missing claim/settlement fence the run; they do not retry it.
 - This development increment admits one input per active run. A different busy input gets
   a durable Capacity/Stopping refusal, not a queue slot. Mid-response delivery is not implemented.
 - Public snapshot/content reads expose committed state without starting work; cancelled reads
@@ -30,10 +34,14 @@ The approved read increment passed **61/61** Release tests after locked restore,
 build warnings/errors. Coverage adds scalar-safe full-content paging, committed tail following,
 final output during held cleanup, reopened/faulted fences, exact recent-window boundaries,
 indexed selection over 9,000 mixed-history runs, and atomic version-2-to-3 migration/rollback.
-The subsequent naming/decision-readability pass passes **66/66** Release tests after
-locked restore, including five cases covering overlapping admission-refusal conditions.
-Behavior and schema are unchanged. These are fake-client/Core checks, not browser polling,
-load or real-provider qualification.
+The subsequent naming/decision-readability pass passed **66/66** Release tests after
+locked restore, including five cases covering overlapping admission-refusal conditions;
+that pass changed no behavior or schema.
+The owner-approved execution redesign passes **73/73** Release tests after locked restore,
+with no build warnings/errors. Added coverage exercises invalid/incomplete Unicode, empty and
+exact-size final chunks, reentrant/held cancellation callbacks, repeated and stale Stops,
+and callback-failure fencing. The redesign changes internal lifetime coordination, not schema.
+These are fake-client/Core checks, not browser polling, load or real-provider qualification.
 This is a Core review checkpoint, not the browser-to-Core milestone or a complete hosting API.
 
 ## Read contract and incremental review order
@@ -76,8 +84,10 @@ Paths below are relative to the repository. Read the small data records alongsid
    [PrimarySession.cs](../source/backend/harness/sessions/PrimarySession.cs) — admission/driver ownership;
    [InputContracts.cs](../source/backend/harness/sessions/InputContracts.cs) groups the input command,
    receipt and decision/refusal enums.
-3. [SessionExecution.cs](../source/backend/harness/execution/SessionExecution.cs) — streaming,
-   buffering, cancellation and cleanup. [ExecutionContracts.cs](../source/backend/harness/execution/ExecutionContracts.cs)
+3. [SessionExecution.cs](../source/backend/harness/execution/SessionExecution.cs) — one invocation,
+   response streaming, cancellation and cleanup; then
+   [LlmResponseWriter.cs](../source/backend/harness/execution/LlmResponseWriter.cs) — request-local
+   Unicode-safe chunking and flush timing. [ExecutionContracts.cs](../source/backend/harness/execution/ExecutionContracts.cs)
    keeps the related data types together: `LlmRequest`, `LlmResponseChunk`,
    `LlmRequestOutcome`, saved whole-run `ExecutionResult`, and `ExecutionOutcome`.
    Their comments identify the producer/consumer roles and lifecycle guarantees.

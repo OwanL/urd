@@ -111,12 +111,17 @@ public abstract class SessionBase
 
     internal async Task RequestStopAsync(Guid runId)
     {
-        SessionExecution? execution;
+        Task cancellationCallbacks = Task.CompletedTask;
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
             _store.RequestStop(Id, runId);
-            execution = _execution?.RunId == runId ? _execution : null;
+            if (_execution?.RunId == runId)
+            {
+                // Cache/initiate under the same guard that fences the durable run;
+                // await callbacks only after releasing the guard.
+                cancellationCallbacks = _execution.RequestCancellationAsync();
+            }
         }
         catch (SqliteException)
         {
@@ -128,9 +133,7 @@ public abstract class SessionBase
             _gate.Release();
         }
 
-        // Cancellation callbacks may run synchronously. Never invoke them under
-        // the session guard, and never let an old run's Stop target a newer run.
-        execution?.RequestCancellation();
+        await cancellationCallbacks.ConfigureAwait(false);
     }
 
     internal async Task<ExecutionResult> WaitForSettlementAsync(Guid runId, CancellationToken waitCancellation = default)
@@ -209,32 +212,37 @@ public abstract class SessionBase
         try
         {
             // Admission publishes ownership under the guard before opening this
-            // barrier. Model work and cleanup therefore never run under that guard.
+            // barrier. The driver is the sole invocation owner.
             await start.ConfigureAwait(false);
-            while (true)
-            {
-                ExecutionOutcome outcome = await execution.RunAsync().ConfigureAwait(false);
-                await _gate.WaitAsync().ConfigureAwait(false);
-                try
-                {
-                    ExecutionResult? saved = _store.TrySettle(Id, execution.RunId, outcome);
-                    if (saved is null)
-                    {
-                        continue;
-                    }
+            ExecutionOutcome outcome = await execution.RunAsync().ConfigureAwait(false);
 
-                    // RunAsync has already quiesced enumeration, timers, writes and
-                    // cleanup. This release only disposes the retained run resources.
-                    execution.ReleaseAfterSettlement();
-                    _execution = null;
-                    _settlement = null;
-                    settlement.TrySetResult(saved);
+            Task cancellationCallbacks;
+            await _gate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                cancellationCallbacks = execution.CancellationCompletion;
+                if (cancellationCallbacks.IsCompletedSuccessfully)
+                {
+                    SettleExecution(execution, settlement, outcome);
                     return;
                 }
-                finally
-                {
-                    _gate.Release();
-                }
+            }
+            finally
+            {
+                _gate.Release();
+            }
+
+            // Never wait for cancellation callbacks while holding the session guard.
+            await cancellationCallbacks.ConfigureAwait(false);
+
+            await _gate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                SettleExecution(execution, settlement, outcome);
+            }
+            finally
+            {
+                _gate.Release();
             }
         }
         catch (Exception failure)
@@ -253,5 +261,19 @@ public abstract class SessionBase
                 _gate.Release();
             }
         }
+    }
+
+    // Caller holds _gate. One synchronous boundary saves the result before releasing
+    // owned resources, clearing the active reference, and publishing to waiters.
+    private void SettleExecution(SessionExecution execution,
+        TaskCompletionSource<ExecutionResult> settlement, ExecutionOutcome outcome)
+    {
+        ExecutionResult saved = _store.TrySettle(Id, execution.RunId, outcome)
+            ?? throw new InvalidOperationException("The current execution could not be settled.");
+
+        execution.ReleaseAfterSettlement();
+        _execution = null;
+        _settlement = null;
+        settlement.TrySetResult(saved);
     }
 }

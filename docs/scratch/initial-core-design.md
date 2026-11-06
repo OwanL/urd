@@ -132,8 +132,10 @@ below; broader queue, context and hosting contracts remain proposed.
 
 ## Owner-approved fifth bite — SessionExecution lifetime boundary
 The owner answered **“yeah seems reasonable i think”** to the presented `internal sealed`
-`SessionExecution`; section 4 below holds its declarations (`RunId`, constructor and
-`RunAsync`/`RequestCancellation`/`ReleaseAfterSettlement`). It is temporary active work;
+`SessionExecution`; section 4 below holds its current declarations. The initial boundary
+used `RunAsync`/`RequestCancellation`/`ReleaseAfterSettlement`; the subsequently approved
+execution redesign below makes cancellation asynchronous and revises lifecycle ownership.
+It is temporary active work;
 the chat persists. Construction starts no work. SessionBase starts/observes the task and
 owns admission/DB writes; execution owns the model stream, Stop signal and bounded output
 buffer, batching updates rather than per-token writes. Browser disconnect does not cancel.
@@ -201,6 +203,33 @@ unapproved status of wider proposals remain unchanged. Storage decisions now use
 facts and explicit precedence rather than compressed predicates. Refusal-state meaning
 (including the broader-than-stopping use of `Stopping`) is not silently changed here.
 
+## Owner-approved execution redesign — 2026-11-06
+
+During source review the owner challenged the mixed state and naming in `SessionExecution`,
+explicitly permitted execution behavior changes, and approved the revised smaller ownership
+model with **“Yes, implement it”**. This supersedes the earlier repeated-invocation design:
+
+- `SessionBase`'s existing guard is the sole lifecycle authority. `SessionExecution` keeps
+  its owner, borrowed client, owned Stop source and one cached cancellation-callback task;
+  there is no second lock, active/released flag pair or hand-built completion source.
+- Each execution is invoked once outside the guard. The current schema permits one claimed
+  request per run. Future model/tool rounds can belong inside that invocation when designed;
+  this does not implement or remove eventual steering/follow-up behavior.
+- Stop persists its intent and initiates `CancelAsync` under the guard; callbacks are awaited
+  outside it. The driver checks callback completion and settles under the same guard, or
+  joins the cached task outside the guard before returning to settle. Successful work is
+  not cancelled merely to provide a cleanup barrier. Callback failure prevents settlement.
+- A fresh `LlmResponseWriter` owns one response's Unicode fragments, byte buffer, chunk
+  identity/order and flush delay. It publishes through execution's guarded owner callback,
+  never directly to storage. Disposal stops the timer without publishing an unfinished tail.
+- An unstopped run without a claim or a missing settlement result is an invariant failure
+  that fences admission, not permission to spin/reinvoke the execution. Release still follows
+  actual cleanup and saved settlement; the shared client is never execution-owned.
+
+The owner approved corresponding `SessionBase` coordination changes, not new public APIs,
+queuing, schema, hosting or provider behavior. Independent design and implementation reviews
+passed; current verification is recorded below.
+
 ## Current implementation — first fake-text Core checkpoint
 
 The owner subsequently confirmed the obvious shared-client choice and requested the actual
@@ -229,9 +258,10 @@ separately; read cancellation never owns model cancellation. No subscriptions or
 state were introduced. Snapshot previews and body slices stay bounded before materialization.
 
 Independent component and integration reviews passed. Parent locked restore and Release
-build/tests pass **66/66** after the readability pass, with no build warnings/errors. Tests cover shared-client chats,
-exact retries/reopen, commit/migration rollback, Unicode/NUL paging, held cleanup after
-final output, persisted and live fences, and indexed recent-window selection over large
+build/tests pass **73/73** after the execution redesign, with no build warnings/errors.
+Tests cover shared-client chats, exact retries/reopen, commit/migration rollback, Unicode/NUL
+paging and chunking, held cleanup after final output, cancellation callback joins/failures,
+stale Stops, persisted and live fences, and indexed recent-window selection over large
 mixed histories. Tests use disposable SQLite and fake clients only; no browser/polling
 performance claim. See the [read review map](../backend-development.md#read-contract-and-incremental-review-order).
 
@@ -337,14 +367,13 @@ for new work; shutdown fences new acceptance under that same guard. While an adm
 Submit handler can still use the live store, the fence can produce a durable refusal,
 not accepted work. Host refusal before Core is only an unavailable attempt.
 Execution has no store access. `DriveExecutionAsync` owns/observes the pump and failures.
-Never await model work, settlement or subscribers under the guard. Once resources are
-quiescent, `TrySettleAsync` rechecks pending input transactionally: normal outcome plus
-more input continues the same run; otherwise commit settlement, clear execution and
-complete `_settlement` under the guard. If that normal-outcome recheck finds pending input
-after `RunAsync` returned, the single owner driver invokes and awaits `RunAsync` again on
-the same retained execution/run, never concurrently or under the guard; release follows
-terminal settlement only.
-Stop/error terminalizes undelivered input honestly.
+Never await model work, cancellation callbacks, settlement or subscribers under the guard.
+The current driver invokes `RunAsync` once. After response cleanup, it joins any outstanding
+cancellation callback task outside the guard, then commits settlement, releases run resources,
+clears execution and completes `_settlement` under the guard. The no-cancellation check and
+settlement share the guard so a late Stop cannot escape the join. A missing settlement result
+fences the run instead of restarting it. The earlier repeated-invocation/pending-input sketch
+is superseded; queued input remains future work, not an implemented continuation path.
 An ambiguous request/run terminal commit prevents continuation and keeps admission fenced
 pending reconciliation; no false idle.
 ### 3. `PrimarySession : SessionBase` — ongoing primary input policy
@@ -363,30 +392,30 @@ creation, and leaves its draft client-owned; existing decisions remain readable.
 No pending-edit, suffix-edit, snooze or final-close API is implied or removed here.
 
 ### 4. `SessionExecution` — fifth-approved temporary owned async work boundary
-Owns requests, bounded output buffer and cancellation, not admission or transcript storage.
-One per active run; no thread/process per session or global request queue. Constructor
-initializes inert state only, never starts work. SessionBase creates/observes the sole
-execution driver; no overlapping `RunAsync` calls or fire-and-forget cleanup.
+Owns response streaming and cancellation, not admission or transcript storage. Response
+buffering belongs to its request-local `LlmResponseWriter`. One execution per active run;
+no thread/process per session or global request queue. Construction starts no work.
+SessionBase invokes `RunAsync` once outside its guard and observes all cleanup.
 ```csharp
 internal Guid RunId { get; }
 private readonly SessionBase _owner;
 private readonly IChatClient _chatClient; // borrowed
 private readonly CancellationTokenSource _stop;
-private readonly StringBuilder _outputBatch;
-private int _batchUtf8Bytes;
-private PeriodicTimer? _flushTimer; // activated during RunAsync, not construction
+private Task? _cancellationCallbacks;
 internal SessionExecution(Guid runId, SessionBase owner, IChatClient chatClient);
 internal Task<ExecutionOutcome> RunAsync();
-internal void RequestCancellation();
+internal Task RequestCancellationAsync();
+internal Task CancellationCompletion { get; }
 internal void ReleaseAfterSettlement();
 ```
-A returned invocation has quiesced its model/enumerator, timer and append work; it is
-not durable settlement. Owner rechecks pending input and either drives the same retained
-object again, sequentially, or persists settlement. No direct store access; owner retains
-claim/record/outcome/publication authority. The fifth approval covers the lifetime and
-ownership boundary, not every SessionBase public contract or storage rule. Private pump,
-reinvocation and timer mechanics are revisable implementation choices within that boundary;
-substantive ownership, concurrency or persistence changes still need review.
+A successfully returned invocation has quiesced its model/enumerator, writer timer and
+append work; it is not durable settlement or a join of run cancellation callbacks.
+SessionBase serializes cancellation/release under its guard and joins `CancellationCompletion`
+outside it before saving settlement. Repeated Stop calls share that task; a stale run ID
+cannot cancel a replacement. No direct store access: owner retains claim/record/outcome/
+publication authority. The fifth approval and subsequent execution redesign cover this
+boundary, not every SessionBase public contract or storage rule. Substantive ownership,
+concurrency or persistence changes still need review.
 Uses its Stop token, never HTTP/observer tokens. Claims input through owner, constructs
 request-local MEAI messages and records through owner. Completion does not close chat.
 A successful request requires positive terminal-success evidence (explicit in the fake
@@ -395,9 +424,10 @@ failed or incomplete terminal evidence cannot yield success. Each claimed reques
 its own terminal outcome through `CompleteRequestAsync` before any continuation or normal
 run settlement; output-item completion alone is not request success. Tools remain out of
 this checkpoint.
-Awaits owned cleanup before returning; noncooperation leaves Stop **stopping**, blocking
-replacement. Cancellation/release are idempotent and safe against stale/racing calls.
-Release owned resources only after invocation exit and confirmed durable settlement;
+Response cleanup is awaited before returning; the session additionally joins cancellation
+callbacks. Noncooperation leaves Stop **stopping**, blocking replacement. Lifecycle commands
+rely on the sole session owner rather than another execution-level lock.
+Release owned resources only after invocation/callback exit and confirmed durable settlement;
 ambiguous settlement keeps admission fenced. Never dispose the borrowed client.
 
 ### 5. `SessionStore` — database lifetime; intent-specific transactions

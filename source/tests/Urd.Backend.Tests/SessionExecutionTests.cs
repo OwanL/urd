@@ -13,6 +13,7 @@ public sealed class SessionExecutionTests
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
+    private const string CancellationCallbackFailureMessage = "Scripted cancellation callback failure.";
 
     [Fact]
     public async Task CoalescesTinyUpdatesAndSplitsOversizedTextAtUtf8ScalarBoundaries()
@@ -120,6 +121,205 @@ public sealed class SessionExecutionTests
         Assert.Equal(0, client.DisposeCalls);
     }
 
+    [Theory]
+    [InlineData(0xDC00, null)]
+    [InlineData(0xD800, "x")]
+    [InlineData(0xD800, null)]
+    public async Task RejectsMalformedOrIncompleteUnicodeWithoutFinalMarker(int firstCodeUnit, string? secondUpdate)
+    {
+        // Attribute strings use UTF-8 metadata, so construct the lone surrogate at runtime.
+        string firstUpdate = ((char)firstCodeUnit).ToString();
+        var client = new ScriptedChatClient(token => InvalidUnicodeResponse(firstUpdate, secondUpdate, token));
+        await using var fixture = new ExecutionFixture(client);
+        Guid runId = await fixture.StartRunAsync("go");
+
+        Assert.Equal(ExecutionOutcome.Failed,
+            (await fixture.Session.WaitForSettlementAsync(runId).WaitAsync(Timeout)).Outcome);
+        Assert.DoesNotContain(ReadOutput(fixture.Database), row => row.Final);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(16 * 1024)]
+    public async Task PersistsEmptyAndExactBoundaryResponsesWithOrderedOutputIdentity(int textLength)
+    {
+        string text = new string('x', textLength);
+        var client = new ScriptedChatClient(token => ExactResponse(text, token));
+        await using var fixture = new ExecutionFixture(client);
+        Guid runId = await fixture.StartRunAsync("go");
+
+        Assert.Equal(ExecutionOutcome.Completed,
+            (await fixture.Session.WaitForSettlementAsync(runId).WaitAsync(Timeout)).Outcome);
+        List<(Guid RequestId, Guid ResponseId, long ChunkIndex, byte[] Bytes, bool Final)> output =
+            ReadOutputDetails(fixture.Database);
+        Guid requestId = Guid.Parse(Assert.IsType<string>(fixture.Database.Scalar(
+            "SELECT request_id FROM execution_requests;")));
+        Assert.NotEmpty(output);
+        Guid responseId = output[0].ResponseId;
+
+        Assert.NotEqual(Guid.Empty, responseId);
+        Assert.All(output, row =>
+        {
+            Assert.Equal(requestId, row.RequestId);
+            Assert.Equal(responseId, row.ResponseId);
+        });
+        Assert.Equal(Enumerable.Range(0, output.Count).Select(index => (long)index),
+            output.Select(row => row.ChunkIndex));
+        Assert.Equal(text, string.Concat(output.Select(row => StrictUtf8.GetString(row.Bytes))));
+        Assert.Single(output, row => row.Final);
+        Assert.True(output[^1].Final);
+
+        if (textLength == 0)
+        {
+            Assert.Single(output);
+            Assert.Empty(output[0].Bytes);
+            Assert.Equal(0, output[0].ChunkIndex);
+        }
+        else
+        {
+            Assert.Equal(2, output.Count);
+            Assert.Equal(16 * 1024, output[0].Bytes.Length);
+            Assert.False(output[0].Final);
+            Assert.Empty(output[1].Bytes);
+            Assert.True(output[1].Final);
+        }
+    }
+
+    [Fact]
+    public async Task StopJoinsReentrantCallbackOutsideGuardAndStaleStopCannotCancelReplacement()
+    {
+        var sourceEntered = Signal();
+        var sourceRelease = Signal();
+        var sourceExited = Signal();
+        var callbackRelease = Signal();
+        var replacementEntered = Signal();
+        var replacementRelease = Signal();
+        var callbackSnapshot = new TaskCompletionSource<SessionSnapshot>(TaskCreationOptions.RunContinuationsAsynchronously);
+        PrimarySession session = null!;
+        int request = 0;
+        var client = new ScriptedChatClient(token => Interlocked.Increment(ref request) == 1
+            ? ReentrantBlockedCancellationResponse(session, sourceEntered, sourceRelease, sourceExited,
+                callbackSnapshot, callbackRelease, token)
+            : PausedResponse(replacementEntered, replacementRelease, token));
+        await using var fixture = new ExecutionFixture(client);
+        session = fixture.Session;
+        Guid runId = await fixture.StartRunAsync("first");
+        Task<ExecutionResult> settlement = session.WaitForSettlementAsync(runId);
+        Task firstStop = Task.CompletedTask;
+        Task secondStop = Task.CompletedTask;
+        try
+        {
+            await sourceEntered.Task.WaitAsync(Timeout);
+            firstStop = session.RequestStopAsync(runId);
+            SessionSnapshot callbackRead = await callbackSnapshot.Task.WaitAsync(Timeout);
+            Assert.True(callbackRead.StopRequested);
+            sourceRelease.TrySetResult();
+            await sourceExited.Task.WaitAsync(Timeout);
+            // Reach saved request completion, not merely the iterator's finally block,
+            // while the run still owns the blocked cancellation callback.
+            using (var deadline = new CancellationTokenSource(Timeout))
+            {
+                while (fixture.Database.Scalar("SELECT outcome FROM execution_requests;") is DBNull)
+                {
+                    await Task.Delay(10, deadline.Token);
+                }
+            }
+
+            secondStop = session.RequestStopAsync(runId);
+            Assert.False(firstStop.IsCompleted);
+            Assert.False(secondStop.IsCompleted);
+            Assert.False(settlement.IsCompleted);
+            InputReceipt refused = await session.SubmitUserInputAsync(
+                new InputCommand(Guid.NewGuid(), 0, "too early"));
+            Assert.Equal(InputDecision.Refused, refused.Decision);
+            Assert.Equal(InputRefusalReason.Stopping, refused.RefusalReason);
+            Assert.Equal(1, client.Calls);
+        }
+        finally
+        {
+            sourceRelease.TrySetResult();
+            callbackRelease.TrySetResult();
+        }
+
+        await firstStop.WaitAsync(Timeout);
+        await secondStop.WaitAsync(Timeout);
+        Assert.Equal(ExecutionOutcome.Cancelled, (await settlement.WaitAsync(Timeout)).Outcome);
+
+        Guid replacement = await fixture.StartRunAsync("replacement");
+        Task<ExecutionResult> replacementSettlement = session.WaitForSettlementAsync(replacement);
+        try
+        {
+            await replacementEntered.Task.WaitAsync(Timeout);
+            await session.RequestStopAsync(runId).WaitAsync(Timeout);
+            Assert.False(replacementSettlement.IsCompleted);
+        }
+        finally
+        {
+            replacementRelease.TrySetResult();
+        }
+
+        Assert.Equal(ExecutionOutcome.Completed, (await replacementSettlement.WaitAsync(Timeout)).Outcome);
+        Assert.Equal(2, client.Calls);
+    }
+
+    [Fact]
+    public async Task CancellationCallbackFailureFencesUnsettledRunAfterProviderCleanup()
+    {
+        var requestEntered = Signal();
+        var providerExited = Signal();
+        var database = new TemporaryDatabase();
+        var store = SessionStore.Open(database.Path);
+        var client = new ScriptedChatClient(token => CancellationCallbackFailureResponse(
+            requestEntered, providerExited, token));
+        var session = new PrimarySession(store.CreatePrimary(Guid.NewGuid()), store, client);
+        Guid? runId = null;
+        try
+        {
+            InputReceipt receipt = await session.SubmitUserInputAsync(new InputCommand(Guid.NewGuid(), 0, "go"));
+            Assert.Equal(InputDecision.Accepted, receipt.Decision);
+            runId = Assert.IsType<Guid>(receipt.RunId);
+            Guid acceptedRun = runId.Value;
+            await requestEntered.Task.WaitAsync(Timeout);
+
+            Task stop = session.RequestStopAsync(acceptedRun);
+            await providerExited.Task.WaitAsync(Timeout);
+            await AssertCancellationCallbackFailureAsync(stop);
+            await AssertCancellationCallbackFailureAsync(session.WaitForSettlementAsync(acceptedRun));
+
+            SessionSnapshot snapshot = await session.ReadSnapshotAsync();
+            Assert.True(snapshot.AdmissionFenced);
+            Assert.Equal(acceptedRun, snapshot.UnsettledRunId);
+            Assert.Null(snapshot.LastSettlement);
+            Assert.Equal(DBNull.Value, database.Scalar("SELECT outcome FROM execution_runs;"));
+            InputReceipt refused = await session.SubmitUserInputAsync(
+                new InputCommand(Guid.NewGuid(), 0, "replacement"));
+            Assert.Equal(InputDecision.Refused, refused.Decision);
+            Assert.Equal(InputRefusalReason.Stopping, refused.RefusalReason);
+            Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM execution_runs;"));
+        }
+        finally
+        {
+            if (runId is { } acceptedRun)
+            {
+                if (requestEntered.Task.IsCompletedSuccessfully)
+                {
+                    await AssertCancellationCallbackFailureAsync(session.RequestStopAsync(acceptedRun));
+                    await providerExited.Task.WaitAsync(Timeout);
+                    await AssertCancellationCallbackFailureAsync(session.WaitForSettlementAsync(acceptedRun));
+                }
+                else
+                {
+                    await session.RequestStopAsync(acceptedRun).WaitAsync(Timeout);
+                    await session.WaitForSettlementAsync(acceptedRun).WaitAsync(Timeout);
+                }
+            }
+
+            store.Dispose();
+            client.Dispose();
+            database.Dispose();
+        }
+    }
+
     [Fact]
     public async Task OutputWriteFailureCleansUpButFencesRatherThanSettlesOrReplacesTheRun()
     {
@@ -225,6 +425,82 @@ public sealed class SessionExecutionTests
         yield return new() { FinishReason = ChatFinishReason.Stop };
     }
 
+    private static async IAsyncEnumerable<ChatResponseUpdate> InvalidUnicodeResponse(string firstUpdate,
+        string? secondUpdate, [EnumeratorCancellation] CancellationToken token)
+    {
+        await Task.CompletedTask;
+        token.ThrowIfCancellationRequested();
+        yield return Text(firstUpdate);
+        if (secondUpdate is not null)
+        {
+            yield return Text(secondUpdate);
+        }
+
+        yield return new() { FinishReason = ChatFinishReason.Stop };
+    }
+
+    private static async IAsyncEnumerable<ChatResponseUpdate> ExactResponse(string text,
+        [EnumeratorCancellation] CancellationToken token)
+    {
+        await Task.CompletedTask;
+        token.ThrowIfCancellationRequested();
+        if (text.Length != 0)
+        {
+            yield return Text(text);
+        }
+
+        yield return new() { FinishReason = ChatFinishReason.Stop };
+    }
+
+    private static async IAsyncEnumerable<ChatResponseUpdate> ReentrantBlockedCancellationResponse(
+        PrimarySession session, TaskCompletionSource sourceEntered, TaskCompletionSource sourceRelease,
+        TaskCompletionSource sourceExited, TaskCompletionSource<SessionSnapshot> callbackSnapshot,
+        TaskCompletionSource callbackRelease,
+        [EnumeratorCancellation] CancellationToken token)
+    {
+        // Do not dispose this registration in the iterator: enumerator cleanup must be
+        // able to finish while the callback deliberately waits for its release barrier.
+        token.Register(() =>
+        {
+            SessionSnapshot snapshot = session.ReadSnapshotAsync().WaitAsync(Timeout).GetAwaiter().GetResult();
+            callbackSnapshot.TrySetResult(snapshot);
+            callbackRelease.Task.WaitAsync(Timeout).GetAwaiter().GetResult();
+        });
+
+        try
+        {
+            yield return Text("working");
+            sourceEntered.TrySetResult();
+            await sourceRelease.Task;
+        }
+        finally
+        {
+            sourceExited.TrySetResult();
+        }
+    }
+
+    private static async IAsyncEnumerable<ChatResponseUpdate> CancellationCallbackFailureResponse(
+        TaskCompletionSource requestEntered, TaskCompletionSource providerExited,
+        [EnumeratorCancellation] CancellationToken token)
+    {
+        var cancellationObserved = Signal();
+        token.Register(() =>
+        {
+            cancellationObserved.TrySetResult();
+            throw new InvalidOperationException(CancellationCallbackFailureMessage);
+        });
+        try
+        {
+            yield return Text("working");
+            requestEntered.TrySetResult();
+            await cancellationObserved.Task;
+        }
+        finally
+        {
+            providerExited.TrySetResult();
+        }
+    }
+
     private static async IAsyncEnumerable<ChatResponseUpdate> FailedResponse(string failure,
         [EnumeratorCancellation] CancellationToken token)
     {
@@ -281,6 +557,14 @@ public sealed class SessionExecutionTests
 
     private static TaskCompletionSource Signal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+    private static async Task AssertCancellationCallbackFailureAsync(Task operation)
+    {
+        AggregateException failure = await Assert.ThrowsAsync<AggregateException>(
+            async () => await operation.WaitAsync(Timeout));
+        Assert.Contains(failure.Flatten().InnerExceptions,
+            error => error is InvalidOperationException && error.Message == CancellationCallbackFailureMessage);
+    }
+
     private static async Task WaitForOutputAsync(TemporaryDatabase database)
     {
         using var deadline = new CancellationTokenSource(Timeout);
@@ -290,7 +574,11 @@ public sealed class SessionExecutionTests
         }
     }
 
-    private static List<(byte[] Bytes, bool Final)> ReadOutput(TemporaryDatabase database)
+    private static List<(byte[] Bytes, bool Final)> ReadOutput(TemporaryDatabase database) =>
+        ReadOutputDetails(database).Select(row => (row.Bytes, row.Final)).ToList();
+
+    private static List<(Guid RequestId, Guid ResponseId, long ChunkIndex, byte[] Bytes, bool Final)>
+        ReadOutputDetails(TemporaryDatabase database)
     {
         using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
         {
@@ -300,12 +588,17 @@ public sealed class SessionExecutionTests
         }.ToString());
         connection.Open();
         using SqliteCommand command = connection.CreateCommand();
-        command.CommandText = "SELECT text_utf8, is_final FROM execution_output ORDER BY request_id, batch_index;";
+        command.CommandText = """
+            SELECT o.request_id, q.output_id, o.batch_index, o.text_utf8, o.is_final
+            FROM execution_output o JOIN execution_requests q ON q.request_id = o.request_id
+            ORDER BY o.request_id, o.batch_index;
+            """;
         using SqliteDataReader reader = command.ExecuteReader();
-        var output = new List<(byte[] Bytes, bool Final)>();
+        var output = new List<(Guid RequestId, Guid ResponseId, long ChunkIndex, byte[] Bytes, bool Final)>();
         while (reader.Read())
         {
-            output.Add(((byte[])reader.GetValue(0), reader.GetBoolean(1)));
+            output.Add((Guid.Parse(reader.GetString(0)), Guid.Parse(reader.GetString(1)), reader.GetInt64(2),
+                (byte[])reader.GetValue(3), reader.GetBoolean(4)));
         }
 
         return output;

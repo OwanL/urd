@@ -1,5 +1,3 @@
-using System.Buffers;
-using System.Text;
 using Microsoft.Extensions.AI;
 using Urd.Core.Sessions;
 
@@ -7,21 +5,10 @@ namespace Urd.Core.Execution;
 
 internal sealed class SessionExecution
 {
-    private const int BatchByteLimit = 16 * 1024;
-    private static readonly TimeSpan FlushInterval = TimeSpan.FromMilliseconds(100);
     private readonly SessionBase _owner;
-    private readonly IChatClient _chatClient;
+    private readonly IChatClient _chatClient; // Borrowed; the composing owner controls its lifetime.
     private readonly CancellationTokenSource _stop = new();
-    private readonly StringBuilder _outputBatch = new();
-    private readonly object _lifetimeGate = new();
-    private TaskCompletionSource? _cancellationFinished;
-    private bool _running, _released;
-    private int _batchUtf8Bytes;
-    private char? _pendingHighSurrogate;
-    private Guid _requestId, _outputId;
-    private long _batchIndex;
-    private CancellationTokenSource? _deadlineCancellation;
-    private Task? _deadline;
+    private Task? _cancellationCallbacks;
 
     internal SessionExecution(Guid runId, SessionBase owner, IChatClient chatClient)
     {
@@ -34,132 +21,38 @@ internal sealed class SessionExecution
 
     internal Guid RunId { get; }
 
-    internal Task<ExecutionOutcome> RunAsync()
-    {
-        lock (_lifetimeGate)
-        {
-            ObjectDisposedException.ThrowIf(_released, this);
-            if (_running)
-            {
-                throw new InvalidOperationException("The execution already has an active invocation.");
-            }
+    // Lifecycle members are called only by SessionBase while it holds the session guard.
+    internal Task RequestCancellationAsync() => _cancellationCallbacks ??= _stop.CancelAsync();
 
-            _running = true;
+    internal Task CancellationCompletion => _cancellationCallbacks ?? Task.CompletedTask;
+
+    // The owner calls this only after RunAsync and cancellation callbacks have finished
+    // and the durable run settlement has been saved.
+    internal void ReleaseAfterSettlement() => _stop.Dispose();
+
+    // The sole owner invokes this once, outside the session guard.
+    internal async Task<ExecutionOutcome> RunAsync()
+    {
+        LlmRequest? request = await _owner.ClaimNextRequestAsync(RunId).ConfigureAwait(false);
+        if (request is null)
+        {
+            return _stop.IsCancellationRequested
+                ? ExecutionOutcome.Cancelled
+                : throw new InvalidOperationException("The active run had no claimable request and was not stopped.");
         }
 
-        return RunCoreAsync();
+        return await ExecuteRequestAsync(request).ConfigureAwait(false);
     }
 
-    internal void RequestCancellation()
+    private async Task<ExecutionOutcome> ExecuteRequestAsync(LlmRequest request)
     {
-        TaskCompletionSource finished;
-        lock (_lifetimeGate)
-        {
-            if (_released || _cancellationFinished is not null)
-            {
-                return;
-            }
-
-            finished = new(TaskCreationOptions.RunContinuationsAsynchronously);
-            _cancellationFinished = finished;
-        }
-
-        // Callbacks must not run under the lifecycle lock (or the owner's mutation guard).
-        try
-        {
-            _stop.Cancel();
-        }
-        finally
-        {
-            lock (_lifetimeGate)
-            {
-                finished.TrySetResult();
-                if (_released)
-                {
-                    _stop.Dispose();
-                }
-            }
-        }
-    }
-
-    // The owner confirms durable settlement before calling this; task exit alone is insufficient.
-    internal void ReleaseAfterSettlement()
-    {
-        lock (_lifetimeGate)
-        {
-            if (_released)
-            {
-                return;
-            }
-
-            if (_running)
-            {
-                throw new InvalidOperationException("Cannot release an execution while its invocation is active.");
-            }
-
-            _released = true;
-            if (_cancellationFinished is null || _cancellationFinished.Task.IsCompleted)
-            {
-                _stop.Dispose();
-            }
-        }
-    }
-
-    private async Task<ExecutionOutcome> RunCoreAsync()
-    {
-        try
-        {
-            while (!_stop.IsCancellationRequested)
-            {
-                LlmRequest? request = await _owner.ClaimNextRequestAsync(RunId).ConfigureAwait(false);
-                if (request is null)
-                {
-                    return _stop.IsCancellationRequested ? ExecutionOutcome.Cancelled : ExecutionOutcome.Completed;
-                }
-
-                ExecutionOutcome outcome = await RunRequestAsync(request).ConfigureAwait(false);
-                if (outcome != ExecutionOutcome.Completed)
-                {
-                    return outcome;
-                }
-            }
-
-            return ExecutionOutcome.Cancelled;
-        }
-        finally
-        {
-            // Observe cancellation already in progress before publishing invocation exit.
-            while (true)
-            {
-                Task? cancellation;
-                lock (_lifetimeGate)
-                {
-                    cancellation = _cancellationFinished?.Task;
-                    if (cancellation is null || cancellation.IsCompleted)
-                    {
-                        _running = false;
-                        break;
-                    }
-                }
-
-                await cancellation.ConfigureAwait(false);
-            }
-        }
-    }
-
-    private async Task<ExecutionOutcome> RunRequestAsync(LlmRequest request)
-    {
-        _requestId = request.RequestId;
-        _outputId = Guid.NewGuid();
-        _batchIndex = 0;
-        _outputBatch.Clear();
-        _batchUtf8Bytes = 0;
-        _pendingHighSurrogate = null;
+        using var requestStop = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
+        var writer = new LlmResponseWriter(request.RequestId, WriteResponseChunkAsync, _stop.Token);
         ExecutionOutcome outcome;
         string? error = null;
         try
         {
-            await StreamRequestAsync(request).ConfigureAwait(false);
+            await StreamResponseAsync(request, requestStop, writer).ConfigureAwait(false);
             outcome = _stop.IsCancellationRequested ? ExecutionOutcome.Cancelled : ExecutionOutcome.Completed;
         }
         catch (OwnerOperationException)
@@ -178,20 +71,20 @@ internal sealed class SessionExecution
         {
             outcome = ExecutionOutcome.Cancelled;
         }
-        catch (Exception modelError)
+        catch (Exception providerError)
         {
             outcome = ExecutionOutcome.Failed;
-            error = modelError.Message;
+            error = providerError.Message;
         }
 
-        bool recorded = await _owner.CompleteRequestAsync(RunId, new LlmRequestOutcome(request.RequestId, outcome, error))
-            .ConfigureAwait(false);
+        bool recorded = await _owner.CompleteRequestAsync(RunId,
+            new LlmRequestOutcome(request.RequestId, outcome, error)).ConfigureAwait(false);
         return recorded ? outcome : ExecutionOutcome.Cancelled;
     }
 
-    private async Task StreamRequestAsync(LlmRequest request)
+    private async Task StreamResponseAsync(LlmRequest request,
+        CancellationTokenSource requestStop, LlmResponseWriter writer)
     {
-        using var requestStop = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
         IAsyncEnumerator<ChatResponseUpdate>? source = null;
         Task<bool>? next = null;
         Exception? primaryFailure = null;
@@ -204,12 +97,14 @@ internal sealed class SessionExecution
             while (true)
             {
                 next ??= source.MoveNextAsync().AsTask();
-                if (_deadline is { IsCompleted: true }
-                    || (_deadline is not null && await Task.WhenAny(next, _deadline).ConfigureAwait(false) == _deadline))
+                Task? flushDelay = writer.FlushDelay;
+                if (flushDelay is { IsCompleted: true }
+                    || (flushDelay is not null
+                        && await Task.WhenAny(next, flushDelay).ConfigureAwait(false) == flushDelay))
                 {
                     _stop.Token.ThrowIfCancellationRequested();
-                    await FlushBatchAsync(isFinal: false).ConfigureAwait(false);
-                    continue; // Retain the SAME pending read when the deadline wins.
+                    await writer.FlushAsync().ConfigureAwait(false);
+                    continue; // Retain the SAME pending read when the flush delay wins.
                 }
 
                 Task<bool> ready = next;
@@ -231,7 +126,7 @@ internal sealed class SessionExecution
                                 throw new InvalidDataException("Text arrived after the terminal response marker.");
                             }
 
-                            await AppendTextAsync(text.Text).ConfigureAwait(false);
+                            await writer.AppendAsync(text.Text).ConfigureAwait(false);
                             break;
                         case UsageContent:
                             break;
@@ -252,111 +147,40 @@ internal sealed class SessionExecution
             }
 
             _stop.Token.ThrowIfCancellationRequested();
-            if (!terminalSuccess || _pendingHighSurrogate is not null)
+            if (!terminalSuccess)
             {
-                throw new InvalidDataException("The fake-text response lacks terminal success or contains incomplete Unicode.");
+                throw new InvalidDataException("The fake-text response lacks terminal success.");
             }
 
-            await FlushBatchAsync(isFinal: true).ConfigureAwait(false);
+            await writer.CompleteAsync().ConfigureAwait(false);
         }
-        catch (Exception error)
+        catch (Exception failure)
         {
-            primaryFailure = error;
+            primaryFailure = failure;
             throw;
         }
         finally
         {
             try
             {
-                await CleanupRequestAsync(requestStop, source, next).ConfigureAwait(false);
+                await CleanupResponseAsync(requestStop, source, next, writer).ConfigureAwait(false);
             }
-            catch (Exception cleanupError)
+            catch (Exception cleanupFailure)
             {
-                throw new ExecutionCleanupException(primaryFailure is null
-                    ? cleanupError : new AggregateException(primaryFailure, cleanupError));
+                Exception combined = primaryFailure is null
+                    ? cleanupFailure
+                    : new AggregateException(primaryFailure, cleanupFailure);
+                throw new ExecutionCleanupException(combined);
             }
         }
     }
 
-    private async Task AppendTextAsync(string text)
+    private async Task WriteResponseChunkAsync(LlmResponseChunk chunk)
     {
-        int offset = 0;
-        if (_pendingHighSurrogate is { } high && text.Length != 0)
-        {
-            if (!Rune.TryCreate(high, text[0], out Rune pair))
-            {
-                throw new InvalidDataException("The fake-text response contains invalid Unicode.");
-            }
-
-            if (_batchUtf8Bytes + pair.Utf8SequenceLength > BatchByteLimit)
-            {
-                await FlushBatchAsync(isFinal: false).ConfigureAwait(false);
-            }
-
-            _outputBatch.Append(high).Append(text[0]);
-            _batchUtf8Bytes += pair.Utf8SequenceLength;
-            _pendingHighSurrogate = null;
-            ArmDeadline();
-            if (_batchUtf8Bytes == BatchByteLimit)
-            {
-                await FlushBatchAsync(isFinal: false).ConfigureAwait(false);
-            }
-
-            offset = 1;
-        }
-
-        while (offset < text.Length)
-        {
-            if (char.IsHighSurrogate(text[offset]) && offset == text.Length - 1)
-            {
-                _pendingHighSurrogate = text[offset];
-                break;
-            }
-
-            if (Rune.DecodeFromUtf16(text.AsSpan(offset), out Rune rune, out int consumed) != OperationStatus.Done)
-            {
-                throw new InvalidDataException("The fake-text response contains invalid Unicode.");
-            }
-
-            if (_batchUtf8Bytes + rune.Utf8SequenceLength > BatchByteLimit)
-            {
-                await FlushBatchAsync(isFinal: false).ConfigureAwait(false);
-            }
-
-            _outputBatch.Append(text.AsSpan(offset, consumed));
-            _batchUtf8Bytes += rune.Utf8SequenceLength;
-            offset += consumed;
-            ArmDeadline();
-            if (_batchUtf8Bytes == BatchByteLimit)
-            {
-                await FlushBatchAsync(isFinal: false).ConfigureAwait(false);
-            }
-        }
-    }
-
-    private void ArmDeadline()
-    {
-        if (_deadline is null)
-        {
-            _deadlineCancellation = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
-            _deadline = Task.Delay(FlushInterval, _deadlineCancellation.Token);
-        }
-    }
-
-    private async Task FlushBatchAsync(bool isFinal)
-    {
-        await DisarmDeadlineAsync().ConfigureAwait(false);
-        _stop.Token.ThrowIfCancellationRequested();
-        if (_batchUtf8Bytes == 0 && !isFinal)
-        {
-            return;
-        }
-
         bool recorded;
         try
         {
-            recorded = await _owner.RecordOutputAsync(RunId,
-                new LlmResponseChunk(_requestId, _outputId, _batchIndex, _outputBatch.ToString(), isFinal)).ConfigureAwait(false);
+            recorded = await _owner.RecordOutputAsync(RunId, chunk).ConfigureAwait(false);
         }
         catch (Exception error)
         {
@@ -367,53 +191,31 @@ internal sealed class SessionExecution
         {
             throw new FencedExecutionException();
         }
-
-        _batchIndex++;
-        _outputBatch.Clear();
-        _batchUtf8Bytes = 0;
     }
 
-    private async Task DisarmDeadlineAsync()
+    private static async Task CleanupResponseAsync(CancellationTokenSource requestStop,
+        IAsyncEnumerator<ChatResponseUpdate>? source, Task<bool>? next, LlmResponseWriter writer)
     {
-        if (_deadline is null)
-        {
-            return;
-        }
-
-        CancellationTokenSource cancellation = _deadlineCancellation!;
-        try
-        {
-            cancellation.Cancel();
-            await _deadline.ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
-        {
-        }
-        finally
-        {
-            cancellation.Dispose();
-            _deadline = null;
-            _deadlineCancellation = null;
-        }
-    }
-
-    private async Task CleanupRequestAsync(CancellationTokenSource requestStop,
-        IAsyncEnumerator<ChatResponseUpdate>? source, Task<bool>? next)
-    {
-        Exception? error = null;
+        Exception? cleanupFailure = null;
         try
         {
             await requestStop.CancelAsync().ConfigureAwait(false);
         }
-        catch (Exception cancellationError)
+        catch (Exception cancellationFailure)
         {
-            error = cancellationError;
+            cleanupFailure = cancellationFailure;
         }
 
         if (next is not null)
         {
-            try { await next.ConfigureAwait(false); }
-            catch (Exception) { /* Observe the abandoned read, then dispose only after it exits. */ }
+            try
+            {
+                await next.ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // Observe the abandoned read and wait for it to exit before disposing its enumerator.
+            }
         }
 
         try
@@ -423,23 +225,28 @@ internal sealed class SessionExecution
                 await source.DisposeAsync().ConfigureAwait(false);
             }
         }
-        catch (Exception disposalError)
+        catch (Exception disposalFailure)
         {
-            error = error is null ? disposalError : new AggregateException(error, disposalError);
-        }
-        finally
-        {
-            await DisarmDeadlineAsync().ConfigureAwait(false);
-            _outputBatch.Clear();
-            _batchUtf8Bytes = 0;
-            _pendingHighSurrogate = null;
+            cleanupFailure = Combine(cleanupFailure, disposalFailure);
         }
 
-        if (error is not null)
+        try
         {
-            throw error;
+            await writer.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception disposalFailure)
+        {
+            cleanupFailure = Combine(cleanupFailure, disposalFailure);
+        }
+
+        if (cleanupFailure is not null)
+        {
+            throw cleanupFailure;
         }
     }
+
+    private static Exception Combine(Exception? existing, Exception additional) =>
+        existing is null ? additional : new AggregateException(existing, additional);
 
     private sealed class FencedExecutionException : Exception { }
     private sealed class OwnerOperationException(Exception inner) : Exception("Recording output failed.", inner) { }

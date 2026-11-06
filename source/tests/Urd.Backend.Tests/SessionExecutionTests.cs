@@ -14,6 +14,7 @@ public sealed class SessionExecutionTests
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private const string CancellationCallbackFailureMessage = "Scripted cancellation callback failure.";
+    private const string EnumeratorDisposalFailureMessage = "Scripted enumerator disposal failure.";
 
     [Fact]
     public async Task CoalescesTinyUpdatesAndSplitsOversizedTextAtUtf8ScalarBoundaries()
@@ -351,6 +352,79 @@ public sealed class SessionExecutionTests
     }
 
     [Fact]
+    public async Task OutputWriteAndCleanupFailuresAreRetainedWhileRunRemainsFenced()
+    {
+        var database = new TemporaryDatabase();
+        var store = SessionStore.Open(database.Path);
+        var disposed = Signal();
+        var client = new ScriptedChatClient(token => WriteAndCleanupFailureResponse(disposed, token));
+        var session = new PrimarySession(store.CreatePrimary(Guid.NewGuid()), store, client);
+        Guid? runId = null;
+        try
+        {
+            database.Execute("""
+                CREATE TRIGGER reject_output BEFORE INSERT ON execution_output
+                BEGIN SELECT RAISE(ABORT, 'Injected output write failure'); END;
+                """);
+            InputReceipt receipt = await session.SubmitUserInputAsync(new InputCommand(Guid.NewGuid(), 0, "go"));
+            Assert.Equal(InputDecision.Accepted, receipt.Decision);
+            runId = receipt.RunId;
+            Guid acceptedRun = Assert.IsType<Guid>(runId);
+
+            Exception failure = await Assert.ThrowsAnyAsync<Exception>(
+                () => session.WaitForSettlementAsync(acceptedRun).WaitAsync(Timeout));
+            Exception[] failures = FlattenFailures(failure).ToArray();
+            Assert.Contains(failures, error => error.GetBaseException() is SqliteException sqlite &&
+                sqlite.SqliteErrorCode == 19);
+            Assert.Contains(failures, error => error.Message == CancellationCallbackFailureMessage);
+            Assert.Contains(failures, error => error.Message == EnumeratorDisposalFailureMessage);
+            await disposed.Task.WaitAsync(Timeout);
+
+            SessionSnapshot snapshot = await session.ReadSnapshotAsync();
+            Assert.True(snapshot.AdmissionFenced);
+            Assert.Equal(acceptedRun, snapshot.UnsettledRunId);
+            Assert.Null(snapshot.LastSettlement);
+            Assert.Equal(DBNull.Value, database.Scalar("SELECT outcome FROM execution_runs;"));
+            Assert.Equal(DBNull.Value, database.Scalar("SELECT outcome FROM execution_requests;"));
+            InputReceipt refused = await session.SubmitUserInputAsync(
+                new InputCommand(Guid.NewGuid(), 0, "replacement"));
+            Assert.Equal(InputDecision.Refused, refused.Decision);
+            Assert.Equal(InputRefusalReason.Stopping, refused.RefusalReason);
+            Assert.Null(refused.RunId);
+            Assert.Equal(1, client.Calls);
+            Assert.Equal(0, client.DisposeCalls);
+        }
+        finally
+        {
+            if (runId is { } acceptedRun)
+            {
+                try
+                {
+                    await session.RequestStopAsync(acceptedRun).WaitAsync(Timeout);
+                }
+                catch (Exception failure) when (failure is not TimeoutException &&
+                    FlattenFailures(failure).Any(error => error.Message == CancellationCallbackFailureMessage))
+                {
+                }
+
+                await disposed.Task.WaitAsync(Timeout);
+                try
+                {
+                    await session.WaitForSettlementAsync(acceptedRun).WaitAsync(Timeout);
+                }
+                catch (Exception failure) when (failure is not TimeoutException &&
+                    FlattenFailures(failure).Any(error => error.Message == EnumeratorDisposalFailureMessage))
+                {
+                }
+            }
+
+            store.Dispose();
+            client.Dispose();
+            database.Dispose();
+        }
+    }
+
+    [Fact]
     public async Task OutputWriteFailureCleansUpButFencesRatherThanSettlesOrReplacesTheRun()
     {
         var database = new TemporaryDatabase();
@@ -413,6 +487,22 @@ public sealed class SessionExecutionTests
             store.Dispose();
             client.Dispose();
             database.Dispose();
+        }
+    }
+
+    private static async IAsyncEnumerable<ChatResponseUpdate> WriteAndCleanupFailureResponse(
+        TaskCompletionSource disposed, [EnumeratorCancellation] CancellationToken token)
+    {
+        token.Register(() => throw new InvalidOperationException(CancellationCallbackFailureMessage));
+        try
+        {
+            yield return Text(new string('x', 16 * 1024));
+            await Task.Delay(System.Threading.Timeout.InfiniteTimeSpan, token);
+        }
+        finally
+        {
+            disposed.TrySetResult();
+            throw new InvalidOperationException(EnumeratorDisposalFailureMessage);
         }
     }
 
@@ -585,6 +675,21 @@ public sealed class SessionExecutionTests
     };
 
     private static TaskCompletionSource Signal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    private static IEnumerable<Exception> FlattenFailures(Exception failure)
+    {
+        if (failure is AggregateException aggregate)
+        {
+            return aggregate.InnerExceptions.SelectMany(FlattenFailures);
+        }
+
+        if (failure.InnerException is { } inner)
+        {
+            return FlattenFailures(inner);
+        }
+
+        return [failure];
+    }
 
     private static async Task AssertCancellationCallbackFailureAsync(Task operation)
     {

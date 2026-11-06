@@ -1,3 +1,4 @@
+using System.Runtime.ExceptionServices;
 using Microsoft.Extensions.AI;
 using Urd.Core.Sessions;
 
@@ -41,48 +42,16 @@ internal sealed class SessionExecution
                 : throw new InvalidOperationException("The active run had no claimable request and was not stopped.");
         }
 
-        return await ExecuteRequestAsync(request).ConfigureAwait(false);
-    }
-
-    private async Task<ExecutionOutcome> ExecuteRequestAsync(LlmRequest request)
-    {
+        // Disposing the linked source can wait for a running cancellation callback.
+        // Keep it alive until after request completion has been recorded.
         using var requestStop = CancellationTokenSource.CreateLinkedTokenSource(_runStop.Token);
         var writer = new LlmResponseWriter(request.RequestId, WriteResponseChunkAsync, _runStop.Token);
-        ExecutionOutcome outcome;
-        string? error = null;
-        try
-        {
-            await StreamResponseAsync(request, requestStop, writer).ConfigureAwait(false);
-            outcome = _runStop.IsCancellationRequested ? ExecutionOutcome.Cancelled : ExecutionOutcome.Completed;
-        }
-        catch (OwnerOperationException)
-        {
-            throw;
-        }
-        catch (ExecutionCleanupException)
-        {
-            throw;
-        }
-        catch (FencedExecutionException)
-        {
-            outcome = ExecutionOutcome.Cancelled;
-        }
-        catch (OperationCanceledException) when (_runStop.IsCancellationRequested)
-        {
-            outcome = ExecutionOutcome.Cancelled;
-        }
-        catch (Exception providerError)
-        {
-            outcome = ExecutionOutcome.Failed;
-            error = providerError.Message;
-        }
-
-        bool recorded = await _owner.CompleteRequestAsync(RunId,
-            new LlmRequestOutcome(request.RequestId, outcome, error)).ConfigureAwait(false);
-        return recorded ? outcome : ExecutionOutcome.Cancelled;
+        LlmRequestOutcome completion = await StreamResponseAsync(request, requestStop, writer).ConfigureAwait(false);
+        bool recorded = await _owner.CompleteRequestAsync(RunId, completion).ConfigureAwait(false);
+        return recorded ? completion.Outcome : ExecutionOutcome.Cancelled;
     }
 
-    private async Task StreamResponseAsync(LlmRequest request,
+    private async Task<LlmRequestOutcome> StreamResponseAsync(LlmRequest request,
         CancellationTokenSource requestStop, LlmResponseWriter writer)
     {
         IAsyncEnumerator<ChatResponseUpdate>? source = null;
@@ -115,35 +84,8 @@ internal sealed class SessionExecution
                 }
 
                 _runStop.Token.ThrowIfCancellationRequested();
-                ChatResponseUpdate update = source.Current;
-                foreach (AIContent content in update.Contents)
-                {
-                    switch (content)
-                    {
-                        case TextContent text:
-                            if (sawStopFinishReason && text.Text.Length != 0)
-                            {
-                                throw new InvalidDataException("Text arrived after the terminal response marker.");
-                            }
-
-                            await writer.AppendTextAsync(text.Text).ConfigureAwait(false);
-                            break;
-                        case UsageContent:
-                            break;
-                        default:
-                            throw new InvalidDataException("The fake-text execution received non-text or error content.");
-                    }
-                }
-
-                if (update.FinishReason is { } finish)
-                {
-                    if (finish != ChatFinishReason.Stop)
-                    {
-                        throw new InvalidDataException("The fake-text request did not finish successfully.");
-                    }
-
-                    sawStopFinishReason = true;
-                }
+                sawStopFinishReason = await AppendUpdateAsync(source.Current, writer, sawStopFinishReason)
+                    .ConfigureAwait(false);
             }
 
             _runStop.Token.ThrowIfCancellationRequested();
@@ -157,22 +99,65 @@ internal sealed class SessionExecution
         catch (Exception failure)
         {
             primaryFailure = failure;
-            throw;
         }
-        finally
+
+        // Cleanup always runs before classifying the response. Its failures must reach
+        // the owner, not become an ordinary failed request that permits settlement.
+        await CleanupResponseAsync(requestStop, source, pendingRead, writer, primaryFailure).ConfigureAwait(false);
+        return GetRequestOutcome(request.RequestId, primaryFailure);
+    }
+
+    private static async Task<bool> AppendUpdateAsync(ChatResponseUpdate update,
+        LlmResponseWriter writer, bool sawStopFinishReason)
+    {
+        foreach (AIContent content in update.Contents)
         {
-            try
+            if (content is UsageContent)
             {
-                await CleanupResponseAsync(requestStop, source, pendingRead, writer).ConfigureAwait(false);
+                continue;
             }
-            catch (Exception cleanupFailure)
+
+            if (content is not TextContent text)
             {
-                Exception combined = primaryFailure is null
-                    ? cleanupFailure
-                    : new AggregateException(primaryFailure, cleanupFailure);
-                throw new ExecutionCleanupException(combined);
+                throw new InvalidDataException("The fake-text execution received non-text or error content.");
             }
+
+            if (sawStopFinishReason && text.Text.Length != 0)
+            {
+                throw new InvalidDataException("Text arrived after the terminal response marker.");
+            }
+
+            await writer.AppendTextAsync(text.Text).ConfigureAwait(false);
         }
+
+        if (update.FinishReason is null)
+        {
+            return sawStopFinishReason;
+        }
+
+        if (update.FinishReason != ChatFinishReason.Stop)
+        {
+            throw new InvalidDataException("The fake-text request did not finish successfully.");
+        }
+
+        return true;
+    }
+
+    private LlmRequestOutcome GetRequestOutcome(Guid requestId, Exception? failure)
+    {
+        if (failure is OwnerOperationException)
+        {
+            ExceptionDispatchInfo.Throw(failure);
+        }
+
+        ExecutionOutcome outcome = failure switch
+        {
+            null => _runStop.IsCancellationRequested ? ExecutionOutcome.Cancelled : ExecutionOutcome.Completed,
+            FencedExecutionException => ExecutionOutcome.Cancelled,
+            OperationCanceledException when _runStop.IsCancellationRequested => ExecutionOutcome.Cancelled,
+            _ => ExecutionOutcome.Failed
+        };
+        return new(requestId, outcome, outcome == ExecutionOutcome.Failed ? failure!.Message : null);
     }
 
     private async Task WriteResponseChunkAsync(LlmResponseChunk chunk)
@@ -194,61 +179,43 @@ internal sealed class SessionExecution
     }
 
     private static async Task CleanupResponseAsync(CancellationTokenSource requestStop,
-        IAsyncEnumerator<ChatResponseUpdate>? source, Task<bool>? pendingRead, LlmResponseWriter writer)
+        IAsyncEnumerator<ChatResponseUpdate>? source, Task<bool>? pendingRead,
+        LlmResponseWriter writer, Exception? primaryFailure)
     {
-        Exception? cleanupFailure = null;
-        try
-        {
-            await requestStop.CancelAsync().ConfigureAwait(false);
-        }
-        catch (Exception cancellationFailure)
-        {
-            cleanupFailure = cancellationFailure;
-        }
-
+        Exception? cancellationFailure = await CaptureCleanupFailureAsync(() => new ValueTask(requestStop.CancelAsync()))
+            .ConfigureAwait(false);
         if (pendingRead is not null)
         {
-            try
-            {
-                await pendingRead.ConfigureAwait(false);
-            }
-            catch (Exception)
-            {
-                // Observe the abandoned read and wait for it to exit before disposing its enumerator.
-            }
+            // The abandoned read may fail on cancellation. Join it before disposing
+            // its enumerator, but do not treat its failure as a cleanup failure.
+            _ = await CaptureCleanupFailureAsync(() => new ValueTask(pendingRead)).ConfigureAwait(false);
         }
 
+        Exception? sourceFailure = source is null ? null
+            : await CaptureCleanupFailureAsync(source.DisposeAsync).ConfigureAwait(false);
+        Exception? writerFailure = await CaptureCleanupFailureAsync(writer.DisposeAsync).ConfigureAwait(false);
+        if (cancellationFailure is null && sourceFailure is null && writerFailure is null)
+        {
+            return;
+        }
+
+        throw new AggregateException("Execution cleanup could not be confirmed.",
+            new[] { primaryFailure, cancellationFailure, sourceFailure, writerFailure }.OfType<Exception>());
+    }
+
+    private static async Task<Exception?> CaptureCleanupFailureAsync(Func<ValueTask> cleanup)
+    {
         try
         {
-            if (source is not null)
-            {
-                await source.DisposeAsync().ConfigureAwait(false);
-            }
+            await cleanup().ConfigureAwait(false);
+            return null;
         }
-        catch (Exception disposalFailure)
+        catch (Exception failure)
         {
-            cleanupFailure = CombineFailures(cleanupFailure, disposalFailure);
-        }
-
-        try
-        {
-            await writer.DisposeAsync().ConfigureAwait(false);
-        }
-        catch (Exception disposalFailure)
-        {
-            cleanupFailure = CombineFailures(cleanupFailure, disposalFailure);
-        }
-
-        if (cleanupFailure is not null)
-        {
-            throw cleanupFailure;
+            return failure;
         }
     }
 
-    private static Exception CombineFailures(Exception? existing, Exception additional) =>
-        existing is null ? additional : new AggregateException(existing, additional);
-
     private sealed class FencedExecutionException : Exception { }
     private sealed class OwnerOperationException(Exception inner) : Exception("Recording output failed.", inner) { }
-    private sealed class ExecutionCleanupException(Exception inner) : Exception("Execution cleanup could not be confirmed.", inner) { }
 }

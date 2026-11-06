@@ -78,34 +78,31 @@ internal sealed class MessageContentReader {
         if (!reader.Read() || reader.GetInt64(0) != message.HistoryRevision)
             throw new KeyNotFoundException("The message does not belong to this session history.");
 
+        // Run columns name the SELECT in order. Request columns are NULL until a
+        // request exists, so the assistant branch reads the rest only when present.
         Guid inputId = reader.GetGuid(1);
+        bool stopRequested = reader.GetInt32(2) != 0;
+        bool runSettled = !reader.IsDBNull(3);
         Guid? requestId = reader.IsDBNull(4) ? null : reader.GetGuid(4);
-        return message.Role == MessageRole.User
-            ? InputMetadata(message, inputId, requestId)
-            : OutputMetadata(reader, message, inputId, requestId);
-    }
 
-    private static MessageMetadata InputMetadata(MessageRef message, Guid inputId, Guid? requestId) {
-        if (inputId != message.MessageId)
-            throw new KeyNotFoundException("The input message does not belong to this run.");
+        if (message.Role == MessageRole.User) {
+            if (inputId != message.MessageId)
+                throw new KeyNotFoundException("The input message does not belong to this run.");
 
-        return new(inputId, requestId, SegmentCount: 1, IsClosed: true, FinalOutputCommitted: false);
-    }
+            return new(inputId, requestId, SegmentCount: 1, IsClosed: true, FinalOutputCommitted: false);
+        }
 
-    private static MessageMetadata OutputMetadata(SqliteDataReader reader, MessageRef message,
-        Guid inputId, Guid? requestId) {
-        if (reader.IsDBNull(5) || reader.GetGuid(5) != message.MessageId)
+        Guid? outputId = reader.IsDBNull(5) ? null : reader.GetGuid(5);
+        if (outputId != message.MessageId)
             throw new KeyNotFoundException("The output message does not belong to this run.");
 
         long segmentCount = reader.GetInt64(6);
         bool finalOutputCommitted = reader.GetInt32(7) != 0;
-        bool stopRequested = reader.GetInt32(2) != 0;
-        bool runSettled = !reader.IsDBNull(3);
         bool requestEnded = !reader.IsDBNull(8);
-        bool isClosed = finalOutputCommitted || stopRequested || runSettled || requestEnded;
         if (requestId is null || segmentCount <= 0)
             throw new InvalidDataException("An output message has no committed segments.");
 
+        bool isClosed = finalOutputCommitted || stopRequested || runSettled || requestEnded;
         return new(inputId, requestId, segmentCount, isClosed, finalOutputCommitted);
     }
 

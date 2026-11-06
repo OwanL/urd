@@ -5,11 +5,11 @@ namespace Urd.Core.Storage;
 
 // Appends ordered output segments and records explicit request completion.
 internal sealed class OutputStorage(Database database) {
-    internal bool Append(Guid sessionId, Guid runId, long historyRevision, LlmResponseChunk batch) {
-        ArgumentOutOfRangeException.ThrowIfNegative(batch.ChunkIndex);
-        if (batch.RequestId == Guid.Empty || batch.ResponseId == Guid.Empty
-            || StorageText.StrictUtf8.GetByteCount(batch.Text) > StorageText.MaximumBytes) {
-            throw new ArgumentException("Output requires identities and at most 16 KiB of valid UTF-8 text.", nameof(batch));
+    internal bool Append(Guid sessionId, Guid runId, long historyRevision, LlmResponseChunk chunk) {
+        ArgumentOutOfRangeException.ThrowIfNegative(chunk.ChunkIndex);
+        if (chunk.RequestId == Guid.Empty || chunk.ResponseId == Guid.Empty
+            || StorageText.StrictUtf8.GetByteCount(chunk.Text) > StorageText.MaximumBytes) {
+            throw new ArgumentException("Output requires identities and at most 16 KiB of valid UTF-8 text.", nameof(chunk));
         }
 
         return database.Write(transaction => {
@@ -26,10 +26,10 @@ internal sealed class OutputStorage(Database database) {
                 ("$session", sessionId),
                 ("$run", runId),
                 ("$revision", historyRevision),
-                ("$request", batch.RequestId),
-                ("$output", batch.ResponseId),
-                ("$index", batch.ChunkIndex),
-                ("$final", batch.IsFinal ? 1 : 0));
+                ("$request", chunk.RequestId),
+                ("$output", chunk.ResponseId),
+                ("$index", chunk.ChunkIndex),
+                ("$final", chunk.IsFinal ? 1 : 0));
             if (advance.ExecuteNonQuery() == 0)
                 return false;
 
@@ -37,10 +37,10 @@ internal sealed class OutputStorage(Database database) {
                 INSERT INTO execution_output (request_id, batch_index, text_utf8, is_final)
                 VALUES ($request, $index, $text, $final);
                 """,
-                ("$request", batch.RequestId),
-                ("$index", batch.ChunkIndex),
-                ("$text", StorageText.StrictUtf8.GetBytes(batch.Text)),
-                ("$final", batch.IsFinal ? 1 : 0));
+                ("$request", chunk.RequestId),
+                ("$index", chunk.ChunkIndex),
+                ("$text", StorageText.StrictUtf8.GetBytes(chunk.Text)),
+                ("$final", chunk.IsFinal ? 1 : 0));
             append.ExecuteNonQuery();
             return true;
         });
@@ -70,21 +70,22 @@ internal sealed class OutputStorage(Database database) {
             if (!reader.Read())
                 return false;
 
-            // An exact retry succeeds without rewriting the original evidence, even after settlement.
-            if (!reader.IsDBNull(0)) {
-                return (ExecutionOutcome)reader.GetInt32(0) == completion.Outcome
-                    && (reader.IsDBNull(1) ? null : reader.GetString(1)) == completion.Error;
-            }
+            // Locals name the SELECT columns in order.
+            ExecutionOutcome? savedOutcome = reader.IsDBNull(0) ? null : (ExecutionOutcome)reader.GetInt32(0);
+            string? savedError = reader.IsDBNull(1) ? null : reader.GetString(1);
+            bool hasFinalOutput = reader.GetInt32(2) != 0;
+            bool stopRequested = reader.GetInt32(3) != 0;
+            bool runSettled = !reader.IsDBNull(4);
 
-            if (!reader.IsDBNull(4))
+            // An exact retry succeeds without rewriting the original evidence, even after settlement.
+            if (savedOutcome is not null)
+                return savedOutcome == completion.Outcome && savedError == completion.Error;
+
+            if (runSettled)
                 return false;
 
-            if (completion.Outcome == ExecutionOutcome.Completed) {
-                bool stopRequested = reader.GetInt32(3) != 0;
-                bool hasFinalOutput = reader.GetInt32(2) != 0;
-                if (stopRequested || !hasFinalOutput)
-                    return false;
-            }
+            if (completion.Outcome == ExecutionOutcome.Completed && (stopRequested || !hasFinalOutput))
+                return false;
         }
 
         using SqliteCommand update = database.Command(transaction,

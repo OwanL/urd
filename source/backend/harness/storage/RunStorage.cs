@@ -91,20 +91,22 @@ internal sealed class RunStorage(Database database) {
         if (!reader.Read())
             return null;
 
-        bool isAlreadySettled = !reader.IsDBNull(0);
-        if (isAlreadySettled)
-            return new((ExecutionOutcome)reader.GetInt32(0), AlreadySettled: true);
+        // Locals name TrySettle's SELECT columns in order: run outcome, stop flag, request outcome.
+        ExecutionOutcome? runOutcome = reader.IsDBNull(0) ? null : (ExecutionOutcome)reader.GetInt32(0);
+        bool stopRequested = reader.GetInt32(1) != 0;
+        ExecutionOutcome? requestOutcome = reader.IsDBNull(2) ? null : (ExecutionOutcome)reader.GetInt32(2);
 
-        bool isStopping = reader.GetInt32(1) != 0;
-        if (isStopping)
+        if (runOutcome is { } settled)
+            return new(settled, AlreadySettled: true);
+
+        if (stopRequested)
             return new(ExecutionOutcome.Cancelled, AlreadySettled: false);
 
         if (driverOutcome != ExecutionOutcome.Completed)
             return new(driverOutcome, AlreadySettled: false);
 
         // Invocation exit or text alone never manufactures request success.
-        return reader.IsDBNull(2)
-            ? null : new((ExecutionOutcome)reader.GetInt32(2), AlreadySettled: false);
+        return requestOutcome is { } outcome ? new(outcome, AlreadySettled: false) : null;
     }
 
     private ReadOnlyCollection<ChatMessage> ReadRequestContext(

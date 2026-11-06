@@ -101,6 +101,8 @@ internal static class DatabaseSchema {
     private static void EnsureExecutionSchema(SqliteConnection connection, SqliteTransaction transaction, bool create) {
         using SqliteCommand command = connection.CreateCommand();
         command.Transaction = transaction;
+        // Storage columns call one response's chunks "batches": output_id is its response
+        // identity and next_batch_index/batch_index are its chunk index.
         command.CommandText = create ? """
             CREATE TABLE execution_runs (
                 ordinal INTEGER PRIMARY KEY AUTOINCREMENT,

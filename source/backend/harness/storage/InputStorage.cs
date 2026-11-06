@@ -80,12 +80,14 @@ internal sealed class InputStorage(Database database) {
         if (!reader.Read())
             return null;
 
-        var original = new InputCommand(
-            inputId, reader.GetInt64(0), StorageText.StrictUtf8.GetString((byte[])reader.GetValue(1)));
-        return new InputReceipt(sessionId, original,
-            Decision: (InputDecision)reader.GetInt32(2),
-            RefusalReason: reader.IsDBNull(4) ? null : (InputRefusalReason)reader.GetInt32(4),
-            RunId: reader.IsDBNull(3) ? null : reader.GetGuid(3));
+        // Locals name the SELECT columns in order.
+        long expectedRevision = reader.GetInt64(0);
+        string originalText = StorageText.StrictUtf8.GetString((byte[])reader.GetValue(1));
+        var decision = (InputDecision)reader.GetInt32(2);
+        Guid? runId = reader.IsDBNull(3) ? null : reader.GetGuid(3);
+        InputRefusalReason? refusalReason = reader.IsDBNull(4) ? null : (InputRefusalReason)reader.GetInt32(4);
+        var original = new InputCommand(inputId, expectedRevision, originalText);
+        return new InputReceipt(sessionId, original, decision, refusalReason, runId);
     }
 
     private long ReadRevision(SqliteTransaction transaction, Guid sessionId) {

@@ -111,10 +111,7 @@ internal sealed class SnapshotReader {
         var messages = new List<MessagePreview>(messageCount);
         for (int index = messageCount - 1; index >= 0; index--) {
             (MessageRef message, ExecutionOutcome? settlement) = candidates[index];
-            MessageContentPage prefix = _content.Read(transaction, sessionId, new(message, 0, 0),
-                maximumUtf8Bytes: StorageText.MaximumBytes,
-                maximumUtf16Units: PreviewUtf16Limit,
-                maximumSegments: StorageText.MaximumSegments);
+            MessageContentPage prefix = _content.ReadPreview(transaction, sessionId, message, PreviewUtf16Limit);
             messages.Add(new(message, prefix.Text, prefix.HasMore, prefix.AvailableThrough,
                 prefix.FinalOutputCommitted, settlement));
         }

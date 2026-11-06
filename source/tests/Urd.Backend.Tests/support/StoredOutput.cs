@@ -38,8 +38,7 @@ internal static class StoredOutput {
 
     internal static async Task WaitForAnyAsync(TemporaryDatabase database) {
         using var deadline = new CancellationTokenSource(TestTimeout);
-        while (Read(database).Count == 0) {
+        while (database.Scalar("SELECT EXISTS(SELECT 1 FROM execution_output);") is 0L)
             await Task.Delay(10, deadline.Token);
-        }
     }
 }

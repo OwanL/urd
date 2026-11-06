@@ -13,24 +13,32 @@ internal sealed class MessageContentReader {
         _database = database;
     }
 
-    internal MessageContentPage Read(Guid sessionId, MessageContentCursor cursor)
-        => _database.Read(transaction => Read(transaction, sessionId, cursor,
-            StorageText.MaximumBytes, int.MaxValue, StorageText.MaximumSegments));
-
-    // Snapshots use their existing read transaction and smaller preview budget.
-    internal MessageContentPage Read(SqliteTransaction transaction, Guid sessionId, MessageContentCursor cursor,
-        int maximumUtf8Bytes, int maximumUtf16Units, int maximumSegments) {
-        ValidateCursorAndLimits(sessionId, cursor, maximumUtf8Bytes, maximumUtf16Units, maximumSegments);
-        CheckHistoryRevision(transaction, sessionId, cursor.Message.HistoryRevision);
-        MessageMetadata metadata = ReadMetadata(transaction, sessionId, cursor.Message);
-        ValidateCommittedTail(cursor, metadata.SegmentCount);
-        return ReadSegments(transaction, sessionId, cursor, metadata,
-            maximumUtf8Bytes, maximumUtf16Units, maximumSegments);
+    internal MessageContentPage Read(Guid sessionId, MessageContentCursor cursor) {
+        return _database.Read(transaction => {
+            ValidateCursorAndLimit(sessionId, cursor, int.MaxValue);
+            CheckHistoryRevision(transaction, sessionId, cursor.Message.HistoryRevision);
+            return ReadValidated(transaction, sessionId, cursor, int.MaxValue);
+        });
     }
 
-    private static void ValidateCursorAndLimits(Guid sessionId, MessageContentCursor cursor,
-        int maximumUtf8Bytes, int maximumUtf16Units, int maximumSegments) {
-        // Cursors come from public session APIs.
+    // SnapshotReader already selected messages from the current revision in this
+    // transaction. Do not query that same revision again for every preview.
+    internal MessageContentPage ReadPreview(SqliteTransaction transaction, Guid sessionId, MessageRef message,
+        int maximumUtf16Units) {
+        var cursor = new MessageContentCursor(message, 0, 0);
+        ValidateCursorAndLimit(sessionId, cursor, maximumUtf16Units);
+        return ReadValidated(transaction, sessionId, cursor, maximumUtf16Units);
+    }
+
+    private MessageContentPage ReadValidated(SqliteTransaction transaction, Guid sessionId, MessageContentCursor cursor,
+        int maximumUtf16Units) {
+        MessageMetadata metadata = ReadMetadata(transaction, sessionId, cursor.Message);
+        ValidateCommittedTail(cursor, metadata.SegmentCount);
+        return ReadSegments(transaction, sessionId, cursor, metadata, maximumUtf16Units);
+    }
+
+    private static void ValidateCursorAndLimit(Guid sessionId, MessageContentCursor cursor, int maximumUtf16Units) {
+        // Check public cursors and stored preview identities before reading content.
         ArgumentNullException.ThrowIfNull(cursor);
         ArgumentNullException.ThrowIfNull(cursor.Message);
         MessageRef message = cursor.Message;
@@ -43,11 +51,7 @@ internal sealed class MessageContentReader {
         ArgumentOutOfRangeException.ThrowIfNegative(cursor.SegmentIndex);
         ArgumentOutOfRangeException.ThrowIfNegative(cursor.Utf8Offset);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(cursor.Utf8Offset, StorageText.MaximumBytes);
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumUtf8Bytes);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(maximumUtf8Bytes, StorageText.MaximumBytes);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumUtf16Units);
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumSegments);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(maximumSegments, StorageText.MaximumSegments);
     }
 
     private void CheckHistoryRevision(SqliteTransaction transaction, Guid sessionId, long historyRevision) {
@@ -118,15 +122,15 @@ internal sealed class MessageContentReader {
     }
 
     private MessageContentPage ReadSegments(SqliteTransaction transaction, Guid sessionId, MessageContentCursor cursor,
-        MessageMetadata metadata, int maximumUtf8Bytes, int maximumUtf16Units, int maximumSegments) {
+        MessageMetadata metadata, int maximumUtf16Units) {
         var text = new StringBuilder();
         long segment = cursor.SegmentIndex;
         int offset = cursor.Utf8Offset;
         int utf8Bytes = 0;
-        for (int examined = 0; segment < metadata.SegmentCount && examined < maximumSegments; examined++) {
+        for (int examined = 0; segment < metadata.SegmentCount && examined < StorageText.MaximumSegments; examined++) {
             // Exhausted text budgets still permit length probes to normalize empty final segments.
             // These probes share the same segment budget.
-            int remainingBytes = maximumUtf8Bytes - utf8Bytes;
+            int remainingBytes = StorageText.MaximumBytes - utf8Bytes;
             int remainingUnits = maximumUtf16Units - text.Length;
             bool textBudgetExhausted = remainingBytes == 0 || remainingUnits == 0;
             // A UTF-16 unit needs at most three UTF-8 bytes. Three lookahead bytes

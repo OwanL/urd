@@ -6,6 +6,7 @@ using Urd.Core.Execution;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
 using Xunit;
+using static Urd.Backend.Tests.Support.ScriptedResponses;
 using static Urd.Backend.Tests.Support.TestAsync;
 
 namespace Urd.Backend.Tests.Sessions;
@@ -123,7 +124,8 @@ public sealed class SessionReadFlowTests {
             Assert.True(original.Output.Append(sessionId, runId, 0, new(request.RequestId, outputId, 0, "partial\0🙂", false)));
         }
 
-        using var client = new ScriptedChatClient(UnexpectedResponse);
+        using var client = new ScriptedChatClient(_ =>
+            throw new InvalidOperationException("Reads must not start a model request."));
         using SessionStore store = SessionStore.Open(database.Path);
         var manager = new SessionManager(store, client);
         PrimarySession session = await manager.GetPrimaryAsync(sessionId);
@@ -176,15 +178,6 @@ public sealed class SessionReadFlowTests {
             await Task.Delay(10, deadline.Token);
         }
     }
-
-    private static async IAsyncEnumerable<ChatResponseUpdate> UnexpectedResponse(
-        [EnumeratorCancellation] CancellationToken token) {
-        await Task.CompletedTask;
-        token.ThrowIfCancellationRequested();
-        yield return new() { FinishReason = ChatFinishReason.Stop };
-    }
-
-    private static ChatResponseUpdate Text(string text) => new() { Contents = [new TextContent(text)] };
 
     private sealed class HeldDisposal(IAsyncEnumerable<ChatResponseUpdate> source,
         TaskCompletionSource entered, Task release) : IAsyncEnumerable<ChatResponseUpdate> {

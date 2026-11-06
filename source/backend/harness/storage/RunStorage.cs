@@ -89,16 +89,6 @@ internal sealed class RunStorage(Database database) {
         });
     }
 
-    internal bool Exists(Guid sessionId, Guid runId) {
-        return database.WithoutTransaction(() => {
-            using SqliteCommand read = database.Command(null,
-                "SELECT EXISTS(SELECT 1 FROM execution_runs WHERE session_id = $session AND run_id = $run);",
-                ("$session", sessionId),
-                ("$run", runId));
-            return (long)read.ExecuteScalar()! != 0;
-        });
-    }
-
     private static Settlement? DecideSettlement(SqliteCommand read, ExecutionOutcome driverOutcome) {
         using SqliteDataReader reader = read.ExecuteReader();
         if (!reader.Read()) {

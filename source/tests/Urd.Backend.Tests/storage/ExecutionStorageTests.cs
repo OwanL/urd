@@ -26,7 +26,6 @@ public sealed class ExecutionStorageTests {
             """);
         Assert.Throws<SqliteException>(() => store.Inputs.Admit(session, 0, input, true, run));
         Assert.Null(store.Inputs.ReadReceipt(session, input.InputId));
-        Assert.False(store.Runs.Exists(session, run));
         Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM input_decisions;"));
         Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM execution_runs;"));
         Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM test_child;"));
@@ -35,7 +34,7 @@ public sealed class ExecutionStorageTests {
         var admitted = store.Inputs.Admit(session, 0, input, true, run);
         Assert.True(admitted.NewlyAccepted);
         Assert.Equal(run, admitted.Receipt.RunId);
-        Assert.True(store.Runs.Exists(session, run));
+        Assert.Equal(run.ToString("D"), database.Scalar("SELECT run_id FROM execution_runs;"));
         Assert.Equal(1L, database.Scalar("""
             SELECT COUNT(*) FROM input_decisions i JOIN execution_runs r
             ON r.session_id = i.session_id AND r.input_id = i.input_id AND r.run_id = i.run_id;

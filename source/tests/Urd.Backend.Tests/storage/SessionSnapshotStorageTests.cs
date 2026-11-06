@@ -113,6 +113,17 @@ public sealed class SessionSnapshotStorageTests {
     }
 
     [Fact]
+    public void PreviewsStillValidateMessageIdentityFromStoredRows() {
+        using var database = new TemporaryDatabase();
+        using SessionStore store = SessionStore.Open(database.Path);
+        Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
+        SeedHistory(database, session, 0, 1, outputs: true);
+        database.Execute($"UPDATE execution_requests SET output_id = '{Guid.Empty:D}';");
+
+        Assert.Throws<ArgumentException>(() => store.Snapshots.Read(session));
+    }
+
+    [Fact]
     public void LargeMixedHistoriesUseBoundedIndexedSelectionWithoutDecodingOmittedBodies() {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);

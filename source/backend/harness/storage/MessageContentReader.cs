@@ -114,40 +114,40 @@ internal sealed class MessageContentReader {
     private MessageContentPage ReadSegments(SqliteTransaction transaction, Guid sessionId, MessageContentCursor cursor,
         MessageMetadata metadata, int maximumUtf16Units) {
         var text = new StringBuilder();
-        long segment = cursor.SegmentIndex;
-        int offset = cursor.Utf8Offset;
+        long segmentIndex = cursor.SegmentIndex;
+        int utf8Offset = cursor.Utf8Offset;
         int utf8Bytes = 0;
-        for (int examined = 0; segment < metadata.SegmentCount && examined < StorageText.MaximumSegments; examined++) {
+        for (int examined = 0; segmentIndex < metadata.SegmentCount && examined < StorageText.MaximumSegments; examined++) {
             // Exhausted text budgets still permit length probes to normalize empty final segments.
             // These probes share the same segment budget.
             int remainingBytes = StorageText.MaximumBytes - utf8Bytes;
-            int remainingUnits = maximumUtf16Units - text.Length;
-            bool textBudgetExhausted = remainingBytes == 0 || remainingUnits == 0;
+            int remainingUtf16Units = maximumUtf16Units - text.Length;
+            bool textBudgetExhausted = remainingBytes == 0 || remainingUtf16Units == 0;
             // A UTF-16 unit needs at most three UTF-8 bytes. Three lookahead bytes
             // let the decoder finish a scalar that starts at the budget boundary.
             int prefixBytes = textBudgetExhausted ? 0 : (int)Math.Min(StorageText.MaximumBytes,
-                Math.Min(remainingBytes, (long)remainingUnits * 3) + 3);
-            (long length, byte[] prefix) = ReadSegment(transaction, sessionId, cursor, metadata,
-                segment, offset, prefixBytes);
+                Math.Min(remainingBytes, (long)remainingUtf16Units * 3) + 3);
+            (long segmentByteLength, byte[] prefix) = ReadSegment(transaction, sessionId, cursor, metadata,
+                segmentIndex, utf8Offset, prefixBytes);
             int appendedBytes = AppendPrefix(prefix, text, remainingBytes, maximumUtf16Units);
-            offset += appendedBytes;
+            utf8Offset += appendedBytes;
             utf8Bytes += appendedBytes;
-            if (offset != length) {
+            if (utf8Offset != segmentByteLength) {
                 break; // A byte/scalar/UTF-16 budget ended within this immutable segment.
             }
 
-            segment++;
-            offset = 0;
+            segmentIndex++;
+            utf8Offset = 0;
         }
 
-        var next = new MessageContentCursor(cursor.Message, segment, offset);
+        var next = new MessageContentCursor(cursor.Message, segmentIndex, utf8Offset);
         var availableThrough = new MessageContentCursor(cursor.Message, metadata.SegmentCount, 0);
-        return new(cursor, text.ToString(), next, availableThrough, segment < metadata.SegmentCount,
+        return new(cursor, text.ToString(), next, availableThrough, segmentIndex < metadata.SegmentCount,
             metadata.IsClosed, metadata.FinalOutputCommitted);
     }
 
-    private (long Length, byte[] Prefix) ReadSegment(SqliteTransaction transaction, Guid sessionId,
-        MessageContentCursor cursor, MessageMetadata metadata, long segment, int offset, int prefixBytes) {
+    private (long ByteLength, byte[] Prefix) ReadSegment(SqliteTransaction transaction, Guid sessionId,
+        MessageContentCursor cursor, MessageMetadata metadata, long segmentIndex, int utf8Offset, int prefixBytes) {
         // SQLite substr of an empty BLOB returns NULL; retain its empty-byte meaning.
         using SqliteCommand segmentRead = cursor.Message.Role == MessageRole.User
             ? _database.Command(transaction, """
@@ -156,47 +156,47 @@ internal sealed class MessageContentReader {
                 """,
                 ("$session", sessionId),
                 ("$input", metadata.InputId),
-                ("$offset", offset),
+                ("$offset", utf8Offset),
                 ("$count", prefixBytes))
             : _database.Command(transaction, """
                 SELECT length(text_utf8), coalesce(substr(text_utf8, $offset + 1, $count), X'')
                 FROM execution_output WHERE request_id = $request AND batch_index = $segment;
                 """,
                 ("$request", metadata.RequestId),
-                ("$segment", segment),
-                ("$offset", offset),
+                ("$segment", segmentIndex),
+                ("$offset", utf8Offset),
                 ("$count", prefixBytes));
         using SqliteDataReader reader = segmentRead.ExecuteReader();
         if (!reader.Read())
             throw new InvalidDataException("A committed message segment is missing.");
 
-        long length = reader.GetInt64(0);
-        if (length > StorageText.MaximumBytes)
+        long segmentByteLength = reader.GetInt64(0);
+        if (segmentByteLength > StorageText.MaximumBytes)
             throw new InvalidDataException("A message segment exceeds the storage limit.");
 
-        if (offset > length)
+        if (utf8Offset > segmentByteLength)
             throw new ArgumentException("The cursor offset is beyond its segment.", nameof(cursor));
 
         byte[] prefix = (byte[])reader.GetValue(1);
-        if (offset != 0 && prefix.Length != 0 && (prefix[0] & 0xc0) == 0x80)
+        if (utf8Offset != 0 && prefix.Length != 0 && (prefix[0] & 0xc0) == 0x80)
             throw new ArgumentException("The cursor must begin at a UTF-8 scalar boundary.", nameof(cursor));
 
-        return (length, prefix);
+        return (segmentByteLength, prefix);
     }
 
     private static int AppendPrefix(byte[] prefix, StringBuilder text, int maximumUtf8Bytes, int maximumUtf16Units) {
         int consumed = 0;
         Span<char> scalar = stackalloc char[2];
         while (consumed < prefix.Length && text.Length < maximumUtf16Units && consumed < maximumUtf8Bytes) {
-            if (Rune.DecodeFromUtf8(prefix.AsSpan(consumed), out Rune rune, out int size) != OperationStatus.Done)
+            if (Rune.DecodeFromUtf8(prefix.AsSpan(consumed), out Rune rune, out int scalarBytes) != OperationStatus.Done)
                 throw new InvalidDataException("A message segment contains invalid UTF-8.");
 
-            if (size > maximumUtf8Bytes - consumed || rune.Utf16SequenceLength > maximumUtf16Units - text.Length)
+            if (scalarBytes > maximumUtf8Bytes - consumed || rune.Utf16SequenceLength > maximumUtf16Units - text.Length)
                 break;
 
             int units = rune.EncodeToUtf16(scalar);
             text.Append(scalar[..units]);
-            consumed += size;
+            consumed += scalarBytes;
         }
 
         return consumed;

@@ -8,15 +8,12 @@ namespace Urd.Backend.Tests.Support;
 internal static class StoredOutput {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 
-    internal static List<(byte[] Bytes, bool Final)> Read(TemporaryDatabase database) =>
-        ReadDetails(database).Select(row => (row.Bytes, row.Final)).ToList();
-
     // Decodes strictly, so a chunk that split a UTF-8 scalar fails the test.
     internal static string ReadText(TemporaryDatabase database) =>
-        string.Concat(ReadDetails(database).Select(row => StrictUtf8.GetString(row.Bytes)));
+        string.Concat(Read(database).Select(row => StrictUtf8.GetString(row.Bytes)));
 
     internal static List<(Guid RequestId, Guid ResponseId, long ChunkIndex, byte[] Bytes, bool Final)>
-        ReadDetails(TemporaryDatabase database) {
+        Read(TemporaryDatabase database) {
         using var connection = new SqliteConnection(new SqliteConnectionStringBuilder {
             DataSource = database.Path,
             Mode = SqliteOpenMode.ReadOnly,

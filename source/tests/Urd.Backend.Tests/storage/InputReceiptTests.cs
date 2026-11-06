@@ -3,6 +3,7 @@ using Urd.Backend.Tests.Support;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
 using Xunit;
+using static Urd.Backend.Tests.Support.TestAsync;
 
 namespace Urd.Backend.Tests.Storage;
 
@@ -197,7 +198,7 @@ public sealed class InputReceiptTests {
         using SessionStore second = SessionStore.Open(database.Path);
         Guid sessionId = first.Sessions.CreatePrimary(Guid.NewGuid()).Id;
         var command = new InputCommand(Guid.NewGuid(), 0, "same command");
-        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var start = Signal();
         Task<InputReceipt>[] tasks = new[] { first, second }.Select((store, index) => Task.Run(async () => {
             await start.Task;
             return store.Inputs.RecordRefusal(sessionId, command, index == 0 ? InputRefusalReason.Capacity : InputRefusalReason.Stopping);

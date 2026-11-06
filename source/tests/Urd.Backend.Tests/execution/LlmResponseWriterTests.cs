@@ -2,7 +2,6 @@ using System.Runtime.CompilerServices;
 using Microsoft.Extensions.AI;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Execution;
-using Urd.Core.Sessions;
 using Xunit;
 using static Urd.Backend.Tests.Support.ScriptedResponses;
 using static Urd.Backend.Tests.Support.TestAsync;
@@ -20,7 +19,7 @@ public sealed class LlmResponseWriterTests {
 
         ExecutionResult settlement = await fixture.Session.WaitForSettlementAsync(runId).WaitAsync(TestTimeout);
         Assert.Equal(ExecutionOutcome.Completed, settlement.Outcome);
-        List<(byte[] Bytes, bool Final)> output = StoredOutput.Read(fixture.Database);
+        var output = StoredOutput.Read(fixture.Database);
         Assert.NotEmpty(output);
         Assert.All(output, row => Assert.InRange(row.Bytes.Length, 0, 16 * 1024));
         Assert.Equal(text, StoredOutput.ReadText(fixture.Database));
@@ -51,7 +50,7 @@ public sealed class LlmResponseWriterTests {
 
         Assert.Equal(ExecutionOutcome.Completed,
             (await fixture.Session.WaitForSettlementAsync(runId).WaitAsync(TestTimeout)).Outcome);
-        List<(byte[] Bytes, bool Final)> output = StoredOutput.Read(fixture.Database);
+        var output = StoredOutput.Read(fixture.Database);
         Assert.NotEmpty(output);
         Assert.All(output, row => Assert.InRange(row.Bytes.Length, 0, maxChunkBytes));
         Assert.Equal(text, StoredOutput.ReadText(fixture.Database));
@@ -112,8 +111,7 @@ public sealed class LlmResponseWriterTests {
 
         Assert.Equal(ExecutionOutcome.Completed,
             (await fixture.Session.WaitForSettlementAsync(runId).WaitAsync(TestTimeout)).Outcome);
-        List<(Guid RequestId, Guid ResponseId, long ChunkIndex, byte[] Bytes, bool Final)> output =
-            StoredOutput.ReadDetails(fixture.Database);
+        var output = StoredOutput.Read(fixture.Database);
         Guid requestId = Guid.Parse(Assert.IsType<string>(fixture.Database.Scalar(
             "SELECT request_id FROM execution_requests;")));
         Assert.NotEmpty(output);
@@ -143,7 +141,6 @@ public sealed class LlmResponseWriterTests {
         }
     }
 
-
     private static async IAsyncEnumerable<ChatResponseUpdate> TextResponse(string text,
         [EnumeratorCancellation] CancellationToken token) {
         await Task.CompletedTask;
@@ -158,7 +155,6 @@ public sealed class LlmResponseWriterTests {
         yield return new() { FinishReason = ChatFinishReason.Stop };
     }
 
-
     private static async IAsyncEnumerable<ChatResponseUpdate> ExactResponse(string text,
         [EnumeratorCancellation] CancellationToken token) {
         await Task.CompletedTask;
@@ -169,5 +165,4 @@ public sealed class LlmResponseWriterTests {
 
         yield return new() { FinishReason = ChatFinishReason.Stop };
     }
-
 }

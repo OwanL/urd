@@ -3,6 +3,7 @@ using Urd.Backend.Tests.Support;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
 using Xunit;
+using static Urd.Backend.Tests.Support.TestAsync;
 
 namespace Urd.Backend.Tests.Sessions;
 
@@ -58,7 +59,7 @@ public sealed class SessionIdentityTests {
         SessionRecord saved = store.Sessions.CreatePrimary(Guid.NewGuid());
         using var client = IdentityClient();
         var manager = new SessionManager(store, client);
-        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var start = Signal();
         Task<(PrimarySession Created, PrimarySession Loaded)>[] tasks = Enumerable.Range(0, 8)
             .Select(_ => Task.Run(async () => {
                 await start.Task;

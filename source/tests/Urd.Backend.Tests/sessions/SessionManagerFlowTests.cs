@@ -5,15 +5,15 @@ using Urd.Core.Execution;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
 using Xunit;
+using static Urd.Backend.Tests.Support.TestAsync;
 
 namespace Urd.Backend.Tests.Sessions;
 
 public sealed class SessionManagerFlowTests {
     [Fact]
     public async Task SharedClientStreamsAcrossCanonicalChatsAndRetainedRetriesNeverRestartWork() {
-        TimeSpan timeout = TimeSpan.FromSeconds(10);
-        var bothEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var bothEntered = Signal();
+        var release = Signal();
         int entered = 0;
         async IAsyncEnumerable<ChatResponseUpdate> Response([EnumeratorCancellation] CancellationToken token) {
             if (Interlocked.Increment(ref entered) == 2)
@@ -45,7 +45,7 @@ public sealed class SessionManagerFlowTests {
                 Assert.Equal(commands[i], receipts[i].Command);
             }
 
-            await bothEntered.Task.WaitAsync(timeout);
+            await bothEntered.Task.WaitAsync(TestTimeout);
             foreach (var (session, runId) in runs)
                 Assert.False(session.WaitForSettlementAsync(runId).IsCompleted);
             for (int i = 0; i < sessions.Length; i++) {
@@ -58,7 +58,7 @@ public sealed class SessionManagerFlowTests {
             Assert.Equal(2, client.Calls);
             release.TrySetResult();
             ExecutionResult[] settlements = await Task.WhenAll(runs.Select(run =>
-                run.Session.WaitForSettlementAsync(run.RunId))).WaitAsync(timeout);
+                run.Session.WaitForSettlementAsync(run.RunId))).WaitAsync(TestTimeout);
             Assert.All(settlements, settlement => Assert.Equal(ExecutionOutcome.Completed, settlement.Outcome));
             runs.Clear();
             store.Dispose();
@@ -76,15 +76,15 @@ public sealed class SessionManagerFlowTests {
                     runs.Add((loaded, runId));
                 Assert.Equal(receipts[i], retry);
                 Assert.Equal(ExecutionOutcome.Completed,
-                    (await loaded.WaitForSettlementAsync(retry.RunId!.Value).WaitAsync(timeout)).Outcome);
+                    (await loaded.WaitForSettlementAsync(retry.RunId!.Value).WaitAsync(TestTimeout)).Outcome);
             }
             Assert.Equal(2, client.Calls);
             Assert.Equal(0, client.DisposeCalls);
         } finally {
             release.TrySetResult();
             // A failed timed wait must not dispose borrowed resources beneath live work.
-            await Task.WhenAll(runs.Select(run => run.Session.RequestStopAsync(run.RunId))).WaitAsync(timeout);
-            await Task.WhenAll(runs.Select(run => run.Session.WaitForSettlementAsync(run.RunId))).WaitAsync(timeout);
+            await Task.WhenAll(runs.Select(run => run.Session.RequestStopAsync(run.RunId))).WaitAsync(TestTimeout);
+            await Task.WhenAll(runs.Select(run => run.Session.WaitForSettlementAsync(run.RunId))).WaitAsync(TestTimeout);
             store?.Dispose();
             client.Dispose();
             database.Dispose();

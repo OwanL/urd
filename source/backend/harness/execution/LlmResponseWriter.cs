@@ -29,9 +29,9 @@ internal sealed class LlmResponseWriter {
     internal async Task AppendTextAsync(string text) {
         int offset = 0;
         while (offset < text.Length) {
-            int length = text.Length - offset > 1 ? AppendSpan(text.AsSpan(offset)) : 0;
-            if (length > 0) {
-                offset += length;
+            int appended = AppendSpan(text.AsSpan(offset));
+            if (appended > 0) {
+                offset += appended;
             } else {
                 // Single units, split scalars and the last few chunk bytes use the scalar path.
                 if (!TryCompleteCharacter(text[offset++], out Rune character))
@@ -59,7 +59,8 @@ internal sealed class LlmResponseWriter {
     internal Task FinishResponseAsync() => SaveChunkAsync(isFinal: true);
 
     private int AppendSpan(ReadOnlySpan<char> text) {
-        if (_pendingHighSurrogate is not null)
+        // A lone trailing unit resolves on the scalar path, where a split pair can complete.
+        if (_pendingHighSurrogate is not null || text.Length < 2)
             return 0;
 
         // Each UTF-16 unit needs at most three UTF-8 bytes. Limit validation to text

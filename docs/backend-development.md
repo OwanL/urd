@@ -48,6 +48,14 @@ clearer diagnostic wording from the earlier refactor is retained for new failure
 The follow-up smell pass passes **90/90** Release tests, adding coverage for awaited chunk saves,
 write-failure ordering, cancelled lock waiters and stored preview identities. It removes per-character
 async work, avoidable allocations and repeated revision queries within a snapshot transaction.
+The response-batching optimization passes **101/101** Release tests. It counts strict UTF-8
+and appends bounded spans, retaining scalar handling for single units and Unicode/chunk boundaries.
+An additional temporary differential check matched the prior writer on 541 fragmented valid and
+malformed inputs. A local .NET 10 Release microbenchmark (64 warmups, nine alternating samples of
+64 responses, prebuilt text and synchronous no-I/O saves) measured roughly **4.5–5.6×** faster
+batching for 32-character updates and **9–11×** for oversized ASCII/mixed text. Single-character
+updates were roughly unchanged; measured allocations did not increase. These are isolated writer
+measurements with default runtime settings, not end-to-end provider or storage speedups.
 These are fake-client/Core checks, not browser polling, load or real-provider qualification.
 This is a Core review checkpoint, not the browser-to-Core milestone or a complete hosting API.
 

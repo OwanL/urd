@@ -181,8 +181,97 @@ public sealed class LlmResponseWriterTests {
             });
     }
 
+    [Theory]
+    [InlineData("é", 1, 2)]
+    [InlineData("終", 1, 3)]
+    [InlineData("終", 2, 3)]
+    [InlineData("😀", 1, 4)]
+    [InlineData("😀", 2, 4)]
+    [InlineData("😀", 3, 4)]
+    public async Task SplitsGreedilyBeforeScalarsThatDoNotFit(string scalar, int bytesLeft, int scalarBytes) {
+        const int maxChunkBytes = 16 * 1024;
+        string prefix = new string('x', maxChunkBytes - bytesLeft);
+        string nextChunk = scalar + new string('t', maxChunkBytes - scalarBytes);
+        var chunks = new List<LlmResponseChunk>();
+        var writer = new LlmResponseWriter(Guid.NewGuid(), chunk => {
+            chunks.Add(chunk);
+            return Task.CompletedTask;
+        });
+
+        await writer.AppendTextAsync(prefix + nextChunk);
+        await writer.FinishResponseAsync();
+
+        Assert.Equal(3, chunks.Count);
+        Assert.Collection(chunks,
+            first => {
+                Assert.Equal(0L, first.ChunkIndex);
+                Assert.Equal(prefix, first.Text);
+                Assert.False(first.IsFinal);
+            },
+            second => {
+                Assert.Equal(1L, second.ChunkIndex);
+                Assert.Equal(nextChunk, second.Text);
+                Assert.False(second.IsFinal);
+            },
+            final => {
+                Assert.Equal(2L, final.ChunkIndex);
+                Assert.Empty(final.Text);
+                Assert.True(final.IsFinal);
+            });
+        Assert.Equal(prefix + nextChunk, string.Concat(chunks.Select(chunk => chunk.Text)));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SavesValidTextBeforeRejectingInvalidTextAtChunkBoundary(bool overflowBoundary) {
+        const int maxChunkBytes = 16 * 1024;
+        string validText = overflowBoundary
+            ? new string('x', maxChunkBytes - 1) + "é"
+            : new string('x', maxChunkBytes);
+        string savedText = overflowBoundary ? new string('x', maxChunkBytes - 1) : validText;
+        var chunks = new List<LlmResponseChunk>();
+        var writer = new LlmResponseWriter(Guid.NewGuid(), chunk => {
+            chunks.Add(chunk);
+            return Task.CompletedTask;
+        });
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => writer.AppendTextAsync(validText + "\udc00"));
+
+        var saved = Assert.Single(chunks);
+        Assert.Equal(savedText, saved.Text);
+        Assert.Equal(0L, saved.ChunkIndex);
+        Assert.False(saved.IsFinal);
+    }
+
     [Fact]
-    public async Task FailedChunkWriteStopsBeforeProcessingRemainingText() {
+    public async Task KeepsFlushDelayIdentityAcrossAppendsAndEmptyUpdatesUntilFlush() {
+        var chunks = new List<LlmResponseChunk>();
+        var writer = new LlmResponseWriter(Guid.NewGuid(), chunk => {
+            chunks.Add(chunk);
+            return Task.CompletedTask;
+        });
+
+        await writer.AppendTextAsync("first");
+        Task firstFlushDelay = Assert.IsAssignableFrom<Task>(writer.FlushDelay);
+        await writer.AppendTextAsync(string.Empty);
+        Assert.Same(firstFlushDelay, writer.FlushDelay);
+        await writer.AppendTextAsync(" second");
+        Assert.Same(firstFlushDelay, writer.FlushDelay);
+
+        await writer.FlushAsync();
+        Assert.Null(writer.FlushDelay);
+        Assert.Equal("first second", Assert.Single(chunks).Text);
+
+        await writer.AppendTextAsync("after flush");
+        Assert.NotNull(writer.FlushDelay);
+        Assert.NotSame(firstFlushDelay, writer.FlushDelay);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FailedChunkWriteStopsBeforeProcessingRemainingText(bool overflowBoundary) {
         var failure = new IOException("Chunk save failed.");
         int attempts = 0;
         var writer = new LlmResponseWriter(Guid.NewGuid(), _ => {
@@ -190,7 +279,10 @@ public sealed class LlmResponseWriterTests {
             return Task.FromException(failure);
         });
         // The invalid tail must not mask the earlier persistence failure or cause another write.
-        string text = new string('x', 16 * 1024) + "\ud800x";
+        string prefix = overflowBoundary
+            ? new string('x', 16 * 1024 - 1) + "é"
+            : new string('x', 16 * 1024);
+        string text = prefix + "\ud800x";
 
         IOException observed = await Assert.ThrowsAsync<IOException>(() => writer.AppendTextAsync(text));
         Assert.Same(failure, observed);

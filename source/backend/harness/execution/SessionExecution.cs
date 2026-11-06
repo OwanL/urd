@@ -168,11 +168,11 @@ internal sealed class SessionExecution : IDisposable {
     // run unsettled, so it is thrown to the session instead of becoming a failed request.
     private static async Task CleanUpAsync(CancellationTokenSource requestStop, Task<bool>? pendingRead,
         IAsyncEnumerator<ChatResponseUpdate>? updates, Exception? requestFailure) {
-        Exception? cancelFailure = await CaptureFailureAsync(async () => await requestStop.CancelAsync());
+        Exception? cancelFailure = await CaptureFailureAsync(() => new ValueTask(requestStop.CancelAsync()));
         if (pendingRead is not null) {
             // A read abandoned by cancellation is expected to fail. Wait for it anyway,
             // because the enumerator must be idle before it is disposed.
-            _ = await CaptureFailureAsync(async () => await pendingRead);
+            _ = await CaptureFailureAsync(() => new ValueTask(pendingRead));
         }
 
         Exception? updatesFailure = updates is null ? null : await CaptureFailureAsync(updates.DisposeAsync);

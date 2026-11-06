@@ -11,6 +11,31 @@ namespace Urd.Backend.Tests.Sessions;
 
 public sealed class SessionConcurrencyTests {
     [Fact]
+    public async Task CancelledLockWaiterDoesNotReleaseAnotherOwnersLock() {
+        var guard = new AsyncLock();
+        var entered = Signal();
+        async Task EnterAsync() {
+            using var held = await guard.AcquireAsync();
+            entered.TrySetResult();
+        }
+
+        Task waiting;
+        using (await guard.AcquireAsync()) {
+            waiting = EnterAsync();
+            using var cancellation = new CancellationTokenSource();
+            Task<AsyncLock.Handle> cancelled = guard.AcquireAsync(cancellation.Token).AsTask();
+            cancellation.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelled.WaitAsync(TestTimeout));
+            Assert.False(entered.Task.IsCompleted);
+            Assert.False(waiting.IsCompleted);
+        }
+
+        await waiting.WaitAsync(TestTimeout);
+        Assert.True(entered.Task.IsCompletedSuccessfully);
+        using var reacquired = await guard.AcquireAsync().AsTask().WaitAsync(TestTimeout);
+    }
+
+    [Fact]
     public async Task ConcurrentExactSubmissionsShareOneDurableReceiptRunAndModelRequest() {
         var ready = Signal();
         var start = Signal();

@@ -27,9 +27,20 @@ internal sealed class LlmResponseWriter {
 
     internal async Task AppendTextAsync(string text) {
         foreach (char codeUnit in text) {
-            if (TryCompleteCharacter(codeUnit, out Rune character)) {
-                await AppendCharacterAsync(character);
-            }
+            if (!TryCompleteCharacter(codeUnit, out Rune character))
+                continue;
+
+            int utf8Bytes = character.Utf8SequenceLength;
+            if (_chunkUtf8Bytes + utf8Bytes > ChunkByteLimit)
+                await FlushAsync();
+
+            AppendCharacter(character);
+            _chunkUtf8Bytes += utf8Bytes;
+            // Keep the oldest unsaved character's deadline until the next flush.
+            if (_chunkUtf8Bytes == ChunkByteLimit)
+                await FlushAsync();
+            else
+                FlushDelay ??= Task.Delay(FlushInterval);
         }
     }
 
@@ -58,23 +69,10 @@ internal sealed class LlmResponseWriter {
         return true;
     }
 
-    private async Task AppendCharacterAsync(Rune character) {
-        int utf8Bytes = character.Utf8SequenceLength;
-        if (_chunkUtf8Bytes + utf8Bytes > ChunkByteLimit) {
-            await FlushAsync();
-        }
-
+    private void AppendCharacter(Rune character) {
         Span<char> utf16 = stackalloc char[2];
         int length = character.EncodeToUtf16(utf16);
         _chunk.Append(utf16[..length]);
-        _chunkUtf8Bytes += utf8Bytes;
-
-        if (_chunkUtf8Bytes == ChunkByteLimit) {
-            await FlushAsync();
-        } else {
-            // Later text must not postpone the first unsaved character's deadline.
-            FlushDelay ??= Task.Delay(FlushInterval);
-        }
     }
 
     private async Task SaveChunkAsync(bool isFinal) {

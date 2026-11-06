@@ -49,7 +49,7 @@ public abstract class SessionBase {
 
     private protected async Task<InputReceipt> AdmitInputAsync(InputCommand command) {
         // A new run starts only after the lock is released.
-        var lockReleased = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource? lockReleased = null;
         InputReceipt receipt;
         using (await _lock.AcquireAsync()) {
             (receipt, bool newlyAccepted) = WriteToStore(
@@ -58,11 +58,12 @@ public abstract class SessionBase {
             // Only the call that saved the acceptance may start the run; a retained
             // Accepted receipt from an earlier call must not start it again.
             if (newlyAccepted) {
+                lockReleased = new(TaskCreationOptions.RunContinuationsAsynchronously);
                 StartExecution(receipt.RunId!.Value, lockReleased.Task);
             }
         }
 
-        lockReleased.SetResult();
+        lockReleased?.SetResult();
         return receipt;
     }
 

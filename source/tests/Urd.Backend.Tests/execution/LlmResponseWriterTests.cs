@@ -141,6 +141,56 @@ public sealed class LlmResponseWriterTests {
         }
     }
 
+    [Fact]
+    public async Task WaitsForChunkWritesBeforeContinuingAndKeepsTheirOrder() {
+        var writing = Signal();
+        var release = Signal();
+        var chunks = new List<LlmResponseChunk>();
+        var writer = new LlmResponseWriter(Guid.NewGuid(), async chunk => {
+            writing.TrySetResult();
+            await release.Task;
+            chunks.Add(chunk);
+        });
+        string text = new string('x', 16 * 1024) + "🙂tail";
+        Task append = writer.AppendTextAsync(text);
+        try {
+            await writing.Task.WaitAsync(TestTimeout);
+            Assert.False(append.IsCompleted);
+            Assert.Empty(chunks);
+        } finally {
+            release.TrySetResult();
+            await append.WaitAsync(TestTimeout);
+        }
+
+        await writer.FinishResponseAsync();
+        Assert.Equal(text, string.Concat(chunks.Select(chunk => chunk.Text)));
+        Assert.Collection(chunks,
+            first => {
+                Assert.Equal(0, first.ChunkIndex);
+                Assert.False(first.IsFinal);
+            },
+            last => {
+                Assert.Equal(1, last.ChunkIndex);
+                Assert.True(last.IsFinal);
+            });
+    }
+
+    [Fact]
+    public async Task FailedChunkWriteStopsBeforeProcessingRemainingText() {
+        var failure = new IOException("Chunk save failed.");
+        int attempts = 0;
+        var writer = new LlmResponseWriter(Guid.NewGuid(), _ => {
+            attempts++;
+            return Task.FromException(failure);
+        });
+        // The invalid tail must not mask the earlier persistence failure or cause another write.
+        string text = new string('x', 16 * 1024) + "\ud800x";
+
+        IOException observed = await Assert.ThrowsAsync<IOException>(() => writer.AppendTextAsync(text));
+        Assert.Same(failure, observed);
+        Assert.Equal(1, attempts);
+    }
+
     private static async IAsyncEnumerable<ChatResponseUpdate> TextResponse(string text,
         [EnumeratorCancellation] CancellationToken token) {
         await Task.CompletedTask;

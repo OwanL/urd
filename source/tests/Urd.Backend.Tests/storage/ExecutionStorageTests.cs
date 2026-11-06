@@ -173,6 +173,37 @@ public sealed class ExecutionStorageTests {
         Assert.Equal(0L, database.Scalar("SELECT outcome FROM execution_requests WHERE run_id = '" + run.ToString("D") + "';"));
     }
 
+    [Theory]
+    [InlineData(ExecutionOutcome.Completed)]
+    [InlineData(ExecutionOutcome.Cancelled)]
+    [InlineData(ExecutionOutcome.Failed)]
+    public void CompletionRetriesAfterSettlementNeverRewriteSavedEvidence(ExecutionOutcome outcome) {
+        using var database = new TemporaryDatabase();
+        using SessionStore store = SessionStore.Open(database.Path);
+        Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
+        Guid run = Guid.NewGuid();
+        store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "request"), true, run);
+        LlmRequest request = store.Runs.ClaimNextRequest(session, run, 0)!;
+        Assert.True(store.Output.Append(session, run, 0,
+            new(request.RequestId, Guid.NewGuid(), 0, "answer", outcome == ExecutionOutcome.Completed)));
+        var completion = new LlmRequestOutcome(request.RequestId, outcome,
+            outcome == ExecutionOutcome.Failed ? "retained failure" : null);
+        Assert.True(store.Output.CompleteRequest(session, run, 0, completion));
+        Assert.Equal(outcome, store.Runs.TrySettle(session, run, outcome)!.Outcome);
+        database.Execute("""
+            CREATE TRIGGER reject_completion_rewrite BEFORE UPDATE ON execution_requests
+            BEGIN SELECT RAISE(ABORT, 'A retry must not rewrite saved completion'); END;
+            """);
+
+        Assert.True(store.Output.CompleteRequest(session, run, 0, completion));
+        Assert.False(store.Output.CompleteRequest(session, run, 0, completion with { Error = "changed" }));
+        Assert.False(store.Output.CompleteRequest(Guid.NewGuid(), run, 0, completion));
+        Assert.False(store.Output.CompleteRequest(session, Guid.NewGuid(), 0, completion));
+        Assert.False(store.Output.CompleteRequest(session, run, 1, completion));
+        Assert.False(store.Output.CompleteRequest(session, run, 0, completion with { RequestId = Guid.NewGuid() }));
+        Assert.Equal((long)outcome, database.Scalar("SELECT outcome FROM execution_requests;"));
+    }
+
     [Fact]
     public void RevisionAndRunFencesRejectStaleWritesAndAdmission() {
         using var database = new TemporaryDatabase();

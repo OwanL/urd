@@ -83,12 +83,15 @@ public sealed class LlmResponseWriterTests {
 
     [Theory]
     [InlineData(0xDC00, null)]
-    [InlineData(0xD800, "x")]
+    [InlineData(0xD800, 0x0078)]
+    [InlineData(0xD800, 0xD800)]
     [InlineData(0xD800, null)]
-    public async Task RejectsMalformedOrIncompleteUnicodeWithoutFinalMarker(int firstCodeUnit, string? secondUpdate) {
-        // Attribute strings use UTF-8 metadata, so construct the lone surrogate at runtime.
+    public async Task RejectsMalformedOrIncompleteUnicodeWithoutFinalMarker(int firstCodeUnit, int? secondCodeUnit) {
+        // Attribute strings use UTF-8 metadata, so construct lone surrogates at runtime.
         string firstUpdate = ((char)firstCodeUnit).ToString();
-        string[] updates = secondUpdate is null ? [firstUpdate] : [firstUpdate, secondUpdate];
+        string[] updates = secondCodeUnit is { } codeUnit
+            ? [firstUpdate, ((char)codeUnit).ToString()]
+            : [firstUpdate];
         var client = new ScriptedChatClient(token => TextUpdates(updates, token));
         await using var fixture = new ExecutionFixture(client);
         Guid runId = await fixture.StartRunAsync("go");

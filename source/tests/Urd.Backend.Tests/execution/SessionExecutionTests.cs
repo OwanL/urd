@@ -21,6 +21,9 @@ public sealed class SessionExecutionTests {
     [InlineData("length")]
     [InlineData("exception")]
     [InlineData("exception-after-stop")]
+    [InlineData("non-text")]
+    [InlineData("text-after-stop")]
+    [InlineData("length-after-stop")]
     public async Task RequiresPositiveTerminalEvidenceAndAnOtherwiseSuccessfulRequest(string failureScenario) {
         var client = new ScriptedChatClient(token => FailedResponse(failureScenario, token));
         await using var fixture = new ExecutionFixture(client);
@@ -30,6 +33,30 @@ public sealed class SessionExecutionTests {
             (await fixture.Session.WaitForSettlementAsync(runId).WaitAsync(TestTimeout)).Outcome);
         Assert.Equal((long)ExecutionOutcome.Failed, fixture.Database.Scalar("SELECT outcome FROM execution_requests;"));
         Assert.All(StoredOutput.Read(fixture.Database), row => Assert.False(row.Final));
+        Assert.Equal(1, client.Calls);
+        Assert.Equal(0, client.DisposeCalls);
+    }
+
+    [Fact]
+    public async Task StopMarkerAllowsTrailingUsageAndEmptyTextBeforeSettlement() {
+        async IAsyncEnumerable<ChatResponseUpdate> Response([EnumeratorCancellation] CancellationToken token) {
+            await Task.CompletedTask;
+            token.ThrowIfCancellationRequested();
+            yield return new() {
+                Contents = [new TextContent("answer")],
+                FinishReason = ChatFinishReason.Stop
+            };
+            yield return new() { Contents = [new UsageContent(), new TextContent("")] };
+        }
+
+        var client = new ScriptedChatClient(Response);
+        await using var fixture = new ExecutionFixture(client);
+        Guid runId = await fixture.StartRunAsync("go");
+
+        ExecutionResult result = await fixture.Session.WaitForSettlementAsync(runId).WaitAsync(TestTimeout);
+        Assert.Equal(ExecutionOutcome.Completed, result.Outcome);
+        Assert.Equal("answer", StoredOutput.ReadText(fixture.Database));
+        Assert.Single(StoredOutput.Read(fixture.Database), chunk => chunk.Final);
         Assert.Equal(1, client.Calls);
         Assert.Equal(0, client.DisposeCalls);
     }
@@ -374,16 +401,30 @@ public sealed class SessionExecutionTests {
         await Task.CompletedTask;
         token.ThrowIfCancellationRequested();
         yield return Text("partial");
-        if (failureScenario == "length") {
-            yield return new() { FinishReason = ChatFinishReason.Length };
-        }
-
-        if (failureScenario == "exception-after-stop") {
-            yield return new() { FinishReason = ChatFinishReason.Stop };
-        }
-
-        if (failureScenario.StartsWith("exception", StringComparison.Ordinal)) {
-            throw new InvalidOperationException("Scripted request failure.");
+        switch (failureScenario) {
+            case "eof":
+                yield break;
+            case "length":
+                yield return new() { FinishReason = ChatFinishReason.Length };
+                break;
+            case "exception":
+                throw new InvalidOperationException("Scripted request failure.");
+            case "exception-after-stop":
+                yield return new() { FinishReason = ChatFinishReason.Stop };
+                throw new InvalidOperationException("Scripted request failure.");
+            case "non-text":
+                yield return new() { Contents = [new FunctionCallContent("call", "unsupported", null)] };
+                break;
+            case "text-after-stop":
+                yield return new() { FinishReason = ChatFinishReason.Stop };
+                yield return Text("late text");
+                break;
+            case "length-after-stop":
+                yield return new() { FinishReason = ChatFinishReason.Stop };
+                yield return new() { FinishReason = ChatFinishReason.Length };
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(failureScenario));
         }
     }
 

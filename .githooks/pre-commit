@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+repo=$(git rev-parse --show-toplevel) || exit $?
+scanner="$repo/.tools/gitleaks/gitleaks"
+[ -x "$scanner" ] || scanner="$scanner.exe"
+if [ ! -x "$scanner" ]; then
+    echo 'Secret scan blocked: run powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .githooks/install.ps1 from this repository to install Gitleaks.' >&2
+    exit 1
+fi
+exec "$scanner" git --staged --config "$repo/.gitleaks.toml" --redact=100 --no-banner "$repo"

@@ -197,6 +197,44 @@ code in an isolated copy: builds and tests must exit unsuccessfully with the exp
 IDs, and clean code must pass again after removing the probe. Passing tests or analyzers
 still does not replace review of ownership, concurrency, SQL or error handling.
 
+## Test effectiveness
+
+Prefer improving an existing behavioral case over adding overlapping tests or fixture
+machinery. Assert observable outcomes and durable state, not private helper calls or
+incidental execution order. Coverage helps find untested paths; it is not a quality score
+or a percentage target. For critical invariants, use small semantic mutations in an
+isolated copy and verify that tests—not compiler/analyzer errors—reject the broken
+behavior. Keep waits bounded and cleanup safe; teardown must not mask the original
+assertion failure or dispose resources while owned work may still be running.
+
+## Local secret checks
+
+From the repository root, enable the staged-change commit check on each new Windows x64
+checkout:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .githooks/install.ps1
+```
+
+The installer downloads pinned Gitleaks **8.30.1**, verifies its SHA256, stores the binary
+and license under ignored `.tools/gitleaks/`, and sets only this checkout's
+`core.hooksPath` to `.githooks`. It refuses to replace another hook setup. No machine-wide
+installation or CI is involved. Other platforms need their native Gitleaks binary at
+`.tools/gitleaks/gitleaks` and the same local hook setting; the installer is Windows x64 only.
+
+Commits scan **staged changes**, not the working copy or full history, using the standard
+rules in `.gitleaks.toml`. Findings are redacted; findings, scanner errors and a missing
+scanner block the commit. Commits do not download tools or run builds/tests. Re-run the
+installer if the managed scanner is missing; review the version and checksum together
+when upgrading it. Investigate findings rather than bypassing the check or adding a
+blanket allowlist. Hooks are a local guardrail, not access control or proof that no secret
+exists. Existing history needs a separate scan.
+
+Local `.env` files and SQLite databases/sidecars are ignored; `.env.example` and
+`.env.template` remain trackable and must contain placeholders, never real credentials.
+Git attributes normalize text to LF, preserve detected binary files, and check out
+`.bat`/`.cmd` files with CRLF. Adding this policy does not require mass-renormalizing files.
+
 ## Outputs and data
 
 Normal generated `bin/`, `obj/` and test results stay inside the repository and are

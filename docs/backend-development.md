@@ -45,6 +45,9 @@ The readability review passes **86/86** Release tests after locked restore. Adde
 unsupported content, updates after Stop, trailing usage, repeated high surrogates and immutable
 completion retries after settlement. SQL, transactions and lifecycle ownership remain unchanged;
 clearer diagnostic wording from the earlier refactor is retained for new failures.
+The follow-up smell pass passes **90/90** Release tests, adding coverage for awaited chunk saves,
+write-failure ordering, cancelled lock waiters and stored preview identities. It removes per-character
+async work, avoidable allocations and repeated revision queries within a snapshot transaction.
 These are fake-client/Core checks, not browser polling, load or real-provider qualification.
 This is a Core review checkpoint, not the browser-to-Core milestone or a complete hosting API.
 

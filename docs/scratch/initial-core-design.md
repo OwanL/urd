@@ -221,7 +221,8 @@ model with **“Yes, implement it”**. This supersedes the earlier repeated-inv
   not cancelled merely to provide a cleanup barrier. Callback failure prevents settlement.
 - A fresh `LlmResponseWriter` owns one response's Unicode fragments, byte buffer, chunk
   identity/order and flush delay. It publishes through execution's guarded owner callback,
-  never directly to storage. Disposal stops the timer without publishing an unfinished tail.
+  never directly to storage. The delay is a finite task, not an owned timer requiring disposal;
+  abandoning a failed response does not publish its unfinished tail.
 - An unstopped run without a claim or a missing settlement result is an invariant failure
   that fences admission, not permission to spin/reinvoke the execution. Release still follows
   actual cleanup and saved settlement; the shared client is never execution-owned.

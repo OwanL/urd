@@ -61,24 +61,13 @@ internal sealed class SessionExecution : IDisposable {
                 .GetAsyncEnumerator(requestStop.Token);
 
             bool stopReceived = false;
-            while (true) {
-                pendingRead ??= updates.MoveNextAsync().AsTask();
-                if (await IsFlushDueFirstAsync(writer.FlushDelay, pendingRead)) {
-                    // Keep the pending read; it is awaited on the next pass.
-                    stop.ThrowIfCancellationRequested();
-                    await writer.FlushAsync();
-                    continue;
-                }
-
-                bool hasUpdate = await pendingRead;
+            while (await WaitForNextUpdateAsync(writer, pendingRead ??= updates.MoveNextAsync().AsTask())) {
                 pendingRead = null;
-                if (!hasUpdate)
-                    break;
-
                 stop.ThrowIfCancellationRequested();
                 stopReceived = await WriteUpdateAsync(updates.Current, writer, stopReceived);
             }
 
+            pendingRead = null;
             stop.ThrowIfCancellationRequested();
             if (!stopReceived)
                 throw new InvalidDataException("The response ended without a stop finish reason.");
@@ -92,11 +81,16 @@ internal sealed class SessionExecution : IDisposable {
         return ToRequestOutcome(request.RequestId, failure);
     }
 
-    private static async Task<bool> IsFlushDueFirstAsync(Task? flushDelay, Task<bool> pendingRead) {
-        if (flushDelay is null)
-            return false;
+    private async Task<bool> WaitForNextUpdateAsync(LlmResponseWriter writer, Task<bool> pendingRead) {
+        Task? flushDelay = writer.FlushDelay;
+        if (flushDelay is not null &&
+            (flushDelay.IsCompleted || await Task.WhenAny(pendingRead, flushDelay) == flushDelay)) {
+            _stop.Token.ThrowIfCancellationRequested();
+            // Flushing clears the deadline; only another update can start a new one.
+            await writer.FlushAsync();
+        }
 
-        return flushDelay.IsCompleted || await Task.WhenAny(pendingRead, flushDelay) == flushDelay;
+        return await pendingRead;
     }
 
     // A Stop marker closes text; enumeration and cleanup must still finish successfully.

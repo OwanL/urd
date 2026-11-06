@@ -58,8 +58,10 @@ public sealed class LlmResponseWriterTests {
         Assert.True(output[^1].Final);
     }
 
-    [Fact]
-    public async Task FlushesDeadlineWhileTheSingleNextSourceReadIsPaused() {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FlushesDeadlineWhileTheSingleNextSourceReadIsPaused(bool stopWhilePaused) {
         var waiting = Signal();
         var release = Signal();
         var client = new ScriptedChatClient(token => Paused(waiting, release, token));
@@ -72,12 +74,16 @@ public sealed class LlmResponseWriterTests {
             Assert.All(StoredOutput.Read(fixture.Database), row => Assert.False(row.Final));
             Assert.False(fixture.Session.WaitForSettlementAsync(runId).IsCompleted);
             Assert.Equal(1, client.Calls);
+            if (stopWhilePaused)
+                await fixture.Session.RequestStopAsync(runId).WaitAsync(TestTimeout);
         } finally {
             release.TrySetResult();
         }
 
-        Assert.Equal(ExecutionOutcome.Completed,
-            (await fixture.Session.WaitForSettlementAsync(runId).WaitAsync(TestTimeout)).Outcome);
+        ExecutionResult settlement = await fixture.Session.WaitForSettlementAsync(runId).WaitAsync(TestTimeout);
+        Assert.Equal(stopWhilePaused ? ExecutionOutcome.Cancelled : ExecutionOutcome.Completed, settlement.Outcome);
+        Assert.Equal("visible", StoredOutput.ReadText(fixture.Database));
+        Assert.Equal(!stopWhilePaused, StoredOutput.Read(fixture.Database).Any(row => row.Final));
     }
 
     [Theory]

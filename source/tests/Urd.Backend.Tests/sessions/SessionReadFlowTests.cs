@@ -171,12 +171,13 @@ public sealed class SessionReadFlowTests {
 
     private static async Task<SessionSnapshot> WaitForOutputAsync(PrimarySession session) {
         using var deadline = new CancellationTokenSource(TestTimeout);
-        while (true) {
-            SessionSnapshot snapshot = await session.ReadSnapshotAsync(deadline.Token);
-            if (snapshot.Messages.Any(row => row.Message.Role == MessageRole.Assistant))
-                return snapshot;
+        SessionSnapshot snapshot = await session.ReadSnapshotAsync(deadline.Token);
+        while (!snapshot.Messages.Any(row => row.Message.Role == MessageRole.Assistant)) {
             await Task.Delay(10, deadline.Token);
+            snapshot = await session.ReadSnapshotAsync(deadline.Token);
         }
+
+        return snapshot;
     }
 
     private sealed class HeldDisposal(IAsyncEnumerable<ChatResponseUpdate> source,

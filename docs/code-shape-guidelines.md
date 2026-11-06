@@ -63,6 +63,23 @@ not its language-specific patterns or class hierarchy. Shorter code is not autom
   roles and important lifecycle guarantees apparent. Do not cram the whole contract
   into a long identifier or require a separate glossary to understand a declaration.
 
+## Control flow and failure paths
+
+- Put a loop's normal termination condition in its header. Use `foreach` / `await foreach`
+  for straightforward enumeration; use a meaningful condition for polling or manual reads.
+  Do not use `while (true)` or `for (;;)` with exits hidden in the body, or replace them
+  with a flag that merely disguises the same control flow.
+- Keep progress visible: each pass consumes input, advances a cursor, or awaits a specific
+  event. Polling tests need a deadline. A bounded loop may still exit early when the next
+  item will not fit; keep that reason beside the exit rather than adding artificial state.
+- Separate waiting from processing when their responsibilities differ. For an async stream
+  with timed flushes, make the pending read and its cleanup ownership explicit; never start
+  a second read while the first is pending or dispose work before it has stopped.
+- Name the facts behind decisions and preserve their priority. Prefer guard clauses to
+  nested branches, and let SQL ordering name its columns instead of their positions.
+- Comments explain constraints and reasons, not what an obvious statement does. Do not
+  replace meaningful names with narration or turn an uncertain failure into success.
+
 ## Size signals — prompts for review, not targets
 
 | Signal | Review question |

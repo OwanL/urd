@@ -91,10 +91,12 @@ internal sealed class RunStorage(Database database) {
         if (!reader.Read())
             return null;
 
-        if (!reader.IsDBNull(0))
+        bool isAlreadySettled = !reader.IsDBNull(0);
+        if (isAlreadySettled)
             return new((ExecutionOutcome)reader.GetInt32(0), AlreadySettled: true);
 
-        if (reader.GetInt32(1) != 0)
+        bool isStopping = reader.GetInt32(1) != 0;
+        if (isStopping)
             return new(ExecutionOutcome.Cancelled, AlreadySettled: false);
 
         if (driverOutcome != ExecutionOutcome.Completed)
@@ -108,7 +110,7 @@ internal sealed class RunStorage(Database database) {
     private ReadOnlyCollection<ChatMessage> ReadRequestContext(
         SqliteTransaction transaction, Guid sessionId, Guid runId, long historyRevision) {
         using SqliteCommand read = database.Command(transaction, """
-            SELECT r.ordinal, 0 AS role_order, 0 AS batch_index, i.original_text_utf8
+            SELECT r.ordinal AS run_ordinal, 0 AS is_assistant, 0 AS batch_index, i.original_text_utf8
             FROM execution_runs r JOIN input_decisions i ON i.session_id = r.session_id AND i.input_id = r.input_id
             WHERE r.session_id = $session AND r.history_revision = $revision
                 AND r.ordinal <= (SELECT ordinal FROM execution_runs WHERE run_id = $run)
@@ -118,7 +120,7 @@ internal sealed class RunStorage(Database database) {
                 JOIN execution_output o ON o.request_id = q.request_id
             WHERE r.session_id = $session AND r.history_revision = $revision
                 AND r.ordinal <= (SELECT ordinal FROM execution_runs WHERE run_id = $run)
-            ORDER BY 1, 2, 3;
+            ORDER BY run_ordinal, is_assistant, batch_index;
             """,
             ("$session", sessionId),
             ("$run", runId),
@@ -128,7 +130,8 @@ internal sealed class RunStorage(Database database) {
         StringBuilder? assistant = null;
         while (reader.Read()) {
             string text = StorageText.StrictUtf8.GetString((byte[])reader.GetValue(3));
-            if (reader.GetInt32(1) != 0) {
+            bool isAssistant = reader.GetInt32(1) != 0;
+            if (isAssistant) {
                 (assistant ??= new()).Append(text);
                 continue;
             }

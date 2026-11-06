@@ -11,7 +11,7 @@ public abstract class SessionBase
 {
     private readonly SessionStore _store;
     private readonly IChatClient _chatClient;
-    private readonly SemaphoreSlim _lock = new(1, 1);
+    private readonly AsyncLock _lock = new();
     private bool _acceptingInput = true;
     private SessionExecution? _execution;
     private TaskCompletionSource<ExecutionResult>? _settlement;
@@ -31,13 +31,13 @@ public abstract class SessionBase
 
     public async Task<InputReceipt?> GetInputReceiptAsync(Guid inputId)
     {
-        using var held = await LockAsync();
+        using var held = await _lock.AcquireAsync();
         return _store.Inputs.ReadReceipt(Id, inputId);
     }
 
     public async Task<SessionSnapshot> ReadSnapshotAsync(CancellationToken cancellation = default)
     {
-        using var held = await LockAsync(cancellation);
+        using var held = await _lock.AcquireAsync(cancellation);
         StoredSessionSnapshot stored = _store.Snapshots.Read(Id);
         bool runOwnedElsewhere = stored.UnsettledRunId is { } runId && !IsCurrentRun(runId);
         bool fenced = !_acceptingInput || stored.HistoryRevision != HistoryRevision || runOwnedElsewhere;
@@ -48,7 +48,7 @@ public abstract class SessionBase
     public async Task<MessageContentPage> ReadMessageContentAsync(
         MessageContentCursor cursor, CancellationToken cancellation = default)
     {
-        using var held = await LockAsync(cancellation);
+        using var held = await _lock.AcquireAsync(cancellation);
         return _store.Content.Read(Id, cursor);
     }
 
@@ -57,7 +57,7 @@ public abstract class SessionBase
         // A new run starts only after the lock is released.
         var lockReleased = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         InputReceipt receipt;
-        using (await LockAsync())
+        using (await _lock.AcquireAsync())
         {
             (receipt, bool newlyAccepted) = WriteToStore(
                 () => _store.Inputs.Admit(Id, HistoryRevision, command, _acceptingInput, Guid.NewGuid()));
@@ -77,7 +77,7 @@ public abstract class SessionBase
     internal async Task RequestStopAsync(Guid runId)
     {
         Task stopCallbacks = Task.CompletedTask;
-        using (await LockAsync())
+        using (await _lock.AcquireAsync())
         {
             WriteToStore(() => _store.Runs.RequestStop(Id, runId));
 
@@ -96,7 +96,7 @@ public abstract class SessionBase
     {
         Task executionTask;
         Task<ExecutionResult> settlement;
-        using (await LockAsync(cancellation))
+        using (await _lock.AcquireAsync(cancellation))
         {
             if (!IsCurrentRun(runId))
             {
@@ -114,19 +114,19 @@ public abstract class SessionBase
 
     internal async Task<LlmRequest?> ClaimNextRequestAsync(Guid runId)
     {
-        using var held = await LockAsync();
+        using var held = await _lock.AcquireAsync();
         return IsCurrentRun(runId) ? _store.Runs.ClaimNextRequest(Id, runId, HistoryRevision) : null;
     }
 
     internal async Task<bool> RecordOutputAsync(Guid runId, LlmResponseChunk chunk)
     {
-        using var held = await LockAsync();
+        using var held = await _lock.AcquireAsync();
         return IsCurrentRun(runId) && _store.Output.Append(Id, runId, HistoryRevision, chunk);
     }
 
     internal async Task<bool> CompleteRequestAsync(Guid runId, LlmRequestOutcome outcome)
     {
-        using var held = await LockAsync();
+        using var held = await _lock.AcquireAsync();
         return IsCurrentRun(runId) && _store.Output.CompleteRequest(Id, runId, HistoryRevision, outcome);
     }
 
@@ -153,7 +153,7 @@ public abstract class SessionBase
         {
             // The run's saved state is uncertain, so keep it unsettled and refuse new input.
             // The execution and its resources stay in place for later recovery.
-            using var held = await LockAsync();
+            using var held = await _lock.AcquireAsync();
             _acceptingInput = false;
             settlement.TrySetException(failure);
             _ = settlement.Task.Exception; // Observed even if nobody is waiting yet.
@@ -164,7 +164,7 @@ public abstract class SessionBase
         TaskCompletionSource<ExecutionResult> settlement, ExecutionOutcome outcome)
     {
         Task stopCallbacks;
-        using (await LockAsync())
+        using (await _lock.AcquireAsync())
         {
             // Checking and settling under one lock stops a late Stop from skipping the wait.
             stopCallbacks = execution.StopCallbacks;
@@ -177,7 +177,7 @@ public abstract class SessionBase
 
         // Stop callbacks may call back into this session, so never await them under the lock.
         await stopCallbacks;
-        using (await LockAsync())
+        using (await _lock.AcquireAsync())
         {
             Settle(execution, settlement, outcome);
         }
@@ -218,15 +218,4 @@ public abstract class SessionBase
         write();
         return true;
     });
-
-    private async Task<LockHandle> LockAsync(CancellationToken cancellation = default)
-    {
-        await _lock.WaitAsync(cancellation);
-        return new LockHandle(_lock);
-    }
-
-    private readonly struct LockHandle(SemaphoreSlim semaphore) : IDisposable
-    {
-        public void Dispose() => semaphore.Release();
-    }
 }

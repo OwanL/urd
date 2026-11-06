@@ -169,11 +169,13 @@ public sealed class SessionSnapshotStorageTests {
     [Fact]
     public void VersionTwoMigrationPreservesReceiptsRunsRequestsAndOutput() {
         using var database = new TemporaryDatabase();
-        Guid session, run = Guid.NewGuid(), output = Guid.NewGuid(), refused = Guid.NewGuid();
-        Guid request;
+        Guid session, run = Guid.NewGuid(), output = Guid.NewGuid(), refusedInputId = Guid.NewGuid();
+        Guid refusedProposedRunId = Guid.NewGuid(), request;
+        InputReceipt refusedReceipt;
         using (SessionStore store = SessionStore.Open(database.Path)) {
             session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
-            store.Inputs.RecordRefusal(session, new(refused, 0, "refused\0🙂"), InputRefusalReason.Capacity);
+            refusedReceipt = store.Inputs.Admit(session, 0, new(refusedInputId, 0, "refused\0🙂"),
+                accepting: false, proposedRunId: refusedProposedRunId).Receipt;
             store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "accepted\0🙂"), true, run);
             request = store.Runs.ClaimNextRequest(session, run, 0)!.RequestId;
             store.Output.Append(session, run, 0, new(request, output, 0, "partial\0🙂", false));
@@ -183,7 +185,12 @@ public sealed class SessionSnapshotStorageTests {
         MakeVersionTwo(database);
         using SessionStore migrated = SessionStore.Open(database.Path);
         Assert.Equal(3L, database.Scalar("PRAGMA user_version;")); // raw-sql: the migrated schema version is the subject under test
-        Assert.Equal("refused\0🙂", migrated.Inputs.ReadReceipt(session, refused)!.Command.Text);
+        InputReceipt migratedRefusal = migrated.Inputs.ReadReceipt(session, refusedInputId)!;
+        Assert.Equal(refusedReceipt, migratedRefusal);
+        Assert.Equal(InputDecision.Refused, migratedRefusal.Decision);
+        Assert.Equal(InputRefusalReason.Stopping, migratedRefusal.RefusalReason);
+        Assert.Null(migratedRefusal.RunId);
+        Assert.DoesNotContain(StoredRuns.Read(database), stored => stored.RunId == refusedProposedRunId);
         StoredSessionSnapshot snapshot = migrated.Snapshots.Read(session);
         Assert.Equal(new[] { "accepted\0🙂", "partial\0🙂" }, snapshot.Messages.Select(message => message.Preview));
         Assert.Equal(run, snapshot.UnsettledRunId);

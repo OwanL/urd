@@ -45,27 +45,6 @@ internal sealed class InputStorage(Database database) {
         });
     }
 
-    // An identical retry retains its original decision rather than today's refusal reason.
-    internal InputReceipt RecordRefusal(Guid sessionId, InputCommand command, InputRefusalReason reason) {
-        Validate(sessionId, command);
-        return database.Write(transaction => {
-            InputReceipt? retained = ReadReceipt(sessionId, command.InputId, transaction);
-            if (retained is not null) {
-                EnsureSameCommand(retained, command);
-                return retained;
-            }
-
-#pragma warning disable S3928 // Captured method argument; an exact retry retains its original reason.
-            if (!Enum.IsDefined(reason))
-                throw new ArgumentOutOfRangeException(nameof(reason));
-#pragma warning restore S3928
-
-            var receipt = new InputReceipt(sessionId, command, InputDecision.Refused, reason, null);
-            InsertReceipt(transaction, receipt);
-            return receipt;
-        });
-    }
-
     internal InputReceipt? ReadReceipt(Guid sessionId, Guid inputId)
         => database.Guarded(() => ReadReceipt(sessionId, inputId, transaction: null));
 

@@ -10,41 +10,51 @@ namespace Urd.Backend.Tests.Storage;
 // Durable input decisions: exact retries, conflicting originals, rollback and version-one migration.
 public sealed class InputReceiptTests {
     [Fact]
-    public void RefusalSurvivesLostReplyReopenAndChangedConditions() {
+    public void LostRefusalReplyDoesNotPermitAcceptanceAfterReopen() {
         using var database = new TemporaryDatabase();
         Guid sessionId = Guid.NewGuid();
+        Guid firstProposedRunId = Guid.NewGuid(), retryProposedRunId = Guid.NewGuid();
         var command = new InputCommand(Guid.NewGuid(), 0, "original \r\n e\u0301 \0 🙂");
         using (SessionStore store = SessionStore.Open(database.Path)) {
             store.Sessions.CreatePrimary(sessionId);
             // Deliberately discard the committed reply, as an uncertain caller would.
-            store.Inputs.RecordRefusal(sessionId, command, InputRefusalReason.Capacity);
+            store.Inputs.Admit(sessionId, 0, command, accepting: false, proposedRunId: firstProposedRunId);
         }
 
-        database.ForceHistoryRevision(9);
         using SessionStore reopened = SessionStore.Open(database.Path);
+        var retry = reopened.Inputs.Admit(sessionId, 0, command, accepting: true, proposedRunId: retryProposedRunId);
         InputReceipt receipt = reopened.Inputs.ReadReceipt(sessionId, command.InputId)!;
         Assert.Equal(sessionId, receipt.SessionId);
         Assert.Equal(command, receipt.Command);
         Assert.Equal(InputDecision.Refused, receipt.Decision);
         Assert.Null(receipt.RunId);
-        Assert.Equal(InputRefusalReason.Capacity, receipt.RefusalReason);
-        Assert.Equal(receipt, reopened.Inputs.RecordRefusal(sessionId, command, InputRefusalReason.Stopping));
+        Assert.Equal(InputRefusalReason.Stopping, receipt.RefusalReason);
+        Assert.Equal(receipt, retry.Receipt);
+        Assert.False(retry.NewlyAccepted);
         Assert.Single(StoredInputs.Read(database));
-        Assert.Equal(9L, reopened.Sessions.Read(sessionId)!.HistoryRevision);
+        Assert.Empty(StoredRuns.Read(database));
+        Assert.Equal(0L, reopened.Sessions.Read(sessionId)!.HistoryRevision);
     }
 
     [Fact]
-    public void DelayedOriginalCannotReplaceFirstRefusal() {
+    public void DelayedStaleAdmissionCannotReplaceFirstRefusal() {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
         Guid sessionId = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
         var command = new InputCommand(Guid.NewGuid(), 0, "delayed original");
-        InputReceipt retryReceipt = store.Inputs.RecordRefusal(sessionId, command, InputRefusalReason.Stopping);
+        InputReceipt firstReceipt = store.Inputs.Admit(
+            sessionId, 0, command, accepting: false, proposedRunId: Guid.NewGuid()).Receipt;
+        database.ForceHistoryRevision(1);
 
-        Assert.Equal(retryReceipt, store.Inputs.RecordRefusal(sessionId, command, InputRefusalReason.Capacity));
-        Assert.Equal(retryReceipt, store.Inputs.ReadReceipt(sessionId, command.InputId));
-        Assert.Equal(0L, store.Sessions.Read(sessionId)!.HistoryRevision);
+        var delayed = store.Inputs.Admit(
+            sessionId, 0, command, accepting: true, proposedRunId: Guid.NewGuid());
+        Assert.Equal(firstReceipt, delayed.Receipt);
+        Assert.False(delayed.NewlyAccepted);
+        Assert.Equal(firstReceipt, store.Inputs.ReadReceipt(sessionId, command.InputId));
+        Assert.Equal(InputRefusalReason.Stopping, firstReceipt.RefusalReason);
+        Assert.Equal(1L, store.Sessions.Read(sessionId)!.HistoryRevision);
         Assert.Single(StoredInputs.Read(database));
+        Assert.Empty(StoredRuns.Read(database));
     }
 
     [Fact]
@@ -53,7 +63,8 @@ public sealed class InputReceiptTests {
         using SessionStore store = SessionStore.Open(database.Path);
         Guid sessionId = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
         var command = new InputCommand(Guid.NewGuid(), 0, "e\u0301\r\n");
-        InputReceipt original = store.Inputs.RecordRefusal(sessionId, command, InputRefusalReason.Capacity);
+        InputReceipt original = store.Inputs.Admit(
+            sessionId, 0, command, accepting: false, proposedRunId: Guid.NewGuid()).Receipt;
         InputCommand[] conflicts =
         [
             command with { Text = "é\r\n" },
@@ -64,11 +75,12 @@ public sealed class InputReceiptTests {
 
         foreach (InputCommand conflict in conflicts) {
             Assert.Throws<InvalidOperationException>(() =>
-                store.Inputs.RecordRefusal(sessionId, conflict, InputRefusalReason.Stopping));
+                store.Inputs.Admit(sessionId, 0, conflict, accepting: true, proposedRunId: Guid.NewGuid()));
         }
 
         Assert.Equal(original, store.Inputs.ReadReceipt(sessionId, command.InputId));
         Assert.Single(StoredInputs.Read(database));
+        Assert.Empty(StoredRuns.Read(database));
     }
 
     [Fact]
@@ -78,12 +90,21 @@ public sealed class InputReceiptTests {
         Guid first = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
         Guid second = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
         var command = new InputCommand(Guid.NewGuid(), 0, "first session");
-        InputReceipt firstReceipt = store.Inputs.RecordRefusal(first, command, InputRefusalReason.Capacity);
+        InputReceipt firstReceipt = store.Inputs.Admit(
+            first, 0, command, accepting: false, proposedRunId: Guid.NewGuid()).Receipt;
         Assert.Null(store.Inputs.ReadReceipt(second, command.InputId));
         Assert.Null(store.Inputs.ReadReceipt(Guid.NewGuid(), command.InputId));
-        InputReceipt secondReceipt = store.Inputs.RecordRefusal(second, command with { Text = "second session" }, InputRefusalReason.Stopping);
+        Guid secondRunId = Guid.NewGuid();
+        InputReceipt secondReceipt = store.Inputs.Admit(second, 0, command with { Text = "second session" },
+            accepting: true, proposedRunId: secondRunId).Receipt;
+        Assert.Equal(InputDecision.Refused, firstReceipt.Decision);
+        Assert.Equal(InputDecision.Accepted, secondReceipt.Decision);
+        Assert.Equal(secondRunId, secondReceipt.RunId);
         Assert.NotEqual(firstReceipt, secondReceipt);
         Assert.Equal(2, StoredInputs.Read(database).Count);
+        StoredRun storedRun = Assert.Single(StoredRuns.Read(database));
+        Assert.Equal(second, storedRun.SessionId);
+        Assert.Equal(command.InputId, storedRun.InputId);
     }
 
     [Fact]
@@ -105,15 +126,18 @@ public sealed class InputReceiptTests {
             """);
 
         // The insert succeeds; the deferred foreign key makes COMMIT fail.
-        SqliteException error = Assert.Throws<SqliteException>(() => store.Inputs.RecordRefusal(sessionId, command, InputRefusalReason.Capacity));
+        SqliteException error = Assert.Throws<SqliteException>(() => store.Inputs.Admit(
+            sessionId, 0, command, accepting: false, proposedRunId: Guid.NewGuid()));
         Assert.Equal(19, error.SqliteErrorCode);
         Assert.Null(store.Inputs.ReadReceipt(sessionId, command.InputId));
         Assert.Equal(0L, store.Sessions.Read(sessionId)!.HistoryRevision);
         Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM test_child;")); // raw-sql: test_child is a fixture-owned rollback witness
         database.Execute("DROP TRIGGER fail_decision;");
-        InputReceipt receipt = store.Inputs.RecordRefusal(sessionId, command, InputRefusalReason.Stopping);
+        InputReceipt receipt = store.Inputs.Admit(
+            sessionId, 0, command, accepting: false, proposedRunId: Guid.NewGuid()).Receipt;
         Assert.Equal(InputRefusalReason.Stopping, receipt.RefusalReason);
         Assert.Single(StoredInputs.Read(database));
+        Assert.Empty(StoredRuns.Read(database));
     }
 
     [Fact]
@@ -127,7 +151,8 @@ public sealed class InputReceiptTests {
         Assert.Throws<SqliteException>(() => store.Inputs.ReadReceipt(sessionId, command.InputId));
         store.Dispose();
         Assert.Throws<ObjectDisposedException>(() => store.Inputs.ReadReceipt(sessionId, command.InputId));
-        Assert.Throws<ObjectDisposedException>(() => store.Inputs.RecordRefusal(sessionId, command, InputRefusalReason.Capacity));
+        Assert.Throws<ObjectDisposedException>(() => store.Inputs.Admit(
+            sessionId, 0, command, accepting: false, proposedRunId: Guid.NewGuid()));
     }
 
     [Fact]
@@ -136,16 +161,23 @@ public sealed class InputReceiptTests {
         using SessionStore store = SessionStore.Open(database.Path);
         Guid sessionId = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
         var command = new InputCommand(Guid.NewGuid(), 0, "valid");
-        Assert.Throws<KeyNotFoundException>(() => store.Inputs.RecordRefusal(Guid.NewGuid(), command, InputRefusalReason.Capacity));
-        Assert.Throws<ArgumentException>(() => store.Inputs.RecordRefusal(sessionId, command with { InputId = Guid.Empty }, InputRefusalReason.Capacity));
-        Assert.Throws<ArgumentOutOfRangeException>(() => store.Inputs.RecordRefusal(sessionId, command with { ExpectedHistoryRevision = -1 }, InputRefusalReason.Capacity));
-        Assert.ThrowsAny<ArgumentException>(() => store.Inputs.RecordRefusal(sessionId, command with { Text = "\ud800" }, InputRefusalReason.Capacity));
-        Assert.Throws<ArgumentException>(() => store.Inputs.RecordRefusal(sessionId, command with { Text = new string('é', 8193) }, InputRefusalReason.Capacity));
-        Assert.Throws<ArgumentOutOfRangeException>(() => store.Inputs.RecordRefusal(sessionId, command, (InputRefusalReason)99));
+        Assert.Throws<KeyNotFoundException>(() => store.Inputs.Admit(
+            Guid.NewGuid(), 0, command, accepting: false, proposedRunId: Guid.NewGuid()));
+        Assert.Throws<ArgumentException>(() => store.Inputs.Admit(
+            sessionId, 0, command with { InputId = Guid.Empty }, accepting: false, proposedRunId: Guid.NewGuid()));
+        Assert.Throws<ArgumentOutOfRangeException>(() => store.Inputs.Admit(
+            sessionId, 0, command with { ExpectedHistoryRevision = -1 }, accepting: false, proposedRunId: Guid.NewGuid()));
+        Assert.ThrowsAny<ArgumentException>(() => store.Inputs.Admit(
+            sessionId, 0, command with { Text = "\ud800" }, accepting: false, proposedRunId: Guid.NewGuid()));
+        Assert.Throws<ArgumentException>(() => store.Inputs.Admit(
+            sessionId, 0, command with { Text = new string('é', 8193) }, accepting: false, proposedRunId: Guid.NewGuid()));
         Assert.Empty(StoredInputs.Read(database));
 
-        InputReceipt boundary = store.Inputs.RecordRefusal(sessionId, command with { Text = new string('é', 8192) }, InputRefusalReason.Capacity);
+        InputReceipt boundary = store.Inputs.Admit(sessionId, 0,
+            command with { Text = new string('é', 8192) }, accepting: false, proposedRunId: Guid.NewGuid()).Receipt;
         Assert.Equal(8192, boundary.Command.Text.Length);
+        Assert.Equal(InputDecision.Refused, boundary.Decision);
+        Assert.Equal(InputRefusalReason.Stopping, boundary.RefusalReason);
         Assert.Equal(boundary, store.Inputs.ReadReceipt(sessionId, command.InputId));
     }
 
@@ -193,20 +225,34 @@ public sealed class InputReceiptTests {
     }
 
     [Fact]
-    public async Task ConcurrentStoresRetainOneFirstDecision() {
+    public async Task ConcurrentStoresRetainOneFirstDecisionAcrossDifferentRefusals() {
         using var database = new TemporaryDatabase();
         using SessionStore first = SessionStore.Open(database.Path);
         using SessionStore second = SessionStore.Open(database.Path);
         Guid sessionId = first.Sessions.CreatePrimary(Guid.NewGuid()).Id;
+        database.ForceHistoryRevision(1);
+        Assert.Equal(1L, first.Sessions.Read(sessionId)!.HistoryRevision);
         var command = new InputCommand(Guid.NewGuid(), 0, "same command");
+        var attempts = new[] {
+            (Store: first, HistoryRevision: 0L, Accepting: false, ProposedRunId: Guid.NewGuid()),
+            (Store: second, HistoryRevision: 0L, Accepting: true, ProposedRunId: Guid.NewGuid())
+        };
         var start = Signal();
-        Task<InputReceipt>[] tasks = new[] { first, second }.Select((store, index) => Task.Run(async () => {
+        Task<(InputReceipt Receipt, bool NewlyAccepted)>[] tasks = attempts.Select(attempt => Task.Run(async () => {
             await start.Task;
-            return store.Inputs.RecordRefusal(sessionId, command, index == 0 ? InputRefusalReason.Capacity : InputRefusalReason.Stopping);
+            return attempt.Store.Inputs.Admit(sessionId, attempt.HistoryRevision, command,
+                accepting: attempt.Accepting, proposedRunId: attempt.ProposedRunId);
         })).ToArray();
         start.SetResult();
-        InputReceipt[] receipts = await Task.WhenAll(tasks);
-        Assert.Equal(receipts[0], receipts[1]);
+        var results = await Task.WhenAll(tasks);
+        Assert.Equal(results[0].Receipt, results[1].Receipt);
+        Assert.All(results, result => Assert.False(result.NewlyAccepted));
+
+        InputReceipt persisted = first.Inputs.ReadReceipt(sessionId, command.InputId)!;
+        Assert.Equal(persisted, results[0].Receipt);
+        Assert.Equal(InputDecision.Refused, persisted.Decision);
+        Assert.True(persisted.RefusalReason is InputRefusalReason.Stopping or InputRefusalReason.StaleRevision);
         Assert.Single(StoredInputs.Read(database));
+        Assert.Empty(StoredRuns.Read(database));
     }
 }

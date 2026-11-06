@@ -33,14 +33,14 @@ public sealed class SessionSnapshotStorageTests {
     [InlineData(31, true, true)]
     [InlineData(60, false, false)]
     [InlineData(61, false, true)]
-    public void NewestSixtyMessagesAreChronologicalAndOmissionIsExact(int runs, bool outputs, bool hasOlder) {
+    public void NewestSixtyMessagesAreChronologicalAndOmissionIsExact(int runCount, bool includeOutputs, bool hasOlder) {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
         Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
-        SeedHistory(database, session, 0, runs, outputs);
+        SeedHistory(database, session, 0, runCount, includeOutputs);
         StoredSessionSnapshot snapshot = store.Snapshots.Read(session);
-        string[] expected = Enumerable.Range(1, runs)
-            .SelectMany(index => outputs ? new[] { $"input {index}", $"output {index}" } : new[] { $"input {index}" })
+        string[] expected = Enumerable.Range(1, runCount)
+            .SelectMany(index => includeOutputs ? new[] { $"input {index}", $"output {index}" } : new[] { $"input {index}" })
             .TakeLast(60).ToArray();
         Assert.Equal(expected, snapshot.Messages.Select(message => message.Preview));
         Assert.Equal(hasOlder, snapshot.HasOlderMessages);
@@ -51,7 +51,7 @@ public sealed class SessionSnapshotStorageTests {
             Assert.Equal(message.Message.Role == MessageRole.Assistant, message.FinalOutputCommitted);
         });
         Assert.Throws<NotSupportedException>(() => ((IList<MessagePreview>)snapshot.Messages).Clear());
-        SeedHistory(database, session, 0, 1, outputs);
+        SeedHistory(database, session, 0, 1, includeOutputs);
         Assert.Equal(expected, snapshot.Messages.Select(message => message.Preview));
     }
 
@@ -118,7 +118,7 @@ public sealed class SessionSnapshotStorageTests {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
         Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
-        SeedHistory(database, session, 0, 1, outputs: true);
+        SeedHistory(database, session, 0, 1, includeOutputs: true);
         database.Execute($"UPDATE execution_requests SET output_id = '{Guid.Empty:D}';");
 
         Assert.Throws<ArgumentException>(() => store.Snapshots.Read(session));
@@ -130,10 +130,10 @@ public sealed class SessionSnapshotStorageTests {
         using SessionStore store = SessionStore.Open(database.Path);
         Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
         Guid other = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
-        SeedHistory(database, session, 0, 3000, true);
+        SeedHistory(database, session, 0, 3000, includeOutputs: true);
         database.Execute($"UPDATE sessions SET history_revision = 1 WHERE session_id = '{session:D}';");
-        SeedHistory(database, session, 1, 3000, true);
-        SeedHistory(database, other, 0, 3000, true);
+        SeedHistory(database, session, 1, 3000, includeOutputs: true);
+        SeedHistory(database, other, 0, 3000, includeOutputs: true);
         // If a read decodes all retained rows then trims, it fails on these omitted bytes.
         database.Execute($"""
             UPDATE input_decisions SET original_text_utf8 = X'FF'
@@ -208,7 +208,7 @@ public sealed class SessionSnapshotStorageTests {
         Guid session;
         using (SessionStore store = SessionStore.Open(database.Path)) {
             session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
-            SeedHistory(database, session, 0, 2, true);
+            SeedHistory(database, session, 0, 2, includeOutputs: true);
         }
 
         MakeVersionTwo(database);
@@ -247,29 +247,29 @@ public sealed class SessionSnapshotStorageTests {
     }
 
     // Bulk fixture writes avoid the execution context builder, which deliberately reads full history.
-    private static void SeedHistory(TemporaryDatabase database, Guid session, long revision, int count, bool outputs) {
-        string input = Guid.NewGuid().ToString("D")[..24], run = Guid.NewGuid().ToString("D")[..24];
-        string request = Guid.NewGuid().ToString("D")[..24], output = Guid.NewGuid().ToString("D")[..24];
+    private static void SeedHistory(TemporaryDatabase database, Guid session, long revision, int runCount, bool includeOutputs) {
+        string inputIdPrefix = Guid.NewGuid().ToString("D")[..24], runIdPrefix = Guid.NewGuid().ToString("D")[..24];
+        string requestIdPrefix = Guid.NewGuid().ToString("D")[..24], outputIdPrefix = Guid.NewGuid().ToString("D")[..24];
         database.Execute($"""
             BEGIN;
-            WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x + 1 FROM n WHERE x < {count})
+            WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x + 1 FROM n WHERE x < {runCount})
             INSERT INTO input_decisions
-            SELECT '{session:D}', '{input}' || printf('%012d', x), {revision}, CAST('input ' || x AS BLOB),
-                1, '{run}' || printf('%012d', x), NULL FROM n;
+            SELECT '{session:D}', '{inputIdPrefix}' || printf('%012d', x), {revision}, CAST('input ' || x AS BLOB),
+                1, '{runIdPrefix}' || printf('%012d', x), NULL FROM n;
             INSERT INTO execution_runs (session_id, run_id, history_revision, input_id, outcome)
             SELECT session_id, run_id, expected_history_revision, input_id, 0 FROM input_decisions
-            WHERE session_id = '{session:D}' AND input_id LIKE '{input}%' ORDER BY input_id;
+            WHERE session_id = '{session:D}' AND input_id LIKE '{inputIdPrefix}%' ORDER BY input_id;
             COMMIT;
             """);
-        if (outputs) {
+        if (includeOutputs) {
             database.Execute($"""
                 BEGIN;
                 INSERT INTO execution_requests (request_id, run_id, output_id, next_batch_index, output_final, outcome)
-                SELECT '{request}' || substr(input_id, 25), run_id, '{output}' || substr(input_id, 25), 1, 1, 0
-                FROM execution_runs WHERE session_id = '{session:D}' AND input_id LIKE '{input}%';
+                SELECT '{requestIdPrefix}' || substr(input_id, 25), run_id, '{outputIdPrefix}' || substr(input_id, 25), 1, 1, 0
+                FROM execution_runs WHERE session_id = '{session:D}' AND input_id LIKE '{inputIdPrefix}%';
                 INSERT INTO execution_output
                 SELECT request_id, 0, CAST('output ' || CAST(substr(request_id, 25) AS INTEGER) AS BLOB), 1
-                FROM execution_requests WHERE request_id LIKE '{request}%';
+                FROM execution_requests WHERE request_id LIKE '{requestIdPrefix}%';
                 COMMIT;
                 """);
         }

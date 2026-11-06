@@ -2,8 +2,9 @@ using System.Text;
 
 namespace Urd.Core.Execution;
 
-// Batches this response by byte size and elapsed time before persisting chunks.
-internal sealed class LlmResponseWriter : IAsyncDisposable
+// Gathers one response's text into chunks, saving each when it fills or has waited long enough.
+// The session decides whether a chunk is still wanted; this class only sizes and times them.
+internal sealed class LlmResponseWriter
 {
     private const int ChunkByteLimit = 16 * 1024;
     private static readonly TimeSpan FlushInterval = TimeSpan.FromMilliseconds(100);
@@ -11,54 +12,36 @@ internal sealed class LlmResponseWriter : IAsyncDisposable
     private readonly Guid _requestId;
     private readonly Guid _responseId = Guid.NewGuid();
     private readonly Func<LlmResponseChunk, Task> _saveChunkAsync;
-    private readonly CancellationToken _cancellationToken;
 
-    private readonly StringBuilder _buffer = new();
-    private int _bufferUtf8Bytes;
-    private char? _pendingHighSurrogate;
+    private readonly StringBuilder _chunk = new();
+    private int _chunkUtf8Bytes;
     private long _chunkIndex;
+    private char? _pendingHighSurrogate;
 
-    private CancellationTokenSource? _flushDelayCancellation;
-    private Task? _flushDelay;
-    private bool _disposed;
-
-    internal LlmResponseWriter(Guid requestId, Func<LlmResponseChunk, Task> saveChunkAsync,
-        CancellationToken cancellationToken)
+    internal LlmResponseWriter(Guid requestId, Func<LlmResponseChunk, Task> saveChunkAsync)
     {
         _requestId = requestId;
         _saveChunkAsync = saveChunkAsync;
-        _cancellationToken = cancellationToken;
     }
 
-    internal Task? FlushDelay => _flushDelay;
+    // Completes when the oldest unsaved text is due; null while nothing is waiting.
+    internal Task? FlushDelay { get; private set; }
 
     internal async Task AppendTextAsync(string text)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
         foreach (char codeUnit in text)
         {
             if (TryCompleteCharacter(codeUnit, out Rune character))
             {
-                await BufferCharacterAsync(character);
+                await AppendCharacterAsync(character);
             }
         }
     }
 
-    internal Task FlushAsync() => WriteChunkAsync(isFinal: false);
+    internal Task FlushAsync() => SaveChunkAsync(isFinal: false);
 
     // Closes the response text, not the request or execution.
-    internal Task FinishResponseAsync() => WriteChunkAsync(isFinal: true);
-
-    public async ValueTask DisposeAsync()
-    {
-        if (_disposed)
-        {
-            return;
-        }
-
-        _disposed = true;
-        await CancelFlushDelayAsync();
-    }
+    internal Task FinishResponseAsync() => SaveChunkAsync(isFinal: true);
 
     // Returns false while waiting for the second half of a surrogate pair,
     // which may arrive in a later update.
@@ -82,75 +65,45 @@ internal sealed class LlmResponseWriter : IAsyncDisposable
 
     private static InvalidDataException InvalidUnicode() => new("The LLM response contains invalid Unicode.");
 
-    private async Task BufferCharacterAsync(Rune character)
+    private async Task AppendCharacterAsync(Rune character)
     {
         int utf8Bytes = character.Utf8SequenceLength;
-        if (_bufferUtf8Bytes + utf8Bytes > ChunkByteLimit)
+        if (_chunkUtf8Bytes + utf8Bytes > ChunkByteLimit)
         {
             await FlushAsync();
         }
 
         Span<char> utf16 = stackalloc char[2];
-        int length = character.EncodeToUtf16(utf16);
-        _buffer.Append(utf16[..length]);
-        _bufferUtf8Bytes += utf8Bytes;
+        _chunk.Append(utf16[..character.EncodeToUtf16(utf16)]);
+        _chunkUtf8Bytes += utf8Bytes;
 
-        if (_bufferUtf8Bytes == ChunkByteLimit)
+        if (_chunkUtf8Bytes == ChunkByteLimit)
         {
             await FlushAsync();
         }
         else
         {
-            ScheduleFlush();
+            // Later text must not postpone the first unsaved character's deadline.
+            FlushDelay ??= Task.Delay(FlushInterval);
         }
     }
 
-    private async Task WriteChunkAsync(bool isFinal)
+    private async Task SaveChunkAsync(bool isFinal)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        await CancelFlushDelayAsync();
         if (isFinal && _pendingHighSurrogate is not null)
         {
             throw new InvalidDataException("The LLM response ends with an incomplete Unicode scalar.");
         }
 
-        _cancellationToken.ThrowIfCancellationRequested();
-        if (_bufferUtf8Bytes == 0 && !isFinal)
+        FlushDelay = null;
+        if (_chunkUtf8Bytes == 0 && !isFinal)
         {
             return;
         }
 
-        var chunk = new LlmResponseChunk(_requestId, _responseId, _chunkIndex, _buffer.ToString(), isFinal);
-        await _saveChunkAsync(chunk);
-
+        await _saveChunkAsync(new LlmResponseChunk(_requestId, _responseId, _chunkIndex, _chunk.ToString(), isFinal));
         _chunkIndex++;
-        _buffer.Clear();
-        _bufferUtf8Bytes = 0;
-    }
-
-    // Later text must not postpone the first buffered character's deadline.
-    private void ScheduleFlush()
-    {
-        if (_flushDelay is not null)
-        {
-            return;
-        }
-
-        _flushDelayCancellation = CancellationTokenSource.CreateLinkedTokenSource(_cancellationToken);
-        _flushDelay = Task.Delay(FlushInterval, _flushDelayCancellation.Token);
-    }
-
-    private async Task CancelFlushDelayAsync()
-    {
-        if (_flushDelay is not { } delay)
-        {
-            return;
-        }
-
-        using CancellationTokenSource cancellation = _flushDelayCancellation!;
-        _flushDelay = null;
-        _flushDelayCancellation = null;
-        cancellation.Cancel();
-        await delay.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        _chunk.Clear();
+        _chunkUtf8Bytes = 0;
     }
 }

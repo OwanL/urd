@@ -53,7 +53,7 @@ internal sealed class SessionExecution : IDisposable
 
     private async Task<LlmRequestOutcome> SendRequestAsync(LlmRequest request, CancellationTokenSource requestStop)
     {
-        var writer = new LlmResponseWriter(request.RequestId, SaveChunkAsync, _stop.Token);
+        var writer = new LlmResponseWriter(request.RequestId, SaveChunkAsync);
         IAsyncEnumerator<ChatResponseUpdate>? updates = null;
         Task<bool>? pendingRead = null;
         Exception? failure = null;
@@ -101,7 +101,7 @@ internal sealed class SessionExecution : IDisposable
             failure = exception;
         }
 
-        await CleanUpAsync(requestStop, pendingRead, updates, writer, failure);
+        await CleanUpAsync(requestStop, pendingRead, updates, failure);
         return ToRequestOutcome(request.RequestId, failure);
     }
 
@@ -191,7 +191,7 @@ internal sealed class SessionExecution : IDisposable
     // Attempts every step even when an earlier one fails. A cleanup failure leaves the
     // run unsettled, so it is thrown to the session instead of becoming a failed request.
     private static async Task CleanUpAsync(CancellationTokenSource requestStop, Task<bool>? pendingRead,
-        IAsyncEnumerator<ChatResponseUpdate>? updates, LlmResponseWriter writer, Exception? requestFailure)
+        IAsyncEnumerator<ChatResponseUpdate>? updates, Exception? requestFailure)
     {
         Exception? cancelFailure = await CaptureFailureAsync(async () => await requestStop.CancelAsync());
         if (pendingRead is not null)
@@ -202,13 +202,12 @@ internal sealed class SessionExecution : IDisposable
         }
 
         Exception? updatesFailure = updates is null ? null : await CaptureFailureAsync(updates.DisposeAsync);
-        Exception? writerFailure = await CaptureFailureAsync(writer.DisposeAsync);
-        if (cancelFailure is null && updatesFailure is null && writerFailure is null)
+        if (cancelFailure is null && updatesFailure is null)
         {
             return;
         }
 
-        Exception?[] failures = [requestFailure, cancelFailure, updatesFailure, writerFailure];
+        Exception?[] failures = [requestFailure, cancelFailure, updatesFailure];
         throw new AggregateException("The request could not be cleaned up.", failures.OfType<Exception>());
     }
 

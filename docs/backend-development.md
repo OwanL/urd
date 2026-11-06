@@ -13,7 +13,7 @@ there is no runnable Server or UI yet.
   the original decision; neither lookup nor retained acceptance starts work. Refusal fences delayed originals.
 - `SessionBase` owns admission, database writes and lifecycle coordination under its existing guard.
   It invokes each `SessionExecution` once, outside that guard. Execution owns the model stream and
-  Stop source; a request-local `LlmResponseWriter` owns bounded UTF-8 batches and their flush timer.
+  Stop source; a request-local `LlmResponseWriter` owns bounded UTF-8 batches and their flush deadline.
 - Stop starts asynchronous cancellation under the guard, then joins callbacks outside it.
   Replacement requires stream/timer cleanup, successful callback completion and saved settlement.
   Callback failures or an unexpected missing claim/settlement fence the run; they do not retry it.

@@ -118,7 +118,7 @@ public sealed class InputReceiptTests {
     [Fact]
     public void LookupErrorsAreNotReportedAsAbsence() {
         using var database = new TemporaryDatabase();
-        SessionStore store = SessionStore.Open(database.Path);
+        using SessionStore store = SessionStore.Open(database.Path);
         Guid sessionId = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
         var command = new InputCommand(Guid.NewGuid(), 0, "error distinction");
         Assert.Null(store.Inputs.ReadReceipt(sessionId, command.InputId));

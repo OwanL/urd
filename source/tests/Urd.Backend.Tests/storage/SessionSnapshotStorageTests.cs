@@ -12,7 +12,7 @@ public sealed class SessionSnapshotStorageTests {
     [Fact]
     public void EmptyMissingAndDisposedReadsDoNotInventState() {
         using var database = new TemporaryDatabase();
-        SessionStore store = SessionStore.Open(database.Path);
+        using SessionStore store = SessionStore.Open(database.Path);
         Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
         StoredSessionSnapshot snapshot = store.Snapshots.Read(session);
         Assert.Equal(0, snapshot.HistoryRevision);

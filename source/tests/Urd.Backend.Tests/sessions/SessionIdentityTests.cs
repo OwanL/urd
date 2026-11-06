@@ -53,7 +53,11 @@ public sealed class SessionIdentityTests {
     }
 
     [Fact]
-    public async Task ConcurrentCreatesAndColdLookupsShareCanonicalHandles() {
+    public Task ConcurrentCreatesAndColdLookupsShareCanonicalHandles()
+        => CheckConcurrentHandlesAsync().WaitAsync(TestTimeout);
+
+    private static async Task CheckConcurrentHandlesAsync() {
+        // Keep ownership here: a timed-out test wait must not dispose resources beneath callers.
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
         SessionRecord saved = store.Sessions.CreatePrimary(Guid.NewGuid());

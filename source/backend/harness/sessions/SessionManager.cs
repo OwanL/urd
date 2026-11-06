@@ -25,7 +25,7 @@ public sealed class SessionManager
         await _registryGate.WaitAsync().ConfigureAwait(false);
         try
         {
-            SessionRecord record = _store.CreatePrimary(Guid.NewGuid());
+            SessionRecord record = _store.Sessions.CreatePrimary(Guid.NewGuid());
             var session = new PrimarySession(record, _store, _chatClient);
             _sessions.Add(session.Id, session);
             return session;
@@ -47,7 +47,7 @@ public sealed class SessionManager
                     ?? throw new InvalidOperationException($"Session '{sessionId}' is not a primary session.");
             }
 
-            SessionRecord record = _store.ReadSession(sessionId)
+            SessionRecord record = _store.Sessions.Read(sessionId)
                 ?? throw new KeyNotFoundException($"Session '{sessionId}' does not exist.");
             var session = new PrimarySession(record, _store, _chatClient);
             _sessions.Add(session.Id, session);

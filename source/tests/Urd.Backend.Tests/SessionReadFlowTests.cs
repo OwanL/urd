@@ -126,11 +126,11 @@ public sealed class SessionReadFlowTests
         Guid sessionId, cleanId, runId = Guid.NewGuid(), outputId = Guid.NewGuid();
         using (SessionStore original = SessionStore.Open(database.Path))
         {
-            sessionId = original.CreatePrimary(Guid.NewGuid()).Id;
-            cleanId = original.CreatePrimary(Guid.NewGuid()).Id;
-            original.AdmitInput(sessionId, 0, new(Guid.NewGuid(), 0, "retained input"), true, runId);
-            LlmRequest request = original.ClaimNextRequest(sessionId, runId, 0)!;
-            Assert.True(original.AppendOutput(sessionId, runId, 0, new(request.RequestId, outputId, 0, "partial\0🙂", false)));
+            sessionId = original.Sessions.CreatePrimary(Guid.NewGuid()).Id;
+            cleanId = original.Sessions.CreatePrimary(Guid.NewGuid()).Id;
+            original.Inputs.Admit(sessionId, 0, new(Guid.NewGuid(), 0, "retained input"), true, runId);
+            LlmRequest request = original.Runs.ClaimNextRequest(sessionId, runId, 0)!;
+            Assert.True(original.Output.Append(sessionId, runId, 0, new(request.RequestId, outputId, 0, "partial\0🙂", false)));
         }
 
         using var client = new ScriptedChatClient(UnexpectedResponse);

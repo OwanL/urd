@@ -32,13 +32,13 @@ public abstract class SessionBase
     public async Task<InputReceipt?> GetInputReceiptAsync(Guid inputId)
     {
         using var held = await LockAsync();
-        return _store.ReadInputReceipt(Id, inputId);
+        return _store.Inputs.ReadReceipt(Id, inputId);
     }
 
     public async Task<SessionSnapshot> ReadSnapshotAsync(CancellationToken cancellation = default)
     {
         using var held = await LockAsync(cancellation);
-        StoredSessionSnapshot stored = _store.ReadSnapshot(Id);
+        StoredSessionSnapshot stored = _store.Snapshots.Read(Id);
         bool runOwnedElsewhere = stored.UnsettledRunId is { } runId && !IsCurrentRun(runId);
         bool fenced = !_acceptingInput || stored.HistoryRevision != HistoryRevision || runOwnedElsewhere;
         return new(Id, stored.HistoryRevision, fenced, stored.UnsettledRunId, stored.StopRequested,
@@ -49,7 +49,7 @@ public abstract class SessionBase
         MessageContentCursor cursor, CancellationToken cancellation = default)
     {
         using var held = await LockAsync(cancellation);
-        return _store.ReadMessageContent(Id, cursor);
+        return _store.Content.Read(Id, cursor);
     }
 
     private protected async Task<InputReceipt> AdmitInputAsync(InputCommand command)
@@ -60,7 +60,7 @@ public abstract class SessionBase
         using (await LockAsync())
         {
             (receipt, bool newlyAccepted) = WriteToStore(
-                () => _store.AdmitInput(Id, HistoryRevision, command, _acceptingInput, Guid.NewGuid()));
+                () => _store.Inputs.Admit(Id, HistoryRevision, command, _acceptingInput, Guid.NewGuid()));
 
             // Only the call that saved the acceptance may start the run; a retained
             // Accepted receipt from an earlier call must not start it again.
@@ -79,7 +79,7 @@ public abstract class SessionBase
         Task stopCallbacks = Task.CompletedTask;
         using (await LockAsync())
         {
-            WriteToStore(() => _store.RequestStop(Id, runId));
+            WriteToStore(() => _store.Runs.RequestStop(Id, runId));
 
             // Checked under the lock, so a stale run ID cannot stop a replacement run.
             if (IsCurrentRun(runId))
@@ -100,7 +100,7 @@ public abstract class SessionBase
         {
             if (!IsCurrentRun(runId))
             {
-                return _store.ReadSettlement(Id, runId)
+                return _store.Runs.ReadSettlement(Id, runId)
                     ?? throw new InvalidOperationException($"Run '{runId}' has no known settlement in this session.");
             }
 
@@ -115,19 +115,19 @@ public abstract class SessionBase
     internal async Task<LlmRequest?> ClaimNextRequestAsync(Guid runId)
     {
         using var held = await LockAsync();
-        return IsCurrentRun(runId) ? _store.ClaimNextRequest(Id, runId, HistoryRevision) : null;
+        return IsCurrentRun(runId) ? _store.Runs.ClaimNextRequest(Id, runId, HistoryRevision) : null;
     }
 
     internal async Task<bool> RecordOutputAsync(Guid runId, LlmResponseChunk chunk)
     {
         using var held = await LockAsync();
-        return IsCurrentRun(runId) && _store.AppendOutput(Id, runId, HistoryRevision, chunk);
+        return IsCurrentRun(runId) && _store.Output.Append(Id, runId, HistoryRevision, chunk);
     }
 
     internal async Task<bool> CompleteRequestAsync(Guid runId, LlmRequestOutcome outcome)
     {
         using var held = await LockAsync();
-        return IsCurrentRun(runId) && _store.CompleteRequest(Id, runId, HistoryRevision, outcome);
+        return IsCurrentRun(runId) && _store.Output.CompleteRequest(Id, runId, HistoryRevision, outcome);
     }
 
     // Caller holds the lock.
@@ -188,7 +188,7 @@ public abstract class SessionBase
     private void Settle(SessionExecution execution,
         TaskCompletionSource<ExecutionResult> settlement, ExecutionOutcome outcome)
     {
-        ExecutionResult saved = _store.TrySettle(Id, execution.RunId, outcome)
+        ExecutionResult saved = _store.Runs.TrySettle(Id, execution.RunId, outcome)
             ?? throw new InvalidOperationException("The current run could not be settled.");
 
         execution.Dispose();

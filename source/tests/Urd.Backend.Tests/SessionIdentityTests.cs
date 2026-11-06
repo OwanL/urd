@@ -22,7 +22,7 @@ public sealed class SessionIdentityTests
             created = await manager.CreatePrimaryAsync();
             Assert.NotEqual(Guid.Empty, created.Id);
             Assert.Equal(0L, created.HistoryRevision);
-            Assert.Equal(created.Id, store.ReadSession(created.Id)!.Id);
+            Assert.Equal(created.Id, store.Sessions.Read(created.Id)!.Id);
         }
 
         Assert.Equal(3L, database.Scalar("PRAGMA user_version;"));
@@ -45,12 +45,12 @@ public sealed class SessionIdentityTests
         var manager = new SessionManager(store, client);
         Guid missing = Guid.NewGuid();
         await Assert.ThrowsAsync<KeyNotFoundException>(() => manager.GetPrimaryAsync(missing));
-        Assert.Null(store.ReadSession(missing));
+        Assert.Null(store.Sessions.Read(missing));
         Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM sessions;"));
 
         PrimarySession created = await manager.CreatePrimaryAsync();
         Assert.Same(created, await manager.GetPrimaryAsync(created.Id));
-        Assert.Equal(created.Id, store.ReadSession(created.Id)!.Id);
+        Assert.Equal(created.Id, store.Sessions.Read(created.Id)!.Id);
         Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM sessions;"));
     }
 
@@ -59,7 +59,7 @@ public sealed class SessionIdentityTests
     {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
-        SessionRecord saved = store.CreatePrimary(Guid.NewGuid());
+        SessionRecord saved = store.Sessions.CreatePrimary(Guid.NewGuid());
         using var client = IdentityClient();
         var manager = new SessionManager(store, client);
         var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -91,7 +91,7 @@ public sealed class SessionIdentityTests
         Guid id = Guid.NewGuid();
         using (SessionStore store = SessionStore.Open(database.Path))
         {
-            store.CreatePrimary(id);
+            store.Sessions.CreatePrimary(id);
         }
 
         database.Execute("UPDATE sessions SET history_revision = 7;");
@@ -100,7 +100,7 @@ public sealed class SessionIdentityTests
         using (SessionStore store = SessionStore.Open(database.Path))
         {
             borrowedStore = store;
-            loaded = store.ReadSession(id)!;
+            loaded = store.Sessions.Read(id)!;
         }
 
         using var client = IdentityClient();
@@ -117,10 +117,10 @@ public sealed class SessionIdentityTests
     {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
-        SessionRecord saved = store.CreatePrimary(Guid.NewGuid());
-        SqliteException error = Assert.Throws<SqliteException>(() => store.CreatePrimary(saved.Id));
+        SessionRecord saved = store.Sessions.CreatePrimary(Guid.NewGuid());
+        SqliteException error = Assert.Throws<SqliteException>(() => store.Sessions.CreatePrimary(saved.Id));
         Assert.Equal(19, error.SqliteErrorCode);
-        Assert.Equal(saved, store.ReadSession(saved.Id));
+        Assert.Equal(saved, store.Sessions.Read(saved.Id));
         Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM sessions;"));
     }
 
@@ -130,7 +130,7 @@ public sealed class SessionIdentityTests
         using var database = new TemporaryDatabase();
         using (SessionStore store = SessionStore.Open(database.Path))
         {
-            store.CreatePrimary(Guid.NewGuid());
+            store.Sessions.CreatePrimary(Guid.NewGuid());
         }
 
         database.Execute("PRAGMA user_version = 4;");
@@ -162,7 +162,7 @@ public sealed class SessionIdentityTests
         SessionStore store = SessionStore.Open(database.Path);
         store.Dispose();
         store.Dispose();
-        Assert.Throws<ObjectDisposedException>(() => store.ReadSession(Guid.NewGuid()));
-        Assert.Throws<ObjectDisposedException>(() => store.CreatePrimary(Guid.NewGuid()));
+        Assert.Throws<ObjectDisposedException>(() => store.Sessions.Read(Guid.NewGuid()));
+        Assert.Throws<ObjectDisposedException>(() => store.Sessions.CreatePrimary(Guid.NewGuid()));
     }
 }

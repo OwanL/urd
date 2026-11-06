@@ -302,7 +302,7 @@ public sealed class SessionExecutionTests
         var store = SessionStore.Open(database.Path);
         var client = new ScriptedChatClient(token => CancellationCallbackFailureResponse(
             requestEntered, providerExited, token));
-        var session = new PrimarySession(store.CreatePrimary(Guid.NewGuid()), store, client);
+        var session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid()), store, client);
         Guid? runId = null;
         try
         {
@@ -358,7 +358,7 @@ public sealed class SessionExecutionTests
         var store = SessionStore.Open(database.Path);
         var disposed = Signal();
         var client = new ScriptedChatClient(token => WriteAndCleanupFailureResponse(disposed, token));
-        var session = new PrimarySession(store.CreatePrimary(Guid.NewGuid()), store, client);
+        var session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid()), store, client);
         Guid? runId = null;
         try
         {
@@ -431,7 +431,7 @@ public sealed class SessionExecutionTests
         var store = SessionStore.Open(database.Path);
         var cleaned = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var client = new ScriptedChatClient(token => WriteFailureResponse(cleaned, token));
-        var session = new PrimarySession(store.CreatePrimary(Guid.NewGuid()), store, client);
+        var session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid()), store, client);
         Guid? runId = null;
         var command = new InputCommand(Guid.NewGuid(), 0, "go");
         try
@@ -749,7 +749,7 @@ public sealed class SessionExecutionTests
             _client = client;
             Database = new TemporaryDatabase();
             _store = SessionStore.Open(Database.Path);
-            Session = new PrimarySession(_store.CreatePrimary(Guid.NewGuid()), _store, client);
+            Session = new PrimarySession(_store.Sessions.CreatePrimary(Guid.NewGuid()), _store, client);
         }
 
         internal TemporaryDatabase Database { get; }

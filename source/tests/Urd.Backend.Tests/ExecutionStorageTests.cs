@@ -14,7 +14,7 @@ public sealed class ExecutionStorageTests
     {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
-        Guid session = store.CreatePrimary(Guid.NewGuid()).Id;
+        Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
         var input = new InputCommand(Guid.NewGuid(), 0, "atomic input");
         Guid run = Guid.NewGuid();
         database.Execute("""
@@ -25,18 +25,18 @@ public sealed class ExecutionStorageTests
                 INSERT INTO test_child VALUES (1);
             END;
             """);
-        Assert.Throws<SqliteException>(() => store.AdmitInput(session, 0, input, true, run));
-        Assert.Null(store.ReadInputReceipt(session, input.InputId));
-        Assert.False(store.RunExists(session, run));
+        Assert.Throws<SqliteException>(() => store.Inputs.Admit(session, 0, input, true, run));
+        Assert.Null(store.Inputs.ReadReceipt(session, input.InputId));
+        Assert.False(store.Runs.Exists(session, run));
         Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM input_decisions;"));
         Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM execution_runs;"));
         Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM test_child;"));
 
         database.Execute("DROP TRIGGER fail_run;");
-        var admitted = store.AdmitInput(session, 0, input, true, run);
+        var admitted = store.Inputs.Admit(session, 0, input, true, run);
         Assert.True(admitted.NewlyAccepted);
         Assert.Equal(run, admitted.Receipt.RunId);
-        Assert.True(store.RunExists(session, run));
+        Assert.True(store.Runs.Exists(session, run));
         Assert.Equal(1L, database.Scalar("""
             SELECT COUNT(*) FROM input_decisions i JOIN execution_runs r
             ON r.session_id = i.session_id AND r.input_id = i.input_id AND r.run_id = i.run_id;
@@ -52,20 +52,20 @@ public sealed class ExecutionStorageTests
         InputReceipt receipt;
         using (SessionStore store = SessionStore.Open(database.Path))
         {
-            store.CreatePrimary(session);
-            receipt = store.AdmitInput(session, 0, input, true, run).Receipt;
-            store.RequestStop(session, run);
-            Assert.Equal(ExecutionOutcome.Cancelled, store.TrySettle(session, run, ExecutionOutcome.Completed)!.Outcome);
+            store.Sessions.CreatePrimary(session);
+            receipt = store.Inputs.Admit(session, 0, input, true, run).Receipt;
+            store.Runs.RequestStop(session, run);
+            Assert.Equal(ExecutionOutcome.Cancelled, store.Runs.TrySettle(session, run, ExecutionOutcome.Completed)!.Outcome);
         }
 
         database.Execute("UPDATE sessions SET history_revision = 7;");
         using SessionStore reopened = SessionStore.Open(database.Path);
-        var retry = reopened.AdmitInput(session, 7, input, false, Guid.Empty);
+        var retry = reopened.Inputs.Admit(session, 7, input, false, Guid.Empty);
         Assert.Equal(receipt, retry.Receipt);
         Assert.False(retry.NewlyAccepted);
-        Assert.Null(reopened.ClaimNextRequest(session, run, 7));
-        Assert.Throws<InvalidOperationException>(() => reopened.AdmitInput(session, 7, input with { Text = "changed" }, false, Guid.NewGuid()));
-        Assert.Throws<InvalidOperationException>(() => reopened.AdmitInput(session, 7, input with { ExpectedHistoryRevision = 7 }, false, Guid.NewGuid()));
+        Assert.Null(reopened.Runs.ClaimNextRequest(session, run, 7));
+        Assert.Throws<InvalidOperationException>(() => reopened.Inputs.Admit(session, 7, input with { Text = "changed" }, false, Guid.NewGuid()));
+        Assert.Throws<InvalidOperationException>(() => reopened.Inputs.Admit(session, 7, input with { ExpectedHistoryRevision = 7 }, false, Guid.NewGuid()));
         Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM execution_runs;"));
     }
 
@@ -74,21 +74,21 @@ public sealed class ExecutionStorageTests
     {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
-        Guid session = store.CreatePrimary(Guid.NewGuid()).Id, run = Guid.NewGuid();
-        store.AdmitInput(session, 0, new(Guid.NewGuid(), 0, "accepted"), true, run);
+        Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, run = Guid.NewGuid();
+        store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "accepted"), true, run);
         var busyInput = new InputCommand(Guid.NewGuid(), 0, "refused while busy");
-        var busy = store.AdmitInput(session, 0, busyInput, true, Guid.NewGuid());
+        var busy = store.Inputs.Admit(session, 0, busyInput, true, Guid.NewGuid());
         Assert.Equal(InputRefusalReason.Capacity, busy.Receipt.RefusalReason);
         Assert.False(busy.NewlyAccepted);
         Assert.Null(busy.Receipt.RunId);
-        store.RequestStop(session, run);
-        var stopped = store.AdmitInput(session, 0, new(Guid.NewGuid(), 0, "refused while stopping"), true, Guid.NewGuid());
+        store.Runs.RequestStop(session, run);
+        var stopped = store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "refused while stopping"), true, Guid.NewGuid());
         Assert.Equal(InputRefusalReason.Stopping, stopped.Receipt.RefusalReason);
-        store.TrySettle(session, run, ExecutionOutcome.Cancelled);
-        Assert.Equal(busy.Receipt, store.AdmitInput(session, 0, busyInput, true, Guid.NewGuid()).Receipt);
+        store.Runs.TrySettle(session, run, ExecutionOutcome.Cancelled);
+        Assert.Equal(busy.Receipt, store.Inputs.Admit(session, 0, busyInput, true, Guid.NewGuid()).Receipt);
         Guid nextRun = Guid.NewGuid();
-        store.AdmitInput(session, 0, new(Guid.NewGuid(), 0, "next accepted"), true, nextRun);
-        LlmRequest next = store.ClaimNextRequest(session, nextRun, 0)!;
+        store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "next accepted"), true, nextRun);
+        LlmRequest next = store.Runs.ClaimNextRequest(session, nextRun, 0)!;
         Assert.Equal(new[] { "accepted", "next accepted" }, next.Messages.Select(message => message.Text));
         Assert.Equal(2L, database.Scalar("SELECT COUNT(*) FROM execution_runs;"));
         Assert.Equal(4L, database.Scalar("SELECT COUNT(*) FROM input_decisions;"));
@@ -106,21 +106,21 @@ public sealed class ExecutionStorageTests
     {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
-        Guid session = store.CreatePrimary(Guid.NewGuid()).Id, run = Guid.NewGuid();
-        store.AdmitInput(session, 0, new(Guid.NewGuid(), 0, "accepted"), true, run);
+        Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, run = Guid.NewGuid();
+        store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "accepted"), true, run);
         if (stopRequested)
         {
-            store.RequestStop(session, run);
+            store.Runs.RequestStop(session, run);
         }
 
         var input = new InputCommand(Guid.NewGuid(), expectedRevision, "new input");
-        var admissionResult = store.AdmitInput(session, handleRevision, input, admissionEnabled, Guid.NewGuid());
+        var admissionResult = store.Inputs.Admit(session, handleRevision, input, admissionEnabled, Guid.NewGuid());
 
         Assert.Equal(InputDecision.Refused, admissionResult.Receipt.Decision);
         Assert.Equal(expectedReason, admissionResult.Receipt.RefusalReason);
         Assert.False(admissionResult.NewlyAccepted);
         Assert.Null(admissionResult.Receipt.RunId);
-        Assert.Equal(admissionResult.Receipt, store.ReadInputReceipt(session, input.InputId));
+        Assert.Equal(admissionResult.Receipt, store.Inputs.ReadReceipt(session, input.InputId));
         Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM execution_runs;"));
     }
 
@@ -131,21 +131,21 @@ public sealed class ExecutionStorageTests
         Guid session = Guid.NewGuid(), run = Guid.NewGuid(), requestId;
         using (SessionStore store = SessionStore.Open(database.Path))
         {
-            store.CreatePrimary(session);
-            store.AdmitInput(session, 0, new(Guid.NewGuid(), 0, "claimed"), true, run);
-            LlmRequest request = store.ClaimNextRequest(session, run, 0)!;
+            store.Sessions.CreatePrimary(session);
+            store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "claimed"), true, run);
+            LlmRequest request = store.Runs.ClaimNextRequest(session, run, 0)!;
             requestId = request.RequestId;
             Assert.NotEqual(Guid.Empty, requestId);
             Assert.Single(request.Messages);
-            Assert.Null(store.ClaimNextRequest(session, run, 0));
+            Assert.Null(store.Runs.ClaimNextRequest(session, run, 0));
         }
 
         using SessionStore reopened = SessionStore.Open(database.Path);
-        Assert.Null(reopened.ClaimNextRequest(session, run, 0));
-        Assert.Null(reopened.ReadSettlement(session, run));
+        Assert.Null(reopened.Runs.ClaimNextRequest(session, run, 0));
+        Assert.Null(reopened.Runs.ReadSettlement(session, run));
         Assert.Equal(requestId.ToString("D"), database.Scalar("SELECT request_id FROM execution_requests;"));
         Assert.Equal(InputRefusalReason.Capacity,
-            reopened.AdmitInput(session, 0, new(Guid.NewGuid(), 0, "not replay or replacement"), true, Guid.NewGuid()).Receipt.RefusalReason);
+            reopened.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "not replay or replacement"), true, Guid.NewGuid()).Receipt.RefusalReason);
     }
 
     [Fact]
@@ -153,29 +153,29 @@ public sealed class ExecutionStorageTests
     {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
-        Guid session = store.CreatePrimary(Guid.NewGuid()).Id, run = Guid.NewGuid(), output = Guid.NewGuid();
-        store.AdmitInput(session, 0, new(Guid.NewGuid(), 0, "first \0 input"), true, run);
-        LlmRequest request = store.ClaimNextRequest(session, run, 0)!;
+        Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, run = Guid.NewGuid(), output = Guid.NewGuid();
+        store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "first \0 input"), true, run);
+        LlmRequest request = store.Runs.ClaimNextRequest(session, run, 0)!;
         var firstChunk = new LlmResponseChunk(request.RequestId, output, 0, "part🙂", false);
-        Assert.False(store.AppendOutput(session, run, 0, firstChunk with { ChunkIndex = 1 }));
-        Assert.True(store.AppendOutput(session, run, 0, firstChunk));
-        Assert.False(store.AppendOutput(session, run, 0, firstChunk));
-        Assert.False(store.AppendOutput(session, run, 0, firstChunk with { ChunkIndex = 1, ResponseId = Guid.NewGuid() }));
-        Assert.False(store.CompleteRequest(session, run, 0, new(request.RequestId, ExecutionOutcome.Completed)));
-        Assert.Null(store.TrySettle(session, run, ExecutionOutcome.Completed));
-        Assert.True(store.AppendOutput(session, run, 0, firstChunk with { ChunkIndex = 1, Text = "\0 final", IsFinal = true }));
-        Assert.False(store.AppendOutput(session, run, 0, firstChunk with { ChunkIndex = 2 }));
-        Assert.Null(store.TrySettle(session, run, ExecutionOutcome.Completed)); // Final text is not request success.
+        Assert.False(store.Output.Append(session, run, 0, firstChunk with { ChunkIndex = 1 }));
+        Assert.True(store.Output.Append(session, run, 0, firstChunk));
+        Assert.False(store.Output.Append(session, run, 0, firstChunk));
+        Assert.False(store.Output.Append(session, run, 0, firstChunk with { ChunkIndex = 1, ResponseId = Guid.NewGuid() }));
+        Assert.False(store.Output.CompleteRequest(session, run, 0, new(request.RequestId, ExecutionOutcome.Completed)));
+        Assert.Null(store.Runs.TrySettle(session, run, ExecutionOutcome.Completed));
+        Assert.True(store.Output.Append(session, run, 0, firstChunk with { ChunkIndex = 1, Text = "\0 final", IsFinal = true }));
+        Assert.False(store.Output.Append(session, run, 0, firstChunk with { ChunkIndex = 2 }));
+        Assert.Null(store.Runs.TrySettle(session, run, ExecutionOutcome.Completed)); // Final text is not request success.
         var completion = new LlmRequestOutcome(request.RequestId, ExecutionOutcome.Completed);
-        Assert.True(store.CompleteRequest(session, run, 0, completion));
-        Assert.True(store.CompleteRequest(session, run, 0, completion));
-        Assert.False(store.CompleteRequest(session, run, 0, completion with { Outcome = ExecutionOutcome.Failed }));
-        Assert.Equal(new ExecutionResult(run, ExecutionOutcome.Completed), store.TrySettle(session, run, ExecutionOutcome.Completed));
-        Assert.Equal(new ExecutionResult(run, ExecutionOutcome.Completed), store.TrySettle(session, run, ExecutionOutcome.Failed));
+        Assert.True(store.Output.CompleteRequest(session, run, 0, completion));
+        Assert.True(store.Output.CompleteRequest(session, run, 0, completion));
+        Assert.False(store.Output.CompleteRequest(session, run, 0, completion with { Outcome = ExecutionOutcome.Failed }));
+        Assert.Equal(new ExecutionResult(run, ExecutionOutcome.Completed), store.Runs.TrySettle(session, run, ExecutionOutcome.Completed));
+        Assert.Equal(new ExecutionResult(run, ExecutionOutcome.Completed), store.Runs.TrySettle(session, run, ExecutionOutcome.Failed));
 
         Guid nextRun = Guid.NewGuid();
-        store.AdmitInput(session, 0, new(Guid.NewGuid(), 0, "second"), true, nextRun);
-        LlmRequest next = store.ClaimNextRequest(session, nextRun, 0)!;
+        store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "second"), true, nextRun);
+        LlmRequest next = store.Runs.ClaimNextRequest(session, nextRun, 0)!;
         Assert.Equal(new[] { ChatRole.User, ChatRole.Assistant, ChatRole.User }, next.Messages.Select(message => message.Role));
         Assert.Equal(new[] { "first \0 input", "part🙂\0 final", "second" }, next.Messages.Select(message => message.Text));
         Assert.Equal(2L, database.Scalar("SELECT COUNT(*) FROM execution_output;"));
@@ -187,19 +187,19 @@ public sealed class ExecutionStorageTests
     {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
-        Guid session = store.CreatePrimary(Guid.NewGuid()).Id, run = Guid.NewGuid();
-        store.AdmitInput(session, 0, new(Guid.NewGuid(), 0, "current"), true, run);
-        Assert.Null(store.ClaimNextRequest(session, run, 1));
-        Assert.Null(store.ClaimNextRequest(Guid.NewGuid(), run, 0));
-        LlmRequest request = store.ClaimNextRequest(session, run, 0)!;
+        Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, run = Guid.NewGuid();
+        store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "current"), true, run);
+        Assert.Null(store.Runs.ClaimNextRequest(session, run, 1));
+        Assert.Null(store.Runs.ClaimNextRequest(Guid.NewGuid(), run, 0));
+        LlmRequest request = store.Runs.ClaimNextRequest(session, run, 0)!;
         var batch = new LlmResponseChunk(request.RequestId, Guid.NewGuid(), 0, "late", true);
-        Assert.False(store.AppendOutput(session, Guid.NewGuid(), 0, batch));
-        Assert.False(store.AppendOutput(session, run, 1, batch));
+        Assert.False(store.Output.Append(session, Guid.NewGuid(), 0, batch));
+        Assert.False(store.Output.Append(session, run, 1, batch));
         database.Execute("UPDATE sessions SET history_revision = 1;");
-        Assert.False(store.AppendOutput(session, run, 0, batch));
-        Assert.False(store.CompleteRequest(session, run, 0, new(request.RequestId, ExecutionOutcome.Failed)));
+        Assert.False(store.Output.Append(session, run, 0, batch));
+        Assert.False(store.Output.CompleteRequest(session, run, 0, new(request.RequestId, ExecutionOutcome.Failed)));
         Assert.Equal(InputRefusalReason.StaleRevision,
-            store.AdmitInput(session, 0, new(Guid.NewGuid(), 0, "stale"), true, Guid.NewGuid()).Receipt.RefusalReason);
+            store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "stale"), true, Guid.NewGuid()).Receipt.RefusalReason);
         Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM execution_output;"));
     }
 
@@ -208,25 +208,25 @@ public sealed class ExecutionStorageTests
     {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
-        Guid session = store.CreatePrimary(Guid.NewGuid()).Id, run = Guid.NewGuid();
-        store.AdmitInput(session, 0, new(Guid.NewGuid(), 0, "stop"), true, run);
-        LlmRequest request = store.ClaimNextRequest(session, run, 0)!;
+        Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, run = Guid.NewGuid();
+        store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "stop"), true, run);
+        LlmRequest request = store.Runs.ClaimNextRequest(session, run, 0)!;
         var batch = new LlmResponseChunk(request.RequestId, Guid.NewGuid(), 0, "committed before stop", true);
-        Assert.True(store.AppendOutput(session, run, 0, batch));
-        store.RequestStop(session, run);
-        Assert.False(store.CompleteRequest(session, run, 0, new(request.RequestId, ExecutionOutcome.Completed)));
-        Assert.False(store.AppendOutput(session, run, 0, batch with { ChunkIndex = 1 }));
-        Assert.True(store.CompleteRequest(session, run, 0, new(request.RequestId, ExecutionOutcome.Cancelled)));
-        Assert.Equal(ExecutionOutcome.Cancelled, store.TrySettle(session, run, ExecutionOutcome.Completed)!.Outcome);
+        Assert.True(store.Output.Append(session, run, 0, batch));
+        store.Runs.RequestStop(session, run);
+        Assert.False(store.Output.CompleteRequest(session, run, 0, new(request.RequestId, ExecutionOutcome.Completed)));
+        Assert.False(store.Output.Append(session, run, 0, batch with { ChunkIndex = 1 }));
+        Assert.True(store.Output.CompleteRequest(session, run, 0, new(request.RequestId, ExecutionOutcome.Cancelled)));
+        Assert.Equal(ExecutionOutcome.Cancelled, store.Runs.TrySettle(session, run, ExecutionOutcome.Completed)!.Outcome);
 
         Guid nextRun = Guid.NewGuid();
-        store.AdmitInput(session, 0, new(Guid.NewGuid(), 0, "replacement after cleanup"), true, nextRun);
-        store.RequestStop(session, run);
-        store.RequestStop(Guid.NewGuid(), nextRun);
-        Assert.NotNull(store.ClaimNextRequest(session, nextRun, 0));
-        Assert.Null(store.ReadSettlement(session, nextRun));
-        Assert.Equal(ExecutionOutcome.Cancelled, store.ReadSettlement(session, run)!.Outcome);
-        Assert.Null(store.TrySettle(session, Guid.NewGuid(), ExecutionOutcome.Failed));
+        store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "replacement after cleanup"), true, nextRun);
+        store.Runs.RequestStop(session, run);
+        store.Runs.RequestStop(Guid.NewGuid(), nextRun);
+        Assert.NotNull(store.Runs.ClaimNextRequest(session, nextRun, 0));
+        Assert.Null(store.Runs.ReadSettlement(session, nextRun));
+        Assert.Equal(ExecutionOutcome.Cancelled, store.Runs.ReadSettlement(session, run)!.Outcome);
+        Assert.Null(store.Runs.TrySettle(session, Guid.NewGuid(), ExecutionOutcome.Failed));
     }
 
     [Fact]
@@ -234,17 +234,17 @@ public sealed class ExecutionStorageTests
     {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
-        Guid session = store.CreatePrimary(Guid.NewGuid()).Id, run = Guid.NewGuid();
-        store.AdmitInput(session, 0, new(Guid.NewGuid(), 0, "fail"), true, run);
-        LlmRequest request = store.ClaimNextRequest(session, run, 0)!;
+        Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, run = Guid.NewGuid();
+        store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "fail"), true, run);
+        LlmRequest request = store.Runs.ClaimNextRequest(session, run, 0)!;
         var batch = new LlmResponseChunk(request.RequestId, Guid.NewGuid(), 0, new string('é', 8192), false);
-        Assert.Throws<ArgumentException>(() => store.AppendOutput(session, run, 0, batch with { Text = batch.Text + "x" }));
-        Assert.ThrowsAny<ArgumentException>(() => store.AppendOutput(session, run, 0, batch with { Text = "\ud800" }));
-        Assert.True(store.AppendOutput(session, run, 0, batch));
-        Assert.True(store.CompleteRequest(session, run, 0, new(request.RequestId, ExecutionOutcome.Failed, "actual error")));
-        Assert.False(store.CompleteRequest(session, run, 0, new(request.RequestId, ExecutionOutcome.Failed, "different")));
-        Assert.False(store.AppendOutput(session, run, 0, batch with { ChunkIndex = 1 }));
-        Assert.Equal(ExecutionOutcome.Failed, store.TrySettle(session, run, ExecutionOutcome.Completed)!.Outcome);
+        Assert.Throws<ArgumentException>(() => store.Output.Append(session, run, 0, batch with { Text = batch.Text + "x" }));
+        Assert.ThrowsAny<ArgumentException>(() => store.Output.Append(session, run, 0, batch with { Text = "\ud800" }));
+        Assert.True(store.Output.Append(session, run, 0, batch));
+        Assert.True(store.Output.CompleteRequest(session, run, 0, new(request.RequestId, ExecutionOutcome.Failed, "actual error")));
+        Assert.False(store.Output.CompleteRequest(session, run, 0, new(request.RequestId, ExecutionOutcome.Failed, "different")));
+        Assert.False(store.Output.Append(session, run, 0, batch with { ChunkIndex = 1 }));
+        Assert.Equal(ExecutionOutcome.Failed, store.Runs.TrySettle(session, run, ExecutionOutcome.Completed)!.Outcome);
         Assert.Equal("actual error", database.Scalar("SELECT error FROM execution_requests;"));
         Assert.Equal(16384L, database.Scalar("SELECT length(text_utf8) FROM execution_output;"));
     }

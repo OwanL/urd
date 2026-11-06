@@ -5,8 +5,7 @@ using Urd.Core.Sessions;
 namespace Urd.Core.Storage;
 
 // Projects a bounded session history and its current execution state.
-internal sealed class SnapshotReader
-{
+internal sealed class SnapshotReader {
     private const int SnapshotMessageLimit = 60;
     private readonly Database _database;
     private readonly MessageContentReader _content;
@@ -35,24 +34,20 @@ internal sealed class SnapshotReader
         ORDER BY ordinal DESC LIMIT 1;
         """;
 
-    internal SnapshotReader(Database database, MessageContentReader content)
-    {
+    internal SnapshotReader(Database database, MessageContentReader content) {
         _database = database;
         _content = content;
     }
 
-    internal StoredSessionSnapshot Read(Guid sessionId)
-    {
-        if (sessionId == Guid.Empty)
-        {
+    internal StoredSessionSnapshot Read(Guid sessionId) {
+        if (sessionId == Guid.Empty) {
             throw new ArgumentException("Session ID cannot be empty.", nameof(sessionId));
         }
 
         return _database.Read(transaction => Read(transaction, sessionId));
     }
 
-    private StoredSessionSnapshot Read(SqliteTransaction transaction, Guid sessionId)
-    {
+    private StoredSessionSnapshot Read(SqliteTransaction transaction, Guid sessionId) {
         long historyRevision = ReadHistoryRevision(transaction, sessionId);
         (Guid? unsettledRun, bool stopRequested) = ReadUnsettledRun(transaction, sessionId);
         ExecutionResult? lastSettlement = ReadLastSettlement(transaction, sessionId);
@@ -63,23 +58,20 @@ internal sealed class SnapshotReader
         return new(historyRevision, unsettledRun, stopRequested, lastSettlement, messages, hasOlder);
     }
 
-    private long ReadHistoryRevision(SqliteTransaction transaction, Guid sessionId)
-    {
+    private long ReadHistoryRevision(SqliteTransaction transaction, Guid sessionId) {
         using SqliteCommand revisionRead = _database.Command(transaction,
             "SELECT history_revision FROM sessions WHERE session_id = $session;", ("$session", sessionId));
         return revisionRead.ExecuteScalar() is long value
             ? value : throw new KeyNotFoundException($"Session {sessionId} does not exist.");
     }
 
-    private (Guid? RunId, bool StopRequested) ReadUnsettledRun(SqliteTransaction transaction, Guid sessionId)
-    {
+    private (Guid? RunId, bool StopRequested) ReadUnsettledRun(SqliteTransaction transaction, Guid sessionId) {
         using SqliteCommand activeRead = _database.Command(transaction, SnapshotUnsettledSql, ("$session", sessionId));
         using SqliteDataReader reader = activeRead.ExecuteReader();
         return reader.Read() ? (reader.GetGuid(0), reader.GetBoolean(1)) : (null, false);
     }
 
-    private ExecutionResult? ReadLastSettlement(SqliteTransaction transaction, Guid sessionId)
-    {
+    private ExecutionResult? ReadLastSettlement(SqliteTransaction transaction, Guid sessionId) {
         using SqliteCommand terminalRead = _database.Command(transaction, SnapshotSettlementSql,
             ("$session", sessionId));
         using SqliteDataReader reader = terminalRead.ExecuteReader();
@@ -87,25 +79,21 @@ internal sealed class SnapshotReader
     }
 
     private List<(MessageRef Message, ExecutionOutcome? Settlement)> ReadCandidates(
-        SqliteTransaction transaction, Guid sessionId, long historyRevision)
-    {
+        SqliteTransaction transaction, Guid sessionId, long historyRevision) {
         // Newest first, with assistant after input in chronological order.
         var candidates = new List<(MessageRef Message, ExecutionOutcome? Settlement)>();
         using SqliteCommand runsRead = _database.Command(transaction, SnapshotRunsSql,
             ("$session", sessionId),
             ("$revision", historyRevision));
         using SqliteDataReader reader = runsRead.ExecuteReader();
-        while (candidates.Count <= SnapshotMessageLimit && reader.Read())
-        {
+        while (candidates.Count <= SnapshotMessageLimit && reader.Read()) {
             Guid run = reader.GetGuid(0);
             ExecutionOutcome? outcome = reader.IsDBNull(2) ? null : (ExecutionOutcome)reader.GetInt32(2);
-            if (!reader.IsDBNull(3))
-            {
+            if (!reader.IsDBNull(3)) {
                 candidates.Add((new(run, reader.GetGuid(3), MessageRole.Assistant, historyRevision), outcome));
             }
 
-            if (candidates.Count <= SnapshotMessageLimit)
-            {
+            if (candidates.Count <= SnapshotMessageLimit) {
                 candidates.Add((new(run, reader.GetGuid(1), MessageRole.User, historyRevision), outcome));
             }
         }
@@ -114,11 +102,9 @@ internal sealed class SnapshotReader
     }
 
     private IReadOnlyList<MessagePreview> ReadPreviews(SqliteTransaction transaction, Guid sessionId,
-        List<(MessageRef Message, ExecutionOutcome? Settlement)> candidates)
-    {
+        List<(MessageRef Message, ExecutionOutcome? Settlement)> candidates) {
         var messages = new List<MessagePreview>(Math.Min(candidates.Count, SnapshotMessageLimit));
-        for (int index = Math.Min(candidates.Count, SnapshotMessageLimit) - 1; index >= 0; index--)
-        {
+        for (int index = Math.Min(candidates.Count, SnapshotMessageLimit) - 1; index >= 0; index--) {
             (MessageRef message, ExecutionOutcome? settlement) = candidates[index];
             MessageContentPage prefix = _content.Read(transaction, sessionId, new(message, 0, 0),
                 maximumUtf8Bytes: StorageText.MaximumBytes,

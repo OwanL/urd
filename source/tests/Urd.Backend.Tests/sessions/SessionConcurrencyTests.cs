@@ -9,18 +9,15 @@ using static Urd.Backend.Tests.Support.TestAsync;
 
 namespace Urd.Backend.Tests.Sessions;
 
-public sealed class SessionConcurrencyTests
-{
+public sealed class SessionConcurrencyTests {
     [Fact]
-    public async Task ConcurrentExactSubmissionsShareOneDurableReceiptRunAndModelRequest()
-    {
+    public async Task ConcurrentExactSubmissionsShareOneDurableReceiptRunAndModelRequest() {
         var ready = Signal();
         var start = Signal();
         var modelEntered = Signal();
         var modelRelease = Signal();
         int waiting = 0;
-        async IAsyncEnumerable<ChatResponseUpdate> Response([EnumeratorCancellation] CancellationToken token)
-        {
+        async IAsyncEnumerable<ChatResponseUpdate> Response([EnumeratorCancellation] CancellationToken token) {
             modelEntered.TrySetResult();
             await modelRelease.Task.WaitAsync(token);
             yield return new() { FinishReason = ChatFinishReason.Stop };
@@ -32,15 +29,13 @@ public sealed class SessionConcurrencyTests
         var manager = new SessionManager(store, client);
         PrimarySession session = await manager.CreatePrimaryAsync();
         var command = new InputCommand(Guid.NewGuid(), 0, "concurrent exact retry");
-        Task<InputReceipt>[] submissions = Enumerable.Range(0, 2).Select(_ => Task.Run(async () =>
-        {
+        Task<InputReceipt>[] submissions = Enumerable.Range(0, 2).Select(_ => Task.Run(async () => {
             if (Interlocked.Increment(ref waiting) == 2)
                 ready.TrySetResult();
             await start.Task;
             return await session.SubmitUserInputAsync(command);
         })).ToArray();
-        try
-        {
+        try {
             await ready.Task.WaitAsync(TestTimeout);
             start.TrySetResult();
             InputReceipt[] receipts = await Task.WhenAll(submissions).WaitAsync(TestTimeout);
@@ -63,16 +58,13 @@ public sealed class SessionConcurrencyTests
             Assert.Equal(ExecutionOutcome.Completed, settlements[0].Outcome);
             Assert.Equal(1, client.Calls);
             Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM execution_requests;"));
-        }
-        finally
-        {
+        } finally {
             start.TrySetResult();
             modelRelease.TrySetResult();
             // Join all callers before discovering runs, then drain owned work before disposal.
             InputReceipt[] receipts = await Task.WhenAll(submissions).WaitAsync(TestTimeout);
             foreach (Guid runId in receipts.Where(receipt => receipt.RunId.HasValue)
-                         .Select(receipt => receipt.RunId!.Value).Distinct())
-            {
+                         .Select(receipt => receipt.RunId!.Value).Distinct()) {
                 await session.RequestStopAsync(runId);
                 await session.WaitForSettlementAsync(runId).WaitAsync(TestTimeout);
             }
@@ -83,13 +75,11 @@ public sealed class SessionConcurrencyTests
     }
 
     [Fact]
-    public async Task CancellingSettlementWaitDoesNotCancelOwnedModelWork()
-    {
+    public async Task CancellingSettlementWaitDoesNotCancelOwnedModelWork() {
         var modelEntered = Signal();
         var modelRelease = Signal();
         CancellationToken modelToken = default;
-        async IAsyncEnumerable<ChatResponseUpdate> Response([EnumeratorCancellation] CancellationToken token)
-        {
+        async IAsyncEnumerable<ChatResponseUpdate> Response([EnumeratorCancellation] CancellationToken token) {
             modelToken = token;
             modelEntered.TrySetResult();
             await modelRelease.Task.WaitAsync(token);
@@ -104,8 +94,7 @@ public sealed class SessionConcurrencyTests
         PrimarySession session = await manager.CreatePrimaryAsync();
         Guid? ownedRun = null;
         using var waitCancellation = new CancellationTokenSource();
-        try
-        {
+        try {
             InputReceipt receipt = await session.SubmitUserInputAsync(new InputCommand(Guid.NewGuid(), 0, "go"));
             ownedRun = receipt.RunId;
             Assert.Equal(InputDecision.Accepted, receipt.Decision);
@@ -131,12 +120,9 @@ public sealed class SessionConcurrencyTests
                 database.Scalar("SELECT group_concat(CAST(text_utf8 AS TEXT), '' ORDER BY batch_index) FROM execution_output;"));
             Assert.Equal(1, client.Calls);
             Assert.Equal(0, client.DisposeCalls);
-        }
-        finally
-        {
+        } finally {
             modelRelease.TrySetResult();
-            if (ownedRun is { } runId)
-            {
+            if (ownedRun is { } runId) {
                 await session.RequestStopAsync(runId);
                 await session.WaitForSettlementAsync(runId).WaitAsync(TestTimeout);
             }

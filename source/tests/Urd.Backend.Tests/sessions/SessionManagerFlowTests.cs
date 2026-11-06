@@ -8,17 +8,14 @@ using Xunit;
 
 namespace Urd.Backend.Tests.Sessions;
 
-public sealed class SessionManagerFlowTests
-{
+public sealed class SessionManagerFlowTests {
     [Fact]
-    public async Task SharedClientStreamsAcrossCanonicalChatsAndRetainedRetriesNeverRestartWork()
-    {
+    public async Task SharedClientStreamsAcrossCanonicalChatsAndRetainedRetriesNeverRestartWork() {
         TimeSpan timeout = TimeSpan.FromSeconds(10);
         var bothEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         int entered = 0;
-        async IAsyncEnumerable<ChatResponseUpdate> Response([EnumeratorCancellation] CancellationToken token)
-        {
+        async IAsyncEnumerable<ChatResponseUpdate> Response([EnumeratorCancellation] CancellationToken token) {
             if (Interlocked.Increment(ref entered) == 2)
                 bothEntered.TrySetResult();
             await release.Task.WaitAsync(token);
@@ -29,8 +26,7 @@ public sealed class SessionManagerFlowTests
         var client = new ScriptedChatClient(Response);
         SessionStore? store = null;
         var runs = new List<(PrimarySession Session, Guid RunId)>();
-        try
-        {
+        try {
             store = SessionStore.Open(database.Path);
             var manager = new SessionManager(store, client);
             PrimarySession[] sessions = [await manager.CreatePrimaryAsync(), await manager.CreatePrimaryAsync()];
@@ -38,8 +34,7 @@ public sealed class SessionManagerFlowTests
             Guid inputId = Guid.NewGuid();
             InputCommand[] commands = [new(inputId, 0, "first chat"), new(inputId, 0, "second chat")];
             var receipts = new InputReceipt[2];
-            for (int i = 0; i < sessions.Length; i++)
-            {
+            for (int i = 0; i < sessions.Length; i++) {
                 Assert.Same(sessions[i], await manager.GetPrimaryAsync(sessions[i].Id));
                 receipts[i] = await sessions[i].SubmitUserInputAsync(commands[i]);
                 if (receipts[i].RunId is { } runId)
@@ -53,8 +48,7 @@ public sealed class SessionManagerFlowTests
             await bothEntered.Task.WaitAsync(timeout);
             foreach (var (session, runId) in runs)
                 Assert.False(session.WaitForSettlementAsync(runId).IsCompleted);
-            for (int i = 0; i < sessions.Length; i++)
-            {
+            for (int i = 0; i < sessions.Length; i++) {
                 Assert.Equal(receipts[i], await sessions[i].GetInputReceiptAsync(inputId));
                 InputReceipt retry = await sessions[i].SubmitUserInputAsync(commands[i]);
                 if (retry.RunId is { } runId && runId != receipts[i].RunId)
@@ -72,8 +66,7 @@ public sealed class SessionManagerFlowTests
 
             store = SessionStore.Open(database.Path);
             var reopenedManager = new SessionManager(store, client);
-            for (int i = 0; i < sessions.Length; i++)
-            {
+            for (int i = 0; i < sessions.Length; i++) {
                 PrimarySession loaded = await reopenedManager.GetPrimaryAsync(sessions[i].Id);
                 Assert.NotSame(sessions[i], loaded);
                 Assert.Same(loaded, await reopenedManager.GetPrimaryAsync(loaded.Id));
@@ -87,9 +80,7 @@ public sealed class SessionManagerFlowTests
             }
             Assert.Equal(2, client.Calls);
             Assert.Equal(0, client.DisposeCalls);
-        }
-        finally
-        {
+        } finally {
             release.TrySetResult();
             // A failed timed wait must not dispose borrowed resources beneath live work.
             await Task.WhenAll(runs.Select(run => run.Session.RequestStopAsync(run.RunId))).WaitAsync(timeout);

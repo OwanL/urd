@@ -4,16 +4,14 @@ namespace Urd.Backend.Tests.Support;
 
 // Streaming-only fake model client that replays a scripted response and counts calls.
 internal sealed class ScriptedChatClient(Func<CancellationToken, IAsyncEnumerable<ChatResponseUpdate>> script)
-    : IChatClient
-{
+    : IChatClient {
     private int _calls, _disposeCalls;
     internal int Calls => Volatile.Read(ref _calls);
     internal int DisposeCalls => Volatile.Read(ref _disposeCalls);
     internal IReadOnlyList<ChatMessage> LastRequest { get; private set; } = [];
 
     public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
-        ChatOptions? options = null, CancellationToken cancellationToken = default)
-    {
+        ChatOptions? options = null, CancellationToken cancellationToken = default) {
         ObjectDisposedException.ThrowIf(DisposeCalls != 0, this);
         LastRequest = messages.ToArray();
         Interlocked.Increment(ref _calls);

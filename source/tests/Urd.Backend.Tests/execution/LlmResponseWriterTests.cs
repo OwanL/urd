@@ -10,11 +10,9 @@ using static Urd.Backend.Tests.Support.TestAsync;
 namespace Urd.Backend.Tests.Execution;
 
 // Response buffering through a real session: chunk sizes, flush timing and Unicode boundaries.
-public sealed class LlmResponseWriterTests
-{
+public sealed class LlmResponseWriterTests {
     [Fact]
-    public async Task CoalescesTinyUpdatesAndSplitsOversizedTextAtUtf8ScalarBoundaries()
-    {
+    public async Task CoalescesTinyUpdatesAndSplitsOversizedTextAtUtf8ScalarBoundaries() {
         string text = new string('a', 16 * 1024 - 1) + "😀" + new string('b', 40_000) + "\0終";
         var client = new ScriptedChatClient(token => TextResponse(text, token));
         await using var fixture = new ExecutionFixture(client);
@@ -38,8 +36,7 @@ public sealed class LlmResponseWriterTests
     [InlineData(false, true)]
     [InlineData(true, false)]
     [InlineData(true, true)]
-    public async Task PreservesSupplementaryScalarAcrossUpdateBoundaries(bool splitScalar, bool overflowBoundary)
-    {
+    public async Task PreservesSupplementaryScalarAcrossUpdateBoundaries(bool splitScalar, bool overflowBoundary) {
         const int maxChunkBytes = 16 * 1024;
         string prefix = new string('a', overflowBoundary ? maxChunkBytes - 3 : maxChunkBytes - 4);
         const string scalar = "😀";
@@ -63,24 +60,20 @@ public sealed class LlmResponseWriterTests
     }
 
     [Fact]
-    public async Task FlushesDeadlineWhileTheSingleNextSourceReadIsPaused()
-    {
+    public async Task FlushesDeadlineWhileTheSingleNextSourceReadIsPaused() {
         var waiting = Signal();
         var release = Signal();
         var client = new ScriptedChatClient(token => Paused(waiting, release, token));
         await using var fixture = new ExecutionFixture(client);
         Guid runId = await fixture.StartRunAsync("go");
-        try
-        {
+        try {
             await waiting.Task.WaitAsync(TestTimeout);
             await StoredOutput.WaitForAnyAsync(fixture.Database);
             Assert.Equal("visible", StoredOutput.ReadText(fixture.Database));
             Assert.All(StoredOutput.Read(fixture.Database), row => Assert.False(row.Final));
             Assert.False(fixture.Session.WaitForSettlementAsync(runId).IsCompleted);
             Assert.Equal(1, client.Calls);
-        }
-        finally
-        {
+        } finally {
             release.TrySetResult();
         }
 
@@ -92,8 +85,7 @@ public sealed class LlmResponseWriterTests
     [InlineData(0xDC00, null)]
     [InlineData(0xD800, "x")]
     [InlineData(0xD800, null)]
-    public async Task RejectsMalformedOrIncompleteUnicodeWithoutFinalMarker(int firstCodeUnit, string? secondUpdate)
-    {
+    public async Task RejectsMalformedOrIncompleteUnicodeWithoutFinalMarker(int firstCodeUnit, string? secondUpdate) {
         // Attribute strings use UTF-8 metadata, so construct the lone surrogate at runtime.
         string firstUpdate = ((char)firstCodeUnit).ToString();
         string[] updates = secondUpdate is null ? [firstUpdate] : [firstUpdate, secondUpdate];
@@ -109,8 +101,7 @@ public sealed class LlmResponseWriterTests
     [Theory]
     [InlineData(0)]
     [InlineData(16 * 1024)]
-    public async Task PersistsEmptyAndExactBoundaryResponsesWithOrderedOutputIdentity(int textLength)
-    {
+    public async Task PersistsEmptyAndExactBoundaryResponsesWithOrderedOutputIdentity(int textLength) {
         string text = new string('x', textLength);
         var client = new ScriptedChatClient(token => ExactResponse(text, token));
         await using var fixture = new ExecutionFixture(client);
@@ -126,8 +117,7 @@ public sealed class LlmResponseWriterTests
         Guid responseId = output[0].ResponseId;
 
         Assert.NotEqual(Guid.Empty, responseId);
-        Assert.All(output, row =>
-        {
+        Assert.All(output, row => {
             Assert.Equal(requestId, row.RequestId);
             Assert.Equal(responseId, row.ResponseId);
         });
@@ -137,14 +127,11 @@ public sealed class LlmResponseWriterTests
         Assert.Single(output, row => row.Final);
         Assert.True(output[^1].Final);
 
-        if (textLength == 0)
-        {
+        if (textLength == 0) {
             Assert.Single(output);
             Assert.Empty(output[0].Bytes);
             Assert.Equal(0, output[0].ChunkIndex);
-        }
-        else
-        {
+        } else {
             Assert.Equal(2, output.Count);
             Assert.Equal(16 * 1024, output[0].Bytes.Length);
             Assert.False(output[0].Final);
@@ -155,11 +142,9 @@ public sealed class LlmResponseWriterTests
 
 
     private static async IAsyncEnumerable<ChatResponseUpdate> TextResponse(string text,
-        [EnumeratorCancellation] CancellationToken token)
-    {
+        [EnumeratorCancellation] CancellationToken token) {
         await Task.CompletedTask;
-        for (int i = 0; i < 1_000; i++)
-        {
+        for (int i = 0; i < 1_000; i++) {
             token.ThrowIfCancellationRequested();
             yield return Text(text[i].ToString());
         }
@@ -172,12 +157,10 @@ public sealed class LlmResponseWriterTests
 
 
     private static async IAsyncEnumerable<ChatResponseUpdate> ExactResponse(string text,
-        [EnumeratorCancellation] CancellationToken token)
-    {
+        [EnumeratorCancellation] CancellationToken token) {
         await Task.CompletedTask;
         token.ThrowIfCancellationRequested();
-        if (text.Length != 0)
-        {
+        if (text.Length != 0) {
             yield return Text(text);
         }
 

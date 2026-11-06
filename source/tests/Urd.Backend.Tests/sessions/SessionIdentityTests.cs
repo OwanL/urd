@@ -6,19 +6,16 @@ using Xunit;
 
 namespace Urd.Backend.Tests.Sessions;
 
-public sealed class SessionIdentityTests
-{
+public sealed class SessionIdentityTests {
     private static ScriptedChatClient IdentityClient()
         => new(_ => throw new InvalidOperationException("Identity operations must not start a request."));
 
     [Fact]
-    public async Task CommittedIdentitySurvivesReopen()
-    {
+    public async Task CommittedIdentitySurvivesReopen() {
         using var database = new TemporaryDatabase();
         using var client = IdentityClient();
         PrimarySession created;
-        using (SessionStore store = SessionStore.Open(database.Path))
-        {
+        using (SessionStore store = SessionStore.Open(database.Path)) {
             var manager = new SessionManager(store, client);
             created = await manager.CreatePrimaryAsync();
             Assert.NotEqual(Guid.Empty, created.Id);
@@ -38,8 +35,7 @@ public sealed class SessionIdentityTests
     }
 
     [Fact]
-    public async Task ManagerReturnsCanonicalHandleAndMissingLookupNeverInserts()
-    {
+    public async Task ManagerReturnsCanonicalHandleAndMissingLookupNeverInserts() {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
         using var client = IdentityClient();
@@ -56,8 +52,7 @@ public sealed class SessionIdentityTests
     }
 
     [Fact]
-    public async Task ConcurrentCreatesAndColdLookupsShareCanonicalHandles()
-    {
+    public async Task ConcurrentCreatesAndColdLookupsShareCanonicalHandles() {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
         SessionRecord saved = store.Sessions.CreatePrimary(Guid.NewGuid());
@@ -65,8 +60,7 @@ public sealed class SessionIdentityTests
         var manager = new SessionManager(store, client);
         var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Task<(PrimarySession Created, PrimarySession Loaded)>[] tasks = Enumerable.Range(0, 8)
-            .Select(_ => Task.Run(async () =>
-            {
+            .Select(_ => Task.Run(async () => {
                 await start.Task;
                 PrimarySession created = await manager.CreatePrimaryAsync();
                 PrimarySession loaded = await manager.GetPrimaryAsync(saved.Id);
@@ -79,27 +73,23 @@ public sealed class SessionIdentityTests
         Assert.All(results, result => Assert.Same(results[0].Loaded, result.Loaded));
         Assert.Equal(saved.Id, results[0].Loaded.Id);
         Assert.Equal(9L, database.Scalar("SELECT COUNT(*) FROM sessions;"));
-        foreach (var (created, _) in results)
-        {
+        foreach (var (created, _) in results) {
             Assert.Same(created, await manager.GetPrimaryAsync(created.Id));
         }
     }
 
     [Fact]
-    public void HandleConstructionCopiesAlreadyLoadedIdentityAfterStoreCloses()
-    {
+    public void HandleConstructionCopiesAlreadyLoadedIdentityAfterStoreCloses() {
         using var database = new TemporaryDatabase();
         Guid id = Guid.NewGuid();
-        using (SessionStore store = SessionStore.Open(database.Path))
-        {
+        using (SessionStore store = SessionStore.Open(database.Path)) {
             store.Sessions.CreatePrimary(id);
         }
 
         database.Execute("UPDATE sessions SET history_revision = 7;");
         SessionRecord loaded;
         SessionStore borrowedStore;
-        using (SessionStore store = SessionStore.Open(database.Path))
-        {
+        using (SessionStore store = SessionStore.Open(database.Path)) {
             borrowedStore = store;
             loaded = store.Sessions.Read(id)!;
         }
@@ -114,8 +104,7 @@ public sealed class SessionIdentityTests
     }
 
     [Fact]
-    public void DuplicateCreateDoesNotOverwriteSavedIdentity()
-    {
+    public void DuplicateCreateDoesNotOverwriteSavedIdentity() {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
         SessionRecord saved = store.Sessions.CreatePrimary(Guid.NewGuid());
@@ -126,18 +115,15 @@ public sealed class SessionIdentityTests
     }
 
     [Fact]
-    public void NewerSchemaIsRejectedAndAcquiredResourcesAreClosed()
-    {
+    public void NewerSchemaIsRejectedAndAcquiredResourcesAreClosed() {
         using var database = new TemporaryDatabase();
-        using (SessionStore store = SessionStore.Open(database.Path))
-        {
+        using (SessionStore store = SessionStore.Open(database.Path)) {
             store.Sessions.CreatePrimary(Guid.NewGuid());
         }
 
         database.Execute("PRAGMA user_version = 4;");
         Assert.Throws<NotSupportedException>(() => SessionStore.Open(database.Path));
-        using (FileStream file = File.Open(database.Path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
-        {
+        using (FileStream file = File.Open(database.Path, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) {
             Assert.True(file.Length > 0);
         }
 
@@ -146,8 +132,7 @@ public sealed class SessionIdentityTests
     }
 
     [Fact]
-    public void UnversionedForeignDatabaseIsNotAdopted()
-    {
+    public void UnversionedForeignDatabaseIsNotAdopted() {
         using var database = new TemporaryDatabase();
         database.Execute("CREATE TABLE unrelated (value TEXT); INSERT INTO unrelated VALUES ('retained');");
         Assert.Throws<NotSupportedException>(() => SessionStore.Open(database.Path));
@@ -157,8 +142,7 @@ public sealed class SessionIdentityTests
     }
 
     [Fact]
-    public void DisposedStoreErrorsAreNotMistakenForAbsentIdentity()
-    {
+    public void DisposedStoreErrorsAreNotMistakenForAbsentIdentity() {
         using var database = new TemporaryDatabase();
         SessionStore store = SessionStore.Open(database.Path);
         store.Dispose();

@@ -7,11 +7,9 @@ using Xunit;
 
 namespace Urd.Backend.Tests.Storage;
 
-public sealed class MessageContentTests
-{
+public sealed class MessageContentTests {
     [Fact]
-    public void FullInputAndMultiPageOutputPreserveUnicodeNulAndScalarBoundaries()
-    {
+    public void FullInputAndMultiPageOutputPreserveUnicodeNulAndScalarBoundaries() {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
         string input = string.Concat(Enumerable.Repeat("🙂\0é", 2000));
@@ -49,8 +47,7 @@ public sealed class MessageContentTests
     }
 
     [Fact]
-    public void ExactByteLimitNormalizesToNextSegmentWithoutReadingAnUnboundedBody()
-    {
+    public void ExactByteLimitNormalizesToNextSegmentWithoutReadingAnUnboundedBody() {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
         TestRun run = StartRun(store);
@@ -71,8 +68,7 @@ public sealed class MessageContentTests
     [Theory]
     [InlineData(256)]
     [InlineData(8192)]
-    public void ExactTextBudgetsNormalizeAnEmptyFinalSegment(int utf16Units)
-    {
+    public void ExactTextBudgetsNormalizeAnEmptyFinalSegment(int utf16Units) {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
         TestRun run = StartRun(store);
@@ -95,13 +91,11 @@ public sealed class MessageContentTests
     }
 
     [Fact]
-    public void SegmentBudgetBoundsEvenEmptySegmentsAndContinuationMakesProgress()
-    {
+    public void SegmentBudgetBoundsEvenEmptySegmentsAndContinuationMakesProgress() {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
         TestRun run = StartRun(store);
-        for (int index = 0; index < 16; index++)
-        {
+        for (int index = 0; index < 16; index++) {
             Append(store, run, index, "");
         }
 
@@ -117,8 +111,7 @@ public sealed class MessageContentTests
     }
 
     [Fact]
-    public void EmptyTailWaitsForAppendAndEmptyFinalAdvancesWithoutClaimingSettlement()
-    {
+    public void EmptyTailWaitsForAppendAndEmptyFinalAdvancesWithoutClaimingSettlement() {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
         TestRun run = StartRun(store);
@@ -149,8 +142,7 @@ public sealed class MessageContentTests
     }
 
     [Fact]
-    public void ACommittedEmptyMessageIsReadableAndDistinctFromMissingOutput()
-    {
+    public void ACommittedEmptyMessageIsReadableAndDistinctFromMissingOutput() {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
         TestRun run = StartRun(store, "");
@@ -169,8 +161,7 @@ public sealed class MessageContentTests
     }
 
     [Fact]
-    public void CursorRequiresScalarBoundaryAndCannotSeekPastSegmentOrTail()
-    {
+    public void CursorRequiresScalarBoundaryAndCannotSeekPastSegmentOrTail() {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
         TestRun run = StartRun(store);
@@ -182,20 +173,17 @@ public sealed class MessageContentTests
         Assert.Equal("", atEnd.Text);
         Assert.Equal(suffix.Next, atEnd.Next);
 
-        foreach (MessageContentCursor invalid in new MessageContentCursor[]
-        {
+        foreach (MessageContentCursor invalid in new MessageContentCursor[] {
             new(run.Assistant, -1, 0), new(run.Assistant, 0, -1), new(run.Assistant, 0, 2),
             new(run.Assistant, 0, 9), new(run.Assistant, 1, 1), new(run.Assistant, 2, 0),
             new(run.Assistant, 0, 16385)
-        })
-        {
+        }) {
             Assert.ThrowsAny<ArgumentException>(() => store.Content.Read(run.Session, invalid));
         }
     }
 
     [Fact]
-    public void ReferencesAreScopedToSessionRunRoleIdentityAndCurrentRevision()
-    {
+    public void ReferencesAreScopedToSessionRunRoleIdentityAndCurrentRevision() {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
         TestRun run = StartRun(store);
@@ -203,14 +191,12 @@ public sealed class MessageContentTests
         Guid otherSession = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
         Assert.Throws<KeyNotFoundException>(() => store.Content.Read(otherSession, new(run.Assistant, 0, 0)));
         Assert.Throws<KeyNotFoundException>(() => store.Content.Read(Guid.NewGuid(), new(run.Assistant, 0, 0)));
-        foreach (MessageRef missing in new MessageRef[]
-        {
+        foreach (MessageRef missing in new MessageRef[] {
             run.Assistant with { RunId = Guid.NewGuid() },
             run.Assistant with { MessageId = Guid.NewGuid() },
             run.Assistant with { Role = MessageRole.User },
             run.User with { Role = MessageRole.Assistant }
-        })
-        {
+        }) {
             Assert.Throws<KeyNotFoundException>(() => store.Content.Read(run.Session, new(missing, 0, 0)));
         }
 
@@ -228,8 +214,7 @@ public sealed class MessageContentTests
     }
 
     [Fact]
-    public void StopClosesPartialBytesWithoutFinalOutputOrTerminalOutcome()
-    {
+    public void StopClosesPartialBytesWithoutFinalOutputOrTerminalOutcome() {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
         TestRun run = StartRun(store);
@@ -245,12 +230,10 @@ public sealed class MessageContentTests
     }
 
     [Fact]
-    public void FailedRequestAndReopenedPartialMessageNeverInventFinalOutput()
-    {
+    public void FailedRequestAndReopenedPartialMessageNeverInventFinalOutput() {
         using var database = new TemporaryDatabase();
         TestRun run;
-        using (SessionStore store = SessionStore.Open(database.Path))
-        {
+        using (SessionStore store = SessionStore.Open(database.Path)) {
             run = StartRun(store);
             Append(store, run, 0, "retained partial");
         }
@@ -270,8 +253,7 @@ public sealed class MessageContentTests
     }
 
     [Fact]
-    public void MissingOrInvalidCommittedSegmentsFailInsteadOfReturningAFalseTail()
-    {
+    public void MissingOrInvalidCommittedSegmentsFailInsteadOfReturningAFalseTail() {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
         TestRun run = StartRun(store);
@@ -282,8 +264,7 @@ public sealed class MessageContentTests
         Assert.Throws<InvalidDataException>(() => store.Content.Read(run.Session, new(run.Assistant, 0, 0)));
     }
 
-    private static TestRun StartRun(SessionStore store, string input = "input")
-    {
+    private static TestRun StartRun(SessionStore store, string input = "input") {
         Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, run = Guid.NewGuid();
         var command = new InputCommand(Guid.NewGuid(), 0, input);
         Assert.True(store.Inputs.Admit(session, 0, command, true, run).NewlyAccepted);

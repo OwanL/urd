@@ -4,33 +4,28 @@ using Urd.Core.Storage;
 namespace Urd.Core.Sessions;
 
 // Creates and opens sessions, keeping one live instance per session ID.
-public sealed class SessionManager
-{
+public sealed class SessionManager {
     private readonly SessionStore _store;
     private readonly IChatClient _chatClient;
     private readonly AsyncLock _lock = new();
     private readonly Dictionary<Guid, SessionBase> _sessions = new();
 
-    public SessionManager(SessionStore store, IChatClient chatClient)
-    {
+    public SessionManager(SessionStore store, IChatClient chatClient) {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(chatClient);
         _store = store;
         _chatClient = chatClient;
     }
 
-    public async Task<PrimarySession> CreatePrimaryAsync()
-    {
+    public async Task<PrimarySession> CreatePrimaryAsync() {
         using var held = await _lock.AcquireAsync();
         SessionRecord record = _store.Sessions.CreatePrimary(Guid.NewGuid());
         return Track(new PrimarySession(record, _store, _chatClient));
     }
 
-    public async Task<PrimarySession> GetPrimaryAsync(Guid sessionId)
-    {
+    public async Task<PrimarySession> GetPrimaryAsync(Guid sessionId) {
         using var held = await _lock.AcquireAsync();
-        if (_sessions.TryGetValue(sessionId, out SessionBase? cached))
-        {
+        if (_sessions.TryGetValue(sessionId, out SessionBase? cached)) {
             return cached as PrimarySession
                 ?? throw new InvalidOperationException($"Session '{sessionId}' is not a primary session.");
         }
@@ -40,8 +35,7 @@ public sealed class SessionManager
         return Track(new PrimarySession(record, _store, _chatClient));
     }
 
-    private PrimarySession Track(PrimarySession session)
-    {
+    private PrimarySession Track(PrimarySession session) {
         _sessions.Add(session.Id, session);
         return session;
     }

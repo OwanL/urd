@@ -6,8 +6,7 @@ public sealed record ExecutionResult(
     ExecutionOutcome Outcome);
 
 // Outcome of one LLM request attempt or of a whole run.
-public enum ExecutionOutcome
-{
+public enum ExecutionOutcome {
     Completed,
     Cancelled,
     Failed

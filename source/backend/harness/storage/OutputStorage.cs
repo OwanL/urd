@@ -4,19 +4,15 @@ using Urd.Core.Execution;
 namespace Urd.Core.Storage;
 
 // Appends ordered output segments and records explicit request completion.
-internal sealed class OutputStorage(Database database)
-{
-    internal bool Append(Guid sessionId, Guid runId, long historyRevision, LlmResponseChunk batch)
-    {
+internal sealed class OutputStorage(Database database) {
+    internal bool Append(Guid sessionId, Guid runId, long historyRevision, LlmResponseChunk batch) {
         ArgumentOutOfRangeException.ThrowIfNegative(batch.ChunkIndex);
         if (batch.RequestId == Guid.Empty || batch.ResponseId == Guid.Empty
-            || StorageText.StrictUtf8.GetByteCount(batch.Text) > StorageText.MaximumBytes)
-        {
+            || StorageText.StrictUtf8.GetByteCount(batch.Text) > StorageText.MaximumBytes) {
             throw new ArgumentException("Output requires identities and at most 16 KiB of valid UTF-8 text.", nameof(batch));
         }
 
-        return database.Write(transaction =>
-        {
+        return database.Write(transaction => {
             using SqliteCommand advance = database.Command(transaction, """
                 UPDATE execution_requests SET next_batch_index = next_batch_index + 1,
                     output_id = $output, output_final = $final
@@ -34,8 +30,7 @@ internal sealed class OutputStorage(Database database)
                 ("$output", batch.ResponseId),
                 ("$index", batch.ChunkIndex),
                 ("$final", batch.IsFinal ? 1 : 0));
-            if (advance.ExecuteNonQuery() == 0)
-            {
+            if (advance.ExecuteNonQuery() == 0) {
                 return false;
             }
 
@@ -52,18 +47,14 @@ internal sealed class OutputStorage(Database database)
         });
     }
 
-    internal bool CompleteRequest(Guid sessionId, Guid runId, long historyRevision, LlmRequestOutcome completion)
-    {
-        if (!Enum.IsDefined(completion.Outcome))
-        {
+    internal bool CompleteRequest(Guid sessionId, Guid runId, long historyRevision, LlmRequestOutcome completion) {
+        if (!Enum.IsDefined(completion.Outcome)) {
             throw new ArgumentOutOfRangeException(nameof(completion));
         }
 
-        return database.Write(transaction =>
-        {
+        return database.Write(transaction => {
             bool? retained = ReadCompletion(transaction, sessionId, runId, historyRevision, completion);
-            if (retained is { } result)
-            {
+            if (retained is { } result) {
                 return result;
             }
 
@@ -79,8 +70,7 @@ internal sealed class OutputStorage(Database database)
 
     // Null means the request is still eligible for its first completion write.
     private bool? ReadCompletion(SqliteTransaction transaction, Guid sessionId, Guid runId,
-        long historyRevision, LlmRequestOutcome completion)
-    {
+        long historyRevision, LlmRequestOutcome completion) {
         using SqliteCommand read = database.Command(transaction, """
             SELECT q.outcome, q.error, q.output_final, r.stopping, r.outcome
             FROM execution_requests q JOIN execution_runs r ON r.run_id = q.run_id
@@ -93,24 +83,20 @@ internal sealed class OutputStorage(Database database)
             ("$revision", historyRevision),
             ("$request", completion.RequestId));
         using SqliteDataReader reader = read.ExecuteReader();
-        if (!reader.Read())
-        {
+        if (!reader.Read()) {
             return false;
         }
 
-        if (!reader.IsDBNull(0))
-        {
+        if (!reader.IsDBNull(0)) {
             return (ExecutionOutcome)reader.GetInt32(0) == completion.Outcome
                 && (reader.IsDBNull(1) ? null : reader.GetString(1)) == completion.Error;
         }
 
-        if (!reader.IsDBNull(4))
-        {
+        if (!reader.IsDBNull(4)) {
             return false;
         }
 
-        if (completion.Outcome != ExecutionOutcome.Completed)
-        {
+        if (completion.Outcome != ExecutionOutcome.Completed) {
             return null;
         }
 

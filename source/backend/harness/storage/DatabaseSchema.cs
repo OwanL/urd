@@ -3,19 +3,16 @@ using Microsoft.Data.Sqlite;
 namespace Urd.Core.Storage;
 
 // Initializes connection pragmas and creates, verifies, or upgrades the schema.
-internal static class DatabaseSchema
-{
+internal static class DatabaseSchema {
     private const int SchemaVersion = 3;
 
-    internal static void Initialize(SqliteConnection connection)
-    {
+    internal static void Initialize(SqliteConnection connection) {
         using SqliteCommand command = connection.CreateCommand();
         command.CommandText = "PRAGMA foreign_keys = ON;";
         command.ExecuteNonQuery();
         InitializeSchema(connection);
         command.CommandText = "PRAGMA journal_mode = WAL;";
-        if (!string.Equals(command.ExecuteScalar() as string, "wal", StringComparison.OrdinalIgnoreCase))
-        {
+        if (!string.Equals(command.ExecuteScalar() as string, "wal", StringComparison.OrdinalIgnoreCase)) {
             throw new InvalidOperationException("The session database could not enable WAL mode.");
         }
 
@@ -23,15 +20,13 @@ internal static class DatabaseSchema
         command.ExecuteNonQuery();
     }
 
-    private static void InitializeSchema(SqliteConnection connection)
-    {
+    private static void InitializeSchema(SqliteConnection connection) {
         using SqliteTransaction transaction = connection.BeginTransaction();
         using SqliteCommand command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = "PRAGMA user_version;";
         long version = (long)command.ExecuteScalar()!;
-        if (version < 0 || version > SchemaVersion)
-        {
+        if (version < 0 || version > SchemaVersion) {
             throw new NotSupportedException(
                 $"Session database schema version {version} is not supported (expected {SchemaVersion}).");
         }
@@ -39,8 +34,7 @@ internal static class DatabaseSchema
         EnsureSessionSchema(command, version);
         EnsureInputSchema(command, version);
         EnsureExecutionSchema(connection, transaction, create: version < 2);
-        if (version < 3)
-        {
+        if (version < 3) {
             command.CommandText = """
                 CREATE INDEX execution_runs_history_order
                     ON execution_runs(session_id, history_revision, ordinal DESC);
@@ -54,18 +48,15 @@ internal static class DatabaseSchema
         transaction.Commit();
     }
 
-    private static void EnsureSessionSchema(SqliteCommand command, long version)
-    {
-        if (version != 0)
-        {
+    private static void EnsureSessionSchema(SqliteCommand command, long version) {
+        if (version != 0) {
             command.CommandText = "SELECT session_id, history_revision FROM sessions LIMIT 0;";
             using SqliteDataReader reader = command.ExecuteReader();
             return;
         }
 
         command.CommandText = "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*');";
-        if ((long)command.ExecuteScalar()! != 0)
-        {
+        if ((long)command.ExecuteScalar()! != 0) {
             throw new NotSupportedException("An unversioned, nonempty database cannot be initialized as a session store.");
         }
 
@@ -78,10 +69,8 @@ internal static class DatabaseSchema
         command.ExecuteNonQuery();
     }
 
-    private static void EnsureInputSchema(SqliteCommand command, long version)
-    {
-        if (version >= 2)
-        {
+    private static void EnsureInputSchema(SqliteCommand command, long version) {
+        if (version >= 2) {
             command.CommandText = """
                 SELECT session_id, input_id, expected_history_revision, original_text_utf8, decision, run_id, refusal_reason
                 FROM input_decisions LIMIT 0;
@@ -111,8 +100,7 @@ internal static class DatabaseSchema
         command.ExecuteNonQuery();
     }
 
-    private static void EnsureExecutionSchema(SqliteConnection connection, SqliteTransaction transaction, bool create)
-    {
+    private static void EnsureExecutionSchema(SqliteConnection connection, SqliteTransaction transaction, bool create) {
         using SqliteCommand command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = create ? """

@@ -13,15 +13,13 @@ public sealed record InputReceipt(
     Guid? RunId);
 
 // Whether submitted input was accepted into a run or refused.
-public enum InputDecision
-{
+public enum InputDecision {
     Accepted = 1,
     Refused = 2
 }
 
 // Why submitted input was refused.
-public enum InputRefusalReason
-{
+public enum InputRefusalReason {
     StaleRevision = 1,
     Capacity = 2,
     Stopping = 3

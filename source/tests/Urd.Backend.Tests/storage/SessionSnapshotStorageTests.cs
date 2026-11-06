@@ -8,11 +8,9 @@ using Xunit;
 
 namespace Urd.Backend.Tests.Storage;
 
-public sealed class SessionSnapshotStorageTests
-{
+public sealed class SessionSnapshotStorageTests {
     [Fact]
-    public void EmptyMissingAndDisposedReadsDoNotInventState()
-    {
+    public void EmptyMissingAndDisposedReadsDoNotInventState() {
         using var database = new TemporaryDatabase();
         SessionStore store = SessionStore.Open(database.Path);
         Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
@@ -34,8 +32,7 @@ public sealed class SessionSnapshotStorageTests
     [InlineData(31, true, true)]
     [InlineData(60, false, false)]
     [InlineData(61, false, true)]
-    public void NewestSixtyMessagesAreChronologicalAndOmissionIsExact(int runs, bool outputs, bool hasOlder)
-    {
+    public void NewestSixtyMessagesAreChronologicalAndOmissionIsExact(int runs, bool outputs, bool hasOlder) {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
         Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
@@ -46,8 +43,7 @@ public sealed class SessionSnapshotStorageTests
             .TakeLast(60).ToArray();
         Assert.Equal(expected, snapshot.Messages.Select(message => message.Preview));
         Assert.Equal(hasOlder, snapshot.HasOlderMessages);
-        Assert.All(snapshot.Messages, message =>
-        {
+        Assert.All(snapshot.Messages, message => {
             Assert.Equal(ExecutionOutcome.Completed, message.Settlement);
             Assert.False(message.Truncated);
             Assert.Equal(new MessageContentCursor(message.Message, 1, 0), message.AvailableThrough);
@@ -59,12 +55,10 @@ public sealed class SessionSnapshotStorageTests
     }
 
     [Fact]
-    public void LifecycleFactsSurviveReopenAndAreIndependentOfRevisionWindow()
-    {
+    public void LifecycleFactsSurviveReopenAndAreIndependentOfRevisionWindow() {
         using var database = new TemporaryDatabase();
         Guid session, terminal = Guid.NewGuid(), active = Guid.NewGuid();
-        using (SessionStore store = SessionStore.Open(database.Path))
-        {
+        using (SessionStore store = SessionStore.Open(database.Path)) {
             session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
             store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "terminal"), true, terminal);
             store.Runs.TrySettle(session, terminal, ExecutionOutcome.Failed);
@@ -85,8 +79,7 @@ public sealed class SessionSnapshotStorageTests
     }
 
     [Fact]
-    public void PrefixesAreScalarBoundedAndFinalOutputIsNotSettlement()
-    {
+    public void PrefixesAreScalarBoundedAndFinalOutputIsNotSettlement() {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
         Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, run = Guid.NewGuid(), output = Guid.NewGuid();
@@ -120,8 +113,7 @@ public sealed class SessionSnapshotStorageTests
     }
 
     [Fact]
-    public void LargeMixedHistoriesUseBoundedIndexedSelectionWithoutDecodingOmittedBodies()
-    {
+    public void LargeMixedHistoriesUseBoundedIndexedSelectionWithoutDecodingOmittedBodies() {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
         Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
@@ -163,13 +155,11 @@ public sealed class SessionSnapshotStorageTests
     }
 
     [Fact]
-    public void VersionTwoMigrationPreservesReceiptsRunsRequestsAndOutput()
-    {
+    public void VersionTwoMigrationPreservesReceiptsRunsRequestsAndOutput() {
         using var database = new TemporaryDatabase();
         Guid session, run = Guid.NewGuid(), output = Guid.NewGuid(), refused = Guid.NewGuid();
         Guid request;
-        using (SessionStore store = SessionStore.Open(database.Path))
-        {
+        using (SessionStore store = SessionStore.Open(database.Path)) {
             session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
             store.Inputs.RecordRefusal(session, new(refused, 0, "refused\0🙂"), InputRefusalReason.Capacity);
             store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "accepted\0🙂"), true, run);
@@ -194,12 +184,10 @@ public sealed class SessionSnapshotStorageTests
     }
 
     [Fact]
-    public void FailedVersionTwoMigrationRollsBackFirstIndexAndVersionWithoutLosingRows()
-    {
+    public void FailedVersionTwoMigrationRollsBackFirstIndexAndVersionWithoutLosingRows() {
         using var database = new TemporaryDatabase();
         Guid session;
-        using (SessionStore store = SessionStore.Open(database.Path))
-        {
+        using (SessionStore store = SessionStore.Open(database.Path)) {
             session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
             SeedHistory(database, session, 0, 2, true);
         }
@@ -224,8 +212,7 @@ public sealed class SessionSnapshotStorageTests
         PRAGMA user_version = 2;
         """);
 
-    private static string[] Explain(TemporaryDatabase database, string sql, Guid session, long revision)
-    {
+    private static string[] Explain(TemporaryDatabase database, string sql, Guid session, long revision) {
         using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = database.Path, Pooling = false }.ToString());
         connection.Open();
         using SqliteCommand command = connection.CreateCommand();
@@ -234,8 +221,7 @@ public sealed class SessionSnapshotStorageTests
         command.Parameters.AddWithValue("$revision", revision);
         using SqliteDataReader reader = command.ExecuteReader();
         var steps = new List<string>();
-        while (reader.Read())
-        {
+        while (reader.Read()) {
             steps.Add(reader.GetString(3));
         }
 
@@ -243,8 +229,7 @@ public sealed class SessionSnapshotStorageTests
     }
 
     // Bulk fixture writes avoid the execution context builder, which deliberately reads full history.
-    private static void SeedHistory(TemporaryDatabase database, Guid session, long revision, int count, bool outputs)
-    {
+    private static void SeedHistory(TemporaryDatabase database, Guid session, long revision, int count, bool outputs) {
         string input = Guid.NewGuid().ToString("D")[..24], run = Guid.NewGuid().ToString("D")[..24];
         string request = Guid.NewGuid().ToString("D")[..24], output = Guid.NewGuid().ToString("D")[..24];
         database.Execute($"""
@@ -258,8 +243,7 @@ public sealed class SessionSnapshotStorageTests
             WHERE session_id = '{session:D}' AND input_id LIKE '{input}%' ORDER BY input_id;
             COMMIT;
             """);
-        if (outputs)
-        {
+        if (outputs) {
             database.Execute($"""
                 BEGIN;
                 INSERT INTO execution_requests (request_id, run_id, output_id, next_batch_index, output_final, outcome)

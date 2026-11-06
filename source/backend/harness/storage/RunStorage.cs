@@ -6,12 +6,9 @@ using Urd.Core.Execution;
 namespace Urd.Core.Storage;
 
 // Claims run work, reads its context, and retains stop and settlement facts.
-internal sealed class RunStorage(Database database)
-{
-    internal LlmRequest? ClaimNextRequest(Guid sessionId, Guid runId, long historyRevision)
-    {
-        return database.Write<LlmRequest?>(transaction =>
-        {
+internal sealed class RunStorage(Database database) {
+    internal LlmRequest? ClaimNextRequest(Guid sessionId, Guid runId, long historyRevision) {
+        return database.Write<LlmRequest?>(transaction => {
             Guid requestId = Guid.NewGuid();
             using SqliteCommand claim = database.Command(transaction, """
                 INSERT INTO execution_requests (request_id, run_id)
@@ -26,8 +23,7 @@ internal sealed class RunStorage(Database database)
                 ("$run", runId),
                 ("$revision", historyRevision),
                 ("$request", requestId));
-            if (claim.ExecuteNonQuery() == 0)
-            {
+            if (claim.ExecuteNonQuery() == 0) {
                 return null;
             }
 
@@ -36,10 +32,8 @@ internal sealed class RunStorage(Database database)
         });
     }
 
-    internal void RequestStop(Guid sessionId, Guid runId)
-    {
-        database.WithoutTransaction(() =>
-        {
+    internal void RequestStop(Guid sessionId, Guid runId) {
+        database.WithoutTransaction(() => {
             using SqliteCommand command = database.Command(null,
                 "UPDATE execution_runs SET stopping = 1 WHERE session_id = $session AND run_id = $run AND outcome IS NULL;",
                 ("$session", sessionId),
@@ -49,15 +43,12 @@ internal sealed class RunStorage(Database database)
     }
 
     // The caller has joined all owned work before entering this transaction.
-    internal ExecutionResult? TrySettle(Guid sessionId, Guid runId, ExecutionOutcome driverOutcome)
-    {
-        if (!Enum.IsDefined(driverOutcome))
-        {
+    internal ExecutionResult? TrySettle(Guid sessionId, Guid runId, ExecutionOutcome driverOutcome) {
+        if (!Enum.IsDefined(driverOutcome)) {
             throw new ArgumentOutOfRangeException(nameof(driverOutcome));
         }
 
-        return database.Write<ExecutionResult?>(transaction =>
-        {
+        return database.Write<ExecutionResult?>(transaction => {
             using SqliteCommand read = database.Command(transaction, """
                 SELECT r.outcome, r.stopping, q.outcome FROM execution_runs r
                 LEFT JOIN execution_requests q ON q.run_id = r.run_id
@@ -66,13 +57,11 @@ internal sealed class RunStorage(Database database)
                 ("$session", sessionId),
                 ("$run", runId));
             Settlement? settlement = DecideSettlement(read, driverOutcome);
-            if (settlement is null)
-            {
+            if (settlement is null) {
                 return null;
             }
 
-            if (settlement.AlreadySettled)
-            {
+            if (settlement.AlreadySettled) {
                 return new(runId, settlement.Outcome);
             }
 
@@ -89,10 +78,8 @@ internal sealed class RunStorage(Database database)
         });
     }
 
-    internal ExecutionResult? ReadSettlement(Guid sessionId, Guid runId)
-    {
-        return database.WithoutTransaction<ExecutionResult?>(() =>
-        {
+    internal ExecutionResult? ReadSettlement(Guid sessionId, Guid runId) {
+        return database.WithoutTransaction<ExecutionResult?>(() => {
             using SqliteCommand read = database.Command(null,
                 "SELECT outcome FROM execution_runs WHERE session_id = $session AND run_id = $run;",
                 ("$session", sessionId),
@@ -102,10 +89,8 @@ internal sealed class RunStorage(Database database)
         });
     }
 
-    internal bool Exists(Guid sessionId, Guid runId)
-    {
-        return database.WithoutTransaction(() =>
-        {
+    internal bool Exists(Guid sessionId, Guid runId) {
+        return database.WithoutTransaction(() => {
             using SqliteCommand read = database.Command(null,
                 "SELECT EXISTS(SELECT 1 FROM execution_runs WHERE session_id = $session AND run_id = $run);",
                 ("$session", sessionId),
@@ -114,26 +99,21 @@ internal sealed class RunStorage(Database database)
         });
     }
 
-    private static Settlement? DecideSettlement(SqliteCommand read, ExecutionOutcome driverOutcome)
-    {
+    private static Settlement? DecideSettlement(SqliteCommand read, ExecutionOutcome driverOutcome) {
         using SqliteDataReader reader = read.ExecuteReader();
-        if (!reader.Read())
-        {
+        if (!reader.Read()) {
             return null;
         }
 
-        if (!reader.IsDBNull(0))
-        {
+        if (!reader.IsDBNull(0)) {
             return new((ExecutionOutcome)reader.GetInt32(0), AlreadySettled: true);
         }
 
-        if (reader.GetInt32(1) != 0)
-        {
+        if (reader.GetInt32(1) != 0) {
             return new(ExecutionOutcome.Cancelled, AlreadySettled: false);
         }
 
-        if (driverOutcome != ExecutionOutcome.Completed)
-        {
+        if (driverOutcome != ExecutionOutcome.Completed) {
             return new(driverOutcome, AlreadySettled: false);
         }
 
@@ -143,8 +123,7 @@ internal sealed class RunStorage(Database database)
     }
 
     private IReadOnlyList<ChatMessage> ReadRequestContext(
-        SqliteTransaction transaction, Guid sessionId, Guid runId, long historyRevision)
-    {
+        SqliteTransaction transaction, Guid sessionId, Guid runId, long historyRevision) {
         using SqliteCommand read = database.Command(transaction, """
             SELECT r.ordinal, 0 AS role_order, 0 AS batch_index, i.original_text_utf8
             FROM execution_runs r JOIN input_decisions i ON i.session_id = r.session_id AND i.input_id = r.input_id
@@ -164,11 +143,9 @@ internal sealed class RunStorage(Database database)
         using SqliteDataReader reader = read.ExecuteReader();
         var messages = new List<ChatMessage>();
         StringBuilder? assistant = null;
-        while (reader.Read())
-        {
+        while (reader.Read()) {
             string text = StorageText.StrictUtf8.GetString((byte[])reader.GetValue(3));
-            if (reader.GetInt32(1) != 0)
-            {
+            if (reader.GetInt32(1) != 0) {
                 (assistant ??= new()).Append(text);
                 continue;
             }
@@ -182,10 +159,8 @@ internal sealed class RunStorage(Database database)
         return messages.AsReadOnly();
     }
 
-    private static void AddAssistant(List<ChatMessage> messages, StringBuilder? assistant)
-    {
-        if (assistant is not null)
-        {
+    private static void AddAssistant(List<ChatMessage> messages, StringBuilder? assistant) {
+        if (assistant is not null) {
             messages.Add(new(ChatRole.Assistant, assistant.ToString()));
         }
     }

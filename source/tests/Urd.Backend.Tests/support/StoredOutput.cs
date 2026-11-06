@@ -5,8 +5,7 @@ using static Urd.Backend.Tests.Support.TestAsync;
 namespace Urd.Backend.Tests.Support;
 
 // Reads persisted response chunks directly from a test database.
-internal static class StoredOutput
-{
+internal static class StoredOutput {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 
     internal static List<(byte[] Bytes, bool Final)> Read(TemporaryDatabase database) =>
@@ -17,10 +16,8 @@ internal static class StoredOutput
         string.Concat(ReadDetails(database).Select(row => StrictUtf8.GetString(row.Bytes)));
 
     internal static List<(Guid RequestId, Guid ResponseId, long ChunkIndex, byte[] Bytes, bool Final)>
-        ReadDetails(TemporaryDatabase database)
-    {
-        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
-        {
+        ReadDetails(TemporaryDatabase database) {
+        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder {
             DataSource = database.Path,
             Mode = SqliteOpenMode.ReadOnly,
             Pooling = false
@@ -34,8 +31,7 @@ internal static class StoredOutput
             """;
         using SqliteDataReader reader = command.ExecuteReader();
         var output = new List<(Guid RequestId, Guid ResponseId, long ChunkIndex, byte[] Bytes, bool Final)>();
-        while (reader.Read())
-        {
+        while (reader.Read()) {
             output.Add((Guid.Parse(reader.GetString(0)), Guid.Parse(reader.GetString(1)), reader.GetInt64(2),
                 (byte[])reader.GetValue(3), reader.GetBoolean(4)));
         }
@@ -43,11 +39,9 @@ internal static class StoredOutput
         return output;
     }
 
-    internal static async Task WaitForAnyAsync(TemporaryDatabase database)
-    {
+    internal static async Task WaitForAnyAsync(TemporaryDatabase database) {
         using var deadline = new CancellationTokenSource(TestTimeout);
-        while (Read(database).Count == 0)
-        {
+        while (Read(database).Count == 0) {
             await Task.Delay(10, deadline.Token);
         }
     }

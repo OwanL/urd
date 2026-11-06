@@ -6,16 +6,13 @@ using Xunit;
 
 namespace Urd.Backend.Tests.Storage;
 
-public sealed class InputReceiptTests
-{
+public sealed class InputReceiptTests {
     [Fact]
-    public void RefusalSurvivesLostReplyReopenAndChangedConditions()
-    {
+    public void RefusalSurvivesLostReplyReopenAndChangedConditions() {
         using var database = new TemporaryDatabase();
         Guid sessionId = Guid.NewGuid();
         var command = new InputCommand(Guid.NewGuid(), 0, "original \r\n e\u0301 \0 🙂");
-        using (SessionStore store = SessionStore.Open(database.Path))
-        {
+        using (SessionStore store = SessionStore.Open(database.Path)) {
             store.Sessions.CreatePrimary(sessionId);
             // Deliberately discard the committed reply, as an uncertain caller would.
             store.Inputs.RecordRefusal(sessionId, command, InputRefusalReason.Capacity);
@@ -35,8 +32,7 @@ public sealed class InputReceiptTests
     }
 
     [Fact]
-    public void DelayedOriginalCannotReplaceFirstRefusal()
-    {
+    public void DelayedOriginalCannotReplaceFirstRefusal() {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
         Guid sessionId = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
@@ -50,8 +46,7 @@ public sealed class InputReceiptTests
     }
 
     [Fact]
-    public void ConflictingTextOrRevisionNeverResolvesOrOverwritesOriginal()
-    {
+    public void ConflictingTextOrRevisionNeverResolvesOrOverwritesOriginal() {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
         Guid sessionId = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
@@ -65,8 +60,7 @@ public sealed class InputReceiptTests
             command with { ExpectedHistoryRevision = 1 }
         ];
 
-        foreach (InputCommand conflict in conflicts)
-        {
+        foreach (InputCommand conflict in conflicts) {
             Assert.Throws<InvalidOperationException>(() =>
                 store.Inputs.RecordRefusal(sessionId, conflict, InputRefusalReason.Stopping));
         }
@@ -76,8 +70,7 @@ public sealed class InputReceiptTests
     }
 
     [Fact]
-    public void InputIdentityIsScopedToSessionAndMissingLookupDoesNotInsert()
-    {
+    public void InputIdentityIsScopedToSessionAndMissingLookupDoesNotInsert() {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
         Guid first = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
@@ -92,8 +85,7 @@ public sealed class InputReceiptTests
     }
 
     [Fact]
-    public void TransactionFailureLeavesNoPartialDecisionAndAllowsRetry()
-    {
+    public void TransactionFailureLeavesNoPartialDecisionAndAllowsRetry() {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
         Guid sessionId = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
@@ -123,8 +115,7 @@ public sealed class InputReceiptTests
     }
 
     [Fact]
-    public void LookupErrorsAreNotReportedAsAbsence()
-    {
+    public void LookupErrorsAreNotReportedAsAbsence() {
         using var database = new TemporaryDatabase();
         SessionStore store = SessionStore.Open(database.Path);
         Guid sessionId = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
@@ -138,8 +129,7 @@ public sealed class InputReceiptTests
     }
 
     [Fact]
-    public void InvalidOrMissingSessionCommandsCreateNoDecision()
-    {
+    public void InvalidOrMissingSessionCommandsCreateNoDecision() {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
         Guid sessionId = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
@@ -158,8 +148,7 @@ public sealed class InputReceiptTests
     }
 
     [Fact]
-    public void VersionOneIdentityDatabaseMigratesWithoutChangingIdentity()
-    {
+    public void VersionOneIdentityDatabaseMigratesWithoutChangingIdentity() {
         using var database = new TemporaryDatabase();
         Guid sessionId = Guid.NewGuid();
         database.Execute($"""
@@ -170,8 +159,7 @@ public sealed class InputReceiptTests
             INSERT INTO sessions VALUES ('{sessionId:D}', 7);
             PRAGMA user_version = 1;
             """);
-        using (SessionStore store = SessionStore.Open(database.Path))
-        {
+        using (SessionStore store = SessionStore.Open(database.Path)) {
             Assert.Equal(7L, store.Sessions.Read(sessionId)!.HistoryRevision);
             Assert.Null(store.Inputs.ReadReceipt(sessionId, Guid.NewGuid()));
         }
@@ -182,8 +170,7 @@ public sealed class InputReceiptTests
     }
 
     [Fact]
-    public void FailedVersionOneMigrationRollsBackSchemaAndKeepsIdentity()
-    {
+    public void FailedVersionOneMigrationRollsBackSchemaAndKeepsIdentity() {
         using var database = new TemporaryDatabase();
         database.Execute("""
             CREATE TABLE sessions (
@@ -204,16 +191,14 @@ public sealed class InputReceiptTests
     }
 
     [Fact]
-    public async Task ConcurrentStoresRetainOneFirstDecision()
-    {
+    public async Task ConcurrentStoresRetainOneFirstDecision() {
         using var database = new TemporaryDatabase();
         using SessionStore first = SessionStore.Open(database.Path);
         using SessionStore second = SessionStore.Open(database.Path);
         Guid sessionId = first.Sessions.CreatePrimary(Guid.NewGuid()).Id;
         var command = new InputCommand(Guid.NewGuid(), 0, "same command");
         var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        Task<InputReceipt>[] tasks = new[] { first, second }.Select((store, index) => Task.Run(async () =>
-        {
+        Task<InputReceipt>[] tasks = new[] { first, second }.Select((store, index) => Task.Run(async () => {
             await start.Task;
             return store.Inputs.RecordRefusal(sessionId, command, index == 0 ? InputRefusalReason.Capacity : InputRefusalReason.Stopping);
         })).ToArray();

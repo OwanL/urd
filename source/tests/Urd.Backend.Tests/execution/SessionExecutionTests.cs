@@ -12,8 +12,7 @@ using static Urd.Backend.Tests.Support.TestAsync;
 namespace Urd.Backend.Tests.Execution;
 
 // Run lifecycle: terminal evidence, stop and cleanup ordering, and failure fencing.
-public sealed class SessionExecutionTests
-{
+public sealed class SessionExecutionTests {
     private const string CancellationCallbackFailureMessage = "Scripted cancellation callback failure.";
     private const string EnumeratorDisposalFailureMessage = "Scripted enumerator disposal failure.";
 
@@ -22,8 +21,7 @@ public sealed class SessionExecutionTests
     [InlineData("length")]
     [InlineData("exception")]
     [InlineData("exception-after-stop")]
-    public async Task RequiresPositiveTerminalEvidenceAndAnOtherwiseSuccessfulRequest(string failureScenario)
-    {
+    public async Task RequiresPositiveTerminalEvidenceAndAnOtherwiseSuccessfulRequest(string failureScenario) {
         var client = new ScriptedChatClient(token => FailedResponse(failureScenario, token));
         await using var fixture = new ExecutionFixture(client);
         Guid runId = await fixture.StartRunAsync("go");
@@ -37,8 +35,7 @@ public sealed class SessionExecutionTests
     }
 
     [Fact]
-    public async Task StopWaitsForActualCleanupBeforeSettlementOrReplacementAndBorrowsClient()
-    {
+    public async Task StopWaitsForActualCleanupBeforeSettlementOrReplacementAndBorrowsClient() {
         var waiting = Signal();
         var cleanupEntered = Signal();
         var cleanupRelease = Signal();
@@ -48,8 +45,7 @@ public sealed class SessionExecutionTests
             : Complete(token));
         await using var fixture = new ExecutionFixture(client);
         Guid runId = await fixture.StartRunAsync("first");
-        try
-        {
+        try {
             await waiting.Task.WaitAsync(TestTimeout);
             await fixture.Session.RequestStopAsync(runId);
             await fixture.Session.RequestStopAsync(runId);
@@ -60,9 +56,7 @@ public sealed class SessionExecutionTests
             Assert.Equal(InputRefusalReason.Stopping, refused.RefusalReason);
             Assert.Null(refused.RunId);
             Assert.Equal(1, client.Calls);
-        }
-        finally
-        {
+        } finally {
             cleanupRelease.TrySetResult();
         }
 
@@ -77,8 +71,7 @@ public sealed class SessionExecutionTests
     }
 
     [Fact]
-    public async Task StopJoinsReentrantCallbackOutsideGuardAndStaleStopCannotCancelReplacement()
-    {
+    public async Task StopJoinsReentrantCallbackOutsideGuardAndStaleStopCannotCancelReplacement() {
         var sourceEntered = Signal();
         var sourceRelease = Signal();
         var sourceExited = Signal();
@@ -98,8 +91,7 @@ public sealed class SessionExecutionTests
         Task<ExecutionResult> settlement = session.WaitForSettlementAsync(runId);
         Task firstStop = Task.CompletedTask;
         Task secondStop = Task.CompletedTask;
-        try
-        {
+        try {
             await sourceEntered.Task.WaitAsync(TestTimeout);
             firstStop = session.RequestStopAsync(runId);
             SessionSnapshot callbackRead = await callbackSnapshot.Task.WaitAsync(TestTimeout);
@@ -108,10 +100,8 @@ public sealed class SessionExecutionTests
             await sourceExited.Task.WaitAsync(TestTimeout);
             // Reach saved request completion, not merely the iterator's finally block,
             // while the run still owns the blocked cancellation callback.
-            using (var deadline = new CancellationTokenSource(TestTimeout))
-            {
-                while (fixture.Database.Scalar("SELECT outcome FROM execution_requests;") is DBNull)
-                {
+            using (var deadline = new CancellationTokenSource(TestTimeout)) {
+                while (fixture.Database.Scalar("SELECT outcome FROM execution_requests;") is DBNull) {
                     await Task.Delay(10, deadline.Token);
                 }
             }
@@ -125,9 +115,7 @@ public sealed class SessionExecutionTests
             Assert.Equal(InputDecision.Refused, refused.Decision);
             Assert.Equal(InputRefusalReason.Stopping, refused.RefusalReason);
             Assert.Equal(1, client.Calls);
-        }
-        finally
-        {
+        } finally {
             sourceRelease.TrySetResult();
             callbackRelease.TrySetResult();
         }
@@ -138,14 +126,11 @@ public sealed class SessionExecutionTests
 
         Guid replacement = await fixture.StartRunAsync("replacement");
         Task<ExecutionResult> replacementSettlement = session.WaitForSettlementAsync(replacement);
-        try
-        {
+        try {
             await replacementEntered.Task.WaitAsync(TestTimeout);
             await session.RequestStopAsync(runId).WaitAsync(TestTimeout);
             Assert.False(replacementSettlement.IsCompleted);
-        }
-        finally
-        {
+        } finally {
             replacementRelease.TrySetResult();
         }
 
@@ -154,8 +139,7 @@ public sealed class SessionExecutionTests
     }
 
     [Fact]
-    public async Task CancellationCallbackFailureFencesUnsettledRunAfterProviderCleanup()
-    {
+    public async Task CancellationCallbackFailureFencesUnsettledRunAfterProviderCleanup() {
         var requestEntered = Signal();
         var providerExited = Signal();
         var database = new TemporaryDatabase();
@@ -164,8 +148,7 @@ public sealed class SessionExecutionTests
             requestEntered, providerExited, token));
         var session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid()), store, client);
         Guid? runId = null;
-        try
-        {
+        try {
             InputReceipt receipt = await session.SubmitUserInputAsync(new InputCommand(Guid.NewGuid(), 0, "go"));
             Assert.Equal(InputDecision.Accepted, receipt.Decision);
             runId = Assert.IsType<Guid>(receipt.RunId);
@@ -187,19 +170,13 @@ public sealed class SessionExecutionTests
             Assert.Equal(InputDecision.Refused, refused.Decision);
             Assert.Equal(InputRefusalReason.Stopping, refused.RefusalReason);
             Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM execution_runs;"));
-        }
-        finally
-        {
-            if (runId is { } acceptedRun)
-            {
-                if (requestEntered.Task.IsCompletedSuccessfully)
-                {
+        } finally {
+            if (runId is { } acceptedRun) {
+                if (requestEntered.Task.IsCompletedSuccessfully) {
                     await AssertCancellationCallbackFailureAsync(session.RequestStopAsync(acceptedRun));
                     await providerExited.Task.WaitAsync(TestTimeout);
                     await AssertCancellationCallbackFailureAsync(session.WaitForSettlementAsync(acceptedRun));
-                }
-                else
-                {
+                } else {
                     await session.RequestStopAsync(acceptedRun).WaitAsync(TestTimeout);
                     await session.WaitForSettlementAsync(acceptedRun).WaitAsync(TestTimeout);
                 }
@@ -212,16 +189,14 @@ public sealed class SessionExecutionTests
     }
 
     [Fact]
-    public async Task OutputWriteAndCleanupFailuresAreRetainedWhileRunRemainsFenced()
-    {
+    public async Task OutputWriteAndCleanupFailuresAreRetainedWhileRunRemainsFenced() {
         var database = new TemporaryDatabase();
         var store = SessionStore.Open(database.Path);
         var disposed = Signal();
         var client = new ScriptedChatClient(token => WriteAndCleanupFailureResponse(disposed, token));
         var session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid()), store, client);
         Guid? runId = null;
-        try
-        {
+        try {
             database.Execute("""
                 CREATE TRIGGER reject_output BEFORE INSERT ON execution_output
                 BEGIN SELECT RAISE(ABORT, 'Injected output write failure'); END;
@@ -253,28 +228,19 @@ public sealed class SessionExecutionTests
             Assert.Null(refused.RunId);
             Assert.Equal(1, client.Calls);
             Assert.Equal(0, client.DisposeCalls);
-        }
-        finally
-        {
-            if (runId is { } acceptedRun)
-            {
-                try
-                {
+        } finally {
+            if (runId is { } acceptedRun) {
+                try {
                     await session.RequestStopAsync(acceptedRun).WaitAsync(TestTimeout);
-                }
-                catch (Exception failure) when (failure is not TimeoutException &&
-                    FlattenFailures(failure).Any(error => error.Message == CancellationCallbackFailureMessage))
-                {
+                } catch (Exception failure) when (failure is not TimeoutException &&
+                      FlattenFailures(failure).Any(error => error.Message == CancellationCallbackFailureMessage)) {
                 }
 
                 await disposed.Task.WaitAsync(TestTimeout);
-                try
-                {
+                try {
                     await session.WaitForSettlementAsync(acceptedRun).WaitAsync(TestTimeout);
-                }
-                catch (Exception failure) when (failure is not TimeoutException &&
-                    FlattenFailures(failure).Any(error => error.Message == EnumeratorDisposalFailureMessage))
-                {
+                } catch (Exception failure) when (failure is not TimeoutException &&
+                      FlattenFailures(failure).Any(error => error.Message == EnumeratorDisposalFailureMessage)) {
                 }
             }
 
@@ -285,8 +251,7 @@ public sealed class SessionExecutionTests
     }
 
     [Fact]
-    public async Task OutputWriteFailureCleansUpButFencesRatherThanSettlesOrReplacesTheRun()
-    {
+    public async Task OutputWriteFailureCleansUpButFencesRatherThanSettlesOrReplacesTheRun() {
         var database = new TemporaryDatabase();
         var store = SessionStore.Open(database.Path);
         var cleaned = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -294,8 +259,7 @@ public sealed class SessionExecutionTests
         var session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid()), store, client);
         Guid? runId = null;
         var command = new InputCommand(Guid.NewGuid(), 0, "go");
-        try
-        {
+        try {
             database.Execute("""
                 CREATE TRIGGER reject_output BEFORE INSERT ON execution_output
                 BEGIN SELECT RAISE(ABORT, 'Injected output write failure'); END;
@@ -325,20 +289,14 @@ public sealed class SessionExecutionTests
             Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM execution_runs;"));
             Assert.Equal(1, client.Calls);
             Assert.Equal(0, client.DisposeCalls);
-        }
-        finally
-        {
-            if (runId is { } acceptedRun)
-            {
+        } finally {
+            if (runId is { } acceptedRun) {
                 // Stop is only a cleanup fallback, not recovery or proof of saved settlement.
                 await session.RequestStopAsync(acceptedRun);
                 await cleaned.Task.WaitAsync(TestTimeout);
-                try
-                {
+                try {
                     await session.WaitForSettlementAsync(acceptedRun).WaitAsync(TestTimeout);
-                }
-                catch (Exception failure) when (failure.GetBaseException() is SqliteException)
-                {
+                } catch (Exception failure) when (failure.GetBaseException() is SqliteException) {
                     // Expected driver failure. Timeouts/other uncertain exits must not permit disposal.
                 }
 
@@ -351,31 +309,23 @@ public sealed class SessionExecutionTests
     }
 
     private static async IAsyncEnumerable<ChatResponseUpdate> WriteAndCleanupFailureResponse(
-        TaskCompletionSource disposed, [EnumeratorCancellation] CancellationToken token)
-    {
+        TaskCompletionSource disposed, [EnumeratorCancellation] CancellationToken token) {
         token.Register(() => throw new InvalidOperationException(CancellationCallbackFailureMessage));
-        try
-        {
+        try {
             yield return Text(new string('x', 16 * 1024));
             await Task.Delay(System.Threading.Timeout.InfiniteTimeSpan, token);
-        }
-        finally
-        {
+        } finally {
             disposed.TrySetResult();
             throw new InvalidOperationException(EnumeratorDisposalFailureMessage);
         }
     }
 
     private static async IAsyncEnumerable<ChatResponseUpdate> WriteFailureResponse(TaskCompletionSource<bool> cleaned,
-        [EnumeratorCancellation] CancellationToken token)
-    {
-        try
-        {
+        [EnumeratorCancellation] CancellationToken token) {
+        try {
             yield return Text("working");
             await Task.Delay(System.Threading.Timeout.InfiniteTimeSpan, token);
-        }
-        finally
-        {
+        } finally {
             cleaned.TrySetResult(token.IsCancellationRequested);
         }
     }
@@ -384,107 +334,85 @@ public sealed class SessionExecutionTests
         PrimarySession session, TaskCompletionSource sourceEntered, TaskCompletionSource sourceRelease,
         TaskCompletionSource sourceExited, TaskCompletionSource<SessionSnapshot> callbackSnapshot,
         TaskCompletionSource callbackRelease,
-        [EnumeratorCancellation] CancellationToken token)
-    {
+        [EnumeratorCancellation] CancellationToken token) {
         // Do not dispose this registration in the iterator: enumerator cleanup must be
         // able to finish while the callback deliberately waits for its release barrier.
-        token.Register(() =>
-        {
+        token.Register(() => {
             SessionSnapshot snapshot = session.ReadSnapshotAsync().WaitAsync(TestTimeout).GetAwaiter().GetResult();
             callbackSnapshot.TrySetResult(snapshot);
             callbackRelease.Task.WaitAsync(TestTimeout).GetAwaiter().GetResult();
         });
 
-        try
-        {
+        try {
             yield return Text("working");
             sourceEntered.TrySetResult();
             await sourceRelease.Task;
-        }
-        finally
-        {
+        } finally {
             sourceExited.TrySetResult();
         }
     }
 
     private static async IAsyncEnumerable<ChatResponseUpdate> CancellationCallbackFailureResponse(
         TaskCompletionSource requestEntered, TaskCompletionSource providerExited,
-        [EnumeratorCancellation] CancellationToken token)
-    {
+        [EnumeratorCancellation] CancellationToken token) {
         var cancellationObserved = Signal();
-        token.Register(() =>
-        {
+        token.Register(() => {
             cancellationObserved.TrySetResult();
             throw new InvalidOperationException(CancellationCallbackFailureMessage);
         });
-        try
-        {
+        try {
             yield return Text("working");
             requestEntered.TrySetResult();
             await cancellationObserved.Task;
-        }
-        finally
-        {
+        } finally {
             providerExited.TrySetResult();
         }
     }
 
     private static async IAsyncEnumerable<ChatResponseUpdate> FailedResponse(string failureScenario,
-        [EnumeratorCancellation] CancellationToken token)
-    {
+        [EnumeratorCancellation] CancellationToken token) {
         await Task.CompletedTask;
         token.ThrowIfCancellationRequested();
         yield return Text("partial");
-        if (failureScenario == "length")
-        {
+        if (failureScenario == "length") {
             yield return new() { FinishReason = ChatFinishReason.Length };
         }
 
-        if (failureScenario == "exception-after-stop")
-        {
+        if (failureScenario == "exception-after-stop") {
             yield return new() { FinishReason = ChatFinishReason.Stop };
         }
 
-        if (failureScenario.StartsWith("exception", StringComparison.Ordinal))
-        {
+        if (failureScenario.StartsWith("exception", StringComparison.Ordinal)) {
             throw new InvalidOperationException("Scripted request failure.");
         }
     }
 
     private static async IAsyncEnumerable<ChatResponseUpdate> HeldCleanupResponse(TaskCompletionSource waiting,
         TaskCompletionSource cleanupEntered, TaskCompletionSource cleanupRelease,
-        [EnumeratorCancellation] CancellationToken token)
-    {
-        try
-        {
+        [EnumeratorCancellation] CancellationToken token) {
+        try {
             yield return Text("working");
             waiting.TrySetResult();
             await Task.Delay(System.Threading.Timeout.InfiniteTimeSpan, token);
-        }
-        finally
-        {
+        } finally {
             cleanupEntered.TrySetResult();
             await cleanupRelease.Task;
         }
     }
 
-    private static IEnumerable<Exception> FlattenFailures(Exception failure)
-    {
-        if (failure is AggregateException aggregate)
-        {
+    private static IEnumerable<Exception> FlattenFailures(Exception failure) {
+        if (failure is AggregateException aggregate) {
             return aggregate.InnerExceptions.SelectMany(FlattenFailures);
         }
 
-        if (failure.InnerException is { } inner)
-        {
+        if (failure.InnerException is { } inner) {
             return FlattenFailures(inner);
         }
 
         return [failure];
     }
 
-    private static async Task AssertCancellationCallbackFailureAsync(Task operation)
-    {
+    private static async Task AssertCancellationCallbackFailureAsync(Task operation) {
         AggregateException failure = await Assert.ThrowsAsync<AggregateException>(
             async () => await operation.WaitAsync(TestTimeout));
         Assert.Contains(failure.Flatten().InnerExceptions,

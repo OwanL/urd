@@ -10,11 +10,9 @@ using static Urd.Backend.Tests.Support.TestAsync;
 
 namespace Urd.Backend.Tests.Sessions;
 
-public sealed class SessionReadFlowTests
-{
+public sealed class SessionReadFlowTests {
     [Fact]
-    public async Task ReadsFollowFullCommittedContentWithoutOwningWorkOrConfusingFinalTextWithSettlement()
-    {
+    public async Task ReadsFollowFullCommittedContentWithoutOwningWorkOrConfusingFinalTextWithSettlement() {
         var sourceWaiting = Signal();
         var sourceRelease = Signal();
         var cleanupEntered = Signal();
@@ -22,8 +20,7 @@ public sealed class SessionReadFlowTests
         CancellationToken modelToken = default;
         string input = new string('q', 600) + "\0🙂";
         string output = new string('x', 16_000) + "🙂\0λ" + new string('y', 24_000);
-        async IAsyncEnumerable<ChatResponseUpdate> Response([EnumeratorCancellation] CancellationToken token)
-        {
+        async IAsyncEnumerable<ChatResponseUpdate> Response([EnumeratorCancellation] CancellationToken token) {
             modelToken = token;
             yield return Text(output[..1024]);
             sourceWaiting.TrySetResult();
@@ -37,8 +34,7 @@ public sealed class SessionReadFlowTests
         var store = SessionStore.Open(database.Path);
         PrimarySession session = await new SessionManager(store, client).CreatePrimaryAsync();
         Guid? ownedRun = null;
-        try
-        {
+        try {
             SessionSnapshot idle = await session.ReadSnapshotAsync();
             Assert.False(idle.AdmissionFenced);
             Assert.Null(idle.UnsettledRunId);
@@ -65,8 +61,7 @@ public sealed class SessionReadFlowTests
             Assert.Equal(first.Last.Next, tail.Next);
             Assert.False(tail.HasMore);
 
-            using (var cancelledRead = new CancellationTokenSource())
-            {
+            using (var cancelledRead = new CancellationTokenSource()) {
                 cancelledRead.Cancel();
                 await Assert.ThrowsAnyAsync<OperationCanceledException>(
                     () => session.ReadSnapshotAsync(cancelledRead.Token));
@@ -103,13 +98,10 @@ public sealed class SessionReadFlowTests
             Assert.All(settled.Messages, row => Assert.Equal(ExecutionOutcome.Completed, row.Settlement));
             Assert.Equal(1, client.Calls);
             Assert.Equal(0, client.DisposeCalls);
-        }
-        finally
-        {
+        } finally {
             sourceRelease.TrySetResult();
             cleanupRelease.TrySetResult();
-            if (ownedRun is { } runId)
-            {
+            if (ownedRun is { } runId) {
                 await session.RequestStopAsync(runId);
                 await session.WaitForSettlementAsync(runId).WaitAsync(TestTimeout);
             }
@@ -120,12 +112,10 @@ public sealed class SessionReadFlowTests
     }
 
     [Fact]
-    public async Task ReopenReadsRetainedUnsettledContentWithoutReplayAndDiagnosesStaleHandles()
-    {
+    public async Task ReopenReadsRetainedUnsettledContentWithoutReplayAndDiagnosesStaleHandles() {
         using var database = new TemporaryDatabase();
         Guid sessionId, cleanId, runId = Guid.NewGuid(), outputId = Guid.NewGuid();
-        using (SessionStore original = SessionStore.Open(database.Path))
-        {
+        using (SessionStore original = SessionStore.Open(database.Path)) {
             sessionId = original.Sessions.CreatePrimary(Guid.NewGuid()).Id;
             cleanId = original.Sessions.CreatePrimary(Guid.NewGuid()).Id;
             original.Inputs.Admit(sessionId, 0, new(Guid.NewGuid(), 0, "retained input"), true, runId);
@@ -161,13 +151,11 @@ public sealed class SessionReadFlowTests
     }
 
     private static async Task<(string Text, MessageContentPage Last)> ReadAvailableAsync(
-        PrimarySession session, MessageContentCursor cursor)
-    {
+        PrimarySession session, MessageContentCursor cursor) {
         using var deadline = new CancellationTokenSource(TestTimeout);
         var text = new StringBuilder();
         MessageContentPage page;
-        do
-        {
+        do {
             page = await session.ReadMessageContentAsync(cursor, deadline.Token).WaitAsync(deadline.Token);
             Assert.Equal(cursor, page.From);
             Assert.InRange(Encoding.UTF8.GetByteCount(page.Text), 0, 16 * 1024);
@@ -179,11 +167,9 @@ public sealed class SessionReadFlowTests
         return (text.ToString(), page);
     }
 
-    private static async Task<SessionSnapshot> WaitForOutputAsync(PrimarySession session)
-    {
+    private static async Task<SessionSnapshot> WaitForOutputAsync(PrimarySession session) {
         using var deadline = new CancellationTokenSource(TestTimeout);
-        while (true)
-        {
+        while (true) {
             SessionSnapshot snapshot = await session.ReadSnapshotAsync(deadline.Token);
             if (snapshot.Messages.Any(row => row.Message.Role == MessageRole.Assistant))
                 return snapshot;
@@ -192,8 +178,7 @@ public sealed class SessionReadFlowTests
     }
 
     private static async IAsyncEnumerable<ChatResponseUpdate> UnexpectedResponse(
-        [EnumeratorCancellation] CancellationToken token)
-    {
+        [EnumeratorCancellation] CancellationToken token) {
         await Task.CompletedTask;
         token.ThrowIfCancellationRequested();
         yield return new() { FinishReason = ChatFinishReason.Stop };
@@ -202,18 +187,15 @@ public sealed class SessionReadFlowTests
     private static ChatResponseUpdate Text(string text) => new() { Contents = [new TextContent(text)] };
 
     private sealed class HeldDisposal(IAsyncEnumerable<ChatResponseUpdate> source,
-        TaskCompletionSource entered, Task release) : IAsyncEnumerable<ChatResponseUpdate>
-    {
+        TaskCompletionSource entered, Task release) : IAsyncEnumerable<ChatResponseUpdate> {
         public IAsyncEnumerator<ChatResponseUpdate> GetAsyncEnumerator(CancellationToken cancellationToken = default)
             => new Enumerator(source.GetAsyncEnumerator(cancellationToken), entered, release);
 
         private sealed class Enumerator(IAsyncEnumerator<ChatResponseUpdate> inner,
-            TaskCompletionSource entered, Task release) : IAsyncEnumerator<ChatResponseUpdate>
-        {
+            TaskCompletionSource entered, Task release) : IAsyncEnumerator<ChatResponseUpdate> {
             public ChatResponseUpdate Current => inner.Current;
             public ValueTask<bool> MoveNextAsync() => inner.MoveNextAsync();
-            public async ValueTask DisposeAsync()
-            {
+            public async ValueTask DisposeAsync() {
                 await inner.DisposeAsync();
                 entered.TrySetResult();
                 await release;

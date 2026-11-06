@@ -8,11 +8,9 @@ using Xunit;
 
 namespace Urd.Backend.Tests.Storage;
 
-public sealed class ExecutionStorageTests
-{
+public sealed class ExecutionStorageTests {
     [Fact]
-    public void AcceptanceAndRunRollbackTogetherOnCommitFailure()
-    {
+    public void AcceptanceAndRunRollbackTogetherOnCommitFailure() {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
         Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
@@ -45,14 +43,12 @@ public sealed class ExecutionStorageTests
     }
 
     [Fact]
-    public void RetainedAcceptanceResolvesBeforeAllCurrentGatesAndCannotCreateAnotherRun()
-    {
+    public void RetainedAcceptanceResolvesBeforeAllCurrentGatesAndCannotCreateAnotherRun() {
         using var database = new TemporaryDatabase();
         Guid session = Guid.NewGuid(), run = Guid.NewGuid();
         var input = new InputCommand(Guid.NewGuid(), 0, "original \0 🙂");
         InputReceipt receipt;
-        using (SessionStore store = SessionStore.Open(database.Path))
-        {
+        using (SessionStore store = SessionStore.Open(database.Path)) {
             store.Sessions.CreatePrimary(session);
             receipt = store.Inputs.Admit(session, 0, input, true, run).Receipt;
             store.Runs.RequestStop(session, run);
@@ -71,8 +67,7 @@ public sealed class ExecutionStorageTests
     }
 
     [Fact]
-    public void BusyAndStoppingRefusalsAreDurableWithoutTranscriptOrRunFacts()
-    {
+    public void BusyAndStoppingRefusalsAreDurableWithoutTranscriptOrRunFacts() {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
         Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, run = Guid.NewGuid();
@@ -103,14 +98,12 @@ public sealed class ExecutionStorageTests
     [InlineData(true, false, 0, 0, InputRefusalReason.Capacity)]
     public void NewInputRefusalUsesStoppingThenRevisionThenCapacityPriority(
         bool admissionEnabled, bool stopRequested, long handleRevision,
-        long expectedRevision, InputRefusalReason expectedReason)
-    {
+        long expectedRevision, InputRefusalReason expectedReason) {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
         Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, run = Guid.NewGuid();
         store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "accepted"), true, run);
-        if (stopRequested)
-        {
+        if (stopRequested) {
             store.Runs.RequestStop(session, run);
         }
 
@@ -126,12 +119,10 @@ public sealed class ExecutionStorageTests
     }
 
     [Fact]
-    public void ClaimIsPersistedOnceAndReopenDoesNotReplayActiveInput()
-    {
+    public void ClaimIsPersistedOnceAndReopenDoesNotReplayActiveInput() {
         using var database = new TemporaryDatabase();
         Guid session = Guid.NewGuid(), run = Guid.NewGuid(), requestId;
-        using (SessionStore store = SessionStore.Open(database.Path))
-        {
+        using (SessionStore store = SessionStore.Open(database.Path)) {
             store.Sessions.CreatePrimary(session);
             store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "claimed"), true, run);
             LlmRequest request = store.Runs.ClaimNextRequest(session, run, 0)!;
@@ -150,8 +141,7 @@ public sealed class ExecutionStorageTests
     }
 
     [Fact]
-    public void OrderedBatchesAndExplicitCompletionProduceOrderedPlainTextContext()
-    {
+    public void OrderedBatchesAndExplicitCompletionProduceOrderedPlainTextContext() {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
         Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, run = Guid.NewGuid(), output = Guid.NewGuid();
@@ -184,8 +174,7 @@ public sealed class ExecutionStorageTests
     }
 
     [Fact]
-    public void RevisionAndRunFencesRejectStaleWritesAndAdmission()
-    {
+    public void RevisionAndRunFencesRejectStaleWritesAndAdmission() {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
         Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, run = Guid.NewGuid();
@@ -205,8 +194,7 @@ public sealed class ExecutionStorageTests
     }
 
     [Fact]
-    public void StopRejectsLateSuccessAndOnlyFencesAddressedRun()
-    {
+    public void StopRejectsLateSuccessAndOnlyFencesAddressedRun() {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
         Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, run = Guid.NewGuid();
@@ -231,8 +219,7 @@ public sealed class ExecutionStorageTests
     }
 
     [Fact]
-    public void OutputValidationIsUtf8BoundedAndFailuresRemainTruthful()
-    {
+    public void OutputValidationIsUtf8BoundedAndFailuresRemainTruthful() {
         using var database = new TemporaryDatabase();
         using SessionStore store = SessionStore.Open(database.Path);
         Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, run = Guid.NewGuid();

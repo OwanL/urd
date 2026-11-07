@@ -104,15 +104,15 @@ internal sealed class SnapshotReader {
 
   private ReadOnlyCollection<MessagePreview> ReadPreviews(SqliteTransaction transaction, Guid sessionId,
       List<(MessageRef Message, ExecutionOutcome? Settlement)> candidates) {
-    int messageCount = Math.Min(candidates.Count, SnapshotMessageLimit);
-    var messages = new List<MessagePreview>(messageCount);
-    for (int index = messageCount - 1; index >= 0; index--) {
-      (MessageRef message, ExecutionOutcome? settlement) = candidates[index];
-      MessageContentPage prefix = content.ReadPreview(transaction, sessionId, message, PreviewUtf16Limit);
-      messages.Add(new(message, prefix.Text, prefix.HasMore, prefix.AvailableThrough,
-          prefix.FinalOutputCommitted, settlement));
-    }
-
-    return messages.AsReadOnly();
+    return candidates
+        .Take(SnapshotMessageLimit)
+        .Reverse()
+        .Select(candidate => {
+          MessageContentPage prefix = content.ReadPreview(transaction, sessionId, candidate.Message, PreviewUtf16Limit);
+          return new MessagePreview(candidate.Message, prefix.Text, prefix.HasMore, prefix.AvailableThrough,
+              prefix.FinalOutputCommitted, candidate.Settlement);
+        })
+        .ToList()
+        .AsReadOnly();
   }
 }

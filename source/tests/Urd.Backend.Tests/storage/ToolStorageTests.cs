@@ -45,7 +45,7 @@ public sealed class ToolStorageTests {
     using SessionStore store = SessionStore.Open(database.Path);
     var (session, run, request) = Begin(store);
     FinalText(store, session, run, request);
-    store.Runs.RequestStop(session, run);
+    store.Runs.RequestStop(session, run, ownsRun: true);
 
     Assert.False(store.Output.CompleteRequest(session, run, 0,
         new(request, ExecutionOutcome.Completed, ToolCalls: [Call("late")])));
@@ -193,7 +193,7 @@ public sealed class ToolStorageTests {
     Authorize(store, session, run, request, first, second);
     var completion = new LlmRequestOutcome(request, ExecutionOutcome.Completed, ToolCalls: [first, second]);
     Assert.True(store.Tools.TryStart(session, run, 0, request, "one"));
-    store.Runs.RequestStop(session, run);
+    store.Runs.RequestStop(session, run, ownsRun: true);
     Assert.True(store.Tools.Complete(session, run, 0, request, Result("one")));
     Assert.False(store.Tools.TryStart(session, run, 0, request, "two"));
     Assert.Equal(ExecutionOutcome.Cancelled, store.Runs.TrySettle(session, run, ExecutionOutcome.Completed)!.Outcome);

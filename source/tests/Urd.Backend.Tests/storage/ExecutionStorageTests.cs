@@ -77,7 +77,7 @@ public sealed class ExecutionStorageTests {
     Assert.Equal(InputRefusalReason.Capacity, busy.Receipt.RefusalReason);
     Assert.False(busy.NewlyAccepted);
     Assert.Null(busy.Receipt.RunId);
-    store.Runs.RequestStop(session, run);
+    store.Runs.RequestStop(session, run, ownsRun: true);
     var stopped = store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "refused while stopping"), true, Guid.NewGuid());
     Assert.Equal(InputRefusalReason.Stopping, stopped.Receipt.RefusalReason);
     store.Runs.TrySettle(session, run, ExecutionOutcome.Cancelled);
@@ -104,7 +104,7 @@ public sealed class ExecutionStorageTests {
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, run = Guid.NewGuid();
     store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "accepted"), true, run);
     if (stopRequested)
-      store.Runs.RequestStop(session, run);
+      store.Runs.RequestStop(session, run, ownsRun: true);
 
     var input = new InputCommand(Guid.NewGuid(), expectedRevision, "new input");
     var admissionResult = store.Inputs.Admit(session, handleRevision, input, admissionEnabled, Guid.NewGuid());
@@ -233,7 +233,7 @@ public sealed class ExecutionStorageTests {
     LlmRequest request = store.Runs.ClaimNextRequest(session, run, 0)!;
     var chunk = new LlmResponseChunk(request.RequestId, Guid.NewGuid(), 0, "committed before stop", true);
     Assert.True(store.Output.Append(session, run, 0, chunk));
-    store.Runs.RequestStop(session, run);
+    store.Runs.RequestStop(session, run, ownsRun: true);
     Assert.False(store.Output.CompleteRequest(session, run, 0, new(request.RequestId, ExecutionOutcome.Completed)));
     Assert.False(store.Output.Append(session, run, 0, chunk with { ChunkIndex = 1 }));
     Assert.True(store.Output.CompleteRequest(session, run, 0, new(request.RequestId, ExecutionOutcome.Cancelled)));
@@ -241,8 +241,8 @@ public sealed class ExecutionStorageTests {
 
     Guid nextRun = Guid.NewGuid();
     store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "replacement after cleanup"), true, nextRun);
-    store.Runs.RequestStop(session, run);
-    store.Runs.RequestStop(Guid.NewGuid(), nextRun);
+    store.Runs.RequestStop(session, run, ownsRun: true);
+    store.Runs.RequestStop(Guid.NewGuid(), nextRun, ownsRun: true);
     Assert.NotNull(store.Runs.ClaimNextRequest(session, nextRun, 0));
     Assert.Null(store.Runs.ReadSettlement(session, nextRun));
     Assert.Equal(ExecutionOutcome.Cancelled, store.Runs.ReadSettlement(session, run)!.Outcome);
@@ -339,7 +339,7 @@ public sealed class ExecutionStorageTests {
     Assert.Equal(new[] { ChatRole.User, ChatRole.Assistant, ChatRole.Tool }, continuation.Messages.Select(message => message.Role));
     var pending = new InputCommand(Guid.NewGuid(), 0, "never delivered");
     InputReceipt receipt = store.Inputs.Admit(session, 0, pending, true, Guid.NewGuid(), run).Receipt;
-    store.Runs.RequestStop(session, run);
+    store.Runs.RequestStop(session, run, ownsRun: true);
     Assert.Single(StoredDeliveries.Read(database), input => input.RequestId is null && input.Outcome == ExecutionOutcome.Cancelled);
     Assert.Null(store.Runs.ClaimNextRequest(session, run, 0));
     Assert.Equal(ExecutionOutcome.Cancelled, store.Runs.TrySettle(session, run, ExecutionOutcome.Completed)!.Outcome);

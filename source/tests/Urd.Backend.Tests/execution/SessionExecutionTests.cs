@@ -74,8 +74,10 @@ public sealed class SessionExecutionTests {
     Guid runId = await fixture.StartRunAsync("first");
     try {
       await waiting.Task.WaitAsync(TestTimeout);
-      await fixture.Session.RequestStopAsync(runId);
-      await fixture.Session.RequestStopAsync(runId);
+      Assert.Equal(new StopReceipt(runId, StopStatus.Requested),
+          await fixture.Session.RequestStopAsync(runId).WaitAsync(TestTimeout));
+      Assert.Equal(new StopReceipt(runId, StopStatus.Requested),
+          await fixture.Session.RequestStopAsync(runId).WaitAsync(TestTimeout));
       await cleanupEntered.Task.WaitAsync(TestTimeout);
       Assert.False(fixture.Session.WaitForSettlementAsync(runId).IsCompleted);
       InputReceipt refused = await fixture.Session.SubmitUserInputAsync(new InputCommand(Guid.NewGuid(), 0, "too early"));
@@ -98,7 +100,7 @@ public sealed class SessionExecutionTests {
   }
 
   [Fact]
-  public async Task StopJoinsReentrantCallbackOutsideGuardAndStaleStopCannotCancelReplacement() {
+  public async Task StopAcknowledgesBeforeReentrantCallbackJoinAndStaleStopCannotCancelReplacement() {
     var sourceEntered = Signal();
     var sourceRelease = Signal();
     var sourceExited = Signal();
@@ -116,11 +118,10 @@ public sealed class SessionExecutionTests {
     session = fixture.Session;
     Guid runId = await fixture.StartRunAsync("first");
     Task<ExecutionResult> settlement = session.WaitForSettlementAsync(runId);
-    Task firstStop = Task.CompletedTask;
-    Task secondStop = Task.CompletedTask;
     try {
       await sourceEntered.Task.WaitAsync(TestTimeout);
-      firstStop = session.RequestStopAsync(runId);
+      Task<StopReceipt> firstStop = session.RequestStopAsync(runId);
+      Assert.Equal(new StopReceipt(runId, StopStatus.Requested), await firstStop.WaitAsync(TestTimeout));
       SessionSnapshot callbackRead = await callbackSnapshot.Task.WaitAsync(TestTimeout);
       Assert.True(callbackRead.StopRequested);
       sourceRelease.TrySetResult();
@@ -132,9 +133,8 @@ public sealed class SessionExecutionTests {
           await Task.Delay(10, deadline.Token);
       }
 
-      secondStop = session.RequestStopAsync(runId);
-      Assert.False(firstStop.IsCompleted);
-      Assert.False(secondStop.IsCompleted);
+      Task<StopReceipt> secondStop = session.RequestStopAsync(runId);
+      Assert.Equal(new StopReceipt(runId, StopStatus.Requested), await secondStop.WaitAsync(TestTimeout));
       Assert.False(settlement.IsCompleted);
       InputReceipt refused = await session.SubmitUserInputAsync(
           new InputCommand(Guid.NewGuid(), 0, "too early"));
@@ -146,15 +146,14 @@ public sealed class SessionExecutionTests {
       callbackRelease.TrySetResult();
     }
 
-    await firstStop.WaitAsync(TestTimeout);
-    await secondStop.WaitAsync(TestTimeout);
     Assert.Equal(ExecutionOutcome.Cancelled, (await settlement.WaitAsync(TestTimeout)).Outcome);
 
     Guid replacement = await fixture.StartRunAsync("replacement");
     Task<ExecutionResult> replacementSettlement = session.WaitForSettlementAsync(replacement);
     try {
       await replacementEntered.Task.WaitAsync(TestTimeout);
-      await session.RequestStopAsync(runId).WaitAsync(TestTimeout);
+      Assert.Equal(new StopReceipt(runId, StopStatus.Settled, ExecutionOutcome.Cancelled),
+          await session.RequestStopAsync(runId).WaitAsync(TestTimeout));
       Assert.False(replacementSettlement.IsCompleted);
     } finally {
       replacementRelease.TrySetResult();
@@ -181,9 +180,9 @@ public sealed class SessionExecutionTests {
       Guid acceptedRun = runId.Value;
       await requestEntered.Task.WaitAsync(TestTimeout);
 
-      Task stop = session.RequestStopAsync(acceptedRun);
+      Assert.Equal(new StopReceipt(acceptedRun, StopStatus.Requested),
+          await session.RequestStopAsync(acceptedRun).WaitAsync(TestTimeout));
       await providerExited.Task.WaitAsync(TestTimeout);
-      await AssertCancellationCallbackFailureAsync(stop);
       await AssertCancellationCallbackFailureAsync(session.WaitForSettlementAsync(acceptedRun));
 
       SessionSnapshot snapshot = await session.ReadSnapshotAsync();
@@ -199,7 +198,8 @@ public sealed class SessionExecutionTests {
     } finally {
       if (runId is { } acceptedRun) {
         if (requestEntered.Task.IsCompletedSuccessfully) {
-          await AssertCancellationCallbackFailureAsync(session.RequestStopAsync(acceptedRun));
+          Assert.Equal(new StopReceipt(acceptedRun, StopStatus.Requested),
+              await session.RequestStopAsync(acceptedRun).WaitAsync(TestTimeout));
           await providerExited.Task.WaitAsync(TestTimeout);
           await AssertCancellationCallbackFailureAsync(session.WaitForSettlementAsync(acceptedRun));
         } else {
@@ -256,13 +256,7 @@ public sealed class SessionExecutionTests {
       Assert.Equal(0, client.DisposeCalls);
     } finally {
       if (runId is { } acceptedRun) {
-        try {
-          await session.RequestStopAsync(acceptedRun).WaitAsync(TestTimeout);
-        } catch (Exception failure) when (failure is not TimeoutException &&
-              FlattenFailures(failure).Any(error => error.Message == CancellationCallbackFailureMessage)) {
-          // Expected injected callback failure; timeouts must still prevent disposal.
-        }
-
+        await session.RequestStopAsync(acceptedRun).WaitAsync(TestTimeout);
         await disposed.Task.WaitAsync(TestTimeout);
         try {
           await session.WaitForSettlementAsync(acceptedRun).WaitAsync(TestTimeout);

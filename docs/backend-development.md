@@ -2,9 +2,10 @@
 
 The current Core checkpoint includes session identity, durable user-Send decisions,
 fake-text/tool execution with default durable steering, bounded snapshot/content reads
-through real SQLite and graceful session shutdown.
+through real SQLite, graceful session shutdown and owner-approved public addressed Stop.
+The Stop increment passed locked restore and **281/281 Release tests**, without warnings.
 Core remains an ASP.NET-free .NET library. The [local Server](server-development.md)
-now exposes five chat HTTP operations over it; UI is not implemented yet.
+now exposes six chat HTTP operations over it; UI is not implemented yet.
 
 ## Checkpoint scope
 
@@ -20,9 +21,19 @@ now exposes five chat HTTP operations over it; UI is not implemented yet.
   Each run has one `SessionExecution` and one driver, with sequential request phases outside the guard.
   Execution owns model streams, tool invocation and the run's Stop source; a request-local
   `LlmResponseWriter` owns bounded UTF-8 batches and their flush deadline.
-- Stop starts asynchronous cancellation under the guard, then joins callbacks outside it.
-  Replacement requires stream cleanup, successful callback completion and saved settlement.
+- Public `SessionBase.RequestStopAsync(Guid runId)` returns `StopReceipt(RunId, Status, Outcome)`:
+  `Requested` acknowledges committed Stop intent/steering retirement, not completed cancellation;
+  `Settled` carries the saved outcome; `NotFound` includes wrong-session IDs; `Unavailable` means
+  an unresolved saved run is not locally owned. Empty IDs are invalid. Retries report current status,
+  so Requested can advance to Settled; stale Stop cannot affect a replacement.
+- Stop initiates cached asynchronous cancellation under the guard even if its save fails.
+  The driver, not the public/HTTP caller, joins callbacks outside it before settlement.
+  Replacement requires model/tool cleanup, successful callbacks and saved settlement.
   Callback failures or an unexpected missing claim/settlement fence the run; they do not retry it.
+  Failed Stop persistence fences admission and fails the request without a false durable acknowledgement.
+  Local `IsStopping` also blocks output, successful request completion, claims and tool starts;
+  actual tool results may still be saved. Snapshots merge local Stop intent for owned unsettled work
+  with stored Stop state; this observation is not a durable acknowledgement.
 - A distinct busy Send defaults to durable steering in the live owned run, within a limit of
   eight nonterminal input deliveries. Pending inputs join the next request as separate user
   messages in admission order, after any tool results. A claimed request is never mutated.
@@ -47,20 +58,39 @@ now exposes five chat HTTP operations over it; UI is not implemented yet.
   retained receipts remain available during shutdown; new inputs receive durable Stopping refusals.
   Shutdown does not close saved conversations, recover orphan runs or shut down the host itself.
   Cancellation callbacks may reenter reads/admission, but must not await shutdown or their own settlement.
-- Addressed Stop/settlement helpers remain internal. Public reads expose user/assistant text
-  only; tool-inspection UI/API, push subscriptions, real tools/providers and provider-native
+- Settlement waiting remains internal; public snapshots observe stopping and saved settlement.
+  Unowned orphan Stop does not mutate/recover/replay the run or fabricate settlement.
+  Public reads expose user/assistant text only; tool-inspection UI/API, push subscriptions,
+  real tools/providers and provider-native
   context fidelity remain deferred. An admission receipt is not completion.
 - Normal terminal close/reopen is tested without replay. Nonterminal rows survive reopening
   and block new admission; startup interruption/recovery is **not** implemented.
 
-The completed steering/fake-tool checkpoint passed locked restore and the full Release
-suite: **259/259** tests, with no warnings. Coverage adds durable busy admission and bounds,
+Public Stop passed independent production/test review and the full **281/281** Release suite.
+Real SQLite and HTTP checks cover prompt acknowledgement during held callbacks/cleanup,
+uncooperative fake tools, immutable steering receipts, stale/wrong-session Stop isolation,
+unowned orphans, lost acknowledgements, rollback and local cancellation after a failed save.
+In an isolated copy, tests rejected deliberate removal of local Stop write guards and the
+callback join; all four restored controls passed. No real-process or subagent termination
+qualification is implied. Review `sessions/SessionStopTests.cs`,
+`storage/StopStorageTests.cs` and `hosting/SessionStopRoutesTests.cs` under
+`source/tests/Urd.Backend.Tests/`; shared `support/HeldDisposal.cs` holds provider cleanup
+without duplicating the existing content-read test machinery.
+
+The previous steering/fake-tool checkpoint passed locked restore and the full Release
+suite: **259/259** tests, with no warnings.
+Coverage adds durable busy admission and bounds,
 ordered tool-result/steering continuation (including no-tool boundaries), claim-or-settle races,
 Stop/shutdown retirement, ordinary tool errors versus uncertain-effect fencing, transactional
 schema-4 migration/rollback and real HTTP busy Sends through the unchanged routes.
 In an isolated copy, focused tests rejected deliberate regressions that dropped no-tool
 continuation or blocked continuation on a saved tool error; both restored controls passed.
 These are fake-client/tool checks, not real-tool/provider or UI qualification.
+Public Stop adds no schema, framework, UI, real tools or child runtime. Full bounded-descendant
+ownership/join requirements remain in [architecture](ARCHITECTURE.md) and
+[session design](SESSION-DESIGN.md); separately opened independent worker chats continue.
+Functions must honor cancellation and join their owned work; Stop neither undoes effects nor
+forcibly kills arbitrary in-process functions. No subagent-runtime qualification is claimed.
 
 ### Historical checkpoint evidence
 
@@ -117,7 +147,7 @@ See that same record for the real HTTP flow, controlled active-work shutdown evi
    `ExecutionResult`/`ExecutionOutcome` in [ExecutionResult.cs](../source/backend/core/execution/ExecutionResult.cs)
    are public, not duplicated.
 2. [SessionBase.cs](../source/backend/core/sessions/SessionBase.cs) — the two public read methods
-   take the existing guard; snapshots merge the live admission fence with one committed view.
+   take the existing guard; snapshots merge live admission fencing/local Stop intent with one committed view.
 3. [SnapshotReader.cs](../source/backend/core/storage/SnapshotReader.cs), then
    [MessageContentReader.cs](../source/backend/core/storage/MessageContentReader.cs) — bounded queries
    in short read transactions. [DatabaseSchema.cs](../source/backend/core/storage/DatabaseSchema.cs)
@@ -154,6 +184,7 @@ share a file per concept. Read them alongside their owners.
 2. [SessionBase.cs](../source/backend/core/sessions/SessionBase.cs) and
    [PrimarySession.cs](../source/backend/core/sessions/PrimarySession.cs) — admission/driver ownership;
    [Input.cs](../source/backend/core/sessions/Input.cs) holds the input command, receipt and enums;
+   [Stop.cs](../source/backend/core/sessions/Stop.cs) holds the public Stop receipt/status;
    [AsyncLock.cs](../source/backend/core/sessions/AsyncLock.cs) is the shared async lock.
 3. [SessionExecution.cs](../source/backend/core/execution/SessionExecution.cs) — sequential request/tool
    phases, response streaming, cancellation and cleanup;

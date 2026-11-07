@@ -1,7 +1,7 @@
 # Initial Core class design — internal integration reference
 2026-11-05. **The three identity bites, fourth user-Send reliability contract, fifth
 SessionExecution lifetime boundary, sixth coherent read surface, seventh session shutdown
-and subsequent default-steering/fake-tool increment below are owner-approved.
+and subsequent default-steering/fake-tool and public addressed Stop increments below are owner-approved.
 Other API/state shape remains proposed, not implementation permission.**
 Checkpoint only: Windows local browser app, deterministic request-only `IChatClient`,
 two primary chats/two clients, real SQLite, mid-response input, addressed Stop/settlement
@@ -10,8 +10,9 @@ transcript/lifecycle schema or transport beyond the [scoped hosting approvals](i
 The identity foundation, first fake-text Send/execution increment and bounded reads are
 implemented; see the current implementation section below. Acceptance has real durable work behind it,
 not a stub. Session shutdown now supplies the Core drain boundary needed by hosting.
-Five thin HTTP operations now expose the existing Core; UI and the broader browser checkpoint
-remain unimplemented. The subsequently approved steering increment now supplies durable busy
+Six thin HTTP operations now expose the existing Core, including public addressed Stop
+(implemented and verified); UI and the broader browser checkpoint remain unimplemented.
+The subsequently approved steering increment now supplies durable busy
 input and a minimal fake-tool continuation loop. Explicit after-run queueing, real tools/providers
 and startup recovery remain separate scoped work.
 Present one bite inline at a time, not this whole document or a five-type pack; approval
@@ -30,7 +31,8 @@ approve delegation subtypes/relationships or a generic public lookup API.
 **Still proposed:** provider selection, startup recovery, listing and the
 broader execution/Stop/view/storage-lifecycle members below, except the approved slices
 recorded here: identity persistence/manager wiring, user-Send reliability, SessionExecution,
-coherent reads and session shutdown. No other workstream or full Core-draft approval follows.
+coherent reads, session shutdown, default steering/fake-tool continuation and public addressed Stop.
+No other workstream or full Core-draft approval follows.
 
 ## Owner-approved second bite — identity/construction only
 The owner answered **“good”** to the revised identity-only construction proposal:
@@ -254,7 +256,8 @@ model with **“Yes, implement it”**. This supersedes the earlier repeated-inv
 - At that checkpoint, each execution was invoked once and schema 3 permitted one claimed
   request per run. The later steering increment below replaces that one-request limit with
   sequential request phases while retaining one driver and Stop source per run.
-- Stop persists its intent and initiates `CancelAsync` under the guard; callbacks are awaited
+- At that checkpoint Stop persisted its intent and initiated `CancelAsync` under the guard;
+  public Stop below now initiates cancellation even if persistence fails. Callbacks are awaited
   outside it. The driver checks callback completion and settles under the same guard, or
   joins the cached task outside the guard before returning to settle. Successful work is
   not cancelled merely to provide a cleanup barrier. Callback failure prevents settlement.
@@ -306,8 +309,9 @@ mixed histories. Tests use disposable SQLite and fake clients only; no browser/p
 performance claim. See the [read review map](../backend-development.md#read-contract-and-incremental-review-order).
 
 That initial staging policy permitted one input per active run and refused different busy
-input. The default-steering increment below supersedes that restriction. Addressed Stop/wait
-helpers remain internal; the seventh bite adds the public manager-level session drain.
+input. The default-steering increment below supersedes that restriction. At that checkpoint,
+addressed Stop/wait helpers were internal; the seventh bite adds the public manager-level session
+drain. Public addressed Stop is separately approved below; settlement waiting remains internal.
 Old nonterminal rows stay fenced across reopen; startup recovery is not implemented. UI/HTTP, native-context fidelity, tools
 and real-provider qualification remain outside this checkpoint. The owner requested notification
 at tested milestones for their own file-by-file, line-by-line review before more layers accumulate.
@@ -339,12 +343,56 @@ That means the next safe request boundary, not altering or cancelling an in-flig
   a bounded text-message index. Migration preserves existing receipts, IDs, UTF-8 bytes and
   cursors. Public snapshots/content remain user/assistant text; tool inspection remains deferred.
 
-Independent reviews passed. Locked restore and **259/259 Release tests** pass without warnings,
+Independent reviews passed for that steering checkpoint. Locked restore and **259/259 Release tests**
+passed without warnings (previous evidence, not public Stop verification),
 including real HTTP busy Sends, tool-result/steering order, no-tool continuation, boundary races,
 Stop/shutdown joins, ordinary errors, uncertain-save fences and migration rollback. These are
 fake-client/function checks, not provider-native fidelity or exactly-once external effects.
-Explicit after-run queueing, pending edits, public Stop, recovery and UI remain separate bites.
+At that checkpoint public Stop remained a separate bite; its subsequent approval is recorded below.
+Explicit after-run queueing, pending edits, recovery and UI remain separate work.
 See [backend development](../backend-development.md) for the current review map and bounds.
+
+## Owner-approved public addressed Stop — 2026-11-07
+
+The owner approved stopping a conversation's current work, not closing/deleting the conversation,
+with this public method and receipt shape. It is implemented and verified:
+```csharp
+public Task<StopReceipt> RequestStopAsync(Guid runId);
+public sealed record StopReceipt(Guid RunId, StopStatus Status, ExecutionOutcome? Outcome = null);
+public enum StopStatus { Requested, Settled, NotFound, Unavailable }
+```
+`Requested` acknowledges committed Stop intent and pending-steering retirement, not completed
+cancellation. `Settled` carries the saved outcome; `NotFound` includes wrong-session IDs;
+`Unavailable` means an unresolved saved run is not locally owned. Empty IDs are invalid.
+Repeated Stop reports current status (Requested may become Settled), reuses cancellation and
+cannot affect a replacement. Accepted input receipts stay immutable; no automatic carryover/replay.
+
+Under the existing session guard, Core initiates cached local cancellation before attempting
+Stop persistence. `RunStorage.RequestStop(sessionId, runId, ownsRun)` classifies identity and
+settlement before ownership, then commits Stop/retirement for an owned unresolved run in one
+transaction. An unowned orphan is not mutated, recovered or falsely settled. The public method
+acknowledges intent; the driver alone joins callbacks outside the guard before saved settlement.
+Held model/tool cleanup blocks replacement; callback faults retain fenced/unsettled execution
+and resources for shutdown rather than fabricating success. Shutdown keeps its existing join path.
+
+A failed Stop write still cancels locally, fences admission and fails the request (HTTP 503),
+never acknowledging durable success. Local `IsStopping` guards output and successful request
+completion as well as claims/tool starts; actual tool results may still be saved. Snapshots
+merge local Stop intent for owned unsettled work with persisted status: observation, not durable
+acknowledgement. Existing snapshots expose stopping/fencing, run identity and saved settlement.
+
+The hosting route accepts JSON `{}` at POST `/api/sessions/{sessionId}/runs/{runId}/stop`:
+200 Requested/Settled, 404 missing, 409 with Unavailable for an unowned unresolved run.
+Disconnect does not cancel admitted Stop; HTTP never waits for callback completion.
+No schema, framework, UI, real tools or child runtime is added. Full bounded-descendant
+requirements are recorded in [architecture](../ARCHITECTURE.md) and
+[session design](../SESSION-DESIGN.md); separately opened independent worker chats continue.
+Stop does not undo effects or forcibly kill arbitrary in-process functions; functions must honor
+cancellation and join their owned work. This slice does not qualify a subagent runtime.
+Independent production/test reviews passed. Locked restore and **281/281 Release tests** pass
+without warnings. In an isolated copy, tests detected missing local Stop write guards and a
+skipped callback join; all four restored controls passed. Full evidence and review paths are in
+[backend development](../backend-development.md) and [server development](../server-development.md).
 
 ## Existing constraints, not new decisions
 - [Architecture](../ARCHITECTURE.md): shared SQLite, message rows/bounded previews,
@@ -354,7 +402,8 @@ See [backend development](../backend-development.md) for the current review map 
   APIs. [Execution design](../EXECUTION-DESIGN.md): request-only client/Urd-owned cycle.
 - ASP.NET-free Core; **Server → Core**. Server owns composition/HTTP/browser admission.
   [Application plan](../APPLICATION-PLAN.md) owns component-led layout.
-- Disconnect does not cancel accepted work; Stop waits for actual settlement. Unknown
+- Disconnect does not cancel accepted work; Stop acknowledges intent, while replacement waits
+  for actual cleanup and saved settlement. Unknown
   Send receipts reconcile, not replay. Original history remains readable.
 - [SQLite validation](../SQLITE-VALIDATION.md): coherent cursors, Unicode-safe previews,
   lifecycle/revision fences and schema versioning; archived APIs are not promoted.
@@ -526,7 +575,7 @@ internal InputReceipt? ReadInputReceipt(Guid sessionId, Guid inputId);
 internal LlmRequest? ClaimNextRequest(Guid sessionId, Guid runId, long historyRevision);
 internal WriteReceipt AppendOutput(Guid sessionId, Guid runId, long historyRevision, LlmResponseChunk batch);
 internal WriteReceipt CompleteRequest(Guid sessionId, Guid runId, long historyRevision, LlmRequestOutcome completion);
-internal StopReceipt RequestStop(Guid sessionId, Guid runId);
+internal StopReceipt RequestStop(Guid sessionId, Guid runId, bool ownsRun);
 internal SettlementAttempt TrySettle(Guid sessionId, Guid runId, ExecutionOutcome outcome);
 internal SessionView ReadView(Guid sessionId, ViewLimits limits);
 internal HistoryPage ReadHistory(Guid sessionId, HistoryCursor cursor, ReadLimits limits);
@@ -634,10 +683,13 @@ Accepted never means model success, and later interruption never changes it to R
    scan/materialize an arbitrarily large body, or read all preceding segments then truncate.
    This constrains message-row content access, not a new store/service or finalized schema;
    accepted input and output batches already have the 16 KiB UTF-8 bound.
-4. **Stop/settle:** `RequestStop(runId)` durably fences that run, cancels its undelivered
-   inputs, then signals its token outside the guard. Receipt says stopping or retained
-   settlement; stale/unknown run IDs never stop a newer run. Wait cancellation cancels
-   only the wait. Settlement is persisted only after cleanup; no overlapping replacement.
+4. **Stop/settle:** public `RequestStopAsync(runId)` initiates cached local cancellation
+   under the guard even if persistence fails, then attempts durable Stop/retirement of pending
+   steering. Requested acknowledges intent, Settled carries saved outcome, NotFound includes
+   wrong-session IDs, and Unavailable leaves an unowned unresolved run untouched. Failed writes
+   fence and fail, not acknowledge. The driver joins callbacks outside the guard; only cleanup
+   and saved settlement permit replacement. Stale Stop cannot affect a newer run. Internal
+   settlement-wait cancellation cancels only the wait.
 5. **Restart:** versioned transactional upgrades reject newer schemas. Recovery preserves
    both accepted/refused admission decisions and their command matching data, alongside
    committed request outcomes/receipts; it marks prior active runs and nonterminal requests,

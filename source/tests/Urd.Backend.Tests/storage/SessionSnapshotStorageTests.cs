@@ -138,7 +138,7 @@ public sealed class SessionSnapshotStorageTests {
       store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "terminal"), true, terminal);
       store.Runs.TrySettle(session, terminal, ExecutionOutcome.Failed);
       store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "unsettled"), true, active);
-      store.Runs.RequestStop(session, active);
+      store.Runs.RequestStop(session, active, ownsRun: true);
     }
 
     database.ForceHistoryRevision(9);
@@ -254,7 +254,7 @@ public sealed class SessionSnapshotStorageTests {
       store.Inputs.Admit(session, 0, new(acceptedInputId, 0, "accepted\0🙂"), true, run);
       request = store.Runs.ClaimNextRequest(session, run, 0)!.RequestId;
       store.Output.Append(session, run, 0, new(request, output, 0, "partial\0🙂", false));
-      store.Runs.RequestStop(session, run);
+      store.Runs.RequestStop(session, run, ownsRun: true);
     }
 
     MakeVersionTwo(database);

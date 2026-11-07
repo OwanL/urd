@@ -252,7 +252,7 @@ public sealed class InputReceiptTests {
       var retry = store.Inputs.Admit(session, 0, steering, true, Guid.Empty, run);
       Assert.Equal(retained, retry.Receipt);
       Assert.False(retry.NewlyAccepted);
-      store.Runs.RequestStop(session, run);
+      store.Runs.RequestStop(session, run, ownsRun: true);
       Assert.Equal(retained, store.Inputs.Admit(session, 0, steering, false, Guid.Empty).Receipt);
       Assert.Equal(7, StoredDeliveries.Read(database).Count(input => input.Outcome == ExecutionOutcome.Cancelled));
       Assert.Equal(8, StoredDeliveries.ReadMessages(database).Count);

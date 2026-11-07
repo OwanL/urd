@@ -1,9 +1,10 @@
 # Local server development
 
 The local ASP.NET Core server composes Urd's existing Core and SQLite; it is not a
-second backend. It now exposes **create, Send, receipt lookup, snapshot polling and
-content reads**. UI, listing, addressed Stop, static assets, startup recovery and real
-providers are not implemented. Core now provides default durable safe-boundary steering
+second backend. It now exposes six operations: **create, Send, receipt lookup, snapshot polling,
+content reads and addressed Stop**. The owner-approved Stop increment is implemented and tested.
+UI, listing, static assets, startup recovery and real providers are not implemented.
+Core now provides default durable safe-boundary steering
 for busy Sends in the owned run; real tools, tool-inspection UI/API and an explicit after-run
 queue remain deferred.
 
@@ -59,6 +60,7 @@ and Core shutdown operations both finish; it has no forced cleanup timeout.
 | POST `/api/sessions` | Empty JSON object `{}` → 201 `{sessionId}`; Location names its snapshot |
 | POST `/api/sessions/{sessionId}/inputs` | `InputCommand` → 200 `InputReceipt`, Accepted **or** Refused |
 | GET `/api/sessions/{sessionId}/inputs/{inputId}` | 200 receipt or literal JSON `null` |
+| POST `/api/sessions/{sessionId}/runs/{runId}/stop` | Empty JSON object `{}` → 200 `StopReceipt` for Requested or Settled |
 | GET `/api/sessions/{sessionId}/snapshot` | 200 `SessionSnapshot` |
 | GET `/api/sessions/{sessionId}/content` | 200 `MessageContentPage` |
 
@@ -87,11 +89,23 @@ A distinct busy Send can receive an Accepted receipt for durable steering in the
 up to eight nonterminal input deliveries. At the next safe request boundary, tool results
 precede separate user messages in admission order; pending steering also continues after a
 successful no-tool response. Already-claimed requests are unchanged. The HTTP layer adds no
-busy policy or routes and does not turn a durable refusal into an HTTP error. Public reads
-remain user/assistant text only; there is no tool-inspection endpoint.
+busy policy or steering-specific routes and does not turn a durable refusal into an HTTP error.
+Public reads remain user/assistant text only; there is no tool-inspection endpoint.
+
+Stop addresses the observed run ID, never a replacement: `Requested` acknowledges committed
+intent and pending-steering retirement, not finished cleanup; `Settled` includes the saved
+outcome. Retrying reports current status. Missing/wrong-session runs return 404; an unresolved
+unowned run returns 409 with an `Unavailable` receipt, without mutation or fake settlement.
+Poll existing snapshots for stopping/fencing and saved settlement; no completion endpoint was added.
+Core initiates local cancellation even if the Stop write fails, fences admission and returns
+503 rather than a false durable acknowledgement. Local stopping also blocks late output,
+successful request completion and new model/tool work; snapshots include that local intent,
+not a promise it was saved. Actual tool-result evidence may still be persisted.
+The driver joins cancellation callbacks and model/tool cleanup, not the HTTP request.
+A held cleanup remains visibly stopping; callback faults leave fenced/unsettled work.
 
 Errors: 400 malformed input/cursor, 413 oversized body/text, 415 non-JSON POST or unsupported charset,
-404 missing session/message, 409 conflicting input identity or stale content revision,
+404 missing session/message/run, 409 conflicting input identity, stale content revision or unavailable Stop,
 503 shutdown admission/storage failure. Input conflicts are classified by Core's
 `InputConflictException`, not exception text or every `InvalidOperationException`.
 None of these errors—or an absent receipt—proves an earlier Send was durably refused.
@@ -111,8 +125,9 @@ An internal overload accepts a client factory for controlled composition tests. 
 constructs and owns that client inside the same lifetime; CLI behavior is unchanged.
 
 Request cancellation applies to receipt/snapshot/content reads, not accepted model work.
-Create/Send handlers return after admission without waiting for model settlement; closing
-a connection does not own cancellation of the session.
+Create/Send handlers return after admission and Stop after intent acknowledgement, without waiting
+for settlement. Stop body validation may use request cancellation, but no `RequestAborted` token
+enters Core Stop; closing a connection does not own cancellation of the session.
 
 A second Urd host for that directory fails before opening SQLite. The lock file is retained;
 its open handle, not its contents or a PID, conveys ownership. Separate data roots can run
@@ -129,12 +144,22 @@ The stop token requests shutdown; it is not a deadline or permission to abandon 
 Normal reopen preserves saved history and does not replay work. Opening a database does
 **not** recover orphan runs or make a previously fenced conversation usable again.
 Stop retires pending steering without rewriting Accepted receipts or automatically carrying
-it into another run. The CLI still configures only its deterministic text client, not tools.
+it into another run. Separate independent worker chats continue; bounded-descendant ownership
+requirements remain in [architecture](ARCHITECTURE.md) and [session design](SESSION-DESIGN.md),
+not a new child runtime. Stop cannot undo effects or forcibly kill arbitrary in-process functions.
+The CLI still configures only its deterministic text client, not tools. No schema, framework or UI
+change accompanies public Stop.
 
 ## Verification and review
 
-The completed steering/fake-tool checkpoint passed locked restore and the full Release
-solution suite: **259/259** tests, with no warnings. The new real Kestrel/SQLite
+Public Stop passed locked restore, independent review and the full **281/281 Release tests**,
+without warnings. `SessionStopRoutesTests` exercises real Kestrel/SQLite acknowledgements while
+callbacks/cleanup remain held, unread acknowledgements, repeated and stale Stops, independent
+sessions, orphan 409 responses, failed persistence with local cancellation, and validation/gates.
+Core tests cover uncooperative fake tools, late-write rejection, rollback and callback failures.
+These do not qualify real tools, subprocess termination or subagent-runtime cancellation.
+The previous steering/fake-tool checkpoint passed locked restore and the full Release
+solution suite: **259/259** tests, with no warnings. Its real Kestrel/SQLite
 `BusyHttpSendsBecomeDurableSteeringWithoutChangingTheRoutes` case verifies Accepted busy
 Sends, receipt lookup/exact retry and ordered continuation in the same run through the
 existing routes. Core tests cover fake-tool execution and lifecycle/fault boundaries;

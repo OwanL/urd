@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Urd.Core.Execution;
+using Urd.Core.Sessions;
 
 namespace Urd.Core.Storage;
 
@@ -40,15 +41,30 @@ internal sealed class RunStorage(Database database) {
     });
   }
 
-  internal void RequestStop(Guid sessionId, Guid runId) {
-    database.Write(transaction => {
+  internal StopReceipt RequestStop(Guid sessionId, Guid runId, bool ownsRun) {
+    return database.Write(transaction => {
+      using SqliteCommand read = database.Command(transaction,
+          "SELECT outcome FROM execution_runs WHERE session_id = $session AND run_id = $run;",
+          ("$session", sessionId), ("$run", runId));
+      object? outcome = read.ExecuteScalar();
+      if (outcome is null)
+        return new StopReceipt(runId, StopStatus.NotFound);
+
+      if (outcome is not DBNull)
+        return new StopReceipt(runId, StopStatus.Settled, (ExecutionOutcome)(long)outcome);
+
+      if (!ownsRun)
+        return new StopReceipt(runId, StopStatus.Unavailable);
+
       using SqliteCommand command = database.Command(transaction, """
-        UPDATE execution_runs SET stopping = 1 WHERE session_id = $session AND run_id = $run AND outcome IS NULL;
+        UPDATE execution_runs SET stopping = 1
+        WHERE session_id = $session AND run_id = $run AND stopping = 0 AND outcome IS NULL;
         UPDATE execution_inputs SET outcome = 1
         WHERE session_id = $session AND run_id = $run AND request_id IS NULL AND outcome IS NULL
             AND EXISTS (SELECT 1 FROM execution_runs WHERE run_id = $run AND stopping = 1 AND outcome IS NULL);
         """, ("$session", sessionId), ("$run", runId));
-      return command.ExecuteNonQuery();
+      command.ExecuteNonQuery();
+      return new StopReceipt(runId, StopStatus.Requested);
     });
   }
 

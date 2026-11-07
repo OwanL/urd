@@ -1,6 +1,7 @@
 # Initial UI / hosting design — scoped startup approval and remaining proposals
-2026-11-05; startup and five-operation HTTP bites approved 2026-11-07. **Only those
-scoped bites below are implemented. UI and the broader checkpoint remain proposed.**
+2026-11-05; startup, original five-operation HTTP and subsequent public Stop bites approved
+2026-11-07. **These scoped hosting bites are implemented and verified.
+The current surface has six operations. UI and the broader checkpoint remain proposed.**
 
 ## Owner-approved first hosting bite — startup and shutdown
 
@@ -58,6 +59,32 @@ An internal client factory preserves server-owned construction/disposal while en
 held-cleanup tests of the real host. Exact routes, commands and evidence are in
 [server development](../server-development.md).
 
+## Owner-approved third hosting bite — public addressed Stop
+
+The owner approved public `SessionBase.RequestStopAsync(Guid runId)` and the thin route
+POST `/api/sessions/{sessionId}/runs/{runId}/stop` with JSON `{}`. Independent review, locked
+restore and **281/281 Release tests** pass without warnings, extending the steering checkpoint.
+`StopReceipt(RunId, Status, Outcome)` reports current status: 200 Requested (committed intent
+and pending-steering retirement, not cleanup completion) or Settled (saved outcome), 404
+NotFound including wrong-session runs, or 409 with Unavailable for an unowned unresolved run.
+No orphan mutation/recovery or fake settlement; retries may advance Requested to Settled,
+and a stale run ID cannot stop its replacement. Accepted input receipts remain unchanged.
+
+The route retains local admission/no-store policy, JSON/body validation (400/415/413) and
+503 shutdown/storage failures. It never passes `RequestAborted` into Core Stop or waits for
+cancellation callbacks. The driver joins callbacks/model/tool cleanup before saved settlement;
+existing snapshots show stopping/fencing and settlement. A failed Stop save still initiates
+local cancellation and fences admission, but fails HTTP with 503, not a durable acknowledgement.
+Core blocks late output/success and new work through local Stop guards; snapshot local intent
+is observational, not proof of persistence. Actual tool results may still be saved.
+
+No schema, new framework, UI, real tools or child runtime is added. Full bounded-descendant
+requirements remain in [architecture](../ARCHITECTURE.md) and [session design](../SESSION-DESIGN.md);
+separately opened independent worker chats continue. Stop does not undo effects or forcibly
+kill arbitrary in-process functions. See the [Core approval record](initial-core-design.md#owner-approved-public-addressed-stop--2026-11-07)
+for the owner-approved method/receipt and failure contract. Real HTTP tests exercise held
+cleanup, unread acknowledgements, stale/independent runs, failed saves and unowned orphans.
+
 ## Remaining UI / transport proposal
 
 **Approved read-boundary update:** the owner approved Core snapshot/content reads and
@@ -75,7 +102,8 @@ Existing: TypeScript/Preact, Core without ASP.NET, Server → Core; trusted-loca
 supersedes ACCESS-BOUNDARY-EVIDENCE's earlier credential/pairing recommendation.
 [Browser](../BROWSER-DESIGN.md), [application](../APPLICATION-PLAN.md),
 [session](../SESSION-DESIGN.md) and [Core draft](initial-core-design.md) retain scope.
-Core members below are provisional dependencies, **not newly approved operations**.
+Core members below remain provisional except the scoped approvals above; the Stop route/method
+is now implemented, not approval of the wider UI/SSE/listing sketches.
 
 ## 1. `Workspace`, `Transcript`, `Composer` — ordinary Preact functions
 One mounted workspace per browser; no frontend session-kind hierarchy or state library.

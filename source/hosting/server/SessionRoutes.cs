@@ -24,6 +24,8 @@ internal static class SessionRoutes {
         SubmitAsync(http, sessions, sessionId));
     routes.MapGet("/{sessionId}/inputs/{inputId}", (HttpContext http, Guid sessionId, Guid inputId) =>
         ReadReceiptAsync(http, sessions, sessionId, inputId));
+    routes.MapPost("/{sessionId}/runs/{runId}/stop", (HttpContext http, Guid sessionId, Guid runId) =>
+        StopAsync(http, sessions, sessionId, runId));
     routes.MapGet("/{sessionId}/snapshot", (HttpContext http, Guid sessionId) =>
         WithSessionAsync(http, sessions, sessionId, async session =>
             Results.Ok(await session.ReadSnapshotAsync(http.RequestAborted))));
@@ -113,6 +115,26 @@ internal static class SessionRoutes {
       // Core retains the decision; a disconnected request never owns accepted work.
       InputReceipt receipt = await session.SubmitUserInputAsync(command);
       return Results.Ok(receipt);
+    });
+  }
+
+  private static async Task<IResult> StopAsync(HttpContext http, SessionManager sessions, Guid sessionId, Guid runId) {
+    if (runId == Guid.Empty)
+      return Results.BadRequest();
+
+    JsonElement body = await http.Request.ReadFromJsonAsync<JsonElement>(http.RequestAborted);
+    if (body.ValueKind != JsonValueKind.Object || body.EnumerateObject().Any())
+      return Results.BadRequest();
+
+    return await WithSessionAsync(http, sessions, sessionId, async session => {
+      // Disconnecting cannot undo admitted Stop intent; cleanup remains owned by Core.
+      StopReceipt receipt = await session.RequestStopAsync(runId);
+      return receipt.Status switch {
+        StopStatus.Requested or StopStatus.Settled => Results.Ok(receipt),
+        StopStatus.NotFound => Results.NotFound(),
+        StopStatus.Unavailable => Results.Conflict(receipt),
+        _ => throw new InvalidOperationException("Unknown Stop status.")
+      };
     });
   }
 

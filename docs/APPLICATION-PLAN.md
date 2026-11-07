@@ -180,11 +180,16 @@ comparisons or a larger complete specification:
    pass the integrated suite. Explicit after-run queueing, real tools and provider qualification
    remain separate work; see the Core record's primary-input policy section. The approved
    `SessionManager.ShutdownSessionsAsync` now fences and drains owned work without disposing
-   borrowed resources; startup recovery, public addressed Stop and push subscriptions remain pending.
+   borrowed resources. Owner-approved `SessionBase.RequestStopAsync(runId)` and its addressed HTTP
+   route now pass independent review and **281/281 Release tests**: intent acknowledgement is distinct from cleanup
+   and saved settlement; failures still cancel locally and fence without false durable acknowledgement.
+   This extends the previous 259-test steering checkpoint. Startup recovery and push
+   subscriptions remain pending; bounded-descendant requirements do not imply a child runtime,
+   and separately opened independent worker chats continue.
    See the [read review map](backend-development.md#read-contract-and-incremental-review-order) before expanding it.
    The approved [Server slices](server-development.md) supply real loopback listening, exclusive
-   data ownership, orderly shutdown and five thin chat HTTP operations: create, Send, receipt,
-   snapshot and content. UI, listing and public addressed Stop remain separate bites;
+   data ownership, orderly shutdown and six thin chat HTTP operations: create, Send, receipt,
+   snapshot, content and addressed Stop. UI and listing remain separate bites;
    this is not the integrated browser milestone or a complete chat workflow.
    Keep independent Core/storage and UI/hosting/build work parallel with disjoint ownership;
    routine dependency wiring is not another approval gate. This is not whole-Core approval.

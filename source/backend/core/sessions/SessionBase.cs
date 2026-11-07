@@ -40,7 +40,9 @@ public abstract class SessionBase {
     StoredSessionSnapshot stored = store.Snapshots.Read(Id);
     bool runOwnedElsewhere = stored.UnsettledRunId is { } runId && !IsCurrentRun(runId);
     bool fenced = !acceptingInput || stored.HistoryRevision != HistoryRevision || runOwnedElsewhere;
-    return new(Id, stored.HistoryRevision, fenced, stored.UnsettledRunId, stored.StopRequested,
+    bool stopping = stored.StopRequested
+        || (stored.UnsettledRunId is { } activeRun && IsCurrentRun(activeRun) && execution!.IsStopping);
+    return new(Id, stored.HistoryRevision, fenced, stored.UnsettledRunId, stopping,
         stored.LastSettlement, stored.Messages, stored.HasOlderMessages);
   }
 
@@ -86,7 +88,7 @@ public abstract class SessionBase {
       pendingSettlement = settlement?.Task ?? Task.CompletedTask;
       if (execution is not null) {
         try {
-          WriteToStore(() => store.Runs.RequestStop(Id, execution.RunId));
+          WriteToStore(() => store.Runs.RequestStop(Id, execution.RunId, ownsRun: true));
         } catch (Exception failure) {
           stopFailure = failure;
         }
@@ -104,18 +106,18 @@ public abstract class SessionBase {
     }
   }
 
-  internal async Task RequestStopAsync(Guid runId) {
-    Task stopCallbacks = Task.CompletedTask;
-    using (await gate.AcquireAsync()) {
-      WriteToStore(() => store.Runs.RequestStop(Id, runId));
+  public async Task<StopReceipt> RequestStopAsync(Guid runId) {
+    if (runId == Guid.Empty)
+      throw new ArgumentException("A run ID is required.", nameof(runId));
 
-      // Checked under the lock, so a stale run ID cannot stop a replacement run.
-      if (IsCurrentRun(runId))
-        stopCallbacks = execution!.StopAsync();
-    }
+    using var held = await gate.AcquireAsync();
+    bool ownsRun = IsCurrentRun(runId);
+    // Signal even if the Stop write fails. The driver owns joining the retained
+    // callback task before settlement; this acknowledgement never means cleanup finished.
+    if (ownsRun)
+      _ = execution!.StopAsync();
 
-    // Stop callbacks may call back into this session, so never await them under the lock.
-    await stopCallbacks;
+    return WriteToStore(() => store.Runs.RequestStop(Id, runId, ownsRun));
   }
 
   internal async Task<ExecutionResult> WaitForSettlementAsync(Guid runId, CancellationToken cancellation = default) {
@@ -143,12 +145,15 @@ public abstract class SessionBase {
 
   internal async Task<bool> RecordOutputAsync(Guid runId, LlmResponseChunk chunk) {
     using var held = await gate.AcquireAsync();
-    return IsCurrentRun(runId) && store.Output.Append(Id, runId, HistoryRevision, chunk);
+    return IsCurrentRun(runId) && !execution!.IsStopping
+        && store.Output.Append(Id, runId, HistoryRevision, chunk);
   }
 
   internal async Task<bool> CompleteRequestAsync(Guid runId, LlmRequestOutcome outcome) {
     using var held = await gate.AcquireAsync();
-    return IsCurrentRun(runId) && store.Output.CompleteRequest(Id, runId, HistoryRevision, outcome);
+    return IsCurrentRun(runId)
+        && (outcome.Outcome != ExecutionOutcome.Completed || !execution!.IsStopping)
+        && store.Output.CompleteRequest(Id, runId, HistoryRevision, outcome);
   }
 
   internal async Task<bool> TryStartToolAsync(Guid runId, Guid requestId, string callId) {
@@ -252,9 +257,4 @@ public abstract class SessionBase {
       throw;
     }
   }
-
-  private void WriteToStore(Action write) => WriteToStore(() => {
-    write();
-    return true;
-  });
 }

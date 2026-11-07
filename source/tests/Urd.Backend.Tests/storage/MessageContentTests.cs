@@ -240,7 +240,7 @@ public sealed class MessageContentTests {
           Guid.NewGuid(), activeRunId: first.Run).NewlyAccepted);
       Assert.Equal(new[] { first.User, steering, first.Assistant, secondOutput, undelivered },
           store.Snapshots.Read(first.Session).Messages.Select(message => message.Message));
-      store.Runs.RequestStop(first.Session, first.Run);
+      store.Runs.RequestStop(first.Session, first.Run, ownsRun: true);
     }
 
     using SessionStore reopened = SessionStore.Open(database.Path);
@@ -266,7 +266,7 @@ public sealed class MessageContentTests {
     using SessionStore store = SessionStore.Open(database.Path);
     TestRun run = StartRun(store);
     Append(store, run, 0, "partial");
-    store.Runs.RequestStop(run.Session, run.Run);
+    store.Runs.RequestStop(run.Session, run.Run, ownsRun: true);
     MessageContentPage stopped = store.Content.Read(run.Session, new(run.Assistant, 0, 0));
     Assert.Equal("partial", stopped.Text);
     Assert.True(stopped.IsClosed);

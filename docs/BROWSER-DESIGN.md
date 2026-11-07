@@ -46,6 +46,43 @@ mock or survey every JS framework. The Blazor subset is **not a fair framework
 performance/LOC comparison**. Existing research had advanced a shared TS/DOM UI
 and reserved Blazor; it had not ranked individual JS component libraries.
 
+## Next-work owner alignment — 2026-11-08
+
+This discussion aligns the next work; it does not approve production implementation,
+a complete UI design, class structure, provider/account operations or benchmark runs.
+
+- **Imitate Pie's UI, rebuilding incrementally at the highest quality.** The owner
+  rejected a choice between a limited interface and immediate full imitation: build
+  the familiar interface from the ground up, incrementally. Reduce each increment's
+  scope, not its quality; do not interpret incremental delivery as throwaway UI work.
+- **Reference only; new code.** Asked specifically about selective reuse of Pie's
+  styling/presentation code, the owner chose “Reference only; new code”. Pie is the
+  visual and behavioural reference, not a source of copied UI code or styles. This
+  does not change the selected TypeScript/Preact stack or sharing Urd's new UI across
+  its eventual hosts.
+- **Single-agent trials are useful alongside Pie.** Delegation need not precede
+  those trials. This neither removes delegation from Urd nor requires an early
+  switch away from Pie for normal development.
+- **Reuse the existing read-only comparison as a reference, not an acceptance gate.**
+  The owner proposed replaying the earlier Pie/Codex prompts and clarified that
+  measurement and comparison should inform the work without overfitting.
+  Compare output quality and costs without tuning Urd to win these particular tasks
+  or treating prior answers/grades as ground truth. No numerical winning threshold
+  or requirement to beat either harness was selected.
+
+The retained local study is
+`C:\dev\data\investigations\pie-codex-readonly-20261106-224745`.
+Its `prompts/` and `fixtures/` preserve the approved task bodies and frozen inputs;
+`METHODS.md` and `RESULTS.md` describe the comparison and its limitations. The three
+cases are PR #2628 review, RT-33 georeferencing research and provider prompt-caching
+research, with three runs per harness per case using Astra/high. Pie used helpers;
+Codex did not in the recorded trials. An initial single-agent Urd comparison therefore
+would not isolate harness efficiency. The report also identifies inconsistent PR
+correctness grading. Cost figures use a shared pricing catalog, not actual invoices.
+These read-only results do not qualify editing, process cancellation or crash
+recovery. No study was rerun and no evidence or personal data was imported into
+Urd during this alignment.
+
 ## Resumed client/access review — 2026-11-05
 
 ### Owner outcome: local first, without a new sign-in system

@@ -266,6 +266,16 @@ trade-off and bounded synthetic evidence. CSS, remaining build-tooling details,
 transport, client-state classes, file layout and desktop host remain open;
 a prototype is not their approval.
 
+**Rebuild Pie's UI incrementally, using it as a reference only.** On 2026-11-08,
+the owner chose new Urd UI code and styling rather than selective reuse of Pie's
+presentation code. Imitate the familiar interface from the ground up; incremental
+delivery reduces scope, not the quality expected of each delivered part.
+Single-agent trials alongside Pie are useful before delegation arrives. The existing
+Pie/Codex read-only tasks provide quality/cost reference points, not pass/fail targets
+or a reason to overfit. [Next-work alignment](docs/BROWSER-DESIGN.md#next-work-owner-alignment--2026-11-08)
+records these outcomes and the retained study location; this is not production
+implementation approval.
+
 ### Single-user, local-first workspace
 
 **Urd is a single-user, local-first application, not a shared multi-user service.**

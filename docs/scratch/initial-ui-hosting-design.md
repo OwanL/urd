@@ -14,8 +14,8 @@ deterministic request-only `IChatClient`, real SQLite, mid-response input, Stop,
 history/reconnect/restart without replay. No providers/tools, LAN or desktop scaffold.
 Existing: TypeScript/Preact, Core without ASP.NET, Server → Core; trusted-local UX
 supersedes ACCESS-BOUNDARY-EVIDENCE's earlier credential/pairing recommendation.
-[Browser](../../BROWSER-DESIGN.md), [application](../../APPLICATION-PLAN.md),
-[session](../../SESSION-DESIGN.md) and [Core draft](initial-core-design.md) retain scope.
+[Browser](../BROWSER-DESIGN.md), [application](../APPLICATION-PLAN.md),
+[session](../SESSION-DESIGN.md) and [Core draft](initial-core-design.md) retain scope.
 Core members below are provisional dependencies, **not newly approved operations**.
 
 ## 1. `Workspace`, `Transcript`, `Composer` — ordinary Preact functions

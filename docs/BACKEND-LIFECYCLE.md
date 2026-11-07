@@ -3,7 +3,7 @@
 **2026-11-04 — Windows experiment, not production bootstrap.** ASP.NET Core/Kestrel
 is selected. One backend shared by clients remains a **working default**, not a
 locked topology. This report tests local coordination mechanics against
-[the lifecycle requirements](README.md#share-the-backend-across-user-interfaces)
+[the lifecycle requirements](../README.md#share-the-backend-across-user-interfaces)
 and [hosting boundaries](ARCHITECTURE.md#aspnet-core-hosting-and-http); it does not
 choose application classes, layout, tray integration or authentication.
 

@@ -13,7 +13,7 @@ provider coverage, local-build feasibility or acceptable resource use.
 
 Later investigation will compare concrete combinations against Urd's documented
 requirements and the useful capabilities carried forward from Pie, rather than
-requiring parity with Pie's implementation. See [README.md](README.md) and
+requiring parity with Pie's implementation. See [README.md](../README.md) and
 [ARCHITECTURE.md](ARCHITECTURE.md). The earlier proposed research order in
 [FOUNDATION-RESEARCH.md](FOUNDATION-RESEARCH.md) does not restrict this inventory.
 

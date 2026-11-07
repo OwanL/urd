@@ -1,7 +1,7 @@
 # Repository foundations: source customization and stage-3 review
 
 **2026-11-05 — owner direction plus proposals, not scaffold approval.**
-[README](README.md) owns product intent; [Session Design](SESSION-DESIGN.md)
+[README](../README.md) owns product intent; [Session Design](SESSION-DESIGN.md)
 records the selected, revisable Core-without-ASP.NET / Server → Core boundary.
 This review does not change those responsibilities or select frontend internals.
 

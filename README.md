@@ -97,7 +97,7 @@ The UI must remain responsive throughout the application, including minimal
 delay between clicking a session tab and seeing its contents. Substantial agent
 fan-out must not make interaction sluggish. Support as much work as is practical
 without treating speculative workload examples as hard limits. Concrete sizing
-scenarios and performance investigations belong in [ARCHITECTURE.md](ARCHITECTURE.md).
+scenarios and performance investigations belong in [ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ### Keep the harness's own resource overhead low
 
@@ -128,7 +128,7 @@ of Pi logic may be considered case by case; this is not approval to adopt a Pi
 package.** First-party ownership does not require inventing every algorithm or
 rejecting focused libraries. It means Urd owns its architecture and behaviour.
 A narrow Urd-owned model/tool cycle is now the provisional direction after
-[focused comparison and owner alignment](EXECUTION-DESIGN.md); "first-party"
+[focused comparison and owner alignment](docs/EXECUTION-DESIGN.md); "first-party"
 alone was not a requirement to write one. Revisit the choice if real integration
 changes the code/dependency trade-off.
 The backend uses C# on .NET with ASP.NET Core hosting and the official C# MCP
@@ -144,11 +144,11 @@ settled choice, not another shortlist recommendation.
 Plan a strong class structure around Urd's actual responsibilities, state
 ownership and lifecycles. The goal is code that is easy to read and change,
 not a large hierarchy or layers for their own sake. The strict small-codebase
-requirement still applies. [ARCHITECTURE.md](ARCHITECTURE.md#c-backend-and-class-design)
-records the design work this calls for. The [owner-reviewed session sketch](SESSION-DESIGN.md)
+requirement still applies. [ARCHITECTURE.md](docs/ARCHITECTURE.md#c-backend-and-class-design)
+records the design work this calls for. The [owner-reviewed session sketch](docs/SESSION-DESIGN.md)
 uses `SessionBase`, `PrimarySession` and `SubagentSession` as its working structure.
 Class responsibilities must drive file layout. The selected, revisable boundary is
-[`Urd.Server → Urd.Core`](SESSION-DESIGN.md#5-coreserver-project-boundary--selected-revisable):
+[`Urd.Server → Urd.Core`](docs/SESSION-DESIGN.md#5-coreserver-project-boundary--selected-revisable):
 Core owns session/execution/storage logic without ASP.NET. APIs and base-class
 responsibilities outside the approved identity slice remain proposed. Scoped approvals
 and implementation evidence are recorded in the [Core design record](docs/scratch/initial-core-design.md).
@@ -161,11 +161,11 @@ remains intended scope and requires normal functional verification.
 
 **Library choices are revisitable:** if implementation shows a selected library
 is cumbersome or a poor fit, consider an alternative rather than forcing Urd around
-it. The [MCP decision and selection policy](ARCHITECTURE.md#mcp-client-library-and-revisiting-library-choices)
+it. The [MCP decision and selection policy](docs/ARCHITECTURE.md#mcp-client-library-and-revisiting-library-choices)
 record this direction.
 
 The shared model interface (`IChatClient`), shared SQLite storage and
-TypeScript/Preact frontend are selected; see [ARCHITECTURE.md](ARCHITECTURE.md).
+TypeScript/Preact frontend are selected; see [ARCHITECTURE.md](docs/ARCHITECTURE.md).
 Exact SDK/Node versions, endpoint style, provider-specific adapters and desktop
 host remain open; the provisional loop direction still needs production qualification.
 Resource use, portability and local source builds require verification; selected
@@ -179,7 +179,7 @@ or override platform merely to make those source changes possible.
 
 **Matching editable source and build instructions travel with distributable
 builds, including modified source in custom packages.** The accepted
-[source-distribution direction](REPO-FOUNDATIONS.md#owner-outcome) does not require
+[source-distribution direction](docs/REPO-FOUNDATIONS.md#owner-outcome) does not require
 repackaging on every compile or select a physical archive/folder/embedding format,
 SDK/cache bundling, tooling or activation mechanics.
 
@@ -207,7 +207,7 @@ and data; exact subfolder names remain open. Data sits outside generated outputs
 and source/distribution inputs and survives clean/rebuild. Rebuilding the same copy
 does not reset its data. Users manage their data; this does not select ordinary
 installed-release paths, credential portability, migrations or activation mechanics.
-See the scoped [owner outcomes](REPO-FOUNDATIONS.md#owner-outcome).
+See the scoped [owner outcomes](docs/REPO-FOUNDATIONS.md#owner-outcome).
 
 **Editing source, then building and reloading, is an acceptable normal workflow.**
 Make the developer and user experience as smooth as is feasible without adding
@@ -254,7 +254,7 @@ remain separate design work.
 
 **Use TypeScript + Preact for the shared UI.** The owner selected this direction
 on 2026-11-04: ordinary browser components and presentation logic should be reusable
-in later desktop/VS Code hosts. [Browser design](BROWSER-DESIGN.md) records the
+in later desktop/VS Code hosts. [Browser design](docs/BROWSER-DESIGN.md) records the
 trade-off and bounded synthetic evidence. CSS, remaining build-tooling details,
 transport, client-state classes, file layout and desktop host remain open;
 a prototype is not their approval.
@@ -413,15 +413,15 @@ reference evidence, not Urd architectural contracts.
 
 ## Architecture and feature review
 
-[ARCHITECTURE.md](ARCHITECTURE.md) records the continuing feature review,
+[ARCHITECTURE.md](docs/ARCHITECTURE.md) records the continuing feature review,
 architectural decisions and unresolved design questions. This README owns the
 project's purpose and strategic constraints; the architecture document owns the
 more detailed decisions as they are made.
 
-[Foundation review](FOUNDATION-REVIEW.md) gathers the latest evidence and scoped
-owner outcomes. The [application plan](APPLICATION-PLAN.md) now records the accepted
+[Foundation review](docs/FOUNDATION-REVIEW.md) gathers the latest evidence and scoped
+owner outcomes. The [application plan](docs/APPLICATION-PLAN.md) now records the accepted
 rough structure, deliberately open to correction during implementation, plus proposed
-centralized documentation and repository-support areas. [Structure research](STRUCTURE-RESEARCH.md)
+centralized documentation and repository-support areas. [Structure research](docs/STRUCTURE-RESEARCH.md)
 retains the source investigation and reasoning behind it; the earlier project-first
 and `systems/` layouts are superseded. Less-developed application areas remain explicitly
 TBD, not omitted or treated as finished. Existing decisions remain; rough-layout
@@ -429,20 +429,20 @@ acceptance does not authorize production implementation or claim a completed doc
 
 Focused qualification evidence, distinct from architecture approval:
 
-- [Session design](SESSION-DESIGN.md): working sketch and guarded lifecycle/
+- [Session design](docs/SESSION-DESIGN.md): working sketch and guarded lifecycle/
   process-exit evidence; final hierarchy, fine layout and independent-worker closure remain open.
-- [Execution design](EXECUTION-DESIGN.md): provisional cycle and composed native
+- [Execution design](docs/EXECUTION-DESIGN.md): provisional cycle and composed native
   adapter/guard/loop/SQLite test-envelope evidence—not actual session-store,
   process-kill, production-streaming or live-provider qualification.
-- [Browser design](BROWSER-DESIGN.md): TypeScript/Preact selection, bounded synthetic
+- [Browser design](docs/BROWSER-DESIGN.md): TypeScript/Preact selection, bounded synthetic
   UI evidence and unresolved client structure/integration.
-- [SQLite validation](SQLITE-VALIDATION.md): concurrency/recovery evidence and
+- [SQLite validation](docs/SQLITE-VALIDATION.md): concurrency/recovery evidence and
   three experimental preview fixes; separate range-read races remain.
-- [Provider qualification](PROVIDER-QUALIFICATION.md): route limits and offline
+- [Provider qualification](docs/PROVIDER-QUALIFICATION.md): route limits and offline
   candidate OAuth/refresh evidence—not production auth or live-account qualification.
-- [Backend lifecycle](BACKEND-LIFECYCLE.md): Windows attach/start/stop mechanics;
+- [Backend lifecycle](docs/BACKEND-LIFECYCLE.md): Windows attach/start/stop mechanics;
   portable locking, packaged daemon, remote authentication and topology remain unselected.
-- [MCP qualification](MCP-QUALIFICATION.md): real SDK with fake stdio peers and an
+- [MCP qualification](docs/MCP-QUALIFICATION.md): real SDK with fake stdio peers and an
   explicit 2025 handshake; default 2026 negotiation/fallback remains untested.
 
 ## Open design work

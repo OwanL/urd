@@ -8,7 +8,7 @@
 Research and Windows probes: **2026-11-03**. This advances the comparison in
 [FOUNDATION-RANKING.md](FOUNDATION-RANKING.md); this investigation selected no
 stack, storage, UI or loop ownership. The owner requested research and small experiments.
-[README.md](README.md) and [ARCHITECTURE.md](ARCHITECTURE.md) remain authoritative.
+[README.md](../README.md) and [ARCHITECTURE.md](ARCHITECTURE.md) remain authoritative.
 
 ## Bottom line
 

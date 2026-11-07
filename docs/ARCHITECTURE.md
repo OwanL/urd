@@ -3,7 +3,7 @@
 ## Status and scope
 
 This is a living design record, not an implemented architecture. The project
-purpose and strategic constraints are owned by [README.md](README.md).
+purpose and strategic constraints are owned by [README.md](../README.md).
 
 The review includes feature value as well as interfaces, data models,
 dependencies, class/module structure, ownership, coupling, failure behaviour
@@ -180,7 +180,7 @@ The owner subsequently requests flat `docs/`, optionally `docs/scratch/`, reject
 `development/` as vague and drops `experiments/` from the target layout. The baseline
 uses `scripts/` for executable automation; shared assets remain conditional. The
 owner subsequently authorized moving the existing experimental tree to machine-local
-scratch; [the verified archive](README.md#experimental-source-archive) preserves its
+scratch; [the verified archive](../README.md#experimental-source-archive) preserves its
 files and provenance. Documentation remains in place. Routine naming/nesting corrections
 can follow real implementation needs; this is not a frozen class, project or persistence
 contract.

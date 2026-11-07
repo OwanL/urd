@@ -16,7 +16,7 @@ Windows x64, .NET SDK **10.0.403**, runtime **10.0.14**,
 `Microsoft.Data.Sqlite` **10.0.14**; existing repository toolchain, no installs.
 Tested source: `experiments/transcript-harness/`, at repository revision
 `2d3fa93b06e101643d986d26000060c0b61922d5`. Shared/adapter source was not edited.
-These are historical repository paths: the tree was later [moved to local scratch](README.md#experimental-source-archive).
+These are historical repository paths: the tree was later [moved to local scratch](../README.md#experimental-source-archive).
 Keep this report's tested revision distinct from the archive revision. Reproduction
 scripts below may still assume the old location; relocation was not a new test run.
 Configuration: **WAL, synchronous=NORMAL**, default auto-checkpoint; adapter calls

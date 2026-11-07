@@ -12,7 +12,7 @@ The owner prefers flat documentation, optionally `docs/scratch/`, and drops
 `experiments/` from the target layout. Use `scripts/` rather than the vague
 `development/` label for executable automation. The shared-assets home remains
 conditional. The owner subsequently authorized moving the experimental tree to
-machine-local scratch; [the archive note](README.md#experimental-source-archive)
+machine-local scratch; [the archive note](../README.md#experimental-source-archive)
 records the verified relocation. Documentation has not yet been reorganized.
 
 ## Working layout
@@ -141,16 +141,16 @@ architectural choice at hand. Wait for the owner's response before the next bite
 Review wider lifetimes, state, dependencies and transaction boundaries internally.
 The rough layout remains accepted; exact new APIs remain proposals until reviewed.
 
-The [Core draft](docs/scratch/initial-core-design.md),
-[UI/hosting draft](docs/scratch/initial-ui-hosting-design.md) and
-[build/startup draft](docs/scratch/initial-build-setup-design.md) are internal integration
+The [Core draft](scratch/initial-core-design.md),
+[UI/hosting draft](scratch/initial-ui-hosting-design.md) and
+[build/startup draft](scratch/initial-build-setup-design.md) are internal integration
 references, not required owner reading or whole-document approval requests.
 Each workstream must obtain independent
 agent review and fix supported issues before the coordinator brings its concrete
 code/class/method proposal to the owner. The owner reviews architectural shape and
-code, not engineering guidelines or process documents. [Code-shape guidance](docs/code-shape-guidelines.md)
+code, not engineering guidelines or process documents. [Code-shape guidance](code-shape-guidelines.md)
 is maintained by the agents/coordinator; its size signals are not hard limits.
-[AGENTS.md](AGENTS.md) records this workflow. Peer-review acceptance is not owner approval.
+[AGENTS.md](../AGENTS.md) records this workflow. Peer-review acceptance is not owner approval.
 
 An approved bite permits only its presented scope, not the rest of a draft, unrelated features or external
 actions. Once the initial base is accepted, follow its conventions and use implementation
@@ -175,7 +175,7 @@ comparisons or a larger complete specification:
    for the first browser increment; browser wiring itself is not implemented yet.
    This staging increment refuses distinct busy input rather than queuing it; startup
    recovery, public shutdown and push subscriptions remain pending. See the
-   [read review map](docs/backend-development.md#read-contract-and-incremental-review-order) before expanding it.
+   [read review map](backend-development.md#read-contract-and-incremental-review-order) before expanding it.
    Keep independent Core/storage and UI/hosting/build work parallel with disjoint ownership;
    routine dependency wiring is not another approval gate. This is not whole-Core approval.
 2. Order the necessary small Core and hosting/UI bites toward one built browser → Core →

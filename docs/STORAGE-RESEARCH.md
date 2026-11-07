@@ -43,7 +43,7 @@ inflate the project with stronger guarantees the owner has not requested.
 ## Data lifetimes for the next comparison
 
 This inventory derives from the decisions in [ARCHITECTURE.md](ARCHITECTURE.md)
-and [README.md](README.md); it is not a schema, a new retention policy or evidence
+and [README.md](../README.md); it is not a schema, a new retention policy or evidence
 that discovery is complete. Logical ownership does not select a storage layout.
 
 | Data family | Established boundary | Still unresolved |

@@ -7,9 +7,9 @@ deterministic request-only model) remains proposed. No Server/UI or bootstrap sc
 are implemented; the current baseline keeps its few package pins in the projects.
 
 ## Existing direction and scope
-- [Application plan](../../APPLICATION-PLAN.md): component-led source; `scripts/`
+- [Application plan](../APPLICATION-PLAN.md): component-led source; `scripts/`
   owns executable automation. Core is ASP.NET-free; Server references Core.
-- [Foundations](../../REPO-FOUNDATIONS.md): .NET 10 LTS, Vite, preferred npm;
+- [Foundations](../REPO-FOUNDATIONS.md): .NET 10 LTS, Vite, preferred npm;
   copy-local tool acquisition where practical; each customized copy keeps its data.
 - Exact supported pins follow support lifetime/dependency compatibility at implementation,
   not installed versions. No owner vote on ordinary compiler/test-runner selection.

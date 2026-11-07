@@ -14,7 +14,7 @@ selection or performance result**. No toolchains were installed, prototypes
 built, accounts accessed or resource benchmarks run in this round.
 
 **We have enough requirements to rank structural fit, not enough evidence to
-choose a final winner.** [README.md](README.md) and [ARCHITECTURE.md](ARCHITECTURE.md)
+choose a final winner.** [README.md](../README.md) and [ARCHITECTURE.md](ARCHITECTURE.md)
 cover the important direction: small maintained code, low resource overhead,
 browser-first delivery with an OS rollout of Windows → macOS → Linux,
 one shared backend with independent client

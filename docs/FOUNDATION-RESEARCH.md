@@ -14,7 +14,7 @@ it is not a benchmark, implementation-cost measurement or compatibility guarante
 No toolchains were installed, applications built, provider accounts used or model
 requests made for this investigation.
 
-[README.md](README.md) and [ARCHITECTURE.md](ARCHITECTURE.md) own the requirements.
+[README.md](../README.md) and [ARCHITECTURE.md](ARCHITECTURE.md) own the requirements.
 [PROVIDER-RESEARCH.md](PROVIDER-RESEARCH.md) owns the earlier transport/loop probes;
 those Node-based checks do not qualify Bun, Go, Rust or .NET, or establish a runtime
 performance winner. [STORAGE-RESEARCH.md](STORAGE-RESEARCH.md) remains undecided.

@@ -232,7 +232,7 @@ frozen methods. Both projects can evolve together. One project remains simpler
 plumbing, but is not the selected starting point.
 
 **Historical coarse source mapping:** the later [application plan](APPLICATION-PLAN.md)
-now owns the rough layout, and [experimental source has been archived](README.md#experimental-source-archive).
+now owns the rough layout, and [experimental source has been archived](../README.md#experimental-source-archive).
 The earlier sketch below did not approve every filename, frontend structure or
 test-project arrangement:
 

@@ -274,16 +274,16 @@ and real-provider qualification remain outside this checkpoint. The owner reques
 at tested milestones for their own file-by-file, line-by-line review before more layers accumulate.
 
 ## Existing constraints, not new decisions
-- [Architecture](../../ARCHITECTURE.md): shared SQLite, message rows/bounded previews,
+- [Architecture](../ARCHITECTURE.md): shared SQLite, message rows/bounded previews,
   WAL / `synchronous=NORMAL`. Returned commits survive process crash; uncommitted output
   may be lost. No power-loss, exactly-once-effect or attachment-file atomicity guarantee.
-- [Session design](../../SESSION-DESIGN.md): small hierarchy/guarded ownership, not frozen
-  APIs. [Execution design](../../EXECUTION-DESIGN.md): request-only client/Urd-owned cycle.
+- [Session design](../SESSION-DESIGN.md): small hierarchy/guarded ownership, not frozen
+  APIs. [Execution design](../EXECUTION-DESIGN.md): request-only client/Urd-owned cycle.
 - ASP.NET-free Core; **Server → Core**. Server owns composition/HTTP/browser admission.
-  [Application plan](../../APPLICATION-PLAN.md) owns component-led layout.
+  [Application plan](../APPLICATION-PLAN.md) owns component-led layout.
 - Disconnect does not cancel accepted work; Stop waits for actual settlement. Unknown
   Send receipts reconcile, not replay. Original history remains readable.
-- [SQLite validation](../../SQLITE-VALIDATION.md): coherent cursors, Unicode-safe previews,
+- [SQLite validation](../SQLITE-VALIDATION.md): coherent cursors, Unicode-safe previews,
   lifecycle/revision fences and schema versioning; archived APIs are not promoted.
 ## Internal five-type integration sketch — not an owner-review pack
 Fragments are declarations only, not compilable definitions. Names follow the approved

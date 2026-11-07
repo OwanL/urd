@@ -381,6 +381,30 @@ human use before closing. Do not add a hard takeover/protection rule merely
 because the user has spoken in the child chat. Urd's final-closure policy still
 applies; this does not inherit Pie's normal-session history retention.
 
+### Owner decision (2026-11-07): Stop owns the bounded work tree
+
+**Required product contract:** Stop in the main session must cancel its current
+work, including tools, bounded subagents and all descendants of those subagents.
+No owned work may silently continue or be reported as “Stopped” while still live.
+Separately opened independent worker chats continue: creation by the stopped
+session or later human steering does not bring them into its Stop scope.
+
+Cancellation requested is not cleanup complete. Keep the session stopping/fenced
+until owned work is confirmed stopped; admit no overlapping replacement. Future
+tool/child implementations must own and join their nested work, forbid untracked
+background work and reject late child admission after stopping begins. A cancelled
+token or disposed handle alone does not confirm that an external process exited.
+
+Stop is not close/delete or recovery: it neither deletes history nor reverses
+completed effects, and uncertain results must not be replayed as though nothing
+happened. Independent-worker close and creator-cleanup policies above and below
+are unchanged; this decision does not settle the open independent-close question.
+
+**Implementation boundary:** Current runtime scope is primary-session/model work
+and configured fake `AIFunction`s only. This records the required contract, not
+implementation or qualification of bounded-subagent/process-tree cancellation.
+No future classes or frameworks are promised.
+
 ### Keep conversation history linear
 
 **Decision:** A session has a linear conversation, not a tree of revisitable

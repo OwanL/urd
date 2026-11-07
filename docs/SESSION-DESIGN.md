@@ -151,6 +151,27 @@ Do not translate `CreatorId` into a cascading foreign key. Do not return title
 inference as the identity-readiness barrier. No generic relationship framework
 is needed: these are a few explicit IDs with different meanings.
 
+### Owner decision (2026-11-07): Stop scope and settlement
+
+**Required product contract, not a qualified implementation:** Main-session Stop
+must cancel current work, including tools, bounded subagents and all descendants
+of those subagents. No owned work may silently continue or produce a false
+“Stopped” status. Separately opened independent worker chats continue, even if
+the stopped session created them or a human has steered them.
+
+Cancellation requested is not cleanup complete: retain stopping/fenced state
+until owned work is confirmed stopped, with no overlapping replacement. Future
+tool/child implementations must own and join nested work, forbid untracked
+background work and reject late child admission after stopping begins. A token
+or disposed handle is not confirmation that an external process has exited.
+
+Stop is distinct from close/delete and recovery: it does not delete history,
+undo completed effects or justify replay of uncertain work. The independent-close
+owner gate and creator-cleanup authority remain unchanged. Current runtime scope
+is primary-session/model work and configured fake `AIFunction`s only. This is
+not implementation or qualification of bounded-subagent/process-tree cancellation;
+no future classes or frameworks are promised.
+
 ## 3. Durable facts and boundary rules
 
 Logical facts below are **not a final schema or new class per row**:
@@ -201,7 +222,7 @@ it does not qualify this entire walkthrough.
 | **Input while busy** | Ordinary user input defaults to durable steering at the next safe request boundary: after a tool-result batch, or after a no-tool response finishes. Inputs stay separate and ordered; they never rewrite a claimed request. This owner clarification supersedes timing-inferred preflight follow-up. Explicit after-run queueing remains separate work. Notes do not start idle work; assignments cannot silently merge into a busy worker. |
 | **Edit pending input** | Compare the exact pending input/delivery identity before replacement. Reject a delivery race; preserve whether input is steering or follow-up. Do not clear unrelated notes/results as a shortcut. No transcript suffix mutation or tool replay is involved. |
 | **Edit earlier prompt** | Stop and await affected execution; block new admission; atomically replace the suffix and invalidate stale execution/detail/context identities. Removed conversation does not roll back files/network actions or erase separately needed assignment evidence. Failure after committed replacement cannot restore the old tail on a guess. Then start replacement input deliberately. |
-| **Cancel / Stop** | Request cancellation of active/queued work, tools, bounded children and applicable auxiliary work; settle only when owned work has actually stopped. Keep “stopping” if unconfirmed; do not admit an overlapping replacement. A token/disposed object is not proof an external process died. Independent primary workers are not implicitly cancelled through a creator token. |
+| **Cancel / Stop** | Cancel active/queued work, tools, bounded subagents and all their descendants, plus applicable auxiliary work; join owned nested work and reject late child admission. Cancellation requested is not cleanup complete: retain stopping/fenced state until confirmed stopped, with no silent background work, false “Stopped” or overlapping replacement. A token/disposed object is not proof an external process died. Separately opened independent worker chats continue regardless of creator or human steering. Stop is not close/delete or recovery (§2 owner decision). |
 | **Bounded child** | Create a `SubagentSession` with stable caller identity and bucket selection; share the execution code, not its model context. Return one direct outcome. Release live execution at finish; retain lazy-readable child messages/tool detail with the containing chat. |
 | **Independent worker / human steering** | Create another `PrimarySession`, then admit explicit durable work from its requester. Human input uses that same session; it neither changes type nor cancels the creator's cleanup authority. Idle without an explicit finish is awaiting-result, not success. Preserve default running-worker cleanup skip and instructions to inspect human use/results. |
 | **Parent final close** | Fence admission, stop bounded owned work, then delete the containing conversation/helper detail and cancel follow-ups targeting it. Retain needed assignment/results independently. Independent-worker cascade/survival is an owner gate: this sketch must not implement either implicitly. Self-close must not wait for its own execution to die before returning acceptance; cleanup completion is separate. |

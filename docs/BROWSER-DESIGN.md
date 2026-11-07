@@ -87,7 +87,7 @@ Urd during this alignment.
 
 ### Owner outcome: local first, without a new sign-in system
 
-The question explicitly separated the fake-model **technical slice** from the
+The question explicitly separated the fake-LLM **technical slice** from the
 first **normal-use browser milestone**. Asked whether that milestone needs another
 device, the owner answered: **“Yes. local first, then lan, tailscale comes later”.**
 The access delivery order is therefore **same-machine → LAN → Tailscale**. This
@@ -204,7 +204,7 @@ needed, but neither their fixture success nor the old recommendation selects the
 The existing TEMP `FIRST-SLICE-CLIENT-CONTRACT.md` and
 `FIRST-SLICE-IMPLEMENTATION-PLAN.md` remain candidate integration details. Their old
 review-sequencing language does not supersede the resumed parallel discussion.
-The proposed technical slice is still two chats/two browser clients, fake-model
+The proposed technical slice is still two chats/two browser clients, fake-LLM
 streaming, real SQLite history, switching/reconnect and explicit settled Stop—not
 normal-use readiness. Independent navigation retains the production ≤100 incremental
 LOC condition. Client-state/API/fine layout remain revisable; this review grants no
@@ -217,7 +217,7 @@ controls and stream/read disclosure alongside actual two-client reconciliation.
 Check server effects as well as browser errors; do not claim local-program isolation.
 Later normal-use gates include real provider onboarding/storage and backend controls;
 LAN/device testing, Tailscale identity/deployment and actual desktop/editor reuse
-remain staged work, not prerequisites to this fake-model slice.
+remain staged work, not prerequisites to this fake-LLM slice.
 
 **Review verification:** a focused independent review checked the new decision/
 proposal boundaries against Urd authority, overnight evidence and the cited Pie
@@ -295,7 +295,7 @@ only and were shown inline to the owner, not presented as final styling.
 - Two synthetic streams update every 100 ms independently of subscribers.
   Updates carry latest bounded text, not a final proposed delta protocol.
 - A logical 2 MiB ASCII tool result is generated/read in 64 KiB chunks on demand;
-  child detail is requested only on expansion. These are not 2 MiB model calls.
+  child detail is requested only on expansion. These are not 2 MiB LLM calls.
 - Headless Chromium, 1100×800; heavy jobs serialized with `urd:heavy-local-work`.
   Host free RAM was roughly 0.65 GiB/16 GiB. No comparative resource superiority
   is inferred from this constrained machine.
@@ -427,10 +427,10 @@ inline to the owner. All owned browser/server processes were stopped.
   Include stable session/message/tool/child identities; never derive run completion
   from stream EOF, a tab selection, missing result or transport closure.
 - A bounded original-history page needs coherent rows, cursor, history revision
-  and explicit gaps. Fetch original history separately from model context. SQLite
+  and explicit gaps. Fetch original history separately from LLM context. SQLite
   Validation found count/window inconsistency in its experimental adapter: agree
   an atomic read contract before integrating, not its current preview semantics.
-- Lazy tool/model-exchange and child references must support bounded retrieval,
+- Lazy tool/LLM-exchange and child references must support bounded retrieval,
   refresh, unavailable/error and revision invalidation, without nested full-history
   copies. Attachments use backend-served identities, not arbitrary client paths.
 - Display updates need session identity, ordering/revision and a bounded recovery
@@ -467,7 +467,7 @@ their exact adoption and packaged-source workflow still need qualification.
 
 **Smallest next step, after integrated foundation agreement:** implement one
 browser→ASP.NET→SQLite newest-window read and explicit session switch, then one
-live fake-model stream and lazy detail path. Do not copy this disposable single-file
+live fake-LLM stream and lazy detail path. Do not copy this disposable single-file
 probe into production as its class design.
 
 First-slice acceptance checks:
@@ -481,7 +481,7 @@ First-slice acceptance checks:
 3. Switch rapidly during streaming; stale responses never steal selection or
    contaminate another session. Paging, selection, hover/focus and reader anchors
    work together; keyboard inspection can close/retry without fetching all detail.
-4. Disconnect/reload all clients while a real backend-owned fake-model run proceeds;
+4. Disconnect/reload all clients while a real backend-owned fake-LLM run proceeds;
    reconnect recovers changed history and explicit status without command replay.
 5. Two clients share backend work but navigate independently only while the full
    incremental implementation remains within 100 LOC; no draft-handoff system.

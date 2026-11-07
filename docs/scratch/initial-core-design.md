@@ -4,6 +4,8 @@ SessionExecution lifetime boundary, sixth coherent read surface, seventh session
 and subsequent default-steering/fake-tool, public addressed Stop and saved-primary-ID
 discovery increments below are owner-approved.
 Other API/state shape remains proposed, not implementation permission.**
+Current signatures and source ownership live in [backend development](../backend-development.md);
+the wider declaration sketches later in this record are not a complete live API listing.
 Checkpoint only: Windows local browser app, deterministic request-only `IChatClient`,
 two primary chats/two clients, real SQLite, mid-response input, addressed Stop/settlement
 and restart/reconnect without replay. No approval of the whole checkpoint,
@@ -20,10 +22,22 @@ and startup recovery remain separate scoped work.
 Present one bite inline at a time, not this whole document or a five-type pack; approval
 never extends to unpresented members.
 
+## Phase-1 vocabulary update
+
+The agreed breaking naming/API refactor uses user message submissions/acceptance and
+session executions. Declarations below use this vocabulary; historical counts qualify
+only their original checkpoints, not this refactor. Saved IDs, revisions, enum values,
+SQL identifiers/schema 5, decisions and exact-retry/Stop semantics are unchanged;
+there are no legacy aliases. See [current Core](../backend-development.md#breaking-api-vocabulary--phase-1)
+and [HTTP](../server-development.md#session-http-contract) contracts.
+Phase-2 structural cleanup is not yet included: `StoredSessionSnapshot`, the private
+settlement record and the existing JSON helper remain. Wider sketches below remain
+proposals where marked; renamed vocabulary does not implement them.
+
 ## Owner-approved first bite — creation/lookup only
 The owner approved `SessionManager` creation/lookup after discussion: one canonical live
 object per session ID; a flat kind-neutral `Dictionary<Guid, SessionBase>`; a
-`SemaphoreSlim` serializing lookup/creation only, never model work. The presented typed
+`SemaphoreSlim` serializing lookup/creation only, never LLM work. The presented typed
 operations are `CreatePrimaryAsync()` and `GetPrimaryAsync(Guid sessionId)`, returning
 `PrimarySession`. Lookup of a missing ID neither creates a record nor starts execution.
 The registry stores base references; the typed primary operations construct/return a
@@ -114,17 +128,17 @@ This is normal close/reopen evidence, not process-kill/power-loss or broader app
 Independent implementation acceptance review found no supported blockers. Parent
 verification also passed locked restore (lockfile hashes unchanged) and all eight Release
 tests, including public-manager creation followed by store reopen and a fresh manager's
-canonical lookup. No messages/executions, model calls or hosting were added.
+canonical lookup. No messages/executions, LLM calls or hosting were added.
 
 ## Owner-approved fourth bite — user-Send reliability contract
 The owner answered **“seems reasonable”** after the inline proposal and clarification:
 this is reliability of incoming user instructions, including input during a response;
 not transcript management, generated assistant replies, or agent-to-agent coordination.
 ```csharp
-// PrimarySession (name clarified in the later readability pass)
-public Task<InputReceipt> SubmitUserInputAsync(InputCommand input);
+// PrimarySession (current phase-1 names)
+public Task<UserMessageReceipt> SubmitUserMessageAsync(UserMessageSubmission submission);
 // SessionBase
-public Task<InputReceipt?> GetInputReceiptAsync(Guid inputId);
+public Task<UserMessageReceipt?> GetUserMessageReceiptAsync(Guid submissionId);
 ```
 Record a stable first Accepted/Refused decision before returning a definitive receipt.
 A refused ID cannot later accept a delayed original; returning an old acceptance never
@@ -137,8 +151,8 @@ before implementing an acceptance path; do not add a placeholder that accepts bu
 execute. The subsequently approved constructor/execution ownership scope is recorded
 in the fifth bite below. The narrow fake-text integration is now implemented as described
 below; broader queue and context contracts remain proposed. The approved HTTP slice now uses
-`InputConflictException : InvalidOperationException` to identify changed-command reuse, carrying
-`InputId` without changing receipt/decision policy. See the hosting record for the transport scope.
+`UserMessageConflictException : InvalidOperationException` to identify changed-submission reuse, carrying
+`SubmissionId` without changing receipt/decision policy. See the hosting record for the transport scope.
 
 ## Owner-approved fifth bite — SessionExecution lifetime boundary
 The owner answered **“yeah seems reasonable i think”** to the presented `internal sealed`
@@ -147,7 +161,7 @@ used `RunAsync`/`RequestCancellation`/`ReleaseAfterSettlement`; the subsequently
 execution redesign below makes cancellation asynchronous and revises lifecycle ownership.
 It is temporary active work;
 the chat persists. Construction starts no work. SessionBase starts/observes the task and
-owns admission/DB writes; execution owns the model stream, Stop signal and bounded output
+owns admission/DB writes; execution owns the LLM stream, Stop signal and bounded output
 buffer, batching updates rather than per-token writes. Browser disconnect does not cancel.
 Replacement waits for actual cleanup and saved final state. Release only owned resources,
 never the borrowed client. This is scoped approval, not implementation evidence or approval
@@ -198,7 +212,7 @@ Already retained input decisions remain
 readable and exact retries keep their original receipts; new input receives the existing
 durable `Refused`/`Stopping` decision. No sessions or history are deleted or closed.
 
-Shutdown stops all owned runs and joins model cleanup, cancellation callbacks and saved
+Shutdown stops all owned executions and joins LLM cleanup, cancellation callbacks and saved
 settlement. A failed Stop write must not suppress local cancellation, skip that run's
 drain, or prevent other sessions from stopping. Repeated calls join one retained result;
 a failure cannot turn into success. Even an initially cancelled call initiates shutdown:
@@ -220,19 +234,22 @@ Implementation and verification are recorded in [backend development](../backend
 ## Owner-approved record naming cleanup
 
 During the Core source review, the owner approved these names individually and selected
-`Llm` consistently for our model-facing data types (the interim `ChatRequest` therefore
+`Llm` consistently for our LLM-facing data types (the interim `ChatRequest` therefore
 became `LlmRequest`). The records remain cohesive data, not methods or new services:
 
 | Previous name | Approved name | Meaning |
 | --- | --- | --- |
-| `RunSettlement` | `ExecutionResult` | Saved whole-run terminal result, published after owned work and cleanup finish. |
+| `RunSettlement` (later `ExecutionResult`) | `SessionExecutionResult` | Saved whole-execution terminal result, published after owned work and cleanup finish. |
 | `RequestPlan` | `LlmRequest` | Claimed request identity and prepared messages, supplied to execution through its session. |
 | `OutputBatch` | `LlmResponseChunk` | Buffered LLM response text submitted to the session for persistence. |
-| `RequestCompletion` | `LlmRequestOutcome` | Final local request-attempt outcome, not live/provider status or a saved acknowledgement. |
+| `RequestCompletion` (later `LlmRequestOutcome`) | `LlmRequestResult` | Final local request-attempt result, not live/provider status or a saved acknowledgement. |
 
 These types first lived together in `execution/ExecutionContracts.cs`; the later style pass
-regrouped them by concept into `execution/LlmRequest.cs` and `execution/ExecutionResult.cs`. A file-purpose note and short producer/consumer
-comments make their roles clear. `ExecutionOutcome` keeps its name and enum values.
+regrouped them by concept; their current files are `execution/LlmRequest.cs` and
+`execution/SessionExecutionResult.cs`. The table uses the latest names, not the interim
+`ExecutionResult`/`LlmRequestOutcome` vocabulary. Short producer/consumer comments make
+roles clear. `ExecutionOutcome` keeps its name and enum values across three scopes:
+one LLM request attempt, one tool invocation or a whole session execution.
 Chunk members use `ResponseId` and `ChunkIndex` instead of `OutputId` and `BatchIndex`.
 SDK symbols such as `IChatClient` and `ChatMessage` keep their names. This cleanup changes no behavior, schema,
 ownership, cancellation or settlement guarantees; it is not approval of broader API work.
@@ -240,7 +257,7 @@ ownership, cancellation or settlement guarantees; it is not approval of broader 
 ## Clear-cut readability corrections
 
 The owner subsequently authorized clear-cut readability fixes without further per-name
-approval. The user-input entry point is now `SubmitUserInputAsync`; bounded message reads
+approval. The user-message entry point is now `SubmitUserMessageAsync`; bounded message reads
 use `ReadMessageContentAsync`, `MessageContentCursor` and `MessageContentPage`. Declarations
 above and the wider sketches below use the current vocabulary; existing behavior and the
 unapproved status of wider proposals remain unchanged. Storage decisions now use named
@@ -284,7 +301,7 @@ inside the existing classes:
 ```text
 SessionManager(store, client)
   -> PrimarySession(record, store, client) : SessionBase
-     -> SessionExecution(runId, session, client)
+     -> SessionExecution(executionId, session, client)
 ```
 Manager and sessions borrow the caller's store/client. SessionBase retains database authority;
 execution calls its owner back rather than writing SQLite. No client factory, service locator,
@@ -300,7 +317,7 @@ preserves migration from versions 0/1/2. This is not the final transcript/view/q
 
 The sixth bite adds coherent bounded snapshots and full-content pages over immutable
 input/output segments. It exposes committed availability, final bytes and settlement
-separately; read cancellation never owns model cancellation. No subscriptions or HTTP
+separately; read cancellation never owns LLM cancellation. No subscriptions or HTTP
 state were introduced. Snapshot previews and body slices stay bounded before materialization.
 
 Independent component and integration reviews passed. Parent locked restore and Release
@@ -324,7 +341,7 @@ at tested milestones for their own file-by-file, line-by-line review before more
 The owner approved moving forward with an integrated Core slice, not a second chat engine:
 real SQLite, configured fake tools, no real provider or UI. During policy discussion, the
 owner clarified that tool problems (such as bash syntax errors) should normally reach the
-model, and that steering without tool calls should occur at another opportune time.
+LLM, and that steering without tool calls should occur at another opportune time.
 That means the next safe request boundary, not altering or cancelling an in-flight request.
 
 - `SessionManager(store, client, tools)` optionally borrows configured `AIFunction`s and
@@ -336,7 +353,7 @@ That means the next safe request boundary, not altering or cancelling an in-flig
   separate user messages; a successful no-tool response also continues if steering is waiting.
 - One `SessionExecution`/Stop source and one driver remain owned per run. The driver awaits
   sequential `RunRequestAsync` phases outside the guard, then claims or settles under it.
-  Model/tool cleanup and cancellation joins still precede settlement and resource release.
+  LLM/tool cleanup and cancellation joins still precede settlement and resource release.
 - Ordinary invocation errors become saved error results and permit continuation. They do not
   prove no effects, including when binding/marshalling happens inside an opaque function.
   Core-owned encoding, persistence and cleanup failures fence instead of replaying work.
@@ -360,8 +377,8 @@ See [backend development](../backend-development.md) for the current review map 
 The owner approved stopping a conversation's current work, not closing/deleting the conversation,
 with this public method and receipt shape. It is implemented and verified:
 ```csharp
-public Task<StopReceipt> RequestStopAsync(Guid runId);
-public sealed record StopReceipt(Guid RunId, StopStatus Status, ExecutionOutcome? Outcome = null);
+public Task<StopReceipt> RequestStopAsync(Guid executionId);
+public sealed record StopReceipt(Guid ExecutionId, StopStatus Status, ExecutionOutcome? Outcome = null);
 public enum StopStatus { Requested, Settled, NotFound, Unavailable }
 ```
 `Requested` acknowledges committed Stop intent and pending-steering retirement, not completed
@@ -371,11 +388,11 @@ Repeated Stop reports current status (Requested may become Settled), reuses canc
 cannot affect a replacement. Accepted input receipts stay immutable; no automatic carryover/replay.
 
 Under the existing session guard, Core initiates cached local cancellation before attempting
-Stop persistence. `RunStorage.RequestStop(sessionId, runId, ownsRun)` classifies identity and
+Stop persistence. `SessionExecutionStorage.RequestStop(sessionId, executionId, ownsExecution)` classifies identity and
 settlement before ownership, then commits Stop/retirement for an owned unresolved run in one
 transaction. An unowned orphan is not mutated, recovered or falsely settled. The public method
 acknowledges intent; the driver alone joins callbacks outside the guard before saved settlement.
-Held model/tool cleanup blocks replacement; callback faults retain fenced/unsettled execution
+Held LLM/tool cleanup blocks replacement; callback faults retain fenced/unsettled execution
 and resources for shutdown rather than fabricating success. Shutdown keeps its existing join path.
 
 A failed Stop write still cancels locally, fences admission and fails the request (HTTP 503),
@@ -384,7 +401,7 @@ completion as well as claims/tool starts; actual tool results may still be saved
 merge local Stop intent for owned unsettled work with persisted status: observation, not durable
 acknowledgement. Existing snapshots expose stopping/fencing, run identity and saved settlement.
 
-The hosting route accepts JSON `{}` at POST `/api/sessions/{sessionId}/runs/{runId}/stop`:
+The hosting route accepts JSON `{}` at POST `/api/sessions/{sessionId}/executions/{executionId}/stop`:
 200 Requested/Settled, 404 missing, 409 with Unavailable for an unowned unresolved run.
 Disconnect does not cancel admitted Stop; HTTP never waits for callback completion.
 No schema, framework, UI, real tools or child runtime is added. Full bounded-descendant
@@ -472,7 +489,7 @@ public Task ShutdownSessionsAsync(CancellationToken waitCancellation = default);
 ```
 Approved registry storage is flat and kind-neutral; `CreatePrimaryAsync`/`GetPrimaryAsync`
 are typed primary entrypoints, not a primary-only registry. The registry gate covers
-lookup/creation/discovery, never model execution. Startup mechanics below remain proposed;
+lookup/creation/discovery, never LLM execution. Startup mechanics below remain proposed;
 listing is only the approved ID discovery above, and the seventh bite approves session shutdown.
 Startup versions storage/reconciles nonterminal runs before serving: **zero requests
 restart**. Registry serialization guarantees one handle/ID; lookup never creates IDs.
@@ -501,22 +518,22 @@ private long _historyRevision, _viewVersion;
 private readonly Guid _viewEpoch;
 private bool _accepting;
 private SessionExecution? _execution;
-private TaskCompletionSource<ExecutionResult>? _settlement;
+private TaskCompletionSource<SessionExecutionResult>? _settlement;
 private readonly Dictionary<Guid, (ViewLimits Limits, Channel<SessionView> Updates)> _observers;
 protected SessionBase(SessionRecord record, SessionStore store, IChatClient chatClient);
 public IAsyncEnumerable<SessionView> ObserveAsync(ViewLimits limits, CancellationToken observationCancellation);
 public Task<HistoryPage> ReadHistoryAsync(HistoryCursor cursor, ReadLimits limits);
 public Task<MessageContentPage> ReadMessageContentAsync(MessageContentCursor cursor);
-public Task<InputReceipt?> GetInputReceiptAsync(Guid inputId);
-public Task<StopReceipt> RequestStopAsync(Guid runId);
-public Task<ExecutionResult> WaitForSettlementAsync(Guid runId, CancellationToken waitCancellation);
-protected Task<InputReceipt> AdmitInputAsync(InputCommand command);
-internal Task FenceAdmissionAsync();
-internal Task<LlmRequest?> ClaimNextRequestAsync(Guid runId);
-internal Task<bool> RecordOutputAsync(Guid runId, LlmResponseChunk batch);
-internal Task<bool> CompleteRequestAsync(Guid runId, LlmRequestOutcome completion);
+public Task<UserMessageReceipt?> GetUserMessageReceiptAsync(Guid submissionId);
+public Task<StopReceipt> RequestStopAsync(Guid executionId);
+internal Task<SessionExecutionResult> WaitForSettlementAsync(Guid executionId, CancellationToken waitCancellation);
+private protected Task<UserMessageReceipt> AdmitUserMessageAsync(UserMessageSubmission submission);
+internal Task FenceUserMessagesAsync();
+internal Task<LlmRequest?> ClaimNextRequestAsync(Guid executionId);
+internal Task<bool> RecordOutputAsync(Guid executionId, LlmResponseChunk chunk);
+internal Task<bool> CompleteRequestAsync(Guid executionId, LlmRequestResult result);
 private Task DriveExecutionAsync(SessionExecution execution);
-private Task<bool> TrySettleAsync(Guid runId, ExecutionOutcome outcome);
+private Task<bool> TrySettleAsync(Guid executionId, ExecutionOutcome outcome);
 private SessionView CaptureView(ViewLimits limits);
 ```
 NEW proposed hydration: constructors copy ID/revision from the stored `SessionRecord`,
@@ -528,7 +545,7 @@ for new work; shutdown fences new acceptance under that same guard. While an adm
 Submit handler can still use the live store, the fence can produce a durable refusal,
 not accepted work. Host refusal before Core is only an unavailable attempt.
 Execution has no store access. `DriveExecutionAsync` owns/observes the pump and failures.
-Never await model work, cancellation callbacks, settlement or subscribers under the guard.
+Never await LLM work, cancellation callbacks, settlement or subscribers under the guard.
 The current driver invokes `RunRequestAsync` sequentially on one owned execution. After each
 request/tool phase, it joins outstanding cancellation callbacks outside the guard, then claims
 the next request or settles under the guard. Admission cannot slip between the pending-input
@@ -540,14 +557,14 @@ pending reconciliation; no false idle.
 Handle lifetime; no extra mutable fields. Chooses ordinary-input policy, not another lock.
 ```csharp
 internal PrimarySession(SessionRecord record, SessionStore store, IChatClient chatClient);
-public Task<InputReceipt> SubmitUserInputAsync(InputCommand input);
+public Task<UserMessageReceipt> SubmitUserMessageAsync(UserMessageSubmission submission);
 ```
 **Owner direction, 2026-11-07 — steering by default, now implemented:** ordinary
 input during active work defaults to steering. The owner asked to send it as a message
-alongside whatever batch of tool-call results is sent to the model next. This supersedes
+alongside whatever batch of tool-call results is sent to the LLM next. This supersedes
 the earlier proposal to infer follow-up versus steering from arrival before/after the
 initial request claim. Idle input still starts work; steering does not mutate an in-flight
-request. Tool results and steering remain distinct messages in the next model request.
+request. Tool results and steering remain distinct messages in the next LLM request.
 
 The owner subsequently approved the integrated fake-tool slice and clarified no-tool delivery:
 pending steering triggers the next request after the current response finishes, rather than
@@ -563,16 +580,16 @@ buffering belongs to its request-local `LlmResponseWriter`. One execution per ac
 no thread/process per session or global request queue. Construction starts no work.
 SessionBase invokes sequential request phases outside its guard and observes all cleanup.
 ```csharp
-internal Guid RunId { get; }
+internal Guid ExecutionId { get; }
 internal bool IsStopping { get; }
-internal SessionExecution(Guid runId, SessionBase session, IChatClient chatClient,
+internal SessionExecution(Guid executionId, SessionBase session, IChatClient chatClient,
     IReadOnlyList<AIFunction>? tools = null);
 internal Task<ExecutionOutcome> RunRequestAsync(LlmRequest request);
 internal Task StopAsync();
 internal Task StopCallbacks { get; }
 public void Dispose();
 ```
-A successfully returned invocation has quiesced its model/enumerator, writer timer and
+A successfully returned invocation has quiesced its LLM/enumerator, writer timer and
 append work; it is not durable settlement or a join of run cancellation callbacks.
 SessionBase serializes cancellation/release under its guard and joins `StopCallbacks`
 outside it before saving settlement. Repeated Stop calls share that task; a stale run ID
@@ -596,7 +613,7 @@ ambiguous settlement keeps admission fenced. Never dispose the borrowed client.
 
 ### 5. `SessionStore` — database lifetime; intent-specific transactions
 Owns SQL/schema, serialized writer and short independent readers; no shared concurrent
-connection or transaction across model work/observation. Calls are synchronous/bounded.
+connection or transaction across LLM work/observation. Calls are synchronous/bounded.
 ```csharp
 private readonly SqliteConnection _writer;
 private readonly object _writeGate;
@@ -607,29 +624,32 @@ internal void InitializeAndRecover();
 internal SessionRecord CreatePrimary(Guid sessionId);
 internal SessionRecord? ReadSession(Guid sessionId);
 // ID discovery is owned by SessionStorage.ListPrimaryIds(string? cursor), not a summary API.
-internal (InputReceipt Receipt, bool NewlyAccepted) AdmitInput(Guid sessionId, long historyRevision, InputCommand command);
-internal InputReceipt? ReadInputReceipt(Guid sessionId, Guid inputId);
-internal LlmRequest? ClaimNextRequest(Guid sessionId, Guid runId, long historyRevision);
-internal WriteReceipt AppendOutput(Guid sessionId, Guid runId, long historyRevision, LlmResponseChunk batch);
-internal WriteReceipt CompleteRequest(Guid sessionId, Guid runId, long historyRevision, LlmRequestOutcome completion);
-internal StopReceipt RequestStop(Guid sessionId, Guid runId, bool ownsRun);
-internal SettlementAttempt TrySettle(Guid sessionId, Guid runId, ExecutionOutcome outcome);
+// Current focused owners: UserMessages.Admit/ReadReceipt, Executions.ClaimNextRequest/
+// RequestStop/TrySettle/ReadSettlement, LlmResponses.Append/CompleteRequest.
+// The signatures below remain the wider, unimplemented store-facade sketch, not live members.
+internal (UserMessageReceipt Receipt, bool NewlyAccepted) AdmitUserMessage(Guid sessionId, long historyRevision, UserMessageSubmission submission);
+internal UserMessageReceipt? ReadUserMessageReceipt(Guid sessionId, Guid submissionId);
+internal LlmRequest? ClaimNextRequest(Guid sessionId, Guid executionId, long historyRevision);
+internal WriteReceipt AppendOutput(Guid sessionId, Guid executionId, long historyRevision, LlmResponseChunk chunk);
+internal WriteReceipt CompleteRequest(Guid sessionId, Guid executionId, long historyRevision, LlmRequestResult result);
+internal StopReceipt RequestStop(Guid sessionId, Guid executionId, bool ownsExecution);
+internal SettlementAttempt TrySettle(Guid sessionId, Guid executionId, ExecutionOutcome outcome);
 internal SessionView ReadView(Guid sessionId, ViewLimits limits);
 internal HistoryPage ReadHistory(Guid sessionId, HistoryCursor cursor, ReadLimits limits);
 internal MessageContentPage ReadMessageContent(Guid sessionId, MessageContentCursor cursor);
-internal ExecutionResult? ReadSettlement(Guid sessionId, Guid runId);
+internal SessionExecutionResult? ReadSettlement(Guid sessionId, Guid executionId);
 public void Dispose();
 ```
 ## Coordinated input → stream → Stop → recovery flow
-`InputReceipt` correlates session/input ID and the exact original command (expected
+`UserMessageReceipt` correlates session/submission ID and the exact original submission (expected
 history revision and bounded decoded text, without normalization). Its admission decision
 is immutable **Accepted or Refused**: refusal has a reason and no admitted run; acceptance
 has its original run/disposition and separately evolving request/terminal evidence.
-Accepted never means model success, and later interruption never changes it to Refused.
-`ExecutionResult` retains run ID and completed/cancelled/failed/interrupted outcome.
+Accepted never means LLM success, and later interruption never changes it to Refused.
+`SessionExecutionResult` retains execution ID and the `Completed`, `Cancelled` or `Failed` outcome.
 1. **Decide input — reliability contract approved; queue/schema details still proposed:**
-   `InputCommand` carries
-   stable input ID, expected history revision and text. For an existing session and valid
+   `UserMessageSubmission` carries
+   stable submission ID, expected history revision and text. For an existing session and valid
    command, one guarded store transaction resolves the ID or commits its first decision:
    - Existing ID with identical text **and original revision** returns retained evidence
      before today's capacity/revision/stopping checks. Conflicting reuse is an attempt
@@ -639,7 +659,7 @@ Accepted never means model success, and later interruption never changes it to R
      returned Accepted receipt, may trigger new execution work. The flag is internal,
      per-call evidence, not part of the durable decision or public receipt.
    - New capacity/stale-revision/stopping refusal commits its receipt and matching command
-     before returning. No accepted input/message/run or model work is created; a delayed
+     before returning. No accepted submission/message/execution or LLM work is created; a delayed
      original must return this same refusal even after capacity becomes available.
    Core enforces **16 KiB UTF-8/input** and **eight nonterminal accepted inputs/session**,
    including claimed inputs awaiting outcome; admission repeats the capacity check in its
@@ -663,8 +683,8 @@ Accepted never means model success, and later interruption never changes it to R
 2. **Deliver/record:** request claim atomically records which queued inputs belong to
    that request. Claiming is not proof of provider receipt/consumption or a completed
    answer; the receipt must retain the request outcome rather than imply success.
-   `LlmRequest` carries request/run IDs, revision, input IDs and ordered model input,
-   not UI state. `LlmRequestOutcome` carries that request ID and succeeded/failed/cancelled
+   `LlmRequest` carries request identity, revision and prepared ordered LLM messages,
+   not UI state. `LlmRequestResult` carries that request ID and completed/failed/cancelled
    outcome; success requires the validated positive terminal evidence above, even for an
    empty response. Its guarded transaction checks request/run/revision and commits the
    request outcome plus associated input receipts independently of run settlement. Identical
@@ -720,7 +740,7 @@ Accepted never means model success, and later interruption never changes it to R
    scan/materialize an arbitrarily large body, or read all preceding segments then truncate.
    This constrains message-row content access, not a new store/service or finalized schema;
    accepted input and output batches already have the 16 KiB UTF-8 bound.
-4. **Stop/settle:** public `RequestStopAsync(runId)` initiates cached local cancellation
+4. **Stop/settle:** public `RequestStopAsync(executionId)` initiates cached local cancellation
    under the guard even if persistence fails, then attempts durable Stop/retirement of pending
    steering. Requested acknowledges intent, Settled carries saved outcome, NotFound includes
    wrong-session IDs, and Unavailable leaves an unowned unresolved run untouched. Failed writes

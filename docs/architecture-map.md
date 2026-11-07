@@ -1,5 +1,10 @@
 # Urd architecture — visual audit map
 
+> **Historical snapshot — superseded for current phase-1 naming/API.** See
+> [Backend development](backend-development.md) and [Server development](server-development.md) for current contracts.
+> Diagrams, counts, source-link labels and line numbers retain the captured state; only renamed live-source destinations are repaired.
+> Phase 2 is not complete: `StoredSessionSnapshot`, the `Settlement` record and `JsonText` remain.
+
 > **Working-tree snapshot · 7 November 2026, 08:03 UTC**<br>
 > Base commit: `e5537192e8c8b5f9eea76266c8f8a6726868732f`, **plus uncommitted changes**.
 > This describes inspected source, not a new design approval or a runtime qualification.
@@ -240,9 +245,9 @@ flowchart LR
 - The store rebuilds model context from claimed inputs, saved assistant text, calls and results.
   Visible admission order and model-delivery order are therefore intentionally different views.
 
-**Source:** [InputStorage.cs](../source/backend/core/storage/InputStorage.cs),
-[RunStorage.cs](../source/backend/core/storage/RunStorage.cs),
-[RequestContextReader.cs](../source/backend/core/storage/RequestContextReader.cs),
+**Source:** [InputStorage.cs](../source/backend/core/storage/UserMessageStorage.cs),
+[RunStorage.cs](../source/backend/core/storage/SessionExecutionStorage.cs),
+[RequestContextReader.cs](../source/backend/core/storage/LlmContextReader.cs),
 [ToolStorage.cs](../source/backend/core/storage/ToolStorage.cs),
 [SessionBase.cs](../source/backend/core/sessions/SessionBase.cs).
 

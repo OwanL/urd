@@ -4,8 +4,8 @@ using Urd.Core.Sessions;
 
 namespace Urd.Core.Execution;
 
-// Sends a run's requests to the model and executes each authorized fake-tool batch.
-// The session owns locking and storage; this class owns the model call and its cleanup.
+// Sends an execution's requests to the LLM and executes each authorized fake-tool batch.
+// The session owns locking and storage; this class owns the LLM call and its cleanup.
 internal sealed class SessionExecution : IDisposable {
   private readonly SessionBase session;
   private readonly IChatClient chatClient; // Borrowed from the session; never disposed here.
@@ -13,15 +13,15 @@ internal sealed class SessionExecution : IDisposable {
   private readonly CancellationTokenSource stop = new();
   private Task? stopCallbacks;
 
-  internal SessionExecution(Guid runId, SessionBase session, IChatClient chatClient,
+  internal SessionExecution(Guid executionId, SessionBase session, IChatClient chatClient,
       IReadOnlyList<AIFunction>? tools = null) {
-    RunId = runId;
+    ExecutionId = executionId;
     this.session = session;
     this.chatClient = chatClient;
     this.tools = tools ?? [];
   }
 
-  internal Guid RunId { get; }
+  internal Guid ExecutionId { get; }
   internal bool IsStopping => stop.IsCancellationRequested;
 
   // Completes once every callback registered on the stop token has finished.
@@ -31,18 +31,18 @@ internal sealed class SessionExecution : IDisposable {
   internal Task StopAsync() => stopCallbacks ??= stop.CancelAsync();
 
   // Called by the session only after every request and StopCallbacks have finished
-  // and the run's result has been saved.
+  // and the execution's result has been saved.
   public void Dispose() => stop.Dispose();
 
   // Called sequentially by the session, outside its lock. No work survives the return.
   internal async Task<ExecutionOutcome> RunRequestAsync(LlmRequest request) {
-    LlmRequestOutcome outcome;
+    LlmRequestResult outcome;
     bool saved;
     // Keep the source alive through the outcome save, as disposal can wait for callbacks.
-    // Tools use the run token, never this already-cleaned-up provider-request source.
+    // Tools use the execution token, never this already-cleaned-up provider-request source.
     using (var requestStop = CancellationTokenSource.CreateLinkedTokenSource(stop.Token)) {
       outcome = await SendRequestAsync(request, requestStop);
-      saved = await session.CompleteRequestAsync(RunId, outcome);
+      saved = await session.CompleteRequestAsync(ExecutionId, outcome);
     }
 
     if (!saved)
@@ -51,13 +51,13 @@ internal sealed class SessionExecution : IDisposable {
       return outcome.Outcome;
 
     foreach (LlmToolCall call in outcome.ToolCalls ?? []) {
-      if (IsStopping || !await session.TryStartToolAsync(RunId, request.RequestId, call.CallId))
+      if (IsStopping || !await session.TryStartToolAsync(ExecutionId, request.RequestId, call.CallId))
         return ExecutionOutcome.Cancelled;
 
       LlmToolResult result = await InvokeToolAsync(call);
       // A rejected or failed result save leaves effects uncertain. Never turn it into
-      // an ordinary tool error or allow a model continuation.
-      if (!await session.CompleteToolAsync(RunId, request.RequestId, result))
+      // an ordinary tool error or allow an LLM continuation.
+      if (!await session.CompleteToolAsync(ExecutionId, request.RequestId, result))
         throw new InvalidOperationException("The tool result could not be saved.");
     }
 
@@ -82,7 +82,7 @@ internal sealed class SessionExecution : IDisposable {
       return ToolError(call, ExecutionOutcome.Failed, exception.Message);
     }
 
-    // Serialization owned here can fail after an effect. Let that uncertainty fence the run.
+    // Serialization owned here can fail after an effect. Let that uncertainty fence the execution.
     return new(call.CallId, ExecutionOutcome.Completed, LlmResponseAccumulator.FreezeJson(value));
   }
 
@@ -92,7 +92,7 @@ internal sealed class SessionExecution : IDisposable {
     return new(call.CallId, outcome, LlmResponseAccumulator.FreezeJson(new { error }), error);
   }
 
-  private async Task<LlmRequestOutcome> SendRequestAsync(LlmRequest request, CancellationTokenSource requestStop) {
+  private async Task<LlmRequestResult> SendRequestAsync(LlmRequest request, CancellationTokenSource requestStop) {
     var writer = new LlmResponseWriter(request.RequestId, SaveChunkAsync);
     var response = new LlmResponseAccumulator(writer);
     IAsyncEnumerator<ChatResponseUpdate>? updates = null;
@@ -119,7 +119,7 @@ internal sealed class SessionExecution : IDisposable {
     }
 
     await CleanUpAsync(requestStop, pendingRead, updates, failure);
-    LlmRequestOutcome outcome = ToRequestOutcome(request.RequestId, failure);
+    LlmRequestResult outcome = ToRequestResult(request.RequestId, failure);
     return outcome.Outcome == ExecutionOutcome.Completed
         ? outcome with { ToolCalls = response.ToolCalls }
         : outcome;
@@ -137,8 +137,8 @@ internal sealed class SessionExecution : IDisposable {
     return await pendingRead;
   }
 
-  private LlmRequestOutcome ToRequestOutcome(Guid requestId, Exception? failure) {
-    // A failed save is a session failure, not a failed model request.
+  private LlmRequestResult ToRequestResult(Guid requestId, Exception? failure) {
+    // A failed save is a session failure, not a failed LLM request.
     if (failure is OutputSaveException)
       ExceptionDispatchInfo.Throw(failure);
 
@@ -157,7 +157,7 @@ internal sealed class SessionExecution : IDisposable {
   private async Task SaveChunkAsync(LlmResponseChunk chunk) {
     bool saved;
     try {
-      saved = await session.RecordOutputAsync(RunId, chunk);
+      saved = await session.RecordOutputAsync(ExecutionId, chunk);
     } catch (Exception exception) {
       throw new OutputSaveException(exception);
     }
@@ -167,7 +167,7 @@ internal sealed class SessionExecution : IDisposable {
   }
 
   // Attempts every step even when an earlier one fails. A cleanup failure leaves the
-  // run unsettled, so it is thrown to the session instead of becoming a failed request.
+  // execution unsettled, so it is thrown to the session instead of becoming a failed request.
   private static async Task CleanUpAsync(CancellationTokenSource requestStop, Task<bool>? pendingRead,
       IAsyncEnumerator<ChatResponseUpdate>? updates, Exception? requestFailure) {
     Exception? cancelFailure = await CaptureFailureAsync(() => new ValueTask(requestStop.CancelAsync()));
@@ -195,7 +195,7 @@ internal sealed class SessionExecution : IDisposable {
   }
 
 #pragma warning disable S3871 // Private driver signals, not public exception contracts.
-  // The session no longer accepts output from this run.
+  // The session no longer accepts output from this execution.
   private sealed class OutputRejectedException : Exception;
 
   private sealed class OutputSaveException(Exception inner) : Exception("Saving response output failed.", inner);

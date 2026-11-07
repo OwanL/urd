@@ -76,8 +76,8 @@ public sealed class SessionManager {
   private static async Task StopSessionsAsync(PrimarySession[] sessions, TaskCompletionSource shutdown) {
     Task pending = Task.CompletedTask;
     try {
-      // Fence every handle before a Stop callback can submit input to another session.
-      pending = Task.WhenAll(sessions.Select(session => session.FenceInputAsync()));
+      // Fence every handle before a Stop callback can submit a user message to another session.
+      pending = Task.WhenAll(sessions.Select(session => session.FenceUserMessagesAsync()));
       await pending;
       pending = Task.WhenAll(sessions.Select(session => session.StopExecutionAsync()));
       await pending;

@@ -2,7 +2,7 @@ using Microsoft.Extensions.AI;
 
 namespace Urd.Backend.Tests.Support;
 
-// Holds model cleanup after the source has been disposed, before request settlement.
+// Holds LLM cleanup after the source has been disposed, before request settlement.
 internal sealed class HeldDisposal(IAsyncEnumerable<ChatResponseUpdate> source,
     TaskCompletionSource entered, Task release) : IAsyncEnumerable<ChatResponseUpdate> {
   public IAsyncEnumerator<ChatResponseUpdate> GetAsyncEnumerator(CancellationToken cancellationToken = default)

@@ -1,4 +1,6 @@
-# Model/tool execution: decision and qualification
+<a id="modeltool-execution-decision-and-qualification"></a>
+
+# LLM/tool execution: decision and qualification
 
 **2026-11-04.** Bounded design work, not a production implementation or application
 class/file layout. `IChatClient` / `Microsoft.Extensions.AI.Abstractions` remains
@@ -13,7 +15,7 @@ following the next tool-result batch, or after a no-tool response finishes. Clai
 records and settlement are durable; reopening never automatically invokes historical tools.
 
 The owner clarified that ordinary tool problems, such as command syntax errors, should reach
-the model rather than fail the whole run. Pi's pinned loop also turns invocation errors into
+the LLM rather than fail the whole run. Pi's pinned loop also turns invocation errors into
 matching error results and normally continues. Urd follows that pattern; tools may describe
 domain failures in their own results. Errors do not imply rollback or prove no effects.
 Core-owned result encoding/save and cleanup failures instead fence continuation. An opaque
@@ -73,31 +75,31 @@ wrapper or rerun tools.
 ## What was actually exercised
 
 Earlier [Go/.NET discovery](GO-DOTNET-DISCOVERY.md) ran real loop libraries with
-**in-process fake models**. Earlier [model-interface research](MODEL-INTERFACE-RESEARCH.md)
+**in-process fake LLMs**. Earlier [LLM-interface research](MODEL-INTERFACE-RESEARCH.md)
 only round-tripped native SDK JSON. Both artifact sets survived and were reused:
 source patterns, exact cached dependencies and raw-item reconstruction. They were
 not mistaken for new HTTP or provider evidence.
 
 New work used .NET SDK **10.0.403**, runtime **10.0.14**, MEAI **10.11.0**, and
-OpenAI **2.14.0** on Windows. No login, credentials, live models, metered calls,
+OpenAI **2.14.0** on Windows. No login, credentials, live LLMs, metered calls,
 machine-wide installs or production builds. Builds/runs were sequential under
 `urd:heavy-local-work`; the final pre-build snapshot was 1,201 MiB free RAM.
 
 ### Matched scripted-IChatClient comparison: 63 assertions passed
 
-Both paths shared the fake model, harmless counted-effect tools, admission/save
+Both paths shared the fake LLM, harmless counted-effect tools, admission/save
 boundary and assertions. These are functional tests, not latency/RAM benchmarks.
 
 | Scenario | Observed in both candidates |
 | --- | --- |
-| Stream → tool → continuation | Two model requests, one effect; matching call/result IDs in continuation and emitted results; final text and response/message IDs present. |
-| Cancel queued for model admission | No provider/model call and no tool effect. |
-| Cancel while waiting on model | Cooperative cancellation; one model call, no continuation. |
+| Stream → tool → continuation | Two LLM requests, one effect; matching call/result IDs in continuation and emitted results; final text and response/message IDs present. |
+| Cancel queued for LLM admission | No provider/LLM call and no tool effect. |
+| Cancel while waiting on LLM | Cooperative cancellation; one LLM call, no continuation. |
 | Cancel in cooperative tool | Effect counter already incremented; no continuation. Cancellation did **not** mean no effect. |
 | Client detaches | A separately cancelled channel reader left the backend pump running; backend completed. This is token-ownership evidence, **not an actual browser/HTTP disconnect test**. |
-| Ordinary model/tool exception | Explicit terminal-error policy surfaced failure without retry or another model call. |
-| Recording fails **after** effect | One effect, failed simulated save sees matching call/result history; next model request prevented. No rollback or database-durability claim. |
-| Error content / Length / EOF after complete-looking call | Common model boundary rejected unsuccessful or missing terminal evidence; neither loop executed the call. |
+| Ordinary LLM/tool exception | Explicit terminal-error policy surfaced failure without retry or another LLM call. |
+| Recording fails **after** effect | One effect, failed simulated save sees matching call/result history; next LLM request prevented. No rollback or database-durability claim. |
+| Error content / Length / EOF after complete-looking call | Common LLM boundary rejected unsuccessful or missing terminal evidence; neither loop executed the call. |
 | Provisional steering within a two-tool batch | Second unstarted call skipped with an explicit matching nonexecution result; steering retained through another tool round. Feasibility experiment, **not adopted steering policy**. |
 
 Library-specific observations:
@@ -106,15 +108,15 @@ Library-specific observations:
   fork or duplicate top-level tool definitions.
 - Default tool exceptions become a generic error result and permit continuation.
   The matched terminal-error case explicitly set the error limit to zero. Neither
-  choice established the final Urd ordinary-tool-error policy at that research stage; useful model recovery from a
+  choice established the final Urd ordinary-tool-error policy at that research stage; useful LLM recovery from a
   routine tool error must not be confused with retrying uncertain effects.
 - `MaximumIterationsPerRequest=3` produced **four** requests: three tool rounds,
   then a final request with callable tools removed. Default 40 produced **41**.
   The custom fixture instead stopped at three requests without changing the tool
   list. This is a real behaviour difference, not a hidden equal-cap comparison.
-- A model-request middleware gate can stop continuation on recording failure.
+- An LLM-request middleware gate can stop continuation on recording failure.
   Putting a fatal recording failure in an ordinary tool-error observer is not
-  equivalent: the library can convert tool failures into model-visible results.
+  equivalent: the library can convert tool failures into LLM-visible results.
 
 Neither fixture is a production-complete loop: concurrent-tool policy, approvals,
 noncooperating commands, full validation, recovery and final-response persistence
@@ -160,11 +162,11 @@ specific local integration gap, not production or live-provider qualification.
 This newly authorized disposable experiment links the **unchanged prior `UrdLoop.cs`**,
 uses the real pinned Responses `IChatClient` adapter, and invokes a harmless counted
 `AIFunction`. Same SDK/runtime/MEAI/OpenAI pins as above; `Microsoft.Data.Sqlite`
-**10.0.14**. No live endpoint, real credentials, model use or production scaffold.
+**10.0.14**. No live endpoint, real credentials, LLM use or production scaffold.
 
 | Flow | Verified result |
 | --- | --- |
-| Successful call, persisted reload, continuation | First execution commits the actual tool result and deliberately stops before another model request. A fresh loop/adapter loads only SQLite history and issues request two. Exactly one tool effect; historical call/result not reexecuted. Final assistant text/message ID also committed and reopened. |
+| Successful call, persisted reload, continuation | First execution commits the actual tool result and deliberately stops before another LLM request. A fresh loop/adapter loads only SQLite history and issues request two. Exactly one tool effect; historical call/result not reexecuted. Final assistant text/message ID also committed and reopened. |
 | Native fidelity across that reload | Full initial input prefix, appended definition payload/developer role, native `at_1` / `rs_1` / `fc_1` IDs, encrypted reasoning, item order, call/result pairing and decoded counted result survive. Executable registry entries do not duplicate the appended definitions in top-level tools. All six requests retain the tested plan-route flags. |
 | Failed / incomplete / clean EOF | Each real adapter projection contains the complete-looking parsed call. The native positive-terminal guard rejects it before the actual loop dispatches: zero effects, one request, no recorded authorized call or claimed result. |
 | Recording failure after successful effect | Injected exception after the SQLite result UPDATE but before COMMIT rolls back that transaction. One effect, no second request. Reopen retains the earlier unresolved-call marker, not a result receipt; the continuation loader refuses to run or replay it. Emitting a tool result was not treated as durability. |
@@ -192,14 +194,14 @@ recorded with the fixture; it is not an independent runtime rerun.
 
 ## Control and responsibility seam — proposal, not a new class layout
 
-Current Pie reference inspection found steering at start and after a model/tool
+Current Pie reference inspection found steering at start and after an LLM/tool
 batch (`harness/pi/packages/agent/src/agent-loop.ts:167–268`), not a requirement
 to interrupt between each individual tool. Its session-control/state contracts
 separate non-waking notes, explicit work, execution end and durable terminal.
 Preserve useful behaviour, not Pie's process/reducer machinery.
 
 Session Design owns the integrated structure. This stream proposes only:
-- **Shared execution operation:** one straightforward model → validate → tool →
+- **Shared execution operation:** one straightforward LLM → validate → tool →
   record → continuation cycle, usable by both primary and bounded sessions.
   Do not introduce per-provider or per-session-kind loop subclasses.
 - **Request-only `IChatClient` path:** provider settings, native-item reconstruction
@@ -280,7 +282,7 @@ lifecycle rules. The follow-up above closes the local adapter/loop/SQLite-envelo
 seam only; it does not choose or implement that owner. A real-provider round trip
 still requires explicit approval; no account action is implicitly authorized here.
 
-Remaining: actual wrapper exposure/model reliability, native provider acceptance,
+Remaining: actual wrapper exposure/LLM reliability, native provider acceptance,
 namespace calls, images, multiple/interleaved calls, network errors/cancellation,
 retries/fallback, real durable recovery and noncooperative tools. Claude/Ollama/
 Copilot were not adapter-tested here; their current limitations belong in Provider

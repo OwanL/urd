@@ -35,11 +35,11 @@ urd/
 │  │  │  │  ├─ messaging/             messages between sessions
 │  │  │  │  ├─ assignments/           delegated work, results and waits
 │  │  │  │  └─ wakeups/               timer/event/condition-triggered input
-│  │  │  ├─ execution/                model/tool loop, cancellation and settlement
+│  │  │  ├─ execution/                LLM/tool loop, cancellation and settlement
 │  │  │  ├─ context/                  assembly, selection, compaction and recall
 │  │  │  ├─ guidance-loading/         scoped discovery and reading
 │  │  │  ├─ tools/                    definitions, implementations and invocation
-│  │  │  ├─ providers/                models, accounts, adapters and request policy
+│  │  │  ├─ providers/                LLMs, accounts, adapters and request policy
 │  │  │  ├─ mcp/                      connections, discovery and protocol integration
 │  │  │  ├─ storage/                  durable harness records and attachments
 │  │  │  └─ usage/                    usage and cost accounting
@@ -99,9 +99,9 @@ This update records that organization, not a claim that the migration already ha
 
 ## Responsibilities survive directory changes
 
-- The broad harness groups agent machinery; `execution` names the narrow model/tool
-  loop. Shared provider accounts and MCP connections do not become run-owned objects.
-- Model-context selection is not tool permission. Compaction does not delete original
+- The broad harness groups agent machinery; `execution` names the narrow LLM/tool
+  loop. Shared provider accounts and MCP connections do not become execution-owned objects.
+- LLM-context selection is not tool permission. Compaction does not delete original
   transcripts. Session tools enter ordinary guarded commands rather than owning a
   second session/assignment state machine.
 - Messaging, assignments and wakeups have distinct lifetimes. Assignment acceptance,
@@ -167,9 +167,9 @@ ambiguous state/ownership semantics; those remain substantive decisions.
 The identity foundation, first fake-text Core Send/execution increment and approved bounded
 read surface are implemented. Prioritize a working integrated path, not more broad technology
 comparisons or a larger complete specification:
-1. The Core checkpoint now commits input decisions/run association, streams through a
+1. The Core checkpoint now commits submission decisions/execution association, streams through a
    borrowed client and saves terminal state after cleanup. Two chats share a client without
-   serializing model work; retained acceptance does not replay after normal reopen.
+   serializing LLM work; retained acceptance does not replay after normal reopen.
    Coherent snapshots and full-content pages now expose committed state without replay;
    final output remains distinct from settled work. The owner selected snapshot polling
    for the first browser increment; browser wiring itself is not implemented yet.
@@ -180,7 +180,7 @@ comparisons or a larger complete specification:
    pass the integrated suite. Explicit after-run queueing, real tools and provider qualification
    remain separate work; see the Core record's primary-input policy section. The approved
    `SessionManager.ShutdownSessionsAsync` now fences and drains owned work without disposing
-   borrowed resources. Owner-approved `SessionBase.RequestStopAsync(runId)` and its addressed HTTP
+   borrowed resources. Owner-approved `SessionBase.RequestStopAsync(executionId)` and its addressed HTTP
    route passed independent review and **281/281 Release tests** at the Stop checkpoint:
    intent acknowledgement is distinct from cleanup
    and saved settlement; failures still cancel locally and fence without false durable acknowledgement.
@@ -196,6 +196,12 @@ comparisons or a larger complete specification:
    Schema 5 adds creation-order metadata and atomic identity/order creation; legacy rows use a
    fixed binary-ID fallback, not recovered chronology. Listing creates no handles or execution.
    Independent review, locked restore and **295/295 Release tests** pass without warnings.
+   Phase-1 vocabulary now uses `SubmitUserMessageAsync(UserMessageSubmission)` /
+   `GetUserMessageReceiptAsync(submissionId)`, `UserMessageReceipt` and `SessionExecutionResult`.
+   HTTP Send/lookup use `message-submissions`; Stop uses `executions/{executionId}/stop`.
+   There are no legacy aliases. Saved IDs, revisions, SQL identifiers/schema 5, decisions and
+   exact-retry semantics remain unchanged; the counts above predate the naming refactor.
+   Phase-2 snapshot/helper/settlement cleanup is not claimed here.
    No summaries/titles, full-history navigation, last-used tracking, UI or automatic recovery
    follows. IDs can be rediscovered, but cannot be associated with a lost create acknowledgement
    or justify automatic create retry. This narrow approval supersedes the old ID-ordered summary
@@ -204,7 +210,7 @@ comparisons or a larger complete specification:
    Keep independent Core/storage and UI/hosting/build work parallel with disjoint ownership;
    routine dependency wiring is not another approval gate. This is not whole-Core approval.
 2. Order the necessary small Core and hosting/UI bites toward one built browser → Core →
-   SQLite fake-model response, then extend that same path to two clients/chats, input while
+   SQLite fake-LLM response, then extend that same path to two clients/chats, input while
    busy, addressed Stop/settlement and reopen without replay. Do not add a parallel demo
    implementation or defer integration until every proposed component is finished.
 3. Exercise tiny output chunks and a slow observer on that path: measure commit/view/read

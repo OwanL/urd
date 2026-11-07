@@ -26,9 +26,9 @@ public sealed class SessionHttpLifetimeTests {
   public async Task DisconnectWithoutReadingAcknowledgementRetainsWorkAndOriginalRetryDoesNotReplay() {
     var entered = Signal();
     var finish = Signal();
-    CancellationToken modelCancellation = default;
+    CancellationToken llmCancellation = default;
     var client = new ScriptedChatClient(token => {
-      modelCancellation = token;
+      llmCancellation = token;
       return Paused(entered, finish, token);
     });
     var database = new TemporaryDatabase();
@@ -38,27 +38,27 @@ public sealed class SessionHttpLifetimeTests {
       Uri origin = await server.WaitForReadyAsync();
       server.Client.DefaultRequestHeaders.Add("X-Urd-Client", "browser");
       Guid sessionId = await CreateSessionAsync(server.Client);
-      var command = new InputCommand(Guid.NewGuid(), 0, "survives a disconnected sender");
-      await SendWithoutReadingAcknowledgementAsync(origin, sessionId, command, entered.Task);
+      var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "survives a disconnected sender");
+      await SendWithoutReadingAcknowledgementAsync(origin, sessionId, submission, entered.Task);
 
-      InputReceipt receipt = (await server.Client.GetFromJsonAsync<InputReceipt>(
-          $"/api/sessions/{sessionId}/inputs/{command.InputId}", json))!;
-      Assert.Equal(InputDecision.Accepted, receipt.Decision);
-      Assert.Equal(command, receipt.Command);
-      Assert.False(modelCancellation.IsCancellationRequested);
+      UserMessageReceipt receipt = (await server.Client.GetFromJsonAsync<UserMessageReceipt>(
+          $"/api/sessions/{sessionId}/message-submissions/{submission.SubmissionId}", json))!;
+      Assert.Equal(MessageAcceptance.Accepted, receipt.Acceptance);
+      Assert.Equal(submission, receipt.Submission);
+      Assert.False(llmCancellation.IsCancellationRequested);
       using HttpResponseMessage retry = await server.Client.PostAsJsonAsync(
-          $"/api/sessions/{sessionId}/inputs", command, json);
+          $"/api/sessions/{sessionId}/message-submissions", submission, json);
       Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
-      Assert.Equal(receipt, await retry.Content.ReadFromJsonAsync<InputReceipt>(json));
+      Assert.Equal(receipt, await retry.Content.ReadFromJsonAsync<UserMessageReceipt>(json));
       Assert.Equal(1, client.Calls);
-      Assert.Null(Assert.Single(StoredRuns.Read(database)).Outcome);
+      Assert.Null(Assert.Single(StoredExecutions.Read(database)).Outcome);
 
       finish.TrySetResult();
-      SessionSnapshot settled = await WaitForSettlementAsync(server.Client, sessionId, receipt.RunId!.Value);
+      SessionSnapshot settled = await WaitForSettlementAsync(server.Client, sessionId, receipt.ExecutionId!.Value);
       Assert.Equal(ExecutionOutcome.Completed, settled.LastSettlement!.Outcome);
-      Assert.Equal("visible", StoredOutput.ReadText(database));
-      Assert.Single(StoredInputs.Read(database));
-      Assert.Single(StoredRuns.ReadRequests(database));
+      Assert.Equal("visible", StoredLlmResponses.ReadText(database));
+      Assert.Single(StoredSubmissions.Read(database));
+      Assert.Single(StoredExecutions.ReadRequests(database));
       Assert.Equal(1, client.Calls);
     } finally {
       finish.TrySetResult();
@@ -70,7 +70,7 @@ public sealed class SessionHttpLifetimeTests {
   }
 
   [Fact]
-  public async Task HostStopFencesHttpAndRetainsLeaseAndClientUntilAdmittedModelCleanupFinishes() {
+  public async Task HostStopFencesHttpAndRetainsLeaseAndClientUntilAdmittedLlmCleanupFinishes() {
     var entered = Signal();
     var cleanupEntered = Signal();
     var releaseCleanup = Signal();
@@ -93,12 +93,12 @@ public sealed class SessionHttpLifetimeTests {
       await server.WaitForReadyAsync();
       server.Client.DefaultRequestHeaders.Add("X-Urd-Client", "browser");
       Guid sessionId = await CreateSessionAsync(server.Client);
-      var command = new InputCommand(Guid.NewGuid(), 0, "stop after HTTP admission");
+      var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "stop after HTTP admission");
       using HttpResponseMessage sent = await server.Client.PostAsJsonAsync(
-          $"/api/sessions/{sessionId}/inputs", command, json);
+          $"/api/sessions/{sessionId}/message-submissions", submission, json);
       Assert.Equal(HttpStatusCode.OK, sent.StatusCode);
-      InputReceipt receipt = (await sent.Content.ReadFromJsonAsync<InputReceipt>(json))!;
-      Assert.Equal(InputDecision.Accepted, receipt.Decision);
+      UserMessageReceipt receipt = (await sent.Content.ReadFromJsonAsync<UserMessageReceipt>(json))!;
+      Assert.Equal(MessageAcceptance.Accepted, receipt.Acceptance);
       await entered.Task.WaitAsync(TestTimeout);
 
       server.Cancel();
@@ -110,18 +110,18 @@ public sealed class SessionHttpLifetimeTests {
         using var lease = new FileStream(Path.Combine(dataRoot, "urd.lock"),
             FileMode.Open, FileAccess.ReadWrite, FileShare.None);
       });
-      StoredRun pending = Assert.Single(StoredRuns.Read(database));
+      StoredExecution pending = Assert.Single(StoredExecutions.Read(database));
       Assert.True(pending.Stopping);
       Assert.Null(pending.Outcome);
       await AssertCreationBlockedAsync(server.Client);
       Assert.Single(StoredSessions.Read(database));
-      Assert.Single(StoredInputs.Read(database));
+      Assert.Single(StoredSubmissions.Read(database));
       Assert.False(stopped.IsCompleted);
 
       releaseCleanup.TrySetResult();
       await stopped;
       Assert.Equal(1, client.DisposeCalls);
-      Assert.Equal(ExecutionOutcome.Cancelled, Assert.Single(StoredRuns.Read(database)).Outcome);
+      Assert.Equal(ExecutionOutcome.Cancelled, Assert.Single(StoredExecutions.Read(database)).Outcome);
       using var releasedLease = new FileStream(Path.Combine(dataRoot, "urd.lock"),
           FileMode.Open, FileAccess.ReadWrite, FileShare.None);
     } finally {
@@ -140,28 +140,28 @@ public sealed class SessionHttpLifetimeTests {
   }
 
   private static async Task SendWithoutReadingAcknowledgementAsync(Uri origin, Guid sessionId,
-      InputCommand command, Task modelStarted) {
+      UserMessageSubmission submission, Task llmStarted) {
     using var deadline = new CancellationTokenSource(TestTimeout);
     using var connection = new TcpClient();
     await connection.ConnectAsync(origin.Host, origin.Port, deadline.Token);
-    byte[] body = JsonSerializer.SerializeToUtf8Bytes(command, json);
-    string headers = $"POST /api/sessions/{sessionId}/inputs HTTP/1.1\r\n" +
+    byte[] body = JsonSerializer.SerializeToUtf8Bytes(submission, json);
+    string headers = $"POST /api/sessions/{sessionId}/message-submissions HTTP/1.1\r\n" +
         $"Host: {origin.Authority}\r\nX-Urd-Client: browser\r\nContent-Type: application/json\r\n" +
         $"Content-Length: {body.Length}\r\nConnection: close\r\n\r\n";
     await using NetworkStream stream = connection.GetStream();
     await stream.WriteAsync(Encoding.ASCII.GetBytes(headers), deadline.Token);
     await stream.WriteAsync(body, deadline.Token);
-    await modelStarted.WaitAsync(deadline.Token);
+    await llmStarted.WaitAsync(deadline.Token);
     // Closing without reading a single reply byte leaves the sender's outcome unknown.
   }
 
-  private static async Task<SessionSnapshot> WaitForSettlementAsync(HttpClient client, Guid sessionId, Guid runId) {
+  private static async Task<SessionSnapshot> WaitForSettlementAsync(HttpClient client, Guid sessionId, Guid executionId) {
     using var deadline = new CancellationTokenSource(TestTimeout);
     SessionSnapshot? snapshot = null;
-    while (snapshot?.LastSettlement?.RunId != runId) {
+    while (snapshot?.LastSettlement?.ExecutionId != executionId) {
       snapshot = await client.GetFromJsonAsync<SessionSnapshot>($"/api/sessions/{sessionId}/snapshot",
           json, deadline.Token);
-      if (snapshot?.LastSettlement?.RunId != runId)
+      if (snapshot?.LastSettlement?.ExecutionId != executionId)
         await Task.Delay(10, deadline.Token);
     }
 

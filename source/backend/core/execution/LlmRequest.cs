@@ -9,7 +9,7 @@ internal sealed record LlmRequest(
     IReadOnlyList<ChatMessage> Messages);
 
 // Buffered response text sent through SessionBase for persistence.
-// IsFinal closes the text, not the run; the final chunk may be empty.
+// IsFinal closes the text, not the execution; the final chunk may be empty.
 internal sealed record LlmResponseChunk(
     Guid RequestId,
     Guid ResponseId,
@@ -17,9 +17,9 @@ internal sealed record LlmResponseChunk(
     string Text,
     bool IsFinal);
 
-// Local outcome of one LLM request attempt, not live provider status.
+// Local result of one LLM request attempt, not live provider status.
 // SessionExecution reports it to SessionBase, which still has to save it.
-internal sealed record LlmRequestOutcome(
+internal sealed record LlmRequestResult(
     Guid RequestId,
     ExecutionOutcome Outcome,
     string? Error = null,

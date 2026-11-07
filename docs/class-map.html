@@ -15,7 +15,7 @@
 </head>
 <body>
 <header class="topbar"><div class="topbar-inner"><a href="#top" class="brand">Urd</a><nav aria-label="Architecture views" id="nav"><a href="#1-hosting-and-http"><span>01</span>Hosting</a><a href="#2-sessions-input-and-stop"><span>02</span>Sessions</a><a href="#3-execution-and-model-data"><span>03</span>Execution</a><a href="#4-storage-classes"><span>04</span>Storage</a><a href="#5-snapshot-and-content-records"><span>05</span>Read models</a><a href="#6-error-classes-and-private-execution-signals"><span>06</span>Errors</a><a href="#7-complete-type-index"><span>07</span>Type index</a></nav><a class="source-link" href="class-map.md">Mermaid source ↗</a><button type="button" id="notes-toggle" aria-pressed="false">Expand notes</button></div></header>
-<main id="guide"><header class="hero" id="top"><p class="eyebrow">Complete production inventory / class atlas</p><h1>All of Urd’s classes.</h1><p class="subtitle">Every first-party class, grouped by responsibility. Data types are mapped too.</p><div class="meta"><span class="pill">28 classes</span><span>20 records</span><span>5 enums</span><span>1 struct</span><span class="count">54 / 54 types mapped</span><span>07 Nov 2026 · 08:54 UTC</span></div><div class="class-grid" id="class-grid" aria-label="All 28 ordinary classes"><section class="class-group"><h2>Hosting<span>4</span></h2><ul><li><a href="#host-composition" data-type="Urd.Server.FakeChatClient">FakeChatClient</a></li><li><a href="#http-boundary" data-type="Urd.Server.LocalBrowserGate">LocalBrowserGate</a></li><li><a href="#host-composition" data-type="Urd.Server.Program">Program</a></li><li><a href="#http-boundary" data-type="Urd.Server.SessionRoutes">SessionRoutes</a></li></ul></section><section class="class-group"><h2>Sessions<span>6</span></h2><ul><li><a href="#session-lifetime-and-locks" data-type="Urd.Core.Sessions.AsyncLock">AsyncLock</a></li><li><a href="#6-error-classes-and-private-execution-signals" data-type="Urd.Core.Sessions.HistoryRevisionConflictException">HistoryRevisionConflictException</a></li><li><a href="#6-error-classes-and-private-execution-signals" data-type="Urd.Core.Sessions.InputConflictException">InputConflictException</a></li><li><a href="#session-lifetime-and-locks" data-type="Urd.Core.Sessions.PrimarySession">PrimarySession</a></li><li><a href="#session-lifetime-and-locks" data-type="Urd.Core.Sessions.SessionBase">SessionBase</a></li><li><a href="#session-lifetime-and-locks" data-type="Urd.Core.Sessions.SessionManager">SessionManager</a></li></ul></section><section class="class-group"><h2>Execution<span>6</span></h2><ul><li><a href="#execution-collaborators" data-type="Urd.Core.Execution.LlmResponseAccumulator.BoundedJsonStream">BoundedJsonStream</a><small>nested in LlmResponseAccumulator</small></li><li><a href="#execution-collaborators" data-type="Urd.Core.Execution.LlmResponseAccumulator">LlmResponseAccumulator</a></li><li><a href="#execution-collaborators" data-type="Urd.Core.Execution.LlmResponseWriter">LlmResponseWriter</a></li><li><a href="#6-error-classes-and-private-execution-signals" data-type="Urd.Core.Execution.SessionExecution.OutputRejectedException">OutputRejectedException</a><small>nested in SessionExecution</small></li><li><a href="#6-error-classes-and-private-execution-signals" data-type="Urd.Core.Execution.SessionExecution.OutputSaveException">OutputSaveException</a><small>nested in SessionExecution</small></li><li><a href="#execution-collaborators" data-type="Urd.Core.Execution.SessionExecution">SessionExecution</a></li></ul></section><section class="class-group"><h2>Storage<span>12</span></h2><ul><li><a href="#store-database-and-identity" data-type="Urd.Core.Storage.Database">Database</a></li><li><a href="#store-database-and-identity" data-type="Urd.Core.Storage.DatabaseSchema">DatabaseSchema</a></li><li><a href="#durable-writes" data-type="Urd.Core.Storage.InputStorage">InputStorage</a></li><li><a href="#readers-context-and-text" data-type="Urd.Core.Storage.MessageContentReader">MessageContentReader</a></li><li><a href="#durable-writes" data-type="Urd.Core.Storage.OutputStorage">OutputStorage</a></li><li><a href="#readers-context-and-text" data-type="Urd.Core.Storage.RequestContextReader">RequestContextReader</a></li><li><a href="#durable-writes" data-type="Urd.Core.Storage.RunStorage">RunStorage</a></li><li><a href="#store-database-and-identity" data-type="Urd.Core.Storage.SessionStorage">SessionStorage</a></li><li><a href="#store-database-and-identity" data-type="Urd.Core.Storage.SessionStore">SessionStore</a></li><li><a href="#readers-context-and-text" data-type="Urd.Core.Storage.SnapshotReader">SnapshotReader</a></li><li><a href="#readers-context-and-text" data-type="Urd.Core.Storage.StorageText">StorageText</a></li><li><a href="#durable-writes" data-type="Urd.Core.Storage.ToolStorage">ToolStorage</a></li></ul></section></div><p class="inventory-note">Select a class to jump to its diagram. Private nested classes are included. <a href="#7-complete-type-index">Browse all 54 types and source files →</a></p><details class="intro-notes"><summary>Scope, snapshot &amp; diagram key</summary><div class="source-body">
+<main id="guide"><header class="hero" id="top"><p class="eyebrow">Complete production inventory / class atlas</p><h1>All of Urd’s classes.</h1><blockquote><p><strong>Historical snapshot — superseded for current phase-1 naming/API.</strong> See <a href="backend-development.md">Backend development</a> and <a href="server-development.md">Server development</a> for current contracts. Diagrams, counts, source-link labels and line numbers retain the captured state; only renamed live-source destinations are repaired. Phase 2 is not complete: <code>StoredSessionSnapshot</code>, the <code>Settlement</code> record and <code>JsonText</code> remain.</p></blockquote><p class="subtitle">Every first-party class, grouped by responsibility. Data types are mapped too.</p><div class="meta"><span class="pill">28 classes</span><span>20 records</span><span>5 enums</span><span>1 struct</span><span class="count">54 / 54 types mapped</span><span>07 Nov 2026 · 08:54 UTC</span></div><div class="class-grid" id="class-grid" aria-label="All 28 ordinary classes"><section class="class-group"><h2>Hosting<span>4</span></h2><ul><li><a href="#host-composition" data-type="Urd.Server.FakeChatClient">FakeChatClient</a></li><li><a href="#http-boundary" data-type="Urd.Server.LocalBrowserGate">LocalBrowserGate</a></li><li><a href="#host-composition" data-type="Urd.Server.Program">Program</a></li><li><a href="#http-boundary" data-type="Urd.Server.SessionRoutes">SessionRoutes</a></li></ul></section><section class="class-group"><h2>Sessions<span>6</span></h2><ul><li><a href="#session-lifetime-and-locks" data-type="Urd.Core.Sessions.AsyncLock">AsyncLock</a></li><li><a href="#6-error-classes-and-private-execution-signals" data-type="Urd.Core.Sessions.HistoryRevisionConflictException">HistoryRevisionConflictException</a></li><li><a href="#6-error-classes-and-private-execution-signals" data-type="Urd.Core.Sessions.InputConflictException">InputConflictException</a></li><li><a href="#session-lifetime-and-locks" data-type="Urd.Core.Sessions.PrimarySession">PrimarySession</a></li><li><a href="#session-lifetime-and-locks" data-type="Urd.Core.Sessions.SessionBase">SessionBase</a></li><li><a href="#session-lifetime-and-locks" data-type="Urd.Core.Sessions.SessionManager">SessionManager</a></li></ul></section><section class="class-group"><h2>Execution<span>6</span></h2><ul><li><a href="#execution-collaborators" data-type="Urd.Core.Execution.LlmResponseAccumulator.BoundedJsonStream">BoundedJsonStream</a><small>nested in LlmResponseAccumulator</small></li><li><a href="#execution-collaborators" data-type="Urd.Core.Execution.LlmResponseAccumulator">LlmResponseAccumulator</a></li><li><a href="#execution-collaborators" data-type="Urd.Core.Execution.LlmResponseWriter">LlmResponseWriter</a></li><li><a href="#6-error-classes-and-private-execution-signals" data-type="Urd.Core.Execution.SessionExecution.OutputRejectedException">OutputRejectedException</a><small>nested in SessionExecution</small></li><li><a href="#6-error-classes-and-private-execution-signals" data-type="Urd.Core.Execution.SessionExecution.OutputSaveException">OutputSaveException</a><small>nested in SessionExecution</small></li><li><a href="#execution-collaborators" data-type="Urd.Core.Execution.SessionExecution">SessionExecution</a></li></ul></section><section class="class-group"><h2>Storage<span>12</span></h2><ul><li><a href="#store-database-and-identity" data-type="Urd.Core.Storage.Database">Database</a></li><li><a href="#store-database-and-identity" data-type="Urd.Core.Storage.DatabaseSchema">DatabaseSchema</a></li><li><a href="#durable-writes" data-type="Urd.Core.Storage.InputStorage">InputStorage</a></li><li><a href="#readers-context-and-text" data-type="Urd.Core.Storage.MessageContentReader">MessageContentReader</a></li><li><a href="#durable-writes" data-type="Urd.Core.Storage.OutputStorage">OutputStorage</a></li><li><a href="#readers-context-and-text" data-type="Urd.Core.Storage.RequestContextReader">RequestContextReader</a></li><li><a href="#durable-writes" data-type="Urd.Core.Storage.RunStorage">RunStorage</a></li><li><a href="#store-database-and-identity" data-type="Urd.Core.Storage.SessionStorage">SessionStorage</a></li><li><a href="#store-database-and-identity" data-type="Urd.Core.Storage.SessionStore">SessionStore</a></li><li><a href="#readers-context-and-text" data-type="Urd.Core.Storage.SnapshotReader">SnapshotReader</a></li><li><a href="#readers-context-and-text" data-type="Urd.Core.Storage.StorageText">StorageText</a></li><li><a href="#durable-writes" data-type="Urd.Core.Storage.ToolStorage">ToolStorage</a></li></ul></section></div><p class="inventory-note">Select a class to jump to its diagram. Private nested classes are included. <a href="#7-complete-type-index">Browse all 54 types and source files →</a></p><details class="intro-notes"><summary>Scope, snapshot &amp; diagram key</summary><div class="source-body">
 <p><strong>28 classes · 20 records · 5 enums · 1 struct = 54 declared types, all shown below.</strong>
 This is the complete first-party production type inventory, not just the four session classes.
 Records are counted separately from ordinary <code>class</code> declarations; all 20 are record classes.</p>
@@ -234,8 +234,8 @@ behavior or imply that stopping one run stops separate independent worker chats.
 <p class="sources"><strong>Source:</strong> <a href="../source/backend/core/sessions/SessionManager.cs">SessionManager</a>,
 <a href="../source/backend/core/sessions/SessionBase.cs">SessionBase</a>, <a href="../source/backend/core/sessions/PrimarySession.cs">PrimarySession</a>,
 <a href="../source/backend/core/sessions/AsyncLock.cs">AsyncLock and Handle</a>, <a href="../source/backend/core/sessions/SessionRecord.cs">SessionRecord</a>,
-<a href="../source/backend/core/sessions/Input.cs">Input contracts</a>, <a href="../source/backend/core/sessions/Stop.cs">Stop contracts</a>,
-<a href="../source/backend/core/execution/ExecutionResult.cs">ExecutionResult and outcome</a>.</p>
+<a href="../source/backend/core/sessions/UserMessageSubmission.cs">Input contracts</a>, <a href="../source/backend/core/sessions/Stop.cs">Stop contracts</a>,
+<a href="../source/backend/core/execution/SessionExecutionResult.cs">ExecutionResult and outcome</a>.</p>
 </details></section><section class="chapter" id="3-execution-and-model-data" aria-labelledby="3-execution-and-model-data-title"><h2 id="3-execution-and-model-data-title"><span class="number">03</span>Execution and model data</h2>
 <p>Execution owns the model/tool work lifetime, accumulation interprets updates, and the writer batches text.
 Private error classes are included in section 6, rather than omitted from the atlas.</p>
@@ -456,9 +456,9 @@ start markers and results around external invocation; a database transaction doe
 context assembly is not similarly bounded, and holds the shared connection lock.</p>
 <p class="sources"><strong>Source:</strong> <a href="../source/backend/core/storage/SessionStore.cs">SessionStore</a>, <a href="../source/backend/core/storage/Database.cs">Database</a>,
 <a href="../source/backend/core/storage/DatabaseSchema.cs">DatabaseSchema</a>, <a href="../source/backend/core/storage/SessionStorage.cs">SessionStorage</a>,
-<a href="../source/backend/core/storage/InputStorage.cs">InputStorage</a>, <a href="../source/backend/core/storage/RunStorage.cs">RunStorage</a>,
-<a href="../source/backend/core/storage/OutputStorage.cs">OutputStorage</a>, <a href="../source/backend/core/storage/ToolStorage.cs">ToolStorage</a>,
-<a href="../source/backend/core/storage/RequestContextReader.cs">RequestContextReader</a>, <a href="../source/backend/core/storage/SnapshotReader.cs">SnapshotReader</a>,
+<a href="../source/backend/core/storage/UserMessageStorage.cs">InputStorage</a>, <a href="../source/backend/core/storage/SessionExecutionStorage.cs">RunStorage</a>,
+<a href="../source/backend/core/storage/LlmResponseStorage.cs">OutputStorage</a>, <a href="../source/backend/core/storage/ToolStorage.cs">ToolStorage</a>,
+<a href="../source/backend/core/storage/LlmContextReader.cs">RequestContextReader</a>, <a href="../source/backend/core/storage/SnapshotReader.cs">SnapshotReader</a>,
 <a href="../source/backend/core/storage/MessageContentReader.cs">MessageContentReader</a>, <a href="../source/backend/core/storage/StorageText.cs">StorageText</a>.</p>
 </details></section><section class="chapter" id="5-snapshot-and-content-records" aria-labelledby="5-snapshot-and-content-records-title"><h2 id="5-snapshot-and-content-records-title"><span class="number">05</span>Snapshot and content records</h2>
 <p>These are detached read values, not live sessions. Listing them separately keeps the runtime diagrams
@@ -579,7 +579,7 @@ nested execution signals. Their different roles are preserved rather than folded
 <p>The other nested helpers are explicitly drawn with their users: <code>AsyncLock.Handle</code> in section 2,
 <code>LlmResponseAccumulator.BoundedJsonStream</code> in section 3, <code>RunStorage.Settlement</code> and
 <code>MessageContentReader.MessageMetadata</code> in section 4, and <code>SessionRoutes.ContentQuery</code> in section 1.</p>
-<p class="sources"><strong>Source:</strong> <a href="../source/backend/core/sessions/InputConflictException.cs">InputConflictException</a>,
+<p class="sources"><strong>Source:</strong> <a href="../source/backend/core/sessions/UserMessageConflictException.cs">InputConflictException</a>,
 <a href="../source/backend/core/sessions/HistoryRevisionConflictException.cs">HistoryRevisionConflictException</a>,
 <a href="../source/backend/core/execution/SessionExecution.cs">Execution signals</a>.</p>
 </details></section><section class="chapter type-index" id="7-complete-type-index" aria-labelledby="7-complete-type-index-title"><h2 id="7-complete-type-index-title"><span class="number">07</span>Complete type index</h2>
@@ -596,12 +596,12 @@ source line numbers refer to the captured snapshot. Referenced external types an
 <tbody><tr>
 <td><a href="#stop-acknowledgement-versus-run-settlement">ExecutionOutcome</a></td>
 <td>enum</td>
-<td><a href="../source/backend/core/execution/ExecutionResult.cs">ExecutionResult.cs:9</a></td>
+<td><a href="../source/backend/core/execution/SessionExecutionResult.cs">ExecutionResult.cs:9</a></td>
 </tr>
 <tr>
 <td><a href="#stop-acknowledgement-versus-run-settlement">ExecutionResult</a></td>
 <td>record</td>
-<td><a href="../source/backend/core/execution/ExecutionResult.cs">ExecutionResult.cs:4</a></td>
+<td><a href="../source/backend/core/execution/SessionExecutionResult.cs">ExecutionResult.cs:4</a></td>
 </tr>
 <tr>
 <td><a href="#model-requests-chunks-and-tools">LlmRequest</a></td>
@@ -676,27 +676,27 @@ source line numbers refer to the captured snapshot. Referenced external types an
 <tr>
 <td><a href="#identity-and-input-contracts">InputCommand</a></td>
 <td>record</td>
-<td><a href="../source/backend/core/sessions/Input.cs">Input.cs:4</a></td>
+<td><a href="../source/backend/core/sessions/UserMessageSubmission.cs">Input.cs:4</a></td>
 </tr>
 <tr>
 <td><a href="#6-error-classes-and-private-execution-signals">InputConflictException</a></td>
 <td>class</td>
-<td><a href="../source/backend/core/sessions/InputConflictException.cs">InputConflictException.cs:4</a></td>
+<td><a href="../source/backend/core/sessions/UserMessageConflictException.cs">InputConflictException.cs:4</a></td>
 </tr>
 <tr>
 <td><a href="#identity-and-input-contracts">InputDecision</a></td>
 <td>enum</td>
-<td><a href="../source/backend/core/sessions/Input.cs">Input.cs:16</a></td>
+<td><a href="../source/backend/core/sessions/UserMessageSubmission.cs">Input.cs:16</a></td>
 </tr>
 <tr>
 <td><a href="#identity-and-input-contracts">InputReceipt</a></td>
 <td>record</td>
-<td><a href="../source/backend/core/sessions/Input.cs">Input.cs:8</a></td>
+<td><a href="../source/backend/core/sessions/UserMessageSubmission.cs">Input.cs:8</a></td>
 </tr>
 <tr>
 <td><a href="#identity-and-input-contracts">InputRefusalReason</a></td>
 <td>enum</td>
-<td><a href="../source/backend/core/sessions/Input.cs">Input.cs:22</a></td>
+<td><a href="../source/backend/core/sessions/UserMessageSubmission.cs">Input.cs:22</a></td>
 </tr>
 <tr>
 <td><a href="#message-identity-and-paging">MessageContentCursor</a></td>
@@ -771,7 +771,7 @@ source line numbers refer to the captured snapshot. Referenced external types an
 <tr>
 <td><a href="#durable-writes">InputStorage</a></td>
 <td>class</td>
-<td><a href="../source/backend/core/storage/InputStorage.cs">InputStorage.cs:7</a></td>
+<td><a href="../source/backend/core/storage/UserMessageStorage.cs">InputStorage.cs:7</a></td>
 </tr>
 <tr>
 <td><a href="#readers-context-and-text">MessageContentReader</a></td>
@@ -786,22 +786,22 @@ source line numbers refer to the captured snapshot. Referenced external types an
 <tr>
 <td><a href="#durable-writes">OutputStorage</a></td>
 <td>class</td>
-<td><a href="../source/backend/core/storage/OutputStorage.cs">OutputStorage.cs:7</a></td>
+<td><a href="../source/backend/core/storage/LlmResponseStorage.cs">OutputStorage.cs:7</a></td>
 </tr>
 <tr>
 <td><a href="#readers-context-and-text">RequestContextReader</a></td>
 <td>class</td>
-<td><a href="../source/backend/core/storage/RequestContextReader.cs">RequestContextReader.cs:10</a></td>
+<td><a href="../source/backend/core/storage/LlmContextReader.cs">RequestContextReader.cs:10</a></td>
 </tr>
 <tr>
 <td><a href="#durable-writes">RunStorage</a></td>
 <td>class</td>
-<td><a href="../source/backend/core/storage/RunStorage.cs">RunStorage.cs:8</a></td>
+<td><a href="../source/backend/core/storage/SessionExecutionStorage.cs">RunStorage.cs:8</a></td>
 </tr>
 <tr>
 <td><a href="#durable-writes">RunStorage.Settlement</a></td>
 <td>nested record</td>
-<td><a href="../source/backend/core/storage/RunStorage.cs">RunStorage.cs:151</a></td>
+<td><a href="../source/backend/core/storage/SessionExecutionStorage.cs">RunStorage.cs:151</a></td>
 </tr>
 <tr>
 <td><a href="#store-database-and-identity">SessionStorage</a></td>

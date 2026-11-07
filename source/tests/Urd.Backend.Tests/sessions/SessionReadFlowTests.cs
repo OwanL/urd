@@ -19,11 +19,11 @@ public sealed class SessionReadFlowTests {
     var sourceRelease = Signal();
     var cleanupEntered = Signal();
     var cleanupRelease = Signal();
-    CancellationToken modelToken = default;
-    string input = new string('q', 600) + "\0🙂";
+    CancellationToken llmToken = default;
+    string submission = new string('q', 600) + "\0🙂";
     string output = new string('x', 16_000) + "🙂\0λ" + new string('y', 24_000);
     async IAsyncEnumerable<ChatResponseUpdate> Response([EnumeratorCancellation] CancellationToken token) {
-      modelToken = token;
+      llmToken = token;
       yield return Text(output[..1024]);
       sourceWaiting.TrySetResult();
       await sourceRelease.Task.WaitAsync(token);
@@ -35,26 +35,26 @@ public sealed class SessionReadFlowTests {
     var client = new ScriptedChatClient(token => new HeldDisposal(Response(token), cleanupEntered, cleanupRelease.Task));
     var store = SessionStore.Open(database.Path);
     PrimarySession session = await new SessionManager(store, client).CreatePrimaryAsync();
-    Guid? ownedRun = null;
+    Guid? ownedExecution = null;
     try {
       SessionSnapshot idle = await session.ReadSnapshotAsync();
       Assert.False(idle.AdmissionFenced);
-      Assert.Null(idle.UnsettledRunId);
+      Assert.Null(idle.UnsettledExecutionId);
       Assert.Empty(idle.Messages);
       Assert.Equal(0, client.Calls);
 
-      InputReceipt receipt = await session.SubmitUserInputAsync(new(Guid.NewGuid(), 0, input));
-      ownedRun = receipt.RunId;
-      Guid runId = Assert.IsType<Guid>(ownedRun);
+      UserMessageReceipt receipt = await session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, submission));
+      ownedExecution = receipt.ExecutionId;
+      Guid executionId = Assert.IsType<Guid>(ownedExecution);
       await sourceWaiting.Task.WaitAsync(TestTimeout);
       SessionSnapshot initial = await WaitForOutputAsync(session);
-      Assert.Equal(runId, initial.UnsettledRunId);
+      Assert.Equal(executionId, initial.UnsettledExecutionId);
       Assert.False(initial.AdmissionFenced);
       MessagePreview user = Assert.Single(initial.Messages, row => row.Message.Role == MessageRole.User);
       MessagePreview assistant = Assert.Single(initial.Messages, row => row.Message.Role == MessageRole.Assistant);
       Assert.True(user.Truncated);
       Assert.True(assistant.Truncated);
-      Assert.Equal(input, (await ReadAvailableAsync(session, new(user.Message, 0, 0))).Text);
+      Assert.Equal(submission, (await ReadAvailableAsync(session, new(user.Message, 0, 0))).Text);
       var first = await ReadAvailableAsync(session, new(assistant.Message, 0, 0));
       Assert.Equal(output[..1024], first.Text);
       Assert.False(first.Last.IsClosed);
@@ -70,8 +70,8 @@ public sealed class SessionReadFlowTests {
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => session.ReadMessageContentAsync(tail.Next, cancelledRead.Token));
       }
-      Assert.False(modelToken.IsCancellationRequested);
-      Assert.False(session.WaitForSettlementAsync(runId).IsCompleted);
+      Assert.False(llmToken.IsCancellationRequested);
+      Assert.False(session.WaitForSettlementAsync(executionId).IsCompleted);
       Assert.Equal(1, client.Calls);
 
       sourceRelease.TrySetResult();
@@ -82,30 +82,30 @@ public sealed class SessionReadFlowTests {
       Assert.True(finalText.AvailableThrough.SegmentIndex > assistant.AvailableThrough.SegmentIndex);
       Assert.True(finalText.FinalOutputCommitted);
       Assert.Null(finalText.Settlement);
-      Assert.Equal(runId, held.UnsettledRunId);
+      Assert.Equal(executionId, held.UnsettledExecutionId);
       Assert.Null(held.LastSettlement);
       Assert.False(held.AdmissionFenced);
-      Assert.False(session.WaitForSettlementAsync(runId).IsCompleted);
+      Assert.False(session.WaitForSettlementAsync(executionId).IsCompleted);
       var remainder = await ReadAvailableAsync(session, tail.Next);
       Assert.Equal(output, first.Text + remainder.Text);
       Assert.True(remainder.Last.IsClosed);
       Assert.True(remainder.Last.FinalOutputCommitted);
 
       cleanupRelease.TrySetResult();
-      await session.WaitForSettlementAsync(runId).WaitAsync(TestTimeout);
+      await session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout);
       SessionSnapshot settled = await session.ReadSnapshotAsync();
-      Assert.Null(settled.UnsettledRunId);
+      Assert.Null(settled.UnsettledExecutionId);
       Assert.False(settled.AdmissionFenced);
-      Assert.Equal(new ExecutionResult(runId, ExecutionOutcome.Completed), settled.LastSettlement);
+      Assert.Equal(new SessionExecutionResult(executionId, ExecutionOutcome.Completed), settled.LastSettlement);
       Assert.All(settled.Messages, row => Assert.Equal(ExecutionOutcome.Completed, row.Settlement));
       Assert.Equal(1, client.Calls);
       Assert.Equal(0, client.DisposeCalls);
     } finally {
       sourceRelease.TrySetResult();
       cleanupRelease.TrySetResult();
-      if (ownedRun is { } runId) {
-        await session.RequestStopAsync(runId);
-        await session.WaitForSettlementAsync(runId).WaitAsync(TestTimeout);
+      if (ownedExecution is { } executionId) {
+        await session.RequestStopAsync(executionId);
+        await session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout);
       }
       store.Dispose();
       client.Dispose();
@@ -116,23 +116,23 @@ public sealed class SessionReadFlowTests {
   [Fact]
   public async Task ReopenReadsRetainedUnsettledContentWithoutReplayAndDiagnosesStaleHandles() {
     using var database = new TemporaryDatabase();
-    Guid sessionId, cleanId, runId = Guid.NewGuid(), outputId = Guid.NewGuid();
+    Guid sessionId, cleanId, executionId = Guid.NewGuid(), outputId = Guid.NewGuid();
     using (SessionStore original = SessionStore.Open(database.Path)) {
       sessionId = original.Sessions.CreatePrimary(Guid.NewGuid()).Id;
       cleanId = original.Sessions.CreatePrimary(Guid.NewGuid()).Id;
-      original.Inputs.Admit(sessionId, 0, new(Guid.NewGuid(), 0, "retained input"), true, runId);
-      LlmRequest request = original.Runs.ClaimNextRequest(sessionId, runId, 0)!;
-      Assert.True(original.Output.Append(sessionId, runId, 0, new(request.RequestId, outputId, 0, "partial\0🙂", false)));
+      original.UserMessages.Admit(sessionId, 0, new(Guid.NewGuid(), 0, "retained input"), true, executionId);
+      LlmRequest request = original.Executions.ClaimNextRequest(sessionId, executionId, 0)!;
+      Assert.True(original.LlmResponses.Append(sessionId, executionId, 0, new(request.RequestId, outputId, 0, "partial\0🙂", false)));
     }
 
     using var client = new ScriptedChatClient(_ =>
-        throw new InvalidOperationException("Reads must not start a model request."));
+        throw new InvalidOperationException("Reads must not start a llm request."));
     using SessionStore store = SessionStore.Open(database.Path);
     var manager = new SessionManager(store, client);
     PrimarySession session = await manager.GetPrimaryAsync(sessionId);
     SessionSnapshot retained = await session.ReadSnapshotAsync();
     Assert.True(retained.AdmissionFenced);
-    Assert.Equal(runId, retained.UnsettledRunId);
+    Assert.Equal(executionId, retained.UnsettledExecutionId);
     Assert.Null(retained.LastSettlement);
     MessagePreview output = Assert.Single(retained.Messages, row => row.Message.Role == MessageRole.Assistant);
     Assert.Equal(outputId, output.Message.MessageId);
@@ -147,10 +147,10 @@ public sealed class SessionReadFlowTests {
     SessionSnapshot stale = await clean.ReadSnapshotAsync();
     Assert.Equal(1, stale.HistoryRevision);
     Assert.True(stale.AdmissionFenced);
-    Assert.Null(stale.UnsettledRunId);
+    Assert.Null(stale.UnsettledExecutionId);
     Assert.Equal(0, client.Calls);
-    Assert.Null(Assert.Single(StoredRuns.Read(database)).Outcome);
-    Assert.Single(StoredRuns.ReadRequests(database));
+    Assert.Null(Assert.Single(StoredExecutions.Read(database)).Outcome);
+    Assert.Single(StoredExecutions.ReadRequests(database));
   }
 
   private static async Task<(string Text, MessageContentPage Last)> ReadAvailableAsync(

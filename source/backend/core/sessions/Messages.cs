@@ -4,7 +4,7 @@ namespace Urd.Core.Sessions;
 
 // Identifies one user or assistant message within a history revision.
 public sealed record MessageRef(
-    Guid RunId, Guid MessageId, MessageRole Role, long HistoryRevision);
+    Guid ExecutionId, Guid MessageId, MessageRole Role, long HistoryRevision);
 
 // Who wrote a message.
 public enum MessageRole { User, Assistant }

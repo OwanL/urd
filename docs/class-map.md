@@ -1,5 +1,10 @@
 # Urd — complete production class atlas
 
+> **Historical snapshot — superseded for current phase-1 naming/API.** See
+> [Backend development](backend-development.md) and [Server development](server-development.md) for current contracts.
+> Diagrams, counts, source-link labels and line numbers retain the captured state; only renamed live-source destinations are repaired.
+> Phase 2 is not complete: `StoredSessionSnapshot`, the `Settlement` record and `JsonText` remain.
+
 **28 classes · 20 records · 5 enums · 1 struct = 54 declared types, all shown below.**
 This is the complete first-party production type inventory, not just the four session classes.
 Records are counted separately from ordinary `class` declarations; all 20 are record classes.
@@ -246,8 +251,8 @@ behavior or imply that stopping one run stops separate independent worker chats.
 **Source:** [SessionManager](../source/backend/core/sessions/SessionManager.cs),
 [SessionBase](../source/backend/core/sessions/SessionBase.cs), [PrimarySession](../source/backend/core/sessions/PrimarySession.cs),
 [AsyncLock and Handle](../source/backend/core/sessions/AsyncLock.cs), [SessionRecord](../source/backend/core/sessions/SessionRecord.cs),
-[Input contracts](../source/backend/core/sessions/Input.cs), [Stop contracts](../source/backend/core/sessions/Stop.cs),
-[ExecutionResult and outcome](../source/backend/core/execution/ExecutionResult.cs).
+[Input contracts](../source/backend/core/sessions/UserMessageSubmission.cs), [Stop contracts](../source/backend/core/sessions/Stop.cs),
+[ExecutionResult and outcome](../source/backend/core/execution/SessionExecutionResult.cs).
 
 ## 3. Execution and model data
 
@@ -494,9 +499,9 @@ context assembly is not similarly bounded, and holds the shared connection lock.
 
 **Source:** [SessionStore](../source/backend/core/storage/SessionStore.cs), [Database](../source/backend/core/storage/Database.cs),
 [DatabaseSchema](../source/backend/core/storage/DatabaseSchema.cs), [SessionStorage](../source/backend/core/storage/SessionStorage.cs),
-[InputStorage](../source/backend/core/storage/InputStorage.cs), [RunStorage](../source/backend/core/storage/RunStorage.cs),
-[OutputStorage](../source/backend/core/storage/OutputStorage.cs), [ToolStorage](../source/backend/core/storage/ToolStorage.cs),
-[RequestContextReader](../source/backend/core/storage/RequestContextReader.cs), [SnapshotReader](../source/backend/core/storage/SnapshotReader.cs),
+[InputStorage](../source/backend/core/storage/UserMessageStorage.cs), [RunStorage](../source/backend/core/storage/SessionExecutionStorage.cs),
+[OutputStorage](../source/backend/core/storage/LlmResponseStorage.cs), [ToolStorage](../source/backend/core/storage/ToolStorage.cs),
+[RequestContextReader](../source/backend/core/storage/LlmContextReader.cs), [SnapshotReader](../source/backend/core/storage/SnapshotReader.cs),
 [MessageContentReader](../source/backend/core/storage/MessageContentReader.cs), [StorageText](../source/backend/core/storage/StorageText.cs).
 
 ## 5. Snapshot and content records
@@ -633,7 +638,7 @@ The other nested helpers are explicitly drawn with their users: `AsyncLock.Handl
 `LlmResponseAccumulator.BoundedJsonStream` in section 3, `RunStorage.Settlement` and
 `MessageContentReader.MessageMetadata` in section 4, and `SessionRoutes.ContentQuery` in section 1.
 
-**Source:** [InputConflictException](../source/backend/core/sessions/InputConflictException.cs),
+**Source:** [InputConflictException](../source/backend/core/sessions/UserMessageConflictException.cs),
 [HistoryRevisionConflictException](../source/backend/core/sessions/HistoryRevisionConflictException.cs),
 [Execution signals](../source/backend/core/execution/SessionExecution.cs).
 
@@ -644,8 +649,8 @@ source line numbers refer to the captured snapshot. Referenced external types an
 
 | Type | Kind | Source (snapshot line) |
 | --- | --- | --- |
-| [ExecutionOutcome](#stop-acknowledgement-versus-run-settlement) | enum | [ExecutionResult.cs:9](../source/backend/core/execution/ExecutionResult.cs) |
-| [ExecutionResult](#stop-acknowledgement-versus-run-settlement) | record | [ExecutionResult.cs:4](../source/backend/core/execution/ExecutionResult.cs) |
+| [ExecutionOutcome](#stop-acknowledgement-versus-run-settlement) | enum | [ExecutionResult.cs:9](../source/backend/core/execution/SessionExecutionResult.cs) |
+| [ExecutionResult](#stop-acknowledgement-versus-run-settlement) | record | [ExecutionResult.cs:4](../source/backend/core/execution/SessionExecutionResult.cs) |
 | [LlmRequest](#model-requests-chunks-and-tools) | record | [LlmRequest.cs:7](../source/backend/core/execution/LlmRequest.cs) |
 | [LlmRequestOutcome](#model-requests-chunks-and-tools) | record | [LlmRequest.cs:22](../source/backend/core/execution/LlmRequest.cs) |
 | [LlmResponseAccumulator](#execution-collaborators) | class | [LlmResponseAccumulator.cs:7](../source/backend/core/execution/LlmResponseAccumulator.cs) |
@@ -660,11 +665,11 @@ source line numbers refer to the captured snapshot. Referenced external types an
 | [AsyncLock](#session-lifetime-and-locks) | class | [AsyncLock.cs:8](../source/backend/core/sessions/AsyncLock.cs) |
 | [AsyncLock.Handle](#session-lifetime-and-locks) | nested struct | [AsyncLock.cs:16](../source/backend/core/sessions/AsyncLock.cs) |
 | [HistoryRevisionConflictException](#6-error-classes-and-private-execution-signals) | class | [HistoryRevisionConflictException.cs:4](../source/backend/core/sessions/HistoryRevisionConflictException.cs) |
-| [InputCommand](#identity-and-input-contracts) | record | [Input.cs:4](../source/backend/core/sessions/Input.cs) |
-| [InputConflictException](#6-error-classes-and-private-execution-signals) | class | [InputConflictException.cs:4](../source/backend/core/sessions/InputConflictException.cs) |
-| [InputDecision](#identity-and-input-contracts) | enum | [Input.cs:16](../source/backend/core/sessions/Input.cs) |
-| [InputReceipt](#identity-and-input-contracts) | record | [Input.cs:8](../source/backend/core/sessions/Input.cs) |
-| [InputRefusalReason](#identity-and-input-contracts) | enum | [Input.cs:22](../source/backend/core/sessions/Input.cs) |
+| [InputCommand](#identity-and-input-contracts) | record | [Input.cs:4](../source/backend/core/sessions/UserMessageSubmission.cs) |
+| [InputConflictException](#6-error-classes-and-private-execution-signals) | class | [InputConflictException.cs:4](../source/backend/core/sessions/UserMessageConflictException.cs) |
+| [InputDecision](#identity-and-input-contracts) | enum | [Input.cs:16](../source/backend/core/sessions/UserMessageSubmission.cs) |
+| [InputReceipt](#identity-and-input-contracts) | record | [Input.cs:8](../source/backend/core/sessions/UserMessageSubmission.cs) |
+| [InputRefusalReason](#identity-and-input-contracts) | enum | [Input.cs:22](../source/backend/core/sessions/UserMessageSubmission.cs) |
 | [MessageContentCursor](#message-identity-and-paging) | record | [Messages.cs:19](../source/backend/core/sessions/Messages.cs) |
 | [MessageContentPage](#message-identity-and-paging) | record | [Messages.cs:23](../source/backend/core/sessions/Messages.cs) |
 | [MessagePreview](#message-identity-and-paging) | record | [Messages.cs:13](../source/backend/core/sessions/Messages.cs) |
@@ -679,13 +684,13 @@ source line numbers refer to the captured snapshot. Referenced external types an
 | [StopStatus](#stop-acknowledgement-versus-run-settlement) | enum | [Stop.cs:8](../source/backend/core/sessions/Stop.cs) |
 | [Database](#store-database-and-identity) | class | [Database.cs:6](../source/backend/core/storage/Database.cs) |
 | [DatabaseSchema](#store-database-and-identity) | class | [DatabaseSchema.cs:6](../source/backend/core/storage/DatabaseSchema.cs) |
-| [InputStorage](#durable-writes) | class | [InputStorage.cs:7](../source/backend/core/storage/InputStorage.cs) |
+| [InputStorage](#durable-writes) | class | [InputStorage.cs:7](../source/backend/core/storage/UserMessageStorage.cs) |
 | [MessageContentReader](#readers-context-and-text) | class | [MessageContentReader.cs:9](../source/backend/core/storage/MessageContentReader.cs) |
 | [MessageContentReader.MessageMetadata](#readers-context-and-text) | nested record | [MessageContentReader.cs:215](../source/backend/core/storage/MessageContentReader.cs) |
-| [OutputStorage](#durable-writes) | class | [OutputStorage.cs:7](../source/backend/core/storage/OutputStorage.cs) |
-| [RequestContextReader](#readers-context-and-text) | class | [RequestContextReader.cs:10](../source/backend/core/storage/RequestContextReader.cs) |
-| [RunStorage](#durable-writes) | class | [RunStorage.cs:8](../source/backend/core/storage/RunStorage.cs) |
-| [RunStorage.Settlement](#durable-writes) | nested record | [RunStorage.cs:151](../source/backend/core/storage/RunStorage.cs) |
+| [OutputStorage](#durable-writes) | class | [OutputStorage.cs:7](../source/backend/core/storage/LlmResponseStorage.cs) |
+| [RequestContextReader](#readers-context-and-text) | class | [RequestContextReader.cs:10](../source/backend/core/storage/LlmContextReader.cs) |
+| [RunStorage](#durable-writes) | class | [RunStorage.cs:8](../source/backend/core/storage/SessionExecutionStorage.cs) |
+| [RunStorage.Settlement](#durable-writes) | nested record | [RunStorage.cs:151](../source/backend/core/storage/SessionExecutionStorage.cs) |
 | [SessionStorage](#store-database-and-identity) | class | [SessionStorage.cs:7](../source/backend/core/storage/SessionStorage.cs) |
 | [SessionStore](#store-database-and-identity) | class | [SessionStore.cs:6](../source/backend/core/storage/SessionStore.cs) |
 | [SnapshotReader](#readers-context-and-text) | class | [SnapshotReader.cs:10](../source/backend/core/storage/SnapshotReader.cs) |

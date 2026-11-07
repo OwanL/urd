@@ -6,15 +6,15 @@ using Urd.Core.Storage;
 namespace Urd.Core.Sessions;
 
 // Owns one session's state. Every read and write goes through this class's lock;
-// model work and stop callbacks always run outside it.
+// LLM work and stop callbacks always run outside it.
 public abstract class SessionBase {
   private readonly SessionStore store;
   private readonly IChatClient chatClient;
   private readonly IReadOnlyList<AIFunction> tools;
   private readonly AsyncLock gate = new();
-  private bool acceptingInput = true;
+  private bool acceptingUserMessages = true;
   private SessionExecution? execution;
-  private TaskCompletionSource<ExecutionResult>? settlement;
+  private TaskCompletionSource<SessionExecutionResult>? settlement;
   private Task? executionTask;
 
   private protected SessionBase(SessionRecord record, SessionStore store, IChatClient chatClient,
@@ -30,19 +30,19 @@ public abstract class SessionBase {
 
   internal long HistoryRevision { get; }
 
-  public async Task<InputReceipt?> GetInputReceiptAsync(Guid inputId, CancellationToken cancellation = default) {
+  public async Task<UserMessageReceipt?> GetUserMessageReceiptAsync(Guid submissionId, CancellationToken cancellation = default) {
     using var held = await gate.AcquireAsync(cancellation);
-    return store.Inputs.ReadReceipt(Id, inputId);
+    return store.UserMessages.ReadReceipt(Id, submissionId);
   }
 
   public async Task<SessionSnapshot> ReadSnapshotAsync(CancellationToken cancellation = default) {
     using var held = await gate.AcquireAsync(cancellation);
     StoredSessionSnapshot stored = store.Snapshots.Read(Id);
-    bool runOwnedElsewhere = stored.UnsettledRunId is { } runId && !IsCurrentRun(runId);
-    bool fenced = !acceptingInput || stored.HistoryRevision != HistoryRevision || runOwnedElsewhere;
+    bool executionOwnedElsewhere = stored.UnsettledExecutionId is { } executionId && !IsCurrentExecution(executionId);
+    bool fenced = !acceptingUserMessages || stored.HistoryRevision != HistoryRevision || executionOwnedElsewhere;
     bool stopping = stored.StopRequested
-        || (stored.UnsettledRunId is { } activeRun && IsCurrentRun(activeRun) && execution!.IsStopping);
-    return new(Id, stored.HistoryRevision, fenced, stored.UnsettledRunId, stopping,
+        || (stored.UnsettledExecutionId is { } activeExecution && IsCurrentExecution(activeExecution) && execution!.IsStopping);
+    return new(Id, stored.HistoryRevision, fenced, stored.UnsettledExecutionId, stopping,
         stored.LastSettlement, stored.Messages, stored.HasOlderMessages);
   }
 
@@ -52,18 +52,18 @@ public abstract class SessionBase {
     return store.Content.Read(Id, cursor);
   }
 
-  private protected async Task<InputReceipt> AdmitInputAsync(InputCommand command) {
-    // A new run starts only after the lock is released.
+  private protected async Task<UserMessageReceipt> AdmitUserMessageAsync(UserMessageSubmission submission) {
+    // A new execution starts only after the lock is released.
     TaskCompletionSource? lockReleased = null;
-    InputReceipt receipt;
+    UserMessageReceipt receipt;
     using (await gate.AcquireAsync()) {
       (receipt, bool newlyAccepted) = WriteToStore(
-          () => store.Inputs.Admit(Id, HistoryRevision, command, acceptingInput, Guid.NewGuid(), execution?.RunId));
+          () => store.UserMessages.Admit(Id, HistoryRevision, submission, acceptingUserMessages, Guid.NewGuid(), execution?.ExecutionId));
 
-      // Steering joins the owned run; neither it nor a retained receipt starts another driver.
+      // Steering joins the owned execution; neither it nor a retained receipt starts another driver.
       if (newlyAccepted && execution is null) {
         lockReleased = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        StartExecution(receipt.RunId!.Value, lockReleased.Task);
+        StartExecution(receipt.ExecutionId!.Value, lockReleased.Task);
       }
     }
 
@@ -71,12 +71,12 @@ public abstract class SessionBase {
     return receipt;
   }
 
-  internal async Task FenceInputAsync() {
+  internal async Task FenceUserMessagesAsync() {
     using var held = await gate.AcquireAsync();
-    acceptingInput = false;
+    acceptingUserMessages = false;
   }
 
-  // Called after all manager-owned sessions have fenced input. A failed Stop write
+  // Called after all manager-owned sessions have fenced user messages. A failed Stop write
   // must not prevent local cancellation or let shutdown skip waiting for owned work.
   internal async Task StopExecutionAsync() {
     Task pendingExecution;
@@ -88,7 +88,7 @@ public abstract class SessionBase {
       pendingSettlement = settlement?.Task ?? Task.CompletedTask;
       if (execution is not null) {
         try {
-          WriteToStore(() => store.Runs.RequestStop(Id, execution.RunId, ownsRun: true));
+          WriteToStore(() => store.Executions.RequestStop(Id, execution.ExecutionId, ownsExecution: true));
         } catch (Exception failure) {
           stopFailure = failure;
         }
@@ -106,27 +106,27 @@ public abstract class SessionBase {
     }
   }
 
-  public async Task<StopReceipt> RequestStopAsync(Guid runId) {
-    if (runId == Guid.Empty)
-      throw new ArgumentException("A run ID is required.", nameof(runId));
+  public async Task<StopReceipt> RequestStopAsync(Guid executionId) {
+    if (executionId == Guid.Empty)
+      throw new ArgumentException("An execution ID is required.", nameof(executionId));
 
     using var held = await gate.AcquireAsync();
-    bool ownsRun = IsCurrentRun(runId);
+    bool ownsExecution = IsCurrentExecution(executionId);
     // Signal even if the Stop write fails. The driver owns joining the retained
     // callback task before settlement; this acknowledgement never means cleanup finished.
-    if (ownsRun)
+    if (ownsExecution)
       _ = execution!.StopAsync();
 
-    return WriteToStore(() => store.Runs.RequestStop(Id, runId, ownsRun));
+    return WriteToStore(() => store.Executions.RequestStop(Id, executionId, ownsExecution));
   }
 
-  internal async Task<ExecutionResult> WaitForSettlementAsync(Guid runId, CancellationToken cancellation = default) {
+  internal async Task<SessionExecutionResult> WaitForSettlementAsync(Guid executionId, CancellationToken cancellation = default) {
     Task pendingExecution;
-    Task<ExecutionResult> pendingSettlement;
+    Task<SessionExecutionResult> pendingSettlement;
     using (await gate.AcquireAsync(cancellation)) {
-      if (!IsCurrentRun(runId)) {
-        return store.Runs.ReadSettlement(Id, runId)
-            ?? throw new InvalidOperationException($"Run '{runId}' has no known settlement in this session.");
+      if (!IsCurrentExecution(executionId)) {
+        return store.Executions.ReadSettlement(Id, executionId)
+            ?? throw new InvalidOperationException($"Execution '{executionId}' has no known settlement in this session.");
       }
 
       pendingExecution = executionTask!;
@@ -137,53 +137,53 @@ public abstract class SessionBase {
     return await pendingSettlement.WaitAsync(cancellation);
   }
 
-  internal async Task<LlmRequest?> ClaimNextRequestAsync(Guid runId) {
+  internal async Task<LlmRequest?> ClaimNextRequestAsync(Guid executionId) {
     using var held = await gate.AcquireAsync();
-    return IsCurrentRun(runId) && !execution!.IsStopping
-        ? store.Runs.ClaimNextRequest(Id, runId, HistoryRevision) : null;
+    return IsCurrentExecution(executionId) && !execution!.IsStopping
+        ? store.Executions.ClaimNextRequest(Id, executionId, HistoryRevision) : null;
   }
 
-  internal async Task<bool> RecordOutputAsync(Guid runId, LlmResponseChunk chunk) {
+  internal async Task<bool> RecordOutputAsync(Guid executionId, LlmResponseChunk chunk) {
     using var held = await gate.AcquireAsync();
-    return IsCurrentRun(runId) && !execution!.IsStopping
-        && store.Output.Append(Id, runId, HistoryRevision, chunk);
+    return IsCurrentExecution(executionId) && !execution!.IsStopping
+        && store.LlmResponses.Append(Id, executionId, HistoryRevision, chunk);
   }
 
-  internal async Task<bool> CompleteRequestAsync(Guid runId, LlmRequestOutcome outcome) {
+  internal async Task<bool> CompleteRequestAsync(Guid executionId, LlmRequestResult outcome) {
     using var held = await gate.AcquireAsync();
-    return IsCurrentRun(runId)
+    return IsCurrentExecution(executionId)
         && (outcome.Outcome != ExecutionOutcome.Completed || !execution!.IsStopping)
-        && store.Output.CompleteRequest(Id, runId, HistoryRevision, outcome);
+        && store.LlmResponses.CompleteRequest(Id, executionId, HistoryRevision, outcome);
   }
 
-  internal async Task<bool> TryStartToolAsync(Guid runId, Guid requestId, string callId) {
+  internal async Task<bool> TryStartToolAsync(Guid executionId, Guid requestId, string callId) {
     using var held = await gate.AcquireAsync();
-    return IsCurrentRun(runId) && !execution!.IsStopping
-        && store.Tools.TryStart(Id, runId, HistoryRevision, requestId, callId);
+    return IsCurrentExecution(executionId) && !execution!.IsStopping
+        && store.Tools.TryStart(Id, executionId, HistoryRevision, requestId, callId);
   }
 
-  internal async Task<bool> CompleteToolAsync(Guid runId, Guid requestId, LlmToolResult result) {
+  internal async Task<bool> CompleteToolAsync(Guid executionId, Guid requestId, LlmToolResult result) {
     using var held = await gate.AcquireAsync();
-    return IsCurrentRun(runId) && store.Tools.Complete(Id, runId, HistoryRevision, requestId, result);
+    return IsCurrentExecution(executionId) && store.Tools.Complete(Id, executionId, HistoryRevision, requestId, result);
   }
 
   // Caller holds the lock.
-  private void StartExecution(Guid runId, Task lockReleased) {
-    var newExecution = new SessionExecution(runId, this, chatClient, tools);
-    var newSettlement = new TaskCompletionSource<ExecutionResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+  private void StartExecution(Guid executionId, Task lockReleased) {
+    var newExecution = new SessionExecution(executionId, this, chatClient, tools);
+    var newSettlement = new TaskCompletionSource<SessionExecutionResult>(TaskCreationOptions.RunContinuationsAsynchronously);
     execution = newExecution;
     settlement = newSettlement;
     executionTask = RunExecutionAsync(newExecution, newSettlement, lockReleased);
   }
 
   private async Task RunExecutionAsync(SessionExecution execution,
-      TaskCompletionSource<ExecutionResult> settlement, Task lockReleased) {
+      TaskCompletionSource<SessionExecutionResult> settlement, Task lockReleased) {
     try {
       await lockReleased;
-      LlmRequest? request = await ClaimNextRequestAsync(execution.RunId);
+      LlmRequest? request = await ClaimNextRequestAsync(execution.ExecutionId);
       if (request is null) {
         if (!execution.IsStopping)
-          throw new InvalidOperationException("The run has no initial request and was not stopped.");
+          throw new InvalidOperationException("The execution has no initial request and was not stopped.");
 
         await AdvanceExecutionAsync(execution, settlement, ExecutionOutcome.Cancelled);
         return;
@@ -194,17 +194,17 @@ public abstract class SessionBase {
         request = await AdvanceExecutionAsync(execution, settlement, outcome);
       }
     } catch (Exception failure) {
-      // The run's saved state is uncertain, so keep it unsettled and refuse new input.
+      // The execution's saved state is uncertain, so keep it unsettled and refuse new user messages.
       // The execution and its resources stay in place for later recovery.
       using var held = await gate.AcquireAsync();
-      acceptingInput = false;
+      acceptingUserMessages = false;
       settlement.TrySetException(failure);
       _ = settlement.Task.Exception; // Observed even if nobody is waiting yet.
     }
   }
 
   private async Task<LlmRequest?> AdvanceExecutionAsync(SessionExecution execution,
-      TaskCompletionSource<ExecutionResult> settlement, ExecutionOutcome outcome) {
+      TaskCompletionSource<SessionExecutionResult> settlement, ExecutionOutcome outcome) {
     Task stopCallbacks;
     using (await gate.AcquireAsync()) {
       // A late Stop cannot escape its join or race the next request's claim.
@@ -220,11 +220,11 @@ public abstract class SessionBase {
     }
   }
 
-  // Caller holds the lock. Admission cannot slip between the pending-input check and settlement.
+  // Caller holds the lock. Admission cannot slip between the pending-submission check and settlement.
   private LlmRequest? ClaimOrSettle(SessionExecution execution,
-      TaskCompletionSource<ExecutionResult> settlement, ExecutionOutcome outcome) {
+      TaskCompletionSource<SessionExecutionResult> settlement, ExecutionOutcome outcome) {
     if (outcome == ExecutionOutcome.Completed && !execution.IsStopping) {
-      LlmRequest? next = store.Runs.ClaimNextRequest(Id, execution.RunId, HistoryRevision);
+      LlmRequest? next = store.Executions.ClaimNextRequest(Id, execution.ExecutionId, HistoryRevision);
       if (next is not null)
         return next;
     }
@@ -236,9 +236,9 @@ public abstract class SessionBase {
   // Caller holds the lock. Saves the result before releasing resources and
   // publishing it, so waiters only ever see a saved settlement.
   private void Settle(SessionExecution execution,
-      TaskCompletionSource<ExecutionResult> settlement, ExecutionOutcome outcome) {
-    ExecutionResult saved = store.Runs.TrySettle(Id, execution.RunId, outcome)
-        ?? throw new InvalidOperationException("The current run could not be settled.");
+      TaskCompletionSource<SessionExecutionResult> settlement, ExecutionOutcome outcome) {
+    SessionExecutionResult saved = store.Executions.TrySettle(Id, execution.ExecutionId, outcome)
+        ?? throw new InvalidOperationException("The current execution could not be settled.");
 
     execution.Dispose();
     this.execution = null;
@@ -246,14 +246,14 @@ public abstract class SessionBase {
     settlement.TrySetResult(saved);
   }
 
-  private bool IsCurrentRun(Guid runId) => execution?.RunId == runId;
+  private bool IsCurrentExecution(Guid executionId) => execution?.ExecutionId == executionId;
 
-  // A failed write may still have been committed, so refuse new input rather than guess.
+  // A failed write may still have been committed, so refuse new user messages rather than guess.
   private T WriteToStore<T>(Func<T> write) {
     try {
       return write();
     } catch (SqliteException) {
-      acceptingInput = false;
+      acceptingUserMessages = false;
       throw;
     }
   }

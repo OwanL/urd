@@ -3,7 +3,7 @@ using Microsoft.Extensions.AI;
 
 namespace Urd.Backend.Tests.Support;
 
-// Streaming-only fake model client that replays a scripted response and counts calls.
+// Streaming-only fake LLM client that replays a scripted response and counts calls.
 internal sealed class ScriptedChatClient(Func<CancellationToken, IAsyncEnumerable<ChatResponseUpdate>> script)
     : IChatClient {
   private readonly ConcurrentQueue<IReadOnlyList<ChatMessage>> requests = new();

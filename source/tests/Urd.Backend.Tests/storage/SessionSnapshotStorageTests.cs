@@ -20,7 +20,7 @@ public sealed class SessionSnapshotStorageTests {
     Assert.Equal(0, snapshot.HistoryRevision);
     Assert.Empty(snapshot.Messages);
     Assert.False(snapshot.HasOlderMessages);
-    Assert.Null(snapshot.UnsettledRunId);
+    Assert.Null(snapshot.UnsettledExecutionId);
     Assert.False(snapshot.StopRequested);
     Assert.Null(snapshot.LastSettlement);
     Assert.Throws<KeyNotFoundException>(() => store.Snapshots.Read(Guid.NewGuid()));
@@ -34,13 +34,13 @@ public sealed class SessionSnapshotStorageTests {
   [InlineData(31, true, true)]
   [InlineData(60, false, false)]
   [InlineData(61, false, true)]
-  public void NewestSixtyMessagesAreChronologicalAndOmissionIsExact(int runCount, bool includeOutputs, bool hasOlder) {
+  public void NewestSixtyMessagesAreChronologicalAndOmissionIsExact(int executionCount, bool includeOutputs, bool hasOlder) {
     using var database = new TemporaryDatabase();
     using SessionStore store = SessionStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
-    SeedHistory(database, session, 0, runCount, includeOutputs);
+    SeedHistory(database, session, 0, executionCount, includeOutputs);
     StoredSessionSnapshot snapshot = store.Snapshots.Read(session);
-    string[] expected = Enumerable.Range(1, runCount)
+    string[] expected = Enumerable.Range(1, executionCount)
         .SelectMany(index => includeOutputs ? new[] { $"input {index}", $"output {index}" } : new[] { $"input {index}" })
         .TakeLast(60).ToArray();
     Assert.Equal(expected, snapshot.Messages.Select(message => message.Preview));
@@ -59,30 +59,30 @@ public sealed class SessionSnapshotStorageTests {
   [Theory]
   [InlineData(30, false)]
   [InlineData(31, true)]
-  public void OneRunUsesMessageNotRequestOrRunCountForTheRecentWindow(int requestCount, bool hasOlder) {
+  public void OneExecutionUsesMessageNotRequestOrExecutionCountForTheRecentWindow(int requestCount, bool hasOlder) {
     using var database = new TemporaryDatabase();
     using SessionStore store = SessionStore.Open(database.Path);
-    Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, run = Guid.NewGuid();
-    var inputs = new List<Guid>();
+    Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, execution = Guid.NewGuid();
+    var submissions = new List<Guid>();
     var requests = new List<Guid>();
     for (int index = 1; index <= requestCount; index++) {
-      Guid input = Guid.NewGuid();
-      inputs.Add(input);
-      Assert.True(store.Inputs.Admit(session, 0, new(input, 0, $"input {index}"), true,
-          index == 1 ? run : Guid.NewGuid(), activeRunId: index == 1 ? null : run).NewlyAccepted);
-      LlmRequest request = store.Runs.ClaimNextRequest(session, run, 0)!;
+      Guid submission = Guid.NewGuid();
+      submissions.Add(submission);
+      Assert.True(store.UserMessages.Admit(session, 0, new(submission, 0, $"input {index}"), true,
+          index == 1 ? execution : Guid.NewGuid(), activeExecutionId: index == 1 ? null : execution).NewlyAccepted);
+      LlmRequest request = store.Executions.ClaimNextRequest(session, execution, 0)!;
       requests.Add(request.RequestId);
-      Assert.True(store.Output.Append(session, run, 0,
+      Assert.True(store.LlmResponses.Append(session, execution, 0,
           new(request.RequestId, Guid.NewGuid(), 0, $"output {index}", true)));
-      Assert.True(store.Output.CompleteRequest(session, run, 0,
+      Assert.True(store.LlmResponses.CompleteRequest(session, execution, 0,
           new(request.RequestId, ExecutionOutcome.Completed)));
     }
 
-    Assert.Equal(ExecutionOutcome.Completed, store.Runs.TrySettle(session, run, ExecutionOutcome.Completed)!.Outcome);
+    Assert.Equal(ExecutionOutcome.Completed, store.Executions.TrySettle(session, execution, ExecutionOutcome.Completed)!.Outcome);
     if (hasOlder) {
-      // Even within one run, omitted message bodies must never be decoded for previews.
+      // Even within one execution, omitted message bodies must never be decoded for previews.
       database.Execute($"""
-        UPDATE input_decisions SET original_text_utf8 = X'FF' WHERE input_id = '{inputs[0]:D}';
+        UPDATE input_decisions SET original_text_utf8 = X'FF' WHERE input_id = '{submissions[0]:D}';
         UPDATE execution_output SET text_utf8 = X'FF' WHERE request_id = '{requests[0]:D}';
         """);
     }
@@ -94,7 +94,7 @@ public sealed class SessionSnapshotStorageTests {
     Assert.Equal(60, snapshot.Messages.Count);
     Assert.Equal(hasOlder, snapshot.HasOlderMessages);
     Assert.All(snapshot.Messages, message => {
-      Assert.Equal(run, message.Message.RunId);
+      Assert.Equal(execution, message.Message.ExecutionId);
       Assert.Equal(ExecutionOutcome.Completed, message.Settlement);
     });
     Assert.Equal(60, snapshot.Messages.Select(message => message.Message.MessageId).Distinct().Count());
@@ -104,11 +104,11 @@ public sealed class SessionSnapshotStorageTests {
   [InlineData(39, false)]
   [InlineData(40, false)]
   [InlineData(41, true)]
-  public void MixedRunsWithAndWithoutOutputKeepTheSameRecentMessageWindow(int runCount, bool hasOlder) {
+  public void MixedExecutionsWithAndWithoutOutputKeepTheSameRecentMessageWindow(int executionCount, bool hasOlder) {
     using var database = new TemporaryDatabase();
     using SessionStore store = SessionStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
-    SeedHistory(database, session, 0, runCount, includeOutputs: true);
+    SeedHistory(database, session, 0, executionCount, includeOutputs: true);
     database.Execute($"""
       DELETE FROM execution_messages WHERE role = 1 AND run_id IN (
           SELECT run_id FROM execution_runs WHERE session_id = '{session:D}' AND ordinal % 2 = 1);
@@ -122,7 +122,7 @@ public sealed class SessionSnapshotStorageTests {
       """);
 
     StoredSessionSnapshot snapshot = store.Snapshots.Read(session);
-    string[] expected = Enumerable.Range(1, runCount)
+    string[] expected = Enumerable.Range(1, executionCount)
         .SelectMany(index => index % 2 == 0 ? new[] { $"input {index}", $"output {index}" } : new[] { $"input {index}" })
         .TakeLast(60).ToArray();
     Assert.Equal(expected, snapshot.Messages.Select(message => message.Preview));
@@ -135,10 +135,10 @@ public sealed class SessionSnapshotStorageTests {
     Guid session, terminal = Guid.NewGuid(), active = Guid.NewGuid();
     using (SessionStore store = SessionStore.Open(database.Path)) {
       session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
-      store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "terminal"), true, terminal);
-      store.Runs.TrySettle(session, terminal, ExecutionOutcome.Failed);
-      store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "unsettled"), true, active);
-      store.Runs.RequestStop(session, active, ownsRun: true);
+      store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "terminal"), true, terminal);
+      store.Executions.TrySettle(session, terminal, ExecutionOutcome.Failed);
+      store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "unsettled"), true, active);
+      store.Executions.RequestStop(session, active, ownsExecution: true);
     }
 
     database.ForceHistoryRevision(9);
@@ -147,42 +147,42 @@ public sealed class SessionSnapshotStorageTests {
     Assert.Equal(9, snapshot.HistoryRevision);
     Assert.Empty(snapshot.Messages);
     Assert.False(snapshot.HasOlderMessages);
-    Assert.Equal(active, snapshot.UnsettledRunId);
+    Assert.Equal(active, snapshot.UnsettledExecutionId);
     Assert.True(snapshot.StopRequested);
-    Assert.Equal(new ExecutionResult(terminal, ExecutionOutcome.Failed), snapshot.LastSettlement);
-    Assert.Null(reopened.Runs.ReadSettlement(session, active)); // Reading never recovers or settles it.
+    Assert.Equal(new SessionExecutionResult(terminal, ExecutionOutcome.Failed), snapshot.LastSettlement);
+    Assert.Null(reopened.Executions.ReadSettlement(session, active)); // Reading never recovers or settles it.
   }
 
   [Fact]
   public void PrefixesAreScalarBoundedAndFinalOutputIsNotSettlement() {
     using var database = new TemporaryDatabase();
     using SessionStore store = SessionStore.Open(database.Path);
-    Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, run = Guid.NewGuid(), output = Guid.NewGuid();
-    store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, new string('a', 255) + "🙂\0tail"), true, run);
-    LlmRequest request = store.Runs.ClaimNextRequest(session, run, 0)!;
+    Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, execution = Guid.NewGuid(), output = Guid.NewGuid();
+    store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, new string('a', 255) + "🙂\0tail"), true, execution);
+    LlmRequest request = store.Executions.ClaimNextRequest(session, execution, 0)!;
     Assert.Single(store.Snapshots.Read(session).Messages); // Claim alone has no assistant row.
-    store.Output.Append(session, run, 0, new(request.RequestId, output, 0, new string('é', 300), false));
-    store.Output.Append(session, run, 0, new(request.RequestId, output, 1, "", true));
+    store.LlmResponses.Append(session, execution, 0, new(request.RequestId, output, 0, new string('é', 300), false));
+    store.LlmResponses.Append(session, execution, 0, new(request.RequestId, output, 1, "", true));
     StoredSessionSnapshot snapshot = store.Snapshots.Read(session);
-    Assert.Equal(run, snapshot.UnsettledRunId);
+    Assert.Equal(execution, snapshot.UnsettledExecutionId);
     Assert.Null(snapshot.LastSettlement);
     Assert.False(snapshot.StopRequested);
-    MessagePreview input = snapshot.Messages[0], assistant = snapshot.Messages[1];
-    Assert.Equal(new string('a', 255), input.Preview);
-    Assert.True(input.Truncated);
+    MessagePreview submission = snapshot.Messages[0], assistant = snapshot.Messages[1];
+    Assert.Equal(new string('a', 255), submission.Preview);
+    Assert.True(submission.Truncated);
     Assert.Equal(new string('é', 256), assistant.Preview);
     Assert.True(assistant.Truncated);
     Assert.Equal(new MessageContentCursor(assistant.Message, 2, 0), assistant.AvailableThrough);
     Assert.True(assistant.FinalOutputCommitted);
     Assert.Null(assistant.Settlement);
-    Assert.Null(input.Settlement);
+    Assert.Null(submission.Settlement);
     Assert.True(snapshot.Messages.Sum(message => Encoding.UTF8.GetByteCount(message.Preview)) < 65536);
 
-    store.Output.CompleteRequest(session, run, 0, new(request.RequestId, ExecutionOutcome.Completed));
-    store.Runs.TrySettle(session, run, ExecutionOutcome.Completed);
+    store.LlmResponses.CompleteRequest(session, execution, 0, new(request.RequestId, ExecutionOutcome.Completed));
+    store.Executions.TrySettle(session, execution, ExecutionOutcome.Completed);
     StoredSessionSnapshot settled = store.Snapshots.Read(session);
-    Assert.Null(settled.UnsettledRunId);
-    Assert.Equal(new ExecutionResult(run, ExecutionOutcome.Completed), settled.LastSettlement);
+    Assert.Null(settled.UnsettledExecutionId);
+    Assert.Equal(new SessionExecutionResult(execution, ExecutionOutcome.Completed), settled.LastSettlement);
     Assert.All(settled.Messages, message => Assert.Equal(ExecutionOutcome.Completed, message.Settlement));
     Assert.Null(assistant.Settlement); // The earlier detached snapshot does not change.
   }
@@ -223,7 +223,7 @@ public sealed class SessionSnapshotStorageTests {
     Assert.Equal("input 2971", snapshot.Messages[0].Preview);
     Assert.Equal("output 3000", snapshot.Messages[^1].Preview);
     Assert.All(snapshot.Messages, message => Assert.Equal(1, message.Message.HistoryRevision));
-    Assert.Equal(snapshot.Messages[^1].Message.RunId, snapshot.LastSettlement!.RunId);
+    Assert.Equal(snapshot.Messages[^1].Message.ExecutionId, snapshot.LastSettlement!.ExecutionId);
 
     string[] windowPlan = Explain(database, SnapshotReader.SnapshotMessagesSql, session, 1);
     Assert.Contains(windowPlan, step => step.Contains("SEARCH execution_messages USING INDEX execution_messages_history_order", StringComparison.Ordinal));
@@ -241,42 +241,42 @@ public sealed class SessionSnapshotStorageTests {
   }
 
   [Fact]
-  public void VersionTwoMigrationPreservesReceiptsRunsRequestsAndOutput() {
+  public void VersionTwoMigrationPreservesReceiptsExecutionsRequestsAndOutput() {
     using var database = new TemporaryDatabase();
-    Guid session, run = Guid.NewGuid(), output = Guid.NewGuid(), refusedInputId = Guid.NewGuid();
-    Guid acceptedInputId = Guid.NewGuid();
-    Guid refusedProposedRunId = Guid.NewGuid(), request;
-    InputReceipt refusedReceipt;
+    Guid session, execution = Guid.NewGuid(), output = Guid.NewGuid(), refusedSubmissionId = Guid.NewGuid();
+    Guid acceptedSubmissionId = Guid.NewGuid();
+    Guid refusedProposedExecutionId = Guid.NewGuid(), request;
+    UserMessageReceipt refusedReceipt;
     using (SessionStore store = SessionStore.Open(database.Path)) {
       session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
-      refusedReceipt = store.Inputs.Admit(session, 0, new(refusedInputId, 0, "refused\0🙂"),
-          accepting: false, proposedRunId: refusedProposedRunId).Receipt;
-      store.Inputs.Admit(session, 0, new(acceptedInputId, 0, "accepted\0🙂"), true, run);
-      request = store.Runs.ClaimNextRequest(session, run, 0)!.RequestId;
-      store.Output.Append(session, run, 0, new(request, output, 0, "partial\0🙂", false));
-      store.Runs.RequestStop(session, run, ownsRun: true);
+      refusedReceipt = store.UserMessages.Admit(session, 0, new(refusedSubmissionId, 0, "refused\0🙂"),
+          accepting: false, proposedExecutionId: refusedProposedExecutionId).Receipt;
+      store.UserMessages.Admit(session, 0, new(acceptedSubmissionId, 0, "accepted\0🙂"), true, execution);
+      request = store.Executions.ClaimNextRequest(session, execution, 0)!.RequestId;
+      store.LlmResponses.Append(session, execution, 0, new(request, output, 0, "partial\0🙂", false));
+      store.Executions.RequestStop(session, execution, ownsExecution: true);
     }
 
     MakeVersionTwo(database);
     using SessionStore migrated = SessionStore.Open(database.Path);
     Assert.Equal(5L, database.Scalar("PRAGMA user_version;")); // raw-sql: the migrated schema version is the subject under test
-    InputReceipt migratedRefusal = migrated.Inputs.ReadReceipt(session, refusedInputId)!;
+    UserMessageReceipt migratedRefusal = migrated.UserMessages.ReadReceipt(session, refusedSubmissionId)!;
     Assert.Equal(refusedReceipt, migratedRefusal);
-    Assert.Equal(InputDecision.Refused, migratedRefusal.Decision);
-    Assert.Equal(InputRefusalReason.Stopping, migratedRefusal.RefusalReason);
-    Assert.Null(migratedRefusal.RunId);
-    Assert.DoesNotContain(StoredRuns.Read(database), stored => stored.RunId == refusedProposedRunId);
+    Assert.Equal(MessageAcceptance.Refused, migratedRefusal.Acceptance);
+    Assert.Equal(MessageRefusalReason.Stopping, migratedRefusal.RefusalReason);
+    Assert.Null(migratedRefusal.ExecutionId);
+    Assert.DoesNotContain(StoredExecutions.Read(database), stored => stored.ExecutionId == refusedProposedExecutionId);
     StoredSessionSnapshot snapshot = migrated.Snapshots.Read(session);
     Assert.Equal(new[] { "accepted\0🙂", "partial\0🙂" }, snapshot.Messages.Select(message => message.Preview));
-    Assert.Equal(run, snapshot.UnsettledRunId);
+    Assert.Equal(execution, snapshot.UnsettledExecutionId);
     Assert.True(snapshot.StopRequested);
     Assert.Null(snapshot.LastSettlement);
     Assert.False(snapshot.Messages[1].FinalOutputCommitted);
-    Assert.Equal(new(run, acceptedInputId, MessageRole.User, 0), snapshot.Messages[0].Message);
-    Assert.Equal(new(run, output, MessageRole.Assistant, 0), snapshot.Messages[1].Message);
+    Assert.Equal(new(execution, acceptedSubmissionId, MessageRole.User, 0), snapshot.Messages[0].Message);
+    Assert.Equal(new(execution, output, MessageRole.Assistant, 0), snapshot.Messages[1].Message);
     Assert.Equal("\0🙂", migrated.Content.Read(session,
         new(snapshot.Messages[1].Message, 0, Encoding.UTF8.GetByteCount("partial"))).Text);
-    Assert.Equal(request, Assert.Single(StoredRuns.ReadRequests(database)).RequestId);
+    Assert.Equal(request, Assert.Single(StoredExecutions.ReadRequests(database)).RequestId);
     Assert.Equal(2L, database.Scalar("SELECT COUNT(*) FROM sqlite_schema WHERE name IN ('execution_runs_history_order', 'execution_runs_terminal_order') AND type = 'index';")); // raw-sql: migrated indexes are schema structure under test
   }
 
@@ -295,9 +295,9 @@ public sealed class SessionSnapshotStorageTests {
     Assert.Equal(2L, database.Scalar("PRAGMA user_version;")); // raw-sql: rolled-back schema version is the subject under test
     Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM sqlite_schema WHERE name = 'execution_runs_history_order';")); // raw-sql: rolled-back index is schema structure under test
     Assert.Equal("retained", database.Scalar("SELECT value FROM execution_runs_terminal_order;")); // raw-sql: fixture witness table must survive the rollback
-    Assert.Equal(2, StoredRuns.Read(database).Count);
-    Assert.Equal(2, StoredRuns.ReadRequests(database).Count);
-    Assert.Equal(2, StoredOutput.Read(database).Count);
+    Assert.Equal(2, StoredExecutions.Read(database).Count);
+    Assert.Equal(2, StoredExecutions.ReadRequests(database).Count);
+    Assert.Equal(2, StoredLlmResponses.Read(database).Count);
     database.Execute("DROP TABLE execution_runs_terminal_order;");
     using SessionStore retried = SessionStore.Open(database.Path);
     Assert.Equal(4, retried.Snapshots.Read(session).Messages.Count);
@@ -350,18 +350,18 @@ public sealed class SessionSnapshotStorageTests {
   }
 
   // Bulk fixture writes avoid the execution context builder, which deliberately reads full history.
-  private static void SeedHistory(TemporaryDatabase database, Guid session, long revision, int runCount, bool includeOutputs) {
-    string inputIdPrefix = Guid.NewGuid().ToString("D")[..24], runIdPrefix = Guid.NewGuid().ToString("D")[..24];
+  private static void SeedHistory(TemporaryDatabase database, Guid session, long revision, int executionCount, bool includeOutputs) {
+    string submissionIdPrefix = Guid.NewGuid().ToString("D")[..24], executionIdPrefix = Guid.NewGuid().ToString("D")[..24];
     string requestIdPrefix = Guid.NewGuid().ToString("D")[..24], outputIdPrefix = Guid.NewGuid().ToString("D")[..24];
     database.Execute($"""
       BEGIN;
-      WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x + 1 FROM n WHERE x < {runCount})
+      WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x + 1 FROM n WHERE x < {executionCount})
       INSERT INTO input_decisions
-      SELECT '{session:D}', '{inputIdPrefix}' || printf('%012d', x), {revision}, CAST('input ' || x AS BLOB),
-          1, '{runIdPrefix}' || printf('%012d', x), NULL FROM n;
+      SELECT '{session:D}', '{submissionIdPrefix}' || printf('%012d', x), {revision}, CAST('input ' || x AS BLOB),
+          1, '{executionIdPrefix}' || printf('%012d', x), NULL FROM n;
       INSERT INTO execution_runs (session_id, run_id, history_revision, input_id, outcome)
       SELECT session_id, run_id, expected_history_revision, input_id, 0 FROM input_decisions
-      WHERE session_id = '{session:D}' AND input_id LIKE '{inputIdPrefix}%' ORDER BY input_id;
+      WHERE session_id = '{session:D}' AND input_id LIKE '{submissionIdPrefix}%' ORDER BY input_id;
       COMMIT;
       """);
     if (includeOutputs) {
@@ -369,7 +369,7 @@ public sealed class SessionSnapshotStorageTests {
         BEGIN;
         INSERT INTO execution_requests (request_id, run_id, output_id, next_batch_index, output_final, outcome)
         SELECT '{requestIdPrefix}' || substr(input_id, 25), run_id, '{outputIdPrefix}' || substr(input_id, 25), 1, 1, 0
-        FROM execution_runs WHERE session_id = '{session:D}' AND input_id LIKE '{inputIdPrefix}%';
+        FROM execution_runs WHERE session_id = '{session:D}' AND input_id LIKE '{submissionIdPrefix}%';
         INSERT INTO execution_output
         SELECT request_id, 0, CAST('output ' || CAST(substr(request_id, 25) AS INTEGER) AS BLOB), 1
         FROM execution_requests WHERE request_id LIKE '{requestIdPrefix}%';
@@ -382,16 +382,16 @@ public sealed class SessionSnapshotStorageTests {
       INSERT INTO execution_inputs (session_id, input_id, run_id, request_id, outcome)
       SELECT r.session_id, r.input_id, r.run_id, q.request_id, 0
       FROM execution_runs r LEFT JOIN execution_requests q ON q.run_id = r.run_id
-      WHERE r.session_id = '{session:D}' AND r.input_id LIKE '{inputIdPrefix}%' ORDER BY r.ordinal;
+      WHERE r.session_id = '{session:D}' AND r.input_id LIKE '{submissionIdPrefix}%' ORDER BY r.ordinal;
       INSERT INTO execution_messages (session_id, history_revision, run_id, role, message_id, input_id, request_id)
       SELECT session_id, history_revision, run_id, role, message_id, input_id, request_id FROM (
           SELECT ordinal AS run_ordinal, session_id, history_revision, run_id,
               0 AS role, input_id AS message_id, input_id, NULL AS request_id
-          FROM execution_runs WHERE session_id = '{session:D}' AND input_id LIKE '{inputIdPrefix}%'
+          FROM execution_runs WHERE session_id = '{session:D}' AND input_id LIKE '{submissionIdPrefix}%'
           UNION ALL
           SELECT r.ordinal, r.session_id, r.history_revision, r.run_id, 1, q.output_id, NULL, q.request_id
           FROM execution_runs r JOIN execution_requests q ON q.run_id = r.run_id
-          WHERE r.session_id = '{session:D}' AND r.input_id LIKE '{inputIdPrefix}%'
+          WHERE r.session_id = '{session:D}' AND r.input_id LIKE '{submissionIdPrefix}%'
       ) ORDER BY run_ordinal, role;
       COMMIT;
       """);

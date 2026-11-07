@@ -15,14 +15,14 @@ public sealed class LlmResponseWriterTests {
     string text = new string('a', 16 * 1024 - 1) + "😀" + new string('b', 40_000) + "\0終";
     var client = new ScriptedChatClient(token => TextResponse(text, token));
     await using var fixture = new ExecutionFixture(client);
-    Guid runId = await fixture.StartRunAsync("go");
+    Guid executionId = await fixture.StartExecutionAsync("go");
 
-    ExecutionResult settlement = await fixture.Session.WaitForSettlementAsync(runId).WaitAsync(TestTimeout);
+    SessionExecutionResult settlement = await fixture.Session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout);
     Assert.Equal(ExecutionOutcome.Completed, settlement.Outcome);
-    var output = StoredOutput.Read(fixture.Database);
+    var output = StoredLlmResponses.Read(fixture.Database);
     Assert.NotEmpty(output);
     Assert.All(output, row => Assert.InRange(row.Bytes.Length, 0, 16 * 1024));
-    Assert.Equal(text, StoredOutput.ReadText(fixture.Database));
+    Assert.Equal(text, StoredLlmResponses.ReadText(fixture.Database));
     Assert.Single(output, row => row.Final);
     Assert.True(output.Count < 100, "Tiny source updates must not each cause a durable append.");
     Assert.Equal(1, client.Calls);
@@ -46,14 +46,14 @@ public sealed class LlmResponseWriterTests {
         : [prefix + scalar + suffix];
     var client = new ScriptedChatClient(token => TextUpdates(updates, token));
     await using var fixture = new ExecutionFixture(client);
-    Guid runId = await fixture.StartRunAsync("go");
+    Guid executionId = await fixture.StartExecutionAsync("go");
 
     Assert.Equal(ExecutionOutcome.Completed,
-        (await fixture.Session.WaitForSettlementAsync(runId).WaitAsync(TestTimeout)).Outcome);
-    var output = StoredOutput.Read(fixture.Database);
+        (await fixture.Session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout)).Outcome);
+    var output = StoredLlmResponses.Read(fixture.Database);
     Assert.NotEmpty(output);
     Assert.All(output, row => Assert.InRange(row.Bytes.Length, 0, maxChunkBytes));
-    Assert.Equal(text, StoredOutput.ReadText(fixture.Database));
+    Assert.Equal(text, StoredLlmResponses.ReadText(fixture.Database));
     Assert.Single(output, row => row.Final);
     Assert.True(output[^1].Final);
   }
@@ -66,24 +66,24 @@ public sealed class LlmResponseWriterTests {
     var release = Signal();
     var client = new ScriptedChatClient(token => Paused(waiting, release, token));
     await using var fixture = new ExecutionFixture(client);
-    Guid runId = await fixture.StartRunAsync("go");
+    Guid executionId = await fixture.StartExecutionAsync("go");
     try {
       await waiting.Task.WaitAsync(TestTimeout);
-      await StoredOutput.WaitForAnyAsync(fixture.Database);
-      Assert.Equal("visible", StoredOutput.ReadText(fixture.Database));
-      Assert.All(StoredOutput.Read(fixture.Database), row => Assert.False(row.Final));
-      Assert.False(fixture.Session.WaitForSettlementAsync(runId).IsCompleted);
+      await StoredLlmResponses.WaitForAnyAsync(fixture.Database);
+      Assert.Equal("visible", StoredLlmResponses.ReadText(fixture.Database));
+      Assert.All(StoredLlmResponses.Read(fixture.Database), row => Assert.False(row.Final));
+      Assert.False(fixture.Session.WaitForSettlementAsync(executionId).IsCompleted);
       Assert.Equal(1, client.Calls);
       if (stopWhilePaused)
-        await fixture.Session.RequestStopAsync(runId).WaitAsync(TestTimeout);
+        await fixture.Session.RequestStopAsync(executionId).WaitAsync(TestTimeout);
     } finally {
       release.TrySetResult();
     }
 
-    ExecutionResult settlement = await fixture.Session.WaitForSettlementAsync(runId).WaitAsync(TestTimeout);
+    SessionExecutionResult settlement = await fixture.Session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout);
     Assert.Equal(stopWhilePaused ? ExecutionOutcome.Cancelled : ExecutionOutcome.Completed, settlement.Outcome);
-    Assert.Equal("visible", StoredOutput.ReadText(fixture.Database));
-    Assert.Equal(!stopWhilePaused, StoredOutput.Read(fixture.Database).Any(row => row.Final));
+    Assert.Equal("visible", StoredLlmResponses.ReadText(fixture.Database));
+    Assert.Equal(!stopWhilePaused, StoredLlmResponses.Read(fixture.Database).Any(row => row.Final));
   }
 
   [Theory]
@@ -99,11 +99,11 @@ public sealed class LlmResponseWriterTests {
         : [firstUpdate];
     var client = new ScriptedChatClient(token => TextUpdates(updates, token));
     await using var fixture = new ExecutionFixture(client);
-    Guid runId = await fixture.StartRunAsync("go");
+    Guid executionId = await fixture.StartExecutionAsync("go");
 
     Assert.Equal(ExecutionOutcome.Failed,
-        (await fixture.Session.WaitForSettlementAsync(runId).WaitAsync(TestTimeout)).Outcome);
-    Assert.DoesNotContain(StoredOutput.Read(fixture.Database), row => row.Final);
+        (await fixture.Session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout)).Outcome);
+    Assert.DoesNotContain(StoredLlmResponses.Read(fixture.Database), row => row.Final);
   }
 
   [Theory]
@@ -113,12 +113,12 @@ public sealed class LlmResponseWriterTests {
     string text = new string('x', textLength);
     var client = new ScriptedChatClient(token => ExactResponse(text, token));
     await using var fixture = new ExecutionFixture(client);
-    Guid runId = await fixture.StartRunAsync("go");
+    Guid executionId = await fixture.StartExecutionAsync("go");
 
     Assert.Equal(ExecutionOutcome.Completed,
-        (await fixture.Session.WaitForSettlementAsync(runId).WaitAsync(TestTimeout)).Outcome);
-    var output = StoredOutput.Read(fixture.Database);
-    Guid requestId = Assert.Single(StoredRuns.ReadRequests(fixture.Database)).RequestId;
+        (await fixture.Session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout)).Outcome);
+    var output = StoredLlmResponses.Read(fixture.Database);
+    Guid requestId = Assert.Single(StoredExecutions.ReadRequests(fixture.Database)).RequestId;
     Assert.NotEmpty(output);
     Guid responseId = output[0].ResponseId;
 
@@ -129,7 +129,7 @@ public sealed class LlmResponseWriterTests {
     });
     Assert.Equal(Enumerable.Range(0, output.Count).Select(index => (long)index),
         output.Select(row => row.ChunkIndex));
-    Assert.Equal(text, StoredOutput.ReadText(fixture.Database));
+    Assert.Equal(text, StoredLlmResponses.ReadText(fixture.Database));
     Assert.Single(output, row => row.Final);
     Assert.True(output[^1].Final);
 

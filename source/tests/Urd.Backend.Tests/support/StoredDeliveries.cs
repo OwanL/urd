@@ -5,7 +5,7 @@ using Urd.Core.Execution;
 
 namespace Urd.Backend.Tests.Support;
 
-// Reads durable input delivery, request order and message index evidence.
+// Reads durable submission delivery, request order and message index evidence.
 internal static class StoredDeliveries {
   internal static List<StoredDelivery> Read(TemporaryDatabase database) {
     using SqliteConnection connection = database.OpenReadOnlyConnection();
@@ -42,4 +42,4 @@ internal static class StoredDeliveries {
   }
 }
 
-internal sealed record StoredDelivery(Guid InputId, Guid RunId, Guid? RequestId, ExecutionOutcome? Outcome);
+internal sealed record StoredDelivery(Guid SubmissionId, Guid ExecutionId, Guid? RequestId, ExecutionOutcome? Outcome);

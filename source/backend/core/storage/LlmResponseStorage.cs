@@ -4,8 +4,8 @@ using Urd.Core.Execution;
 namespace Urd.Core.Storage;
 
 // Appends ordered output segments and records explicit request completion.
-internal sealed class OutputStorage(Database database) {
-  internal bool Append(Guid sessionId, Guid runId, long historyRevision, LlmResponseChunk chunk) {
+internal sealed class LlmResponseStorage(Database database) {
+  internal bool Append(Guid sessionId, Guid executionId, long historyRevision, LlmResponseChunk chunk) {
     ArgumentOutOfRangeException.ThrowIfNegative(chunk.ChunkIndex);
     if (chunk.RequestId == Guid.Empty || chunk.ResponseId == Guid.Empty
         || StorageText.StrictUtf8.GetByteCount(chunk.Text) > StorageText.MaximumBytes) {
@@ -24,7 +24,7 @@ internal sealed class OutputStorage(Database database) {
                     AND s.history_revision = $revision AND r.stopping = 0 AND r.outcome IS NULL);
         """,
           ("$session", sessionId),
-          ("$run", runId),
+          ("$run", executionId),
           ("$revision", historyRevision),
           ("$request", chunk.RequestId),
           ("$output", chunk.ResponseId),
@@ -48,7 +48,7 @@ internal sealed class OutputStorage(Database database) {
               (session_id, history_revision, run_id, role, message_id, request_id)
           VALUES ($session, $revision, $run, 1, $output, $request);
           """,
-            ("$session", sessionId), ("$revision", historyRevision), ("$run", runId),
+            ("$session", sessionId), ("$revision", historyRevision), ("$run", executionId),
             ("$output", chunk.ResponseId), ("$request", chunk.RequestId));
         index.ExecuteNonQuery();
       }
@@ -56,7 +56,7 @@ internal sealed class OutputStorage(Database database) {
     });
   }
 
-  internal bool CompleteRequest(Guid sessionId, Guid runId, long historyRevision, LlmRequestOutcome completion) {
+  internal bool CompleteRequest(Guid sessionId, Guid executionId, long historyRevision, LlmRequestResult completion) {
     if (!Enum.IsDefined(completion.Outcome))
       throw new ArgumentOutOfRangeException(nameof(completion));
 
@@ -70,11 +70,11 @@ internal sealed class OutputStorage(Database database) {
         || (calls.Length != 0 && completion.Outcome != ExecutionOutcome.Completed))
       throw new ArgumentException("Only a completed response may authorize up to 16 distinct, named tool calls.", nameof(completion));
 
-    return database.Write(transaction => CompleteRequest(transaction, sessionId, runId, historyRevision, completion, calls));
+    return database.Write(transaction => CompleteRequest(transaction, sessionId, executionId, historyRevision, completion, calls));
   }
 
-  private bool CompleteRequest(SqliteTransaction transaction, Guid sessionId, Guid runId,
-      long historyRevision, LlmRequestOutcome completion, (string CallId, string Name, string Arguments)[] calls) {
+  private bool CompleteRequest(SqliteTransaction transaction, Guid sessionId, Guid executionId,
+      long historyRevision, LlmRequestResult completion, (string CallId, string Name, string Arguments)[] calls) {
     bool alreadyCompleted;
     using (SqliteCommand read = database.Command(transaction, """
       SELECT q.outcome, q.error, q.output_final, r.stopping, r.outcome,
@@ -86,7 +86,7 @@ internal sealed class OutputStorage(Database database) {
           AND r.history_revision = $revision AND s.history_revision = $revision;
       """,
         ("$session", sessionId),
-        ("$run", runId),
+        ("$run", executionId),
         ("$revision", historyRevision),
         ("$request", completion.RequestId)))
     using (SqliteDataReader reader = read.ExecuteReader()) {
@@ -98,7 +98,7 @@ internal sealed class OutputStorage(Database database) {
       string? savedError = reader.IsDBNull(1) ? null : reader.GetString(1);
       bool hasFinalOutput = reader.GetInt32(2) != 0;
       bool stopRequested = reader.GetInt32(3) != 0;
-      bool runSettled = !reader.IsDBNull(4);
+      bool executionSettled = !reader.IsDBNull(4);
 
       // An exact retry succeeds without rewriting the original evidence, even after settlement.
       alreadyCompleted = savedOutcome is not null;
@@ -106,7 +106,7 @@ internal sealed class OutputStorage(Database database) {
         if (savedOutcome != completion.Outcome || savedError != completion.Error)
           return false;
       } else {
-        if (runSettled || reader.GetInt32(5) != 0)
+        if (executionSettled || reader.GetInt32(5) != 0)
           return false;
         if (completion.Outcome == ExecutionOutcome.Completed && (stopRequested || !hasFinalOutput))
           return false;
@@ -116,11 +116,11 @@ internal sealed class OutputStorage(Database database) {
     if (alreadyCompleted)
       return MatchesCalls(transaction, completion.RequestId, calls);
 
-    // A call identity cannot be reused by a later response in the same run.
+    // A call identity cannot be reused by a later response in the same execution.
     foreach (var call in calls) {
       using SqliteCommand exists = database.Command(transaction,
           "SELECT EXISTS(SELECT 1 FROM execution_tools WHERE run_id = $run AND call_id = $call);",
-          ("$run", runId), ("$call", call.CallId));
+          ("$run", executionId), ("$call", call.CallId));
       if ((long)exists.ExecuteScalar()! != 0)
         return false;
     }
@@ -141,7 +141,7 @@ internal sealed class OutputStorage(Database database) {
         INSERT INTO execution_tools (run_id, request_id, call_index, call_id, name, arguments_json)
         VALUES ($run, $request, $index, $call, $name, $arguments);
         """,
-          ("$run", runId), ("$request", completion.RequestId), ("$index", index),
+          ("$run", executionId), ("$request", completion.RequestId), ("$index", index),
           ("$call", call.CallId), ("$name", call.Name), ("$arguments", call.Arguments));
       authorize.ExecuteNonQuery();
     }

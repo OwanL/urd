@@ -23,5 +23,5 @@ internal static class StoredTools {
   }
 }
 
-internal sealed record StoredTool(Guid RunId, Guid RequestId, long Index, string CallId, string Name,
+internal sealed record StoredTool(Guid ExecutionId, Guid RequestId, long Index, string CallId, string Name,
     string ArgumentsJson, bool Started, ExecutionOutcome? Outcome, string? ResultJson, string? Error);

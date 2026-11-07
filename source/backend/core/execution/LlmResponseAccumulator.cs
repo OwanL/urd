@@ -3,7 +3,7 @@ using Microsoft.Extensions.AI;
 
 namespace Urd.Core.Execution;
 
-// Accepts complete fake-model content only; provider-native deltas are not supported.
+// Accepts complete fake-LLM content only; provider-native deltas are not supported.
 internal sealed class LlmResponseAccumulator(LlmResponseWriter writer) {
   private const int ToolCallLimit = 16;
   private const int JsonByteLimit = 16 * 1024;

@@ -79,10 +79,10 @@ public sealed class ServerLifecycleTests {
     try {
       await SeedHistoryAsync(database);
       List<StoredSessionRow> sessions = StoredSessions.Read(database);
-      List<StoredDecision> decisions = StoredInputs.Read(database);
-      List<StoredRun> runs = StoredRuns.Read(database);
-      List<StoredRequest> requests = StoredRuns.ReadRequests(database);
-      string output = StoredOutput.ReadText(database);
+      List<StoredSubmission> decisions = StoredSubmissions.Read(database);
+      List<StoredExecution> executions = StoredExecutions.Read(database);
+      List<StoredRequest> requests = StoredExecutions.ReadRequests(database);
+      string output = StoredLlmResponses.ReadText(database);
       Assert.Equal("done", output);
 
       first = new RunningServer(Options(database));
@@ -93,7 +93,7 @@ public sealed class ServerLifecycleTests {
       await AssertListenerClosedAsync(firstOrigin);
       AssertLeaseFree(database);
       Assert.Equal(sessions, StoredSessions.Read(database));
-      Assert.Equal(decisions, StoredInputs.Read(database));
+      Assert.Equal(decisions, StoredSubmissions.Read(database));
 
       restarted = new RunningServer(Options(database));
       Uri restartedOrigin = await restarted.WaitForReadyAsync();
@@ -103,10 +103,10 @@ public sealed class ServerLifecycleTests {
       await AssertListenerClosedAsync(restartedOrigin);
       AssertLeaseFree(database);
       Assert.Equal(sessions, StoredSessions.Read(database));
-      Assert.Equal(decisions, StoredInputs.Read(database));
-      Assert.Equal(runs, StoredRuns.Read(database));
-      Assert.Equal(requests, StoredRuns.ReadRequests(database));
-      Assert.Equal(output, StoredOutput.ReadText(database));
+      Assert.Equal(decisions, StoredSubmissions.Read(database));
+      Assert.Equal(executions, StoredExecutions.Read(database));
+      Assert.Equal(requests, StoredExecutions.ReadRequests(database));
+      Assert.Equal(output, StoredLlmResponses.ReadText(database));
 
     } finally {
       await Task.WhenAll(first?.DisposeAsync().AsTask() ?? Task.CompletedTask,
@@ -196,12 +196,12 @@ public sealed class ServerLifecycleTests {
     var manager = new SessionManager(store, client);
     try {
       PrimarySession session = await manager.CreatePrimaryAsync().WaitAsync(TestTimeout);
-      InputReceipt receipt = await session.SubmitUserInputAsync(
-          new InputCommand(Guid.NewGuid(), 0, "retained input")).WaitAsync(TestTimeout);
-      Assert.Equal(InputDecision.Accepted, receipt.Decision);
-      Guid runId = Assert.IsType<Guid>(receipt.RunId);
+      UserMessageReceipt receipt = await session.SubmitUserMessageAsync(
+          new UserMessageSubmission(Guid.NewGuid(), 0, "retained input")).WaitAsync(TestTimeout);
+      Assert.Equal(MessageAcceptance.Accepted, receipt.Acceptance);
+      Guid executionId = Assert.IsType<Guid>(receipt.ExecutionId);
       Assert.Equal(ExecutionOutcome.Completed,
-          (await session.WaitForSettlementAsync(runId).WaitAsync(TestTimeout)).Outcome);
+          (await session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout)).Outcome);
       Assert.Equal(1, client.Calls);
     } finally {
       await manager.ShutdownSessionsAsync().WaitAsync(TestTimeout);

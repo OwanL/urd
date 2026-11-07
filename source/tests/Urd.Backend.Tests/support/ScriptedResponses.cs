@@ -3,7 +3,7 @@ using Microsoft.Extensions.AI;
 
 namespace Urd.Backend.Tests.Support;
 
-// Reusable scripted model responses for ScriptedChatClient.
+// Reusable scripted LLM responses for ScriptedChatClient.
 internal static class ScriptedResponses {
   internal static ChatResponseUpdate Text(string text) => new() {
     Role = ChatRole.Assistant,

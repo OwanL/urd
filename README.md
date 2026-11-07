@@ -9,15 +9,18 @@ excluding general-purpose agent work.
 
 ## Status and authority
 
-The ASP.NET-free Core implements session identity, durable user-input decisions,
-fake-text/tool execution with default durable safe-boundary steering in the owned run,
+The ASP.NET-free Core implements session identity, durable user-message submission decisions,
+fake-text/tool execution with default durable safe-boundary steering in the owned execution,
 bounded session snapshots plus paged message-content reads through SQLite, and graceful
 shutdown of the manager's live sessions.
 See [backend build/test instructions](docs/backend-development.md).
-The [local HTTP Server](docs/server-development.md) now exposes chat creation, Send,
-receipt lookup and bounded snapshot/content reads, with exclusive data ownership and graceful
-shutdown. Busy Sends use Core's bounded steering admission without new HTTP routes.
-Real tools/providers, UI, tool-inspection APIs and an explicit after-run queue are not
+The [local HTTP Server](docs/server-development.md) exposes seven operations: chat creation,
+saved-primary-ID listing, Send, receipt lookup, snapshot, content and addressed Stop,
+with exclusive data ownership and graceful shutdown. Busy Sends use Core's bounded steering
+admission. The phase-1 breaking API vocabulary uses message submissions and executions,
+with no legacy aliases; saved IDs/schema 5, decisions and exact retries are unchanged.
+The naming pass passed 296/296 Release tests and independent review; see the development guides.
+Real tools/providers, UI, tool-inspection APIs and an explicit after-execution queue are not
 implemented; reopening does not recover or replay work. Wider designs remain subject to
 bite-sized owner review; the
 [Core](docs/scratch/initial-core-design.md) and [hosting](docs/scratch/initial-ui-hosting-design.md)
@@ -66,7 +69,7 @@ Current Pie responsibilities include:
 - Delegation, agent/session coordination and deferred work.
 - Agent guidance, named agents, skills, tools, discovery and external tool
   integration such as MCP.
-- Provider/model management and tool, skill and context selection/pruning.
+- Provider/LLM management and tool, skill and context selection/pruning.
 - The shared application backend and session-oriented user interfaces.
 - Local usage/accounting analytics and user configuration.
 
@@ -108,7 +111,7 @@ scenarios and performance investigations belong in [ARCHITECTURE.md](docs/ARCHIT
 
 ### Keep the harness's own resource overhead low
 
-The backend, agent runtime and model/tool loop should use as little CPU and
+The backend, agent runtime and LLM/tool loop should use as little CPU and
 memory as is reasonable: agents' routine work already competes for the user's
 machine resources. Balance this with ease of installation, library availability
 and long-term maintenance. Low first-party LOC is not proof of low total resource
@@ -134,7 +137,7 @@ Ideas and useful logic may be borrowed from other harnesses. **Selected snippets
 of Pi logic may be considered case by case; this is not approval to adopt a Pi
 package.** First-party ownership does not require inventing every algorithm or
 rejecting focused libraries. It means Urd owns its architecture and behaviour.
-A narrow Urd-owned model/tool cycle is now the provisional direction after
+A narrow Urd-owned LLM/tool cycle is now the provisional direction after
 [focused comparison and owner alignment](docs/EXECUTION-DESIGN.md); "first-party"
 alone was not a requirement to write one. Revisit the choice if real integration
 changes the code/dependency trade-off.
@@ -171,7 +174,7 @@ is cumbersome or a poor fit, consider an alternative rather than forcing Urd aro
 it. The [MCP decision and selection policy](docs/ARCHITECTURE.md#mcp-client-library-and-revisiting-library-choices)
 record this direction.
 
-The shared model interface (`IChatClient`), shared SQLite storage and
+The shared LLM interface (`IChatClient`), shared SQLite storage and
 TypeScript/Preact frontend are selected; see [ARCHITECTURE.md](docs/ARCHITECTURE.md).
 Exact SDK/Node versions, endpoint style, provider-specific adapters and desktop
 host remain open; the provisional loop direction still needs production qualification.
@@ -249,7 +252,7 @@ these delivery sequences are distinct from the technology selections.
 
 **Browser access delivery order: same-machine first, then LAN, then Tailscale.**
 The owner selected this sequence for normal use; it is separate from the smaller
-fake-model technical slice. Remote access trust, startup/discovery, provider
+fake-LLM technical slice. Remote access trust, startup/discovery, provider
 onboarding and transport remain unselected.
 
 **Local browser access should be open-and-use, as in Pie.** Trust programs already
@@ -302,7 +305,7 @@ Native desktop and VS Code clients should connect to an existing backend or
 start it when absent. Closing a UI leaves the backend running; stopping the
 backend is an explicit user action, not a consequence of a client disconnecting.
 Already-authorised agent work and scheduled follow-ups continue even when no UI
-is visible; this can consume model usage and change files. Closing a session is
+is visible; this can consume LLM usage and change files. Closing a session is
 a separate, final action, not the same as closing a client.
 This permits switching interfaces without tying ongoing work to whichever UI
 happened to start it.
@@ -433,7 +436,8 @@ reference evidence, not Urd architectural contracts.
 The [complete class atlas](docs/class-map.html) maps every production class, record, enum and struct,
 with grouped diagrams and an [editable source index](docs/class-map.md). The separate
 [architecture overview](docs/architecture-map.html) explains system boundaries, execution flow and storage
-relationships ([Mermaid source](docs/architecture-map.md)). These are dated source snapshots, not new design approvals.
+relationships ([Mermaid source](docs/architecture-map.md)). These are historical source snapshots,
+superseded for current API naming; their labels/counts are retained, not new design approvals.
 
 [ARCHITECTURE.md](docs/ARCHITECTURE.md) records the continuing feature review,
 architectural decisions and unresolved design questions. This README owns the

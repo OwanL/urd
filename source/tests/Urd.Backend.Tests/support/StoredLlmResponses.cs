@@ -6,7 +6,7 @@ using static Urd.Backend.Tests.Support.TestAsync;
 namespace Urd.Backend.Tests.Support;
 
 // Reads persisted response chunks directly from a test database.
-internal static class StoredOutput {
+internal static class StoredLlmResponses {
   private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 
   // Decodes strictly, so a chunk that split a UTF-8 scalar fails the test.

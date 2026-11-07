@@ -65,8 +65,8 @@ public sealed class SessionListingStorageTests {
     Assert.Equal(created.Reverse(), listed);
     Assert.Equal(125, listed.Distinct().Count());
     Assert.Equal(inserted, reopened.Sessions.ListPrimaryIds(null).SessionIds[0]);
-    Assert.Empty(StoredRuns.Read(database));
-    Assert.Empty(StoredOutput.Read(database));
+    Assert.Empty(StoredExecutions.Read(database));
+    Assert.Empty(StoredLlmResponses.Read(database));
   }
 
   [Fact]
@@ -149,8 +149,8 @@ public sealed class SessionListingStorageTests {
     using (SessionStore store = SessionStore.Open(database.Path)) {
       Assert.Equal(new[] { Id(3), Id(2), Id(1) }, store.Sessions.ListPrimaryIds(null).SessionIds);
       Assert.Equal(new long[] { 1, 2, 3 }, StoredSessions.ReadCreation(database).Select(row => row.Ordinal));
-      Assert.Equal(new InputCommand(Id(11), 7, Original), store.Inputs.ReadReceipt(Id(1), Id(11))!.Command);
-      Assert.Equal(ExecutionOutcome.Failed, store.Runs.ReadSettlement(Id(1), Id(12))!.Outcome);
+      Assert.Equal(new UserMessageSubmission(Id(11), 7, Original), store.UserMessages.ReadReceipt(Id(1), Id(11))!.Submission);
+      Assert.Equal(ExecutionOutcome.Failed, store.Executions.ReadSettlement(Id(1), Id(12))!.Outcome);
       AssertLegacyEvidence(database);
       store.Sessions.CreatePrimary(Id(4));
       Assert.Equal(new[] { Id(4), Id(3), Id(2), Id(1) }, store.Sessions.ListPrimaryIds(null).SessionIds);
@@ -178,13 +178,13 @@ public sealed class SessionListingStorageTests {
   private static void AssertLegacyEvidence(TemporaryDatabase database, bool hasNewSession = false) {
     Assert.Equal(hasNewSession ? 4 : 3, StoredSessions.Read(database).Count);
     Assert.Equal(new StoredSessionRow(Id(1), 7), StoredSessions.Read(database)[0]);
-    Assert.Equal(new StoredDecision(Id(11), Id(12)), Assert.Single(StoredInputs.Read(database)));
-    Assert.Equal(new StoredRun(Id(1), Id(12), Id(11), true, ExecutionOutcome.Failed), Assert.Single(StoredRuns.Read(database)));
-    Assert.Equal(new StoredRequest(Id(13), Id(12), ExecutionOutcome.Failed, "old error"), Assert.Single(StoredRuns.ReadRequests(database)));
+    Assert.Equal(new StoredSubmission(Id(11), Id(12)), Assert.Single(StoredSubmissions.Read(database)));
+    Assert.Equal(new StoredExecution(Id(1), Id(12), Id(11), true, ExecutionOutcome.Failed), Assert.Single(StoredExecutions.Read(database)));
+    Assert.Equal(new StoredRequest(Id(13), Id(12), ExecutionOutcome.Failed, "old error"), Assert.Single(StoredExecutions.ReadRequests(database)));
     Assert.Equal((Id(13), 0L), Assert.Single(StoredDeliveries.ReadRequestOrder(database)));
     Assert.Equal(new StoredDelivery(Id(11), Id(12), Id(13), ExecutionOutcome.Failed), Assert.Single(StoredDeliveries.Read(database)));
     Assert.Equal(new[] { (ChatRole.User, Id(11)), (ChatRole.Assistant, Id(14)) }, StoredDeliveries.ReadMessages(database));
-    var output = Assert.Single(StoredOutput.Read(database));
+    var output = Assert.Single(StoredLlmResponses.Read(database));
     Assert.Equal(Id(13), output.RequestId);
     Assert.Equal(Id(14), output.ResponseId);
     Assert.Equal(0L, output.ChunkIndex);

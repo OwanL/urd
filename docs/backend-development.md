@@ -8,34 +8,53 @@ saved-primary-ID discovery. The current listing increment passed locked restore 
 Core remains an ASP.NET-free .NET library. The [local Server](server-development.md)
 now exposes seven chat HTTP operations over it; UI is not implemented yet.
 
+## Breaking API vocabulary — phase 1
+
+Core and HTTP now use **user message submission / acceptance / session execution**:
+`UserMessageSubmission(SubmissionId, ExpectedHistoryRevision, Text)` and
+`UserMessageReceipt(SessionId, Submission, Acceptance, RefusalReason, ExecutionId)`;
+`MessageAcceptance` and `MessageRefusalReason` retain the existing enum values/meanings.
+`GetUserMessageReceiptAsync(submissionId)` reads the retained receipt or null.
+Execution identities are `ExecutionId`, including `StopReceipt`, `SessionExecutionResult`
+and `MessageRef`; snapshots use `UnsettledExecutionId`.
+This is a breaking vocabulary change, with **no legacy aliases**. Saved IDs, revisions,
+SQL identifiers/schema 5, decisions and exact-retry semantics are unchanged.
+[Server](server-development.md#session-http-contract) records the renamed wire contract.
+This naming pass passed locked restore and **296/296 Release tests** without warnings;
+independent acceptance review found no blockers. Raw HTTP assertions verify the renamed
+JSON members and reject legacy routes/required field names, alongside existing retry,
+reopen, migration, Stop and bounded-read checks. Counts below describe earlier checkpoints.
+Phase-2 structural cleanup is not included here: `StoredSessionSnapshot`, the private
+settlement record and the existing JSON helper remain.
+
 ## Checkpoint scope
 
 - `SessionManager(store, client, IReadOnlyList<AIFunction>? tools = null)` passes borrowed
   dependencies to canonical session handles. It snapshots the optional tool list, not the
   functions themselves; the caller owns store, client and functions. Constructors start no work.
-- `PrimarySession.SubmitUserInputAsync(input)` returns a durable acceptance/refusal receipt,
-  not an LLM answer. Acceptance and run identity commit together. Exact retries return
+- `PrimarySession.SubmitUserMessageAsync(submission)` returns a durable acceptance/refusal receipt,
+  not an LLM answer. Acceptance and execution identity commit together. Exact retries return
   the original decision; neither lookup nor retained acceptance starts work. Refusal fences delayed originals.
-  Changed-command reuse throws `InputConflictException` with its input ID, so HTTP can distinguish
+  Changed-submission reuse throws `UserMessageConflictException` with its `SubmissionId`, so HTTP can distinguish
   conflicts from shutdown or uncertain failure without parsing exception messages.
 - `SessionBase` owns admission, database writes and lifecycle coordination under its existing guard.
-  Each run has one `SessionExecution` and one driver, with sequential request phases outside the guard.
-  Execution owns model streams, tool invocation and the run's Stop source; a request-local
+  Each execution has one `SessionExecution` and one driver, with sequential request phases outside the guard.
+  Execution owns LLM streams, tool invocation and the execution's Stop source; a request-local
   `LlmResponseWriter` owns bounded UTF-8 batches and their flush deadline.
-- Public `SessionBase.RequestStopAsync(Guid runId)` returns `StopReceipt(RunId, Status, Outcome)`:
+- Public `SessionBase.RequestStopAsync(Guid executionId)` returns `StopReceipt(ExecutionId, Status, Outcome)`:
   `Requested` acknowledges committed Stop intent/steering retirement, not completed cancellation;
   `Settled` carries the saved outcome; `NotFound` includes wrong-session IDs; `Unavailable` means
-  an unresolved saved run is not locally owned. Empty IDs are invalid. Retries report current status,
+  an unresolved saved execution is not locally owned. Empty IDs are invalid. Retries report current status,
   so Requested can advance to Settled; stale Stop cannot affect a replacement.
 - Stop initiates cached asynchronous cancellation under the guard even if its save fails.
   The driver, not the public/HTTP caller, joins callbacks outside it before settlement.
-  Replacement requires model/tool cleanup, successful callbacks and saved settlement.
-  Callback failures or an unexpected missing claim/settlement fence the run; they do not retry it.
+  Replacement requires LLM/tool cleanup, successful callbacks and saved settlement.
+  Callback failures or an unexpected missing claim/settlement fence the execution; they do not retry it.
   Failed Stop persistence fences admission and fails the request without a false durable acknowledgement.
   Local `IsStopping` also blocks output, successful request completion, claims and tool starts;
   actual tool results may still be saved. Snapshots merge local Stop intent for owned unsettled work
   with stored Stop state; this observation is not a durable acknowledgement.
-- A distinct busy Send defaults to durable steering in the live owned run, within a limit of
+- A distinct busy Send defaults to durable steering in the live owned execution, within a limit of
   eight nonterminal input deliveries. Pending inputs join the next request as separate user
   messages in admission order, after any tool results. A claimed request is never mutated.
   Pending steering also continues after a successful no-tool response at the safe boundary.
@@ -43,24 +62,24 @@ now exposes seven chat HTTP operations over it; UI is not implemented yet.
   strand accepted input. Capacity, revision and Stopping refusals remain durable decisions.
 - Fake-tool batches are authorized only after successful response completion and provider cleanup;
   calls execute sequentially, at most 16 per response, with 16 KiB JSON arguments/results per call.
-  Ordinary tool errors become feedback and remaining calls/model continuation proceed, including
+  Ordinary tool errors become feedback and remaining calls/LLM continuation proceed, including
   failures inside an opaque `AIFunction`'s binding/marshalling. Such errors do not guarantee no effects.
   Core-owned result encoding, persistence or cleanup faults fence uncertain work instead of
   being converted into ordinary tool errors.
 - Stop retires pending deliveries without rewriting Accepted receipts or automatically carrying
-  them into another run. No explicit after-run queue is implemented.
+  them into another execution. No explicit after-execution queue is implemented.
 - Public snapshot/content reads expose committed state without starting work; cancelled reads
-  do not cancel execution. Reopened orphan runs and live persistence faults are reported as fenced.
+  do not cancel execution. Reopened orphan executions and live persistence faults are reported as fenced.
 - `SessionManager.ShutdownSessionsAsync(waitCancellation)` fences creation/lookup/listing and input on every
-  held handle, then stops and drains owned runs through cleanup and saved settlement. Concurrent/repeated
+  held handle, then stops and drains owned executions through cleanup and saved settlement. Concurrent/repeated
   calls join one retained outcome; cancellation abandons only the caller's wait, not shutdown. A failed
   Stop write still triggers local cancellation and draining, and the shutdown failure remains visible.
 - The caller gates/drains external operations before disposing the borrowed store/client. Handle reads
   and retained receipts remain available during shutdown; new inputs receive durable Stopping refusals.
-  Shutdown does not close saved conversations, recover orphan runs or shut down the host itself.
+  Shutdown does not close saved conversations, recover orphan executions or shut down the host itself.
   Cancellation callbacks may reenter reads/admission, but must not await shutdown or their own settlement.
 - Settlement waiting remains internal; public snapshots observe stopping and saved settlement.
-  Unowned orphan Stop does not mutate/recover/replay the run or fabricate settlement.
+  Unowned orphan Stop does not mutate/recover/replay the execution or fabricate settlement.
   Public reads expose user/assistant text only; tool-inspection UI/API, push subscriptions,
   real tools/providers and provider-native
   context fidelity remain deferred. An admission receipt is not completion.
@@ -187,8 +206,9 @@ These qualify ID discovery, not UI, activity tracking or a complete summary API.
 
 1. [SessionSnapshot.cs](../source/backend/core/sessions/SessionSnapshot.cs) and
    [Messages.cs](../source/backend/core/sessions/Messages.cs) — detached records; shared
-   `ExecutionResult`/`ExecutionOutcome` in [ExecutionResult.cs](../source/backend/core/execution/ExecutionResult.cs)
-   are public, not duplicated.
+   `SessionExecutionResult`/`ExecutionOutcome` in [SessionExecutionResult.cs](../source/backend/core/execution/SessionExecutionResult.cs)
+   are public, not duplicated. `ExecutionOutcome` describes an LLM request attempt, a tool invocation
+   or a whole session execution; a successful request/tool does not imply settled execution.
 2. [SessionBase.cs](../source/backend/core/sessions/SessionBase.cs) — the two public read methods
    take the existing guard; snapshots merge live admission fencing/local Stop intent with one committed view.
 3. [SnapshotReader.cs](../source/backend/core/storage/SnapshotReader.cs), then
@@ -202,10 +222,10 @@ These qualify ID discovery, not UI, activity tracking or a complete summary API.
    [SessionSnapshotStorageTests.cs](../source/tests/Urd.Backend.Tests/storage/SessionSnapshotStorageTests.cs).
 
 Snapshots select at most 60 recent current-revision user/assistant text messages through the
-message-order index, not an unbounded expansion of recent runs. Each preview is at most 256 UTF-16
+message-order index, not an unbounded expansion of recent executions. Each preview is at most 256 UTF-16
 units without splitting a scalar (under 64 KiB aggregate preview UTF-8). `HasOlderMessages`
 labels omission; older-history navigation is not implemented. Latest settlement and unsettled
-run/Stop facts are queried independently of the recent window.
+execution/Stop facts are queried independently of the recent window.
 
 Call `ReadMessageContentAsync` with `new MessageContentCursor(messageRef, 0, 0)`.
 Each page returns at most 16 KiB of original UTF-8 and examines at most 16 immutable segments. Follow `Next` while
@@ -214,7 +234,7 @@ Poll snapshots and resume from that tail only when availability changes. Segment
 offsets preserve Unicode and embedded NUL; stale revisions throw `HistoryRevisionConflictException`.
 `Truncated` means the preview did not reach the committed segment endpoint within its budget.
 `IsClosed` concerns further bytes; `FinalOutputCommitted` is a saved final marker. Neither
-means successful run settlement or finished cleanup. Continue status reads until settlement
+means successful execution settlement or finished cleanup. Continue status reads until settlement
 or a diagnosed fence. HTTP read cancellation is wired; browser poll scheduling, client-side
 cancellation and rendering are not built yet.
 
@@ -229,7 +249,7 @@ share a file per concept. Read them alongside their owners.
    is the detached discovery page.
 2. [SessionBase.cs](../source/backend/core/sessions/SessionBase.cs) and
    [PrimarySession.cs](../source/backend/core/sessions/PrimarySession.cs) — admission/driver ownership;
-   [Input.cs](../source/backend/core/sessions/Input.cs) holds the input command, receipt and enums;
+   [UserMessageSubmission.cs](../source/backend/core/sessions/UserMessageSubmission.cs) holds the submission, receipt and enums;
    [Stop.cs](../source/backend/core/sessions/Stop.cs) holds the public Stop receipt/status;
    [AsyncLock.cs](../source/backend/core/sessions/AsyncLock.cs) is the shared async lock.
 3. [SessionExecution.cs](../source/backend/core/execution/SessionExecution.cs) — sequential request/tool
@@ -239,18 +259,19 @@ share a file per concept. Read them alongside their owners.
    [LlmTools.cs](../source/backend/core/execution/LlmTools.cs) — call/result records; then
    [LlmResponseWriter.cs](../source/backend/core/execution/LlmResponseWriter.cs) — request-local
    Unicode-safe chunking and flush timing. [LlmRequest.cs](../source/backend/core/execution/LlmRequest.cs) holds
-   `LlmRequest`, `LlmResponseChunk` and `LlmRequestOutcome`; [ExecutionResult.cs](../source/backend/core/execution/ExecutionResult.cs)
-   holds the saved whole-run `ExecutionResult` and `ExecutionOutcome`. Their comments identify
+   `LlmRequest`, `LlmResponseChunk` and `LlmRequestResult`; [SessionExecutionResult.cs](../source/backend/core/execution/SessionExecutionResult.cs)
+   holds the saved whole-execution `SessionExecutionResult` and `ExecutionOutcome`. Their comments identify
    producer/consumer roles and lifecycle guarantees.
 4. [SessionStore.cs](../source/backend/core/storage/SessionStore.cs) — opens the database and exposes
    focused parts: [Database.cs](../source/backend/core/storage/Database.cs) (connection, lock,
    transactions), [DatabaseSchema.cs](../source/backend/core/storage/DatabaseSchema.cs) (migrations),
    [SessionStorage.cs](../source/backend/core/storage/SessionStorage.cs),
-   [InputStorage.cs](../source/backend/core/storage/InputStorage.cs) (receipts),
-   [RunStorage.cs](../source/backend/core/storage/RunStorage.cs) and
-   [OutputStorage.cs](../source/backend/core/storage/OutputStorage.cs) — atomic run/request/output and delivery facts;
+   [UserMessageStorage.cs](../source/backend/core/storage/UserMessageStorage.cs) (receipts),
+   [SessionExecutionStorage.cs](../source/backend/core/storage/SessionExecutionStorage.cs) and
+   [LlmResponseStorage.cs](../source/backend/core/storage/LlmResponseStorage.cs) — atomic execution/request/response and delivery facts;
+   these are exposed internally as `UserMessages`, `Executions` and `LlmResponses`.
    [ToolStorage.cs](../source/backend/core/storage/ToolStorage.cs) — dispatch claims and retained results;
-   [RequestContextReader.cs](../source/backend/core/storage/RequestContextReader.cs) — claimed input and
+   [LlmContextReader.cs](../source/backend/core/storage/LlmContextReader.cs) — claimed submissions and
    ordered assistant/tool context, distinct from the public text-only read projection.
 5. [SessionManagerFlowTests.cs](../source/tests/Urd.Backend.Tests/sessions/SessionManagerFlowTests.cs),
    [SessionConcurrencyTests.cs](../source/tests/Urd.Backend.Tests/sessions/SessionConcurrencyTests.cs),
@@ -258,11 +279,11 @@ share a file per concept. Read them alongside their owners.
    [LlmResponseWriterTests.cs](../source/tests/Urd.Backend.Tests/execution/LlmResponseWriterTests.cs) and
    [SessionExecutionTests.cs](../source/tests/Urd.Backend.Tests/execution/SessionExecutionTests.cs) — whole Core flow,
    concurrent retries, cancelled waiters and lifecycle failures.
-6. [InputReceiptTests.cs](../source/tests/Urd.Backend.Tests/storage/InputReceiptTests.cs),
+6. [UserMessageReceiptTests.cs](../source/tests/Urd.Backend.Tests/storage/UserMessageReceiptTests.cs),
    [ExecutionStorageTests.cs](../source/tests/Urd.Backend.Tests/storage/ExecutionStorageTests.cs) and
    [SessionIdentityTests.cs](../source/tests/Urd.Backend.Tests/sessions/SessionIdentityTests.cs) — storage/registry invariants;
    [TemporaryDatabase.cs](../source/tests/Urd.Backend.Tests/support/TemporaryDatabase.cs) supplies isolated test data.
-   `support/` also holds the scripted model client, response scripts and execution fixture;
+   `support/` also holds the scripted LLM client, response scripts and execution fixture;
    test folders mirror the source folders.
 7. [SteeringFlowTests.cs](../source/tests/Urd.Backend.Tests/sessions/SteeringFlowTests.cs) — ordered steering,
    no-tool continuation, boundary races and shutdown without carryover;
@@ -271,7 +292,7 @@ share a file per concept. Read them alongside their owners.
    [ToolStorageTests.cs](../source/tests/Urd.Backend.Tests/storage/ToolStorageTests.cs) — authorization,
    sequential claims, bounded results and rollback;
    [SteeringMigrationTests.cs](../source/tests/Urd.Backend.Tests/storage/SteeringMigrationTests.cs) —
-   preserved identities/cursors, atomic upgrade and reopen without replay. The input-receipt and
+   preserved identities/cursors, atomic upgrade and reopen without replay. The user-message-receipt and
    snapshot suites also cover eight-delivery capacity, atomic message indexing and bounded selection.
    `support/StoredDeliveries.cs` and `support/StoredTools.cs` supply the corresponding durable evidence.
 
@@ -358,7 +379,7 @@ still does not replace review of ownership, concurrency, SQL or error handling.
 Prefer improving an existing behavioral case over adding overlapping tests or fixture
 machinery. Assert observable outcomes and durable state, not private helper calls or
 incidental execution order. Assertions on durable state read through the shared `support/`
-readers (`StoredRuns`, `StoredInputs`, `StoredOutput`, `StoredSessions`, `StoredDeliveries`, `StoredTools`),
+readers (`StoredExecutions`, `StoredSubmissions`, `StoredLlmResponses`, `StoredSessions`, `StoredDeliveries`, `StoredTools`),
 not ad-hoc SQL, so schema evolution
 touches one reader instead of every test. Raw `Scalar(...)` observation inside a `*Tests.cs`
 file needs a same-line `// raw-sql:` justification, which the pre-commit hook enforces on

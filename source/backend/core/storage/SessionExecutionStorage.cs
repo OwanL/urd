@@ -4,9 +4,9 @@ using Urd.Core.Sessions;
 
 namespace Urd.Core.Storage;
 
-// Claims run work and retains stop and settlement facts. The caller joins request cleanup first.
-internal sealed class RunStorage(Database database) {
-  internal LlmRequest? ClaimNextRequest(Guid sessionId, Guid runId, long historyRevision) {
+// Claims execution work and retains stop and settlement facts. The caller joins request cleanup first.
+internal sealed class SessionExecutionStorage(Database database) {
+  internal LlmRequest? ClaimNextRequest(Guid sessionId, Guid executionId, long historyRevision) {
     return database.Write<LlmRequest?>(transaction => {
       Guid requestId = Guid.NewGuid();
       using SqliteCommand claim = database.Command(transaction, """
@@ -27,34 +27,34 @@ internal sealed class RunStorage(Database database) {
                     WHERE q.run_id = r.run_id AND q.request_index =
                         (SELECT MAX(request_index) FROM execution_requests WHERE run_id = r.run_id)));
         """,
-          ("$session", sessionId), ("$run", runId), ("$revision", historyRevision), ("$request", requestId));
+          ("$session", sessionId), ("$run", executionId), ("$revision", historyRevision), ("$request", requestId));
       if (claim.ExecuteNonQuery() == 0)
         return null;
 
       using SqliteCommand assign = database.Command(transaction, """
         UPDATE execution_inputs SET request_id = $request
         WHERE run_id = $run AND request_id IS NULL AND outcome IS NULL;
-        """, ("$run", runId), ("$request", requestId));
+        """, ("$run", executionId), ("$request", requestId));
       assign.ExecuteNonQuery();
       return new LlmRequest(requestId,
-          new RequestContextReader(database).Read(transaction, sessionId, runId, historyRevision, requestId));
+          new LlmContextReader(database).Read(transaction, sessionId, executionId, historyRevision, requestId));
     });
   }
 
-  internal StopReceipt RequestStop(Guid sessionId, Guid runId, bool ownsRun) {
+  internal StopReceipt RequestStop(Guid sessionId, Guid executionId, bool ownsExecution) {
     return database.Write(transaction => {
       using SqliteCommand read = database.Command(transaction,
           "SELECT outcome FROM execution_runs WHERE session_id = $session AND run_id = $run;",
-          ("$session", sessionId), ("$run", runId));
+          ("$session", sessionId), ("$run", executionId));
       object? outcome = read.ExecuteScalar();
       if (outcome is null)
-        return new StopReceipt(runId, StopStatus.NotFound);
+        return new StopReceipt(executionId, StopStatus.NotFound);
 
       if (outcome is not DBNull)
-        return new StopReceipt(runId, StopStatus.Settled, (ExecutionOutcome)(long)outcome);
+        return new StopReceipt(executionId, StopStatus.Settled, (ExecutionOutcome)(long)outcome);
 
-      if (!ownsRun)
-        return new StopReceipt(runId, StopStatus.Unavailable);
+      if (!ownsExecution)
+        return new StopReceipt(executionId, StopStatus.Unavailable);
 
       using SqliteCommand command = database.Command(transaction, """
         UPDATE execution_runs SET stopping = 1
@@ -62,18 +62,18 @@ internal sealed class RunStorage(Database database) {
         UPDATE execution_inputs SET outcome = 1
         WHERE session_id = $session AND run_id = $run AND request_id IS NULL AND outcome IS NULL
             AND EXISTS (SELECT 1 FROM execution_runs WHERE run_id = $run AND stopping = 1 AND outcome IS NULL);
-        """, ("$session", sessionId), ("$run", runId));
+        """, ("$session", sessionId), ("$run", executionId));
       command.ExecuteNonQuery();
-      return new StopReceipt(runId, StopStatus.Requested);
+      return new StopReceipt(executionId, StopStatus.Requested);
     });
   }
 
   // The caller has joined all owned work, including cancellation callbacks, before settlement.
-  internal ExecutionResult? TrySettle(Guid sessionId, Guid runId, ExecutionOutcome driverOutcome) {
+  internal SessionExecutionResult? TrySettle(Guid sessionId, Guid executionId, ExecutionOutcome driverOutcome) {
     if (!Enum.IsDefined(driverOutcome))
       throw new ArgumentOutOfRangeException(nameof(driverOutcome));
 
-    return database.Write<ExecutionResult?>(transaction => {
+    return database.Write<SessionExecutionResult?>(transaction => {
       using SqliteCommand read = database.Command(transaction, """
         SELECT r.outcome, r.stopping,
             (SELECT q.outcome FROM execution_requests q WHERE q.run_id = r.run_id ORDER BY q.request_index DESC LIMIT 1),
@@ -83,13 +83,13 @@ internal sealed class RunStorage(Database database) {
                 WHERE q.run_id = r.run_id AND q.request_index =
                     (SELECT MAX(request_index) FROM execution_requests WHERE run_id = r.run_id))
         FROM execution_runs r WHERE r.session_id = $session AND r.run_id = $run;
-        """, ("$session", sessionId), ("$run", runId));
+        """, ("$session", sessionId), ("$run", executionId));
       Settlement? settlement = DecideSettlement(read, driverOutcome);
       if (settlement is null)
         return null;
 
       if (settlement.AlreadySettled)
-        return new(runId, settlement.Outcome);
+        return new(executionId, settlement.Outcome);
 
       using SqliteCommand settle = database.Command(transaction, """
         UPDATE execution_requests SET outcome = $outcome WHERE run_id = $run AND outcome IS NULL;
@@ -101,21 +101,21 @@ internal sealed class RunStorage(Database database) {
         WHERE run_id = $run AND result_json IS NULL;
         UPDATE execution_runs SET outcome = $outcome WHERE session_id = $session AND run_id = $run;
         """,
-          ("$session", sessionId), ("$run", runId), ("$outcome", (int)settlement.Outcome),
+          ("$session", sessionId), ("$run", executionId), ("$outcome", (int)settlement.Outcome),
           ("$toolOutcome", (int)(settlement.Outcome == ExecutionOutcome.Cancelled
               ? ExecutionOutcome.Cancelled : ExecutionOutcome.Failed)));
       settle.ExecuteNonQuery();
-      return new(runId, settlement.Outcome);
+      return new(executionId, settlement.Outcome);
     });
   }
 
-  internal ExecutionResult? ReadSettlement(Guid sessionId, Guid runId) {
-    return database.Guarded<ExecutionResult?>(() => {
+  internal SessionExecutionResult? ReadSettlement(Guid sessionId, Guid executionId) {
+    return database.Guarded<SessionExecutionResult?>(() => {
       using SqliteCommand read = database.Command(null,
           "SELECT outcome FROM execution_runs WHERE session_id = $session AND run_id = $run;",
-          ("$session", sessionId), ("$run", runId));
+          ("$session", sessionId), ("$run", executionId));
       object? outcome = read.ExecuteScalar();
-      return outcome is null or DBNull ? null : new(runId, (ExecutionOutcome)(long)outcome);
+      return outcome is null or DBNull ? null : new(executionId, (ExecutionOutcome)(long)outcome);
     });
   }
 
@@ -124,13 +124,13 @@ internal sealed class RunStorage(Database database) {
     if (!reader.Read())
       return null;
 
-    ExecutionOutcome? runOutcome = reader.IsDBNull(0) ? null : (ExecutionOutcome)reader.GetInt32(0);
+    ExecutionOutcome? executionOutcome = reader.IsDBNull(0) ? null : (ExecutionOutcome)reader.GetInt32(0);
     bool stopRequested = reader.GetInt32(1) != 0;
     ExecutionOutcome? lastOutcome = reader.IsDBNull(2) ? null : (ExecutionOutcome)reader.GetInt32(2);
-    bool pendingInputs = reader.GetInt32(3) != 0;
+    bool pendingSubmissions = reader.GetInt32(3) != 0;
     bool missingResults = reader.GetInt32(4) != 0;
     bool needsToolContinuation = reader.GetInt32(5) != 0;
-    if (runOutcome is { } settled)
+    if (executionOutcome is { } settled)
       return new(settled, AlreadySettled: true);
 
     if (stopRequested)
@@ -142,7 +142,7 @@ internal sealed class RunStorage(Database database) {
     if (lastOutcome is not { } outcome)
       return null;
 
-    if (outcome == ExecutionOutcome.Completed && (pendingInputs || missingResults || needsToolContinuation))
+    if (outcome == ExecutionOutcome.Completed && (pendingSubmissions || missingResults || needsToolContinuation))
       return null;
 
     return new(outcome, AlreadySettled: false);

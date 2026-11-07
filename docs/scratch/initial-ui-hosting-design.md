@@ -4,6 +4,15 @@
 The subsequent owner-approved saved-primary-ID slice is also implemented and verified.
 The current surface has seven operations. UI and the broader checkpoint remain proposed.**
 
+## Phase-1 vocabulary update
+
+Current Core/HTTP names are user message submissions/acceptance and session executions;
+the declarations below use this vocabulary without approving the remaining UI proposals.
+The breaking rename has no legacy aliases. Saved IDs, revisions, SQL identifiers/schema 5,
+decisions and exact-retry/Stop semantics are unchanged. Historical verification counts below
+predate this refactor; its build/test verification is pending. See the
+[current HTTP contract](../server-development.md#session-http-contract).
+
 ## Owner-approved first hosting bite — startup and shutdown
 
 The owner approved this concrete operation with “go ahead” on 2026-11-07:
@@ -64,10 +73,10 @@ held-cleanup tests of the real host. Exact routes, commands and evidence are in
 
 ## Owner-approved third hosting bite — public addressed Stop
 
-The owner approved public `SessionBase.RequestStopAsync(Guid runId)` and the thin route
-POST `/api/sessions/{sessionId}/runs/{runId}/stop` with JSON `{}`. Independent review, locked
+The owner approved public `SessionBase.RequestStopAsync(Guid executionId)` and the thin route
+POST `/api/sessions/{sessionId}/executions/{executionId}/stop` with JSON `{}`. Independent review, locked
 restore and **281/281 Release tests** pass without warnings, extending the steering checkpoint.
-`StopReceipt(RunId, Status, Outcome)` reports current status: 200 Requested (committed intent
+`StopReceipt(ExecutionId, Status, Outcome)` reports current status: 200 Requested (committed intent
 and pending-steering retirement, not cleanup completion) or Settled (saved outcome), 404
 NotFound including wrong-session runs, or 409 with Unavailable for an unowned unresolved run.
 No orphan mutation/recovery or fake settlement; retries may advance Requested to Settled,
@@ -75,7 +84,7 @@ and a stale run ID cannot stop its replacement. Accepted input receipts remain u
 
 The route retains local admission/no-store policy, JSON/body validation (400/415/413) and
 503 shutdown/storage failures. It never passes `RequestAborted` into Core Stop or waits for
-cancellation callbacks. The driver joins callbacks/model/tool cleanup before saved settlement;
+cancellation callbacks. The driver joins callbacks/LLM/tool cleanup before saved settlement;
 existing snapshots show stopping/fencing and settlement. A failed Stop save still initiates
 local cancellation and fences admission, but fails HTTP with 503, not a durable acknowledgement.
 Core blocks late output/success and new work through local Stop guards; snapshot local intent
@@ -160,7 +169,7 @@ No close/worker controls: independent-worker closure remains an unresolved later
 ```ts
 type ChatId = string;
 type Draft = { text: string; version: number };
-type PendingSend = { inputId: string; draftVersion: number; text: string;
+type PendingSend = { submissionId: string; draftVersion: number; text: string;
   expectedRevision: number; status: 'sending' | 'unknown' };
 type Reader = { follow: boolean; anchor?: { rowId: string; offsetPx: number } };
 type CachedChat = { view: SessionView; older: HistoryPage[]; reader: Reader;
@@ -170,8 +179,8 @@ function useWorkspace(backend: Backend): {
   creation: 'ready' | 'creating' | 'unknown'; createChat(): Promise<void>;
   drafts: Map<ChatId, Draft>; pending: Map<ChatId, PendingSend[]>;
   select(id: ChatId): void; setDraft(id: ChatId, text: string): void;
-  send(id: ChatId): Promise<void>; retryUnknown(id: ChatId, inputId: string): Promise<void>;
-  stop(id: ChatId, runId: string): Promise<void>;
+  send(id: ChatId): Promise<void>; retryUnknown(id: ChatId, submissionId: string): Promise<void>;
+  stop(id: ChatId, executionId: string): Promise<void>;
   loadOlder(id: ChatId): Promise<void>;
   loadMessageContent(id: ChatId, cursor: MessageContentCursor): Promise<void>;
   setReader(id: ChatId, reader: Reader): void;
@@ -221,7 +230,7 @@ when full disable new Send with an explanation rather than evict unknown identit
 text or expected revision, and never allocates another pending slot. It remains available
 when new Send is disabled by that cap or stopping; serialize retries for the same ID.
 Follow the [Core admission-decision contract](initial-core-design.md): clear an unresolved
-slot only on a durable receipt matching session/input ID, original text and revision.
+slot only on a durable receipt matching session/submission ID, original text and revision.
 Accepted clears only its submitted draft version; Refused leaves the current draft
 untouched. Conflict, malformed response, generic 409/503, timeout or absence is not such
 proof and keeps the original unknown. After confirmed refusal, a deliberate fresh Send
@@ -239,9 +248,9 @@ const backend: Backend = {
   history(id: ChatId, cursor: HistoryCursor, signal: AbortSignal): Promise<HistoryPage>,
   messageContent(id: ChatId, cursor: MessageContentCursor, signal: AbortSignal): Promise<MessageContentPage>,
   observe(id: ChatId, signal: AbortSignal): AsyncIterable<SessionView>,
-  submit(id: ChatId, command: InputCommand): Promise<InputReceipt>,
-  receipt(id: ChatId, inputId: string, signal: AbortSignal): Promise<InputReceipt | null>,
-  stop(id: ChatId, runId: string): Promise<StopReceipt>
+  submit(id: ChatId, submission: UserMessageSubmission): Promise<UserMessageReceipt>,
+  receipt(id: ChatId, submissionId: string, signal: AbortSignal): Promise<UserMessageReceipt | null>,
+  stop(id: ChatId, executionId: string): Promise<StopReceipt>
 };
 ```
 Declaration sketch, not executable object syntax. `list` reflects the approved ID-only wire
@@ -250,7 +259,7 @@ Wire records project Core data into
 camelCase JSON with string GUIDs and integer revisions; test that boundary, no generic
 DTO mapper/generated SDK. `SessionView` preserves epoch/version, history revision,
 row identities/cursor, run ID/status, pending dispositions, committed output offsets and
-nullable LastSettlement (retained terminal run ID/outcome, distinct from a newer active run).
+nullable LastSettlement (retained terminal execution ID/outcome, distinct from a newer active execution).
 Use **HTTP JSON + fetch-read SSE**, same origin. Every API fetch includes non-secret
 `X-Urd-Client: browser`; no token/cookie, native EventSource or second transport.
 `observe` decodes bounded UTF-8 SSE `event: view` / JSON `data`, including split chunks,
@@ -262,7 +271,7 @@ Core's capacity-one replacement channel bounds queued views; Server has no updat
 One serialized writer awaits response writes, observes disconnect, and unregisters in
 `finally`; slow/disconnected readers cannot hold Core guards or accumulate frames.
 Unknown Stop acknowledgement shows unknown/stopping until a fresh authoritative view;
-stream EOF cannot mean settled. Stop never derives its run ID from a newer response.
+stream EOF cannot mean settled. Stop never derives its execution ID from a newer response.
 Create is explicit, not an automatic retrying startup action: lost acknowledgement
 refreshes the list and reports uncertainty, never silently creates another chat.
 
@@ -320,15 +329,15 @@ No endpoint base classes, command bus, per-route service or second session regis
 | GET `/sessions/{id}/history?cursor=...` | `GetPrimaryAsync(id)` → `ReadHistoryAsync(cursor, limits)` |
 | GET `/sessions/{id}/content?cursor=...` | `GetPrimaryAsync(id)` → `ReadMessageContentAsync(cursor)` |
 | GET `/sessions/{id}/view` (SSE) | `GetPrimaryAsync(id)` → `ObserveAsync(limits, http.RequestAborted)` |
-| POST `/sessions/{id}/inputs` | `GetPrimaryAsync(id)` → `SubmitUserInputAsync(command)` |
-| GET `/sessions/{id}/inputs/{inputId}` | `GetPrimaryAsync(id)` → `GetInputReceiptAsync(inputId)` |
-| POST `/sessions/{id}/runs/{runId}/stop` | `GetPrimaryAsync(id)` → `RequestStopAsync(runId)` |
+| POST `/sessions/{id}/message-submissions` | `GetPrimaryAsync(id)` → `SubmitUserMessageAsync(submission)` |
+| GET `/sessions/{id}/message-submissions/{submissionId}` | `GetPrimaryAsync(id)` → `GetUserMessageReceiptAsync(submissionId)` |
+| POST `/sessions/{id}/executions/{executionId}/stop` | `GetPrimaryAsync(id)` → `RequestStopAsync(executionId)` |
 The old observation-only cancellation sketch is superseded for implemented reads:
 listing/receipt/snapshot/content use request cancellation, never execution cancellation.
 Accepted Send/Stop continues after abort.
 Stop returns admission/status promptly, not a request held until cleanup. Views show
 settlement; no endpoint calls `WaitForSettlementAsync` merely to keep a browser alive.
-Submit returns 200 with the matched durable `InputReceipt` for **both** Accepted and
+Submit returns 200 with the matched durable `UserMessageReceipt` for **both** Accepted and
 Refused; HTTP success means the admission decision was recorded, not that work ran.
 Capacity/stale-revision/stopping reasons belong to that Refused receipt. Conflicting ID
 reuse is a per-attempt 409, never a new decision for the original ID. Map malformed
@@ -356,7 +365,7 @@ rapid switching/stale frames, lazy Unicode content paging/tail/revision/budget/a
 checks, preflight follow-up and busy steering,
 held-cleanup Stop, lost acknowledgements before/after admission decisions, refused retry
 before delayed original, changed revision, mismatching receipts, retry at the full unresolved
-cap, preserved later typing, and reload/restart without model/command replay,
+cap, preserved later typing, and reload/restart without LLM/submission replay,
 all clients detached while work continues, oversized frames and slow-reader disposal.
 Acceptance: a followed response streams visibly beyond 256 units without clicks, under
 rolling bounds/one read per row; pausing/selection stops automatic reads and preserves anchors.

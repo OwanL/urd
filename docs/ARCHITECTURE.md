@@ -74,10 +74,10 @@ span multiple decisions, and the inventory can grow as Pie is inspected.
 | Area | Questions to resolve |
 | --- | --- |
 | Client and backend authority | Shared session state versus independent navigation, drafts, settings and concurrent client actions. |
-| Sessions and conversation history | Session identity, branches/forks, turns, messages, attachments and model context versus displayed history. |
+| Sessions and conversation history | Session identity, branches/forks, turns, messages, attachments and LLM context versus displayed history. |
 | Storage and recovery | Durable truth, transactions, indexes, large payloads, retention, restart and interrupted work. |
 | Agent execution | Agent loop, admission, streaming, tool dispatch, cancellation, isolation and resource ownership. |
-| Providers and models | Provider adapters, credentials, model metadata/selection, request limits, retries, fallback, usage and pricing. |
+| Providers and LLMs | Provider adapters, credentials, LLM metadata/selection, request limits, retries, fallback, usage and pricing. |
 | Guidance and resources | Bundled guidance, user/project context, named agents, skills, discovery and precedence. |
 | Tools and integrations | Tool contracts, validation, result representation, side effects, shell/browser/computer tools and MCP. |
 | Context management | Tool/skill selection and recovery, tool-result reduction/recall, history compaction and their distinct purposes. |
@@ -160,9 +160,9 @@ remains; no final structure or production scaffold is approved.
 tree broadly acceptable structurally, but requests clearer names and grouping. In
 particular, `guidance/` versus `agent-instructions/` does not distinguish authored
 content from loader code clearly; “agent instructions” is not the preferred top-level
-name for the editable Markdown/skills collection either. Model context, agent tools
+name for the editable Markdown/skills collection either. LLM context, agent tools
 and similar responsibilities belong under the broader harness, rather than requiring
-peer folders beside it. Use `execution` for the narrow model/tool loop. The owner
+peer folders beside it. Use `execution` for the narrow LLM/tool loop. The owner
 subsequently accepted this nesting, rejected `agent-content/` as misleading, and prefers
 “guidance”, “instructions” or similar with matching loader terminology. “Collaboration”
 and “follow-ups” also need concrete names. Usage accounting is expected within the
@@ -225,7 +225,7 @@ than being cancelled by an HTTP request or client disconnect.
 `ModelContextProtocol.Core` for MCP client protocol and transport mechanics.
 [The research](MCP-LIBRARY-RESEARCH.md) found no evidence-based blocker; qualify
 required servers and transports during implementation. Its MEAI abstractions
-dependency does not select a model/tool loop or model exposure policy; the
+dependency does not select an LLM/tool loop or LLM exposure policy; the
 separate `IChatClient` decision is recorded below.
 Urd retains connection lifetime, credentials, permissions and discovery/exposure
 responsibilities. The inspected package version is not a locked dependency version.
@@ -252,7 +252,7 @@ part of the destination; desktop host and host-specific integration remain open.
 **Subsequent owner alignment:** deliver normal-use browser access on the backend
 machine first, then LAN, then Tailscale. This sequence alone did not select
 transport, client bootstrap or provider onboarding and is distinct from the smaller
-fake-model technical slice.
+fake-LLM technical slice.
 
 **Local access direction:** keep Pie-like open-and-use access, with programs already
 running on the backend PC trusted. No Urd account, pairing or remembered-browser
@@ -324,19 +324,21 @@ Cross-client hand-off of unfinished text/attachments is not required, and neithe
 is a choice of draft modes. Avoid synchronisation/conflict machinery merely to
 share drafts. This does not select draft storage or reload persistence.
 
-### Preserve bucket-based model selection for agent-created work
+<a id="preserve-bucket-based-model-selection-for-agent-created-work"></a>
+
+### Preserve bucket-based LLM selection for agent-created work
 
 **Decision:** Retain Pie's bucket system for agents creating other agents.
-The selected bucket expresses the task's complexity; configured model choices
-supply the actual provider/model. This is a model-selection policy, separate
+The selected bucket expresses the task's complexity; configured LLM choices
+supply the actual provider/LLM. This is an LLM-selection policy, separate
 from how sessions are represented or stored internally.
 
 The existing `small`, `medium` and `frontier` buckets remain the reference
-behaviour. **Keep bucket-only creation for now; do not add an exact-model
+behaviour. **Keep bucket-only creation for now; do not add an exact-LLM
 creation override.** In current Pie, both subagent creation and independent
-session creation require a bucket. An independent session's model can be
+session creation require a bucket. An independent session's LLM can be
 changed afterwards through its settings; capability requirements such as image
-support are distinct from choosing an exact model.
+support are distinct from choosing an exact LLM.
 
 **Rationale:** Preserve the current selection workflow rather than expand its
 interface during the rebuild. Internal session representation remains a separate
@@ -347,7 +349,7 @@ fallback workflow for delegated work: bounded subagents and independent delegate
 sessions. Switching within that configured policy does not require repeated
 approval, including when it selects an already-enabled metered provider. Do not
 silently widen the allowed provider pool. This decision does not choose automatic
-fallback for a user-selected model in their own chat.
+fallback for a user-selected LLM in their own chat.
 
 Creation-time selection and in-run retries are distinct paths to inspect, not
 proof that Pie implements both delegation forms identically. Detailed eligibility,
@@ -361,7 +363,7 @@ spending-approval system.
 as redundant.
 
 - **Bounded subagent:** a focused delegated task with a direct call/result
-  relationship to its caller and its own model context.
+  relationship to its caller and its own LLM context.
 - **Independent agent-created session:** an ongoing conversation that can receive
   follow-up assignments, coordinate with other sessions and be steered by the
   user, rather than only returning one result from a helper call.
@@ -400,7 +402,7 @@ completed effects, and uncertain results must not be replayed as though nothing
 happened. Independent-worker close and creator-cleanup policies above and below
 are unchanged; this decision does not settle the open independent-close question.
 
-**Implementation boundary:** Current runtime scope is primary-session/model work
+**Implementation boundary:** Current runtime scope is primary-session/LLM work
 and configured fake `AIFunction`s only. This records the required contract, not
 implementation or qualification of bounded-subagent/process-tree cancellation.
 No future classes or frameworks are promised.
@@ -495,20 +497,22 @@ Do not introduce an arbitrary global agent limit from these estimates, or assume
 that supporting many contexts requires a process per agent or distributed
 infrastructure. The provisional process model remains provisional.
 
-### Keep subscription, API-key and local-model access
+<a id="keep-subscription-api-key-and-local-model-access"></a>
 
-**Decision:** Retain all three model-access methods:
+### Keep subscription, API-key and local-LLM access
+
+**Decision:** Retain all three LLM-access methods:
 
 - Subscription sign-in, such as ChatGPT or GitHub Copilot access.
 - Provider API keys.
-- Connections to local model servers, such as Ollama.
+- Connections to local LLM servers, such as Ollama.
 
 **Popular subscription support is intended scope**, not merely one arbitrary
 vendor to satisfy the sign-in category. Prefer existing libraries for standard
 authentication and token management rather than rebuilding those mechanisms.
-This does not select a library or promise every model/vendor combination;
-authentication alone does not establish subscription access to a model API.
-Connecting to a local server does not mean building Urd's own model runner.
+This does not select a library or promise every LLM/vendor combination;
+authentication alone does not establish subscription access to an LLM API.
+Connecting to a local server does not mean building Urd's own LLM runner.
 **Claude is API-access-only:** retain API-key access, not Claude consumer-plan
 subscription integration. Other popular subscription routes still need their own
 qualification; this exception does not remove the wider subscription requirement.
@@ -525,11 +529,11 @@ layer; do not assume an SDK for API-key requests also handles subscription
 sign-in. First-party harness ownership does not require hand-writing all provider
 code, and these requirements do not select a language or SDK.
 
-[Provider research](PROVIDER-RESEARCH.md) compares model-client approaches and
+[Provider research](PROVIDER-RESEARCH.md) compares LLM-client approaches and
 subscription integration seams. Current OpenAI documentation offers a public
 ChatGPT-plan Responses API flow; Pi's existing Codex route is not the only option.
 GitHub's documented Copilot SDK instead embeds its agent runtime, so it must not
-be mistaken for a neutral model client. These are source findings, not qualified
+be mistaken for a neutral LLM client. These are source findings, not qualified
 Urd integrations or a reason to select a library prematurely.
 
 [Provider qualification](PROVIDER-QUALIFICATION.md) records the later focused
@@ -612,9 +616,11 @@ summarising conversation history. Do not conflate these controls or infer net
 latency/token savings from the owner's positive experience. Retain the useful
 behaviour without automatically copying all cache, retry and lifecycle machinery.
 
-### Preserve model-visible prefixes during ordinary continuation and discovery
+<a id="preserve-model-visible-prefixes-during-ordinary-continuation-and-discovery"></a>
 
-**Direction (2026-11-03):** Preserve already-sent model-visible content during
+### Preserve LLM-visible prefixes during ordinary continuation and discovery
+
+**Direction (2026-11-03):** Preserve already-sent LLM-visible content during
 ordinary continuation and dynamic capability discovery so Urd does not needlessly
 invalidate provider prompt caches. Append-only conversation storage alone is not
 sufficient: system instructions, tool definitions/order and provider serialization
@@ -622,7 +628,7 @@ also affect the cached prefix. This concerns cache eligibility, not guaranteed h
 or savings. Explicit history edits and compaction remain supported; exact reset
 boundaries still need design, not a blanket immutable-session rule.
 
-**Subsequent owner alignment:** an explicitly chosen idle model/provider switch
+**Subsequent owner alignment:** an explicitly chosen idle LLM/provider switch
 need not block for confirmation merely because the old provider's private reasoning
 cannot transfer. This does not permit losing visible messages, tool results or
 attachments, replaying tools, automatic provider fallback or widening billing scope.
@@ -645,7 +651,7 @@ or proof that all providers require it. Claude now documents beta
 that can append tools without rewriting the earlier prefix, subject to provider
 restrictions. This is documented capability, not a qualified Urd integration.
 
-Shared model interfaces and optional loop libraries must be evaluated for stable
+Shared LLM interfaces and optional loop libraries must be evaluated for stable
 request construction, dynamic discovery and lossless handling of necessary
 provider-specific content. A common interface must not erase these controls.
 Check actual serialized request sequences before claiming compatibility; real
@@ -658,7 +664,7 @@ supports the original concern: changing early tool definitions generally loses
 prefix reuse across the later conversation, not necessarily the earlier unchanged
 prefix or the old cache entry itself. Urd-specific savings remain unmeasured.
 Continue dynamic tool discovery design and use its requirements to inform
-model-layer selection.
+LLM-layer selection.
 
 **Owner alignment (2026-11-04): qualified native additions, otherwise an initial
 stable wrapper.** Where the provider **and adapter** support qualified native
@@ -673,10 +679,10 @@ This supersedes the earlier open fallback comparison, not the qualification gate
 Wrapper reliability, native-provider acceptance and cache savings remain unmeasured;
 no generic discovery framework or particular beta adapter is approved. See
 [execution evidence](EXECUTION-DESIGN.md) and [discovery design](DISCOVERY-DESIGN.md).
-This tool-invocation wrapper is distinct from a model-client facade.
+This tool-invocation wrapper is distinct from an LLM-client facade.
 
 **Owner decision (2026-11-04): adopt `Microsoft.Extensions.AI.Abstractions` and
-its `IChatClient` as Urd's shared model request/response interface.** This is the
+its `IChatClient` as Urd's shared LLM request/response interface.** This is the
 chosen chat-library boundary for provider calls, not a requirement to force
 provider-specific features through lossy representations. Urd may use thin
 provider-specific adapters or retain native request/response data where needed.
@@ -695,7 +701,7 @@ address them without silently broadening the interface selection.
 
 **Decision:** Original messages remain readable while a session is open, even
 after older conversation has been summarized for the AI. Context compaction
-changes what the model works from; it does not erase the user's readable history.
+changes what the LLM works from; it does not erase the user's readable history.
 
 These are different views of the session, not a requirement to duplicate every
 message. Opening or switching a tab must not require loading the entire original
@@ -773,11 +779,13 @@ physical packaging, SDK/cache bundling, tooling or activation mechanics.
 [Foundation research](FOUNDATION-RESEARCH.md) preserves the earlier language
 comparison and local-build considerations; its shortlist is now historical.
 [Focused Go/C# discovery](GO-DOTNET-DISCOVERY.md) established small streaming/tool/
-control paths using real loop libraries and fake models in both languages. These
+control paths using real loop libraries and fake LLMs in both languages. These
 remain feasibility observations, not provider, packaging, resource or cross-platform
 qualification. Further qualification should focus on the selected C#/.NET backend.
 
-### Provisional direction: a narrow Urd-owned model/tool cycle
+<a id="provisional-direction-a-narrow-urd-owned-modeltool-cycle"></a>
+
+### Provisional direction: a narrow Urd-owned LLM/tool cycle
 
 **Owner alignment (2026-11-04):** Prefer a small Urd-owned cycle over `IChatClient`
 rather than adding full MEAI for `FunctionInvokingChatClient` now. In the bounded
@@ -837,7 +845,7 @@ abstract SessionBase
 
 Both share core execution/history rules without separate engines. A composed
 `SessionExecution` represents temporary active work; its name/API and exact base
-scope remain provisional. Titles, compaction and pruning use shared model I/O,
+scope remain provisional. Titles, compaction and pruning use shared LLM I/O,
 not additional full-session subtypes. [Session design](SESSION-DESIGN.md) owns the
 responsibility/lifetime walkthrough and acceptance proposals. It separates durable
 history/assignment facts, live execution and client presentation; finished work,
@@ -875,18 +883,20 @@ stale-write fences and reconciliation of ambiguous Send receipts still apply.
 A new instruction does not prove the old effect succeeded or authorize repeating it.
 
 **First-checkpoint sequencing remains engineering planning.** The owner did not
-approve the proposed idle-only Send restriction for the fake-model checkpoint;
+approve the proposed idle-only Send restriction for the fake-LLM checkpoint;
 normal-use steering and follow-up input remain retained. Do not turn that test-stage
 detail into another owner questionnaire or a product feature cut. Choose the bounded
 checkpoint within a concrete, structurally aligned implementation plan, not by
 promoting the draft or fixtures into implementation permission. See
 [the scoped review](SESSION-DESIGN.md#8-resumed-inputrecovery-review--2026-11-05).
 
-### Model-call reuse and composition: design alignment
+<a id="model-call-reuse-and-composition-design-alignment"></a>
 
-**Alignment recorded 2026-11-03:** Reuse common model-request mechanics for agent
+### LLM-call reuse and composition: design alignment
+
+**Alignment recorded 2026-11-03:** Reuse common LLM-request mechanics for agent
 work and auxiliary LLM calls such as title generation and compaction. Prefer
-composition: title generation uses model I/O rather than inheriting from it.
+composition: title generation uses LLM I/O rather than inheriting from it.
 **Follow-up alignment (2026-11-04):** use the configured request-only `IChatClient`
 directly for shared execution and auxiliary operations where it fits. The owner
 accepted this after rejecting an unclear `ModelRequestExecutor` name; no mandatory
@@ -895,12 +905,12 @@ interface as needed. `TitleGenerator`, `HistoryCompactor` and `CatalogPruner` ar
 working operation names, not approved APIs or full session types. A failed title
 can fall back to a bounded excerpt of the first prompt.
 
-Keep model invocation, the model/tool execution cycle and session state/lifetime
+Keep LLM invocation, the LLM/tool execution cycle and session state/lifetime
 as distinct responsibilities. This does not require three framework layers or
 make every auxiliary call a session. Reuse error/retry/fallback mechanisms while
 keeping operation-specific policies explicit: a missing title is tolerable,
 failed compaction must preserve usable context, and delegated fallback approval
-must not silently apply to a user's selected chat model. Cancellation should not
+must not silently apply to a user's selected chat LLM. Cancellation should not
 be swallowed as a missing title; request retries must not replay completed tools.
 
 Design only enough class structure to establish responsibilities, state ownership,
@@ -925,7 +935,7 @@ Prefer stable attachment identities mapped to relative paths rather than absolut
 paths scattered through history. Retained attachments should not depend on an
 original external file remaining in place. Resolve references when serving the UI,
 building provider requests or supplying paths to tools; a local path alone does
-not expose image content to a remote model. Clean up files only when retained
+not expose image content to a remote LLM. Clean up files only when retained
 references no longer need them, including references from other sessions. The transcript database itself is
 selected in the storage section below; a general large-artifact policy beyond
 attachments is not selected.
@@ -948,7 +958,7 @@ No per-token fsync, numerical loss budget, attachment-file atomicity or exactly-
 external effects follow; these words do not qualify every failure mode.
 
 **Workload and guarantees.** The store must serve click-to-visible newest-window
-reads, paged navigation, model-context range reads, incremental appends and
+reads, paged navigation, LLM-context range reads, incremental appends and
 per-batch streaming writes, suffix-replacing edits, persistent assignments
 across restarts, final-closure deletion and many-session fan-out — under a
 single backend process. For the process-crash/reopen boundary above, committed
@@ -1016,10 +1026,10 @@ reference section. This is not yet a complete dependency or lifecycle audit.
 | --- | --- |
 | Compose, submit while busy, edit pending/earlier messages, interrupt | Conversation changes, queued input, drafts and pending attachments have different lifetimes today. Composer drafts/attachments are host runtime state; do not automatically copy that ownership into multi-client Urd. |
 | Questions and attention | Inline `ask_user` cards, prompt responses, waiting markers, sounds and window attention. Pending prompts are live state today; decide the useful offscreen-agent experience before designing its transport. |
-| Session organization | Tabs, pins/groups, snooze and restore, manual titles and optional model-generated titles. Snooze hides an idle chat and restores its tab later; it does not pause running work. These are separate conveniences, not one indivisible session-management feature. |
-| Transcript and execution inspection | Paged history, expandable tool inputs/results, lazy child details and model-produced/model-received inspection. Exact execution detail can have very different size and retention needs from the visible conversation. |
+| Session organization | Tabs, pins/groups, snooze and restore, manual titles and optional LLM-generated titles. Snooze hides an idle chat and restores its tab later; it does not pause running work. These are separate conveniences, not one indivisible session-management feature. |
+| Transcript and execution inspection | Paged history, expandable tool inputs/results, lazy child details and LLM-produced/LLM-received inspection. Exact execution detail can have very different size and retention needs from the visible conversation. |
 | Guidance and discovery | Context documents, append guidance, named agents/roles and skills; main/child composition and resource precedence. Separate authored resources from the live prompt assembled from them. |
-| Provider accounts and model access | API keys, supported subscription logins and local/OpenAI-compatible endpoints are distinct access needs. Much provider/auth behavior comes from `pi-ai`, behind Pie-owned management interfaces; removing Pi includes replacing those seams. API protocol families are not the same thing as login methods. Provider coverage and replacement libraries remain to be reviewed. |
+| Provider accounts and LLM access | API keys, supported subscription logins and local/OpenAI-compatible endpoints are distinct access needs. Much provider/auth behavior comes from `pi-ai`, behind Pie-owned management interfaces; removing Pi includes replacing those seams. API protocol families are not the same thing as login methods. Provider coverage and replacement libraries remain to be reviewed. |
 | Tool/skill selection | The owner confirms successful use and explicitly retains AI-based catalog pruning with protected core entries. Checked-in defaults are not usage evidence. Pie's recovery discloses hidden tools for a wrapper rather than mutating the frozen native catalog; that implementation constraint is not automatically Urd's. |
 | Result reduction and history compaction | Deterministic output rewriting with raw recall is distinct from catalog selection and from summarizing old conversation. Result reduction is enabled in checked-in defaults and excludes `read`; the mechanisms have different data and fidelity needs. |
 | Files, shell, web, MCP, browser and desktop tools | Different dependency and effect boundaries: Pi-supplied core tools, Pie's warm-shell override/fallback, managed web/MCP packages, browser automation and Windows desktop integration. Dropping Pi does not make these integrations free. |
@@ -1028,10 +1038,10 @@ reference section. This is not yet a complete dependency or lifecycle audit.
 | Historical analytics and queries | Automatic fresh capture includes provider settlements, executions, tools/file facets, activity spans and capability/feature observations, with separately addressed detail. Agent queries extend well beyond the small UI counters. Urd's agreed post-closure scope is much smaller: compact usage summaries, not detailed history. |
 | Privacy, retention and deletion | Pie's private-session close deletes associated history/analytics; normal closure/expiry includes a separate gated policy. Source implementation is not proof that the gate is active, and neither policy has been selected for Urd. |
 
-Pie's model-exchange inspector concerns a tool call: provider-normalized name
+Pie's LLM-exchange inspector concerns a tool call: provider-normalized name
 and arguments before execution, and the final tool content confirmed consumed
 by a successful provider response. It is not an original-HTTP-byte capture or a
-complete model-request log. Keep this session-debugging capability distinct from
+complete LLM-request log. Keep this session-debugging capability distinct from
 historical analytics and from ordinary formatted tool cards when reviewing value.
 
 ### Analytics investigation: observed value and limits
@@ -1041,9 +1051,9 @@ followed by independent review and a small local diagnostic check. Aggregate
 figures came from one snapshot of a multi-week dataset; missing usage/outcomes
 and unclassified test/development activity limit the conclusions.
 
-- Counts of tool outcomes, model calls by purpose and measured retry waits gave
+- Counts of tool outcomes, LLM calls by purpose and measured retry waits gave
   leads for investigating failures, delegated workload and pauses. They did not
-  establish waste, model quality, successful task delivery or a concrete fix.
+  establish waste, LLM quality, successful task delivery or a concrete fix.
 - File-change counts represented attempted, unverified edits. Queried pruning
   and initial-context observations lacked size-effect measurements; they did
   not establish whether those features helped. That is missing evidence, not
@@ -1107,7 +1117,7 @@ research observations, not production acceptance or a full analytics value audit
   explicitly retained; simplify its implementation without silently replacing it
   with discovery alone or conflating it with result reduction and compaction.
 - Inspect actual feature data needs before selecting storage: prompts/drafts,
-  assignments, raw model/tool detail, historical accounting and private deletion
+  assignments, raw LLM/tool detail, historical accounting and private deletion
   do not all have the same owner or lifetime.
 - Provider adapters/admission, startup/delivery, full cross-client lifecycles and
   detailed data volumes remain incomplete discovery areas.
@@ -1121,7 +1131,7 @@ parity target. Relevant paths are in the **Pie repository**, not Urd:
 - `docs/architecture/ARCHITECTURE.md`: current runtime/process responsibilities,
   state flow, dependency ownership, storage and delivery.
 - `docs/contracts/STATE_CONTRACT.md`: client/session authority, synchronization,
-  model selection and recovery guarantees.
+  LLM selection and recovery guarantees.
 - `docs/contracts/AGENT-SESSION-CONTROL.md`: session coordination semantics.
 - `harness/agent-instructions/README.md` and `harness/tools/README.md`: guidance
   and tool responsibilities.

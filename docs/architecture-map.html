@@ -14,7 +14,7 @@
 </head>
 <body>
 <header class="topbar"><div class="topbar-inner"><a href="#top" class="brand">Urd</a><nav aria-label="Architecture views" id="nav"><a href="#1-system-boundaries"><span>01</span>System</a><a href="class-map.html"><span>02</span>All classes ↗</a><a href="#3-inside-one-model-request"><span>03</span>Model request</a><a href="#4-send-steering-and-continuation"><span>04</span>Run flow</a><a href="#5-persistence-and-read-boundaries"><span>05</span>Storage</a><a href="#6-durable-data-model"><span>06</span>Data model</a><a href="#7-shutdown-and-the-lifetime-barrier"><span>07</span>Shutdown</a><a href="#8-where-to-focus-the-architecture-audit"><span>08</span>Audit</a></nav><a class="source-link" href="architecture-map.md">Mermaid source ↗</a><button type="button" id="notes-toggle" aria-pressed="false">Expand notes</button></div></header>
-<main id="guide"><header class="hero" id="top"><p class="eyebrow">Architecture / source snapshot</p><h1>Urd, one boundary at a time.</h1><p class="subtitle">Structure, ownership and execution — separated into focused views.</p><div class="meta"><span class="pill">07 Nov 2026 · 08:03 UTC</span><span>Core + local server</span><span>Offline · editable diagrams</span></div><details class="intro-notes"><summary>Snapshot, reading guide &amp; diagram key</summary><div class="source-body">
+<main id="guide"><header class="hero" id="top"><p class="eyebrow">Architecture / source snapshot</p><h1>Urd, one boundary at a time.</h1><blockquote><p><strong>Historical snapshot — superseded for current phase-1 naming/API.</strong> See <a href="backend-development.md">Backend development</a> and <a href="server-development.md">Server development</a> for current contracts. Diagrams, counts, source-link labels and line numbers retain the captured state; only renamed live-source destinations are repaired. Phase 2 is not complete: <code>StoredSessionSnapshot</code>, the <code>Settlement</code> record and <code>JsonText</code> remain.</p></blockquote><p class="subtitle">Structure, ownership and execution — separated into focused views.</p><div class="meta"><span class="pill">07 Nov 2026 · 08:03 UTC</span><span>Core + local server</span><span>Offline · editable diagrams</span></div><details class="intro-notes"><summary>Snapshot, reading guide &amp; diagram key</summary><div class="source-body">
 <blockquote>
 <p><strong>Working-tree snapshot · 7 November 2026, 08:03 UTC</strong><br>
 Base commit: <code>e5537192e8c8b5f9eea76266c8f8a6726868732f</code>, <strong>plus uncommitted changes</strong>.
@@ -291,9 +291,9 @@ check and settlement. An input arriving after settlement starts a new run instea
 <li>The store rebuilds model context from claimed inputs, saved assistant text, calls and results.
 Visible admission order and model-delivery order are therefore intentionally different views.</li>
 </ul>
-<p class="sources"><strong>Source:</strong> <a href="../source/backend/core/storage/InputStorage.cs">InputStorage.cs</a>,
-<a href="../source/backend/core/storage/RunStorage.cs">RunStorage.cs</a>,
-<a href="../source/backend/core/storage/RequestContextReader.cs">RequestContextReader.cs</a>,
+<p class="sources"><strong>Source:</strong> <a href="../source/backend/core/storage/UserMessageStorage.cs">InputStorage.cs</a>,
+<a href="../source/backend/core/storage/SessionExecutionStorage.cs">RunStorage.cs</a>,
+<a href="../source/backend/core/storage/LlmContextReader.cs">RequestContextReader.cs</a>,
 <a href="../source/backend/core/storage/ToolStorage.cs">ToolStorage.cs</a>,
 <a href="../source/backend/core/sessions/SessionBase.cs">SessionBase.cs</a>.</p>
 </details></section><section class="chapter" id="5-persistence-and-read-boundaries" aria-labelledby="5-persistence-and-read-boundaries-title"><h2 id="5-persistence-and-read-boundaries-title"><span class="number">05</span>Persistence and read boundaries</h2>

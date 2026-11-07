@@ -14,7 +14,7 @@ internal sealed class SnapshotReader {
   private readonly MessageContentReader content;
 
   // Select identities before joining lifecycle facts or reading any message bodies.
-  // One run can contain arbitrarily many messages; only this index window is bounded.
+  // One execution can contain arbitrarily many messages; only this index window is bounded.
   internal const string SnapshotMessagesSql = """
     SELECT m.run_id, m.role, m.message_id, r.outcome
     FROM (
@@ -51,13 +51,13 @@ internal sealed class SnapshotReader {
 
   private StoredSessionSnapshot Read(SqliteTransaction transaction, Guid sessionId) {
     long historyRevision = ReadHistoryRevision(transaction, sessionId);
-    (Guid? unsettledRun, bool stopRequested) = ReadUnsettledRun(transaction, sessionId);
-    ExecutionResult? lastSettlement = ReadLastSettlement(transaction, sessionId);
+    (Guid? unsettledExecution, bool stopRequested) = ReadUnsettledExecution(transaction, sessionId);
+    SessionExecutionResult? lastSettlement = ReadLastSettlement(transaction, sessionId);
     List<(MessageRef Message, ExecutionOutcome? Settlement)> candidates =
         ReadCandidates(transaction, sessionId, historyRevision);
     bool hasOlder = candidates.Count > SnapshotMessageLimit;
     IReadOnlyList<MessagePreview> messages = ReadPreviews(transaction, sessionId, candidates);
-    return new(historyRevision, unsettledRun, stopRequested, lastSettlement, messages, hasOlder);
+    return new(historyRevision, unsettledExecution, stopRequested, lastSettlement, messages, hasOlder);
   }
 
   private long ReadHistoryRevision(SqliteTransaction transaction, Guid sessionId) {
@@ -69,13 +69,13 @@ internal sealed class SnapshotReader {
     return historyRevision;
   }
 
-  private (Guid? RunId, bool StopRequested) ReadUnsettledRun(SqliteTransaction transaction, Guid sessionId) {
+  private (Guid? ExecutionId, bool StopRequested) ReadUnsettledExecution(SqliteTransaction transaction, Guid sessionId) {
     using SqliteCommand activeRead = database.Command(transaction, SnapshotUnsettledSql, ("$session", sessionId));
     using SqliteDataReader reader = activeRead.ExecuteReader();
     return reader.Read() ? (reader.GetGuid(0), reader.GetBoolean(1)) : (null, false);
   }
 
-  private ExecutionResult? ReadLastSettlement(SqliteTransaction transaction, Guid sessionId) {
+  private SessionExecutionResult? ReadLastSettlement(SqliteTransaction transaction, Guid sessionId) {
     using SqliteCommand terminalRead = database.Command(transaction, SnapshotSettlementSql,
         ("$session", sessionId));
     using SqliteDataReader reader = terminalRead.ExecuteReader();

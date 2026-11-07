@@ -6,7 +6,7 @@ receipt lookup, snapshot polling, content reads and addressed Stop**. The owner-
 listing slice is implemented and tested; verification evidence is below.
 UI, static assets, startup recovery and real providers are not implemented.
 Core now provides default durable safe-boundary steering
-for busy Sends in the owned run; real tools, tool-inspection UI/API and an explicit after-run
+for busy Sends in the owned execution; real tools, tool-inspection UI/API and an explicit after-execution
 queue remain deferred.
 
 ## Run
@@ -60,11 +60,26 @@ and Core shutdown operations both finish; it has no forced cleanup timeout.
 | --- | --- |
 | POST `/api/sessions` | Empty JSON object `{}` → 201 `{sessionId}`; Location names its snapshot |
 | GET `/api/sessions?cursor=...` | Optional opaque string cursor → 200 `SessionIdPage` (`sessionIds`, `nextCursor`) |
-| POST `/api/sessions/{sessionId}/inputs` | `InputCommand` → 200 `InputReceipt`, Accepted **or** Refused |
-| GET `/api/sessions/{sessionId}/inputs/{inputId}` | 200 receipt or literal JSON `null` |
-| POST `/api/sessions/{sessionId}/runs/{runId}/stop` | Empty JSON object `{}` → 200 `StopReceipt` for Requested or Settled |
+| POST `/api/sessions/{sessionId}/message-submissions` | `UserMessageSubmission` → 200 `UserMessageReceipt`, Accepted **or** Refused |
+| GET `/api/sessions/{sessionId}/message-submissions/{submissionId}` | 200 receipt or literal JSON `null` |
+| POST `/api/sessions/{sessionId}/executions/{executionId}/stop` | Empty JSON object `{}` → 200 `StopReceipt` for Requested or Settled |
 | GET `/api/sessions/{sessionId}/snapshot` | 200 `SessionSnapshot` |
 | GET `/api/sessions/{sessionId}/content` | 200 `MessageContentPage` |
+
+**Breaking vocabulary change (phase 1):** there are no legacy route/member aliases.
+A submission body is `{submissionId, expectedHistoryRevision, text}`. A receipt is
+`{sessionId, submission:{submissionId,expectedHistoryRevision,text}, acceptance, refusalReason, executionId}`.
+`acceptance` is `accepted` or `refused`; accepted receipts have an execution ID, refused
+receipts have a refusal reason and null execution ID. Stop receipts and
+`SessionExecutionResult` use `executionId`; snapshots use `unsettledExecutionId` and
+`MessageRef` (including nested content cursors) uses `executionId`.
+Existing saved IDs, revisions, SQL identifiers/schema 5, decisions and exact-retry/Stop
+semantics are unchanged. All seven operations retain their existing validation, local
+admission gates, status mapping, no-store and read-only request-cancellation rules.
+The naming pass passed locked restore and **296/296 Release tests** without warnings,
+plus independent acceptance review. Raw HTTP checks verify the renamed receipt, Stop,
+snapshot and nested cursor fields, and reject legacy routes and required field names.
+Counts below describe the earlier feature checkpoints.
 
 Listing calls `SessionManager.ListPrimaryIdsAsync` and returns at most 60 IDs in newest-created
 order, without handles, summaries, titles, history loading or execution. Empty and retained
@@ -81,10 +96,10 @@ Legacy rows use a fixed descending binary-ID fallback, not recovered creation ch
 No last-used tracking, full-history navigation or automatic recovery is added.
 
 POST requires JSON. Encoded bodies are limited to 128 KiB, including chunked requests;
-decoded input text is limited to 16 KiB of strict UTF-8. Missing required command members,
+decoded submission text is limited to 16 KiB of strict UTF-8. Missing required submission members,
 null text, empty/malformed GUIDs and invalid cursors are rejected before admission.
 JSON uses camelCase properties and enum names, string GUIDs and integer revisions.
-Content GET requires six query fields: `runId`, `messageId`, `role` (`user` or `assistant`),
+Content GET requires six query fields: `executionId`, `messageId`, `role` (`user` or `assistant`),
 `historyRevision`, `segmentIndex`, `utf8Offset`. These directly describe Core's segment-local
 cursor; offsets are bytes, not string indices. Snapshot/content bounds and the distinct
 closed/final-output/settlement facts are unchanged from [Core](backend-development.md).
@@ -95,37 +110,37 @@ In another terminal, set `$origin` to the actual readiness origin, then:
 $headers = @{ 'X-Urd-Client' = 'browser' }
 $chat = Invoke-RestMethod "$origin/api/sessions" -Method Post -Headers $headers -ContentType 'application/json' -Body '{}'
 $view = Invoke-RestMethod "$origin/api/sessions/$($chat.sessionId)/snapshot" -Headers $headers
-$command = @{ inputId = [guid]::NewGuid().ToString(); expectedHistoryRevision = $view.historyRevision; text = 'Hello' } | ConvertTo-Json
-$receipt = Invoke-RestMethod "$origin/api/sessions/$($chat.sessionId)/inputs" -Method Post -Headers $headers -ContentType 'application/json' -Body $command
+$submission = @{ submissionId = [guid]::NewGuid().ToString(); expectedHistoryRevision = $view.historyRevision; text = 'Hello' } | ConvertTo-Json
+$receipt = Invoke-RestMethod "$origin/api/sessions/$($chat.sessionId)/message-submissions" -Method Post -Headers $headers -ContentType 'application/json' -Body $submission
 $receipt # A durable admission decision, not a completed answer.
 ```
 
 Poll the snapshot to observe committed text and settlement; use content reads beyond previews.
-A distinct busy Send can receive an Accepted receipt for durable steering in the owned run,
+A distinct busy Send can receive an Accepted receipt for durable steering in the owned execution,
 up to eight nonterminal input deliveries. At the next safe request boundary, tool results
 precede separate user messages in admission order; pending steering also continues after a
 successful no-tool response. Already-claimed requests are unchanged. The HTTP layer adds no
 busy policy or steering-specific routes and does not turn a durable refusal into an HTTP error.
 Public reads remain user/assistant text only; there is no tool-inspection endpoint.
 
-Stop addresses the observed run ID, never a replacement: `Requested` acknowledges committed
+Stop addresses the observed execution ID, never a replacement: `Requested` acknowledges committed
 intent and pending-steering retirement, not finished cleanup; `Settled` includes the saved
-outcome. Retrying reports current status. Missing/wrong-session runs return 404; an unresolved
-unowned run returns 409 with an `Unavailable` receipt, without mutation or fake settlement.
+outcome. Retrying reports current status. Missing/wrong-session executions return 404; an unresolved
+unowned execution returns 409 with an `Unavailable` receipt, without mutation or fake settlement.
 Poll existing snapshots for stopping/fencing and saved settlement; no completion endpoint was added.
 Core initiates local cancellation even if the Stop write fails, fences admission and returns
 503 rather than a false durable acknowledgement. Local stopping also blocks late output,
-successful request completion and new model/tool work; snapshots include that local intent,
+successful request completion and new LLM/tool work; snapshots include that local intent,
 not a promise it was saved. Actual tool-result evidence may still be persisted.
-The driver joins cancellation callbacks and model/tool cleanup, not the HTTP request.
+The driver joins cancellation callbacks and LLM/tool cleanup, not the HTTP request.
 A held cleanup remains visibly stopping; callback faults leave fenced/unsettled work.
 
 Errors: 400 malformed input/cursor, 413 oversized body/text, 415 non-JSON POST or unsupported charset,
-404 missing session/message/run, 409 conflicting input identity, stale content revision or unavailable Stop,
-503 shutdown admission/storage failure. Input conflicts are classified by Core's
-`InputConflictException`, not exception text or every `InvalidOperationException`.
+404 missing session/message/execution, 409 conflicting submission identity, stale content revision or unavailable Stop,
+503 shutdown admission/storage failure. Submission conflicts are classified by Core's
+`UserMessageConflictException`, not exception text or every `InvalidOperationException`.
 None of these errors—or an absent receipt—proves an earlier Send was durably refused.
-Only a receipt matching the session and entire original command resolves unknown admission.
+Only a receipt matching the session and entire original submission resolves unknown admission.
 An explicit retry repeats the exact ID/text/revision; no server mutation retries occur.
 Lost creation acknowledgement remains unknown. Listing can rediscover saved IDs, but cannot
 associate any returned ID with that unacknowledged create or justify automatic retry.
@@ -136,12 +151,12 @@ Do not automatically create another chat to hide that uncertainty.
 `Program.RunServerAsync(ServerOptions, Action<Uri>, CancellationToken)` owns one run.
 `ServerOptions` validates paths/ports without I/O. The run creates the explicit directory,
 opens `urd.lock` with exclusive sharing, then opens `urd.sqlite` and composes one store,
-manager and deterministic streaming `FakeChatClient`. Constructors do not start model work.
+manager and deterministic streaming `FakeChatClient`. Constructors do not start LLM work.
 The fake client returns `Hello from Urd.`; no health/read request invokes it.
 An internal overload accepts a client factory for controlled composition tests. The run
 constructs and owns that client inside the same lifetime; CLI behavior is unchanged.
 
-Request cancellation applies to listing/receipt/snapshot/content reads, not accepted model work.
+Request cancellation applies to listing/receipt/snapshot/content reads, not accepted LLM work.
 Listing's `RequestAborted` owns only that bounded read, never execution; cancellation may abandon
 its guard wait or precede the synchronous read, not interrupt an in-progress SQLite query.
 Create/Send handlers return after admission and Stop after intent acknowledgement, without waiting
@@ -161,9 +176,9 @@ the CLI exits unsuccessfully without explicitly disposing resources beneath unce
 The stop token requests shutdown; it is not a deadline or permission to abandon cleanup.
 
 Normal reopen preserves saved history and does not replay work. Opening a database does
-**not** recover orphan runs or make a previously fenced conversation usable again.
+**not** recover orphan executions or make a previously fenced conversation usable again.
 Stop retires pending steering without rewriting Accepted receipts or automatically carrying
-it into another run. Separate independent worker chats continue; bounded-descendant ownership
+it into another execution. Separate independent worker chats continue; bounded-descendant ownership
 requirements remain in [architecture](ARCHITECTURE.md) and [session design](SESSION-DESIGN.md),
 not a new child runtime. Stop cannot undo effects or forcibly kill arbitrary in-process functions.
 The CLI still configures only its deterministic text client, not tools. No schema, framework or UI
@@ -173,7 +188,7 @@ change accompanies public Stop.
 
 The listing slice passed locked restore, independent review and **295/295 Release tests**, without
 warnings. Real Kestrel/SQLite tests cover multiple pages, another client, reopen/cursor reuse,
-invalid cursors, local gates/no-store/no-body rules and storage failures, with no model calls.
+invalid cursors, local gates/no-store/no-body rules and storage failures, with no LLM calls.
 Core/storage tests cover migration/rollback, no hydration/replay and cancellation isolation;
 see [backend evidence](backend-development.md#saved-primary-id-discovery). No UI qualification is implied.
 
@@ -186,7 +201,7 @@ These do not qualify real tools, subprocess termination or subagent-runtime canc
 The previous steering/fake-tool checkpoint passed locked restore and the full Release
 solution suite: **259/259** tests, with no warnings. Its real Kestrel/SQLite
 `BusyHttpSendsBecomeDurableSteeringWithoutChangingTheRoutes` case verifies Accepted busy
-Sends, receipt lookup/exact retry and ordered continuation in the same run through the
+Sends, receipt lookup/exact retry and ordered continuation in the same execution through the
 existing routes. Core tests cover fake-tool execution and lifecycle/fault boundaries;
 HTTP does not expose tool inspection or configure real tools.
 
@@ -206,10 +221,10 @@ or turning a saved refusal into HTTP 409; the restored nine-test route suite pas
 
 The child readiness test explicitly terminates its own process after health checks;
 that is **not** evidence of graceful shutdown. Separate in-process tests use the actual
-server's stop token and await completion. A gated model now proves that HTTP-admitted work
-keeps shutdown, the client and directory lease live until model cleanup releases and
+server's stop token and await completion. A gated LLM now proves that HTTP-admitted work
+keeps shutdown, the client and directory lease live until LLM cleanup releases and
 settlement saves. A sender that closes without reading its acknowledgement can retrieve
-and retry its retained receipt while the model continues; this does not force a precise
+and retry its retained receipt while the LLM continues; this does not force a precise
 in-flight `RequestAborted` race. Core tests independently cover callbacks and persistence
 failures. That earlier evidence did not qualify queue/steering. Neither it nor the current
 fake-tool checkpoint qualifies browser behavior, load or real tools/providers.

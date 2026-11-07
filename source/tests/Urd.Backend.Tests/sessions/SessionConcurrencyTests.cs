@@ -38,15 +38,15 @@ public sealed class SessionConcurrencyTests {
   }
 
   [Fact]
-  public async Task ConcurrentExactSubmissionsShareOneDurableReceiptRunAndModelRequest() {
+  public async Task ConcurrentExactSubmissionsShareOneDurableReceiptExecutionAndLlmRequest() {
     var ready = Signal();
     var start = Signal();
-    var modelEntered = Signal();
-    var modelRelease = Signal();
+    var llmEntered = Signal();
+    var llmRelease = Signal();
     int waiting = 0;
     async IAsyncEnumerable<ChatResponseUpdate> Response([EnumeratorCancellation] CancellationToken token) {
-      modelEntered.TrySetResult();
-      await modelRelease.Task.WaitAsync(token);
+      llmEntered.TrySetResult();
+      await llmRelease.Task.WaitAsync(token);
       yield return new() { FinishReason = ChatFinishReason.Stop };
     }
 
@@ -55,45 +55,45 @@ public sealed class SessionConcurrencyTests {
     var store = SessionStore.Open(database.Path);
     var manager = new SessionManager(store, client);
     PrimarySession session = await manager.CreatePrimaryAsync();
-    var command = new InputCommand(Guid.NewGuid(), 0, "concurrent exact retry");
-    Task<InputReceipt>[] submissions = Enumerable.Range(0, 2).Select(_ => Task.Run(async () => {
+    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "concurrent exact retry");
+    Task<UserMessageReceipt>[] submissions = Enumerable.Range(0, 2).Select(_ => Task.Run(async () => {
       if (Interlocked.Increment(ref waiting) == 2)
         ready.TrySetResult();
       await start.Task;
-      return await session.SubmitUserInputAsync(command);
+      return await session.SubmitUserMessageAsync(submission);
     })).ToArray();
     try {
       await ready.Task.WaitAsync(TestTimeout);
       start.TrySetResult();
-      InputReceipt[] receipts = await Task.WhenAll(submissions).WaitAsync(TestTimeout);
-      await modelEntered.Task.WaitAsync(TestTimeout);
+      UserMessageReceipt[] receipts = await Task.WhenAll(submissions).WaitAsync(TestTimeout);
+      await llmEntered.Task.WaitAsync(TestTimeout);
 
-      Assert.Equal(InputDecision.Accepted, receipts[0].Decision);
-      Guid runId = Assert.IsType<Guid>(receipts[0].RunId);
+      Assert.Equal(MessageAcceptance.Accepted, receipts[0].Acceptance);
+      Guid executionId = Assert.IsType<Guid>(receipts[0].ExecutionId);
       Assert.Equal(receipts[0], receipts[1]);
-      Assert.Equal(receipts[0], await session.GetInputReceiptAsync(command.InputId));
-      Assert.Single(StoredInputs.Read(database));
-      Assert.Single(StoredRuns.Read(database));
-      Assert.Single(StoredRuns.ReadRequests(database));
+      Assert.Equal(receipts[0], await session.GetUserMessageReceiptAsync(submission.SubmissionId));
+      Assert.Single(StoredSubmissions.Read(database));
+      Assert.Single(StoredExecutions.Read(database));
+      Assert.Single(StoredExecutions.ReadRequests(database));
       Assert.Equal(1, client.Calls);
-      Assert.False(session.WaitForSettlementAsync(runId).IsCompleted);
+      Assert.False(session.WaitForSettlementAsync(executionId).IsCompleted);
 
-      modelRelease.TrySetResult();
-      ExecutionResult[] settlements = await Task.WhenAll(receipts.Select(receipt =>
-          session.WaitForSettlementAsync(receipt.RunId!.Value))).WaitAsync(TestTimeout);
+      llmRelease.TrySetResult();
+      SessionExecutionResult[] settlements = await Task.WhenAll(receipts.Select(receipt =>
+          session.WaitForSettlementAsync(receipt.ExecutionId!.Value))).WaitAsync(TestTimeout);
       Assert.Equal(settlements[0], settlements[1]);
       Assert.Equal(ExecutionOutcome.Completed, settlements[0].Outcome);
       Assert.Equal(1, client.Calls);
-      Assert.Single(StoredRuns.ReadRequests(database));
+      Assert.Single(StoredExecutions.ReadRequests(database));
     } finally {
       start.TrySetResult();
-      modelRelease.TrySetResult();
+      llmRelease.TrySetResult();
       // Join all callers before discovering runs, then drain owned work before disposal.
-      InputReceipt[] receipts = await Task.WhenAll(submissions).WaitAsync(TestTimeout);
-      foreach (Guid runId in receipts.Where(receipt => receipt.RunId.HasValue)
-                   .Select(receipt => receipt.RunId!.Value).Distinct()) {
-        await session.RequestStopAsync(runId);
-        await session.WaitForSettlementAsync(runId).WaitAsync(TestTimeout);
+      UserMessageReceipt[] receipts = await Task.WhenAll(submissions).WaitAsync(TestTimeout);
+      foreach (Guid executionId in receipts.Where(receipt => receipt.ExecutionId.HasValue)
+                   .Select(receipt => receipt.ExecutionId!.Value).Distinct()) {
+        await session.RequestStopAsync(executionId);
+        await session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout);
       }
       store.Dispose();
       client.Dispose();
@@ -102,14 +102,14 @@ public sealed class SessionConcurrencyTests {
   }
 
   [Fact]
-  public async Task CancellingSettlementWaitDoesNotCancelOwnedModelWork() {
-    var modelEntered = Signal();
-    var modelRelease = Signal();
-    CancellationToken modelToken = default;
+  public async Task CancellingSettlementWaitDoesNotCancelOwnedLlmWork() {
+    var llmEntered = Signal();
+    var llmRelease = Signal();
+    CancellationToken llmToken = default;
     async IAsyncEnumerable<ChatResponseUpdate> Response([EnumeratorCancellation] CancellationToken token) {
-      modelToken = token;
-      modelEntered.TrySetResult();
-      await modelRelease.Task.WaitAsync(token);
+      llmToken = token;
+      llmEntered.TrySetResult();
+      await llmRelease.Task.WaitAsync(token);
       yield return new() { Role = ChatRole.Assistant, Contents = [new TextContent("completed after release")] };
       yield return new() { FinishReason = ChatFinishReason.Stop };
     }
@@ -119,39 +119,39 @@ public sealed class SessionConcurrencyTests {
     var store = SessionStore.Open(database.Path);
     var manager = new SessionManager(store, client);
     PrimarySession session = await manager.CreatePrimaryAsync();
-    Guid? ownedRun = null;
+    Guid? ownedExecution = null;
     using var waitCancellation = new CancellationTokenSource();
     try {
-      InputReceipt receipt = await session.SubmitUserInputAsync(new InputCommand(Guid.NewGuid(), 0, "go"));
-      ownedRun = receipt.RunId;
-      Assert.Equal(InputDecision.Accepted, receipt.Decision);
-      Guid runId = Assert.IsType<Guid>(ownedRun);
-      await modelEntered.Task.WaitAsync(TestTimeout);
+      UserMessageReceipt receipt = await session.SubmitUserMessageAsync(new UserMessageSubmission(Guid.NewGuid(), 0, "go"));
+      ownedExecution = receipt.ExecutionId;
+      Assert.Equal(MessageAcceptance.Accepted, receipt.Acceptance);
+      Guid executionId = Assert.IsType<Guid>(ownedExecution);
+      await llmEntered.Task.WaitAsync(TestTimeout);
 
-      Task<ExecutionResult> cancelledWait = session.WaitForSettlementAsync(runId, waitCancellation.Token);
+      Task<SessionExecutionResult> cancelledWait = session.WaitForSettlementAsync(executionId, waitCancellation.Token);
       Assert.False(cancelledWait.IsCompleted);
       await waitCancellation.CancelAsync();
       await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelledWait.WaitAsync(TestTimeout));
-      Assert.False(modelToken.IsCancellationRequested);
-      Assert.False(session.WaitForSettlementAsync(runId).IsCompleted);
-      StoredRun unsettled = Assert.Single(StoredRuns.Read(database));
+      Assert.False(llmToken.IsCancellationRequested);
+      Assert.False(session.WaitForSettlementAsync(executionId).IsCompleted);
+      StoredExecution unsettled = Assert.Single(StoredExecutions.Read(database));
       Assert.False(unsettled.Stopping);
       Assert.Null(unsettled.Outcome);
-      Assert.Null(Assert.Single(StoredRuns.ReadRequests(database)).Outcome);
+      Assert.Null(Assert.Single(StoredExecutions.ReadRequests(database)).Outcome);
 
-      modelRelease.TrySetResult();
+      llmRelease.TrySetResult();
       Assert.Equal(ExecutionOutcome.Completed,
-          (await session.WaitForSettlementAsync(runId).WaitAsync(TestTimeout)).Outcome);
-      Assert.Equal(ExecutionOutcome.Completed, Assert.Single(StoredRuns.Read(database)).Outcome);
-      Assert.Equal(ExecutionOutcome.Completed, Assert.Single(StoredRuns.ReadRequests(database)).Outcome);
-      Assert.Equal("completed after release", StoredOutput.ReadText(database));
+          (await session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout)).Outcome);
+      Assert.Equal(ExecutionOutcome.Completed, Assert.Single(StoredExecutions.Read(database)).Outcome);
+      Assert.Equal(ExecutionOutcome.Completed, Assert.Single(StoredExecutions.ReadRequests(database)).Outcome);
+      Assert.Equal("completed after release", StoredLlmResponses.ReadText(database));
       Assert.Equal(1, client.Calls);
       Assert.Equal(0, client.DisposeCalls);
     } finally {
-      modelRelease.TrySetResult();
-      if (ownedRun is { } runId) {
-        await session.RequestStopAsync(runId);
-        await session.WaitForSettlementAsync(runId).WaitAsync(TestTimeout);
+      llmRelease.TrySetResult();
+      if (ownedExecution is { } executionId) {
+        await session.RequestStopAsync(executionId);
+        await session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout);
       }
       store.Dispose();
       client.Dispose();

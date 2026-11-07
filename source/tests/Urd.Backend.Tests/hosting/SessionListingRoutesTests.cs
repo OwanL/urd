@@ -14,13 +14,13 @@ public sealed class SessionListingRoutesTests {
   private static readonly JsonSerializerOptions json = new(JsonSerializerDefaults.Web);
 
   [Fact]
-  public async Task BoundedPagesDiscoverEmptyChatsFromAnotherClientAndAfterReopenWithoutModelWork() {
+  public async Task BoundedPagesDiscoverEmptyChatsFromAnotherClientAndAfterReopenWithoutLlmWork() {
     using var database = new TemporaryDatabase();
-    var model = new ScriptedChatClient(ScriptedResponses.Complete);
+    var llm = new ScriptedChatClient(ScriptedResponses.Complete);
     var created = new List<Guid>();
     string cursor;
     List<StoredSessionRow> retained;
-    await using (var server = new RunningServer(Options(database), createClient: () => model)) {
+    await using (var server = new RunningServer(Options(database), createClient: () => llm)) {
       Uri origin = await server.WaitForReadyAsync();
       SessionIdPage empty = await ReadPageAsync(server.Client);
       Assert.Empty(empty.SessionIds);
@@ -48,29 +48,29 @@ public sealed class SessionListingRoutesTests {
       Assert.Empty(pastOldest.SessionIds);
       Assert.Null(pastOldest.NextCursor);
       Assert.Equal(retained, StoredSessions.Read(database));
-      Assert.Equal(0, model.Calls);
+      Assert.Equal(0, llm.Calls);
     }
 
-    var reopenedModel = new ScriptedChatClient(ScriptedResponses.Complete);
-    await using var reopened = new RunningServer(Options(database), createClient: () => reopenedModel);
+    var reopenedLlm = new ScriptedChatClient(ScriptedResponses.Complete);
+    await using var reopened = new RunningServer(Options(database), createClient: () => reopenedLlm);
     await reopened.WaitForReadyAsync();
     SessionIdPage resumed = await ReadPageAsync(reopened.Client, cursor);
     Assert.Equal(created.AsEnumerable().Reverse().Skip(60), resumed.SessionIds);
     Assert.Null(resumed.NextCursor);
     Assert.Equal(created.AsEnumerable().Reverse().Take(60), (await ReadPageAsync(reopened.Client)).SessionIds);
     Assert.Equal(retained, StoredSessions.Read(database));
-    Assert.Empty(StoredInputs.Read(database));
-    Assert.Empty(StoredRuns.Read(database));
-    Assert.Empty(StoredRuns.ReadRequests(database));
-    Assert.Equal(0, model.Calls);
-    Assert.Equal(0, reopenedModel.Calls);
+    Assert.Empty(StoredSubmissions.Read(database));
+    Assert.Empty(StoredExecutions.Read(database));
+    Assert.Empty(StoredExecutions.ReadRequests(database));
+    Assert.Equal(0, llm.Calls);
+    Assert.Equal(0, reopenedLlm.Calls);
   }
 
   [Fact]
   public async Task InvalidCursorsBodiesAndForeignOrUnmarkedReadsCannotBypassThePrivateReadRules() {
     using var database = new TemporaryDatabase();
-    var model = new ScriptedChatClient(ScriptedResponses.Complete);
-    await using var server = new RunningServer(Options(database), createClient: () => model);
+    var llm = new ScriptedChatClient(ScriptedResponses.Complete);
+    await using var server = new RunningServer(Options(database), createClient: () => llm);
     Uri origin = await server.WaitForReadyAsync();
     foreach (string cursor in new[] { "", "invalid", "0", "-1", "9223372036854775808" }) {
       using HttpResponseMessage response = await RequestAsync(server.Client,
@@ -117,23 +117,23 @@ public sealed class SessionListingRoutesTests {
       AssertPrivateResponse(response);
     }
     Assert.Empty(StoredSessions.Read(database));
-    Assert.Empty(StoredInputs.Read(database));
-    Assert.Empty(StoredRuns.Read(database));
-    Assert.Equal(0, model.Calls);
+    Assert.Empty(StoredSubmissions.Read(database));
+    Assert.Empty(StoredExecutions.Read(database));
+    Assert.Equal(0, llm.Calls);
   }
 
   [Fact]
   public async Task StorageFailureRemainsAServiceUnavailablePrivateResponse() {
     using var database = new TemporaryDatabase();
-    var model = new ScriptedChatClient(ScriptedResponses.Complete);
-    await using var server = new RunningServer(Options(database), createClient: () => model);
+    var llm = new ScriptedChatClient(ScriptedResponses.Complete);
+    await using var server = new RunningServer(Options(database), createClient: () => llm);
     await server.WaitForReadyAsync();
     database.Execute("DROP TABLE session_creation;");
     using HttpResponseMessage response = await RequestAsync(server.Client, new(HttpMethod.Get, "/api/sessions"));
     Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
     AssertPrivateResponse(response);
     Assert.Empty(StoredSessions.Read(database));
-    Assert.Equal(0, model.Calls);
+    Assert.Equal(0, llm.Calls);
   }
 
   private static ServerOptions Options(TemporaryDatabase database) => new(Path.GetDirectoryName(database.Path)!, 0);

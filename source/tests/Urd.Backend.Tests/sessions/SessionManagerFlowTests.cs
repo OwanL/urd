@@ -26,41 +26,41 @@ public sealed class SessionManagerFlowTests {
     var database = new TemporaryDatabase();
     var client = new ScriptedChatClient(Response);
     SessionStore? store = null;
-    var runs = new List<(PrimarySession Session, Guid RunId)>();
+    var executions = new List<(PrimarySession Session, Guid ExecutionId)>();
     try {
       store = SessionStore.Open(database.Path);
       var manager = new SessionManager(store, client);
       PrimarySession[] sessions = [await manager.CreatePrimaryAsync(), await manager.CreatePrimaryAsync()];
       Assert.NotEqual(sessions[0].Id, sessions[1].Id);
-      Guid inputId = Guid.NewGuid();
-      InputCommand[] commands = [new(inputId, 0, "first chat"), new(inputId, 0, "second chat")];
-      var receipts = new InputReceipt[2];
+      Guid submissionId = Guid.NewGuid();
+      UserMessageSubmission[] submissions = [new(submissionId, 0, "first chat"), new(submissionId, 0, "second chat")];
+      var receipts = new UserMessageReceipt[2];
       for (int i = 0; i < sessions.Length; i++) {
         Assert.Same(sessions[i], await manager.GetPrimaryAsync(sessions[i].Id));
-        receipts[i] = await sessions[i].SubmitUserInputAsync(commands[i]);
-        if (receipts[i].RunId is { } runId)
-          runs.Add((sessions[i], runId));
-        Assert.Equal(InputDecision.Accepted, receipts[i].Decision);
-        Assert.IsType<Guid>(receipts[i].RunId);
+        receipts[i] = await sessions[i].SubmitUserMessageAsync(submissions[i]);
+        if (receipts[i].ExecutionId is { } executionId)
+          executions.Add((sessions[i], executionId));
+        Assert.Equal(MessageAcceptance.Accepted, receipts[i].Acceptance);
+        Assert.IsType<Guid>(receipts[i].ExecutionId);
         Assert.Equal(sessions[i].Id, receipts[i].SessionId);
-        Assert.Equal(commands[i], receipts[i].Command);
+        Assert.Equal(submissions[i], receipts[i].Submission);
       }
 
       await bothEntered.Task.WaitAsync(TestTimeout);
-      Assert.All(runs, run => Assert.False(run.Session.WaitForSettlementAsync(run.RunId).IsCompleted));
+      Assert.All(executions, execution => Assert.False(execution.Session.WaitForSettlementAsync(execution.ExecutionId).IsCompleted));
       for (int i = 0; i < sessions.Length; i++) {
-        Assert.Equal(receipts[i], await sessions[i].GetInputReceiptAsync(inputId));
-        InputReceipt retry = await sessions[i].SubmitUserInputAsync(commands[i]);
-        if (retry.RunId is { } runId && runId != receipts[i].RunId)
-          runs.Add((sessions[i], runId));
+        Assert.Equal(receipts[i], await sessions[i].GetUserMessageReceiptAsync(submissionId));
+        UserMessageReceipt retry = await sessions[i].SubmitUserMessageAsync(submissions[i]);
+        if (retry.ExecutionId is { } executionId && executionId != receipts[i].ExecutionId)
+          executions.Add((sessions[i], executionId));
         Assert.Equal(receipts[i], retry);
       }
       Assert.Equal(2, client.Calls);
       release.TrySetResult();
-      ExecutionResult[] settlements = await Task.WhenAll(runs.Select(run =>
-          run.Session.WaitForSettlementAsync(run.RunId))).WaitAsync(TestTimeout);
+      SessionExecutionResult[] settlements = await Task.WhenAll(executions.Select(execution =>
+          execution.Session.WaitForSettlementAsync(execution.ExecutionId))).WaitAsync(TestTimeout);
       Assert.All(settlements, settlement => Assert.Equal(ExecutionOutcome.Completed, settlement.Outcome));
-      runs.Clear();
+      executions.Clear();
       store.Dispose();
       Assert.Equal(0, client.DisposeCalls);
 
@@ -70,21 +70,21 @@ public sealed class SessionManagerFlowTests {
         PrimarySession loaded = await reopenedManager.GetPrimaryAsync(sessions[i].Id);
         Assert.NotSame(sessions[i], loaded);
         Assert.Same(loaded, await reopenedManager.GetPrimaryAsync(loaded.Id));
-        Assert.Equal(receipts[i], await loaded.GetInputReceiptAsync(inputId));
-        InputReceipt retry = await loaded.SubmitUserInputAsync(commands[i]);
-        if (retry.RunId is { } runId)
-          runs.Add((loaded, runId));
+        Assert.Equal(receipts[i], await loaded.GetUserMessageReceiptAsync(submissionId));
+        UserMessageReceipt retry = await loaded.SubmitUserMessageAsync(submissions[i]);
+        if (retry.ExecutionId is { } executionId)
+          executions.Add((loaded, executionId));
         Assert.Equal(receipts[i], retry);
         Assert.Equal(ExecutionOutcome.Completed,
-            (await loaded.WaitForSettlementAsync(retry.RunId!.Value).WaitAsync(TestTimeout)).Outcome);
+            (await loaded.WaitForSettlementAsync(retry.ExecutionId!.Value).WaitAsync(TestTimeout)).Outcome);
       }
       Assert.Equal(2, client.Calls);
       Assert.Equal(0, client.DisposeCalls);
     } finally {
       release.TrySetResult();
       // A failed timed wait must not dispose borrowed resources beneath live work.
-      await Task.WhenAll(runs.Select(run => run.Session.RequestStopAsync(run.RunId))).WaitAsync(TestTimeout);
-      await Task.WhenAll(runs.Select(run => run.Session.WaitForSettlementAsync(run.RunId))).WaitAsync(TestTimeout);
+      await Task.WhenAll(executions.Select(execution => execution.Session.RequestStopAsync(execution.ExecutionId))).WaitAsync(TestTimeout);
+      await Task.WhenAll(executions.Select(execution => execution.Session.WaitForSettlementAsync(execution.ExecutionId))).WaitAsync(TestTimeout);
       store?.Dispose();
       client.Dispose();
       database.Dispose();

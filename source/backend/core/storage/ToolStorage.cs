@@ -6,7 +6,7 @@ namespace Urd.Core.Storage;
 
 // Claims authorized calls before invocation and retains actual results without replay.
 internal sealed class ToolStorage(Database database) {
-  internal bool TryStart(Guid sessionId, Guid runId, long revision, Guid requestId, string callId) {
+  internal bool TryStart(Guid sessionId, Guid executionId, long revision, Guid requestId, string callId) {
     return database.Write(transaction => {
       using SqliteCommand start = database.Command(transaction, """
         UPDATE execution_tools SET started = 1
@@ -24,13 +24,13 @@ internal sealed class ToolStorage(Database database) {
                     AND NOT EXISTS (SELECT 1 FROM execution_requests later
                         WHERE later.run_id = $run AND later.request_index > q.request_index));
         """,
-          ("$session", sessionId), ("$run", runId), ("$revision", revision),
+          ("$session", sessionId), ("$run", executionId), ("$revision", revision),
           ("$request", requestId), ("$call", callId), ("$completed", (int)ExecutionOutcome.Completed));
       return start.ExecuteNonQuery() == 1;
     });
   }
 
-  internal bool Complete(Guid sessionId, Guid runId, long revision, Guid requestId, LlmToolResult result) {
+  internal bool Complete(Guid sessionId, Guid executionId, long revision, Guid requestId, LlmToolResult result) {
     if (!Enum.IsDefined(result.Outcome))
       throw new ArgumentOutOfRangeException(nameof(result));
     string json = JsonText(result.Result);
@@ -45,7 +45,7 @@ internal sealed class ToolStorage(Database database) {
         WHERE t.run_id = $run AND t.request_id = $request AND t.call_id = $call
             AND r.session_id = $session AND r.history_revision = $revision AND s.history_revision = $revision;
         """,
-          ("$session", sessionId), ("$run", runId), ("$revision", revision),
+          ("$session", sessionId), ("$run", executionId), ("$revision", revision),
           ("$request", requestId), ("$call", result.CallId)))
       using (SqliteDataReader reader = read.ExecuteReader()) {
         if (!reader.Read() || reader.GetInt32(0) == 0)

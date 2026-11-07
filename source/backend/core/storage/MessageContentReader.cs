@@ -42,7 +42,7 @@ internal sealed class MessageContentReader {
     ArgumentNullException.ThrowIfNull(cursor);
     ArgumentNullException.ThrowIfNull(cursor.Message);
     MessageRef message = cursor.Message;
-    if (sessionId == Guid.Empty || message.RunId == Guid.Empty || message.MessageId == Guid.Empty
+    if (sessionId == Guid.Empty || message.ExecutionId == Guid.Empty || message.MessageId == Guid.Empty
         || !Enum.IsDefined(message.Role)) {
       throw new ArgumentException("Content requires a session and a valid message reference.", nameof(cursor));
     }
@@ -66,7 +66,7 @@ internal sealed class MessageContentReader {
   }
 
   private MessageMetadata ReadMetadata(SqliteTransaction transaction, Guid sessionId, MessageRef message) {
-    // Resolve the exact indexed identity, never the first request or input of a run.
+    // Resolve the exact indexed identity, never the first request or submission of an execution.
     string sourceSql = message.Role == MessageRole.User ? """
       SELECT i.input_id, i.request_id
       FROM execution_messages m
@@ -88,7 +88,7 @@ internal sealed class MessageContentReader {
       """;
     using SqliteCommand metadata = database.Command(transaction, sourceSql,
         ("$session", sessionId),
-        ("$run", message.RunId),
+        ("$run", message.ExecutionId),
         ("$role", (int)message.Role),
         ("$message", message.MessageId),
         ("$revision", message.HistoryRevision));
@@ -107,11 +107,11 @@ internal sealed class MessageContentReader {
     bool finalOutputCommitted = reader.GetInt32(2) != 0;
     bool requestEnded = !reader.IsDBNull(3);
     bool stopRequested = reader.GetInt32(4) != 0;
-    bool runSettled = !reader.IsDBNull(5);
+    bool executionSettled = !reader.IsDBNull(5);
     if (segmentCount <= 0)
       throw new InvalidDataException("An output message has no committed segments.");
 
-    bool isClosed = finalOutputCommitted || stopRequested || runSettled || requestEnded;
+    bool isClosed = finalOutputCommitted || stopRequested || executionSettled || requestEnded;
     return new(Guid.Empty, requestId, segmentCount, isClosed, finalOutputCommitted);
   }
 
@@ -164,7 +164,7 @@ internal sealed class MessageContentReader {
           FROM input_decisions WHERE session_id = $session AND input_id = $input AND decision = 1;
           """,
             ("$session", sessionId),
-            ("$input", metadata.InputId),
+            ("$input", metadata.SubmissionId),
             ("$offset", utf8Offset),
             ("$count", prefixBytes))
         : database.Command(transaction, """
@@ -213,5 +213,5 @@ internal sealed class MessageContentReader {
 
   // Describes committed message segments and their completion state.
   private sealed record MessageMetadata(
-      Guid InputId, Guid? RequestId, long SegmentCount, bool IsClosed, bool FinalOutputCommitted);
+      Guid SubmissionId, Guid? RequestId, long SegmentCount, bool IsClosed, bool FinalOutputCommitted);
 }

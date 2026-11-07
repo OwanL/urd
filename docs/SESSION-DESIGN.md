@@ -20,7 +20,7 @@ The owner participated before the structure was settled:
   `ChatSession`/`ConversationSession`; `SubagentSession` was considered clear.
   The owner preferred `SessionBase` or visibly explicit base-type naming.
 - **Auxiliary operations:** roughly accepted separate title/compaction/pruning
-  operations sharing model-call behaviour, rather than full session lifecycles.
+  operations sharing LLM-call behaviour, rather than full session lifecycles.
   After rejecting the unclear `ModelRequestExecutor` name, the owner accepted
   using selected `IChatClient` directly if it does the required job. No extra
   first-party facade is mandated. Provider qualification still matters.
@@ -40,14 +40,14 @@ The owner participated before the structure was settled:
 
 | Owner | Facts or resources | Lifetime |
 | --- | --- | --- |
-| **Durable records** | Session identity/kind/settings; ordered original history; model-context representation; assignments/results; explicit delayed follow-ups; usage totals; attachment references | SQLite/files under retention rules; survive backend restart. Not serialized live object graphs. |
-| **Live session/execution objects** | Admission/mutation guard; current execution identity; model/tool work, cancellation, queued input and waits; bounded live stream state | Backend-owned. A session handle can be loaded lazily; an execution exists only while work is active. Neither needs its own thread/process. |
+| **Durable records** | Session identity/kind/settings; ordered original history; LLM-context representation; assignments/results; explicit delayed follow-ups; usage totals; attachment references | SQLite/files under retention rules; survive backend restart. Not serialized live object graphs. |
+| **Live session/execution objects** | Admission/mutation guard; current execution identity; LLM/tool work, cancellation, queued input and waits; bounded live stream state | Backend-owned. A session handle can be loaded lazily; an execution exists only while work is active. Neither needs its own thread/process. |
 | **Client presentation** | Selected session, unsent drafts, finite page/detail caches, view/connection state | Client-owned where the approved simplicity/cost conditions permit. Never authority for whether an agent is running or an action occurred. |
 
 A stable session ID is allocated independently of its mutable title. Browsing
 history does not start an execution or require loading all history. The database
 is durable truth; an in-memory session is a controlled handle/cache, not a second
-independently writable history. Original readable history and the model's compacted
+independently writable history. Original readable history and the LLM's compacted
 context are different views: compaction does not erase the former.
 
 **Finished execution ≠ finished assignment ≠ closed session.** A worker can be
@@ -85,7 +85,7 @@ CatalogPruner ──────┘
   Finished helper detail remains inspectable until its containing primary closes,
   except detail removed by an explicit history edit. Nested helpers retain the
   same containing-primary retention boundary.
-- `SessionExecution`: the current async job, including model/tool cycle, pending
+- `SessionExecution`: the current async job, including LLM/tool cycle, pending
   steering, waits and cancellation. It reports progress/results through the
   session's guarded write path; it cannot append after an edit/close invalidates
   it. Settlement releases live resources, not retained session data. Long waits
@@ -109,7 +109,7 @@ CatalogPruner ──────┘
 answered: **“Makes sense. of course we should keep things open, i am sure things
 may change at implementation time”.** The working boundary puts identity/current
 execution, admission/Stop coordination and stale-update rejection in `SessionBase`;
-`SessionExecution` owns temporary task/cancellation/model-tool work, while
+`SessionExecution` owns temporary task/cancellation/LLM-tool work, while
 `SessionStore` owns atomic durable writes and revision checks. Editing, assignment
 and caller-specific policies stay with the appropriate concrete kind. “One run”
 means one main execution, not a ban on concurrent title generation. This supports
@@ -126,7 +126,7 @@ through a guarded metadata update. No auxiliary-session/job framework is needed.
 
 Only the two session kinds form an inheritance tree. `SessionExecution`, tool
 execution and auxiliary operations are **used/owned**, not inherited. No
-`UserAgent`, `DelegatedAgent`, model-specific or role-specific session subclasses
+`UserAgent`, `DelegatedAgent`, LLM-specific or role-specific session subclasses
 are justified. Execution Design reports the owner's preference to omit the full
 optional MEAI loop for its modest probe-code saving; the recommendation is one
 small Urd-owned cycle over `IChatClient`, not a different loop per kind. Production
@@ -168,7 +168,7 @@ or disposed handle is not confirmation that an external process has exited.
 Stop is distinct from close/delete and recovery: it does not delete history,
 undo completed effects or justify replay of uncertain work. The independent-close
 owner gate and creator-cleanup authority remain unchanged. Current runtime scope
-is primary-session/model work and configured fake `AIFunction`s only. This is
+is primary-session/LLM work and configured fake `AIFunction`s only. This is
 not implementation or qualification of bounded-subagent/process-tree cancellation;
 no future classes or frameworks are promised.
 
@@ -178,8 +178,8 @@ Logical facts below are **not a final schema or new class per row**:
 
 | Fact | Required distinction |
 | --- | --- |
-| Session/history | Stable identity and kind; open/snoozed/closing status as needed; ordered message/detail identities; suffix-edit identity/revision; original history versus model context. Missing/closed targets reject mutations—append must never implicitly recreate them. |
-| Admitted input/execution | Input identity and queued/delivered/interrupted status; correlation to the execution allowed to report progress. Transport receipt, model consumption and effect completion are not interchangeable. |
+| Session/history | Stable identity and kind; open/snoozed/closing status as needed; ordered message/detail identities; suffix-edit identity/revision; original history versus LLM context. Missing/closed targets reject mutations—append must never implicitly recreate them. |
+| Admitted input/execution | Input identity and queued/delivered/interrupted status; correlation to the execution allowed to report progress. Transport receipt, LLM consumption and effect completion are not interchangeable. |
 | Assignment/result | Task ID, requester, worker, accepted revision, state, explicit outcome/result. One nonterminal assignment per worker. Identical finish returns retained evidence; stale/conflicting finish cannot overwrite it. Persist before notification; notifications do not wake an idle requester by default. |
 | Follow-up | Stable registration/target, intended due time, request and dispatch/uncertainty evidence. A never-dispatched due request is not an interrupted effect being replayed. |
 | Retention | Compact usage after close; coordination facts while open participants/retained references need them; attachment references across sessions. No permanent conversation archive or unconditional infinite assignment retention. |
@@ -187,7 +187,7 @@ Logical facts below are **not a final schema or new class per row**:
 Use a narrow `SessionStore` with intent-specific transactions, not an ORM,
 event-sourcing engine or interchangeable-store framework. A small session lookup/
 creation coordinator (working name `SessionManager`) owns one active handle per
-ID and cross-session admission; it does not absorb the model loop. Session
+ID and cross-session admission; it does not absorb the LLM loop. Session
 commands enforce rules, then store operations commit facts atomically. Exact
 locking and method signatures remain implementation work.
 
@@ -206,7 +206,7 @@ Execution Design's newer owner alignment narrows the earlier discovery proposal:
 use qualified native appended definitions without an upfront invocation wrapper;
 otherwise include a stable invocation wrapper from the initial catalog for
 recovered tools. Retain AI pruning and one current-authority dispatch path. This
-**tool-invocation wrapper** is unrelated to the rejected extra model-client facade.
+**tool-invocation wrapper** is unrelated to the rejected extra LLM-client facade.
 Provider-specific terminal success must be established before tool dispatch:
 complete-looking arguments alone can survive a failed/incomplete/truncated response.
 
@@ -223,7 +223,7 @@ it does not qualify this entire walkthrough.
 | **Edit pending input** | Compare the exact pending input/delivery identity before replacement. Reject a delivery race; preserve whether input is steering or follow-up. Do not clear unrelated notes/results as a shortcut. No transcript suffix mutation or tool replay is involved. |
 | **Edit earlier prompt** | Stop and await affected execution; block new admission; atomically replace the suffix and invalidate stale execution/detail/context identities. Removed conversation does not roll back files/network actions or erase separately needed assignment evidence. Failure after committed replacement cannot restore the old tail on a guess. Then start replacement input deliberately. |
 | **Cancel / Stop** | Cancel active/queued work, tools, bounded subagents and all their descendants, plus applicable auxiliary work; join owned nested work and reject late child admission. Cancellation requested is not cleanup complete: retain stopping/fenced state until confirmed stopped, with no silent background work, false “Stopped” or overlapping replacement. A token/disposed object is not proof an external process died. Separately opened independent worker chats continue regardless of creator or human steering. Stop is not close/delete or recovery (§2 owner decision). |
-| **Bounded child** | Create a `SubagentSession` with stable caller identity and bucket selection; share the execution code, not its model context. Return one direct outcome. Release live execution at finish; retain lazy-readable child messages/tool detail with the containing chat. |
+| **Bounded child** | Create a `SubagentSession` with stable caller identity and bucket selection; share the execution code, not its LLM context. Return one direct outcome. Release live execution at finish; retain lazy-readable child messages/tool detail with the containing chat. |
 | **Independent worker / human steering** | Create another `PrimarySession`, then admit explicit durable work from its requester. Human input uses that same session; it neither changes type nor cancels the creator's cleanup authority. Idle without an explicit finish is awaiting-result, not success. Preserve default running-worker cleanup skip and instructions to inspect human use/results. |
 | **Parent final close** | Fence admission, stop bounded owned work, then delete the containing conversation/helper detail and cancel follow-ups targeting it. Retain needed assignment/results independently. Independent-worker cascade/survival is an owner gate: this sketch must not implement either implicitly. Self-close must not wait for its own execution to die before returning acceptance; cleanup completion is separate. |
 | **Browser disconnect** | Dispose that client's subscriptions, not the session or execution. Reconnect reads bounded durable/live state and command evidence; never blindly resubmits a command with a lost acknowledgement. Unsent drafts are not accepted work. |
@@ -326,7 +326,7 @@ disposable fixtures authorizes production implementation.
 - Durable command/task/history identities and atomic mutation boundaries: settle
   before binding the browser and retaining real data. Include schema-version
   handling and reference-aware cleanup; the experimental schema is insufficient.
-- Lossless provider/model-context representation and effect uncertainty: qualify
+- Lossless provider/LLM-context representation and effect uncertainty: qualify
   early with the chosen route; neither a common interface nor retries solve it.
 - How much behaviour truly belongs in `SessionBase`: test both kinds before
   expanding the base. Keep the working hierarchy small, not “set in stone” APIs.
@@ -347,14 +347,14 @@ a production layout automatically. The base scope and untested flows remain open
 
 **Follow-up, 2026-11-04:** Three focused flow groups passed in a temp-only C#
 fixture using request-only `IChatClient` (Abstractions 10.11.0), a deterministic
-fake model and real Microsoft.Data.Sqlite 10.0.14 transactions. These are fixture
+fake LLM and real Microsoft.Data.Sqlite 10.0.14 transactions. These are fixture
 pins, not new dependency selections. Two serial runs—DLL-hosted and apphost—each
 passed **42 assertions** (34 parent, 1 exiting child, 7 recovery child); the build
 had zero warnings/errors. Independent source and final evidence review were used.
 
 | Flow group | Established within the fixture |
 | --- | --- |
-| **Admission / stream / Stop** | One accepted run; a second admission rejected by both live handle and SQLite facts. Cancelling the synthetic browser reader left the model running and later output recorded. Stop remained “stopping” while fake model cleanup deliberately waited at a barrier; new admission and late output stayed blocked until it settled. A new run then worked; the old execution ID could not append. |
+| **Admission / stream / Stop** | One accepted run; a second admission rejected by both live handle and SQLite facts. Cancelling the synthetic browser reader left the LLM running and later output recorded. Stop remained “stopping” while fake LLM cleanup deliberately waited at a barrier; new admission and late output stayed blocked until it settled. A new run then worked; the old execution ID could not append. |
 | **Earlier edit / close / restart** | Edit blocked admission, awaited the old execution, then atomically replaced the suffix and advanced history identity. Delayed callbacks could neither append nor publish; an injected precommit failure rolled back both history and revision. A wrong history revision failed even with the current run ID. Direct session close awaited owned work and removed history; stale append/admission could not resurrect the ID. |
 | **Explicit assignment result** | A requester distinct from the named creator assigned work. Stream completion left no result; explicit resume advanced the accepted revision. Wrong-worker/stale finishes rejected; identical finishes returned retained evidence and conflicting finishes rejected. Closing the worker removed its conversation but retained the result for the other open requester, including after process restart. |
 
@@ -362,13 +362,13 @@ The parent launched its **own** child, which committed an accepted input/partial
 output while the fake request remained active, then exited with code 17 without
 graceful settlement. A fresh child reopened the database: committed edits/results
 and closed identity survived; the active marker became explicitly interrupted,
-old execution callbacks rejected and **zero model requests restarted**. This is
+old execution callbacks rejected and **zero LLM requests restarted**. This is
 process-exit/reopen evidence after returned commits, **not** a crash during a
 SQLite transaction, power-loss test or exactly-once external-effect guarantee.
 
-**What the split helped—and did not settle:** A temporary execution could own model
+**What the split helped—and did not settle:** A temporary execution could own LLM
 cancellation independently of the reader, while narrow guarded commands and
-intent-specific transactions protected durable facts. No extra model-client
+intent-specific transactions protected durable facts. No extra LLM-client
 facade, event bus or workflow engine was needed. The complexity did not disappear:
 Stop/edit must coordinate settlement **without waiting under the mutation guard**;
 history revision, execution ID and accepted assignment revision protect different
@@ -393,7 +393,7 @@ recording mechanics; combining that with these session guards remains untested.
 `README.md` commands, `build.log`, both run logs and database evidence. Runs used a
 started exclusive `urd:heavy-local-work` lease, cached SDK/packages, no compiler
 server and only owned sequential children. Children exited and no fixture process
-remained; generated build output was removed after review. No live model/network
+remained; generated build output was removed after review. No live LLM/network
 call, production source/schema, installation or activation was involved.
 
 ## 8. Resumed input/recovery review — 2026-11-05
@@ -410,7 +410,7 @@ owned work has actually stopped, keep the missing effect result marked unknown,
 never automatically replay it, and permit a fresh instruction. Do not add a
 chat-wide reconciliation-only lock or recovery wizard. Continuing does not mark
 the old command successful, undo its effects or authorize repeating it. Exact
-controls and model-context representation remain implementation work; this
+controls and LLM-context representation remain implementation work; this
 review did not qualify them. The recommendation was stated to the owner, not
 separately confirmed by them.
 
@@ -422,7 +422,7 @@ remain available while busy. A missing tool result and an unknown Send receipt
 are different problems, not one universal retry button.
 
 **First-checkpoint staging remains a proposal.** Asked whether Send could be
-unavailable during a reply in the first internal fake-model test, the owner said
+unavailable during a reply in the first internal fake-LLM test, the owner said
 **“I still dont understand what you are trying to do”.** No idle-only approval
 followed. The stream explained that developer checkpoint sequencing is not a
 change to the finished product and withdrew the request to make that engineering
@@ -434,7 +434,7 @@ retained, with preflight follow-up versus safe-boundary steering distinguished.
 
 The proposed fake-text restart check keeps saved partial output explicitly
 interrupted, loses only provisional output under the proposed process-crash
-interpretation below, and makes no automatic model request. Deliberate new input
+interpretation below, and makes no automatic LLM request. Deliberate new input
 must not re-admit the old input. This narrower check does not decide all recovery
 controls or weaken **automatic due work proven not to have started**. Existing
 snooze safeguards, shared-result retention and final closed-history deletion stand.
@@ -465,7 +465,7 @@ No new runtime qualification is claimed.
 
 ## Evidence and limits
 
-Read Urd's README/ARCHITECTURE and relevant model/discovery/storage research;
+Read Urd's README/ARCHITECTURE and relevant LLM/discovery/storage research;
 inspected Pie at **`cc82abb0f317f31341d3a6f12aa1545f6be1fbea`**, contracts and
 bounded owning source only. Useful Pie anchors (paths in the Pie repository):
 
@@ -486,7 +486,7 @@ bounded owning source only. Useful Pie anchors (paths in the Pie repository):
   claims, multi-condition triggers or its cross-process machinery.
 - `docs/contracts/SESSION-TITLES.md` and
   `harness/model-providers/title-generation/title-generator.ts`: shared candidate
-  generation, direct model I/O and late-result guards, not a title session.
+  generation, direct LLM I/O and late-result guards, not a title session.
 
 The **original design pass** ran no application build, provider request, crash
 test or benchmark. It performed a walkthrough and source/contract review, with a

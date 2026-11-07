@@ -6,10 +6,10 @@ using Microsoft.Extensions.AI;
 
 namespace Urd.Core.Storage;
 
-// Admission order is readable history; only claimed inputs belong in model context.
-internal sealed class RequestContextReader(Database database) {
+// Admission order is readable history; only claimed submissions belong in LLM context.
+internal sealed class LlmContextReader(Database database) {
   internal ReadOnlyCollection<ChatMessage> Read(SqliteTransaction transaction, Guid sessionId,
-      Guid runId, long historyRevision, Guid requestId) {
+      Guid executionId, long historyRevision, Guid requestId) {
     using SqliteCommand read = database.Command(transaction, """
       WITH requests AS (
           SELECT r.ordinal AS run_ordinal, q.request_index, q.request_id FROM execution_runs r
@@ -38,7 +38,7 @@ internal sealed class RequestContextReader(Database database) {
       ) SELECT request_id, kind, text_utf8, call_id, name, json FROM contents
       ORDER BY run_ordinal, request_index, kind, content_index;
       """,
-        ("$session", sessionId), ("$run", runId), ("$revision", historyRevision), ("$request", requestId));
+        ("$session", sessionId), ("$run", executionId), ("$revision", historyRevision), ("$request", requestId));
     using SqliteDataReader reader = read.ExecuteReader();
     var messages = new List<ChatMessage>();
     string? previousRequest = null;

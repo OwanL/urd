@@ -6,11 +6,11 @@ using static Urd.Backend.Tests.Support.TestAsync;
 
 namespace Urd.Backend.Tests.Support;
 
-// One primary session over a temporary database, with run cleanup on dispose.
+// One primary session over a temporary database, with execution cleanup on dispose.
 internal sealed class ExecutionFixture : IAsyncDisposable {
   private readonly SessionStore store;
   private readonly ScriptedChatClient client;
-  private readonly List<Guid> runs = [];
+  private readonly List<Guid> executions = [];
 
   internal ExecutionFixture(ScriptedChatClient client, IReadOnlyList<AIFunction>? tools = null) {
     this.client = client;
@@ -22,19 +22,19 @@ internal sealed class ExecutionFixture : IAsyncDisposable {
   internal TemporaryDatabase Database { get; }
   internal PrimarySession Session { get; }
 
-  internal async Task<Guid> StartRunAsync(string text) {
-    InputReceipt receipt = await Session.SubmitUserInputAsync(new InputCommand(Guid.NewGuid(), 0, text));
-    Assert.Equal(InputDecision.Accepted, receipt.Decision);
-    Guid runId = Assert.IsType<Guid>(receipt.RunId);
-    runs.Add(runId);
-    return runId;
+  internal async Task<Guid> StartExecutionAsync(string text) {
+    UserMessageReceipt receipt = await Session.SubmitUserMessageAsync(new UserMessageSubmission(Guid.NewGuid(), 0, text));
+    Assert.Equal(MessageAcceptance.Accepted, receipt.Acceptance);
+    Guid executionId = Assert.IsType<Guid>(receipt.ExecutionId);
+    executions.Add(executionId);
+    return executionId;
   }
 
   public async ValueTask DisposeAsync() {
     // Even a failed assertion must not dispose the database or client underneath owned work.
-    foreach (Guid runId in runs) {
-      await Session.RequestStopAsync(runId);
-      await Session.WaitForSettlementAsync(runId).WaitAsync(TestTimeout);
+    foreach (Guid executionId in executions) {
+      await Session.RequestStopAsync(executionId);
+      await Session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout);
     }
 
     store.Dispose();

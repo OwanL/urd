@@ -40,10 +40,10 @@ public sealed class ToolExecutionTests {
             new("second", "count", new Dictionary<string, object?> { ["amount"] = 2 }))
         : Complete(token));
     await using var fixture = new ExecutionFixture(client, tools: [count]);
-    Guid runId = await fixture.StartRunAsync("go");
+    Guid executionId = await fixture.StartExecutionAsync("go");
 
     Assert.Equal(ExecutionOutcome.Completed,
-        (await fixture.Session.WaitForSettlementAsync(runId).WaitAsync(TestTimeout)).Outcome);
+        (await fixture.Session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout)).Outcome);
     Assert.Equal(scenario is "throws" or "function-marshalling" ? 2 : 1, invoked);
     Assert.Equal(2, client.Calls);
     Assert.All(client.Options, options => Assert.Same(count, Assert.Single(options!.Tools!)));
@@ -60,7 +60,7 @@ public sealed class ToolExecutionTests {
   }
 
   [Fact]
-  public async Task CallsAreDeepCopiedAndToolsRunAfterProviderCleanupWithTheRunToken() {
+  public async Task CallsAreDeepCopiedAndToolsRunAfterProviderCleanupWithTheExecutionToken() {
     bool cleaned = false;
     var value = new Dictionary<string, object?> { ["text"] = "original" };
     var arguments = new Dictionary<string, object?> { ["value"] = value };
@@ -73,10 +73,10 @@ public sealed class ToolExecutionTests {
     var client = new ScriptedChatClient(token => Interlocked.Increment(ref requests) == 1
         ? Response(token) : Complete(token));
     await using var fixture = new ExecutionFixture(client, tools: [echo]);
-    Guid runId = await fixture.StartRunAsync("go");
+    Guid executionId = await fixture.StartExecutionAsync("go");
 
     Assert.Equal(ExecutionOutcome.Completed,
-        (await fixture.Session.WaitForSettlementAsync(runId).WaitAsync(TestTimeout)).Outcome);
+        (await fixture.Session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout)).Outcome);
     FunctionResultContent result = Assert.Single(client.LastRequest.SelectMany(message => message.Contents)
         .OfType<FunctionResultContent>());
     Assert.Equal("original", Assert.IsType<JsonElement>(result.Result).GetString());
@@ -108,7 +108,7 @@ public sealed class ToolExecutionTests {
     var cycle = new Dictionary<string, object?>();
     cycle["self"] = cycle;
     AIFunction effect = AIFunctionFactory.Create(() => {
-      Assert.Equal(ExecutionOutcome.Completed, Assert.Single(StoredRuns.ReadRequests(database)).Outcome);
+      Assert.Equal(ExecutionOutcome.Completed, Assert.Single(StoredExecutions.ReadRequests(database)).Outcome);
       Assert.True(Assert.Single(StoredTools.Read(database), tool => tool.CallId == "first").Started);
       effects++;
       return scenario switch {
@@ -133,24 +133,24 @@ public sealed class ToolExecutionTests {
         """);
     }
 
-    InputReceipt receipt = await session.SubmitUserInputAsync(new InputCommand(Guid.NewGuid(), 0, "go"));
-    Guid runId = Assert.IsType<Guid>(receipt.RunId);
+    UserMessageReceipt receipt = await session.SubmitUserMessageAsync(new UserMessageSubmission(Guid.NewGuid(), 0, "go"));
+    Guid executionId = Assert.IsType<Guid>(receipt.ExecutionId);
     try {
       Exception failure = await Assert.ThrowsAnyAsync<Exception>(
-          () => session.WaitForSettlementAsync(runId).WaitAsync(TestTimeout));
+          () => session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout));
       Assert.IsNotType<TimeoutException>(failure);
       if (scenario == "result-write")
         Assert.IsType<SqliteException>(failure.GetBaseException());
       Assert.Equal(1, effects);
       Assert.Equal(1, client.Calls);
       Assert.True((await session.ReadSnapshotAsync()).AdmissionFenced);
-      Assert.Null(Assert.Single(StoredRuns.Read(database)).Outcome);
-      Assert.Equal(ExecutionOutcome.Completed, Assert.Single(StoredRuns.ReadRequests(database)).Outcome);
+      Assert.Null(Assert.Single(StoredExecutions.Read(database)).Outcome);
+      Assert.Equal(ExecutionOutcome.Completed, Assert.Single(StoredExecutions.ReadRequests(database)).Outcome);
       Assert.All(StoredTools.Read(database), tool => Assert.Null(tool.ResultJson));
     } finally {
-      await session.RequestStopAsync(runId).WaitAsync(TestTimeout);
+      await session.RequestStopAsync(executionId).WaitAsync(TestTimeout);
       Exception failure = await Assert.ThrowsAnyAsync<Exception>(
-          () => session.WaitForSettlementAsync(runId).WaitAsync(TestTimeout));
+          () => session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout));
       Assert.IsNotType<TimeoutException>(failure);
       // A timeout must not dispose borrowed resources beneath uncertain live work.
       store.Dispose();
@@ -209,10 +209,10 @@ public sealed class ToolExecutionTests {
     };
     var client = new ScriptedChatClient(Response);
     await using var fixture = new ExecutionFixture(client, tools: [effect]);
-    Guid runId = await fixture.StartRunAsync("go");
+    Guid executionId = await fixture.StartExecutionAsync("go");
 
     Assert.Equal(ExecutionOutcome.Failed,
-        (await fixture.Session.WaitForSettlementAsync(runId).WaitAsync(TestTimeout)).Outcome);
+        (await fixture.Session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout)).Outcome);
     Assert.Equal(0, effects);
     Assert.Equal(1, client.Calls);
     Assert.Empty(StoredTools.Read(fixture.Database));

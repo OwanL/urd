@@ -9,18 +9,18 @@ public sealed class SessionStore : IDisposable {
   private SessionStore(SqliteConnection connection) {
     database = new(connection);
     Sessions = new(database);
-    Inputs = new(database);
-    Runs = new(database);
-    Output = new(database);
+    UserMessages = new(database);
+    Executions = new(database);
+    LlmResponses = new(database);
     Tools = new(database);
     Content = new(database);
     Snapshots = new(database, Content);
   }
 
   internal SessionStorage Sessions { get; }
-  internal InputStorage Inputs { get; }
-  internal RunStorage Runs { get; }
-  internal OutputStorage Output { get; }
+  internal UserMessageStorage UserMessages { get; }
+  internal SessionExecutionStorage Executions { get; }
+  internal LlmResponseStorage LlmResponses { get; }
   internal ToolStorage Tools { get; }
   internal SnapshotReader Snapshots { get; }
   internal MessageContentReader Content { get; }

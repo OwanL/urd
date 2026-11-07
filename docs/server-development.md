@@ -3,8 +3,9 @@
 The local ASP.NET Core server composes Urd's existing Core and SQLite; it is not a
 second backend. It now exposes **create, Send, receipt lookup, snapshot polling and
 content reads**. UI, listing, addressed Stop, static assets, startup recovery and real
-providers are not implemented. Queueing and safe-boundary steering are required Core
-capabilities still to build, not optional extras or a permanent busy-input restriction.
+providers are not implemented. Core now provides default durable safe-boundary steering
+for busy Sends in the owned run; real tools, tool-inspection UI/API and an explicit after-run
+queue remain deferred.
 
 ## Run
 
@@ -82,10 +83,12 @@ $receipt # A durable admission decision, not a completed answer.
 ```
 
 Poll the snapshot to observe committed text and settlement; use content reads beyond previews.
-Current Core admits one input per active run; a distinct busy input gets a durable refusal.
-The HTTP layer adds no busy policy and does not turn a refusal into an HTTP error. Queueing,
-preflight follow-up and safe-boundary steering need their own Core increment before calling
-the chat workflow complete.
+A distinct busy Send can receive an Accepted receipt for durable steering in the owned run,
+up to eight nonterminal input deliveries. At the next safe request boundary, tool results
+precede separate user messages in admission order; pending steering also continues after a
+successful no-tool response. Already-claimed requests are unchanged. The HTTP layer adds no
+busy policy or routes and does not turn a durable refusal into an HTTP error. Public reads
+remain user/assistant text only; there is no tool-inspection endpoint.
 
 Errors: 400 malformed input/cursor, 413 oversized body/text, 415 non-JSON POST or unsupported charset,
 404 missing session/message, 409 conflicting input identity or stale content revision,
@@ -125,10 +128,21 @@ The stop token requests shutdown; it is not a deadline or permission to abandon 
 
 Normal reopen preserves saved history and does not replay work. Opening a database does
 **not** recover orphan runs or make a previously fenced conversation usable again.
+Stop retires pending steering without rewriting Accepted receipts or automatically carrying
+it into another run. The CLI still configures only its deterministic text client, not tools.
 
 ## Verification and review
 
-Locked restore and the Release solution suite pass **210/210** tests with no compiler or
+The completed steering/fake-tool checkpoint passed locked restore and the full Release
+solution suite: **259/259** tests, with no warnings. The new real Kestrel/SQLite
+`BusyHttpSendsBecomeDurableSteeringWithoutChangingTheRoutes` case verifies Accepted busy
+Sends, receipt lookup/exact retry and ordered continuation in the same run through the
+existing routes. Core tests cover fake-tool execution and lifecycle/fault boundaries;
+HTTP does not expose tool inspection or configure real tools.
+
+### Historical hosting evidence
+
+The earlier five-operation HTTP slice passed **210/210** tests with no compiler or
 analyzer warnings. The original 72 hosting cases covered startup/lifetime; 26 added cases
 cover API marker/cache behavior and the five-operation HTTP path. Real Kestrel/SQLite tests
 exercise two clients/chats, exact concurrent retries, retained refusal, Unicode content and
@@ -147,11 +161,14 @@ keeps shutdown, the client and directory lease live until model cleanup releases
 settlement saves. A sender that closes without reading its acknowledgement can retrieve
 and retry its retained receipt while the model continues; this does not force a precise
 in-flight `RequestAborted` race. Core tests independently cover callbacks and persistence
-failures. No browser, load, queue/steering or real-provider claim follows.
+failures. That earlier evidence did not qualify queue/steering. Neither it nor the current
+fake-tool checkpoint qualifies browser behavior, load or real tools/providers.
 
 Review `source/hosting/server/Program.cs` first, then `ServerOptions.cs`,
 `LocalBrowserGate.cs`, `SessionRoutes.cs` and `FakeChatClient.cs`. Tests are in
 `source/tests/Urd.Backend.Tests/hosting/`, using `support/RunningServer.cs`,
-`support/ServerProcess.cs` and the existing SQLite evidence readers.
+`support/ServerProcess.cs` and the existing SQLite evidence readers. In particular,
+`SessionRoutesTests.cs` includes the busy-Send steering flow; `SessionHttpLifetimeTests.cs`
+retains the active-work shutdown and disconnected-sender checks.
 The [hosting design record](scratch/initial-ui-hosting-design.md) separates this approval
 from future Core/transport/UI work.

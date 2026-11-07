@@ -1,7 +1,8 @@
 # Initial Core class design — internal integration reference
 2026-11-05. **The three identity bites, fourth user-Send reliability contract, fifth
-SessionExecution lifetime boundary, sixth coherent read surface and seventh session-shutdown
-operation below are owner-approved. Other API/state shape remains proposed, not implementation permission.**
+SessionExecution lifetime boundary, sixth coherent read surface, seventh session shutdown
+and subsequent default-steering/fake-tool increment below are owner-approved.
+Other API/state shape remains proposed, not implementation permission.**
 Checkpoint only: Windows local browser app, deterministic request-only `IChatClient`,
 two primary chats/two clients, real SQLite, mid-response input, addressed Stop/settlement
 and restart/reconnect without replay. No approval of the whole checkpoint,
@@ -10,9 +11,9 @@ The identity foundation, first fake-text Send/execution increment and bounded re
 implemented; see the current implementation section below. Acceptance has real durable work behind it,
 not a stub. Session shutdown now supplies the Core drain boundary needed by hosting.
 Five thin HTTP operations now expose the existing Core; UI and the broader browser checkpoint
-remain unimplemented. Busy-input queueing and safe-boundary steering are **required** Core work,
-reaffirmed by the owner on 2026-11-07, not optional polish. Their detailed delivery design and
-startup recovery still require scoped implementation review.
+remain unimplemented. The subsequently approved steering increment now supplies durable busy
+input and a minimal fake-tool continuation loop. Explicit after-run queueing, real tools/providers
+and startup recovery remain separate scoped work.
 Present one bite inline at a time, not this whole document or a five-type pack; approval
 never extends to unpresented members.
 
@@ -250,9 +251,9 @@ model with **“Yes, implement it”**. This supersedes the earlier repeated-inv
 - `SessionBase`'s existing guard is the sole lifecycle authority. `SessionExecution` keeps
   its owner, borrowed client, owned Stop source and one cached cancellation-callback task;
   there is no second lock, active/released flag pair or hand-built completion source.
-- Each execution is invoked once outside the guard. The current schema permits one claimed
-  request per run. Future model/tool rounds can belong inside that invocation when designed;
-  this does not implement or remove eventual steering/follow-up behavior.
+- At that checkpoint, each execution was invoked once and schema 3 permitted one claimed
+  request per run. The later steering increment below replaces that one-request limit with
+  sequential request phases while retaining one driver and Stop source per run.
 - Stop persists its intent and initiates `CancelAsync` under the guard; callbacks are awaited
   outside it. The driver checks callback completion and settles under the same guard, or
   joins the cached task outside the guard before returning to settle. Successful work is
@@ -269,7 +270,7 @@ The owner approved corresponding `SessionBase` coordination changes, not new pub
 queuing, schema, hosting or provider behavior. Independent design and implementation reviews
 passed; current verification is recorded below.
 
-## Current implementation — first fake-text Core checkpoint
+## Historical implementation — first fake-text Core checkpoint
 
 The owner subsequently confirmed the obvious shared-client choice and requested the actual
 class structure rather than another approval gate around reuse. Dependency plumbing stays
@@ -304,12 +305,46 @@ stale Stops, persisted and live fences, and indexed recent-window selection over
 mixed histories. Tests use disposable SQLite and fake clients only; no browser/polling
 performance claim. See the [read review map](../backend-development.md#read-contract-and-incremental-review-order).
 
-This staging policy permits one input per active run and durably refuses a different busy
-input; it does not implement the approved eventual mid-response delivery behavior. Addressed Stop/wait
+That initial staging policy permitted one input per active run and refused different busy
+input. The default-steering increment below supersedes that restriction. Addressed Stop/wait
 helpers remain internal; the seventh bite adds the public manager-level session drain.
 Old nonterminal rows stay fenced across reopen; startup recovery is not implemented. UI/HTTP, native-context fidelity, tools
 and real-provider qualification remain outside this checkpoint. The owner requested notification
 at tested milestones for their own file-by-file, line-by-line review before more layers accumulate.
+
+## Owner-approved default steering and fake-tool continuation — 2026-11-07
+
+The owner approved moving forward with an integrated Core slice, not a second chat engine:
+real SQLite, configured fake tools, no real provider or UI. During policy discussion, the
+owner clarified that tool problems (such as bash syntax errors) should normally reach the
+model, and that steering without tool calls should occur at another opportune time.
+That means the next safe request boundary, not altering or cancelling an in-flight request.
+
+- `SessionManager(store, client, tools)` optionally borrows configured `AIFunction`s and
+  snapshots their collection. No tool framework, provider package or host tool configuration
+  was added; existing two-argument construction still works.
+- Busy input accepts into the locally owned run, up to eight nonterminal input deliveries.
+  Receipts remain immutable; duplicate Sends never start another driver or duplicate delivery.
+  Each request claims pending inputs atomically, in arrival order. Tool results precede those
+  separate user messages; a successful no-tool response also continues if steering is waiting.
+- One `SessionExecution`/Stop source and one driver remain owned per run. The driver awaits
+  sequential `RunRequestAsync` phases outside the guard, then claims or settles under it.
+  Model/tool cleanup and cancellation joins still precede settlement and resource release.
+- Ordinary invocation errors become saved error results and permit continuation. They do not
+  prove no effects, including when binding/marshalling happens inside an opaque function.
+  Core-owned encoding, persistence and cleanup failures fence instead of replaying work.
+- Stop retires unclaimed steering and unstarted calls without rewriting Accepted receipts.
+  There is no automatic carryover into a later run or replay on reopen.
+- Schema 4 supports multiple requests, input delivery associations, tool call/result facts and
+  a bounded text-message index. Migration preserves existing receipts, IDs, UTF-8 bytes and
+  cursors. Public snapshots/content remain user/assistant text; tool inspection remains deferred.
+
+Independent reviews passed. Locked restore and **259/259 Release tests** pass without warnings,
+including real HTTP busy Sends, tool-result/steering order, no-tool continuation, boundary races,
+Stop/shutdown joins, ordinary errors, uncertain-save fences and migration rollback. These are
+fake-client/function checks, not provider-native fidelity or exactly-once external effects.
+Explicit after-run queueing, pending edits, public Stop, recovery and UI remain separate bites.
+See [backend development](../backend-development.md) for the current review map and bounds.
 
 ## Existing constraints, not new decisions
 - [Architecture](../ARCHITECTURE.md): shared SQLite, message rows/bounded previews,
@@ -408,12 +443,11 @@ Submit handler can still use the live store, the fence can produce a durable ref
 not accepted work. Host refusal before Core is only an unavailable attempt.
 Execution has no store access. `DriveExecutionAsync` owns/observes the pump and failures.
 Never await model work, cancellation callbacks, settlement or subscribers under the guard.
-The current driver invokes `RunAsync` once. After response cleanup, it joins any outstanding
-cancellation callback task outside the guard, then commits settlement, releases run resources,
-clears execution and completes `_settlement` under the guard. The no-cancellation check and
-settlement share the guard so a late Stop cannot escape the join. A missing settlement result
-fences the run instead of restarting it. The earlier repeated-invocation/pending-input sketch
-is superseded; queued input remains future work, not an implemented continuation path.
+The current driver invokes `RunRequestAsync` sequentially on one owned execution. After each
+request/tool phase, it joins outstanding cancellation callbacks outside the guard, then claims
+the next request or settles under the guard. Admission cannot slip between the pending-input
+check and settlement, and a late Stop cannot escape the join. Saved settlement releases run
+resources and completes waiters; missing settlement or uncertain writes fence rather than replay.
 An ambiguous request/run terminal commit prevents continuation and keeps admission fenced
 pending reconciliation; no false idle.
 ### 3. `PrimarySession : SessionBase` — ongoing primary input policy
@@ -422,19 +456,17 @@ Handle lifetime; no extra mutable fields. Chooses ordinary-input policy, not ano
 internal PrimarySession(SessionRecord record, SessionStore store, IChatClient chatClient);
 public Task<InputReceipt> SubmitUserInputAsync(InputCommand input);
 ```
-**Owner direction, 2026-11-07 — steering by default, not implemented yet:** ordinary
+**Owner direction, 2026-11-07 — steering by default, now implemented:** ordinary
 input during active work defaults to steering. The owner asked to send it as a message
 alongside whatever batch of tool-call results is sent to the model next. This supersedes
 the earlier proposal to infer follow-up versus steering from arrival before/after the
 initial request claim. Idle input still starts work; steering does not mutate an in-flight
 request. Tool results and steering remain distinct messages in the next model request.
 
-The next scoped design must cover durable pending input and request-claim boundaries;
-queue order, Stop/failure handling and explicit queued follow-ups still need detailed review.
-Proposed no-tool fallback: after a completed response with no tool calls, pending steering
-triggers another request rather than waiting forever for a tool-result batch. This fallback
-has been presented, not separately approved. No tool loop, queue schema or new public API
-is authorized merely by the default-steering direction.
+The owner subsequently approved the integrated fake-tool slice and clarified no-tool delivery:
+pending steering triggers the next request after the current response finishes, rather than
+waiting for a tool call. Durable claim order and Stop/failure retirement are implemented as
+recorded above. Explicit after-run queueing remains unimplemented and needs its own design.
 Stopping durably refuses new valid input before acceptance, with no run/message
 creation, and leaves its draft client-owned; existing decisions remain readable.
 No pending-edit, suffix-edit, snooze or final-close API is implied or removed here.
@@ -443,29 +475,27 @@ No pending-edit, suffix-edit, snooze or final-close API is implied or removed he
 Owns response streaming and cancellation, not admission or transcript storage. Response
 buffering belongs to its request-local `LlmResponseWriter`. One execution per active run;
 no thread/process per session or global request queue. Construction starts no work.
-SessionBase invokes `RunAsync` once outside its guard and observes all cleanup.
+SessionBase invokes sequential request phases outside its guard and observes all cleanup.
 ```csharp
 internal Guid RunId { get; }
-private readonly SessionBase _owner;
-private readonly IChatClient _chatClient; // borrowed
-private readonly CancellationTokenSource _runStop;
-private Task? _cancellationCallbacks;
-internal SessionExecution(Guid runId, SessionBase owner, IChatClient chatClient);
-internal Task<ExecutionOutcome> RunAsync();
-internal Task RequestCancellationAsync();
-internal Task CancellationCompletion { get; }
-internal void ReleaseAfterSettlement();
+internal bool IsStopping { get; }
+internal SessionExecution(Guid runId, SessionBase session, IChatClient chatClient,
+    IReadOnlyList<AIFunction>? tools = null);
+internal Task<ExecutionOutcome> RunRequestAsync(LlmRequest request);
+internal Task StopAsync();
+internal Task StopCallbacks { get; }
+public void Dispose();
 ```
 A successfully returned invocation has quiesced its model/enumerator, writer timer and
 append work; it is not durable settlement or a join of run cancellation callbacks.
-SessionBase serializes cancellation/release under its guard and joins `CancellationCompletion`
+SessionBase serializes cancellation/release under its guard and joins `StopCallbacks`
 outside it before saving settlement. Repeated Stop calls share that task; a stale run ID
 cannot cancel a replacement. No direct store access: owner retains claim/record/outcome/
 publication authority. The fifth approval and subsequent execution redesign cover this
 boundary, not every SessionBase public contract or storage rule. Substantive ownership,
 concurrency or persistence changes still need review.
-Uses its Stop token, never HTTP/observer tokens. Claims input through owner, constructs
-request-local MEAI messages and records through owner. Completion does not close chat.
+Uses its Stop token, never HTTP/observer tokens. Receives a durably claimed request from
+its owner and records output/call/result facts through that owner. Completion does not close chat.
 A successful request requires positive terminal-success evidence (explicit in the fake
 client), not clean enumeration, complete-looking text or absence of an exception; missing,
 failed or incomplete terminal evidence cannot yield success. Each claimed request records

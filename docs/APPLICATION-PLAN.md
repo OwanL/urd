@@ -173,12 +173,12 @@ comparisons or a larger complete specification:
    Coherent snapshots and full-content pages now expose committed state without replay;
    final output remains distinct from settled work. The owner selected snapshot polling
    for the first browser increment; browser wiring itself is not implemented yet.
-   This staging increment refuses distinct busy input rather than queuing it. The owner explicitly
-   reaffirmed on 2026-11-07 that **queueing and steering are required core functionality**.
-   The owner then chose steering as the default, sent alongside the next tool-result batch,
-   rather than inferring intent from message timing. Durable delivery and explicit follow-up
-   behavior still need scoped design; see the Core record's primary-input policy section.
-   HTTP/UI must not turn the staging restriction into a permanent Send policy. The approved
+   The owner-approved steering increment now durably accepts busy input into the owned run.
+   Separate messages follow the next tool-result batch in arrival order. If there are no tool
+   calls, pending steering continues at the next safe request boundary; the current request is
+   never changed. The minimal configured fake-tool loop, Stop retirement and schema-4 migration
+   pass the integrated suite. Explicit after-run queueing, real tools and provider qualification
+   remain separate work; see the Core record's primary-input policy section. The approved
    `SessionManager.ShutdownSessionsAsync` now fences and drains owned work without disposing
    borrowed resources; startup recovery, public addressed Stop and push subscriptions remain pending.
    See the [read review map](backend-development.md#read-contract-and-incremental-review-order) before expanding it.

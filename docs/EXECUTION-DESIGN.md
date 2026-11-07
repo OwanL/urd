@@ -5,6 +5,26 @@ class/file layout. `IChatClient` / `Microsoft.Extensions.AI.Abstractions` remain
 selected. Only two loop candidates were compared: a small Urd-controlled cycle and
 `FunctionInvokingChatClient` (MEAI 10.11.0).
 
+## Current Core increment — 2026-11-07
+
+The approved minimal Urd-owned cycle is implemented with real SQLite and configured fake
+`AIFunction`s, using only Abstractions. Busy steering is delivered as separate user messages
+following the next tool-result batch, or after a no-tool response finishes. Claims, call/result
+records and settlement are durable; reopening never automatically invokes historical tools.
+
+The owner clarified that ordinary tool problems, such as command syntax errors, should reach
+the model rather than fail the whole run. Pi's pinned loop also turns invocation errors into
+matching error results and normally continues. Urd follows that pattern; tools may describe
+domain failures in their own results. Errors do not imply rollback or prove no effects.
+Core-owned result encoding/save and cleanup failures instead fence continuation. An opaque
+`AIFunction` may perform binding/marshalling inside `InvokeAsync`; those exceptions remain
+invocation feedback, not evidence of no effect or permission for automatic replay.
+
+See [backend development](backend-development.md) for the tested scope and limitations.
+The older experiments below remain research evidence, not real-provider qualification of
+this implementation. Their deliberately terminal ordinary-tool-error policy is not the
+current policy.
+
 ## Recommendation and owner decisions
 
 **Use a narrow Urd-owned cycle; do not add full MEAI for its function loop now.**
@@ -86,7 +106,7 @@ Library-specific observations:
   fork or duplicate top-level tool definitions.
 - Default tool exceptions become a generic error result and permit continuation.
   The matched terminal-error case explicitly set the error limit to zero. Neither
-  choice is the final Urd ordinary-tool-error policy; useful model recovery from a
+  choice established the final Urd ordinary-tool-error policy at that research stage; useful model recovery from a
   routine tool error must not be confused with retrying uncertain effects.
 - `MaximumIterationsPerRequest=3` produced **four** requests: three tool rounds,
   then a final request with callable tools removed. Default 40 produced **41**.

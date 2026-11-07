@@ -10,13 +10,16 @@ excluding general-purpose agent work.
 ## Status and authority
 
 The ASP.NET-free Core implements session identity, durable user-input decisions,
-fake-text execution, bounded session snapshots plus paged message-content reads
-through SQLite, and graceful shutdown of the manager's live sessions.
+fake-text/tool execution with default durable safe-boundary steering in the owned run,
+bounded session snapshots plus paged message-content reads through SQLite, and graceful
+shutdown of the manager's live sessions.
 See [backend build/test instructions](docs/backend-development.md).
 The [local HTTP Server](docs/server-development.md) now exposes chat creation, Send,
 receipt lookup and bounded snapshot/content reads, with exclusive data ownership and graceful
-shutdown. Queueing and steering remain required Core work; UI and real providers are not
-implemented. Wider designs remain subject to bite-sized owner review; the
+shutdown. Busy Sends use Core's bounded steering admission without new HTTP routes.
+Real tools/providers, UI, tool-inspection APIs and an explicit after-run queue are not
+implemented; reopening does not recover or replay work. Wider designs remain subject to
+bite-sized owner review; the
 [Core](docs/scratch/initial-core-design.md) and [hosting](docs/scratch/initial-ui-hosting-design.md)
 records distinguish approved slices from future proposals.
 

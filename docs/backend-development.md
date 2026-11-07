@@ -1,29 +1,42 @@
 # Backend development
 
 The current Core checkpoint includes session identity, durable user-Send decisions,
-fake-text execution, bounded snapshot/content reads through real SQLite and graceful session shutdown.
+fake-text/tool execution with default durable steering, bounded snapshot/content reads
+through real SQLite and graceful session shutdown.
 Core remains an ASP.NET-free .NET library. The [local Server](server-development.md)
 now exposes five chat HTTP operations over it; UI is not implemented yet.
 
 ## Checkpoint scope
 
-- `SessionManager(store, chatClient)` passes the same borrowed dependencies to canonical
-  session handles. Constructors start no work. The caller owns both resources.
+- `SessionManager(store, client, IReadOnlyList<AIFunction>? tools = null)` passes borrowed
+  dependencies to canonical session handles. It snapshots the optional tool list, not the
+  functions themselves; the caller owns store, client and functions. Constructors start no work.
 - `PrimarySession.SubmitUserInputAsync(input)` returns a durable acceptance/refusal receipt,
   not an LLM answer. Acceptance and run identity commit together. Exact retries return
   the original decision; neither lookup nor retained acceptance starts work. Refusal fences delayed originals.
   Changed-command reuse throws `InputConflictException` with its input ID, so HTTP can distinguish
   conflicts from shutdown or uncertain failure without parsing exception messages.
 - `SessionBase` owns admission, database writes and lifecycle coordination under its existing guard.
-  It invokes each `SessionExecution` once, outside that guard. Execution owns the model stream and
-  Stop source; a request-local `LlmResponseWriter` owns bounded UTF-8 batches and their flush deadline.
+  Each run has one `SessionExecution` and one driver, with sequential request phases outside the guard.
+  Execution owns model streams, tool invocation and the run's Stop source; a request-local
+  `LlmResponseWriter` owns bounded UTF-8 batches and their flush deadline.
 - Stop starts asynchronous cancellation under the guard, then joins callbacks outside it.
   Replacement requires stream cleanup, successful callback completion and saved settlement.
   Callback failures or an unexpected missing claim/settlement fence the run; they do not retry it.
-- This development increment admits one input per active run. A different busy input gets
-  a durable Capacity/Stopping refusal, not a queue slot. Mid-response delivery is not implemented.
-  The owner reaffirmed queueing and steering as required functionality, not optional future polish;
-  this restriction is a staging limit, and the HTTP layer does not duplicate that policy.
+- A distinct busy Send defaults to durable steering in the live owned run, within a limit of
+  eight nonterminal input deliveries. Pending inputs join the next request as separate user
+  messages in admission order, after any tool results. A claimed request is never mutated.
+  Pending steering also continues after a successful no-tool response at the safe boundary.
+  Claiming the next request or settling happens under the same guard, so racing admission cannot
+  strand accepted input. Capacity, revision and Stopping refusals remain durable decisions.
+- Fake-tool batches are authorized only after successful response completion and provider cleanup;
+  calls execute sequentially, at most 16 per response, with 16 KiB JSON arguments/results per call.
+  Ordinary tool errors become feedback and remaining calls/model continuation proceed, including
+  failures inside an opaque `AIFunction`'s binding/marshalling. Such errors do not guarantee no effects.
+  Core-owned result encoding, persistence or cleanup faults fence uncertain work instead of
+  being converted into ordinary tool errors.
+- Stop retires pending deliveries without rewriting Accepted receipts or automatically carrying
+  them into another run. No explicit after-run queue is implemented.
 - Public snapshot/content reads expose committed state without starting work; cancelled reads
   do not cancel execution. Reopened orphan runs and live persistence faults are reported as fenced.
 - `SessionManager.ShutdownSessionsAsync(waitCancellation)` fences creation/lookup and input on every
@@ -34,11 +47,24 @@ now exposes five chat HTTP operations over it; UI is not implemented yet.
   retained receipts remain available during shutdown; new inputs receive durable Stopping refusals.
   Shutdown does not close saved conversations, recover orphan runs or shut down the host itself.
   Cancellation callbacks may reenter reads/admission, but must not await shutdown or their own settlement.
-- Addressed Stop/settlement helpers remain internal. Push subscriptions, UI, tool/native-context
-  fidelity and real-provider qualification remain pending. An admission receipt is not completion.
+- Addressed Stop/settlement helpers remain internal. Public reads expose user/assistant text
+  only; tool-inspection UI/API, push subscriptions, real tools/providers and provider-native
+  context fidelity remain deferred. An admission receipt is not completion.
 - Normal terminal close/reopen is tested without replay. Nonterminal rows survive reopening
   and block new admission; startup interruption/recovery is **not** implemented.
 
+The completed steering/fake-tool checkpoint passed locked restore and the full Release
+suite: **259/259** tests, with no warnings. Coverage adds durable busy admission and bounds,
+ordered tool-result/steering continuation (including no-tool boundaries), claim-or-settle races,
+Stop/shutdown retirement, ordinary tool errors versus uncertain-effect fencing, transactional
+schema-4 migration/rollback and real HTTP busy Sends through the unchanged routes.
+In an isolated copy, focused tests rejected deliberate regressions that dropped no-tool
+continuation or blocked continuation on a saved tool error; both restored controls passed.
+These are fake-client/tool checks, not real-tool/provider or UI qualification.
+
+### Historical checkpoint evidence
+
+The following counts and measurements describe earlier slices, not the current total.
 At Core checkpoint `06c1c3d`, locked restore and the Release suite passed **35/35** tests,
 with no build warnings/errors.
 Coverage includes shared-client concurrent chats, exact retry/reopen, transactional rollback,
@@ -95,12 +121,14 @@ See that same record for the real HTTP flow, controlled active-work shutdown evi
 3. [SnapshotReader.cs](../source/backend/core/storage/SnapshotReader.cs), then
    [MessageContentReader.cs](../source/backend/core/storage/MessageContentReader.cs) — bounded queries
    in short read transactions. [DatabaseSchema.cs](../source/backend/core/storage/DatabaseSchema.cs)
-   adds two indexes in schema version 3, preserving version 0/1/2 migrations.
+   now uses schema version 4: delivery/tool facts, sequential requests and a message-order index
+   preserve existing IDs, bytes and content cursors through migration from versions 0–3.
 4. [SessionReadFlowTests.cs](../source/tests/Urd.Backend.Tests/sessions/SessionReadFlowTests.cs),
    [MessageContentTests.cs](../source/tests/Urd.Backend.Tests/storage/MessageContentTests.cs), and
    [SessionSnapshotStorageTests.cs](../source/tests/Urd.Backend.Tests/storage/SessionSnapshotStorageTests.cs).
 
-Snapshots return at most 60 recent current-revision messages, each preview at most 256 UTF-16
+Snapshots select at most 60 recent current-revision user/assistant text messages through the
+message-order index, not an unbounded expansion of recent runs. Each preview is at most 256 UTF-16
 units without splitting a scalar (under 64 KiB aggregate preview UTF-8). `HasOlderMessages`
 labels omission; older-history navigation is not implemented. Latest settlement and unsettled
 run/Stop facts are queried independently of the recent window.
@@ -127,8 +155,11 @@ share a file per concept. Read them alongside their owners.
    [PrimarySession.cs](../source/backend/core/sessions/PrimarySession.cs) — admission/driver ownership;
    [Input.cs](../source/backend/core/sessions/Input.cs) holds the input command, receipt and enums;
    [AsyncLock.cs](../source/backend/core/sessions/AsyncLock.cs) is the shared async lock.
-3. [SessionExecution.cs](../source/backend/core/execution/SessionExecution.cs) — one invocation,
-   response streaming, cancellation and cleanup; then
+3. [SessionExecution.cs](../source/backend/core/execution/SessionExecution.cs) — sequential request/tool
+   phases, response streaming, cancellation and cleanup;
+   [LlmResponseAccumulator.cs](../source/backend/core/execution/LlmResponseAccumulator.cs) — complete
+   fake-tool batch validation and bounded JSON freezing;
+   [LlmTools.cs](../source/backend/core/execution/LlmTools.cs) — call/result records; then
    [LlmResponseWriter.cs](../source/backend/core/execution/LlmResponseWriter.cs) — request-local
    Unicode-safe chunking and flush timing. [LlmRequest.cs](../source/backend/core/execution/LlmRequest.cs) holds
    `LlmRequest`, `LlmResponseChunk` and `LlmRequestOutcome`; [ExecutionResult.cs](../source/backend/core/execution/ExecutionResult.cs)
@@ -140,7 +171,10 @@ share a file per concept. Read them alongside their owners.
    [SessionStorage.cs](../source/backend/core/storage/SessionStorage.cs),
    [InputStorage.cs](../source/backend/core/storage/InputStorage.cs) (receipts),
    [RunStorage.cs](../source/backend/core/storage/RunStorage.cs) and
-   [OutputStorage.cs](../source/backend/core/storage/OutputStorage.cs) — atomic run/request/output facts.
+   [OutputStorage.cs](../source/backend/core/storage/OutputStorage.cs) — atomic run/request/output and delivery facts;
+   [ToolStorage.cs](../source/backend/core/storage/ToolStorage.cs) — dispatch claims and retained results;
+   [RequestContextReader.cs](../source/backend/core/storage/RequestContextReader.cs) — claimed input and
+   ordered assistant/tool context, distinct from the public text-only read projection.
 5. [SessionManagerFlowTests.cs](../source/tests/Urd.Backend.Tests/sessions/SessionManagerFlowTests.cs),
    [SessionConcurrencyTests.cs](../source/tests/Urd.Backend.Tests/sessions/SessionConcurrencyTests.cs),
    [SessionShutdownTests.cs](../source/tests/Urd.Backend.Tests/sessions/SessionShutdownTests.cs),
@@ -153,6 +187,16 @@ share a file per concept. Read them alongside their owners.
    [TemporaryDatabase.cs](../source/tests/Urd.Backend.Tests/support/TemporaryDatabase.cs) supplies isolated test data.
    `support/` also holds the scripted model client, response scripts and execution fixture;
    test folders mirror the source folders.
+7. [SteeringFlowTests.cs](../source/tests/Urd.Backend.Tests/sessions/SteeringFlowTests.cs) — ordered steering,
+   no-tool continuation, boundary races and shutdown without carryover;
+   [ToolExecutionTests.cs](../source/tests/Urd.Backend.Tests/execution/ToolExecutionTests.cs) — ordinary
+   errors, frozen arguments, cleanup/token ownership, malformed batches and uncertain-effect fencing;
+   [ToolStorageTests.cs](../source/tests/Urd.Backend.Tests/storage/ToolStorageTests.cs) — authorization,
+   sequential claims, bounded results and rollback;
+   [SteeringMigrationTests.cs](../source/tests/Urd.Backend.Tests/storage/SteeringMigrationTests.cs) —
+   preserved identities/cursors, atomic upgrade and reopen without replay. The input-receipt and
+   snapshot suites also cover eight-delivery capacity, atomic message indexing and bounded selection.
+   `support/StoredDeliveries.cs` and `support/StoredTools.cs` supply the corresponding durable evidence.
 
 ## Prerequisite and commands
 
@@ -237,7 +281,8 @@ still does not replace review of ownership, concurrency, SQL or error handling.
 Prefer improving an existing behavioral case over adding overlapping tests or fixture
 machinery. Assert observable outcomes and durable state, not private helper calls or
 incidental execution order. Assertions on durable state read through the shared `support/`
-readers (`StoredRuns`, `StoredInputs`, `StoredOutput`, `StoredSessions`), not ad-hoc SQL, so schema evolution
+readers (`StoredRuns`, `StoredInputs`, `StoredOutput`, `StoredSessions`, `StoredDeliveries`, `StoredTools`),
+not ad-hoc SQL, so schema evolution
 touches one reader instead of every test. Raw `Scalar(...)` observation inside a `*Tests.cs`
 file needs a same-line `// raw-sql:` justification, which the pre-commit hook enforces on
 staged files; schema-migration checks and fixture-owned witness tables are the expected

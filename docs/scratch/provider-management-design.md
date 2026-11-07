@@ -1,7 +1,8 @@
 # Headless provider management — initial design
 
-2026-11-08. Scope and connection shape approved by the owner; remaining operations
-are proposals until reviewed. No provider implementation or live account activity is
+2026-11-08. Scope, connection shape and configuration operations approved by the
+owner. The owner also confirmed that the manager should manage credential storage.
+Authentication operations and storage details remain proposals until reviewed. No provider implementation or live account activity is
 claimed. [Provider qualification](../PROVIDER-QUALIFICATION.md) owns route research
 and the bounded initial provider set.
 
@@ -37,10 +38,12 @@ status are separate observations; saving a connection proves neither access nor 
 selection. Changing an endpoint must not silently redirect an existing credential.
 The connection-view proposal passed independent design review before owner approval.
 
-## Proposed configuration operations — not yet approved
+## Approved configuration operations
 
-One Core `ProviderManager`, exposed through the existing local HTTP Server. No second
-CLI, provider UI, generic configuration framework or JSON/YAML hot-reload mechanism.
+One Core `ProviderManager`, exposed through the existing local HTTP Server. It owns
+the whole connection-management lifecycle, including credential storage coordination,
+not configuration alone. No second CLI, provider UI, generic configuration framework
+or JSON/YAML hot-reload mechanism.
 
 ```csharp
 Task<IReadOnlyList<ProviderConnection>> ListAsync(CancellationToken cancellationToken = default);
@@ -82,6 +85,22 @@ listing connections is not proof of which creation lost its acknowledgement. Exa
 HTTP routes/statuses, input validation and persistence-failure semantics still require
 review before implementation. There are no live agent consumers in this slice.
 
-The proposed configuration boundary passed independent design review. Authentication,
-model discovery, explicit access checks and credential persistence are subsequent bites;
-full session/provider integration, tools and provider UI remain outside this slice.
+The configuration boundary passed independent design review and owner approval.
+Authentication, model discovery, explicit access checks and credential persistence are
+subsequent bites; full session/provider integration, tools and provider UI remain outside
+this slice.
+
+## Credential ownership — aligned responsibility, details pending
+
+`ProviderManager` is the single public management entry point for connection settings,
+API-key replacement, subscription sign-in, refresh, disconnect and credential removal.
+Callers do not coordinate a configuration store with a separate public credential API.
+A small internal credential store handles protection and persistence; provider-specific
+authentication code handles each route's sign-in and refresh protocol. Exact types,
+method signatures and storage technology remain unselected.
+
+The manager must coordinate changes across these responsibilities: changing a destination
+cannot forward an old credential, and late sign-in/refresh completions cannot restore
+credentials after disconnect, removal or superseding configuration changes. Public reads
+report status, never credential contents. These are design requirements, not implemented
+or tested guarantees.

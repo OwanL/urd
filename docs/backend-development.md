@@ -2,8 +2,8 @@
 
 The current Core checkpoint includes session identity, durable user-Send decisions,
 fake-text execution, bounded snapshot/content reads through real SQLite and graceful session shutdown.
-Core remains an ASP.NET-free .NET library. The [health-only local Server](server-development.md)
-now composes it; chat HTTP routes and UI are not implemented yet.
+Core remains an ASP.NET-free .NET library. The [local Server](server-development.md)
+now exposes five chat HTTP operations over it; UI is not implemented yet.
 
 ## Checkpoint scope
 
@@ -12,6 +12,8 @@ now composes it; chat HTTP routes and UI are not implemented yet.
 - `PrimarySession.SubmitUserInputAsync(input)` returns a durable acceptance/refusal receipt,
   not an LLM answer. Acceptance and run identity commit together. Exact retries return
   the original decision; neither lookup nor retained acceptance starts work. Refusal fences delayed originals.
+  Changed-command reuse throws `InputConflictException` with its input ID, so HTTP can distinguish
+  conflicts from shutdown or uncertain failure without parsing exception messages.
 - `SessionBase` owns admission, database writes and lifecycle coordination under its existing guard.
   It invokes each `SessionExecution` once, outside that guard. Execution owns the model stream and
   Stop source; a request-local `LlmResponseWriter` owns bounded UTF-8 batches and their flush deadline.
@@ -20,6 +22,8 @@ now composes it; chat HTTP routes and UI are not implemented yet.
   Callback failures or an unexpected missing claim/settlement fence the run; they do not retry it.
 - This development increment admits one input per active run. A different busy input gets
   a durable Capacity/Stopping refusal, not a queue slot. Mid-response delivery is not implemented.
+  The owner reaffirmed queueing and steering as required functionality, not optional future polish;
+  this restriction is a staging limit, and the HTTP layer does not duplicate that policy.
 - Public snapshot/content reads expose committed state without starting work; cancelled reads
   do not cancel execution. Reopened orphan runs and live persistence faults are reported as fenced.
 - `SessionManager.ShutdownSessionsAsync(waitCancellation)` fences creation/lookup and input on every
@@ -30,7 +34,7 @@ now composes it; chat HTTP routes and UI are not implemented yet.
   retained receipts remain available during shutdown; new inputs receive durable Stopping refusals.
   Shutdown does not close saved conversations, recover orphan runs or shut down the host itself.
   Cancellation callbacks may reenter reads/admission, but must not await shutdown or their own settlement.
-- Addressed Stop/settlement helpers remain internal. Push subscriptions, chat HTTP/UI, tool/native-context
+- Addressed Stop/settlement helpers remain internal. Push subscriptions, UI, tool/native-context
   fidelity and real-provider qualification remain pending. An admission receipt is not completion.
 - Normal terminal close/reopen is tested without replay. Nonterminal rows survive reopening
   and block new admission; startup interruption/recovery is **not** implemented.
@@ -76,6 +80,9 @@ These are fake-client/Core checks, not browser polling, load or real-provider qu
 This is a Core review checkpoint, not the browser-to-Core milestone or a complete hosting API.
 The subsequent health-only Server slice passes **184/184** Release tests after locked restore;
 its 72 added cases and narrower hosting evidence are recorded in [server development](server-development.md).
+The five-operation HTTP slice passes **210/210** Release tests after locked restore, adding 26
+hosting cases and a typed input-conflict error without changing Core policy, schema or dependencies.
+See that same record for the real HTTP flow, controlled active-work shutdown evidence and limits.
 
 ## Read contract and incremental review order
 
@@ -106,7 +113,8 @@ offsets preserve Unicode and embedded NUL; stale revisions throw `HistoryRevisio
 `Truncated` means the preview did not reach the committed segment endpoint within its budget.
 `IsClosed` concerns further bytes; `FinalOutputCommitted` is a saved final marker. Neither
 means successful run settlement or finished cleanup. Continue status reads until settlement
-or a diagnosed fence. Poll scheduling/HTTP cancellation and browser rendering are not built yet.
+or a diagnosed fence. HTTP read cancellation is wired; browser poll scheduling, client-side
+cancellation and rendering are not built yet.
 
 ## Review order
 

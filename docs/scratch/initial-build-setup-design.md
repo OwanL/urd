@@ -1,9 +1,9 @@
 # Initial build/setup design — owner review proposal
 2026-11-05. **The full command/configuration workflow remains proposed, not approved.**
-Minimal Core/Server/test metadata is implemented for the approved Core and health-only hosting
+Minimal Core/Server/test metadata is implemented for the approved Core and scoped hosting
 slices; see [backend development](../backend-development.md) for actual pins and verified commands.
 The wider Windows-first checkpoint below (Core + Server + built Preact UI and a
-deterministic request-only model) remains proposed. A runnable [health-only Server](../server-development.md)
+deterministic request-only model) remains proposed. A runnable [local HTTP Server](../server-development.md)
 now exists, using ordinary .NET commands; UI and bootstrap/build wrapper scripts remain
 unimplemented. The current baseline keeps its few package pins in the projects.
 
@@ -108,7 +108,7 @@ Direct Server startup still needs the hosting owner's separate database lifetime
 # Start-Urd invokes selected dotnet + <copy>\builds\Debug\app\Urd.Server.dll:
 # --data-root <absolute copy>\data --port 0
 ```
-The approved health-only host uses `--data-root <absolute path> --port <0..65535>` and
+The approved local host uses `--data-root <absolute path> --port <0..65535>` and
 reports `urd-ready` as documented in [server development](../server-development.md).
 The commands above, `CopyRoot` script behavior and built UI layout remain proposals.
 `CopyRoot` belongs to that future script, which supplies absolute DataRoot.

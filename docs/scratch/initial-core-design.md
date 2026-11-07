@@ -5,11 +5,14 @@ operation below are owner-approved. Other API/state shape remains proposed, not 
 Checkpoint only: Windows local browser app, deterministic request-only `IChatClient`,
 two primary chats/two clients, real SQLite, mid-response input, addressed Stop/settlement
 and restart/reconnect without replay. No approval of the whole checkpoint,
-transcript/lifecycle schema or transport.
+transcript/lifecycle schema or transport beyond the [scoped hosting approvals](initial-ui-hosting-design.md).
 The identity foundation, first fake-text Send/execution increment and bounded reads are
 implemented; see the current implementation section below. Acceptance has real durable work behind it,
 not a stub. Session shutdown now supplies the Core drain boundary needed by hosting.
-Busy-input queuing, startup recovery, HTTP/UI and the broader browser checkpoint remain unimplemented.
+Five thin HTTP operations now expose the existing Core; UI and the broader browser checkpoint
+remain unimplemented. Busy-input queueing and safe-boundary steering are **required** Core work,
+reaffirmed by the owner on 2026-11-07, not optional polish. Their detailed delivery design and
+startup recovery still require scoped implementation review.
 Present one bite inline at a time, not this whole document or a five-type pack; approval
 never extends to unpresented members.
 
@@ -127,7 +130,9 @@ queue/disposition/driver design or UI/HTTP implementation below. Review those de
 before implementing an acceptance path; do not add a placeholder that accepts but cannot
 execute. The subsequently approved constructor/execution ownership scope is recorded
 in the fifth bite below. The narrow fake-text integration is now implemented as described
-below; broader queue, context and hosting contracts remain proposed.
+below; broader queue and context contracts remain proposed. The approved HTTP slice now uses
+`InputConflictException : InvalidOperationException` to identify changed-command reuse, carrying
+`InputId` without changing receipt/decision policy. See the hosting record for the transport scope.
 
 ## Owner-approved fifth bite — SessionExecution lifetime boundary
 The owner answered **“yeah seems reasonable i think”** to the presented `internal sealed`

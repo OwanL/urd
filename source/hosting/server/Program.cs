@@ -1,10 +1,12 @@
 using System.Net;
 using System.Runtime.ExceptionServices;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging.Console;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
@@ -35,24 +37,30 @@ internal static class Program {
     }
   }
 
-  internal static async Task RunServerAsync(ServerOptions options, Action<Uri> onReady, CancellationToken stopping) {
+  internal static Task RunServerAsync(ServerOptions options, Action<Uri> onReady, CancellationToken stopping) =>
+      RunServerAsync(options, onReady, static () => new FakeChatClient(), stopping);
+
+  // The run constructs and owns the supplied client, including its disposal after successful drain.
+  internal static async Task RunServerAsync(ServerOptions options, Action<Uri> onReady, Func<IChatClient> createClient,
+      CancellationToken stopping) {
     ArgumentNullException.ThrowIfNull(options);
     ArgumentNullException.ThrowIfNull(onReady);
+    ArgumentNullException.ThrowIfNull(createClient);
     Directory.CreateDirectory(options.DataRoot);
     // Keep the file, not a stale PID. The OS releases exclusive ownership when this handle/process exits.
     var directoryLock = new FileStream(Path.Combine(options.DataRoot, "urd.lock"),
         FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
     SessionStore? store = null;
-    FakeChatClient? client = null;
+    IChatClient? client = null;
     SessionManager? manager = null;
     WebApplication? app = null;
     Uri? servedOrigin = null;
     ExceptionDispatchInfo? runFailure = null;
     try {
       store = SessionStore.Open(Path.Combine(options.DataRoot, "urd.sqlite"));
-      client = new FakeChatClient();
+      client = createClient();
       manager = new SessionManager(store, client);
-      app = CreateApplication(options, () => Volatile.Read(ref servedOrigin));
+      app = CreateApplication(options, manager, () => Volatile.Read(ref servedOrigin));
       var shutdownRequested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
       using var lifetimeStop = app.Lifetime.ApplicationStopping.Register(() => shutdownRequested.TrySetResult());
       using var callerStop = stopping.Register(app.Lifetime.StopApplication);
@@ -90,17 +98,25 @@ internal static class Program {
     runFailure?.Throw();
   }
 
-  private static WebApplication CreateApplication(ServerOptions options, Func<Uri?> servedOrigin) {
+  private static WebApplication CreateApplication(ServerOptions options, SessionManager manager,
+      Func<Uri?> servedOrigin) {
     // No default appsettings/environment/URL providers: Kestrel configuration can otherwise add listeners.
     WebApplicationBuilder builder = WebApplication.CreateEmptyBuilder(new WebApplicationOptions {
       ApplicationName = typeof(Program).Assembly.GetName().Name,
       ContentRootPath = AppContext.BaseDirectory,
       EnvironmentName = Environments.Production
     });
-    builder.WebHost.UseKestrelCore().ConfigureKestrel(kestrel => kestrel.Listen(IPAddress.Loopback, options.Port,
-        listener => listener.Protocols = HttpProtocols.Http1));
+    builder.WebHost.UseKestrelCore().ConfigureKestrel(kestrel => {
+      kestrel.Listen(IPAddress.Loopback, options.Port, listener => listener.Protocols = HttpProtocols.Http1);
+      kestrel.Limits.MaxRequestBodySize = 128 * 1024;
+    });
     builder.Host.UseConsoleLifetime(lifetime => lifetime.SuppressStatusMessages = true);
     builder.Services.AddRouting();
+    builder.Services.ConfigureHttpJsonOptions(json => {
+      json.SerializerOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase, allowIntegerValues: false));
+      json.SerializerOptions.RespectRequiredConstructorParameters = true;
+      json.SerializerOptions.RespectNullableAnnotations = true;
+    });
     builder.Services.Configure<HostOptions>(host => host.ShutdownTimeout = Timeout.InfiniteTimeSpan);
     builder.Logging.AddSimpleConsole(console => console.SingleLine = true);
     builder.Logging.SetMinimumLevel(LogLevel.Warning);
@@ -110,6 +126,7 @@ internal static class Program {
     app.MapMethods("/health", [HttpMethods.Get, HttpMethods.Head], (HttpContext context) =>
         context.Features.Get<IHttpRequestBodyDetectionFeature>()?.CanHaveBody == true
             ? Results.BadRequest() : Results.NoContent());
+    app.MapSessions(manager);
     return app;
   }
 }

@@ -1,6 +1,6 @@
 # Initial UI / hosting design — scoped startup approval and remaining proposals
-2026-11-05; startup bite approved 2026-11-07. **Only the startup/lifetime bite below is
-implemented. Chat transport, UI and the broader checkpoint remain proposed.**
+2026-11-05; startup and five-operation HTTP bites approved 2026-11-07. **Only those
+scoped bites below are implemented. UI and the broader checkpoint remain proposed.**
 
 ## Owner-approved first hosting bite — startup and shutdown
 
@@ -31,6 +31,33 @@ The owner chose startup first rather than bundling a chat HTTP flow. This does n
 new Core operations, transport/UI, real providers or the broader build wrapper proposal.
 Implementation, commands and verified limits: [server development](../server-development.md).
 
+## Owner-approved second hosting bite — five HTTP operations
+
+The owner approved `SessionRoutes.MapSessions(app, sessionManager)` with “Proceed with the slice”,
+while emphasizing that **queueing and steering are core functionality we must account for**.
+This approval covers create, Send, receipt lookup, snapshot polling and segment-local content
+paging over existing Core records. It does not make today's one-active-input refusal policy
+permanent or approve a queue/steering implementation by implication.
+
+The route group owns HTTP binding/validation and status translation, not a second session
+registry or admission policy. It passes both Accepted and Refused receipts through as 200;
+absence is literal JSON null, and generic errors never resolve an unknown Send. Only reads
+use request cancellation; accepted execution survives disconnects. Conflicting-command reuse
+has a typed Core exception, distinct from manager shutdown. Core schema/policy are unchanged.
+
+Every API request requires `X-Urd-Client: browser` in addition to the local Host/Origin gate,
+with no CORS grants. API responses are not cacheable. JSON bodies are bounded to 128 KiB and
+decoded input to 16 KiB UTF-8. Wire records use camelCase properties and enum names, required
+command members, GUID strings and integer revisions. Content uses six explicit query fields,
+not the superseded global-byte cursor/SSE sketches below.
+
+Lost create acknowledgement remains unknown and cannot be rediscovered through these routes
+without listing. UI, listing, public Stop, startup recovery, providers and queue/steering are
+not implemented by this bite. The owner accepted the current limits, not a finished chat workflow.
+An internal client factory preserves server-owned construction/disposal while enabling causal
+held-cleanup tests of the real host. Exact routes, commands and evidence are in
+[server development](../server-development.md).
+
 ## Remaining UI / transport proposal
 
 **Approved read-boundary update:** the owner approved Core snapshot/content reads and
@@ -40,7 +67,7 @@ The earlier SSE/subscription/epoch-version and global-byte cursor sketches below
 superseded for that increment, not extra approved APIs. Use the actual snapshot plus
 segment-local content cursor contract when implementing the browser; keep automatic
 bounded follow beyond previews, coherent revisions and independent work lifetimes.
-Other UI/hosting operations and implementation still require their scoped review.
+UI and additional hosting operations still require their scoped review.
 Checkpoint: built Preact UI + ASP.NET server, two primary chats/two browsers,
 deterministic request-only `IChatClient`, real SQLite, mid-response input, Stop,
 history/reconnect/restart without replay. No providers/tools, LAN or desktop scaffold.
@@ -273,7 +300,7 @@ rolling bounds/one read per row; pausing/selection stops automatic reads and pre
 Gate tests cover foreign/missing/null Origin, hostile Host/port/peer, missing marker,
 foreign preflight and no-cors POST, read/stream disclosure; assert server effects too.
 Recheck independent-navigation ≤100 incremental production LOC; no mirrored-mode option.
-Outside the approved startup bite, this document remains design only. The linked server
+Outside the two approved hosting bites, this document remains design only. The linked server
 development record owns the narrow build/test evidence, not the wider browser checkpoint.
 Earlier reviews covered creation/browser admission, lazy content and follow behavior.
 The later Astra critique found the unknown-Send gap and shutdown ownership drift addressed

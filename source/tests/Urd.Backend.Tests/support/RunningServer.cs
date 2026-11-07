@@ -1,3 +1,4 @@
+using Microsoft.Extensions.AI;
 using Urd.Server;
 using static Urd.Backend.Tests.Support.TestAsync;
 
@@ -11,13 +12,13 @@ internal sealed class RunningServer : IAsyncDisposable {
   private bool completionObserved, disposed;
 
   internal RunningServer(ServerOptions options, Action<Uri>? onReady = null,
-      CancellationToken cancellationToken = default) {
+      Func<IChatClient>? createClient = null, CancellationToken cancellationToken = default) {
     stopping = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
     Client = new HttpClient(new SocketsHttpHandler { UseProxy = false }) { Timeout = TestTimeout };
     run = Program.RunServerAsync(options, origin => {
       onReady?.Invoke(origin);
       ready.TrySetResult(origin);
-    }, stopping.Token);
+    }, createClient ?? (static () => new FakeChatClient()), stopping.Token);
   }
 
   internal HttpClient Client { get; }

@@ -3,9 +3,13 @@ using Microsoft.AspNetCore.Http;
 
 namespace Urd.Server;
 
-// Admits local health requests only while the server has a published origin.
+// Checks the local browser boundary before private routes read state or admit work.
 internal sealed class LocalBrowserGate(RequestDelegate next, Func<Uri?> servedOrigin) {
   public Task InvokeAsync(HttpContext context) {
+    bool privateApi = context.Request.Path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase);
+    if (privateApi)
+      context.Response.Headers.CacheControl = "no-store";
+
     Uri? origin = servedOrigin();
     if (origin is null) {
       context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
@@ -25,6 +29,12 @@ internal sealed class LocalBrowserGate(RequestDelegate next, Func<Uri?> servedOr
     if (context.Request.Headers.TryGetValue("Origin", out var suppliedOrigin)
         && (suppliedOrigin.Count != 1
             || !string.Equals(suppliedOrigin[0], origin.GetLeftPart(UriPartial.Authority), StringComparison.Ordinal))) {
+      context.Response.StatusCode = StatusCodes.Status403Forbidden;
+      return Task.CompletedTask;
+    }
+
+    if (privateApi && (!context.Request.Headers.TryGetValue("X-Urd-Client", out var marker)
+        || marker.Count != 1 || !string.Equals(marker[0], "browser", StringComparison.Ordinal))) {
       context.Response.StatusCode = StatusCodes.Status403Forbidden;
       return Task.CompletedTask;
     }

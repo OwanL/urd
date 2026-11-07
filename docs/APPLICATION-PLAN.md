@@ -173,13 +173,17 @@ comparisons or a larger complete specification:
    Coherent snapshots and full-content pages now expose committed state without replay;
    final output remains distinct from settled work. The owner selected snapshot polling
    for the first browser increment; browser wiring itself is not implemented yet.
-   This staging increment refuses distinct busy input rather than queuing it. The approved
+   This staging increment refuses distinct busy input rather than queuing it. The owner explicitly
+   reaffirmed on 2026-11-07 that **queueing and steering are required core functionality**.
+   Their durable admission/delivery and safe-boundary behavior need a scoped Core increment;
+   HTTP/UI must not turn the staging restriction into a permanent Send policy. The approved
    `SessionManager.ShutdownSessionsAsync` now fences and drains owned work without disposing
    borrowed resources; startup recovery, public addressed Stop and push subscriptions remain pending.
    See the [read review map](backend-development.md#read-contract-and-incremental-review-order) before expanding it.
-   The approved [health-only Server startup slice](server-development.md) now supplies real
-   loopback listening, exclusive data ownership and orderly shutdown. Chat endpoints and UI
-   remain separate unapproved bites; this is not the integrated browser milestone.
+   The approved [Server slices](server-development.md) supply real loopback listening, exclusive
+   data ownership, orderly shutdown and five thin chat HTTP operations: create, Send, receipt,
+   snapshot and content. UI, listing and public addressed Stop remain separate bites;
+   this is not the integrated browser milestone or a complete chat workflow.
    Keep independent Core/storage and UI/hosting/build work parallel with disjoint ownership;
    routine dependency wiring is not another approval gate. This is not whole-Core approval.
 2. Order the necessary small Core and hosting/UI bites toward one built browser → Core →

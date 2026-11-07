@@ -6,7 +6,7 @@ using Xunit;
 
 namespace Urd.Backend.Tests.Hosting;
 
-// Local health admission uses the connection, Host and optional exact browser origin.
+// Public and private routes share local admission; only private routes require the browser marker.
 public sealed class LocalBrowserGateTests {
   private static readonly Uri origin = new("http://127.0.0.1:43127");
 
@@ -139,6 +139,71 @@ public sealed class LocalBrowserGateTests {
     context.Request.Headers["X-Forwarded-Proto"] = "http";
 
     await AssertAdmissionAsync(context, StatusCodes.Status403Forbidden);
+  }
+
+  [Theory]
+  [InlineData("/api")]
+  [InlineData("/api/")]
+  [InlineData("/API/sessions")]
+  [InlineData("/api/unknown")]
+  public async Task PrivatePathsRequireMarkerEvenWithoutOrigin(string path) {
+    DefaultHttpContext context = LocalRequest();
+    context.Request.Path = path;
+
+    await AssertAdmissionAsync(context, StatusCodes.Status403Forbidden);
+    Assert.Equal("no-store", context.Response.Headers.CacheControl.ToString());
+
+    context.Request.Headers["X-Urd-Client"] = "browser";
+    await AssertAdmissionAsync(context, StatusCodes.Status204NoContent);
+  }
+
+  [Theory]
+  [InlineData("")]
+  [InlineData("Browser")]
+  [InlineData("browser ")]
+  [InlineData("native")]
+  [InlineData("browser,browser")]
+  public async Task PrivatePathsRequireExactMarker(string marker) {
+    DefaultHttpContext context = LocalRequest();
+    context.Request.Path = "/api/sessions";
+    context.Request.Headers["X-Urd-Client"] = marker;
+    context.Request.Headers.Origin = origin.GetLeftPart(UriPartial.Authority);
+
+    await AssertAdmissionAsync(context, StatusCodes.Status403Forbidden);
+  }
+
+  [Fact]
+  public async Task DuplicateMarkersAreNotAnAdmissionCredential() {
+    DefaultHttpContext context = LocalRequest();
+    context.Request.Path = "/api/sessions";
+    context.Request.Headers["X-Urd-Client"] = new StringValues(["browser", "browser"]);
+
+    await AssertAdmissionAsync(context, StatusCodes.Status403Forbidden);
+  }
+
+  [Theory]
+  [InlineData("/health")]
+  [InlineData("/apiculture")]
+  [InlineData("/api-other")]
+  public async Task PublicPathsRemainUnmarkedAndDoNotGetPrivateCachePolicy(string path) {
+    DefaultHttpContext context = LocalRequest();
+    context.Request.Path = path;
+
+    await AssertAdmissionAsync(context, StatusCodes.Status204NoContent);
+    Assert.False(context.Response.Headers.ContainsKey("Cache-Control"));
+  }
+
+  [Theory]
+  [InlineData(false)]
+  [InlineData(true)]
+  public async Task PrivateRejectionsAreNotCacheableBeforeAnyAdmissionCheck(bool ready) {
+    DefaultHttpContext context = LocalRequest();
+    context.Request.Path = "/api/sessions";
+    context.Request.Headers.Origin = "http://foreign.example";
+
+    await AssertAdmissionAsync(context, ready ? StatusCodes.Status403Forbidden : StatusCodes.Status503ServiceUnavailable,
+        () => ready ? origin : null);
+    Assert.Equal("no-store", context.Response.Headers.CacheControl.ToString());
   }
 
   private static DefaultHttpContext LocalRequest() {

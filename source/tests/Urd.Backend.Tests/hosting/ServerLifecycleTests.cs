@@ -32,7 +32,10 @@ public sealed class ServerLifecycleTests {
       await AssertStatusAsync(server.Client, new(HttpMethod.Get, "/health") {
         Content = new StringContent("body")
       }, HttpStatusCode.BadRequest);
-      await AssertStatusAsync(server.Client, new(HttpMethod.Get, "/api/sessions"), HttpStatusCode.NotFound);
+      await AssertStatusAsync(server.Client, new(HttpMethod.Get, "/api/unknown"), HttpStatusCode.Forbidden);
+      using var unknownApi = new HttpRequestMessage(HttpMethod.Get, "/api/unknown");
+      unknownApi.Headers.Add("X-Urd-Client", "browser");
+      await AssertStatusAsync(server.Client, unknownApi, HttpStatusCode.NotFound);
 
       using var hostileOrigin = new HttpRequestMessage(HttpMethod.Get, "/health");
       hostileOrigin.Headers.Add("Origin", "http://foreign.example");
@@ -171,7 +174,7 @@ public sealed class ServerLifecycleTests {
     using var canceled = new CancellationTokenSource();
     await canceled.CancelAsync();
     int callbacks = 0;
-    var server = new RunningServer(Options(database), _ => callbacks++, canceled.Token);
+    var server = new RunningServer(Options(database), _ => callbacks++, cancellationToken: canceled.Token);
     RunningServer? restarted = null;
     try {
       await server.WaitForCompletionAsync();

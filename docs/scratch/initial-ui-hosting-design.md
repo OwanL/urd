@@ -126,6 +126,23 @@ summary/`ListPrimaryAsync` sketches below, not the UI or wider proposal. No full
 navigation or automatic recovery follows. Independent review, locked restore and
 **295/295 Release tests** pass without warnings; see the [server evidence](../server-development.md#verification-and-review).
 
+## First browser-client bite — approved and implemented 2026-11-08
+
+The owner approved the presented HTTP-only `SessionClient` class, its matching
+TypeScript records, focused tests and minimal tooling. The class in
+`source/ui/sessions/SessionClient.ts` implements `list`, `create`, `getSnapshot`,
+`getMessageContent`, `submitMessage`, `getMessageReceipt` and `stopExecution` against
+the current seven routes. Construction does no I/O; the class owns no polling,
+selection, drafts, caches, IDs or execution state. Read cancellation does not stop
+work, commands never retry automatically, and HTTP failures retain status/body
+without fabricating admission decisions. Full original-submission matching remains
+the future UI owner's responsibility.
+
+This supersedes the old `Backend`/SSE transport sketch below for the first browser
+increment, not the unapproved UI-state/component sketches. No changes to Core/schema/routes,
+work on static assets/rendering/providers or larger scaffold are approved by this bite. The [browser development guide](../browser-development.md) owns tooling,
+checks and evidence limits. New UI code uses Pie only as a visual/behavioural reference.
+
 ## Remaining UI / transport proposal
 
 **Approved read-boundary update:** the owner approved Core snapshot/content reads and

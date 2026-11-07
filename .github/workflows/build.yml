@@ -21,3 +21,12 @@ jobs:
       - run: dotnet restore
       - run: dotnet build --configuration Release --no-restore
       - run: dotnet test --configuration Release --no-build
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: source/ui/.node-version
+          cache: npm
+          cache-dependency-path: source/ui/package-lock.json
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: source/ui
+      - run: npm run check && npm test && npm run test:integration
+        working-directory: source/ui

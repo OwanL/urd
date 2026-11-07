@@ -20,8 +20,10 @@ with exclusive data ownership and graceful shutdown. Busy Sends use Core's bound
 admission. The breaking API vocabulary uses message submissions and executions,
 with no legacy aliases; saved IDs/schema 5, decisions and exact retries are unchanged.
 The naming and structure cleanup passed 296/296 Release tests and independent review; see the development guides.
-Real tools/providers, UI, tool-inspection APIs and an explicit after-execution queue are not
-implemented; reopening does not recover or replay work. Wider designs remain subject to
+The first [browser-client bite](docs/browser-development.md) implements typed HTTP access
+and wire tests, not UI rendering or browser state. Real tools/providers, UI rendering,
+tool-inspection APIs and an explicit after-execution queue are not implemented;
+reopening does not recover or replay work. Wider designs remain subject to
 bite-sized owner review; the
 [Core](docs/scratch/initial-core-design.md) and [hosting](docs/scratch/initial-ui-hosting-design.md)
 records distinguish approved slices from future proposals.

@@ -1,6 +1,7 @@
 /source/**/bin/
 /source/**/obj/
 /source/**/TestResults/
+/source/ui/node_modules/
 /.tools/
 /builds/
 /data/

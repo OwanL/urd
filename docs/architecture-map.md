@@ -34,52 +34,31 @@ Method parameters and asynchronous return wrappers are omitted for readability.
 ## 1. System boundaries
 
 **Read this as:** HTTP adapts commands; Core decides and executes; SQLite retains the facts.
-The boxes inside Core are responsibilities in **one assembly**, not separate services.
+Core's sessions, execution and storage responsibilities live in **one assembly**, not separate services.
 
 ```mermaid
----
-config:
-  flowchart:
-    subGraphTitleMargin:
-      top: 12
-      bottom: 28
----
-flowchart TB
-  caller["HTTP caller / test client"]
-  subgraph server["Urd.Server · ASP.NET Core / Kestrel"]
-    host["Program + ServerOptions<br/>composition, data lease, shutdown"]
-    gate["LocalBrowserGate<br/>loopback, Host, Origin, API marker"]
-    routes["SessionRoutes<br/>create · send · receipt · snapshot · content"]
-    fake["FakeChatClient<br/>deterministic text; no configured tools"]
-  end
-  subgraph core["Urd.Core · no ASP.NET dependency"]
-    sessions["Sessions<br/>identity, admission, lifecycle"]
-    execution["Execution<br/>model stream, tool calls, cleanup"]
-    storage["Storage<br/>receipts, runs, context, read views"]
-  end
-  db[("urd.sqlite<br/>schema v4 · WAL")]
-  caller -->|HTTP on 127.0.0.1| gate
-  gate -->|admitted requests| routes
-  routes -->|Core API| sessions
-  sessions -->|drives requests| execution
-  execution -->|guarded save callbacks| sessions
-  sessions -->|read / write| storage
-  storage -->|single connection| db
-  execution -.->|IChatClient| fake
-  host -.->|creates and owns| sessions
-  host -.->|opens| storage
-  host -.->|creates| fake
-  classDef hosting fill:#eaf2ff,stroke:#315d9e,color:#132a49
-  classDef domain fill:#e6f5ef,stroke:#27745d,color:#163b30
-  classDef persisted fill:#fff3dc,stroke:#a87320,color:#50360e
-  class host,gate,routes,fake hosting
-  class sessions,execution domain
-  class storage,db persisted
+flowchart LR
+  caller["HTTP caller<br/>or test client"]
+  server["Urd.Server<br/>LocalBrowserGate<br/>SessionRoutes"]
+  core["Urd.Core<br/>sessions · execution<br/>storage"]
+  db[("SQLite<br/>schema v4 · WAL")]
+  fake["FakeChatClient<br/>owned by Server"]
+  caller -->|loopback HTTP| server
+  server -->|Core API| core
+  core -->|one connection| db
+  core -.->|borrowed IChatClient| fake
+  classDef host fill:#edf3fa,stroke:#7895ad,color:#1d3343
+  classDef domain fill:#eaf4ef,stroke:#82a896,color:#1c4738
+  classDef data fill:#fff5df,stroke:#cbb789,color:#614b22
+  class server,fake host
+  class core domain
+  class db data
 ```
 
 - The project reference is **`Urd.Server → Urd.Core`**, never the reverse.
 - `Program.RunServerAsync` owns the directory lease, store, client, manager and web application.
-  It borrows none of them from an external dependency-injection container.
+  It borrows none of them from an external dependency-injection container. These composition and ownership
+  edges are kept in prose rather than the overview.
 - HTTP disconnects do not cancel admitted work. Receipt/snapshot/content reads do accept request cancellation.
 - Only the Server composition uses `FakeChatClient`. Core accepts a borrowed `IChatClient` and optional
   `AIFunction` objects; the tool-capable path is present in Core, not configured by the normal server startup.
@@ -119,21 +98,11 @@ classDiagram
     ~RunId : Guid
     ~RunRequestAsync()
     ~StopAsync()
-  }
-  class AsyncLock
-  class SessionStore
-  class IChatClient {
-    <<interface>>
+    +Dispose()
   }
   SessionBase <|-- PrimarySession
   SessionManager "1" *-- "0..*" PrimarySession : canonical handles
   SessionBase "1" *-- "0..1" SessionExecution : current run
-  SessionBase *-- AsyncLock : per-session gate
-  SessionManager *-- AsyncLock : separate registry gate
-  SessionManager --> SessionStore : borrowed
-  SessionManager --> IChatClient : borrowed
-  SessionBase --> SessionStore : borrowed
-  SessionExecution --> IChatClient : borrowed
 ```
 
 | Owner | Keeps / coordinates | Does not own |
@@ -143,8 +112,13 @@ classDiagram
 | `PrimarySession` | Public user-input entry point, delegating to base admission. | A second state machine. |
 | `SessionExecution` | Run cancellation source; sequential request execution and tool batches. | Session lock; SQL; borrowed client/tool disposal. |
 
-The manager passes the same store, client and configured tool references to its sessions.
-The class diagram omits repeated tool-list and client-reference edges for clarity.
+`PrimarySession` inherits the read surface from `SessionBase`. The manager and each
+session have **separate `AsyncLock` instances**: one protects registry coordination, the other serializes
+that session's state and guarded storage calls. The manager passes its borrowed store and client references,
+plus a snapshot of borrowed tool references, to its sessions. Sessions pass the borrowed client and tools to
+`SessionExecution`; none of these classes owns their disposal. The execution owns only its run cancellation
+source and model/tool work lifetime.
+
 `SubagentSession` is a design direction, **not an implemented class** in this snapshot.
 Addressed Stop and settlement waiting exist internally, but are not public HTTP operations.
 
@@ -155,7 +129,7 @@ Addressed Stop and settlement waiting exist internally, but are not public HTTP 
 
 ## 3. Inside one model request
 
-**Read this as:** execution owns the provider lifetime; accumulation interprets updates;
+**Read this as:** execution owns each model request and its cleanup; accumulation interprets updates;
 the writer batches text; the session remains the gateway to storage.
 
 ```mermaid
@@ -179,27 +153,9 @@ classDiagram
     ~FlushAsync()
     ~FinishResponseAsync()
   }
-  class SessionBase {
-    ~RecordOutputAsync()
-    ~CompleteRequestAsync()
-    ~TryStartToolAsync()
-    ~CompleteToolAsync()
-  }
-  class IChatClient {
-    <<interface>>
-    +GetStreamingResponseAsync()
-  }
-  class AIFunction {
-    <<external abstract class>>
-    +InvokeAsync()
-  }
   SessionExecution *-- LlmResponseAccumulator : creates per request
   SessionExecution *-- LlmResponseWriter : creates per request
   LlmResponseAccumulator --> LlmResponseWriter : text and final marker
-  SessionExecution --> IChatClient : borrowed shared client
-  SessionExecution --> AIFunction : borrowed configured tools
-  SessionExecution --> SessionBase : guarded persistence callbacks
-  LlmResponseWriter ..> SessionExecution : saveChunkAsync callback
 ```
 
 | Record | From → to | Meaning |
@@ -209,6 +165,11 @@ classDiagram
 | `LlmRequestOutcome` | execution → session → store | Model request outcome plus authorized tool calls; not run settlement. |
 | `LlmToolCall` / `LlmToolResult` | accumulator / invocation → store | Frozen JSON arguments/results and explicit call identity. |
 | `ExecutionResult` | store → session waiters/read views | Saved whole-run outcome: Completed, Cancelled or Failed. |
+
+For each request, `SessionExecution` creates one accumulator and writer. The writer's `saveChunkAsync`
+callback returns through `SessionExecution` to `SessionBase` for guarded persistence. Execution borrows the
+session, shared `IChatClient` and configured `AIFunction` references; it does not own or dispose them. These
+callback and borrowed-reference edges are intentionally omitted from this focused view.
 
 The writer saves chunks at **16 KiB** or a **100 ms flush deadline**; this is not an end-to-end latency guarantee.
 The accumulator accepts text and complete function-call content, ignores usage content, and requires a supported
@@ -226,57 +187,40 @@ arguments/results are individually bounded to 16 KiB JSON. Tool invocation is se
 **Read this as:** acceptance is durable before execution starts; steering waits for the next request.
 This is the successful path, with refusal/retry branches compressed into the notes below.
 
+### Admission: save the decision
+
+Admission holds the session lock through one storage transaction. Accepted input saves membership and a
+message index, creating a run if idle. A new run's driver starts after the lock is released;
+receipt delivery can race that execution.
+
 ```mermaid
 sequenceDiagram
-  autonumber
-  participant HTTP as HTTP caller
-  participant S as PrimarySession / SessionBase
+  participant C as Caller
+  participant S as Session
   participant DB as SessionStore
-  participant E as SessionExecution
-  participant M as IChatClient
-  participant T as AIFunction
-  HTTP->>S: SubmitUserInputAsync(command)
-  S->>DB: Admit under session lock + transaction
-  Note over S,DB: Save receipt, input, message index and create run if idle
-  DB-->>S: Accepted receipt + run ID
-  S-->>HTTP: Receipt (not an answer)
-  Note over S,E: Driver starts after admission lock releases, response timing may overlap
-  S->>DB: Claim request, assign pending inputs, build context
-  DB-->>S: Committed LlmRequest
-  S->>E: RunRequestAsync(request), outside session lock
-  E->>M: GetStreamingResponseAsync(context)
-  loop Streaming text
-    M-->>E: ChatResponseUpdate
-    E->>S: Save bounded output chunk
-    S->>DB: Append committed bytes
-  end
-  opt More user input while request is active
-    HTTP->>S: SubmitUserInputAsync(new command)
-    S->>DB: Save steering input against same run
-    S-->>HTTP: Accepted, if admission permits
-    Note over S,M: Current request is unchanged
-  end
-  M-->>E: Supported finish + end of stream
-  Note over E,M: Cancel request source, join pending read, dispose stream
-  E->>S: CompleteRequestAsync(outcome + calls)
-  S->>DB: Save request outcome and tool calls
-  loop Authorized tool calls, if any
-    E->>S: TryStartToolAsync(call ID)
-    S->>DB: Persist started marker
-    E->>T: InvokeAsync(run cancellation token)
-    T-->>E: Result or recorded tool error
-    E->>S: CompleteToolAsync(result)
-    S->>DB: Persist result before continuation
-  end
-  E-->>S: Request execution outcome
-  Note over S,DB: Under session lock: claim next request OR save settlement
-  alt Pending input or tool continuation
-    S->>DB: Claim next request with tool results + steering
-    Note over S,E: Repeat model request cycle
-  else No more work
-    S->>DB: Save whole-run settlement
-    Note over S,E: Dispose execution, then publish settlement
-  end
+  C->>S: SubmitUserInputAsync(command)
+  S->>DB: Admit and persist decision
+  DB-->>S: Receipt + run ID if accepted
+  S-->>C: Saved receipt, not an answer
+```
+
+### Execution: repeat at a safe boundary
+
+This view compresses the ordinary request path. It includes cleanup and persistence guards, not just model
+streaming; model and tool work are outside the session lock. Persistence callbacks and request-boundary
+claim/settlement decisions enter the lock. Only successful work with another claimable request loops back.
+
+```mermaid
+flowchart LR
+  model["Model request<br/>stream · clean up · save outcome"]
+  tools["Tools<br/>persist start · invoke · persist result"]
+  boundary["Session-lock boundary<br/>more work?"]
+  settle["Settle<br/>save · dispose · publish"]
+  model -->|authorized calls| tools
+  model -->|no calls| boundary
+  tools --> boundary
+  boundary -->|yes · claim next request| model
+  boundary -->|no| settle
 ```
 
 - An exact retry returns the original receipt without another execution. Reusing an input ID with changed
@@ -304,24 +248,16 @@ sequenceDiagram
 The grouped operation boxes below are visual groupings, **not additional classes**.
 
 ```mermaid
-flowchart TB
-  session["SessionBase<br/>per-session AsyncLock"]
-  store["SessionStore<br/>owns Database and storage components"]
+flowchart LR
+  store["SessionStore"]
   writes["Write components<br/>SessionStorage · InputStorage<br/>RunStorage · OutputStorage · ToolStorage"]
   reads["Read components<br/>SnapshotReader · MessageContentReader"]
-  context["RequestContextReader<br/>created by RunStorage during claim"]
-  database["Database<br/>one monitor · one SqliteConnection<br/>owns transaction lifetimes"]
-  schema["DatabaseSchema<br/>initialize / migrate at Open"]
+  database["Shared Database<br/>one monitor · one SqliteConnection<br/>owns transaction lifetimes"]
   sqlite[("SQLite · WAL<br/>foreign keys ON · synchronous NORMAL")]
-  session -->|borrowed reference| store
   store -->|owns| writes
   store -->|owns| reads
-  writes -->|RunStorage uses| context
-  writes -->|Write / Guarded| database
-  reads -->|Read transaction| database
-  context -->|same claim transaction| database
-  store -->|Open invokes| schema
-  schema -->|schema v4| sqlite
+  writes -->|write| database
+  reads -->|read| database
   database -->|SQL| sqlite
 ```
 
@@ -336,6 +272,8 @@ flowchart TB
 | Full content page | Up to 16 KiB UTF-8, examining at most 16 segments. Cursor is segment index + byte offset, scalar-safe. |
 
 `SnapshotReader` reuses `MessageContentReader` to make previews. Neither read starts execution.
+During a request claim, `RunStorage` uses `RequestContextReader` to reconstruct context in the same write
+transaction. On `Open`, `DatabaseSchema` initializes or migrates the schema to effective v4 before normal use.
 `HasMore = false` means the current committed tail, not necessarily final output.
 `IsClosed`, `FinalOutputCommitted` and saved run settlement answer different questions.
 Snapshots expose user/assistant text previews; they are not a complete tool-call/result inspection API.
@@ -354,20 +292,28 @@ locks, but context reconstruction happens inside the claim transaction and sessi
 ## 6. Durable data model
 
 **Read this as:** input decisions, delivery membership, model attempts and run settlement are different facts.
-This is a **selected relationship map of effective schema v4**, not the old single-request schema or a full DDL dump.
-Crow's foot = many; circle = optional; double bar = exactly one. Lines below represent declared foreign keys;
-redundant direct session/run edges are omitted to avoid a tangle.
+These are **selected relationship maps of effective schema v4**, not the old single-request schema or a full DDL dump.
+Crow's foot = many; circle = optional; double bar = exactly one. Lines represent declared foreign keys.
+Some direct session/run and role-conditional message edges are omitted for readability and listed below.
+
+### Admission and delivery
 
 ```mermaid
 erDiagram
-  direction TB
+  direction LR
   sessions ||--o{ input_decisions : retains
   input_decisions ||--o| execution_runs : originates
-  input_decisions ||--o| execution_inputs : accepted_membership
+  input_decisions ||--o| execution_inputs : membership
   execution_runs ||--o{ execution_requests : contains
   execution_runs ||--o{ execution_inputs : receives
-  execution_runs ||--o{ execution_messages : indexes
   execution_requests |o--o{ execution_inputs : claims
+```
+
+### Output and history
+
+```mermaid
+erDiagram
+  direction LR
   execution_requests ||--o{ execution_output : stores_chunks
   execution_requests ||--o{ execution_tools : authorizes
   execution_requests |o--o{ execution_messages : assistant_message
@@ -393,7 +339,7 @@ erDiagram
   `execution_requests.output_id` likewise is not a foreign key.
 - A message row references an input decision for user content **or** a request for assistant content,
   enforced by a role check. The optional input-decision → message edge is omitted from the diagram.
-- Other omitted direct FKs: sessions → runs/inputs/messages and runs → tools.
+- Other omitted direct FKs: sessions → runs/inputs/messages and runs → tools/messages.
   Separate FKs do not by themselves enforce that all duplicated session/run/request IDs agree;
   application writes preserve that consistency.
 - The v4 migration rebuilds requests/output, adds input/message/tool tables and backfills older data atomically.
@@ -408,40 +354,29 @@ erDiagram
 The host closes HTTP admission before beginning the two drain operations.
 
 ```mermaid
-sequenceDiagram
-  participant H as Program
-  participant W as WebApplication
-  participant M as SessionManager
-  participant S as Live sessions
-  participant E as Execution / tools
-  H->>H: Clear served origin (gate now refuses requests)
-  par HTTP drain
-    H->>W: StopAsync without a cleanup deadline
-    W-->>H: HTTP stopped and drained
-  and Core drain
-    H->>M: ShutdownSessionsAsync
-    M->>M: Fence create / lookup
-    M->>S: Fence input on ALL held handles
-    Note over M,S: Wait for all fences before any stop callbacks
-    M->>S: StopExecutionAsync
-    S->>S: Attempt durable Stop write
-    S->>E: Start local cancellation even if Stop write failed
-    Note over S,E: Join callbacks, model/tool work, stream cleanup
-    S->>S: Save settlement if state is certain
-    S-->>M: Retained shutdown result
-    M-->>H: Core drain result
-  end
-  alt Both drains succeeded
-    H->>H: Dispose app, client, store and release directory lease
-  else A drain failed
-    H->>H: Report failure, no forced disposal beneath uncertain work
-  end
+flowchart LR
+  gate["Close served origin<br/>HTTP gate refuses new requests"]
+  http["HTTP drain<br/>StopAsync without cleanup deadline"]
+  core["Core drain<br/>fence all handles · stop · join · settle"]
+  success{"Both drains<br/>succeeded?"}
+  dispose["Dispose app, client and store<br/>release directory lease"]
+  failure["Report failure<br/>no forced disposal beneath uncertain work"]
+  gate --> http
+  gate --> core
+  http --> success
+  core --> success
+  success -->|yes| dispose
+  success -->|no| failure
 ```
 
-A caller cancelling its shutdown wait does not cancel the shared shutdown operation.
-Stop callbacks may reenter session reads/admission and are joined outside the session lock.
-A cleanup or uncertain persistence failure fences the session rather than silently replaying work.
-Reopening a database preserves orphan runs; it does **not** recover them or restart execution.
+The HTTP and Core drain branches run in parallel after the served origin is cleared. Core fences manager
+creation/lookup and every held session before starting any Stop callbacks, then joins callbacks, model/tool
+work and stream cleanup before saving settlement when state is certain. If a Stop write fails for an active
+execution, local cancellation still starts, but the failed Core drain prevents host disposal. A caller cancelling
+its shutdown wait does not cancel the shared shutdown operation. Stop callbacks may reenter session
+reads/admission and are joined outside the session lock. A cleanup or uncertain persistence failure fences
+the session rather than silently replaying work. Reopening a database preserves orphan runs; it does **not**
+recover them or restart execution.
 
 **Source:** [Program.cs](../source/hosting/server/Program.cs),
 [SessionManager.cs](../source/backend/core/sessions/SessionManager.cs),
@@ -486,7 +421,9 @@ Validation covers diagram rendering, document links and independent source-to-di
 application builds/tests and live-provider/performance validation are not claimed.
 
 This Markdown is the editable diagram source (Mermaid). The HTML companion is a static, offline rendering
-of the same snapshot, with embedded SVGs, navigation and printable layout; it makes no network requests.
+of the same snapshot, with compact views, expandable notes, full-size diagram controls and printable layout;
+it makes no network requests. Shared dependencies and detailed constraints live beside the focused diagrams
+rather than adding more crossing lines.
 It is not live-generated from C#. When updating the map, recheck ownership, cardinalities and transaction
 boundaries against source, update the snapshot label, render the Mermaid blocks again, and regenerate
 both views together. Mermaid **11.12.2** was used for this rendering.

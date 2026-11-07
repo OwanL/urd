@@ -420,6 +420,10 @@ reference evidence, not Urd architectural contracts.
 
 ## Architecture and feature review
 
+The [visual architecture map](docs/architecture-map.md) explains the implemented class structure,
+ownership, execution flow and storage relationships; an [offline HTML guide](docs/architecture-map.html)
+provides the rendered diagrams. Both are dated source snapshots, not new design approvals.
+
 [ARCHITECTURE.md](docs/ARCHITECTURE.md) records the continuing feature review,
 architectural decisions and unresolved design questions. This README owns the
 project's purpose and strategic constraints; the architecture document owns the

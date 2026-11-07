@@ -4,8 +4,8 @@ namespace Urd.Core.Storage;
 
 // Serializes access to the connection and owns transaction lifetimes.
 internal sealed class Database(SqliteConnection connection) : IDisposable {
-    private readonly object _gate = new();
-    private bool _disposed;
+    private readonly object gate = new();
+    private bool disposed;
 
     internal T Write<T>(Func<SqliteTransaction, T> operation)
         => Transact(operation, deferred: false);
@@ -15,8 +15,8 @@ internal sealed class Database(SqliteConnection connection) : IDisposable {
 
     // Runs the operation under the gate, refusing work after disposal.
     internal T Guarded<T>(Func<T> operation) {
-        lock (_gate) {
-            ObjectDisposedException.ThrowIf(_disposed, this);
+        lock (gate) {
+            ObjectDisposedException.ThrowIf(disposed, this);
             return operation();
         }
     }
@@ -34,12 +34,12 @@ internal sealed class Database(SqliteConnection connection) : IDisposable {
     }
 
     public void Dispose() {
-        lock (_gate) {
-            if (_disposed)
+        lock (gate) {
+            if (disposed)
                 return;
 
             connection.Dispose();
-            _disposed = true;
+            disposed = true;
         }
     }
 

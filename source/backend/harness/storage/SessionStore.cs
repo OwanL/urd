@@ -4,16 +4,16 @@ namespace Urd.Core.Storage;
 
 // Opens the session database and exposes its focused storage operations.
 public sealed class SessionStore : IDisposable {
-    private readonly Database _database;
+    private readonly Database database;
 
     private SessionStore(SqliteConnection connection) {
-        _database = new(connection);
-        Sessions = new(_database);
-        Inputs = new(_database);
-        Runs = new(_database);
-        Output = new(_database);
-        Content = new(_database);
-        Snapshots = new(_database, Content);
+        database = new(connection);
+        Sessions = new(database);
+        Inputs = new(database);
+        Runs = new(database);
+        Output = new(database);
+        Content = new(database);
+        Snapshots = new(database, Content);
     }
 
     internal SessionStorage Sessions { get; }
@@ -41,5 +41,5 @@ public sealed class SessionStore : IDisposable {
         }
     }
 
-    public void Dispose() => _database.Dispose();
+    public void Dispose() => database.Dispose();
 }

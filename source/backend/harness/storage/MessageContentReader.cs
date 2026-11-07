@@ -7,14 +7,14 @@ namespace Urd.Core.Storage;
 
 // Reads bounded message content without splitting UTF-8 scalars.
 internal sealed class MessageContentReader {
-    private readonly Database _database;
+    private readonly Database database;
 
     internal MessageContentReader(Database database) {
-        _database = database;
+        this.database = database;
     }
 
     internal MessageContentPage Read(Guid sessionId, MessageContentCursor cursor) {
-        return _database.Read(transaction => {
+        return database.Read(transaction => {
             ValidateCursorAndLimit(sessionId, cursor, int.MaxValue);
             CheckHistoryRevision(transaction, sessionId, cursor.Message.HistoryRevision);
             return ReadValidated(transaction, sessionId, cursor, int.MaxValue);
@@ -55,7 +55,7 @@ internal sealed class MessageContentReader {
     }
 
     private void CheckHistoryRevision(SqliteTransaction transaction, Guid sessionId, long historyRevision) {
-        using SqliteCommand revision = _database.Command(transaction,
+        using SqliteCommand revision = database.Command(transaction,
             "SELECT history_revision FROM sessions WHERE session_id = $session;", ("$session", sessionId));
         object? value = revision.ExecuteScalar();
         if (value is null)
@@ -66,7 +66,7 @@ internal sealed class MessageContentReader {
     }
 
     private MessageMetadata ReadMetadata(SqliteTransaction transaction, Guid sessionId, MessageRef message) {
-        using SqliteCommand metadata = _database.Command(transaction, """
+        using SqliteCommand metadata = database.Command(transaction, """
             SELECT r.history_revision, r.input_id, r.stopping, r.outcome,
                 q.request_id, q.output_id, q.next_batch_index, q.output_final, q.outcome
             FROM execution_runs r LEFT JOIN execution_requests q ON q.run_id = r.run_id
@@ -150,7 +150,7 @@ internal sealed class MessageContentReader {
         MessageContentCursor cursor, MessageMetadata metadata, long segmentIndex, int utf8Offset, int prefixBytes) {
         // SQLite substr of an empty BLOB returns NULL; retain its empty-byte meaning.
         using SqliteCommand segmentRead = cursor.Message.Role == MessageRole.User
-            ? _database.Command(transaction, """
+            ? database.Command(transaction, """
                 SELECT length(original_text_utf8), coalesce(substr(original_text_utf8, $offset + 1, $count), X'')
                 FROM input_decisions WHERE session_id = $session AND input_id = $input AND decision = 1;
                 """,
@@ -158,7 +158,7 @@ internal sealed class MessageContentReader {
                 ("$input", metadata.InputId),
                 ("$offset", utf8Offset),
                 ("$count", prefixBytes))
-            : _database.Command(transaction, """
+            : database.Command(transaction, """
                 SELECT length(text_utf8), coalesce(substr(text_utf8, $offset + 1, $count), X'')
                 FROM execution_output WHERE request_id = $request AND batch_index = $segment;
                 """,

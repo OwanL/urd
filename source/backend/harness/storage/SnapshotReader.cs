@@ -9,8 +9,8 @@ namespace Urd.Core.Storage;
 internal sealed class SnapshotReader {
     private const int SnapshotMessageLimit = 60;
     private const int PreviewUtf16Limit = 256;
-    private readonly Database _database;
-    private readonly MessageContentReader _content;
+    private readonly Database database;
+    private readonly MessageContentReader content;
 
     // Keep the run window before the join: its indexed seek visits at most 61 runs.
     // A possible outer sort is therefore bounded, regardless of retained history size.
@@ -37,15 +37,15 @@ internal sealed class SnapshotReader {
         """;
 
     internal SnapshotReader(Database database, MessageContentReader content) {
-        _database = database;
-        _content = content;
+        this.database = database;
+        this.content = content;
     }
 
     internal StoredSessionSnapshot Read(Guid sessionId) {
         if (sessionId == Guid.Empty)
             throw new ArgumentException("Session ID cannot be empty.", nameof(sessionId));
 
-        return _database.Read(transaction => Read(transaction, sessionId));
+        return database.Read(transaction => Read(transaction, sessionId));
     }
 
     private StoredSessionSnapshot Read(SqliteTransaction transaction, Guid sessionId) {
@@ -60,7 +60,7 @@ internal sealed class SnapshotReader {
     }
 
     private long ReadHistoryRevision(SqliteTransaction transaction, Guid sessionId) {
-        using SqliteCommand revisionRead = _database.Command(transaction,
+        using SqliteCommand revisionRead = database.Command(transaction,
             "SELECT history_revision FROM sessions WHERE session_id = $session;", ("$session", sessionId));
         if (revisionRead.ExecuteScalar() is not long historyRevision)
             throw new KeyNotFoundException($"Session {sessionId} does not exist.");
@@ -69,13 +69,13 @@ internal sealed class SnapshotReader {
     }
 
     private (Guid? RunId, bool StopRequested) ReadUnsettledRun(SqliteTransaction transaction, Guid sessionId) {
-        using SqliteCommand activeRead = _database.Command(transaction, SnapshotUnsettledSql, ("$session", sessionId));
+        using SqliteCommand activeRead = database.Command(transaction, SnapshotUnsettledSql, ("$session", sessionId));
         using SqliteDataReader reader = activeRead.ExecuteReader();
         return reader.Read() ? (reader.GetGuid(0), reader.GetBoolean(1)) : (null, false);
     }
 
     private ExecutionResult? ReadLastSettlement(SqliteTransaction transaction, Guid sessionId) {
-        using SqliteCommand terminalRead = _database.Command(transaction, SnapshotSettlementSql,
+        using SqliteCommand terminalRead = database.Command(transaction, SnapshotSettlementSql,
             ("$session", sessionId));
         using SqliteDataReader reader = terminalRead.ExecuteReader();
         return reader.Read() ? new(reader.GetGuid(0), (ExecutionOutcome)reader.GetInt32(1)) : null;
@@ -85,7 +85,7 @@ internal sealed class SnapshotReader {
         SqliteTransaction transaction, Guid sessionId, long historyRevision) {
         // Newest first: assistant before user within each run. Previews reverse this order.
         var candidates = new List<(MessageRef Message, ExecutionOutcome? Settlement)>();
-        using SqliteCommand runsRead = _database.Command(transaction, SnapshotRunsSql,
+        using SqliteCommand runsRead = database.Command(transaction, SnapshotRunsSql,
             ("$session", sessionId),
             ("$revision", historyRevision));
         using SqliteDataReader reader = runsRead.ExecuteReader();
@@ -108,7 +108,7 @@ internal sealed class SnapshotReader {
         var messages = new List<MessagePreview>(messageCount);
         for (int index = messageCount - 1; index >= 0; index--) {
             (MessageRef message, ExecutionOutcome? settlement) = candidates[index];
-            MessageContentPage prefix = _content.ReadPreview(transaction, sessionId, message, PreviewUtf16Limit);
+            MessageContentPage prefix = content.ReadPreview(transaction, sessionId, message, PreviewUtf16Limit);
             messages.Add(new(message, prefix.Text, prefix.HasMore, prefix.AvailableThrough,
                 prefix.FinalOutputCommitted, settlement));
         }

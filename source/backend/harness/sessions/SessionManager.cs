@@ -5,36 +5,36 @@ namespace Urd.Core.Sessions;
 
 // Creates and opens sessions, keeping one live instance per session ID.
 public sealed class SessionManager {
-    private readonly SessionStore _store;
-    private readonly IChatClient _chatClient;
-    private readonly AsyncLock _lock = new();
-    private readonly Dictionary<Guid, PrimarySession> _sessions = new();
+    private readonly SessionStore store;
+    private readonly IChatClient chatClient;
+    private readonly AsyncLock gate = new();
+    private readonly Dictionary<Guid, PrimarySession> sessions = new();
 
     public SessionManager(SessionStore store, IChatClient chatClient) {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(chatClient);
-        _store = store;
-        _chatClient = chatClient;
+        this.store = store;
+        this.chatClient = chatClient;
     }
 
     public async Task<PrimarySession> CreatePrimaryAsync() {
-        using var held = await _lock.AcquireAsync();
-        SessionRecord record = _store.Sessions.CreatePrimary(Guid.NewGuid());
-        return Track(new PrimarySession(record, _store, _chatClient));
+        using var held = await gate.AcquireAsync();
+        SessionRecord record = store.Sessions.CreatePrimary(Guid.NewGuid());
+        return Track(new PrimarySession(record, store, chatClient));
     }
 
     public async Task<PrimarySession> GetPrimaryAsync(Guid sessionId) {
-        using var held = await _lock.AcquireAsync();
-        if (_sessions.TryGetValue(sessionId, out PrimarySession? cached))
+        using var held = await gate.AcquireAsync();
+        if (sessions.TryGetValue(sessionId, out PrimarySession? cached))
             return cached;
 
-        SessionRecord record = _store.Sessions.Read(sessionId)
+        SessionRecord record = store.Sessions.Read(sessionId)
             ?? throw new KeyNotFoundException($"Session '{sessionId}' does not exist.");
-        return Track(new PrimarySession(record, _store, _chatClient));
+        return Track(new PrimarySession(record, store, chatClient));
     }
 
     private PrimarySession Track(PrimarySession session) {
-        _sessions.Add(session.Id, session);
+        sessions.Add(session.Id, session);
         return session;
     }
 }

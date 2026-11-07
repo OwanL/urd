@@ -9,21 +9,21 @@ internal sealed class LlmResponseWriter {
     private static readonly TimeSpan FlushInterval = TimeSpan.FromMilliseconds(100);
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 
-    private readonly Guid _requestId;
-    private readonly Guid _responseId = Guid.NewGuid();
-    private readonly Func<LlmResponseChunk, Task> _saveChunkAsync;
+    private readonly Guid requestId;
+    private readonly Guid responseId = Guid.NewGuid();
+    private readonly Func<LlmResponseChunk, Task> saveChunkAsync;
 
-    private readonly StringBuilder _chunk = new();
-    private int _chunkUtf8Bytes;
-    private long _chunkIndex;
-    private char? _pendingHighSurrogate;
+    private readonly StringBuilder chunk = new();
+    private int chunkUtf8Bytes;
+    private long chunkIndex;
+    private char? pendingHighSurrogate;
 
     // Completes when the oldest unsaved text is due; null while nothing is waiting.
     internal Task? FlushDelay { get; private set; }
 
     internal LlmResponseWriter(Guid requestId, Func<LlmResponseChunk, Task> saveChunkAsync) {
-        _requestId = requestId;
-        _saveChunkAsync = saveChunkAsync;
+        this.requestId = requestId;
+        this.saveChunkAsync = saveChunkAsync;
     }
 
     internal async Task AppendTextAsync(string text) {
@@ -38,15 +38,15 @@ internal sealed class LlmResponseWriter {
                     continue;
 
                 int utf8Bytes = character.Utf8SequenceLength;
-                if (_chunkUtf8Bytes + utf8Bytes > ChunkByteLimit)
+                if (chunkUtf8Bytes + utf8Bytes > ChunkByteLimit)
                     await FlushAsync();
 
                 AppendCharacter(character);
-                _chunkUtf8Bytes += utf8Bytes;
+                chunkUtf8Bytes += utf8Bytes;
             }
 
             // Keep the oldest unsaved character's deadline until the next flush.
-            if (_chunkUtf8Bytes == ChunkByteLimit)
+            if (chunkUtf8Bytes == ChunkByteLimit)
                 await FlushAsync();
             else
                 FlushDelay ??= Task.Delay(FlushInterval);
@@ -60,12 +60,12 @@ internal sealed class LlmResponseWriter {
 
     private int AppendSpan(ReadOnlySpan<char> text) {
         // A lone trailing unit resolves on the scalar path, where a split pair can complete.
-        if (_pendingHighSurrogate is not null || text.Length < 2)
+        if (pendingHighSurrogate is not null || text.Length < 2)
             return 0;
 
         // Each UTF-16 unit needs at most three UTF-8 bytes. Limit validation to text
         // guaranteed to fit, so a malformed tail cannot hide an earlier chunk-save failure.
-        int length = Math.Min(text.Length, (ChunkByteLimit - _chunkUtf8Bytes) / 3);
+        int length = Math.Min(text.Length, (ChunkByteLimit - chunkUtf8Bytes) / 3);
         if (length > 0 && char.IsHighSurrogate(text[length - 1]))
             length--;
         if (length == 0)
@@ -79,24 +79,24 @@ internal sealed class LlmResponseWriter {
             throw new InvalidDataException("The LLM response contains invalid Unicode.", exception);
         }
 
-        _chunk.Append(portion);
-        _chunkUtf8Bytes += utf8Bytes;
+        chunk.Append(portion);
+        chunkUtf8Bytes += utf8Bytes;
         return length;
     }
 
     // Returns false while waiting for the second half of a surrogate pair,
     // which may arrive in a later update.
     private bool TryCompleteCharacter(char codeUnit, out Rune character) {
-        if (_pendingHighSurrogate is null && char.IsHighSurrogate(codeUnit)) {
-            _pendingHighSurrogate = codeUnit;
+        if (pendingHighSurrogate is null && char.IsHighSurrogate(codeUnit)) {
+            pendingHighSurrogate = codeUnit;
             character = default;
             return false;
         }
 
-        bool valid = _pendingHighSurrogate is { } high
+        bool valid = pendingHighSurrogate is { } high
             ? Rune.TryCreate(high, codeUnit, out character)
             : Rune.TryCreate(codeUnit, out character);
-        _pendingHighSurrogate = null;
+        pendingHighSurrogate = null;
         if (!valid)
             throw new InvalidDataException("The LLM response contains invalid Unicode.");
 
@@ -106,20 +106,20 @@ internal sealed class LlmResponseWriter {
     private void AppendCharacter(Rune character) {
         Span<char> utf16 = stackalloc char[2];
         int length = character.EncodeToUtf16(utf16);
-        _chunk.Append(utf16[..length]);
+        chunk.Append(utf16[..length]);
     }
 
     private async Task SaveChunkAsync(bool isFinal) {
-        if (isFinal && _pendingHighSurrogate is not null)
+        if (isFinal && pendingHighSurrogate is not null)
             throw new InvalidDataException("The LLM response ends with an incomplete Unicode scalar.");
 
         FlushDelay = null;
-        if (_chunkUtf8Bytes == 0 && !isFinal)
+        if (chunkUtf8Bytes == 0 && !isFinal)
             return;
 
-        await _saveChunkAsync(new LlmResponseChunk(_requestId, _responseId, _chunkIndex, _chunk.ToString(), isFinal));
-        _chunkIndex++;
-        _chunk.Clear();
-        _chunkUtf8Bytes = 0;
+        await saveChunkAsync(new LlmResponseChunk(requestId, responseId, chunkIndex, chunk.ToString(), isFinal));
+        chunkIndex++;
+        chunk.Clear();
+        chunkUtf8Bytes = 0;
     }
 }

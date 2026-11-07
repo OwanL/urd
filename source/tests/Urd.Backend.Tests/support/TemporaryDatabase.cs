@@ -4,12 +4,12 @@ namespace Urd.Backend.Tests.Support;
 
 // Isolated SQLite file in a temp directory, with raw SQL helpers for test setup and checks.
 internal sealed class TemporaryDatabase : IDisposable {
-    private readonly string _directory = System.IO.Path.Combine(
+    private readonly string directory = System.IO.Path.Combine(
         System.IO.Path.GetTempPath(), $"urd-identity-tests-{Guid.NewGuid():N}");
 
     internal TemporaryDatabase() {
-        Directory.CreateDirectory(_directory);
-        Path = System.IO.Path.Combine(_directory, "urd.sqlite");
+        Directory.CreateDirectory(directory);
+        Path = System.IO.Path.Combine(directory, "urd.sqlite");
     }
 
     internal string Path { get; }
@@ -35,7 +35,7 @@ internal sealed class TemporaryDatabase : IDisposable {
     internal void ForceHistoryRevision(long revision) =>
         Execute($"UPDATE sessions SET history_revision = {revision};");
 
-    public void Dispose() => Directory.Delete(_directory, recursive: true);
+    public void Dispose() => Directory.Delete(directory, recursive: true);
 
     private SqliteConnection OpenConnection(SqliteOpenMode mode = SqliteOpenMode.ReadWriteCreate) {
         var connection = new SqliteConnection(new SqliteConnectionStringBuilder {

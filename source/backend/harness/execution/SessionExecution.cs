@@ -7,34 +7,34 @@ namespace Urd.Core.Execution;
 // Sends one run's request to the model and streams the response into the session.
 // The session owns locking and storage; this class owns the model call and its cleanup.
 internal sealed class SessionExecution : IDisposable {
-    private readonly SessionBase _session;
-    private readonly IChatClient _chatClient; // Borrowed from the session; never disposed here.
-    private readonly CancellationTokenSource _stop = new();
-    private Task? _stopCallbacks;
+    private readonly SessionBase session;
+    private readonly IChatClient chatClient; // Borrowed from the session; never disposed here.
+    private readonly CancellationTokenSource stop = new();
+    private Task? stopCallbacks;
 
     internal SessionExecution(Guid runId, SessionBase session, IChatClient chatClient) {
         RunId = runId;
-        _session = session;
-        _chatClient = chatClient;
+        this.session = session;
+        this.chatClient = chatClient;
     }
 
     internal Guid RunId { get; }
 
     // Completes once every callback registered on the stop token has finished.
-    internal Task StopCallbacks => _stopCallbacks ?? Task.CompletedTask;
+    internal Task StopCallbacks => stopCallbacks ?? Task.CompletedTask;
 
     // Called by the session while it holds its lock. Repeated calls share one task.
-    internal Task StopAsync() => _stopCallbacks ??= _stop.CancelAsync();
+    internal Task StopAsync() => stopCallbacks ??= stop.CancelAsync();
 
     // Called by the session only after RunAsync and StopCallbacks have finished
     // and the run's result has been saved.
-    public void Dispose() => _stop.Dispose();
+    public void Dispose() => stop.Dispose();
 
     // Called once by the session, outside its lock.
     internal async Task<ExecutionOutcome> RunAsync() {
-        LlmRequest? request = await _session.ClaimNextRequestAsync(RunId);
+        LlmRequest? request = await session.ClaimNextRequestAsync(RunId);
         if (request is null) {
-            if (_stop.IsCancellationRequested)
+            if (stop.IsCancellationRequested)
                 return ExecutionOutcome.Cancelled;
 
             throw new InvalidOperationException("The run has no request to send and was not stopped.");
@@ -42,9 +42,9 @@ internal sealed class SessionExecution : IDisposable {
 
         // Disposing this source waits for its running cancellation callbacks,
         // so keep it alive until the request outcome has been saved.
-        using var requestStop = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
+        using var requestStop = CancellationTokenSource.CreateLinkedTokenSource(stop.Token);
         LlmRequestOutcome outcome = await SendRequestAsync(request, requestStop);
-        bool saved = await _session.CompleteRequestAsync(RunId, outcome);
+        bool saved = await session.CompleteRequestAsync(RunId, outcome);
         return saved ? outcome.Outcome : ExecutionOutcome.Cancelled;
     }
 
@@ -54,21 +54,21 @@ internal sealed class SessionExecution : IDisposable {
         Task<bool>? pendingRead = null;
         Exception? failure = null;
         try {
-            CancellationToken stop = _stop.Token;
-            stop.ThrowIfCancellationRequested();
-            updates = _chatClient
+            CancellationToken stopToken = stop.Token;
+            stopToken.ThrowIfCancellationRequested();
+            updates = chatClient
                 .GetStreamingResponseAsync(request.Messages, cancellationToken: requestStop.Token)
                 .GetAsyncEnumerator(requestStop.Token);
 
             bool stopReceived = false;
             while (await WaitForNextUpdateAsync(writer, pendingRead ??= updates.MoveNextAsync().AsTask())) {
                 pendingRead = null;
-                stop.ThrowIfCancellationRequested();
+                stopToken.ThrowIfCancellationRequested();
                 stopReceived = await WriteUpdateAsync(updates.Current, writer, stopReceived);
             }
 
             pendingRead = null;
-            stop.ThrowIfCancellationRequested();
+            stopToken.ThrowIfCancellationRequested();
             if (!stopReceived)
                 throw new InvalidDataException("The response ended without a stop finish reason.");
 
@@ -85,7 +85,7 @@ internal sealed class SessionExecution : IDisposable {
         Task? flushDelay = writer.FlushDelay;
         if (flushDelay is not null &&
             (flushDelay.IsCompleted || await Task.WhenAny(pendingRead, flushDelay) == flushDelay)) {
-            _stop.Token.ThrowIfCancellationRequested();
+            stop.Token.ThrowIfCancellationRequested();
             // Flushing clears the deadline; only another update can start a new one.
             await writer.FlushAsync();
         }
@@ -123,7 +123,7 @@ internal sealed class SessionExecution : IDisposable {
         if (failure is OutputSaveException)
             ExceptionDispatchInfo.Throw(failure);
 
-        bool stopped = _stop.IsCancellationRequested;
+        bool stopped = stop.IsCancellationRequested;
         ExecutionOutcome outcome = failure switch {
             null when stopped => ExecutionOutcome.Cancelled,
             null => ExecutionOutcome.Completed,
@@ -138,7 +138,7 @@ internal sealed class SessionExecution : IDisposable {
     private async Task SaveChunkAsync(LlmResponseChunk chunk) {
         bool saved;
         try {
-            saved = await _session.RecordOutputAsync(RunId, chunk);
+            saved = await session.RecordOutputAsync(RunId, chunk);
         } catch (Exception exception) {
             throw new OutputSaveException(exception);
         }

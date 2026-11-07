@@ -69,6 +69,10 @@ flowchart LR
 
 ## 2. Session classes and ownership
 
+**This is a session-lifetime overview, not the complete class map.** The newer
+[complete class atlas](class-map.html) covers all 28 classes plus 26 record/enum/struct types,
+with grouped diagrams and a full [source index](class-map.md#7-complete-type-index).
+
 **Read this as:** the manager keeps identity stable; the session owns the run lifecycle.
 A session is not a model request, and neither owns the shared store or client.
 

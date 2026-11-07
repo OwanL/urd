@@ -420,9 +420,10 @@ reference evidence, not Urd architectural contracts.
 
 ## Architecture and feature review
 
-The [visual architecture map](docs/architecture-map.md) explains the implemented class structure,
-ownership, execution flow and storage relationships; an [offline HTML guide](docs/architecture-map.html)
-provides the rendered diagrams. Both are dated source snapshots, not new design approvals.
+The [complete class atlas](docs/class-map.html) maps every production class, record, enum and struct,
+with grouped diagrams and an [editable source index](docs/class-map.md). The separate
+[architecture overview](docs/architecture-map.html) explains system boundaries, execution flow and storage
+relationships ([Mermaid source](docs/architecture-map.md)). These are dated source snapshots, not new design approvals.
 
 [ARCHITECTURE.md](docs/ARCHITECTURE.md) records the continuing feature review,
 architectural decisions and unresolved design questions. This README owns the

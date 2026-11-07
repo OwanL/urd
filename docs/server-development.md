@@ -1,9 +1,10 @@
 # Local server development
 
 The local ASP.NET Core server composes Urd's existing Core and SQLite; it is not a
-second backend. It now exposes six operations: **create, Send, receipt lookup, snapshot polling,
-content reads and addressed Stop**. The owner-approved Stop increment is implemented and tested.
-UI, listing, static assets, startup recovery and real providers are not implemented.
+second backend. It now exposes seven operations: **create, list saved primary IDs, Send,
+receipt lookup, snapshot polling, content reads and addressed Stop**. The owner-approved
+listing slice is implemented and tested; verification evidence is below.
+UI, static assets, startup recovery and real providers are not implemented.
 Core now provides default durable safe-boundary steering
 for busy Sends in the owned run; real tools, tool-inspection UI/API and an explicit after-run
 queue remain deferred.
@@ -58,11 +59,26 @@ and Core shutdown operations both finish; it has no forced cleanup timeout.
 | Method and path | Request / successful response |
 | --- | --- |
 | POST `/api/sessions` | Empty JSON object `{}` → 201 `{sessionId}`; Location names its snapshot |
+| GET `/api/sessions?cursor=...` | Optional opaque string cursor → 200 `SessionIdPage` (`sessionIds`, `nextCursor`) |
 | POST `/api/sessions/{sessionId}/inputs` | `InputCommand` → 200 `InputReceipt`, Accepted **or** Refused |
 | GET `/api/sessions/{sessionId}/inputs/{inputId}` | 200 receipt or literal JSON `null` |
 | POST `/api/sessions/{sessionId}/runs/{runId}/stop` | Empty JSON object `{}` → 200 `StopReceipt` for Requested or Settled |
 | GET `/api/sessions/{sessionId}/snapshot` | 200 `SessionSnapshot` |
 | GET `/api/sessions/{sessionId}/content` | 200 `MessageContentPage` |
+
+Listing calls `SessionManager.ListPrimaryIdsAsync` and returns at most 60 IDs in newest-created
+order, without handles, summaries, titles, history loading or execution. Empty and retained
+unsettled chats are included. Omit `cursor` for the newest page; copy `nextCursor` unchanged
+until null. It is an opaque positive Int64 ordinal encoded as an invariant decimal string,
+not a JSON number. Supplied empty, malformed, nonpositive or overflowing cursors return 400;
+a valid cursor with no remaining entries returns 200 with an empty page, not 404.
+Boundary deletion does not invalidate continuation; new creations require refreshing page one.
+Pages are per-query committed views, not a frozen multi-page snapshot. The existing local
+loopback/Host/Origin/client-marker/no-store gate and no-body GET rule apply; shutdown/storage
+failures remain 503. Core's schema-5 ordering metadata and atomic create are described in
+[backend development](backend-development.md#saved-primary-id-discovery).
+Legacy rows use a fixed descending binary-ID fallback, not recovered creation chronology.
+No last-used tracking, full-history navigation or automatic recovery is added.
 
 POST requires JSON. Encoded bodies are limited to 128 KiB, including chunked requests;
 decoded input text is limited to 16 KiB of strict UTF-8. Missing required command members,
@@ -111,8 +127,9 @@ Errors: 400 malformed input/cursor, 413 oversized body/text, 415 non-JSON POST o
 None of these errors—or an absent receipt—proves an earlier Send was durably refused.
 Only a receipt matching the session and entire original command resolves unknown admission.
 An explicit retry repeats the exact ID/text/revision; no server mutation retries occur.
-Lost creation acknowledgement remains unknown; without listing, this API cannot rediscover
-its session ID. Do not automatically create another chat to hide that uncertainty.
+Lost creation acknowledgement remains unknown. Listing can rediscover saved IDs, but cannot
+associate any returned ID with that unacknowledged create or justify automatic retry.
+Do not automatically create another chat to hide that uncertainty.
 
 ## Data and lifetime
 
@@ -124,7 +141,9 @@ The fake client returns `Hello from Urd.`; no health/read request invokes it.
 An internal overload accepts a client factory for controlled composition tests. The run
 constructs and owns that client inside the same lifetime; CLI behavior is unchanged.
 
-Request cancellation applies to receipt/snapshot/content reads, not accepted model work.
+Request cancellation applies to listing/receipt/snapshot/content reads, not accepted model work.
+Listing's `RequestAborted` owns only that bounded read, never execution; cancellation may abandon
+its guard wait or precede the synchronous read, not interrupt an in-progress SQLite query.
 Create/Send handlers return after admission and Stop after intent acknowledgement, without waiting
 for settlement. Stop body validation may use request cancellation, but no `RequestAborted` token
 enters Core Stop; closing a connection does not own cancellation of the session.
@@ -152,7 +171,13 @@ change accompanies public Stop.
 
 ## Verification and review
 
-Public Stop passed locked restore, independent review and the full **281/281 Release tests**,
+The listing slice passed locked restore, independent review and **295/295 Release tests**, without
+warnings. Real Kestrel/SQLite tests cover multiple pages, another client, reopen/cursor reuse,
+invalid cursors, local gates/no-store/no-body rules and storage failures, with no model calls.
+Core/storage tests cover migration/rollback, no hydration/replay and cancellation isolation;
+see [backend evidence](backend-development.md#saved-primary-id-discovery). No UI qualification is implied.
+
+The historical public Stop slice passed locked restore, independent review and the full **281/281 Release tests**,
 without warnings. `SessionStopRoutesTests` exercises real Kestrel/SQLite acknowledgements while
 callbacks/cleanup remain held, unread acknowledgements, repeated and stale Stops, independent
 sessions, orphan 409 responses, failed persistence with local cancellation, and validation/gates.

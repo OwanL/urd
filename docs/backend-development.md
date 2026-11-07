@@ -2,10 +2,11 @@
 
 The current Core checkpoint includes session identity, durable user-Send decisions,
 fake-text/tool execution with default durable steering, bounded snapshot/content reads
-through real SQLite, graceful session shutdown and owner-approved public addressed Stop.
-The Stop increment passed locked restore and **281/281 Release tests**, without warnings.
+through real SQLite, graceful session shutdown, public addressed Stop and owner-approved
+saved-primary-ID discovery. The current listing increment passed locked restore and
+**295/295 Release tests**, without warnings, plus independent review.
 Core remains an ASP.NET-free .NET library. The [local Server](server-development.md)
-now exposes six chat HTTP operations over it; UI is not implemented yet.
+now exposes seven chat HTTP operations over it; UI is not implemented yet.
 
 ## Checkpoint scope
 
@@ -50,12 +51,12 @@ now exposes six chat HTTP operations over it; UI is not implemented yet.
   them into another run. No explicit after-run queue is implemented.
 - Public snapshot/content reads expose committed state without starting work; cancelled reads
   do not cancel execution. Reopened orphan runs and live persistence faults are reported as fenced.
-- `SessionManager.ShutdownSessionsAsync(waitCancellation)` fences creation/lookup and input on every
+- `SessionManager.ShutdownSessionsAsync(waitCancellation)` fences creation/lookup/listing and input on every
   held handle, then stops and drains owned runs through cleanup and saved settlement. Concurrent/repeated
   calls join one retained outcome; cancellation abandons only the caller's wait, not shutdown. A failed
   Stop write still triggers local cancellation and draining, and the shutdown failure remains visible.
-- The caller gates/drains external operations before disposing the borrowed store/client. Reads and
-  retained receipts remain available during shutdown; new inputs receive durable Stopping refusals.
+- The caller gates/drains external operations before disposing the borrowed store/client. Handle reads
+  and retained receipts remain available during shutdown; new inputs receive durable Stopping refusals.
   Shutdown does not close saved conversations, recover orphan runs or shut down the host itself.
   Cancellation callbacks may reenter reads/admission, but must not await shutdown or their own settlement.
 - Settlement waiting remains internal; public snapshots observe stopping and saved settlement.
@@ -140,6 +141,48 @@ The five-operation HTTP slice passes **210/210** Release tests after locked rest
 hosting cases and a typed input-conflict error without changing Core policy, schema or dependencies.
 See that same record for the real HTTP flow, controlled active-work shutdown evidence and limits.
 
+## Saved-primary-ID discovery
+
+`SessionManager.ListPrimaryIdsAsync(string? cursor = null, CancellationToken cancellationToken = default)`
+returns `SessionIdPage(IReadOnlyList<Guid> SessionIds, string? NextCursor)`: at most 60 IDs,
+newest-created first, including empty chats and retained unsettled chats. It takes the existing
+manager guard, rejects shutdown and reads storage without creating/caching handles, reading
+history, starting execution or changing persisted state. Cancellation can abandon the guard
+wait or precede the synchronous read; it does not promise SQLite query interruption.
+
+Core owns the opaque string cursor (positive Int64 ordinal encoded as invariant decimal).
+Clients copy it unchanged. One indexed query reads at most 61 rows; a lookahead yields
+`NextCursor` from the last returned row, otherwise null. Continuations use `ordinal < cursor`,
+not a boundary-ID lookup or offset. Boundary deletion does not invalidate paging; new creations
+stay ahead of continuation pages. Each query observes committed state, not a frozen multi-page
+snapshot; refresh the first page to discover new chats. No total count or configurable limit.
+
+Schema 5 adds `session_creation`: an AUTOINCREMENT ordinal and unique session-ID foreign key
+with cascading metadata cleanup. Migration follows existing upgrades in their transaction,
+preserving identities, revisions, history and execution/receipt/tool evidence without rebuilding
+the root sessions table or disabling foreign keys. Legacy rows have no recorded creation
+chronology: ascending `session_id COLLATE BINARY` assigns a fixed fallback, returned in descending
+binary-ID order, **not recovered chronology**. Subsequent creations sort ahead of that legacy band.
+Identity and ordering metadata insert atomically in the existing create transaction; handles are
+returned/tracked only after commit. Ordinals are not reused after deletion; gaps are harmless.
+The cascade does not add a public delete/close operation; `SessionRecord` is unchanged.
+
+GET `/api/sessions?cursor=...` exposes the page through the existing local gates/no-store/no-body
+GET rule; see [Server](server-development.md). IDs are discovery only: existing explicit
+snapshot/content/receipt reads supply details. No summaries, titles, full-history navigation,
+last-used tracking, UI or automatic recovery is added. An ID proves neither usability nor stopped
+work. Listing can rediscover saved IDs, but cannot associate one with a lost create acknowledgement
+or justify automatic create retry.
+
+Locked restore and **295/295 Release tests** pass without warnings; independent review found
+no blockers. `SessionListingStorageTests` covers atomic creation, genuine schema-4 migration and
+rollback, preserved evidence, paging across inserts/reopen/deleted boundaries and ordinal nonreuse.
+`SessionListingTests` verifies no handle hydration/replay, independent cancellation and unchanged
+creation order during execution. `SessionListingRoutesTests` exercises real HTTP/SQLite discovery
+across clients/reopen plus validation, admission gates and storage failure. In an isolated copy,
+storage and HTTP tests both rejected an inclusive-cursor regression; both restored controls passed.
+These qualify ID discovery, not UI, activity tracking or a complete summary API.
+
 ## Read contract and incremental review order
 
 1. [SessionSnapshot.cs](../source/backend/core/sessions/SessionSnapshot.cs) and
@@ -151,8 +194,9 @@ See that same record for the real HTTP flow, controlled active-work shutdown evi
 3. [SnapshotReader.cs](../source/backend/core/storage/SnapshotReader.cs), then
    [MessageContentReader.cs](../source/backend/core/storage/MessageContentReader.cs) — bounded queries
    in short read transactions. [DatabaseSchema.cs](../source/backend/core/storage/DatabaseSchema.cs)
-   now uses schema version 4: delivery/tool facts, sequential requests and a message-order index
-   preserve existing IDs, bytes and content cursors through migration from versions 0–3.
+   now uses schema version 5: version 4 added delivery/tool facts, sequential requests and a
+   message-order index; version 5 adds only creation-order metadata. Migrations from versions
+   0–4 preserve existing IDs, bytes and content cursors.
 4. [SessionReadFlowTests.cs](../source/tests/Urd.Backend.Tests/sessions/SessionReadFlowTests.cs),
    [MessageContentTests.cs](../source/tests/Urd.Backend.Tests/storage/MessageContentTests.cs), and
    [SessionSnapshotStorageTests.cs](../source/tests/Urd.Backend.Tests/storage/SessionSnapshotStorageTests.cs).
@@ -180,7 +224,9 @@ Paths below are relative to the repository. Classes have their own files; small 
 share a file per concept. Read them alongside their owners.
 
 1. [SessionManager.cs](../source/backend/core/sessions/SessionManager.cs) — canonical handles,
-   borrowed dependencies, the session-shutdown boundary and `SessionRecord` identity used to create/load handles.
+   borrowed dependencies, ID-only discovery, the session-shutdown boundary and `SessionRecord`
+   identity used to create/load handles; [SessionIdPage.cs](../source/backend/core/sessions/SessionIdPage.cs)
+   is the detached discovery page.
 2. [SessionBase.cs](../source/backend/core/sessions/SessionBase.cs) and
    [PrimarySession.cs](../source/backend/core/sessions/PrimarySession.cs) — admission/driver ownership;
    [Input.cs](../source/backend/core/sessions/Input.cs) holds the input command, receipt and enums;

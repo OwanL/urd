@@ -1,7 +1,8 @@
 # Initial UI / hosting design — scoped startup approval and remaining proposals
 2026-11-05; startup, original five-operation HTTP and subsequent public Stop bites approved
 2026-11-07. **These scoped hosting bites are implemented and verified.
-The current surface has six operations. UI and the broader checkpoint remain proposed.**
+The subsequent owner-approved saved-primary-ID slice is also implemented and verified.
+The current surface has seven operations. UI and the broader checkpoint remain proposed.**
 
 ## Owner-approved first hosting bite — startup and shutdown
 
@@ -52,8 +53,10 @@ decoded input to 16 KiB UTF-8. Wire records use camelCase properties and enum na
 command members, GUID strings and integer revisions. Content uses six explicit query fields,
 not the superseded global-byte cursor/SSE sketches below.
 
-Lost create acknowledgement remains unknown and cannot be rediscovered through these routes
-without listing. UI, listing, public Stop, startup recovery, providers and queue/steering are
+At this historical five-operation checkpoint, lost create acknowledgement remained unknown
+and IDs could not be rediscovered without listing. The later listing slice below discovers
+IDs but still cannot associate one with an unacknowledged create or justify automatic retry.
+UI, listing, public Stop, startup recovery, providers and queue/steering were
 not implemented by this bite. The owner accepted the current limits, not a finished chat workflow.
 An internal client factory preserves server-owned construction/disposal while enabling causal
 held-cleanup tests of the real host. Exact routes, commands and evidence are in
@@ -85,6 +88,34 @@ kill arbitrary in-process functions. See the [Core approval record](initial-core
 for the owner-approved method/receipt and failure contract. Real HTTP tests exercise held
 cleanup, unread acknowledgements, stale/independent runs, failed saves and unowned orphans.
 
+## Owner-approved fourth hosting bite — saved-primary-ID discovery
+
+Implemented and verified. GET `/api/sessions`, optionally
+`?cursor=<opaque returned string>`, returns 200 `SessionIdPage` with camelCase `sessionIds`
+and `nextCursor`: at most 60 IDs, newest-created first. It calls existing
+`SessionManager.ListPrimaryIdsAsync(cursor, http.RequestAborted)` without opening handles,
+loading history, starting execution, recovering work or changing persisted state. Empty and
+retained unsettled chats are included. No summaries/titles, last-used tracking or UI is added.
+Core's schema-5 metadata and atomic identity/order creation preserve existing evidence;
+legacy rows use a fixed descending binary-ID fallback, not recovered creation chronology.
+See the [Core approval](initial-core-design.md#owner-approved-saved-primary-id-discovery).
+
+Omitted cursor starts the newest page; copy `nextCursor` unchanged until null. Core owns
+parsing/formatting the opaque positive Int64 invariant-decimal string, not a JSON number.
+Supplied empty/malformed/nonpositive/overflowing cursors return 400; valid exhausted cursors
+return 200 with an empty page. Continuations use an ordinal range, so deleted boundary IDs
+do not invalidate them. Pages see per-query committed state, not a frozen multi-page snapshot;
+refresh page one for new chats. Existing loopback/Host/Origin/client-marker/no-store and
+no-body GET rules apply; shutdown/storage failures remain 503. `RequestAborted` owns only
+this read's guard wait/before-read check, not SQLite query interruption or session work.
+
+Listing can rediscover IDs but cannot associate one with a lost create acknowledgement or
+justify automatic create retry. IDs prove neither usability nor settled/stopped work; use
+existing explicit detail reads. This narrow discovery supersedes only the old ID-order
+summary/`ListPrimaryAsync` sketches below, not the UI or wider proposal. No full-history
+navigation or automatic recovery follows. Independent review, locked restore and
+**295/295 Release tests** pass without warnings; see the [server evidence](../server-development.md#verification-and-review).
+
 ## Remaining UI / transport proposal
 
 **Approved read-boundary update:** the owner approved Core snapshot/content reads and
@@ -103,7 +134,8 @@ supersedes ACCESS-BOUNDARY-EVIDENCE's earlier credential/pairing recommendation.
 [Browser](../BROWSER-DESIGN.md), [application](../APPLICATION-PLAN.md),
 [session](../SESSION-DESIGN.md) and [Core draft](initial-core-design.md) retain scope.
 Core members below remain provisional except the scoped approvals above; the Stop route/method
-is now implemented, not approval of the wider UI/SSE/listing sketches.
+is now implemented. ID-only listing is separately approved above; the wider UI/SSE/summary
+sketches remain unapproved and are not supplied by that discovery page.
 
 ## 1. `Workspace`, `Transcript`, `Composer` — ordinary Preact functions
 One mounted workspace per browser; no frontend session-kind hierarchy or state library.
@@ -202,7 +234,7 @@ refusal consumes neither accepted work capacity nor an unresolved slot once conf
 ## 3. `Backend` — small HTTP client module, not a host framework
 ```ts
 const backend: Backend = {
-  list(after?: string, signal?: AbortSignal): Promise<SessionSummaryPage>,
+  list(cursor?: string, signal?: AbortSignal): Promise<SessionIdPage>,
   create(): Promise<{ sessionId: ChatId }>,
   history(id: ChatId, cursor: HistoryCursor, signal: AbortSignal): Promise<HistoryPage>,
   messageContent(id: ChatId, cursor: MessageContentCursor, signal: AbortSignal): Promise<MessageContentPage>,
@@ -212,7 +244,9 @@ const backend: Backend = {
   stop(id: ChatId, runId: string): Promise<StopReceipt>
 };
 ```
-Declaration sketch, not executable object syntax. Wire records project Core data into
+Declaration sketch, not executable object syntax. `list` reflects the approved ID-only wire
+contract; it supplies no `SessionSummary` data for the unapproved UI sketches above.
+Wire records project Core data into
 camelCase JSON with string GUIDs and integer revisions; test that boundary, no generic
 DTO mapper/generated SDK. `SessionView` preserves epoch/version, history revision,
 row identities/cursor, run ID/status, pending dispositions, committed output offsets and
@@ -281,7 +315,7 @@ static class SessionEndpoints {
 No endpoint base classes, command bus, per-route service or second session registry.
 | Route under `/api` | Exact provisional Core dependency |
 | --- | --- |
-| GET `/sessions?after=...` | `manager.ListPrimaryAsync(after, limits)` |
+| GET `/sessions?cursor=...` (implemented) | `manager.ListPrimaryIdsAsync(cursor, http.RequestAborted)` → `SessionIdPage` |
 | POST `/sessions` | `manager.CreatePrimaryAsync()`; return stable ID |
 | GET `/sessions/{id}/history?cursor=...` | `GetPrimaryAsync(id)` → `ReadHistoryAsync(cursor, limits)` |
 | GET `/sessions/{id}/content?cursor=...` | `GetPrimaryAsync(id)` → `ReadMessageContentAsync(cursor)` |
@@ -289,8 +323,9 @@ No endpoint base classes, command bus, per-route service or second session regis
 | POST `/sessions/{id}/inputs` | `GetPrimaryAsync(id)` → `SubmitUserInputAsync(command)` |
 | GET `/sessions/{id}/inputs/{inputId}` | `GetPrimaryAsync(id)` → `GetInputReceiptAsync(inputId)` |
 | POST `/sessions/{id}/runs/{runId}/stop` | `GetPrimaryAsync(id)` → `RequestStopAsync(runId)` |
-Only observation gets HTTP cancellation. Existing uncancellable Core reads finish
-boundedly; HTTP abort discards their replies. Accepted Send/Stop continues after abort.
+The old observation-only cancellation sketch is superseded for implemented reads:
+listing/receipt/snapshot/content use request cancellation, never execution cancellation.
+Accepted Send/Stop continues after abort.
 Stop returns admission/status promptly, not a request held until cleanup. Views show
 settlement; no endpoint calls `WaitForSettlementAsync` merely to keep a browser alive.
 Submit returns 200 with the matched durable `InputReceipt` for **both** Accepted and
@@ -328,7 +363,7 @@ rolling bounds/one read per row; pausing/selection stops automatic reads and pre
 Gate tests cover foreign/missing/null Origin, hostile Host/port/peer, missing marker,
 foreign preflight and no-cors POST, read/stream disclosure; assert server effects too.
 Recheck independent-navigation ≤100 incremental production LOC; no mirrored-mode option.
-Outside the two approved hosting bites, this document remains design only. The linked server
+Outside the four scoped hosting bites above, this document remains design only. The linked server
 development record owns the narrow build/test evidence, not the wider browser checkpoint.
 Earlier reviews covered creation/browser admission, lazy content and follow behavior.
 The later Astra critique found the unknown-Send gap and shutdown ownership drift addressed

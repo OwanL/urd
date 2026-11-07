@@ -1,7 +1,8 @@
 # Initial Core class design — internal integration reference
 2026-11-05. **The three identity bites, fourth user-Send reliability contract, fifth
 SessionExecution lifetime boundary, sixth coherent read surface, seventh session shutdown
-and subsequent default-steering/fake-tool and public addressed Stop increments below are owner-approved.
+and subsequent default-steering/fake-tool, public addressed Stop and saved-primary-ID
+discovery increments below are owner-approved.
 Other API/state shape remains proposed, not implementation permission.**
 Checkpoint only: Windows local browser app, deterministic request-only `IChatClient`,
 two primary chats/two clients, real SQLite, mid-response input, addressed Stop/settlement
@@ -10,8 +11,9 @@ transcript/lifecycle schema or transport beyond the [scoped hosting approvals](i
 The identity foundation, first fake-text Send/execution increment and bounded reads are
 implemented; see the current implementation section below. Acceptance has real durable work behind it,
 not a stub. Session shutdown now supplies the Core drain boundary needed by hosting.
-Six thin HTTP operations now expose the existing Core, including public addressed Stop
-(implemented and verified); UI and the broader browser checkpoint remain unimplemented.
+Seven thin HTTP operations now expose the existing Core, including public addressed Stop
+and saved-primary-ID discovery (both implemented and verified).
+UI and the broader browser checkpoint remain unimplemented.
 The subsequently approved steering increment now supplies durable busy
 input and a minimal fake-tool continuation loop. Explicit after-run queueing, real tools/providers
 and startup recovery remain separate scoped work.
@@ -28,10 +30,11 @@ The registry stores base references; the typed primary operations construct/retu
 primary and reject a non-primary target rather than treating it as one. This does not
 approve delegation subtypes/relationships or a generic public lookup API.
 
-**Still proposed:** provider selection, startup recovery, listing and the
+**Still proposed:** provider selection, startup recovery and the
 broader execution/Stop/view/storage-lifecycle members below, except the approved slices
 recorded here: identity persistence/manager wiring, user-Send reliability, SessionExecution,
-coherent reads, session shutdown, default steering/fake-tool continuation and public addressed Stop.
+coherent reads, session shutdown, default steering/fake-tool continuation, public addressed Stop
+and narrow saved-primary-ID discovery.
 No other workstream or full Core-draft approval follows.
 
 ## Owner-approved second bite — identity/construction only
@@ -394,6 +397,42 @@ without warnings. In an isolated copy, tests detected missing local Stop write g
 skipped callback join; all four restored controls passed. Full evidence and review paths are in
 [backend development](../backend-development.md) and [server development](../server-development.md).
 
+## Owner-approved saved-primary-ID discovery
+
+The owner selected saved-chat discovery before UI and approved these final names on the existing manager:
+```csharp
+public Task<SessionIdPage> ListPrimaryIdsAsync(
+    string? cursor = null, CancellationToken cancellationToken = default);
+public sealed record SessionIdPage(IReadOnlyList<Guid> SessionIds, string? NextCursor);
+```
+Return at most 60 IDs in newest-created order, including empty and retained unsettled chats.
+The opaque string cursor is Core-owned (positive Int64 ordinal, invariant decimal); copy it
+unchanged. A single indexed query uses limit 61 and an ordinal range for continuation, not
+an ID lookup or offset. Each query sees committed state; pages are not a frozen snapshot.
+Deleting the boundary does not break paging; refresh page one for new creations. Listing
+uses the manager guard, rejects shutdown and delegates directly to `SessionStorage` without
+hydrating/caching handles, reading history, starting work, recovery or persisted mutation.
+Cancellation owns the guard wait/before-read check, not SQLite interruption or execution.
+The caller still drains external operations before disposing the borrowed store/client.
+
+Schema 5 adds `session_creation` with AUTOINCREMENT ordering and a unique cascading foreign
+key to session identity. Migration runs after existing upgrades in their transaction, preserving
+history/revisions/receipts/request/tool evidence without a root-table rebuild or disabling FKs.
+Legacy rows have no creation chronology: ascending `session_id COLLATE BINARY` assigns a fixed
+fallback, listed as descending binary IDs, not recovered chronology. Later creations sort ahead
+of that band. Identity/order inserts commit atomically before returning/tracking a handle;
+ordinals are not reused after deletion. No new close/delete API or `SessionRecord` change.
+
+GET `/api/sessions?cursor=...` returns the page; the hosting record specifies validation/gates.
+This supersedes only the old ID-order summary/`ListPrimaryAsync` discovery sketches below.
+No summaries, titles, full-history navigation, last-used tracking, UI or automatic recovery
+is approved. IDs prove neither usability nor stopped work; existing explicit reads supply
+those details. Listing can rediscover IDs but cannot associate one with a lost-create
+acknowledgement or justify automatic retry. Independent review, locked restore and
+**295/295 Release tests** pass without warnings. Storage and real HTTP tests rejected an
+inclusive-cursor regression in an isolated copy; restored controls passed. See
+[backend evidence](../backend-development.md#saved-primary-id-discovery).
+
 ## Existing constraints, not new decisions
 - [Architecture](../ARCHITECTURE.md): shared SQLite, message rows/bounded previews,
   WAL / `synchronous=NORMAL`. Returned commits survive process crash; uncommitted output
@@ -428,21 +467,19 @@ public SessionManager(SessionStore store, IChatClient chatClient);
 public Task InitializeAsync();
 public Task<PrimarySession> CreatePrimaryAsync();
 public Task<PrimarySession> GetPrimaryAsync(Guid sessionId);
-public Task<SessionSummaryPage> ListPrimaryAsync(Guid? afterSessionId, ReadLimits limits);
+public Task<SessionIdPage> ListPrimaryIdsAsync(string? cursor = null, CancellationToken cancellationToken = default);
 public Task ShutdownSessionsAsync(CancellationToken waitCancellation = default);
 ```
 Approved registry storage is flat and kind-neutral; `CreatePrimaryAsync`/`GetPrimaryAsync`
 are typed primary entrypoints, not a primary-only registry. The registry gate covers
-lookup/creation, never model execution. Startup/listing mechanics below remain proposed;
-the seventh bite approves the scoped session-shutdown boundary.
+lookup/creation/discovery, never model execution. Startup mechanics below remain proposed;
+listing is only the approved ID discovery above, and the seventh bite approves session shutdown.
 Startup versions storage/reconciles nonterminal runs before serving: **zero requests
 restart**. Registry serialization guarantees one handle/ID; lookup never creates IDs.
 Create/uncached lookup passes the single `CreatePrimary`/`ReadSession` result into the
 handle constructor under the registry gate; cached lookup needs no hydration read.
-NEW proposed list delegates to store without loading handles/history: immutable summary
-page/items (ID, bounded preview, revision, run status), ordered by ID with next-ID cursor.
-Each page is one read snapshot, not a cross-page snapshot; count, preview and byte caps
-apply (defaults: 60 items, 256 UTF-16 units/preview, 64 KiB/page, surrogate-safe).
+The old ID-ordered summary list is superseded by `ListPrimaryIdsAsync` above: IDs only,
+newest-created ordering and opaque ordinal cursor, with no summary/status/preview contract.
 Shutdown fences registry access, then calls every handle's internal input fence before
 requesting Stop/awaiting runs. Cached handles cannot bypass this per-session fence.
 Manager borrows the store/client and never disposes either. The composing Server/caller
@@ -569,7 +606,7 @@ public static SessionStore Open(string databasePath);
 internal void InitializeAndRecover();
 internal SessionRecord CreatePrimary(Guid sessionId);
 internal SessionRecord? ReadSession(Guid sessionId);
-internal SessionSummaryPage ListPrimary(Guid? afterSessionId, ReadLimits limits);
+// ID discovery is owned by SessionStorage.ListPrimaryIds(string? cursor), not a summary API.
 internal (InputReceipt Receipt, bool NewlyAccepted) AdmitInput(Guid sessionId, long historyRevision, InputCommand command);
 internal InputReceipt? ReadInputReceipt(Guid sessionId, Guid inputId);
 internal LlmRequest? ClaimNextRequest(Guid sessionId, Guid runId, long historyRevision);

@@ -181,16 +181,26 @@ comparisons or a larger complete specification:
    remain separate work; see the Core record's primary-input policy section. The approved
    `SessionManager.ShutdownSessionsAsync` now fences and drains owned work without disposing
    borrowed resources. Owner-approved `SessionBase.RequestStopAsync(runId)` and its addressed HTTP
-   route now pass independent review and **281/281 Release tests**: intent acknowledgement is distinct from cleanup
+   route passed independent review and **281/281 Release tests** at the Stop checkpoint:
+   intent acknowledgement is distinct from cleanup
    and saved settlement; failures still cancel locally and fence without false durable acknowledgement.
    This extends the previous 259-test steering checkpoint. Startup recovery and push
    subscriptions remain pending; bounded-descendant requirements do not imply a child runtime,
    and separately opened independent worker chats continue.
    See the [read review map](backend-development.md#read-contract-and-incremental-review-order) before expanding it.
    The approved [Server slices](server-development.md) supply real loopback listening, exclusive
-   data ownership, orderly shutdown and six thin chat HTTP operations: create, Send, receipt,
-   snapshot, content and addressed Stop. UI and listing remain separate bites;
-   this is not the integrated browser milestone or a complete chat workflow.
+   data ownership, orderly shutdown and seven thin chat HTTP operations: create, list saved primary
+   IDs, Send, receipt, snapshot, content and addressed Stop. The owner selected saved-chat discovery
+   before UI: implemented `ListPrimaryIdsAsync` returns `SessionIdPage`, at most 60 IDs in
+   newest-created order with an opaque string cursor, exposed by GET `/api/sessions?cursor=...`.
+   Schema 5 adds creation-order metadata and atomic identity/order creation; legacy rows use a
+   fixed binary-ID fallback, not recovered chronology. Listing creates no handles or execution.
+   Independent review, locked restore and **295/295 Release tests** pass without warnings.
+   No summaries/titles, full-history navigation, last-used tracking, UI or automatic recovery
+   follows. IDs can be rediscovered, but cannot be associated with a lost create acknowledgement
+   or justify automatic create retry. This narrow approval supersedes the old ID-ordered summary
+   listing sketches, not the wider drafts. UI remains a separate bite; this is not the integrated
+   browser milestone or a complete chat workflow.
    Keep independent Core/storage and UI/hosting/build work parallel with disjoint ownership;
    routine dependency wiring is not another approval gate. This is not whole-Core approval.
 2. Order the necessary small Core and hosting/UI bites toward one built browser → Core →

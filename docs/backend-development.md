@@ -2,7 +2,8 @@
 
 The current Core checkpoint includes session identity, durable user-Send decisions,
 fake-text execution, bounded snapshot/content reads through real SQLite and graceful session shutdown.
-Core remains an ASP.NET-free .NET library; there is no runnable Server or UI yet.
+Core remains an ASP.NET-free .NET library. The [health-only local Server](server-development.md)
+now composes it; chat HTTP routes and UI are not implemented yet.
 
 ## Checkpoint scope
 
@@ -29,7 +30,7 @@ Core remains an ASP.NET-free .NET library; there is no runnable Server or UI yet
   retained receipts remain available during shutdown; new inputs receive durable Stopping refusals.
   Shutdown does not close saved conversations, recover orphan runs or shut down the host itself.
   Cancellation callbacks may reenter reads/admission, but must not await shutdown or their own settlement.
-- Addressed Stop/settlement helpers remain internal. Push subscriptions, HTTP/UI, tool/native-context
+- Addressed Stop/settlement helpers remain internal. Push subscriptions, chat HTTP/UI, tool/native-context
   fidelity and real-provider qualification remain pending. An admission receipt is not completion.
 - Normal terminal close/reopen is tested without replay. Nonterminal rows survive reopening
   and block new admission; startup interruption/recovery is **not** implemented.
@@ -73,6 +74,8 @@ also rejected deliberate regressions that dropped concurrent-session failures or
 failed run's drain; the restored copy passed again. No schema or dependency changes.
 These are fake-client/Core checks, not browser polling, load or real-provider qualification.
 This is a Core review checkpoint, not the browser-to-Core milestone or a complete hosting API.
+The subsequent health-only Server slice passes **184/184** Release tests after locked restore;
+its 72 added cases and narrower hosting evidence are recorded in [server development](server-development.md).
 
 ## Read contract and incremental review order
 
@@ -165,7 +168,7 @@ $env:MSBUILDDISABLENODEREUSE = '1'
 Normal restore is locked and must not change the committed `packages.lock.json`
 files. A mismatch fails instead of silently upgrading. Restore needs public NuGet
 access or already cached packages; it does not require personal credentials.
-Test also builds Core/tests with nullable checking and the code-quality gate below.
+Test also builds Core, Server and tests with nullable checking and the code-quality gate below.
 The command avoids persistent build/compiler servers and limits build parallelism.
 
 `Microsoft.Data.Sqlite` **10.0.14** follows the stable .NET 10 provider line and
@@ -179,7 +182,7 @@ not part of the application API/runtime dependency graph. Versions live at these
 references; lockfiles retain the transitive graph and content hashes.
 
 For an intentional reviewed dependency update only, edit the project reference and
-regenerate both locks from `source/` with:
+regenerate the project locks from `source/` with:
 
 ```powershell
 & $dotnet restore Urd.slnx --force-evaluate -p:RestoreLockedMode=false --disable-parallel -m:1 -nodeReuse:false
@@ -191,8 +194,8 @@ for ordinary builds. SDK maintenance is a separate explicit `global.json` edit.
 
 ## Code-quality gate
 
-Ordinary `dotnet build` and `dotnet test` commands enforce the gate in both Core and
-its tests, in Debug and Release. No separate lint command, IDE extension, Sonar server
+Ordinary `dotnet build` and `dotnet test` commands enforce the gate in Core, Server and
+their tests, in Debug and Release. No separate lint command, IDE extension, Sonar server
 or cloud upload is required. `dotnet test --no-build` deliberately skips compilation
 and therefore is not a quality-gate check.
 
@@ -215,7 +218,7 @@ failing provider cleanup in a test. CA1861 alone is disabled for test sources so
 arrays stay beside their assertions rather than becoming shared fixture fields; production
 keeps that rule. Revisit exceptions when their surrounding behavior changes.
 
-Analyzer upgrades are reviewed dependency changes: update the shared reference and both
+Analyzer upgrades are reviewed dependency changes: update the shared reference and project
 locks, triage new diagnostics, then run tests. Verify the gate itself with deliberately bad
 code in an isolated copy: builds and tests must exit unsuccessfully with the expected rule
 IDs, and clean code must pass again after removing the probe. Passing tests or analyzers

@@ -13,9 +13,11 @@ The ASP.NET-free Core implements session identity, durable user-input decisions,
 fake-text execution, bounded session snapshots plus paged message-content reads
 through SQLite, and graceful shutdown of the manager's live sessions.
 See [backend build/test instructions](docs/backend-development.md).
-There is no runnable Server/UI or real-provider integration yet; wider designs remain
-subject to bite-sized owner review. The [Core design record](docs/scratch/initial-core-design.md)
-distinguishes the approved slices from future proposals.
+A [local health-only Server](docs/server-development.md) now exercises startup, exclusive
+data ownership and graceful shutdown. Chat HTTP routes, UI and real-provider integration
+remain unimplemented. Wider designs remain subject to bite-sized owner review; the
+[Core](docs/scratch/initial-core-design.md) and [hosting](docs/scratch/initial-ui-hosting-design.md)
+records distinguish approved slices from future proposals.
 
 This document records agreed direction and its rationale. It is a foundation
 for future design and development, not a detailed implementation specification.

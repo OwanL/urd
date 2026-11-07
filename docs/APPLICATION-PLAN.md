@@ -177,6 +177,9 @@ comparisons or a larger complete specification:
    `SessionManager.ShutdownSessionsAsync` now fences and drains owned work without disposing
    borrowed resources; startup recovery, public addressed Stop and push subscriptions remain pending.
    See the [read review map](backend-development.md#read-contract-and-incremental-review-order) before expanding it.
+   The approved [health-only Server startup slice](server-development.md) now supplies real
+   loopback listening, exclusive data ownership and orderly shutdown. Chat endpoints and UI
+   remain separate unapproved bites; this is not the integrated browser milestone.
    Keep independent Core/storage and UI/hosting/build work parallel with disjoint ownership;
    routine dependency wiring is not another approval gate. This is not whole-Core approval.
 2. Order the necessary small Core and hosting/UI bites toward one built browser → Core →

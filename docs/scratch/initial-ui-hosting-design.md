@@ -1,5 +1,37 @@
-# Initial UI / hosting design — owner review proposal
-2026-11-05. **UI/hosting code shapes remain proposed.**
+# Initial UI / hosting design — scoped startup approval and remaining proposals
+2026-11-05; startup bite approved 2026-11-07. **Only the startup/lifetime bite below is
+implemented. Chat transport, UI and the broader checkpoint remain proposed.**
+
+## Owner-approved first hosting bite — startup and shutdown
+
+The owner approved this concrete operation with “go ahead” on 2026-11-07:
+```csharp
+internal static Task RunServerAsync(
+  ServerOptions options,
+  Action<Uri> onReady,
+  CancellationToken stopping);
+```
+
+`Program` owns the operation; `ServerOptions` contains an explicit absolute data directory
+and port (`0` requests an available port). One run owns a data-directory lease, SQLite
+store, deterministic client, existing Core manager and IPv4-loopback Kestrel host.
+`onReady` reports the actual bound origin only after SQLite and listening succeed.
+The CLI writes one `urd-ready` JSON record to stdout and diagnostics to stderr.
+Default environment/appsettings/URL configuration must not add listeners.
+
+The only endpoint in this bite is bodyless `GET/HEAD /health`. Host/actual-port and
+loopback-peer checks apply; any supplied Origin must exactly match the served origin.
+No API marker, static assets, CORS grants, accounts, browser launch or chat routes yet.
+On stop, close admission, initiate HTTP drain and Core session shutdown, and await both
+without a forced timeout before disposing dependencies or releasing the data-directory
+lease. Startup/readiness failures also clean up; a failed drain must not trigger forced
+resource disposal. The run does not recover or replay orphan work.
+
+The owner chose startup first rather than bundling a chat HTTP flow. This does not approve
+new Core operations, transport/UI, real providers or the broader build wrapper proposal.
+Implementation, commands and verified limits: [server development](../server-development.md).
+
+## Remaining UI / transport proposal
 
 **Approved read-boundary update:** the owner approved Core snapshot/content reads and
 snapshot polling for the first browser increment; see the sixth bite in the
@@ -162,8 +194,9 @@ ownership (a second host fails, not shares). Never infer data from cwd/UI output
 attach another listener. Build owns invocation/tool selection and runnable asset layout;
 UI root is `AppContext.BaseDirectory/wwwroot`, staged with Server in
 `builds/<Configuration>/app/`; no competing CLI flag. Serve built Vite assets, not source/data; no Node server or Vite proxy/CORS mode.
-Compose one `SessionStore`, deterministic `IChatClient`, `SessionManager`; await
-`InitializeAsync`/recovery before opening HTTP. Bind `127.0.0.1` only; port 0 requests
+The approved startup composes one `SessionStore`, deterministic `IChatClient` and
+`SessionManager`, opening SQLite before HTTP. `InitializeAsync`/startup recovery is still
+an unimplemented proposal, not a dependency silently satisfied by opening the database. Bind `127.0.0.1` only; port 0 requests
 an OS-assigned port, never wildcard/localhost fallback. Hosting resolves the actual
 bound `http://127.0.0.1:<port>` origin, then writes one distinguished stdout JSON record:
 `{"event":"urd-ready","origin":"http://127.0.0.1:<actual-port>"}`; logs use stderr.
@@ -240,7 +273,8 @@ rolling bounds/one read per row; pausing/selection stops automatic reads and pre
 Gate tests cover foreign/missing/null Origin, hostile Host/port/peer, missing marker,
 foreign preflight and no-cors POST, read/stream disclosure; assert server effects too.
 Recheck independent-navigation ≤100 incremental production LOC; no mirrored-mode option.
-This document is design only: no build, probe, package acquisition or runtime claim.
+Outside the approved startup bite, this document remains design only. The linked server
+development record owns the narrow build/test evidence, not the wider browser checkpoint.
 Earlier reviews covered creation/browser admission, lazy content and follow behavior.
 The later Astra critique found the unknown-Send gap and shutdown ownership drift addressed
 in these revisions. Design review is not runtime verification or owner approval.

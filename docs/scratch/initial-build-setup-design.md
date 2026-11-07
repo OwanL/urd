@@ -1,10 +1,11 @@
 # Initial build/setup design — owner review proposal
 2026-11-05. **The full command/configuration workflow remains proposed, not approved.**
-Minimal Core/test metadata is implemented for the approved identity slice; see
-[backend development](../backend-development.md) for actual pins and verified commands.
+Minimal Core/Server/test metadata is implemented for the approved Core and health-only hosting
+slices; see [backend development](../backend-development.md) for actual pins and verified commands.
 The wider Windows-first checkpoint below (Core + Server + built Preact UI and a
-deterministic request-only model) remains proposed. No Server/UI or bootstrap scripts
-are implemented; the current baseline keeps its few package pins in the projects.
+deterministic request-only model) remains proposed. A runnable [health-only Server](../server-development.md)
+now exists, using ordinary .NET commands; UI and bootstrap/build wrapper scripts remain
+unimplemented. The current baseline keeps its few package pins in the projects.
 
 ## Existing direction and scope
 - [Application plan](../APPLICATION-PLAN.md): component-led source; `scripts/`
@@ -97,7 +98,7 @@ Direct Server startup still needs the hosting owner's separate database lifetime
   Requires a pre-acquired compatible Playwright Chromium or explicit `-InstallBrowser`.
   Browser acquisition never sneaks into Setup/Check/Build/Run.
 
-## 4. Proposed startup seam — confirm with hosting/UI before implementation
+## 4. Proposed command wrapper — host startup flags now approved
 ```powershell
 .\scripts\urd.ps1 Setup
 .\scripts\urd.ps1 Check
@@ -107,7 +108,10 @@ Direct Server startup still needs the hosting owner's separate database lifetime
 # Start-Urd invokes selected dotnet + <copy>\builds\Debug\app\Urd.Server.dll:
 # --data-root <absolute copy>\data --port 0
 ```
-Flags are proposals; CopyRoot belongs to the script, which supplies absolute DataRoot.
+The approved health-only host uses `--data-root <absolute path> --port <0..65535>` and
+reports `urd-ready` as documented in [server development](../server-development.md).
+The commands above, `CopyRoot` script behavior and built UI layout remain proposals.
+`CopyRoot` belongs to that future script, which supplies absolute DataRoot.
 Host owns option parsing, loopback/browser checks, exclusive data-directory/database
 ownership and initialization before readiness. Static assets resolve from
 `Path.Combine(AppContext.BaseDirectory, "wwwroot")`, never cwd/source/data; no UI-root flag.

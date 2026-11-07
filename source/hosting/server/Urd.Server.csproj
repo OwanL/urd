@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <AssemblyName>Urd.Server</AssemblyName>
+    <RootNamespace>Urd.Server</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../backend/Urd.Core.csproj" />
+    <InternalsVisibleTo Include="Urd.Backend.Tests" />
+  </ItemGroup>
+</Project>

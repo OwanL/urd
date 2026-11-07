@@ -422,11 +422,19 @@ Handle lifetime; no extra mutable fields. Chooses ordinary-input policy, not ano
 internal PrimarySession(SessionRecord record, SessionStore store, IChatClient chatClient);
 public Task<InputReceipt> SubmitUserInputAsync(InputCommand input);
 ```
-Input admitted idle starts a run. Busy preflight input is a **follow-up**, preserving
-an answer to the first prompt; input after the initial request claim is **steering**,
-consumed at the next safe model-response boundary, never by changing an in-flight request.
-Follow-ups receive their own response; queued steering preserves acceptance order.
-For this text-only checkpoint a safe boundary is a completed, recorded model response.
+**Owner direction, 2026-11-07 — steering by default, not implemented yet:** ordinary
+input during active work defaults to steering. The owner asked to send it as a message
+alongside whatever batch of tool-call results is sent to the model next. This supersedes
+the earlier proposal to infer follow-up versus steering from arrival before/after the
+initial request claim. Idle input still starts work; steering does not mutate an in-flight
+request. Tool results and steering remain distinct messages in the next model request.
+
+The next scoped design must cover durable pending input and request-claim boundaries;
+queue order, Stop/failure handling and explicit queued follow-ups still need detailed review.
+Proposed no-tool fallback: after a completed response with no tool calls, pending steering
+triggers another request rather than waiting forever for a tool-result batch. This fallback
+has been presented, not separately approved. No tool loop, queue schema or new public API
+is authorized merely by the default-steering direction.
 Stopping durably refuses new valid input before acceptance, with no run/message
 creation, and leaves its draft client-owned; existing decisions remain readable.
 No pending-edit, suffix-edit, snooze or final-close API is implied or removed here.

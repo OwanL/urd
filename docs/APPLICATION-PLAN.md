@@ -175,7 +175,9 @@ comparisons or a larger complete specification:
    for the first browser increment; browser wiring itself is not implemented yet.
    This staging increment refuses distinct busy input rather than queuing it. The owner explicitly
    reaffirmed on 2026-11-07 that **queueing and steering are required core functionality**.
-   Their durable admission/delivery and safe-boundary behavior need a scoped Core increment;
+   The owner then chose steering as the default, sent alongside the next tool-result batch,
+   rather than inferring intent from message timing. Durable delivery and explicit follow-up
+   behavior still need scoped design; see the Core record's primary-input policy section.
    HTTP/UI must not turn the staging restriction into a permanent Send policy. The approved
    `SessionManager.ShutdownSessionsAsync` now fences and drains owned work without disposing
    borrowed resources; startup recovery, public addressed Stop and push subscriptions remain pending.

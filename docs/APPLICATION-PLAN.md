@@ -30,7 +30,7 @@ urd/
 │  └─ skills/
 ├─ source/
 │  ├─ backend/                        other application responsibilities TBD
-│  │  ├─ harness/
+│  │  ├─ core/
 │  │  │  ├─ sessions/                 registry, lifecycle and session commands
 │  │  │  │  ├─ messaging/             messages between sessions
 │  │  │  │  ├─ assignments/           delegated work, results and waits
@@ -74,7 +74,7 @@ required. One backend test project can cover multiple owners; UI tests may stay 
   It is not a dumping ground for generated logs, downloads or disposable experiments;
   temporary agent working notes/artifacts still belong in owned OS-temp locations.
 - **`guidance/`** contains editable prompts, named-agent definitions and skills used
-  by the harness. `harness/guidance-loading/` is the corresponding loader code.
+  by the harness. `core/guidance-loading/` is the corresponding loader code.
   This does not absorb existing user/project guidance or settle loading/reload timing.
 - **`scripts/`** contains executable setup/build/check/distribution scripts. Their
   documentation lives as ordinary files directly under `docs/`; no second automation

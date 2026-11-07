@@ -6,6 +6,30 @@ route. No Pi dependency, Codex/Copilot agent-runtime adoption, hosted Urd creden
 broker, or Claude consumer-plan integration. This report selects no application
 class hierarchy, project/folder layout, credential store, or model/tool loop.
 
+## Next-slice owner alignment — 2026-11-08
+
+The next slice is **headless provider management only**, separate from the first
+browser increment. The owner approved **ChatGPT sign-in plus OpenAI API-key and
+custom-compatible connections** as the initial provider set. No provider-management
+UI, agent tools or wider harness implementation belongs to this slice. Broader
+subscription/API/local coverage remains intended scope, not a requirement to deliver
+all adapters now. Native Ollama and Anthropic API adapters are not in this initial set.
+
+The proposed management design separates protocol, endpoint/connection and authentication:
+a compatible API endpoint does not imply compatible subscription credentials. Proposed
+operations cover saved connections, private credential changes, sign-in status/cancellation,
+refresh/disconnect, model discovery or explicit model IDs, and explicit access checks.
+Configuration reads should be offline; configured credentials, authenticated identity,
+model discovery and successful inference should remain distinct observations. A bounded
+model-request check is proposed, not full conversation/tool-loop integration.
+
+These are scope decisions and design proposals, **not implementation approval or
+qualification evidence**. Exact classes, headless surface, credential storage and adapter
+contracts still need focused design review. No live sign-in, existing credential access,
+model request or charge was authorized. Earlier route research below must be rechecked
+against current provider contracts before implementation; Pi/Pie behavior is reference
+material, not authority to reuse their integration identities or subscription routes.
+
 ## Recommendation and owner input
 
 Use **ChatGPT-plan → public OpenAI Responses** as the first representative

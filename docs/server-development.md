@@ -87,7 +87,7 @@ The HTTP layer adds no busy policy and does not turn a refusal into an HTTP erro
 preflight follow-up and safe-boundary steering need their own Core increment before calling
 the chat workflow complete.
 
-Errors: 400 malformed input/cursor, 413 oversized body/text, 415 non-JSON POST,
+Errors: 400 malformed input/cursor, 413 oversized body/text, 415 non-JSON POST or unsupported charset,
 404 missing session/message, 409 conflicting input identity or stale content revision,
 503 shutdown admission/storage failure. Input conflicts are classified by Core's
 `InputConflictException`, not exception text or every `InvalidOperationException`.

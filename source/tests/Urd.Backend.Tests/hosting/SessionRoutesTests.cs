@@ -162,9 +162,39 @@ public sealed class SessionRoutesTests {
     }
     await AssertStatusAsync(server.Client, HttpMethod.Post, InputsPath(sessionId), HttpStatusCode.UnsupportedMediaType,
         new StringContent("{}", Encoding.UTF8, "text/plain"));
-    Assert.Single(StoredSessions.Read(database));
+    foreach (string charset in new[] { "bogus", "utf-7" }) {
+      foreach (string path in new[] { "/api/sessions", InputsPath(sessionId) }) {
+        string body = path == "/api/sessions" ? "{}"
+            : JsonSerializer.Serialize(new InputCommand(Guid.NewGuid(), 0, "not admitted"), json);
+        StringContent content = JsonBody(body);
+        content.Headers.ContentType!.CharSet = charset;
+        await AssertStatusAsync(server.Client, HttpMethod.Post, path, HttpStatusCode.UnsupportedMediaType, content);
+      }
+    }
+    Assert.Equal(new StoredSessionRow(sessionId, 0), Assert.Single(StoredSessions.Read(database)));
     Assert.Empty(StoredInputs.Read(database));
     Assert.Empty(StoredRuns.Read(database));
+    Assert.Empty(StoredRuns.ReadRequests(database));
+
+    foreach ((Encoding encoding, string? charset) in new (Encoding, string?)[] {
+        (Encoding.UTF8, null), (Encoding.UTF8, "\"utf-8\""), (Encoding.Unicode, "\"utf-16\"") }) {
+      var createContent = new StringContent("{}", encoding, "application/json");
+      createContent.Headers.ContentType!.CharSet = charset;
+      using HttpResponseMessage created = await RequestAsync(server.Client, HttpMethod.Post, "/api/sessions", createContent);
+      Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+      AssertPrivateResponse(created);
+      using JsonDocument body = JsonDocument.Parse(await created.Content.ReadAsStringAsync());
+      Guid createdId = body.RootElement.GetProperty("sessionId").GetGuid();
+      var command = new InputCommand(Guid.NewGuid(), 0, "supported é🙂");
+      var inputContent = new StringContent(JsonSerializer.Serialize(command, json), encoding, "application/json");
+      inputContent.Headers.ContentType!.CharSet = charset;
+      using HttpResponseMessage submitted = await RequestAsync(server.Client, HttpMethod.Post,
+          InputsPath(createdId), inputContent);
+      InputReceipt receipt = Assert.IsType<InputReceipt>(await ReadAsync<InputReceipt>(submitted));
+      Assert.Equal(command, receipt.Command);
+      Assert.Equal(InputDecision.Accepted, receipt.Decision);
+      await SettledAsync(server.Client, createdId, receipt.RunId!.Value);
+    }
   }
 
   [Fact]

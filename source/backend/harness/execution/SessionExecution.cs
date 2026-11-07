@@ -96,10 +96,7 @@ internal sealed class SessionExecution : IDisposable {
   // A Stop marker closes text; enumeration and cleanup must still finish successfully.
   private static async Task<bool> WriteUpdateAsync(ChatResponseUpdate update,
       LlmResponseWriter writer, bool stopReceived) {
-    foreach (AIContent content in update.Contents) {
-      if (content is UsageContent)
-        continue;
-
+    foreach (AIContent content in update.Contents.Where(content => content is not UsageContent)) {
       if (content is not TextContent text)
         throw new InvalidDataException("The response contained content other than text.");
 

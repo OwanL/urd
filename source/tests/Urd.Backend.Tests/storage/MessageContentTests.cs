@@ -173,13 +173,11 @@ public sealed class MessageContentTests {
     Assert.Equal("", atEnd.Text);
     Assert.Equal(suffix.Next, atEnd.Next);
 
-    foreach (MessageContentCursor invalid in new MessageContentCursor[] {
-            new(run.Assistant, -1, 0), new(run.Assistant, 0, -1), new(run.Assistant, 0, 2),
-            new(run.Assistant, 0, 9), new(run.Assistant, 1, 1), new(run.Assistant, 2, 0),
-            new(run.Assistant, 0, 16385)
-        }) {
-      Assert.ThrowsAny<ArgumentException>(() => store.Content.Read(run.Session, invalid));
-    }
+    Assert.All(new MessageContentCursor[] {
+        new(run.Assistant, -1, 0), new(run.Assistant, 0, -1), new(run.Assistant, 0, 2),
+        new(run.Assistant, 0, 9), new(run.Assistant, 1, 1), new(run.Assistant, 2, 0),
+        new(run.Assistant, 0, 16385)
+    }, invalid => Assert.ThrowsAny<ArgumentException>(() => store.Content.Read(run.Session, invalid)));
   }
 
   [Fact]
@@ -191,14 +189,12 @@ public sealed class MessageContentTests {
     Guid otherSession = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     Assert.Throws<KeyNotFoundException>(() => store.Content.Read(otherSession, new(run.Assistant, 0, 0)));
     Assert.Throws<KeyNotFoundException>(() => store.Content.Read(Guid.NewGuid(), new(run.Assistant, 0, 0)));
-    foreach (MessageRef missing in new MessageRef[] {
-            run.Assistant with { RunId = Guid.NewGuid() },
-            run.Assistant with { MessageId = Guid.NewGuid() },
-            run.Assistant with { Role = MessageRole.User },
-            run.User with { Role = MessageRole.Assistant }
-        }) {
-      Assert.Throws<KeyNotFoundException>(() => store.Content.Read(run.Session, new(missing, 0, 0)));
-    }
+    Assert.All(new MessageRef[] {
+        run.Assistant with { RunId = Guid.NewGuid() },
+        run.Assistant with { MessageId = Guid.NewGuid() },
+        run.Assistant with { Role = MessageRole.User },
+        run.User with { Role = MessageRole.Assistant }
+    }, missing => Assert.Throws<KeyNotFoundException>(() => store.Content.Read(run.Session, new(missing, 0, 0))));
 
     Assert.Throws<ArgumentException>(() => store.Content.Read(run.Session,
         new(run.User with { Role = (MessageRole)42 }, 0, 0)));

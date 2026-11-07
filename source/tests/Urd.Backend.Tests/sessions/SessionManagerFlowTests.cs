@@ -47,8 +47,7 @@ public sealed class SessionManagerFlowTests {
       }
 
       await bothEntered.Task.WaitAsync(TestTimeout);
-      foreach (var (session, runId) in runs)
-        Assert.False(session.WaitForSettlementAsync(runId).IsCompleted);
+      Assert.All(runs, run => Assert.False(run.Session.WaitForSettlementAsync(run.RunId).IsCompleted));
       for (int i = 0; i < sessions.Length; i++) {
         Assert.Equal(receipts[i], await sessions[i].GetInputReceiptAsync(inputId));
         InputReceipt retry = await sessions[i].SubmitUserInputAsync(commands[i]);

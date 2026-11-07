@@ -1,3 +1,4 @@
+using System.Data.Common;
 using Microsoft.Data.Sqlite;
 
 namespace Urd.Backend.Tests.Support;
@@ -9,13 +10,10 @@ internal static class StoredInputs {
     using SqliteCommand command = connection.CreateCommand();
     command.CommandText = "SELECT input_id, run_id FROM input_decisions ORDER BY input_id;";
     using SqliteDataReader reader = command.ExecuteReader();
-    var decisions = new List<StoredDecision>();
-    while (reader.Read()) {
-      decisions.Add(new(Guid.Parse(reader.GetString(0)),
-          reader.IsDBNull(1) ? null : Guid.Parse(reader.GetString(1))));
-    }
-
-    return decisions;
+    return reader.Cast<DbDataRecord>()
+        .Select(row => new StoredDecision(Guid.Parse(row.GetString(0)),
+            row.IsDBNull(1) ? null : Guid.Parse(row.GetString(1))))
+        .ToList();
   }
 }
 

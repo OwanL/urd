@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Data.Common;
 using Microsoft.Data.Sqlite;
 using Urd.Core.Execution;
 using Urd.Core.Sessions;
@@ -84,22 +85,24 @@ internal sealed class SnapshotReader {
   private List<(MessageRef Message, ExecutionOutcome? Settlement)> ReadCandidates(
       SqliteTransaction transaction, Guid sessionId, long historyRevision) {
     // Newest first: assistant before user within each run. Previews reverse this order.
-    var candidates = new List<(MessageRef Message, ExecutionOutcome? Settlement)>();
     using SqliteCommand runsRead = database.Command(transaction, SnapshotRunsSql,
         ("$session", sessionId),
         ("$revision", historyRevision));
     using SqliteDataReader reader = runsRead.ExecuteReader();
-    while (candidates.Count <= SnapshotMessageLimit && reader.Read()) {
-      Guid runId = reader.GetGuid(0);
-      ExecutionOutcome? outcome = reader.IsDBNull(2) ? null : (ExecutionOutcome)reader.GetInt32(2);
-      if (!reader.IsDBNull(3))
-        candidates.Add((new(runId, reader.GetGuid(3), MessageRole.Assistant, historyRevision), outcome));
+    return reader.Cast<DbDataRecord>()
+        .SelectMany(row => MessagesFromRun(row, historyRevision))
+        .Take(SnapshotMessageLimit + 1)
+        .ToList();
+  }
 
-      if (candidates.Count <= SnapshotMessageLimit)
-        candidates.Add((new(runId, reader.GetGuid(1), MessageRole.User, historyRevision), outcome));
-    }
+  private static IEnumerable<(MessageRef Message, ExecutionOutcome? Settlement)> MessagesFromRun(
+      DbDataRecord row, long historyRevision) {
+    Guid runId = Guid.Parse(row.GetString(0));
+    ExecutionOutcome? outcome = row.IsDBNull(2) ? null : (ExecutionOutcome)row.GetInt64(2);
+    if (!row.IsDBNull(3))
+      yield return (new(runId, Guid.Parse(row.GetString(3)), MessageRole.Assistant, historyRevision), outcome);
 
-    return candidates;
+    yield return (new(runId, Guid.Parse(row.GetString(1)), MessageRole.User, historyRevision), outcome);
   }
 
   private ReadOnlyCollection<MessagePreview> ReadPreviews(SqliteTransaction transaction, Guid sessionId,

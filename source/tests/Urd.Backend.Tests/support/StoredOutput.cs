@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Text;
 using Microsoft.Data.Sqlite;
 using static Urd.Backend.Tests.Support.TestAsync;
@@ -22,13 +23,10 @@ internal static class StoredOutput {
       ORDER BY o.request_id, o.batch_index;
       """;
     using SqliteDataReader reader = command.ExecuteReader();
-    var output = new List<(Guid RequestId, Guid ResponseId, long ChunkIndex, byte[] Bytes, bool Final)>();
-    while (reader.Read()) {
-      output.Add((Guid.Parse(reader.GetString(0)), Guid.Parse(reader.GetString(1)), reader.GetInt64(2),
-          (byte[])reader.GetValue(3), reader.GetBoolean(4)));
-    }
-
-    return output;
+    return reader.Cast<DbDataRecord>()
+        .Select(row => (Guid.Parse(row.GetString(0)), Guid.Parse(row.GetString(1)), row.GetInt64(2),
+            (byte[])row.GetValue(3), row.GetInt64(4) != 0))
+        .ToList();
   }
 
   internal static async Task WaitForAnyAsync(TemporaryDatabase database) {

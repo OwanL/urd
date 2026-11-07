@@ -26,9 +26,8 @@ internal sealed class Database(SqliteConnection connection) : IDisposable {
     SqliteCommand command = connection.CreateCommand();
     command.Transaction = transaction;
     command.CommandText = sql;
-    foreach ((string name, object? value) in parameters) {
-      command.Parameters.AddWithValue(name, value is Guid id ? id.ToString("D") : value ?? DBNull.Value);
-    }
+    command.Parameters.AddRange(parameters.Select(parameter => new SqliteParameter(parameter.Name,
+        parameter.Value is Guid id ? id.ToString("D") : parameter.Value ?? DBNull.Value)));
 
     return command;
   }

@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Text;
 using Microsoft.Data.Sqlite;
 using Urd.Backend.Tests.Support;
@@ -53,6 +54,31 @@ public sealed class SessionSnapshotStorageTests {
     Assert.Throws<NotSupportedException>(() => ((IList<MessagePreview>)snapshot.Messages).Clear());
     SeedHistory(database, session, 0, 1, includeOutputs);
     Assert.Equal(expected, snapshot.Messages.Select(message => message.Preview));
+  }
+
+  [Theory]
+  [InlineData(39, false)]
+  [InlineData(40, false)]
+  [InlineData(41, true)]
+  public void MixedRunsWithAndWithoutOutputKeepTheSameRecentMessageWindow(int runCount, bool hasOlder) {
+    using var database = new TemporaryDatabase();
+    using SessionStore store = SessionStore.Open(database.Path);
+    Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
+    SeedHistory(database, session, 0, runCount, includeOutputs: true);
+    database.Execute($"""
+      DELETE FROM execution_output WHERE request_id IN (
+          SELECT q.request_id FROM execution_requests q JOIN execution_runs r ON r.run_id = q.run_id
+          WHERE r.session_id = '{session:D}' AND r.ordinal % 2 = 1);
+      DELETE FROM execution_requests WHERE run_id IN (
+          SELECT run_id FROM execution_runs WHERE session_id = '{session:D}' AND ordinal % 2 = 1);
+      """);
+
+    StoredSessionSnapshot snapshot = store.Snapshots.Read(session);
+    string[] expected = Enumerable.Range(1, runCount)
+        .SelectMany(index => index % 2 == 0 ? new[] { $"input {index}", $"output {index}" } : new[] { $"input {index}" })
+        .TakeLast(60).ToArray();
+    Assert.Equal(expected, snapshot.Messages.Select(message => message.Preview));
+    Assert.Equal(hasOlder, snapshot.HasOlderMessages);
   }
 
   [Fact]
@@ -239,11 +265,7 @@ public sealed class SessionSnapshotStorageTests {
     command.Parameters.AddWithValue("$session", session.ToString("D"));
     command.Parameters.AddWithValue("$revision", revision);
     using SqliteDataReader reader = command.ExecuteReader();
-    var steps = new List<string>();
-    while (reader.Read())
-      steps.Add(reader.GetString(3));
-
-    return steps.ToArray();
+    return reader.Cast<DbDataRecord>().Select(row => row.GetString(3)).ToArray();
   }
 
   // Bulk fixture writes avoid the execution context builder, which deliberately reads full history.

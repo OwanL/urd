@@ -73,10 +73,8 @@ public sealed class InputReceiptTests {
             command with { ExpectedHistoryRevision = 1 }
     ];
 
-    foreach (InputCommand conflict in conflicts) {
-      Assert.Throws<InvalidOperationException>(() =>
-          store.Inputs.Admit(sessionId, 0, conflict, accepting: true, proposedRunId: Guid.NewGuid()));
-    }
+    Assert.All(conflicts, conflict => Assert.Throws<InvalidOperationException>(() =>
+        store.Inputs.Admit(sessionId, 0, conflict, accepting: true, proposedRunId: Guid.NewGuid())));
 
     Assert.Equal(original, store.Inputs.ReadReceipt(sessionId, command.InputId));
     Assert.Single(StoredInputs.Read(database));

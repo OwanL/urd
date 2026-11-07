@@ -1,3 +1,4 @@
+using System.Data.Common;
 using Microsoft.Data.Sqlite;
 
 namespace Urd.Backend.Tests.Support;
@@ -9,11 +10,9 @@ internal static class StoredSessions {
     using SqliteCommand command = connection.CreateCommand();
     command.CommandText = "SELECT session_id, history_revision FROM sessions ORDER BY session_id;";
     using SqliteDataReader reader = command.ExecuteReader();
-    var rows = new List<StoredSessionRow>();
-    while (reader.Read())
-      rows.Add(new(Guid.Parse(reader.GetString(0)), reader.GetInt64(1)));
-
-    return rows;
+    return reader.Cast<DbDataRecord>()
+        .Select(row => new StoredSessionRow(Guid.Parse(row.GetString(0)), row.GetInt64(1)))
+        .ToList();
   }
 }
 

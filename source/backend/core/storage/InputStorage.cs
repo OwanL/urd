@@ -115,7 +115,7 @@ internal sealed class InputStorage(Database database) {
 
   private static void EnsureSameCommand(InputReceipt retained, InputCommand command) {
     if (retained.Command != command)
-      throw new InvalidOperationException("The input ID already belongs to a different original command.");
+      throw new InputConflictException(command.InputId);
   }
 
   private static void Validate(Guid sessionId, InputCommand command) {

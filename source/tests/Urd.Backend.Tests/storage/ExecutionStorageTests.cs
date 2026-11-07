@@ -60,8 +60,8 @@ public sealed class ExecutionStorageTests {
     var retry = reopened.Inputs.Admit(session, 7, input, false, Guid.Empty);
     Assert.Equal(receipt, retry.Receipt);
     Assert.False(retry.NewlyAccepted);
-    Assert.Throws<InvalidOperationException>(() => reopened.Inputs.Admit(session, 7, input with { Text = "changed" }, false, Guid.NewGuid()));
-    Assert.Throws<InvalidOperationException>(() => reopened.Inputs.Admit(session, 7, input with { ExpectedHistoryRevision = 7 }, false, Guid.NewGuid()));
+    Assert.Throws<InputConflictException>(() => reopened.Inputs.Admit(session, 7, input with { Text = "changed" }, false, Guid.NewGuid()));
+    Assert.Throws<InputConflictException>(() => reopened.Inputs.Admit(session, 7, input with { ExpectedHistoryRevision = 7 }, false, Guid.NewGuid()));
     Assert.Single(StoredRuns.Read(database));
   }
 

@@ -73,8 +73,11 @@ public sealed class InputReceiptTests {
             command with { ExpectedHistoryRevision = 1 }
     ];
 
-    Assert.All(conflicts, conflict => Assert.Throws<InvalidOperationException>(() =>
-        store.Inputs.Admit(sessionId, 0, conflict, accepting: true, proposedRunId: Guid.NewGuid())));
+    Assert.All(conflicts, conflict => {
+      InputConflictException failure = Assert.Throws<InputConflictException>(() =>
+          store.Inputs.Admit(sessionId, 0, conflict, accepting: true, proposedRunId: Guid.NewGuid()));
+      Assert.Equal(command.InputId, failure.InputId);
+    });
 
     Assert.Equal(original, store.Inputs.ReadReceipt(sessionId, command.InputId));
     Assert.Single(StoredInputs.Read(database));

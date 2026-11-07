@@ -77,7 +77,7 @@ public sealed class MessageContentTests {
     Append(store, execution, 0, text);
     Append(store, execution, 1, "", final: true);
 
-    MessagePreview preview = Assert.Single(store.Snapshots.Read(execution.Session).Messages,
+    MessagePreview preview = Assert.Single(store.Snapshots.ReadStored(execution.Session).Messages,
         message => message.Message.Role == MessageRole.Assistant);
     Assert.Equal(text[..Math.Min(256, text.Length)], preview.Preview);
     Assert.Equal(utf16Units > 256, preview.Truncated);
@@ -239,7 +239,7 @@ public sealed class MessageContentTests {
       Assert.True(store.UserMessages.Admit(first.Session, 0, new(undelivered.MessageId, 0, "not delivered"), true,
           Guid.NewGuid(), activeExecutionId: first.Execution).NewlyAccepted);
       Assert.Equal(new[] { first.User, steering, first.Assistant, secondOutput, undelivered },
-          store.Snapshots.Read(first.Session).Messages.Select(message => message.Message));
+          store.Snapshots.ReadStored(first.Session).Messages.Select(message => message.Message));
       store.Executions.RequestStop(first.Session, first.Execution, ownsExecution: true);
     }
 

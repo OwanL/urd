@@ -1,9 +1,10 @@
 # Urd — complete production class atlas
 
-> **Historical snapshot — superseded for current phase-1 naming/API.** See
+> **Historical snapshot — superseded for current naming and structure.** See
 > [Backend development](backend-development.md) and [Server development](server-development.md) for current contracts.
-> Diagrams, counts, source-link labels and line numbers retain the captured state; only renamed live-source destinations are repaired.
-> Phase 2 is not complete: `StoredSessionSnapshot`, the `Settlement` record and `JsonText` remain.
+> Diagrams, counts and historical locations retain the captured state; source links point to current replacements.
+> `StoredSessionSnapshot` has since merged into `SessionSnapshot`, the private `Settlement` is a named tuple,
+> and shared `JsonText` validation now lives in `StorageText`.
 
 **28 classes · 20 records · 5 enums · 1 struct = 54 declared types, all shown below.**
 This is the complete first-party production type inventory, not just the four session classes.
@@ -593,7 +594,7 @@ Offsets are UTF-8 bytes inside a segment. `HasMore` describes the current commit
 describes whether more message bytes can arrive. Neither substitutes for saved run settlement.
 
 **Source:** [SessionSnapshot](../source/backend/core/sessions/SessionSnapshot.cs),
-[StoredSessionSnapshot](../source/backend/core/storage/StoredSessionSnapshot.cs),
+[StoredSessionSnapshot (now merged into SessionSnapshot)](../source/backend/core/sessions/SessionSnapshot.cs),
 [Message records and role](../source/backend/core/sessions/Messages.cs).
 
 ## 6. Error classes and private execution signals
@@ -690,12 +691,12 @@ source line numbers refer to the captured snapshot. Referenced external types an
 | [OutputStorage](#durable-writes) | class | [OutputStorage.cs:7](../source/backend/core/storage/LlmResponseStorage.cs) |
 | [RequestContextReader](#readers-context-and-text) | class | [RequestContextReader.cs:10](../source/backend/core/storage/LlmContextReader.cs) |
 | [RunStorage](#durable-writes) | class | [RunStorage.cs:8](../source/backend/core/storage/SessionExecutionStorage.cs) |
-| [RunStorage.Settlement](#durable-writes) | nested record | [RunStorage.cs:151](../source/backend/core/storage/SessionExecutionStorage.cs) |
+| [RunStorage.Settlement](#durable-writes) | nested record (replaced by tuple) | [Current SessionExecutionStorage.cs](../source/backend/core/storage/SessionExecutionStorage.cs) |
 | [SessionStorage](#store-database-and-identity) | class | [SessionStorage.cs:7](../source/backend/core/storage/SessionStorage.cs) |
 | [SessionStore](#store-database-and-identity) | class | [SessionStore.cs:6](../source/backend/core/storage/SessionStore.cs) |
 | [SnapshotReader](#readers-context-and-text) | class | [SnapshotReader.cs:10](../source/backend/core/storage/SnapshotReader.cs) |
 | [StorageText](#readers-context-and-text) | class | [StorageText.cs:6](../source/backend/core/storage/StorageText.cs) |
-| [StoredSessionSnapshot](#snapshot-views) | record | [StoredSessionSnapshot.cs:7](../source/backend/core/storage/StoredSessionSnapshot.cs) |
+| [StoredSessionSnapshot](#snapshot-views) | record (merged into SessionSnapshot) | [Current SessionSnapshot.cs](../source/backend/core/sessions/SessionSnapshot.cs) |
 | [ToolStorage](#durable-writes) | class | [ToolStorage.cs:8](../source/backend/core/storage/ToolStorage.cs) |
 | [FakeChatClient](#host-composition) | class | [FakeChatClient.cs:7](../source/hosting/server/FakeChatClient.cs) |
 | [LocalBrowserGate](#http-boundary) | class | [LocalBrowserGate.cs:7](../source/hosting/server/LocalBrowserGate.cs) |

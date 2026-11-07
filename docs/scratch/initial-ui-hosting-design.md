@@ -4,13 +4,14 @@
 The subsequent owner-approved saved-primary-ID slice is also implemented and verified.
 The current surface has seven operations. UI and the broader checkpoint remain proposed.**
 
-## Phase-1 vocabulary update
+## Owner-approved vocabulary update
 
 Current Core/HTTP names are user message submissions/acceptance and session executions;
 the declarations below use this vocabulary without approving the remaining UI proposals.
 The breaking rename has no legacy aliases. Saved IDs, revisions, SQL identifiers/schema 5,
-decisions and exact-retry/Stop semantics are unchanged. Historical verification counts below
-predate this refactor; its build/test verification is pending. See the
+decisions and exact-retry/Stop semantics are unchanged. The naming and Core structure cleanup
+passed locked restore, **296/296 Release tests** and independent acceptance review; counts
+below describe earlier checkpoints. See the
 [current HTTP contract](../server-development.md#session-http-contract).
 
 ## Owner-approved first hosting bite — startup and shutdown

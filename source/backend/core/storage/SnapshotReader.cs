@@ -42,14 +42,15 @@ internal sealed class SnapshotReader {
     this.content = content;
   }
 
-  internal StoredSessionSnapshot Read(Guid sessionId) {
+  // Reads stored facts only. SessionBase supplies live admission and Stop state before exposure.
+  internal SessionSnapshot ReadStored(Guid sessionId) {
     if (sessionId == Guid.Empty)
       throw new ArgumentException("Session ID cannot be empty.", nameof(sessionId));
 
     return database.Read(transaction => Read(transaction, sessionId));
   }
 
-  private StoredSessionSnapshot Read(SqliteTransaction transaction, Guid sessionId) {
+  private SessionSnapshot Read(SqliteTransaction transaction, Guid sessionId) {
     long historyRevision = ReadHistoryRevision(transaction, sessionId);
     (Guid? unsettledExecution, bool stopRequested) = ReadUnsettledExecution(transaction, sessionId);
     SessionExecutionResult? lastSettlement = ReadLastSettlement(transaction, sessionId);
@@ -57,7 +58,9 @@ internal sealed class SnapshotReader {
         ReadCandidates(transaction, sessionId, historyRevision);
     bool hasOlder = candidates.Count > SnapshotMessageLimit;
     IReadOnlyList<MessagePreview> messages = ReadPreviews(transaction, sessionId, candidates);
-    return new(historyRevision, unsettledExecution, stopRequested, lastSettlement, messages, hasOlder);
+    // Storage cannot establish live admission eligibility; the session replaces this fence.
+    return new(sessionId, historyRevision, AdmissionFenced: true,
+        unsettledExecution, stopRequested, lastSettlement, messages, hasOlder);
   }
 
   private long ReadHistoryRevision(SqliteTransaction transaction, Guid sessionId) {

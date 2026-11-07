@@ -64,7 +64,7 @@ internal sealed class LlmResponseStorage(Database database) {
       throw new ArgumentException("A response may authorize at most 16 tool calls.", nameof(completion));
 
     var calls = (completion.ToolCalls ?? []).Select(call =>
-        (call.CallId, call.Name, Arguments: ToolStorage.JsonText(call.Arguments, requireObject: true))).ToArray();
+        (call.CallId, call.Name, Arguments: StorageText.JsonText(call.Arguments, requireObject: true))).ToArray();
     if (calls.Any(call => string.IsNullOrWhiteSpace(call.CallId) || string.IsNullOrWhiteSpace(call.Name))
         || calls.Select(call => call.CallId).Distinct(StringComparer.Ordinal).Count() != calls.Length
         || (calls.Length != 0 && completion.Outcome != ExecutionOutcome.Completed))

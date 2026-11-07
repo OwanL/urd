@@ -37,13 +37,12 @@ public abstract class SessionBase {
 
   public async Task<SessionSnapshot> ReadSnapshotAsync(CancellationToken cancellation = default) {
     using var held = await gate.AcquireAsync(cancellation);
-    StoredSessionSnapshot stored = store.Snapshots.Read(Id);
+    SessionSnapshot stored = store.Snapshots.ReadStored(Id);
     bool executionOwnedElsewhere = stored.UnsettledExecutionId is { } executionId && !IsCurrentExecution(executionId);
     bool fenced = !acceptingUserMessages || stored.HistoryRevision != HistoryRevision || executionOwnedElsewhere;
     bool stopping = stored.StopRequested
         || (stored.UnsettledExecutionId is { } activeExecution && IsCurrentExecution(activeExecution) && execution!.IsStopping);
-    return new(Id, stored.HistoryRevision, fenced, stored.UnsettledExecutionId, stopping,
-        stored.LastSettlement, stored.Messages, stored.HasOlderMessages);
+    return stored with { AdmissionFenced = fenced, StopRequested = stopping };
   }
 
   public async Task<MessageContentPage> ReadMessageContentAsync(

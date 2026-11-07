@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Urd.Core.Execution;
 
@@ -33,7 +32,7 @@ internal sealed class ToolStorage(Database database) {
   internal bool Complete(Guid sessionId, Guid executionId, long revision, Guid requestId, LlmToolResult result) {
     if (!Enum.IsDefined(result.Outcome))
       throw new ArgumentOutOfRangeException(nameof(result));
-    string json = JsonText(result.Result);
+    string json = StorageText.JsonText(result.Result);
 
     return database.Write(transaction => {
       using (SqliteCommand read = database.Command(transaction, """
@@ -69,17 +68,5 @@ internal sealed class ToolStorage(Database database) {
           ("$result", json), ("$error", result.Error));
       return save.ExecuteNonQuery() == 1;
     });
-  }
-
-  // Capture valid JSON text now rather than retaining a borrowed JsonDocument or serializing exceptions.
-  internal static string JsonText(JsonElement value, bool requireObject = false) {
-    if (value.ValueKind == JsonValueKind.Undefined || (requireObject && value.ValueKind != JsonValueKind.Object))
-      throw new ArgumentException("Tool payloads require valid JSON; arguments must be an object.", nameof(value));
-
-    string json = value.GetRawText();
-    if (StorageText.StrictUtf8.GetByteCount(json) > StorageText.MaximumBytes)
-      throw new ArgumentException("Tool JSON must not exceed 16 KiB of UTF-8.", nameof(value));
-
-    return json;
   }
 }

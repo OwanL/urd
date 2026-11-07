@@ -17,9 +17,9 @@ See [backend build/test instructions](docs/backend-development.md).
 The [local HTTP Server](docs/server-development.md) exposes seven operations: chat creation,
 saved-primary-ID listing, Send, receipt lookup, snapshot, content and addressed Stop,
 with exclusive data ownership and graceful shutdown. Busy Sends use Core's bounded steering
-admission. The phase-1 breaking API vocabulary uses message submissions and executions,
+admission. The breaking API vocabulary uses message submissions and executions,
 with no legacy aliases; saved IDs/schema 5, decisions and exact retries are unchanged.
-The naming pass passed 296/296 Release tests and independent review; see the development guides.
+The naming and structure cleanup passed 296/296 Release tests and independent review; see the development guides.
 Real tools/providers, UI, tool-inspection APIs and an explicit after-execution queue are not
 implemented; reopening does not recover or replay work. Wider designs remain subject to
 bite-sized owner review; the

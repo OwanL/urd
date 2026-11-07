@@ -1,9 +1,10 @@
 # Urd architecture — visual audit map
 
-> **Historical snapshot — superseded for current phase-1 naming/API.** See
+> **Historical snapshot — superseded for current naming and structure.** See
 > [Backend development](backend-development.md) and [Server development](server-development.md) for current contracts.
-> Diagrams, counts, source-link labels and line numbers retain the captured state; only renamed live-source destinations are repaired.
-> Phase 2 is not complete: `StoredSessionSnapshot`, the `Settlement` record and `JsonText` remain.
+> Diagrams, counts and historical locations retain the captured state; source links point to current replacements.
+> `StoredSessionSnapshot` has since merged into `SessionSnapshot`, the private `Settlement` is a named tuple,
+> and shared `JsonText` validation now lives in `StorageText`.
 
 > **Working-tree snapshot · 7 November 2026, 08:03 UTC**<br>
 > Base commit: `e5537192e8c8b5f9eea76266c8f8a6726868732f`, **plus uncommitted changes**.

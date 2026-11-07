@@ -16,17 +16,19 @@ public sealed class SessionSnapshotStorageTests {
     using var database = new TemporaryDatabase();
     using SessionStore store = SessionStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
-    StoredSessionSnapshot snapshot = store.Snapshots.Read(session);
+    SessionSnapshot snapshot = store.Snapshots.ReadStored(session);
+    Assert.Equal(session, snapshot.SessionId);
+    Assert.True(snapshot.AdmissionFenced);
     Assert.Equal(0, snapshot.HistoryRevision);
     Assert.Empty(snapshot.Messages);
     Assert.False(snapshot.HasOlderMessages);
     Assert.Null(snapshot.UnsettledExecutionId);
     Assert.False(snapshot.StopRequested);
     Assert.Null(snapshot.LastSettlement);
-    Assert.Throws<KeyNotFoundException>(() => store.Snapshots.Read(Guid.NewGuid()));
-    Assert.Throws<ArgumentException>(() => store.Snapshots.Read(Guid.Empty));
+    Assert.Throws<KeyNotFoundException>(() => store.Snapshots.ReadStored(Guid.NewGuid()));
+    Assert.Throws<ArgumentException>(() => store.Snapshots.ReadStored(Guid.Empty));
     store.Dispose();
-    Assert.Throws<ObjectDisposedException>(() => store.Snapshots.Read(session));
+    Assert.Throws<ObjectDisposedException>(() => store.Snapshots.ReadStored(session));
   }
 
   [Theory]
@@ -39,7 +41,7 @@ public sealed class SessionSnapshotStorageTests {
     using SessionStore store = SessionStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     SeedHistory(database, session, 0, executionCount, includeOutputs);
-    StoredSessionSnapshot snapshot = store.Snapshots.Read(session);
+    SessionSnapshot snapshot = store.Snapshots.ReadStored(session);
     string[] expected = Enumerable.Range(1, executionCount)
         .SelectMany(index => includeOutputs ? new[] { $"input {index}", $"output {index}" } : new[] { $"input {index}" })
         .TakeLast(60).ToArray();
@@ -87,7 +89,7 @@ public sealed class SessionSnapshotStorageTests {
         """);
     }
 
-    StoredSessionSnapshot snapshot = store.Snapshots.Read(session);
+    SessionSnapshot snapshot = store.Snapshots.ReadStored(session);
     Assert.Equal(Enumerable.Range(1, requestCount)
         .SelectMany(index => new[] { $"input {index}", $"output {index}" }).TakeLast(60),
         snapshot.Messages.Select(message => message.Preview));
@@ -121,7 +123,7 @@ public sealed class SessionSnapshotStorageTests {
           SELECT run_id FROM execution_runs WHERE session_id = '{session:D}' AND ordinal % 2 = 1);
       """);
 
-    StoredSessionSnapshot snapshot = store.Snapshots.Read(session);
+    SessionSnapshot snapshot = store.Snapshots.ReadStored(session);
     string[] expected = Enumerable.Range(1, executionCount)
         .SelectMany(index => index % 2 == 0 ? new[] { $"input {index}", $"output {index}" } : new[] { $"input {index}" })
         .TakeLast(60).ToArray();
@@ -143,7 +145,7 @@ public sealed class SessionSnapshotStorageTests {
 
     database.ForceHistoryRevision(9);
     using SessionStore reopened = SessionStore.Open(database.Path);
-    StoredSessionSnapshot snapshot = reopened.Snapshots.Read(session);
+    SessionSnapshot snapshot = reopened.Snapshots.ReadStored(session);
     Assert.Equal(9, snapshot.HistoryRevision);
     Assert.Empty(snapshot.Messages);
     Assert.False(snapshot.HasOlderMessages);
@@ -160,10 +162,10 @@ public sealed class SessionSnapshotStorageTests {
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, execution = Guid.NewGuid(), output = Guid.NewGuid();
     store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, new string('a', 255) + "🙂\0tail"), true, execution);
     LlmRequest request = store.Executions.ClaimNextRequest(session, execution, 0)!;
-    Assert.Single(store.Snapshots.Read(session).Messages); // Claim alone has no assistant row.
+    Assert.Single(store.Snapshots.ReadStored(session).Messages); // Claim alone has no assistant row.
     store.LlmResponses.Append(session, execution, 0, new(request.RequestId, output, 0, new string('é', 300), false));
     store.LlmResponses.Append(session, execution, 0, new(request.RequestId, output, 1, "", true));
-    StoredSessionSnapshot snapshot = store.Snapshots.Read(session);
+    SessionSnapshot snapshot = store.Snapshots.ReadStored(session);
     Assert.Equal(execution, snapshot.UnsettledExecutionId);
     Assert.Null(snapshot.LastSettlement);
     Assert.False(snapshot.StopRequested);
@@ -180,7 +182,7 @@ public sealed class SessionSnapshotStorageTests {
 
     store.LlmResponses.CompleteRequest(session, execution, 0, new(request.RequestId, ExecutionOutcome.Completed));
     store.Executions.TrySettle(session, execution, ExecutionOutcome.Completed);
-    StoredSessionSnapshot settled = store.Snapshots.Read(session);
+    SessionSnapshot settled = store.Snapshots.ReadStored(session);
     Assert.Null(settled.UnsettledExecutionId);
     Assert.Equal(new SessionExecutionResult(execution, ExecutionOutcome.Completed), settled.LastSettlement);
     Assert.All(settled.Messages, message => Assert.Equal(ExecutionOutcome.Completed, message.Settlement));
@@ -195,7 +197,7 @@ public sealed class SessionSnapshotStorageTests {
     SeedHistory(database, session, 0, 1, includeOutputs: true);
     database.Execute($"UPDATE execution_messages SET message_id = '{Guid.Empty:D}' WHERE role = 1;");
 
-    Assert.Throws<ArgumentException>(() => store.Snapshots.Read(session));
+    Assert.Throws<ArgumentException>(() => store.Snapshots.ReadStored(session));
   }
 
   [Fact]
@@ -217,7 +219,7 @@ public sealed class SessionSnapshotStorageTests {
           SELECT q.request_id FROM execution_requests q JOIN execution_runs r ON r.run_id = q.run_id
           WHERE r.session_id = '{session:D}' ORDER BY r.ordinal LIMIT 4000);
       """);
-    StoredSessionSnapshot snapshot = store.Snapshots.Read(session);
+    SessionSnapshot snapshot = store.Snapshots.ReadStored(session);
     Assert.Equal(60, snapshot.Messages.Count);
     Assert.True(snapshot.HasOlderMessages);
     Assert.Equal("input 2971", snapshot.Messages[0].Preview);
@@ -266,7 +268,7 @@ public sealed class SessionSnapshotStorageTests {
     Assert.Equal(MessageRefusalReason.Stopping, migratedRefusal.RefusalReason);
     Assert.Null(migratedRefusal.ExecutionId);
     Assert.DoesNotContain(StoredExecutions.Read(database), stored => stored.ExecutionId == refusedProposedExecutionId);
-    StoredSessionSnapshot snapshot = migrated.Snapshots.Read(session);
+    SessionSnapshot snapshot = migrated.Snapshots.ReadStored(session);
     Assert.Equal(new[] { "accepted\0🙂", "partial\0🙂" }, snapshot.Messages.Select(message => message.Preview));
     Assert.Equal(execution, snapshot.UnsettledExecutionId);
     Assert.True(snapshot.StopRequested);
@@ -300,7 +302,7 @@ public sealed class SessionSnapshotStorageTests {
     Assert.Equal(2, StoredLlmResponses.Read(database).Count);
     database.Execute("DROP TABLE execution_runs_terminal_order;");
     using SessionStore retried = SessionStore.Open(database.Path);
-    Assert.Equal(4, retried.Snapshots.Read(session).Messages.Count);
+    Assert.Equal(4, retried.Snapshots.ReadStored(session).Messages.Count);
   }
 
   private static void MakeVersionTwo(TemporaryDatabase database) => database.Execute("""

@@ -196,12 +196,14 @@ comparisons or a larger complete specification:
    Schema 5 adds creation-order metadata and atomic identity/order creation; legacy rows use a
    fixed binary-ID fallback, not recovered chronology. Listing creates no handles or execution.
    Independent review, locked restore and **295/295 Release tests** pass without warnings.
-   Phase-1 vocabulary now uses `SubmitUserMessageAsync(UserMessageSubmission)` /
+   The naming cleanup uses `SubmitUserMessageAsync(UserMessageSubmission)` /
    `GetUserMessageReceiptAsync(submissionId)`, `UserMessageReceipt` and `SessionExecutionResult`.
    HTTP Send/lookup use `message-submissions`; Stop uses `executions/{executionId}/stop`.
    There are no legacy aliases. Saved IDs, revisions, SQL identifiers/schema 5, decisions and
    exact-retry semantics remain unchanged; the counts above predate the naming refactor.
-   Phase-2 snapshot/helper/settlement cleanup is not claimed here.
+   The cleanup also uses one `SessionSnapshot` with live flags supplied by `SessionBase`,
+   a private completion tuple and shared JSON validation in `StorageText`. Locked restore,
+   **296/296 Release tests** and independent acceptance review pass for the combined cleanup.
    No summaries/titles, full-history navigation, last-used tracking, UI or automatic recovery
    follows. IDs can be rediscovered, but cannot be associated with a lost create acknowledgement
    or justify automatic create retry. This narrow approval supersedes the old ID-ordered summary

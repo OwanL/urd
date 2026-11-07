@@ -84,8 +84,7 @@ internal sealed class SessionExecutionStorage(Database database) {
                     (SELECT MAX(request_index) FROM execution_requests WHERE run_id = r.run_id))
         FROM execution_runs r WHERE r.session_id = $session AND r.run_id = $run;
         """, ("$session", sessionId), ("$run", executionId));
-      Settlement? settlement = DecideSettlement(read, driverOutcome);
-      if (settlement is null)
+      if (DecideSettlement(read, driverOutcome) is not { } settlement)
         return null;
 
       if (settlement.AlreadySettled)
@@ -119,7 +118,8 @@ internal sealed class SessionExecutionStorage(Database database) {
     });
   }
 
-  private static Settlement? DecideSettlement(SqliteCommand read, ExecutionOutcome driverOutcome) {
+  private static (ExecutionOutcome Outcome, bool AlreadySettled)? DecideSettlement(
+      SqliteCommand read, ExecutionOutcome driverOutcome) {
     using SqliteDataReader reader = read.ExecuteReader();
     if (!reader.Read())
       return null;
@@ -131,13 +131,13 @@ internal sealed class SessionExecutionStorage(Database database) {
     bool missingResults = reader.GetInt32(4) != 0;
     bool needsToolContinuation = reader.GetInt32(5) != 0;
     if (executionOutcome is { } settled)
-      return new(settled, AlreadySettled: true);
+      return (settled, AlreadySettled: true);
 
     if (stopRequested)
-      return new(ExecutionOutcome.Cancelled, AlreadySettled: false);
+      return (ExecutionOutcome.Cancelled, AlreadySettled: false);
 
     if (driverOutcome != ExecutionOutcome.Completed)
-      return new(driverOutcome, AlreadySettled: false);
+      return (driverOutcome, AlreadySettled: false);
 
     if (lastOutcome is not { } outcome)
       return null;
@@ -145,8 +145,6 @@ internal sealed class SessionExecutionStorage(Database database) {
     if (outcome == ExecutionOutcome.Completed && (pendingSubmissions || missingResults || needsToolContinuation))
       return null;
 
-    return new(outcome, AlreadySettled: false);
+    return (outcome, AlreadySettled: false);
   }
-
-  private sealed record Settlement(ExecutionOutcome Outcome, bool AlreadySettled);
 }

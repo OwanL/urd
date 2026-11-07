@@ -66,7 +66,7 @@ and Core shutdown operations both finish; it has no forced cleanup timeout.
 | GET `/api/sessions/{sessionId}/snapshot` | 200 `SessionSnapshot` |
 | GET `/api/sessions/{sessionId}/content` | 200 `MessageContentPage` |
 
-**Breaking vocabulary change (phase 1):** there are no legacy route/member aliases.
+**Breaking vocabulary change:** there are no legacy route/member aliases.
 A submission body is `{submissionId, expectedHistoryRevision, text}`. A receipt is
 `{sessionId, submission:{submissionId,expectedHistoryRevision,text}, acceptance, refusalReason, executionId}`.
 `acceptance` is `accepted` or `refused`; accepted receipts have an execution ID, refused
@@ -76,7 +76,7 @@ receipts have a refusal reason and null execution ID. Stop receipts and
 Existing saved IDs, revisions, SQL identifiers/schema 5, decisions and exact-retry/Stop
 semantics are unchanged. All seven operations retain their existing validation, local
 admission gates, status mapping, no-store and read-only request-cancellation rules.
-The naming pass passed locked restore and **296/296 Release tests** without warnings,
+The naming and structure cleanup passed locked restore and **296/296 Release tests** without warnings,
 plus independent acceptance review. Raw HTTP checks verify the renamed receipt, Stop,
 snapshot and nested cursor fields, and reject legacy routes and required field names.
 Counts below describe the earlier feature checkpoints.

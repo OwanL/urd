@@ -22,16 +22,18 @@ and startup recovery remain separate scoped work.
 Present one bite inline at a time, not this whole document or a five-type pack; approval
 never extends to unpresented members.
 
-## Phase-1 vocabulary update
+## Owner-approved naming and structure update
 
 The agreed breaking naming/API refactor uses user message submissions/acceptance and
 session executions. Declarations below use this vocabulary; historical counts qualify
 only their original checkpoints, not this refactor. Saved IDs, revisions, enum values,
 SQL identifiers/schema 5, decisions and exact-retry/Stop semantics are unchanged;
-there are no legacy aliases. See [current Core](../backend-development.md#breaking-api-vocabulary--phase-1)
+there are no legacy aliases. See [current Core](../backend-development.md#naming-and-structure-cleanup)
 and [HTTP](../server-development.md#session-http-contract) contracts.
-Phase-2 structural cleanup is not yet included: `StoredSessionSnapshot`, the private
-settlement record and the existing JSON helper remain. Wider sketches below remain
+The same cleanup replaces the stored/public snapshot pair with one `SessionSnapshot`,
+retaining live admission/Stop computation in `SessionBase`; the private settlement record
+becomes a named tuple and shared JSON validation moves to `StorageText`. Locked restore,
+**296/296 Release tests** and independent acceptance review pass. Wider sketches below remain
 proposals where marked; renamed vocabulary does not implement them.
 
 ## Owner-approved first bite — creation/lookup only
@@ -135,7 +137,7 @@ The owner answered **“seems reasonable”** after the inline proposal and clar
 this is reliability of incoming user instructions, including input during a response;
 not transcript management, generated assistant replies, or agent-to-agent coordination.
 ```csharp
-// PrimarySession (current phase-1 names)
+// PrimarySession (current names)
 public Task<UserMessageReceipt> SubmitUserMessageAsync(UserMessageSubmission submission);
 // SessionBase
 public Task<UserMessageReceipt?> GetUserMessageReceiptAsync(Guid submissionId);

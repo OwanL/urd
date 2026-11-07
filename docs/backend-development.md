@@ -8,7 +8,7 @@ saved-primary-ID discovery. The current listing increment passed locked restore 
 Core remains an ASP.NET-free .NET library. The [local Server](server-development.md)
 now exposes seven chat HTTP operations over it; UI is not implemented yet.
 
-## Breaking API vocabulary — phase 1
+## Naming and structure cleanup
 
 Core and HTTP now use **user message submission / acceptance / session execution**:
 `UserMessageSubmission(SubmissionId, ExpectedHistoryRevision, Text)` and
@@ -20,12 +20,17 @@ and `MessageRef`; snapshots use `UnsettledExecutionId`.
 This is a breaking vocabulary change, with **no legacy aliases**. Saved IDs, revisions,
 SQL identifiers/schema 5, decisions and exact-retry semantics are unchanged.
 [Server](server-development.md#session-http-contract) records the renamed wire contract.
-This naming pass passed locked restore and **296/296 Release tests** without warnings;
+The naming and structure cleanup passed locked restore and **296/296 Release tests** without warnings;
 independent acceptance review found no blockers. Raw HTTP assertions verify the renamed
 JSON members and reject legacy routes/required field names, alongside existing retry,
 reopen, migration, Stop and bounded-read checks. Counts below describe earlier checkpoints.
-Phase-2 structural cleanup is not included here: `StoredSessionSnapshot`, the private
-settlement record and the existing JSON helper remain.
+`SessionSnapshot` is now the single snapshot shape. `SnapshotReader.ReadStored` supplies
+stored facts with a conservative admission fence; `SessionBase.ReadSnapshotAsync` applies
+the same live admission/Stop rules under its existing lock before returning an immutable
+view. The separate stored snapshot and duplicate field mapping are removed. The private
+settlement bookkeeping pair is a named tuple, and shared tool JSON validation lives in
+`StorageText`, rather than making LLM response storage depend on tool storage. Other storage
+classes remain separate by responsibility; no lifecycle or schema redesign accompanies this cleanup.
 
 ## Checkpoint scope
 

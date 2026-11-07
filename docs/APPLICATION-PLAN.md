@@ -173,9 +173,10 @@ comparisons or a larger complete specification:
    Coherent snapshots and full-content pages now expose committed state without replay;
    final output remains distinct from settled work. The owner selected snapshot polling
    for the first browser increment; browser wiring itself is not implemented yet.
-   This staging increment refuses distinct busy input rather than queuing it; startup
-   recovery, public shutdown and push subscriptions remain pending. See the
-   [read review map](backend-development.md#read-contract-and-incremental-review-order) before expanding it.
+   This staging increment refuses distinct busy input rather than queuing it. The approved
+   `SessionManager.ShutdownSessionsAsync` now fences and drains owned work without disposing
+   borrowed resources; startup recovery, public addressed Stop and push subscriptions remain pending.
+   See the [read review map](backend-development.md#read-contract-and-incremental-review-order) before expanding it.
    Keep independent Core/storage and UI/hosting/build work parallel with disjoint ownership;
    routine dependency wiring is not another approval gate. This is not whole-Core approval.
 2. Order the necessary small Core and hosting/UI bites toward one built browser → Core →

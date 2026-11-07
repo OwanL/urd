@@ -1,15 +1,15 @@
 # Initial Core class design — internal integration reference
 2026-11-05. **The three identity bites, fourth user-Send reliability contract, fifth
-SessionExecution lifetime boundary and sixth coherent read surface below are owner-approved.
-Other API/state shape remains proposed, not implementation permission.**
+SessionExecution lifetime boundary, sixth coherent read surface and seventh session-shutdown
+operation below are owner-approved. Other API/state shape remains proposed, not implementation permission.**
 Checkpoint only: Windows local browser app, deterministic request-only `IChatClient`,
 two primary chats/two clients, real SQLite, mid-response input, addressed Stop/settlement
 and restart/reconnect without replay. No approval of the whole checkpoint,
 transcript/lifecycle schema or transport.
 The identity foundation, first fake-text Send/execution increment and bounded reads are
 implemented; see the current implementation section below. Acceptance has real durable work behind it,
-not a stub. Busy-input queuing, startup recovery, public hosting/lifecycle APIs and the
-broader browser checkpoint remain unimplemented.
+not a stub. Session shutdown now supplies the Core drain boundary needed by hosting.
+Busy-input queuing, startup recovery, HTTP/UI and the broader browser checkpoint remain unimplemented.
 Present one bite inline at a time, not this whole document or a five-type pack; approval
 never extends to unpresented members.
 
@@ -23,11 +23,10 @@ The registry stores base references; the typed primary operations construct/retu
 primary and reject a non-primary target rather than treating it as one. This does not
 approve delegation subtypes/relationships or a generic public lookup API.
 
-**Still proposed:** provider selection, startup recovery, listing, shutdown and the
-broader execution/Stop/view/storage-lifecycle members below, except
-the narrow identity persistence/manager wiring in the third bite, user-Send reliability
-contract in the fourth and SessionExecution boundary in the fifth. No other workstream
-or full Core-draft approval follows.
+**Still proposed:** provider selection, startup recovery, listing and the
+broader execution/Stop/view/storage-lifecycle members below, except the approved slices
+recorded here: identity persistence/manager wiring, user-Send reliability, SessionExecution,
+coherent reads and session shutdown. No other workstream or full Core-draft approval follows.
 
 ## Owner-approved second bite — identity/construction only
 The owner answered **“good”** to the revised identity-only construction proposal:
@@ -173,6 +172,40 @@ This does not approve UI/HTTP implementation, older-history navigation, busy-inp
 startup recovery, public host shutdown or provider/native-context work. Read-path
 implementation evidence is recorded in the backend development document after verification.
 
+## Seventh bite — owner-approved session shutdown
+
+On 2026-11-07 the owner approved this operation after rejecting the vague name
+`ShutdownAsync`: the name must make its scope clear in isolation.
+```csharp
+public Task ShutdownSessionsAsync(CancellationToken waitCancellation = default);
+```
+
+`SessionManager` shuts down its live sessions, not the server or saved conversations.
+The first call irreversibly fences creation/lookup and then input on every canonical
+handle before requesting any cancellation. Creation/lookup then throw `InvalidOperationException`.
+Already retained input decisions remain
+readable and exact retries keep their original receipts; new input receives the existing
+durable `Refused`/`Stopping` decision. No sessions or history are deleted or closed.
+
+Shutdown stops all owned runs and joins model cleanup, cancellation callbacks and saved
+settlement. A failed Stop write must not suppress local cancellation, skip that run's
+drain, or prevent other sessions from stopping. Repeated calls join one retained result;
+a failure cannot turn into success. Even an initially cancelled call initiates shutdown:
+`waitCancellation` abandons only that caller's wait, not the underlying work. There is no
+forced timeout or forced resource disposal. Reopened orphan runs are not owned executions;
+shutdown neither recovers nor replays them.
+
+Manager/session guards are not held while awaiting work or callbacks. Callbacks may
+reenter reads or admission, but must not wait for the shutdown or run settlement that
+requires their own completion. Store/client ownership remains with the composing caller:
+it gates and drains external operations separately, and disposes resources only after
+successful session shutdown and that external drain. Cancelled or failed waits prove
+neither condition.
+
+Approval is for this cohesive Core operation and its tests, not public addressed Stop,
+HTTP/UI, startup recovery, session listing, schema changes or whole-host shutdown policy.
+Implementation and verification are recorded in [backend development](../backend-development.md).
+
 ## Owner-approved record naming cleanup
 
 During the Core source review, the owner approved these names individually and selected
@@ -267,9 +300,9 @@ mixed histories. Tests use disposable SQLite and fake clients only; no browser/p
 performance claim. See the [read review map](../backend-development.md#read-contract-and-incremental-review-order).
 
 This staging policy permits one input per active run and durably refuses a different busy
-input; it does not implement the approved eventual mid-response delivery behavior. Stop/wait
-helpers are internal, not a public hosting/shutdown API. Old nonterminal rows stay fenced
-across reopen; startup recovery is not implemented. UI/HTTP, native-context fidelity, tools
+input; it does not implement the approved eventual mid-response delivery behavior. Addressed Stop/wait
+helpers remain internal; the seventh bite adds the public manager-level session drain.
+Old nonterminal rows stay fenced across reopen; startup recovery is not implemented. UI/HTTP, native-context fidelity, tools
 and real-provider qualification remain outside this checkpoint. The owner requested notification
 at tested milestones for their own file-by-file, line-by-line review before more layers accumulate.
 
@@ -307,11 +340,12 @@ public Task InitializeAsync();
 public Task<PrimarySession> CreatePrimaryAsync();
 public Task<PrimarySession> GetPrimaryAsync(Guid sessionId);
 public Task<SessionSummaryPage> ListPrimaryAsync(Guid? afterSessionId, ReadLimits limits);
-public Task ShutdownAsync(CancellationToken waitCancellation);
+public Task ShutdownSessionsAsync(CancellationToken waitCancellation = default);
 ```
 Approved registry storage is flat and kind-neutral; `CreatePrimaryAsync`/`GetPrimaryAsync`
 are typed primary entrypoints, not a primary-only registry. The registry gate covers
-lookup/creation, never model execution. All following lifecycle mechanics remain proposed.
+lookup/creation, never model execution. Startup/listing mechanics below remain proposed;
+the seventh bite approves the scoped session-shutdown boundary.
 Startup versions storage/reconciles nonterminal runs before serving: **zero requests
 restart**. Registry serialization guarantees one handle/ID; lookup never creates IDs.
 Create/uncached lookup passes the single `CreatePrimary`/`ReadSession` result into the
@@ -320,7 +354,7 @@ NEW proposed list delegates to store without loading handles/history: immutable 
 page/items (ID, bounded preview, revision, run status), ordered by ID with next-ID cursor.
 Each page is one read snapshot, not a cross-page snapshot; count, preview and byte caps
 apply (defaults: 60 items, 256 UTF-16 units/preview, 64 KiB/page, surrogate-safe).
-Shutdown fences registry access, then calls every handle's `FenceAdmissionAsync` before
+Shutdown fences registry access, then calls every handle's internal input fence before
 requesting Stop/awaiting runs. Cached handles cannot bypass this per-session fence.
 Manager borrows the store/client and never disposes either. The composing Server/caller
 gates new external access and drains admitted handlers, queries, subscriptions and read

@@ -67,6 +67,41 @@ public abstract class SessionBase {
     return receipt;
   }
 
+  internal async Task FenceInputAsync() {
+    using var held = await gate.AcquireAsync();
+    acceptingInput = false;
+  }
+
+  // Called after all manager-owned sessions have fenced input. A failed Stop write
+  // must not prevent local cancellation or let shutdown skip waiting for owned work.
+  internal async Task StopExecutionAsync() {
+    Task pendingExecution;
+    Task pendingSettlement;
+    Task stopCallbacks = Task.CompletedTask;
+    Exception? stopFailure = null;
+    using (await gate.AcquireAsync()) {
+      pendingExecution = executionTask ?? Task.CompletedTask;
+      pendingSettlement = settlement?.Task ?? Task.CompletedTask;
+      if (execution is not null) {
+        try {
+          WriteToStore(() => store.Runs.RequestStop(Id, execution.RunId));
+        } catch (Exception failure) {
+          stopFailure = failure;
+        }
+
+        stopCallbacks = execution.StopAsync();
+      }
+    }
+
+    Task stopSaved = stopFailure is null ? Task.CompletedTask : Task.FromException(stopFailure);
+    Task drained = Task.WhenAll(stopSaved, stopCallbacks, pendingExecution, pendingSettlement);
+    try {
+      await drained;
+    } catch (Exception failure) {
+      throw new AggregateException($"Session '{Id}' could not shut down.", drained.Exception ?? failure);
+    }
+  }
+
   internal async Task RequestStopAsync(Guid runId) {
     Task stopCallbacks = Task.CompletedTask;
     using (await gate.AcquireAsync()) {

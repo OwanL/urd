@@ -1,8 +1,8 @@
 # Backend development
 
 The current Core checkpoint includes session identity, durable user-Send decisions,
-fake-text execution and bounded snapshot/content reads through real SQLite. Core remains an ASP.NET-free .NET library;
-there is no runnable Server or UI yet.
+fake-text execution, bounded snapshot/content reads through real SQLite and graceful session shutdown.
+Core remains an ASP.NET-free .NET library; there is no runnable Server or UI yet.
 
 ## Checkpoint scope
 
@@ -21,7 +21,15 @@ there is no runnable Server or UI yet.
   a durable Capacity/Stopping refusal, not a queue slot. Mid-response delivery is not implemented.
 - Public snapshot/content reads expose committed state without starting work; cancelled reads
   do not cancel execution. Reopened orphan runs and live persistence faults are reported as fenced.
-- Stop/settlement helpers are internal. Public shutdown, push subscriptions, HTTP/UI, tool/native-context
+- `SessionManager.ShutdownSessionsAsync(waitCancellation)` fences creation/lookup and input on every
+  held handle, then stops and drains owned runs through cleanup and saved settlement. Concurrent/repeated
+  calls join one retained outcome; cancellation abandons only the caller's wait, not shutdown. A failed
+  Stop write still triggers local cancellation and draining, and the shutdown failure remains visible.
+- The caller gates/drains external operations before disposing the borrowed store/client. Reads and
+  retained receipts remain available during shutdown; new inputs receive durable Stopping refusals.
+  Shutdown does not close saved conversations, recover orphan runs or shut down the host itself.
+  Cancellation callbacks may reenter reads/admission, but must not await shutdown or their own settlement.
+- Addressed Stop/settlement helpers remain internal. Push subscriptions, HTTP/UI, tool/native-context
   fidelity and real-provider qualification remain pending. An admission receipt is not completion.
 - Normal terminal close/reopen is tested without replay. Nonterminal rows survive reopening
   and block new admission; startup interruption/recovery is **not** implemented.
@@ -56,6 +64,13 @@ malformed inputs. A local .NET 10 Release microbenchmark (64 warmups, nine alter
 batching for 32-character updates and **9–11×** for oversized ASCII/mixed text. Single-character
 updates were roughly unchanged; measured allocations did not increase. These are isolated writer
 measurements with default runtime settings, not end-to-end provider or storage speedups.
+The graceful session-shutdown slice passes **112/112** Release tests after locked restore,
+with no build warnings/errors. Eight added cases cover empty/completed/active managers,
+all-handle fencing before reentrant callbacks, held cleanup/callbacks, cancelled/repeated waits,
+failed Stop writes (including failures in multiple sessions), already-faulted settlement,
+borrowed resources and reopen without recovery or replay. In an isolated copy, the new tests
+also rejected deliberate regressions that dropped concurrent-session failures or skipped a
+failed run's drain; the restored copy passed again. No schema or dependency changes.
 These are fake-client/Core checks, not browser polling, load or real-provider qualification.
 This is a Core review checkpoint, not the browser-to-Core milestone or a complete hosting API.
 
@@ -96,7 +111,7 @@ Paths below are relative to the repository. Classes have their own files; small 
 share a file per concept. Read them alongside their owners.
 
 1. [SessionManager.cs](../source/backend/harness/sessions/SessionManager.cs) — canonical handles,
-   borrowed dependencies and the `SessionRecord` identity data used to create/load handles.
+   borrowed dependencies, the session-shutdown boundary and `SessionRecord` identity used to create/load handles.
 2. [SessionBase.cs](../source/backend/harness/sessions/SessionBase.cs) and
    [PrimarySession.cs](../source/backend/harness/sessions/PrimarySession.cs) — admission/driver ownership;
    [Input.cs](../source/backend/harness/sessions/Input.cs) holds the input command, receipt and enums;
@@ -117,6 +132,7 @@ share a file per concept. Read them alongside their owners.
    [OutputStorage.cs](../source/backend/harness/storage/OutputStorage.cs) — atomic run/request/output facts.
 5. [SessionManagerFlowTests.cs](../source/tests/Urd.Backend.Tests/sessions/SessionManagerFlowTests.cs),
    [SessionConcurrencyTests.cs](../source/tests/Urd.Backend.Tests/sessions/SessionConcurrencyTests.cs),
+   [SessionShutdownTests.cs](../source/tests/Urd.Backend.Tests/sessions/SessionShutdownTests.cs),
    [LlmResponseWriterTests.cs](../source/tests/Urd.Backend.Tests/execution/LlmResponseWriterTests.cs) and
    [SessionExecutionTests.cs](../source/tests/Urd.Backend.Tests/execution/SessionExecutionTests.cs) — whole Core flow,
    concurrent retries, cancelled waiters and lifecycle failures.

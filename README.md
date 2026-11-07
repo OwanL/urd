@@ -10,8 +10,9 @@ excluding general-purpose agent work.
 ## Status and authority
 
 The ASP.NET-free Core implements session identity, durable user-input decisions,
-fake-text execution, and bounded session snapshots plus paged message-content reads
-through SQLite. See [backend build/test instructions](docs/backend-development.md).
+fake-text execution, bounded session snapshots plus paged message-content reads
+through SQLite, and graceful shutdown of the manager's live sessions.
+See [backend build/test instructions](docs/backend-development.md).
 There is no runnable Server/UI or real-provider integration yet; wider designs remain
 subject to bite-sized owner review. The [Core design record](docs/scratch/initial-core-design.md)
 distinguishes the approved slices from future proposals.

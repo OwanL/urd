@@ -3,7 +3,7 @@ using Urd.Core.Storage;
 
 namespace Urd.Core.Sessions;
 
-// Creates and opens sessions, keeping one live instance per session ID.
+// Creates, discovers and opens sessions, keeping one live instance per opened session ID.
 public sealed class SessionManager {
   private readonly SessionStore store;
   private readonly IChatClient chatClient;
@@ -41,6 +41,15 @@ public sealed class SessionManager {
     SessionRecord record = store.Sessions.Read(sessionId)
         ?? throw new KeyNotFoundException($"Session '{sessionId}' does not exist.");
     return Track(new PrimarySession(record, store, chatClient, tools));
+  }
+
+  // Discovers saved identities without opening handles or starting execution.
+  public async Task<SessionIdPage> ListPrimaryIdsAsync(
+      string? cursor = null, CancellationToken cancellationToken = default) {
+    using var held = await gate.AcquireAsync(cancellationToken);
+    ThrowIfShuttingDown();
+    cancellationToken.ThrowIfCancellationRequested();
+    return store.Sessions.ListPrimaryIds(cursor);
   }
 
   // Fences new work and stops this manager's live sessions, waiting for saved settlement.

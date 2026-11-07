@@ -4,7 +4,7 @@ namespace Urd.Core.Storage;
 
 // Initializes connection pragmas and creates, verifies, or upgrades the schema.
 internal static class DatabaseSchema {
-  private const int SchemaVersion = 4;
+  private const int SchemaVersion = 5;
 
   internal static void Initialize(SqliteConnection connection) {
     using SqliteCommand command = connection.CreateCommand();
@@ -45,7 +45,28 @@ internal static class DatabaseSchema {
     }
 
     EnsureSteeringSchema(command, version);
+    EnsureCreationSchema(command, version);
     transaction.Commit();
+  }
+
+  private static void EnsureCreationSchema(SqliteCommand command, long version) {
+    if (version >= 5) {
+      command.CommandText = "SELECT ordinal, session_id FROM session_creation LIMIT 0;";
+      command.ExecuteNonQuery();
+      return;
+    }
+
+    // Legacy identities have no creation chronology; give them a deterministic ID-based order.
+    command.CommandText = """
+      CREATE TABLE session_creation (
+          ordinal INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id TEXT NOT NULL UNIQUE REFERENCES sessions(session_id) ON DELETE CASCADE
+      ) STRICT;
+      INSERT INTO session_creation (session_id)
+      SELECT session_id FROM sessions ORDER BY session_id COLLATE BINARY;
+      PRAGMA user_version = 5;
+      """;
+    command.ExecuteNonQuery();
   }
 
   private static void EnsureSteeringSchema(SqliteCommand command, long version) {

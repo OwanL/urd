@@ -200,7 +200,7 @@ public sealed class InputReceiptTests {
       Assert.Null(store.Inputs.ReadReceipt(sessionId, Guid.NewGuid()));
     }
 
-    Assert.Equal(4L, database.Scalar("PRAGMA user_version;")); // raw-sql: the migrated schema version is the subject under test
+    Assert.Equal(5L, database.Scalar("PRAGMA user_version;")); // raw-sql: the migrated schema version is the subject under test
     using SessionStore reopened = SessionStore.Open(database.Path);
     Assert.Equal(7L, reopened.Sessions.Read(sessionId)!.HistoryRevision);
   }

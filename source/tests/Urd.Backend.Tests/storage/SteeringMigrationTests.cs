@@ -50,7 +50,7 @@ public sealed class SteeringMigrationTests {
       Assert.Equal(Input, Assert.Single(messages, message => message.Role == ChatRole.User).MessageId);
       Assert.Equal(Output, Assert.Single(messages, message => message.Role == ChatRole.Assistant).MessageId);
       Assert.Null(database.Scalar("PRAGMA foreign_key_check;")); // raw-sql: migration must preserve referential integrity
-      Assert.Equal(4L, database.Scalar("PRAGMA user_version;")); // raw-sql: the upgraded schema version is under test
+      Assert.Equal(5L, database.Scalar("PRAGMA user_version;")); // raw-sql: the upgraded schema version is under test
     }
 
     using SessionStore reopened = SessionStore.Open(database.Path);

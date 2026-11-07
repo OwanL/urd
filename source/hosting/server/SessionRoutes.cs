@@ -19,6 +19,7 @@ internal static class SessionRoutes {
     ArgumentNullException.ThrowIfNull(sessions);
     RouteGroupBuilder routes = app.MapGroup("/api/sessions");
     routes.AddEndpointFilter(HandleRequestAsync);
+    routes.MapGet("", (Delegate)((HttpContext http) => ListAsync(http, sessions)));
     routes.MapPost("", (Delegate)((HttpContext http) => CreateAsync(http, sessions)));
     routes.MapPost("/{sessionId}/inputs", (HttpContext http, Guid sessionId) =>
         SubmitAsync(http, sessions, sessionId));
@@ -83,6 +84,16 @@ internal static class SessionRoutes {
       return false;
     } catch (NotSupportedException) {
       return false;
+    }
+  }
+
+  private static async Task<IResult> ListAsync(HttpContext http, SessionManager sessions) {
+    // Preserve a supplied empty cursor so Core can reject it rather than treating it as absent.
+    string? cursor = http.Request.Query.TryGetValue("cursor", out var supplied) ? supplied.ToString() : null;
+    try {
+      return Results.Ok(await sessions.ListPrimaryIdsAsync(cursor, http.RequestAborted));
+    } catch (InvalidOperationException) when (IsStopping(http)) {
+      return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
     }
   }
 

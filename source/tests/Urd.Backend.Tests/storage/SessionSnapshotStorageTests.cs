@@ -259,7 +259,7 @@ public sealed class SessionSnapshotStorageTests {
 
     MakeVersionTwo(database);
     using SessionStore migrated = SessionStore.Open(database.Path);
-    Assert.Equal(4L, database.Scalar("PRAGMA user_version;")); // raw-sql: the migrated schema version is the subject under test
+    Assert.Equal(5L, database.Scalar("PRAGMA user_version;")); // raw-sql: the migrated schema version is the subject under test
     InputReceipt migratedRefusal = migrated.Inputs.ReadReceipt(session, refusedInputId)!;
     Assert.Equal(refusedReceipt, migratedRefusal);
     Assert.Equal(InputDecision.Refused, migratedRefusal.Decision);
@@ -305,6 +305,7 @@ public sealed class SessionSnapshotStorageTests {
 
   private static void MakeVersionTwo(TemporaryDatabase database) => database.Execute("""
     BEGIN;
+    DROP TABLE session_creation;
     DROP TABLE execution_tools;
     DROP TABLE execution_messages;
     DROP TABLE execution_inputs;

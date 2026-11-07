@@ -411,7 +411,7 @@ public sealed class SessionExecutionTests {
       "length" => ([length], false),
       "exception" => ([], true),
       "exception-after-stop" => ([stop], true),
-      "non-text" => ([new() { Contents = [new FunctionCallContent("call", "unsupported", null)] }], false),
+      "non-text" => ([new() { Contents = [new FunctionResultContent("call", "unsupported")] }], false),
       "text-after-stop" => ([stop, Text("late text")], false),
       "length-after-stop" => ([stop, length], false),
       _ => throw new ArgumentOutOfRangeException(nameof(failureScenario))

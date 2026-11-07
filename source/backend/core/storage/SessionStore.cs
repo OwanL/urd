@@ -12,6 +12,7 @@ public sealed class SessionStore : IDisposable {
     Inputs = new(database);
     Runs = new(database);
     Output = new(database);
+    Tools = new(database);
     Content = new(database);
     Snapshots = new(database, Content);
   }
@@ -20,6 +21,7 @@ public sealed class SessionStore : IDisposable {
   internal InputStorage Inputs { get; }
   internal RunStorage Runs { get; }
   internal OutputStorage Output { get; }
+  internal ToolStorage Tools { get; }
   internal SnapshotReader Snapshots { get; }
   internal MessageContentReader Content { get; }
 

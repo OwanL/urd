@@ -22,4 +22,5 @@ internal sealed record LlmResponseChunk(
 internal sealed record LlmRequestOutcome(
     Guid RequestId,
     ExecutionOutcome Outcome,
-    string? Error = null);
+    string? Error = null,
+    IReadOnlyList<LlmToolCall>? ToolCalls = null);

@@ -5,8 +5,8 @@ namespace Urd.Core.Sessions;
 
 // The user-facing session: accepts typed user input and runs it against the model.
 public sealed class PrimarySession : SessionBase {
-  internal PrimarySession(SessionRecord record, SessionStore store, IChatClient chatClient)
-      : base(record, store, chatClient) {
+  internal PrimarySession(SessionRecord record, SessionStore store, IChatClient chatClient,
+      IReadOnlyList<AIFunction>? tools = null) : base(record, store, chatClient, tools) {
   }
 
   // Returns a saved acceptance/refusal decision, without waiting for the model answer.

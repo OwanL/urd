@@ -5,9 +5,9 @@ namespace Urd.Core.Storage;
 
 // Retains idempotent input decisions and admits each accepted input with its run.
 internal sealed class InputStorage(Database database) {
-  // The current text workflow admits one input per run; there is no follow-up queue.
   internal (InputReceipt Receipt, bool NewlyAccepted) Admit(
-      Guid sessionId, long historyRevision, InputCommand command, bool accepting, Guid proposedRunId) {
+      Guid sessionId, long historyRevision, InputCommand command, bool accepting, Guid proposedRunId,
+      Guid? activeRunId = null) {
     Validate(sessionId, command);
     return database.Write(transaction => {
       InputReceipt? retained = ReadReceipt(sessionId, command.InputId, transaction);
@@ -18,7 +18,7 @@ internal sealed class InputStorage(Database database) {
 
       long actualRevision = ReadRevision(transaction, sessionId);
       InputRefusalReason? refusal = DecideRefusal(
-          transaction, sessionId, actualRevision, historyRevision, command, accepting);
+          transaction, sessionId, actualRevision, historyRevision, command, accepting, activeRunId);
       if (refusal is { } reason) {
         var refused = new InputReceipt(sessionId, command, InputDecision.Refused, reason, null);
         InsertReceipt(transaction, refused);
@@ -26,20 +26,31 @@ internal sealed class InputStorage(Database database) {
       }
 
 #pragma warning disable S3928 // Captured method argument; validation must follow retained decisions.
-      if (proposedRunId == Guid.Empty)
+      Guid? currentRunId = ReadActiveRun(transaction, sessionId);
+      Guid runId = currentRunId ?? proposedRunId;
+      if (runId == Guid.Empty)
         throw new ArgumentException("Run ID cannot be empty.", nameof(proposedRunId));
 #pragma warning restore S3928
 
-      var accepted = new InputReceipt(sessionId, command, InputDecision.Accepted, null, proposedRunId);
+      var accepted = new InputReceipt(sessionId, command, InputDecision.Accepted, null, runId);
       InsertReceipt(transaction, accepted);
+      if (currentRunId is null) {
+        using SqliteCommand insertRun = database.Command(transaction, """
+          INSERT INTO execution_runs (session_id, run_id, history_revision, input_id)
+          VALUES ($session, $run, $revision, $input);
+          """,
+            ("$session", sessionId), ("$run", runId),
+            ("$revision", actualRevision), ("$input", command.InputId));
+        insertRun.ExecuteNonQuery();
+      }
+
       using SqliteCommand insert = database.Command(transaction, """
-        INSERT INTO execution_runs (session_id, run_id, history_revision, input_id)
-        VALUES ($session, $run, $revision, $input);
+        INSERT INTO execution_inputs (session_id, input_id, run_id) VALUES ($session, $input, $run);
+        INSERT INTO execution_messages (session_id, history_revision, run_id, role, message_id, input_id)
+        VALUES ($session, $revision, $run, 0, $input, $input);
         """,
-          ("$session", sessionId),
-          ("$run", proposedRunId),
-          ("$revision", actualRevision),
-          ("$input", command.InputId));
+          ("$session", sessionId), ("$run", runId),
+          ("$revision", actualRevision), ("$input", command.InputId));
       insert.ExecuteNonQuery();
       return (accepted, true);
     });
@@ -80,7 +91,7 @@ internal sealed class InputStorage(Database database) {
   }
 
   private InputRefusalReason? DecideRefusal(SqliteTransaction transaction, Guid sessionId, long actualRevision,
-      long historyRevision, InputCommand command, bool accepting) {
+      long historyRevision, InputCommand command, bool accepting, Guid? activeRunId) {
     using SqliteCommand read = database.Command(transaction,
         "SELECT stopping FROM execution_runs WHERE session_id = $session AND outcome IS NULL;",
         ("$session", sessionId));
@@ -91,7 +102,24 @@ internal sealed class InputStorage(Database database) {
     if (actualRevision != historyRevision || command.ExpectedHistoryRevision != actualRevision)
       return InputRefusalReason.StaleRevision;
 
-    return stopFlag is not null ? InputRefusalReason.Capacity : null;
+    if (stopFlag is null)
+      return null;
+
+    Guid? currentRunId = ReadActiveRun(transaction, sessionId);
+    if (activeRunId is null || currentRunId != activeRunId)
+      return InputRefusalReason.Capacity;
+
+    using SqliteCommand count = database.Command(transaction,
+        "SELECT COUNT(*) FROM execution_inputs WHERE run_id = $run AND outcome IS NULL;",
+        ("$run", currentRunId));
+    return (long)count.ExecuteScalar()! >= 8 ? InputRefusalReason.Capacity : null;
+  }
+
+  private Guid? ReadActiveRun(SqliteTransaction transaction, Guid sessionId) {
+    using SqliteCommand read = database.Command(transaction,
+        "SELECT run_id FROM execution_runs WHERE session_id = $session AND outcome IS NULL;",
+        ("$session", sessionId));
+    return read.ExecuteScalar() is string run ? Guid.Parse(run) : null;
   }
 
   private void InsertReceipt(SqliteTransaction transaction, InputReceipt receipt) {

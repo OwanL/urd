@@ -13,17 +13,17 @@ internal sealed class SnapshotReader {
   private readonly Database database;
   private readonly MessageContentReader content;
 
-  // Keep the run window before the join: its indexed seek visits at most 61 runs.
-  // A possible outer sort is therefore bounded, regardless of retained history size.
-  internal const string SnapshotRunsSql = """
-    SELECT r.run_id, r.input_id, r.outcome, q.output_id
+  // Select identities before joining lifecycle facts or reading any message bodies.
+  // One run can contain arbitrarily many messages; only this index window is bounded.
+  internal const string SnapshotMessagesSql = """
+    SELECT m.run_id, m.role, m.message_id, r.outcome
     FROM (
-        SELECT ordinal, run_id, input_id, outcome FROM execution_runs
+        SELECT ordinal, run_id, role, message_id FROM execution_messages
         WHERE session_id = $session AND history_revision = $revision
         ORDER BY ordinal DESC LIMIT 61
-    ) r
-    LEFT JOIN execution_requests q ON q.run_id = r.run_id
-    ORDER BY r.ordinal DESC;
+    ) m
+    JOIN execution_runs r ON r.run_id = m.run_id
+    ORDER BY m.ordinal DESC;
     """;
 
   internal const string SnapshotUnsettledSql = """
@@ -84,25 +84,17 @@ internal sealed class SnapshotReader {
 
   private List<(MessageRef Message, ExecutionOutcome? Settlement)> ReadCandidates(
       SqliteTransaction transaction, Guid sessionId, long historyRevision) {
-    // Newest first: assistant before user within each run. Previews reverse this order.
-    using SqliteCommand runsRead = database.Command(transaction, SnapshotRunsSql,
+    // Newest admission/response first. Previews reverse this bounded window.
+    using SqliteCommand messagesRead = database.Command(transaction, SnapshotMessagesSql,
         ("$session", sessionId),
         ("$revision", historyRevision));
-    using SqliteDataReader reader = runsRead.ExecuteReader();
+    using SqliteDataReader reader = messagesRead.ExecuteReader();
     return reader.Cast<DbDataRecord>()
-        .SelectMany(row => MessagesFromRun(row, historyRevision))
-        .Take(SnapshotMessageLimit + 1)
+        .Select(row => (
+            Message: new MessageRef(Guid.Parse(row.GetString(0)), Guid.Parse(row.GetString(2)),
+                (MessageRole)row.GetInt64(1), historyRevision),
+            Settlement: row.IsDBNull(3) ? (ExecutionOutcome?)null : (ExecutionOutcome)row.GetInt64(3)))
         .ToList();
-  }
-
-  private static IEnumerable<(MessageRef Message, ExecutionOutcome? Settlement)> MessagesFromRun(
-      DbDataRecord row, long historyRevision) {
-    Guid runId = Guid.Parse(row.GetString(0));
-    ExecutionOutcome? outcome = row.IsDBNull(2) ? null : (ExecutionOutcome)row.GetInt64(2);
-    if (!row.IsDBNull(3))
-      yield return (new(runId, Guid.Parse(row.GetString(3)), MessageRole.Assistant, historyRevision), outcome);
-
-    yield return (new(runId, Guid.Parse(row.GetString(1)), MessageRole.User, historyRevision), outcome);
   }
 
   private ReadOnlyCollection<MessagePreview> ReadPreviews(SqliteTransaction transaction, Guid sessionId,

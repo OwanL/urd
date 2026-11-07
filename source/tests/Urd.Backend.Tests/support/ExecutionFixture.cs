@@ -1,3 +1,4 @@
+using Microsoft.Extensions.AI;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
 using Xunit;
@@ -11,11 +12,11 @@ internal sealed class ExecutionFixture : IAsyncDisposable {
   private readonly ScriptedChatClient client;
   private readonly List<Guid> runs = [];
 
-  internal ExecutionFixture(ScriptedChatClient client) {
+  internal ExecutionFixture(ScriptedChatClient client, IReadOnlyList<AIFunction>? tools = null) {
     this.client = client;
     Database = new TemporaryDatabase();
     store = SessionStore.Open(Database.Path);
-    Session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid()), store, client);
+    Session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid()), store, client, tools);
   }
 
   internal TemporaryDatabase Database { get; }

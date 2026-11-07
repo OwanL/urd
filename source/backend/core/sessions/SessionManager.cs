@@ -7,22 +7,29 @@ namespace Urd.Core.Sessions;
 public sealed class SessionManager {
   private readonly SessionStore store;
   private readonly IChatClient chatClient;
+  private readonly IReadOnlyList<AIFunction> tools;
   private readonly AsyncLock gate = new();
   private readonly Dictionary<Guid, PrimarySession> sessions = new();
   private TaskCompletionSource? sessionShutdown;
 
-  public SessionManager(SessionStore store, IChatClient chatClient) {
+  public SessionManager(SessionStore store, IChatClient chatClient, IReadOnlyList<AIFunction>? tools = null) {
     ArgumentNullException.ThrowIfNull(store);
     ArgumentNullException.ThrowIfNull(chatClient);
+    AIFunction[] configured = tools?.ToArray() ?? [];
+    if (configured.Any(tool => tool is null || string.IsNullOrWhiteSpace(tool.Name))
+        || configured.Select(tool => tool.Name).Distinct(StringComparer.Ordinal).Count() != configured.Length)
+      throw new ArgumentException("Tools require distinct nonempty names.", nameof(tools));
+
     this.store = store;
     this.chatClient = chatClient;
+    this.tools = Array.AsReadOnly(configured);
   }
 
   public async Task<PrimarySession> CreatePrimaryAsync() {
     using var held = await gate.AcquireAsync();
     ThrowIfShuttingDown();
     SessionRecord record = store.Sessions.CreatePrimary(Guid.NewGuid());
-    return Track(new PrimarySession(record, store, chatClient));
+    return Track(new PrimarySession(record, store, chatClient, tools));
   }
 
   public async Task<PrimarySession> GetPrimaryAsync(Guid sessionId) {
@@ -33,7 +40,7 @@ public sealed class SessionManager {
 
     SessionRecord record = store.Sessions.Read(sessionId)
         ?? throw new KeyNotFoundException($"Session '{sessionId}' does not exist.");
-    return Track(new PrimarySession(record, store, chatClient));
+    return Track(new PrimarySession(record, store, chatClient, tools));
   }
 
   // Fences new work and stops this manager's live sessions, waiting for saved settlement.

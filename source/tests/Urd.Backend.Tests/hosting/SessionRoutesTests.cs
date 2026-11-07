@@ -1,8 +1,10 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.AI;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Execution;
 using Urd.Core.Sessions;
@@ -76,6 +78,52 @@ public sealed class SessionRoutesTests {
     Assert.Single(StoredInputs.Read(database));
     Assert.Single(StoredRuns.Read(database));
     Assert.Single(StoredRuns.ReadRequests(database));
+  }
+
+  [Fact]
+  public async Task BusyHttpSendsBecomeDurableSteeringWithoutChangingTheRoutes() {
+    var entered = Signal();
+    var release = Signal();
+    int requests = 0;
+    async IAsyncEnumerable<ChatResponseUpdate> Response([EnumeratorCancellation] CancellationToken token) {
+      if (Interlocked.Increment(ref requests) == 1) {
+        entered.TrySetResult();
+        await release.Task.WaitAsync(token);
+      }
+      yield return new() { FinishReason = ChatFinishReason.Stop };
+    }
+
+    using var database = new TemporaryDatabase();
+    var model = new ScriptedChatClient(Response);
+    await using var server = new RunningServer(Options(database), createClient: () => model);
+    await server.WaitForReadyAsync();
+    try {
+      Guid sessionId = await CreateAsync(server.Client);
+      InputReceipt origin = await SubmitAsync(server.Client, sessionId, new(Guid.NewGuid(), 0, "start"));
+      await entered.Task.WaitAsync(TestTimeout);
+      var command = new InputCommand(Guid.NewGuid(), 0, "steer through HTTP");
+      InputReceipt[] receipts = await Task.WhenAll(SubmitAsync(server.Client, sessionId, command),
+          SubmitAsync(server.Client, sessionId, command));
+      Assert.Equal(receipts[0], receipts[1]);
+      Assert.Equal(InputDecision.Accepted, receipts[0].Decision);
+      Assert.Equal(origin.RunId, receipts[0].RunId);
+      Assert.Equal(receipts[0], await ReceiptAsync(server.Client, sessionId, command.InputId));
+      Assert.Contains((await SnapshotAsync(server.Client, sessionId)).Messages,
+          message => message.Message.MessageId == command.InputId && message.Preview == command.Text);
+      Assert.Equal(1, model.Calls);
+
+      release.TrySetResult();
+      SessionSnapshot settled = await SettledAsync(server.Client, sessionId, origin.RunId!.Value);
+      Assert.Equal(ExecutionOutcome.Completed, settled.LastSettlement!.Outcome);
+      Assert.Equal(2, model.Calls);
+      Assert.Equal(new[] { "start", command.Text }, model.LastRequest
+          .Where(message => message.Role == ChatRole.User).Select(message => message.Text));
+      Assert.Equal(receipts[0], await SubmitAsync(server.Client, sessionId, command));
+      Assert.Equal(2, StoredRuns.ReadRequests(database).Count);
+      Assert.Single(StoredRuns.Read(database));
+    } finally {
+      release.TrySetResult();
+    }
   }
 
   [Fact]

@@ -210,6 +210,57 @@ public sealed class MessageContentTests {
   }
 
   [Fact]
+  public void SteeringAndDistinctResponsesKeepExactReferencesAndCursorsAcrossReopen() {
+    using var database = new TemporaryDatabase();
+    TestRun first;
+    MessageRef steering, secondOutput, undelivered;
+    MessageContentCursor oldCursor;
+    using (SessionStore store = SessionStore.Open(database.Path)) {
+      first = StartRun(store, "origin\0🙂");
+      steering = new(first.Run, Guid.NewGuid(), MessageRole.User, 0);
+      Assert.True(store.Inputs.Admit(first.Session, 0, new(steering.MessageId, 0, "steering\0é"), true,
+          Guid.NewGuid(), activeRunId: first.Run).NewlyAccepted);
+      MessageContentPage pending = store.Content.Read(first.Session, new(steering, 0, 0));
+      Assert.Equal("steering\0é", pending.Text);
+      Assert.True(pending.IsClosed);
+      Assert.Equal(new(steering, 1, 0), pending.Next);
+
+      Append(store, first, 0, "first🙂");
+      oldCursor = store.Content.Read(first.Session, new(first.Assistant, 0, 0)).Next;
+      Append(store, first, 1, "\0tail", final: true);
+      Assert.True(store.Output.CompleteRequest(first.Session, first.Run, 0,
+          new(first.Request, ExecutionOutcome.Completed)));
+      LlmRequest next = store.Runs.ClaimNextRequest(first.Session, first.Run, 0)!;
+      Assert.NotEqual(first.Request, next.RequestId);
+      secondOutput = new(first.Run, Guid.NewGuid(), MessageRole.Assistant, 0);
+      Assert.True(store.Output.Append(first.Session, first.Run, 0,
+          new(next.RequestId, secondOutput.MessageId, 0, "second\0🙂", false)));
+      undelivered = new(first.Run, Guid.NewGuid(), MessageRole.User, 0);
+      Assert.True(store.Inputs.Admit(first.Session, 0, new(undelivered.MessageId, 0, "not delivered"), true,
+          Guid.NewGuid(), activeRunId: first.Run).NewlyAccepted);
+      Assert.Equal(new[] { first.User, steering, first.Assistant, secondOutput, undelivered },
+          store.Snapshots.Read(first.Session).Messages.Select(message => message.Message));
+      store.Runs.RequestStop(first.Session, first.Run);
+    }
+
+    using SessionStore reopened = SessionStore.Open(database.Path);
+    MessageContentPage retained = reopened.Content.Read(first.Session, oldCursor);
+    Assert.Equal("\0tail", retained.Text);
+    Assert.Equal(new(first.Assistant, 2, 0), retained.Next);
+    Assert.True(retained.FinalOutputCommitted);
+    Assert.True(retained.IsClosed);
+    MessageContentPage second = reopened.Content.Read(first.Session, new(secondOutput, 0, 0));
+    Assert.Equal("second\0🙂", second.Text);
+    Assert.Equal(new(secondOutput, 1, 0), second.Next);
+    Assert.False(second.FinalOutputCommitted);
+    Assert.True(second.IsClosed);
+    Assert.Equal("origin\0🙂", reopened.Content.Read(first.Session, new(first.User, 0, 0)).Text);
+    Assert.Equal("steering\0é", reopened.Content.Read(first.Session, new(steering, 0, 0)).Text);
+    Assert.Equal("not delivered", reopened.Content.Read(first.Session, new(undelivered, 0, 0)).Text);
+    Assert.Null(reopened.Runs.ReadSettlement(first.Session, first.Run));
+  }
+
+  [Fact]
   public void StopClosesPartialBytesWithoutFinalOutputOrTerminalOutcome() {
     using var database = new TemporaryDatabase();
     using SessionStore store = SessionStore.Open(database.Path);

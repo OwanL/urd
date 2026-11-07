@@ -30,6 +30,14 @@ internal static class ScriptedResponses {
     yield return new() { FinishReason = ChatFinishReason.Stop };
   }
 
+  internal static async IAsyncEnumerable<ChatResponseUpdate> ToolBatch(
+      [EnumeratorCancellation] CancellationToken token, params FunctionCallContent[] calls) {
+    await Task.CompletedTask;
+    token.ThrowIfCancellationRequested();
+    yield return new() { Contents = [.. calls], FinishReason = ChatFinishReason.ToolCalls };
+    yield return new() { Contents = [new UsageContent(), new TextContent("")] };
+  }
+
   internal static IAsyncEnumerable<ChatResponseUpdate> Complete(CancellationToken token) =>
       TextUpdates(["done"], token);
 }

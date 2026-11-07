@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.AI;
 using Urd.Backend.Tests.Support;
@@ -84,7 +85,7 @@ public sealed class ExecutionStorageTests {
     Guid nextRun = Guid.NewGuid();
     store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "next accepted"), true, nextRun);
     LlmRequest next = store.Runs.ClaimNextRequest(session, nextRun, 0)!;
-    Assert.Equal(new[] { "accepted", "next accepted" }, next.Messages.Select(message => message.Text));
+    Assert.Equal(new[] { "next accepted" }, next.Messages.Select(message => message.Text));
     Assert.Equal(2, StoredRuns.Read(database).Count);
     Assert.Equal(4, StoredInputs.Read(database).Count);
   }
@@ -246,6 +247,114 @@ public sealed class ExecutionStorageTests {
     Assert.Null(store.Runs.ReadSettlement(session, nextRun));
     Assert.Equal(ExecutionOutcome.Cancelled, store.Runs.ReadSettlement(session, run)!.Outcome);
     Assert.Null(store.Runs.TrySettle(session, Guid.NewGuid(), ExecutionOutcome.Failed));
+  }
+
+  [Fact]
+  public void PendingInputsAreClaimedOnceInOrderAndNeverLeakIntoEarlierRequests() {
+    using var database = new TemporaryDatabase();
+    Guid session = Guid.NewGuid(), run = Guid.NewGuid();
+    var secondInput = new InputCommand(Guid.NewGuid(), 0, "second");
+    using (SessionStore store = SessionStore.Open(database.Path)) {
+      store.Sessions.CreatePrimary(session);
+      store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "first"), true, run);
+      LlmRequest first = store.Runs.ClaimNextRequest(session, run, 0)!;
+      store.Inputs.Admit(session, 0, secondInput, true, Guid.NewGuid(), run);
+      store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "third"), true, Guid.NewGuid(), run);
+      Assert.Equal(new[] { "first" }, first.Messages.Select(message => message.Text));
+      Assert.Null(store.Runs.ClaimNextRequest(session, run, 0));
+      SaveResponse(store, session, run, first, "answer one");
+      Assert.Null(store.Runs.TrySettle(session, run, ExecutionOutcome.Completed));
+
+      LlmRequest second = Assert.IsType<LlmRequest>(store.Runs.ClaimNextRequest(session, run, 0));
+      Assert.Equal(new[] { "first", "answer one", "second", "third" }, second.Messages.Select(message => message.Text));
+      Assert.Equal(new[] { ChatRole.User, ChatRole.Assistant, ChatRole.User, ChatRole.User }, second.Messages.Select(message => message.Role));
+      store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "fourth"), true, Guid.NewGuid(), run);
+      SaveResponse(store, session, run, second, "answer two");
+      Assert.Equal(3, StoredDeliveries.Read(database).Count(input => input.Outcome == ExecutionOutcome.Completed));
+      Assert.Null(store.Runs.TrySettle(session, run, ExecutionOutcome.Completed));
+
+      LlmRequest third = Assert.IsType<LlmRequest>(store.Runs.ClaimNextRequest(session, run, 0));
+      Assert.Equal(new[] { "first", "answer one", "second", "third", "answer two", "fourth" }, third.Messages.Select(message => message.Text));
+      SaveResponse(store, session, run, third, "done");
+      Assert.Null(store.Runs.ClaimNextRequest(session, run, 0));
+      Assert.Equal(ExecutionOutcome.Completed, store.Runs.TrySettle(session, run, ExecutionOutcome.Completed)!.Outcome);
+      Assert.Equal(3, StoredRuns.ReadRequests(database).Count);
+      Assert.Equal(2L, StoredDeliveries.ReadRequestOrder(database).Max(request => request.Index));
+      Assert.Equal(4, StoredDeliveries.Read(database).Count(input => input.RequestId is not null && input.Outcome == ExecutionOutcome.Completed));
+    }
+
+    using SessionStore reopened = SessionStore.Open(database.Path);
+    Assert.Null(reopened.Runs.ClaimNextRequest(session, run, 0));
+    Assert.Equal(run, reopened.Inputs.Admit(session, 0, secondInput, false, Guid.Empty).Receipt.RunId);
+    Assert.Equal(ExecutionOutcome.Completed, reopened.Runs.ReadSettlement(session, run)!.Outcome);
+  }
+
+  [Fact]
+  public void SavedToolErrorsStillRequireModelContinuationBeforeSettlement() {
+    using var database = new TemporaryDatabase();
+    using SessionStore store = SessionStore.Open(database.Path);
+    Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, run = Guid.NewGuid();
+    store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "first"), true, run);
+    LlmRequest first = store.Runs.ClaimNextRequest(session, run, 0)!;
+    LlmToolCall[] calls = [new("call-one", "fake", JsonSerializer.SerializeToElement(new { value = 1 })),
+        new("call-two", "fake", JsonSerializer.SerializeToElement(new { value = 2 }))];
+    SaveResponse(store, session, run, first, "calling", calls);
+    store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "steer one"), true, Guid.NewGuid(), run);
+    store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "steer two"), true, Guid.NewGuid(), run);
+    Assert.Null(store.Runs.ClaimNextRequest(session, run, 0));
+    Assert.Null(store.Runs.TrySettle(session, run, ExecutionOutcome.Completed));
+    Assert.True(store.Tools.TryStart(session, run, 0, first.RequestId, "call-one"));
+    Assert.True(store.Tools.Complete(session, run, 0, first.RequestId,
+        new("call-one", ExecutionOutcome.Failed, JsonSerializer.SerializeToElement(new { error = "syntax" }), "syntax")));
+    Assert.Null(store.Runs.ClaimNextRequest(session, run, 0));
+    Assert.True(store.Tools.TryStart(session, run, 0, first.RequestId, "call-two"));
+    Assert.True(store.Tools.Complete(session, run, 0, first.RequestId,
+        new("call-two", ExecutionOutcome.Completed, JsonSerializer.SerializeToElement(new { value = "ok" }))));
+    Assert.Null(store.Runs.TrySettle(session, run, ExecutionOutcome.Completed));
+
+    LlmRequest next = Assert.IsType<LlmRequest>(store.Runs.ClaimNextRequest(session, run, 0));
+    Assert.Equal(new[] { ChatRole.User, ChatRole.Assistant, ChatRole.Tool, ChatRole.User, ChatRole.User },
+        next.Messages.Select(message => message.Role));
+    Assert.Equal(new[] { "call-one", "call-two" }, next.Messages[1].Contents.OfType<FunctionCallContent>().Select(call => call.CallId));
+    FunctionResultContent[] results = next.Messages[2].Contents.OfType<FunctionResultContent>().ToArray();
+    Assert.Equal(new[] { "call-one", "call-two" }, results.Select(result => result.CallId));
+    Assert.Equal("syntax", Assert.IsType<JsonElement>(results[0].Result).GetProperty("error").GetString());
+    Assert.Equal(new[] { "steer one", "steer two" }, next.Messages.Skip(3).Select(message => message.Text));
+    SaveResponse(store, session, run, next, "corrected");
+    Assert.Equal(ExecutionOutcome.Completed, store.Runs.TrySettle(session, run, ExecutionOutcome.Completed)!.Outcome);
+  }
+
+  [Fact]
+  public void ToolBatchAloneClaimsContinuationButStopRetiresUndeliveredInputs() {
+    using var database = new TemporaryDatabase();
+    using SessionStore store = SessionStore.Open(database.Path);
+    Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, run = Guid.NewGuid();
+    store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "first"), true, run);
+    LlmRequest first = store.Runs.ClaimNextRequest(session, run, 0)!;
+    SaveResponse(store, session, run, first, "", [new("call", "fake", JsonSerializer.SerializeToElement(new { }))]);
+    Assert.True(store.Tools.TryStart(session, run, 0, first.RequestId, "call"));
+    Assert.True(store.Tools.Complete(session, run, 0, first.RequestId,
+        new("call", ExecutionOutcome.Completed, JsonSerializer.SerializeToElement("ok"))));
+    LlmRequest continuation = store.Runs.ClaimNextRequest(session, run, 0)!;
+    Assert.Equal(new[] { ChatRole.User, ChatRole.Assistant, ChatRole.Tool }, continuation.Messages.Select(message => message.Role));
+    var pending = new InputCommand(Guid.NewGuid(), 0, "never delivered");
+    InputReceipt receipt = store.Inputs.Admit(session, 0, pending, true, Guid.NewGuid(), run).Receipt;
+    store.Runs.RequestStop(session, run);
+    Assert.Single(StoredDeliveries.Read(database), input => input.RequestId is null && input.Outcome == ExecutionOutcome.Cancelled);
+    Assert.Null(store.Runs.ClaimNextRequest(session, run, 0));
+    Assert.Equal(ExecutionOutcome.Cancelled, store.Runs.TrySettle(session, run, ExecutionOutcome.Completed)!.Outcome);
+    Assert.Equal(receipt, store.Inputs.ReadReceipt(session, pending.InputId));
+    Guid nextRun = Guid.NewGuid();
+    store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "next run"), true, nextRun);
+    Assert.DoesNotContain(store.Runs.ClaimNextRequest(session, nextRun, 0)!.Messages,
+        message => message.Text == pending.Text);
+  }
+
+  private static void SaveResponse(SessionStore store, Guid session, Guid run, LlmRequest request,
+      string text, IReadOnlyList<LlmToolCall>? calls = null) {
+    Assert.True(store.Output.Append(session, run, 0, new(request.RequestId, Guid.NewGuid(), 0, text, true)));
+    Assert.True(store.Output.CompleteRequest(session, run, 0,
+        new(request.RequestId, ExecutionOutcome.Completed, ToolCalls: calls)));
   }
 
   [Fact]

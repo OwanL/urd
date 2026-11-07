@@ -4,21 +4,25 @@ using Urd.Core.Sessions;
 
 namespace Urd.Core.Execution;
 
-// Sends one run's request to the model and streams the response into the session.
+// Sends a run's requests to the model and executes each authorized fake-tool batch.
 // The session owns locking and storage; this class owns the model call and its cleanup.
 internal sealed class SessionExecution : IDisposable {
   private readonly SessionBase session;
   private readonly IChatClient chatClient; // Borrowed from the session; never disposed here.
+  private readonly IReadOnlyList<AIFunction> tools; // Borrowed; the manager owns the snapshot.
   private readonly CancellationTokenSource stop = new();
   private Task? stopCallbacks;
 
-  internal SessionExecution(Guid runId, SessionBase session, IChatClient chatClient) {
+  internal SessionExecution(Guid runId, SessionBase session, IChatClient chatClient,
+      IReadOnlyList<AIFunction>? tools = null) {
     RunId = runId;
     this.session = session;
     this.chatClient = chatClient;
+    this.tools = tools ?? [];
   }
 
   internal Guid RunId { get; }
+  internal bool IsStopping => stop.IsCancellationRequested;
 
   // Completes once every callback registered on the stop token has finished.
   internal Task StopCallbacks => stopCallbacks ?? Task.CompletedTask;
@@ -26,30 +30,71 @@ internal sealed class SessionExecution : IDisposable {
   // Called by the session while it holds its lock. Repeated calls share one task.
   internal Task StopAsync() => stopCallbacks ??= stop.CancelAsync();
 
-  // Called by the session only after RunAsync and StopCallbacks have finished
+  // Called by the session only after every request and StopCallbacks have finished
   // and the run's result has been saved.
   public void Dispose() => stop.Dispose();
 
-  // Called once by the session, outside its lock.
-  internal async Task<ExecutionOutcome> RunAsync() {
-    LlmRequest? request = await session.ClaimNextRequestAsync(RunId);
-    if (request is null) {
-      if (stop.IsCancellationRequested)
-        return ExecutionOutcome.Cancelled;
-
-      throw new InvalidOperationException("The run has no request to send and was not stopped.");
+  // Called sequentially by the session, outside its lock. No work survives the return.
+  internal async Task<ExecutionOutcome> RunRequestAsync(LlmRequest request) {
+    LlmRequestOutcome outcome;
+    bool saved;
+    // Keep the source alive through the outcome save, as disposal can wait for callbacks.
+    // Tools use the run token, never this already-cleaned-up provider-request source.
+    using (var requestStop = CancellationTokenSource.CreateLinkedTokenSource(stop.Token)) {
+      outcome = await SendRequestAsync(request, requestStop);
+      saved = await session.CompleteRequestAsync(RunId, outcome);
     }
 
-    // Disposing this source waits for its running cancellation callbacks,
-    // so keep it alive until the request outcome has been saved.
-    using var requestStop = CancellationTokenSource.CreateLinkedTokenSource(stop.Token);
-    LlmRequestOutcome outcome = await SendRequestAsync(request, requestStop);
-    bool saved = await session.CompleteRequestAsync(RunId, outcome);
-    return saved ? outcome.Outcome : ExecutionOutcome.Cancelled;
+    if (!saved)
+      return ExecutionOutcome.Cancelled;
+    if (outcome.Outcome != ExecutionOutcome.Completed)
+      return outcome.Outcome;
+
+    foreach (LlmToolCall call in outcome.ToolCalls ?? []) {
+      if (IsStopping || !await session.TryStartToolAsync(RunId, request.RequestId, call.CallId))
+        return ExecutionOutcome.Cancelled;
+
+      LlmToolResult result = await InvokeToolAsync(call);
+      // A rejected or failed result save leaves effects uncertain. Never turn it into
+      // an ordinary tool error or allow a model continuation.
+      if (!await session.CompleteToolAsync(RunId, request.RequestId, result))
+        throw new InvalidOperationException("The tool result could not be saved.");
+    }
+
+    return IsStopping ? ExecutionOutcome.Cancelled : ExecutionOutcome.Completed;
+  }
+
+  private async Task<LlmToolResult> InvokeToolAsync(LlmToolCall call) {
+    object? value;
+    try {
+      stop.Token.ThrowIfCancellationRequested();
+      AIFunction function = tools.FirstOrDefault(tool =>
+          string.Equals(tool.Name, call.Name, StringComparison.Ordinal))
+          ?? throw new InvalidOperationException($"Unknown tool '{call.Name}'.");
+      var arguments = new AIFunctionArguments(call.Arguments.EnumerateObject()
+          .ToDictionary(property => property.Name, property => (object?)property.Value, StringComparer.Ordinal));
+      // A function may also bind or marshal internally; its failures cannot prove no effects.
+      value = await function.InvokeAsync(arguments, stop.Token);
+    } catch (OperationCanceledException) when (IsStopping) {
+      return ToolError(call, ExecutionOutcome.Cancelled,
+          "Tool execution was cancelled; effects may have occurred.");
+    } catch (Exception exception) {
+      return ToolError(call, ExecutionOutcome.Failed, exception.Message);
+    }
+
+    // Serialization owned here can fail after an effect. Let that uncertainty fence the run.
+    return new(call.CallId, ExecutionOutcome.Completed, LlmResponseAccumulator.FreezeJson(value));
+  }
+
+  private static LlmToolResult ToolError(LlmToolCall call, ExecutionOutcome outcome, string message) {
+    // Bound even arbitrary exception messages, allowing for JSON escaping overhead.
+    string error = message[..Math.Min(message.Length, 1024)];
+    return new(call.CallId, outcome, LlmResponseAccumulator.FreezeJson(new { error }), error);
   }
 
   private async Task<LlmRequestOutcome> SendRequestAsync(LlmRequest request, CancellationTokenSource requestStop) {
     var writer = new LlmResponseWriter(request.RequestId, SaveChunkAsync);
+    var response = new LlmResponseAccumulator(writer);
     IAsyncEnumerator<ChatResponseUpdate>? updates = null;
     Task<bool>? pendingRead = null;
     Exception? failure = null;
@@ -57,28 +102,27 @@ internal sealed class SessionExecution : IDisposable {
       CancellationToken stopToken = stop.Token;
       stopToken.ThrowIfCancellationRequested();
       updates = chatClient
-          .GetStreamingResponseAsync(request.Messages, cancellationToken: requestStop.Token)
+          .GetStreamingResponseAsync(request.Messages, new ChatOptions { Tools = [.. tools] }, requestStop.Token)
           .GetAsyncEnumerator(requestStop.Token);
 
-      bool stopReceived = false;
       while (await WaitForNextUpdateAsync(writer, pendingRead ??= updates.MoveNextAsync().AsTask())) {
         pendingRead = null;
         stopToken.ThrowIfCancellationRequested();
-        stopReceived = await WriteUpdateAsync(updates.Current, writer, stopReceived);
+        await response.AppendAsync(updates.Current);
       }
 
       pendingRead = null;
       stopToken.ThrowIfCancellationRequested();
-      if (!stopReceived)
-        throw new InvalidDataException("The response ended without a stop finish reason.");
-
-      await writer.FinishResponseAsync();
+      await response.FinishAsync();
     } catch (Exception exception) {
       failure = exception;
     }
 
     await CleanUpAsync(requestStop, pendingRead, updates, failure);
-    return ToRequestOutcome(request.RequestId, failure);
+    LlmRequestOutcome outcome = ToRequestOutcome(request.RequestId, failure);
+    return outcome.Outcome == ExecutionOutcome.Completed
+        ? outcome with { ToolCalls = response.ToolCalls }
+        : outcome;
   }
 
   private async Task<bool> WaitForNextUpdateAsync(LlmResponseWriter writer, Task<bool> pendingRead) {
@@ -91,28 +135,6 @@ internal sealed class SessionExecution : IDisposable {
     }
 
     return await pendingRead;
-  }
-
-  // A Stop marker closes text; enumeration and cleanup must still finish successfully.
-  private static async Task<bool> WriteUpdateAsync(ChatResponseUpdate update,
-      LlmResponseWriter writer, bool stopReceived) {
-    foreach (AIContent content in update.Contents.Where(content => content is not UsageContent)) {
-      if (content is not TextContent text)
-        throw new InvalidDataException("The response contained content other than text.");
-
-      if (stopReceived && text.Text.Length != 0)
-        throw new InvalidDataException("The response contained text after its stop finish reason.");
-
-      await writer.AppendTextAsync(text.Text);
-    }
-
-    if (update.FinishReason is null)
-      return stopReceived;
-
-    if (update.FinishReason != ChatFinishReason.Stop)
-      throw new InvalidDataException("The response finished without a stop finish reason.");
-
-    return true;
   }
 
   private LlmRequestOutcome ToRequestOutcome(Guid requestId, Exception? failure) {

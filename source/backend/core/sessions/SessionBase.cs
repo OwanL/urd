@@ -10,17 +10,20 @@ namespace Urd.Core.Sessions;
 public abstract class SessionBase {
   private readonly SessionStore store;
   private readonly IChatClient chatClient;
+  private readonly IReadOnlyList<AIFunction> tools;
   private readonly AsyncLock gate = new();
   private bool acceptingInput = true;
   private SessionExecution? execution;
   private TaskCompletionSource<ExecutionResult>? settlement;
   private Task? executionTask;
 
-  private protected SessionBase(SessionRecord record, SessionStore store, IChatClient chatClient) {
+  private protected SessionBase(SessionRecord record, SessionStore store, IChatClient chatClient,
+      IReadOnlyList<AIFunction>? tools = null) {
     Id = record.Id;
     HistoryRevision = record.HistoryRevision;
     this.store = store;
     this.chatClient = chatClient;
+    this.tools = tools ?? [];
   }
 
   public Guid Id { get; }
@@ -53,11 +56,10 @@ public abstract class SessionBase {
     InputReceipt receipt;
     using (await gate.AcquireAsync()) {
       (receipt, bool newlyAccepted) = WriteToStore(
-          () => store.Inputs.Admit(Id, HistoryRevision, command, acceptingInput, Guid.NewGuid()));
+          () => store.Inputs.Admit(Id, HistoryRevision, command, acceptingInput, Guid.NewGuid(), execution?.RunId));
 
-      // Only the call that saved the acceptance may start the run; a retained
-      // Accepted receipt from an earlier call must not start it again.
-      if (newlyAccepted) {
+      // Steering joins the owned run; neither it nor a retained receipt starts another driver.
+      if (newlyAccepted && execution is null) {
         lockReleased = new(TaskCreationOptions.RunContinuationsAsynchronously);
         StartExecution(receipt.RunId!.Value, lockReleased.Task);
       }
@@ -135,7 +137,8 @@ public abstract class SessionBase {
 
   internal async Task<LlmRequest?> ClaimNextRequestAsync(Guid runId) {
     using var held = await gate.AcquireAsync();
-    return IsCurrentRun(runId) ? store.Runs.ClaimNextRequest(Id, runId, HistoryRevision) : null;
+    return IsCurrentRun(runId) && !execution!.IsStopping
+        ? store.Runs.ClaimNextRequest(Id, runId, HistoryRevision) : null;
   }
 
   internal async Task<bool> RecordOutputAsync(Guid runId, LlmResponseChunk chunk) {
@@ -148,9 +151,20 @@ public abstract class SessionBase {
     return IsCurrentRun(runId) && store.Output.CompleteRequest(Id, runId, HistoryRevision, outcome);
   }
 
+  internal async Task<bool> TryStartToolAsync(Guid runId, Guid requestId, string callId) {
+    using var held = await gate.AcquireAsync();
+    return IsCurrentRun(runId) && !execution!.IsStopping
+        && store.Tools.TryStart(Id, runId, HistoryRevision, requestId, callId);
+  }
+
+  internal async Task<bool> CompleteToolAsync(Guid runId, Guid requestId, LlmToolResult result) {
+    using var held = await gate.AcquireAsync();
+    return IsCurrentRun(runId) && store.Tools.Complete(Id, runId, HistoryRevision, requestId, result);
+  }
+
   // Caller holds the lock.
   private void StartExecution(Guid runId, Task lockReleased) {
-    var newExecution = new SessionExecution(runId, this, chatClient);
+    var newExecution = new SessionExecution(runId, this, chatClient, tools);
     var newSettlement = new TaskCompletionSource<ExecutionResult>(TaskCreationOptions.RunContinuationsAsynchronously);
     execution = newExecution;
     settlement = newSettlement;
@@ -161,8 +175,19 @@ public abstract class SessionBase {
       TaskCompletionSource<ExecutionResult> settlement, Task lockReleased) {
     try {
       await lockReleased;
-      ExecutionOutcome outcome = await execution.RunAsync();
-      await SettleAsync(execution, settlement, outcome);
+      LlmRequest? request = await ClaimNextRequestAsync(execution.RunId);
+      if (request is null) {
+        if (!execution.IsStopping)
+          throw new InvalidOperationException("The run has no initial request and was not stopped.");
+
+        await AdvanceExecutionAsync(execution, settlement, ExecutionOutcome.Cancelled);
+        return;
+      }
+
+      while (request is not null) {
+        ExecutionOutcome outcome = await execution.RunRequestAsync(request);
+        request = await AdvanceExecutionAsync(execution, settlement, outcome);
+      }
     } catch (Exception failure) {
       // The run's saved state is uncertain, so keep it unsettled and refuse new input.
       // The execution and its resources stay in place for later recovery.
@@ -173,23 +198,34 @@ public abstract class SessionBase {
     }
   }
 
-  private async Task SettleAsync(SessionExecution execution,
+  private async Task<LlmRequest?> AdvanceExecutionAsync(SessionExecution execution,
       TaskCompletionSource<ExecutionResult> settlement, ExecutionOutcome outcome) {
     Task stopCallbacks;
     using (await gate.AcquireAsync()) {
-      // Checking and settling under one lock stops a late Stop from skipping the wait.
+      // A late Stop cannot escape its join or race the next request's claim.
       stopCallbacks = execution.StopCallbacks;
-      if (stopCallbacks.IsCompletedSuccessfully) {
-        Settle(execution, settlement, outcome);
-        return;
-      }
+      if (stopCallbacks.IsCompletedSuccessfully)
+        return ClaimOrSettle(execution, settlement, outcome);
     }
 
     // Stop callbacks may call back into this session, so never await them under the lock.
     await stopCallbacks;
     using (await gate.AcquireAsync()) {
-      Settle(execution, settlement, outcome);
+      return ClaimOrSettle(execution, settlement, outcome);
     }
+  }
+
+  // Caller holds the lock. Admission cannot slip between the pending-input check and settlement.
+  private LlmRequest? ClaimOrSettle(SessionExecution execution,
+      TaskCompletionSource<ExecutionResult> settlement, ExecutionOutcome outcome) {
+    if (outcome == ExecutionOutcome.Completed && !execution.IsStopping) {
+      LlmRequest? next = store.Runs.ClaimNextRequest(Id, execution.RunId, HistoryRevision);
+      if (next is not null)
+        return next;
+    }
+
+    Settle(execution, settlement, outcome);
+    return null;
   }
 
   // Caller holds the lock. Saves the result before releasing resources and

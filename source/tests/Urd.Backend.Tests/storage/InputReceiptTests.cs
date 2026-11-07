@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Urd.Backend.Tests.Support;
+using Urd.Core.Execution;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
 using Xunit;
@@ -199,7 +200,7 @@ public sealed class InputReceiptTests {
       Assert.Null(store.Inputs.ReadReceipt(sessionId, Guid.NewGuid()));
     }
 
-    Assert.Equal(3L, database.Scalar("PRAGMA user_version;")); // raw-sql: the migrated schema version is the subject under test
+    Assert.Equal(4L, database.Scalar("PRAGMA user_version;")); // raw-sql: the migrated schema version is the subject under test
     using SessionStore reopened = SessionStore.Open(database.Path);
     Assert.Equal(7L, reopened.Sessions.Read(sessionId)!.HistoryRevision);
   }
@@ -223,6 +224,68 @@ public sealed class InputReceiptTests {
     Assert.Equal(7L, database.Scalar("SELECT history_revision FROM sessions;")); // raw-sql: pre-migration identity must survive the rollback
     Assert.Equal("retained", database.Scalar("SELECT unrelated FROM execution_runs;")); // raw-sql: fixture witness row must survive the rollback
     Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM sqlite_schema WHERE name = 'input_decisions';")); // raw-sql: the rolled-back schema must not expose the new table
+  }
+
+  [Fact]
+  public void OwnedRunAcceptsEightNonterminalInputsAndRetainsRetryBeforeCapacityAndStop() {
+    using var database = new TemporaryDatabase();
+    Guid session = Guid.NewGuid(), run = Guid.NewGuid();
+    var first = new InputCommand(Guid.NewGuid(), 0, "first");
+    var steering = new InputCommand(Guid.NewGuid(), 0, "steer \0 🙂");
+    InputReceipt retained;
+    using (SessionStore store = SessionStore.Open(database.Path)) {
+      store.Sessions.CreatePrimary(session);
+      store.Inputs.Admit(session, 0, first, true, run);
+      Assert.NotNull(store.Runs.ClaimNextRequest(session, run, 0));
+      Assert.Equal(InputRefusalReason.Capacity,
+          store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "unowned"), true, Guid.NewGuid()).Receipt.RefusalReason);
+      Assert.Equal(InputRefusalReason.Capacity,
+          store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "wrong owner"), true, Guid.NewGuid(), Guid.NewGuid()).Receipt.RefusalReason);
+      var accepted = store.Inputs.Admit(session, 0, steering, true, Guid.Empty, run);
+      retained = accepted.Receipt;
+      Assert.True(accepted.NewlyAccepted);
+      Assert.Equal(run, retained.RunId);
+      for (int index = 2; index < 8; index++)
+        Assert.True(store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, $"steering {index}"), true, Guid.NewGuid(), run).NewlyAccepted);
+      Assert.Equal(InputRefusalReason.Capacity,
+          store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "ninth"), true, Guid.NewGuid(), run).Receipt.RefusalReason);
+      var retry = store.Inputs.Admit(session, 0, steering, true, Guid.Empty, run);
+      Assert.Equal(retained, retry.Receipt);
+      Assert.False(retry.NewlyAccepted);
+      store.Runs.RequestStop(session, run);
+      Assert.Equal(retained, store.Inputs.Admit(session, 0, steering, false, Guid.Empty).Receipt);
+      Assert.Equal(7, StoredDeliveries.Read(database).Count(input => input.Outcome == ExecutionOutcome.Cancelled));
+      Assert.Equal(8, StoredDeliveries.ReadMessages(database).Count);
+      Assert.Single(StoredRuns.Read(database));
+      Assert.Equal(ExecutionOutcome.Cancelled, store.Runs.TrySettle(session, run, ExecutionOutcome.Completed)!.Outcome);
+      Assert.Equal(8, StoredDeliveries.Read(database).Count(input => input.Outcome == ExecutionOutcome.Cancelled));
+    }
+
+    using SessionStore reopened = SessionStore.Open(database.Path);
+    Assert.Equal(retained, reopened.Inputs.Admit(session, 0, steering, true, Guid.NewGuid()).Receipt);
+    Assert.Null(reopened.Runs.ClaimNextRequest(session, run, 0));
+    Assert.Equal(8, StoredDeliveries.Read(database).Count);
+    Assert.Equal(InputDecision.Accepted, reopened.Inputs.ReadReceipt(session, first.InputId)!.Decision);
+  }
+
+  [Fact]
+  public void MessageIndexFailureRollsBackSteeringReceiptAndDeliveryTogether() {
+    using var database = new TemporaryDatabase();
+    using SessionStore store = SessionStore.Open(database.Path);
+    Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, run = Guid.NewGuid();
+    store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "first"), true, run);
+    var steering = new InputCommand(Guid.NewGuid(), 0, "atomic steering");
+    database.Execute("""
+      CREATE TRIGGER reject_message BEFORE INSERT ON execution_messages
+      BEGIN SELECT RAISE(ABORT, 'message write failed'); END;
+      """);
+    Assert.Throws<SqliteException>(() => store.Inputs.Admit(session, 0, steering, true, Guid.NewGuid(), run));
+    Assert.Null(store.Inputs.ReadReceipt(session, steering.InputId));
+    Assert.Single(StoredDeliveries.Read(database));
+    Assert.Single(StoredDeliveries.ReadMessages(database));
+    database.Execute("DROP TRIGGER reject_message;");
+    Assert.True(store.Inputs.Admit(session, 0, steering, true, Guid.NewGuid(), run).NewlyAccepted);
+    Assert.Single(StoredRuns.Read(database));
   }
 
   [Fact]

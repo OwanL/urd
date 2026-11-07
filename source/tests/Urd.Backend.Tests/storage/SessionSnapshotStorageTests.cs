@@ -9,7 +9,7 @@ using Xunit;
 
 namespace Urd.Backend.Tests.Storage;
 
-// Snapshot projection: bounded indexed window, lifecycle facts and version-two migration.
+// Snapshot projection: bounded indexed message window, lifecycle facts and migration.
 public sealed class SessionSnapshotStorageTests {
   [Fact]
   public void EmptyMissingAndDisposedReadsDoNotInventState() {
@@ -57,6 +57,50 @@ public sealed class SessionSnapshotStorageTests {
   }
 
   [Theory]
+  [InlineData(30, false)]
+  [InlineData(31, true)]
+  public void OneRunUsesMessageNotRequestOrRunCountForTheRecentWindow(int requestCount, bool hasOlder) {
+    using var database = new TemporaryDatabase();
+    using SessionStore store = SessionStore.Open(database.Path);
+    Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, run = Guid.NewGuid();
+    var inputs = new List<Guid>();
+    var requests = new List<Guid>();
+    for (int index = 1; index <= requestCount; index++) {
+      Guid input = Guid.NewGuid();
+      inputs.Add(input);
+      Assert.True(store.Inputs.Admit(session, 0, new(input, 0, $"input {index}"), true,
+          index == 1 ? run : Guid.NewGuid(), activeRunId: index == 1 ? null : run).NewlyAccepted);
+      LlmRequest request = store.Runs.ClaimNextRequest(session, run, 0)!;
+      requests.Add(request.RequestId);
+      Assert.True(store.Output.Append(session, run, 0,
+          new(request.RequestId, Guid.NewGuid(), 0, $"output {index}", true)));
+      Assert.True(store.Output.CompleteRequest(session, run, 0,
+          new(request.RequestId, ExecutionOutcome.Completed)));
+    }
+
+    Assert.Equal(ExecutionOutcome.Completed, store.Runs.TrySettle(session, run, ExecutionOutcome.Completed)!.Outcome);
+    if (hasOlder) {
+      // Even within one run, omitted message bodies must never be decoded for previews.
+      database.Execute($"""
+        UPDATE input_decisions SET original_text_utf8 = X'FF' WHERE input_id = '{inputs[0]:D}';
+        UPDATE execution_output SET text_utf8 = X'FF' WHERE request_id = '{requests[0]:D}';
+        """);
+    }
+
+    StoredSessionSnapshot snapshot = store.Snapshots.Read(session);
+    Assert.Equal(Enumerable.Range(1, requestCount)
+        .SelectMany(index => new[] { $"input {index}", $"output {index}" }).TakeLast(60),
+        snapshot.Messages.Select(message => message.Preview));
+    Assert.Equal(60, snapshot.Messages.Count);
+    Assert.Equal(hasOlder, snapshot.HasOlderMessages);
+    Assert.All(snapshot.Messages, message => {
+      Assert.Equal(run, message.Message.RunId);
+      Assert.Equal(ExecutionOutcome.Completed, message.Settlement);
+    });
+    Assert.Equal(60, snapshot.Messages.Select(message => message.Message.MessageId).Distinct().Count());
+  }
+
+  [Theory]
   [InlineData(39, false)]
   [InlineData(40, false)]
   [InlineData(41, true)]
@@ -66,6 +110,10 @@ public sealed class SessionSnapshotStorageTests {
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     SeedHistory(database, session, 0, runCount, includeOutputs: true);
     database.Execute($"""
+      DELETE FROM execution_messages WHERE role = 1 AND run_id IN (
+          SELECT run_id FROM execution_runs WHERE session_id = '{session:D}' AND ordinal % 2 = 1);
+      UPDATE execution_inputs SET request_id = NULL WHERE run_id IN (
+          SELECT run_id FROM execution_runs WHERE session_id = '{session:D}' AND ordinal % 2 = 1);
       DELETE FROM execution_output WHERE request_id IN (
           SELECT q.request_id FROM execution_requests q JOIN execution_runs r ON r.run_id = q.run_id
           WHERE r.session_id = '{session:D}' AND r.ordinal % 2 = 1);
@@ -145,7 +193,7 @@ public sealed class SessionSnapshotStorageTests {
     using SessionStore store = SessionStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     SeedHistory(database, session, 0, 1, includeOutputs: true);
-    database.Execute($"UPDATE execution_requests SET output_id = '{Guid.Empty:D}';");
+    database.Execute($"UPDATE execution_messages SET message_id = '{Guid.Empty:D}' WHERE role = 1;");
 
     Assert.Throws<ArgumentException>(() => store.Snapshots.Read(session));
   }
@@ -177,12 +225,12 @@ public sealed class SessionSnapshotStorageTests {
     Assert.All(snapshot.Messages, message => Assert.Equal(1, message.Message.HistoryRevision));
     Assert.Equal(snapshot.Messages[^1].Message.RunId, snapshot.LastSettlement!.RunId);
 
-    string[] windowPlan = Explain(database, SnapshotReader.SnapshotRunsSql, session, 1);
-    Assert.Contains(windowPlan, step => step.Contains("SEARCH execution_runs USING INDEX execution_runs_history_order", StringComparison.Ordinal));
-    Assert.Contains(windowPlan, step => step.Contains("SEARCH q USING INDEX sqlite_autoindex_execution_requests_", StringComparison.Ordinal));
-    Assert.DoesNotContain(windowPlan, step => step.Contains("SCAN execution_runs", StringComparison.Ordinal));
-    Assert.DoesNotContain(windowPlan, step => step.Contains("SCAN q", StringComparison.Ordinal));
-    // The only permitted temporary order is the outer, at-most-61-run joined window.
+    string[] windowPlan = Explain(database, SnapshotReader.SnapshotMessagesSql, session, 1);
+    Assert.Contains(windowPlan, step => step.Contains("SEARCH execution_messages USING INDEX execution_messages_history_order", StringComparison.Ordinal));
+    Assert.Contains(windowPlan, step => step.Contains("SEARCH r USING INDEX sqlite_autoindex_execution_runs_", StringComparison.Ordinal));
+    Assert.DoesNotContain(windowPlan, step => step.Contains("SCAN execution_messages", StringComparison.Ordinal));
+    Assert.DoesNotContain(windowPlan, step => step.Contains("execution_requests", StringComparison.Ordinal));
+    // The only permitted temporary order is the outer, at-most-61-message window.
     Assert.DoesNotContain(windowPlan, step => step.Contains("RIGHT PART OF ORDER BY", StringComparison.Ordinal));
     string[] terminalPlan = Explain(database, SnapshotReader.SnapshotSettlementSql, session, 1);
     Assert.Contains(terminalPlan, step => step.Contains("USING INDEX execution_runs_terminal_order", StringComparison.Ordinal));
@@ -196,13 +244,14 @@ public sealed class SessionSnapshotStorageTests {
   public void VersionTwoMigrationPreservesReceiptsRunsRequestsAndOutput() {
     using var database = new TemporaryDatabase();
     Guid session, run = Guid.NewGuid(), output = Guid.NewGuid(), refusedInputId = Guid.NewGuid();
+    Guid acceptedInputId = Guid.NewGuid();
     Guid refusedProposedRunId = Guid.NewGuid(), request;
     InputReceipt refusedReceipt;
     using (SessionStore store = SessionStore.Open(database.Path)) {
       session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
       refusedReceipt = store.Inputs.Admit(session, 0, new(refusedInputId, 0, "refused\0🙂"),
           accepting: false, proposedRunId: refusedProposedRunId).Receipt;
-      store.Inputs.Admit(session, 0, new(Guid.NewGuid(), 0, "accepted\0🙂"), true, run);
+      store.Inputs.Admit(session, 0, new(acceptedInputId, 0, "accepted\0🙂"), true, run);
       request = store.Runs.ClaimNextRequest(session, run, 0)!.RequestId;
       store.Output.Append(session, run, 0, new(request, output, 0, "partial\0🙂", false));
       store.Runs.RequestStop(session, run);
@@ -210,7 +259,7 @@ public sealed class SessionSnapshotStorageTests {
 
     MakeVersionTwo(database);
     using SessionStore migrated = SessionStore.Open(database.Path);
-    Assert.Equal(3L, database.Scalar("PRAGMA user_version;")); // raw-sql: the migrated schema version is the subject under test
+    Assert.Equal(4L, database.Scalar("PRAGMA user_version;")); // raw-sql: the migrated schema version is the subject under test
     InputReceipt migratedRefusal = migrated.Inputs.ReadReceipt(session, refusedInputId)!;
     Assert.Equal(refusedReceipt, migratedRefusal);
     Assert.Equal(InputDecision.Refused, migratedRefusal.Decision);
@@ -223,7 +272,10 @@ public sealed class SessionSnapshotStorageTests {
     Assert.True(snapshot.StopRequested);
     Assert.Null(snapshot.LastSettlement);
     Assert.False(snapshot.Messages[1].FinalOutputCommitted);
-    Assert.Equal(output, snapshot.Messages[1].Message.MessageId);
+    Assert.Equal(new(run, acceptedInputId, MessageRole.User, 0), snapshot.Messages[0].Message);
+    Assert.Equal(new(run, output, MessageRole.Assistant, 0), snapshot.Messages[1].Message);
+    Assert.Equal("\0🙂", migrated.Content.Read(session,
+        new(snapshot.Messages[1].Message, 0, Encoding.UTF8.GetByteCount("partial"))).Text);
     Assert.Equal(request, Assert.Single(StoredRuns.ReadRequests(database)).RequestId);
     Assert.Equal(2L, database.Scalar("SELECT COUNT(*) FROM sqlite_schema WHERE name IN ('execution_runs_history_order', 'execution_runs_terminal_order') AND type = 'index';")); // raw-sql: migrated indexes are schema structure under test
   }
@@ -252,9 +304,37 @@ public sealed class SessionSnapshotStorageTests {
   }
 
   private static void MakeVersionTwo(TemporaryDatabase database) => database.Execute("""
+    BEGIN;
+    DROP TABLE execution_tools;
+    DROP TABLE execution_messages;
+    DROP TABLE execution_inputs;
+    CREATE TABLE execution_requests_v2 (
+        request_id TEXT PRIMARY KEY NOT NULL,
+        run_id TEXT NOT NULL UNIQUE REFERENCES execution_runs(run_id),
+        output_id TEXT,
+        next_batch_index INTEGER NOT NULL DEFAULT 0 CHECK (next_batch_index >= 0),
+        output_final INTEGER NOT NULL DEFAULT 0 CHECK (output_final IN (0, 1)),
+        outcome INTEGER CHECK (outcome IN (0, 1, 2)),
+        error TEXT
+    ) STRICT;
+    CREATE TABLE execution_output_v2 (
+        request_id TEXT NOT NULL REFERENCES execution_requests_v2(request_id),
+        batch_index INTEGER NOT NULL CHECK (batch_index >= 0),
+        text_utf8 BLOB NOT NULL CHECK (length(text_utf8) <= 16384),
+        is_final INTEGER NOT NULL CHECK (is_final IN (0, 1)),
+        PRIMARY KEY (request_id, batch_index)
+    ) STRICT;
+    INSERT INTO execution_requests_v2
+    SELECT request_id, run_id, output_id, next_batch_index, output_final, outcome, error FROM execution_requests;
+    INSERT INTO execution_output_v2 SELECT * FROM execution_output;
+    DROP TABLE execution_output;
+    DROP TABLE execution_requests;
+    ALTER TABLE execution_requests_v2 RENAME TO execution_requests;
+    ALTER TABLE execution_output_v2 RENAME TO execution_output;
     DROP INDEX execution_runs_history_order;
     DROP INDEX execution_runs_terminal_order;
     PRAGMA user_version = 2;
+    COMMIT;
     """);
 
   private static string[] Explain(TemporaryDatabase database, string sql, Guid session, long revision) {
@@ -295,5 +375,24 @@ public sealed class SessionSnapshotStorageTests {
         COMMIT;
         """);
     }
+
+    database.Execute($"""
+      BEGIN;
+      INSERT INTO execution_inputs (session_id, input_id, run_id, request_id, outcome)
+      SELECT r.session_id, r.input_id, r.run_id, q.request_id, 0
+      FROM execution_runs r LEFT JOIN execution_requests q ON q.run_id = r.run_id
+      WHERE r.session_id = '{session:D}' AND r.input_id LIKE '{inputIdPrefix}%' ORDER BY r.ordinal;
+      INSERT INTO execution_messages (session_id, history_revision, run_id, role, message_id, input_id, request_id)
+      SELECT session_id, history_revision, run_id, role, message_id, input_id, request_id FROM (
+          SELECT ordinal AS run_ordinal, session_id, history_revision, run_id,
+              0 AS role, input_id AS message_id, input_id, NULL AS request_id
+          FROM execution_runs WHERE session_id = '{session:D}' AND input_id LIKE '{inputIdPrefix}%'
+          UNION ALL
+          SELECT r.ordinal, r.session_id, r.history_revision, r.run_id, 1, q.output_id, NULL, q.request_id
+          FROM execution_runs r JOIN execution_requests q ON q.run_id = r.run_id
+          WHERE r.session_id = '{session:D}' AND r.input_id LIKE '{inputIdPrefix}%'
+      ) ORDER BY run_ordinal, role;
+      COMMIT;
+      """);
   }
 }

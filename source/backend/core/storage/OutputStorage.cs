@@ -42,6 +42,16 @@ internal sealed class OutputStorage(Database database) {
           ("$text", StorageText.StrictUtf8.GetBytes(chunk.Text)),
           ("$final", chunk.IsFinal ? 1 : 0));
       append.ExecuteNonQuery();
+      if (chunk.ChunkIndex == 0) {
+        using SqliteCommand index = database.Command(transaction, """
+          INSERT INTO execution_messages
+              (session_id, history_revision, run_id, role, message_id, request_id)
+          VALUES ($session, $revision, $run, 1, $output, $request);
+          """,
+            ("$session", sessionId), ("$revision", historyRevision), ("$run", runId),
+            ("$output", chunk.ResponseId), ("$request", chunk.RequestId));
+        index.ExecuteNonQuery();
+      }
       return true;
     });
   }
@@ -50,13 +60,26 @@ internal sealed class OutputStorage(Database database) {
     if (!Enum.IsDefined(completion.Outcome))
       throw new ArgumentOutOfRangeException(nameof(completion));
 
-    return database.Write(transaction => CompleteRequest(transaction, sessionId, runId, historyRevision, completion));
+    if (completion.ToolCalls is { Count: > 16 })
+      throw new ArgumentException("A response may authorize at most 16 tool calls.", nameof(completion));
+
+    var calls = (completion.ToolCalls ?? []).Select(call =>
+        (call.CallId, call.Name, Arguments: ToolStorage.JsonText(call.Arguments, requireObject: true))).ToArray();
+    if (calls.Any(call => string.IsNullOrWhiteSpace(call.CallId) || string.IsNullOrWhiteSpace(call.Name))
+        || calls.Select(call => call.CallId).Distinct(StringComparer.Ordinal).Count() != calls.Length
+        || (calls.Length != 0 && completion.Outcome != ExecutionOutcome.Completed))
+      throw new ArgumentException("Only a completed response may authorize up to 16 distinct, named tool calls.", nameof(completion));
+
+    return database.Write(transaction => CompleteRequest(transaction, sessionId, runId, historyRevision, completion, calls));
   }
 
   private bool CompleteRequest(SqliteTransaction transaction, Guid sessionId, Guid runId,
-      long historyRevision, LlmRequestOutcome completion) {
+      long historyRevision, LlmRequestOutcome completion, (string CallId, string Name, string Arguments)[] calls) {
+    bool alreadyCompleted;
     using (SqliteCommand read = database.Command(transaction, """
-      SELECT q.outcome, q.error, q.output_final, r.stopping, r.outcome
+      SELECT q.outcome, q.error, q.output_final, r.stopping, r.outcome,
+          EXISTS (SELECT 1 FROM execution_requests later
+              WHERE later.run_id = $run AND later.request_index > q.request_index)
       FROM execution_requests q JOIN execution_runs r ON r.run_id = q.run_id
       JOIN sessions s ON s.session_id = r.session_id
       WHERE r.session_id = $session AND r.run_id = $run AND q.request_id = $request
@@ -78,13 +101,27 @@ internal sealed class OutputStorage(Database database) {
       bool runSettled = !reader.IsDBNull(4);
 
       // An exact retry succeeds without rewriting the original evidence, even after settlement.
-      if (savedOutcome is not null)
-        return savedOutcome == completion.Outcome && savedError == completion.Error;
+      alreadyCompleted = savedOutcome is not null;
+      if (alreadyCompleted) {
+        if (savedOutcome != completion.Outcome || savedError != completion.Error)
+          return false;
+      } else {
+        if (runSettled || reader.GetInt32(5) != 0)
+          return false;
+        if (completion.Outcome == ExecutionOutcome.Completed && (stopRequested || !hasFinalOutput))
+          return false;
+      }
+    }
 
-      if (runSettled)
-        return false;
+    if (alreadyCompleted)
+      return MatchesCalls(transaction, completion.RequestId, calls);
 
-      if (completion.Outcome == ExecutionOutcome.Completed && (stopRequested || !hasFinalOutput))
+    // A call identity cannot be reused by a later response in the same run.
+    foreach (var call in calls) {
+      using SqliteCommand exists = database.Command(transaction,
+          "SELECT EXISTS(SELECT 1 FROM execution_tools WHERE run_id = $run AND call_id = $call);",
+          ("$run", runId), ("$call", call.CallId));
+      if ((long)exists.ExecuteScalar()! != 0)
         return false;
     }
 
@@ -94,6 +131,36 @@ internal sealed class OutputStorage(Database database) {
         ("$error", completion.Error),
         ("$request", completion.RequestId));
     update.ExecuteNonQuery();
+    using SqliteCommand delivered = database.Command(transaction,
+        "UPDATE execution_inputs SET outcome = $outcome WHERE request_id = $request;",
+        ("$outcome", (int)completion.Outcome), ("$request", completion.RequestId));
+    delivered.ExecuteNonQuery();
+    for (int index = 0; index < calls.Length; index++) {
+      var call = calls[index];
+      using SqliteCommand authorize = database.Command(transaction, """
+        INSERT INTO execution_tools (run_id, request_id, call_index, call_id, name, arguments_json)
+        VALUES ($run, $request, $index, $call, $name, $arguments);
+        """,
+          ("$run", runId), ("$request", completion.RequestId), ("$index", index),
+          ("$call", call.CallId), ("$name", call.Name), ("$arguments", call.Arguments));
+      authorize.ExecuteNonQuery();
+    }
     return true;
+  }
+
+  private bool MatchesCalls(SqliteTransaction transaction, Guid requestId,
+      (string CallId, string Name, string Arguments)[] calls) {
+    using SqliteCommand read = database.Command(transaction, """
+      SELECT call_id, name, arguments_json FROM execution_tools WHERE request_id = $request ORDER BY call_index;
+      """, ("$request", requestId));
+    using SqliteDataReader reader = read.ExecuteReader();
+    int index = 0;
+    while (reader.Read()) {
+      if (index == calls.Length || reader.GetString(0) != calls[index].CallId
+          || reader.GetString(1) != calls[index].Name || reader.GetString(2) != calls[index].Arguments)
+        return false;
+      index++;
+    }
+    return index == calls.Length;
   }
 }

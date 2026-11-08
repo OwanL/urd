@@ -114,6 +114,12 @@ the complete backend suite passed **453/453 tests**, with independent acceptance
 Offline tests exercise the actual Duende, Microsoft JWT and official OpenAI SDK paths
 against socket-free synthetic transports, plus real local Kestrel and SQLite workflows.
 They cover signed sign-in, refresh/disconnect races, stale results, storage migration,
-reopen, terminal/error streaming and shutdown ownership. No personal credentials,
-real sign-in, provider entitlement, model availability, inference or billing outcome
-has been qualified. Those require separate authorization and fresh live evidence.
+reopen, terminal/error streaming and shutdown ownership.
+
+A separately authorized live check on 2026-11-08 completed fresh ChatGPT OAuth through
+Urd's local callback: identity validation and credential persistence succeeded, with both
+required plan scopes present. On the owner's request, disconnect then cleared local
+credentials and the provider acknowledged revocation. The isolated test process was
+stopped and its entire temporary data directory deleted. No existing credentials were
+reused, and no catalog or model request was sent. Live refresh, restart persistence,
+model entitlement, responses and billing behavior remain unqualified.

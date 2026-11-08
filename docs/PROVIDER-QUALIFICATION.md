@@ -36,12 +36,25 @@ bites and their limits. The owner subsequently requested the execution plan and 
 implementation, selecting ChatGPT as the first complete headless path. The implemented
 [provider-management contract](provider-management.md) records HTTP, persistence and
 lifecycle behavior; its tests use synthetic transports and local SQLite/Kestrel only.
-This is not live qualification evidence. No live sign-in, existing credential access,
-model request or charge was authorized. Earlier route research below must be rechecked
+The offline suite is not live qualification evidence. At initial delivery, no live sign-in,
+existing credential access, model request or charge had been authorized. The subsequent
+separately approved live authentication check is recorded below. Earlier route research must be rechecked
 against current provider contracts before implementation; Pi/Pie behavior is reference
 material, not authority to reuse their integration identities or subscription routes.
 
-## Recommendation and owner input
+## Live authentication check — 2026-11-08
+
+The owner explicitly selected Urd's ChatGPT subscription OAuth flow, not Codex's
+integration. A fresh isolated local instance completed browser authorization and callback,
+validated the identity token, persisted credentials, and reported both required plan
+scopes granted. No existing account credentials were reused and no catalog/inference
+request was sent. The owner then requested disconnect and deletion: the provider
+acknowledged revocation, Urd reported credentials cleared, and the test process and its
+temporary data directory were removed. No account identifiers or tokens are recorded here.
+This establishes one successful live sign-in/disconnect, not live refresh, restart recovery,
+model-specific entitlement, inference or billing qualification.
+
+## Original recommendation and owner input
 
 Use **ChatGPT-plan → public OpenAI Responses** as the first representative
 integration. It exercises the difficult retained requirements—direct sign-in,
@@ -59,13 +72,14 @@ sign-in, credential use, model request, charge, or account change was authorized
 
 **Evidence levels are separate:** documented interface → implementation evidence →
 successful authentication → account/model entitlement → completed inference/tool
-round trip. The last three have **not** been established for any Urd route.
+round trip. ChatGPT authentication and granted plan scopes are now established by the
+live check above; model entitlement and completed inference/tool execution remain unqualified.
 Official documentation below was inspected **2026-11-04**; mutable docs are not
 version-pinned. Library/source pins are research evidence, not selected packages.
 
 | Route | Documented access and request path | Focused implementation path | Qualification / limitation |
 | --- | --- | --- | --- |
-| **ChatGPT subscription** | Public-client OAuth/PKCE/OIDC with dynamic registration; bearer token → `POST https://api.openai.com/v1/responses`. Officially documented for open-source/local apps, with preview restrictions [O1–O5]. | OpenAI .NET `ResponsesClient` + MEAI Responses adapter; small route/auth/fidelity glue, not Codex. | Strongest subscription candidate. Account-specific model listing, scope, entitlement, allowance and actual completion still untested. Paid/remotely hosted offerings have a separate OpenAI interest process; a remote UI to one's local backend does not by itself establish eligibility for a different deployment. |
+| **ChatGPT subscription** | Public-client OAuth/PKCE/OIDC with dynamic registration; bearer token → `POST https://api.openai.com/v1/responses`. Officially documented for open-source/local apps, with preview restrictions [O1–O5]. | OpenAI .NET `ResponsesClient` + MEAI Responses adapter; small route/auth/fidelity glue, not Codex. | Live OAuth, required granted scopes and acknowledged revocation verified on 2026-11-08. Account-specific model listing, entitlement, allowance and actual completion remain untested. Paid/remotely hosted offerings have a separate OpenAI interest process; a remote UI to one's local backend does not by itself establish eligibility for a different deployment. |
 | **GitHub Copilot subscription** | GitHub documents device OAuth and using app tokens with its SDK. Its SDK adopts the Copilot agent runtime, including experimental native in-process transport; neither transport meets Urd's boundary [G1]. | Independent Crush source demonstrates device OAuth → internal Copilot token exchange → OpenAI-compatible model transport [G2–G3]. | Technically evidenced, **not qualified**. No standalone supported subscription inference contract was established in the inspected official SDK/auth/REST docs. Own-app authorization, integration identity, account/model policy and endpoint stability need resolution; source availability is not permission to impersonate VS Code. |
 | **OpenAI API key** | Bearer project API key → `POST https://api.openai.com/v1/responses`; SSE and client-executed functions [A1]. | Same official OpenAI/MEAI model-client family, separate credential and route settings. | Documented API access, not included ChatGPT-plan billing. Exact model/project permissions, billing and limits require a key and approved calls. Do not apply generic API-key options to the more restricted plan route. |
 | **Anthropic API key** | `POST https://api.anthropic.com/v1/messages`; API key (`x-api-key` remains supported; current docs also document bearer), API-version header; SSE `tool_use` / `tool_result` [A2]. | Official Anthropic C# `AsIChatClient()` for ordinary Messages; native inline-tool beta requires separate fidelity work [L1]. | API-only by owner decision. Qualify chosen SDK/API-version pair, model access and limits. No Claude consumer-plan work. Existing adapter's inline-tool drops/default settings are not resolved by successful authentication. |

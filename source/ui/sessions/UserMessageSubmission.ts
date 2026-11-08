@@ -15,7 +15,7 @@ export interface UserMessageReceipt {
 }
 
 // Whether the original submission was admitted into an execution.
-export type MessageAcceptance = 'accepted' | 'refused';
+export type MessageAcceptance = "accepted" | "refused";
 
 // The saved reason a submission was refused.
-export type MessageRefusalReason = 'staleRevision' | 'capacity' | 'stopping';
+export type MessageRefusalReason = "staleRevision" | "capacity" | "stopping";

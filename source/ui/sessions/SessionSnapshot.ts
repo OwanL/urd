@@ -1,5 +1,5 @@
-import type { MessagePreview } from './Messages.ts';
-import type { SessionExecutionResult } from './SessionExecutionResult.ts';
+import type { MessagePreview } from "./Messages.ts";
+import type { SessionExecutionResult } from "./SessionExecutionResult.ts";
 
 // Bounded committed session facts combined with current admission and Stop state.
 export interface SessionSnapshot {

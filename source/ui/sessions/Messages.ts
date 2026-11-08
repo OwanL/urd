@@ -1,4 +1,4 @@
-import type { ExecutionOutcome } from './SessionExecutionResult.ts';
+import type { ExecutionOutcome } from "./SessionExecutionResult.ts";
 
 // Identifies one message within a session's history revision.
 export interface MessageRef {
@@ -9,7 +9,7 @@ export interface MessageRef {
 }
 
 // Who wrote a displayed message.
-export type MessageRole = 'user' | 'assistant';
+export type MessageRole = "user" | "assistant";
 
 // A short message prefix; availableThrough advertises committed content, not completion.
 export interface MessagePreview {

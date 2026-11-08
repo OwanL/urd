@@ -1,4 +1,4 @@
-import type { ExecutionOutcome } from './SessionExecutionResult.ts';
+import type { ExecutionOutcome } from "./SessionExecutionResult.ts";
 
 // Current Stop acknowledgement; requested does not mean cleanup has finished.
 export interface StopReceipt {
@@ -8,4 +8,4 @@ export interface StopReceipt {
 }
 
 // Unavailable is retained in the HTTP 409 error body; missing executions return 404.
-export type StopStatus = 'requested' | 'settled' | 'notFound' | 'unavailable';
+export type StopStatus = "requested" | "settled" | "notFound" | "unavailable";

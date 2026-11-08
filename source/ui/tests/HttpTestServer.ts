@@ -16,8 +16,7 @@ export async function startHttpServer(
   const server = createServer((request, response) => {
     void (async () => {
       const chunks: Buffer[] = [];
-      for await (const chunk of request)
-        chunks.push(Buffer.from(chunk));
+      for await (const chunk of request) chunks.push(Buffer.from(chunk));
 
       const received: HttpRequest = {
         method: request.method ?? "",
@@ -35,15 +34,14 @@ export async function startHttpServer(
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   const address = server.address();
-  if (address === null || typeof address === "string")
-    throw new Error("Expected a TCP address");
+  if (address === null || typeof address === "string") throw new Error("Expected a TCP address");
 
   return {
     origin: new URL(`http://127.0.0.1:${address.port}`),
     requests,
     async close() {
       const closed = new Promise<void>((resolve, reject) => {
-        server.close(error => error ? reject(error) : resolve());
+        server.close((error) => (error ? reject(error) : resolve()));
       });
       server.closeAllConnections();
       await closed;

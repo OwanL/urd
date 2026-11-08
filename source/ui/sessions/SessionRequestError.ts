@@ -5,7 +5,7 @@ export class SessionRequestError extends Error {
 
   constructor(status: number, responseBody: unknown) {
     super(`Session request failed (HTTP ${status}).`);
-    this.name = 'SessionRequestError';
+    this.name = "SessionRequestError";
     this.status = status;
     this.responseBody = responseBody;
   }

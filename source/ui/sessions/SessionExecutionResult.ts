@@ -5,4 +5,4 @@ export interface SessionExecutionResult {
 }
 
 // Shared wire outcome for an execution, LLM request or tool invocation.
-export type ExecutionOutcome = 'completed' | 'cancelled' | 'failed';
+export type ExecutionOutcome = "completed" | "cancelled" | "failed";

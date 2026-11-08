@@ -5,7 +5,9 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
-const assembly = fileURLToPath(new URL("../../hosting/server/bin/Release/net10.0/Urd.Server.dll", import.meta.url));
+const assembly = fileURLToPath(
+  new URL("../../hosting/server/bin/Release/net10.0/Urd.Server.dll", import.meta.url),
+);
 
 // Owns only this child and its temporary data. Termination is not a graceful shutdown test.
 export class ServerProcess {
@@ -14,7 +16,12 @@ export class ServerProcess {
   private readonly closed: Promise<void>;
   private readonly dataRoot: string;
 
-  private constructor(origin: URL, child: ChildProcessWithoutNullStreams, closed: Promise<void>, dataRoot: string) {
+  private constructor(
+    origin: URL,
+    child: ChildProcessWithoutNullStreams,
+    closed: Promise<void>,
+    dataRoot: string,
+  ) {
     this.origin = origin;
     this.child = child;
     this.closed = closed;
@@ -26,22 +33,26 @@ export class ServerProcess {
     const dataRoot = await mkdtemp(join(tmpdir(), "urd-ui-integration-"));
     let child: ChildProcessWithoutNullStreams;
     try {
-      child = spawn(process.env.DOTNET_HOST_PATH ?? "dotnet", [assembly, "--data-root", dataRoot, "--port", "0"], {
-        stdio: "pipe",
-        windowsHide: true,
-      });
+      child = spawn(
+        process.env.DOTNET_HOST_PATH ?? "dotnet",
+        [assembly, "--data-root", dataRoot, "--port", "0"],
+        {
+          stdio: "pipe",
+          windowsHide: true,
+        },
+      );
     } catch (error) {
       await rm(dataRoot, { recursive: true, force: true });
       throw error;
     }
 
-    const closed = new Promise<void>(resolve => child.once("close", () => resolve()));
+    const closed = new Promise<void>((resolve) => child.once("close", () => resolve()));
     const lines = createInterface({ input: child.stdout });
     let errors = "";
     child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
       errors = (errors + chunk).slice(-8_192);
     });
-    child.on("error", error => {
+    child.on("error", (error) => {
       errors = (errors + String(error)).slice(-8_192);
     });
     child.stdin.end();
@@ -58,14 +69,27 @@ export class ServerProcess {
           } catch {
             return;
           }
-          if (typeof ready !== "object" || ready === null || !("event" in ready) || ready.event !== "urd-ready")
+          if (
+            typeof ready !== "object" ||
+            ready === null ||
+            !("event" in ready) ||
+            ready.event !== "urd-ready"
+          )
             return;
           try {
             if (!("origin" in ready) || typeof ready.origin !== "string")
               throw new Error("Readiness did not include an origin");
             const origin = new URL(ready.origin);
-            if (origin.protocol !== "http:" || origin.hostname !== "127.0.0.1" || !origin.port ||
-                origin.pathname !== "/" || origin.search || origin.hash || origin.username || origin.password)
+            if (
+              origin.protocol !== "http:" ||
+              origin.hostname !== "127.0.0.1" ||
+              !origin.port ||
+              origin.pathname !== "/" ||
+              origin.search ||
+              origin.hash ||
+              origin.username ||
+              origin.password
+            )
               throw new Error(`Unexpected server origin: ${origin}`);
             finish(undefined, origin);
           } catch (error) {
@@ -77,10 +101,8 @@ export class ServerProcess {
           child.off("error", onError);
           child.off("close", onClose);
           lines.off("line", onLine);
-          if (origin)
-            resolve(origin);
-          else
-            reject(new Error(`${String(error)}\n${errors}`));
+          if (origin) resolve(origin);
+          else reject(new Error(`${String(error)}\n${errors}`));
         }
         child.once("error", onError);
         child.once("close", onClose);
@@ -101,7 +123,10 @@ export class ServerProcess {
     await rm(this.dataRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   }
 
-  private static async reap(child: ChildProcessWithoutNullStreams, closed: Promise<void>): Promise<void> {
+  private static async reap(
+    child: ChildProcessWithoutNullStreams,
+    closed: Promise<void>,
+  ): Promise<void> {
     // Kill only our child; never remove its data until close confirms it has been reaped.
     if (child.exitCode === null && child.signalCode === null && child.pid !== undefined)
       child.kill("SIGKILL");
@@ -110,7 +135,10 @@ export class ServerProcess {
       await Promise.race([
         closed,
         new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error("Owned server did not exit; temporary data retained")), 5_000);
+          timer = setTimeout(
+            () => reject(new Error("Owned server did not exit; temporary data retained")),
+            5_000,
+          );
         }),
       ]);
     } finally {

@@ -35,6 +35,13 @@ Distinguish throughout:
 - Virtualization is expected from the start. Fetch older sections on demand while
   scrolling; a slight loading delay is acceptable. Do not load the whole history
   just to open a tab or visit an old section.
+- The scrollbar represents the **whole retained conversation**, not only the loaded
+  range. Dragging should allow distant jumps without progressively fetching every
+  intervening page. Offscreen height estimation needs deliberate engineering.
+- Future user-prompt markers/buttons along the scrollbar are desired direction,
+  not an immediate implementation requirement. Their positions must correspond
+  approximately to prompts' actual positions in the full transcript. Navigation
+  and markers must not develop incompatible position models.
 - Long replies remain in the **continuous formatted conversation**. Diverting
   oversized replies to a separate paged plain-text reader is not acceptable.
 - Session switching, input, scrolling and animations must be exceptionally
@@ -129,6 +136,23 @@ including parallel tool calls and visible admission order versus model-delivery
 order. Derive display blocks without making generated HTML the source of truth.
 Define revision invalidation for edits and how a removed anchor falls back.
 
+Read-only navigation feasibility check (2026-11-08):
+- `execution_messages` already has global `ordinal`, unique execution/role/message
+  identity and a `(session_id, history_revision, ordinal DESC)` index. New anchor
+  and adjacent-window APIs can use it without loading bodies.
+- Global ordinals are **not per-session ranks**. Gaps from other sessions/revisions
+  make ordinal interpolation unsuitable for whole-history positioning.
+- Current APIs expose neither total count/rank nor user-prompt marker positions.
+  Counting/filtering can use existing SQL but repeated whole-history scans are not
+  a cheap distant-position lookup. No aggregate height/size index exists today.
+- Assistant segment count is available from request metadata. Total message bytes
+  would need aggregation over output segments; counts alone are poor height
+  estimates. Tools/reasoning are not currently history-index rows.
+- Storage shares a connection lock; repeated aggregate scans can compete with
+  execution writes. Streaming appends do not change history revision, so revision
+  alone cannot invalidate live-tail geometry. No current production edit operation
+  increments that revision; future removed-anchor handling is still design work.
+
 ### Streaming and reconciliation
 
 Backend progress must remain independent of display. Hidden sessions or a reader
@@ -151,6 +175,19 @@ Virtualize within large replies as well as between rows. Preserve a visible
 item/block plus its offset. Estimate and correct offscreen geometry without moving
 content under the reader. Keep user following intent separate from scroll events
 caused by our own compensation. Respect reduced motion.
+
+Whole-history scrollbar semantics are agreed; the mechanism remains proposed:
+use a shared position model for scrollbar navigation and future prompt markers.
+Stable item/block identities locate content; estimated and measured heights project
+those locations into pixels. Do not persist pixel coordinates as prompt identity.
+Investigate aggregate range estimates and indexed target lookup so a distant jump
+need not download one descriptor per message or scan the whole history on each
+navigation. This does not yet select an index schema or a particular tree structure.
+
+A marker's displayed position may be approximate, but activating it must resolve
+its actual prompt. Height correction must preserve the visible content anchor.
+Scrollbar-thumb stability during dragging and corrections after jumps need explicit
+behavior and testing, not a claim that all offscreen heights can be known exactly.
 
 Measurements depend on width, typography, content revision and expansion state.
 Old measurements cannot be reused blindly after resize/zoom. Image dimensions
@@ -190,12 +227,16 @@ attachment publication/reference rules; no general artifact policy is selected.
 Give a recommendation with each product question. Answer code questions by reading
 source, not by asking the owner. Update this document immediately after decisions.
 
-1. **Navigation semantics:** must an ordinary scrollbar represent the entire saved
-   history and allow arbitrary distant jumps, or may it represent a moving loaded
-   neighborhood with progressive older/newer loading? Exact variable-height global
-   geometry is unknowable without measurement; approximate geometry has trade-offs.
-2. **Return to session:** required warm/cold reading-position behavior, live-tail
-   following and minimal useful retained state. No permanent hidden render trees.
+1. **Navigation semantics — resolved at product level:** whole-conversation scrollbar
+   and arbitrary distant jumps; engineer height estimates with future user-prompt
+   markers in mind. Open mechanisms: range summaries, target lookup, width-dependent
+   measurements, drag stability and correction without visible content jumps.
+2. **Return to session — current question:** may inactive tabs' transcript data be
+   evicted, allowing brief cold restoration at the same reading position, or must
+   every open tab keep a warm content window? Recommend a bounded shared warm cache,
+   cheap retained navigation state and permission to evict inactive bodies. Numeric
+   targets and eviction policy follow measurements, not arbitrary limits. Preserve
+   whether the reader was following the tail; no permanent hidden render trees.
 3. **Content identity/order:** message/content-part/tool relationships, interleaving,
    draft-to-final identity and revisions. Derive schema/API from concrete scenarios.
 4. **Streaming recovery:** what the reader sees after interruption during tool-input
@@ -242,6 +283,10 @@ shared-reference and cleanup failure cases; those are not implemented guarantees
   architecture already establishes that direction. Keep it, discuss mechanics.
 - Owner accepted external linked pictures remaining external, without automatic
   retained copies; no mandatory save-picture action initially.
+- Grilling decision 1: owner chose whole-conversation scrollbar navigation and
+  called out estimated heights plus future user-prompt markers along the scrollbar.
+  Markers should appear at approximately correct vertical positions. This is not
+  approval to render/load all history, nor a promise of exact unmeasured geometry.
 - Owner explicitly chose continuous formatting rather than a separate paged
   plaintext fallback for very large replies. Earlier suggested 128 KiB/message and
   2 MiB cache numbers were speculative and are **not selected requirements**.
@@ -258,8 +303,11 @@ shared-reference and cleanup failure cases; those are not implemented guarantees
 ## Continuation and safety
 
 Current task: engineering grilling and durable planning, not implementation.
-Next question is navigation semantics (#1 above), then update this record and
-continue down the dependency tree. Keep recommendations distinct from decisions.
+Navigation semantics (#1 above) is resolved: whole conversation, with future
+prompt markers sharing the position model. Next examine indexed range/location
+lookup and the warm/cold restoration contract; ask only unresolved product questions,
+not questions already settled by position-preservation requirements. Continue down
+the dependency tree and keep recommendations distinct from decisions.
 
 Do not access/mutate `C:/dev/data/urd` or exercise live account/model requests.
 The existing user application was on port 55174/PID 2548 during the initial

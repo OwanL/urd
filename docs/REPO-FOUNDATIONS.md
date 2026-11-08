@@ -61,7 +61,7 @@ The earlier proposed .NET/Node/pnpm/Vite bundle was not approved as a whole.
 
 **Still open:** Node version, exact SDK/package pins, tool-acquisition mechanism,
 physical source/distribution format, exact source/data paths, SDK/cache shipping
-and activation mechanics. Test runners, formatters and CI remain engineering work,
+and activation mechanics. Test runners and formatters remain engineering work,
 not individual owner votes. No production configuration, scripts or scaffold are
 authorized by this review.
 

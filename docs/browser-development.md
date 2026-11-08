@@ -70,10 +70,9 @@ exclusions: overriding them falsely flags valid external `<label htmlFor>`
 associations. Unlabeled inputs need browser accessibility checks, not misleading
 ARIA labels added to satisfy lint. Static checks alone do not prove accessibility.
 
-CI's UI job runs `check` and unit tests independently of the backend. The backend
-job builds the UI before .NET so assets are staged with the Server, then runs the
-real-server integration test; it does not duplicate UI lint/unit passes. Existing
-commit hooks remain unchanged; no auto-stash, fix, build or test hooks are added.
+Run verification locally. Build the UI before .NET so assets are staged with the
+Server, then run the real-server integration test. Existing commit hooks remain
+unchanged; no auto-stash, fix, build or test hooks are added.
 
 ## Building and inspecting the screen
 
@@ -168,7 +167,7 @@ streaming text selection, idle polling, model refresh/search, keyboard tabs,
 Enter/Shift+Enter and the IME guard were checked. Desktop, 390 px mobile, overflowing
 tabs and a 200%-equivalent viewport passed rendered/visual review. Screenshots stay
 local; Pie was only a visual reference, not a source of copied code or styles.
-These are manual Chromium fixture checks, not a CI browser suite or cross-browser,
+These are manual Chromium fixture checks, not an automated browser suite or cross-browser,
 native-IME, live-account or full-history-navigation qualification.
 
 ## Historical qualification
@@ -194,7 +193,7 @@ good/bad checks verified configured diagnostics and formatting, including promis
 inside test bodies. Independent review approved. `npm run check` took **1.13 s
 median** across five fresh processes (1.08–1.19 s; first measured run 1.39 s),
 including npm/shell startup and all three checks. This is a baseline, not a fixed
-budget or a claim about future application performance. Linux CI was not run
+budget or a claim about future application performance. Linux verification was not run
 locally for that checkpoint.
 
 The Preact/Vite preparation passed locked script-disabled installation and a

@@ -1,3 +1,6 @@
+# Development workflow
+
+- Keep verification local. Do not add CI workflows or CI-only tooling unless the owner explicitly requests it.
 
 # style guide
 

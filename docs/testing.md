@@ -5,10 +5,10 @@ budget selected by the owner, not a target for compressed formatting. Prefer one
 clear behavioral owner per guarantee; remove duplicate scenarios before adding
 another fixture or abstraction. Keep independent cases named and failures useful.
 
-Run `node source/tests/check-size.mjs` from the repository root. CI enforces the
-same check. It counts physical lines, including blanks, in first-party C#, JS/TS,
-JSX/TSX, CSS and HTML under `source/`. Test directories, test/spec files and this
-checker count against the test budget. Tracked and unignored new files count;
+Review the budget locally when changing tests. Count physical lines, including
+blanks, in first-party C#, JS/TS, JSX/TSX, CSS and HTML under `source/`. Test
+directories, test/spec files and helpers count against the test budget.
+Tracked and unignored new files count;
 deleted files, dependencies, generated outputs, docs and project metadata do not.
 Moving helpers elsewhere or packing statements onto one line is not a reduction
 in maintenance cost and must not be used to evade the budget.
@@ -58,14 +58,13 @@ behavioral owner where possible, while respecting the hard budget.
 Use the pinned toolchains and commands in [backend development](backend-development.md#prerequisite-and-commands)
 and [browser development](browser-development.md#toolchain-and-checks): Release
 backend tests, UI static checks/unit tests, and the offline SDK integration test.
-The size check is a maintenance gate, not a substitute for these checks or for
+The size budget is a maintenance constraint, not a substitute for these checks or for
 reviewing whether assertions would catch a real regression. Test fixtures must
 use owned temporary data and fake providers, never the user's live profile.
 
-The budget pass verified 7,533 test/helper lines (including the checker), below
+The budget pass verified fewer than 7,600 test/helper lines, below
 both the original 8,199-line ceiling and the concurrently expanded application's
 10,868 lines. Release backend tests (90), UI tests (112), static checks and the
 offline integration flow passed. Isolated mutants weakening peer admission,
 provider scope isolation and buffered text preservation failed their behavioral
-tests; restored controls passed. The size checker was also exercised with
-untracked tests, pending deletions, ignored outputs, CRLF and exact parity.
+tests; restored controls passed.

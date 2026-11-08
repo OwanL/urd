@@ -69,9 +69,10 @@ Distinguish throughout:
   inspectable. Opaque/encrypted continuation state is not public transcript content.
 - A user submission accepted while the model is busy is pending input, not yet a
   normal user entry in the conversation. Owner wants it placed as a user message
-  when it “hits” the model. This changes current admission-ordered display semantics;
-  durable acceptance remains separate. The exact promotion boundary (request start
-  versus response evidence) is the current unresolved question.
+  when Urd starts sending it in a model request, rather than waiting for a response.
+  If the connection/request then fails, it stays in the conversation with that
+  failed attempt; do not return it to the pending queue automatically. This changes
+  current admission-ordered display semantics; durable acceptance remains separate.
 - Tool input must stream into the transcript as the model constructs the call,
   before execution. Providers that do not expose incremental input must not get
   fabricated streaming. Drafting a call is not authorization to execute it.
@@ -159,12 +160,13 @@ different facts; retain admission evidence but do not equate it with display ord
 Derive display blocks without making generated HTML the source of truth. Define
 revision invalidation for edits and how a removed anchor falls back.
 
-Input promotion is still being defined. Recommendation: promote at the start of a
-request attempt containing the input, not after the first response, and preserve
-failed/uncertain attempt evidence without automatic resubmission. “The model read
-it” cannot be guaranteed from local dispatch alone. Current `ClaimNextRequest`
-durably assigns pending inputs and reconstructs context before provider enumeration;
-that is not proof of network delivery. Need an explicit lifecycle/read contract,
+Input promotion is agreed at the product level: once Urd starts sending a request
+containing the input, promote it without waiting for a response. If that attempt
+fails, keep the message with the failure rather than returning it to the queue.
+No automatic resubmission follows. “The model read it” cannot be guaranteed from
+local dispatch alone. Current `ClaimNextRequest` durably assigns pending inputs and
+reconstructs context before provider enumeration; the owner has not selected that
+internal transaction as the sending boundary. Define explicit lifecycle/read facts,
 not a UI guess based on receipt timing or first assistant text. Pending-input
 cancellation/recovery presentation and historical-data compatibility remain open.
 
@@ -324,20 +326,23 @@ source, not by asking the owner. Update this document immediately after decision
    survive browser reload/restart. No permanent hidden render trees or full persisted
    content cache follows. Numeric targets, eviction/prefetch budgets and local
    persistence details remain unselected.
-3. **Content ownership/identity/order — current branch:** model-facing inspection
-   and pruner responsibility are resolved. Pending user input should not enter the
-   conversation until it “hits” the model (owner direction). Current question:
-   promote when a containing request starts, or wait for provider-response evidence?
-   Recommend request start and honest failed/uncertain attempt state, without
-   automatic requeue. Current admission-index projection must change. Then resolve
-   pending cancellation, relationships, draft-to-final identity and revisions.
+3. **Content ownership/identity/order:** model-facing inspection, pruner ownership
+   and user-input promotion semantics are resolved. Promote when sending a containing
+   request starts; keep a failed attempt in history, not automatically back in the
+   queue. Current admission-index projection must change. Relationships, stable
+   draft-to-final identity, revision invalidation and pending cancellation remain
+   mechanism/product questions as applicable; do not reopen existing Stop guarantees.
 4. **Streaming recovery:** what the reader sees after interruption during tool-input
    generation; provisional versus retained evidence, cancellation and terminal facts.
 5. **Large-item correctness:** Markdown semantics, code/table virtualization,
    streaming parse strategy and memory ownership. Prove feasibility before choosing.
-6. **Interaction through eviction:** selection/copy, keyboard navigation, browser or
-   application find, expanded details and resize. Do not silently break existing UX
-   or assume full-history search is already approved.
+6. **Interaction through eviction — current question before index design:** should
+   search cover the entire saved conversation or be deferred? Native browser Find
+   cannot reliably search content absent from the DOM. Recommend a session search
+   backed by saved content and navigation to result identities, without hydrating all
+   history. Scope of searched content, indexing and query mechanics are not selected.
+   Also resolve selection/copy across unloaded ranges, keyboard navigation, expanded
+   details and resize; do not silently break those behaviors through virtualization.
 7. **On-demand payloads/media:** inspector lifecycle, large raw results, clipboard
    uploads, attachment publication/cleanup, image preview/viewer release, external
    URL loading policy. Display rendering does not imply provider image delivery.
@@ -400,6 +405,11 @@ shared-reference and cleanup failure cases; those are not implemented guarantees
   admission-ordered user display; that assumption is superseded. Promotion timing
   needs a precise, observable definition and the public history projection needs
   change; this does not authorize changing input admission/delivery guarantees.
+- Grilling decision 7: after a plain-language failure example, owner confirmed that
+  once Urd starts sending a pending message, a connection/request failure leaves it
+  in the conversation with the error rather than returning it to the queue. This
+  resolves the user-visible promotion/failure behavior, not the exact provider-hook
+  or storage transaction implementing it. Do not imply proven remote consumption.
 - Owner explicitly chose continuous formatting rather than a separate paged
   plaintext fallback for very large replies. Earlier suggested 128 KiB/message and
   2 MiB cache numbers were speculative and are **not selected requirements**.
@@ -422,9 +432,10 @@ hover warming is desired direction. Local reading anchors/following intent must
 survive browser reload/restart. Tool inspection defaults to model-facing content
 including reductions, not raw execution I/O. Pruner/producer owns omission and
 recall policy; do not expand this work into a pruning system. Pending user input
-must remain separate until it joins the model exchange. Current question: define
-“hits the model” as request-attempt start or provider-response evidence. Then
-continue content identity/order and pending cancellation/recovery semantics.
+must remain separate until sending a containing model request begins; a subsequent
+failure stays in the conversation rather than requeueing the input. Next resolve
+full-history search expectations before choosing retrieval/index structure, then
+continue content identity/order, streaming and eviction interactions.
 Ask only unresolved questions,
 not questions already settled by position-preservation requirements. Continue down
 the dependency tree and keep recommendations distinct from decisions.

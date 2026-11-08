@@ -199,8 +199,13 @@ Unchanged from the reviewed draft in substance:
 - Failure after the hook keeps the message with the failed attempt; no requeue.
   Save failure of the marker escapes as execution uncertainty, never as an ordinary
   provider error, and the provider is not called.
-- `LlmContextReader` excludes prior requests known never attempted; keeps the
-  current batch and legacy history.
+- Model-context eligibility is execution-owned, not a transcript contract; the
+  attempt fact is the datum execution consumes. Requests known never attempted are
+  excluded from reconstructed context (new behavior, required so terminal
+  never-attempted inputs are never delivered). Attempted-but-failed requests keep
+  today's behavior — `LlmContextReader` has no outcome filter — so their inputs and
+  any committed partial output remain in later context; this plan changes nothing
+  there.
 - Pending inputs appear in the snapshot as identity plus a bounded preview (the
   existing 256-UTF-16-unit convention), never full text: submission text is
   uncapped after packet 1A, and the snapshot is a hot path. Full pending text
@@ -281,8 +286,9 @@ Reuse `SessionSnapshotStorageTests` seeding/poisoned-body/query-plan helpers,
   count against current polling on the same fixture.
 - Placement: no user entry before attempt; ordered promotion of several steering
   inputs; failure before/after hook; eager client; Stop races; exact receipt retry;
-  ambiguous marker save → no provider call, uncertainty preserved; context excludes
-  never-attempted input; not-sent discovery after a later run and reload.
+  ambiguous marker save → no provider call, uncertainty preserved; execution context
+  excludes never-attempted input while attempted-but-failed content stays included;
+  not-sent discovery after a later run and reload.
 - Migration preserves legacy order and invents no attempt provenance.
 - Lifted caps: a tool call with >16 KiB arguments, a >16 KiB tool result and a
   >16 KiB user submission are accepted, saved, reconstructed into model context and

@@ -8,6 +8,34 @@ and persistence integration remain proposals until reviewed. No provider impleme
 or live account activity is claimed. [Provider qualification](../PROVIDER-QUALIFICATION.md) owns route research
 and the bounded initial provider set.
 
+## Approved library-first direction
+
+The owner agreed to reuse focused libraries rather than implement provider transport,
+OAuth or JWT cryptography from scratch:
+
+- Official OpenAI .NET SDK for normal API model discovery and provider transport.
+- Duende.IdentityModel.OidcClient for native/manual OAuth sign-in mechanics, with
+  Duende.IdentityModel for full-response refresh and token revocation operations.
+- Microsoft.IdentityModel.JsonWebTokens/Tokens for maintained signed identity validation.
+- Retain the selected Microsoft.Extensions.AI boundary for model calls; it is not a
+  provider-account or authentication manager. Add its OpenAI adapter only when needed
+  by the approved implementation, not merely to support configuration storage.
+
+Urd still owns saved connections, private credential persistence, cancellation and refresh
+coordination, and route-specific glue. The ordinary OpenAI catalog SDK parses `data`;
+ChatGPT's documented catalog uses `models` with `slug`, `display_name` and `visibility`,
+so its adapter must not blindly deserialize through the ordinary typed collection.
+Reuse SDK transport where practical. No general provider framework or agent runtime is
+introduced.
+
+This approves the library direction, not new package pins or a claim of live qualification.
+Existing researched pins and synthetic evidence are recorded in
+[provider qualification](../PROVIDER-QUALIFICATION.md) and
+[model-interface research](../MODEL-INTERFACE-RESEARCH.md). Reuse that evidence and test
+remaining integration gaps. The inspected Responses client/adapter is experimental;
+standard OAuth library defaults alone do not enforce all ChatGPT registration, identity
+and scope requirements. No production dependency was installed by this design discussion.
+
 ## Approved connection view
 
 One saved connection is one independently configured route to a provider. Its stable

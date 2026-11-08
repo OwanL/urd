@@ -6,7 +6,7 @@
   user-select: none;
 }
 .chat-tabs.is-reordering .chat-tab {
-  transition: transform 100ms ease-out;
+  transition: transform 40ms linear;
 }
 .chat-tabs.is-reordering .chat-tab.is-dragging {
   z-index: 1;

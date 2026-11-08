@@ -54,10 +54,13 @@ Distinguish throughout:
   window when revisited. Preserve the reading anchor and following intent; keeping
   every open tab warm is not required. Owner suggested predictive warming on hover
   as a general interaction pattern, not something restricted to tabs.
-- Do not prematurely restrict long-distance text selection to local selection and
-  Copy buttons. Owner challenged that shortcut and suggested temporarily retaining
-  more content during selection. Investigate established selection/virtualization
-  techniques; no selection cap or implementation mechanism has been approved.
+- Use the simplest selection approach: native browser selection with temporary
+  retention of the selected rendered span, released when selection clears rather
+  than on pointer release. Keep unrelated content virtualized. Owner rejected
+  premature selection restrictions and directed simplicity after reviewing options.
+  No custom selection engine or separate prototype phase is planned unless a
+  concrete implementation problem justifies reconsideration. Temporary memory
+  growth is a trade-off to test; no arbitrary selection cap has been approved.
 - Session switching, input, scrolling and animations must be exceptionally
   responsive and lightweight. Preserve reading position, focus and drafts; no
   unintended jumps. Animation must not disguise layout instability.
@@ -289,19 +292,20 @@ Two approaches, supported by public documentation inspected on 2026-11-08:
   lazy content retrieval and source-to-rendered text mapping. Do not claim this
   example bounds source memory or establishes rich-clipboard fidelity.
 
-Recommendation, not selected implementation: qualify selected-span retention first,
-while keeping content identities/offsets independent of DOM. Do not disable all
-virtualization or decode unrelated offscreen images merely because selection exists.
-An arbitrarily large selected span can still exhaust memory; bounded logical-range
-selection is the more involved alternative if retention cannot meet the workload.
-No silent truncation, disappearing selection or arbitrary cap is approved.
+Owner directed adopting the simplest approach. Design direction: native browser
+selection with selected-span retention, while keeping content identities independent
+of DOM. Do not disable all virtualization or decode unrelated offscreen images
+merely because selection exists. An arbitrarily large selected span can still
+exhaust memory; temporary growth is a trade-off to qualify, not a bounded-memory
+proof. No silent truncation, disappearing selection or arbitrary cap is approved.
+Do not build a custom logical-selection engine speculatively.
 
-A small isolated feasibility probe could check cross-row/within-message selection,
-copy completeness after scrolling, pointer release, keyboard extension, streaming
-updates, reverse selection and memory release after deselection. This has not been
-run or approved as the next work phase; inspected documentation is not runtime proof.
-Whole-item copy actions remain complementary, not an approved substitute for normal
-selection. Clipboard operations themselves may need transient full payload memory.
+Test during implementation: cross-row/within-message selection, copy completeness
+after scrolling, pointer release, keyboard extension, streaming updates, reverse
+selection and memory release after deselection. No separate prototype phase is
+planned absent a concrete blocker. Public documentation is not runtime proof.
+Whole-item copy actions remain complementary, not a substitute for normal selection.
+Clipboard operations themselves may need transient full payload memory.
 
 ### Markdown and large payloads
 
@@ -385,14 +389,17 @@ source, not by asking the owner. Update this document immediately after decision
 6. **Interaction through eviction — current branch:** full-history search is
    explicitly deferred; owner accepts browser Find's limitation for now and may add
    first-party search later. Do not design a search index/API in this phase. Owner
-   challenged limiting selection and suggested temporary retention. Public docs
-   support render-range pinning and editor-owned logical selection as distinct
-   approaches; neither is qualified for Urd. Next decide whether to run an isolated
-   selection feasibility probe now or continue architecture discussion first. Also
-   resolve keyboard navigation, expanded details and resize.
-7. **On-demand payloads/media:** inspector lifecycle, large raw results, clipboard
-   uploads, attachment publication/cleanup, image preview/viewer release, external
-   URL loading policy. Display rendering does not imply provider image delivery.
+   chose simplicity for selection: native selection with temporary selected-span
+   retention, verified during implementation rather than a separate prototype phase.
+   Custom selection is not planned without a demonstrated need. Also resolve
+   keyboard navigation, expanded details and resize.
+7. **On-demand payloads/media — current question:** should external Markdown images
+   load automatically near the viewport or require activation? Recommend ordinary
+   lazy image loading near the viewport, keeping URLs external and creating no
+   managed copies. This entails requests to external hosts and is not yet approved.
+   Also cover inspector lifecycle, large model-facing results, clipboard uploads,
+   attachment publication/cleanup and image preview/viewer release. Display rendering
+   does not imply provider image delivery.
 8. **Budgets and qualification:** representative workload sizes, numeric latency
    and resource targets, cache/overscan policies, contention and failure cases.
 9. **Implementation sequencing:** bounded milestones and ownership only after
@@ -465,6 +472,10 @@ shared-reference and cleanup failure cases; those are not implemented guarantees
   selection to a local window. Read-only public documentation research identified
   render-range retention and model-owned selection patterns. No package, hard cap,
   custom selection system or prototype implementation has been selected.
+- Grilling direction 10: owner said to adopt whatever is simplest. Proceed with
+  native selection and temporary selected-span retention, not a speculative custom
+  selection engine or separate prototype phase. Verify during implementation;
+  revise only for demonstrated problems, not hypothetical scale alone.
 - Owner explicitly chose continuous formatting rather than a separate paged
   plaintext fallback for very large replies. Earlier suggested 128 KiB/message and
   2 MiB cache numbers were speculative and are **not selected requirements**.
@@ -489,10 +500,11 @@ including reductions, not raw execution I/O. Pruner/producer owns omission and
 recall policy; do not expand this work into a pruning system. Pending user input
 must remain separate until sending a containing model request begins; a subsequent
 failure stays in the conversation rather than requeueing the input. Full-history
-search is deferred. Local-only selection was challenged; investigate temporary
-selected-span retention versus model-owned selection. Public documentation research
-is recorded, but no runtime qualification has occurred. Current steering question:
-isolated selection probe now or continue architecture discussion first.
+search is deferred. Selection direction is the simplest native-selection approach
+with temporary selected-span retention, tested during implementation. Do not add a
+custom selection engine or separate prototype phase without demonstrated need.
+Current question: automatic lazy loading versus click activation for external
+Markdown images; retained-file policy is already settled and must not be reopened.
 Ask only unresolved questions,
 not questions already settled by position-preservation requirements. Continue down
 the dependency tree and keep recommendations distinct from decisions.

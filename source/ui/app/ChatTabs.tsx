@@ -1,4 +1,5 @@
-import { useState } from "preact/hooks";
+import type { RefObject } from "preact";
+import { useLayoutEffect, useState } from "preact/hooks";
 import { IconButton } from "../components/IconButton.tsx";
 import { Tooltip } from "../components/Tooltip.tsx";
 import { moveTab } from "./TabOrder.ts";
@@ -8,12 +9,20 @@ import "./chat-tabs.css";
 export interface ChatTabsProps {
   tabs: readonly { id: string; title: string }[];
   activeId: string | null;
+  emptyFocusTarget: RefObject<HTMLButtonElement | null>;
   onOpen(id: string): void;
   onClose(id: string): void;
   onReorder(id: string, beforeId: string | null): void;
 }
 
-export function ChatTabs({ tabs, activeId, onOpen, onClose, onReorder }: ChatTabsProps) {
+export function ChatTabs({
+  tabs,
+  activeId,
+  emptyFocusTarget,
+  onOpen,
+  onClose,
+  onReorder,
+}: ChatTabsProps) {
   const [announcement, setAnnouncement] = useState("");
   const drag = useTabDrag(tabs, (id, beforeId) => {
     reorder(id, beforeId);
@@ -22,11 +31,29 @@ export function ChatTabs({ tabs, activeId, onOpen, onClose, onReorder }: ChatTab
 
   function focusTab(id: string) {
     requestAnimationFrame(() => {
-      const tab = document.getElementById(`tab-${id}`);
+      const tab = drag.strip.current?.querySelector<HTMLButtonElement>(`#tab-${CSS.escape(id)}`);
       tab?.focus({ preventScroll: true });
       tab?.closest(".chat-tab")?.scrollIntoView({ block: "nearest", inline: "nearest" });
     });
   }
+  function closeTab(id: string) {
+    onClose(id);
+    requestAnimationFrame(() => {
+      const selected = drag.strip.current?.querySelector<HTMLButtonElement>(
+        '[role="tab"][aria-selected="true"]',
+      );
+      (selected ?? emptyFocusTarget.current)?.focus();
+    });
+  }
+  const activeTitle = tabs.find((tab) => tab.id === activeId)?.title;
+  useLayoutEffect(() => {
+    if (activeId === null) return;
+    drag.strip.current
+      ?.querySelector(`#tab-${CSS.escape(activeId)}`)
+      ?.closest(".chat-tab")
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [activeId, activeTitle, drag.strip]);
+
   function reorder(id: string, beforeId: string | null) {
     const next = moveTab(tabs, id, beforeId);
     if (next === tabs) return;
@@ -107,7 +134,7 @@ export function ChatTabs({ tabs, activeId, onOpen, onClose, onReorder }: ChatTab
               onKeyDown={(event) => {
                 if (event.key === "Delete" && !drag.draggedId) {
                   event.preventDefault();
-                  onClose(id);
+                  closeTab(id);
                 }
               }}
             >
@@ -124,7 +151,7 @@ export function ChatTabs({ tabs, activeId, onOpen, onClose, onReorder }: ChatTab
               </>
             }
             placement="below"
-            onClick={() => onClose(id)}
+            onClick={() => closeTab(id)}
           />
         </div>
       ))}

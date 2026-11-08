@@ -41,6 +41,27 @@ the workspace; corrupt data is never silently replaced.
 The palette uses neutral black/charcoal surfaces and grey controls; semantic error
 colours remain distinct. Rich transcript architecture is a separate workstream.
 
+## Workspace composition
+
+`app/Workspace.tsx` connects the behavioral owners and renders the workspace shell.
+It does not implement storage recovery, navigation or catalog request lifecycles.
+
+| Owner | Responsibility and lifetime |
+| --- | --- |
+| `usePersistedWorkspace` | Owns the current workspace and synchronous updates, draft/root persistence, storage failures and explicit recovery. Its stable command access reads the latest state; successful-load identity changes only on read recovery, not ordinary edits. |
+| `useWorkspaceNavigation` | Discovers the initial workspace after a successful read, applies deep links, opens/closes/reorders tabs and synchronizes the URL. It calls the existing Create command; it never stops backend work. |
+| `useWorkspaceModels` | Owns cached catalog loading, refresh state and invalidation at workspace lifetime, using `WorkspaceModels` for request publication ordering. |
+| `WorkspaceCommands` | Owns Create, Send/retry, receipt reconciliation and Stop across conversation switches. Create still journals before dispatch and opens the acknowledged session against current state. |
+| `Conversation` | Mounts only for the active chat; composes snapshot observation, transcript, status and composer. Its snapshot hook owns cancellable reads, not command lifetime. |
+| `ConversationState` | Derives selection, Send eligibility and execution status from existing facts; it stores no additional state. |
+| `ChatTabs` | Owns tab interaction, focus restoration and active-tab scrolling. |
+
+The workspace retains reading positions outside the keyed conversation view and
+starts pending-receipt observation only after storage has been read successfully,
+including recovery. A hidden chat's uncertain Send is still reconciled; switching
+or closing views never cancels a dispatched command. Dependencies are passed
+explicitly rather than through a global store or event bus.
+
 ## Toolchain and checks
 
 Use Node **24.16.0** (`source/ui/.node-version`) and npm **11.13.0**

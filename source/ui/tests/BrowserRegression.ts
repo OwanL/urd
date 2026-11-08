@@ -213,6 +213,137 @@ void test("model and reasoning popovers focus options and restore their triggers
   });
 });
 
+void test("deep links, tab order and close focus preserve hidden drafts across reload", async () => {
+  await withOfflineBrowser(async ({ server, page }) => {
+    const sessions = new SessionClient(server.origin);
+    const firstId = await sessions.create();
+    const secondId = await sessions.create();
+    let creates = 0;
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname === "/api/sessions" && request.method() === "POST")
+        creates++;
+    });
+    await page.goto(`${server.origin.href}#${secondId}`);
+    const message = page.getByRole("textbox", { name: "Message" });
+    await message.waitFor();
+    assert.equal(await page.getByRole("tab").count(), 1);
+    assert.equal(await page.getByRole("tab").getAttribute("id"), `tab-${secondId}`);
+    await message.fill("retained while hidden");
+
+    await page.evaluate((id) => {
+      location.hash = id;
+    }, firstId);
+    await page.locator(`#tab-${firstId}[aria-selected=true]`).waitFor();
+    await page.locator(`#tab-${secondId}`).click();
+    await page.locator(`#tab-${secondId}`).press("Alt+Shift+ArrowRight");
+    await page.waitForFunction(
+      (id) => document.querySelector('[role="tab"]')?.id === `tab-${id}`,
+      firstId,
+    );
+    assert.equal(await message.inputValue(), "retained while hidden");
+    await page.locator(`#tab-${secondId}`).press("Delete");
+    await page.waitForFunction((id) => document.activeElement?.id === `tab-${id}`, firstId);
+    await page.locator(`#tab-${firstId}`).press("Delete");
+    await page.waitForFunction(
+      () => document.activeElement?.getAttribute("aria-label") === "New chat",
+    );
+    await page.waitForFunction(() => location.hash === "");
+
+    // An intentionally empty saved workspace must not trigger another automatic Create.
+    await page.reload();
+    await page.waitForFunction(() => {
+      const button = document.querySelector<HTMLButtonElement>('button[aria-label="New chat"]');
+      return button !== null && !button.disabled;
+    });
+    assert.equal(await page.getByRole("tab").count(), 0);
+    await page.evaluate((id) => {
+      location.hash = id;
+    }, secondId);
+    await message.waitFor();
+    assert.equal(await message.inputValue(), "retained while hidden");
+    assert.equal(creates, 0);
+  });
+});
+
+void test("workspace read recovery reconciles a hidden uncertain send", async () => {
+  await withOfflineBrowser(async ({ model, server, page }) => {
+    let submissions = 0;
+    const receiptReads: string[] = [];
+    page.on("request", (request) => {
+      const { pathname } = new URL(request.url());
+      if (request.method() === "POST" && pathname.endsWith("/message-submissions")) submissions++;
+      else if (
+        request.method() === "GET" &&
+        /^\/api\/sessions\/[^/]+\/message-submissions\/[^/]+$/.test(pathname)
+      )
+        receiptReads.push(pathname);
+    });
+    await page.addInitScript(() => {
+      const getItem = Storage.prototype.getItem;
+      Storage.prototype.getItem = function (key) {
+        if (key === "urd.workspace.v1" && window.name === "fail-next-workspace-read") {
+          window.name = "workspace-read-failed";
+          throw new DOMException("Temporary read failure", "SecurityError");
+        }
+        return getItem.call(this, key);
+      };
+    });
+    await page.route("**/api/sessions/*/message-submissions", async (route) => {
+      if (route.request().method() !== "POST") return route.continue();
+      await route.fetch();
+      await route.abort("failed");
+    });
+
+    await page.goto(server.origin.href);
+    const message = page.getByRole("textbox", { name: "Message" });
+    await page.getByRole("button", { name: /^Model:/ }).click();
+    await page.getByRole("option", { name: "fixture-a" }).click();
+    const originalId = new URL(page.url()).hash.slice(1);
+    model.enqueue({ text: "accepted fixture reply" });
+    await message.fill("accepted despite lost acknowledgement");
+    await page.getByRole("button", { name: "Send" }).click();
+    await page.getByText("Send uncertain.", { exact: false }).waitFor();
+
+    await page.getByRole("button", { name: "New chat" }).click();
+    await page.waitForFunction(() => document.querySelectorAll('[role="tab"]').length === 2);
+    await page.waitForFunction((id) => location.hash.slice(1) !== id, originalId);
+    const secondId = new URL(page.url()).hash.slice(1);
+    await message.fill("second chat draft");
+    await page.waitForFunction(() =>
+      Object.keys(sessionStorage).some((key) => key.startsWith("urd.workspace.v1.draft.")),
+    );
+    await page.evaluate(() => {
+      window.name = "fail-next-workspace-read";
+    });
+    await page.reload();
+    const retryRead = page.getByRole("alert").getByRole("button", { name: "Retry read" });
+    await retryRead.waitFor();
+    await waitForQuietCount(() => receiptReads.length, 300, 2_000, "receipt reads to remain gated");
+    assert.equal(receiptReads.length, 0);
+
+    await retryRead.click();
+    await page.waitForFunction(
+      ({ originalId, secondId }) => {
+        const saved = JSON.parse(sessionStorage.getItem("urd.workspace.v1") ?? "null");
+        return (
+          saved?.activeId === secondId &&
+          saved.chats[originalId]?.pending === null &&
+          saved.chats[originalId]?.draft === ""
+        );
+      },
+      { originalId, secondId },
+    );
+    await waitForQuietCount(() => receiptReads.length, 300, 2_000, "receipt reads to settle");
+    assert.equal(receiptReads.length, 1);
+    assert.match(receiptReads[0]!, new RegExp(`^/api/sessions/${originalId}/message-submissions/`));
+    assert.equal(await message.inputValue(), "second chat draft");
+
+    await page.locator(`#tab-${originalId}`).click();
+    await page.getByText("accepted despite lost acknowledgement", { exact: false }).waitFor();
+    assert.equal(submissions, 1);
+  });
+});
+
 void test("tab changes stop obsolete polling while preserving the reading anchor during a stream", async () => {
   await withOfflineBrowser(async ({ model, server, page }) => {
     const snapshotReads = new Map<string, number>();

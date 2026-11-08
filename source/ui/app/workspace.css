@@ -1,7 +1,7 @@
 :root {
   color-scheme: dark;
   --surface-input: #141414;
-  --surface-popover: #1b1b1b;
+  --surface-popover: var(--surface-input);
   --surface-hover: #262626;
   --text-primary: #e3e3e3;
   --text-secondary: #a0a0a0;
@@ -188,7 +188,7 @@ button:focus-visible,
   max-width: min(86%, 52rem);
   margin-left: auto;
   padding: 9px 13px;
-  border: 1px solid #b4b4b4;
+  border: 1px solid transparent;
   border-radius: 12px 12px 4px 12px;
   background: #a8a8a8;
   color: #171717;
@@ -239,7 +239,6 @@ button:focus-visible,
   border: 1px solid var(--border-subtle);
   border-radius: 50%;
   background: var(--surface-popover);
-  box-shadow: 0 3px 12px #0005;
   color: var(--text-primary);
 }
 .tooltip-detail {

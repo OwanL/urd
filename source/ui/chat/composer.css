@@ -3,14 +3,13 @@
   position: relative;
   margin: 0 12px 12px;
   padding: 4px 7px 7px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid transparent;
   border-radius: 12px;
   background: var(--surface-input);
   color: var(--text-primary);
-  box-shadow: 0 2px 8px #0002;
 }
 .composer:focus-within {
-  border-color: #505050;
+  border-color: var(--border-subtle);
 }
 .composer-input {
   display: block;

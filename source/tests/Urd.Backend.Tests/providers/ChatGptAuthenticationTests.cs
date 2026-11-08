@@ -1,6 +1,7 @@
 using Urd.Backend.Tests.Support;
 using Urd.Core.Providers;
 using Xunit;
+using static Urd.Backend.Tests.Support.TestAsync;
 
 namespace Urd.Backend.Tests.Providers;
 
@@ -214,6 +215,41 @@ public sealed class ChatGptAuthenticationTests {
   }
 
   [Theory]
+  [InlineData("/.well-known/openid-configuration")]
+  [InlineData("/jwks")]
+  public async Task CancellationDuringRefreshDiscoveryPreservesTheKnownGrant(string path) {
+    using var issuer = new FakeOpenAIIdentity();
+    var initial = await SignInAsync(issuer);
+    using var held = new HeldDiscovery(issuer, path);
+    var auth = new ChatGptAuthentication(held, FakeOpenAIIdentity.Issuer);
+    using var cancellation = new CancellationTokenSource();
+    Task<ProviderCredentials> refresh = auth.RefreshAsync(initial.Registration, initial.Credentials, cancellation.Token);
+    try {
+      await held.Entered.Task.WaitAsync(TestTimeout);
+      await cancellation.CancelAsync(); // The manager's refresh deadline, without a wall-clock delay.
+      var error = await Assert.ThrowsAsync<ProviderOperationException>(() => refresh.WaitAsync(TestTimeout));
+      Assert.Equal(ProviderFailure.ProviderUnavailable, error.Failure);
+      Assert.Equal("ProviderUnavailable", error.Message);
+      Assert.Null(error.InnerException);
+      Assert.Equal(0, issuer.RefreshPosts);
+      Assert.False(initial.Credentials.RequiresSignIn);
+    } finally {
+      await cancellation.CancelAsync();
+      try {
+        await refresh.WaitAsync(TestTimeout);
+      } catch (Exception failure) when (failure is OperationCanceledException or ProviderOperationException) {
+        // Join the cancelled discovery before disposing its borrowed transport.
+      }
+    }
+
+    held.Hold = false;
+    var refreshed = await auth.RefreshAsync(initial.Registration, initial.Credentials, CancellationToken.None).WaitAsync(TestTimeout);
+    Assert.Equal("synthetic-access-2", refreshed.AccessToken);
+    Assert.False(refreshed.RequiresSignIn);
+    Assert.Equal(1, issuer.RefreshPosts);
+  }
+
+  [Theory]
   [InlineData("none", true, 1)]
   [InlineData("revoke-failure", false, 1)]
   [InlineData("no-revocation", false, 0)]
@@ -240,6 +276,20 @@ public sealed class ChatGptAuthenticationTests {
     await Assert.ThrowsAnyAsync<OperationCanceledException>(() => auth.RefreshAsync(initial.Registration, initial.Credentials, cancellation.Token));
     await Assert.ThrowsAnyAsync<OperationCanceledException>(() => auth.RevokeAsync(initial.Registration, initial.Credentials, cancellation.Token));
     Assert.Equal(discoveryGets, issuer.DiscoveryGets);
+  }
+
+  private sealed class HeldDiscovery(HttpMessageHandler inner, string path) : DelegatingHandler(inner) {
+    internal TaskCompletionSource Entered { get; } = Signal();
+    internal bool Hold { get; set; } = true;
+
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) {
+      if (Hold && request.RequestUri!.AbsolutePath == path) {
+        Assert.Equal(HttpMethod.Get, request.Method);
+        Entered.TrySetResult();
+        await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+      }
+      return await base.SendAsync(request, cancellationToken);
+    }
   }
 
   private static async Task<ProviderAuthentication> SignInAsync(FakeOpenAIIdentity issuer) {

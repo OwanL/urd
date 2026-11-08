@@ -50,7 +50,7 @@ internal sealed class ChatGptAuthentication(HttpMessageHandler handler, Uri? iss
       return credentials with { RequiresSignIn = true };
 
     using HttpClient http = CreateHttpClient();
-    using var discovery = await DiscoverAsync(http, cancellationToken).ConfigureAwait(false);
+    using var discovery = await DiscoverForRefreshAsync(http, cancellationToken).ConfigureAwait(false);
     var options = CreateOptions(http, discovery, registration.ClientId);
     using var response = await SendRefreshAsync(http, new RefreshTokenRequest {
       Address = options.ProviderInformation.TokenEndpoint,
@@ -111,8 +111,19 @@ internal sealed class ChatGptAuthentication(HttpMessageHandler handler, Uri? iss
     }
   }
 
+  private async Task<DiscoveryDocumentResponse> DiscoverForRefreshAsync(HttpClient http, CancellationToken cancellationToken) {
+    try {
+      return await DiscoverAsync(http, cancellationToken).ConfigureAwait(false);
+    } catch (Exception failure) when (failure is OperationCanceledException or IOException) {
+      // Even the manager's deadline is retryable before a token exchange can rotate credentials.
+      throw new ProviderOperationException(ProviderFailure.ProviderUnavailable);
+    }
+  }
+
   private static async Task<TokenResponse> SendRefreshAsync(
       HttpClient http, RefreshTokenRequest request, CancellationToken cancellationToken) {
+    if (cancellationToken.IsCancellationRequested)
+      throw new ProviderOperationException(ProviderFailure.ProviderUnavailable);
     try {
       return await http.RequestRefreshTokenAsync(request, cancellationToken).ConfigureAwait(false);
     } catch (Exception failure) when (failure is HttpRequestException or OperationCanceledException or IOException) {

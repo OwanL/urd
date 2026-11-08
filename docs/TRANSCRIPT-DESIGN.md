@@ -29,6 +29,9 @@ Distinguish throughout:
 
 - Rich Markdown/code, embedded images and image viewing; extensible to further
   structured content without treating everything as specially formatted text.
+  Initial scope is Markdown, code, tables and images. Maths and diagrams are deferred;
+  check rendering-stack compatibility now and preserve simple extension points,
+  without building a general plugin framework or adding their runtime dependencies.
 - Long-running sessions mixing hundreds of tool calls, substantial reasoning,
   normal assistant output, large code blocks and large tool results. These are
   representative workloads, not hard caps.
@@ -322,9 +325,8 @@ structures independently of DOM virtualization. One huge code block/table also
 needs attention; splitting only at top-level Markdown blocks is insufficient.
 
 Use proven parser/rendering components rather than a homemade Markdown parser.
-Owner considers math/diagrams optional rather than core and asks whether adding
-specialized renderers later would be difficult. Recommendation awaiting confirmation:
-plan compatibility now, defer feature implementation. Preserve source; choose a
+Owner approved treating math/diagrams as optional: plan compatibility now and defer
+feature implementation. Preserve source; choose a
 parser with extension points; allow content-specific renderers to share lazy loading,
 measurement and cleanup behavior. Labelled code fences can supply future diagrams;
 inline math needs parser-level support and cannot be treated solely as a block
@@ -341,6 +343,46 @@ No package is selected. Earlier discussion suggested a unified/mdast/hast pipeli
 but this was not adopted or qualified; compare alternatives after defining needs.
 Do not assume workers are automatically better: transferring/copying content and
 maintaining extra trees can increase memory. Benchmark before adding them.
+
+### Cold access within one huge message — ownership proposal
+
+A correctly formatted middle slice must match the whole message's interpretation,
+not an independently parsed page. A fixed overlap is insufficient: a reference
+link/image can be defined arbitrarily far away; fences and nested lists carry
+state; a later table delimiter, setext heading underline or blank-separated list
+item can alter the preceding block. A huge paragraph can contain inline constructs
+crossing any page boundary. Streaming interpretation is therefore provisional.
+
+Two ownership options were examined through read-only design analysis:
+- **Backend-derived structure/index:** resolve Markdown semantics and serve
+  addressable display structure/source ranges. Browser reads need not acquire the
+  whole message or AST; reusable derived data avoids repeated cold reconstruction.
+  Adds projection/invalidation work and moves parsing cost to the backend—it does
+  not eliminate that cost or establish bounded backend memory.
+- **Browser-owned parsing/index:** simpler source-serving backend, but a cold jump
+  may need substantial or complete source scanning before the slice is correct.
+  A worker alone does not bound source/AST memory; eviction can force repeat work.
+
+Recommendation awaiting owner approval: backend owns reusable, disposable semantic
+structure for large-message retrieval; browser owns components, styling, measured
+geometry and viewport resources. Source remains authoritative. This is not backend
+HTML generation, a new parser, a selected AST wire format or an instruction to
+process every message eagerly. Keep parsing outside database/session critical
+sections; schedule it so transcript work does not stall execution or input.
+
+Needed information, not a selected schema: source identity/ranges and committed
+extent; dialect/parser generation; resolved structural/inline context; effective
+reference definitions; addressable pieces inside giant blocks; and consistent
+layout policy for shared structures such as table columns. History revision alone
+cannot identify a growing tail. Derived state must be invalidatable/rebuildable,
+with publication tied to the source extent it actually represents.
+
+Unqualified risks remain: parser support for reuse while streaming; initial parse
+cost for a cold unindexed giant message; sub-block slicing without copying a whole
+AST; source-to-rendered anchoring; extreme inline constructs/table cells; and
+content whose later bytes change earlier interpretation. No constant-size context,
+instant cold access, fixed memory ceiling or exact final live formatting is promised.
+No parser, schema, transport or implementation has been selected by this proposal.
 
 ### On-demand details and images
 
@@ -406,11 +448,14 @@ source, not by asking the owner. Update this document immediately after decision
 4. **Streaming recovery:** existing architecture permits loss of an unfinished tool
    draft on backend crash. Preserve that simple contract; distinguish browser
    reconnect/current provisional state from committed history and terminal facts.
-5. **Large-item correctness — current question:** owner views math/diagrams as
-   optional. Recommend compatibility checks and simple content-renderer boundaries
-   now, actual optional renderers later; no general plugin framework. Confirm this
-   scope, then determine Markdown semantics, code/table virtualization, streaming
-   parse strategy and memory ownership before choosing dependencies.
+5. **Large-item correctness — current engineering branch:** optional math/diagram
+   compatibility now and implementation later is approved; no general plugin
+   framework. Determine Markdown semantics, code/table virtualization, streaming
+   parse strategy and memory ownership before choosing dependencies. In particular,
+   arbitrary transport pages cannot be parsed as independent Markdown documents.
+   Current proposal: backend reusable semantic structure, browser layout/rendering;
+   compare its extra derivation cost against full-message browser parsing. Neither
+   is runtime-qualified; owner has not selected this responsibility split yet.
 6. **Interaction through eviction — current branch:** full-history search is
    explicitly deferred; owner accepts browser Find's limitation for now and may add
    first-party search later. Do not design a search index/API in this phase. Owner
@@ -501,9 +546,9 @@ shared-reference and cleanup failure cases; those are not implemented guarantees
   revise only for demonstrated problems, not hypothetical scale alone.
 - Grilling decision 11: owner approved automatic loading of external Markdown images
   near the viewport, rather than requiring clicks. External retention remains unchanged.
-- Grilling scope clarification 12: math/diagrams are optional rather than core.
-  Owner asks about future renderer flexibility; recommendation is compatibility now,
-  implementation later, without a general plugin system. Deferral is not yet confirmed.
+- Grilling decision 12: owner approved compatibility now, features later for maths
+  and diagrams. Choose extension-friendly parsing/rendering boundaries without
+  implementing optional renderers or a general plugin system in the initial scope.
 - Owner explicitly chose continuous formatting rather than a separate paged
   plaintext fallback for very large replies. Earlier suggested 128 KiB/message and
   2 MiB cache numbers were speculative and are **not selected requirements**.
@@ -533,9 +578,12 @@ with temporary selected-span retention, tested during implementation. Do not add
 custom selection engine or separate prototype phase without demonstrated need.
 External Markdown images load automatically near the viewport without managed
 retention. Existing architecture already permits losing unfinished tool drafts on
-backend crash; do not ask to redesign that recovery contract. Current question:
-confirm compatibility-now/implementation-later for optional math/diagram renderers,
-then synthesize the remaining engineering mechanisms.
+backend crash; do not ask to redesign that recovery contract. Maths/diagrams are
+approved for compatibility checks now, feature implementation later. Current work:
+review the proposed backend-semantic-structure/browser-layout responsibility split
+for cold access inside huge Markdown messages. Alternatives and unresolved costs
+are recorded; this is not yet an approved schema/package/implementation. Do not keep
+asking minor product questions that can be resolved through existing requirements.
 Ask only unresolved questions,
 not questions already settled by position-preservation requirements. Continue down
 the dependency tree and keep recommendations distinct from decisions.

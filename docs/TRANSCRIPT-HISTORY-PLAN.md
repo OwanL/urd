@@ -137,7 +137,10 @@ Proposed route: `GET /api/sessions/{sessionId}/history`, one reader with modes:
   session/execution status, pending input, and **one short preview of the first
   user entry** for session naming. `WorkspaceCommands` currently names discovered
   sessions from `snapshot.messages`; packet 1B migrates that consumer to the new
-  field in the same change, with a discovered-session regression. Removing the
+  field in the same change, with a discovered-session regression. A session whose
+  first input is still pending keeps the generic "New chat" title until its first
+  send-attempt places the entry; pending previews are never used for naming.
+  Removing the
   other 59 preview reads removes most of the per-update body decoding.
 
 ## 3. Push change notices

@@ -54,6 +54,10 @@ Distinguish throughout:
   search can be added later. No search index or search-specific API is in scope.
 - Long replies remain in the **continuous formatted conversation**. Diverting
   oversized replies to a separate paged plain-text reader is not acceptable.
+  When a large streamed reply outpaces formatting, keep the latest consistent
+  formatted view and catch up in formatted updates, rather than flash raw Markdown.
+  This must not block execution, input or scrolling. No fixed refresh interval or
+  permission for unbounded display lag follows.
 - Reading position and following intent should survive browser reload/restart.
   Retain small local navigation state, not full transcript content; no cross-client
   navigation synchronization is required by this decision.
@@ -481,12 +485,15 @@ Keep demand-driven reuse and bounded shared scheduling. Do not equate cancelling
 queued parse with stopping an in-flight synchronous parse. No dependency selection,
 custom incremental parser or numeric product limits follow from these results.
 
-Current product question: when parsing a very large active message falls behind,
-prefer the latest consistent formatted view with coalesced catch-up updates, or
-show new raw text before formatting catches up? Recommend consistent formatted
-updates. A generating indicator can acknowledge ongoing work independently; this
-must not block input, scrolling or execution. Do not infer a fixed refresh interval
-or permission for unbounded visible lag from the recommendation.
+Owner approved keeping the latest consistent formatted view and catching up in
+formatted updates when a very large active message outpaces parsing. Do not flash
+raw Markdown as an intermediate fallback. “Formatted chunks” means coherent display
+updates derived with the necessary document context, not independently parsing
+transport byte pages. Previously displayed formatting can still change as new
+Markdown resolves earlier syntax; preserve the reader's anchor and selection.
+A generating indicator acknowledges ongoing work independently; input, scrolling
+and execution remain responsive. Refresh cadence and acceptable lag need measured
+qualification, not an arbitrary interval or indefinite starvation.
 
 ### On-demand details and images
 
@@ -577,6 +584,61 @@ source, not by asking the owner. Update this document immediately after decision
 9. **Implementation sequencing:** bounded milestones and ownership only after
    the above contracts and high-risk feasibility checks are coherent.
 
+## Proposed implementation sequence — not yet approved
+
+These are bounded delivery slices, not authorization to implement the entire design.
+Before the first source edits, settle its concrete read contract and ownership,
+coordinate active Workspace/CSS/storage work, and choose only the dependencies that
+slice requires. Markdig remains a candidate; the parser probe alone does not select
+its dialect, projection format or a browser virtualizer.
+
+1. **History/navigation foundation.** Add metadata-only latest/anchor/neighbor reads
+   and the aggregate-position strategy needed for whole-history navigation. Separate
+   pending acceptance from conversation placement at request start, preserving
+   durable receipts and failed-attempt history. Define source-based identities that
+   accommodate later content parts, without inventing a general event framework.
+   Verify revision fencing, interleaved pending input, distant navigation and query
+   cost without reading every body. Do not weaken existing delivery/Stop guarantees.
+2. **Formatted, virtualized text path end to end.** Derive reusable structure outside
+   execution/storage locks; serve consistent ranges; render Markdown/code/tables and
+   external images in the browser. Virtualize between messages and within huge blocks.
+   Integrate the shared position model, anchor restoration across reload, following
+   intent, bounded warm cache and native selected-span retention. Use formatted
+   catch-up under streaming load. Establish source-to-rendered mappings and whole-item
+   copy correctness; do not call a top-level-block-only renderer complete for giant
+   code/table content. Test native selection during implementation rather than
+   launching a separate selection research project.
+3. **Typed tool/reasoning content.** Add provisional call observation and snapshot
+   recovery without weakening terminal validation or execution authority. Project
+   model-facing input/results, statuses and explicit reasoning categories. Fetch
+   inspection data only when needed and release it when no longer useful. Verify
+   draft-to-final identity, failure/cancellation, offscreen streaming and interrupted
+   observation. No pruner, raw-log archive or opaque-continuation exposure.
+4. **Managed images and clipboard input.** Complete storage/publication/reference
+   ownership, metadata/previews, gated binary delivery, upload/draft lifecycle and
+   bounded viewer resources. Provider image input/output is its own capability path,
+   not proof obtained from rendering a picture. This slice may need broader execution
+   and model-context changes; bound and approve those before starting rather than
+   treating the feature as a transcript-only frontend patch.
+5. **Composed qualification and tuning.** Repeated long-session navigation, concurrent
+   streaming, many tool calls and screenshots under realistic resource contention.
+   Measure both browser and backend, warm and cold paths, persistent index cost and
+   post-eviction memory. Derive concrete cache/concurrency/latency targets from this
+   evidence with the owner; the synthetic parser sizes and safeguards are not limits.
+
+Every slice includes meaningful local tests, failure-path checks and independent
+review where practical. Step 5 composes already-tested paths; it is not permission
+to postpone memory/latency checks in steps 1–4. A completed intermediate source
+slice is not automatically an approved replacement for the running user application.
+No production activation, user-data migration or live-model test follows from this plan.
+
+Still unqualified before claiming the overall design works: scrollbar geometry and
+anchor stability under reflow; very large individual inline/table-cell structures;
+selection during streaming/eviction; parser scheduling under execution contention;
+image/GPU resource release; and chosen provider draft/reasoning/image observation
+capabilities. Resolve these at their owning slice, not by promising a universal
+memory ceiling or creating speculative frameworks upfront.
+
 ## Verification approach — broader work proposed; isolated parser probe completed
 
 - Measure disk queries, decoding/projection, transport, parsing, layout/render,
@@ -657,6 +719,9 @@ shared-reference and cleanup failure cases; those are not implemented guarantees
   with browser-owned rendering/layout. Source stays authoritative and derivations
   disposable. Approval is for responsibility boundaries, not a package/schema or
   proof of bounded parsing cost; validate library capabilities next.
+- Grilling decision 14: owner approved formatted catch-up updates when a growing
+  reply outpaces formatting, rather than briefly showing raw Markdown. Scheduling
+  must not block input, scrolling or execution; no fixed latency target is selected.
 - Owner explicitly chose continuous formatting rather than a separate paged
   plaintext fallback for very large replies. Earlier suggested 128 KiB/message and
   2 MiB cache numbers were speculative and are **not selected requirements**.
@@ -693,11 +758,13 @@ split. Candidate source research and proposed derived-state/read lifecycle are n
 recorded. The approved isolated parser probe has completed its runs successfully;
 independent final evidence review passed. Production integration, browser behavior
 and scheduling remain unqualified. No production implementation/dependency selection
-is approved. Next resolve behavior when a growing message outpaces formatting:
-recommend retaining the latest consistent formatted view and catching up in larger
-updates, rather than briefly exposing raw Markdown. This is a proposed streaming
-policy, not an approved latency target. Do not invent a custom parser or treat
-sampled sizes as hard limits. Do not keep
+is approved. Formatted catch-up updates are now agreed: do not flash raw Markdown
+when parsing lags. Next consolidate the agreed boundaries into a bounded proposed
+implementation sequence and explicit remaining qualification gates; implementation
+itself still needs approval. A proposed five-slice implementation sequence is now
+recorded; next steering is whether to make the first slice concrete or continue
+architecture review. Do not invent a custom parser or treat sampled sizes as hard
+limits. Do not keep
 asking minor product questions that can be resolved through existing requirements.
 Ask only unresolved questions,
 not questions already settled by position-preservation requirements. Continue down

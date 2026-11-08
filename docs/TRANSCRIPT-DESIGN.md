@@ -44,6 +44,10 @@ Distinguish throughout:
   and markers must not develop incompatible position models.
 - Long replies remain in the **continuous formatted conversation**. Diverting
   oversized replies to a separate paged plain-text reader is not acceptable.
+- Inactive tabs may evict transcript content and briefly reload their reading
+  window when revisited. Preserve the reading anchor and following intent; keeping
+  every open tab warm is not required. Owner suggested predictive warming on hover
+  as a general interaction pattern, not something restricted to tabs.
 - Session switching, input, scrolling and animations must be exceptionally
   responsive and lightweight. Preserve reading position, focus and drafts; no
   unintended jumps. Animation must not disguise layout instability.
@@ -169,6 +173,24 @@ Reasoning needs explicit provider provenance/content semantics. Prefer default
 collapse when classification is unknown; do not infer summaries from model names
 or prose appearance. This is a proposal needing provider capability investigation.
 
+### Eviction, restoration and predictive warming
+
+Owner approved inactive-tab content eviction. Preserve small navigation state;
+retain a bounded shared warm cache rather than making memory grow with open tabs.
+Cold restoration targets the saved reading window directly. Whether anchors survive
+browser reload/restart is still open; current Workspace positions are in memory.
+
+Owner suggested warming on hover, applicable to other on-demand interactions too.
+Proposed mechanism, not selected implementation: treat hover/focus as a hint to
+prefetch a small internal read, not permission to mount expensive views, decode
+original images or start execution. Share a bounded speculative-work budget across
+features; prioritize actual navigation, deduplicate overlapping reads, cancel or
+ignore obsolete work and prevent rapid pointer movement from retaining many bodies.
+Speculative work should not worsen streaming/input latency. Its failure does not
+need an unsolicited error; an actual requested read must report failure truthfully.
+This is not permission to fetch external image URLs on hover, call a model/provider,
+or perform command side effects. External-image loading policy remains separate.
+
 ### Viewport and layout
 
 Virtualize within large replies as well as between rows. Preserve a visible
@@ -231,12 +253,12 @@ source, not by asking the owner. Update this document immediately after decision
    and arbitrary distant jumps; engineer height estimates with future user-prompt
    markers in mind. Open mechanisms: range summaries, target lookup, width-dependent
    measurements, drag stability and correction without visible content jumps.
-2. **Return to session — current question:** may inactive tabs' transcript data be
-   evicted, allowing brief cold restoration at the same reading position, or must
-   every open tab keep a warm content window? Recommend a bounded shared warm cache,
-   cheap retained navigation state and permission to evict inactive bodies. Numeric
-   targets and eviction policy follow measurements, not arbitrary limits. Preserve
-   whether the reader was following the tail; no permanent hidden render trees.
+2. **Return to session — eviction resolved:** owner permits inactive content eviction
+   and suggests general predictive warming on hover. Preserve reading/following
+   state; no permanently mounted hidden trees. Current question: should small local
+   reading anchors survive browser reload/restart? Recommend yes, per browser/client,
+   without persisting full content caches or syncing navigation between clients.
+   Numeric targets, eviction policy and speculative-work budgets remain unselected.
 3. **Content identity/order:** message/content-part/tool relationships, interleaving,
    draft-to-final identity and revisions. Derive schema/API from concrete scenarios.
 4. **Streaming recovery:** what the reader sees after interruption during tool-input
@@ -287,6 +309,10 @@ shared-reference and cleanup failure cases; those are not implemented guarantees
   called out estimated heights plus future user-prompt markers along the scrollbar.
   Markers should appear at approximately correct vertical positions. This is not
   approval to render/load all history, nor a promise of exact unmeasured geometry.
+- Grilling decision 2: owner approved eviction rather than a warm window for every
+  open tab. Suggested warming on hover for tabs and similar on-demand interactions;
+  exact triggers/work budgets remain engineering proposals, not blanket background
+  fetching permission.
 - Owner explicitly chose continuous formatting rather than a separate paged
   plaintext fallback for very large replies. Earlier suggested 128 KiB/message and
   2 MiB cache numbers were speculative and are **not selected requirements**.
@@ -304,8 +330,9 @@ shared-reference and cleanup failure cases; those are not implemented guarantees
 
 Current task: engineering grilling and durable planning, not implementation.
 Navigation semantics (#1 above) is resolved: whole conversation, with future
-prompt markers sharing the position model. Next examine indexed range/location
-lookup and the warm/cold restoration contract; ask only unresolved product questions,
+prompt markers sharing the position model. Inactive-content eviction is approved;
+hover warming is desired direction. Next resolve whether local reading anchors
+survive browser reload/restart, then content identity/order. Ask only unresolved questions,
 not questions already settled by position-preservation requirements. Continue down
 the dependency tree and keep recommendations distinct from decisions.
 

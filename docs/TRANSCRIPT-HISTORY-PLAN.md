@@ -205,6 +205,10 @@ Proposed route: `GET /api/sessions/{sessionId}/history`, one reader with modes:
   interval in `LlmResponseWriter`), not the 350 ms poll. Measure
   commit → notice → rendered delay on a local fixture; if commit batching dominates,
   that is the next thing to tune, not a reason to send content in notices.
+  Implementation notes for 1B: disable response compression/buffering on the events
+  route; `fetch` streams have no built-in reconnect, so the client owns retry and
+  handshake repetition; the stream permanently holds one of the browser's ~6
+  per-host connections, so ordinary reads must never queue behind it.
 
 ## 4. Conversation placement at a send attempt
 
@@ -311,7 +315,8 @@ Reuse `SessionSnapshotStorageTests` seeding/poisoned-body/query-plan helpers,
   ambiguous marker save → no provider call, uncertainty preserved; execution context
   excludes never-attempted input while attempted-but-failed content stays included;
   not-sent discovery after a later run and reload.
-- Migration preserves legacy order and invents no attempt provenance.
+- Migration preserves legacy order, keeps ordinals append-only after the rebuild,
+  and invents no attempt provenance.
 - Lifted caps: a tool call with >16 KiB arguments, a >16 KiB tool result and a
   >16 KiB user submission are accepted, saved, reconstructed into model context and
   served by bounded reads; existing size tests are updated, not deleted silently.
@@ -320,8 +325,9 @@ Provisional targets are recorded in the design document (decision 18). Stage 1 m
 record a **baseline** for them against the synthetic 25× reference workload
 (decision 26: ~100,000 entries, ~250 MB, generated in an owned temp database, never
 live data): idle work, commit-to-render streaming delay, warm/cold
-tab switch, main-thread long tasks, request count per streamed second, and browser
-and backend memory before/after tab cycles. Cache budgets and absolute memory
+tab switch, main-thread long tasks, request count per streamed second, browser and
+backend memory before/after tab cycles, and `latest`-window history-read latency
+(the hot read path at 100,000-entry scale). Cache budgets and absolute memory
 numbers are set from that baseline, not fixed here.
 Stage 1 proves read, notice and placement contracts — not rich rendering,
 scroll geometry or overall transcript memory.

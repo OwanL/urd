@@ -20,6 +20,7 @@ async function withOfflineBrowser(
     await model.install(runningServer.origin);
     browser = await chromium.launch({ headless: true });
     const page = await browser.newPage({ viewport: { width: 1_024, height: 480 } });
+    page.setDefaultTimeout(10_000);
     await run({ model, server: runningServer, page });
   } finally {
     try {
@@ -70,8 +71,9 @@ async function waitForSnapshot(
   timeoutMs = 15_000,
 ) {
   const deadline = Date.now() + timeoutMs;
+  const signal = AbortSignal.timeout(timeoutMs);
   while (Date.now() < deadline) {
-    const snapshot = await sessions.getSnapshot(sessionId);
+    const snapshot = await sessions.getSnapshot(sessionId, signal);
     if (condition(snapshot)) return snapshot;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
@@ -326,7 +328,7 @@ void test("tab changes stop obsolete polling while preserving the reading anchor
     );
     assert.equal(snapshotReads.get(firstSessionId) ?? 0, inactiveSnapshotReads);
 
-    const runningAway = await sessions.getSnapshot(firstSessionId);
+    const runningAway = await sessions.getSnapshot(firstSessionId, AbortSignal.timeout(5_000));
     assert.ok(runningAway.unsettledExecutionId);
     assert.equal(stopRequests, 0);
     assert.equal(model.calls[1]?.cancelled, false);

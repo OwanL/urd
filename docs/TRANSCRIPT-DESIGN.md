@@ -67,6 +67,11 @@ Distinguish throughout:
 - Provider-supplied formatted reasoning summaries appear inline, visually muted
   but readable. Unsummarized reasoning exposed by a provider is collapsed and
   inspectable. Opaque/encrypted continuation state is not public transcript content.
+- A user submission accepted while the model is busy is pending input, not yet a
+  normal user entry in the conversation. Owner wants it placed as a user message
+  when it “hits” the model. This changes current admission-ordered display semantics;
+  durable acceptance remains separate. The exact promotion boundary (request start
+  versus response evidence) is the current unresolved question.
 - Tool input must stream into the transcript as the model constructs the call,
   before execution. Providers that do not expose incremental input must not get
   fabricated streaming. Drafting a call is not authorization to execute it.
@@ -104,7 +109,11 @@ Source spot-check at `6519de9` on 2026-11-08; recheck before implementation.
   not JavaScript character positions. `hasMore=false` means the committed tail,
   not completion. Closed message, final text marker and execution settlement differ.
 - User text is saved in `input_decisions.original_text_utf8`; assistant text in
-  immutable `execution_output.text_utf8` segments. Submission text is limited to
+  immutable `execution_output.text_utf8` segments. Current `UserMessageStorage.cs`
+  inserts a user history-index row at admission, before `ClaimNextRequest` assigns
+  it to a model request. This conflicts with the newly requested display promotion
+  boundary; change the projection/order contract without weakening durable receipts.
+  Submission text is limited to
   16 KiB UTF-8. There is no implemented image upload/storage/delivery surface.
 - Tools are persisted separately in `execution_tools`; native continuation is in
   `execution_provider_context`. `LlmResponseAccumulator.cs` excludes reasoning from
@@ -143,9 +152,21 @@ anchor, preceding/following ranges, sections within a large item and independent
 inspection/media reads. They must not require full-history reconstruction.
 
 Resolve stable ordering across user messages, reasoning, assistant text and tools,
-including parallel tool calls and visible admission order versus model-delivery
-order. Derive display blocks without making generated HTML the source of truth.
-Define revision invalidation for edits and how a removed anchor falls back.
+including parallel tool calls. Owner clarified that pending user input is treated
+separately until it enters the model exchange, rather than appearing immediately
+among conversation messages. Current admission order and model-delivery order are
+different facts; retain admission evidence but do not equate it with display order.
+Derive display blocks without making generated HTML the source of truth. Define
+revision invalidation for edits and how a removed anchor falls back.
+
+Input promotion is still being defined. Recommendation: promote at the start of a
+request attempt containing the input, not after the first response, and preserve
+failed/uncertain attempt evidence without automatic resubmission. “The model read
+it” cannot be guaranteed from local dispatch alone. Current `ClaimNextRequest`
+durably assigns pending inputs and reconstructs context before provider enumeration;
+that is not proof of network delivery. Need an explicit lifecycle/read contract,
+not a UI guess based on receipt timing or first assistant text. Pending-input
+cancellation/recovery presentation and historical-data compatibility remain open.
 
 Read-only navigation feasibility check (2026-11-08):
 - `execution_messages` already has global `ordinal`, unique execution/role/message
@@ -304,12 +325,12 @@ source, not by asking the owner. Update this document immediately after decision
    content cache follows. Numeric targets, eviction/prefetch budgets and local
    persistence details remain unselected.
 3. **Content ownership/identity/order — current branch:** model-facing inspection
-   and pruner responsibility are resolved. Do not design raw retention/pruning here.
-   Next stress-test stable entry ordering when user input arrives during streaming:
-   retain the existing entry and update it in place, or split later content around
-   intervening input? Recommend stable entry identity and first-appearance order;
-   distinguish entry order from chunk arrival order and model-delivery order. Then
-   define relationships, draft-to-final identity and revision invalidation.
+   and pruner responsibility are resolved. Pending user input should not enter the
+   conversation until it “hits” the model (owner direction). Current question:
+   promote when a containing request starts, or wait for provider-response evidence?
+   Recommend request start and honest failed/uncertain attempt state, without
+   automatic requeue. Current admission-index projection must change. Then resolve
+   pending cancellation, relationships, draft-to-final identity and revisions.
 4. **Streaming recovery:** what the reader sees after interruption during tool-input
    generation; provisional versus retained evidence, cancellation and terminal facts.
 5. **Large-item correctness:** Markdown semantics, code/table virtualization,
@@ -373,6 +394,12 @@ shared-reference and cleanup failure cases; those are not implemented guarantees
   retrieval instructions to the pruner, not the UI/transcript. Do not build a pruning
   system in this work or ask the owner to settle its raw retention policy here.
   Transcript loading/eviction must not masquerade as model-context pruning.
+- Grilling ordering direction 6: queued/pending user input does not reach the model
+  immediately and should be treated separately. Only place it as a user message
+  when it “hits” the model. The previous assistant proposal assumed immediate
+  admission-ordered user display; that assumption is superseded. Promotion timing
+  needs a precise, observable definition and the public history projection needs
+  change; this does not authorize changing input admission/delivery guarantees.
 - Owner explicitly chose continuous formatting rather than a separate paged
   plaintext fallback for very large replies. Earlier suggested 128 KiB/message and
   2 MiB cache numbers were speculative and are **not selected requirements**.
@@ -394,8 +421,10 @@ prompt markers sharing the position model. Inactive-content eviction is approved
 hover warming is desired direction. Local reading anchors/following intent must
 survive browser reload/restart. Tool inspection defaults to model-facing content
 including reductions, not raw execution I/O. Pruner/producer owns omission and
-recall policy; do not expand this work into a pruning system. Current branch:
-content identity/order under interleaved user input and streaming.
+recall policy; do not expand this work into a pruning system. Pending user input
+must remain separate until it joins the model exchange. Current question: define
+“hits the model” as request-attempt start or provider-response evidence. Then
+continue content identity/order and pending cancellation/recovery semantics.
 Ask only unresolved questions,
 not questions already settled by position-preservation requirements. Continue down
 the dependency tree and keep recommendations distinct from decisions.

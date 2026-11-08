@@ -75,8 +75,9 @@ Distinguish throughout:
   content should reflect **what the model produces and is shown**, including
   tool-result pruning/reduction, rather than raw execution I/O. Interactive details
   remain reachable for selection/copy, keyboard and click, not fragile hover-only
-  text. Their data/rendering lifetime belongs in this design. Pre-pruning retention
-  and optional inspection are separate, still-open questions.
+  text. Their data/rendering lifetime belongs in this design. Pre-pruning omission,
+  recall instructions and retained source material are the pruner/producer's
+  responsibility, not a transcript/UI policy. A pruning system is outside this work.
 - Pie is a behavioral/visual reference, not an architecture, code or stylesheet to
   inherit. Do not spend this phase debating appearance. Current theme direction is
   flat dark surfaces, restrained separation, no shadows/bright popup surfaces,
@@ -262,12 +263,25 @@ to be what the model was shown. Input corresponds to what the model produces.
 The transcript is not a dump of hidden instructions or private native continuation.
 
 Keep these boundaries distinct: underlying process/service output; the tool's
-returned result; and its post-processing/model-facing representation. Pre-pruning
-retention and recall remain open. [Context lifetime evidence](CONTEXT-LIFETIME-EVIDENCE.md)
-distinguishes raw execution results from reduced model-facing results and does not
-establish universal upstream capture. [Storage research](STORAGE-RESEARCH.md) likewise
-leaves capture fidelity open. Earlier recommendations to make the original tool
-result the default inspector content are superseded by this clarification.
+returned result; and its post-processing/model-facing representation. Owner assigns
+omission/recall policy to the **pruner/producer**, not the transcript. For enormous
+output, that component may substitute an omission note and instructions/reference
+for retrieving the material. This work does not implement a pruner or select its
+thresholds, raw-result retention policy or recall mechanism.
+
+Transcript responsibilities stop at faithfully retaining/projecting the supplied
+model-facing content and its explicit references, then loading/rendering on demand.
+Viewport eviction must not alter the model-facing result; the UI must not invent
+omission notes, independently prune content or become a second raw-output archive.
+Any retained references still follow the existing shared-reference lifetime contract;
+separating responsibilities does not make a dangling recall link acceptable. The
+exact pruner/storage ownership interface belongs to that later feature.
+
+[Context lifetime evidence](CONTEXT-LIFETIME-EVIDENCE.md) distinguishes raw execution
+results from model-facing results; [storage research](STORAGE-RESEARCH.md) leaves
+capture fidelity open. Earlier proposals to make original tool results the default
+inspector content, or settle global pre-pruning retention in this UI discussion,
+are superseded by the owner's clarified boundary.
 
 Separate original files, generated previews, decoded previews, full-resolution
 viewer resources and pending clipboard/upload data. Small display size does not
@@ -289,13 +303,13 @@ source, not by asking the owner. Update this document immediately after decision
    survive browser reload/restart. No permanent hidden render trees or full persisted
    content cache follows. Numeric targets, eviction/prefetch budgets and local
    persistence details remain unselected.
-3. **Content ownership/identity/order — current branch:** inspector defaults to the
-   model-facing input/result, including tool-result reduction (owner clarified).
-   Current question: must pre-pruning results also remain inspectable, or is their
-   retention limited to explicit tool/artifact/recall needs? Recommend model-facing
-   history as primary, without an automatic duplicate raw-history archive. Do not
-   silently disable any separately required recall contract. Then resolve content
-   relationships, interleaving, draft-to-final identity and revisions.
+3. **Content ownership/identity/order — current branch:** model-facing inspection
+   and pruner responsibility are resolved. Do not design raw retention/pruning here.
+   Next stress-test stable entry ordering when user input arrives during streaming:
+   retain the existing entry and update it in place, or split later content around
+   intervening input? Recommend stable entry identity and first-appearance order;
+   distinguish entry order from chunk arrival order and model-delivery order. Then
+   define relationships, draft-to-final identity and revision invalidation.
 4. **Streaming recovery:** what the reader sees after interruption during tool-input
    generation; provisional versus retained evidence, cancellation and terminal facts.
 5. **Large-item correctness:** Markdown semantics, code/table virtualization,
@@ -355,6 +369,10 @@ shared-reference and cleanup failure cases; those are not implemented guarantees
   such as whitespace/format reduction and omission of huge output to protect context.
   The earlier original-tool-result default proposal is superseded. This clarification
   does not yet settle pre-pruning retention/recall or approve a reduction algorithm.
+- Grilling boundary 5: owner assigns large-output omission, omission notices and
+  retrieval instructions to the pruner, not the UI/transcript. Do not build a pruning
+  system in this work or ask the owner to settle its raw retention policy here.
+  Transcript loading/eviction must not masquerade as model-context pruning.
 - Owner explicitly chose continuous formatting rather than a separate paged
   plaintext fallback for very large replies. Earlier suggested 128 KiB/message and
   2 MiB cache numbers were speculative and are **not selected requirements**.
@@ -375,8 +393,9 @@ Navigation semantics (#1 above) is resolved: whole conversation, with future
 prompt markers sharing the position model. Inactive-content eviction is approved;
 hover warming is desired direction. Local reading anchors/following intent must
 survive browser reload/restart. Tool inspection defaults to model-facing content
-including reductions, not raw execution I/O. Current branch: whether pre-pruning
-results additionally need retention/inspection, then content identity/order.
+including reductions, not raw execution I/O. Pruner/producer owns omission and
+recall policy; do not expand this work into a pruning system. Current branch:
+content identity/order under interleaved user input and streaming.
 Ask only unresolved questions,
 not questions already settled by position-preservation requirements. Continue down
 the dependency tree and keep recommendations distinct from decisions.

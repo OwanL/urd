@@ -4,7 +4,9 @@ The local ASP.NET Core server composes Urd's existing Core and SQLite; it is not
 second backend. It now exposes seven operations: **create, list saved primary IDs, Send,
 receipt lookup, snapshot polling, content reads and addressed Stop**. The owner-approved
 listing slice is implemented and tested; verification evidence is below.
-UI, static assets, startup recovery and real providers are not implemented.
+UI, static assets and startup recovery remain outside this checkpoint. Separate
+[headless provider management](provider-management.md) now supports ChatGPT sign-in,
+OpenAI API keys and custom-compatible connections; chat execution still uses the fake client.
 Core now provides default durable safe-boundary steering
 for busy Sends in the owned execution; real tools, tool-inspection UI/API and an explicit after-execution
 queue remain deferred.

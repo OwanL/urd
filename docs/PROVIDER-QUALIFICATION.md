@@ -1,6 +1,6 @@
 # Provider access: qualification proposal
 
-**2026-11-04 — evidence and bounded recommendations, not an implemented integration.**
+**2026-11-04 research, with the 2026-11-08 headless implementation update below.**
 Scope: direct ChatGPT/Copilot subscriptions, API keys, and one local tool-capable
 route. No Pi dependency, Codex/Copilot agent-runtime adoption, hosted Urd credential
 broker, or Claude consumer-plan integration. This report selects no application
@@ -32,10 +32,12 @@ The owner also approved the authentication operation surface and library-first d
 official OpenAI .NET SDK, Duende's focused OAuth/OIDC packages and Microsoft's JWT validation,
 retaining the selected Microsoft.Extensions.AI boundary rather than adding an agent runtime.
 The [provider management design](scratch/provider-management-design.md) records the approved
-bites, their limits and remaining proposals. Exact model/result/HTTP shapes, persistence
-integration and adapter contracts still need focused review; this is not whole-slice
-implementation approval or qualification evidence. No live sign-in, existing credential access, model request
-or charge was authorized. Earlier route research below must be rechecked
+bites and their limits. The owner subsequently requested the execution plan and approved
+implementation, selecting ChatGPT as the first complete headless path. The implemented
+[provider-management contract](provider-management.md) records HTTP, persistence and
+lifecycle behavior; its tests use synthetic transports and local SQLite/Kestrel only.
+This is not live qualification evidence. No live sign-in, existing credential access,
+model request or charge was authorized. Earlier route research below must be rechecked
 against current provider contracts before implementation; Pi/Pie behavior is reference
 material, not authority to reuse their integration identities or subscription routes.
 

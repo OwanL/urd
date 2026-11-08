@@ -4,10 +4,12 @@
 owner. The manager owns credential management; the owner selected plaintext storage
 for the initial version rather than password/OS-key management. The authentication
 operation surface and flow are also approved, as is inclusion of an explicit single-model
-response test. Detailed result types, model-operation signatures and persistence
-integration remain proposals until reviewed. No provider implementation
-or live account activity is claimed. [Provider qualification](../PROVIDER-QUALIFICATION.md) owns route research
-and the bounded initial provider set.
+response test. This document retains the initial design/proposal record. The owner
+subsequently approved execution; the [implementation plan](provider-management-implementation-plan.md)
+and [delivered contract](../provider-management.md) record the final shapes, persistence
+and offline verification. No live account activity is claimed.
+[Provider qualification](../PROVIDER-QUALIFICATION.md) owns route research and the bounded
+initial provider set.
 
 ## Approved library-first direction
 

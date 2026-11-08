@@ -110,7 +110,7 @@ answered: **“Makes sense. of course we should keep things open, i am sure thin
 may change at implementation time”.** The working boundary puts identity/current
 execution, admission/Stop coordination and stale-update rejection in `SessionBase`;
 `SessionExecution` owns temporary task/cancellation/LLM-tool work, while
-`SessionStore` owns atomic durable writes and revision checks. Editing, assignment
+`UrdStore` owns atomic durable writes and revision checks. Editing, assignment
 and caller-specific policies stay with the appropriate concrete kind. “One run”
 means one main execution, not a ban on concurrent title generation. This supports
 a narrow shared base rather than another coordination helper **as a starting
@@ -184,7 +184,7 @@ Logical facts below are **not a final schema or new class per row**:
 | Follow-up | Stable registration/target, intended due time, request and dispatch/uncertainty evidence. A never-dispatched due request is not an interrupted effect being replayed. |
 | Retention | Compact usage after close; coordination facts while open participants/retained references need them; attachment references across sessions. No permanent conversation archive or unconditional infinite assignment retention. |
 
-Use a narrow `SessionStore` with intent-specific transactions, not an ORM,
+Use a narrow `UrdStore` with intent-specific transactions, not an ORM,
 event-sourcing engine or interchangeable-store framework. A small session lookup/
 creation coordinator (working name `SessionManager`) owns one active handle per
 ID and cross-session admission; it does not absorb the LLM loop. Session
@@ -261,7 +261,7 @@ test-project arrangement:
 src/Urd.Core/
   Sessions/                   SessionBase, PrimarySession, SessionExecution,
                               SessionManager — implemented behaviour, not stubs
-  Storage/                    SessionStore and required durable facts
+  Storage/                    UrdStore and required durable facts
 src/Urd.Server/               host entry/composition and actual HTTP handling
 src/Urd.Web/                  shared TypeScript/Preact UI; UI-specific test source
                               (internal organization/tooling still open)

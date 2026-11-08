@@ -8,6 +8,12 @@ saved-primary-ID discovery. The current listing increment passed locked restore 
 Core remains an ASP.NET-free .NET library. The [local Server](server-development.md)
 now exposes seven chat HTTP operations over it; UI is not implemented yet.
 
+The separate [headless provider-management slice](provider-management.md) adds saved
+ChatGPT/OpenAI/custom connections, authentication, model discovery and explicit response
+diagnostics. `UrdStore` is the mechanically renamed shared database owner; schema 6 adds
+provider tables without changing session SQL/evidence. Real providers are not wired into
+chat execution. Historical checkpoint counts below predate this provider slice.
+
 ## Naming and structure cleanup
 
 Core and HTTP now use **user message submission / acceptance / session execution**:

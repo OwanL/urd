@@ -68,3 +68,17 @@ Plaintext persistence deliberately does not protect copied/committed credential 
 Independent rough-plan review found no architectural blocker and identified orchestration
 races/restart fencing as the main verification risk. Exact private helpers can follow
 implementation evidence; substantive deviations from the agreed scope must be raised.
+
+## Execution result — 2026-11-08
+
+Milestones 1–5 are complete for offline delivery. Locked restore and the .NET 10.0.403
+Release build passed with zero warnings/errors; the full suite passed **453/453 tests**.
+Independent acceptance review approved the final source. Review-driven regressions cover
+late catalog results after changed grants, retained cancellation-callback drains and
+uncertain refresh recovery across restart. Existing migration fixtures now correctly
+exclude schema-6 tables when constructing older layouts.
+
+The [provider-management contract](../provider-management.md) documents the delivered
+HTTP/lifecycle surface. The build is available at the repository's normal Release output;
+no personal-data host, UI, browser or provider account was activated. Live sign-in,
+entitlement and response qualification remain separately authorized follow-up work.

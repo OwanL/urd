@@ -3,14 +3,14 @@
   position: relative;
   margin: 0 12px 12px;
   padding: 4px 7px 7px;
-  border: 1px solid #323335;
+  border: 1px solid var(--border-subtle);
   border-radius: 12px;
   background: var(--surface-input);
   color: var(--text-primary);
   box-shadow: 0 2px 8px #0002;
 }
 .composer:focus-within {
-  border-color: #5b5346;
+  border-color: #505050;
 }
 .composer-input {
   display: block;
@@ -79,17 +79,19 @@
   outline-offset: -1px;
 }
 .composer .composer-send {
-  background: var(--accent);
-  color: #25221d;
+  background: var(--surface-hover);
+  border-color: #3e3e3e;
+  color: var(--text-primary);
   border-radius: 7px;
 }
 .composer .composer-send:hover:not(:disabled) {
-  background: #dec499;
-  color: #25221d;
+  background: #353535;
+  color: var(--text-primary);
 }
 .composer .composer-send:disabled {
-  background: #373633;
-  color: #a9a193;
+  background: #232323;
+  border-color: transparent;
+  color: var(--text-secondary);
   opacity: 0.6;
 }
 .composer .composer-stop {
@@ -148,7 +150,7 @@
   color: var(--text-secondary);
 }
 .composer-model-search-row:focus-within {
-  border-color: #736347;
+  border-color: #707070;
 }
 .composer-model-search {
   width: 100%;

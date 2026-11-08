@@ -5,13 +5,20 @@ The browser uses Preact components and ordinary state/effects over typed
 by the same loopback Server; there is no second production server, API proxy or
 browser-side provider SDK. Provider credentials remain in the backend.
 
-The first screen is intentionally small: closable local tabs, transcript, model and
-reasoning selectors, Send and Stop. Settings and snooze are reserved inert icons,
-not fake settings screens. Provider setup, older-history navigation, Markdown and
-tool inspectors are outside this slice. Closing a tab hides the view; it does not
-stop work, close a backend session or delete history. Components and effects stay
-with their feature; hooks are extracted for actual responsibilities, not a state
-framework.
+The workspace has closable, reorderable local tabs, transcript, model and reasoning
+selectors, Send and Stop, and [provider settings](provider-management.md#browser-settings).
+Snooze remains unavailable. Older-history navigation, Markdown and tool inspectors
+are not implemented yet. Closing a tab hides the view; it does not stop work, close
+a backend session or delete history. Components and effects stay with their feature;
+hooks are extracted for actual responsibilities, not a state framework.
+
+Drag tabs on desktop, or focus a tab and use Alt+Shift+Left/Right to move it. Order is
+saved in the existing browser-session workspace without changing the active chat,
+drafts or backend sessions. Escape/outside drops cancel; the drag uses a private MIME
+type so dropping onto the composer cannot insert a tab ID. Touch dragging is not
+implemented. Normal arrow/Home/End navigation and Delete-to-close remain available.
+The palette uses neutral black/charcoal surfaces and grey controls; semantic error
+colours remain distinct. Rich transcript architecture is a separate workstream.
 
 ## Toolchain and checks
 

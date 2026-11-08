@@ -1,18 +1,18 @@
 :root {
   color-scheme: dark;
-  --surface-input: #1b1c1e;
-  --surface-popover: #222325;
-  --surface-hover: #2a2b2e;
-  --text-primary: #e4e1dc;
-  --text-secondary: #a3a19c;
-  --border-subtle: #363739;
-  --accent: #c8ad7f;
+  --surface-input: #141414;
+  --surface-popover: #1b1b1b;
+  --surface-hover: #262626;
+  --text-primary: #e3e3e3;
+  --text-secondary: #a0a0a0;
+  --border-subtle: #303030;
+  --accent: #c6c6c6;
   --danger: #e4a099;
   font:
     13px/1.6 system-ui,
     sans-serif;
   color: var(--text-primary);
-  background: #111213;
+  background: #050505;
 }
 * {
   box-sizing: border-box;
@@ -77,16 +77,16 @@ button:focus-visible,
   max-width: 230px;
   border: 1px solid transparent;
   border-radius: 7px;
-  background: #1a1b1c;
+  background: #151515;
   color: var(--text-secondary);
 }
 .chat-tab:hover {
-  background: #202123;
+  background: #202020;
 }
 .chat-tab.is-active {
   color: var(--text-primary);
-  background: #282725;
-  border-color: #4b4439;
+  background: #262626;
+  border-color: #424242;
 }
 .chat-tab > .tooltip-anchor:first-child {
   flex: 1;
@@ -126,7 +126,7 @@ button:focus-visible,
   cursor: default;
 }
 .icon-button:active:not(:disabled):not([aria-disabled="true"]) {
-  background: #353638;
+  background: #353535;
 }
 .chat-tab .close-tab {
   width: 27px;
@@ -188,10 +188,10 @@ button:focus-visible,
   max-width: min(86%, 52rem);
   margin-left: auto;
   padding: 9px 13px;
-  border: 1px solid #dfdcd5;
+  border: 1px solid #b4b4b4;
   border-radius: 12px 12px 4px 12px;
-  background: #d5d2cb;
-  color: #242424;
+  background: #a8a8a8;
+  color: #171717;
 }
 .message-assistant {
   max-width: 72rem;

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Composer } from "../chat/Composer.tsx";
 import { IconButton } from "../components/IconButton.tsx";
+import { Icon } from "../components/Icon.tsx";
+import { Settings } from "../settings/Settings.tsx";
 import { Tooltip } from "../components/Tooltip.tsx";
 import { ProviderClient } from "../providers/ProviderClient.ts";
 import type { LlmSelection } from "../providers/LlmSelection.ts";
@@ -18,6 +20,8 @@ import {
   submissionTextError,
 } from "./WorkspaceState.ts";
 import type { ChatState, WorkspaceState } from "./WorkspaceState.ts";
+import { ChatTabs } from "./ChatTabs.tsx";
+import { moveTab } from "./TabOrder.ts";
 import { Transcript } from "./Transcript.tsx";
 import type { ReadingPosition } from "./Transcript.tsx";
 import { useActiveChat } from "./useActiveChat.ts";
@@ -67,6 +71,10 @@ export function Workspace() {
   const [creating, setCreating] = useState(false);
   const createPending = useRef(false);
   const [ready, setReady] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsAnchor = useRef<HTMLButtonElement>(null);
+  const [catalogRevision, setCatalogRevision] = useState(0);
+  const providersChanged = useCallback(() => setCatalogRevision((value) => value + 1), []);
   const [models, setModels] = useState<ModelOption[]>([]);
   const [modelsError, setModelsError] = useState<string | null>(null);
   const [refreshingModels, setRefreshingModels] = useState(false);
@@ -219,7 +227,7 @@ export function Workspace() {
     }
     void catalogs();
     return () => controller.abort();
-  }, []);
+  }, [catalogRevision]);
   async function refreshModels() {
     setRefreshingModels(true);
     setModelsError(null);
@@ -490,64 +498,21 @@ export function Workspace() {
   return (
     <main class="workspace">
       <header class="top-strip">
-        <div
-          class="chat-tabs"
-          role="tablist"
-          aria-label="Chats"
-          onKeyDown={(event) => {
-            if (
-              !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key) ||
-              !workspace.tabs.length
-            )
-              return;
-            event.preventDefault();
-            const index = workspace.tabs.indexOf(activeId ?? "");
-            const next =
-              event.key === "Home"
-                ? 0
-                : event.key === "End"
-                  ? workspace.tabs.length - 1
-                  : (index + (event.key === "ArrowLeft" ? -1 : 1) + workspace.tabs.length) %
-                    workspace.tabs.length;
-            const id = workspace.tabs[next];
-            if (id) {
-              open(id);
-              requestAnimationFrame(() => document.getElementById(`tab-${id}`)?.focus());
-            }
+        <ChatTabs
+          tabs={workspace.tabs.map((id) => ({ id, title: workspace.chats[id]?.title ?? "Chat" }))}
+          activeId={activeId}
+          onOpen={open}
+          onClose={close}
+          onReorder={(id, beforeId) => {
+            const state = current.current;
+            const ordered = moveTab(
+              state.tabs.map((id) => ({ id })),
+              id,
+              beforeId,
+            );
+            save({ ...state, tabs: ordered.map((tab) => tab.id) });
           }}
-        >
-          {workspace.tabs.map((id) => (
-            <div class={`chat-tab ${id === activeId ? "is-active" : ""}`} key={id}>
-              <Tooltip content={workspace.chats[id]?.title ?? "Chat"} placement="below">
-                <button
-                  id={`tab-${id}`}
-                  role="tab"
-                  aria-selected={id === activeId}
-                  aria-controls="chat-view"
-                  tabIndex={id === activeId ? 0 : -1}
-                  onClick={() => open(id)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Delete") close(id);
-                  }}
-                >
-                  {workspace.chats[id]?.title ?? "Chat"}
-                </button>
-              </Tooltip>
-              <IconButton
-                icon="close"
-                class="close-tab"
-                label={`Close ${workspace.chats[id]?.title ?? "chat"}`}
-                hint={
-                  <>
-                    Close tab <kbd>Delete</kbd>
-                  </>
-                }
-                placement="below"
-                onClick={() => close(id)}
-              />
-            </div>
-          ))}
-        </div>
+        />
         <IconButton
           icon="plus"
           class="new-chat"
@@ -572,19 +537,28 @@ export function Workspace() {
             placement="below"
             aria-disabled="true"
           />
-          <IconButton
-            icon="settings"
-            label="Settings"
-            hint={
-              <>
-                Settings<span class="tooltip-detail">Not available yet</span>
-              </>
-            }
-            placement="below"
-            aria-disabled="true"
-          />
+          <Tooltip content="Settings" placement="below" disabled={settingsOpen}>
+            <button
+              ref={settingsAnchor}
+              type="button"
+              class="icon-button"
+              aria-label="Settings"
+              aria-haspopup="dialog"
+              aria-expanded={settingsOpen}
+              onClick={() => setSettingsOpen((value) => !value)}
+            >
+              <Icon name="settings" />
+            </button>
+          </Tooltip>
         </div>
       </header>
+      <Settings
+        open={settingsOpen}
+        anchor={settingsAnchor}
+        client={providers}
+        onClose={() => setSettingsOpen(false)}
+        onChanged={providersChanged}
+      />
       {globalError && (
         <div class="workspace-error" role="alert">
           {globalError}

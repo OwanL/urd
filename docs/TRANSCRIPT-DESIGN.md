@@ -44,6 +44,9 @@ Distinguish throughout:
   and markers must not develop incompatible position models.
 - Long replies remain in the **continuous formatted conversation**. Diverting
   oversized replies to a separate paged plain-text reader is not acceptable.
+- Reading position and following intent should survive browser reload/restart.
+  Retain small local navigation state, not full transcript content; no cross-client
+  navigation synchronization is required by this decision.
 - Inactive tabs may evict transcript content and briefly reload their reading
   window when revisited. Preserve the reading anchor and following intent; keeping
   every open tab warm is not required. Owner suggested predictive warming on hover
@@ -177,8 +180,11 @@ or prose appearance. This is a proposal needing provider capability investigatio
 
 Owner approved inactive-tab content eviction. Preserve small navigation state;
 retain a bounded shared warm cache rather than making memory grow with open tabs.
-Cold restoration targets the saved reading window directly. Whether anchors survive
-browser reload/restart is still open; current Workspace positions are in memory.
+Cold restoration targets the saved reading window directly. Owner approved saving
+small local anchors/following intent across browser reload/restart, independently of
+content caching. Current Workspace positions are in memory, so this requires a
+persistence change. Storage format, save cadence and removed-anchor fallback remain
+engineering questions; do not write full navigation state on every scroll frame.
 
 Owner suggested warming on hover, applicable to other on-demand interactions too.
 Proposed mechanism, not selected implementation: treat hover/focus as a hint to
@@ -238,6 +244,14 @@ bounded reads/rendering. Closing ends unnecessary subscription/rendering work;
 cache retention, if useful, must be explicit. Preserve original captured content;
 a formatted JSON display is not a substitute for the raw evidence that exists.
 
+Open capture boundary: a tool's returned result, Urd's later model-facing reduction,
+and all output emitted by an underlying process/service are different things.
+[Context lifetime evidence](CONTEXT-LIFETIME-EVIDENCE.md) distinguishes raw execution
+results from reduced model-facing results and does not establish universal upstream
+capture. [Storage research](STORAGE-RESEARCH.md) likewise leaves capture fidelity open.
+Do not accidentally promise complete subprocess logs merely by labeling an inspector
+“raw output”; do not present a reduced model-facing summary as the captured original.
+
 Separate original files, generated previews, decoded previews, full-resolution
 viewer resources and pending clipboard/upload data. Small display size does not
 mean small decode cost. Define dimensions, format validation, preview generation,
@@ -253,14 +267,17 @@ source, not by asking the owner. Update this document immediately after decision
    and arbitrary distant jumps; engineer height estimates with future user-prompt
    markers in mind. Open mechanisms: range summaries, target lookup, width-dependent
    measurements, drag stability and correction without visible content jumps.
-2. **Return to session — eviction resolved:** owner permits inactive content eviction
-   and suggests general predictive warming on hover. Preserve reading/following
-   state; no permanently mounted hidden trees. Current question: should small local
-   reading anchors survive browser reload/restart? Recommend yes, per browser/client,
-   without persisting full content caches or syncing navigation between clients.
-   Numeric targets, eviction policy and speculative-work budgets remain unselected.
-3. **Content identity/order:** message/content-part/tool relationships, interleaving,
-   draft-to-final identity and revisions. Derive schema/API from concrete scenarios.
+2. **Return to session — product behavior resolved:** owner permits inactive content
+   eviction, suggests predictive warming, and requires reading/following state to
+   survive browser reload/restart. No permanent hidden render trees or full persisted
+   content cache follows. Numeric targets, eviction/prefetch budgets and local
+   persistence details remain unselected.
+3. **Content ownership/identity/order — current branch:** first clarify what raw tool
+   output denotes: captured tool result before Urd reduction versus all underlying
+   process/service output. Existing docs deliberately do not promise universal raw
+   capture. Recommend preserving captured results and explicit artifact references,
+   without silently adding an unlimited process-log archive. Then resolve message/
+   content-part/tool relationships, interleaving, draft-to-final identity and revisions.
 4. **Streaming recovery:** what the reader sees after interruption during tool-input
    generation; provisional versus retained evidence, cancellation and terminal facts.
 5. **Large-item correctness:** Markdown semantics, code/table virtualization,
@@ -313,6 +330,8 @@ shared-reference and cleanup failure cases; those are not implemented guarantees
   open tab. Suggested warming on hover for tabs and similar on-demand interactions;
   exact triggers/work budgets remain engineering proposals, not blanket background
   fetching permission.
+- Grilling decision 3: owner approved restoring reading position after browser
+  reload/restart using small local navigation state; full content can still be evicted.
 - Owner explicitly chose continuous formatting rather than a separate paged
   plaintext fallback for very large replies. Earlier suggested 128 KiB/message and
   2 MiB cache numbers were speculative and are **not selected requirements**.
@@ -331,8 +350,9 @@ shared-reference and cleanup failure cases; those are not implemented guarantees
 Current task: engineering grilling and durable planning, not implementation.
 Navigation semantics (#1 above) is resolved: whole conversation, with future
 prompt markers sharing the position model. Inactive-content eviction is approved;
-hover warming is desired direction. Next resolve whether local reading anchors
-survive browser reload/restart, then content identity/order. Ask only unresolved questions,
+hover warming is desired direction. Local reading anchors/following intent must
+survive browser reload/restart. Current branch: raw tool-result capture boundary,
+then content identity/order. Ask only unresolved questions,
 not questions already settled by position-preservation requirements. Continue down
 the dependency tree and keep recommendations distinct from decisions.
 

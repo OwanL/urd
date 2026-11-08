@@ -156,6 +156,10 @@ The workspace gear opens a compact Settings panel following Pie's header/search/
 composition, initially with one **Providers** page. `source/ui/settings/Settings.tsx` owns
 the shell; `source/ui/providers/settings/` owns connection forms and operation state.
 Shared UI colour tokens and popover controls keep it aligned with the workspace.
+**Add a provider** sits above **Your providers**. Choosing a provider type reveals its
+creation form; existing providers start collapsed and open their controls inline, one
+at a time. Connection configuration is behind **Edit connection details**. Successful
+creation opens the new provider for authentication; rejected creation retains its draft.
 
 The page supports ChatGPT, OpenAI API-key and custom compatible connections: create,
 rename, custom binding changes, replace-only keys, sign-in/status/cancel, disconnect,
@@ -179,7 +183,11 @@ close/reopen, duplicate guards, search, focus restoration, retained chat drafts,
 short-height scrolling. OAuth UI transitions were intercepted with synthetic statuses;
 this UI check made **no real sign-in or inference requests**. The earlier live backend
 qualification below is separate. UI static checks, unit tests and the Vite build passed;
-independent code and visual reviews approved. The temporary fixture process/database was
+independent code and visual reviews approved. The later layout reorganization was checked
+on desktop/mobile with stateful synthetic API responses, including rejected creation,
+create during initial loading, close/reopen during creation, key clearing and removal.
+Those layout checks do not add backend or live-authentication qualification.
+The temporary fixture process/database was
 removed; shared workspace integration and palette/tab changes are coordinated separately.
 
 ## Qualification

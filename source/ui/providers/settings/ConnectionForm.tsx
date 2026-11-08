@@ -1,6 +1,6 @@
 import { useId } from "preact/hooks";
 import type { ProviderConnection } from "../ProviderConnection.ts";
-import type { AddDraft, ConnectionDraft } from "./ProviderSettingsController.ts";
+import type { ConnectionDraft } from "./ProviderSettingsController.ts";
 import type { ProviderSettingsState } from "./useProviderSettings.ts";
 
 export const providerNames = {
@@ -13,10 +13,14 @@ export function ConnectionForm({
   state,
   connection,
   disabled,
+  onCreate,
+  onCancel,
 }: {
   state: ProviderSettingsState;
-  connection: ProviderConnection | undefined;
+  connection?: ProviderConnection;
   disabled: boolean;
+  onCreate?: () => void;
+  onCancel?: () => void;
 }) {
   const id = useId();
   const { actions } = state;
@@ -30,27 +34,10 @@ export function ConnectionForm({
       onSubmit={(event) => {
         event.preventDefault();
         if (connection) void actions.save(connection);
-        else void actions.create();
+        else onCreate?.();
       }}
     >
       <fieldset disabled={disabled}>
-        {!connection && (
-          <fieldset class="provider-settings-choices">
-            <legend>Provider</legend>
-            {Object.entries(providerNames).map(([value, label]) => (
-              <label key={value}>
-                <input
-                  type="radio"
-                  name={`${id}-route`}
-                  value={value}
-                  checked={state.add.route === value}
-                  onChange={() => actions.editAdd({ route: value as AddDraft["route"] })}
-                />
-                {label}
-              </label>
-            ))}
-          </fieldset>
-        )}
         <label class="provider-settings-field">
           Name
           <input
@@ -70,10 +57,21 @@ export function ConnectionForm({
             {connection.api === "openAIResponses" ? "Responses" : "Chat Completions"}
           </p>
         )}
-        <button type="submit" class="provider-settings-primary" disabled={!draft.name.trim()}>
-          {connection ? "Save changes" : "Add connection"}
-        </button>
       </fieldset>
+      <div class="provider-settings-actions">
+        <button
+          type="submit"
+          class="provider-settings-primary"
+          disabled={disabled || !draft.name.trim()}
+        >
+          {connection ? "Save changes" : "Add provider"}
+        </button>
+        {onCancel && (
+          <button type="button" onClick={onCancel}>
+            Cancel
+          </button>
+        )}
+      </div>
     </form>
   );
 }

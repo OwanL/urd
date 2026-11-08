@@ -827,6 +827,10 @@ shared-reference and cleanup failure cases; those are not implemented guarantees
   proportional to session length may be held in browser memory casually.
   Observation: Urd's 16 KiB stored tool-result cap is below the median session's
   largest model-facing result (33 KB); details must not assume small results.
+  Same data: the largest tool **arguments** exceed 16 KiB in about 10% of sessions
+  (p90 16 KB, max 64 KB, e.g. whole-file writes), which Urd's current 16 KiB argument
+  cap would reject. These are execution-layer limits outside transcript scope, but
+  the transcript must not bake them in.
 - Grilling decision 27: entries record when they happened; tool calls record start
   and end; each model reply records token usage and estimated cost. Captured now so
   later hover/detail views have data. Observed: `LlmResponseAccumulator` currently

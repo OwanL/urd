@@ -1,301 +1,215 @@
-# Transcript stage 1 — history and navigation foundation
+# Transcript stage 1 — history, live updates and placement foundation
 
 **Status: concrete proposal for review, not implementation approval.**
 Source checked at `5c9392f` on 2026-11-09. Requirements are owned by
 [Transcript design](TRANSCRIPT-DESIGN.md); parsing evidence is separate.
 No production code, dependency, migration or running-application change is made here.
+Revised 2026-11-09 after checking the plan against the overall requirements
+(low overhead, snappy streaming, tool rows, images, Markdown, animation).
 
 ## Outcome and explicit boundary
 
-Make saved conversation history addressable without loading bodies or walking from
-the newest page. Place newly accepted input in the conversation when a send attempt
-starts, not merely when the submission is accepted. Preserve receipt idempotency,
-execution authority, Stop, failure and uncertainty guarantees.
+Build the foundation later stages render on:
+1. a history index whose unit is a **transcript entry** (user message, assistant
+   text, tool call), addressable without loading bodies;
+2. bounded anchor-based reads of that index;
+3. **push change notices** replacing 350 ms snapshot polling;
+4. input placed in the conversation when a send attempt starts.
 
-This stage is **not the finished whole-history scrollbar**. Message rank/count is
-useful for indexed navigation, but is not an estimate of rendered height. One huge
-reply must eventually occupy more scroll space than a short prompt. Weighted
-structural estimates and within-message positions belong with stage 2's formatting
-projection. Do not ship an equal-height/count-based scrollbar as satisfying that
-requirement, or persist cumulative pixel offsets that require rewriting every later
-row when earlier content grows/reflows.
+Urd is not yet used for real work; prefer the right foundation over preserving
+interim UI behavior, but never weaken receipts, Stop, failure or uncertainty rules.
 
-No Markdown parser, DOM virtualizer, tool/reasoning projection, attachment delivery,
-search, transport replacement or custom event framework is included. Keep current
-text content reads and their UTF-8 cursors. Minimal pending-input UI integration is
-required if admission-time conversation rows are removed; do not make accepted text
-silently disappear while waiting for stage 2.
+Not included: Markdown parsing, DOM virtualization, rendered-height estimation,
+whole-history scrollbar positions, tool input/output inspection, tool-draft
+streaming, reasoning, attachments, search, custom event framework. Keep current
+text content reads and their UTF-8 cursors.
 
-## 1. Identity and indexed ordering
+## Review corrections applied
 
-- Keep `MessageRef` (execution, role, message ID, history revision) as the identity of
-  an existing text message. Requests, executions, messages and submission IDs remain
-  different concepts. A future content-part anchor can extend a message location;
-  do not pretend tool calls already are these text messages.
-- Keep global `execution_messages.ordinal` as insertion evidence. It is not a
-  session rank: other sessions create gaps.
-- Proposed addition: dense zero-based `position` per session/history revision,
-  allocated only when a visible message is inserted. Add an index on
-  `(session_id, history_revision, position)` and a small per-history summary with
-  message count and an observation version. Allocation, row insertion and summary
-  update occur in the same transaction; replay must not increment them twice.
-- Existing `(run_id, role, message_id)` identity uniqueness remains. New input rows
-  are ordered by their admitted input order **within the request being started**.
-  Assistant rows still enter on first saved output segment, not on request claim.
-- Backfill positions once in existing ordinal order. Do not rescan/recount history
-  during each window request. Revisions scope positions; they are not permanent
-  identities across suffix replacement or future content-index reconstruction.
-- Return new Int64 positions/counts/versions as invariant decimal strings, not JS
-  numbers. Existing revision/segment numeric contracts are unchanged in this stage;
-  their pre-existing safe-integer limitation is not solved by this addition.
+- **Wrong index unit.** The first draft indexed only user/assistant text. Tool calls
+  live in `execution_tools`, outside the index; a tool-only response is just an empty
+  assistant entry. A tool-heavy session (hundreds of calls) could not anchor, window
+  or bound its tool rows, and stage 3 would have to rebuild identities/order. The
+  index now holds kind-tagged entries, and empty assistant entries need not render.
+- **Rank/count dropped from stage 1.** A dense message rank is not scroll geometry;
+  stage 2 must build a weighted position index anyway. Building both means two
+  migrations and per-write summary maintenance for little benefit. Positional lookup
+  moves to stage 2, designed once with its real weights.
+- **Persisted observation version dropped.** Updating a summary row on every streamed
+  chunk adds write cost on the hottest path. Change tracking becomes an in-memory
+  per-session counter feeding push notices (section 3).
+- **Polling replaced.** Up to 350 ms display lag plus a 60-preview reread per poll
+  contradicts snappy streaming and low overhead; tool-input streaming would inherit it.
 
-This deliberately adds rank navigation, not a speculative weighted tree. Stage 2
-must choose and qualify indexed weighted lookup with its actual structural units;
-rank lookup alone does not close that gate. No parser or body scan is needed for
-stage 1's steady-state index maintenance.
+## 1. Entry identity and order
+
+- Extend the existing history index (`execution_messages`, renamed only if clarity
+  warrants the churn) to hold **kind-tagged entries**: `user`, `assistant`, `tool`.
+  Reasoning and attachment-bearing kinds are added later without changing anchors.
+- Entry identity is a stable reference: execution, kind, entry ID, history revision.
+  `MessageRef` stays valid for text entries; tool entries reference
+  `(request, call ID)` and carry a GUID entry ID like the others. Do not overload
+  request, execution, submission and entry identities.
+- Order is the index's insertion order (`ordinal`), scoped by session/revision
+  through the existing `(session_id, history_revision, ordinal)` index. Global
+  ordinal gaps are fine for keyset reads; they are not ranks and never displayed.
+- Insertion points: user entries at send-attempt start (section 4); assistant entry
+  on first saved output segment (unchanged); tool entries when the call is saved
+  at request completion, ordered by `call_index`. Stage 3's draft calls must
+  allocate the entry when first observed and keep it through finalization — note
+  now, implement then.
+- Migration backfills tool entries for existing saved calls after their request's
+  assistant entry (or in request order when none exists), preserving existing
+  message order. Ordinals are append-only, so the migration rebuilds the index in
+  the merged order rather than appending tool rows at the tail. Do not reorder
+  legacy user rows.
 
 ## 2. Bounded history reads
 
-Proposed route: `GET /api/sessions/{sessionId}/history`. One reader/contract supports
-mutually exclusive modes rather than separate implementations of nearly identical
-queries. Concrete public names below are proposals to settle before coding.
+Proposed route: `GET /api/sessions/{sessionId}/history`, one reader with modes:
 
 | Mode | Input | Result |
 | --- | --- | --- |
-| `latest` | Expected history revision | Newest bounded window, oldest first |
-| `before` | Exact message reference + expected revision | Strictly earlier neighbors, oldest first |
-| `after` | Exact message reference + expected revision | Strictly later neighbors, oldest first |
-| `around` | Exact message reference + expected revision | Window including that exact anchor |
-| `position` | Decimal rank + expected revision | Window around a known message rank, not a pixel fraction |
+| `latest` | Expected revision | Newest window, oldest first |
+| `before` / `after` | Exact entry reference + expected revision | Strict neighbors, oldest first |
+| `around` | Exact entry reference + expected revision | Window including the anchor |
 
-Reuse the existing 60-message ceiling as an initial **metadata page size**, not a
-new source-memory/cache budget. Allow smaller positive limits up to that ceiling;
-reject invalid limits/mixed selectors. For `around`/`position`, aim for half the
-remaining slots before the anchor, then after; fill unused slots from the other
-side near a boundary. Empty history returns an empty latest page. A rank outside
-nonempty history or missing exact anchor is not silently changed to latest.
+- Initial window ceiling: reuse the existing 60-entry convention as a **metadata page
+  size**, not a memory/cache budget. Refill from the other side near a boundary.
+- Descriptors carry no bodies or previews: entry reference, kind, lifecycle facts.
+  Text: committed extent (`AvailableThrough`), closed, final-output marker.
+  Tool: name, started/outcome. Execution settlement is reported per execution once
+  per page, not repeated per entry. Arguments/results stay out (stage 3 inspection).
+- One `Database.Read` transaction per page; `hasBefore`/`hasAfter` via indexed
+  lookahead. Stale revision → existing 409, checked before anchor lookup; missing or
+  wrong-session anchor → not found. No server-side fallback to latest.
+- Appends do not change history revision; pages are individual observations merged
+  by entry identity, not a frozen paging snapshot.
+- Snapshot stops carrying 60 previews once the transcript reads history; keep it to
+  session/execution status, pending input, and **one short preview of the first
+  user entry** for session naming. `WorkspaceCommands` currently names discovered
+  sessions from `snapshot.messages`; packet 1B migrates that consumer to the new
+  field in the same change, with a discovered-session regression. Removing the
+  other 59 preview reads removes most of the per-update body decoding.
 
-One transaction reads revision, summary, bounded message identities, lifecycle
-metadata and boundary flags. Descriptors contain no text preview/body:
-- message reference and position;
-- committed content extent (`AvailableThrough` using the existing cursor meaning);
-- message closure, final-output marker and execution settlement as distinct facts.
+## 3. Push change notices
 
-Envelope: session/revision, observation version, message count, chronological
-entries, oldest/newest references, and `hasBefore`/`hasAfter`. Boundary flags use
-indexed existence/lookahead, not full counts. Exact message identity must be checked
-against the addressed session before an index seek; a reference from another session
-is not a position shortcut.
+- One streamed response per **visible** session: `GET .../events`, consumed with
+  `fetch` + a stream reader, so the existing `X-Urd-Client` header gate is kept
+  (`EventSource` cannot send it). Server-Sent Events framing is sufficient; no
+  WebSocket, no new dependency.
+- Notices are tiny and coalescing: `{ boot, version }` plus optionally the changed
+  entry kinds. No content, no event log, no replay. The client compares versions and
+  reads what is on screen (history window tail, open content) — at most one read in
+  flight per kind, newest notice wins.
+- `SessionBase` owns all session writes, so it bumps an **in-memory** counter after
+  each change that affects reads: committed changes (entry insert, output append,
+  tool state, settlement, pending input, Stop) **and in-memory state changes the
+  snapshot exposes**, such as admission fencing after an unexpected execution
+  failure or a failed store write. Bump the counter where the state changes, not
+  per storage call, so no observable transition is missed. `boot` identifies the
+  process so restarts force a full resync. Nothing is persisted.
+- Writers never wait for subscribers: a slow or vanished client only misses
+  intermediate versions. Bound subscribers per session; drop on disconnect.
+- On connect/reconnect the client does a normal snapshot + history read; the stream
+  only says "something changed". Hidden tabs hold no stream (consistent with
+  eviction); focus/visibility reconnects.
+- **No lost final update — subscribe first, then read.** The server registers the
+  subscriber and reads the current version under the session gate, then sends that
+  as the first event. The client starts its snapshot/history reads only after that
+  first event. Any commit after registration therefore produces a later notice; any
+  commit before it is covered by the initial reads. If a notice arrives while a read
+  is in flight, schedule exactly one more read after it completes rather than
+  dropping the notice. A periodic heartbeat detects a dead connection; reconnect
+  repeats this handshake. Test a settlement committed during connection setup.
+- Live latency is then bounded by output commit cadence (currently a 100 ms flush
+  interval in `LlmResponseWriter`), not the 350 ms poll. Measure
+  commit → notice → rendered delay on a local fixture; if commit batching dominates,
+  that is the next thing to tune, not a reason to send content in notices.
 
-Expected revision is checked **before anchor lookup**, including an empty page:
-stale revision follows existing HTTP 409 behavior; absent anchor/session follows
-existing not-found conventions; malformed selector follows validation conventions.
-Do not invent a latest-history fallback in the server. Stage 2 owns the user-visible
-removed-anchor recovery policy.
+## 4. Conversation placement at a send attempt
 
-### Consistency, not a frozen paging snapshot
+Unchanged from the reviewed draft in substance:
 
-Each page is one coherent observation. Appends can occur between pages without a
-history revision change. `before`/`after` keysets preserve existing neighbors while
-new tail entries arrive; callers merge by identity and compare observations, not
-concatenate as if every response belonged to one frozen history.
+- After client/options preparation, immediately before
+  `IChatClient.GetStreamingResponseAsync`, an awaited `StartRequestAsync` marks the
+  request attempted and inserts its assigned inputs as user entries, in admission
+  order, in one transaction. Idempotent; joins the session gate; refuses after Stop.
+- Request attempt fact: `not attempted` / `attempted` / legacy `unknown`. An attempt
+  is not proof of delivery; crash between commit and network call stays uncertain.
+- Failure after the hook keeps the message with the failed attempt; no requeue.
+  Save failure of the marker escapes as execution uncertainty, never as an ordinary
+  provider error, and the provider is not called.
+- `LlmContextReader` excludes prior requests known never attempted; keeps the
+  current batch and legacy history.
+- Pending inputs appear in the snapshot (bounded by the existing outstanding cap).
+  Terminal never-attempted inputs are **not sent**: discoverable through a sparse,
+  keyset-paged session listing; text read through the existing receipt route;
+  explicit resend uses a new submission ID; drafts are never overwritten.
 
-Increment the observation version for changes affecting returned descriptors or
-summary: message insertion, committed content advancement/final marker, and relevant
-closure/settlement. Do not bump it for unrelated provider settings or navigation.
-It is a change token, not a durable event stream. Audit all mutation paths, including
-terminal updates, when implementing; a count-only version would miss live-tail data.
-
-Snapshot and history are separate observations unless explicitly read together.
-Do not claim that separately requested HTTP responses share a transaction. Keep
-existing bounded snapshot previews for compatibility, but implement their message
-selection/lifecycle joins through shared helpers where useful to avoid drifting
-semantics; the new metadata endpoint itself must never call `ReadPreview`.
-
-## 3. Conversation promotion at a send attempt
-
-### Chosen proposal: application send-attempt boundary
-
-After the borrowed chat client and request options are prepared, immediately before
-calling `IChatClient.GetStreamingResponseAsync`, call an awaited session-owned
-operation, proposed name `StartRequestAsync`. It transactionally marks the request
-attempt and promotes only that request's assigned inputs. Calling the marker only
-before `MoveNextAsync` is too late for injected clients that start work eagerly.
-
-This is an **attempt**, not proof that the provider/model received anything.
-Provider wrappers currently do some authentication/validation lazily during
-enumeration; those later failures therefore stay with the attempted conversation
-message. Keeping that simple boundary avoids threading a delivery callback through
-every provider adapter. It is the proposed implementation interpretation of the
-owner's failed-send example, not a claim that claim/receipt timing proves delivery.
-
-The database commit and external invocation cannot be atomic. A crash/Stop between
-them may leave an attempted message that was never transmitted. Preserve that
-uncertainty; do not requeue or silently erase it. No exact network-delivery protocol
-is proposed.
-
-### Required state and transitions
-
-Add one request-level attempt fact, not per-input independent dispatch state:
-new requests start `not attempted`; crossing the hook sets `attempted`; legacy
-requests can be `unknown`. Their assigned inputs inherit that fact.
-
-| Event | Durable/input behavior | Conversation behavior |
-| --- | --- | --- |
-| Accept | Save receipt and execution input as today | Pending, no new normal message row |
-| Claim | Bind input batch to a request and freeze context as today | Still pending |
-| Start attempt | Validate owner/revision/non-stopping run and matching unfinished request; commit marker + ordered input rows atomically | Promote once, before calling client |
-| Later failure/Stop | Preserve claim and attempt; use existing cleanup/settlement | Keep message with failed/cancelled/uncertain attempt |
-| Failure/Stop before attempt | Retire according to existing execution rules; never auto-resend | Keep recoverable not-sent input separate, not a normal conversation message |
-| Exact submission retry | Return original receipt; no new admission or send | No duplicate message/promotion |
-
-`StartRequestAsync` must join the existing session gate/ownership discipline and be
-idempotent for the same request. Stop winning the gate prevents a fresh attempt;
-a marker already committed remains evidence of an attempt even if cancellation wins
-before invocation. Do not hold a database/session lock during provider execution.
-
-A rejected attempt operation must not call the provider. An exception/ambiguous
-save must escape as execution uncertainty using the established fencing path, not
-be caught as an ordinary provider error and falsely settled. Cover the broad catch
-in `SendRequestAsync` explicitly; the output-save uncertainty pattern is relevant.
-
-### Context eligibility is part of this change
-
-`LlmContextReader` currently includes historical user inputs when merely claimed.
-Keep the **current** request's assigned inputs while constructing its frozen context,
-but exclude prior requests known never to have crossed the attempt boundary. Keep
-legacy-unknown inputs compatible with existing history rather than guessing they
-were unsent. Preserve request/tool/provider-context ordering and continuation rules.
-Without this change, a pre-attempt failure could invisibly reappear in a later model
-request despite never becoming a conversation message.
-
-## 4. Pending and never-sent inputs
-
-Expose pending input independently of `Messages`, using existing execution/input
-identities. Add a bounded snapshot projection for the current execution's waiting
-inputs; reuse the existing outstanding-input cap rather than hydrate every accepted
-submission in history. Distinguish waiting from claimed-but-not-attempted internally;
-neither means delivered. Input body retrieval stays separate from metadata.
-
-Proposed recovery rule: retain terminal never-attempted input as **not sent**, with
-copy/explicit resend available; do not overwrite the current composer draft. An
-explicit resend uses a new submission ID. Reusing the original ID must continue to
-return the original receipt. Recovery needs **discovery**, not only a body-read API:
-after later executions and reload, the client may no longer know the older execution
-or submission ID.
-
-Proposed bounded discovery: a session-scoped `not-sent` listing, keyset-paged in
-input order, backed by a sparse derived index of terminal, known-unattempted input
-references. Update it transactionally when those inputs retire; do not scan all
-successful inputs to find rare failures. A snapshot may expose an indexed existence
-flag, not the whole archive. Records identify execution/submission, outcome and
-ordering cursor; retrieve original text using the **existing receipt read**
-(`GET /message-submissions/{submissionId}`), which already returns the retained
-submission. Preserve its current text bound. Do not duplicate the submission body.
-The sparse projection is not a second dispatch authority; attempted/legacy-unknown
-requests must never be inferred to be definitely not sent.
-
-Provide an explicit on-demand way to open that listing after reload, independent of
-the latest settlement or local submission journal. No unsolicited popup, automatic
-retry, queue editing, dismissal protocol or general execution archive is proposed.
-
-The exact pending/not-sent presentation and minimal client wiring are part of the
-1B plan review, before removing admission-time rows. Do not implement invisible
-pending-state changes backend-only and declare the stage complete.
+Promotion from pending to conversation is a visible transition. It must not move
+content the user is reading: append below the reading anchor, and when following
+the tail, keep following. Any animation is transform/opacity only, respects reduced
+motion, and does not delay the state change.
 
 ## 5. Existing data
 
-Schema v8 has no send-attempt fact. Existing output supports an attempt; absence of
-output does not prove no attempt. Original admission-time ordinals cannot reconstruct
-true send chronology. Recommended migration: **preserve existing visible rows/order**,
-backfill dense positions in that order, and leave missing attempt provenance unknown.
-New writes follow the new placement rule. Do not guess, delete accepted text, replay
-work or reorder old conversations to fabricate historical certainty.
+Schema v8 has no attempt fact. Preserve existing visible rows and order, mark
+attempt provenance unknown, backfill tool entries as above. No guessed reordering,
+deletion or replay. Genuine old-schema fixture tests upgrade/rollback. No live
+`C:/dev/data/urd` migration is authorized by this plan.
 
-A genuine old-schema fixture must test upgrade and rollback, including existing
-failed/unsettled requests. No live `C:/dev/data/urd` migration is authorized by this
-plan. Future revision replacement must rebuild/remove matching derived positions
-and reject stale anchors; this stage does not add a history-edit command.
+## 6. Implementation packets
 
-## 6. Implementation packets and ownership
+Sequential; they share storage/session files.
 
-These packets are sequential where they share contracts; they are not parallel
-assignments to edit the same storage/session files.
+**1A — entry index and history reads.** Migration (entry kinds, tool backfill),
+history reader, core method, route, typed client. Old user placement unchanged.
 
-**1A — metadata navigation, old placement preserved.** Finalize contracts; migrate
-rank/count/version metadata; add indexed history reader/core method/server route and
-typed client calls. Cover reads, migration and version updates. No UI scrollbar or
-pending-input behavior changes yet. This packet can be reviewed independently.
+**1B — push notices.** In-memory session version, events route, client stream
+reader replacing `useSessionSnapshot` polling for visible sessions; snapshot slimmed
+once the transcript reads history. Keep the existing rendered regressions passing.
 
-**1B — send-attempt placement, complete small vertical slice.** Add the attempt
-fact/hook, context eligibility, pending/not-sent projection and minimal client
-presentation together. Coordinate Workspace/Transcript ownership, reuse the newly
-extracted Workspace command/persistence boundaries, and retain rendered regression
-coverage. Do not mix this with rich Markdown or CSS redesign.
+**1C — send-attempt placement.** Attempt fact/hook, context eligibility, pending and
+not-sent projection with minimal client presentation, promotion without anchor
+movement.
 
-Likely owning files:
-- Backend: `core/sessions/Messages.cs`, `SessionSnapshot.cs`, `SessionBase.cs`;
-  `core/storage/DatabaseSchema.cs`, `SnapshotReader.cs`, `MessageContentReader.cs`,
-  `UserMessageStorage.cs`, `SessionExecutionStorage.cs`, `LlmResponseStorage.cs`,
-  `LlmContextReader.cs`; `core/execution/SessionExecution.cs`.
-- New focused history reader/contract files as appropriate; no giant generic service.
-- Hosting: `source/hosting/server/SessionRoutes.cs`.
-- UI: `source/ui/sessions/Messages.ts`, `SessionClient.ts`; minimal pending projection
-  integration in the existing workspace/transcript owners after coordination.
+Likely owning files: backend `core/sessions/` (`Messages.cs`, `SessionSnapshot.cs`,
+`SessionBase.cs`), `core/storage/` (`DatabaseSchema.cs`, `SnapshotReader.cs`,
+`MessageContentReader.cs`, `UserMessageStorage.cs`, `SessionExecutionStorage.cs`,
+`LlmResponseStorage.cs`, `LlmContextReader.cs`), `core/execution/SessionExecution.cs`,
+a new focused history reader; `source/hosting/server/SessionRoutes.cs`; UI
+`sessions/Messages.ts`, `SessionClient.ts`, `app/useSessionSnapshot.ts` and the
+existing workspace/transcript owners after coordination.
 
-## 7. Acceptance tests and stop conditions
+## 7. Acceptance checks
 
-Reuse `SessionSnapshotStorageTests`' synthetic seeding, poisoned omitted bodies and
-query-plan helpers; extract helpers rather than copy entire fixtures. Use existing
-`MessageContentTests`, `ExecutionStorageTests`, `SteeringFlowTests`, `SessionStopTests`,
-`SessionExecutionTests`, `SessionRoutesTests`, `SessionClient.test.ts` and the offline
-rendered workspace regression where their behavior is affected.
+Reuse `SessionSnapshotStorageTests` seeding/poisoned-body/query-plan helpers,
+`MessageContentTests`, `ExecutionStorageTests`, `SteeringFlowTests`,
+`SessionStopTests`, `SessionExecutionTests`, `SessionRoutesTests`,
+`SessionClient.test.ts` and the offline rendered workspace regression.
 
-- Latest/before/after/around/rank: boundaries, empty history, exact anchor inclusion,
-  wrong-session identity, stale revision before lookup, bounded pages, consistent
-  flags/count/version and identity-based merge under append.
-- Interleaved sessions and global ordinal gaps; direct distant-rank lookup with no
-  OFFSET or repeated whole-history COUNT; poisoned bodies prove metadata reads do
-  not decode text. A large omitted body must not affect response payload size.
-- Compare synthetic small and long histories using query plans and observed work;
-  do not assert that a SEARCH plan alone proves flat latency. Measure write overhead
-  from the summary/version updates as well as read speed.
-- Promotion: blocked fake client, multiple admitted steering inputs, no row before
-  attempt, one ordered promotion, failure after hook, local failure before hook,
-  synchronous/eager client behavior, Stop races and exact receipt retry.
-- Ambiguous marker-save failure must invoke no provider and preserve uncertainty;
-  do not silently mark it failed-and-retryable. Existing tool cleanup/authority
-  and unowned-execution behavior must remain unchanged.
-- Context excludes known unattempted prior inputs while retaining the current batch
-  and legacy history. Never infer tool non-execution from missing display rows.
-- Waiting/not-sent text remains recoverable without overwriting drafts; explicit
-  resend creates new identity, while retrying the old identity does not resend.
-  Cover pre-attempt failure, a later successful execution, browser reload, then
-  discovery/copy/resend of the original not-sent input. Its discovery query must stay
-  bounded when surrounded by many successful inputs.
-- Real migration and reopen preserve old content/order and do not fabricate attempt
-  provenance. New count/version/position strings round-trip above JS safe-integer
-  range using small focused fixtures, without allocating that many history rows.
+- Reads: all modes, boundaries, empty history, wrong-session anchor, stale revision,
+  mixed kinds including a tool-only request, interleaved sessions; poisoned bodies
+  prove no text/argument decoding; indexed plans without OFFSET/COUNT scans.
+- Push: notice after each change kind; coalescing under a fast stream; a stalled
+  subscriber does not slow writes; reconnect and process restart resync; hidden tab
+  holds no stream; a final settlement committed between server registration and the
+  client's first read is still displayed; a failed output/settlement write after
+  subscription, with no later commit, still surfaces the fenced/uncertain state. Measure commit-to-render delay and per-update request count
+  against current polling on the same fixture.
+- Placement: no user entry before attempt; ordered promotion of several steering
+  inputs; failure before/after hook; eager client; Stop races; exact receipt retry;
+  ambiguous marker save → no provider call, uncertainty preserved; context excludes
+  never-attempted input; not-sent discovery after a later run and reload.
+- Migration preserves legacy order and invents no attempt provenance.
 
-No fixed millisecond, row-count scale ceiling or cache budget is selected here.
-Record representative query/allocation results before signoff; regressions or
-unbounded scans are blockers, not reasons to quietly raise limits. Stage 1 completion
-proves the addressed read/placement contracts—not rich rendering, estimated pixel
-geometry, full-history UI navigation or overall transcript memory performance.
+No millisecond targets or cache budgets are fixed here; record measured results.
+Stage 1 proves read, notice and placement contracts — not rich rendering,
+scroll geometry or overall transcript memory.
 
-## Review status
+## Decisions before implementation
 
-Independent source-grounded review found a missing discovery path for old never-sent
-inputs. Section 4 and its failure → later execution → reload regression now close
-that gap; targeted re-review approved the correction. This was static plan review,
-not implementation or runtime qualification. Packet 1A does not depend on building
-the separate not-sent discovery feature in packet 1B.
-
-## Review decisions before implementation
-
-1. Approve packet 1A as the first implementation boundary, with rank explicitly
-   distinct from scrollbar geometry; or require weighted positioning in this stage.
-2. Confirm the proposed application-level attempt interpretation and minimal
-   pending/not-sent recovery slice before packet 1B.
-3. Recheck current owners and actual source state, then issue bounded implementation
-   work. This plan alone does not authorize source edits, installation or activation.
+1. Approve this revised stage 1 (entries, reads, push, placement) as the first
+   implementation scope.
+2. Recheck owners and source state, then issue bounded packets 1A → 1B → 1C.

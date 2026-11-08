@@ -231,7 +231,8 @@ state a new observer needs without replaying an unlimited event log. Existing
 explicitly permits losing an unfinished tool draft on backend crash. Do not reopen
 that decision or introduce per-token durability. Browser reconnect to a still-running
 backend is a separate synchronization problem; obtain current provisional state
-without mistaking it for committed history. No transport choice follows yet.
+without mistaking it for committed history. Stage 1 adds push change notices
+(decision 16); draft-state delivery for stage 3 reuses that channel, not a new one.
 
 Reasoning needs explicit provider provenance/content semantics. Prefer default
 collapse when classification is unknown; do not infer summaries from model names
@@ -597,13 +598,13 @@ coordinate active Workspace/CSS/storage work, and choose only the dependencies t
 slice requires. Markdig remains a candidate; the parser probe alone does not select
 its dialect, projection format or a browser virtualizer.
 
-1. **History/navigation foundation.** Add metadata-only latest/anchor/neighbor reads
-   and the aggregate-position strategy needed for whole-history navigation. Separate
-   pending acceptance from conversation placement at request start, preserving
-   durable receipts and failed-attempt history. Define source-based identities that
-   accommodate later content parts, without inventing a general event framework.
-   Verify revision fencing, interleaved pending input, distant navigation and query
-   cost without reading every body. Do not weaken existing delivery/Stop guarantees.
+1. **History, live-update and placement foundation.** Kind-tagged entry index
+   (user, assistant, tool) with metadata-only latest/anchor/neighbor reads; push
+   change notices replacing snapshot polling; conversation placement at send-attempt
+   start, preserving durable receipts and failed-attempt history. Whole-history
+   position lookup is deferred to stage 2's weighted index. Verify revision fencing,
+   mixed kinds, notice coalescing and query cost without reading bodies. Do not
+   weaken existing delivery/Stop guarantees.
 2. **Formatted, virtualized text path end to end.** Derive reusable structure outside
    execution/storage locks; serve consistent ranges; render Markdown/code/tables and
    external images in the browser. Virtualize between messages and within huge blocks.
@@ -643,6 +644,21 @@ selection during streaming/eviction; parser scheduling under execution contentio
 image/GPU resource release; and chosen provider draft/reasoning/image observation
 capabilities. Resolve these at their owning slice, not by promising a universal
 memory ceiling or creating speculative frameworks upfront.
+
+Requirements check additions (2026-11-09), owned by the named stage:
+- **Animation (stages 1C–3):** animate transform/opacity only; never animate height
+  inside the virtualized list without anchoring the reader; state changes are not
+  delayed by animation; reduced motion honoured. Measure dropped frames while
+  streaming, expanding tool rows and promoting pending input.
+- **Small-message latency (stage 2):** most replies are small. Measure time from
+  committed text to formatted display through the backend-structure path; the
+  large-message design must not make the common case sluggish.
+- **Syntax highlighting ownership (stage 2):** unassigned. Decide backend tokens vs
+  browser highlighter, including memory for large code blocks and lazy highlighting
+  of offscreen ranges, before choosing a library.
+- **Tool payload size (stage 3):** stored tool arguments/results are currently capped
+  at 16 KiB each. Inspection can read them whole today; bounded paging is needed only
+  if a future pruner/producer raises that limit.
 
 ## Verification approach — broader work proposed; isolated parser probe completed
 
@@ -737,8 +753,23 @@ shared-reference and cleanup failure cases; those are not implemented guarantees
   placement and muted inline reasoning. It did not qualify live draft streaming,
   expansion behavior or underlying architecture/performance. No Pie source/styles
   were inspected/copied. Temporary browser/computer sessions were closed.
-- No source implementation, dependencies, cache budgets, push/poll transport,
-  schema, worker design or runtime performance guarantee has been approved here.
+- No source implementation, dependencies, cache budgets, schema, worker design or
+  runtime performance guarantee has been approved here. Push change notices are
+  agreed in principle (decision 16); their implementation is not yet approved.
+- Grilling decision 15 (requirements check, 2026-11-09): owner reconfirmed tool
+  details show **model-facing** input/results only, not process I/O. “Raw tool IO”
+  in conversation means this; do not reintroduce a raw execution-log feature.
+- Grilling decision 16: owner approved replacing 350 ms snapshot polling with
+  lightweight server-pushed change notices in stage 1. Notices say “changed”;
+  content is still read on demand. Polling lag and repeated preview rereads
+  contradicted snappy streaming and low overhead.
+- Grilling decision 17: images stay in stage 4. Urd is not yet used for real work;
+  the goal is a strong foundation rather than early daily-use features.
+- Requirements check found stage 1 indexed only text messages, so tool calls (the
+  dominant row type) had no anchors/order. Stage 1 now indexes kind-tagged entries.
+  Dense message ranks and a persisted change version were dropped from stage 1:
+  rank is not scroll geometry, and per-chunk summary writes cost the hot path.
+  Weighted position lookup is designed once in stage 2.
 
 ## Continuation and safety
 
@@ -772,6 +803,10 @@ rechecked at 5c9392f after frontend cleanup. Stage 1 is split into metadata navi
 is implementation-approved. Review found that historical never-sent input needs
 bounded discovery after later runs/reload; the proposal now includes that path.
 Next steering is approval/scope of packet 1A, not full-transcript implementation.
+Requirements check (decisions 15–17) revised stage 1 to: kind-tagged entry index
+including tool calls; anchor-window reads; push change notices replacing polling;
+send-attempt placement. Packets are now 1A entries/reads, 1B push, 1C placement.
+Next steering is approval of the revised stage 1 scope.
 Do not invent a custom parser or treat sampled sizes as hard limits. Do not keep
 asking minor product questions that can be resolved through existing requirements.
 Ask only unresolved questions,

@@ -1,5 +1,8 @@
 # Browser development
 
+Tests and helpers share the repository-wide [hard size budget](testing.md).
+Historical test counts below are checkpoint evidence, not the current suite size.
+
 The browser uses Preact components and ordinary state/effects over typed
 `SessionClient` and `ProviderClient` HTTP access. Vite builds static assets served
 by the same loopback Server; there is no second production server, API proxy or

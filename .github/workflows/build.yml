@@ -18,6 +18,7 @@ jobs:
           node-version-file: source/ui/.node-version
           cache: npm
           cache-dependency-path: source/ui/package-lock.json
+      - run: node ../tests/check-size.mjs
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm run check
       - run: npm test

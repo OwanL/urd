@@ -105,7 +105,9 @@ Prefer the smallest clear implementation that meets the agreed behaviour.
 Reduce machinery, duplication and unnecessary generality rather than compressing
 formatting or hiding complexity. Code-size costs must inform design decisions,
 not be considered only after a large system has been built. No numerical cap
-for the entire repository has been selected.
+for the entire repository has been selected. **Tests and test helpers must not
+exceed application source LOC.** The [test scope and budget](docs/testing.md)
+defines the counting rule, coverage owners and deliberate coverage trade-offs.
 
 ### Responsiveness and scale are fundamental
 

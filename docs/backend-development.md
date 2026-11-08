@@ -1,5 +1,8 @@
 # Backend development
 
+The current [test scope and hard size budget](testing.md) supersedes the suite
+coverage/counts in historical checkpoints below. Application contracts are unchanged.
+
 The current Core checkpoint includes session identity, durable user-Send decisions,
 fake-text/tool execution with default durable steering, bounded snapshot/content reads
 through real SQLite, graceful session shutdown, public addressed Stop and owner-approved
@@ -228,8 +231,7 @@ These qualify ID discovery, not UI, activity tracking or a complete summary API.
    now uses schema version 5: version 4 added delivery/tool facts, sequential requests and a
    message-order index; version 5 adds only creation-order metadata. Migrations from versions
    0–4 preserve existing IDs, bytes and content cursors.
-4. [SessionReadFlowTests.cs](../source/tests/Urd.Backend.Tests/sessions/SessionReadFlowTests.cs),
-   [MessageContentTests.cs](../source/tests/Urd.Backend.Tests/storage/MessageContentTests.cs), and
+4. [MessageContentTests.cs](../source/tests/Urd.Backend.Tests/storage/MessageContentTests.cs) and
    [SessionSnapshotStorageTests.cs](../source/tests/Urd.Backend.Tests/storage/SessionSnapshotStorageTests.cs).
 
 Snapshots select at most 60 recent current-revision user/assistant text messages through the
@@ -284,8 +286,7 @@ share a file per concept. Read them alongside their owners.
    [ToolStorage.cs](../source/backend/core/storage/ToolStorage.cs) — dispatch claims and retained results;
    [LlmContextReader.cs](../source/backend/core/storage/LlmContextReader.cs) — claimed submissions and
    ordered assistant/tool context, distinct from the public text-only read projection.
-5. [SessionManagerFlowTests.cs](../source/tests/Urd.Backend.Tests/sessions/SessionManagerFlowTests.cs),
-   [SessionConcurrencyTests.cs](../source/tests/Urd.Backend.Tests/sessions/SessionConcurrencyTests.cs),
+5. [SessionConcurrencyTests.cs](../source/tests/Urd.Backend.Tests/sessions/SessionConcurrencyTests.cs),
    [SessionShutdownTests.cs](../source/tests/Urd.Backend.Tests/sessions/SessionShutdownTests.cs),
    [LlmResponseWriterTests.cs](../source/tests/Urd.Backend.Tests/execution/LlmResponseWriterTests.cs) and
    [SessionExecutionTests.cs](../source/tests/Urd.Backend.Tests/execution/SessionExecutionTests.cs) — whole Core flow,
@@ -296,15 +297,11 @@ share a file per concept. Read them alongside their owners.
    [TemporaryDatabase.cs](../source/tests/Urd.Backend.Tests/support/TemporaryDatabase.cs) supplies isolated test data.
    `support/` also holds the scripted LLM client, response scripts and execution fixture;
    test folders mirror the source folders.
-7. [SteeringFlowTests.cs](../source/tests/Urd.Backend.Tests/sessions/SteeringFlowTests.cs) — ordered steering,
-   no-tool continuation, boundary races and shutdown without carryover;
-   [ToolExecutionTests.cs](../source/tests/Urd.Backend.Tests/execution/ToolExecutionTests.cs) — ordinary
-   errors, frozen arguments, cleanup/token ownership, malformed batches and uncertain-effect fencing;
-   [ToolStorageTests.cs](../source/tests/Urd.Backend.Tests/storage/ToolStorageTests.cs) — authorization,
-   sequential claims, bounded results and rollback;
-   [SteeringMigrationTests.cs](../source/tests/Urd.Backend.Tests/storage/SteeringMigrationTests.cs) —
-   preserved identities/cursors, atomic upgrade and reopen without replay. The user-message-receipt and
-   snapshot suites also cover eight-delivery capacity, atomic message indexing and bounded selection.
+7. [SteeringFlowTests.cs](../source/tests/Urd.Backend.Tests/sessions/SteeringFlowTests.cs),
+   [ToolExecutionTests.cs](../source/tests/Urd.Backend.Tests/execution/ToolExecutionTests.cs) and
+   [ToolStorageTests.cs](../source/tests/Urd.Backend.Tests/storage/ToolStorageTests.cs) — representative
+   safe-boundary steering, cleanup before effects, invalid batches and durable claim/result failure.
+   See [test scope](testing.md) for current coverage owners and deliberate reductions.
    `support/StoredDeliveries.cs` and `support/StoredTools.cs` supply the corresponding durable evidence.
 
 ## Prerequisite and commands

@@ -197,18 +197,19 @@ public sealed class ChatGptAuthenticationTests {
   }
 
   [Theory]
-  [InlineData("transient", 1)]
-  [InlineData("network", 0)]
-  [InlineData("timeout", 0)]
-  public async Task UncertainRefreshDoesNotRetryOrExposeProviderErrors(string fault, int expectedPosts) {
+  [InlineData("network", 0, ProviderFailure.ProviderUnavailable)] // Discovery fails before a token exchange.
+  [InlineData("timeout", 0, ProviderFailure.ProviderUnavailable)]
+  [InlineData("transient", 1, ProviderFailure.ProviderUnavailable)]
+  [InlineData("refresh-network", 1, ProviderFailure.RefreshUncertain)] // The token acknowledgement is lost.
+  public async Task RefreshFailuresDoNotRetryOrExposeProviderErrors(string fault, int expectedPosts, ProviderFailure expectedFailure) {
     using var issuer = new FakeOpenAIIdentity();
     var initial = await SignInAsync(issuer);
     issuer.Fault = fault;
     var auth = new ChatGptAuthentication(issuer, FakeOpenAIIdentity.Issuer);
     var error = await Assert.ThrowsAsync<ProviderOperationException>(() =>
         auth.RefreshAsync(initial.Registration, initial.Credentials, CancellationToken.None));
-    Assert.Equal(ProviderFailure.ProviderUnavailable, error.Failure);
-    Assert.Equal("ProviderUnavailable", error.Message);
+    Assert.Equal(expectedFailure, error.Failure);
+    Assert.Equal(expectedFailure.ToString(), error.Message);
     Assert.Null(error.InnerException);
     Assert.Equal(expectedPosts, issuer.RefreshPosts);
     Assert.False(initial.Credentials.RequiresSignIn);

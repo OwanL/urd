@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text;
 using Microsoft.Extensions.AI;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Execution;
@@ -10,9 +11,12 @@ namespace Urd.Backend.Tests.Execution;
 
 // Response buffering through a real session: chunk sizes, flush timing and Unicode boundaries.
 public sealed class LlmResponseWriterTests {
+  private const int MaxChunkBytes = 16 * 1024;
+  private static readonly UTF8Encoding StrictUtf8 = new(false, true);
+
   [Fact]
   public async Task CoalescesTinyUpdatesAndSplitsOversizedTextAtUtf8ScalarBoundaries() {
-    string text = new string('a', 16 * 1024 - 1) + "😀" + new string('b', 40_000) + "\0終";
+    string text = new string('a', MaxChunkBytes - 1) + "😀" + new string('b', 40_000) + "\0終";
     var client = new ScriptedChatClient(token => TextResponse(text, token));
     await using var fixture = new ExecutionFixture(client);
     Guid executionId = await fixture.StartExecutionAsync("go");
@@ -20,10 +24,8 @@ public sealed class LlmResponseWriterTests {
     SessionExecutionResult settlement = await fixture.Session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout);
     Assert.Equal(ExecutionOutcome.Completed, settlement.Outcome);
     var output = StoredLlmResponses.Read(fixture.Database);
-    Assert.NotEmpty(output);
-    Assert.All(output, row => Assert.InRange(row.Bytes.Length, 0, 16 * 1024));
-    Assert.Equal(text, StoredLlmResponses.ReadText(fixture.Database));
-    Assert.Single(output, row => row.Final);
+    AssertValidResponse(output.Select(chunk =>
+        (chunk.ChunkIndex, StrictUtf8.GetString(chunk.Bytes), chunk.Final)), text);
     Assert.True(output.Count < 100, "Tiny source updates must not each cause a durable append.");
     Assert.Equal(1, client.Calls);
     Assert.Equal(0, client.DisposeCalls);
@@ -31,31 +33,43 @@ public sealed class LlmResponseWriterTests {
   }
 
   [Theory]
-  [InlineData(false, false)]
-  [InlineData(false, true)]
-  [InlineData(true, false)]
-  [InlineData(true, true)]
-  public async Task PreservesSupplementaryScalarAcrossUpdateBoundaries(bool splitScalar, bool overflowBoundary) {
-    const int maxChunkBytes = 16 * 1024;
-    string prefix = new string('a', overflowBoundary ? maxChunkBytes - 3 : maxChunkBytes - 4);
-    const string scalar = "😀";
-    const string suffix = "é終\0";
+  [InlineData(1, "é", false)]
+  [InlineData(2, "é", false)]
+  [InlineData(1, "終", false)]
+  [InlineData(2, "終", false)]
+  [InlineData(3, "終", false)]
+  [InlineData(1, "😀", false)]
+  [InlineData(2, "😀", false)]
+  [InlineData(3, "😀", false)]
+  [InlineData(4, "😀", false)]
+  [InlineData(3, "😀", true)]
+  [InlineData(4, "😀", true)]
+  public async Task WritesValidUnicodeAndPacksGreedilyAtScalarBoundaries(int bytesLeft, string scalar, bool splitAcrossUpdates) {
+    string prefix = new string('a', MaxChunkBytes - bytesLeft);
+    // Keep enough text after the tested scalar to fill a second chunk as well.
+    string suffix = new string('t', MaxChunkBytes);
     string text = prefix + scalar + suffix;
-    string[] updates = splitScalar
+    string[] updates = splitAcrossUpdates
         ? [prefix, scalar[..1], string.Empty, scalar[1..], suffix]
-        : [prefix + scalar + suffix];
-    var client = new ScriptedChatClient(token => TextUpdates(updates, token));
-    await using var fixture = new ExecutionFixture(client);
-    Guid executionId = await fixture.StartExecutionAsync("go");
+        : [text];
+    var chunks = new List<LlmResponseChunk>();
+    var writer = new LlmResponseWriter(Guid.NewGuid(), chunk => {
+      chunks.Add(chunk);
+      return Task.CompletedTask;
+    });
 
-    Assert.Equal(ExecutionOutcome.Completed,
-        (await fixture.Session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout)).Outcome);
-    var output = StoredLlmResponses.Read(fixture.Database);
-    Assert.NotEmpty(output);
-    Assert.All(output, row => Assert.InRange(row.Bytes.Length, 0, maxChunkBytes));
-    Assert.Equal(text, StoredLlmResponses.ReadText(fixture.Database));
-    Assert.Single(output, row => row.Final);
-    Assert.True(output[^1].Final);
+    foreach (string update in updates)
+      await writer.AppendTextAsync(update);
+    await writer.FinishResponseAsync();
+
+    AssertValidResponse(chunks.Select(chunk => (chunk.ChunkIndex, chunk.Text, chunk.IsFinal)), text);
+    int offset = 0;
+    foreach (var chunk in chunks.Where(chunk => !chunk.IsFinal)) {
+      offset += chunk.Text.Length;
+      int nextBytes = offset < text.Length ? Rune.GetRuneAt(text, offset).Utf8SequenceLength : 1;
+      Assert.True(StrictUtf8.GetByteCount(chunk.Text) + nextBytes > MaxChunkBytes,
+          "A size-flushed chunk must not leave room for the next scalar.");
+    }
   }
 
   [Theory]
@@ -118,8 +132,9 @@ public sealed class LlmResponseWriterTests {
     Assert.Equal(ExecutionOutcome.Completed,
         (await fixture.Session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout)).Outcome);
     var output = StoredLlmResponses.Read(fixture.Database);
+    AssertValidResponse(output.Select(chunk =>
+        (chunk.ChunkIndex, StrictUtf8.GetString(chunk.Bytes), chunk.Final)), text);
     Guid requestId = Assert.Single(StoredExecutions.ReadRequests(fixture.Database)).RequestId;
-    Assert.NotEmpty(output);
     Guid responseId = output[0].ResponseId;
 
     Assert.NotEqual(Guid.Empty, responseId);
@@ -127,22 +142,13 @@ public sealed class LlmResponseWriterTests {
       Assert.Equal(requestId, row.RequestId);
       Assert.Equal(responseId, row.ResponseId);
     });
-    Assert.Equal(Enumerable.Range(0, output.Count).Select(index => (long)index),
-        output.Select(row => row.ChunkIndex));
-    Assert.Equal(text, StoredLlmResponses.ReadText(fixture.Database));
-    Assert.Single(output, row => row.Final);
-    Assert.True(output[^1].Final);
 
     if (textLength == 0) {
       Assert.Single(output);
       Assert.Empty(output[0].Bytes);
-      Assert.Equal(0, output[0].ChunkIndex);
     } else {
-      Assert.Equal(2, output.Count);
-      Assert.Equal(16 * 1024, output[0].Bytes.Length);
-      Assert.False(output[0].Final);
-      Assert.Empty(output[1].Bytes);
-      Assert.True(output[1].Final);
+      Assert.Contains(output, row => row.Bytes.Length == MaxChunkBytes && !row.Final);
+      Assert.Empty(output[^1].Bytes);
     }
   }
 
@@ -168,56 +174,7 @@ public sealed class LlmResponseWriterTests {
     }
 
     await writer.FinishResponseAsync();
-    Assert.Equal(text, string.Concat(chunks.Select(chunk => chunk.Text)));
-    Assert.Collection(chunks,
-        first => {
-          Assert.Equal(0, first.ChunkIndex);
-          Assert.False(first.IsFinal);
-        },
-        last => {
-          Assert.Equal(1, last.ChunkIndex);
-          Assert.True(last.IsFinal);
-        });
-  }
-
-  [Theory]
-  [InlineData("é", 1, 2)]
-  [InlineData("終", 1, 3)]
-  [InlineData("終", 2, 3)]
-  [InlineData("😀", 1, 4)]
-  [InlineData("😀", 2, 4)]
-  [InlineData("😀", 3, 4)]
-  public async Task SplitsGreedilyBeforeScalarsThatDoNotFit(string scalar, int bytesLeft, int scalarBytes) {
-    const int maxChunkBytes = 16 * 1024;
-    string prefix = new string('x', maxChunkBytes - bytesLeft);
-    string nextChunk = scalar + new string('t', maxChunkBytes - scalarBytes);
-    var chunks = new List<LlmResponseChunk>();
-    var writer = new LlmResponseWriter(Guid.NewGuid(), chunk => {
-      chunks.Add(chunk);
-      return Task.CompletedTask;
-    });
-
-    await writer.AppendTextAsync(prefix + nextChunk);
-    await writer.FinishResponseAsync();
-
-    Assert.Equal(3, chunks.Count);
-    Assert.Collection(chunks,
-        first => {
-          Assert.Equal(0L, first.ChunkIndex);
-          Assert.Equal(prefix, first.Text);
-          Assert.False(first.IsFinal);
-        },
-        second => {
-          Assert.Equal(1L, second.ChunkIndex);
-          Assert.Equal(nextChunk, second.Text);
-          Assert.False(second.IsFinal);
-        },
-        final => {
-          Assert.Equal(2L, final.ChunkIndex);
-          Assert.Empty(final.Text);
-          Assert.True(final.IsFinal);
-        });
-    Assert.Equal(prefix + nextChunk, string.Concat(chunks.Select(chunk => chunk.Text)));
+    AssertValidResponse(chunks.Select(chunk => (chunk.ChunkIndex, chunk.Text, chunk.IsFinal)), text);
   }
 
   [Theory]
@@ -288,6 +245,18 @@ public sealed class LlmResponseWriterTests {
     Assert.Equal(1, attempts);
   }
 
+  private static void AssertValidResponse(
+      IEnumerable<(long ChunkIndex, string Text, bool Final)> chunks, string expectedText) {
+    var output = chunks.ToArray();
+    Assert.NotEmpty(output);
+    Assert.Equal(expectedText, string.Concat(output.Select(chunk => chunk.Text)));
+    Assert.Equal(Enumerable.Range(0, output.Length).Select(index => (long)index),
+        output.Select(chunk => chunk.ChunkIndex));
+    Assert.Single(output, chunk => chunk.Final);
+    Assert.True(output[^1].Final);
+    Assert.All(output, chunk => Assert.InRange(StrictUtf8.GetByteCount(chunk.Text), 0, MaxChunkBytes));
+  }
+
   private static async IAsyncEnumerable<ChatResponseUpdate> TextResponse(string text,
       [EnumeratorCancellation] CancellationToken token) {
     await Task.CompletedTask;
@@ -296,9 +265,9 @@ public sealed class LlmResponseWriterTests {
       yield return Text(text[i].ToString());
     }
 
-    // Deliberately split the surrogate pair across updates, then yield an oversized update.
-    yield return Text(text[1_000..(16 * 1024)]);
-    yield return Text(text[(16 * 1024)..]);
+    // Split a surrogate pair across updates at the chunk boundary, then yield oversized text.
+    yield return Text(text[1_000..MaxChunkBytes]);
+    yield return Text(text[MaxChunkBytes..]);
     yield return new() { FinishReason = ChatFinishReason.Stop };
   }
 

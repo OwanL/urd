@@ -204,7 +204,11 @@ Reuse `SessionSnapshotStorageTests` seeding/poisoned-body/query-plan helpers,
   never-attempted input; not-sent discovery after a later run and reload.
 - Migration preserves legacy order and invents no attempt provenance.
 
-No millisecond targets or cache budgets are fixed here; record measured results.
+Provisional targets are recorded in the design document (decision 18). Stage 1 must
+record a **baseline** for them: idle work, commit-to-render streaming delay, warm/cold
+tab switch, main-thread long tasks, request count per streamed second, and browser
+and backend memory before/after tab cycles. Cache budgets and absolute memory
+numbers are set from that baseline, not fixed here.
 Stage 1 proves read, notice and placement contracts — not rich rendering,
 scroll geometry or overall transcript memory.
 

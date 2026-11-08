@@ -646,6 +646,21 @@ capabilities. Resolve these at their owning slice, not by promising a universal
 memory ceiling or creating speculative frameworks upfront.
 
 Requirements check additions (2026-11-09), owned by the named stage:
+- **Provisional performance targets (decision 18).** Local machine, measured from
+  stage 1 onward and revised from evidence, not silently relaxed:
+  - Input: keystroke painted within one frame (~16 ms), including while streaming.
+  - Streaming: committed model text visible ≤100 ms after arrival at the backend;
+    may require a shorter output flush interval than today's 100 ms.
+  - Smoothness: no main-thread task >50 ms during streaming or scrolling; huge code
+    blocks/tables are formatted and mounted incrementally.
+  - Tab switch: ≤33 ms when content is warm; ≤100 ms cold when derived structure
+    exists. First-time formatting of a huge message is the stated exception.
+  - Idle: no periodic work beyond a ~30 s connection heartbeat.
+  - Backend: transcript formatting runs as one low-priority shared job and never
+    delays model or tool execution; large messages wait instead.
+  - Memory: transcript memory independent of history length and returning to
+    baseline after detail close/tab cycles. Absolute browser/backend numbers are
+    set after stage 1 baseline measurement, not guessed now.
 - **Animation (stages 1C–3):** animate transform/opacity only; never animate height
   inside the virtualized list without anchoring the reader; state changes are not
   delayed by animation; reduced motion honoured. Measure dropped frames while
@@ -765,6 +780,9 @@ shared-reference and cleanup failure cases; those are not implemented guarantees
   contradicted snappy streaming and low overhead.
 - Grilling decision 17: images stay in stage 4. Urd is not yet used for real work;
   the goal is a strong foundation rather than early daily-use features.
+- Grilling decision 18: owner adopted the tightened provisional performance targets
+  listed under "Requirements check additions"; absolute memory budgets follow stage 1
+  measurements. Owner accepted that tighter streaming latency may cost more writes.
 - Requirements check found stage 1 indexed only text messages, so tool calls (the
   dominant row type) had no anchors/order. Stage 1 now indexes kind-tagged entries.
   Dense message ranks and a persisted change version were dropped from stage 1:

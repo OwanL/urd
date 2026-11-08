@@ -831,6 +831,9 @@ shared-reference and cleanup failure cases; those are not implemented guarantees
   (p90 16 KB, max 64 KB, e.g. whole-file writes), which Urd's current 16 KiB argument
   cap would reject. These are execution-layer limits outside transcript scope, but
   the transcript must not bake them in.
+- Grilling decision 31: lift the 16 KiB caps on tool arguments, tool results and
+  user submission text in stage 1's migration, with no replacement ceiling ("we can
+  add it back if we need to"). Bounded reads, not write caps, protect display paths.
 - Grilling decision 27: entries record when they happened; tool calls record start
   and end; each model reply records token usage and estimated cost. Captured now so
   later hover/detail views have data. Observed: `LlmResponseAccumulator` currently

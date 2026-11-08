@@ -18,7 +18,13 @@ Build the foundation later stages render on:
 2. bounded anchor-based reads of that index;
 3. **push change notices** over one stream per browser page, replacing 350 ms
    snapshot polling;
-4. input placed in the conversation when a send attempt starts.
+4. input placed in the conversation when a send attempt starts;
+5. the 16 KiB caps on tool arguments, tool results and user submission text
+   removed (owner: "just lift them, we can add it back if we need to"). No
+   replacement ceiling is introduced; reads of these values stay bounded by the
+   readers that serve them, not by write-time caps. The 16 KiB output segment and
+   content-page sizes are chunking, not caps, and stay; provider-context and API-key
+   limits are unrelated and unchanged.
 
 Urd is not yet used for real work; prefer the right foundation over preserving
 interim UI behavior, but never weaken receipts, Stop, failure or uncertainty rules.
@@ -211,8 +217,10 @@ prove no invented times, usage or attempt provenance. No live
 Sequential; they share storage/session files.
 
 **1A — entry index and history reads.** Migration (entry kinds, text runs, entry
-facts, tool backfill), usage capture, history reader, core method, route, typed
-client. Old user placement unchanged.
+facts, tool backfill, lifted 16 KiB caps on tool arguments/results and submission
+text, including `LlmResponseAccumulator`, provider stream and route/client checks),
+usage capture, history reader, core method, route, typed client. Old user placement
+unchanged.
 
 **1B — push notices.** In-memory session version, page stream with watch set and
 open-session status, client stream reader replacing `useSessionSnapshot` polling
@@ -263,6 +271,9 @@ Reuse `SessionSnapshotStorageTests` seeding/poisoned-body/query-plan helpers,
   ambiguous marker save → no provider call, uncertainty preserved; context excludes
   never-attempted input; not-sent discovery after a later run and reload.
 - Migration preserves legacy order and invents no attempt provenance.
+- Lifted caps: a tool call with >16 KiB arguments, a >16 KiB tool result and a
+  >16 KiB user submission are accepted, saved, reconstructed into model context and
+  served by bounded reads; existing size tests are updated, not deleted silently.
 
 Provisional targets are recorded in the design document (decision 18). Stage 1 must
 record a **baseline** for them against the synthetic 25× reference workload

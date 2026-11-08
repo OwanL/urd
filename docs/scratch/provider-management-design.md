@@ -3,8 +3,9 @@
 2026-11-08. Scope, connection shape and configuration operations approved by the
 owner. The manager owns credential management; the owner selected plaintext storage
 for the initial version rather than password/OS-key management. The authentication
-operation surface and flow are also approved; detailed result types, model operations
-and persistence integration remain proposals until reviewed. No provider implementation
+operation surface and flow are also approved, as is inclusion of an explicit single-model
+response test. Detailed result types, model-operation signatures and persistence
+integration remain proposals until reviewed. No provider implementation
 or live account activity is claimed. [Provider qualification](../PROVIDER-QUALIFICATION.md) owns route research
 and the bounded initial provider set.
 
@@ -185,6 +186,59 @@ The operation proposal and its token-exposure/disconnect corrections passed inde
 review before owner approval. OpenAI's public registration/sign-in and accounts/sessions
 pages were rechecked on 2026-11-08; see O1/O2 in [provider qualification](../PROVIDER-QUALIFICATION.md).
 This is design evidence only, not live authentication or adapter qualification.
+
+## Model discovery — proposed operation shape
+
+The initial proposal is `GetModelCatalogAsync(connectionId)` for the last saved catalog
+and `RefreshModelCatalogAsync(connectionId)` for explicit discovery. The owner paused
+its detailed review to select library reuse; the library direction above is now approved.
+Exact result types remain proposed, not a separate hand-written discovery framework.
+
+A catalog needs connection identity, nullable last-successful-fetch timestamp, and model
+ID/display-name pairs (`ProviderModel(string Id, string Name)`). No successful fetch yet
+is distinct from a successful empty catalog. Refresh failure preserves the prior snapshot
+and timestamp and returns an error; offline reads never implicitly refresh it. Guard
+catalog commits against changed connection/authentication state, and invalidate catalog
+state after credential/account/endpoint/protocol changes.
+
+Use the official SDK's normal catalog support and a narrow ChatGPT-envelope adapter.
+`Endpoint` denotes the API base URL, preserving any custom path prefix; the selected API
+supplies operation paths. A known model ID remains usable for an explicit test even when
+custom discovery is unsupported. No invented capabilities, prices or context limits,
+manual-catalog merge system or session/default model selection is included. The proposed
+catalog shape passed independent review; current ChatGPT catalog documentation was
+rechecked on 2026-11-08. Discovery alone is not successful inference qualification.
+
+## Explicit model-response test — scope approved
+
+The owner chose to include an explicit model-response test rather than stopping at
+sign-in and discovery. Proposed operation: `TestModelAsync(connectionId, modelId,
+cancellationToken)`, awaited directly rather than creating a durable agent execution
+or a general background-operation framework. Detailed result/HTTP types remain pending.
+
+- Send one fixed short prompt through the selected route's SDK client. Include no
+  repository data, tools, prior conversation or arbitrary user prompt. Do not create a
+  chat. The prompt requests short output; success is not an exact-text benchmark.
+- Disable SDK automatic retries and do not fall back to another connection/model. Apply
+  the actual route's request restrictions; ChatGPT requires streamed Responses with
+  `store:false`. Custom compatibility remains something to test, not assume.
+- Require positive provider-specific successful terminal evidence, completed consumption
+  and cleanup. HTTP 200, partial text and clean transport EOF are insufficient. Surface
+  provider failure/incompleteness, transport interruption and cancellation distinctly.
+- Return bounded response text with any truncation marked and actual reported usage;
+  missing usage is unknown, not zero. No pricing/accounting framework is included.
+- Bound waiting and retained output. Caller cancellation cancels this diagnostic request,
+  unlike accepted agent work; shutdown/disconnect also cancel and join owned work. Token
+  refresh persistence must still complete consistently when a test waiter cancels. Late
+  results must not update a replacement connection's state.
+- Timeouts, cancellation and a short prompt are not guaranteed spending caps. An abandoned
+  response may already consume allowance or incur charges, and the ChatGPT route does not
+  accept a generic output-token cap. Never expose credentials in test errors/results.
+
+This bounded test proposal passed independent review. Offline fixtures must exercise the
+real selected SDK with controlled endpoints before any live test. No live sign-in,
+credential access or model request was authorized by choosing to implement this capability.
+Full conversation/tool-loop integration remains a later slice.
 
 ## Initial credential storage — plaintext
 

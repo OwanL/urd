@@ -20,17 +20,21 @@ a compatible API endpoint does not imply compatible subscription credentials. Pr
 operations cover saved connections, private credential changes, sign-in status/cancellation,
 refresh/disconnect, model discovery or explicit model IDs, and explicit access checks.
 Configuration reads should be offline; configured credentials, authenticated identity,
-model discovery and successful inference should remain distinct observations. A bounded
-model-request check is proposed, not full conversation/tool-loop integration.
+model discovery and successful inference should remain distinct observations. The owner
+selected inclusion of an explicit single-model response test: fixed short prompt, no tools
+or conversation integration, no automatic retries/fallbacks and no guaranteed spending cap.
 
 The owner subsequently approved the connection view and configuration-manager surface,
 using the existing local HTTP server, and confirmed that the manager owns credential
 management. Initial credentials will be plaintext to avoid unlock passwords/key management;
 this does not protect secrets accidentally committed to Git. Encryption may be revisited.
+The owner also approved the authentication operation surface and library-first direction:
+official OpenAI .NET SDK, Duende's focused OAuth/OIDC packages and Microsoft's JWT validation,
+retaining the selected Microsoft.Extensions.AI boundary rather than adding an agent runtime.
 The [provider management design](scratch/provider-management-design.md) records the approved
-bites, their limits and remaining proposals. Authentication operations, persistence integration
-and adapter contracts still need focused review; this is not whole-slice implementation
-approval or qualification evidence. No live sign-in, existing credential access, model request
+bites, their limits and remaining proposals. Exact model/result/HTTP shapes, persistence
+integration and adapter contracts still need focused review; this is not whole-slice
+implementation approval or qualification evidence. No live sign-in, existing credential access, model request
 or charge was authorized. Earlier route research below must be rechecked
 against current provider contracts before implementation; Pi/Pie behavior is reference
 material, not authority to reuse their integration identities or subscription routes.

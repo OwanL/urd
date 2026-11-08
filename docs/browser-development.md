@@ -27,6 +27,14 @@ the active chat, drafts and backend sessions are unchanged. Escape, outside rele
 pointer cancellation, lost capture, blur and external order changes cancel the preview.
 There is no native drag payload to insert into the composer. Normal arrow/Home/End
 navigation and Delete-to-close remain available.
+
+Closing a tab hides it; the workspace retains its chat record, draft and uncertain Send
+journal in this browser tab's `sessionStorage`. Records are not automatically pruned:
+there is no chat-delete action, and removing a pending journal could lose an unresolved
+command. Ordinary draft edits write only that chat's draft record; command journals
+synchronously persist the complete workspace before dispatch. A storage failure blocks
+commands and offers an explicit retry. A failed initial read stays fail-closed until a
+retry can restore the saved workspace; corrupt data is never silently replaced.
 The palette uses neutral black/charcoal surfaces and grey controls; semantic error
 colours remain distinct. Rich transcript architecture is a separate workstream.
 

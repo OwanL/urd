@@ -11,15 +11,13 @@ import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
 import {
   applyReceipt,
   beginSubmission,
-  decodeWorkspace,
   editDraft,
-  emptyWorkspace,
-  encodeWorkspace,
   executionSettled,
   newChat,
   submissionTextError,
 } from "./WorkspaceState.ts";
 import type { ChatState, WorkspaceState } from "./WorkspaceState.ts";
+import { WorkspacePersistence } from "./WorkspacePersistence.ts";
 import { ChatTabs } from "./ChatTabs.tsx";
 import { moveTab } from "./TabOrder.ts";
 import { Transcript } from "./Transcript.tsx";
@@ -45,29 +43,15 @@ interface ModelOption {
   selection: LlmSelection;
 }
 
-function load(): { state: WorkspaceState; error: string | null; first: boolean } {
-  try {
-    const raw = sessionStorage.getItem(storageKey);
-    return {
-      state: raw === null ? emptyWorkspace() : decodeWorkspace(raw),
-      error: null,
-      first: raw === null,
-    };
-  } catch (cause) {
-    return {
-      state: emptyWorkspace(),
-      error: `Saved workspace could not be read: ${description(cause)}`,
-      first: false,
-    };
-  }
-}
-
 export function Workspace() {
-  const [initial] = useState(load);
+  const [persistence] = useState(() => new WorkspacePersistence(() => sessionStorage, storageKey));
+  const [initial] = useState(() => persistence.load());
   const [workspace, setWorkspace] = useState(initial.state);
   const current = useRef(workspace);
-  const storageBlocked = useRef(initial.error !== null);
-  const [globalError, setGlobalError] = useState<string | null>(initial.error);
+  const storageProblem = useRef<"read" | "write" | null>(initial.error ? "read" : null);
+  const [storageError, setStorageError] = useState<string | null>(initial.error);
+  const [readRecovered, setReadRecovered] = useState(false);
+  const [globalError, setGlobalError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const createPending = useRef(false);
   const [ready, setReady] = useState(false);
@@ -90,28 +74,66 @@ export function Workspace() {
   const activeId = workspace.activeId;
   const chat = activeId ? workspace.chats[activeId] : undefined;
 
-  const save = useCallback((next: WorkspaceState): boolean => {
-    current.current = next;
-    setWorkspace(next);
-    if (storageBlocked.current) return false;
-    try {
-      sessionStorage.setItem(storageKey, encodeWorkspace(next));
-      return true;
-    } catch (cause) {
-      storageBlocked.current = true;
-      setGlobalError(`Workspace could not be saved: ${description(cause)}`);
-      return false;
-    }
-  }, []);
-  const changeChat = useCallback(
-    (id: string, update: (previous: ChatState) => ChatState): boolean => {
+  const save = useCallback(
+    (next: WorkspaceState, draftId?: string): boolean => {
+      if (storageProblem.current === "read") return false;
+      current.current = next;
+      setWorkspace(next);
+      if (storageProblem.current === "write") return false;
+      try {
+        if (draftId) {
+          const chat = next.chats[draftId];
+          if (!chat) throw new Error("Draft chat is unavailable.");
+          persistence.saveDraft(draftId, chat);
+        } else persistence.save(next);
+        return true;
+      } catch (cause) {
+        storageProblem.current = "write";
+        setStorageError(`Workspace could not be saved: ${description(cause)}`);
+        return false;
+      }
+    },
+    [persistence],
+  );
+  const updateChat = useCallback(
+    (
+      id: string,
+      update: (previous: ChatState) => ChatState,
+      persistenceKind: "workspace" | "draft" = "workspace",
+    ): boolean => {
       const state = current.current;
       const previous = state.chats[id];
       if (!previous) return false;
-      return save({ ...state, chats: { ...state.chats, [id]: update(previous) } });
+      return save(
+        { ...state, chats: { ...state.chats, [id]: update(previous) } },
+        persistenceKind === "draft" ? id : undefined,
+      );
     },
     [save],
   );
+  const retryStorage = useCallback(() => {
+    if (storageProblem.current === "read") {
+      const restored = persistence.load();
+      if (restored.error) {
+        setStorageError(restored.error);
+        return;
+      }
+      current.current = restored.state;
+      setWorkspace(restored.state);
+      setReadRecovered(true);
+      storageProblem.current = null;
+      setStorageError(null);
+      return;
+    }
+    if (storageProblem.current !== "write") return;
+    try {
+      persistence.save(current.current);
+      storageProblem.current = null;
+      setStorageError(null);
+    } catch (cause) {
+      setStorageError(`Workspace could not be saved: ${description(cause)}`);
+    }
+  }, [persistence]);
   const open = useCallback(
     (id: string) => {
       const state = current.current;
@@ -125,7 +147,7 @@ export function Workspace() {
     [save],
   );
   const create = useCallback(async () => {
-    if (storageBlocked.current || createPending.current) return;
+    if (storageProblem.current !== null || createPending.current) return;
     // Persist the first visit before dispatch: reload must not retry an uncertain Create.
     if (!save(current.current)) return;
     createPending.current = true;
@@ -151,7 +173,7 @@ export function Workspace() {
   useEffect(() => {
     const controller = new AbortController();
     async function discover() {
-      if (initial.error) return;
+      if (storageProblem.current === "read") return;
       try {
         const page = await sessions.list(undefined, controller.signal);
         if (controller.signal.aborted) return;
@@ -176,7 +198,7 @@ export function Workspace() {
     }
     void discover();
     return () => controller.abort();
-  }, [initial, open, save, create]);
+  }, [initial, open, save, create, readRecovered]);
   useEffect(() => {
     if (!ready) return;
     window.history.replaceState(
@@ -258,13 +280,13 @@ export function Workspace() {
       if (saved?.title === "New chat" && snapshot.messages.length > 0) {
         const prompt = snapshot.messages.find((message) => message.message.role === "user");
         const title = [...(prompt?.preview.trim() ?? "Chat")].slice(0, 48).join("");
-        changeChat(snapshot.sessionId, (previous) => ({ ...previous, title: title || "Chat" }));
+        updateChat(snapshot.sessionId, (previous) => ({ ...previous, title: title || "Chat" }));
       }
       if (
         saved?.knownExecutionId &&
         executionSettled(snapshot, saved.knownExecutionId, knownWhenRead)
       )
-        changeChat(snapshot.sessionId, (previous) => ({ ...previous, knownExecutionId: null }));
+        updateChat(snapshot.sessionId, (previous) => ({ ...previous, knownExecutionId: null }));
       setStopping((previous) => {
         const executionId = previous[snapshot.sessionId]?.executionId;
         if (
@@ -277,7 +299,7 @@ export function Workspace() {
         return next;
       });
     },
-    [changeChat],
+    [updateChat],
   );
   const {
     snapshot,
@@ -295,7 +317,7 @@ export function Workspace() {
   const reconcile = useCallback(
     async (id: string, retry: boolean) => {
       const original = current.current.chats[id]?.pending?.original;
-      if (!original || checks.current.has(id) || (retry && storageBlocked.current)) return;
+      if (!original || checks.current.has(id) || (retry && storageProblem.current !== null)) return;
       if (!retry && document.hidden) return;
       const controller = retry ? null : new AbortController();
       if (controller) receiptReads.current.set(id, controller);
@@ -304,7 +326,7 @@ export function Workspace() {
       try {
         if (
           retry &&
-          !changeChat(id, (previous) =>
+          !updateChat(id, (previous) =>
             previous.pending
               ? { ...previous, pending: { ...previous.pending, status: "sending" }, error: null }
               : previous,
@@ -315,10 +337,10 @@ export function Workspace() {
           ? await sessions.submitMessage(id, original)
           : await sessions.getMessageReceipt(id, original.submissionId, controller?.signal);
         if (receipt === null) throw new Error("No receipt found. Send remains uncertain.");
-        changeChat(id, (previous) => applyReceipt(previous, id, receipt));
+        updateChat(id, (previous) => applyReceipt(previous, id, receipt));
       } catch (cause) {
         if (controller?.signal.aborted) return;
-        changeChat(id, (previous) =>
+        updateChat(id, (previous) =>
           previous.pending
             ? {
                 ...previous,
@@ -338,7 +360,7 @@ export function Workspace() {
         setRefresh((value) => value + 1);
       }
     },
-    [changeChat],
+    [updateChat],
   );
   useEffect(() => {
     const reads = receiptReads.current;
@@ -389,7 +411,7 @@ export function Workspace() {
     !snapshot.stopRequested &&
     !snapshot.admissionFenced &&
     !stopId &&
-    !storageBlocked.current,
+    storageProblem.current === null,
   );
 
   async function send() {
@@ -413,7 +435,7 @@ export function Workspace() {
       text: latest.draft,
       llmSelection: initiatingSelection,
     };
-    const persisted = changeChat(id, (previous) => ({
+    const persisted = updateChat(id, (previous) => ({
       ...beginSubmission(previous, original),
       title:
         previous.title === "New chat"
@@ -421,7 +443,7 @@ export function Workspace() {
           : previous.title,
     }));
     if (!persisted) {
-      changeChat(id, (previous) =>
+      updateChat(id, (previous) =>
         previous.pending
           ? {
               ...previous,
@@ -519,7 +541,7 @@ export function Workspace() {
           label="New chat"
           hint={creating ? "Creating chat…" : "New chat"}
           placement="below"
-          disabled={creating || !ready || storageBlocked.current}
+          disabled={creating || !ready || storageProblem.current !== null}
           aria-busy={creating}
           onClick={() => {
             void create();
@@ -562,6 +584,14 @@ export function Workspace() {
       {globalError && (
         <div class="workspace-error" role="alert">
           {globalError}
+        </div>
+      )}
+      {storageError && (
+        <div class="workspace-error" role="alert">
+          {storageError}{" "}
+          <button type="button" onClick={retryStorage}>
+            {storageProblem.current === "read" ? "Retry read" : "Retry save"}
+          </button>
         </div>
       )}
       {activeId && chat ? (
@@ -629,7 +659,7 @@ export function Workspace() {
                       Check receipt
                     </button>
                     <button
-                      disabled={storageBlocked.current || checking[activeId]}
+                      disabled={storageProblem.current !== null || checking[activeId]}
                       onClick={() => {
                         void reconcile(activeId, true);
                       }}
@@ -645,7 +675,7 @@ export function Workspace() {
           <Composer
             text={chat.draft}
             onTextChange={(text) => {
-              changeChat(activeId, (previous) => editDraft(previous, text));
+              updateChat(activeId, (previous) => editDraft(previous, text), "draft");
             }}
             models={models}
             modelKey={selection ? modelKey(selection) : null}

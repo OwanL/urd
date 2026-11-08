@@ -1,4 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
+using Microsoft.Extensions.AI;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
 
@@ -13,6 +15,7 @@ public sealed class ProviderManager : IDisposable {
   private readonly HttpClient client;
   private readonly ChatGptAuthentication authentication;
   private readonly OpenAIProviderClient models;
+  private readonly ProviderModelClient modelRequests;
   private readonly ProviderSignIns signIns;
   private readonly List<ProviderRequest> requests = [];
   private readonly Dictionary<Guid, Task<ProviderState>> refreshes = [];
@@ -34,7 +37,17 @@ public sealed class ProviderManager : IDisposable {
     client = new(handler, disposeHandler: false) { Timeout = Timeout.InfiniteTimeSpan };
     authentication = new(handler, issuer);
     models = new(client);
+    modelRequests = new(client);
     signIns = new(storage, authentication, gate, callbackUri, CancelRequests);
+  }
+
+  // The client borrows this manager. Construction performs no network or credential access.
+  public IChatClient CreateChatClient(ProviderConnection expectedBinding) {
+    ArgumentNullException.ThrowIfNull(expectedBinding);
+    if (expectedBinding.Id == Guid.Empty)
+      throw new ArgumentException("A saved provider connection is required.", nameof(expectedBinding));
+    ObjectDisposedException.ThrowIf(disposed, this);
+    return new ProviderChatClient(this, expectedBinding);
   }
 
   public async Task<IReadOnlyList<ProviderConnection>> ListAsync(CancellationToken cancellationToken = default) {
@@ -222,16 +235,7 @@ public sealed class ProviderManager : IDisposable {
 
   private async Task<T> RunRequestAsync<T>(Guid connectionId,
       Func<ProviderState, CancellationToken, Task<T>> operation, CancellationToken cancellationToken) {
-    ProviderRequest request;
-    long generation;
-    using (await gate.AcquireAsync(cancellationToken)) {
-      ThrowIfStopping();
-      ProviderState state = storage.Get(connectionId);
-      EnsureAvailable(state);
-      generation = state.Generation;
-      request = new(connectionId, cancellationToken);
-      requests.Add(request);
-    }
+    var (request, generation) = await BeginRequestAsync(connectionId, cancellationToken);
     try {
       ProviderState state = await GetCredentialsAsync(connectionId, generation, request.Cancellation.Token);
       request.Cancellation.Token.ThrowIfCancellationRequested();
@@ -241,10 +245,67 @@ public sealed class ProviderManager : IDisposable {
       RequireCurrentGrant(state);
       return result;
     } finally {
+      await FinishRequestAsync(request, cancellationToken: CancellationToken.None);
+    }
+  }
+
+  internal async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+      ProviderConnection expectedBinding, IEnumerable<ChatMessage> messages, ChatOptions options,
+      [EnumeratorCancellation] CancellationToken cancellationToken) {
+    var (request, generation) = await BeginRequestAsync(expectedBinding.Id, cancellationToken,
+        Timeout.InfiniteTimeSpan, expectedBinding);
+    ChatResponseUpdate? completion = null;
+    ProviderState? completedState = null;
+    try {
+      ProviderState state = await GetCredentialsAsync(expectedBinding.Id, generation, request.Cancellation.Token);
+      request.Cancellation.Token.ThrowIfCancellationRequested();
+      await foreach (var update in modelRequests.GetStreamingResponseAsync(state, messages, options, request.Cancellation.Token)) {
+        if (completion is not null)
+          throw new ProviderOperationException(ProviderFailure.InvalidProviderResponse);
+        if (update.FinishReason is not null)
+          completion = update;
+        else
+          yield return update;
+      }
+      request.Cancellation.Token.ThrowIfCancellationRequested();
+      if (completion is null)
+        throw new ProviderOperationException(ProviderFailure.IncompleteResponse);
+      completedState = state;
+    } finally {
+      await FinishRequestAsync(request, completedState, cancellationToken);
+    }
+    // No executable calls or native-context completion escape before the manager accepts the result.
+    yield return completion;
+  }
+
+  private async Task<(ProviderRequest Request, long Generation)> BeginRequestAsync(Guid connectionId,
+      CancellationToken cancellationToken, TimeSpan? timeout = null, ProviderConnection? expectedBinding = null) {
+    using var held = await gate.AcquireAsync(cancellationToken);
+    ThrowIfStopping();
+    ProviderState state = storage.Get(connectionId);
+    EnsureAvailable(state);
+    if (expectedBinding is not null && !SameBinding(state.Connection, expectedBinding))
+      throw new ProviderOperationException(ProviderFailure.ConnectionChanged);
+    var request = new ProviderRequest(connectionId, cancellationToken, timeout);
+    requests.Add(request);
+    return (request, state.Generation);
+  }
+
+  private async Task FinishRequestAsync(ProviderRequest request, ProviderState? completedState = null,
+      CancellationToken cancellationToken = default) {
+    bool drained = false;
+    try {
+      await request.Cancellation.CancelAsync();
+      drained = true;
+    } finally {
+      using var held = await gate.AcquireAsync(CancellationToken.None);
       try {
-        await request.Cancellation.CancelAsync();
+        if (drained && completedState is not null) {
+          cancellationToken.ThrowIfCancellationRequested();
+          ThrowIfStopping();
+          RequireCurrentGrant(completedState);
+        }
       } finally {
-        using var held = await gate.AcquireAsync(CancellationToken.None);
         requests.Remove(request);
         request.Cancellation.Dispose();
         request.Finished.TrySetResult();

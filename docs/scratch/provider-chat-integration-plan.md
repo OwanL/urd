@@ -84,6 +84,12 @@ a harmless tool loop, SQLite reopen and exact already-sent result replay without
 effects. Public transcript text excludes private reasoning.
 
 Selection/admission and HTTP/UI composition remain with the UI stream after this checkpoint.
-No live inference, personal database migration or application activation was performed.
-Per-model reasoning compatibility remains unknown; no context-window/pricing variant policy
-was added. Those are separate decisions, not inferred capabilities.
+The separately authorized live qualification subsequently passed ChatGPT `gpt-6-luna`
+and local Ollama `qwen3.5:9b` streaming, harmless tool continuation, SQLite reopen without
+repeating effects, and Stop. It exposed and fixed a required namespace description and
+compatible Chat's `reasoning` alias; the patched isolated checkpoint passed 573/573 tests
+and independent review. ChatGPT revocation was acknowledged and temporary data removed.
+See [qualification evidence](../PROVIDER-QUALIFICATION.md#live-shared-request-qualification--2026-11-08)
+for request counts and limits. No personal database migration or application activation
+was performed. Broader per-model reasoning compatibility remains unknown; no context-window
+or pricing variant policy was inferred.

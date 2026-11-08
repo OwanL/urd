@@ -152,18 +152,31 @@ never replayed to repair context. Private reasoning is not appended to public tr
 
 ## Qualification
 
-2026-11-08: locked restore and .NET 10.0.403 Release build passed with zero warnings/errors;
-the complete backend suite passed **453/453 tests**, with independent acceptance review.
+2026-11-08: the provider-management checkpoint passed **453/453 tests**. The shared-request
+and native-session checkpoint, including both live-discovered compatibility fixes,
+passed locked restore, a zero-warning .NET 10.0.403 Release build and **573/573 tests** in
+an isolated source archive. Independent acceptance reviews approved the changes.
 
 Offline tests exercise the actual Duende, Microsoft JWT and official OpenAI SDK paths
 against socket-free synthetic transports, plus real local Kestrel and SQLite workflows.
 They cover signed sign-in, refresh/disconnect races, stale results, storage migration,
 reopen, terminal/error streaming and shutdown ownership.
 
-A separately authorized live check on 2026-11-08 completed fresh ChatGPT OAuth through
-Urd's local callback: identity validation and credential persistence succeeded, with both
-required plan scopes present. On the owner's request, disconnect then cleared local
-credentials and the provider acknowledged revocation. The isolated test process was
-stopped and its entire temporary data directory deleted. No existing credentials were
-reused, and no catalog or model request was sent. Live refresh, restart persistence,
-model entitlement, responses and billing behavior remain unqualified.
+Separately authorized live checks completed fresh ChatGPT OAuth and then qualified the
+owner-selected `gpt-6-luna` Responses path: catalog retrieval, streamed text, a harmless
+function/result round trip, SQLite continuation without repeating the effect, and public
+Stop through cancelled settlement. The live tool check exposed a required namespace
+description missing from the request; the fix passed both regression tests and the real
+round trip. Revocation was acknowledged, local credentials cleared and the temporary
+ChatGPT database deleted afterward. No existing credentials or personal chats were used.
+
+The existing local Ollama 0.40.13 `qwen3.5:9b` also passed streaming, tool/result,
+SQLite continuation and Stop through compatible Chat Completions. Its `reasoning` alias
+is now preserved under its native wire name alongside support for `reasoning_content`;
+the final continuation retained three reasoning-bearing envelopes without repeating the
+lookup effect. Temporary harness data was removed; the borrowed Ollama service was not
+reconfigured or stopped.
+
+See [provider qualification](PROVIDER-QUALIFICATION.md#live-shared-request-qualification--2026-11-08)
+for exact evidence and limits. This is not blanket model/reasoning, forced-refresh, billing,
+UI or failure-mode qualification.

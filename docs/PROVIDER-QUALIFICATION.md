@@ -54,6 +54,79 @@ temporary data directory were removed. No account identifiers or tokens are reco
 This establishes one successful live sign-in/disconnect, not live refresh, restart recovery,
 model-specific entitlement, inference or billing qualification.
 
+## Live shared-request qualification — 2026-11-08
+
+The owner separately approved live inference using a fresh temporary ChatGPT sign-in,
+synthetic prompts, one harmless in-memory lookup function, and an existing local Ollama
+endpoint. No previous credentials, personal chats or cloud Ollama aliases were used, and
+no models were downloaded. The probe runs the public Core APIs from checkpoint `ab83a7d`, independently of
+concurrent selection/UI changes; it does not qualify browser chat composition.
+
+### ChatGPT Responses: GPT-6-Luna
+
+Fresh OAuth and account-specific catalog retrieval succeeded. The owner selected the returned
+`gpt-6-luna` ID. Reasoning/context settings were left at provider defaults; no model-name
+capability, token-window or pricing assumption was introduced.
+
+| Check | Observed result |
+| --- | --- |
+| Streaming greeting | Expected synthetic text, five text updates, one final completion; fully enumerated through cleanup. |
+| Initial tool request | Failed before any function ran or successful native envelope was saved. The namespace declaration lacked its required `description` field. |
+| Corrected tool round trip | After adding the namespace description, two requests completed through the real SDK/manager/session loop. The lookup executed once and its generated value appeared in the answer; two native response envelopes and one completed tool result were saved. |
+| SQLite continuation | Closed and recreated the session manager, provider manager and SQLite store. The reopened conversation returned the saved lookup value without invoking the tool again. Three native envelopes were retained; the stored result hash was unchanged. |
+| Public Stop | Sent Stop after actual text began. Acknowledgement was `Requested`; settlement was `Cancelled` approximately 105 ms later, with no additional tool invocation. This does not establish when remote computation stops or guarantee no allowance consumption. |
+| Teardown | Provider acknowledged revocation, local credentials were cleared, the isolated process exited and its entire temporary database directory was deleted. |
+
+The owner raised the bound from five to **six model-request attempts**, including the initial
+failed tool request. No automatic retries or fallback route were enabled. The namespace fix is
+`9193bfc`; an isolated `ab83a7d` source archive plus that patch passed locked restore, a zero-warning
+Release build and **566/566 tests**, and independent review. The regression checks a nonblank
+namespace description in the outgoing request. The current official
+[NamespaceTool interface](https://github.com/openai/openai-node/blob/master/src/resources/responses/responses.ts)
+requires `description: string`; its nested function description is a separate field.
+
+This qualifies this account/model's basic text/function/continuation/Stop path, not every model,
+reasoning effort, opaque-reasoning variant, forced refresh, billing policy, UI flow or provider
+failure mode. Native fidelity and already-sent wire representation retain their broader offline
+coverage; this live check observes saved envelopes/results and successful continuation rather
+than recording raw authenticated traffic.
+
+### Local Ollama: compatible Chat Completions
+
+Qualified the existing Ollama **0.40.13** service at `http://127.0.0.1:11434/v1` with
+`qwen3.5:9b` (`Q4_K_M`, digest
+`56671c2ab9385f9cfcb404638e32cd62d88e3501d44822208363c010179a3c90`).
+No model was downloaded and no Ollama cloud alias was used. The server reported a 4,096-token
+runtime context; Urd did not infer or impose that limit.
+
+- Streamed the expected greeting and completed a harmless lookup/result round trip.
+- Recreated SQLite/session/provider managers and recovered the result without repeating
+  the effect. Public Stop after text began settled as `Cancelled` in approximately **115 ms**.
+- Fidelity inspection exposed an adapter gap: this Ollama version emits and accepts
+  `reasoning`, whereas pinned MEAI reads `reasoning_content` only. Fix `f951053` preserves
+  either observed string field under its original name, rejects malformed or ambiguous
+  reasoning, and strips private reasoning on scope changes. This is a compatible-API fix,
+  not a native Ollama adapter or model-name heuristic.
+- After the fix, a fresh two-request lookup round trip saved two reasoning-bearing native
+  envelopes; SQLite continuation saved a third. The lookup value and stored result hash
+  were retained, with exactly **one effect before and after reopen**. Offline tests also
+  inspect actual SDK request bodies for same-scope replay and changed-model omission.
+
+There were **ten local model-request attempts**: five initial checks, a two-request probe
+that supplied incorrect lookup arguments and received an ordinary tool error with no effect,
+and the final three-request successful fidelity/continuation check. No automatic retry or
+fallback was enabled. This is not a model instruction-following reliability benchmark.
+The final archived checkpoint plus both fixes passed **573/573 tests**, a zero-warning
+Release build and independent review. Stop was measured before the reasoning-alias fix;
+the final live rerun focused on the affected tool/history path.
+
+The isolated harnesses exited and their temporary data/build directories were removed.
+The borrowed Ollama service and installed model were left unchanged; its ordinary idle
+cache expiry was not overridden. UI/composition qualification belongs to the separate UI
+stream. Protocol evidence:
+[Ollama 0.40.13 conversion](https://github.com/ollama/ollama/blob/v0.40.13/openai/openai.go),
+[pinned MEAI streaming adapter](https://github.com/dotnet/extensions/blob/25f07afa51034e37b334210642d7dc5f191c142d/src/Libraries/Microsoft.Extensions.AI.OpenAI/OpenAIChatClient.cs).
+
 ## Original recommendation and owner input
 
 Use **ChatGPT-plan → public OpenAI Responses** as the first representative
@@ -72,18 +145,18 @@ sign-in, credential use, model request, charge, or account change was authorized
 
 **Evidence levels are separate:** documented interface → implementation evidence →
 successful authentication → account/model entitlement → completed inference/tool
-round trip. ChatGPT authentication and granted plan scopes are now established by the
-live check above; model entitlement and completed inference/tool execution remain unqualified.
+round trip. The live checks above establish ChatGPT authentication, catalog access and
+completed text/tool continuation for the selected `gpt-6-luna`, not every account/model.
 Official documentation below was inspected **2026-11-04**; mutable docs are not
 version-pinned. Library/source pins are research evidence, not selected packages.
 
 | Route | Documented access and request path | Focused implementation path | Qualification / limitation |
 | --- | --- | --- | --- |
-| **ChatGPT subscription** | Public-client OAuth/PKCE/OIDC with dynamic registration; bearer token → `POST https://api.openai.com/v1/responses`. Officially documented for open-source/local apps, with preview restrictions [O1–O5]. | OpenAI .NET `ResponsesClient` + MEAI Responses adapter; small route/auth/fidelity glue, not Codex. | Live OAuth, required granted scopes and acknowledged revocation verified on 2026-11-08. Account-specific model listing, entitlement, allowance and actual completion remain untested. Paid/remotely hosted offerings have a separate OpenAI interest process; a remote UI to one's local backend does not by itself establish eligibility for a different deployment. |
+| **ChatGPT subscription** | Public-client OAuth/PKCE/OIDC with dynamic registration; bearer token → `POST https://api.openai.com/v1/responses`. Officially documented for open-source/local apps, with preview restrictions [O1–O5]. | OpenAI .NET `ResponsesClient` + MEAI Responses adapter; small route/auth/fidelity glue, not Codex. | Live OAuth, required scopes, catalog retrieval, selected `gpt-6-luna` text/tool/SQLite continuation, Stop and acknowledged revocation verified on 2026-11-08. Allowance/pricing, other models and forced refresh remain unqualified. Paid/remotely hosted offerings have a separate OpenAI interest process; a remote UI to one's local backend does not by itself establish eligibility for a different deployment. |
 | **GitHub Copilot subscription** | GitHub documents device OAuth and using app tokens with its SDK. Its SDK adopts the Copilot agent runtime, including experimental native in-process transport; neither transport meets Urd's boundary [G1]. | Independent Crush source demonstrates device OAuth → internal Copilot token exchange → OpenAI-compatible model transport [G2–G3]. | Technically evidenced, **not qualified**. No standalone supported subscription inference contract was established in the inspected official SDK/auth/REST docs. Own-app authorization, integration identity, account/model policy and endpoint stability need resolution; source availability is not permission to impersonate VS Code. |
 | **OpenAI API key** | Bearer project API key → `POST https://api.openai.com/v1/responses`; SSE and client-executed functions [A1]. | Same official OpenAI/MEAI model-client family, separate credential and route settings. | Documented API access, not included ChatGPT-plan billing. Exact model/project permissions, billing and limits require a key and approved calls. Do not apply generic API-key options to the more restricted plan route. |
 | **Anthropic API key** | `POST https://api.anthropic.com/v1/messages`; API key (`x-api-key` remains supported; current docs also document bearer), API-version header; SSE `tool_use` / `tool_result` [A2]. | Official Anthropic C# `AsIChatClient()` for ordinary Messages; native inline-tool beta requires separate fidelity work [L1]. | API-only by owner decision. Qualify chosen SDK/API-version pair, model access and limits. No Claude consumer-plan work. Existing adapter's inline-tool drops/default settings are not resolved by successful authentication. |
-| **Local Ollama** | `POST http://localhost:11434/api/chat`; no authentication required for local API; streaming NDJSON, ordinary function tools. Qwen3 is an official tool-calling example [M1]. | OllamaSharp `OllamaApiClient : IChatClient`, after checking actual server/model behavior [L1]. | No model/server installed, inspected or called here. Pin server + model digest/template; confirm it is a local model, not Ollama cloud routing. Tool reliability, thinking replay, call identity and memory requirements remain untested. Ordinary tools-list updates, not assumed OpenAI-native discovery. |
+| **Local Ollama** | Native `/api/chat` supports NDJSON and ordinary tools [M1]; this implementation instead uses compatible `/v1/chat/completions`. | Official OpenAI/MEAI adapter with native reasoning-field preservation. Native OllamaSharp remains outside this checkpoint. | Existing 0.40.13 / local `qwen3.5:9b` qualified for text, tool/result, reasoning-bearing SQLite continuation and Stop as recorded above. No downloads or cloud routing. Broader tool reliability, other models and native discovery are not established. |
 
 ## First route: exact auth → request → tool continuation
 
@@ -279,10 +352,11 @@ OpenAI acceptance or entitlement. Final fixture evidence belongs in
    before implementing or signing in. Success with one account/model cannot
    establish every plan, model, enterprise policy or geographic entitlement.
 
-**Initial scaffold is not blocked by live access. Normal use is not yet qualified.**
-Remaining normal-use gates: at least one real account/model/tool round trip,
-credential renewal/revocation, durable native context, chosen-platform onboarding,
-and bounded failure handling. Copilot support remains its own gap. There is no
+**Historical initial scaffold gates:** live access was not needed to build the scaffold.
+The subsequent ChatGPT check above now establishes one real account/model/tool round trip,
+SQLite continuation and revocation. Forced credential renewal, broader models/routes,
+chosen-platform UI onboarding and additional live failure handling remain separate gates.
+Copilot support remains its own gap. There is no
 outstanding owner question in this session and no production work is authorized
 by this report.
 

@@ -56,8 +56,8 @@ text content reads and their UTF-8 cursors.
 
 ## 1. Entry identity and order
 
-- Extend the existing history index (`execution_messages`, renamed only if clarity
-  warrants the churn) to hold **kind-tagged entries**: `user`, `text` (assistant text
+- Rebuild the existing history index (`execution_messages`) to hold **kind-tagged
+  entries**: `user`, `text` (assistant text
   run) and `tool`. Later kinds join without changing anchors: `reasoning` (stage 3,
   decision 20), compaction marker (decision 22), subagent card (decision 21) and
   attachment references on user entries (stage 4).
@@ -99,10 +99,14 @@ text content reads and their UTF-8 cursors.
   and owned content are deleted, not hidden. A revision change invalidates anchors;
   the client falls back to the edited prompt. No production edit exists yet; stage 1
   only keeps revision fencing correct.
-- Migration backfills tool entries for existing saved calls after their request's
-  text-run entry (or in request order when none exists), preserving existing
-  message order. Ordinals are append-only, so the migration rebuilds the index in
-  the merged order rather than appending tool rows at the tail. Do not reorder
+- Migration: the STRICT table's CHECKs (two roles, user rows forbid `request_id`)
+  reject tool-kind rows, and merged order cannot append to an AUTOINCREMENT primary
+  key, so the migration **rebuilds the table** — every row is rewritten in merged
+  order, ordinals renumbered (append-only afterwards), UNIQUE/foreign-key semantics
+  carried over. Renaming is free at rebuild time; the table name is picked in
+  packet 1A, not here. Tool entries are backfilled for existing saved calls after
+  their request's text-run entry (or in request order when none exists), preserving
+  existing message order. Do not reorder
   legacy user rows.
 
 ## 2. Bounded history reads

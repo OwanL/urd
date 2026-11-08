@@ -12,7 +12,7 @@ public sealed class SessionListingTests {
   [Fact]
   public async Task ListingColdIdentitiesDoesNotCacheHandlesAndShutdownRejectsFurtherListing() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     using var client = new ScriptedChatClient(_ =>
         throw new InvalidOperationException("Discovery must not start llm work."));
     Guid first = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
@@ -44,7 +44,7 @@ public sealed class SessionListingTests {
     var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "retained input");
     UserMessageReceipt accepted;
     LlmRequest request;
-    using (SessionStore original = SessionStore.Open(database.Path)) {
+    using (UrdStore original = UrdStore.Open(database.Path)) {
       original.Sessions.CreatePrimary(sessionId);
       original.Sessions.CreatePrimary(emptyId);
       accepted = original.UserMessages.Admit(sessionId, 0, submission, true, executionId).Receipt;
@@ -57,7 +57,7 @@ public sealed class SessionListingTests {
     var requests = StoredExecutions.ReadRequests(database);
     var deliveries = StoredDeliveries.Read(database);
     var creations = StoredSessions.ReadCreation(database);
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     using var client = new ScriptedChatClient(_ =>
         throw new InvalidOperationException("Listing must not replay an orphaned run."));
     var manager = new SessionManager(store, client);
@@ -87,7 +87,7 @@ public sealed class SessionListingTests {
       llmToken = token;
       return ScriptedResponses.Paused(waiting, release, token);
     });
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     var manager = new SessionManager(store, client);
     PrimarySession active = await manager.CreatePrimaryAsync();
     PrimarySession idle = await manager.CreatePrimaryAsync();

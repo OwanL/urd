@@ -14,7 +14,7 @@ public sealed class SessionSnapshotStorageTests {
   [Fact]
   public void EmptyMissingAndDisposedReadsDoNotInventState() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     SessionSnapshot snapshot = store.Snapshots.ReadStored(session);
     Assert.Equal(session, snapshot.SessionId);
@@ -38,7 +38,7 @@ public sealed class SessionSnapshotStorageTests {
   [InlineData(61, false, true)]
   public void NewestSixtyMessagesAreChronologicalAndOmissionIsExact(int executionCount, bool includeOutputs, bool hasOlder) {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     SeedHistory(database, session, 0, executionCount, includeOutputs);
     SessionSnapshot snapshot = store.Snapshots.ReadStored(session);
@@ -63,7 +63,7 @@ public sealed class SessionSnapshotStorageTests {
   [InlineData(31, true)]
   public void OneExecutionUsesMessageNotRequestOrExecutionCountForTheRecentWindow(int requestCount, bool hasOlder) {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, execution = Guid.NewGuid();
     var submissions = new List<Guid>();
     var requests = new List<Guid>();
@@ -108,7 +108,7 @@ public sealed class SessionSnapshotStorageTests {
   [InlineData(41, true)]
   public void MixedExecutionsWithAndWithoutOutputKeepTheSameRecentMessageWindow(int executionCount, bool hasOlder) {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     SeedHistory(database, session, 0, executionCount, includeOutputs: true);
     database.Execute($"""
@@ -135,7 +135,7 @@ public sealed class SessionSnapshotStorageTests {
   public void LifecycleFactsSurviveReopenAndAreIndependentOfRevisionWindow() {
     using var database = new TemporaryDatabase();
     Guid session, terminal = Guid.NewGuid(), active = Guid.NewGuid();
-    using (SessionStore store = SessionStore.Open(database.Path)) {
+    using (UrdStore store = UrdStore.Open(database.Path)) {
       session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
       store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "terminal"), true, terminal);
       store.Executions.TrySettle(session, terminal, ExecutionOutcome.Failed);
@@ -144,7 +144,7 @@ public sealed class SessionSnapshotStorageTests {
     }
 
     database.ForceHistoryRevision(9);
-    using SessionStore reopened = SessionStore.Open(database.Path);
+    using UrdStore reopened = UrdStore.Open(database.Path);
     SessionSnapshot snapshot = reopened.Snapshots.ReadStored(session);
     Assert.Equal(9, snapshot.HistoryRevision);
     Assert.Empty(snapshot.Messages);
@@ -158,7 +158,7 @@ public sealed class SessionSnapshotStorageTests {
   [Fact]
   public void PrefixesAreScalarBoundedAndFinalOutputIsNotSettlement() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, execution = Guid.NewGuid(), output = Guid.NewGuid();
     store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, new string('a', 255) + "🙂\0tail"), true, execution);
     LlmRequest request = store.Executions.ClaimNextRequest(session, execution, 0)!;
@@ -192,7 +192,7 @@ public sealed class SessionSnapshotStorageTests {
   [Fact]
   public void PreviewsStillValidateMessageIdentityFromStoredRows() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     SeedHistory(database, session, 0, 1, includeOutputs: true);
     database.Execute($"UPDATE execution_messages SET message_id = '{Guid.Empty:D}' WHERE role = 1;");
@@ -203,7 +203,7 @@ public sealed class SessionSnapshotStorageTests {
   [Fact]
   public void LargeMixedHistoriesUseBoundedIndexedSelectionWithoutDecodingOmittedBodies() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     Guid other = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     SeedHistory(database, session, 0, 3000, includeOutputs: true);
@@ -249,7 +249,7 @@ public sealed class SessionSnapshotStorageTests {
     Guid acceptedSubmissionId = Guid.NewGuid();
     Guid refusedProposedExecutionId = Guid.NewGuid(), request;
     UserMessageReceipt refusedReceipt;
-    using (SessionStore store = SessionStore.Open(database.Path)) {
+    using (UrdStore store = UrdStore.Open(database.Path)) {
       session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
       refusedReceipt = store.UserMessages.Admit(session, 0, new(refusedSubmissionId, 0, "refused\0🙂"),
           accepting: false, proposedExecutionId: refusedProposedExecutionId).Receipt;
@@ -260,8 +260,8 @@ public sealed class SessionSnapshotStorageTests {
     }
 
     MakeVersionTwo(database);
-    using SessionStore migrated = SessionStore.Open(database.Path);
-    Assert.Equal(5L, database.Scalar("PRAGMA user_version;")); // raw-sql: the migrated schema version is the subject under test
+    using UrdStore migrated = UrdStore.Open(database.Path);
+    Assert.Equal(6L, database.Scalar("PRAGMA user_version;")); // raw-sql: the migrated schema version is the subject under test
     UserMessageReceipt migratedRefusal = migrated.UserMessages.ReadReceipt(session, refusedSubmissionId)!;
     Assert.Equal(refusedReceipt, migratedRefusal);
     Assert.Equal(MessageAcceptance.Refused, migratedRefusal.Acceptance);
@@ -286,14 +286,14 @@ public sealed class SessionSnapshotStorageTests {
   public void FailedVersionTwoMigrationRollsBackFirstIndexAndVersionWithoutLosingRows() {
     using var database = new TemporaryDatabase();
     Guid session;
-    using (SessionStore store = SessionStore.Open(database.Path)) {
+    using (UrdStore store = UrdStore.Open(database.Path)) {
       session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
       SeedHistory(database, session, 0, 2, includeOutputs: true);
     }
 
     MakeVersionTwo(database);
     database.Execute("CREATE TABLE execution_runs_terminal_order (value TEXT); INSERT INTO execution_runs_terminal_order VALUES ('retained');");
-    Assert.Throws<SqliteException>(() => SessionStore.Open(database.Path));
+    Assert.Throws<SqliteException>(() => UrdStore.Open(database.Path));
     Assert.Equal(2L, database.Scalar("PRAGMA user_version;")); // raw-sql: rolled-back schema version is the subject under test
     Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM sqlite_schema WHERE name = 'execution_runs_history_order';")); // raw-sql: rolled-back index is schema structure under test
     Assert.Equal("retained", database.Scalar("SELECT value FROM execution_runs_terminal_order;")); // raw-sql: fixture witness table must survive the rollback
@@ -301,12 +301,14 @@ public sealed class SessionSnapshotStorageTests {
     Assert.Equal(2, StoredExecutions.ReadRequests(database).Count);
     Assert.Equal(2, StoredLlmResponses.Read(database).Count);
     database.Execute("DROP TABLE execution_runs_terminal_order;");
-    using SessionStore retried = SessionStore.Open(database.Path);
+    using UrdStore retried = UrdStore.Open(database.Path);
     Assert.Equal(4, retried.Snapshots.ReadStored(session).Messages.Count);
   }
 
   private static void MakeVersionTwo(TemporaryDatabase database) => database.Execute("""
     BEGIN;
+    DROP TABLE provider_connections;
+    DROP TABLE provider_host;
     DROP TABLE session_creation;
     DROP TABLE execution_tools;
     DROP TABLE execution_messages;

@@ -7,7 +7,7 @@ namespace Urd.Server;
 internal sealed class LocalBrowserGate(RequestDelegate next, Func<Uri?> servedOrigin) {
   public Task InvokeAsync(HttpContext context) {
     bool privateApi = context.Request.Path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase);
-    if (privateApi)
+    if (privateApi || context.Request.Path.Equals("/auth/callback", StringComparison.OrdinalIgnoreCase))
       context.Response.Headers.CacheControl = "no-store";
 
     Uri? origin = servedOrigin();

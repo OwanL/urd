@@ -52,7 +52,7 @@ public sealed class SessionConcurrencyTests {
 
     var database = new TemporaryDatabase();
     var client = new ScriptedChatClient(Response);
-    var store = SessionStore.Open(database.Path);
+    var store = UrdStore.Open(database.Path);
     var manager = new SessionManager(store, client);
     PrimarySession session = await manager.CreatePrimaryAsync();
     var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "concurrent exact retry");
@@ -116,7 +116,7 @@ public sealed class SessionConcurrencyTests {
 
     var database = new TemporaryDatabase();
     var client = new ScriptedChatClient(Response);
-    var store = SessionStore.Open(database.Path);
+    var store = UrdStore.Open(database.Path);
     var manager = new SessionManager(store, client);
     PrimarySession session = await manager.CreatePrimaryAsync();
     Guid? ownedExecution = null;

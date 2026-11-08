@@ -168,7 +168,7 @@ public sealed class SessionExecutionTests {
     var requestEntered = Signal();
     var providerExited = Signal();
     var database = new TemporaryDatabase();
-    var store = SessionStore.Open(database.Path);
+    var store = UrdStore.Open(database.Path);
     var client = new ScriptedChatClient(token => CancellationCallbackFailureResponse(
         requestEntered, providerExited, token));
     var session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid()), store, client);
@@ -217,7 +217,7 @@ public sealed class SessionExecutionTests {
   [Fact]
   public async Task OutputWriteAndCleanupFailuresAreRetainedWhileExecutionRemainsFenced() {
     var database = new TemporaryDatabase();
-    var store = SessionStore.Open(database.Path);
+    var store = UrdStore.Open(database.Path);
     var disposed = Signal();
     var client = new ScriptedChatClient(token => WriteAndCleanupFailureResponse(disposed, token));
     var session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid()), store, client);
@@ -276,7 +276,7 @@ public sealed class SessionExecutionTests {
   [Fact]
   public async Task OutputWriteFailureCleansUpButFencesRatherThanSettlesOrReplacesTheExecution() {
     var database = new TemporaryDatabase();
-    var store = SessionStore.Open(database.Path);
+    var store = UrdStore.Open(database.Path);
     var cleaned = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
     var client = new ScriptedChatClient(token => WriteFailureResponse(cleaned, token));
     var session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid()), store, client);

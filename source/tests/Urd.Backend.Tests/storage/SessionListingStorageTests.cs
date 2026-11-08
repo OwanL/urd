@@ -17,7 +17,7 @@ public sealed class SessionListingStorageTests {
   [Fact]
   public void EmptyAndExactPageSizeHaveNoContinuationAndCursorsAreStrictPositiveDecimals() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     SessionIdPage empty = store.Sessions.ListPrimaryIds(null);
     Assert.Empty(empty.SessionIds);
     Assert.Null(empty.NextCursor);
@@ -42,7 +42,7 @@ public sealed class SessionListingStorageTests {
     Guid[] created = Enumerable.Range(1, 125).Reverse().Select(Id).ToArray();
     SessionIdPage first;
     Guid inserted = Id(200);
-    using (SessionStore store = SessionStore.Open(database.Path)) {
+    using (UrdStore store = UrdStore.Open(database.Path)) {
       foreach (Guid id in created)
         store.Sessions.CreatePrimary(id);
       first = store.Sessions.ListPrimaryIds(null);
@@ -54,7 +54,7 @@ public sealed class SessionListingStorageTests {
       Assert.DoesNotContain(StoredSessions.ReadCreation(database), row => row.Id == first.SessionIds[^1]);
     }
 
-    using SessionStore reopened = SessionStore.Open(database.Path);
+    using UrdStore reopened = UrdStore.Open(database.Path);
     SessionIdPage second = reopened.Sessions.ListPrimaryIds(first.NextCursor);
     SessionIdPage third = reopened.Sessions.ListPrimaryIds(second.NextCursor);
     Assert.Equal(60, second.SessionIds.Count);
@@ -72,7 +72,7 @@ public sealed class SessionListingStorageTests {
   [Fact]
   public void CreationOrdinalsAreNotReusedAfterDeletingHighestOrAllRows() {
     using var database = new TemporaryDatabase();
-    using (SessionStore store = SessionStore.Open(database.Path)) {
+    using (UrdStore store = UrdStore.Open(database.Path)) {
       store.Sessions.CreatePrimary(Id(1));
       long first = Assert.Single(StoredSessions.ReadCreation(database)).Ordinal;
       store.Sessions.CreatePrimary(Id(2));
@@ -87,7 +87,7 @@ public sealed class SessionListingStorageTests {
     long previous = StoredSessions.ReadCreation(database)[^1].Ordinal;
     database.Execute("PRAGMA foreign_keys = ON; DELETE FROM sessions;");
     Assert.Empty(StoredSessions.ReadCreation(database));
-    using SessionStore reopened = SessionStore.Open(database.Path);
+    using UrdStore reopened = UrdStore.Open(database.Path);
     reopened.Sessions.CreatePrimary(Id(4));
     Assert.True(Assert.Single(StoredSessions.ReadCreation(database)).Ordinal > previous);
     Assert.Empty(reopened.Sessions.ListPrimaryIds(previous.ToString(System.Globalization.CultureInfo.InvariantCulture)).SessionIds);
@@ -99,7 +99,7 @@ public sealed class SessionListingStorageTests {
   [InlineData(true)]
   public void OrderingInsertAndCommitFailuresRollBackIdentityAndDuplicatePreservesOrder(bool deferredFailure) {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     store.Sessions.CreatePrimary(Id(1));
     database.ForceHistoryRevision(7);
     StoredSessionCreation original = Assert.Single(StoredSessions.ReadCreation(database));
@@ -138,7 +138,7 @@ public sealed class SessionListingStorageTests {
     if (failMigration) {
       // Exhaust this table's allocator so backfill fails after CREATE TABLE, not before any writes.
       database.Execute("INSERT INTO sqlite_sequence (name, seq) VALUES ('session_creation', 9223372036854775807);");
-      Assert.Throws<SqliteException>(() => SessionStore.Open(database.Path));
+      Assert.Throws<SqliteException>(() => UrdStore.Open(database.Path));
       Assert.Equal(4L, database.Scalar("PRAGMA user_version;")); // raw-sql: failed upgrade retains the real schema-four version
       Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM sqlite_schema WHERE name = 'session_creation';")); // raw-sql: failed backfill rolls back its new table
       Assert.Equal(long.MaxValue, database.Scalar("SELECT seq FROM sqlite_sequence WHERE name = 'session_creation';")); // raw-sql: fixture-owned allocator fault survives rollback
@@ -146,7 +146,7 @@ public sealed class SessionListingStorageTests {
       database.Execute("DELETE FROM sqlite_sequence WHERE name = 'session_creation';");
     }
 
-    using (SessionStore store = SessionStore.Open(database.Path)) {
+    using (UrdStore store = UrdStore.Open(database.Path)) {
       Assert.Equal(new[] { Id(3), Id(2), Id(1) }, store.Sessions.ListPrimaryIds(null).SessionIds);
       Assert.Equal(new long[] { 1, 2, 3 }, StoredSessions.ReadCreation(database).Select(row => row.Ordinal));
       Assert.Equal(new UserMessageSubmission(Id(11), 7, Original), store.UserMessages.ReadReceipt(Id(1), Id(11))!.Submission);
@@ -156,22 +156,22 @@ public sealed class SessionListingStorageTests {
       Assert.Equal(new[] { Id(4), Id(3), Id(2), Id(1) }, store.Sessions.ListPrimaryIds(null).SessionIds);
     }
 
-    Assert.Equal(5L, database.Scalar("PRAGMA user_version;")); // raw-sql: successful schema-four upgrade applies schema five
+    Assert.Equal(6L, database.Scalar("PRAGMA user_version;")); // raw-sql: successful schema-four upgrade applies the current schema
     Assert.Equal(root, database.Scalar("SELECT rootpage FROM sqlite_schema WHERE name = 'sessions';")); // raw-sql: existing root table was not rebuilt
     Assert.Null(database.Scalar("PRAGMA foreign_key_check;")); // raw-sql: original execution evidence and new metadata retain valid foreign keys
-    using SessionStore reopened = SessionStore.Open(database.Path);
+    using UrdStore reopened = UrdStore.Open(database.Path);
     Assert.Equal(new[] { Id(4), Id(3), Id(2), Id(1) }, reopened.Sessions.ListPrimaryIds(null).SessionIds);
     AssertLegacyEvidence(database, hasNewSession: true);
   }
 
   [Fact]
-  public void SchemaFiveRequiresCreationMetadataShape() {
+  public void CurrentSchemaRequiresCreationMetadataShape() {
     using var database = new TemporaryDatabase();
-    using (SessionStore store = SessionStore.Open(database.Path))
+    using (UrdStore store = UrdStore.Open(database.Path))
       store.Sessions.CreatePrimary(Id(1));
     database.Execute("DROP TABLE session_creation; CREATE TABLE session_creation (unrelated TEXT);");
-    Assert.Throws<SqliteException>(() => SessionStore.Open(database.Path));
-    Assert.Equal(5L, database.Scalar("PRAGMA user_version;")); // raw-sql: invalid version-five schema must not be silently recreated
+    Assert.Throws<SqliteException>(() => UrdStore.Open(database.Path));
+    Assert.Equal(6L, database.Scalar("PRAGMA user_version;")); // raw-sql: invalid current schema must not be silently recreated
     Assert.Equal(Id(1), Assert.Single(StoredSessions.Read(database)).Id);
   }
 

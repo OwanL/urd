@@ -242,7 +242,7 @@ public sealed class SessionStopTests {
   [Fact]
   public async Task StaleWrongSessionAndMissingStopsLeaveReplacementAndIndependentSessionUntouched() {
     var database = new TemporaryDatabase();
-    SessionStore store = SessionStore.Open(database.Path);
+    UrdStore store = UrdStore.Open(database.Path);
     var independentEntered = Signal();
     var independentRelease = Signal();
     var replacementEntered = Signal();
@@ -334,7 +334,7 @@ public sealed class SessionStopTests {
     UserMessageReceipt accepted;
     UserMessageReceipt queued;
     Guid requestId;
-    using (SessionStore original = SessionStore.Open(database.Path)) {
+    using (UrdStore original = UrdStore.Open(database.Path)) {
       original.Sessions.CreatePrimary(sessionId);
       accepted = original.UserMessages.Admit(sessionId, 0, submission, true, executionId).Receipt;
       requestId = Assert.IsType<LlmRequest>(original.Executions.ClaimNextRequest(sessionId, executionId, 0)).RequestId;
@@ -342,7 +342,7 @@ public sealed class SessionStopTests {
     }
 
     using var client = new ScriptedChatClient(_ => throw new InvalidOperationException("Stop must not replay orphan work."));
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     var manager = new SessionManager(store, client);
     try {
       PrimarySession session = await manager.GetPrimaryAsync(sessionId);

@@ -25,10 +25,10 @@ public sealed class SessionManagerFlowTests {
 
     var database = new TemporaryDatabase();
     var client = new ScriptedChatClient(Response);
-    SessionStore? store = null;
+    UrdStore? store = null;
     var executions = new List<(PrimarySession Session, Guid ExecutionId)>();
     try {
-      store = SessionStore.Open(database.Path);
+      store = UrdStore.Open(database.Path);
       var manager = new SessionManager(store, client);
       PrimarySession[] sessions = [await manager.CreatePrimaryAsync(), await manager.CreatePrimaryAsync()];
       Assert.NotEqual(sessions[0].Id, sessions[1].Id);
@@ -64,7 +64,7 @@ public sealed class SessionManagerFlowTests {
       store.Dispose();
       Assert.Equal(0, client.DisposeCalls);
 
-      store = SessionStore.Open(database.Path);
+      store = UrdStore.Open(database.Path);
       var reopenedManager = new SessionManager(store, client);
       for (int i = 0; i < sessions.Length; i++) {
         PrimarySession loaded = await reopenedManager.GetPrimaryAsync(sessions[i].Id);

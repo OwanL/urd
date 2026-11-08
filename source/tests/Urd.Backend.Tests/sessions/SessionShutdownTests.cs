@@ -17,7 +17,7 @@ public sealed class SessionShutdownTests {
   public async Task EmptyManagerShutdownIsRepeatableAndPreventsNewSessions() {
     using var database = new TemporaryDatabase();
     using var client = new ScriptedChatClient(Complete);
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     var manager = new SessionManager(store, client);
 
     await manager.ShutdownSessionsAsync().WaitAsync(TestTimeout);
@@ -33,7 +33,7 @@ public sealed class SessionShutdownTests {
   [Fact]
   public async Task ShutdownFencesRegistryAndHeldHandlesButRetainsSavedReceiptsAndOwnership() {
     var database = new TemporaryDatabase();
-    SessionStore store = SessionStore.Open(database.Path);
+    UrdStore store = UrdStore.Open(database.Path);
     var client = new ScriptedChatClient(Complete);
     var manager = new SessionManager(store, client);
     var ownedExecutions = new List<(PrimarySession Session, Guid ExecutionId)>();
@@ -75,7 +75,7 @@ public sealed class SessionShutdownTests {
       Assert.Equal(0, client.DisposeCalls);
 
       store.Dispose();
-      store = SessionStore.Open(database.Path);
+      store = UrdStore.Open(database.Path);
       var reopenedManager = new SessionManager(store, client);
       PrimarySession reopened = await reopenedManager.GetPrimaryAsync(active.Id);
       SessionSnapshot reopenedSnapshot = await reopened.ReadSnapshotAsync();
@@ -105,7 +105,7 @@ public sealed class SessionShutdownTests {
   [Fact]
   public async Task ShutdownFencesBothHandlesBeforeCancellingAndJoinsReentrantCallbacksAndWaiters() {
     var database = new TemporaryDatabase();
-    SessionStore store = SessionStore.Open(database.Path);
+    UrdStore store = UrdStore.Open(database.Path);
     PrimarySession[] sessions = [];
     SessionManager manager = null!;
     var entered = new[] { Signal(), Signal() };
@@ -214,7 +214,7 @@ public sealed class SessionShutdownTests {
   [Fact]
   public async Task InitiallyCancelledWaitStillInitiatesShutdown() {
     var database = new TemporaryDatabase();
-    SessionStore store = SessionStore.Open(database.Path);
+    UrdStore store = UrdStore.Open(database.Path);
     var entered = Signal();
     var cleanupEntered = Signal();
     var cleanupRelease = Signal();
@@ -259,7 +259,7 @@ public sealed class SessionShutdownTests {
   [InlineData(true)]
   public async Task StopPersistenceFailuresStillCancelAndDrainEverySessionAndRemainSticky(bool failEveryStop) {
     var database = new TemporaryDatabase();
-    SessionStore store = SessionStore.Open(database.Path);
+    UrdStore store = UrdStore.Open(database.Path);
     var entered = new[] { Signal(), Signal() };
     var cleanupEntered = new[] { Signal(), Signal() };
     var cleanupRelease = new[] { Signal(), Signal() };
@@ -336,7 +336,7 @@ public sealed class SessionShutdownTests {
   [Fact]
   public async Task FaultedSettlementKeepsShutdownFailedAfterOtherExecutionDrains() {
     var database = new TemporaryDatabase();
-    SessionStore store = SessionStore.Open(database.Path);
+    UrdStore store = UrdStore.Open(database.Path);
     var healthyEntered = Signal();
     var healthyCleanupEntered = Signal();
     var healthyCleanupRelease = Signal();
@@ -412,7 +412,7 @@ public sealed class SessionShutdownTests {
     var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "retained orphan");
     UserMessageReceipt accepted;
     Guid requestId;
-    using (SessionStore original = SessionStore.Open(database.Path)) {
+    using (UrdStore original = UrdStore.Open(database.Path)) {
       original.Sessions.CreatePrimary(sessionId);
       accepted = original.UserMessages.Admit(sessionId, 0, submission, true, executionId).Receipt;
       requestId = Assert.IsType<LlmRequest>(original.Executions.ClaimNextRequest(sessionId, executionId, 0)).RequestId;
@@ -420,7 +420,7 @@ public sealed class SessionShutdownTests {
 
     using var client = new ScriptedChatClient(_ =>
         throw new InvalidOperationException("Shutdown must not replay an orphaned run."));
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     var manager = new SessionManager(store, client);
     PrimarySession session = await manager.GetPrimaryAsync(sessionId);
     await manager.ShutdownSessionsAsync().WaitAsync(TestTimeout);

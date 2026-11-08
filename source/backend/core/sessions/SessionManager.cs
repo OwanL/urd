@@ -5,14 +5,14 @@ namespace Urd.Core.Sessions;
 
 // Creates, discovers and opens sessions, keeping one live instance per opened session ID.
 public sealed class SessionManager {
-  private readonly SessionStore store;
+  private readonly UrdStore store;
   private readonly IChatClient chatClient;
   private readonly IReadOnlyList<AIFunction> tools;
   private readonly AsyncLock gate = new();
   private readonly Dictionary<Guid, PrimarySession> sessions = new();
   private TaskCompletionSource? sessionShutdown;
 
-  public SessionManager(SessionStore store, IChatClient chatClient, IReadOnlyList<AIFunction>? tools = null) {
+  public SessionManager(UrdStore store, IChatClient chatClient, IReadOnlyList<AIFunction>? tools = null) {
     ArgumentNullException.ThrowIfNull(store);
     ArgumentNullException.ThrowIfNull(chatClient);
     AIFunction[] configured = tools?.ToArray() ?? [];

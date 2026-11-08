@@ -17,7 +17,7 @@ public sealed class SessionIdentityTests {
     using var database = new TemporaryDatabase();
     using var client = IdentityClient();
     PrimarySession created;
-    using (SessionStore store = SessionStore.Open(database.Path)) {
+    using (UrdStore store = UrdStore.Open(database.Path)) {
       var manager = new SessionManager(store, client);
       created = await manager.CreatePrimaryAsync();
       Assert.NotEqual(Guid.Empty, created.Id);
@@ -25,9 +25,9 @@ public sealed class SessionIdentityTests {
       Assert.Equal(created.Id, store.Sessions.Read(created.Id)!.Id);
     }
 
-    Assert.Equal(5L, database.Scalar("PRAGMA user_version;")); // raw-sql: applied schema version is the subject under test
+    Assert.Equal(6L, database.Scalar("PRAGMA user_version;")); // raw-sql: applied schema version is the subject under test
     Assert.Equal("wal", database.Scalar("PRAGMA journal_mode;")); // raw-sql: journal mode is database configuration under test
-    using SessionStore reopened = SessionStore.Open(database.Path);
+    using UrdStore reopened = UrdStore.Open(database.Path);
     var reopenedManager = new SessionManager(reopened, client);
     PrimarySession loaded = await reopenedManager.GetPrimaryAsync(created.Id);
     Assert.Equal(created.Id, loaded.Id);
@@ -39,7 +39,7 @@ public sealed class SessionIdentityTests {
   [Fact]
   public async Task ManagerReturnsCanonicalHandleAndMissingLookupNeverInserts() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     using var client = IdentityClient();
     var manager = new SessionManager(store, client);
     Guid missing = Guid.NewGuid();
@@ -60,7 +60,7 @@ public sealed class SessionIdentityTests {
   private static async Task CheckConcurrentHandlesAsync() {
     // Keep ownership here: a timed-out test wait must not dispose resources beneath callers.
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     SessionRecord saved = store.Sessions.CreatePrimary(Guid.NewGuid());
     using var client = IdentityClient();
     var manager = new SessionManager(store, client);
@@ -88,14 +88,14 @@ public sealed class SessionIdentityTests {
   public void HandleConstructionCopiesAlreadyLoadedIdentityAfterStoreCloses() {
     using var database = new TemporaryDatabase();
     Guid id = Guid.NewGuid();
-    using (SessionStore store = SessionStore.Open(database.Path)) {
+    using (UrdStore store = UrdStore.Open(database.Path)) {
       store.Sessions.CreatePrimary(id);
     }
 
     database.ForceHistoryRevision(7);
     SessionRecord loaded;
-    SessionStore borrowedStore;
-    using (SessionStore store = SessionStore.Open(database.Path)) {
+    UrdStore borrowedStore;
+    using (UrdStore store = UrdStore.Open(database.Path)) {
       borrowedStore = store;
       loaded = store.Sessions.Read(id)!;
     }
@@ -112,7 +112,7 @@ public sealed class SessionIdentityTests {
   [Fact]
   public void DuplicateCreateDoesNotOverwriteSavedIdentity() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     SessionRecord saved = store.Sessions.CreatePrimary(Guid.NewGuid());
     SqliteException error = Assert.Throws<SqliteException>(() => store.Sessions.CreatePrimary(saved.Id));
     Assert.Equal(19, error.SqliteErrorCode);
@@ -123,17 +123,17 @@ public sealed class SessionIdentityTests {
   [Fact]
   public void NewerSchemaIsRejectedAndAcquiredResourcesAreClosed() {
     using var database = new TemporaryDatabase();
-    using (SessionStore store = SessionStore.Open(database.Path)) {
+    using (UrdStore store = UrdStore.Open(database.Path)) {
       store.Sessions.CreatePrimary(Guid.NewGuid());
     }
 
-    database.Execute("PRAGMA user_version = 6;");
-    Assert.Throws<NotSupportedException>(() => SessionStore.Open(database.Path));
+    database.Execute("PRAGMA user_version = 7;");
+    Assert.Throws<NotSupportedException>(() => UrdStore.Open(database.Path));
     using (FileStream file = File.Open(database.Path, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) {
       Assert.True(file.Length > 0);
     }
 
-    Assert.Equal(6L, database.Scalar("PRAGMA user_version;")); // raw-sql: rejecting a newer schema must not rewrite it
+    Assert.Equal(7L, database.Scalar("PRAGMA user_version;")); // raw-sql: rejecting a newer schema must not rewrite it
     Assert.Single(StoredSessions.Read(database));
   }
 
@@ -141,7 +141,7 @@ public sealed class SessionIdentityTests {
   public void UnversionedForeignDatabaseIsNotAdopted() {
     using var database = new TemporaryDatabase();
     database.Execute("CREATE TABLE unrelated (value TEXT); INSERT INTO unrelated VALUES ('retained');");
-    Assert.Throws<NotSupportedException>(() => SessionStore.Open(database.Path));
+    Assert.Throws<NotSupportedException>(() => UrdStore.Open(database.Path));
     Assert.Equal(0L, database.Scalar("PRAGMA user_version;")); // raw-sql: a foreign database must stay unversioned
     Assert.Equal("retained", database.Scalar("SELECT value FROM unrelated;")); // raw-sql: foreign rows must be untouched
     Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM sqlite_schema WHERE name = 'sessions';")); // raw-sql: no schema may be created
@@ -150,7 +150,7 @@ public sealed class SessionIdentityTests {
   [Fact]
   public void DisposedStoreErrorsAreNotMistakenForAbsentIdentity() {
     using var database = new TemporaryDatabase();
-    SessionStore store = SessionStore.Open(database.Path);
+    UrdStore store = UrdStore.Open(database.Path);
     store.Dispose();
     store.Dispose();
     Assert.Throws<ObjectDisposedException>(() => store.Sessions.Read(Guid.NewGuid()));

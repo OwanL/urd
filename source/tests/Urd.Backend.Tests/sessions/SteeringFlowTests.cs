@@ -87,7 +87,7 @@ public sealed class SteeringFlowTests {
       Assert.Equal(3, StoredExecutions.ReadRequests(fixture.Database).Count);
       Assert.All(StoredTools.Read(fixture.Database), tool => Assert.Equal(ExecutionOutcome.Completed, tool.Outcome));
 
-      using SessionStore reopened = SessionStore.Open(fixture.Database.Path);
+      using UrdStore reopened = UrdStore.Open(fixture.Database.Path);
       var manager = new SessionManager(reopened, client, [step]);
       PrimarySession loaded = await manager.GetPrimaryAsync(fixture.Session.Id);
       Assert.Equal(retries[0], await loaded.SubmitUserMessageAsync(first));
@@ -132,7 +132,7 @@ public sealed class SteeringFlowTests {
     var client = new ScriptedChatClient(token => Interlocked.Increment(ref round) == 1
         ? ToolBatch(token, Call("first", 1), Call("second", 2)) : Complete(token));
     var database = new TemporaryDatabase();
-    var store = SessionStore.Open(database.Path);
+    var store = UrdStore.Open(database.Path);
     AIFunction step = AIFunctionFactory.Create(Step, name: "step");
     AIFunction[] configured = [step];
     var manager = new SessionManager(store, client, configured);
@@ -170,7 +170,7 @@ public sealed class SteeringFlowTests {
       Assert.Equal(ExecutionOutcome.Cancelled, Assert.Single((await session.ReadSnapshotAsync()).Messages,
           message => message.Message.MessageId == submission.SubmissionId).Settlement);
 
-      using SessionStore reopened = SessionStore.Open(database.Path);
+      using UrdStore reopened = UrdStore.Open(database.Path);
       var nextManager = new SessionManager(reopened, client);
       try {
         PrimarySession loaded = await nextManager.GetPrimaryAsync(session.Id);

@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging.Console;
+using Urd.Core.Providers;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
 
@@ -42,7 +43,7 @@ internal static class Program {
 
   // The run constructs and owns the supplied client, including its disposal after successful drain.
   internal static async Task RunServerAsync(ServerOptions options, Action<Uri> onReady, Func<IChatClient> createClient,
-      CancellationToken stopping) {
+      CancellationToken stopping, Func<UrdStore, Func<Uri>, ProviderManager>? createProviders = null) {
     ArgumentNullException.ThrowIfNull(options);
     ArgumentNullException.ThrowIfNull(onReady);
     ArgumentNullException.ThrowIfNull(createClient);
@@ -50,17 +51,21 @@ internal static class Program {
     // Keep the file, not a stale PID. The OS releases exclusive ownership when this handle/process exits.
     var directoryLock = new FileStream(Path.Combine(options.DataRoot, "urd.lock"),
         FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-    SessionStore? store = null;
+    UrdStore? store = null;
     IChatClient? client = null;
     SessionManager? manager = null;
+    ProviderManager? providers = null;
     WebApplication? app = null;
     Uri? servedOrigin = null;
     ExceptionDispatchInfo? runFailure = null;
     try {
-      store = SessionStore.Open(Path.Combine(options.DataRoot, "urd.sqlite"));
+      store = UrdStore.Open(Path.Combine(options.DataRoot, "urd.sqlite"));
       client = createClient();
       manager = new SessionManager(store, client);
-      app = CreateApplication(options, manager, () => Volatile.Read(ref servedOrigin));
+      Uri CallbackUri() => new(Volatile.Read(ref servedOrigin)
+          ?? throw new InvalidOperationException("The server is not ready."), "/auth/callback");
+      providers = createProviders?.Invoke(store, CallbackUri) ?? new ProviderManager(store, CallbackUri);
+      app = CreateApplication(options, manager, providers, () => Volatile.Read(ref servedOrigin));
       var shutdownRequested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
       using var lifetimeStop = app.Lifetime.ApplicationStopping.Register(() => shutdownRequested.TrySetResult());
       using var callerStop = stopping.Register(app.Lifetime.StopApplication);
@@ -80,6 +85,7 @@ internal static class Program {
 
     Volatile.Write(ref servedOrigin, null);
     Task drained = Task.WhenAll(manager?.ShutdownSessionsAsync(CancellationToken.None) ?? Task.CompletedTask,
+        providers?.ShutdownAsync() ?? Task.CompletedTask,
         app?.StopAsync(CancellationToken.None) ?? Task.CompletedTask);
     try {
       await drained;
@@ -92,6 +98,7 @@ internal static class Program {
 
     if (app is not null)
       await app.DisposeAsync();
+    providers?.Dispose();
     client?.Dispose();
     store?.Dispose();
     await directoryLock.DisposeAsync();
@@ -99,7 +106,7 @@ internal static class Program {
   }
 
   private static WebApplication CreateApplication(ServerOptions options, SessionManager manager,
-      Func<Uri?> servedOrigin) {
+      ProviderManager providers, Func<Uri?> servedOrigin) {
     // No default appsettings/environment/URL providers: Kestrel configuration can otherwise add listeners.
     WebApplicationBuilder builder = WebApplication.CreateEmptyBuilder(new WebApplicationOptions {
       ApplicationName = typeof(Program).Assembly.GetName().Name,
@@ -127,6 +134,7 @@ internal static class Program {
         context.Features.Get<IHttpRequestBodyDetectionFeature>()?.CanHaveBody == true
             ? Results.BadRequest() : Results.NoContent());
     app.MapSessions(manager);
+    app.MapProviders(providers);
     return app;
   }
 }

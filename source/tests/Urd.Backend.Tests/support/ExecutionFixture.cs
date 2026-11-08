@@ -8,14 +8,14 @@ namespace Urd.Backend.Tests.Support;
 
 // One primary session over a temporary database, with execution cleanup on dispose.
 internal sealed class ExecutionFixture : IAsyncDisposable {
-  private readonly SessionStore store;
+  private readonly UrdStore store;
   private readonly ScriptedChatClient client;
   private readonly List<Guid> executions = [];
 
   internal ExecutionFixture(ScriptedChatClient client, IReadOnlyList<AIFunction>? tools = null) {
     this.client = client;
     Database = new TemporaryDatabase();
-    store = SessionStore.Open(Database.Path);
+    store = UrdStore.Open(Database.Path);
     Session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid()), store, client, tools);
   }
 

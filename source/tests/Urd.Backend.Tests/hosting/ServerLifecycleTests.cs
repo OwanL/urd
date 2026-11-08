@@ -191,7 +191,7 @@ public sealed class ServerLifecycleTests {
   }
 
   private static async Task SeedHistoryAsync(TemporaryDatabase database) {
-    SessionStore store = SessionStore.Open(database.Path);
+    UrdStore store = UrdStore.Open(database.Path);
     var client = new ScriptedChatClient(ScriptedResponses.Complete);
     var manager = new SessionManager(store, client);
     try {

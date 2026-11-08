@@ -171,7 +171,7 @@ public sealed class SessionStopRoutesTests {
     using var database = new TemporaryDatabase();
     Guid sessionId = Guid.NewGuid();
     Guid executionId = Guid.NewGuid();
-    using (SessionStore store = SessionStore.Open(database.Path)) {
+    using (UrdStore store = UrdStore.Open(database.Path)) {
       store.Sessions.CreatePrimary(sessionId);
       store.UserMessages.Admit(sessionId, 0, new(Guid.NewGuid(), 0, "orphan"), true, executionId);
       Assert.NotNull(store.Executions.ClaimNextRequest(sessionId, executionId, 0));

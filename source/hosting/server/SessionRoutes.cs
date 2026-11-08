@@ -2,7 +2,6 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Data.Sqlite;
-using Microsoft.Net.Http.Headers;
 using Urd.Core.Sessions;
 
 namespace Urd.Server;
@@ -42,7 +41,7 @@ internal static class SessionRoutes {
         && http.Features.Get<IHttpRequestBodyDetectionFeature>()?.CanHaveBody == true)
       return Results.BadRequest();
 
-    if (HttpMethods.IsPost(http.Request.Method) && !TryPrepareJsonRequest(http.Request))
+    if (HttpMethods.IsPost(http.Request.Method) && !HttpJson.TryPrepare(http.Request))
       return Results.StatusCode(StatusCodes.Status415UnsupportedMediaType);
 
     try {
@@ -63,27 +62,6 @@ internal static class SessionRoutes {
       return StorageUnavailable(http, failure);
     } catch (InvalidDataException failure) {
       return StorageUnavailable(http, failure);
-    }
-  }
-
-  private static bool TryPrepareJsonRequest(HttpRequest request) {
-    if (!request.HasJsonContentType())
-      return false;
-
-    MediaTypeHeaderValue mediaType = MediaTypeHeaderValue.Parse(request.ContentType!);
-    if (!mediaType.Charset.HasValue)
-      return true;
-
-    try {
-      Encoding encoding = Encoding.GetEncoding(HeaderUtilities.RemoveQuotes(mediaType.Charset).Value!);
-      // ASP.NET's JSON reader passes charset directly to GetEncoding, including any quotes.
-      mediaType.Charset = encoding.WebName;
-      request.ContentType = mediaType.ToString();
-      return true;
-    } catch (ArgumentException) {
-      return false;
-    } catch (NotSupportedException) {
-      return false;
     }
   }
 

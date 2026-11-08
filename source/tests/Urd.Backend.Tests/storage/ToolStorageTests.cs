@@ -13,7 +13,7 @@ public sealed class ToolStorageTests {
   [Fact]
   public void OnlyFinalSuccessfulCompletionAuthorizesDispatchAndDeliversSubmissions() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     var (session, execution, request) = Begin(store);
     var call = Call("first");
     var completion = new LlmRequestResult(request, ExecutionOutcome.Completed, ToolCalls: [call]);
@@ -42,7 +42,7 @@ public sealed class ToolStorageTests {
   [Fact]
   public void StopBeforeCompletionNeverAuthorizesCalls() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     var (session, execution, request) = Begin(store);
     FinalText(store, session, execution, request);
     store.Executions.RequestStop(session, execution, ownsExecution: true);
@@ -57,7 +57,7 @@ public sealed class ToolStorageTests {
   [Fact]
   public void AssistantIndexAndEmptyFinalChunkCommitTogetherOrNotAtAll() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     var (session, execution, request) = Begin(store);
     var chunk = new LlmResponseChunk(request, Guid.NewGuid(), 0, "", true);
     database.Execute("""
@@ -77,7 +77,7 @@ public sealed class ToolStorageTests {
   [Fact]
   public void AuthorizationCommitFailureRollsBackRequestDeliveryAndWholeBatch() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     var (session, execution, request) = Begin(store);
     FinalText(store, session, execution, request);
     var completion = new LlmRequestResult(request, ExecutionOutcome.Completed, ToolCalls: [Call("one"), Call("two")]);
@@ -102,7 +102,7 @@ public sealed class ToolStorageTests {
   [Fact]
   public void InvalidBatchesCannotAuthorizeCallsButSixteenBoundedCallsCan() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     var (session, execution, request) = Begin(store);
     FinalText(store, session, execution, request);
     var completion = new LlmRequestResult(request, ExecutionOutcome.Completed);
@@ -135,7 +135,7 @@ public sealed class ToolStorageTests {
   [Fact]
   public void ClaimsAreSequentialCurrentAndNeverRepeatedAndErrorsPermitContinuation() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     var (session, execution, request) = Begin(store);
     Authorize(store, session, execution, request, Call("one"), Call("two"));
     Assert.False(store.Tools.TryStart(Guid.NewGuid(), execution, 0, request, "one"));
@@ -162,7 +162,7 @@ public sealed class ToolStorageTests {
   [Fact]
   public void FailedClaimCommitNeverGrantsInvocationPermission() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     var (session, execution, request) = Begin(store);
     Authorize(store, session, execution, request, Call("effect"));
     database.Execute("""
@@ -187,7 +187,7 @@ public sealed class ToolStorageTests {
   [Fact]
   public void StopAllowsActualResultButPreventsNextStartAndRetainedRetriesNeverRewrite() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     var (session, execution, request) = Begin(store);
     LlmToolCall first = Call("one"), second = Call("two");
     Authorize(store, session, execution, request, first, second);
@@ -223,7 +223,7 @@ public sealed class ToolStorageTests {
   [Fact]
   public void ResultIdentityAndRevisionFencesAlsoApplyToRetainedWrites() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     var (session, execution, request) = Begin(store);
     Authorize(store, session, execution, request, Call("one"));
     Assert.True(store.Tools.TryStart(session, execution, 0, request, "one"));
@@ -244,7 +244,7 @@ public sealed class ToolStorageTests {
     using var database = new TemporaryDatabase();
     Guid session, execution, request;
     int effects = 0;
-    using (SessionStore store = SessionStore.Open(database.Path)) {
+    using (UrdStore store = UrdStore.Open(database.Path)) {
       (session, execution, request) = Begin(store);
       Authorize(store, session, execution, request, Call("effect"));
       if (store.Tools.TryStart(session, execution, 0, request, "effect"))
@@ -269,7 +269,7 @@ public sealed class ToolStorageTests {
       Assert.Null(store.Executions.TrySettle(session, execution, ExecutionOutcome.Completed));
     }
 
-    using SessionStore reopened = SessionStore.Open(database.Path);
+    using UrdStore reopened = UrdStore.Open(database.Path);
     if (reopened.Tools.TryStart(session, execution, 0, request, "effect"))
       effects++;
     Assert.Equal(1, effects);
@@ -280,7 +280,7 @@ public sealed class ToolStorageTests {
   [Fact]
   public void ResultsRequireValidBoundedUtf8JsonAndRetainTheActualPayload() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     var (session, execution, request) = Begin(store);
     Authorize(store, session, execution, request, Call("one"));
     Assert.True(store.Tools.TryStart(session, execution, 0, request, "one"));
@@ -295,16 +295,16 @@ public sealed class ToolStorageTests {
     Assert.Equal(bounded.GetRawText(), Assert.Single(StoredTools.Read(database)).ResultJson);
   }
 
-  private static (Guid Session, Guid Execution, Guid Request) Begin(SessionStore store) {
+  private static (Guid Session, Guid Execution, Guid Request) Begin(UrdStore store) {
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, execution = Guid.NewGuid();
     store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "request"), true, execution);
     return (session, execution, store.Executions.ClaimNextRequest(session, execution, 0)!.RequestId);
   }
 
-  private static void FinalText(SessionStore store, Guid session, Guid execution, Guid request) =>
+  private static void FinalText(UrdStore store, Guid session, Guid execution, Guid request) =>
       Assert.True(store.LlmResponses.Append(session, execution, 0, new(request, Guid.NewGuid(), 0, "", true)));
 
-  private static void Authorize(SessionStore store, Guid session, Guid execution, Guid request, params LlmToolCall[] calls) {
+  private static void Authorize(UrdStore store, Guid session, Guid execution, Guid request, params LlmToolCall[] calls) {
     FinalText(store, session, execution, request);
     Assert.True(store.LlmResponses.CompleteRequest(session, execution, 0, new(request, ExecutionOutcome.Completed, ToolCalls: calls)));
   }

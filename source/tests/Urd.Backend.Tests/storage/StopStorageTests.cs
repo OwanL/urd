@@ -14,7 +14,7 @@ public sealed class StopStorageTests {
   [InlineData(true)]
   public void MissingAndWrongSessionExecutionsAreNotFoundBeforeOwnership(bool ownsExecution) {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     Guid otherSession = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     Guid execution = Guid.NewGuid(), missing = Guid.NewGuid();
@@ -37,14 +37,14 @@ public sealed class StopStorageTests {
   public void ReopenedUnownedExecutionIsUnavailableWithoutMutation(bool stopping) {
     using var database = new TemporaryDatabase();
     Guid session = Guid.NewGuid(), execution = Guid.NewGuid();
-    using (SessionStore store = SessionStore.Open(database.Path)) {
+    using (UrdStore store = UrdStore.Open(database.Path)) {
       store.Sessions.CreatePrimary(session);
       store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "orphaned input"), true, execution);
       if (stopping)
         Assert.Equal(StopStatus.Requested, store.Executions.RequestStop(session, execution, ownsExecution: true).Status);
     }
 
-    using SessionStore reopened = SessionStore.Open(database.Path);
+    using UrdStore reopened = UrdStore.Open(database.Path);
     StoredExecution savedExecution = Assert.Single(StoredExecutions.Read(database));
     StoredDelivery delivery = Assert.Single(StoredDeliveries.Read(database));
     RejectUpdates(database);
@@ -62,7 +62,7 @@ public sealed class StopStorageTests {
   [InlineData(ExecutionOutcome.Failed)]
   public void SettledOutcomeWinsOverOwnershipAndCannotStopReplacement(ExecutionOutcome outcome) {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     Guid otherSession = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     Guid execution = Guid.NewGuid(), replacement = Guid.NewGuid();
@@ -88,7 +88,7 @@ public sealed class StopStorageTests {
   [Fact]
   public void OwnedStopRetiresOnlyPendingSubmissionsAndRetriesAdvanceToSettlement() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, execution = Guid.NewGuid();
     var initial = new UserMessageSubmission(Guid.NewGuid(), 0, "claimed");
     var pending = new UserMessageSubmission(Guid.NewGuid(), 0, "pending one");
@@ -126,7 +126,7 @@ public sealed class StopStorageTests {
   [Fact]
   public void AlreadyStoppingRetryStillRetiresPendingSubmissionsWithoutRewritingExecution() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, execution = Guid.NewGuid();
     var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "unclaimed");
     UserMessageReceipt accepted = store.UserMessages.Admit(session, 0, submission, true, execution).Receipt;
@@ -152,7 +152,7 @@ public sealed class StopStorageTests {
   [InlineData(true)]
   public void RetirementAndStopFlagRollbackTogetherOnStatementOrCommitFailure(bool failAtCommit) {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, execution = Guid.NewGuid();
     store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "claimed"), true, execution);
     store.Executions.ClaimNextRequest(session, execution, 0);

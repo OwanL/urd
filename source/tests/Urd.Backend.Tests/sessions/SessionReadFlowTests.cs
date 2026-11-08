@@ -33,7 +33,7 @@ public sealed class SessionReadFlowTests {
 
     var database = new TemporaryDatabase();
     var client = new ScriptedChatClient(token => new HeldDisposal(Response(token), cleanupEntered, cleanupRelease.Task));
-    var store = SessionStore.Open(database.Path);
+    var store = UrdStore.Open(database.Path);
     PrimarySession session = await new SessionManager(store, client).CreatePrimaryAsync();
     Guid? ownedExecution = null;
     try {
@@ -117,7 +117,7 @@ public sealed class SessionReadFlowTests {
   public async Task ReopenReadsRetainedUnsettledContentWithoutReplayAndDiagnosesStaleHandles() {
     using var database = new TemporaryDatabase();
     Guid sessionId, cleanId, executionId = Guid.NewGuid(), outputId = Guid.NewGuid();
-    using (SessionStore original = SessionStore.Open(database.Path)) {
+    using (UrdStore original = UrdStore.Open(database.Path)) {
       sessionId = original.Sessions.CreatePrimary(Guid.NewGuid()).Id;
       cleanId = original.Sessions.CreatePrimary(Guid.NewGuid()).Id;
       original.UserMessages.Admit(sessionId, 0, new(Guid.NewGuid(), 0, "retained input"), true, executionId);
@@ -127,7 +127,7 @@ public sealed class SessionReadFlowTests {
 
     using var client = new ScriptedChatClient(_ =>
         throw new InvalidOperationException("Reads must not start a llm request."));
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     var manager = new SessionManager(store, client);
     PrimarySession session = await manager.GetPrimaryAsync(sessionId);
     SessionSnapshot retained = await session.ReadSnapshotAsync();

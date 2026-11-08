@@ -4,7 +4,7 @@ namespace Urd.Core.Storage;
 
 // Initializes connection pragmas and creates, verifies, or upgrades the schema.
 internal static class DatabaseSchema {
-  private const int SchemaVersion = 5;
+  private const int SchemaVersion = 6;
 
   internal static void Initialize(SqliteConnection connection) {
     using SqliteCommand command = connection.CreateCommand();
@@ -46,7 +46,45 @@ internal static class DatabaseSchema {
 
     EnsureSteeringSchema(command, version);
     EnsureCreationSchema(command, version);
+    EnsureProviderSchema(command, version);
     transaction.Commit();
+  }
+
+  private static void EnsureProviderSchema(SqliteCommand command, long version) {
+    if (version >= 6) {
+      command.CommandText = """
+        SELECT connection_id, name, route, api, endpoint, authentication, generation, credential_version,
+            registration_json, credentials_json, disconnecting, catalog_json FROM provider_connections LIMIT 0;
+        """;
+      command.ExecuteNonQuery();
+      command.CommandText = "SELECT singleton, host_id FROM provider_host LIMIT 0;";
+      command.ExecuteNonQuery();
+      return;
+    }
+
+    command.CommandText = """
+      CREATE TABLE provider_connections (
+          connection_id TEXT PRIMARY KEY NOT NULL,
+          name TEXT NOT NULL,
+          route INTEGER NOT NULL CHECK (route IN (0, 1, 2)),
+          api INTEGER NOT NULL CHECK (api IN (0, 1)),
+          endpoint TEXT NOT NULL,
+          authentication INTEGER NOT NULL CHECK (authentication IN (0, 1, 2)),
+          generation INTEGER NOT NULL CHECK (generation >= 0),
+          credential_version INTEGER NOT NULL CHECK (credential_version >= 0),
+          registration_json TEXT,
+          credentials_json TEXT,
+          disconnecting INTEGER NOT NULL CHECK (disconnecting IN (0, 1)),
+          catalog_json TEXT,
+          CHECK (route <> 2 OR authentication IN (0, 1))
+      ) STRICT;
+      CREATE TABLE provider_host (
+          singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+          host_id TEXT NOT NULL
+      ) STRICT;
+      PRAGMA user_version = 6;
+      """;
+    command.ExecuteNonQuery();
   }
 
   private static void EnsureCreationSchema(SqliteCommand command, long version) {

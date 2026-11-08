@@ -103,7 +103,7 @@ public sealed class ToolExecutionTests {
   [InlineData("serialization")]
   public async Task UncertainResultAfterAnEffectFencesWithoutStartingAnotherCallOrRequest(string scenario) {
     var database = new TemporaryDatabase();
-    var store = SessionStore.Open(database.Path);
+    var store = UrdStore.Open(database.Path);
     int effects = 0;
     var cycle = new Dictionary<string, object?>();
     cycle["self"] = cycle;

@@ -14,7 +14,7 @@ public sealed class ExecutionStorageTests {
   [Fact]
   public void AcceptanceAndExecutionRollbackTogetherOnCommitFailure() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "atomic input");
     Guid execution = Guid.NewGuid();
@@ -48,13 +48,13 @@ public sealed class ExecutionStorageTests {
     Guid session = Guid.NewGuid(), execution = Guid.NewGuid();
     var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "original \0 🙂");
     UserMessageReceipt receipt;
-    using (SessionStore store = SessionStore.Open(database.Path)) {
+    using (UrdStore store = UrdStore.Open(database.Path)) {
       store.Sessions.CreatePrimary(session);
       receipt = store.UserMessages.Admit(session, 0, submission, true, execution).Receipt;
       Assert.Equal(ExecutionOutcome.Failed, store.Executions.TrySettle(session, execution, ExecutionOutcome.Failed)!.Outcome);
     }
 
-    using SessionStore reopened = SessionStore.Open(database.Path);
+    using UrdStore reopened = UrdStore.Open(database.Path);
     // Settlement alone must prevent a claim: no Stop, revision mismatch or prior request can mask it.
     Assert.Null(reopened.Executions.ClaimNextRequest(session, execution, 0));
     database.ForceHistoryRevision(7);
@@ -69,7 +69,7 @@ public sealed class ExecutionStorageTests {
   [Fact]
   public void BusyAndStoppingRefusalsAreDurableWithoutTranscriptOrExecutionFacts() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, execution = Guid.NewGuid();
     store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "accepted"), true, execution);
     var busySubmission = new UserMessageSubmission(Guid.NewGuid(), 0, "refused while busy");
@@ -100,7 +100,7 @@ public sealed class ExecutionStorageTests {
       bool admissionEnabled, bool stopRequested, long handleRevision,
       long expectedRevision, MessageRefusalReason expectedReason) {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, execution = Guid.NewGuid();
     store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "accepted"), true, execution);
     if (stopRequested)
@@ -121,7 +121,7 @@ public sealed class ExecutionStorageTests {
   public void ClaimIsPersistedOnceAndReopenDoesNotReplayActiveSubmission() {
     using var database = new TemporaryDatabase();
     Guid session = Guid.NewGuid(), execution = Guid.NewGuid(), requestId;
-    using (SessionStore store = SessionStore.Open(database.Path)) {
+    using (UrdStore store = UrdStore.Open(database.Path)) {
       store.Sessions.CreatePrimary(session);
       store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "claimed"), true, execution);
       LlmRequest request = store.Executions.ClaimNextRequest(session, execution, 0)!;
@@ -131,7 +131,7 @@ public sealed class ExecutionStorageTests {
       Assert.Null(store.Executions.ClaimNextRequest(session, execution, 0));
     }
 
-    using SessionStore reopened = SessionStore.Open(database.Path);
+    using UrdStore reopened = UrdStore.Open(database.Path);
     Assert.Null(reopened.Executions.ClaimNextRequest(session, execution, 0));
     Assert.Null(reopened.Executions.ReadSettlement(session, execution));
     Assert.Equal(requestId, Assert.Single(StoredExecutions.ReadRequests(database)).RequestId);
@@ -142,7 +142,7 @@ public sealed class ExecutionStorageTests {
   [Fact]
   public void OrderedBatchesAndExplicitCompletionProduceOrderedPlainTextContext() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, execution = Guid.NewGuid(), output = Guid.NewGuid();
     store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "first \0 input"), true, execution);
     LlmRequest request = store.Executions.ClaimNextRequest(session, execution, 0)!;
@@ -179,7 +179,7 @@ public sealed class ExecutionStorageTests {
   [InlineData(ExecutionOutcome.Failed)]
   public void CompletionRetriesAfterSettlementNeverRewriteSavedEvidence(ExecutionOutcome outcome) {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     Guid execution = Guid.NewGuid();
     store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "request"), true, execution);
@@ -207,7 +207,7 @@ public sealed class ExecutionStorageTests {
   [Fact]
   public void RevisionAndExecutionFencesRejectStaleWritesAndAdmission() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, execution = Guid.NewGuid();
     store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "current"), true, execution);
     Assert.Null(store.Executions.ClaimNextRequest(session, execution, 1));
@@ -227,7 +227,7 @@ public sealed class ExecutionStorageTests {
   [Fact]
   public void StopRejectsLateSuccessAndOnlyFencesAddressedExecution() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, execution = Guid.NewGuid();
     store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "stop"), true, execution);
     LlmRequest request = store.Executions.ClaimNextRequest(session, execution, 0)!;
@@ -254,7 +254,7 @@ public sealed class ExecutionStorageTests {
     using var database = new TemporaryDatabase();
     Guid session = Guid.NewGuid(), execution = Guid.NewGuid();
     var secondSubmission = new UserMessageSubmission(Guid.NewGuid(), 0, "second");
-    using (SessionStore store = SessionStore.Open(database.Path)) {
+    using (UrdStore store = UrdStore.Open(database.Path)) {
       store.Sessions.CreatePrimary(session);
       store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "first"), true, execution);
       LlmRequest first = store.Executions.ClaimNextRequest(session, execution, 0)!;
@@ -283,7 +283,7 @@ public sealed class ExecutionStorageTests {
       Assert.Equal(4, StoredDeliveries.Read(database).Count(submission => submission.RequestId is not null && submission.Outcome == ExecutionOutcome.Completed));
     }
 
-    using SessionStore reopened = SessionStore.Open(database.Path);
+    using UrdStore reopened = UrdStore.Open(database.Path);
     Assert.Null(reopened.Executions.ClaimNextRequest(session, execution, 0));
     Assert.Equal(execution, reopened.UserMessages.Admit(session, 0, secondSubmission, false, Guid.Empty).Receipt.ExecutionId);
     Assert.Equal(ExecutionOutcome.Completed, reopened.Executions.ReadSettlement(session, execution)!.Outcome);
@@ -292,7 +292,7 @@ public sealed class ExecutionStorageTests {
   [Fact]
   public void SavedToolErrorsStillRequireLlmContinuationBeforeSettlement() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, execution = Guid.NewGuid();
     store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "first"), true, execution);
     LlmRequest first = store.Executions.ClaimNextRequest(session, execution, 0)!;
@@ -327,7 +327,7 @@ public sealed class ExecutionStorageTests {
   [Fact]
   public void ToolBatchAloneClaimsContinuationButStopRetiresUndeliveredSubmissions() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, execution = Guid.NewGuid();
     store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "first"), true, execution);
     LlmRequest first = store.Executions.ClaimNextRequest(session, execution, 0)!;
@@ -350,7 +350,7 @@ public sealed class ExecutionStorageTests {
         message => message.Text == pending.Text);
   }
 
-  private static void SaveResponse(SessionStore store, Guid session, Guid execution, LlmRequest request,
+  private static void SaveResponse(UrdStore store, Guid session, Guid execution, LlmRequest request,
       string text, IReadOnlyList<LlmToolCall>? calls = null) {
     Assert.True(store.LlmResponses.Append(session, execution, 0, new(request.RequestId, Guid.NewGuid(), 0, text, true)));
     Assert.True(store.LlmResponses.CompleteRequest(session, execution, 0,
@@ -360,7 +360,7 @@ public sealed class ExecutionStorageTests {
   [Fact]
   public void OutputValidationIsUtf8BoundedAndFailuresRemainTruthful() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, execution = Guid.NewGuid();
     store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "fail"), true, execution);
     LlmRequest request = store.Executions.ClaimNextRequest(session, execution, 0)!;

@@ -16,13 +16,13 @@ public sealed class UserMessageReceiptTests {
     Guid sessionId = Guid.NewGuid();
     Guid firstProposedExecutionId = Guid.NewGuid(), retryProposedExecutionId = Guid.NewGuid();
     var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "original \r\n e\u0301 \0 🙂");
-    using (SessionStore store = SessionStore.Open(database.Path)) {
+    using (UrdStore store = UrdStore.Open(database.Path)) {
       store.Sessions.CreatePrimary(sessionId);
       // Deliberately discard the committed reply, as an uncertain caller would.
       store.UserMessages.Admit(sessionId, 0, submission, accepting: false, proposedExecutionId: firstProposedExecutionId);
     }
 
-    using SessionStore reopened = SessionStore.Open(database.Path);
+    using UrdStore reopened = UrdStore.Open(database.Path);
     var retry = reopened.UserMessages.Admit(sessionId, 0, submission, accepting: true, proposedExecutionId: retryProposedExecutionId);
     UserMessageReceipt receipt = reopened.UserMessages.ReadReceipt(sessionId, submission.SubmissionId)!;
     Assert.Equal(sessionId, receipt.SessionId);
@@ -40,7 +40,7 @@ public sealed class UserMessageReceiptTests {
   [Fact]
   public void DelayedStaleAdmissionCannotReplaceFirstRefusal() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     Guid sessionId = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "delayed original");
     UserMessageReceipt firstReceipt = store.UserMessages.Admit(
@@ -61,7 +61,7 @@ public sealed class UserMessageReceiptTests {
   [Fact]
   public void ConflictingTextOrRevisionNeverResolvesOrOverwritesOriginal() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     Guid sessionId = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "e\u0301\r\n");
     UserMessageReceipt original = store.UserMessages.Admit(
@@ -88,7 +88,7 @@ public sealed class UserMessageReceiptTests {
   [Fact]
   public void SubmissionIdentityIsScopedToSessionAndMissingLookupDoesNotInsert() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     Guid first = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     Guid second = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "first session");
@@ -112,7 +112,7 @@ public sealed class UserMessageReceiptTests {
   [Fact]
   public void TransactionFailureLeavesNoPartialDecisionAndAllowsRetry() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     Guid sessionId = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "rolled back");
     database.Execute("""
@@ -145,7 +145,7 @@ public sealed class UserMessageReceiptTests {
   [Fact]
   public void LookupErrorsAreNotReportedAsAbsence() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     Guid sessionId = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "error distinction");
     Assert.Null(store.UserMessages.ReadReceipt(sessionId, submission.SubmissionId));
@@ -160,7 +160,7 @@ public sealed class UserMessageReceiptTests {
   [Fact]
   public void InvalidOrMissingSessionCommandsCreateNoDecision() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     Guid sessionId = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "valid");
     Assert.Throws<KeyNotFoundException>(() => store.UserMessages.Admit(
@@ -195,13 +195,13 @@ public sealed class UserMessageReceiptTests {
       INSERT INTO sessions VALUES ('{sessionId:D}', 7);
       PRAGMA user_version = 1;
       """);
-    using (SessionStore store = SessionStore.Open(database.Path)) {
+    using (UrdStore store = UrdStore.Open(database.Path)) {
       Assert.Equal(7L, store.Sessions.Read(sessionId)!.HistoryRevision);
       Assert.Null(store.UserMessages.ReadReceipt(sessionId, Guid.NewGuid()));
     }
 
-    Assert.Equal(5L, database.Scalar("PRAGMA user_version;")); // raw-sql: the migrated schema version is the subject under test
-    using SessionStore reopened = SessionStore.Open(database.Path);
+    Assert.Equal(6L, database.Scalar("PRAGMA user_version;")); // raw-sql: the migrated schema version is the subject under test
+    using UrdStore reopened = UrdStore.Open(database.Path);
     Assert.Equal(7L, reopened.Sessions.Read(sessionId)!.HistoryRevision);
   }
 
@@ -219,7 +219,7 @@ public sealed class UserMessageReceiptTests {
       PRAGMA user_version = 1;
       """);
 
-    Assert.Throws<SqliteException>(() => SessionStore.Open(database.Path));
+    Assert.Throws<SqliteException>(() => UrdStore.Open(database.Path));
     Assert.Equal(1L, database.Scalar("PRAGMA user_version;")); // raw-sql: rolled-back schema version is the subject under test
     Assert.Equal(7L, database.Scalar("SELECT history_revision FROM sessions;")); // raw-sql: pre-migration identity must survive the rollback
     Assert.Equal("retained", database.Scalar("SELECT unrelated FROM execution_runs;")); // raw-sql: fixture witness row must survive the rollback
@@ -233,7 +233,7 @@ public sealed class UserMessageReceiptTests {
     var first = new UserMessageSubmission(Guid.NewGuid(), 0, "first");
     var steering = new UserMessageSubmission(Guid.NewGuid(), 0, "steer \0 🙂");
     UserMessageReceipt retained;
-    using (SessionStore store = SessionStore.Open(database.Path)) {
+    using (UrdStore store = UrdStore.Open(database.Path)) {
       store.Sessions.CreatePrimary(session);
       store.UserMessages.Admit(session, 0, first, true, execution);
       Assert.NotNull(store.Executions.ClaimNextRequest(session, execution, 0));
@@ -261,7 +261,7 @@ public sealed class UserMessageReceiptTests {
       Assert.Equal(8, StoredDeliveries.Read(database).Count(submission => submission.Outcome == ExecutionOutcome.Cancelled));
     }
 
-    using SessionStore reopened = SessionStore.Open(database.Path);
+    using UrdStore reopened = UrdStore.Open(database.Path);
     Assert.Equal(retained, reopened.UserMessages.Admit(session, 0, steering, true, Guid.NewGuid()).Receipt);
     Assert.Null(reopened.Executions.ClaimNextRequest(session, execution, 0));
     Assert.Equal(8, StoredDeliveries.Read(database).Count);
@@ -271,7 +271,7 @@ public sealed class UserMessageReceiptTests {
   [Fact]
   public void MessageIndexFailureRollsBackSteeringReceiptAndDeliveryTogether() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, execution = Guid.NewGuid();
     store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "first"), true, execution);
     var steering = new UserMessageSubmission(Guid.NewGuid(), 0, "atomic steering");
@@ -291,8 +291,8 @@ public sealed class UserMessageReceiptTests {
   [Fact]
   public async Task ConcurrentStoresRetainOneFirstDecisionAcrossDifferentRefusals() {
     using var database = new TemporaryDatabase();
-    using SessionStore first = SessionStore.Open(database.Path);
-    using SessionStore second = SessionStore.Open(database.Path);
+    using UrdStore first = UrdStore.Open(database.Path);
+    using UrdStore second = UrdStore.Open(database.Path);
     Guid sessionId = first.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     database.ForceHistoryRevision(1);
     Assert.Equal(1L, first.Sessions.Read(sessionId)!.HistoryRevision);

@@ -12,7 +12,7 @@ public sealed class MessageContentTests {
   [Fact]
   public void FullSubmissionAndMultiPageOutputPreserveUnicodeNulAndScalarBoundaries() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     string submission = string.Concat(Enumerable.Repeat("🙂\0é", 2000));
     TestExecution execution = StartExecution(store, submission);
     string firstSegment = new('a', 16383);
@@ -50,7 +50,7 @@ public sealed class MessageContentTests {
   [Fact]
   public void ExactByteLimitNormalizesToNextSegmentWithoutReadingAnUnboundedBody() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     TestExecution execution = StartExecution(store);
     string block = new('é', 8192);
     Append(store, execution, 0, block);
@@ -71,7 +71,7 @@ public sealed class MessageContentTests {
   [InlineData(8192)]
   public void ExactTextBudgetsNormalizeAnEmptyFinalSegment(int utf16Units) {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     TestExecution execution = StartExecution(store);
     string text = new('é', utf16Units);
     Append(store, execution, 0, text);
@@ -94,7 +94,7 @@ public sealed class MessageContentTests {
   [Fact]
   public void SegmentBudgetBoundsEvenEmptySegmentsAndContinuationMakesProgress() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     TestExecution execution = StartExecution(store);
     for (int index = 0; index < 16; index++)
       Append(store, execution, index, "");
@@ -113,7 +113,7 @@ public sealed class MessageContentTests {
   [Fact]
   public void EmptyTailWaitsForAppendAndEmptyFinalAdvancesWithoutClaimingSettlement() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     TestExecution execution = StartExecution(store);
     Append(store, execution, 0, "partial\0🙂");
     MessageContentPage initial = store.Content.Read(execution.Session, new(execution.Assistant, 0, 0));
@@ -144,7 +144,7 @@ public sealed class MessageContentTests {
   [Fact]
   public void ACommittedEmptyMessageIsReadableAndDistinctFromMissingOutput() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     TestExecution execution = StartExecution(store, "");
     Assert.Throws<KeyNotFoundException>(() => store.Content.Read(execution.Session, new(execution.Assistant, 0, 0)));
     MessageContentPage submission = store.Content.Read(execution.Session, new(execution.User, 0, 0));
@@ -163,7 +163,7 @@ public sealed class MessageContentTests {
   [Fact]
   public void CursorRequiresScalarBoundaryAndCannotSeekPastSegmentOrTail() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     TestExecution execution = StartExecution(store);
     Append(store, execution, 0, "a🙂\0é", final: true);
     MessageContentPage suffix = store.Content.Read(execution.Session, new(execution.Assistant, 0, 1));
@@ -183,7 +183,7 @@ public sealed class MessageContentTests {
   [Fact]
   public void ReferencesAreScopedToSessionExecutionRoleIdentityAndCurrentRevision() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     TestExecution execution = StartExecution(store);
     Append(store, execution, 0, "owned");
     Guid otherSession = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
@@ -215,7 +215,7 @@ public sealed class MessageContentTests {
     TestExecution first;
     MessageRef steering, secondOutput, undelivered;
     MessageContentCursor oldCursor;
-    using (SessionStore store = SessionStore.Open(database.Path)) {
+    using (UrdStore store = UrdStore.Open(database.Path)) {
       first = StartExecution(store, "origin\0🙂");
       steering = new(first.Execution, Guid.NewGuid(), MessageRole.User, 0);
       Assert.True(store.UserMessages.Admit(first.Session, 0, new(steering.MessageId, 0, "steering\0é"), true,
@@ -243,7 +243,7 @@ public sealed class MessageContentTests {
       store.Executions.RequestStop(first.Session, first.Execution, ownsExecution: true);
     }
 
-    using SessionStore reopened = SessionStore.Open(database.Path);
+    using UrdStore reopened = UrdStore.Open(database.Path);
     MessageContentPage retained = reopened.Content.Read(first.Session, oldCursor);
     Assert.Equal("\0tail", retained.Text);
     Assert.Equal(new(first.Assistant, 2, 0), retained.Next);
@@ -263,7 +263,7 @@ public sealed class MessageContentTests {
   [Fact]
   public void StopClosesPartialBytesWithoutFinalOutputOrTerminalOutcome() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     TestExecution execution = StartExecution(store);
     Append(store, execution, 0, "partial");
     store.Executions.RequestStop(execution.Session, execution.Execution, ownsExecution: true);
@@ -280,12 +280,12 @@ public sealed class MessageContentTests {
   public void FailedRequestAndReopenedPartialMessageNeverInventFinalOutput() {
     using var database = new TemporaryDatabase();
     TestExecution execution;
-    using (SessionStore store = SessionStore.Open(database.Path)) {
+    using (UrdStore store = UrdStore.Open(database.Path)) {
       execution = StartExecution(store);
       Append(store, execution, 0, "retained partial");
     }
 
-    using SessionStore reopened = SessionStore.Open(database.Path);
+    using UrdStore reopened = UrdStore.Open(database.Path);
     MessageContentPage orphan = reopened.Content.Read(execution.Session, new(execution.Assistant, 0, 0));
     Assert.Equal("retained partial", orphan.Text);
     Assert.False(orphan.IsClosed);
@@ -302,7 +302,7 @@ public sealed class MessageContentTests {
   [Fact]
   public void MissingOrInvalidCommittedSegmentsFailInsteadOfReturningAFalseTail() {
     using var database = new TemporaryDatabase();
-    using SessionStore store = SessionStore.Open(database.Path);
+    using UrdStore store = UrdStore.Open(database.Path);
     TestExecution execution = StartExecution(store);
     Append(store, execution, 0, "valid");
     database.Execute("UPDATE execution_output SET text_utf8 = X'80';");
@@ -311,7 +311,7 @@ public sealed class MessageContentTests {
     Assert.Throws<InvalidDataException>(() => store.Content.Read(execution.Session, new(execution.Assistant, 0, 0)));
   }
 
-  private static TestExecution StartExecution(SessionStore store, string text = "input") {
+  private static TestExecution StartExecution(UrdStore store, string text = "input") {
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, execution = Guid.NewGuid();
     var submission = new UserMessageSubmission(Guid.NewGuid(), 0, text);
     Assert.True(store.UserMessages.Admit(session, 0, submission, true, execution).NewlyAccepted);
@@ -321,7 +321,7 @@ public sealed class MessageContentTests {
         new(execution, Guid.NewGuid(), MessageRole.Assistant, 0));
   }
 
-  private static void Append(SessionStore store, TestExecution execution, int index, string text, bool final = false)
+  private static void Append(UrdStore store, TestExecution execution, int index, string text, bool final = false)
       => Assert.True(store.LlmResponses.Append(execution.Session, execution.Execution, 0,
           new(execution.Request, execution.Assistant.MessageId, index, text, final)));
 

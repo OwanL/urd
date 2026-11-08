@@ -8,7 +8,7 @@ namespace Urd.Core.Sessions;
 // Owns one session's state. Every read and write goes through this class's lock;
 // LLM work and stop callbacks always run outside it.
 public abstract class SessionBase {
-  private readonly SessionStore store;
+  private readonly UrdStore store;
   private readonly IChatClient chatClient;
   private readonly IReadOnlyList<AIFunction> tools;
   private readonly AsyncLock gate = new();
@@ -17,7 +17,7 @@ public abstract class SessionBase {
   private TaskCompletionSource<SessionExecutionResult>? settlement;
   private Task? executionTask;
 
-  private protected SessionBase(SessionRecord record, SessionStore store, IChatClient chatClient,
+  private protected SessionBase(SessionRecord record, UrdStore store, IChatClient chatClient,
       IReadOnlyList<AIFunction>? tools = null) {
     Id = record.Id;
     HistoryRevision = record.HistoryRevision;

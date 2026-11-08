@@ -25,7 +25,7 @@ public sealed class SteeringMigrationTests {
   public void UpgradePreservesOriginalEvidenceAndAddsDeliveryAndMessageIdentities(int version, ExecutionOutcome outcome) {
     using var database = new TemporaryDatabase();
     CreateLegacy(database, version, outcome);
-    using (SessionStore store = SessionStore.Open(database.Path)) {
+    using (UrdStore store = UrdStore.Open(database.Path)) {
       UserMessageReceipt receipt = store.UserMessages.ReadReceipt(Session, Submission)!;
       Assert.Equal(new UserMessageSubmission(Submission, 7, Original), receipt.Submission);
       Assert.Equal(MessageAcceptance.Accepted, receipt.Acceptance);
@@ -50,10 +50,10 @@ public sealed class SteeringMigrationTests {
       Assert.Equal(Submission, Assert.Single(messages, message => message.Role == ChatRole.User).MessageId);
       Assert.Equal(Output, Assert.Single(messages, message => message.Role == ChatRole.Assistant).MessageId);
       Assert.Null(database.Scalar("PRAGMA foreign_key_check;")); // raw-sql: migration must preserve referential integrity
-      Assert.Equal(5L, database.Scalar("PRAGMA user_version;")); // raw-sql: the upgraded schema version is under test
+      Assert.Equal(6L, database.Scalar("PRAGMA user_version;")); // raw-sql: the upgraded schema version is under test
     }
 
-    using SessionStore reopened = SessionStore.Open(database.Path);
+    using UrdStore reopened = UrdStore.Open(database.Path);
     Assert.Equal(outcome, reopened.Executions.ReadSettlement(Session, Execution)!.Outcome);
     Assert.Equal(2, StoredDeliveries.ReadMessages(database).Count);
     Assert.Single(StoredDeliveries.Read(database));
@@ -64,7 +64,7 @@ public sealed class SteeringMigrationTests {
   public void RetainedNonterminalRequestIsNotReplayedOrOwnedAfterUpgradeAndReopen() {
     using var database = new TemporaryDatabase();
     CreateLegacy(database, 3, outcome: null);
-    using (SessionStore store = SessionStore.Open(database.Path)) {
+    using (UrdStore store = UrdStore.Open(database.Path)) {
       Assert.Null(store.Executions.ReadSettlement(Session, Execution));
       Assert.Null(store.Executions.ClaimNextRequest(Session, Execution, 7));
       Assert.Equal(MessageRefusalReason.Capacity, store.UserMessages.Admit(Session, 7,
@@ -72,7 +72,7 @@ public sealed class SteeringMigrationTests {
       Assert.Null(Assert.Single(StoredDeliveries.Read(database)).Outcome);
     }
 
-    using SessionStore reopened = SessionStore.Open(database.Path);
+    using UrdStore reopened = UrdStore.Open(database.Path);
     Assert.Null(reopened.Executions.ClaimNextRequest(Session, Execution, 7));
     Assert.Equal(Request, Assert.Single(StoredExecutions.ReadRequests(database)).RequestId);
     Assert.False(reopened.UserMessages.Admit(Session, 7, new(Submission, 7, Original), false, Guid.Empty).NewlyAccepted);
@@ -83,7 +83,7 @@ public sealed class SteeringMigrationTests {
     using var database = new TemporaryDatabase();
     CreateLegacy(database, 3, ExecutionOutcome.Failed);
     database.Execute("CREATE TABLE execution_messages (witness TEXT); INSERT INTO execution_messages VALUES ('retained');");
-    Assert.Throws<SqliteException>(() => SessionStore.Open(database.Path));
+    Assert.Throws<SqliteException>(() => UrdStore.Open(database.Path));
     Assert.Equal(3L, database.Scalar("PRAGMA user_version;")); // raw-sql: failed migration must retain the old schema version
     Assert.Equal("retained", database.Scalar("SELECT witness FROM execution_messages;")); // raw-sql: fixture-owned schema collision witness must survive rollback
     Assert.Equal("00F09F9982", database.Scalar("SELECT hex(text_utf8) FROM execution_output;")); // raw-sql: failed rebuild must retain original output bytes in the old schema
@@ -92,7 +92,7 @@ public sealed class SteeringMigrationTests {
     Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM sqlite_schema WHERE name IN ('execution_inputs', 'execution_requests_v4', 'execution_output_v4', 'one_unfinished_request');")); // raw-sql: failed migration must roll back new tables and indexes
     AssertForeignKeysRemainEnforced(database);
     database.Execute("DROP TABLE execution_messages;");
-    using SessionStore recovered = SessionStore.Open(database.Path);
+    using UrdStore recovered = UrdStore.Open(database.Path);
     Assert.Equal(ExecutionOutcome.Failed, recovered.Executions.ReadSettlement(Session, Execution)!.Outcome);
   }
 

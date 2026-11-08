@@ -71,9 +71,12 @@ Distinguish throughout:
   before execution. Providers that do not expose incremental input must not get
   fabricated streaming. Drafting a call is not authorization to execute it.
 - Tools use compact rows, generally one per call, with on-demand deeper inspection.
-  Tool icons also expose rich hover inspection of raw input/output. Interactive
-  details remain reachable for selection/copy, keyboard and click, not fragile
-  hover-only text. Their data/rendering lifetime belongs in this design.
+  Tool icons also expose rich hover inspection. Owner clarified that its default
+  content should reflect **what the model produces and is shown**, including
+  tool-result pruning/reduction, rather than raw execution I/O. Interactive details
+  remain reachable for selection/copy, keyboard and click, not fragile hover-only
+  text. Their data/rendering lifetime belongs in this design. Pre-pruning retention
+  and optional inspection are separate, still-open questions.
 - Pie is a behavioral/visual reference, not an architecture, code or stylesheet to
   inherit. Do not spend this phase debating appearance. Current theme direction is
   flat dark surfaces, restrained separation, no shadows/bright popup surfaces,
@@ -166,6 +169,14 @@ Backend progress must remain independent of display. Hidden sessions or a reader
 far above the live tail should not parse/render every arriving body update.
 Coalesce obsolete display updates without dropping authoritative content.
 
+Model-facing tool inspection must preserve the historical result representation
+supplied for that exchange, not rerun today's reducer when an old row is opened.
+Later context compaction must not rewrite the original readable exchange. This is
+an engineering implication of the clarified display direction and existing readable
+history contract, not a decision to archive all provider-native/private context.
+Distinguish preparing a model-facing result from actually submitting it in a request;
+UI availability alone is not evidence that a model consumed it.
+
 Keep partial tool input distinct from validated saved calls. Correlate draft and
 final identity; preserve positive provider-terminal and cleanup requirements for
 execution. Incomplete argument text need not be valid JSON. Decide what draft
@@ -241,16 +252,22 @@ maintaining extra trees can increase memory. Benchmark before adding them.
 A compact tool descriptor must not carry full input/output in every history update.
 Opening inspection requests relevant content; huge payloads and live tails need
 bounded reads/rendering. Closing ends unnecessary subscription/rendering work;
-cache retention, if useful, must be explicit. Preserve original captured content;
-a formatted JSON display is not a substitute for the raw evidence that exists.
+cache retention, if useful, must be explicit.
 
-Open capture boundary: a tool's returned result, Urd's later model-facing reduction,
-and all output emitted by an underlying process/service are different things.
-[Context lifetime evidence](CONTEXT-LIFETIME-EVIDENCE.md) distinguishes raw execution
-results from reduced model-facing results and does not establish universal upstream
-capture. [Storage research](STORAGE-RESEARCH.md) likewise leaves capture fidelity open.
-Do not accidentally promise complete subprocess logs merely by labeling an inspector
-“raw output”; do not present a reduced model-facing summary as the captured original.
+Owner clarified the inspector's primary representation: **model-facing**, not raw
+execution I/O. For example, pruning may remove needless whitespace/formatting or
+omit huge output to protect the model context. Show the resulting tool response,
+not an unrelated full process log or an additional UI-generated summary pretending
+to be what the model was shown. Input corresponds to what the model produces.
+The transcript is not a dump of hidden instructions or private native continuation.
+
+Keep these boundaries distinct: underlying process/service output; the tool's
+returned result; and its post-processing/model-facing representation. Pre-pruning
+retention and recall remain open. [Context lifetime evidence](CONTEXT-LIFETIME-EVIDENCE.md)
+distinguishes raw execution results from reduced model-facing results and does not
+establish universal upstream capture. [Storage research](STORAGE-RESEARCH.md) likewise
+leaves capture fidelity open. Earlier recommendations to make the original tool
+result the default inspector content are superseded by this clarification.
 
 Separate original files, generated previews, decoded previews, full-resolution
 viewer resources and pending clipboard/upload data. Small display size does not
@@ -272,12 +289,13 @@ source, not by asking the owner. Update this document immediately after decision
    survive browser reload/restart. No permanent hidden render trees or full persisted
    content cache follows. Numeric targets, eviction/prefetch budgets and local
    persistence details remain unselected.
-3. **Content ownership/identity/order — current branch:** first clarify what raw tool
-   output denotes: captured tool result before Urd reduction versus all underlying
-   process/service output. Existing docs deliberately do not promise universal raw
-   capture. Recommend preserving captured results and explicit artifact references,
-   without silently adding an unlimited process-log archive. Then resolve message/
-   content-part/tool relationships, interleaving, draft-to-final identity and revisions.
+3. **Content ownership/identity/order — current branch:** inspector defaults to the
+   model-facing input/result, including tool-result reduction (owner clarified).
+   Current question: must pre-pruning results also remain inspectable, or is their
+   retention limited to explicit tool/artifact/recall needs? Recommend model-facing
+   history as primary, without an automatic duplicate raw-history archive. Do not
+   silently disable any separately required recall contract. Then resolve content
+   relationships, interleaving, draft-to-final identity and revisions.
 4. **Streaming recovery:** what the reader sees after interruption during tool-input
    generation; provisional versus retained evidence, cancellation and terminal facts.
 5. **Large-item correctness:** Markdown semantics, code/table virtualization,
@@ -332,6 +350,11 @@ shared-reference and cleanup failure cases; those are not implemented guarantees
   fetching permission.
 - Grilling decision 3: owner approved restoring reading position after browser
   reload/restart using small local navigation state; full content can still be evicted.
+- Grilling clarification 4: “raw tool input/output” was imprecise. Owner wants
+  inspection generally to reflect what the model produces/sees, after any pruning
+  such as whitespace/format reduction and omission of huge output to protect context.
+  The earlier original-tool-result default proposal is superseded. This clarification
+  does not yet settle pre-pruning retention/recall or approve a reduction algorithm.
 - Owner explicitly chose continuous formatting rather than a separate paged
   plaintext fallback for very large replies. Earlier suggested 128 KiB/message and
   2 MiB cache numbers were speculative and are **not selected requirements**.
@@ -351,8 +374,10 @@ Current task: engineering grilling and durable planning, not implementation.
 Navigation semantics (#1 above) is resolved: whole conversation, with future
 prompt markers sharing the position model. Inactive-content eviction is approved;
 hover warming is desired direction. Local reading anchors/following intent must
-survive browser reload/restart. Current branch: raw tool-result capture boundary,
-then content identity/order. Ask only unresolved questions,
+survive browser reload/restart. Tool inspection defaults to model-facing content
+including reductions, not raw execution I/O. Current branch: whether pre-pruning
+results additionally need retention/inspection, then content identity/order.
+Ask only unresolved questions,
 not questions already settled by position-preservation requirements. Continue down
 the dependency tree and keep recommendations distinct from decisions.
 

@@ -599,9 +599,10 @@ slice requires. Markdig remains a candidate; the parser probe alone does not sel
 its dialect, projection format or a browser virtualizer.
 
 1. **History, live-update and placement foundation.** Kind-tagged entry index
-   (user, assistant, tool) with metadata-only latest/anchor/neighbor reads; push
-   change notices replacing snapshot polling; conversation placement at send-attempt
-   start, preserving durable receipts and failed-attempt history. Whole-history
+   (user, text run, tool) in observed order, with entry times, tool start/end and
+   per-reply usage; metadata-only latest/anchor/neighbor reads; one multiplexed push
+   stream per browser page replacing snapshot polling; conversation placement at
+   send-attempt start, preserving durable receipts and failed-attempt history. Whole-history
    position lookup is deferred to stage 2's weighted index. Verify revision fencing,
    mixed kinds, notice coalescing and query cost without reading bodies. Do not
    weaken existing delivery/Stop guarantees.
@@ -661,10 +662,11 @@ Requirements check additions (2026-11-09), owned by the named stage:
   - Memory: transcript memory independent of history length and returning to
     baseline after detail close/tab cycles. Absolute browser/backend numbers are
     set after stage 1 baseline measurement, not guessed now.
-- **Animation (stages 1C–3):** animate transform/opacity only; never animate height
+- **Animation constraints for the future UI design (stages 2–3):** performance
+  rules, not visual choices. Animate transform/opacity only; never animate height
   inside the virtualized list without anchoring the reader; state changes are not
   delayed by animation; reduced motion honoured. Measure dropped frames while
-  streaming, expanding tool rows and promoting pending input.
+  streaming, expanding rows and promoting pending input.
 - **Small-message latency (stage 2):** most replies are small. Measure time from
   committed text to formatted display through the backend-structure path; the
   large-message design must not make the common case sluggish.
@@ -825,6 +827,47 @@ shared-reference and cleanup failure cases; those are not implemented guarantees
   proportional to session length may be held in browser memory casually.
   Observation: Urd's 16 KiB stored tool-result cap is below the median session's
   largest model-facing result (33 KB); details must not assume small results.
+- Grilling decision 27: entries record when they happened; tool calls record start
+  and end; each model reply records token usage and estimated cost. Captured now so
+  later hover/detail views have data. Observed: `LlmResponseAccumulator` currently
+  discards `UsageContent`, so usage capture is new backend work.
+- Grilling decision 28: a running tool may expose live progress output. It is
+  transient (not saved), bounded to the latest output, delivered only while its
+  session is observed, and replaced by the model-facing result on completion. Only
+  tools that report progress provide it; model-facing inspection is unchanged.
+- **Owner steer (2026-11-09): UI decisions stay open.** This phase defines the
+  architecture and backend support the future UI needs (data, identities, reads,
+  live updates, lifetimes), not layout, controls or interaction details. E.g. a
+  message copy action is undecided; the backend must simply be able to serve an
+  entry's full original source in bounded pages. Ask the owner only questions that
+  change architecture/backend contracts.
+- Engineering consequences of decisions 19–28 (proposed, not owner decisions):
+  - **One push stream per browser page, multiplexed by session.** Browsers allow
+    about six HTTP/1.1 connections per host; a parent plus streaming subagent cards
+    would exhaust them with per-session streams and stall ordinary reads. The page
+    tells the server which sessions it is watching; notices name the session.
+  - **Observed order needs provider support.** Calls are currently collected at
+    completion and limited to 16 per reply; adapters must surface output-item order
+    where the provider exposes it. Where it does not, fall back to text-then-calls
+    rather than fabricating order.
+  - **Subagent cards** need a cheap child-session preview/tail read and child
+    notices on the same stream, without loading the child's history.
+  - **Fan-out load.** Architecture's scale direction (~50 live agents direct, ~210
+    deep) applies: the reference workload adds ~50 concurrently streaming sessions
+    of which one is visible with a few expanded subagent cards. Unobserved sessions
+    must cost no transcript parsing, notices or browser work.
+- Grilling decision 29: a tool entry stores **one** result: what the model was given
+  when the result entered its context (after any reduction applied before delivery).
+  Later context reductions are not tracked or shown on the entry; no second copy and
+  no reduction history. Compaction markers (decision 22) remain the context signal.
+- Grilling decision 30: for pasted/uploaded images Urd stores **only the version the
+  model receives**. Urd performs any downscaling itself so the stored file is exactly
+  what was sent; the full-resolution original is not retained. Proposed engineering:
+  also store one small preview per image at save time so compact views never decode
+  the model image.
+- Proposed engineering: the multiplexed page stream also carries cheap status
+  changes (running/idle/failed/needs attention) for every open session, so tabs and
+  cards stay truthful without content reads; content notices only for watched ones.
 
 ## Continuation and safety
 
@@ -852,16 +895,13 @@ and scheduling remain unqualified. No production implementation/dependency selec
 is approved. Formatted catch-up updates are now agreed: do not flash raw Markdown
 when parsing lags. Next consolidate the agreed boundaries into a bounded proposed
 implementation sequence and explicit remaining qualification gates. Owner approved
-planning stage 1; the concrete proposal is in TRANSCRIPT-HISTORY-PLAN.md. Source was
-rechecked at 5c9392f after frontend cleanup. Stage 1 is split into metadata navigation
-(1A, placement unchanged) and a complete attempt/pending-state slice (1B). Neither
-is implementation-approved. Review found that historical never-sent input needs
-bounded discovery after later runs/reload; the proposal now includes that path.
-Next steering is approval/scope of packet 1A, not full-transcript implementation.
-Requirements check (decisions 15–17) revised stage 1 to: kind-tagged entry index
-including tool calls; anchor-window reads; push change notices replacing polling;
-send-attempt placement. Packets are now 1A entries/reads, 1B push, 1C placement.
-Next steering is approval of the revised stage 1 scope.
+planning stage 1; the concrete proposal is in TRANSCRIPT-HISTORY-PLAN.md. Review
+found that historical never-sent input needs bounded discovery after later
+runs/reload; the proposal includes that path. Requirements checks (decisions 15–30)
+revised stage 1 to: kind-tagged entries in observed order with entry facts;
+anchor-window reads; one multiplexed push stream per page replacing polling;
+send-attempt placement. Packets are 1A entries/reads, 1B push, 1C placement. None is
+implementation-approved; next steering is approval of the revised stage 1 scope.
 Do not invent a custom parser or treat sampled sizes as hard limits. Do not keep
 asking minor product questions that can be resolved through existing requirements.
 Ask only unresolved questions,

@@ -5,15 +5,19 @@ Source checked at `5c9392f` on 2026-11-09. Requirements are owned by
 [Transcript design](TRANSCRIPT-DESIGN.md); parsing evidence is separate.
 No production code, dependency, migration or running-application change is made here.
 Revised 2026-11-09 after checking the plan against the overall requirements
-(low overhead, snappy streaming, tool rows, images, Markdown, animation).
+(low overhead, snappy streaming, tool rows, images, Markdown, animation), then again
+after the second requirements pass (design decisions 19–30). UI decisions remain
+open; this plan covers backend contracts and data the future UI needs.
 
 ## Outcome and explicit boundary
 
 Build the foundation later stages render on:
 1. a history index whose unit is a **transcript entry** (user message, assistant
-   text, tool call), addressable without loading bodies;
+   text run, tool call) in the order the model produced it, addressable without
+   loading bodies, carrying times, tool start/end and per-reply usage;
 2. bounded anchor-based reads of that index;
-3. **push change notices** replacing 350 ms snapshot polling;
+3. **push change notices** over one stream per browser page, replacing 350 ms
+   snapshot polling;
 4. input placed in the conversation when a send attempt starts.
 
 Urd is not yet used for real work; prefer the right foundation over preserving
@@ -44,8 +48,20 @@ text content reads and their UTF-8 cursors.
 ## 1. Entry identity and order
 
 - Extend the existing history index (`execution_messages`, renamed only if clarity
-  warrants the churn) to hold **kind-tagged entries**: `user`, `assistant`, `tool`.
-  Reasoning and attachment-bearing kinds are added later without changing anchors.
+  warrants the churn) to hold **kind-tagged entries**: `user`, `text` (assistant text
+  run) and `tool`. Later kinds join without changing anchors: `reasoning` (stage 3,
+  decision 20), compaction marker (decision 22), subagent card (decision 21) and
+  attachment references on user entries (stage 4).
+- **Observed order (decision 19).** One reply may contain several text runs and
+  calls, e.g. text → call → text → call. A text run owns a contiguous range of its
+  request's output segments; a call boundary flushes and closes the current run, and
+  the next text opens a new run entry. Content cursors become per text run, mapped
+  onto the request's existing segment numbering (a run is a `batch_index` range);
+  batch numbering does not restart per run, so model-context reconstruction is
+  unchanged. Where an
+  adapter does not expose item order (today calls are collected at completion),
+  record text-then-calls; never fabricate interleaving. Adapter ordering support
+  is a separate provider task, not a stage 1 requirement.
 - Entry identity is a stable reference: execution, kind, entry ID, history revision.
   `MessageRef` stays valid for text entries; tool entries reference
   `(request, call ID)` and carry a GUID entry ID like the others. Do not overload
@@ -53,13 +69,25 @@ text content reads and their UTF-8 cursors.
 - Order is the index's insertion order (`ordinal`), scoped by session/revision
   through the existing `(session_id, history_revision, ordinal)` index. Global
   ordinal gaps are fine for keyset reads; they are not ranks and never displayed.
-- Insertion points: user entries at send-attempt start (section 4); assistant entry
-  on first saved output segment (unchanged); tool entries when the call is saved
-  at request completion, ordered by `call_index`. Stage 3's draft calls must
-  allocate the entry when first observed and keep it through finalization — note
-  now, implement then.
+- Insertion points: user entries at send-attempt start (section 4); text-run entry
+  on its first saved segment; a tool entry is **reserved when its call boundary is
+  observed**: the writer flushes and closes the current text run, then inserts the
+  tool entry (call ID and name if known, state `observed`, no arguments, no execution
+  authority) before any later text commits. Completion attaches the validated call;
+  a reply that fails, is cancelled or never validates the call leaves the entry
+  closed as not executed. Calls only reported at completion (today's adapters) are
+  reserved then, in `call_index` order, giving text-then-calls. Stage 3's streamed
+  drafts reuse the same reserved entry; no second allocation path.
+- **Entry facts (decision 27):** creation time on every entry; tool start and end
+  times; token usage and estimated cost per model reply (request), captured from
+  provider `UsageContent`, which `LlmResponseAccumulator` currently discards. Usage
+  belongs to the request, not repeated per entry. Missing usage stays unknown.
+- **Edits (decision 23):** an edit permanently discards later entries; their rows
+  and owned content are deleted, not hidden. A revision change invalidates anchors;
+  the client falls back to the edited prompt. No production edit exists yet; stage 1
+  only keeps revision fencing correct.
 - Migration backfills tool entries for existing saved calls after their request's
-  assistant entry (or in request order when none exists), preserving existing
+  text-run entry (or in request order when none exists), preserving existing
   message order. Ordinals are append-only, so the migration rebuilds the index in
   the merged order rather than appending tool rows at the tail. Do not reorder
   legacy user rows.
@@ -77,9 +105,11 @@ Proposed route: `GET /api/sessions/{sessionId}/history`, one reader with modes:
 - Initial window ceiling: reuse the existing 60-entry convention as a **metadata page
   size**, not a memory/cache budget. Refill from the other side near a boundary.
 - Descriptors carry no bodies or previews: entry reference, kind, lifecycle facts.
-  Text: committed extent (`AvailableThrough`), closed, final-output marker.
-  Tool: name, started/outcome. Execution settlement is reported per execution once
-  per page, not repeated per entry. Arguments/results stay out (stage 3 inspection).
+  Text: committed extent (`AvailableThrough`), closed, final-output marker, time.
+  Tool: name, started/outcome, start/end times. Execution settlement and per-request
+  usage are reported once per page, not repeated per entry. Arguments/results stay
+  out (stage 3 inspection). An entry's full original source remains readable through
+  bounded content pages (future copy/export needs no new contract).
 - One `Database.Read` transaction per page; `hasBefore`/`hasAfter` via indexed
   lookahead. Stale revision → existing 409, checked before anchor lookup; missing or
   wrong-session anchor → not found. No server-side fallback to latest.
@@ -94,14 +124,27 @@ Proposed route: `GET /api/sessions/{sessionId}/history`, one reader with modes:
 
 ## 3. Push change notices
 
-- One streamed response per **visible** session: `GET .../events`, consumed with
-  `fetch` + a stream reader, so the existing `X-Urd-Client` header gate is kept
-  (`EventSource` cannot send it). Server-Sent Events framing is sufficient; no
-  WebSocket, no new dependency.
-- Notices are tiny and coalescing: `{ boot, version }` plus optionally the changed
-  entry kinds. No content, no event log, no replay. The client compares versions and
-  reads what is on screen (history window tail, open content) — at most one read in
-  flight per kind, newest notice wins.
+- **One stream per browser page**, multiplexed by session: `GET /api/events`,
+  consumed with `fetch` + a stream reader, so the existing `X-Urd-Client` header
+  gate is kept (`EventSource` cannot send it). Server-Sent Events framing is
+  sufficient; no WebSocket, no new dependency. Per-session streams are rejected:
+  browsers allow about six HTTP/1.1 connections per host, and a parent plus
+  streaming subagent cards would exhaust them and stall ordinary reads.
+- The page declares its **open sessions** (its tabs) and, within them, its
+  **watched sessions** (visible conversation, expanded or streaming subagent cards)
+  through a small request bound to its stream; changing either set does not
+  reconnect. For every open session the stream carries its small status itself
+  (running/idle/failed/fenced/needs attention), not just a notice, so tabs stay
+  truthful without content reads. Unwatched sessions cost no content notices.
+- **Status has the same no-lost-update rule:** registering an open session (on
+  connect, reconnect or opening a tab) reads its status, including in-memory
+  fencing, under the session gate and sends it as that session's first status event;
+  every later transition sends the new status. Test a settlement and a fencing
+  transition racing registration of an unwatched session with no later change.
+- Content notices are tiny and coalescing: `{ session, boot, version }` plus
+  optionally the changed entry kinds. No content, no event log, no replay. The
+  client reads what is on screen (history window tail, open content) — at most one
+  read in flight per session and kind, newest notice wins.
 - `SessionBase` owns all session writes, so it bumps an **in-memory** counter after
   each change that affects reads: committed changes (entry insert, output append,
   tool state, settlement, pending input, Stop) **and in-memory state changes the
@@ -110,14 +153,16 @@ Proposed route: `GET /api/sessions/{sessionId}/history`, one reader with modes:
   per storage call, so no observable transition is missed. `boot` identifies the
   process so restarts force a full resync. Nothing is persisted.
 - Writers never wait for subscribers: a slow or vanished client only misses
-  intermediate versions. Bound subscribers per session; drop on disconnect.
-- On connect/reconnect the client does a normal snapshot + history read; the stream
-  only says "something changed". Hidden tabs hold no stream (consistent with
-  eviction); focus/visibility reconnects.
-- **No lost final update — subscribe first, then read.** The server registers the
-  subscriber and reads the current version under the session gate, then sends that
-  as the first event. The client starts its snapshot/history reads only after that
-  first event. Any commit after registration therefore produces a later notice; any
+  intermediate versions. Bound watchers per page and pages per process; drop on
+  disconnect.
+- On connect/reconnect, open sessions receive fresh status events and watched
+  sessions repeat the handshake below, then read their snapshot + visible history.
+  For watched content the stream only says "something changed". A hidden page holds
+  no stream; focus/visibility reconnects.
+- **No lost final update — subscribe first, then read.** When a session is added to
+  the watch set, the server registers it and reads its current version under the
+  session gate, then sends that as the session's first event. The client starts
+  that session's reads only after the first event. Any commit after registration therefore produces a later notice; any
   commit before it is covered by the initial reads. If a notice arrives while a read
   is in flight, schedule exactly one more read after it completes rather than
   dropping the notice. A periodic heartbeat detects a dead connection; reconnect
@@ -147,28 +192,32 @@ Unchanged from the reviewed draft in substance:
   keyset-paged session listing; text read through the existing receipt route;
   explicit resend uses a new submission ID; drafts are never overwritten.
 
-Promotion from pending to conversation is a visible transition. It must not move
-content the user is reading: append below the reading anchor, and when following
-the tail, keep following. Any animation is transform/opacity only, respects reduced
-motion, and does not delay the state change.
+Promotion from pending to conversation is a visible transition. Backend facts must
+let the client append it without moving content the user is reading; presentation
+and animation are left to the UI design.
 
 ## 5. Existing data
 
 Schema v8 has no attempt fact. Preserve existing visible rows and order, mark
-attempt provenance unknown, backfill tool entries as above. No guessed reordering,
-deletion or replay. Genuine old-schema fixture tests upgrade/rollback. No live
+attempt provenance unknown, backfill tool entries as above. Schema v8 also has no
+entry times, tool start/end times or usage: legacy values stay **unknown** (null),
+never approximated. Existing reply text becomes one text run per request. No guessed
+reordering, deletion or replay. Genuine old-schema fixture tests upgrade/rollback and
+prove no invented times, usage or attempt provenance. No live
 `C:/dev/data/urd` migration is authorized by this plan.
 
 ## 6. Implementation packets
 
 Sequential; they share storage/session files.
 
-**1A — entry index and history reads.** Migration (entry kinds, tool backfill),
-history reader, core method, route, typed client. Old user placement unchanged.
+**1A — entry index and history reads.** Migration (entry kinds, text runs, entry
+facts, tool backfill), usage capture, history reader, core method, route, typed
+client. Old user placement unchanged.
 
-**1B — push notices.** In-memory session version, events route, client stream
-reader replacing `useSessionSnapshot` polling for visible sessions; snapshot slimmed
-once the transcript reads history. Keep the existing rendered regressions passing.
+**1B — push notices.** In-memory session version, page stream with watch set and
+open-session status, client stream reader replacing `useSessionSnapshot` polling
+(now called from `app/Conversation.tsx`); snapshot slimmed once the transcript reads
+history. Keep the existing rendered regressions passing.
 
 **1C — send-attempt placement.** Attempt fact/hook, context eligibility, pending and
 not-sent projection with minimal client presentation, promotion without anchor
@@ -178,9 +227,11 @@ Likely owning files: backend `core/sessions/` (`Messages.cs`, `SessionSnapshot.c
 `SessionBase.cs`), `core/storage/` (`DatabaseSchema.cs`, `SnapshotReader.cs`,
 `MessageContentReader.cs`, `UserMessageStorage.cs`, `SessionExecutionStorage.cs`,
 `LlmResponseStorage.cs`, `LlmContextReader.cs`), `core/execution/SessionExecution.cs`,
-a new focused history reader; `source/hosting/server/SessionRoutes.cs`; UI
-`sessions/Messages.ts`, `SessionClient.ts`, `app/useSessionSnapshot.ts` and the
-existing workspace/transcript owners after coordination.
+`LlmResponseAccumulator.cs`, `LlmResponseWriter.cs`, a new focused history reader;
+`source/hosting/server/SessionRoutes.cs` plus a page-stream route; UI
+`sessions/Messages.ts`, `SessionClient.ts`, `app/useSessionSnapshot.ts`,
+`app/Conversation.tsx` and the existing workspace/transcript owners after
+coordination with the frontend audit session.
 
 ## 7. Acceptance checks
 
@@ -192,12 +243,21 @@ Reuse `SessionSnapshotStorageTests` seeding/poisoned-body/query-plan helpers,
 - Reads: all modes, boundaries, empty history, wrong-session anchor, stale revision,
   mixed kinds including a tool-only request, interleaved sessions; poisoned bodies
   prove no text/argument decoding; indexed plans without OFFSET/COUNT scans.
+- Entries: with a test adapter that reports call boundaries, a reply text → call →
+  text yields three entries in that order; with today's completion-only adapters,
+  text-then-calls; a reserved call whose reply fails stays closed as not executed and
+  never runs; per-run content reads
+  stay cursor-correct; entry times, tool start/end and per-request usage are saved,
+  with missing usage left unknown.
 - Push: notice after each change kind; coalescing under a fast stream; a stalled
-  subscriber does not slow writes; reconnect and process restart resync; hidden tab
-  holds no stream; a final settlement committed between server registration and the
-  client's first read is still displayed; a failed output/settlement write after
-  subscription, with no later commit, still surfaces the fenced/uncertain state. Measure commit-to-render delay and per-update request count
-  against current polling on the same fixture.
+  subscriber does not slow writes; reconnect and process restart resync; hidden page
+  holds no stream; adding/removing watched sessions without reconnecting; status for
+  unwatched open sessions without content notices; ~50 concurrently streaming
+  sessions cost no work for unwatched content; a final settlement committed between
+  watch registration and the client's first read is still displayed; a failed
+  output/settlement write after subscription, with no later commit, still surfaces
+  the fenced/uncertain state. Measure commit-to-render delay and per-update request
+  count against current polling on the same fixture.
 - Placement: no user entry before attempt; ordered promotion of several steering
   inputs; failure before/after hook; eager client; Stop races; exact receipt retry;
   ambiguous marker save → no provider call, uncertainty preserved; context excludes
@@ -205,7 +265,9 @@ Reuse `SessionSnapshotStorageTests` seeding/poisoned-body/query-plan helpers,
 - Migration preserves legacy order and invents no attempt provenance.
 
 Provisional targets are recorded in the design document (decision 18). Stage 1 must
-record a **baseline** for them: idle work, commit-to-render streaming delay, warm/cold
+record a **baseline** for them against the synthetic 25× reference workload
+(decision 26: ~100,000 entries, ~250 MB, generated in an owned temp database, never
+live data): idle work, commit-to-render streaming delay, warm/cold
 tab switch, main-thread long tasks, request count per streamed second, and browser
 and backend memory before/after tab cycles. Cache budgets and absolute memory
 numbers are set from that baseline, not fixed here.

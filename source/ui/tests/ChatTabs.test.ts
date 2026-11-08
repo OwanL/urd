@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { moveTab, tabInsertion } from "../app/TabOrder.ts";
+import { moveTab, tabDragIndex, tabDragOffset } from "../app/TabOrder.ts";
 
 const tabs = Object.freeze([
   Object.freeze({ id: "a", title: "First", draft: "Keep me" }),
@@ -35,18 +35,68 @@ void test("unchanged, missing and self-target moves preserve the original order"
   assert.equal(moveTab(single, "a", null), single);
 });
 
-void test("insertion uses remaining tab midpoints, including gaps and viewport offsets", () => {
-  const positions = [
-    { id: "a", left: -80, right: 20 },
-    { id: "c", left: 140, right: 300 },
-  ];
-  assert.equal(tabInsertion(positions, -31), "a");
-  assert.equal(tabInsertion(positions, -30), "c");
-  assert.equal(tabInsertion(positions, 60), "c");
-  assert.equal(tabInsertion(positions, 219), "c");
-  assert.equal(tabInsertion(positions, 220), null);
-  assert.equal(tabInsertion(positions, 500), null);
-  assert.equal(tabInsertion([], 100), null);
+const positions = Object.freeze([
+  Object.freeze({ id: "a", left: 40, right: 240 }),
+  Object.freeze({ id: "b", left: 245, right: 345 }),
+  Object.freeze({ id: "c", left: 350, right: 500 }),
+]);
+
+void test("facing edges cross early, independently of the grab offset and unequal widths", () => {
+  // Grab near the leading edge: the pointer is far short of b's center (295).
+  assert.equal(tabDragIndex(positions, 0, 0, 105, 10), 0);
+  assert.equal(tabDragIndex(positions, 0, 0, 106, 10), 1);
+  // The same left edge with a grab near the opposite end gives the same slot.
+  assert.equal(tabDragIndex(positions, 0, 0, 286, 190), 1);
+  // Moving left uses the leading edge even with the pointer still right of b.
+  assert.equal(tabDragIndex(positions, 2, 2, 435, 140), 2);
+  assert.equal(tabDragIndex(positions, 2, 2, 434, 140), 1);
+  assert.equal(tabDragIndex(positions, 2, 2, 304, 10), 1);
+});
+
+void test("shifted slots do not jitter at a crossing and backtracking restores the order", () => {
+  let to = tabDragIndex(positions, 0, 0, 96, 0);
+  assert.equal(to, 1);
+  for (const left of [96, 96, 95, 94, 91, 90]) {
+    to = tabDragIndex(positions, 0, to, left, 0);
+    assert.equal(to, 1);
+  }
+  to = tabDragIndex(positions, 0, to, 89, 0);
+  assert.equal(to, 0);
+  to = tabDragIndex(positions, 0, to, 226, 0);
+  assert.equal(to, 2);
+  for (const left of [226, 225, 221, 220]) {
+    to = tabDragIndex(positions, 0, to, left, 0);
+    assert.equal(to, 2);
+  }
+  to = tabDragIndex(positions, 0, to, 219, 0);
+  assert.equal(to, 1);
+  assert.equal(tabDragIndex(positions, 0, to, 40, 0), 0);
+  assert.equal(tabDragIndex(positions, 0, 0, 1000, 0), 2);
+  assert.equal(tabDragIndex(positions, 2, 2, -1000, 0), 0);
+});
+
+void test("sibling transforms reserve the dragged width and gap without changing geometry", () => {
+  assert.deepEqual(
+    positions.map((_, index) => tabDragOffset(positions, 0, 2, index)),
+    [0, -205, -205],
+  );
+  assert.deepEqual(
+    positions.map((_, index) => tabDragOffset(positions, 2, 0, index)),
+    [155, 155, 0],
+  );
+  assert.deepEqual(
+    positions.map((_, index) => tabDragOffset(positions, 0, 0, index)),
+    [0, 0, 0],
+  );
+  const single = [positions[0]!];
+  assert.equal(tabDragIndex(single, 0, 0, 900, 20), 0);
+  // Translating the snapshot and pointer equally (viewport offset/scroll) changes nothing.
+  const shifted = positions.map((tab) => ({
+    ...tab,
+    left: tab.left - 300,
+    right: tab.right - 300,
+  }));
+  assert.equal(tabDragIndex(shifted, 0, 0, 106 - 300, 10), 1);
 });
 
 void test("single-step keyboard targets move once, without wrapping at boundaries", () => {

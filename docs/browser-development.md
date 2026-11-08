@@ -15,11 +15,18 @@ are not implemented yet. Closing a tab hides the view; it does not stop work, cl
 a backend session or delete history. Components and effects stay with their feature;
 hooks are extracted for actual responsibilities, not a state framework.
 
-Drag tabs on desktop, or focus a tab and use Alt+Shift+Left/Right to move it. Order is
-saved in the existing browser-session workspace without changing the active chat,
-drafts or backend sessions. Escape/outside drops cancel; the drag uses a private MIME
-type so dropping onto the composer cannot insert a tab ID. Touch dragging is not
-implemented. Normal arrow/Home/End navigation and Delete-to-close remain available.
+Drag tabs with a pointer, or focus a tab and use Alt+Shift+Left/Right to move it.
+The held tab follows the pointer; neighbours move aside when its facing edge crosses
+their midpoint, without waiting for release. Stable layout geometry prevents jitter;
+short sibling transitions respect reduced motion. At strip edges the held tab stays
+visible while overflowing content scrolls beneath it. Small movements remain clicks,
+and vertical touch gestures do not reorder.
+
+Only release inside the strip saves order in the existing browser-session workspace;
+the active chat, drafts and backend sessions are unchanged. Escape, outside release,
+pointer cancellation, lost capture, blur and external order changes cancel the preview.
+There is no native drag payload to insert into the composer. Normal arrow/Home/End
+navigation and Delete-to-close remain available.
 The palette uses neutral black/charcoal surfaces and grey controls; semantic error
 colours remain distinct. Rich transcript architecture is a separate workstream.
 

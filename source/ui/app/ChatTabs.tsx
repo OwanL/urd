@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useState } from "preact/hooks";
 import { IconButton } from "../components/IconButton.tsx";
 import { Tooltip } from "../components/Tooltip.tsx";
-import { moveTab, tabInsertion } from "./TabOrder.ts";
+import { moveTab } from "./TabOrder.ts";
+import { useTabDrag } from "./useTabDrag.ts";
 import "./chat-tabs.css";
 
 export interface ChatTabsProps {
@@ -13,13 +14,11 @@ export interface ChatTabsProps {
 }
 
 export function ChatTabs({ tabs, activeId, onOpen, onClose, onReorder }: ChatTabsProps) {
-  const strip = useRef<HTMLDivElement>(null);
-  const drag = useRef<{ id: string; order: typeof tabs } | null>(null);
-  const suppressClick = useRef(false);
-  const frame = useRef(0);
-  const [preview, setPreview] = useState<{ id: string; beforeId: string | null } | null>(null);
   const [announcement, setAnnouncement] = useState("");
-  useEffect(() => () => cancelAnimationFrame(frame.current), []);
+  const drag = useTabDrag(tabs, (id, beforeId) => {
+    reorder(id, beforeId);
+    focusTab(id);
+  });
 
   function focusTab(id: string) {
     requestAnimationFrame(() => {
@@ -35,88 +34,17 @@ export function ChatTabs({ tabs, activeId, onOpen, onClose, onReorder }: ChatTab
     setAnnouncement(`${next[index]!.title}, position ${index + 1} of ${next.length}`);
     onReorder(id, beforeId);
   }
-  function insertion(x: number) {
-    const positions = [...strip.current!.querySelectorAll<HTMLElement>(".chat-tab")]
-      .filter((element) => element.dataset.tabId !== drag.current?.id)
-      .map((element) => {
-        const { left, right } = element.getBoundingClientRect();
-        return { id: element.dataset.tabId!, left, right };
-      });
-    return tabInsertion(positions, x);
-  }
-  function finish() {
-    cancelAnimationFrame(frame.current);
-    drag.current = null;
-    setPreview(null);
-  }
-  function showInsertion(x: number) {
-    const item = drag.current;
-    if (!item) return;
-    const beforeId = insertion(x);
-    setPreview((previous) =>
-      previous?.id === item.id && previous.beforeId === beforeId
-        ? previous
-        : { id: item.id, beforeId },
-    );
-  }
-  function scrollEdge(x: number) {
-    cancelAnimationFrame(frame.current);
-    const element = strip.current!;
-    const { left, right, width } = element.getBoundingClientRect();
-    const edge = Math.min(32, width / 4);
-    const speed = x < left + edge ? -8 : x > right - edge ? 8 : 0;
-    function tick() {
-      element.scrollLeft += speed;
-      showInsertion(x);
-      if (speed && drag.current) frame.current = requestAnimationFrame(tick);
-    }
-    tick();
-  }
 
   return (
     <div
-      ref={strip}
+      ref={drag.strip}
       class="chat-tabs"
       role="tablist"
       aria-label="Chats"
-      onPointerDownCapture={() => {
-        suppressClick.current = false;
-      }}
-      onClickCapture={(event) => {
-        if (!suppressClick.current || event.detail === 0) return;
-        event.preventDefault();
-        event.stopPropagation();
-      }}
-      onDragOver={(event) => {
-        if (!drag.current) return;
-        event.preventDefault();
-        event.dataTransfer!.dropEffect = "move";
-        scrollEdge(event.clientX);
-      }}
-      onDragLeave={(event) => {
-        if (
-          event.relatedTarget instanceof Node &&
-          event.currentTarget.contains(event.relatedTarget)
-        )
-          return;
-        cancelAnimationFrame(frame.current);
-        setPreview(null);
-      }}
-      onDrop={(event) => {
-        const item = drag.current;
-        if (!item) return;
-        event.preventDefault();
-        if (
-          tabs.length === item.order.length &&
-          tabs.every((tab, index) => tab.id === item.order[index]?.id)
-        )
-          reorder(item.id, insertion(event.clientX));
-        finish();
-        focusTab(item.id);
-      }}
-      onDragEnd={finish}
+      onPointerDownCapture={drag.resetClick}
+      onClickCapture={drag.suppressClick}
       onKeyDown={(event) => {
-        if (drag.current) return;
+        if (drag.draggedId) return;
         const focused = (event.target as HTMLElement).closest<HTMLElement>(".chat-tab")?.dataset
           .tabId;
         const index = tabs.findIndex((tab) => tab.id === (focused ?? activeId));
@@ -146,13 +74,14 @@ export function ChatTabs({ tabs, activeId, onOpen, onClose, onReorder }: ChatTab
         focusTab(id);
       }}
     >
-      {tabs.map(({ id, title }, index) => (
+      {tabs.map(({ id, title }) => (
         <div
           key={id}
           data-tab-id={id}
-          class={`chat-tab ${id === activeId ? "is-active" : ""} ${preview?.id === id ? "is-dragging" : ""} ${preview?.beforeId === id ? "reorder-before" : ""} ${preview && preview.beforeId === null && index === tabs.length - 1 ? "reorder-end" : ""}`}
+          class={`chat-tab ${id === activeId ? "is-active" : ""} ${drag.draggedId === id ? "is-dragging" : ""}`}
         >
           <Tooltip
+            disabled={drag.draggedId !== null}
             placement="below"
             content={
               <>
@@ -172,16 +101,11 @@ export function ChatTabs({ tabs, activeId, onOpen, onClose, onReorder }: ChatTab
                 "Alt+Shift+ArrowLeft Alt+Shift+ArrowRight" // gitleaks:allow -- public keyboard shortcuts, not a credential
               }
               tabIndex={id === activeId ? 0 : -1}
-              draggable
-              onDragStart={(event) => {
-                drag.current = { id, order: tabs };
-                suppressClick.current = true;
-                event.dataTransfer!.effectAllowed = "move";
-                event.dataTransfer!.setData("application/x-urd-tab", id);
-              }}
+              onPointerDown={(event) => drag.start(event, id)}
+              onDragStart={(event) => event.preventDefault()}
               onClick={() => onOpen(id)}
               onKeyDown={(event) => {
-                if (event.key === "Delete") {
+                if (event.key === "Delete" && !drag.draggedId) {
                   event.preventDefault();
                   onClose(id);
                 }

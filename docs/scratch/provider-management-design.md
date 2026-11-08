@@ -2,9 +2,10 @@
 
 2026-11-08. Scope, connection shape and configuration operations approved by the
 owner. The manager owns credential management; the owner selected plaintext storage
-for the initial version rather than password/OS-key management. Authentication operations
-and detailed persistence integration remain proposals until reviewed. No provider
-implementation or live account activity is claimed. [Provider qualification](../PROVIDER-QUALIFICATION.md) owns route research
+for the initial version rather than password/OS-key management. The authentication
+operation surface and flow are also approved; detailed result types, model operations
+and persistence integration remain proposals until reviewed. No provider implementation
+or live account activity is claimed. [Provider qualification](../PROVIDER-QUALIFICATION.md) owns route research
 and the bounded initial provider set.
 
 ## Approved connection view
@@ -91,7 +92,7 @@ Authentication, model discovery, explicit access checks and credential persisten
 subsequent bites; full session/provider integration, tools and provider UI remain outside
 this slice.
 
-## Credential ownership — aligned responsibility, details pending
+## Credential ownership
 
 `ProviderManager` is the single public management entry point for connection settings,
 API-key replacement, subscription sign-in, refresh, disconnect and credential removal.
@@ -105,6 +106,57 @@ cannot forward an old credential, and late sign-in/refresh completions cannot re
 credentials after disconnect, removal or superseding configuration changes. Public reads
 report status, never credential contents. These are design requirements, not implemented
 or tested guarantees.
+
+## Approved authentication operations and flow
+
+All operations belong to `ProviderManager`; the signatures below show the approved
+operation shape, not finalized result types or transport DTOs.
+
+```csharp
+SetApiKeyAsync(connection, apiKey)
+GetCredentialStatusAsync(connectionId)
+BeginSignInAsync(connectionId)
+GetSignInAsync(signInId)
+CancelSignInAsync(signInId)
+DisconnectAsync(connectionId)
+```
+
+- API-key replacement saves the key without implicit provider calls. The caller supplies
+  its previously read `ProviderConnection`; under the manager guard, compare ID, route,
+  API, endpoint and authentication before saving. Ignore display-name differences. Reject
+  a changed destination rather than attaching the key to it. No public revision field
+  is needed solely for this check. Status reads are offline and never return a key/token.
+- ChatGPT sign-in returns an attempt ID, provider authorization URL and expiry. The caller
+  opens the URL in a browser on the backend machine; Urd does not launch it automatically.
+  The local callback is validated before committing credentials. Polling/cancellation use
+  the attempt ID, so cancelling an old attempt cannot cancel its replacement. There is no
+  manual token-copy step, provider settings UI or arbitrary OAuth registration capability.
+- Repeated begin while an attempt is pending returns that attempt. New attempts use fresh
+  OAuth state/nonce/PKCE; completed attempts are not replayed. Pending attempts are ephemeral,
+  expire and do not resume after restart. Failure/cancellation preserves prior credentials;
+  successful replacement is guarded against concurrent disconnect/removal/configuration
+  changes. Network work runs outside the mutation guard.
+- Returning sign-in reauthorizes the saved registration and verifies the same account
+  identity/client mapping. A different account uses a separate connection. Authorization
+  URLs returned headlessly omit the optional `id_token_hint` so no saved ID token is exposed.
+  Status distinguishes stored credentials from access qualification; refreshable token
+  expiry is not automatically reauthentication, and validated identity alone is not a plan
+  access grant. Exact status/result records remain an implementation-design detail.
+- Refresh is automatic when required by an explicit provider operation, serialized per
+  connection, not driven by a background timer or status reads. Late refresh results cannot
+  overwrite newer credentials, resurrect removed connections or reverse a disconnect.
+- Disconnect fences credential use and invalidates pending connection operations. Join
+  owned refresh before capturing the latest token, attempt bounded provider revocation,
+  then clear local tokens even if remote revocation remains unconfirmed. Report that
+  distinction; local persistence failure is not successful disconnect. Keep the connection
+  and account/client registration for later sign-in, but no retained ID/access/refresh
+  tokens. Interrupted disconnect must not silently reopen credential use; exact durable
+  operation state and shutdown joins need the storage/lifetime integration review.
+
+The operation proposal and its token-exposure/disconnect corrections passed independent
+review before owner approval. OpenAI's public registration/sign-in and accounts/sessions
+pages were rechecked on 2026-11-08; see O1/O2 in [provider qualification](../PROVIDER-QUALIFICATION.md).
+This is design evidence only, not live authentication or adapter qualification.
 
 ## Initial credential storage — plaintext
 

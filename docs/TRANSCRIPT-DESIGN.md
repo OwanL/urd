@@ -35,6 +35,10 @@ Distinguish throughout:
 - Long-running sessions mixing hundreds of tool calls, substantial reasoning,
   normal assistant output, large code blocks and large tool results. These are
   representative workloads, not hard caps.
+- Pursue backend-derived reusable formatting structure with browser-owned rendering
+  and layout. Original source stays authoritative; derived structure is disposable.
+  Owner approved this responsibility split, subject to parser/streaming feasibility.
+  No package, wire format, new schema or server-generated HTML follows from it.
 - Virtualization is expected from the start. Fetch older sections on demand while
   scrolling; a slight loading delay is acceptable. Do not load the whole history
   just to open a tab or visit an old section.
@@ -344,7 +348,7 @@ but this was not adopted or qualified; compare alternatives after defining needs
 Do not assume workers are automatically better: transferring/copying content and
 maintaining extra trees can increase memory. Benchmark before adding them.
 
-### Cold access within one huge message — ownership proposal
+### Cold access within one huge message — agreed ownership direction
 
 A correctly formatted middle slice must match the whole message's interpretation,
 not an independently parsed page. A fixed overlap is insufficient: a reference
@@ -363,7 +367,7 @@ Two ownership options were examined through read-only design analysis:
   may need substantial or complete source scanning before the slice is correct.
   A worker alone does not bound source/AST memory; eviction can force repeat work.
 
-Recommendation awaiting owner approval: backend owns reusable, disposable semantic
+Owner approved pursuing this split: backend owns reusable, disposable semantic
 structure for large-message retrieval; browser owns components, styling, measured
 geometry and viewport resources. Source remains authoritative. This is not backend
 HTML generation, a new parser, a selected AST wire format or an instruction to
@@ -382,7 +386,79 @@ cost for a cold unindexed giant message; sub-block slicing without copying a who
 AST; source-to-rendered anchoring; extreme inline constructs/table cells; and
 content whose later bytes change earlier interpretation. No constant-size context,
 instant cold access, fixed memory ceiling or exact final live formatting is promised.
-No parser, schema, transport or implementation has been selected by this proposal.
+No parser, schema, transport or implementation has been selected by this direction.
+
+### Derived-state lifecycle and reads — proposed mechanics
+
+Keep one reusable structural derivation per relevant source/dialect version, not a
+new tree per browser tab. Store compact, addressable derived records alongside
+existing session storage if measurement supports it; do not serialize a library's
+live AST as the canonical history. Exact storage shape remains unselected.
+
+1. Save authoritative output independently of transcript viewers. Committed source
+   and provisional tool drafts retain their existing different durability meanings.
+2. A visible read requests missing/stale structure for a known committed extent.
+   Coalesce repeated requests and prioritize actual reading over speculative warming.
+   Do not format every hidden session on every stream update.
+3. Read the required source consistently, then parse/project outside database and
+   session locks. Bound concurrent work and pending jobs across sessions. The basic
+   whole-message-parser candidate still needs a whole-message temporary allocation;
+   queue control does not remove that per-job cost.
+4. Publish a projection tagged with the extent it represents. A later append need
+   not invalidate that useful prefix result: show it as behind the current source
+   and schedule the latest extent. Do not discard every result during sustained
+   streaming and starve the display. History replacement/incompatible dialect change
+   is different and must reject an obsolete projection.
+5. Fetch descriptors and display slices from a consistent derivation generation;
+   do not combine offsets/structure from one parse with another's content. Use
+   source-based locations rather than transient AST node numbers for saved anchors.
+6. Release parser trees and backing strings after extraction. Retain only deliberately
+   reusable derived data. Browser caches independently release fetched source,
+   component state, highlight results, decoded images and measurements as applicable.
+
+Logical reads—not selected endpoint/type names—are: recent window; window around
+an anchor; older/newer neighbors; approximate whole-history position lookup;
+subranges within a large item; and independent tool/attachment detail. Each returns
+bounded useful data plus continuation/availability facts. Missing derivation means
+explicit pending/loading, not an empty item or falsely completed transcript.
+No search index or full-history descriptor download follows from these reads.
+
+The backend's structural estimates and browser's measured heights must refer to the
+same source locations. Width-dependent pixel geometry remains browser-owned; future
+prompt markers reuse that mapping. Formatting corrections preserve the reader's
+source anchor and active selection rather than rerendering the entire viewport.
+These mechanics remain design proposals until the parser/projection path is qualified.
+
+### Parser candidate evidence — not a dependency selection
+
+Read-only upstream inspection on 2026-11-08 examined Markdig as a natural .NET
+candidate at [`ac4f83e79d3829e7d181ec360e07afc3101d4dd0`](https://github.com/xoofx/markdig/tree/ac4f83e79d3829e7d181ec360e07afc3101d4dd0/src/Markdig).
+No package was installed or runtime test performed; current-main feature availability
+in a released package is unverified.
+- `Markdown.cs` / `Parsers/MarkdownParser.cs`: inspected public parse entry points
+  accept a whole .NET string, build a new document, then process inlines. No previous
+  tree/append/resume API was found in those surfaces. Internal pooling is not
+  incremental parsing. This does not establish what a custom parser fork could do;
+  building one is not proposed.
+- `Syntax/SourceSpan.cs` / `Syntax/MarkdownObject.cs`: spans use inclusive ends and
+  UTF-16 string offsets; precise inline locations require enabling that option.
+  These cannot be copied directly into Urd's UTF-8 byte cursors.
+- `Helpers/StringSlice.cs` / `Syntax/LeafBlock.cs`: nodes can retain slices backed by
+  larger strings. Keeping a few AST nodes can pin whole source buffers. A bounded
+  projection must not accidentally keep the parser tree/backing source resident.
+- Fenced-code lines and table rows/cells can be traversed without generating full
+  HTML. That supports custom structural extraction, not lazy/bounded parsing.
+- [Custom renderers](https://xoofx.github.io/markdig/docs/advanced/renderers/) and
+  parser extensions support non-HTML output and future math handling. Check
+  [table options](https://xoofx.github.io/markdig/docs/extensions/tables/) explicitly:
+  permissive pipe tables and strict GFM are not interchangeable dialect choices.
+
+Implication: this candidate supports the chosen ownership split structurally, but
+whole-message parse cost and streaming reuse remain the qualification gate. Do not
+reparse on every token, retain its AST as the permanent index, or claim that moving
+parsing to the backend bounded total process memory. The simplest candidate strategy
+is demand-driven, coalesced whole-message parsing with disposable ASTs; measure it
+before introducing custom incremental machinery or selecting the dependency.
 
 ### On-demand details and images
 
@@ -453,9 +529,9 @@ source, not by asking the owner. Update this document immediately after decision
    framework. Determine Markdown semantics, code/table virtualization, streaming
    parse strategy and memory ownership before choosing dependencies. In particular,
    arbitrary transport pages cannot be parsed as independent Markdown documents.
-   Current proposal: backend reusable semantic structure, browser layout/rendering;
-   compare its extra derivation cost against full-message browser parsing. Neither
-   is runtime-qualified; owner has not selected this responsibility split yet.
+   Owner approved backend reusable semantic structure with browser layout/rendering.
+   Next check existing parser capabilities against the split, especially streaming
+   reuse and sub-block ranges, before selecting a package or projection format.
 6. **Interaction through eviction — current branch:** full-history search is
    explicitly deferred; owner accepts browser Find's limitation for now and may add
    first-party search later. Do not design a search index/API in this phase. Owner
@@ -549,6 +625,10 @@ shared-reference and cleanup failure cases; those are not implemented guarantees
 - Grilling decision 12: owner approved compatibility now, features later for maths
   and diagrams. Choose extension-friendly parsing/rendering boundaries without
   implementing optional renderers or a general plugin system in the initial scope.
+- Grilling decision 13: owner approved pursuing backend-derived formatting structure
+  with browser-owned rendering/layout. Source stays authoritative and derivations
+  disposable. Approval is for responsibility boundaries, not a package/schema or
+  proof of bounded parsing cost; validate library capabilities next.
 - Owner explicitly chose continuous formatting rather than a separate paged
   plaintext fallback for very large replies. Earlier suggested 128 KiB/message and
   2 MiB cache numbers were speculative and are **not selected requirements**.
@@ -580,9 +660,11 @@ External Markdown images load automatically near the viewport without managed
 retention. Existing architecture already permits losing unfinished tool drafts on
 backend crash; do not ask to redesign that recovery contract. Maths/diagrams are
 approved for compatibility checks now, feature implementation later. Current work:
-review the proposed backend-semantic-structure/browser-layout responsibility split
-for cold access inside huge Markdown messages. Alternatives and unresolved costs
-are recorded; this is not yet an approved schema/package/implementation. Do not keep
+qualify parser capabilities for the approved backend-semantic-structure/browser-layout
+split. Candidate source research and proposed derived-state/read lifecycle are now
+recorded. Current steering question: run a bounded synthetic parser qualification
+before dependency selection, or remain design-only? No prototype, package install,
+production implementation or runtime measurement has been approved/run yet. Do not keep
 asking minor product questions that can be resolved through existing requirements.
 Ask only unresolved questions,
 not questions already settled by position-preservation requirements. Continue down

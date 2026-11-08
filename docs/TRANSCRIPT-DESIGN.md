@@ -72,8 +72,9 @@ Distinguish throughout:
   removal according to existing retention rules.
 - Markdown-linked pictures remain **external**; viewing them does not automatically
   retain a managed copy. The owner accepted this as the simplest policy. A separate
-  save-picture feature is not required initially. Automatic external loading versus
-  explicit activation remains unresolved; do not silently introduce remote fetching.
+  save-picture feature is not required initially. Owner approved automatic lazy
+  loading as external images approach the viewport, including requests to their
+  hosts. This is not background fetching of all history or managed-copy retention.
 - Provider-supplied formatted reasoning summaries appear inline, visually muted
   but readable. Unsummarized reasoning exposed by a provider is collapsed and
   inspectable. Opaque/encrypted continuation state is not public transcript content.
@@ -214,8 +215,12 @@ UI availability alone is not evidence that a model consumed it.
 Keep partial tool input distinct from validated saved calls. Correlate draft and
 final identity; preserve positive provider-terminal and cleanup requirements for
 execution. Incomplete argument text need not be valid JSON. Decide what draft
-state survives disconnect/restart, and how a new observer obtains current state
-without replaying an unlimited event log. No transport choice follows yet.
+state a new observer needs without replaying an unlimited event log. Existing
+[practical crash recovery](ARCHITECTURE.md#practical-crash-recovery-coherent-continuation-not-exact-loss-budgets)
+explicitly permits losing an unfinished tool draft on backend crash. Do not reopen
+that decision or introduce per-token durability. Browser reconnect to a still-running
+backend is a separate synchronization problem; obtain current provisional state
+without mistaking it for committed history. No transport choice follows yet.
 
 Reasoning needs explicit provider provenance/content semantics. Prefer default
 collapse when classification is unknown; do not infer summaries from model names
@@ -240,7 +245,8 @@ ignore obsolete work and prevent rapid pointer movement from retaining many bodi
 Speculative work should not worsen streaming/input latency. Its failure does not
 need an unsolicited error; an actual requested read must report failure truthfully.
 This is not permission to fetch external image URLs on hover, call a model/provider,
-or perform command side effects. External-image loading policy remains separate.
+or perform command side effects. External images instead follow the separately
+approved near-viewport automatic-loading policy, not tab-hover prefetch.
 
 ### Viewport and layout
 
@@ -316,6 +322,9 @@ structures independently of DOM virtualization. One huge code block/table also
 needs attention; splitting only at top-level Markdown blocks is insufficient.
 
 Use proven parser/rendering components rather than a homemade Markdown parser.
+Initial Markdown feature scope is the current product question: recommend standard
+Markdown with fenced code, tables and images, deferring extra math/diagram renderers
+unless required. This is a recommendation, not an approved feature exclusion.
 No package is selected. Earlier discussion suggested a unified/mdast/hast pipeline,
 but this was not adopted or qualified; compare alternatives after defining needs.
 Do not assume workers are automatically better: transferring/copying content and
@@ -382,10 +391,13 @@ source, not by asking the owner. Update this document immediately after decision
    queue. Current admission-index projection must change. Relationships, stable
    draft-to-final identity, revision invalidation and pending cancellation remain
    mechanism/product questions as applicable; do not reopen existing Stop guarantees.
-4. **Streaming recovery:** what the reader sees after interruption during tool-input
-   generation; provisional versus retained evidence, cancellation and terminal facts.
-5. **Large-item correctness:** Markdown semantics, code/table virtualization,
-   streaming parse strategy and memory ownership. Prove feasibility before choosing.
+4. **Streaming recovery:** existing architecture permits loss of an unfinished tool
+   draft on backend crash. Preserve that simple contract; distinguish browser
+   reconnect/current provisional state from committed history and terminal facts.
+5. **Large-item correctness — current question:** initial formatting scope: standard
+   Markdown/code/tables/images, or also math/diagrams? Recommend standard scope first.
+   Then determine Markdown semantics, code/table virtualization, streaming parse
+   strategy and memory ownership. Prove feasibility before choosing dependencies.
 6. **Interaction through eviction — current branch:** full-history search is
    explicitly deferred; owner accepts browser Find's limitation for now and may add
    first-party search later. Do not design a search index/API in this phase. Owner
@@ -393,10 +405,8 @@ source, not by asking the owner. Update this document immediately after decision
    retention, verified during implementation rather than a separate prototype phase.
    Custom selection is not planned without a demonstrated need. Also resolve
    keyboard navigation, expanded details and resize.
-7. **On-demand payloads/media — current question:** should external Markdown images
-   load automatically near the viewport or require activation? Recommend ordinary
-   lazy image loading near the viewport, keeping URLs external and creating no
-   managed copies. This entails requests to external hosts and is not yet approved.
+7. **On-demand payloads/media:** automatic near-viewport loading of external Markdown
+   images is approved; URLs stay external and no managed copies are created.
    Also cover inspector lifecycle, large model-facing results, clipboard uploads,
    attachment publication/cleanup and image preview/viewer release. Display rendering
    does not imply provider image delivery.
@@ -476,6 +486,8 @@ shared-reference and cleanup failure cases; those are not implemented guarantees
   native selection and temporary selected-span retention, not a speculative custom
   selection engine or separate prototype phase. Verify during implementation;
   revise only for demonstrated problems, not hypothetical scale alone.
+- Grilling decision 11: owner approved automatic loading of external Markdown images
+  near the viewport, rather than requiring clicks. External retention remains unchanged.
 - Owner explicitly chose continuous formatting rather than a separate paged
   plaintext fallback for very large replies. Earlier suggested 128 KiB/message and
   2 MiB cache numbers were speculative and are **not selected requirements**.
@@ -503,8 +515,10 @@ failure stays in the conversation rather than requeueing the input. Full-history
 search is deferred. Selection direction is the simplest native-selection approach
 with temporary selected-span retention, tested during implementation. Do not add a
 custom selection engine or separate prototype phase without demonstrated need.
-Current question: automatic lazy loading versus click activation for external
-Markdown images; retained-file policy is already settled and must not be reopened.
+External Markdown images load automatically near the viewport without managed
+retention. Existing architecture already permits losing unfinished tool drafts on
+backend crash; do not ask to redesign that recovery contract. Current question:
+initial Markdown feature scope, then synthesize the remaining engineering mechanisms.
 Ask only unresolved questions,
 not questions already settled by position-preservation requirements. Continue down
 the dependency tree and keep recommendations distinct from decisions.
@@ -514,7 +528,11 @@ The existing user application was on port 55174/PID 2548 during the initial
 inventory; identifiers can change and are not permission to operate it. Do not
 inspect/copy Pie UI source/styles. Visible control requires appropriate user scope.
 
-Other work: parent handled palette/tabs and `workspace.css`; provider/settings peer
-handled Settings/Workspace integration. Recheck current ownership before changes.
+Other work: Urd Frontend Cleanup owns approved `source/ui` audit remediation,
+including Workspace persistence/commands/catalog, provider feedback, tests and CSS
+ownership. It avoids Transcript behavior but may relocate transcript CSS unchanged.
+This session owns only this working design document; cleanup was informed. Earlier
+parent work covered palette/tabs and provider/settings integration. Recheck ownership
+before any source edits.
 Future transcript logic can stay feature-local; coordinate shared CSS, Workspace,
 package/lockfile and docs changes. Preserve unrelated working-tree edits.

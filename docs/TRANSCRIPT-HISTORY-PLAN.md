@@ -6,8 +6,11 @@ Source checked at `5c9392f` on 2026-11-09. Requirements are owned by
 No production code, dependency, migration or running-application change is made here.
 Revised 2026-11-09 after checking the plan against the overall requirements
 (low overhead, snappy streaming, tool rows, images, Markdown, animation), then again
-after the second requirements pass (design decisions 19–30). UI decisions remain
-open; this plan covers backend contracts and data the future UI needs.
+after the second requirements pass (design decisions 19–30). Revised 2026-11-09 after
+review against the wider requirements: usage capture is reassigned to the harness
+(execution/storage, stored per request) with no stage-1 usage read contract, and cost
+estimation is deferred until a pricing source exists. UI decisions remain open; this
+plan covers backend contracts and data the future UI needs.
 
 ## Outcome and explicit boundary
 
@@ -85,9 +88,13 @@ text content reads and their UTF-8 cursors.
   reserved then, in `call_index` order, giving text-then-calls. Stage 3's streamed
   drafts reuse the same reserved entry; no second allocation path.
 - **Entry facts (decision 27):** creation time on every entry; tool start and end
-  times; token usage and estimated cost per model reply (request), captured from
-  provider `UsageContent`, which `LlmResponseAccumulator` currently discards. Usage
-  belongs to the request, not repeated per entry. Missing usage stays unknown.
+  times. Token usage per model reply is a **harness-owned capture**, not a
+  transcript entry fact: the request row stores usage from provider `UsageContent`
+  (which `LlmResponseAccumulator` currently discards) so the harness's post-closure
+  usage summaries and later transcript detail views have data. Stage 1 adds no usage
+  read contract; future detail views read it on demand by request ID. Cost
+  estimation is not captured: no pricing source exists, so cost stays unknown until
+  one does. Missing usage stays unknown, never approximated.
 - **Edits (decision 23):** an edit permanently discards later entries; their rows
   and owned content are deleted, not hidden. A revision change invalidates anchors;
   the client falls back to the edited prompt. No production edit exists yet; stage 1
@@ -112,9 +119,10 @@ Proposed route: `GET /api/sessions/{sessionId}/history`, one reader with modes:
   size**, not a memory/cache budget. Refill from the other side near a boundary.
 - Descriptors carry no bodies or previews: entry reference, kind, lifecycle facts.
   Text: committed extent (`AvailableThrough`), closed, final-output marker, time.
-  Tool: name, started/outcome, start/end times. Execution settlement and per-request
-  usage are reported once per page, not repeated per entry. Arguments/results stay
-  out (stage 3 inspection). An entry's full original source remains readable through
+  Tool: name, started/outcome, start/end times. Execution settlement is reported
+  once per page, not repeated per entry; per-request usage is not part of the page
+  contract (harness-owned, served by a later bounded read when detail views need
+  it). Arguments/results stay out (stage 3 inspection). An entry's full original source remains readable through
   bounded content pages (future copy/export needs no new contract).
 - One `Database.Read` transaction per page; `hasBefore`/`hasAfter` via indexed
   lookahead. Stale revision → existing 409, checked before anchor lookup; missing or
@@ -219,8 +227,8 @@ Sequential; they share storage/session files.
 **1A — entry index and history reads.** Migration (entry kinds, text runs, entry
 facts, tool backfill, lifted 16 KiB caps on tool arguments/results and submission
 text, including `LlmResponseAccumulator`, provider stream and route/client checks),
-usage capture, history reader, core method, route, typed client. Old user placement
-unchanged.
+harness-owned usage capture (stored per request, no read route), history reader,
+core method, route, typed client. Old user placement unchanged.
 
 **1B — push notices.** In-memory session version, page stream with watch set and
 open-session status, client stream reader replacing `useSessionSnapshot` polling
@@ -255,8 +263,9 @@ Reuse `SessionSnapshotStorageTests` seeding/poisoned-body/query-plan helpers,
   text yields three entries in that order; with today's completion-only adapters,
   text-then-calls; a reserved call whose reply fails stays closed as not executed and
   never runs; per-run content reads
-  stay cursor-correct; entry times, tool start/end and per-request usage are saved,
-  with missing usage left unknown.
+  stay cursor-correct; entry times and tool start/end are saved; per-request usage
+  is captured on the request row with missing usage left unknown and no usage read
+  added.
 - Push: notice after each change kind; coalescing under a fast stream; a stalled
   subscriber does not slow writes; reconnect and process restart resync; hidden page
   holds no stream; adding/removing watched sessions without reconnecting; status for

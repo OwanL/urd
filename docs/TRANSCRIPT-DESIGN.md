@@ -838,6 +838,11 @@ shared-reference and cleanup failure cases; those are not implemented guarantees
   and end; each model reply records token usage and estimated cost. Captured now so
   later hover/detail views have data. Observed: `LlmResponseAccumulator` currently
   discards `UsageContent`, so usage capture is new backend work.
+- Decision 27 follow-up (2026-11-09): usage capture is **harness-owned**
+  (execution/storage, on the request row), also feeding the agreed post-closure
+  usage summaries; it is not a transcript entry fact. Stage 1 adds no usage read
+  contract — later detail views read on demand by request ID. Only provider-reported
+  usage is captured; estimated cost waits on a pricing source.
 - Grilling decision 28: a running tool may expose live progress output. It is
   transient (not saved), bounded to the latest output, delivered only while its
   session is observed, and replaced by the model-facing result on completion. Only

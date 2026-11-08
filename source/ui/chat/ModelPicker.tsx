@@ -1,5 +1,8 @@
 import type { TargetedKeyboardEvent } from "preact";
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
+import { useEffect, useId, useMemo, useRef, useState } from "preact/hooks";
+import { Icon } from "../components/Icon.tsx";
+import { Popover, scrollOptionIntoView } from "../components/Popover.tsx";
+import { Tooltip } from "../components/Tooltip.tsx";
 import type { ComposerModel, ModelPickerProps } from "./ComposerModels.ts";
 
 export function ModelPicker({
@@ -13,7 +16,6 @@ export function ModelPicker({
   disabled,
 }: ModelPickerProps) {
   const id = useId();
-  const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const search = useRef<HTMLInputElement>(null);
   const activeOption = useRef<HTMLDivElement>(null);
@@ -47,7 +49,7 @@ export function ModelPicker({
 
   function close(returnFocus: boolean) {
     setOpen(false);
-    if (returnFocus) trigger.current?.focus();
+    if (returnFocus) trigger.current?.focus({ preventScroll: true });
   }
 
   function show() {
@@ -78,91 +80,70 @@ export function ModelPicker({
     setActiveKey(options[next]!.key);
   }
 
-  useLayoutEffect(() => {
-    if (expanded) search.current?.focus();
-  }, [expanded]);
-
   useEffect(() => {
     if (disabled) setOpen(false);
   }, [disabled]);
 
   useEffect(() => {
-    if (!expanded) return;
-    function dismiss(event: PointerEvent) {
-      if (!root.current?.contains(event.target as Node)) setOpen(false);
-    }
-    document.addEventListener("pointerdown", dismiss);
-    return () => document.removeEventListener("pointerdown", dismiss);
-  }, [expanded]);
-
-  useEffect(() => {
-    if (expanded) activeOption.current?.scrollIntoView({ block: "nearest" });
+    if (expanded) scrollOptionIntoView(activeOption.current);
   }, [expanded, activeModel?.key]);
 
   return (
-    <div
-      class="composer-model"
-      ref={root}
-      onKeyDown={(event) => {
-        if (event.key === "Escape" && expanded) {
-          event.preventDefault();
-          event.stopPropagation();
-          close(true);
-        }
-      }}
-      onFocusOut={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
-      }}
-    >
-      <button
-        class="composer-selector composer-model-trigger"
-        type="button"
-        ref={trigger}
-        disabled={disabled}
-        aria-label={`Model: ${modelLabel}`}
-        aria-haspopup="dialog"
-        aria-expanded={expanded}
-        aria-controls={expanded ? `${id}-popover` : undefined}
-        title={modelLabel}
-        onClick={() => (expanded ? close(false) : show())}
-        onKeyDown={(event) => {
-          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-            event.preventDefault();
-            show();
-          }
-        }}
-      >
-        <span class="composer-model-label">{modelLabel}</span>
-        <span class="composer-chevron" aria-hidden="true">
-          ⌄
-        </span>
-      </button>
+    <div class="composer-model">
+      <Tooltip content={modelLabel} disabled={expanded}>
+        <button
+          class="composer-selector composer-model-trigger"
+          type="button"
+          ref={trigger}
+          disabled={disabled}
+          aria-label={`Model: ${modelLabel}`}
+          aria-haspopup="dialog"
+          aria-expanded={expanded}
+          aria-controls={expanded ? `${id}-popover` : undefined}
+          onClick={() => (expanded ? close(false) : show())}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+              event.preventDefault();
+              show();
+            }
+          }}
+        >
+          <span class="composer-model-label">{modelLabel}</span>
+          <Icon name="chevron" />
+        </button>
+      </Tooltip>
       {expanded && (
-        <div
+        <Popover
+          anchor={trigger}
+          initialFocus={search}
+          onClose={() => setOpen(false)}
+          placement="above"
           class="composer-model-popover"
           id={`${id}-popover`}
-          role="dialog"
-          aria-label="Choose model"
+          label="Choose model"
         >
-          <input
-            class="composer-model-search"
-            ref={search}
-            type="search"
-            placeholder="Search models"
-            aria-label="Search models"
-            role="combobox"
-            list={undefined}
-            aria-autocomplete="list"
-            aria-expanded="true"
-            aria-controls={`${id}-options`}
-            aria-activedescendant={activeModel ? `${id}-option-${activeIndex}` : undefined}
-            value={query}
-            onInput={(event) => {
-              setQuery(event.currentTarget.value);
-              setActiveKey(null);
-            }}
-            onKeyDown={navigate}
-          />
+          <div class="composer-model-search-row">
+            <Icon name="search" />
+            <input
+              class="composer-model-search"
+              ref={search}
+              type="search"
+              placeholder="Search models"
+              aria-label="Search models"
+              role="combobox"
+              list={undefined}
+              aria-autocomplete="list"
+              aria-expanded="true"
+              aria-controls={`${id}-options`}
+              aria-activedescendant={activeModel ? `${id}-option-${activeIndex}` : undefined}
+              value={query}
+              onInput={(event) => {
+                setQuery(event.currentTarget.value);
+                setActiveKey(null);
+              }}
+              onKeyDown={navigate}
+            />
+          </div>
           <div
             class="composer-model-options"
             id={`${id}-options`}
@@ -186,12 +167,12 @@ export function ModelPicker({
                       aria-selected={model.key === modelKey}
                       tabIndex={-1}
                       ref={active ? activeOption : null}
-                      title={model.modelLabel}
+                      onPointerMove={() => setActiveKey(model.key)}
                       onPointerDown={(event) => event.preventDefault()}
                       onClick={() => choose(model.key)}
                     >
                       <span class="composer-model-label">{model.modelLabel}</span>
-                      {model.key === modelKey && <span aria-hidden="true">✓</span>}
+                      {model.key === modelKey && <Icon name="check" />}
                     </div>
                   );
                 })}
@@ -221,12 +202,13 @@ export function ModelPicker({
                     if (!refreshingModels) onRefreshModels();
                   }}
                 >
+                  <Icon name="refresh" />
                   {refreshingModels ? "Refreshing…" : "Refresh models"}
                 </button>
               )}
             </div>
           )}
-        </div>
+        </Popover>
       )}
     </div>
   );

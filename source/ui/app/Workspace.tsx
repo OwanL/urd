@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Composer } from "../chat/Composer.tsx";
+import { IconButton } from "../components/IconButton.tsx";
+import { Tooltip } from "../components/Tooltip.tsx";
 import { ProviderClient } from "../providers/ProviderClient.ts";
 import type { LlmSelection } from "../providers/LlmSelection.ts";
 import { SessionClient } from "../sessions/SessionClient.ts";
@@ -179,7 +181,8 @@ export function Workspace() {
     if (activeId)
       document
         .getElementById(`tab-${activeId}`)
-        ?.parentElement?.scrollIntoView({ block: "nearest", inline: "nearest" });
+        ?.closest(".chat-tab")
+        ?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [activeId, chat?.title]);
   useEffect(() => {
     function hashChanged() {
@@ -515,47 +518,71 @@ export function Workspace() {
         >
           {workspace.tabs.map((id) => (
             <div class={`chat-tab ${id === activeId ? "is-active" : ""}`} key={id}>
-              <button
-                id={`tab-${id}`}
-                role="tab"
-                aria-selected={id === activeId}
-                aria-controls="chat-view"
-                tabIndex={id === activeId ? 0 : -1}
-                onClick={() => open(id)}
-                onKeyDown={(event) => {
-                  if (event.key === "Delete") close(id);
-                }}
-              >
-                {workspace.chats[id]?.title ?? "Chat"}
-              </button>
-              <button
+              <Tooltip content={workspace.chats[id]?.title ?? "Chat"} placement="below">
+                <button
+                  id={`tab-${id}`}
+                  role="tab"
+                  aria-selected={id === activeId}
+                  aria-controls="chat-view"
+                  tabIndex={id === activeId ? 0 : -1}
+                  onClick={() => open(id)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Delete") close(id);
+                  }}
+                >
+                  {workspace.chats[id]?.title ?? "Chat"}
+                </button>
+              </Tooltip>
+              <IconButton
+                icon="close"
                 class="close-tab"
-                aria-label={`Close ${workspace.chats[id]?.title ?? "chat"}`}
+                label={`Close ${workspace.chats[id]?.title ?? "chat"}`}
+                hint={
+                  <>
+                    Close tab <kbd>Delete</kbd>
+                  </>
+                }
+                placement="below"
                 onClick={() => close(id)}
-              >
-                ×
-              </button>
+              />
             </div>
           ))}
         </div>
-        <button
-          class="icon-button new-chat"
-          aria-label="New chat"
+        <IconButton
+          icon="plus"
+          class="new-chat"
+          label="New chat"
+          hint={creating ? "Creating chat…" : "New chat"}
+          placement="below"
           disabled={creating || !ready || storageBlocked.current}
           aria-busy={creating}
           onClick={() => {
             void create();
           }}
-        >
-          {creating ? "…" : "+"}
-        </button>
+        />
         <div class="top-actions">
-          <button class="icon-button" aria-label="Snooze">
-            ☾
-          </button>
-          <button class="icon-button" aria-label="Settings">
-            ⚙
-          </button>
+          <IconButton
+            icon="moon"
+            label="Snooze"
+            hint={
+              <>
+                Snooze<span class="tooltip-detail">Not available yet</span>
+              </>
+            }
+            placement="below"
+            aria-disabled="true"
+          />
+          <IconButton
+            icon="settings"
+            label="Settings"
+            hint={
+              <>
+                Settings<span class="tooltip-detail">Not available yet</span>
+              </>
+            }
+            placement="below"
+            aria-disabled="true"
+          />
         </div>
       </header>
       {globalError && (

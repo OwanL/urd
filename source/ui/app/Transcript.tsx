@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { SessionClient } from "../sessions/SessionClient.ts";
+import { IconButton } from "../components/IconButton.tsx";
 import type { MessageContentCursor, MessagePreview } from "../sessions/Messages.ts";
 import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
 
@@ -245,7 +246,9 @@ export function Transcript({
         </div>
       </div>
       {jump && (
-        <button
+        <IconButton
+          icon="arrow-down"
+          label="Jump to latest"
           class="jump-latest"
           onClick={() => {
             following.current = true;
@@ -253,9 +256,7 @@ export function Transcript({
             if (scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight;
             setJump(false);
           }}
-        >
-          Jump to latest ↓
-        </button>
+        />
       )}
     </div>
   );

@@ -86,6 +86,26 @@ up. Set `DOTNET_HOST_PATH` to a specific `dotnet` executable if needed; otherwis
 uses PATH. Explicit fixture termination is not evidence of graceful shutdown.
 Neither command authorizes live provider/account requests.
 
+## Shared UI controls
+
+`components/Popover.tsx` owns anchored placement, viewport clamping and dismissal.
+It uses the browser's manual top layer with entirely custom markup/styles, not OS
+menus or dialogs; current browsers with the Popover API are required. Interactive
+panels focus their initial control and return focus on Escape, but outside clicks
+keep their destination. Selection controls keep their own keyboard/value semantics.
+
+`Tooltip` accepts formatted descriptive content and links it to the actual control
+with `aria-describedby`; interactive details belong in `Popover`. Hints appear on
+keyboard focus or brief hover, remain reachable across the gap and dismiss on Escape
+or action. `IconButton` combines an accessible label, SVG icon and custom hint. Do not
+add native `title` hints or native select menus alongside these controls.
+
+The refinement was checked in isolated Chromium with the real loopback fixture:
+model/reasoning selection, focus/dismissal, hoverable hints, empty selection, narrow
+overflowing tabs, streaming/Stop, draft retention and jump-to-latest. Desktop, mobile
+and 600×400 zoom-equivalent captures passed independent visual review. No live
+account requests were made for these checks; screenshots stay in an owned temp folder.
+
 ## Transport and selection ownership
 
 - `source/ui/sessions/SessionClient.ts` maps to the

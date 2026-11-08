@@ -1,25 +1,10 @@
 import type { TargetedKeyboardEvent } from "preact";
 import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
+import { IconButton } from "../components/IconButton.tsx";
 import type { ComposerProps } from "./ComposerModels.ts";
 import { ModelPicker } from "./ModelPicker.tsx";
+import { ReasoningPicker } from "./ReasoningPicker.tsx";
 import "./composer.css";
-
-function effortLabel(effort: string): string {
-  switch (effort) {
-    case "none":
-      return "None";
-    case "low":
-      return "Low";
-    case "medium":
-      return "Medium";
-    case "high":
-      return "High";
-    case "extraHigh":
-      return "Extra high";
-    default:
-      return effort;
-  }
-}
 
 function resizeInput(input: HTMLTextAreaElement) {
   input.style.height = "0px";
@@ -49,8 +34,6 @@ export function Composer({
   const input = useRef<HTMLTextAreaElement>(null);
   const composing = useRef(false);
   const locked = selectionLocked || working || stopping;
-  const efforts = [...new Set(reasoningOptions)];
-  const unknownEffort = reasoningEffort !== null && !efforts.includes(reasoningEffort);
 
   useLayoutEffect(() => {
     const textarea = input.current;
@@ -121,45 +104,37 @@ export function Composer({
             modelsError={modelsError}
             disabled={locked}
           />
-          <select
-            class="composer-selector composer-reasoning"
-            aria-label="Reasoning effort"
-            title={`Reasoning: ${reasoningEffort === null ? "Provider default" : effortLabel(reasoningEffort)}`}
-            disabled={locked}
-            value={reasoningEffort === null ? "default" : `effort:${reasoningEffort}`}
-            onChange={(event) => {
-              const value = event.currentTarget.value;
-              onReasoningChange(value === "default" ? null : value.slice("effort:".length));
-            }}
-          >
-            <option value="default">Default</option>
-            {unknownEffort && (
-              <option value={`effort:${reasoningEffort}`} disabled>
-                {effortLabel(reasoningEffort)}
-              </option>
-            )}
-            {efforts.map((effort) => (
-              <option key={effort} value={`effort:${effort}`}>
-                {effortLabel(effort)}
-              </option>
-            ))}
-          </select>
+          <ReasoningPicker
+            effort={reasoningEffort}
+            options={reasoningOptions}
+            onChange={onReasoningChange}
+            disabled={locked || !modelKey}
+          />
         </div>
         <div class="composer-actions">
           {(working || stopping) && (
-            <button
+            <IconButton
+              icon="stop"
+              label="Stop"
+              hint={stopping ? "Stopping…" : "Stop"}
               class="composer-stop"
-              type="button"
               disabled={stopping}
               aria-busy={stopping}
               onClick={onStop}
-            >
-              {stopping ? "Stopping…" : "Stop"}
-            </button>
+            />
           )}
-          <button class="composer-send" type="submit" disabled={!canSend}>
-            Send
-          </button>
+          <IconButton
+            icon="send"
+            label="Send"
+            hint={
+              <>
+                Send <kbd>Enter</kbd>
+              </>
+            }
+            class="composer-send"
+            type="submit"
+            disabled={!canSend}
+          />
         </div>
       </div>
     </form>

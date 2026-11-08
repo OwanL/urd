@@ -145,7 +145,11 @@ Proposed route: `GET /api/sessions/{sessionId}/history`, one reader with modes:
 - **One stream per browser page**, multiplexed by session: `GET /api/events`,
   consumed with `fetch` + a stream reader, so the existing `X-Urd-Client` header
   gate is kept (`EventSource` cannot send it). Server-Sent Events framing is
-  sufficient; no WebSocket, no new dependency. Per-session streams are rejected:
+  sufficient; no WebSocket, no new dependency. Every message carries a **named
+  event type** from the start (change, status, session-created), so stage 3 can add
+  content-carrying types — live tool progress and streamed call drafting (decision
+  28) — on the same framing without a redesign; stage 1 itself sends no content
+  payloads. Per-session streams are rejected:
   browsers allow about six HTTP/1.1 connections per host, and a parent plus
   streaming subagent cards would exhaust them and stall ordinary reads.
 - The page declares its **open sessions** (its tabs) and, within them, its

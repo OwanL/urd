@@ -156,11 +156,17 @@ The workspace gear opens a compact Settings panel following Pie's header/search/
 composition, initially with one **Providers** page. `source/ui/settings/Settings.tsx` owns
 the shell; `source/ui/providers/settings/` owns connection forms and operation state.
 Shared UI colour tokens and popover controls keep it aligned with the workspace.
-**Add a provider** sits above **Your providers**. ChatGPT and OpenAI add directly;
-Custom reveals endpoint settings. Providers are identified by hostname, without a name
-field or rename step. Existing stored names are not migrated. Existing providers start
-collapsed and open inline, one at a time; custom configuration is behind **Edit connection
-details**. Successful creation opens authentication; rejected custom creation retains its draft.
+The initial view contains **Add provider** and a compact saved-provider list. Add opens a
+chooser that distinguishes account sign-in, API key and custom/local servers. Selecting a
+saved provider opens its focused connection view; Back returns to the list and search can
+return directly to matching providers without stealing typing focus. Connected providers do
+not show setup forms. Configuration, model refresh and removal live under **Advanced**.
+A first-time **Load models** action stays visible until a usable connection has fetched its
+catalog, so ordinary setup does not require exploring advanced settings.
+New configurations are named from their hostname without a name field; presets display their
+recognizable provider name and custom connections display their hostname. Existing stored
+names are not migrated. Successful creation opens authentication; rejected custom creation
+retains its draft.
 
 The page supports ChatGPT, OpenAI API-key and custom compatible connections: create,
 custom binding changes, replace-only keys, sign-in/status/cancel, disconnect,
@@ -191,9 +197,36 @@ on desktop/mobile with stateful synthetic API responses, including rejected crea
 create during initial loading, close/reopen during creation, key clearing and removal.
 Hostname setup and automatic status updates were also checked, including draft retention,
 no polling after close, and no automatic mutations or model discovery.
-Those layout checks do not add backend or live-authentication qualification.
+The progressive-disclosure flow additionally covered back/search focus, hidden advanced
+controls, API-key replacement, sign-in handoff/cancel/completion and narrow/short viewports.
+These layout checks do not add backend or live-authentication qualification.
 The temporary fixture process/database was
 removed; shared workspace integration and palette/tab changes are coordinated separately.
+
+## Provider removal and future usage accounting
+
+A connection is mutable configuration, not the identity store for historical usage.
+Current-format submitted selections already snapshot the connection ID, route, API,
+endpoint, requested model and reasoning option independently of `provider_connections`.
+Removing or editing that connection does not rewrite the snapshot or delete session
+receipts. `LlmSelectionTests.SavedBindingCannotFollowAnEndpointChangeAndReceiptsSurviveProviderRemoval`
+covers removal and reopen without resolving a live provider; this focused Release regression
+was rerun successfully during the UI refinement. Hostnames and display labels
+are not unique accounting keys; recreating the same host must not merge distinct connections.
+
+Future compact usage records must capture their own secret-free attribution at the request
+boundary and survive both provider removal and conversation cleanup. Preserve the stable
+connection ID and provider/API/endpoint/model snapshot, plus reported usage and its provenance.
+Account attribution and provider-resolved model IDs need an explicit design when accounting
+is implemented; neither is established by the current selection snapshot. Do not depend on
+retaining credentials, OAuth registration, model catalogs or native response envelopes.
+This follows the [compact post-closure summary policy](ARCHITECTURE.md#keep-small-usage-summaries-after-closure),
+not a requirement to retain conversations or add a deleted-provider registry now.
+
+Token usage is not recorded by the session accumulator yet. Legacy selections may be null;
+missing identity, resolved-model data or token counts must stay explicitly unknown, never
+be guessed from a live connection or silently counted as zero. Current snapshots preserve
+the future integration seam, not retrospective billing completeness.
 
 ## Qualification
 

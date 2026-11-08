@@ -5,7 +5,7 @@ import type { ProviderSettingsState } from "./useProviderSettings.ts";
 
 export const providerNames = {
   chatGpt: "ChatGPT",
-  openAI: "OpenAI API key",
+  openAI: "OpenAI",
   custom: "Custom",
 } as const;
 
@@ -85,44 +85,49 @@ function CustomFields({
           onInput={(event) => edit({ endpoint: event.currentTarget.value })}
         />
       </label>
-      <fieldset class="provider-settings-choices">
-        <legend>API</legend>
-        {(
-          [
-            ["openAIResponses", "Responses"],
-            ["openAIChatCompletions", "Chat Completions"],
-          ] as const
-        ).map(([value, label]) => (
-          <label key={value}>
-            <input
-              type="radio"
-              name={`${id}-api`}
-              checked={draft.api === value}
-              onChange={() => edit({ api: value })}
-            />
-            {label}
-          </label>
-        ))}
-      </fieldset>
-      <fieldset class="provider-settings-choices">
-        <legend>Authentication</legend>
-        {(
-          [
-            ["apiKey", "API key"],
-            ["none", "None"],
-          ] as const
-        ).map(([value, label]) => (
-          <label key={value}>
-            <input
-              type="radio"
-              name={`${id}-auth`}
-              checked={draft.authentication === value}
-              onChange={() => edit({ authentication: value })}
-            />
-            {label}
-          </label>
-        ))}
-      </fieldset>
+      <details class="provider-settings-details">
+        <summary>Advanced</summary>
+        <div class="provider-settings-form-options">
+          <fieldset class="provider-settings-choices">
+            <legend>Protocol</legend>
+            {(
+              [
+                ["openAIResponses", "Responses"],
+                ["openAIChatCompletions", "Chat Completions"],
+              ] as const
+            ).map(([value, label]) => (
+              <label key={value}>
+                <input
+                  type="radio"
+                  name={`${id}-api`}
+                  checked={draft.api === value}
+                  onChange={() => edit({ api: value })}
+                />
+                {label}
+              </label>
+            ))}
+          </fieldset>
+          <fieldset class="provider-settings-choices">
+            <legend>Authentication</legend>
+            {(
+              [
+                ["apiKey", "API key"],
+                ["none", "None"],
+              ] as const
+            ).map(([value, label]) => (
+              <label key={value}>
+                <input
+                  type="radio"
+                  name={`${id}-auth`}
+                  checked={draft.authentication === value}
+                  onChange={() => edit({ authentication: value })}
+                />
+                {label}
+              </label>
+            ))}
+          </fieldset>
+        </div>
+      </details>
       {draft.endpoint.trim().toLowerCase().startsWith("http:") && (
         <p class="provider-settings-warning">HTTP does not protect keys or requests in transit.</p>
       )}

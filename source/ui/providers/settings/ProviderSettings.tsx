@@ -1,4 +1,4 @@
-import { useCallback, useId, useLayoutEffect, useState } from "preact/hooks";
+import { useCallback, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Icon } from "../../components/Icon.tsx";
 import type { ProviderConnection, ProviderRoute } from "../ProviderConnection.ts";
 import { ConnectionForm, providerNames } from "./ConnectionForm.tsx";
@@ -11,58 +11,93 @@ import {
 import type { ProviderSettingsState } from "./useProviderSettings.ts";
 import "./provider-settings.css";
 
-interface ProviderSettingsProps {
-  state: ProviderSettingsState;
-  search: string;
-}
-
 interface Presentation {
-  adding: boolean;
-  expandedId: string | null;
+  screen: "overview" | "chooser" | "custom" | "detail";
+  connectionId: string | null;
   creating: ReadonlySet<string> | null;
+  returnId: string | null;
 }
 
-// Settings unmounts its content when closed. Keep presentation with its existing command owner.
+// Settings unmounts its content when closed. Keep navigation with its command owner.
 const presentations = new WeakMap<ProviderSettingsState["actions"], Presentation>();
 
 export function ProviderSettings({ state, search }: ProviderSettingsProps) {
   const { actions } = state;
-  const id = useId();
+  const heading = useRef<HTMLHeadingElement>(null);
+  const surface = useRef<HTMLElement>(null);
+  const overviewControl = useRef<HTMLButtonElement>(null);
+  const focusRequested = useRef(false);
+  const previousSearch = useRef(search);
   const [presentation, setPresentation] = useState<Presentation>(
-    () => presentations.get(actions) ?? { adding: false, expandedId: null, creating: null },
+    () =>
+      presentations.get(actions) ?? {
+        screen: "overview",
+        connectionId: null,
+        creating: null,
+        returnId: null,
+      },
   );
-  const { adding, expandedId, creating } = presentation;
+  const { screen, connectionId, creating, returnId } = presentation;
   const show = useCallback(
-    (next: Presentation) => {
+    (next: Presentation, focus = true) => {
+      focusRequested.current = focus;
       presentations.set(actions, next);
       setPresentation(next);
     },
     [actions],
   );
+  const connection = state.connections.find(({ id }) => id === connectionId);
 
   useLayoutEffect(() => {
-    // Only a successful create selects a new ID. Rejections and uncertain reads stay in the form.
+    if (search === previousSearch.current) return;
+    previousSearch.current = search;
+    if (search.trim() && screen !== "overview") {
+      actions.select(null);
+      show({ screen: "overview", connectionId: null, creating: null, returnId: null }, false);
+    }
+  }, [search, screen, actions, show]);
+
+  useLayoutEffect(() => {
+    // Only a successful create selects a new ID. Rejections and uncertain reads stay put.
     if (
       creating &&
       state.selectedId &&
       !creating.has(state.selectedId) &&
-      state.connections.some((connection) => connection.id === state.selectedId)
+      state.connections.some((item) => item.id === state.selectedId)
     )
-      show({ adding: false, expandedId: state.selectedId, creating: null });
+      show({
+        screen: "detail",
+        connectionId: state.selectedId,
+        creating: null,
+        returnId: null,
+      });
   }, [creating, state.selectedId, state.connections, show]);
 
+  useLayoutEffect(() => {
+    if (screen === "detail" && !connection && state.loaded && !state.pending)
+      show({ screen: "overview", connectionId: null, creating: null, returnId: null });
+  }, [screen, connection, state.loaded, state.pending, show]);
+
+  useLayoutEffect(() => {
+    if (!focusRequested.current) return;
+    focusRequested.current = false;
+    if (screen === "overview") {
+      const control = overviewControl.current;
+      (control && !control.disabled ? control : surface.current)?.focus();
+    } else heading.current?.focus();
+  }, [presentation, screen]);
+
   if (!state.active) return null;
-  const visible = state.connections.filter(
-    (connection) => connection.id === expandedId || matchesConnection(connection, search),
-  );
+  const visible = state.connections.filter((item) => matchesConnection(item, search));
   const canEdit = state.pending === null && !state.uncertain && state.confirmation === null;
+  const canNavigate = state.confirmation === null;
+  const overview = () => {
+    actions.select(null);
+    show({ screen: "overview", connectionId: null, creating: null, returnId: connectionId });
+  };
   const create = () => {
     if (!canEdit) return;
-    show({
-      adding: true,
-      expandedId: null,
-      creating: new Set(state.connections.map(({ id }) => id)),
-    });
+    show({ ...presentation, creating: new Set(state.connections.map(({ id }) => id)) });
     actions.select(null);
     void actions.create();
   };
@@ -71,40 +106,135 @@ export function ProviderSettings({ state, search }: ProviderSettingsProps) {
     if (route !== "custom") create();
     else {
       actions.select(null);
-      show({ adding: true, expandedId: null, creating: null });
+      show({ screen: "custom", connectionId: null, creating: null, returnId: null });
     }
   };
-  const collapse = () => {
-    actions.select(null);
-    show({ adding: false, expandedId: null, creating: null });
-  };
+  const notice = state.notice?.endsWith(" completed.") ? null : state.notice;
 
   return (
-    <section class="provider-settings" aria-label="Providers" aria-busy={state.reading}>
-      <section class="provider-settings-add" aria-labelledby={`${id}-add`}>
-        <h3 id={`${id}-add`}>Add a provider</h3>
-        <div class="provider-settings-actions" aria-label="Provider type">
-          {(Object.keys(providerNames) as ProviderRoute[]).map((route) => (
-            <button
-              type="button"
-              key={route}
-              aria-pressed={adding && state.add.route === route}
+    <section
+      ref={surface}
+      tabIndex={-1}
+      class="provider-settings"
+      aria-label="Providers"
+      aria-busy={state.reading}
+    >
+      {screen !== "overview" && (
+        <button
+          type="button"
+          class="provider-settings-back"
+          disabled={!canNavigate}
+          onClick={overview}
+        >
+          <Icon name="chevron" />
+          Back to providers
+        </button>
+      )}
+
+      {screen === "overview" ? (
+        <>
+          <button
+            ref={returnId && visible.some(({ id }) => id === returnId) ? null : overviewControl}
+            type="button"
+            class="provider-settings-primary provider-settings-add"
+            disabled={!canEdit}
+            onClick={() => {
+              actions.select(null);
+              show({ screen: "chooser", connectionId: null, creating: null, returnId: null });
+            }}
+          >
+            Add provider
+          </button>
+          <div class="provider-settings-connections">
+            {!state.loaded && !state.reading && <p>Saved providers have not been read.</p>}
+            {state.loaded && !!state.connections.length && !visible.length && (
+              <p class="provider-settings-secondary">No matching providers.</p>
+            )}
+            {visible.map((item) => (
+              <button
+                ref={returnId === item.id ? overviewControl : null}
+                type="button"
+                class="provider-settings-connection"
+                key={item.id}
+                disabled={!canNavigate}
+                onClick={() => {
+                  actions.select(item.id);
+                  show({
+                    screen: "detail",
+                    connectionId: item.id,
+                    creating: null,
+                    returnId: item.id,
+                  });
+                }}
+              >
+                <strong>{connectionTitle(item)}</strong>
+                <span class="provider-settings-secondary">{connectionStatus(state, item)}</span>
+                <Icon name="chevron" />
+              </button>
+            ))}
+          </div>
+        </>
+      ) : (
+        <>
+          <header class="provider-settings-panel-heading">
+            <h3 ref={heading} tabIndex={-1}>
+              {screen === "chooser"
+                ? "Add provider"
+                : screen === "custom"
+                  ? "Custom provider"
+                  : connection
+                    ? connectionTitle(connection)
+                    : "Provider unavailable"}
+            </h3>
+            {connection && (
+              <p class="provider-settings-secondary">{connectionStatus(state, connection)}</p>
+            )}
+          </header>
+          {screen === "chooser" && (
+            <div class="provider-settings-connections" aria-label="Choose a provider">
+              {(Object.keys(providerNames) as ProviderRoute[]).map((route) => (
+                <button
+                  type="button"
+                  class="provider-settings-connection"
+                  key={route}
+                  disabled={!canEdit}
+                  onClick={() => choose(route)}
+                >
+                  <strong>{providerNames[route]}</strong>
+                  <span class="provider-settings-secondary">
+                    {route === "chatGpt"
+                      ? "Account sign-in"
+                      : route === "openAI"
+                        ? "API key"
+                        : "Local or compatible server"}
+                  </span>
+                  <Icon name="chevron" />
+                </button>
+              ))}
+            </div>
+          )}
+          {screen === "custom" && (
+            <ConnectionForm state={state} disabled={!canEdit} onCreate={create} />
+          )}
+          {screen === "detail" && connection && (
+            <ConnectionManagement
+              key={connection.id}
+              state={state}
+              connection={connection}
               disabled={!canEdit}
-              onClick={() => choose(route)}
-            >
-              {route === "openAI" ? "OpenAI" : providerNames[route]}
-            </button>
-          ))}
-        </div>
-        {adding && state.add.route === "custom" && (
-          <ConnectionForm state={state} disabled={!canEdit} onCancel={collapse} onCreate={create} />
-        )}
-      </section>
+            />
+          )}
+        </>
+      )}
 
       <div class="provider-settings-feedback" aria-live="polite" aria-atomic="true">
-        {state.pending && <p>{state.pending}… Closing settings will not cancel this command.</p>}
-        {state.notice && (
-          <p class={state.uncertain ? "provider-settings-error" : ""}>{state.notice}</p>
+        {state.pending && <p>{state.pending}…</p>}
+        {notice && (
+          <p
+            class={state.uncertain || notice.includes(" rejected") ? "provider-settings-error" : ""}
+          >
+            {notice}
+          </p>
         )}
         {state.uncertain && state.reviewed && (
           <div class="provider-settings-warning">
@@ -118,57 +248,13 @@ export function ProviderSettings({ state, search }: ProviderSettingsProps) {
           <p class="provider-settings-error">{state.errors.connections}</p>
         )}
       </div>
-
-      <section class="provider-settings-saved" aria-labelledby={`${id}-saved`}>
-        <h3 id={`${id}-saved`}>Your providers</h3>
-        <div class="provider-settings-connections">
-          {!state.loaded && !state.reading && <p>Saved providers have not been read.</p>}
-          {state.loaded && !state.connections.length && <p>No saved providers.</p>}
-          {!!state.connections.length && !visible.length && <p>No matching providers.</p>}
-          {visible.map((connection) => {
-            const expanded = expandedId === connection.id;
-            const panelId = `${id}-connection-${connection.id}`;
-            return (
-              <div class="provider-settings-connection-item" key={connection.id}>
-                <button
-                  type="button"
-                  class="provider-settings-connection"
-                  aria-expanded={expanded}
-                  aria-controls={expanded ? panelId : undefined}
-                  onClick={() => {
-                    if (expanded) collapse();
-                    else {
-                      actions.select(connection.id);
-                      show({ adding: false, expandedId: connection.id, creating: null });
-                    }
-                  }}
-                >
-                  <span class="provider-settings-connection-heading">
-                    <strong>{providerHostname(connection.endpoint)}</strong>
-                    <span>{providerNames[connection.route]}</span>
-                  </span>
-                  <span class="provider-settings-secondary">
-                    {credentialSummary(connection, state.credentials[connection.id])}
-                    {state.errors[`credentials:${connection.id}`] && " · read failed; may be stale"}
-                  </span>
-                  <Icon name="chevron" />
-                </button>
-                {expanded && (
-                  <div id={panelId} class="provider-settings-management">
-                    <ConnectionManagement
-                      state={state}
-                      connection={connection}
-                      disabled={!canEdit}
-                    />
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </section>
     </section>
   );
+}
+
+interface ProviderSettingsProps {
+  state: ProviderSettingsState;
+  search: string;
 }
 
 function ConnectionManagement({
@@ -181,134 +267,207 @@ function ConnectionManagement({
   disabled: boolean;
 }) {
   const { actions } = state;
+  const [advanced, setAdvanced] = useState(false);
   const credential = state.credentials[connection.id];
   const signIn = state.signIns[connection.id];
-  const confirmation =
-    state.confirmation?.connection.id === connection.id ? state.confirmation : null;
+  const pendingSignIn = !!signIn && signInPending(signIn);
+  const hasCredentials = !!credential?.hasCredentials;
+  const connected = hasCredentials && !credential?.requiresSignIn;
+  const showDisconnect = hasCredentials || !!credential?.isDisconnecting;
+  const catalog = state.catalogs[connection.id];
+  const needsModels =
+    catalog &&
+    !catalog.refreshedAt &&
+    !credential?.isDisconnecting &&
+    credential?.planAccessGranted !== false &&
+    (connected || connection.authentication === "none");
+  const disconnect = (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={() => actions.requestConfirmation("disconnect", connection)}
+    >
+      Disconnect
+    </button>
+  );
 
   return (
     <>
-      {connection.route === "custom" && (
-        <details class="provider-settings-details">
-          <summary>Edit connection details</summary>
-          <ConnectionForm state={state} connection={connection} disabled={disabled} />
-        </details>
+      {state.errors[`credentials:${connection.id}`] && (
+        <p class="provider-settings-error">{state.errors[`credentials:${connection.id}`]}</p>
       )}
-      {confirmation?.kind === "binding" && <ConfirmChange state={state} />}
-
-      <div class="provider-settings-group">
-        <h4>Authentication</h4>
-        <p>{credentialSummary(connection, credential)}</p>
-        {state.errors[`credentials:${connection.id}`] && (
-          <p class="provider-settings-error">{state.errors[`credentials:${connection.id}`]}</p>
-        )}
-        {credential && (credential.accountLabel || credential.expiresAt) && (
-          <p class="provider-settings-secondary">
-            {credential.accountLabel && <span>{credential.accountLabel}</span>}
-            {credential.expiresAt && <span>Expires: {credential.expiresAt}</span>}
-          </p>
-        )}
-        {connection.authentication === "apiKey" && (
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              void actions.replaceApiKey(connection);
-            }}
-          >
-            <fieldset disabled={disabled}>
-              <label class="provider-settings-field">
-                Replacement API key
-                <input
-                  type="password"
-                  value={state.apiKey}
-                  autoComplete="new-password"
-                  spellcheck={false}
-                  autoCapitalize="off"
-                  onInput={(event) => actions.setApiKey(event.currentTarget.value)}
-                />
-              </label>
-              <p class="provider-settings-secondary">
-                Saved locally without encryption. Existing keys are never displayed.
-              </p>
-              <button type="submit" disabled={!state.apiKey}>
-                Replace API key
-              </button>
-            </fieldset>
-          </form>
-        )}
-        {connection.route === "chatGpt" && (
-          <div class="provider-settings-sign-in">
-            {signIn && (
-              <p>
-                Sign-in: {signIn.status}
-                {signIn.error ? ` · ${signIn.error}` : ""}
-              </p>
-            )}
-            {state.errors[`signIn:${connection.id}`] && (
-              <p class="provider-settings-error">{state.errors[`signIn:${connection.id}`]}</p>
-            )}
-            {signIn?.status === "pending" && authorizationLink(signIn.authorizationUrl) && (
-              <a
-                class="provider-settings-action"
-                href={authorizationLink(signIn.authorizationUrl)!}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                Open external sign-in ↗
-              </a>
-            )}
-            {signIn && signInPending(signIn) && (
-              <p class="provider-settings-secondary">Expires: {signIn.expiresAt}</p>
-            )}
+      {connection.authentication === "apiKey" &&
+        (hasCredentials ? (
+          <div class="provider-settings-auth">
+            {disconnect}
+            <details class="provider-settings-details">
+              <summary>Change API key</summary>
+              <ApiKeyForm state={state} connection={connection} disabled={disabled} />
+            </details>
+          </div>
+        ) : (
+          <ApiKeyForm state={state} connection={connection} disabled={disabled} />
+        ))}
+      {connection.route === "chatGpt" && (
+        <div class="provider-settings-auth">
+          {signIn?.error && <p class="provider-settings-error">{signIn.error}</p>}
+          {signIn && ["expired", "failed", "cancelled"].includes(signIn.status) && (
+            <p
+              class={
+                signIn.status === "cancelled"
+                  ? "provider-settings-secondary"
+                  : "provider-settings-error"
+              }
+            >
+              {signIn.status === "expired"
+                ? "Sign-in expired."
+                : signIn.status === "cancelled"
+                  ? "Sign-in cancelled."
+                  : "Sign-in failed."}
+            </p>
+          )}
+          {state.errors[`signIn:${connection.id}`] && (
+            <p class="provider-settings-error">{state.errors[`signIn:${connection.id}`]}</p>
+          )}
+          {pendingSignIn ? (
             <div class="provider-settings-actions">
+              {signIn.status === "pending" && authorizationLink(signIn.authorizationUrl) && (
+                <a
+                  class="provider-settings-action"
+                  href={authorizationLink(signIn.authorizationUrl)!}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Continue in browser ↗
+                </a>
+              )}
               <button
                 type="button"
-                disabled={disabled || (!!signIn && signInPending(signIn))}
+                disabled={disabled}
+                onClick={() => {
+                  void actions.cancelSignIn(signIn);
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            !connected && (
+              <button
+                type="button"
+                disabled={disabled}
                 onClick={() => {
                   void actions.beginSignIn(connection);
                 }}
               >
-                Begin sign-in
+                Sign in
               </button>
-              {signIn && signInPending(signIn) && (
-                <button
-                  type="button"
-                  disabled={disabled}
-                  onClick={() => {
-                    void actions.cancelSignIn(signIn);
-                  }}
-                >
-                  Cancel sign-in
-                </button>
-              )}
+            )
+          )}
+          {showDisconnect && disconnect}
+        </div>
+      )}
+      {connection.authentication !== "apiKey" &&
+        connection.route !== "chatGpt" &&
+        showDisconnect &&
+        disconnect}
+      {connection.authentication === "apiKey" && !hasCredentials && showDisconnect && disconnect}
+      {needsModels && (
+        <div class="provider-settings-auth">
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => {
+              void actions.refreshModels(connection);
+            }}
+          >
+            Load models
+          </button>
+          {state.errors[`models:${connection.id}`] && (
+            <p class="provider-settings-error">{state.errors[`models:${connection.id}`]}</p>
+          )}
+        </div>
+      )}
+
+      <details
+        class="provider-settings-details provider-settings-advanced"
+        onToggle={(event) => setAdvanced(event.currentTarget.open)}
+      >
+        <summary>Advanced</summary>
+        {advanced && (
+          <div class="provider-settings-advanced-content">
+            {connection.route === "custom" && (
+              <details class="provider-settings-details">
+                <summary>Edit connection</summary>
+                <ConnectionForm state={state} connection={connection} disabled={disabled} />
+              </details>
+            )}
+            <SavedModels state={state} connection={connection} disabled={disabled} />
+            {(credential?.accountLabel || credential?.expiresAt || pendingSignIn) && (
+              <div class="provider-settings-group provider-settings-secondary">
+                {credential?.accountLabel && <p>Account: {credential.accountLabel}</p>}
+                {credential?.expiresAt && (
+                  <p>Credentials expire: {displayDate(credential.expiresAt)}</p>
+                )}
+                {pendingSignIn && <p>Sign-in expires: {displayDate(signIn.expiresAt)}</p>}
+              </div>
+            )}
+            <div class="provider-settings-group provider-settings-actions">
+              {!showDisconnect && disconnect}
+              <button
+                type="button"
+                class="provider-settings-danger"
+                disabled={disabled}
+                onClick={() => actions.requestConfirmation("remove", connection)}
+              >
+                Remove provider
+              </button>
             </div>
           </div>
         )}
-      </div>
-
-      <SavedModels state={state} connection={connection} disabled={disabled} />
-
-      <div class="provider-settings-group">
-        <div class="provider-settings-actions">
-          <button
-            type="button"
-            disabled={disabled}
-            onClick={() => actions.requestConfirmation("disconnect", connection)}
-          >
-            Disconnect
-          </button>
-          <button
-            type="button"
-            class="provider-settings-danger"
-            disabled={disabled}
-            onClick={() => actions.requestConfirmation("remove", connection)}
-          >
-            Remove locally
-          </button>
-        </div>
-        {confirmation && confirmation.kind !== "binding" && <ConfirmChange state={state} />}
-      </div>
+      </details>
+      {state.confirmation?.connection.id === connection.id && <ConfirmChange state={state} />}
     </>
+  );
+}
+
+function ApiKeyForm({
+  state,
+  connection,
+  disabled,
+}: {
+  state: ProviderSettingsState;
+  connection: ProviderConnection;
+  disabled: boolean;
+}) {
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        void state.actions.replaceApiKey(connection);
+      }}
+    >
+      <fieldset disabled={disabled}>
+        <label class="provider-settings-field">
+          API key
+          <input
+            type="password"
+            value={state.apiKey}
+            autoComplete="new-password"
+            spellcheck={false}
+            autoCapitalize="off"
+            onInput={(event) => state.actions.setApiKey(event.currentTarget.value)}
+          />
+        </label>
+        <p class="provider-settings-secondary">
+          Stored on this device without encryption. Saved keys are never displayed.
+        </p>
+        <button type="submit" disabled={!state.apiKey}>
+          Save key
+        </button>
+        {state.notice === "Replace API key completed." && <p role="status">Key saved.</p>}
+      </fieldset>
+    </form>
   );
 }
 
@@ -326,7 +485,7 @@ function SavedModels({
   return (
     <div class="provider-settings-group">
       <div class="provider-settings-group-heading">
-        <h4>Saved models</h4>
+        <h4>Models</h4>
         <button
           type="button"
           disabled={disabled}
@@ -342,12 +501,12 @@ function SavedModels({
       )}
       {!catalog && <p class="provider-settings-secondary">Catalog status unknown.</p>}
       {catalog && !catalog.refreshedAt && (
-        <p class="provider-settings-secondary">Never refreshed.</p>
+        <p class="provider-settings-secondary">No models discovered yet.</p>
       )}
       {catalog?.refreshedAt && (
         <details onToggle={(event) => setExpanded(event.currentTarget.open)}>
           <summary>
-            {catalog.models.length} models · {catalog.refreshedAt}
+            {catalog.models.length} saved {catalog.models.length === 1 ? "model" : "models"}
           </summary>
           {expanded && (
             <ul class="provider-settings-models">
@@ -394,6 +553,28 @@ function ConfirmChange({ state }: { state: ProviderSettingsState }) {
   );
 }
 
+function connectionTitle(connection: ProviderConnection): string {
+  return connection.route === "custom"
+    ? providerHostname(connection.endpoint)
+    : providerNames[connection.route];
+}
+
+function connectionStatus(state: ProviderSettingsState, connection: ProviderConnection): string {
+  const signIn = state.signIns[connection.id];
+  if (signIn && signInPending(signIn))
+    return signIn.status === "completing" ? "Completing sign-in…" : "Signing in…";
+  if (state.errors[`credentials:${connection.id}`]) return "Status unavailable";
+  const summary = credentialSummary(connection, state.credentials[connection.id]);
+  if (summary === "No credentials") return "Not connected";
+  if (summary === "No authentication") return "No sign-in needed";
+  return summary === "Credential status unknown" ? "Checking…" : summary;
+}
+
+function displayDate(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "Unknown" : date.toLocaleString();
+}
+
 function authorizationLink(value: string | null): string | undefined {
   if (!value) return undefined;
   try {
@@ -409,8 +590,8 @@ function confirmationText(
   connection: ProviderConnection,
 ): string {
   if (kind === "binding")
-    return `Change the endpoint, API or authentication for “${providerHostname(connection.endpoint)}”? This clears credentials and saved models and may cancel active requests.`;
+    return `Change connection settings for “${connectionTitle(connection)}”? Saved credentials and models will be cleared, and active requests may stop.`;
   if (kind === "disconnect")
-    return `Disconnect “${providerHostname(connection.endpoint)}”? This may cancel active requests, clears local credentials and attempts remote revocation where applicable.`;
-  return `Remove “${providerHostname(connection.endpoint)}” from this device only? This deletes local configuration and credentials and may cancel active requests. It does not revoke remote access; disconnect first if needed.`;
+    return `Disconnect “${connectionTitle(connection)}”? Saved credentials will be cleared and active requests may stop. Urd will also try to revoke remote access where supported.`;
+  return `Remove “${connectionTitle(connection)}” from this device? This deletes its settings and credentials and may stop active requests. Disconnect first if you also want to revoke remote access.`;
 }

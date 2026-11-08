@@ -23,10 +23,15 @@ Configuration reads should be offline; configured credentials, authenticated ide
 model discovery and successful inference should remain distinct observations. A bounded
 model-request check is proposed, not full conversation/tool-loop integration.
 
-These are scope decisions and design proposals, **not implementation approval or
-qualification evidence**. Exact classes, headless surface, credential storage and adapter
-contracts still need focused design review. No live sign-in, existing credential access,
-model request or charge was authorized. Earlier route research below must be rechecked
+The owner subsequently approved the connection view and configuration-manager surface,
+using the existing local HTTP server, and confirmed that the manager owns credential
+management. Initial credentials will be plaintext to avoid unlock passwords/key management;
+this does not protect secrets accidentally committed to Git. Encryption may be revisited.
+The [provider management design](scratch/provider-management-design.md) records the approved
+bites, their limits and remaining proposals. Authentication operations, persistence integration
+and adapter contracts still need focused review; this is not whole-slice implementation
+approval or qualification evidence. No live sign-in, existing credential access, model request
+or charge was authorized. Earlier route research below must be rechecked
 against current provider contracts before implementation; Pi/Pie behavior is reference
 material, not authority to reuse their integration identities or subscription routes.
 

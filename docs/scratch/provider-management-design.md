@@ -1,9 +1,10 @@
 # Headless provider management — initial design
 
 2026-11-08. Scope, connection shape and configuration operations approved by the
-owner. The owner also confirmed that the manager should manage credential storage.
-Authentication operations and storage details remain proposals until reviewed. No provider implementation or live account activity is
-claimed. [Provider qualification](../PROVIDER-QUALIFICATION.md) owns route research
+owner. The manager owns credential management; the owner selected plaintext storage
+for the initial version rather than password/OS-key management. Authentication operations
+and detailed persistence integration remain proposals until reviewed. No provider
+implementation or live account activity is claimed. [Provider qualification](../PROVIDER-QUALIFICATION.md) owns route research
 and the bounded initial provider set.
 
 ## Approved connection view
@@ -95,12 +96,34 @@ this slice.
 `ProviderManager` is the single public management entry point for connection settings,
 API-key replacement, subscription sign-in, refresh, disconnect and credential removal.
 Callers do not coordinate a configuration store with a separate public credential API.
-A small internal credential store handles protection and persistence; provider-specific
-authentication code handles each route's sign-in and refresh protocol. Exact types,
-method signatures and storage technology remain unselected.
+Internal storage handles persistence; provider-specific authentication code handles
+each route's sign-in and refresh protocol. Exact types and method signatures remain
+unselected; the initial plaintext choice is recorded below.
 
 The manager must coordinate changes across these responsibilities: changing a destination
 cannot forward an old credential, and late sign-in/refresh completions cannot restore
 credentials after disconnect, removal or superseding configuration changes. Public reads
 report status, never credential contents. These are design requirements, not implemented
 or tested guarantees.
+
+## Initial credential storage — plaintext
+
+After comparing OS protection, OS credential stores and a portable password-protected
+vault, the owner chose to start with plaintext and potentially revisit encryption later.
+The priority is simple startup and small implementation, without a Urd unlock password,
+user-managed keys or a new encryption framework. Encryption is not promised follow-up work.
+
+The proposed persistence location is the existing `urd.sqlite`, keeping credential writes
+and connection changes within one database transaction. This does not authorize a broad
+storage refactor; the shared database owner and exact schema still need integration design.
+No separate public credential service or speculative encryption abstraction is needed.
+
+Credentials remain backend-private: public reads return status, never secrets; keys and
+tokens must not enter logs or distributable source/build outputs. Existing `.gitignore`
+entries exclude `/data/` and SQLite files including journals/WAL sidecars. Ignore rules
+reduce accidental inclusion but do not stop forced adds, renamed exports or copied data.
+
+**Explicit limitation:** plaintext does not meet the earlier goal that accidental Git
+inclusion would leave credentials unusable. Anyone obtaining the credential data can use
+the secrets. Later encryption cannot retroactively protect earlier copies, backups or
+commits. This is an initial simplicity trade-off, not a claim of encrypted-at-rest security.

@@ -672,8 +672,9 @@ Requirements check additions (2026-11-09), owned by the named stage:
   browser highlighter, including memory for large code blocks and lazy highlighting
   of offscreen ranges, before choosing a library.
 - **Tool payload size (stage 3):** stored tool arguments/results are currently capped
-  at 16 KiB each. Inspection can read them whole today; bounded paging is needed only
-  if a future pruner/producer raises that limit.
+  at 16 KiB each, below real model-facing results (decision 26). Inspection needs
+  bounded reads once that execution-layer limit is raised; do not design for small
+  payloads only.
 
 ## Verification approach — broader work proposed; isolated parser probe completed
 
@@ -788,6 +789,42 @@ shared-reference and cleanup failure cases; those are not implemented guarantees
   Dense message ranks and a persisted change version were dropped from stage 1:
   rank is not scroll geometry, and per-chunk summary writes cost the hot path.
   Weighted position lookup is designed once in stage 2.
+- Grilling decision 19 (second requirements pass, 2026-11-09): a model reply's
+  text runs, tool calls and (later) reasoning are separate entries **in the order
+  the provider produced them**, e.g. text → call → text → call. One reply is not
+  stored/displayed as all text followed by all calls. Stage 1's entry index must
+  allocate entries in observed order, so a text run closes when a call begins.
+- Grilling decision 20: reasoning summaries are saved for display and remain
+  visible after reload/eviction, as their own entries under the same retention and
+  bounded-read rules as other text. Opaque continuation data stays private.
+- Grilling decision 21: subagents follow Pie's interaction. The parent shows a
+  subagent **card** entry with a preview and streamed output; expanding it shows the
+  full subagent transcript nested in the card, in a bounded-height panel with its
+  own scroll and its own on-demand loading (same transcript component, child session
+  as source). The parent's scroll geometry is not inflated by child entries.
+- Grilling decision 22: compaction leaves a compact **marker entry** at the point
+  it took effect; the summary the model received is inspectable on demand. Original
+  entries above it stay readable.
+- Grilling decision 23: editing an earlier prompt **permanently discards** every
+  entry after it. No Undo and no viewable previous versions. History stays linear;
+  a revision change invalidates later anchors, and a reader whose anchor was
+  discarded falls back to the edited prompt.
+- Grilling decision 24: user messages render as Markdown, like assistant text.
+- Grilling decision 25: images a tool returns to the model are **on-demand only**
+  (details, expansion or rich tooltip), never full-size in a collapsed tool row.
+  Exact placement waits for the tool-row design in stage 3; no image is decoded for
+  a row until its detail is requested.
+- Grilling decision 26 — reference workload. Read-only stats over 1,033 Pie
+  sessions (8 Sep–9 Nov 2026; subagents separate; Codex/older sessions excluded;
+  message content only, not file size): per session p99 1,441 entries, 924 tool
+  calls, 2.6 MB tool results, 8 images; largest seen 2,421 calls, ~4,000 messages,
+  ~6 MB content, single tool result 196 KB, single reply 40 KB. Owner believes real
+  peaks were larger, so this is a lower bound. Adopted **25× headroom** fixture:
+  ~100,000 entries (~60,000 tool calls), ~250 MB content, single 5 MB reply and
+  5 MB tool result, ~1,000 images, five such tabs plus one streaming. Nothing
+  proportional to session length may be held in browser memory casually.
+  Observation: Urd's 16 KiB stored tool-result cap is below the median session's
+  largest model-facing result (33 KB); details must not assume small results.
 
 ## Continuation and safety
 

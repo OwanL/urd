@@ -5,6 +5,7 @@ using Urd.Backend.Tests.Support;
 using Urd.Core.Sessions;
 using Urd.Server;
 using Xunit;
+using static Urd.Backend.Tests.Support.HttpTest;
 using static Urd.Backend.Tests.Support.TestAsync;
 
 namespace Urd.Backend.Tests.Hosting;
@@ -145,13 +146,6 @@ public sealed class SessionListingRoutesTests {
         request.Headers.Add("X-Urd-Client", "browser");
       return await client.SendAsync(request);
     }
-  }
-
-  private static void AssertPrivateResponse(HttpResponseMessage response) {
-    Assert.True(response.Headers.CacheControl?.NoStore);
-    Assert.False(response.Headers.Contains("Access-Control-Allow-Origin"));
-    Assert.False(response.Headers.Contains("Access-Control-Allow-Methods"));
-    Assert.False(response.Headers.Contains("Access-Control-Allow-Headers"));
   }
 
   private static async Task<SessionIdPage> ReadPageAsync(HttpClient client, string? cursor = null) {

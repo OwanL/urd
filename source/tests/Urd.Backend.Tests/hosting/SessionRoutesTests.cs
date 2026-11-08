@@ -10,6 +10,7 @@ using Urd.Core.Execution;
 using Urd.Core.Sessions;
 using Urd.Server;
 using Xunit;
+using static Urd.Backend.Tests.Support.HttpTest;
 using static Urd.Backend.Tests.Support.TestAsync;
 
 namespace Urd.Backend.Tests.Hosting;
@@ -435,27 +436,6 @@ public sealed class SessionRoutesTests {
       + $"&role={JsonNamingPolicy.CamelCase.ConvertName(cursor.Message.Role.ToString())}"
       + $"&historyRevision={cursor.Message.HistoryRevision}&segmentIndex={cursor.SegmentIndex}&utf8Offset={cursor.Utf8Offset}";
 
-  private static StringContent JsonBody(string body) => new(body, Encoding.UTF8, "application/json");
-
-  private static async Task<HttpResponseMessage> RequestAsync(HttpClient client, HttpMethod method, string path,
-      HttpContent? content = null, bool marker = true, string? suppliedOrigin = null, bool chunked = false) {
-    using var request = new HttpRequestMessage(method, path) { Content = content };
-    if (marker)
-      request.Headers.Add("X-Urd-Client", "browser");
-    if (suppliedOrigin is not null)
-      request.Headers.Add("Origin", suppliedOrigin);
-    if (chunked)
-      request.Headers.TransferEncodingChunked = true;
-    return await client.SendAsync(request);
-  }
-
-  private static void AssertPrivateResponse(HttpResponseMessage response) {
-    Assert.True(response.Headers.CacheControl?.NoStore);
-    Assert.False(response.Headers.Contains("Access-Control-Allow-Origin"));
-    Assert.False(response.Headers.Contains("Access-Control-Allow-Methods"));
-    Assert.False(response.Headers.Contains("Access-Control-Allow-Headers"));
-  }
-
   private static async Task AssertStatusAsync(HttpClient client, HttpMethod method, string path,
       HttpStatusCode status, HttpContent? content = null) {
     using HttpResponseMessage response = await RequestAsync(client, method, path, content);
@@ -562,14 +542,6 @@ public sealed class SessionRoutesTests {
     AssertMessageRefJson(value.GetProperty("message"));
   }
 
-  private static async Task<SessionSnapshot> SettledAsync(HttpClient client, Guid sessionId, Guid executionId) {
-    using var deadline = new CancellationTokenSource(TestTimeout);
-    SessionSnapshot snapshot = await SnapshotAsync(client, sessionId).WaitAsync(deadline.Token);
-    while (snapshot.LastSettlement?.ExecutionId != executionId) {
-      await Task.Delay(10, deadline.Token);
-      snapshot = await SnapshotAsync(client, sessionId).WaitAsync(deadline.Token);
-    }
-    Assert.Null(snapshot.UnsettledExecutionId);
-    return snapshot;
-  }
+  private static Task<SessionSnapshot> SettledAsync(HttpClient client, Guid sessionId, Guid executionId) =>
+      HttpTest.SettledAsync(executionId, () => SnapshotAsync(client, sessionId));
 }

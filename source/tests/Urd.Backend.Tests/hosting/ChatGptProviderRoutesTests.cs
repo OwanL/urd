@@ -7,6 +7,7 @@ using Urd.Core.Providers;
 using Urd.Core.Storage;
 using Urd.Server;
 using Xunit;
+using static Urd.Backend.Tests.Support.HttpTest;
 using static Urd.Backend.Tests.Support.OpenAIStreams;
 
 namespace Urd.Backend.Tests.Hosting;
@@ -220,13 +221,6 @@ public sealed class ChatGptProviderRoutesTests {
     using JsonDocument document = JsonDocument.Parse(content);
     AssertCredentialFree(document.RootElement);
     return Assert.IsType<T>(JsonSerializer.Deserialize<T>(content, json));
-  }
-
-  private static void AssertPrivateResponse(HttpResponseMessage response) {
-    Assert.True(response.Headers.CacheControl?.NoStore);
-    Assert.False(response.Headers.Contains("Access-Control-Allow-Origin"));
-    Assert.False(response.Headers.Contains("Access-Control-Allow-Methods"));
-    Assert.False(response.Headers.Contains("Access-Control-Allow-Headers"));
   }
 
   private static void AssertCredentialFree(JsonElement value) {

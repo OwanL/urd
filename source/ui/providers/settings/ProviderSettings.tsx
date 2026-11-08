@@ -3,10 +3,15 @@ import { Icon } from "../../components/Icon.tsx";
 import type { ProviderConnection, ProviderRoute } from "../ProviderConnection.ts";
 import { ConnectionForm, providerNames } from "./ConnectionForm.tsx";
 import {
-  credentialSummary,
+  credentialState,
   matchesConnection,
   providerHostname,
   signInPending,
+} from "./ProviderSettingsController.ts";
+import type {
+  ProviderCredentialState,
+  ProviderSettingsNotice,
+  ProviderSettingsOperation,
 } from "./ProviderSettingsController.ts";
 import type { ProviderSettingsState } from "./useProviderSettings.ts";
 import "./provider-settings.css";
@@ -17,6 +22,28 @@ interface Presentation {
   creating: ReadonlySet<string> | null;
   returnId: string | null;
 }
+
+const operationLabels: Record<ProviderSettingsOperation, string> = {
+  add: "Add connection",
+  save: "Save connection",
+  changeBinding: "Change connection binding",
+  remove: "Remove local connection",
+  disconnect: "Disconnect",
+  replaceApiKey: "Replace API key",
+  beginSignIn: "Begin sign-in",
+  cancelSignIn: "Cancel sign-in",
+  refreshModels: "Refresh models",
+};
+
+const credentialStateLabels: Record<ProviderCredentialState, string> = {
+  unknown: "Checking…",
+  disconnecting: "Disconnect incomplete · requests blocked",
+  noAuthentication: "No sign-in needed",
+  noCredentials: "Not connected",
+  signInRequired: "Sign-in required",
+  planAccessMissing: "Plan access missing",
+  connected: "Connected",
+};
 
 // Settings unmounts its content when closed. Keep navigation with its command owner.
 const presentations = new WeakMap<ProviderSettingsState["actions"], Presentation>();
@@ -109,7 +136,7 @@ export function ProviderSettings({ state, search }: ProviderSettingsProps) {
       show({ screen: "custom", connectionId: null, creating: null, returnId: null });
     }
   };
-  const notice = state.notice?.endsWith(" completed.") ? null : state.notice;
+  const notice = state.notice ? noticeText(state.notice) : null;
 
   return (
     <section
@@ -228,10 +255,14 @@ export function ProviderSettings({ state, search }: ProviderSettingsProps) {
       )}
 
       <div class="provider-settings-feedback" aria-live="polite" aria-atomic="true">
-        {state.pending && <p>{state.pending}…</p>}
+        {state.pending && <p>{operationLabels[state.pending]}…</p>}
         {notice && (
           <p
-            class={state.uncertain || notice.includes(" rejected") ? "provider-settings-error" : ""}
+            class={
+              state.notice?.outcome === "uncertain" || state.notice?.outcome === "rejected"
+                ? "provider-settings-error"
+                : ""
+            }
           >
             {notice}
           </p>
@@ -465,7 +496,9 @@ function ApiKeyForm({
         <button type="submit" disabled={!state.apiKey}>
           Save key
         </button>
-        {state.notice === "Replace API key completed." && <p role="status">Key saved.</p>}
+        {state.notice?.operation === "replaceApiKey" && state.notice.outcome === "succeeded" && (
+          <p role="status">Key saved.</p>
+        )}
       </fieldset>
     </form>
   );
@@ -564,10 +597,27 @@ function connectionStatus(state: ProviderSettingsState, connection: ProviderConn
   if (signIn && signInPending(signIn))
     return signIn.status === "completing" ? "Completing sign-in…" : "Signing in…";
   if (state.errors[`credentials:${connection.id}`]) return "Status unavailable";
-  const summary = credentialSummary(connection, state.credentials[connection.id]);
-  if (summary === "No credentials") return "Not connected";
-  if (summary === "No authentication") return "No sign-in needed";
-  return summary === "Credential status unknown" ? "Checking…" : summary;
+  return credentialStateLabels[credentialState(connection, state.credentials[connection.id])];
+}
+
+function noticeText(notice: ProviderSettingsNotice): string | null {
+  if (notice.outcome === "succeeded") {
+    if (notice.operation !== "disconnect") return null;
+    if (!notice.disconnect) return "Disconnect completed; result details unavailable.";
+    const { localCredentialsCleared, remoteRevocationConfirmed } = notice.disconnect;
+    const remoteRevocation =
+      remoteRevocationConfirmed === null
+        ? "not applicable"
+        : remoteRevocationConfirmed
+          ? "confirmed"
+          : "not confirmed";
+    return `Local credentials ${localCredentialsCleared ? "cleared" : "not confirmed cleared"}. Remote revocation: ${remoteRevocation}.`;
+  }
+
+  const label = operationLabels[notice.operation];
+  const detail = notice.httpStatus === undefined ? "" : ` (HTTP ${notice.httpStatus})`;
+  if (notice.outcome === "rejected") return `${label} rejected${detail}. No automatic retry.`;
+  return `${label}: outcome uncertain${detail}. The server may still have accepted it. Saved state refreshes automatically, but cannot prove unfinished work stopped. Explicitly allow new commands to continue.`;
 }
 
 function displayDate(value: string): string {

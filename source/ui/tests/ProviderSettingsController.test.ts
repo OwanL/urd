@@ -6,7 +6,7 @@ import type { ProviderConnection } from "../providers/ProviderConnection.ts";
 import type { ProviderCredentialStatus } from "../providers/ProviderCredentials.ts";
 import type { ProviderSignIn } from "../providers/ProviderSignIn.ts";
 import {
-  credentialSummary,
+  credentialState,
   matchesConnection,
   providerHostname,
   ProviderSettingsController,
@@ -71,6 +71,13 @@ function setup(overrides: Partial<ProviderClient> = {}) {
   return { client, state, notifications: () => notifications };
 }
 
+void test("snapshot is exposed through a read-only controller getter", () => {
+  const { state } = setup();
+  const snapshot = state.snapshot;
+  assert.equal(Reflect.set(state, "snapshot", {}), false);
+  assert.equal(state.snapshot, snapshot);
+});
+
 void test("names come from endpoint hostnames only when creating or saving", async () => {
   assert.equal(
     providerHostname("https://user:secret@API.Example:443/v1/?key=value"),
@@ -133,7 +140,7 @@ void test("closing preserves a dispatched command and guards it across reopen; k
   state.setApiKey("synthetic-secret");
   const command = state.replaceApiKey(connection);
   assert.equal(state.snapshot.apiKey, "");
-  assert.equal(state.snapshot.pending, "Replace API key");
+  assert.equal(state.snapshot.pending, "replaceApiKey");
   state.setActivity(false, true);
   state.setActivity(true, true);
   state.setApiKey("other-synthetic-secret");
@@ -166,9 +173,10 @@ void test("lost acknowledgement auto-reads but still requires explicit permissio
   await state.create();
   assert.equal(creates, 1);
   assert.equal(state.snapshot.uncertain, true);
-  assert.match(state.snapshot.notice ?? "", /outcome uncertain/);
-  assert.match(state.snapshot.notice ?? "", /refreshes automatically/);
-  assert.doesNotMatch(state.snapshot.notice ?? "", /Read saved state/);
+  assert.deepEqual(state.snapshot.notice, {
+    operation: "add",
+    outcome: "uncertain",
+  });
   state.allowNewCommands();
   assert.equal(state.snapshot.uncertain, false);
   assert.equal(creates, 1);
@@ -189,8 +197,8 @@ void test("only explicit terminal HTTP rejection is called rejected; server fail
     await flush();
     await state.refreshModels(connection);
     assert.equal(state.snapshot.uncertain, uncertain);
-    assert.match(state.snapshot.notice ?? "", new RegExp(`HTTP ${status}`));
-    assert.doesNotMatch(state.snapshot.notice ?? "", /never display/);
+    assert.equal(state.snapshot.notice?.outcome, uncertain ? "uncertain" : "rejected");
+    assert.equal(state.snapshot.notice?.httpStatus, status);
     state.setActivity(false, false);
   }
 });
@@ -487,10 +495,15 @@ void test("binding edits, disconnect and removal require confirmation; remote re
     assert.equal(disconnects, 0);
     await state.confirm();
     assert.equal(disconnects, 1);
-    assert.match(
-      state.snapshot.notice ?? "",
-      remoteRevocationConfirmed === false ? /not confirmed/ : /not applicable/,
-    );
+    assert.deepEqual(state.snapshot.notice, {
+      operation: "disconnect",
+      outcome: "succeeded",
+      disconnect: {
+        connectionId: "one",
+        localCredentialsCleared: true,
+        remoteRevocationConfirmed,
+      },
+    });
     state.requestConfirmation("remove", custom);
     assert.equal(removes, 0);
     state.dismissConfirmation();
@@ -518,13 +531,22 @@ void test("an older disconnect reconciliation cannot overwrite a newer uncertain
   const disconnect = state.confirm();
   await flush();
   assert.equal(state.snapshot.pending, null);
-  assert.match(state.snapshot.notice ?? "", /Remote revocation: not confirmed/);
+  assert.deepEqual(state.snapshot.notice, {
+    operation: "disconnect",
+    outcome: "succeeded",
+    disconnect: {
+      connectionId: "one",
+      localCredentialsCleared: true,
+      remoteRevocationConfirmed: false,
+    },
+  });
   const discovery = state.refreshModels(connection);
   await flush();
   assert.equal(state.snapshot.uncertain, true);
   delayed.resolve([connection]);
   await Promise.all([disconnect, discovery]);
-  assert.match(state.snapshot.notice ?? "", /Refresh models: outcome uncertain/);
+  assert.equal(state.snapshot.notice?.operation, "refreshModels");
+  assert.equal(state.snapshot.notice?.outcome, "uncertain");
   state.setActivity(false, false);
 });
 
@@ -544,24 +566,32 @@ void test("model discovery is explicit and status text does not imply model enti
   assert.equal(refreshes, 0);
   await state.refreshModels(connection);
   assert.equal(refreshes, 1);
-  assert.match(credentialSummary(connection, undefined), /unknown/);
-  assert.equal(credentialSummary(connection, credential), "No credentials");
-  assert.match(
-    credentialSummary(connection, { ...credential, isDisconnecting: true }),
-    /requests blocked/,
+  assert.equal(credentialState(connection, undefined), "unknown");
+  assert.equal(
+    credentialState({ ...connection, authentication: "none" }, credential),
+    "noAuthentication",
+  );
+  assert.equal(credentialState(connection, credential), "noCredentials");
+  assert.equal(
+    credentialState(connection, { ...credential, hasCredentials: true, requiresSignIn: true }),
+    "signInRequired",
   );
   assert.equal(
-    credentialSummary(connection, {
+    credentialState(connection, { ...credential, isDisconnecting: true }),
+    "disconnecting",
+  );
+  assert.equal(
+    credentialState(connection, {
       ...credential,
       hasCredentials: true,
       requiresSignIn: false,
       planAccessGranted: false,
     }),
-    "Plan access missing",
+    "planAccessMissing",
   );
   assert.equal(
-    credentialSummary(connection, { ...credential, hasCredentials: true, requiresSignIn: false }),
-    "Connected",
+    credentialState(connection, { ...credential, hasCredentials: true, requiresSignIn: false }),
+    "connected",
   );
   assert.equal(matchesConnection(connection, "CHATGPT"), true);
   assert.equal(matchesConnection(connection, "provider.example"), true);

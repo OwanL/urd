@@ -5,39 +5,76 @@ import type {
   ProviderConnection,
   ProviderRoute,
 } from "../ProviderConnection.ts";
-import type { ProviderCredentialStatus } from "../ProviderCredentials.ts";
+import type { ProviderCredentialStatus, ProviderDisconnectResult } from "../ProviderCredentials.ts";
 import type { ProviderModelCatalog } from "../ProviderModels.ts";
 import type { ProviderSignIn } from "../ProviderSignIn.ts";
 
 export type ConnectionDraft = CustomProviderSettings;
 
 export interface AddDraft extends ConnectionDraft {
-  route: ProviderRoute;
+  readonly route: ProviderRoute;
 }
 
+export type ProviderSettingsOperation =
+  | "add"
+  | "save"
+  | "changeBinding"
+  | "remove"
+  | "disconnect"
+  | "replaceApiKey"
+  | "beginSignIn"
+  | "cancelSignIn"
+  | "refreshModels";
+
+export type ProviderSettingsNotice =
+  | {
+      readonly operation: ProviderSettingsOperation;
+      readonly outcome: "succeeded";
+      readonly disconnect: ProviderDisconnectResult | null;
+    }
+  | {
+      readonly operation: ProviderSettingsOperation;
+      readonly outcome: "rejected";
+      readonly httpStatus?: number;
+    }
+  | {
+      readonly operation: ProviderSettingsOperation;
+      readonly outcome: "uncertain";
+      readonly httpStatus?: number;
+    };
+
+export type ProviderCredentialState =
+  | "unknown"
+  | "disconnecting"
+  | "noAuthentication"
+  | "noCredentials"
+  | "signInRequired"
+  | "planAccessMissing"
+  | "connected";
+
 export interface Confirmation {
-  kind: "binding" | "disconnect" | "remove";
-  connection: ProviderConnection;
-  settings?: CustomProviderSettings;
+  readonly kind: "binding" | "disconnect" | "remove";
+  readonly connection: ProviderConnection;
+  readonly settings?: CustomProviderSettings;
 }
 
 export interface ProviderSettingsSnapshot {
-  connections: readonly ProviderConnection[];
-  selectedId: string | null;
-  loaded: boolean;
-  reading: boolean;
-  pending: string | null;
-  notice: string | null;
-  uncertain: boolean;
-  reviewed: boolean;
-  errors: Readonly<Record<string, string>>;
-  credentials: Readonly<Record<string, ProviderCredentialStatus>>;
-  catalogs: Readonly<Record<string, ProviderModelCatalog>>;
-  signIns: Readonly<Record<string, ProviderSignIn>>;
-  drafts: Readonly<Record<string, ConnectionDraft>>;
-  add: AddDraft;
-  apiKey: string;
-  confirmation: Confirmation | null;
+  readonly connections: readonly ProviderConnection[];
+  readonly selectedId: string | null;
+  readonly loaded: boolean;
+  readonly reading: boolean;
+  readonly pending: ProviderSettingsOperation | null;
+  readonly notice: ProviderSettingsNotice | null;
+  readonly uncertain: boolean;
+  readonly reviewed: boolean;
+  readonly errors: Readonly<Record<string, string>>;
+  readonly credentials: Readonly<Record<string, ProviderCredentialStatus>>;
+  readonly catalogs: Readonly<Record<string, ProviderModelCatalog>>;
+  readonly signIns: Readonly<Record<string, ProviderSignIn>>;
+  readonly drafts: Readonly<Record<string, ConnectionDraft>>;
+  readonly add: AddDraft;
+  readonly apiKey: string;
+  readonly confirmation: Confirmation | null;
 }
 
 export function providerHostname(endpoint: string): string {
@@ -52,17 +89,17 @@ export function signInPending(signIn: ProviderSignIn): boolean {
   return signIn.status === "pending" || signIn.status === "completing";
 }
 
-export function credentialSummary(
+export function credentialState(
   connection: ProviderConnection,
   status: ProviderCredentialStatus | undefined,
-): string {
-  if (!status) return "Credential status unknown";
-  if (status.isDisconnecting) return "Disconnect incomplete · requests blocked";
-  if (connection.authentication === "none") return "No authentication";
-  if (!status.hasCredentials) return "No credentials";
-  if (status.requiresSignIn) return "Sign-in required";
-  if (status.planAccessGranted === false) return "Plan access missing";
-  return "Connected";
+): ProviderCredentialState {
+  if (!status) return "unknown";
+  if (status.isDisconnecting) return "disconnecting";
+  if (connection.authentication === "none") return "noAuthentication";
+  if (!status.hasCredentials) return "noCredentials";
+  if (status.requiresSignIn) return "signInRequired";
+  if (status.planAccessGranted === false) return "planAccessMissing";
+  return "connected";
 }
 
 export function matchesConnection(connection: ProviderConnection, search: string): boolean {
@@ -89,7 +126,7 @@ function readFailure(error: unknown): string {
 
 // Kept alive by the always-mounted hook. Commands never receive an AbortSignal.
 export class ProviderSettingsController {
-  snapshot: ProviderSettingsSnapshot = {
+  private currentSnapshot: ProviderSettingsSnapshot = {
     connections: [],
     selectedId: null,
     loaded: false,
@@ -127,6 +164,10 @@ export class ProviderSettingsController {
     this.changed = changed;
   }
 
+  get snapshot(): ProviderSettingsSnapshot {
+    return this.currentSnapshot;
+  }
+
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -150,7 +191,7 @@ export class ProviderSettingsController {
   }
 
   private patch(update: Partial<ProviderSettingsSnapshot>): void {
-    this.snapshot = { ...this.snapshot, ...update };
+    this.currentSnapshot = { ...this.currentSnapshot, ...update };
     for (const listener of this.listeners) listener();
   }
 
@@ -364,28 +405,43 @@ export class ProviderSettingsController {
   }
 
   private async command<T>(
-    label: string,
+    operation: ProviderSettingsOperation,
     run: () => Promise<T>,
-    apply: (value: T) => string | void,
+    apply: (value: T) => ProviderDisconnectResult | void,
   ): Promise<void> {
     if (!this.canMutate) return;
     this.stopReads();
-    this.patch({ pending: label, notice: null, apiKey: "", confirmation: null });
+    this.patch({ pending: operation, notice: null, apiKey: "", confirmation: null });
     let changed = false;
     try {
       const result = await run();
-      const notice = apply(result) ?? `${label} completed.`;
-      this.patch({ notice });
+      const disconnect = apply(result);
+      this.patch({
+        notice: {
+          operation,
+          outcome: "succeeded",
+          disconnect: operation === "disconnect" ? (disconnect ?? null) : null,
+        },
+      });
       changed = true;
     } catch (error) {
       const rejected =
         error instanceof RequestError && [400, 404, 409, 415, 422].includes(error.status);
-      const detail = error instanceof RequestError ? ` (HTTP ${error.status})` : "";
       this.patch(
         rejected
-          ? { notice: `${label} rejected${detail}. No automatic retry.` }
+          ? {
+              notice: {
+                operation,
+                outcome: "rejected",
+                httpStatus: error.status,
+              },
+            }
           : {
-              notice: `${label}: outcome uncertain${detail}. The server may still have accepted it. Saved state refreshes automatically, but cannot prove unfinished work stopped. Explicitly allow new commands to continue.`,
+              notice: {
+                operation,
+                outcome: "uncertain",
+                ...(error instanceof RequestError ? { httpStatus: error.status } : {}),
+              },
               uncertain: true,
               reviewed: false,
             },
@@ -416,7 +472,7 @@ export class ProviderSettingsController {
       name: providerHostname(route === "custom" ? draft.endpoint : "https://api.openai.com"),
     };
     await this.command(
-      "Add connection",
+      "add",
       () => {
         if (route === "chatGpt") return this.client.createChatGpt(settings.name);
         if (route === "openAI") return this.client.createOpenAI(settings.name);
@@ -446,7 +502,7 @@ export class ProviderSettingsController {
       return;
     }
     await this.command(
-      "Save connection",
+      "save",
       () => this.client.updateCustom(connection.id, settings),
       (updated) => this.storeConnection(updated),
     );
@@ -462,7 +518,7 @@ export class ProviderSettingsController {
     const { connection, kind, settings } = confirmation;
     if (kind === "binding" && settings) {
       await this.command(
-        "Change connection binding",
+        "changeBinding",
         () => this.client.updateCustom(connection.id, settings),
         (updated) => {
           this.storeConnection(updated);
@@ -471,7 +527,7 @@ export class ProviderSettingsController {
       );
     } else if (kind === "remove") {
       await this.command(
-        "Remove local connection",
+        "remove",
         () => this.client.remove(connection.id),
         () => {
           const connections = this.snapshot.connections.filter((item) => item.id !== connection.id);
@@ -490,11 +546,11 @@ export class ProviderSettingsController {
       );
     } else if (kind === "disconnect") {
       await this.command(
-        "Disconnect",
+        "disconnect",
         () => this.client.disconnect(connection.id),
         (result) => {
           this.forgetStatus(connection.id);
-          return `Local credentials ${result.localCredentialsCleared ? "cleared" : "not confirmed cleared"}. Remote revocation: ${result.remoteRevocationConfirmed === null ? "not applicable" : result.remoteRevocationConfirmed ? "confirmed" : "not confirmed"}.`;
+          return result;
         },
       );
     }
@@ -514,7 +570,7 @@ export class ProviderSettingsController {
     const key = this.snapshot.apiKey;
     if (!key) return;
     await this.command(
-      "Replace API key",
+      "replaceApiKey",
       () => this.client.setApiKey(connection, key),
       (status) => this.storeCredentials(status),
     );
@@ -528,7 +584,7 @@ export class ProviderSettingsController {
     )
       return;
     await this.command(
-      "Begin sign-in",
+      "beginSignIn",
       () => this.client.beginSignIn(connection.id),
       (signIn) => this.storeSignIn(signIn),
     );
@@ -536,7 +592,7 @@ export class ProviderSettingsController {
 
   async cancelSignIn(signIn: ProviderSignIn): Promise<void> {
     await this.command(
-      "Cancel sign-in",
+      "cancelSignIn",
       () => this.client.cancelSignIn(signIn.id),
       (updated) => this.storeSignIn(updated),
     );
@@ -544,7 +600,7 @@ export class ProviderSettingsController {
 
   async refreshModels(connection: ProviderConnection): Promise<void> {
     await this.command(
-      "Refresh models",
+      "refreshModels",
       () => this.client.refreshModels(connection.id),
       (catalog) => this.storeCatalog(catalog),
     );

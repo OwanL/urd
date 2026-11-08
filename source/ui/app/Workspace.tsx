@@ -18,6 +18,8 @@ import {
 } from "./WorkspaceState.ts";
 import type { ChatState, WorkspaceState } from "./WorkspaceState.ts";
 import { WorkspacePersistence } from "./WorkspacePersistence.ts";
+import { WorkspaceModels } from "./WorkspaceModels.ts";
+import type { ModelOption } from "./WorkspaceModels.ts";
 import { ChatTabs } from "./ChatTabs.tsx";
 import { moveTab } from "./TabOrder.ts";
 import { Transcript } from "./Transcript.tsx";
@@ -36,13 +38,6 @@ function description(cause: unknown): string {
 function modelKey(selection: LlmSelection): string {
   return `${selection.connection.id}/${selection.modelId}`;
 }
-interface ModelOption {
-  key: string;
-  modelLabel: string;
-  providerLabel: string;
-  selection: LlmSelection;
-}
-
 export function Workspace() {
   const [persistence] = useState(() => new WorkspacePersistence(() => sessionStorage, storageKey));
   const [initial] = useState(() => persistence.load());
@@ -58,10 +53,16 @@ export function Workspace() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsAnchor = useRef<HTMLButtonElement>(null);
   const [catalogRevision, setCatalogRevision] = useState(0);
-  const providersChanged = useCallback(() => setCatalogRevision((value) => value + 1), []);
+  const [modelCatalog] = useState(() => new WorkspaceModels(providers));
   const [models, setModels] = useState<ModelOption[]>([]);
   const [modelsError, setModelsError] = useState<string | null>(null);
   const [refreshingModels, setRefreshingModels] = useState(false);
+  const providersChanged = useCallback(() => {
+    modelCatalog.invalidate();
+    setCatalogRevision((value) => value + 1);
+    setRefreshingModels(false);
+    setModelsError(null);
+  }, [modelCatalog]);
   const [refresh, setRefresh] = useState(0);
   const [stopping, setStopping] = useState<
     Record<string, { executionId: string; pending: boolean; error: string | null }>
@@ -225,53 +226,28 @@ export function Workspace() {
 
   useEffect(() => {
     const controller = new AbortController();
-    async function catalogs() {
-      try {
-        const saved = await providers.list(controller.signal);
-        const options: ModelOption[] = [];
-        for (const connection of saved) {
-          const catalog = await providers.getModels(connection.id, controller.signal);
-          for (const model of catalog.models)
-            options.push({
-              key: `${connection.id}/${model.id}`,
-              modelLabel: model.name,
-              providerLabel: connection.name,
-              selection: { connection, modelId: model.id, reasoningEffort: null },
-            });
-        }
-        if (!controller.signal.aborted) {
-          setModels(options);
-          setModelsError(null);
-        }
-      } catch (cause) {
-        if (!controller.signal.aborted) setModelsError(description(cause));
+    void modelCatalog.readCached(controller.signal).then((result) => {
+      if (!modelCatalog.isCurrent(result.revision)) return;
+      if (result.error) {
+        setModelsError(description(result.error));
+        return;
       }
-    }
-    void catalogs();
-    return () => controller.abort();
-  }, [catalogRevision]);
+      setModels(result.options ?? []);
+      setModelsError(null);
+    });
+    return () => {
+      controller.abort();
+      modelCatalog.invalidate();
+    };
+  }, [catalogRevision, modelCatalog]);
   async function refreshModels() {
     setRefreshingModels(true);
     setModelsError(null);
-    try {
-      const saved = await providers.list();
-      const options: ModelOption[] = [];
-      for (const connection of saved) {
-        const catalog = await providers.refreshModels(connection.id);
-        for (const model of catalog.models)
-          options.push({
-            key: `${connection.id}/${model.id}`,
-            modelLabel: model.name,
-            providerLabel: connection.name,
-            selection: { connection, modelId: model.id, reasoningEffort: null },
-          });
-      }
-      setModels(options);
-    } catch (cause) {
-      setModelsError(description(cause));
-    } finally {
-      setRefreshingModels(false);
-    }
+    const result = await modelCatalog.refresh();
+    if (!modelCatalog.isCurrent(result.revision)) return;
+    if (result.error) setModelsError(description(result.error));
+    else setModels(result.options ?? []);
+    setRefreshingModels(false);
   }
 
   const observeSnapshot = useCallback(

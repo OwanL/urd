@@ -1,7 +1,7 @@
 # Transcript engineering — working design
 
 **Status: requirements agreed in discussion; architecture under examination.**
-**Updated: 2026-11-08.** No renderer, virtualizer, transport, cache budgets,
+**Updated: 2026-11-09.** No renderer, virtualizer, transport, cache budgets,
 new schema or implementation milestones have been selected. This document is the
 working record for continued design discussion, including after context compaction.
 
@@ -586,6 +586,11 @@ source, not by asking the owner. Update this document immediately after decision
 
 ## Proposed implementation sequence — not yet approved
 
+Owner approved making stage 1 concrete as a **plan**, not implementing it. See
+[History/navigation plan](TRANSCRIPT-HISTORY-PLAN.md) for source-grounded contracts,
+read/placement packets, migration policy and acceptance gates. It explicitly keeps
+message-rank navigation distinct from stage 2's estimated rendered geometry.
+
 These are bounded delivery slices, not authorization to implement the entire design.
 Before the first source edits, settle its concrete read contract and ownership,
 coordinate active Workspace/CSS/storage work, and choose only the dependencies that
@@ -760,11 +765,14 @@ independent final evidence review passed. Production integration, browser behavi
 and scheduling remain unqualified. No production implementation/dependency selection
 is approved. Formatted catch-up updates are now agreed: do not flash raw Markdown
 when parsing lags. Next consolidate the agreed boundaries into a bounded proposed
-implementation sequence and explicit remaining qualification gates; implementation
-itself still needs approval. A proposed five-slice implementation sequence is now
-recorded; next steering is whether to make the first slice concrete or continue
-architecture review. Do not invent a custom parser or treat sampled sizes as hard
-limits. Do not keep
+implementation sequence and explicit remaining qualification gates. Owner approved
+planning stage 1; the concrete proposal is in TRANSCRIPT-HISTORY-PLAN.md. Source was
+rechecked at 5c9392f after frontend cleanup. Stage 1 is split into metadata navigation
+(1A, placement unchanged) and a complete attempt/pending-state slice (1B). Neither
+is implementation-approved. Review found that historical never-sent input needs
+bounded discovery after later runs/reload; the proposal now includes that path.
+Next steering is approval/scope of packet 1A, not full-transcript implementation.
+Do not invent a custom parser or treat sampled sizes as hard limits. Do not keep
 asking minor product questions that can be resolved through existing requirements.
 Ask only unresolved questions,
 not questions already settled by position-preservation requirements. Continue down
@@ -775,11 +783,11 @@ The existing user application was on port 55174/PID 2548 during the initial
 inventory; identifiers can change and are not permission to operate it. Do not
 inspect/copy Pie UI source/styles. Visible control requires appropriate user scope.
 
-Other work: Urd Frontend Cleanup owns approved `source/ui` audit remediation,
-including Workspace persistence/commands/catalog, provider feedback, tests and CSS
-ownership. It avoids Transcript behavior but may relocate transcript CSS unchanged.
-This session owns only this working design document; cleanup was informed. Earlier
-parent work covered palette/tabs and provider/settings integration. Recheck ownership
-before any source edits.
+Other work: frontend audit cleanup has landed through 5c9392f, including Workspace
+ownership boundaries, stylesheet separation and offline rendered regressions. Its
+reported anchor failure was resolved as test setup/timing, without Transcript behavior
+changes. This session remains planning-only in the transcript design/evidence/plan
+documents. Earlier parent work covered palette/tabs and provider/settings integration.
+Recheck ownership before any source edits.
 Future transcript logic can stay feature-local; coordinate shared CSS, Workspace,
 package/lockfile and docs changes. Preserve unrelated working-tree edits.

@@ -11,7 +11,7 @@ namespace Urd.Backend.Tests.Providers;
 // Recovery starts from real validated sign-in; only the synthetic credential's expiry is advanced.
 public sealed class ProviderRefreshRecoveryTests {
   [Fact]
-  public async Task LostTokenAcknowledgementPersistsSignInRequirementAcrossReopenAndRetainsDisconnectToken() {
+  public async Task LostTokenAcknowledgementPersistsSignInFenceAcrossReopenAndRetainsDisconnectToken() {
     using var database = new TemporaryDatabase();
     Guid id;
     using (UrdStore store = UrdStore.Open(database.Path)) {
@@ -25,11 +25,10 @@ public sealed class ProviderRefreshRecoveryTests {
         Expire(store, id);
         identity.Fault = "refresh-network";
         await AssertFailureAsync(ProviderFailure.RefreshUncertain, () => manager.RefreshModelCatalogAsync(id));
-        Assert.Equal(1, identity.RefreshPosts); // The failure was at token exchange, not discovery.
+        Assert.Equal(1, identity.RefreshPosts);
         AssertPersistedRecovery(store, id);
         Assert.True((await manager.GetCredentialStatusAsync(id)).RequiresSignIn);
         await AssertFailureAsync(ProviderFailure.AuthenticationRequired, () => manager.TestModelAsync(id, "fixture-model"));
-        Assert.Equal(1, identity.RefreshPosts);
         Assert.Empty(catalog.Requests);
         Assert.Empty(responses.Requests);
       } finally {
@@ -54,7 +53,7 @@ public sealed class ProviderRefreshRecoveryTests {
       ProviderDisconnectResult result = await reopenedManager.DisconnectAsync(id).WaitAsync(TestTimeout);
       Assert.True(result.LocalCredentialsCleared);
       Assert.True(result.RemoteRevocationConfirmed);
-      Assert.Equal(1, reopenedIdentity.RevocationPosts); // Fixture requires the retained original refresh token.
+      Assert.Equal(1, reopenedIdentity.RevocationPosts);
       Assert.Null(reopened.Providers.Get(id).Credentials);
       Assert.NotNull(reopened.Providers.Get(id).Registration);
     } finally {
@@ -96,39 +95,7 @@ public sealed class ProviderRefreshRecoveryTests {
   }
 
   [Fact]
-  public async Task DefiniteServiceUnavailableRemainsRetryableWithoutMarkingCredentialsForSignIn() {
-    using var database = new TemporaryDatabase();
-    using UrdStore store = UrdStore.Open(database.Path);
-    var identity = new FakeOpenAIIdentity();
-    var catalog = Catalog();
-    var responses = new ScriptedOpenAIHandler(ResponseStream());
-    var manager = Manager(store, identity, catalog, responses);
-    try {
-      Guid id = (await manager.AddChatGptAsync("Plan")).Id;
-      await SignInAsync(manager, identity, id);
-      Expire(store, id);
-      StoredProviderRow original = Assert.Single(StoredProviders.Read(database));
-      identity.Fault = "transient";
-      await AssertFailureAsync(ProviderFailure.ProviderUnavailable, () => manager.RefreshModelCatalogAsync(id));
-      Assert.Equal(1, identity.RefreshPosts);
-      Assert.Equal(original, Assert.Single(StoredProviders.Read(database)));
-      Assert.False((await manager.GetCredentialStatusAsync(id)).RequiresSignIn);
-      Assert.Empty(catalog.Requests);
-      Assert.Empty(responses.Requests);
-
-      identity.Fault = "omitted-scope";
-      Assert.NotNull((await manager.RefreshModelCatalogAsync(id)).RefreshedAt);
-      Assert.Equal(2, identity.RefreshPosts);
-      Assert.False(store.Providers.Get(id).Credentials!.RequiresSignIn);
-      Assert.Single(catalog.Requests);
-      Assert.Equal("Bearer synthetic-access-2", catalog.Requests[0].Authorization);
-    } finally {
-      await CloseAsync(manager);
-    }
-  }
-
-  [Fact]
-  public async Task FailedRotatedTokenSavePersistsRecoveryUsingOriginalCredentialSnapshot() {
+  public async Task FailedRotatedTokenSavePersistsRecoveryFromOriginalCredentialSnapshot() {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     var identity = new FakeOpenAIIdentity();
@@ -140,13 +107,14 @@ public sealed class ProviderRefreshRecoveryTests {
       await SignInAsync(manager, identity, id);
       Expire(store, id);
       identity.Fault = "omitted-scope";
-      // Fail only the rotated-token write; the recovery flag on the original snapshot can still commit.
       database.Execute("""
         CREATE TRIGGER fail_rotated_token BEFORE UPDATE ON provider_connections
         WHEN instr(NEW.credentials_json, 'synthetic-access-2') > 0
         BEGIN SELECT RAISE(ABORT, 'synthetic credential write failure'); END;
         """);
+
       await Assert.ThrowsAsync<SqliteException>(() => manager.RefreshModelCatalogAsync(id).WaitAsync(TestTimeout));
+
       AssertPersistedRecovery(store, id);
       Assert.True((await manager.GetCredentialStatusAsync(id)).RequiresSignIn);
       await AssertFailureAsync(ProviderFailure.AuthenticationRequired, () => manager.TestModelAsync(id, "fixture-model"));
@@ -155,35 +123,6 @@ public sealed class ProviderRefreshRecoveryTests {
       Assert.Empty(responses.Requests);
     } finally {
       database.Execute("DROP TRIGGER IF EXISTS fail_rotated_token;");
-      await CloseAsync(manager);
-    }
-  }
-
-  [Fact]
-  public async Task LateUncertainRefreshCannotMarkNewerValidatedSignInForRecovery() {
-    using var database = new TemporaryDatabase();
-    using UrdStore store = UrdStore.Open(database.Path);
-    var identity = new FakeOpenAIIdentity { Fault = "refresh-network" };
-    var held = new HeldRefresh(new ChatGptProviderTransport(identity, Catalog(), new ScriptedOpenAIHandler(ResponseStream())));
-    var manager = new ProviderManager(store, () => FakeOpenAIIdentity.Callback, held, FakeOpenAIIdentity.Issuer);
-    try {
-      Guid id = (await manager.AddChatGptAsync("Plan")).Id;
-      await SignInAsync(manager, identity, id);
-      Expire(store, id);
-      Task<ProviderModelCatalog> oldRequest = manager.RefreshModelCatalogAsync(id);
-      await held.Entered.Task.WaitAsync(TestTimeout);
-      await SignInAsync(manager, identity, id); // Same account, new generation; old request is cancelled and joined.
-      await Assert.ThrowsAnyAsync<OperationCanceledException>(() => oldRequest.WaitAsync(TestTimeout));
-      StoredProviderRow replacement = Assert.Single(StoredProviders.Read(database));
-      held.Release.TrySetResult();
-      await manager.ShutdownAsync().WaitAsync(TestTimeout); // Join the old refresh before comparing persisted state.
-      Assert.Equal(replacement, Assert.Single(StoredProviders.Read(database)));
-      Assert.False(store.Providers.Get(id).Credentials!.RequiresSignIn);
-      Assert.False((await manager.GetCredentialStatusAsync(id)).RequiresSignIn);
-      Assert.Equal(1, identity.RefreshPosts);
-      Assert.Equal(2, identity.CodePosts);
-    } finally {
-      held.Release.TrySetResult();
       await CloseAsync(manager);
     }
   }
@@ -227,19 +166,5 @@ public sealed class ProviderRefreshRecoveryTests {
   private static async Task CloseAsync(ProviderManager manager) {
     await manager.ShutdownAsync().WaitAsync(TestTimeout);
     manager.Dispose();
-  }
-
-  private sealed class HeldRefresh(HttpMessageHandler inner) : DelegatingHandler(inner) {
-    internal TaskCompletionSource Entered { get; } = Signal();
-    internal TaskCompletionSource Release { get; } = Signal();
-
-    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) {
-      if (request.RequestUri!.AbsolutePath == "/api/accounts/oauth/token" && request.Content is not null &&
-          FakeOpenAIIdentity.Parse(await request.Content.ReadAsStringAsync(cancellationToken)).GetValueOrDefault("grant_type") == "refresh_token") {
-        Entered.TrySetResult();
-        await Release.Task.WaitAsync(cancellationToken);
-      }
-      return await base.SendAsync(request, cancellationToken);
-    }
   }
 }

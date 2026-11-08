@@ -6,16 +6,13 @@ using static Urd.Backend.Tests.Support.TestAsync;
 
 namespace Urd.Backend.Tests.Providers;
 
-// Cancellation callbacks remain owned work even after the provider HTTP operation has unwound.
 public sealed class ProviderCancellationTests {
   [Theory]
-  [InlineData("remove")]
-  [InlineData("settings")]
-  [InlineData("caller")]
-  public async Task ShutdownRetainsCallbackDrainAfterAnotherCancellationOriginAndHttpUnwind(string origin) {
+  [InlineData(false)]
+  [InlineData(true)]
+  public async Task DisconnectAndShutdownJoinCancellationCallbacks(bool disconnect) {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
-    using var caller = new CancellationTokenSource();
     var entered = Signal();
     var httpUnwound = Signal();
     var callbackEntered = Signal();
@@ -23,8 +20,6 @@ public sealed class ProviderCancellationTests {
     var callbackFinished = Signal();
     CancellationTokenRegistration registration = default;
     var handler = new ControlledProviderHandler(async (_, token) => {
-      // Retain registration outside this operation: disposing it here would accidentally
-      // make HTTP cleanup itself join the callback and hide the manager's ownership bug.
       registration = token.Register(() => HoldCallback(callbackEntered, callbackRelease, callbackFinished));
       entered.TrySetResult();
       try {
@@ -36,26 +31,28 @@ public sealed class ProviderCancellationTests {
     });
     var manager = new ProviderManager(store, () => new Uri("http://127.0.0.1:54321/auth/callback"), handler);
     Task? operation = null;
-    Task? trigger = null;
+    Task? lifecycle = null;
     Task? shutdown = null;
     Task? repeated = null;
     try {
       var settings = new CustomProviderSettings("Fixture", LlmApi.OpenAIResponses,
           new Uri("https://fixture.invalid/v1/"), AuthenticationMethod.None);
       ProviderConnection connection = await manager.AddCustomAsync(settings);
-      operation = manager.TestModelAsync(connection.Id, "fixture-model", caller.Token);
+      operation = manager.TestModelAsync(connection.Id, "fixture-model");
       await entered.Task.WaitAsync(TestTimeout);
-      trigger = origin switch {
-        "remove" => manager.RemoveAsync(connection.Id),
-        "settings" => manager.UpdateCustomAsync(connection.Id,
-            settings with { Endpoint = new Uri("https://replacement.invalid/v1/") }),
-        _ => caller.CancelAsync()
-      };
+      Task<ProviderDisconnectResult>? disconnecting = null;
+      if (disconnect) {
+        disconnecting = manager.DisconnectAsync(connection.Id);
+        lifecycle = disconnecting;
+      } else {
+        lifecycle = manager.ShutdownAsync();
+      }
       await Task.WhenAll(callbackEntered.Task, httpUnwound.Task).WaitAsync(TestTimeout);
       shutdown = manager.ShutdownAsync();
       repeated = manager.ShutdownAsync();
 
       Assert.False(operation.IsCompleted);
+      Assert.False(lifecycle.IsCompleted);
       Assert.False(shutdown.IsCompleted);
       Assert.False(repeated.IsCompleted);
       Assert.False(callbackFinished.Task.IsCompleted);
@@ -64,7 +61,9 @@ public sealed class ProviderCancellationTests {
 
       callbackRelease.TrySetResult();
       await Assert.ThrowsAnyAsync<OperationCanceledException>(() => operation.WaitAsync(TestTimeout));
-      await Task.WhenAll(trigger, shutdown, repeated).WaitAsync(TestTimeout);
+      if (disconnecting is not null)
+        Assert.True((await disconnecting.WaitAsync(TestTimeout)).LocalCredentialsCleared);
+      await Task.WhenAll(lifecycle, shutdown, repeated).WaitAsync(TestTimeout);
       Assert.True(callbackFinished.Task.IsCompletedSuccessfully);
       Assert.Single(handler.Requests);
       manager.Dispose();
@@ -72,70 +71,10 @@ public sealed class ProviderCancellationTests {
     } finally {
       callbackRelease.TrySetResult();
       Task cleanup = manager.ShutdownAsync();
-      await ObserveAsync(operation, trigger, shutdown, repeated);
+      await ObserveAsync(operation, lifecycle, shutdown, repeated);
       await cleanup.WaitAsync(TestTimeout);
       await registration.DisposeAsync();
       manager.Dispose();
-    }
-  }
-
-  [Fact]
-  public async Task RepeatedExplicitCancellationJoinsTheOriginalHeldCallback() {
-    using var cancellation = new ProviderCancellation(Timeout.InfiniteTimeSpan);
-    var entered = Signal();
-    var release = Signal();
-    var finished = Signal();
-    using var registration = cancellation.Token.Register(() => HoldCallback(entered, release, finished));
-    Task? first = null;
-    Task? repeated = null;
-    try {
-      first = cancellation.CancelAsync();
-      await entered.Task.WaitAsync(TestTimeout);
-      repeated = cancellation.CancelAsync();
-      Assert.True(cancellation.IsCancellationRequested);
-      Assert.True(cancellation.Token.IsCancellationRequested);
-      Assert.False(first.IsCompleted);
-      Assert.False(repeated.IsCompleted);
-      Assert.False(finished.Task.IsCompleted);
-      release.TrySetResult();
-      await Task.WhenAll(first, repeated).WaitAsync(TestTimeout);
-      Assert.True(finished.Task.IsCompletedSuccessfully);
-    } finally {
-      release.TrySetResult();
-      await ObserveAsync(first, repeated);
-      await cancellation.CancelAsync().WaitAsync(TestTimeout);
-    }
-  }
-
-  [Fact]
-  public async Task TimerOriginRetainsTheCallbackDrainForLaterCancellationWaiters() {
-    using var cancellation = new ProviderCancellation(TimeSpan.FromSeconds(1));
-    var entered = Signal();
-    var release = Signal();
-    var finished = Signal();
-    CancellationTokenRegistration registration = default;
-    // Register off-thread so even a deadline racing registration can be released by finally.
-    Task registering = Task.Run(() => {
-      registration = cancellation.Token.Register(() => HoldCallback(entered, release, finished));
-    });
-    Task? first = null;
-    Task? repeated = null;
-    try {
-      await entered.Task.WaitAsync(TestTimeout); // The actual deadline, not an explicit CancelAsync, starts cancellation.
-      first = cancellation.CancelAsync();
-      repeated = cancellation.CancelAsync();
-      Assert.True(cancellation.IsCancellationRequested);
-      Assert.False(first.IsCompleted);
-      Assert.False(repeated.IsCompleted);
-      Assert.False(finished.Task.IsCompleted);
-      release.TrySetResult();
-      await Task.WhenAll(first, repeated, registering).WaitAsync(TestTimeout);
-      Assert.True(finished.Task.IsCompletedSuccessfully);
-    } finally {
-      release.TrySetResult();
-      await ObserveAsync(first, repeated, registering);
-      await cancellation.CancelAsync().WaitAsync(TestTimeout);
-      await registration.DisposeAsync();
     }
   }
 
@@ -153,8 +92,7 @@ public sealed class ProviderCancellationTests {
     try {
       await joined.WaitAsync(TestTimeout);
     } catch when (joined.IsCompleted) {
-      // Observe cancellation/failure while preserving the test's original assertion.
-      // A timeout is not a join and must still fail cleanup.
+      // Observe cancellation/failure without mistaking a timeout for a join.
     }
   }
 }

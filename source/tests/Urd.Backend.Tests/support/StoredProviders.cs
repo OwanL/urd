@@ -24,17 +24,6 @@ internal static class StoredProviders {
 
     string? Json(int column) => reader.IsDBNull(column) ? null : reader.GetString(column);
   }
-
-  internal static IReadOnlyList<string> ReadHostIds(TemporaryDatabase database) {
-    using SqliteConnection connection = database.OpenReadOnlyConnection();
-    using SqliteCommand command = connection.CreateCommand();
-    command.CommandText = "SELECT host_id FROM provider_host ORDER BY singleton;";
-    using SqliteDataReader reader = command.ExecuteReader();
-    var ids = new List<string>();
-    while (reader.Read())
-      ids.Add(reader.GetString(0));
-    return ids;
-  }
 }
 
 internal sealed record StoredProviderRow(

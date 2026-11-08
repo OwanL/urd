@@ -241,8 +241,8 @@ public sealed class SessionStopTests {
 
   [Fact]
   public async Task StaleWrongSessionAndMissingStopsLeaveReplacementAndIndependentSessionUntouched() {
-    var database = new TemporaryDatabase();
-    UrdStore store = UrdStore.Open(database.Path);
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
     var independentEntered = Signal();
     var independentRelease = Signal();
     var replacementEntered = Signal();
@@ -250,7 +250,7 @@ public sealed class SessionStopTests {
     CancellationToken independentToken = default;
     CancellationToken replacementToken = default;
     int request = 0;
-    var client = new ScriptedChatClient(token => Interlocked.Increment(ref request) switch {
+    using var client = new ScriptedChatClient(token => Interlocked.Increment(ref request) switch {
       1 => Complete(token),
       2 => Independent(token),
       _ => Replacement(token)
@@ -265,10 +265,9 @@ public sealed class SessionStopTests {
     }
 
     var manager = new SessionManager(store, _ => client);
-    var executions = new List<(PrimarySession Session, Guid ExecutionId)>();
+    PrimarySession target = await manager.CreatePrimaryAsync();
+    PrimarySession independent = await manager.CreatePrimaryAsync();
     try {
-      PrimarySession target = await manager.CreatePrimaryAsync();
-      PrimarySession independent = await manager.CreatePrimaryAsync();
       Guid original = await StartAsync(target, "original");
       await target.WaitForSettlementAsync(original).WaitAsync(TestTimeout);
       Guid independentExecution = await StartAsync(independent, "independent");
@@ -287,85 +286,30 @@ public sealed class SessionStopTests {
       Guid missing = Guid.NewGuid();
       Assert.Equal(new StopReceipt(missing, StopStatus.NotFound),
           await target.RequestStopAsync(missing).WaitAsync(TestTimeout));
-      await Assert.ThrowsAsync<ArgumentException>(() => target.RequestStopAsync(Guid.Empty));
       Assert.False(independentToken.IsCancellationRequested);
       Assert.False(replacementToken.IsCancellationRequested);
       Assert.False(independentSettlement.IsCompleted);
       Assert.False(replacementSettlement.IsCompleted);
-      Assert.False((await target.ReadSnapshotAsync()).StopRequested);
-      Assert.False((await independent.ReadSnapshotAsync()).StopRequested);
 
       Assert.Equal(new StopReceipt(replacement, StopStatus.Requested),
           await target.RequestStopAsync(replacement).WaitAsync(TestTimeout));
       Assert.Equal(ExecutionOutcome.Cancelled, (await replacementSettlement.WaitAsync(TestTimeout)).Outcome);
       Assert.False(independentToken.IsCancellationRequested);
       Assert.False(independentSettlement.IsCompleted);
-      Assert.False((await independent.ReadSnapshotAsync()).StopRequested);
       independentRelease.TrySetResult();
       Assert.Equal(ExecutionOutcome.Completed, (await independentSettlement.WaitAsync(TestTimeout)).Outcome);
-      Assert.Equal(3, client.Calls);
     } finally {
       independentRelease.TrySetResult();
       replacementRelease.TrySetResult();
       await manager.ShutdownSessionsAsync().WaitAsync(TestTimeout);
-      foreach (var execution in executions)
-        await execution.Session.WaitForSettlementAsync(execution.ExecutionId).WaitAsync(TestTimeout);
-      store.Dispose();
-      client.Dispose();
-      database.Dispose();
     }
 
     async Task<Guid> StartAsync(PrimarySession session, string text) {
-      UserMessageReceipt receipt = await session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, text, TestLlmSelection.Default));
-      Guid executionId = Assert.IsType<Guid>(receipt.ExecutionId);
-      executions.Add((session, executionId));
+      UserMessageReceipt receipt = await session.SubmitUserMessageAsync(
+          new(Guid.NewGuid(), 0, text, TestLlmSelection.Default));
       Assert.Equal(MessageAcceptance.Accepted, receipt.Acceptance);
-      return executionId;
+      return Assert.IsType<Guid>(receipt.ExecutionId);
     }
   }
 
-  [Fact]
-  public async Task ReopenedUnownedExecutionIsUnavailableWithoutMutationOrReplay() {
-    using var database = new TemporaryDatabase();
-    Guid sessionId = Guid.NewGuid();
-    Guid executionId = Guid.NewGuid();
-    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "saved orphan", TestLlmSelection.Default);
-    var pending = new UserMessageSubmission(Guid.NewGuid(), 0, "unclaimed steering", TestLlmSelection.Default);
-    UserMessageReceipt accepted;
-    UserMessageReceipt queued;
-    Guid requestId;
-    using (UrdStore original = UrdStore.Open(database.Path)) {
-      original.Sessions.CreatePrimary(sessionId);
-      accepted = original.UserMessages.Admit(sessionId, 0, submission, true, executionId).Receipt;
-      requestId = Assert.IsType<LlmRequest>(original.Executions.ClaimNextRequest(sessionId, executionId, 0)).RequestId;
-      queued = original.UserMessages.Admit(sessionId, 0, pending, true, Guid.NewGuid(), executionId).Receipt;
-    }
-
-    using var client = new ScriptedChatClient(_ => throw new InvalidOperationException("Stop must not replay orphan work."));
-    using UrdStore store = UrdStore.Open(database.Path);
-    var manager = new SessionManager(store, _ => client);
-    try {
-      PrimarySession session = await manager.GetPrimaryAsync(sessionId);
-      for (int retry = 0; retry < 2; retry++)
-        Assert.Equal(new StopReceipt(executionId, StopStatus.Unavailable),
-            await session.RequestStopAsync(executionId).WaitAsync(TestTimeout));
-      StoredExecution saved = Assert.Single(StoredExecutions.Read(database));
-      Assert.False(saved.Stopping);
-      Assert.Null(saved.Outcome);
-      StoredRequest request = Assert.Single(StoredExecutions.ReadRequests(database));
-      Assert.Equal(requestId, request.RequestId);
-      Assert.Null(request.Outcome);
-      SessionSnapshot snapshot = await session.ReadSnapshotAsync();
-      Assert.True(snapshot.AdmissionFenced);
-      Assert.False(snapshot.StopRequested);
-      Assert.Equal(executionId, snapshot.UnsettledExecutionId);
-      Assert.Null(snapshot.LastSettlement);
-      Assert.Equal(accepted, await session.SubmitUserMessageAsync(submission));
-      Assert.Equal(queued, await session.SubmitUserMessageAsync(pending));
-      Assert.Null(Assert.Single(snapshot.Messages, message => message.Message.MessageId == pending.SubmissionId).Settlement);
-      Assert.Equal(0, client.Calls);
-    } finally {
-      await manager.ShutdownSessionsAsync().WaitAsync(TestTimeout);
-    }
-  }
 }

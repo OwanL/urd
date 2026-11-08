@@ -67,7 +67,8 @@ npm run build
 | `npm run format` / `npm run format:check` | Write formatting / check formatting without changes. |
 | `npm run lint` / `npm run lint:fast` | Combined typed lint / syntax-only feedback. |
 | `npm run typecheck` / `npm run typecheck:watch` | Strict compiler once / persistent watch. |
-| `npm test` | Node unit tests discovered from `tests/**/*.test.ts`; no frontend test framework. |
+| `npm test` | Fast Node unit tests discovered from `tests/**/*.test.ts`; no frontend component framework. |
+| `npm run test:browser` | Headless Playwright regression against the temporary real Server and offline loopback model fixture. |
 | `npm run build` / `npm run build:watch` | Bundle once / watch into `source/ui/dist`; neither runs a server. |
 | `npm run test:integration` | Real Server and SDK-to-loopback-provider test; requires built UI assets and the Release backend build. |
 | `npm run test:browser:host` | Explicit temporary browser fixture host; real Urd plus a credential-free loopback model fixture, never saved accounts. |
@@ -105,8 +106,11 @@ require the browser marker. Unknown API paths are not redirected to HTML.
 The fixture launches the built Server with its own temporary data root and port
 `0`, creates a custom no-auth connection to its owned loopback model endpoint, and
 refreshes only that fixture's catalog. It exercises the real managed provider, SDK,
-execution and SQLite path, not a production fake-client flag. For rendered checks,
-run `npm run test:browser:host` and open its printed Urd origin. Ctrl+C or POST to
+execution and SQLite path, not a production fake-client flag. Install the pinned
+Playwright Chromium once with `npx playwright install chromium`, then run
+`npm run test:browser` for the headless draft/reload/send/recovery regression. For
+manual inspection, run `npm run test:browser:host` and open its printed Urd origin.
+Ctrl+C or POST to
 the printed model origin's `/__shutdown` closes the fixture. Test-control routes
 belong only to the fixture process, not Urd. Only owned processes/data are cleaned
 up. Set `DOTNET_HOST_PATH` to a specific `dotnet` executable if needed; otherwise it

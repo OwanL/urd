@@ -72,7 +72,6 @@
 }
 
 .provider-settings :where(form button[type="submit"]),
-.provider-settings .provider-settings-add,
 .provider-settings .provider-settings-auth > button {
   justify-self: start;
 }

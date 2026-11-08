@@ -322,9 +322,21 @@ structures independently of DOM virtualization. One huge code block/table also
 needs attention; splitting only at top-level Markdown blocks is insufficient.
 
 Use proven parser/rendering components rather than a homemade Markdown parser.
-Initial Markdown feature scope is the current product question: recommend standard
-Markdown with fenced code, tables and images, deferring extra math/diagram renderers
-unless required. This is a recommendation, not an approved feature exclusion.
+Owner considers math/diagrams optional rather than core and asks whether adding
+specialized renderers later would be difficult. Recommendation awaiting confirmation:
+plan compatibility now, defer feature implementation. Preserve source; choose a
+parser with extension points; allow content-specific renderers to share lazy loading,
+measurement and cleanup behavior. Labelled code fences can supply future diagrams;
+inline math needs parser-level support and cannot be treated solely as a block
+component swap. Keep generated display/parse caches disposable rather than making
+an initial renderer's HTML the durable format. Adding syntax can require reparsing
+and invalidating derived layout; do not promise zero future migration work.
+
+This is not a proposal for user-installable renderer plugins, an abstract rendering
+framework or eager math/diagram dependencies. Check candidate stack compatibility
+before selection; defer detailed feature design and runtime qualification until
+needed. Streaming, selection, scroll stability and resource release still apply to
+future renderers, so extensibility alone does not establish their performance.
 No package is selected. Earlier discussion suggested a unified/mdast/hast pipeline,
 but this was not adopted or qualified; compare alternatives after defining needs.
 Do not assume workers are automatically better: transferring/copying content and
@@ -394,10 +406,11 @@ source, not by asking the owner. Update this document immediately after decision
 4. **Streaming recovery:** existing architecture permits loss of an unfinished tool
    draft on backend crash. Preserve that simple contract; distinguish browser
    reconnect/current provisional state from committed history and terminal facts.
-5. **Large-item correctness — current question:** initial formatting scope: standard
-   Markdown/code/tables/images, or also math/diagrams? Recommend standard scope first.
-   Then determine Markdown semantics, code/table virtualization, streaming parse
-   strategy and memory ownership. Prove feasibility before choosing dependencies.
+5. **Large-item correctness — current question:** owner views math/diagrams as
+   optional. Recommend compatibility checks and simple content-renderer boundaries
+   now, actual optional renderers later; no general plugin framework. Confirm this
+   scope, then determine Markdown semantics, code/table virtualization, streaming
+   parse strategy and memory ownership before choosing dependencies.
 6. **Interaction through eviction — current branch:** full-history search is
    explicitly deferred; owner accepts browser Find's limitation for now and may add
    first-party search later. Do not design a search index/API in this phase. Owner
@@ -488,6 +501,9 @@ shared-reference and cleanup failure cases; those are not implemented guarantees
   revise only for demonstrated problems, not hypothetical scale alone.
 - Grilling decision 11: owner approved automatic loading of external Markdown images
   near the viewport, rather than requiring clicks. External retention remains unchanged.
+- Grilling scope clarification 12: math/diagrams are optional rather than core.
+  Owner asks about future renderer flexibility; recommendation is compatibility now,
+  implementation later, without a general plugin system. Deferral is not yet confirmed.
 - Owner explicitly chose continuous formatting rather than a separate paged
   plaintext fallback for very large replies. Earlier suggested 128 KiB/message and
   2 MiB cache numbers were speculative and are **not selected requirements**.
@@ -518,7 +534,8 @@ custom selection engine or separate prototype phase without demonstrated need.
 External Markdown images load automatically near the viewport without managed
 retention. Existing architecture already permits losing unfinished tool drafts on
 backend crash; do not ask to redesign that recovery contract. Current question:
-initial Markdown feature scope, then synthesize the remaining engineering mechanisms.
+confirm compatibility-now/implementation-later for optional math/diagram renderers,
+then synthesize the remaining engineering mechanisms.
 Ask only unresolved questions,
 not questions already settled by position-preservation requirements. Continue down
 the dependency tree and keep recommendations distinct from decisions.

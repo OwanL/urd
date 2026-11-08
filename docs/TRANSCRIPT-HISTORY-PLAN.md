@@ -201,7 +201,11 @@ Unchanged from the reviewed draft in substance:
   provider error, and the provider is not called.
 - `LlmContextReader` excludes prior requests known never attempted; keeps the
   current batch and legacy history.
-- Pending inputs appear in the snapshot (bounded by the existing outstanding cap).
+- Pending inputs appear in the snapshot as identity plus a bounded preview (the
+  existing 256-UTF-16-unit convention), never full text: submission text is
+  uncapped after packet 1A, and the snapshot is a hot path. Full pending text
+  stays readable through the existing receipt route. The outstanding count cap
+  still bounds the pending list itself.
   Terminal never-attempted inputs are **not sent**: discoverable through a sparse,
   keyset-paged session listing; text read through the existing receipt route;
   explicit resend uses a new submission ID; drafts are never overwritten.

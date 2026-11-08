@@ -1,0 +1,246 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { WorkspaceCommands } from "../app/WorkspaceCommands.ts";
+import type { WorkspaceCommandAccess, WorkspaceCommandState } from "../app/WorkspaceCommands.ts";
+import { decodeWorkspace, editDraft, emptyWorkspace, newChat } from "../app/WorkspaceState.ts";
+import type { WorkspaceState } from "../app/WorkspaceState.ts";
+import type { LlmSelection } from "../providers/LlmSelection.ts";
+import type { SessionClient } from "../sessions/SessionClient.ts";
+import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
+import type { StopReceipt } from "../sessions/Stop.ts";
+import type {
+  UserMessageReceipt,
+  UserMessageSubmission,
+} from "../sessions/UserMessageSubmission.ts";
+
+const sessionId = "10000000-0000-0000-0000-000000000001";
+const firstExecutionId = "20000000-0000-0000-0000-000000000002";
+const nextExecutionId = "20000000-0000-0000-0000-000000000003";
+const selection: LlmSelection = {
+  connection: {
+    id: "50000000-0000-0000-0000-000000000005",
+    name: "Saved provider",
+    route: "custom",
+    api: "openAIResponses",
+    endpoint: "http://127.0.0.1:1234/v1/",
+    authentication: "none",
+  },
+  modelId: "model-id",
+  reasoningEffort: null,
+};
+
+function snapshot(overrides: Partial<SessionSnapshot> = {}): SessionSnapshot {
+  return {
+    sessionId,
+    historyRevision: 7,
+    admissionFenced: false,
+    unsettledExecutionId: null,
+    stopRequested: false,
+    lastSettlement: null,
+    latestLlmSelection: selection,
+    messages: [],
+    hasOlderMessages: false,
+    ...overrides,
+  };
+}
+
+function fixture(): {
+  read: () => WorkspaceState;
+  set: (state: WorkspaceState) => void;
+  access: WorkspaceCommandAccess;
+  setWritable: (writable: boolean) => void;
+} {
+  let state = emptyWorkspace();
+  state.tabs = [sessionId];
+  state.activeId = sessionId;
+  state.lastSelection = selection;
+  state.chats[sessionId] = editDraft(newChat(selection), "submitted text");
+  let writable = true;
+  const persist = (next: WorkspaceState) => {
+    state = next;
+    return writable;
+  };
+  return {
+    read: () => state,
+    set: (next) => {
+      state = next;
+    },
+    setWritable: (next) => {
+      writable = next;
+    },
+    access: {
+      read: () => state,
+      save: persist,
+      updateChat: (id, update) => {
+        const previous = state.chats[id];
+        if (!previous) return false;
+        return persist({ ...state, chats: { ...state.chats, [id]: update(previous) } });
+      },
+      canPersist: () => true,
+    },
+  };
+}
+
+function commands(
+  access: WorkspaceCommandAccess,
+  client: Pick<SessionClient, "create" | "submitMessage" | "getMessageReceipt" | "stopExecution">,
+  onState: (state: WorkspaceCommandState) => void = () => {},
+): WorkspaceCommands {
+  return new WorkspaceCommands(
+    client,
+    access,
+    onState,
+    () => {},
+    () => {},
+  );
+}
+
+function receipt(submission: UserMessageSubmission): UserMessageReceipt {
+  return {
+    sessionId,
+    submission,
+    acceptance: "accepted",
+    refusalReason: null,
+    executionId: firstExecutionId,
+  };
+}
+
+function emptyClient(
+  submitMessage: SessionClient["submitMessage"] = async () => {
+    throw new Error("Unexpected Send");
+  },
+  stopExecution: SessionClient["stopExecution"] = async (_id, executionId) => ({
+    executionId,
+    status: "requested",
+    outcome: null,
+  }),
+): Pick<SessionClient, "create" | "submitMessage" | "getMessageReceipt" | "stopExecution"> {
+  return {
+    create: async () => sessionId,
+    submitMessage,
+    getMessageReceipt: async () => null,
+    stopExecution,
+  };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (cause: unknown) => void;
+  const promise = new Promise<T>((complete, fail) => {
+    resolve = complete;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
+}
+
+void test("a failed synchronous Send journal dispatches nothing and reload keeps it uncertain", async () => {
+  const workspace = fixture();
+  workspace.setWritable(false);
+  let sends = 0;
+  const coordinator = commands(
+    workspace.access,
+    emptyClient(async () => {
+      sends++;
+      throw new Error("must not dispatch");
+    }),
+  );
+
+  await coordinator.send(sessionId, snapshot(), false, true);
+
+  const pending = workspace.read().chats[sessionId]?.pending;
+  assert.equal(sends, 0);
+  assert.equal(pending?.status, "uncertain");
+  assert.equal(pending?.original.text, "submitted text");
+  assert.equal(
+    decodeWorkspace(JSON.stringify(workspace.read())).chats[sessionId]?.pending?.status,
+    "uncertain",
+  );
+});
+
+void test("retry journals and resends the exact original while retaining a newer draft", async () => {
+  const workspace = fixture();
+  workspace.setWritable(false);
+  const coordinator = commands(workspace.access, emptyClient());
+  await coordinator.send(sessionId, snapshot(), false, true);
+  workspace.setWritable(true);
+
+  const reloaded = decodeWorkspace(JSON.stringify(workspace.read()));
+  workspace.set({
+    ...reloaded,
+    chats: {
+      ...reloaded.chats,
+      [sessionId]: editDraft(reloaded.chats[sessionId]!, "newer draft"),
+    },
+  });
+  const original = workspace.read().chats[sessionId]!.pending!.original;
+  let dispatched: UserMessageSubmission | null = null;
+  let journaledBeforeDispatch = false;
+  const retry = commands(
+    workspace.access,
+    emptyClient(async (_id, submission) => {
+      dispatched = submission;
+      journaledBeforeDispatch = workspace.read().chats[sessionId]?.pending?.status === "sending";
+      return receipt(submission);
+    }),
+  );
+
+  await retry.reconcile(sessionId, true);
+
+  assert.deepEqual(dispatched, original);
+  assert.equal(journaledBeforeDispatch, true);
+  assert.equal(workspace.read().chats[sessionId]?.pending, null);
+  assert.equal(workspace.read().chats[sessionId]?.draft, "newer draft");
+});
+
+void test("a late Stop failure for an earlier execution cannot replace or block Stop for its successor", async () => {
+  const workspace = fixture();
+  const first = deferred<StopReceipt>();
+  const second = deferred<StopReceipt>();
+  const third = deferred<StopReceipt>();
+  const executions: string[] = [];
+  const coordinator = commands(
+    workspace.access,
+    emptyClient(undefined, async (_id, executionId) => {
+      executions.push(executionId);
+      if (executions.length === 1) return first.promise;
+      if (executions.length === 2) return second.promise;
+      return third.promise;
+    }),
+  );
+
+  const stopFirst = coordinator.stop(
+    sessionId,
+    snapshot({ unsettledExecutionId: firstExecutionId }),
+    undefined,
+  );
+  coordinator.observeSnapshot(
+    snapshot({
+      unsettledExecutionId: nextExecutionId,
+      lastSettlement: { executionId: firstExecutionId, outcome: "completed" },
+    }),
+    null,
+  );
+  const stopSecond = coordinator.stop(
+    sessionId,
+    snapshot({ unsettledExecutionId: nextExecutionId }),
+    undefined,
+  );
+  second.reject(new Error("acknowledgement lost"));
+  await stopSecond;
+  assert.equal(coordinator.status.stopping[sessionId]?.executionId, nextExecutionId);
+  assert.equal(coordinator.status.stopping[sessionId]?.pending, false);
+
+  first.reject(new Error("older acknowledgement lost"));
+  await stopFirst;
+  assert.equal(coordinator.status.stopping[sessionId]?.executionId, nextExecutionId);
+  assert.match(coordinator.status.stopping[sessionId]?.error ?? "", /acknowledgement lost/);
+
+  const retrySecond = coordinator.stop(
+    sessionId,
+    snapshot({ unsettledExecutionId: nextExecutionId }),
+    undefined,
+  );
+  assert.deepEqual(executions, [firstExecutionId, nextExecutionId, nextExecutionId]);
+  third.resolve({ executionId: nextExecutionId, status: "requested", outcome: null });
+  await retrySecond;
+});

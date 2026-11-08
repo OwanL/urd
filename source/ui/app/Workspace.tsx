@@ -8,23 +8,18 @@ import { ProviderClient } from "../providers/ProviderClient.ts";
 import type { LlmSelection } from "../providers/LlmSelection.ts";
 import { SessionClient } from "../sessions/SessionClient.ts";
 import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
-import {
-  applyReceipt,
-  beginSubmission,
-  editDraft,
-  executionSettled,
-  newChat,
-  submissionTextError,
-} from "./WorkspaceState.ts";
+import { editDraft, newChat, submissionTextError } from "./WorkspaceState.ts";
 import type { ChatState, WorkspaceState } from "./WorkspaceState.ts";
 import { WorkspacePersistence } from "./WorkspacePersistence.ts";
 import { WorkspaceModels } from "./WorkspaceModels.ts";
+import { emptyWorkspaceCommandState, WorkspaceCommands } from "./WorkspaceCommands.ts";
+import type { WorkspaceCommandState } from "./WorkspaceCommands.ts";
 import type { ModelOption } from "./WorkspaceModels.ts";
 import { ChatTabs } from "./ChatTabs.tsx";
 import { moveTab } from "./TabOrder.ts";
 import { Transcript } from "./Transcript.tsx";
 import type { ReadingPosition } from "./Transcript.tsx";
-import { useActiveChat } from "./useActiveChat.ts";
+import { useSessionSnapshot } from "./useSessionSnapshot.ts";
 import "./workspace.css";
 
 const sessions = new SessionClient(new URL(window.location.href));
@@ -47,8 +42,6 @@ export function Workspace() {
   const [storageError, setStorageError] = useState<string | null>(initial.error);
   const [readRecovered, setReadRecovered] = useState(false);
   const [globalError, setGlobalError] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
-  const createPending = useRef(false);
   const [ready, setReady] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsAnchor = useRef<HTMLButtonElement>(null);
@@ -64,13 +57,9 @@ export function Workspace() {
     setModelsError(null);
   }, [modelCatalog]);
   const [refresh, setRefresh] = useState(0);
-  const [stopping, setStopping] = useState<
-    Record<string, { executionId: string; pending: boolean; error: string | null }>
-  >({});
-  const checks = useRef(new Set<string>());
-  const receiptReads = useRef(new Map<string, AbortController>());
-  const [checking, setChecking] = useState<Record<string, boolean>>({});
-  const stoppingRequests = useRef(new Set<string>());
+  const [commandState, setCommandState] = useState<WorkspaceCommandState>(
+    emptyWorkspaceCommandState,
+  );
   const readingPositions = useRef(new Map<string, ReadingPosition>());
   const activeId = workspace.activeId;
   const chat = activeId ? workspace.chats[activeId] : undefined;
@@ -121,6 +110,22 @@ export function Workspace() {
     },
     [save],
   );
+  const readWorkspace = useCallback(() => current.current, []);
+  const canPersist = useCallback(
+    () => storageProblem.current !== "read" && storageProblem.current !== "write",
+    [],
+  );
+  const refreshSnapshot = useCallback(() => setRefresh((value) => value + 1), []);
+  const [commands] = useState(
+    () =>
+      new WorkspaceCommands(
+        sessions,
+        { read: readWorkspace, save, updateChat, canPersist },
+        setCommandState,
+        setGlobalError,
+        refreshSnapshot,
+      ),
+  );
   const retryStorage = useCallback(() => {
     if (storageProblem.current === "read") {
       const restored = persistence.load();
@@ -155,35 +160,6 @@ export function Workspace() {
     },
     [save],
   );
-  const create = useCallback(async () => {
-    if (
-      storageProblem.current === "read" ||
-      storageProblem.current === "write" ||
-      createPending.current
-    )
-      return;
-    // Persist the first visit before dispatch: reload must not retry an uncertain Create.
-    if (!save(current.current)) return;
-    createPending.current = true;
-    setCreating(true);
-    setGlobalError(null);
-    try {
-      const id = await sessions.create();
-      const state = current.current;
-      save({
-        ...state,
-        activeId: id,
-        tabs: [...state.tabs, id],
-        chats: { ...state.chats, [id]: newChat(state.lastSelection) },
-      });
-    } catch (cause) {
-      setGlobalError(`Chat creation is uncertain: ${description(cause)}`);
-    } finally {
-      createPending.current = false;
-      setCreating(false);
-    }
-  }, [save]);
-
   useEffect(() => {
     const controller = new AbortController();
     async function discover() {
@@ -203,7 +179,7 @@ export function Workspace() {
               activeId: ids[0] ?? null,
               chats: Object.fromEntries(ids.map((id) => [id, newChat(null)])),
             });
-          } else if (page.nextCursor === null) await create();
+          } else if (page.nextCursor === null) await commands.create();
         }
         setReady(true);
       } catch (cause) {
@@ -212,7 +188,7 @@ export function Workspace() {
     }
     void discover();
     return () => controller.abort();
-  }, [initial, open, save, create, readRecovered]);
+  }, [initial, open, save, commands, readRecovered]);
   useEffect(() => {
     if (!ready) return;
     window.history.replaceState(
@@ -264,37 +240,15 @@ export function Workspace() {
   }
 
   const observeSnapshot = useCallback(
-    (snapshot: SessionSnapshot, knownWhenRead: string | null) => {
-      const saved = current.current.chats[snapshot.sessionId];
-      if (saved?.title === "New chat" && snapshot.messages.length > 0) {
-        const prompt = snapshot.messages.find((message) => message.message.role === "user");
-        const title = [...(prompt?.preview.trim() ?? "Chat")].slice(0, 48).join("");
-        updateChat(snapshot.sessionId, (previous) => ({ ...previous, title: title || "Chat" }));
-      }
-      if (
-        saved?.knownExecutionId &&
-        executionSettled(snapshot, saved.knownExecutionId, knownWhenRead)
-      )
-        updateChat(snapshot.sessionId, (previous) => ({ ...previous, knownExecutionId: null }));
-      setStopping((previous) => {
-        const executionId = previous[snapshot.sessionId]?.executionId;
-        if (
-          !executionId ||
-          (snapshot.unsettledExecutionId && snapshot.lastSettlement?.executionId !== executionId)
-        )
-          return previous;
-        const next = { ...previous };
-        delete next[snapshot.sessionId];
-        return next;
-      });
-    },
-    [updateChat],
+    (snapshot: SessionSnapshot, knownWhenRead: string | null) =>
+      commands.observeSnapshot(snapshot, knownWhenRead),
+    [commands],
   );
   const {
     snapshot,
     error: readError,
     visible,
-  } = useActiveChat(
+  } = useSessionSnapshot(
     sessions,
     activeId,
     refresh,
@@ -303,81 +257,10 @@ export function Workspace() {
     observeSnapshot,
   );
 
-  const reconcile = useCallback(
-    async (id: string, retry: boolean) => {
-      const original = current.current.chats[id]?.pending?.original;
-      if (
-        !original ||
-        checks.current.has(id) ||
-        (retry && (storageProblem.current === "read" || storageProblem.current === "write"))
-      )
-        return;
-      if (!retry && document.hidden) return;
-      const controller = retry ? null : new AbortController();
-      if (controller) receiptReads.current.set(id, controller);
-      checks.current.add(id);
-      setChecking((previous) => ({ ...previous, [id]: true }));
-      try {
-        if (
-          retry &&
-          !updateChat(id, (previous) =>
-            previous.pending
-              ? { ...previous, pending: { ...previous.pending, status: "sending" }, error: null }
-              : previous,
-          )
-        )
-          throw new Error("The original Send could not be journaled; it was not dispatched.");
-        const receipt = retry
-          ? await sessions.submitMessage(id, original)
-          : await sessions.getMessageReceipt(id, original.submissionId, controller?.signal);
-        if (receipt === null) throw new Error("No receipt found. Send remains uncertain.");
-        updateChat(id, (previous) => applyReceipt(previous, id, receipt));
-      } catch (cause) {
-        if (controller?.signal.aborted) return;
-        updateChat(id, (previous) =>
-          previous.pending
-            ? {
-                ...previous,
-                pending: { ...previous.pending, status: "uncertain" },
-                error: description(cause),
-              }
-            : previous,
-        );
-      } finally {
-        checks.current.delete(id);
-        receiptReads.current.delete(id);
-        setChecking((previous) => {
-          const next = { ...previous };
-          delete next[id];
-          return next;
-        });
-        setRefresh((value) => value + 1);
-      }
-    },
-    [updateChat],
-  );
-  useEffect(() => {
-    const reads = receiptReads.current;
-    function checkPending() {
-      if (document.hidden) {
-        for (const controller of reads.values()) controller.abort();
-        return;
-      }
-      for (const [id, saved] of Object.entries(current.current.chats))
-        if (saved.pending?.status === "uncertain") void reconcile(id, false);
-    }
-    checkPending();
-    window.addEventListener("focus", checkPending);
-    document.addEventListener("visibilitychange", checkPending);
-    return () => {
-      for (const controller of reads.values()) controller.abort();
-      window.removeEventListener("focus", checkPending);
-      document.removeEventListener("visibilitychange", checkPending);
-    };
-  }, [reconcile]);
+  useEffect(() => commands.watchPendingReceipts(), [commands]);
 
   const active = Boolean(snapshot?.unsettledExecutionId && !snapshot.admissionFenced);
-  const stopState = activeId ? stopping[activeId] : undefined;
+  const stopState = activeId ? commandState.stopping[activeId] : undefined;
   const stopId = stopState?.pending ? stopState.executionId : undefined;
   const locked = Boolean(
     active ||
@@ -409,83 +292,6 @@ export function Workspace() {
     storageProblem.current !== "write",
   );
 
-  async function send() {
-    if (!canSend || !chat || !activeId || !snapshot || !selection) return;
-    const id = activeId;
-    const latest = current.current.chats[id];
-    const initiatingSelection = active
-      ? snapshot.latestLlmSelection
-      : (latest?.selection ?? snapshot.latestLlmSelection);
-    if (
-      !latest ||
-      latest.pending ||
-      !initiatingSelection ||
-      !latest.draft.trim() ||
-      submissionTextError(latest.draft)
-    )
-      return;
-    const original = {
-      submissionId: crypto.randomUUID(),
-      expectedHistoryRevision: snapshot.historyRevision,
-      text: latest.draft,
-      llmSelection: initiatingSelection,
-    };
-    const persisted = updateChat(id, (previous) => ({
-      ...beginSubmission(previous, original),
-      title:
-        previous.title === "New chat"
-          ? [...original.text.trim()].slice(0, 48).join("")
-          : previous.title,
-    }));
-    if (!persisted) {
-      updateChat(id, (previous) =>
-        previous.pending
-          ? {
-              ...previous,
-              pending: { ...previous.pending, status: "uncertain" },
-              error: "Send was not dispatched because the journal could not be saved.",
-            }
-          : previous,
-      );
-      return;
-    }
-    await reconcile(id, true);
-  }
-  async function stop() {
-    const id = activeId;
-    const executionId = snapshot?.unsettledExecutionId;
-    if (!id || !executionId || stopId) return;
-    const requestKey = `${id}/${executionId}`;
-    if (stoppingRequests.current.has(requestKey)) return;
-    stoppingRequests.current.add(requestKey);
-    setStopping((previous) => ({
-      ...previous,
-      [id]: { executionId, pending: true, error: null },
-    }));
-    try {
-      const receipt = await sessions.stopExecution(id, executionId);
-      if (
-        receipt.executionId !== executionId ||
-        (receipt.status !== "requested" && receipt.status !== "settled")
-      )
-        throw new Error("Stop was not acknowledged.");
-    } catch (cause) {
-      setStopping((previous) => {
-        if (previous[id]?.executionId !== executionId) return previous;
-        return {
-          ...previous,
-          [id]: {
-            executionId,
-            pending: false,
-            error: `Stop acknowledgement uncertain: ${description(cause)}`,
-          },
-        };
-      });
-    } finally {
-      stoppingRequests.current.delete(requestKey);
-      setRefresh((value) => value + 1);
-    }
-  }
   function choose(next: LlmSelection) {
     if (!activeId || locked) return;
     const state = current.current;
@@ -534,17 +340,17 @@ export function Workspace() {
           icon="plus"
           class="new-chat"
           label="New chat"
-          hint={creating ? "Creating chat…" : "New chat"}
+          hint={commandState.creating ? "Creating chat…" : "New chat"}
           placement="below"
           disabled={
-            creating ||
+            commandState.creating ||
             !ready ||
             storageProblem.current === "read" ||
             storageProblem.current === "write"
           }
-          aria-busy={creating}
+          aria-busy={commandState.creating}
           onClick={() => {
-            void create();
+            void commands.create();
           }}
         />
         <div class="top-actions">
@@ -649,15 +455,15 @@ export function Workspace() {
               <span>
                 {chat.pending.status === "sending"
                   ? "Sending…"
-                  : checking[activeId]
+                  : commandState.checking[activeId]
                     ? "Checking receipt…"
                     : "Send uncertain."}{" "}
                 {chat.pending.status === "uncertain" && (
                   <>
                     <button
-                      disabled={checking[activeId]}
+                      disabled={commandState.checking[activeId]}
                       onClick={() => {
-                        void reconcile(activeId, false);
+                        void commands.reconcile(activeId, false);
                       }}
                     >
                       Check receipt
@@ -666,10 +472,10 @@ export function Workspace() {
                       disabled={
                         storageProblem.current === "read" ||
                         storageProblem.current === "write" ||
-                        checking[activeId]
+                        commandState.checking[activeId]
                       }
                       onClick={() => {
-                        void reconcile(activeId, true);
+                        void commands.reconcile(activeId, true);
                       }}
                     >
                       Retry original
@@ -711,10 +517,10 @@ export function Workspace() {
             working={active}
             stopping={active && Boolean(stopId || snapshot?.stopRequested)}
             onSend={() => {
-              void send();
+              if (activeId && snapshot) void commands.send(activeId, snapshot, active, canSend);
             }}
             onStop={() => {
-              void stop();
+              if (activeId && snapshot) void commands.stop(activeId, snapshot, stopId);
             }}
             onRefreshModels={() => {
               void refreshModels();

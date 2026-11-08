@@ -42,6 +42,9 @@ Distinguish throughout:
   not an immediate implementation requirement. Their positions must correspond
   approximately to prompts' actual positions in the full transcript. Navigation
   and markers must not develop incompatible position models.
+- Full-history search is deferred. Native browser Find may be limited to rendered
+  content for now; do not load hidden history to make it exhaustive. First-party
+  search can be added later. No search index or search-specific API is in scope.
 - Long replies remain in the **continuous formatted conversation**. Diverting
   oversized replies to a separate paged plain-text reader is not acceptable.
 - Reading position and following intent should survive browser reload/restart.
@@ -336,13 +339,13 @@ source, not by asking the owner. Update this document immediately after decision
    generation; provisional versus retained evidence, cancellation and terminal facts.
 5. **Large-item correctness:** Markdown semantics, code/table virtualization,
    streaming parse strategy and memory ownership. Prove feasibility before choosing.
-6. **Interaction through eviction — current question before index design:** should
-   search cover the entire saved conversation or be deferred? Native browser Find
-   cannot reliably search content absent from the DOM. Recommend a session search
-   backed by saved content and navigation to result identities, without hydrating all
-   history. Scope of searched content, indexing and query mechanics are not selected.
-   Also resolve selection/copy across unloaded ranges, keyboard navigation, expanded
-   details and resize; do not silently break those behaviors through virtualization.
+6. **Interaction through eviction — current branch:** full-history search is
+   explicitly deferred; owner accepts browser Find's limitation for now and may add
+   first-party search later. Do not design a search index/API in this phase. Next
+   resolve selection/copy across unloaded ranges. Recommend ordinary local selection
+   plus explicit whole-message/code copying initially, rather than requiring native
+   drag-selection through arbitrarily large unloaded spans. This recommendation is
+   not yet approved. Also resolve keyboard navigation, expanded details and resize.
 7. **On-demand payloads/media:** inspector lifecycle, large raw results, clipboard
    uploads, attachment publication/cleanup, image preview/viewer release, external
    URL loading policy. Display rendering does not imply provider image delivery.
@@ -410,6 +413,9 @@ shared-reference and cleanup failure cases; those are not implemented guarantees
   in the conversation with the error rather than returning it to the queue. This
   resolves the user-visible promotion/failure behavior, not the exact provider-hook
   or storage transaction implementing it. Do not imply proven remote consumption.
+- Grilling decision 8: owner deferred search; a first-party search feature can later
+  replace browser Find. No full-history search/index work is required now, and
+  virtualization must not be defeated merely to make browser Find exhaustive.
 - Owner explicitly chose continuous formatting rather than a separate paged
   plaintext fallback for very large replies. Earlier suggested 128 KiB/message and
   2 MiB cache numbers were speculative and are **not selected requirements**.
@@ -433,9 +439,9 @@ survive browser reload/restart. Tool inspection defaults to model-facing content
 including reductions, not raw execution I/O. Pruner/producer owns omission and
 recall policy; do not expand this work into a pruning system. Pending user input
 must remain separate until sending a containing model request begins; a subsequent
-failure stays in the conversation rather than requeueing the input. Next resolve
-full-history search expectations before choosing retrieval/index structure, then
-continue content identity/order, streaming and eviction interactions.
+failure stays in the conversation rather than requeueing the input. Full-history
+search is deferred. Next resolve selection/copy across unloaded spans, then continue
+content identity/order, streaming and other eviction interactions.
 Ask only unresolved questions,
 not questions already settled by position-preservation requirements. Continue down
 the dependency tree and keep recommendations distinct from decisions.

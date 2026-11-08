@@ -39,7 +39,7 @@ public sealed class ProviderMigrationTests {
     ProviderConnection connection = new(Guid.NewGuid(), "synthetic", ProviderRoute.OpenAI,
         LlmApi.OpenAIResponses, new Uri("https://api.example.invalid/v1/"), AuthenticationMethod.ApiKey);
     using (UrdStore store = UrdStore.Open(database.Path)) {
-      Assert.Equal(6L, database.Scalar("PRAGMA user_version;")); // raw-sql: successful upgrade version is the subject under test
+      Assert.Equal(7L, database.Scalar("PRAGMA user_version;")); // raw-sql: successful upgrade version is the subject under test
       AssertLegacyEvidence();
       Assert.Empty(store.Providers.List());
       Assert.Empty(StoredProviders.ReadHostIds(database));
@@ -74,7 +74,7 @@ public sealed class ProviderMigrationTests {
   [Theory]
   [InlineData("provider_connections")]
   [InlineData("provider_host")]
-  public void SchemaSixVerifiesProviderTableShapeRatherThanSilentlyRecreatingIt(string table) {
+  public void SchemaSevenVerifiesProviderTableShapeRatherThanSilentlyRecreatingIt(string table) {
     using var database = new TemporaryDatabase();
     using (UrdStore store = UrdStore.Open(database.Path))
       store.Sessions.CreatePrimary(SchemaFiveDatabase.SessionId);
@@ -82,7 +82,7 @@ public sealed class ProviderMigrationTests {
     Assert.Throws<SqliteException>(() => {
       using UrdStore store = UrdStore.Open(database.Path);
     });
-    Assert.Equal(6L, database.Scalar("PRAGMA user_version;")); // raw-sql: rejecting malformed current schema must not rewrite its version
+    Assert.Equal(7L, database.Scalar("PRAGMA user_version;")); // raw-sql: rejecting malformed current schema must not rewrite its version
     Assert.Equal(SchemaFiveDatabase.SessionId, Assert.Single(StoredSessions.Read(database)).Id);
   }
 }

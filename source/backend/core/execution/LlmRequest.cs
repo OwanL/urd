@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using Urd.Core.Providers;
 
 namespace Urd.Core.Execution;
 
@@ -23,4 +24,5 @@ internal sealed record LlmRequestResult(
     Guid RequestId,
     ExecutionOutcome Outcome,
     string? Error = null,
-    IReadOnlyList<LlmToolCall>? ToolCalls = null);
+    IReadOnlyList<LlmToolCall>? ToolCalls = null,
+    LlmProviderResponse? ProviderResponse = null);

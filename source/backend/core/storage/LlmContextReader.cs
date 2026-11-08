@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.AI;
+using Urd.Core.Providers;
 
 namespace Urd.Core.Storage;
 
@@ -26,15 +27,20 @@ internal sealed class LlmContextReader(Database database) {
           UNION ALL
           SELECT q.run_ordinal, q.request_index, q.request_id, 1, o.batch_index, o.text_utf8, NULL, NULL, NULL
           FROM requests q JOIN execution_output o ON o.request_id = q.request_id
+          WHERE NOT EXISTS (SELECT 1 FROM execution_provider_context c WHERE c.request_id = q.request_id)
           UNION ALL
           SELECT q.run_ordinal, q.request_index, q.request_id, 2, t.call_index, NULL,
               t.call_id, t.name, t.arguments_json
           FROM requests q JOIN execution_tools t ON t.request_id = q.request_id
+          WHERE NOT EXISTS (SELECT 1 FROM execution_provider_context c WHERE c.request_id = q.request_id)
           UNION ALL
           SELECT q.run_ordinal, q.request_index, q.request_id, 3, t.call_index, NULL,
               t.call_id, t.name, t.result_json
           FROM requests q JOIN execution_tools t ON t.request_id = q.request_id
           WHERE t.result_json IS NOT NULL
+          UNION ALL
+          SELECT q.run_ordinal, q.request_index, q.request_id, 4, 0, NULL, NULL, NULL, c.response_json
+          FROM requests q JOIN execution_provider_context c ON c.request_id = q.request_id
       ) SELECT request_id, kind, text_utf8, call_id, name, json FROM contents
       ORDER BY run_ordinal, request_index, kind, content_index;
       """,
@@ -43,13 +49,15 @@ internal sealed class LlmContextReader(Database database) {
     var messages = new List<ChatMessage>();
     string? previousRequest = null;
     StringBuilder? text = null;
+    ChatMessage? providerMessage = null;
     var calls = new List<AIContent>();
     var results = new List<AIContent>();
     while (reader.Read()) {
       string currentRequest = reader.GetString(0);
       if (previousRequest != currentRequest) {
-        AddResponse(messages, text, calls, results);
+        AddResponse(messages, text, calls, results, providerMessage);
         text = null;
+        providerMessage = null;
         calls.Clear();
         results.Clear();
         previousRequest = currentRequest;
@@ -70,16 +78,22 @@ internal sealed class LlmContextReader(Database database) {
           results.Add(new FunctionResultContent(reader.GetString(3),
               JsonSerializer.Deserialize<JsonElement>(reader.GetString(5))));
           break;
+        case 4:
+          providerMessage = LlmProviderContext.Restore(
+              JsonSerializer.Deserialize<LlmProviderResponse>(reader.GetString(5))!);
+          break;
       }
     }
 
-    AddResponse(messages, text, calls, results);
+    AddResponse(messages, text, calls, results, providerMessage);
     return messages.AsReadOnly();
   }
 
   private static void AddResponse(List<ChatMessage> messages, StringBuilder? text,
-      List<AIContent> calls, List<AIContent> results) {
-    if (text is not null || calls.Count > 0) {
+      List<AIContent> calls, List<AIContent> results, ChatMessage? providerMessage) {
+    if (providerMessage is not null) {
+      messages.Add(providerMessage);
+    } else if (text is not null || calls.Count > 0) {
       var contents = new List<AIContent>();
       if (text is not null)
         contents.Add(new TextContent(text.ToString()));

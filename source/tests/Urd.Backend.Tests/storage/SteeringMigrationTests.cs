@@ -50,7 +50,7 @@ public sealed class SteeringMigrationTests {
       Assert.Equal(Submission, Assert.Single(messages, message => message.Role == ChatRole.User).MessageId);
       Assert.Equal(Output, Assert.Single(messages, message => message.Role == ChatRole.Assistant).MessageId);
       Assert.Null(database.Scalar("PRAGMA foreign_key_check;")); // raw-sql: migration must preserve referential integrity
-      Assert.Equal(6L, database.Scalar("PRAGMA user_version;")); // raw-sql: the upgraded schema version is under test
+      Assert.Equal(7L, database.Scalar("PRAGMA user_version;")); // raw-sql: the upgraded schema version is under test
     }
 
     using UrdStore reopened = UrdStore.Open(database.Path);

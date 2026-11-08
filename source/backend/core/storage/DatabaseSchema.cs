@@ -4,7 +4,7 @@ namespace Urd.Core.Storage;
 
 // Initializes connection pragmas and creates, verifies, or upgrades the schema.
 internal static class DatabaseSchema {
-  private const int SchemaVersion = 6;
+  private const int SchemaVersion = 7;
 
   internal static void Initialize(SqliteConnection connection) {
     using SqliteCommand command = connection.CreateCommand();
@@ -47,7 +47,25 @@ internal static class DatabaseSchema {
     EnsureSteeringSchema(command, version);
     EnsureCreationSchema(command, version);
     EnsureProviderSchema(command, version);
+    EnsureProviderContextSchema(command, version);
     transaction.Commit();
+  }
+
+  private static void EnsureProviderContextSchema(SqliteCommand command, long version) {
+    if (version >= 7) {
+      command.CommandText = "SELECT request_id, response_json FROM execution_provider_context LIMIT 0;";
+      command.ExecuteNonQuery();
+      return;
+    }
+
+    command.CommandText = """
+      CREATE TABLE execution_provider_context (
+          request_id TEXT PRIMARY KEY NOT NULL REFERENCES execution_requests(request_id),
+          response_json TEXT NOT NULL
+      ) STRICT;
+      PRAGMA user_version = 7;
+      """;
+    command.ExecuteNonQuery();
   }
 
   private static void EnsureProviderSchema(SqliteCommand command, long version) {

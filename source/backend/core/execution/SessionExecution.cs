@@ -121,7 +121,7 @@ internal sealed class SessionExecution : IDisposable {
     await CleanUpAsync(requestStop, pendingRead, updates, failure);
     LlmRequestResult outcome = ToRequestResult(request.RequestId, failure);
     return outcome.Outcome == ExecutionOutcome.Completed
-        ? outcome with { ToolCalls = response.ToolCalls }
+        ? outcome with { ToolCalls = response.ToolCalls, ProviderResponse = response.ProviderResponse }
         : outcome;
   }
 

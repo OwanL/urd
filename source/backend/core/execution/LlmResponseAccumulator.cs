@@ -1,22 +1,37 @@
 using System.Text.Json;
 using Microsoft.Extensions.AI;
+using Urd.Core.Providers;
 
 namespace Urd.Core.Execution;
 
-// Accepts complete fake-LLM content only; provider-native deltas are not supported.
+// Keeps visible text separate from completed calls and opaque provider continuation state.
 internal sealed class LlmResponseAccumulator(LlmResponseWriter writer) {
   private const int ToolCallLimit = 16;
   private const int JsonByteLimit = 16 * 1024;
   private readonly List<LlmToolCall> calls = [];
   private readonly HashSet<string> callIds = new(StringComparer.Ordinal);
   private ChatFinishReason? finishReason;
+  private bool hasReasoning;
 
   internal IReadOnlyList<LlmToolCall> ToolCalls => calls.ToArray();
+  internal LlmProviderResponse? ProviderResponse { get; private set; }
 
   internal async Task AppendAsync(ChatResponseUpdate update) {
+    if (ProviderResponse is not null)
+      throw new InvalidDataException("The response contained updates after its provider context.");
+    LlmProviderResponse? providerResponse = LlmProviderContext.GetResponse(update);
+    if (providerResponse is not null && (update.FinishReason is null || finishReason is not null))
+      throw new InvalidDataException("Provider context requires one final response update.");
+
     foreach (AIContent content in update.Contents) {
       if (content is UsageContent)
         continue;
+      if (content is TextReasoningContent) {
+        hasReasoning = true;
+        if (finishReason is not null)
+          throw new InvalidDataException("The response contained reasoning after its finish reason.");
+        continue;
+      }
 
       if (content is TextContent text) {
         if (finishReason is not null && text.Text.Length != 0)
@@ -42,12 +57,17 @@ internal sealed class LlmResponseAccumulator(LlmResponseWriter writer) {
     if ((reason == ChatFinishReason.ToolCalls) != (calls.Count != 0))
       throw new InvalidDataException("The finish reason did not match the response's tool calls.");
 
+    if (providerResponse is not null)
+      _ = LlmProviderContext.Restore(providerResponse);
     finishReason = reason;
+    ProviderResponse = providerResponse;
   }
 
   internal Task FinishAsync() {
     if (finishReason is null)
       throw new InvalidDataException("The response ended without a supported finish reason.");
+    if (hasReasoning && ProviderResponse is null)
+      throw new InvalidDataException("The response contained reasoning without provider context.");
 
     return writer.FinishResponseAsync();
   }

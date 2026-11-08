@@ -25,7 +25,7 @@ public sealed class SessionIdentityTests {
       Assert.Equal(created.Id, store.Sessions.Read(created.Id)!.Id);
     }
 
-    Assert.Equal(6L, database.Scalar("PRAGMA user_version;")); // raw-sql: applied schema version is the subject under test
+    Assert.Equal(7L, database.Scalar("PRAGMA user_version;")); // raw-sql: applied schema version is the subject under test
     Assert.Equal("wal", database.Scalar("PRAGMA journal_mode;")); // raw-sql: journal mode is database configuration under test
     using UrdStore reopened = UrdStore.Open(database.Path);
     var reopenedManager = new SessionManager(reopened, client);
@@ -127,13 +127,13 @@ public sealed class SessionIdentityTests {
       store.Sessions.CreatePrimary(Guid.NewGuid());
     }
 
-    database.Execute("PRAGMA user_version = 7;");
+    database.Execute("PRAGMA user_version = 8;");
     Assert.Throws<NotSupportedException>(() => UrdStore.Open(database.Path));
     using (FileStream file = File.Open(database.Path, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) {
       Assert.True(file.Length > 0);
     }
 
-    Assert.Equal(7L, database.Scalar("PRAGMA user_version;")); // raw-sql: rejecting a newer schema must not rewrite it
+    Assert.Equal(8L, database.Scalar("PRAGMA user_version;")); // raw-sql: rejecting a newer schema must not rewrite it
     Assert.Single(StoredSessions.Read(database));
   }
 

@@ -1,5 +1,7 @@
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Urd.Core.Execution;
+using Urd.Core.Providers;
 
 namespace Urd.Core.Storage;
 
@@ -70,18 +72,29 @@ internal sealed class LlmResponseStorage(Database database) {
         || (calls.Length != 0 && completion.Outcome != ExecutionOutcome.Completed))
       throw new ArgumentException("Only a completed response may authorize up to 16 distinct, named tool calls.", nameof(completion));
 
-    return database.Write(transaction => CompleteRequest(transaction, sessionId, executionId, historyRevision, completion, calls));
+    string? providerResponseJson = null;
+    if (completion.ProviderResponse is { } response) {
+      if (completion.Outcome != ExecutionOutcome.Completed)
+        throw new ArgumentException("Only a completed response may retain provider context.", nameof(completion));
+      _ = LlmProviderContext.Restore(response);
+      providerResponseJson = JsonSerializer.Serialize(response);
+    }
+
+    return database.Write(transaction => CompleteRequest(transaction, sessionId, executionId,
+        historyRevision, completion, calls, providerResponseJson));
   }
 
   private bool CompleteRequest(SqliteTransaction transaction, Guid sessionId, Guid executionId,
-      long historyRevision, LlmRequestResult completion, (string CallId, string Name, string Arguments)[] calls) {
+      long historyRevision, LlmRequestResult completion, (string CallId, string Name, string Arguments)[] calls,
+      string? providerResponseJson) {
     bool alreadyCompleted;
     using (SqliteCommand read = database.Command(transaction, """
       SELECT q.outcome, q.error, q.output_final, r.stopping, r.outcome,
           EXISTS (SELECT 1 FROM execution_requests later
-              WHERE later.run_id = $run AND later.request_index > q.request_index)
+              WHERE later.run_id = $run AND later.request_index > q.request_index), c.response_json
       FROM execution_requests q JOIN execution_runs r ON r.run_id = q.run_id
       JOIN sessions s ON s.session_id = r.session_id
+      LEFT JOIN execution_provider_context c ON c.request_id = q.request_id
       WHERE r.session_id = $session AND r.run_id = $run AND q.request_id = $request
           AND r.history_revision = $revision AND s.history_revision = $revision;
       """,
@@ -103,7 +116,9 @@ internal sealed class LlmResponseStorage(Database database) {
       // An exact retry succeeds without rewriting the original evidence, even after settlement.
       alreadyCompleted = savedOutcome is not null;
       if (alreadyCompleted) {
-        if (savedOutcome != completion.Outcome || savedError != completion.Error)
+        string? savedProviderResponseJson = reader.IsDBNull(6) ? null : reader.GetString(6);
+        if (savedOutcome != completion.Outcome || savedError != completion.Error
+            || savedProviderResponseJson != providerResponseJson)
           return false;
       } else {
         if (executionSettled || reader.GetInt32(5) != 0)
@@ -135,6 +150,12 @@ internal sealed class LlmResponseStorage(Database database) {
         "UPDATE execution_inputs SET outcome = $outcome WHERE request_id = $request;",
         ("$outcome", (int)completion.Outcome), ("$request", completion.RequestId));
     delivered.ExecuteNonQuery();
+    if (providerResponseJson is not null) {
+      using SqliteCommand retain = database.Command(transaction, """
+        INSERT INTO execution_provider_context (request_id, response_json) VALUES ($request, $response);
+        """, ("$request", completion.RequestId), ("$response", providerResponseJson));
+      retain.ExecuteNonQuery();
+    }
     for (int index = 0; index < calls.Length; index++) {
       var call = calls[index];
       using SqliteCommand authorize = database.Command(transaction, """

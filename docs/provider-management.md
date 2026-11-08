@@ -3,7 +3,9 @@
 The local server manages saved **ChatGPT subscription**, **OpenAI API-key** and
 **custom OpenAI-compatible** connections. ChatGPT uses Responses; custom endpoints
 choose Responses or Chat Completions, with an API key or no authentication.
-This does not connect providers to chat execution or add a provider UI, agent tools,
+A shared request-only model client now supports conversation consumers as well as future
+pruning, compaction and title operations. Provider selection/HTTP/UI composition is a separate
+integration checkpoint; this does not add those auxiliary operations, discovery tools,
 other subscription providers or native Ollama/Anthropic adapters.
 
 ## Storage and ownership
@@ -105,6 +107,48 @@ It clears local tokens/catalog while retaining registration and host identity. A
 `remoteRevocationConfirmed` means no revocation was applicable; false means not confirmed. An
 interrupted disconnect stays fenced after restart and can be explicitly repeated.
 Remove only deletes local state; disconnect first when remote revocation is wanted.
+
+## Shared model requests
+
+`ProviderManager.CreateChatClient(expectedBinding)` returns a borrowed `IChatClient`.
+Construction is offline; requests supply `ChatOptions.ModelId` and optional
+`Reasoning.Effort`. Conversations and auxiliary operations share authentication, refresh,
+request validation and transport without inheriting each other's session state. Disposing
+a client view does not dispose the manager or another consumer's transport.
+
+Both Responses and compatible Chat Completions stream through the official SDK/MEAI
+adapter. Ordinary requests have no Urd wall-clock cutoff: callers can impose a deadline,
+and Stop, disconnect or shutdown still cancel and drain owned work. Diagnostics retain
+their separate two-minute limit. There are no automatic retries, fallback providers,
+provider-hosted conversations or tool execution inside the client. `GetResponseAsync`
+consumes the same guarded streaming path, not a second unvalidated implementation.
+
+Text streams incrementally. Executable calls, final completion and native context are
+withheld until the positive native terminal, complete SDK iteration/disposal, cancellation
+callback drain and final manager grant check all succeed. A changed binding cannot redirect
+a stale client to a new endpoint; a rename is harmless. Already accepted completion does
+not become invalid merely because the caller later replaces credentials.
+
+Supported requests are text/function/reasoning exchanges, with `store:false` and full
+history. Responses requests include encrypted reasoning for stateless continuation.
+ChatGPT function declarations use the permitted `urd` namespace; this is offline wire
+qualification, not live tool/discovery qualification. Unsupported content/options are
+rejected rather than silently omitted, including named speakers, hosted tools, raw option
+factories and explicit strict-function schema settings on the plan namespace path.
+Protocol support for a reasoning effort does not establish support by a particular model;
+current ID/name catalogs leave that compatibility unknown. No model-name heuristic fills it in.
+
+`LlmProviderContext` captures a versioned native response scoped to connection ID, binding
+generation, API and exact **requested** model ID, not the provider's resolved alias.
+Same-scope replay retains ordered native items, function IDs and private reasoning. An
+explicit changed scope retains portable visible text/calls while omitting private reasoning;
+nonportable visible content fails explicitly. Native payloads have a 4 MiB UTF-8 limit and
+are rejected rather than truncated. The codec retains appended-definition representations
+without implementing a discovery policy. Schema 7 stores this envelope in
+`execution_provider_context`, atomically with successful request completion and tool-call
+authorization. Context reconstruction restores it instead of flattening native history;
+legacy responses remain supported. Tool results remain paired and historical effects are
+never replayed to repair context. Private reasoning is not appended to public transcript text.
 
 ## Qualification
 

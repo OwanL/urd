@@ -156,7 +156,7 @@ public sealed class SessionListingStorageTests {
       Assert.Equal(new[] { Id(4), Id(3), Id(2), Id(1) }, store.Sessions.ListPrimaryIds(null).SessionIds);
     }
 
-    Assert.Equal(6L, database.Scalar("PRAGMA user_version;")); // raw-sql: successful schema-four upgrade applies the current schema
+    Assert.Equal(7L, database.Scalar("PRAGMA user_version;")); // raw-sql: successful schema-four upgrade applies the current schema
     Assert.Equal(root, database.Scalar("SELECT rootpage FROM sqlite_schema WHERE name = 'sessions';")); // raw-sql: existing root table was not rebuilt
     Assert.Null(database.Scalar("PRAGMA foreign_key_check;")); // raw-sql: original execution evidence and new metadata retain valid foreign keys
     using UrdStore reopened = UrdStore.Open(database.Path);
@@ -171,7 +171,7 @@ public sealed class SessionListingStorageTests {
       store.Sessions.CreatePrimary(Id(1));
     database.Execute("DROP TABLE session_creation; CREATE TABLE session_creation (unrelated TEXT);");
     Assert.Throws<SqliteException>(() => UrdStore.Open(database.Path));
-    Assert.Equal(6L, database.Scalar("PRAGMA user_version;")); // raw-sql: invalid current schema must not be silently recreated
+    Assert.Equal(7L, database.Scalar("PRAGMA user_version;")); // raw-sql: invalid current schema must not be silently recreated
     Assert.Equal(Id(1), Assert.Single(StoredSessions.Read(database)).Id);
   }
 

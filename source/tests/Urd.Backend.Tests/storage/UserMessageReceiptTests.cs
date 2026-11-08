@@ -200,7 +200,7 @@ public sealed class UserMessageReceiptTests {
       Assert.Null(store.UserMessages.ReadReceipt(sessionId, Guid.NewGuid()));
     }
 
-    Assert.Equal(6L, database.Scalar("PRAGMA user_version;")); // raw-sql: the migrated schema version is the subject under test
+    Assert.Equal(7L, database.Scalar("PRAGMA user_version;")); // raw-sql: the migrated schema version is the subject under test
     using UrdStore reopened = UrdStore.Open(database.Path);
     Assert.Equal(7L, reopened.Sessions.Read(sessionId)!.HistoryRevision);
   }

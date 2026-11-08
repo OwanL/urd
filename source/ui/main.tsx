@@ -1,4 +1,5 @@
 import { render } from "preact";
+import "./base.css";
 import { Workspace } from "./app/Workspace.tsx";
 
 const root = document.getElementById("app");

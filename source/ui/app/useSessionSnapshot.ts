@@ -2,7 +2,7 @@ import { useEffect, useState } from "preact/hooks";
 import { SessionClient } from "../sessions/SessionClient.ts";
 import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
 
-export function useActiveChat(
+export function useSessionSnapshot(
   client: SessionClient,
   sessionId: string | null,
   refresh: number,

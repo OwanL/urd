@@ -1,0 +1,33 @@
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.icon-button:hover:not(:disabled):not([aria-disabled="true"]) {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.icon-button[aria-disabled="true"] {
+  cursor: default;
+}
+
+.icon-button:active:not(:disabled):not([aria-disabled="true"]) {
+  background: #353535;
+}
+
+@media (pointer: coarse) {
+  .icon-button {
+    min-width: 36px;
+    min-height: 36px;
+  }
+}

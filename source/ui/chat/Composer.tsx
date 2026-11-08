@@ -1,10 +1,10 @@
 import type { TargetedKeyboardEvent } from "preact";
 import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
 import { IconButton } from "../components/IconButton.tsx";
-import type { ComposerProps } from "./ComposerModels.ts";
+import type { ComposerProps } from "./ComposerTypes.ts";
 import { ModelPicker } from "./ModelPicker.tsx";
-import { ReasoningPicker } from "./ReasoningPicker.tsx";
 import "./composer.css";
+import { ReasoningPicker } from "./ReasoningPicker.tsx";
 
 function resizeInput(input: HTMLTextAreaElement) {
   input.style.height = "0px";

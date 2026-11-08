@@ -3,7 +3,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "preact/hooks";
 import { Icon } from "../components/Icon.tsx";
 import { Popover, scrollOptionIntoView } from "../components/Popover.tsx";
 import { Tooltip } from "../components/Tooltip.tsx";
-import type { ComposerModel, ModelPickerProps } from "./ComposerModels.ts";
+import type { ComposerModel, ModelPickerProps } from "./ComposerTypes.ts";
 
 export function ModelPicker({
   models,

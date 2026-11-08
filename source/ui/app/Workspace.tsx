@@ -68,7 +68,7 @@ export function Workspace() {
     if (error) {
       storageProblem.current = "cleanup";
       setStorageError(`Workspace was saved, but old draft data could not be cleared: ${error}`);
-    } else if (storageProblem.current === "cleanup") {
+    } else if (storageProblem.current === "write" || storageProblem.current === "cleanup") {
       storageProblem.current = null;
       setStorageError(null);
     }

@@ -11,6 +11,12 @@
   min-width: 0;
 }
 
+.tooltip-detail {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
 .popover {
   position: fixed;
   inset: auto;

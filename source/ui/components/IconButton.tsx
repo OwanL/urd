@@ -2,6 +2,7 @@ import type { ButtonHTMLAttributes, ComponentChildren } from "preact";
 import { Icon } from "./Icon.tsx";
 import type { IconName } from "./Icon.tsx";
 import { Tooltip } from "./Tooltip.tsx";
+import "./icon-button.css";
 import type { PopoverPlacement } from "./PopoverGeometry.ts";
 
 interface IconButtonProps extends Omit<

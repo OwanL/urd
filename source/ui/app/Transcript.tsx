@@ -3,6 +3,7 @@ import { SessionClient } from "../sessions/SessionClient.ts";
 import { IconButton } from "../components/IconButton.tsx";
 import type { MessageContentCursor, MessagePreview } from "../sessions/Messages.ts";
 import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
+import "../chat/transcript.css";
 
 function sameCursor(left: MessageContentCursor, right: MessageContentCursor): boolean {
   return (

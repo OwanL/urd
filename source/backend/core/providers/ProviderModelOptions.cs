@@ -57,6 +57,7 @@ internal static class ProviderModelOptions {
       writer.WriteStartObject();
       writer.WriteString("type", "namespace");
       writer.WriteString("name", "urd");
+      writer.WriteString("description", "Tools provided by Urd.");
       writer.WritePropertyName("tools");
       writer.WriteStartArray();
       foreach (var function in tools.Cast<AIFunctionDeclaration>()) {

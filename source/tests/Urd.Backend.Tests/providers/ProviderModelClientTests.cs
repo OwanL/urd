@@ -142,6 +142,7 @@ public sealed class ProviderModelClientTests {
     var tool = Assert.Single(body.RootElement.GetProperty("tools").EnumerateArray());
     Assert.Equal("namespace", tool.GetProperty("type").GetString());
     Assert.Equal("urd", tool.GetProperty("name").GetString());
+    Assert.False(string.IsNullOrWhiteSpace(tool.GetProperty("description").GetString()));
     var function = Assert.Single(tool.GetProperty("tools").EnumerateArray());
     Assert.Equal("function", function.GetProperty("type").GetString());
     Assert.Equal("lookup", function.GetProperty("name").GetString());

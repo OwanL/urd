@@ -55,8 +55,10 @@ internal static class LlmProviderContext {
     return Freeze(scope, stream);
   }
 
-  internal static LlmProviderResponse CaptureChat(LlmProviderScope scope, ChatMessage message) {
+  internal static LlmProviderResponse CaptureChat(LlmProviderScope scope, ChatMessage message,
+      string reasoningField = "reasoning_content") {
     ValidateScope(scope);
+    Require(reasoningField is "reasoning_content" or "reasoning");
     Require(scope.Api == LlmApi.OpenAIChatCompletions && message.Role == ChatRole.Assistant);
     AssistantChatMessage native;
     if (message.RawRepresentation is AssistantChatMessage assistant) {
@@ -78,7 +80,7 @@ internal static class LlmProviderContext {
           writer.WriteStartObject();
           foreach (JsonProperty property in document.RootElement.EnumerateObject())
             property.WriteTo(writer);
-          writer.WriteString("reasoning_content", reasoning);
+          writer.WriteString(reasoningField, reasoning);
           writer.WriteEndObject();
         }
         CheckSize(stream.Length);
@@ -206,7 +208,7 @@ internal static class LlmProviderContext {
 
   private static void ExtractChat(JsonElement item, IList<AIContent> contents, bool portable) {
     Require(RequiredString(item, "role") == "assistant");
-    RequireKnown(item, "role", "content", "tool_calls", "reasoning_content", "name", "refusal", "function_call", "audio");
+    RequireKnown(item, "role", "content", "tool_calls", "reasoning_content", "reasoning", "name", "refusal", "function_call", "audio");
     foreach (string unsupported in new[] { "name", "refusal", "function_call", "audio" })
       Require(!item.TryGetProperty(unsupported, out JsonElement value) || value.ValueKind == JsonValueKind.Null);
 
@@ -214,8 +216,17 @@ internal static class LlmProviderContext {
       ExtractChatText(content, contents);
     if (item.TryGetProperty("tool_calls", out JsonElement calls) && calls.ValueKind != JsonValueKind.Null)
       ExtractChatCalls(calls, contents);
-    if (!portable && item.TryGetProperty("reasoning_content", out JsonElement reasoning) && reasoning.ValueKind != JsonValueKind.Null)
-      contents.Add(new TextReasoningContent(reasoning.GetString()));
+    string? reasoning = null;
+    foreach (string field in new[] { "reasoning_content", "reasoning" }) {
+      if (!item.TryGetProperty(field, out JsonElement value) || value.ValueKind == JsonValueKind.Null) continue;
+      Require(value.ValueKind == JsonValueKind.String);
+      string? text = value.GetString();
+      if (string.IsNullOrEmpty(text)) continue;
+      Require(reasoning is null);
+      reasoning = text;
+    }
+    if (!portable && reasoning is not null)
+      contents.Add(new TextReasoningContent(reasoning));
   }
 
   private static void ExtractChatText(JsonElement content, IList<AIContent> contents) {

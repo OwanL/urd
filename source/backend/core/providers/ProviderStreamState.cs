@@ -7,7 +7,7 @@ using OpenAI.Responses;
 using ChatFinishReason = Microsoft.Extensions.AI.ChatFinishReason;
 using ChatMessage = Microsoft.Extensions.AI.ChatMessage;
 
-#pragma warning disable OPENAI001, MEAI001
+#pragma warning disable OPENAI001, MEAI001, SCME0001 // Read compatible reasoning fields through the pinned SDK patch API.
 
 namespace Urd.Core.Providers;
 
@@ -22,6 +22,7 @@ internal sealed class ProviderStreamState(LlmProviderScope scope, IEnumerable<AI
   private ResponseItem[]? output;
   private ChatResponseUpdate? terminal;
   private bool toolFinish;
+  private string? reasoningField;
   private int contentBytes;
   private int completedBytes;
   private int argumentBytes;
@@ -100,6 +101,7 @@ internal sealed class ProviderStreamState(LlmProviderScope scope, IEnumerable<AI
       if (update.RawRepresentation is not null || update.Contents.Any(content => content is not FunctionCallContent)) throw Invalid();
       return;
     }
+    AcceptChatReasoning(native, update);
     bool hasContent = native.ContentUpdate.Count != 0 || native.ToolCallUpdates.Count != 0 ||
         native.RefusalUpdate is not null || native.OutputAudioUpdate is not null ||
         update.Contents.Any(content => content is TextContent or TextReasoningContent);
@@ -119,6 +121,26 @@ internal sealed class ProviderStreamState(LlmProviderScope scope, IEnumerable<AI
     terminal = update;
   }
 
+  private void AcceptChatReasoning(StreamingChatCompletionUpdate native, ChatResponseUpdate update) {
+    string? alternate = ReadReasoning(native, "$.choices[0].delta.reasoning"u8);
+    string? standard = ReadReasoning(native, "$.choices[0].delta.reasoning_content"u8);
+    bool hasAlternate = !string.IsNullOrEmpty(alternate);
+    bool hasStandard = !string.IsNullOrEmpty(standard);
+    if (hasAlternate && hasStandard) throw Invalid();
+    if (!hasAlternate && !hasStandard) return;
+    string field = hasAlternate ? "reasoning" : "reasoning_content";
+    if (reasoningField is not null && reasoningField != field) throw Invalid();
+    reasoningField = field;
+    // MEAI already extracts reasoning_content; the compatible reasoning alias needs explicit preservation.
+    if (hasAlternate) {
+      if (update.Contents.Any(content => content is TextReasoningContent)) throw Invalid();
+      update.Contents.Add(new TextReasoningContent(alternate));
+    }
+  }
+
+  private static string? ReadReasoning(StreamingChatCompletionUpdate native, ReadOnlySpan<byte> path) =>
+      native.Patch.TryGetJson(path, out ReadOnlyMemory<byte> json) ? JsonSerializer.Deserialize<string>(json.Span) : null;
+
   internal ChatResponseUpdate Complete() {
     if (terminal is null) throw new ProviderOperationException(ProviderFailure.IncompleteResponse);
     var calls = scope.Api == LlmApi.OpenAIResponses ? ResponseCalls() : chatCalls;
@@ -137,7 +159,7 @@ internal sealed class ProviderStreamState(LlmProviderScope scope, IEnumerable<AI
       var message = new ChatMessage(ChatRole.Assistant, text.ToString());
       if (reasoning.Length > 0) message.Contents.Add(new TextReasoningContent(reasoning.ToString()));
       foreach (var call in calls) message.Contents.Add(call);
-      response = LlmProviderContext.CaptureChat(scope, message);
+      response = LlmProviderContext.CaptureChat(scope, message, reasoningField ?? "reasoning_content");
     }
     var final = new ChatResponseUpdate(ChatRole.Assistant, calls.Cast<AIContent>().ToList()) {
       ResponseId = terminal.ResponseId,
@@ -189,4 +211,4 @@ internal sealed class ProviderStreamState(LlmProviderScope scope, IEnumerable<AI
   private static ProviderOperationException Invalid() => new(ProviderFailure.InvalidProviderResponse);
 }
 
-#pragma warning restore OPENAI001, MEAI001
+#pragma warning restore OPENAI001, MEAI001, SCME0001

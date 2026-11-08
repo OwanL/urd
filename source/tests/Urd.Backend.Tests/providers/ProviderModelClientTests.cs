@@ -151,6 +151,44 @@ public sealed class ProviderModelClientTests {
     Assert.Single(body.RootElement.GetProperty("input").EnumerateArray());
   }
 
+  [Theory]
+  [InlineData("reasoning_content")]
+  [InlineData("reasoning")]
+  public async Task CompatibleReasoningIsStreamedAndCapturedUnderItsOriginalField(string field) {
+    using var handler = new ScriptedOpenAIHandler(ChatCalls(reasoning: true).Replace("reasoning_content", field));
+    using var http = new HttpClient(handler);
+    var client = new ProviderModelClient(http);
+    var state = State(LlmApi.OpenAIChatCompletions);
+    var options = Options(tools: true);
+    var updates = await Read(client, state, options);
+    Assert.Equal("thought", string.Concat(updates.SelectMany(update => update.Contents).OfType<TextReasoningContent>().Select(content => content.Text)));
+    var response = Assert.IsType<LlmProviderResponse>(LlmProviderContext.GetResponse(updates[^1]));
+    using var payload = JsonDocument.Parse(response.Json);
+    Assert.Equal("thought", payload.RootElement.GetProperty("message").GetProperty(field).GetString());
+    var restored = LlmProviderContext.Restore(response);
+    Assert.Single(restored.Contents.OfType<FunctionCallContent>());
+    ChatMessage[] history = [.. History(), restored, new(ChatRole.Tool, [new FunctionResultContent("call_fixture", "value")])];
+    foreach (bool changedModel in new[] { false, true }) {
+      options.ModelId = changedModel ? "different-model" : "fixture-model";
+      await foreach (var update in client.GetStreamingResponseAsync(state, history, options, default))
+        Assert.NotNull(update);
+      using var request = JsonDocument.Parse(handler.Requests[^1].Body);
+      var assistant = Assert.Single(request.RootElement.GetProperty("messages").EnumerateArray(),
+          message => message.GetProperty("role").GetString() == "assistant");
+      Assert.Equal(!changedModel, assistant.TryGetProperty(field, out var value));
+      if (!changedModel) Assert.Equal("thought", value.GetString());
+      Assert.Single(assistant.GetProperty("tool_calls").EnumerateArray());
+    }
+  }
+
+  [Theory]
+  [InlineData("\"reasoning\":42")]
+  [InlineData("\"reasoning_content\":42")]
+  [InlineData("\"reasoning\":\"other\",\"reasoning_content\":\"thought\"")]
+  public async Task InvalidOrAmbiguousReasoningCannotAuthorizeCalls(string replacement) =>
+      await Rejected(ChatCalls(reasoning: true).Replace("\"reasoning_content\":\"thought\"", replacement),
+          ProviderFailure.InvalidProviderResponse, State(LlmApi.OpenAIChatCompletions), Options(tools: true));
+
   [Fact]
   public async Task PlanDoesNotSilentlyDropRequestedToolStrictness() {
     using var handler = new ScriptedOpenAIHandler(Responses());

@@ -161,6 +161,24 @@ public sealed class LlmProviderContextTests {
     Assert.Throws<NotSupportedException>(() => LlmProviderContext.Prepare([restored], Chat));
   }
 
+  [Theory]
+  [InlineData("reasoning_content")]
+  [InlineData("reasoning")]
+  public void ChatReasoningRetainsItsWireFieldOnlyWithinTheSameScope(string field) {
+    var message = new ChatMessage(ChatRole.Assistant, "answer");
+    message.Contents.Add(new TextReasoningContent("private thought"));
+    LlmProviderResponse response = Reload(LlmProviderContext.CaptureChat(Chat, message, field));
+    ChatMessage restored = LlmProviderContext.Restore(response);
+    Assert.Equal("private thought", Assert.Single(restored.Contents.OfType<TextReasoningContent>()).Text);
+    ChatMessage same = Assert.Single(LlmProviderContext.Prepare([restored], Chat));
+    using var wire = JsonDocument.Parse(ModelReaderWriter.Write(Assert.IsType<AssistantChatMessage>(same.RawRepresentation)));
+    Assert.Equal("private thought", wire.RootElement.GetProperty(field).GetString());
+    ChatMessage changed = Assert.Single(LlmProviderContext.Prepare([restored], Chat with { ModelId = "different-model" }));
+    Assert.Equal("answer", changed.Text);
+    Assert.Empty(changed.Contents.OfType<TextReasoningContent>());
+    Assert.Null(changed.RawRepresentation);
+  }
+
   [Fact]
   public void NamedSpeakersCannotSilentlyBecomeAnonymous() {
     var message = new ChatMessage(ChatRole.Assistant, "hello") { AuthorName = "reviewer" };

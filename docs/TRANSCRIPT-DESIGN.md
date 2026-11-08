@@ -54,6 +54,10 @@ Distinguish throughout:
   window when revisited. Preserve the reading anchor and following intent; keeping
   every open tab warm is not required. Owner suggested predictive warming on hover
   as a general interaction pattern, not something restricted to tabs.
+- Do not prematurely restrict long-distance text selection to local selection and
+  Copy buttons. Owner challenged that shortcut and suggested temporarily retaining
+  more content during selection. Investigate established selection/virtualization
+  techniques; no selection cap or implementation mechanism has been approved.
 - Session switching, input, scrolling and animations must be exceptionally
   responsive and lightweight. Preserve reading position, focus and drafts; no
   unintended jumps. Animation must not disguise layout instability.
@@ -260,6 +264,45 @@ Old measurements cannot be reused blindly after resize/zoom. Image dimensions
 should be available before decode where possible. Define selection/focus behavior
 when their content would otherwise be evicted, without allowing an unbounded pin.
 
+### Selection and virtualization — feasibility branch
+
+Owner challenged the proposed local-selection-only shortcut. Temporary retention
+is a valid candidate, not a reason to abandon normal selection. Retaining source
+text alone does not preserve native browser selection/copy when selected DOM is
+removed or replaced. Selection lifetime extends beyond pointer release, until the
+selection is cleared/replaced; streaming rerenders and keyboard extension matter too.
+
+Two approaches, supported by public documentation inspected on 2026-11-08:
+- **Keep selected content mounted:** expand the render range to include the selected
+  span while continuing normal virtualization elsewhere. TanStack Virtual's
+  [rangeExtractor](https://tanstack.com/virtual/latest/docs/api/virtualizer#rangeextractor)
+  permits rendering indexes outside the visible range. That is a mechanism for
+  retention, not a documented guarantee of correct selection. Within-message
+  virtualization must also retain relevant blocks; preserving endpoint rows alone
+  does not preserve omitted text between them.
+- **Represent selection independently of DOM:** CodeMirror 6 stores selection as
+  document positions in [editor state](https://codemirror.net/docs/guide/#selection)
+  while [rendering only a viewport](https://codemirror.net/docs/guide/#viewport).
+  Its document model supports extraction beyond rendered text. This is an editor
+  architecture, not a drop-in solution for a rich transcript: it owns a resident
+  document and handles selection/clipboard behavior. Urd would additionally need
+  lazy content retrieval and source-to-rendered text mapping. Do not claim this
+  example bounds source memory or establishes rich-clipboard fidelity.
+
+Recommendation, not selected implementation: qualify selected-span retention first,
+while keeping content identities/offsets independent of DOM. Do not disable all
+virtualization or decode unrelated offscreen images merely because selection exists.
+An arbitrarily large selected span can still exhaust memory; bounded logical-range
+selection is the more involved alternative if retention cannot meet the workload.
+No silent truncation, disappearing selection or arbitrary cap is approved.
+
+A small isolated feasibility probe could check cross-row/within-message selection,
+copy completeness after scrolling, pointer release, keyboard extension, streaming
+updates, reverse selection and memory release after deselection. This has not been
+run or approved as the next work phase; inspected documentation is not runtime proof.
+Whole-item copy actions remain complementary, not an approved substitute for normal
+selection. Clipboard operations themselves may need transient full payload memory.
+
 ### Markdown and large payloads
 
 Transport pages are not independent Markdown documents. Fences, lists, tables and
@@ -341,11 +384,12 @@ source, not by asking the owner. Update this document immediately after decision
    streaming parse strategy and memory ownership. Prove feasibility before choosing.
 6. **Interaction through eviction — current branch:** full-history search is
    explicitly deferred; owner accepts browser Find's limitation for now and may add
-   first-party search later. Do not design a search index/API in this phase. Next
-   resolve selection/copy across unloaded ranges. Recommend ordinary local selection
-   plus explicit whole-message/code copying initially, rather than requiring native
-   drag-selection through arbitrarily large unloaded spans. This recommendation is
-   not yet approved. Also resolve keyboard navigation, expanded details and resize.
+   first-party search later. Do not design a search index/API in this phase. Owner
+   challenged limiting selection and suggested temporary retention. Public docs
+   support render-range pinning and editor-owned logical selection as distinct
+   approaches; neither is qualified for Urd. Next decide whether to run an isolated
+   selection feasibility probe now or continue architecture discussion first. Also
+   resolve keyboard navigation, expanded details and resize.
 7. **On-demand payloads/media:** inspector lifecycle, large raw results, clipboard
    uploads, attachment publication/cleanup, image preview/viewer release, external
    URL loading policy. Display rendering does not imply provider image delivery.
@@ -416,6 +460,11 @@ shared-reference and cleanup failure cases; those are not implemented guarantees
 - Grilling decision 8: owner deferred search; a first-party search feature can later
   replace browser Find. No full-history search/index work is required now, and
   virtualization must not be defeated merely to make browser Find exhaustive.
+- Grilling challenge 9: owner expects investigation of ordinary long-distance
+  selection, suggesting temporary extra retention, rather than prematurely limiting
+  selection to a local window. Read-only public documentation research identified
+  render-range retention and model-owned selection patterns. No package, hard cap,
+  custom selection system or prototype implementation has been selected.
 - Owner explicitly chose continuous formatting rather than a separate paged
   plaintext fallback for very large replies. Earlier suggested 128 KiB/message and
   2 MiB cache numbers were speculative and are **not selected requirements**.
@@ -440,8 +489,10 @@ including reductions, not raw execution I/O. Pruner/producer owns omission and
 recall policy; do not expand this work into a pruning system. Pending user input
 must remain separate until sending a containing model request begins; a subsequent
 failure stays in the conversation rather than requeueing the input. Full-history
-search is deferred. Next resolve selection/copy across unloaded spans, then continue
-content identity/order, streaming and other eviction interactions.
+search is deferred. Local-only selection was challenged; investigate temporary
+selected-span retention versus model-owned selection. Public documentation research
+is recorded, but no runtime qualification has occurred. Current steering question:
+isolated selection probe now or continue architecture discussion first.
 Ask only unresolved questions,
 not questions already settled by position-preservation requirements. Continue down
 the dependency tree and keep recommendations distinct from decisions.

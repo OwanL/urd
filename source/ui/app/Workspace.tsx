@@ -43,7 +43,7 @@ export function Workspace() {
   const [initial] = useState(() => persistence.load());
   const [workspace, setWorkspace] = useState(initial.state);
   const current = useRef(workspace);
-  const storageProblem = useRef<"read" | "write" | null>(initial.error ? "read" : null);
+  const storageProblem = useRef<"read" | "write" | "cleanup" | null>(initial.error ? "read" : null);
   const [storageError, setStorageError] = useState<string | null>(initial.error);
   const [readRecovered, setReadRecovered] = useState(false);
   const [globalError, setGlobalError] = useState<string | null>(null);
@@ -75,6 +75,15 @@ export function Workspace() {
   const activeId = workspace.activeId;
   const chat = activeId ? workspace.chats[activeId] : undefined;
 
+  const reportCleanup = useCallback((error: string | null) => {
+    if (error) {
+      storageProblem.current = "cleanup";
+      setStorageError(`Workspace was saved, but old draft data could not be cleared: ${error}`);
+    } else if (storageProblem.current === "cleanup") {
+      storageProblem.current = null;
+      setStorageError(null);
+    }
+  }, []);
   const save = useCallback(
     (next: WorkspaceState, draftId?: string): boolean => {
       if (storageProblem.current === "read") return false;
@@ -86,7 +95,7 @@ export function Workspace() {
           const chat = next.chats[draftId];
           if (!chat) throw new Error("Draft chat is unavailable.");
           persistence.saveDraft(draftId, chat);
-        } else persistence.save(next);
+        } else reportCleanup(persistence.save(next).cleanupError);
         return true;
       } catch (cause) {
         storageProblem.current = "write";
@@ -94,7 +103,7 @@ export function Workspace() {
         return false;
       }
     },
-    [persistence],
+    [persistence, reportCleanup],
   );
   const updateChat = useCallback(
     (
@@ -126,15 +135,14 @@ export function Workspace() {
       setStorageError(null);
       return;
     }
-    if (storageProblem.current !== "write") return;
+    if (storageProblem.current !== "write" && storageProblem.current !== "cleanup") return;
     try {
-      persistence.save(current.current);
-      storageProblem.current = null;
-      setStorageError(null);
+      reportCleanup(persistence.save(current.current).cleanupError);
     } catch (cause) {
+      storageProblem.current = "write";
       setStorageError(`Workspace could not be saved: ${description(cause)}`);
     }
-  }, [persistence]);
+  }, [persistence, reportCleanup]);
   const open = useCallback(
     (id: string) => {
       const state = current.current;
@@ -148,7 +156,12 @@ export function Workspace() {
     [save],
   );
   const create = useCallback(async () => {
-    if (storageProblem.current !== null || createPending.current) return;
+    if (
+      storageProblem.current === "read" ||
+      storageProblem.current === "write" ||
+      createPending.current
+    )
+      return;
     // Persist the first visit before dispatch: reload must not retry an uncertain Create.
     if (!save(current.current)) return;
     createPending.current = true;
@@ -293,7 +306,12 @@ export function Workspace() {
   const reconcile = useCallback(
     async (id: string, retry: boolean) => {
       const original = current.current.chats[id]?.pending?.original;
-      if (!original || checks.current.has(id) || (retry && storageProblem.current !== null)) return;
+      if (
+        !original ||
+        checks.current.has(id) ||
+        (retry && (storageProblem.current === "read" || storageProblem.current === "write"))
+      )
+        return;
       if (!retry && document.hidden) return;
       const controller = retry ? null : new AbortController();
       if (controller) receiptReads.current.set(id, controller);
@@ -387,7 +405,8 @@ export function Workspace() {
     !snapshot.stopRequested &&
     !snapshot.admissionFenced &&
     !stopId &&
-    storageProblem.current === null,
+    storageProblem.current !== "read" &&
+    storageProblem.current !== "write",
   );
 
   async function send() {
@@ -517,7 +536,12 @@ export function Workspace() {
           label="New chat"
           hint={creating ? "Creating chat…" : "New chat"}
           placement="below"
-          disabled={creating || !ready || storageProblem.current !== null}
+          disabled={
+            creating ||
+            !ready ||
+            storageProblem.current === "read" ||
+            storageProblem.current === "write"
+          }
           aria-busy={creating}
           onClick={() => {
             void create();
@@ -566,7 +590,11 @@ export function Workspace() {
         <div class="workspace-error" role="alert">
           {storageError}{" "}
           <button type="button" onClick={retryStorage}>
-            {storageProblem.current === "read" ? "Retry read" : "Retry save"}
+            {storageProblem.current === "read"
+              ? "Retry read"
+              : storageProblem.current === "cleanup"
+                ? "Retry cleanup"
+                : "Retry save"}
           </button>
         </div>
       )}
@@ -635,7 +663,11 @@ export function Workspace() {
                       Check receipt
                     </button>
                     <button
-                      disabled={storageProblem.current !== null || checking[activeId]}
+                      disabled={
+                        storageProblem.current === "read" ||
+                        storageProblem.current === "write" ||
+                        checking[activeId]
+                      }
                       onClick={() => {
                         void reconcile(activeId, true);
                       }}

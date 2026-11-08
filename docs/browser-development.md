@@ -28,13 +28,16 @@ pointer cancellation, lost capture, blur and external order changes cancel the p
 There is no native drag payload to insert into the composer. Normal arrow/Home/End
 navigation and Delete-to-close remain available.
 
-Closing a tab hides it; the workspace retains its chat record, draft and uncertain Send
-journal in this browser tab's `sessionStorage`. Records are not automatically pruned:
-there is no chat-delete action, and removing a pending journal could lose an unresolved
-command. Ordinary draft edits write only that chat's draft record; command journals
-synchronously persist the complete workspace before dispatch. A storage failure blocks
-commands and offers an explicit retry. A failed initial read stays fail-closed until a
-retry can restore the saved workspace; corrupt data is never silently replaced.
+Closing a chat tab only hides it. Its record, draft and uncertain Send journal stay in
+this browser tab's `sessionStorage` until the browser tab ends; records are not
+automatically pruned because there is no chat-delete action and removing a pending
+journal could lose an unresolved command. Ordinary draft edits write only that chat's
+draft record. A full workspace save folds in and then removes stale draft records; a
+newer draft overlay is retained. Command journals synchronously save the complete
+workspace before dispatch. Failed reads/writes block commands and offer an explicit
+retry. If cleanup alone fails after a successful save, the saved state remains usable
+and cleanup can be retried. A failed initial read stays fail-closed until retry restores
+the workspace; corrupt data is never silently replaced.
 The palette uses neutral black/charcoal surfaces and grey controls; semantic error
 colours remain distinct. Rich transcript architecture is a separate workstream.
 

@@ -88,9 +88,10 @@ void test("a synchronous workspace journal wins ties with a stale draft overlay"
   assert.equal(restored.draft, "submitted");
   assert.equal(restored.pending?.status, "uncertain");
   assert.equal(restored.pending?.original.text, "submitted");
+  assert.equal(storage.getItem(`${key}.draft.${sessionId}`), null);
 });
 
-void test("draft overlays apply only when newer than the durable workspace snapshot", () => {
+void test("newer overlays survive a full save while incorporated overlays are removed", () => {
   const storage = new MemoryStorage();
   const saved = persistence(storage);
   const state = emptyWorkspace();
@@ -105,6 +106,29 @@ void test("draft overlays apply only when newer than the durable workspace snaps
   const later = { ...state, chats: { ...state.chats, [sessionId]: chat("cleared") } };
   saved.save(later);
   assert.equal(saved.load().state.chats[sessionId]?.draft, "cleared");
+  assert.equal(storage.getItem(`${key}.draft.${sessionId}`), null);
+});
+
+void test("cleanup failure keeps the durable workspace usable and can be retried", () => {
+  const storage = new MemoryStorage();
+  const saved = persistence(storage);
+  const state = emptyWorkspace();
+  state.tabs = [sessionId];
+  state.activeId = sessionId;
+  state.chats[sessionId] = chat("current draft");
+  storage.values.set(`${key}.draft.${sessionId}`, JSON.stringify(chat("stale draft")));
+  const removeItem = storage.removeItem.bind(storage);
+  storage.removeItem = () => {
+    throw new Error("storage cleanup unavailable");
+  };
+
+  const failedCleanup = saved.save(state);
+  assert.equal(failedCleanup.cleanupError, "storage cleanup unavailable");
+  assert.equal(saved.load().state.chats[sessionId]?.draft, "current draft");
+
+  storage.removeItem = removeItem;
+  assert.deepEqual(saved.save(state), { cleanupError: null });
+  assert.equal(storage.getItem(`${key}.draft.${sessionId}`), null);
 });
 
 void test("corrupt workspace or draft data stays unreadable instead of resetting saved state", () => {

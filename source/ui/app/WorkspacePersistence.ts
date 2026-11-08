@@ -47,8 +47,21 @@ export class WorkspacePersistence {
     }
   }
 
-  save(state: WorkspaceState): void {
-    this.storage().setItem(this.key, encodeWorkspace(state));
+  save(state: WorkspaceState): { cleanupError: string | null } {
+    const storage = this.storage();
+    storage.setItem(this.key, encodeWorkspace(state));
+    let cleanupError: string | null = null;
+    for (const [id, chat] of Object.entries(state.chats)) {
+      try {
+        const saved = storage.getItem(this.draftKey(id));
+        if (saved === null) continue;
+        const draft = decodeDraft(saved);
+        if (draft.draftVersion <= chat.draftVersion) storage.removeItem(this.draftKey(id));
+      } catch (cause) {
+        cleanupError = description(cause);
+      }
+    }
+    return { cleanupError };
   }
 
   saveDraft(id: string, chat: ChatState): void {

@@ -36,6 +36,7 @@ function modelKey(selection: LlmSelection): string {
 export function Workspace() {
   const [persistence] = useState(() => new WorkspacePersistence(() => sessionStorage, storageKey));
   const [initial] = useState(() => persistence.load());
+  const firstVisit = useRef(initial.first);
   const [workspace, setWorkspace] = useState(initial.state);
   const current = useRef(workspace);
   const storageProblem = useRef<"read" | "write" | "cleanup" | null>(initial.error ? "read" : null);
@@ -134,6 +135,7 @@ export function Workspace() {
         return;
       }
       current.current = restored.state;
+      firstVisit.current = restored.first;
       setWorkspace(restored.state);
       setReadRecovered(true);
       storageProblem.current = null;
@@ -168,8 +170,10 @@ export function Workspace() {
         const page = await sessions.list(undefined, controller.signal);
         if (controller.signal.aborted) return;
         const hash = window.location.hash.slice(1);
+        const first = firstVisit.current;
+        firstVisit.current = false;
         if (idPattern.test(hash)) open(hash);
-        else if (initial.first) {
+        else if (first) {
           if (page.sessionIds.length > 0) {
             const state = current.current;
             const ids = page.sessionIds;

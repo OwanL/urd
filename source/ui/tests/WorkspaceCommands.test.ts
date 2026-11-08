@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { WorkspaceCommands } from "../app/WorkspaceCommands.ts";
 import type { WorkspaceCommandAccess, WorkspaceCommandState } from "../app/WorkspaceCommands.ts";
-import { decodeWorkspace, editDraft, emptyWorkspace, newChat } from "../app/WorkspaceState.ts";
+import {
+  decodeWorkspace,
+  editDraft,
+  emptyWorkspace,
+  encodeWorkspace,
+  newChat,
+} from "../app/WorkspaceState.ts";
 import type { WorkspaceState } from "../app/WorkspaceState.ts";
 import type { LlmSelection } from "../providers/LlmSelection.ts";
 import type { SessionClient } from "../sessions/SessionClient.ts";
@@ -46,7 +52,8 @@ function snapshot(overrides: Partial<SessionSnapshot> = {}): SessionSnapshot {
 
 function fixture(): {
   read: () => WorkspaceState;
-  set: (state: WorkspaceState) => void;
+  reload: () => WorkspaceState;
+  durable: () => WorkspaceState;
   access: WorkspaceCommandAccess;
   setWritable: (writable: boolean) => void;
 } {
@@ -56,15 +63,22 @@ function fixture(): {
   state.lastSelection = selection;
   state.chats[sessionId] = editDraft(newChat(selection), "submitted text");
   let writable = true;
+  let persisted = encodeWorkspace(state);
+  let durable = state;
   const persist = (next: WorkspaceState) => {
     state = next;
-    return writable;
+    if (!writable) return false;
+    persisted = encodeWorkspace(next);
+    durable = next;
+    return true;
   };
   return {
     read: () => state,
-    set: (next) => {
-      state = next;
+    reload: () => {
+      state = decodeWorkspace(persisted);
+      return state;
     },
+    durable: () => durable,
     setWritable: (next) => {
       writable = next;
     },
@@ -133,7 +147,7 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-void test("a failed synchronous Send journal dispatches nothing and reload keeps it uncertain", async () => {
+void test("a failed synchronous Send journal stays unsaved and dispatches nothing", async () => {
   const workspace = fixture();
   workspace.setWritable(false);
   let sends = 0;
@@ -151,27 +165,31 @@ void test("a failed synchronous Send journal dispatches nothing and reload keeps
   assert.equal(sends, 0);
   assert.equal(pending?.status, "uncertain");
   assert.equal(pending?.original.text, "submitted text");
-  assert.equal(
-    decodeWorkspace(JSON.stringify(workspace.read())).chats[sessionId]?.pending?.status,
-    "uncertain",
-  );
+  assert.equal(workspace.reload().chats[sessionId]?.pending, null);
 });
 
-void test("retry journals and resends the exact original while retaining a newer draft", async () => {
+void test("retry resends a saved uncertain original while retaining a newer draft", async () => {
   const workspace = fixture();
-  workspace.setWritable(false);
-  const coordinator = commands(workspace.access, emptyClient());
-  await coordinator.send(sessionId, snapshot(), false, true);
-  workspace.setWritable(true);
+  let loseFirstAcknowledgement = true;
+  let firstJournaledBeforeDispatch = false;
+  const initial = commands(
+    workspace.access,
+    emptyClient(async (_id, submission) => {
+      firstJournaledBeforeDispatch =
+        workspace.durable().chats[sessionId]?.pending?.status === "sending";
+      if (loseFirstAcknowledgement) {
+        loseFirstAcknowledgement = false;
+        throw new Error("acknowledgement lost");
+      }
+      return receipt(submission);
+    }),
+  );
 
-  const reloaded = decodeWorkspace(JSON.stringify(workspace.read()));
-  workspace.set({
-    ...reloaded,
-    chats: {
-      ...reloaded.chats,
-      [sessionId]: editDraft(reloaded.chats[sessionId]!, "newer draft"),
-    },
-  });
+  await initial.send(sessionId, snapshot(), false, true);
+  assert.equal(firstJournaledBeforeDispatch, true);
+  assert.equal(workspace.durable().chats[sessionId]?.pending?.status, "uncertain");
+  assert.equal(workspace.reload().chats[sessionId]?.pending?.status, "uncertain");
+  workspace.access.updateChat(sessionId, (previous) => editDraft(previous, "newer draft"));
   const original = workspace.read().chats[sessionId]!.pending!.original;
   let dispatched: UserMessageSubmission | null = null;
   let journaledBeforeDispatch = false;
@@ -179,7 +197,7 @@ void test("retry journals and resends the exact original while retaining a newer
     workspace.access,
     emptyClient(async (_id, submission) => {
       dispatched = submission;
-      journaledBeforeDispatch = workspace.read().chats[sessionId]?.pending?.status === "sending";
+      journaledBeforeDispatch = workspace.durable().chats[sessionId]?.pending?.status === "sending";
       return receipt(submission);
     }),
   );

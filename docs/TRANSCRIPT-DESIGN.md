@@ -912,8 +912,12 @@ found that historical never-sent input needs bounded discovery after later
 runs/reload; the proposal includes that path. Requirements checks (decisions 15–30)
 revised stage 1 to: kind-tagged entries in observed order with entry facts;
 anchor-window reads; one multiplexed push stream per page replacing polling;
-send-attempt placement. Packets are 1A entries/reads, 1B push, 1C placement. None is
-implementation-approved; next steering is approval of the revised stage 1 scope.
+send-attempt placement. Packets are 1A entries/reads, 1B push, 1C placement. The
+revised stage 1 scope was approved 2026-11-09 after the wider-requirements review
+(usage capture harness-owned, no usage read contract, cost deferred; pending inputs
+preview-only in the snapshot; migration stated as a table rebuild; session-created
+notices; typed stream messages; generic title until first send), and packet 1A
+(entry index and history reads) was issued.
 Do not invent a custom parser or treat sampled sizes as hard limits. Do not keep
 asking minor product questions that can be resolved through existing requirements.
 Ask only unresolved questions,

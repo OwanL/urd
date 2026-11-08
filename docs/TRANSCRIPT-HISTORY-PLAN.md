@@ -1,6 +1,6 @@
 # Transcript stage 1 — history, live updates and placement foundation
 
-**Status: concrete proposal for review, not implementation approval.**
+**Status: approved as the first implementation scope 2026-11-09; packet 1A issued.**
 Source checked at `5c9392f` on 2026-11-09. Requirements are owned by
 [Transcript design](TRANSCRIPT-DESIGN.md); parsing evidence is separate.
 No production code, dependency, migration or running-application change is made here.
@@ -334,6 +334,7 @@ scroll geometry or overall transcript memory.
 
 ## Decisions before implementation
 
-1. Approve this revised stage 1 (entries, reads, push, placement) as the first
-   implementation scope.
+1. **Approved 2026-11-09:** this revised stage 1 (entries, reads, push, placement)
+   is the first implementation scope.
 2. Recheck owners and source state, then issue bounded packets 1A → 1B → 1C.
+   1A issued 2026-11-09.

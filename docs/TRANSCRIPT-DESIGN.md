@@ -433,8 +433,9 @@ These mechanics remain design proposals until the parser/projection path is qual
 
 Read-only upstream inspection on 2026-11-08 examined Markdig as a natural .NET
 candidate at [`ac4f83e79d3829e7d181ec360e07afc3101d4dd0`](https://github.com/xoofx/markdig/tree/ac4f83e79d3829e7d181ec360e07afc3101d4dd0/src/Markdig).
-No package was installed or runtime test performed; current-main feature availability
-in a released package is unverified.
+That source inspection installed no package and ran no tests; current-main feature
+availability in a release was not inferred. The later approved isolated probe used
+released Markdig 1.6.0, as recorded below, not an unpinned main build.
 - `Markdown.cs` / `Parsers/MarkdownParser.cs`: inspected public parse entry points
   accept a whole .NET string, build a new document, then process inlines. No previous
   tree/append/resume API was found in those surfaces. Internal pooling is not
@@ -459,6 +460,33 @@ reparse on every token, retain its AST as the permanent index, or claim that mov
 parsing to the backend bounded total process memory. The simplest candidate strategy
 is demand-driven, coalesced whole-message parsing with disposable ASTs; measure it
 before introducing custom incremental machinery or selecting the dependency.
+
+### Focused parser probe — measured scope
+
+The approved isolated Markdig 1.6.0 probe passed its 41 result records: source-span,
+reference and slice checks; three parses for each of four content shapes at three
+sizes; and four streamed-growth schedules. See
+[parser evidence](TRANSCRIPT-PARSER-EVIDENCE.md) for method, raw-evidence location,
+measurements and limitations. Independent final static review checked the raw
+records, recomputed summaries and approved the claims/limits without findings;
+it did not independently rerun the fixture.
+
+A roughly 2 MiB table took 343–514 ms per parse and about 57 MiB extra live managed
+memory with the AST held. For the same growing mixed message, 64 whole-prefix parses
+allocated about seven times as many bytes as eight parses. Detached middle slices
+were small and correct for the fixtures; this does not qualify a production range
+index, general rich-cell rendering or browser interactions.
+
+Keep demand-driven reuse and bounded shared scheduling. Do not equate cancelling a
+queued parse with stopping an in-flight synchronous parse. No dependency selection,
+custom incremental parser or numeric product limits follow from these results.
+
+Current product question: when parsing a very large active message falls behind,
+prefer the latest consistent formatted view with coalesced catch-up updates, or
+show new raw text before formatting catches up? Recommend consistent formatted
+updates. A generating indicator can acknowledge ongoing work independently; this
+must not block input, scrolling or execution. Do not infer a fixed refresh interval
+or permission for unbounded visible lag from the recommendation.
 
 ### On-demand details and images
 
@@ -549,7 +577,7 @@ source, not by asking the owner. Update this document immediately after decision
 9. **Implementation sequencing:** bounded milestones and ownership only after
    the above contracts and high-risk feasibility checks are coherent.
 
-## Verification approach — proposed, not executed
+## Verification approach — broader work proposed; isolated parser probe completed
 
 - Measure disk queries, decoding/projection, transport, parsing, layout/render,
   retained browser memory and backend cost separately and end to end.
@@ -662,9 +690,14 @@ backend crash; do not ask to redesign that recovery contract. Maths/diagrams are
 approved for compatibility checks now, feature implementation later. Current work:
 qualify parser capabilities for the approved backend-semantic-structure/browser-layout
 split. Candidate source research and proposed derived-state/read lifecycle are now
-recorded. Current steering question: run a bounded synthetic parser qualification
-before dependency selection, or remain design-only? No prototype, package install,
-production implementation or runtime measurement has been approved/run yet. Do not keep
+recorded. The approved isolated parser probe has completed its runs successfully;
+independent final evidence review passed. Production integration, browser behavior
+and scheduling remain unqualified. No production implementation/dependency selection
+is approved. Next resolve behavior when a growing message outpaces formatting:
+recommend retaining the latest consistent formatted view and catching up in larger
+updates, rather than briefly exposing raw Markdown. This is a proposed streaming
+policy, not an approved latency target. Do not invent a custom parser or treat
+sampled sizes as hard limits. Do not keep
 asking minor product questions that can be resolved through existing requirements.
 Ask only unresolved questions,
 not questions already settled by position-preservation requirements. Continue down

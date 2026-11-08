@@ -8,6 +8,7 @@ import type { ProviderSignIn } from "../providers/ProviderSignIn.ts";
 import {
   credentialSummary,
   matchesConnection,
+  providerHostname,
   ProviderSettingsController,
 } from "../providers/settings/ProviderSettingsController.ts";
 
@@ -70,6 +71,54 @@ function setup(overrides: Partial<ProviderClient> = {}) {
   return { client, state, notifications: () => notifications };
 }
 
+void test("names come from endpoint hostnames only when creating or saving", async () => {
+  assert.equal(
+    providerHostname("https://user:secret@API.Example:443/v1/?key=value"),
+    "api.example",
+  );
+  assert.equal(providerHostname("http://localhost:1234/v1/"), "localhost");
+  assert.equal(providerHostname("not a URL"), "");
+  const custom = { ...connection, route: "custom", authentication: "apiKey" } as const;
+  const names: string[] = [];
+  const { state } = setup({
+    list: async () => [custom],
+    createChatGpt: async (name) => {
+      names.push(name);
+      return connection;
+    },
+    createOpenAI: async (name) => {
+      names.push(name);
+      return connection;
+    },
+    createCustom: async (settings) => {
+      names.push(settings.name);
+      return { ...custom, ...settings };
+    },
+    updateCustom: async (_id, settings) => {
+      names.push(settings.name);
+      return { ...custom, ...settings };
+    },
+  });
+  state.setActivity(true, true);
+  await flush();
+  assert.equal(state.snapshot.connections[0]?.name, "Work");
+  state.editAdd({ name: "Ignored", endpoint: "https://custom.example:1234/v1/" });
+  await state.create();
+  state.editAdd({ route: "openAI" });
+  await state.create();
+  state.editAdd({ route: "custom", name: "Ignored again" });
+  await state.create();
+  assert.equal(state.snapshot.connections[0]?.name, "Work");
+  await state.save(custom);
+  assert.deepEqual(names, [
+    "api.openai.com",
+    "api.openai.com",
+    "custom.example",
+    "provider.example",
+  ]);
+  state.setActivity(false, false);
+});
+
 void test("closing preserves a dispatched command and guards it across reopen; keys are cleared", async () => {
   const result = deferred<ProviderCredentialStatus>();
   let calls = 0;
@@ -99,7 +148,7 @@ void test("closing preserves a dispatched command and guards it across reopen; k
   assert.equal(notifications(), 1);
 });
 
-void test("lost create acknowledgement is uncertain, never replayed, and requires explicit read review", async () => {
+void test("lost acknowledgement auto-reads but still requires explicit permission for new commands", async () => {
   let creates = 0;
   const { state, notifications } = setup({
     createChatGpt: async () => {
@@ -110,19 +159,16 @@ void test("lost create acknowledgement is uncertain, never replayed, and require
   state.setActivity(true, true);
   await flush();
   state.select(null);
-  state.editAdd({ name: "New" });
   await state.create();
   assert.equal(state.snapshot.uncertain, true);
+  assert.equal(state.snapshot.reviewed, true);
   assert.equal(notifications(), 1);
-  state.setActivity(false, true);
-  state.setActivity(true, true);
-  await flush();
   await state.create();
   assert.equal(creates, 1);
   assert.equal(state.snapshot.uncertain, true);
   assert.match(state.snapshot.notice ?? "", /outcome uncertain/);
-  await state.read();
-  assert.equal(state.snapshot.reviewed, true);
+  assert.match(state.snapshot.notice ?? "", /refreshes automatically/);
+  assert.doesNotMatch(state.snapshot.notice ?? "", /Read saved state/);
   state.allowNewCommands();
   assert.equal(state.snapshot.uncertain, false);
   assert.equal(creates, 1);
@@ -135,14 +181,13 @@ void test("only explicit terminal HTTP rejection is called rejected; server fail
     [503, true],
   ] as const) {
     const { state } = setup({
-      rename: async () => {
+      refreshModels: async () => {
         throw new RequestError(status, { secret: "never display" });
       },
     });
     state.setActivity(true, true);
     await flush();
-    state.edit("one", { name: "Renamed" });
-    await state.save(connection);
+    await state.refreshModels(connection);
     assert.equal(state.snapshot.uncertain, uncertain);
     assert.match(state.snapshot.notice ?? "", new RegExp(`HTTP ${status}`));
     assert.doesNotMatch(state.snapshot.notice ?? "", /never display/);
@@ -204,6 +249,63 @@ void test("a failed individual status read or list read retains records and othe
   state.setActivity(false, false);
 });
 
+void test("metadata refreshes every ten seconds without overlap or changing edits, and recovers after errors", async (context) => {
+  context.mock.timers.enable({ apis: ["setTimeout"] });
+  const delayed = deferred<readonly ProviderConnection[]>();
+  let lists = 0;
+  let credentials = 0;
+  let models = 0;
+  const { state, client } = setup({
+    list: async () => (++lists === 2 ? delayed.promise : [connection]),
+    getCredentials: async () => {
+      credentials++;
+      return credential;
+    },
+    getModels: async () => {
+      models++;
+      return emptyCatalog;
+    },
+  });
+  state.setActivity(true, true);
+  await flush();
+  state.edit("one", { endpoint: "https://edited.example/" });
+  state.editAdd({ endpoint: "https://draft.example/" });
+  state.setApiKey("synthetic");
+  state.requestConfirmation("disconnect", connection);
+  context.mock.timers.tick(9999);
+  assert.equal(lists, 1);
+  context.mock.timers.tick(1);
+  await state.read();
+  context.mock.timers.tick(30000);
+  assert.equal(lists, 2);
+  delayed.resolve([connection]);
+  await flush();
+  assert.equal(credentials, 2);
+  assert.equal(models, 2);
+  assert.equal(state.snapshot.drafts.one?.endpoint, "https://edited.example/");
+  assert.equal(state.snapshot.add.endpoint, "https://draft.example/");
+  assert.equal(state.snapshot.apiKey, "synthetic");
+  assert.equal(state.snapshot.confirmation?.kind, "disconnect");
+  state.setActivity(true, false);
+  context.mock.timers.tick(30000);
+  assert.equal(lists, 2);
+  client.list = async () => {
+    throw new TypeError("offline");
+  };
+  state.setActivity(true, true);
+  await flush();
+  assert.ok(state.snapshot.errors.connections);
+  client.list = async () => [connection];
+  context.mock.timers.tick(10000);
+  await flush();
+  assert.equal(state.snapshot.errors.connections, undefined);
+  state.setActivity(false, false);
+  const before = credentials;
+  context.mock.timers.tick(30000);
+  await flush();
+  assert.equal(credentials, before);
+});
+
 void test("polling is visible-only, non-overlapping, terminal-bounded, and rereads credentials", async (context) => {
   context.mock.timers.enable({ apis: ["setTimeout"] });
   let statusReads = 0;
@@ -244,30 +346,30 @@ void test("polling is visible-only, non-overlapping, terminal-bounded, and rerea
 void test("a rejected unrelated command resumes observation without repeating the command", async (context) => {
   context.mock.timers.enable({ apis: ["setTimeout"] });
   let reads = 0;
-  let renames = 0;
+  let discoveries = 0;
   const { state } = setup({
     beginSignIn: async () => pending,
     getSignIn: async () => {
       reads++;
       return pending;
     },
-    rename: async () => {
-      renames++;
+    refreshModels: async () => {
+      discoveries++;
       throw new RequestError(409, undefined);
     },
   });
   state.setActivity(true, true);
   await flush();
   await state.beginSignIn(connection);
-  await state.save(connection);
+  await state.refreshModels(connection);
   context.mock.timers.tick(2000);
   await flush();
   assert.equal(reads, 2);
-  assert.equal(renames, 1);
+  assert.equal(discoveries, 1);
   state.setActivity(false, false);
 });
 
-void test("hiding aborts pending poll reads and does not poll without a known pending attempt", async (context) => {
+void test("hiding aborts pending reads and only known attempts are polled", async (context) => {
   context.mock.timers.enable({ apis: ["setTimeout"] });
   const delayed = deferred<ProviderSignIn>();
   let reads = 0;
@@ -284,6 +386,7 @@ void test("hiding aborts pending poll reads and does not poll without a known pe
   state.setActivity(true, true);
   await flush();
   context.mock.timers.tick(10000);
+  await flush();
   assert.equal(reads, 0);
   await state.beginSignIn(connection);
   context.mock.timers.tick(2000);
@@ -298,7 +401,7 @@ void test("hiding aborts pending poll reads and does not poll without a known pe
   state.setActivity(false, false);
 });
 
-void test("failed polling stops until an explicit status read; it does not erase known sign-in", async (context) => {
+void test("read errors slow pending observation to ten seconds and recover automatically", async (context) => {
   context.mock.timers.enable({ apis: ["setTimeout"] });
   let reads = 0;
   const { state, client } = setup({
@@ -311,13 +414,24 @@ void test("failed polling stops until an explicit status read; it does not erase
   state.setActivity(true, true);
   await flush();
   await state.beginSignIn(connection);
-  context.mock.timers.tick(10000);
+  context.mock.timers.tick(2000);
   await flush();
   assert.equal(reads, 1);
   assert.equal(state.snapshot.signIns.one?.status, "pending");
-  client.getSignIn = async () => ({ ...pending, status: "expired" });
-  await state.read();
-  assert.equal(state.snapshot.signIns.one?.status, "expired");
+  client.getSignIn = async () => {
+    reads++;
+    return pending;
+  };
+  context.mock.timers.tick(7999);
+  await flush();
+  assert.equal(reads, 1);
+  context.mock.timers.tick(1);
+  await flush();
+  assert.equal(reads, 2);
+  assert.equal(state.snapshot.errors["signIn:one"], undefined);
+  context.mock.timers.tick(2000);
+  await flush();
+  assert.equal(reads, 3);
   state.setActivity(false, false);
 });
 
@@ -350,6 +464,7 @@ void test("binding edits, disconnect and removal require confirmation; remote re
       list: async () => [custom],
       updateCustom: async (_id, settings) => {
         updates++;
+        assert.equal(settings.name, "new.example");
         return { ...custom, ...settings };
       },
       disconnect: async () => {
@@ -392,7 +507,7 @@ void test("an older disconnect reconciliation cannot overwrite a newer uncertain
       localCredentialsCleared: true,
       remoteRevocationConfirmed: false,
     }),
-    rename: async () => {
+    refreshModels: async () => {
       throw new TypeError("acknowledgement lost");
     },
   });
@@ -404,15 +519,17 @@ void test("an older disconnect reconciliation cannot overwrite a newer uncertain
   await flush();
   assert.equal(state.snapshot.pending, null);
   assert.match(state.snapshot.notice ?? "", /Remote revocation: not confirmed/);
-  await state.save(connection);
+  const discovery = state.refreshModels(connection);
+  await flush();
   assert.equal(state.snapshot.uncertain, true);
   delayed.resolve([connection]);
-  await disconnect;
-  assert.match(state.snapshot.notice ?? "", /Rename connection: outcome uncertain/);
+  await Promise.all([disconnect, discovery]);
+  assert.match(state.snapshot.notice ?? "", /Refresh models: outcome uncertain/);
   state.setActivity(false, false);
 });
 
-void test("model discovery is explicit and status text does not imply model entitlement", async () => {
+void test("model discovery is explicit and status text does not imply model entitlement", async (context) => {
+  context.mock.timers.enable({ apis: ["setTimeout"] });
   let refreshes = 0;
   const { state } = setup({
     refreshModels: async () => {
@@ -422,7 +539,8 @@ void test("model discovery is explicit and status text does not imply model enti
   });
   state.setActivity(true, true);
   await flush();
-  await state.read();
+  context.mock.timers.tick(10000);
+  await flush();
   assert.equal(refreshes, 0);
   await state.refreshModels(connection);
   assert.equal(refreshes, 1);

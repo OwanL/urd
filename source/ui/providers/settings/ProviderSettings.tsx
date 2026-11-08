@@ -5,6 +5,7 @@ import { ConnectionForm, providerNames } from "./ConnectionForm.tsx";
 import {
   credentialSummary,
   matchesConnection,
+  providerHostname,
   signInPending,
 } from "./ProviderSettingsController.ts";
 import type { ProviderSettingsState } from "./useProviderSettings.ts";
@@ -55,10 +56,23 @@ export function ProviderSettings({ state, search }: ProviderSettingsProps) {
     (connection) => connection.id === expandedId || matchesConnection(connection, search),
   );
   const canEdit = state.pending === null && !state.uncertain && state.confirmation === null;
-  const choose = (route: ProviderRoute) => {
+  const create = () => {
+    if (!canEdit) return;
+    show({
+      adding: true,
+      expandedId: null,
+      creating: new Set(state.connections.map(({ id }) => id)),
+    });
     actions.select(null);
+    void actions.create();
+  };
+  const choose = (route: ProviderRoute) => {
     actions.editAdd({ route });
-    show({ adding: true, expandedId: null, creating: null });
+    if (route !== "custom") create();
+    else {
+      actions.select(null);
+      show({ adding: true, expandedId: null, creating: null });
+    }
   };
   const collapse = () => {
     actions.select(null);
@@ -75,25 +89,15 @@ export function ProviderSettings({ state, search }: ProviderSettingsProps) {
               type="button"
               key={route}
               aria-pressed={adding && state.add.route === route}
-              disabled={state.pending !== null || state.uncertain}
+              disabled={!canEdit}
               onClick={() => choose(route)}
             >
               {route === "openAI" ? "OpenAI" : providerNames[route]}
             </button>
           ))}
         </div>
-        {adding && (
-          <ConnectionForm
-            state={state}
-            disabled={!canEdit}
-            onCancel={collapse}
-            onCreate={() => {
-              if (!canEdit) return;
-              show({ ...presentation, creating: new Set(state.connections.map(({ id }) => id)) });
-              actions.select(null);
-              void actions.create();
-            }}
-          />
+        {adding && state.add.route === "custom" && (
+          <ConnectionForm state={state} disabled={!canEdit} onCancel={collapse} onCreate={create} />
         )}
       </section>
 
@@ -116,20 +120,7 @@ export function ProviderSettings({ state, search }: ProviderSettingsProps) {
       </div>
 
       <section class="provider-settings-saved" aria-labelledby={`${id}-saved`}>
-        <div class="provider-settings-group-heading">
-          <h3 id={`${id}-saved`}>Your providers</h3>
-          <button
-            type="button"
-            class="provider-settings-refresh"
-            disabled={state.reading || state.pending !== null}
-            onClick={() => {
-              void actions.read();
-            }}
-          >
-            <Icon name="refresh" />
-            {state.reading ? "Refreshing…" : "Refresh status"}
-          </button>
-        </div>
+        <h3 id={`${id}-saved`}>Your providers</h3>
         <div class="provider-settings-connections">
           {!state.loaded && !state.reading && <p>Saved providers have not been read.</p>}
           {state.loaded && !state.connections.length && <p>No saved providers.</p>}
@@ -153,7 +144,7 @@ export function ProviderSettings({ state, search }: ProviderSettingsProps) {
                   }}
                 >
                   <span class="provider-settings-connection-heading">
-                    <strong>{connection.name}</strong>
+                    <strong>{providerHostname(connection.endpoint)}</strong>
                     <span>{providerNames[connection.route]}</span>
                   </span>
                   <span class="provider-settings-secondary">
@@ -197,10 +188,12 @@ function ConnectionManagement({
 
   return (
     <>
-      <details class="provider-settings-details">
-        <summary>Edit connection details</summary>
-        <ConnectionForm state={state} connection={connection} disabled={disabled} />
-      </details>
+      {connection.route === "custom" && (
+        <details class="provider-settings-details">
+          <summary>Edit connection details</summary>
+          <ConnectionForm state={state} connection={connection} disabled={disabled} />
+        </details>
+      )}
       {confirmation?.kind === "binding" && <ConfirmChange state={state} />}
 
       <div class="provider-settings-group">
@@ -277,17 +270,6 @@ function ConnectionManagement({
               >
                 Begin sign-in
               </button>
-              {signIn && (
-                <button
-                  type="button"
-                  disabled={state.reading || state.pending !== null}
-                  onClick={() => {
-                    void actions.read();
-                  }}
-                >
-                  Get status
-                </button>
-              )}
               {signIn && signInPending(signIn) && (
                 <button
                   type="button"
@@ -427,8 +409,8 @@ function confirmationText(
   connection: ProviderConnection,
 ): string {
   if (kind === "binding")
-    return `Change the endpoint, API or authentication for “${connection.name}”? This clears credentials and saved models and may cancel active requests.`;
+    return `Change the endpoint, API or authentication for “${providerHostname(connection.endpoint)}”? This clears credentials and saved models and may cancel active requests.`;
   if (kind === "disconnect")
-    return `Disconnect “${connection.name}”? This may cancel active requests, clears local credentials and attempts remote revocation where applicable.`;
-  return `Remove “${connection.name}” from this device only? This deletes local configuration and credentials and may cancel active requests. It does not revoke remote access; disconnect first if needed.`;
+    return `Disconnect “${providerHostname(connection.endpoint)}”? This may cancel active requests, clears local credentials and attempts remote revocation where applicable.`;
+  return `Remove “${providerHostname(connection.endpoint)}” from this device only? This deletes local configuration and credentials and may cancel active requests. It does not revoke remote access; disconnect first if needed.`;
 }

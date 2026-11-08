@@ -156,21 +156,24 @@ The workspace gear opens a compact Settings panel following Pie's header/search/
 composition, initially with one **Providers** page. `source/ui/settings/Settings.tsx` owns
 the shell; `source/ui/providers/settings/` owns connection forms and operation state.
 Shared UI colour tokens and popover controls keep it aligned with the workspace.
-**Add a provider** sits above **Your providers**. Choosing a provider type reveals its
-creation form; existing providers start collapsed and open their controls inline, one
-at a time. Connection configuration is behind **Edit connection details**. Successful
-creation opens the new provider for authentication; rejected creation retains its draft.
+**Add a provider** sits above **Your providers**. ChatGPT and OpenAI add directly;
+Custom reveals endpoint settings. Providers are identified by hostname, without a name
+field or rename step. Existing stored names are not migrated. Existing providers start
+collapsed and open inline, one at a time; custom configuration is behind **Edit connection
+details**. Successful creation opens authentication; rejected custom creation retains its draft.
 
 The page supports ChatGPT, OpenAI API-key and custom compatible connections: create,
-rename, custom binding changes, replace-only keys, sign-in/status/cancel, disconnect,
+custom binding changes, replace-only keys, sign-in/status/cancel, disconnect,
 local removal and explicit model refresh. Binding changes, disconnect and removal require
 inline confirmation because they may cancel active work. Removal does not promise remote
 revocation. A connection status is not proof of model entitlement.
 
-The owner remains mounted when the panel closes. Reads and known-attempt sign-in polling
-stop while closed/hidden; accepted commands are not cancelled, automatically retried or
-forgotten on panel reopen. Lost acknowledgements remain uncertain until the user reads
-saved state and explicitly permits another command. This is not a durable command receipt
+The owner remains mounted when the panel closes. Metadata refreshes automatically every
+10 seconds while visible, every 2 seconds during pending sign-in, and on returning to the
+panel. Read failures recover at the slower interval; there is no manual status button.
+Reads stop while closed/hidden; accepted commands are not cancelled, automatically retried
+or forgotten on panel reopen. Lost acknowledgements automatically reread saved state but
+remain uncertain until the user explicitly permits another command. This is not a durable command receipt
 across a full browser restart. The backend owns authentication regardless of panel lifetime.
 Sign-in opens through an explicit external link; completion is observed through status
 reads, not inferred from a popup closing. Key fields clear on dispatch, selection change
@@ -186,6 +189,8 @@ qualification below is separate. UI static checks, unit tests and the Vite build
 independent code and visual reviews approved. The later layout reorganization was checked
 on desktop/mobile with stateful synthetic API responses, including rejected creation,
 create during initial loading, close/reopen during creation, key clearing and removal.
+Hostname setup and automatic status updates were also checked, including draft retention,
+no polling after close, and no automatic mutations or model discovery.
 Those layout checks do not add backend or live-authentication qualification.
 The temporary fixture process/database was
 removed; shared workspace integration and palette/tab changes are coordinated separately.

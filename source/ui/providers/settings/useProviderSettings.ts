@@ -19,10 +19,15 @@ export function useProviderSettings(
   useLayoutEffect(() => controller.subscribe(() => render((version) => version + 1)), [controller]);
   useLayoutEffect(() => {
     const update = () => controller.setActivity(active, document.visibilityState === "visible");
+    const focus = () => {
+      if (active) void controller.read();
+    };
     update();
     document.addEventListener("visibilitychange", update);
+    window.addEventListener("focus", focus);
     return () => {
       document.removeEventListener("visibilitychange", update);
+      window.removeEventListener("focus", focus);
       controller.setActivity(false, false);
     };
   }, [controller, active]);

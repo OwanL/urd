@@ -40,6 +40,14 @@ export interface ProviderSettingsSnapshot {
   confirmation: Confirmation | null;
 }
 
+export function providerHostname(endpoint: string): string {
+  try {
+    return new URL(endpoint).hostname;
+  } catch {
+    return "";
+  }
+}
+
 export function signInPending(signIn: ProviderSignIn): boolean {
   return signIn.status === "pending" || signIn.status === "completing";
 }
@@ -156,7 +164,10 @@ export class ProviderSettingsController {
 
   select(id: string | null): void {
     this.patch({ selectedId: id, apiKey: "", confirmation: null });
-    if (this.canRead) void this.read();
+    if (this.canRead) {
+      this.stopReads();
+      void this.read();
+    }
   }
 
   editAdd(update: Partial<AddDraft>): void {
@@ -183,7 +194,7 @@ export class ProviderSettingsController {
   }
 
   async read(): Promise<void> {
-    if (!this.canRead) return;
+    if (!this.canRead || this.readAbort) return;
     this.stopReads();
     const abort = new AbortController();
     this.readAbort = abort;
@@ -259,9 +270,9 @@ export class ProviderSettingsController {
       await Promise.all(jobs);
       if (!current()) return;
       await Promise.all(
-        Object.values(this.snapshot.signIns).map((signIn) =>
-          this.observeSignIn(signIn, abort, current),
-        ),
+        Object.values(this.snapshot.signIns)
+          .filter(signInPending)
+          .map((signIn) => this.observeSignIn(signIn, abort, current)),
       );
     } finally {
       if (current()) {
@@ -341,40 +352,15 @@ export class ProviderSettingsController {
   }
 
   private schedulePoll(): void {
-    // A failed attempt read needs an explicit check, not an automatic retry loop.
-    if (
-      !this.canRead ||
-      !Object.values(this.snapshot.signIns).some(
-        (signIn) => signInPending(signIn) && !this.snapshot.errors[`signIn:${signIn.connectionId}`],
-      )
-    )
-      return;
-    this.timer = setTimeout(() => {
-      void this.poll();
-    }, 2000);
-  }
-
-  private async poll(): Promise<void> {
+    clearTimeout(this.timer);
     this.timer = undefined;
     if (!this.canRead || this.readAbort) return;
-    const abort = new AbortController();
-    this.readAbort = abort;
-    const current = () => this.readAbort === abort && !abort.signal.aborted;
-    try {
-      await Promise.all(
-        Object.values(this.snapshot.signIns)
-          .filter(
-            (signIn) =>
-              signInPending(signIn) && !this.snapshot.errors[`signIn:${signIn.connectionId}`],
-          )
-          .map((signIn) => this.observeSignIn(signIn, abort, current)),
-      );
-    } finally {
-      if (current()) {
-        this.readAbort = null;
-        this.schedulePoll();
-      }
-    }
+    const pending = Object.values(this.snapshot.signIns).some(signInPending);
+    const delay = pending && Object.keys(this.snapshot.errors).length === 0 ? 2000 : 10000;
+    this.timer = setTimeout(() => {
+      this.timer = undefined;
+      void this.read();
+    }, delay);
   }
 
   private async command<T>(
@@ -386,13 +372,11 @@ export class ProviderSettingsController {
     this.stopReads();
     this.patch({ pending: label, notice: null, apiKey: "", confirmation: null });
     let changed = false;
-    let succeeded = false;
     try {
       const result = await run();
       const notice = apply(result) ?? `${label} completed.`;
       this.patch({ notice });
       changed = true;
-      succeeded = true;
     } catch (error) {
       const rejected =
         error instanceof RequestError && [400, 404, 409, 415, 422].includes(error.status);
@@ -401,7 +385,7 @@ export class ProviderSettingsController {
         rejected
           ? { notice: `${label} rejected${detail}. No automatic retry.` }
           : {
-              notice: `${label}: outcome uncertain${detail}. The server may still have accepted it. Read saved state before allowing another command; a read cannot prove unfinished work stopped.`,
+              notice: `${label}: outcome uncertain${detail}. The server may still have accepted it. Saved state refreshes automatically, but cannot prove unfinished work stopped. Explicitly allow new commands to continue.`,
               uncertain: true,
               reviewed: false,
             },
@@ -411,7 +395,7 @@ export class ProviderSettingsController {
       this.patch({ pending: null });
     }
     if (changed) this.changed();
-    if (succeeded && this.canRead) await this.read();
+    if (changed && this.canRead) await this.read();
     else this.schedulePoll();
   }
 
@@ -426,7 +410,11 @@ export class ProviderSettingsController {
   }
 
   async create(): Promise<void> {
-    const { route, ...settings } = this.snapshot.add;
+    const { route, ...draft } = this.snapshot.add;
+    const settings = {
+      ...draft,
+      name: providerHostname(route === "custom" ? draft.endpoint : "https://api.openai.com"),
+    };
     await this.command(
       "Add connection",
       () => {
@@ -445,21 +433,21 @@ export class ProviderSettingsController {
   }
 
   async save(connection: ProviderConnection): Promise<void> {
-    if (!this.canMutate) return;
+    if (!this.canMutate || connection.route !== "custom") return;
     const draft = this.snapshot.drafts[connection.id];
     if (!draft) return;
+    const settings = { ...draft, name: providerHostname(draft.endpoint) };
     const bindingChanged =
-      connection.route === "custom" &&
-      (draft.endpoint !== connection.endpoint ||
-        draft.api !== connection.api ||
-        draft.authentication !== connection.authentication);
+      settings.endpoint !== connection.endpoint ||
+      settings.api !== connection.api ||
+      settings.authentication !== connection.authentication;
     if (bindingChanged) {
-      this.patch({ confirmation: { kind: "binding", connection, settings: { ...draft } } });
+      this.patch({ confirmation: { kind: "binding", connection, settings } });
       return;
     }
     await this.command(
-      "Rename connection",
-      () => this.client.rename(connection.id, draft.name),
+      "Save connection",
+      () => this.client.updateCustom(connection.id, settings),
       (updated) => this.storeConnection(updated),
     );
   }

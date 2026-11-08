@@ -90,20 +90,6 @@
   border-top: 1px solid var(--border-subtle);
 }
 
-.provider-settings .provider-settings-refresh {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border-color: transparent;
-  color: var(--text-secondary);
-  font-size: 12px;
-}
-
-.provider-settings .provider-settings-refresh .icon {
-  width: 13px;
-  height: 13px;
-}
-
 .provider-settings .provider-settings-connections {
   display: grid;
   gap: 6px;

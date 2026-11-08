@@ -38,16 +38,6 @@ export function ConnectionForm({
       }}
     >
       <fieldset disabled={disabled}>
-        <label class="provider-settings-field">
-          Name
-          <input
-            required
-            type="text"
-            value={draft.name}
-            autoComplete="off"
-            onInput={(event) => edit({ name: event.currentTarget.value })}
-          />
-        </label>
         {(connection?.route ?? state.add.route) === "custom" && (
           <CustomFields id={id} draft={draft} edit={edit} />
         )}
@@ -59,11 +49,7 @@ export function ConnectionForm({
         )}
       </fieldset>
       <div class="provider-settings-actions">
-        <button
-          type="submit"
-          class="provider-settings-primary"
-          disabled={disabled || !draft.name.trim()}
-        >
+        <button type="submit" class="provider-settings-primary" disabled={disabled}>
           {connection ? "Save changes" : "Add provider"}
         </button>
         {onCancel && (

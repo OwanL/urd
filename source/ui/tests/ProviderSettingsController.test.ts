@@ -9,6 +9,7 @@ import {
   credentialState,
   matchesConnection,
   providerHostname,
+  providerSetupState,
   ProviderSettingsController,
 } from "../providers/settings/ProviderSettingsController.ts";
 
@@ -70,6 +71,32 @@ function setup(overrides: Partial<ProviderClient> = {}) {
   });
   return { client, state, notifications: () => notifications };
 }
+
+void test("setup membership uses saved credentials, not current provider health", () => {
+  assert.equal(
+    providerSetupState({ ...connection, authentication: "none" }, undefined),
+    "complete",
+  );
+  for (const authentication of ["apiKey", "oAuth"] as const) {
+    const item = { ...connection, authentication };
+    assert.equal(providerSetupState(item, undefined), "unknown");
+    assert.equal(providerSetupState(item, credential), "incomplete");
+    assert.equal(
+      providerSetupState(item, { ...credential, hasCredentials: true, requiresSignIn: false }),
+      "complete",
+    );
+    assert.equal(
+      providerSetupState(item, {
+        ...credential,
+        hasCredentials: true,
+        expiresAt: "2000-01-01T00:00:00Z",
+        planAccessGranted: false,
+        isDisconnecting: true,
+      }),
+      "complete",
+    );
+  }
+});
 
 void test("snapshot is exposed through a read-only controller getter", () => {
   const { state } = setup();

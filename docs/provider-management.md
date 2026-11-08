@@ -156,9 +156,19 @@ The workspace gear opens a compact Settings panel following Pie's header/search/
 composition, initially with one **Providers** page. `source/ui/settings/Settings.tsx` owns
 the shell; `source/ui/providers/settings/` owns connection forms and operation state.
 Shared UI colour tokens and popover controls keep it aligned with the workspace.
-The initial view contains **Add provider** and a compact saved-provider list. Add opens a
-chooser that distinguishes account sign-in, API key and custom/local servers. Selecting a
-saved provider opens its focused connection view; Back returns to the list and search can
+The initial view has a compact **Add provider** header action and a plain list of set-up
+providers, without routine connected-status labels. Setup means saved credentials or a
+no-auth configuration, not current validity, model discovery or plan entitlement. Expired
+credentials remain in the list with an attention label. Disconnect or binding changes that
+clear required credentials return the connection to unfinished setup; no records are deleted
+by this presentation rule. Unknown credential reads are reported rather than treated as
+unfinished or silently omitted without explanation.
+
+Add opens a chooser that distinguishes account sign-in, API key and custom/local servers.
+Its **Finish setup** section resumes saved configurations that still need credentials;
+**Check setup** keeps failed/unknown reads reachable. Successful authentication offers **Done**
+to return to the main list. Selecting a set-up provider opens its connection view; Back
+returns to the list and search can
 return directly to matching providers without stealing typing focus. Connected providers do
 not show setup forms. Configuration, model refresh and removal live under **Advanced**.
 A first-time **Load models** action stays visible until a usable connection has fetched its
@@ -199,6 +209,9 @@ Hostname setup and automatic status updates were also checked, including draft r
 no polling after close, and no automatic mutations or model discovery.
 The progressive-disclosure flow additionally covered back/search focus, hidden advanced
 controls, API-key replacement, sign-in handoff/cancel/completion and narrow/short viewports.
+Set-up-only membership was checked with no-auth locals, expired credentials, unknown reads,
+resuming unfinished authentication, completing setup, disconnecting and pending creation
+across close/reopen. These are membership rules, not an online health check.
 These layout checks do not add backend or live-authentication qualification.
 The temporary fixture process/database was
 removed; shared workspace integration and palette/tab changes are coordinated separately.

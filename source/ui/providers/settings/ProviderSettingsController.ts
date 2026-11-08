@@ -102,6 +102,16 @@ export function credentialState(
   return "connected";
 }
 
+// Setup is credential presence, not current validity, plan access or catalog discovery.
+export function providerSetupState(
+  connection: ProviderConnection,
+  status: ProviderCredentialStatus | undefined,
+): "complete" | "incomplete" | "unknown" {
+  if (connection.authentication === "none") return "complete";
+  if (!status) return "unknown";
+  return status.hasCredentials ? "complete" : "incomplete";
+}
+
 export function matchesConnection(connection: ProviderConnection, search: string): boolean {
   const query = search.trim().toLocaleLowerCase();
   return [connection.name, connection.route, connection.endpoint].some((value) =>

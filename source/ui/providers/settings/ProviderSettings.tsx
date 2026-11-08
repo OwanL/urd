@@ -6,6 +6,7 @@ import {
   credentialState,
   matchesConnection,
   providerHostname,
+  providerSetupState,
   signInPending,
 } from "./ProviderSettingsController.ts";
 import type {
@@ -21,6 +22,7 @@ interface Presentation {
   connectionId: string | null;
   creating: ReadonlySet<string> | null;
   returnId: string | null;
+  setup?: boolean;
 }
 
 const operationLabels: Record<ProviderSettingsOperation, string> = {
@@ -97,6 +99,7 @@ export function ProviderSettings({ state, search }: ProviderSettingsProps) {
         connectionId: state.selectedId,
         creating: null,
         returnId: null,
+        setup: true,
       });
   }, [creating, state.selectedId, state.connections, show]);
 
@@ -115,13 +118,38 @@ export function ProviderSettings({ state, search }: ProviderSettingsProps) {
   }, [presentation, screen]);
 
   if (!state.active) return null;
-  const visible = state.connections.filter((item) => matchesConnection(item, search));
+  const complete = state.connections.filter(
+    (item) => providerSetupState(item, state.credentials[item.id]) === "complete",
+  );
+  const unfinished = state.connections.filter(
+    (item) => providerSetupState(item, state.credentials[item.id]) === "incomplete",
+  );
+  const unknown = state.connections.filter(
+    (item) => providerSetupState(item, state.credentials[item.id]) === "unknown",
+  );
+  const visible = complete.filter((item) => matchesConnection(item, search));
+  const setup = connection && providerSetupState(connection, state.credentials[connection.id]);
   const canEdit = state.pending === null && !state.uncertain && state.confirmation === null;
   const canNavigate = state.confirmation === null;
   const overview = () => {
     actions.select(null);
     show({ screen: "overview", connectionId: null, creating: null, returnId: connectionId });
   };
+  const chooser = () => {
+    actions.select(null);
+    show({ screen: "chooser", connectionId: null, creating: null, returnId: null });
+  };
+  const open = (item: ProviderConnection, setup = false) => {
+    actions.select(item.id);
+    show({
+      screen: "detail",
+      connectionId: item.id,
+      creating: null,
+      returnId: item.id,
+      setup,
+    });
+  };
+  const backToChooser = screen === "custom" || (screen === "detail" && setup !== "complete");
   const create = () => {
     if (!canEdit) return;
     show({ ...presentation, creating: new Set(state.connections.map(({ id }) => id)) });
@@ -151,55 +179,62 @@ export function ProviderSettings({ state, search }: ProviderSettingsProps) {
           type="button"
           class="provider-settings-back"
           disabled={!canNavigate}
-          onClick={overview}
+          onClick={backToChooser ? chooser : overview}
         >
           <Icon name="chevron" />
-          Back to providers
+          {backToChooser ? "Back to add provider" : "Back to providers"}
         </button>
       )}
 
       {screen === "overview" ? (
         <>
-          <button
-            ref={returnId && visible.some(({ id }) => id === returnId) ? null : overviewControl}
-            type="button"
-            class="provider-settings-primary provider-settings-add"
-            disabled={!canEdit}
-            onClick={() => {
-              actions.select(null);
-              show({ screen: "chooser", connectionId: null, creating: null, returnId: null });
-            }}
-          >
-            Add provider
-          </button>
-          <div class="provider-settings-connections">
-            {!state.loaded && !state.reading && <p>Saved providers have not been read.</p>}
-            {state.loaded && !!state.connections.length && !visible.length && (
-              <p class="provider-settings-secondary">No matching providers.</p>
-            )}
-            {visible.map((item) => (
-              <button
-                ref={returnId === item.id ? overviewControl : null}
-                type="button"
-                class="provider-settings-connection"
-                key={item.id}
-                disabled={!canNavigate}
-                onClick={() => {
-                  actions.select(item.id);
-                  show({
-                    screen: "detail",
-                    connectionId: item.id,
-                    creating: null,
-                    returnId: item.id,
-                  });
-                }}
-              >
-                <strong>{connectionTitle(item)}</strong>
-                <span class="provider-settings-secondary">{connectionStatus(state, item)}</span>
-                <Icon name="chevron" />
-              </button>
-            ))}
-          </div>
+          <header class="provider-settings-overview-heading">
+            <h3>Providers</h3>
+            <button
+              ref={returnId && visible.some(({ id }) => id === returnId) ? null : overviewControl}
+              type="button"
+              class="provider-settings-add"
+              disabled={!canEdit}
+              onClick={chooser}
+            >
+              <span aria-hidden="true">+</span> Add provider
+            </button>
+          </header>
+          {(!state.loaded || !!unknown.length) && (
+            <p class="provider-settings-secondary">
+              {unknown.some((item) => state.errors[`credentials:${item.id}`])
+                ? "Could not check some providers. Open Add provider to review."
+                : state.reading || state.loaded
+                  ? "Checking provider setup…"
+                  : "Saved providers have not been read."}
+            </p>
+          )}
+          {state.loaded && !state.errors.connections && !unknown.length && !complete.length && (
+            <p class="provider-settings-secondary">No providers set up.</p>
+          )}
+          {state.loaded && !!complete.length && !visible.length && (
+            <p class="provider-settings-secondary">No matching providers.</p>
+          )}
+          <ul class="provider-settings-connections" aria-label="Set-up providers">
+            {visible.map((item) => {
+              const attention = connectionAttention(state, item);
+              return (
+                <li key={item.id}>
+                  <button
+                    ref={returnId === item.id ? overviewControl : null}
+                    type="button"
+                    class="provider-settings-connection"
+                    disabled={!canNavigate}
+                    onClick={() => open(item)}
+                  >
+                    <strong>{connectionTitle(item)}</strong>
+                    {attention && <span class="provider-settings-secondary">{attention}</span>}
+                    <Icon name="chevron" />
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
         </>
       ) : (
         <>
@@ -218,38 +253,78 @@ export function ProviderSettings({ state, search }: ProviderSettingsProps) {
             )}
           </header>
           {screen === "chooser" && (
-            <div class="provider-settings-connections" aria-label="Choose a provider">
-              {(Object.keys(providerNames) as ProviderRoute[]).map((route) => (
-                <button
-                  type="button"
-                  class="provider-settings-connection"
-                  key={route}
-                  disabled={!canEdit}
-                  onClick={() => choose(route)}
-                >
-                  <strong>{providerNames[route]}</strong>
-                  <span class="provider-settings-secondary">
-                    {route === "chatGpt"
-                      ? "Account sign-in"
-                      : route === "openAI"
-                        ? "API key"
-                        : "Local or compatible server"}
-                  </span>
-                  <Icon name="chevron" />
-                </button>
-              ))}
-            </div>
+            <>
+              <ul class="provider-settings-connections" aria-label="Choose a provider">
+                {(Object.keys(providerNames) as ProviderRoute[]).map((route) => (
+                  <li key={route}>
+                    <button
+                      type="button"
+                      class="provider-settings-connection"
+                      disabled={!canEdit}
+                      onClick={() => choose(route)}
+                    >
+                      <strong>{providerNames[route]}</strong>
+                      <span class="provider-settings-secondary">
+                        {route === "chatGpt"
+                          ? "Account sign-in"
+                          : route === "openAI"
+                            ? "API key"
+                            : "Local or compatible server"}
+                      </span>
+                      <Icon name="chevron" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              {[
+                { title: "Finish setup", items: unfinished },
+                { title: "Check setup", items: unknown },
+              ].map(({ title, items }) =>
+                items.length ? (
+                  <section class="provider-settings-group" aria-label={title} key={title}>
+                    <h4>{title}</h4>
+                    <ul class="provider-settings-connections">
+                      {items.map((item) => (
+                        <li key={item.id}>
+                          <button
+                            type="button"
+                            class="provider-settings-connection"
+                            disabled={!canNavigate}
+                            onClick={() => open(item, true)}
+                          >
+                            <strong>{connectionTitle(item)}</strong>
+                            <span class="provider-settings-secondary">
+                              {connectionStatus(state, item)}
+                            </span>
+                            <Icon name="chevron" />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                ) : null,
+              )}
+            </>
           )}
           {screen === "custom" && (
             <ConnectionForm state={state} disabled={!canEdit} onCreate={create} />
           )}
           {screen === "detail" && connection && (
-            <ConnectionManagement
-              key={connection.id}
-              state={state}
-              connection={connection}
-              disabled={!canEdit}
-            />
+            <>
+              <ConnectionManagement
+                key={connection.id}
+                state={state}
+                connection={connection}
+                disabled={!canEdit}
+              />
+              {presentation.setup && setup === "complete" && (
+                <div class="provider-settings-actions">
+                  <button type="button" disabled={!canNavigate} onClick={overview}>
+                    Done
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </>
       )}
@@ -328,6 +403,7 @@ function ConnectionManagement({
         <p class="provider-settings-error">{state.errors[`credentials:${connection.id}`]}</p>
       )}
       {connection.authentication === "apiKey" &&
+        credential &&
         (hasCredentials ? (
           <div class="provider-settings-auth">
             {disconnect}
@@ -339,7 +415,7 @@ function ConnectionManagement({
         ) : (
           <ApiKeyForm state={state} connection={connection} disabled={disabled} />
         ))}
-      {connection.route === "chatGpt" && (
+      {connection.route === "chatGpt" && credential && (
         <div class="provider-settings-auth">
           {signIn?.error && <p class="provider-settings-error">{signIn.error}</p>}
           {signIn && ["expired", "failed", "cancelled"].includes(signIn.status) && (
@@ -598,6 +674,22 @@ function connectionStatus(state: ProviderSettingsState, connection: ProviderConn
     return signIn.status === "completing" ? "Completing sign-in…" : "Signing in…";
   if (state.errors[`credentials:${connection.id}`]) return "Status unavailable";
   return credentialStateLabels[credentialState(connection, state.credentials[connection.id])];
+}
+
+function connectionAttention(
+  state: ProviderSettingsState,
+  connection: ProviderConnection,
+): string | null {
+  const status = connectionStatus(state, connection);
+  const credential = credentialState(connection, state.credentials[connection.id]);
+  if (
+    status === credentialStateLabels[credential] &&
+    (credential === "connected" ||
+      credential === "noAuthentication" ||
+      (credential === "unknown" && connection.authentication === "none"))
+  )
+    return null;
+  return status;
 }
 
 function noticeText(notice: ProviderSettingsNotice): string | null {

@@ -38,7 +38,7 @@ public sealed class SessionHttpLifetimeTests {
       Uri origin = await server.WaitForReadyAsync();
       server.Client.DefaultRequestHeaders.Add("X-Urd-Client", "browser");
       Guid sessionId = await CreateSessionAsync(server.Client);
-      var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "survives a disconnected sender");
+      var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "survives a disconnected sender", TestLlmSelection.Default);
       await SendWithoutReadingAcknowledgementAsync(origin, sessionId, submission, entered.Task);
 
       UserMessageReceipt receipt = (await server.Client.GetFromJsonAsync<UserMessageReceipt>(
@@ -93,7 +93,7 @@ public sealed class SessionHttpLifetimeTests {
       await server.WaitForReadyAsync();
       server.Client.DefaultRequestHeaders.Add("X-Urd-Client", "browser");
       Guid sessionId = await CreateSessionAsync(server.Client);
-      var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "stop after HTTP admission");
+      var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "stop after HTTP admission", TestLlmSelection.Default);
       using HttpResponseMessage sent = await server.Client.PostAsJsonAsync(
           $"/api/sessions/{sessionId}/message-submissions", submission, json);
       Assert.Equal(HttpStatusCode.OK, sent.StatusCode);

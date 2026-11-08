@@ -9,24 +9,28 @@ excluding general-purpose agent work.
 
 ## Status and authority
 
-The ASP.NET-free Core implements session identity, durable user-message submission decisions,
-fake-text/tool execution with default durable safe-boundary steering in the owned execution,
-bounded session snapshots plus paged message-content reads through SQLite, and graceful
-shutdown of the manager's live sessions.
-See [backend build/test instructions](docs/backend-development.md).
-The [local HTTP Server](docs/server-development.md) exposes seven operations: chat creation,
-saved-primary-ID listing, Send, receipt lookup, snapshot, content and addressed Stop,
-with exclusive data ownership and graceful shutdown. Busy Sends use Core's bounded steering
-admission. The breaking API vocabulary uses message submissions and executions,
-with no legacy aliases; saved IDs/schema 5, decisions and exact retries are unchanged.
-The naming and structure cleanup passed 296/296 Release tests and independent review; see the development guides.
-The first [browser-client bite](docs/browser-development.md) implements typed HTTP access
-and wire tests, not UI rendering or browser state. Real tools/providers, UI rendering,
-tool-inspection APIs and an explicit after-execution queue are not implemented;
-reopening does not recover or replay work. Wider designs remain subject to
-bite-sized owner review; the
-[Core](docs/scratch/initial-core-design.md) and [hosting](docs/scratch/initial-ui-hosting-design.md)
-records distinguish approved slices from future proposals.
+The ASP.NET-free Core implements durable sessions, real provider-backed requests,
+safe-boundary steering, configured tool continuation, bounded snapshots and paged
+message content through SQLite. A Send freezes its provider binding, model and
+reasoning choice; exact retries retain that whole original submission. Native
+provider context is saved separately from visible text. See the
+[backend guide](docs/backend-development.md) and
+[provider qualification](docs/provider-management.md) for the tested boundaries.
+
+The [local HTTP Server](docs/server-development.md) exposes chat creation,
+saved-primary-ID listing, Send, receipt lookup, snapshot, content and addressed
+Stop, with exclusive data ownership and graceful shutdown. The first
+[browser UI](docs/browser-development.md) adds local closable tabs, transcript,
+model/reasoning choice and Send/Stop over those real operations. Its build is served
+by the same loopback host. Provider setup remains headless; settings and snooze
+icons are intentionally inert. Closing a tab hides it, not its backend session.
+
+Application tools, tool-inspection UI/APIs, older-history navigation and an explicit
+after-execution queue remain deferred. Reopening does not recover or replay work.
+Wider designs remain subject to bite-sized owner review; the
+[Core](docs/scratch/initial-core-design.md) and
+[hosting](docs/scratch/initial-ui-hosting-design.md) records distinguish approved
+slices from future proposals. Verification evidence lives in the development guides.
 
 This document records agreed direction and its rationale. It is a foundation
 for future design and development, not a detailed implementation specification.

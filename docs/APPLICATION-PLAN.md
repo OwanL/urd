@@ -164,15 +164,23 @@ ambiguous state/ownership semantics; those remain substantive decisions.
 
 ### Near-term sequence — each new operation still needs its own approval
 
-The identity foundation, first fake-text Core Send/execution increment and approved bounded
-read surface are implemented. Prioritize a working integrated path, not more broad technology
-comparisons or a larger complete specification:
+The identity foundation, Core Send/execution and bounded reads are implemented.
+The subsequent provider/native-context and frozen-selection checkpoints now connect
+production sessions to managed provider clients; schema 8 preserves full selections
+and legacy receipts. The first Preact workspace and static hosting are implemented
+against those operations, with exact uncertain-Send journaling and independent local
+tabs. See [browser development](browser-development.md) for current build/verification
+boundaries and [provider management](provider-management.md) for separately authorized
+live qualification. The numbered history below retains earlier approvals/evidence;
+it is not a claim that each old fake-only checkpoint remains the current composition.
+Prioritize this working integrated path, not broad comparisons or a larger complete
+specification:
 1. The Core checkpoint now commits submission decisions/execution association, streams through a
    borrowed client and saves terminal state after cleanup. Two chats share a client without
    serializing LLM work; retained acceptance does not replay after normal reopen.
    Coherent snapshots and full-content pages now expose committed state without replay;
    final output remains distinct from settled work. The owner selected snapshot polling
-   for the first browser increment; browser wiring itself is not implemented yet.
+   for the first browser increment; that wiring is now implemented by the Preact workspace.
    The owner-approved steering increment now durably accepts busy input into the owned run.
    Separate messages follow the next tool-result batch in arrival order. If there are no tool
    calls, pending steering continues at the next safe request boundary; the current request is
@@ -211,10 +219,11 @@ comparisons or a larger complete specification:
    browser milestone or a complete chat workflow.
    Keep independent Core/storage and UI/hosting/build work parallel with disjoint ownership;
    routine dependency wiring is not another approval gate. This is not whole-Core approval.
-2. Order the necessary small Core and hosting/UI bites toward one built browser → Core →
-   SQLite fake-LLM response, then extend that same path to two clients/chats, input while
-   busy, addressed Stop/settlement and reopen without replay. Do not add a parallel demo
-   implementation or defer integration until every proposed component is finished.
+2. Qualify the built browser → HTTP → Core → SQLite → managed-provider path, including
+   two clients/chats, busy input, addressed Stop/settlement and reopen without replay.
+   The offline fixture uses the real provider SDK with an owned loopback endpoint,
+   not a parallel demo implementation or production fake mode. Further UI work must
+   extend this path rather than defer integration until every proposed component exists.
 3. Exercise tiny output chunks and a slow observer on that path: measure commit/view/read
    counts, guard occupancy, click-to-visible content and memory under background work.
    Include one source-edit/build/reload check; use observations to choose practical budgets.

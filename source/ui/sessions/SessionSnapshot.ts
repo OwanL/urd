@@ -1,3 +1,4 @@
+import type { LlmSelection } from "../providers/LlmSelection.ts";
 import type { MessagePreview } from "./Messages.ts";
 import type { SessionExecutionResult } from "./SessionExecutionResult.ts";
 
@@ -9,6 +10,7 @@ export interface SessionSnapshot {
   readonly unsettledExecutionId: string | null;
   readonly stopRequested: boolean;
   readonly lastSettlement: SessionExecutionResult | null;
+  readonly latestLlmSelection: LlmSelection | null;
   readonly messages: readonly MessagePreview[];
   readonly hasOlderMessages: boolean;
 }

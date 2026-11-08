@@ -41,8 +41,8 @@ public sealed class SteeringFlowTests {
     try {
       Guid executionId = await fixture.StartExecutionAsync("start");
       await toolEntered.Task.WaitAsync(TestTimeout);
-      var first = new UserMessageSubmission(Guid.NewGuid(), 0, "focus on performance");
-      var second = new UserMessageSubmission(Guid.NewGuid(), 0, "keep Unicode: 🙂\0");
+      var first = new UserMessageSubmission(Guid.NewGuid(), 0, "focus on performance", TestLlmSelection.Default);
+      var second = new UserMessageSubmission(Guid.NewGuid(), 0, "keep Unicode: 🙂\0", TestLlmSelection.Default);
       UserMessageReceipt[] retries = await Task.WhenAll(fixture.Session.SubmitUserMessageAsync(first),
           fixture.Session.SubmitUserMessageAsync(first));
       UserMessageReceipt secondReceipt = await fixture.Session.SubmitUserMessageAsync(second);
@@ -71,7 +71,7 @@ public sealed class SteeringFlowTests {
 
       IEnumerable<ChatMessage> inFlight = client.LastRequestSource;
       string[] claimedUsers = Users(inFlight);
-      var late = new UserMessageSubmission(Guid.NewGuid(), 0, "also explain the trade-off");
+      var late = new UserMessageSubmission(Guid.NewGuid(), 0, "also explain the trade-off", TestLlmSelection.Default);
       UserMessageReceipt lateReceipt = await fixture.Session.SubmitUserMessageAsync(late);
       Assert.Equal(executionId, lateReceipt.ExecutionId);
       Assert.Equal(claimedUsers, Users(inFlight)); // Inspect the actual passed collection, not the fake's copy.
@@ -88,7 +88,7 @@ public sealed class SteeringFlowTests {
       Assert.All(StoredTools.Read(fixture.Database), tool => Assert.Equal(ExecutionOutcome.Completed, tool.Outcome));
 
       using UrdStore reopened = UrdStore.Open(fixture.Database.Path);
-      var manager = new SessionManager(reopened, client, [step]);
+      var manager = new SessionManager(reopened, _ => client, [step]);
       PrimarySession loaded = await manager.GetPrimaryAsync(fixture.Session.Id);
       Assert.Equal(retries[0], await loaded.SubmitUserMessageAsync(first));
       Assert.Equal(secondReceipt, await loaded.SubmitUserMessageAsync(second));
@@ -135,14 +135,14 @@ public sealed class SteeringFlowTests {
     var store = UrdStore.Open(database.Path);
     AIFunction step = AIFunctionFactory.Create(Step, name: "step");
     AIFunction[] configured = [step];
-    var manager = new SessionManager(store, client, configured);
+    var manager = new SessionManager(store, _ => client, configured);
     configured[0] = AIFunctionFactory.Create(() => "replacement", name: "replacement");
     try {
       session = await manager.CreatePrimaryAsync();
-      UserMessageReceipt origin = await session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, "start"));
+      UserMessageReceipt origin = await session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, "start", TestLlmSelection.Default));
       Guid executionId = Assert.IsType<Guid>(origin.ExecutionId);
       await entered.Task.WaitAsync(TestTimeout);
-      var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "pending steering");
+      var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "pending steering", TestLlmSelection.Default);
       UserMessageReceipt pending = await session.SubmitUserMessageAsync(submission);
       Assert.Equal(executionId, pending.ExecutionId);
       Assert.Same(step, Assert.Single(client.Options[0]!.Tools!)); // The manager snapshots the caller's collection.
@@ -171,12 +171,12 @@ public sealed class SteeringFlowTests {
           message => message.Message.MessageId == submission.SubmissionId).Settlement);
 
       using UrdStore reopened = UrdStore.Open(database.Path);
-      var nextManager = new SessionManager(reopened, client);
+      var nextManager = new SessionManager(reopened, _ => client);
       try {
         PrimarySession loaded = await nextManager.GetPrimaryAsync(session.Id);
         Assert.Equal(pending, await loaded.SubmitUserMessageAsync(submission));
         Assert.Equal(1, client.Calls);
-        UserMessageReceipt fresh = await loaded.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, "fresh"));
+        UserMessageReceipt fresh = await loaded.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, "fresh", TestLlmSelection.Default));
         await loaded.WaitForSettlementAsync(fresh.ExecutionId!.Value).WaitAsync(TestTimeout);
         Assert.Equal(new[] { "start", "fresh" }, Users(client.LastRequest));
         Assert.Equal(1, effects);

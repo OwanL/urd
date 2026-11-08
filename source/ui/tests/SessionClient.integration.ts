@@ -3,8 +3,9 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { SessionClient } from "../sessions/SessionClient.ts";
-import { SessionRequestError } from "../sessions/SessionRequestError.ts";
+import { RequestError } from "../http/RequestError.ts";
 import { ServerProcess } from "./ServerProcess.ts";
+import { startLocalModelServer } from "./LocalModelServer.ts";
 
 function beforeDeadline<T>(operation: Promise<T>, deadline: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -24,12 +25,36 @@ void test(
   "SessionClient preserves the real server's session and message contract",
   { timeout: 45_000 },
   async (t) => {
+    const model = await startLocalModelServer();
+    t.after(() => model.close());
     const server = await ServerProcess.start();
     t.after(() => server.stop());
+    const connection = await model.install(server.origin);
     const client = new SessionClient(server.origin);
     const deadline = performance.now() + 20_000;
     const signal = AbortSignal.timeout(20_000);
     const request = <T>(operation: Promise<T>) => beforeDeadline(operation, deadline);
+
+    const page = await fetch(server.origin, { signal });
+    assert.equal(page.status, 200);
+    assert.match(page.headers.get("content-type") ?? "", /^text\/html/);
+    assert.equal(page.headers.get("cache-control"), "no-store");
+    const html = await page.text();
+    const script = html.match(/<script\b[^>]*src="(\/assets\/[^\"]+\.js)"/);
+    assert.ok(script, "The staged HTML must load the real bundled application");
+    const asset = await fetch(new URL(script[1]!, server.origin), { signal });
+    assert.equal(asset.status, 200);
+    assert.match(asset.headers.get("cache-control") ?? "", /immutable/);
+    await asset.arrayBuffer();
+    const forbidden = await fetch(server.origin, {
+      headers: { Origin: "https://example.invalid" },
+      signal,
+    });
+    assert.equal(forbidden.status, 403);
+    await forbidden.arrayBuffer();
+    const privateApi = await fetch(new URL("/api/sessions", server.origin), { signal });
+    assert.equal(privateApi.status, 403, "Static hosting must not bypass the API marker");
+    await privateApi.arrayBuffer();
 
     assert.deepEqual(await request(client.list(undefined, signal)), {
       sessionIds: [],
@@ -49,6 +74,7 @@ void test(
       unsettledExecutionId: null,
       stopRequested: false,
       lastSettlement: null,
+      latestLlmSelection: null,
       messages: [],
       hasOlderMessages: false,
     });
@@ -57,6 +83,7 @@ void test(
     const submission = {
       submissionId: randomUUID(),
       expectedHistoryRevision: initial.historyRevision,
+      llmSelection: { connection, modelId: "fixture-a", reasoningEffort: "high" },
       text:
         "\n  Original café 東京 🧭\r\n" + "line: é / 🦉 / 漢字\n".repeat(200) + "  final line\n",
     };
@@ -87,6 +114,10 @@ void test(
     assert.equal(settled.stopRequested, false);
     assert.deepEqual(settled.lastSettlement, { executionId, outcome: "completed" });
     assert.equal(settled.hasOlderMessages, false);
+    assert.deepEqual(settled.latestLlmSelection, submission.llmSelection);
+    assert.equal(model.calls.length, 1, "An exact retry must not make another provider request");
+    assert.equal(model.calls[0]!.request.model, "fixture-a");
+    assert.equal(model.calls[0]!.request.reasoning_effort, "high");
     assert.equal(settled.messages.length, 2);
     const user = settled.messages.find((message) => message.message.role === "user");
     const assistant = settled.messages.find((message) => message.message.role === "assistant");
@@ -148,7 +179,7 @@ void test(
     await assert.rejects(
       request(client.submitMessage(id, { ...submission, text: submission.text + "changed" })),
       (error) => {
-        assert.ok(error instanceof SessionRequestError);
+        assert.ok(error instanceof RequestError);
         assert.equal(error.status, 409);
         assert.ok("responseBody" in error);
         return true;

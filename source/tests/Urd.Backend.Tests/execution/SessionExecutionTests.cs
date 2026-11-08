@@ -80,7 +80,7 @@ public sealed class SessionExecutionTests {
           await fixture.Session.RequestStopAsync(executionId).WaitAsync(TestTimeout));
       await cleanupEntered.Task.WaitAsync(TestTimeout);
       Assert.False(fixture.Session.WaitForSettlementAsync(executionId).IsCompleted);
-      UserMessageReceipt refused = await fixture.Session.SubmitUserMessageAsync(new UserMessageSubmission(Guid.NewGuid(), 0, "too early"));
+      UserMessageReceipt refused = await fixture.Session.SubmitUserMessageAsync(new UserMessageSubmission(Guid.NewGuid(), 0, "too early", TestLlmSelection.Default));
       Assert.Equal(MessageAcceptance.Refused, refused.Acceptance);
       Assert.Equal(MessageRefusalReason.Stopping, refused.RefusalReason);
       Assert.Null(refused.ExecutionId);
@@ -137,7 +137,7 @@ public sealed class SessionExecutionTests {
       Assert.Equal(new StopReceipt(executionId, StopStatus.Requested), await secondStop.WaitAsync(TestTimeout));
       Assert.False(settlement.IsCompleted);
       UserMessageReceipt refused = await session.SubmitUserMessageAsync(
-          new UserMessageSubmission(Guid.NewGuid(), 0, "too early"));
+          new UserMessageSubmission(Guid.NewGuid(), 0, "too early", TestLlmSelection.Default));
       Assert.Equal(MessageAcceptance.Refused, refused.Acceptance);
       Assert.Equal(MessageRefusalReason.Stopping, refused.RefusalReason);
       Assert.Equal(1, client.Calls);
@@ -171,10 +171,10 @@ public sealed class SessionExecutionTests {
     var store = UrdStore.Open(database.Path);
     var client = new ScriptedChatClient(token => CancellationCallbackFailureResponse(
         requestEntered, providerExited, token));
-    var session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid()), store, client);
+    var session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid()), store, _ => client);
     Guid? executionId = null;
     try {
-      UserMessageReceipt receipt = await session.SubmitUserMessageAsync(new UserMessageSubmission(Guid.NewGuid(), 0, "go"));
+      UserMessageReceipt receipt = await session.SubmitUserMessageAsync(new UserMessageSubmission(Guid.NewGuid(), 0, "go", TestLlmSelection.Default));
       Assert.Equal(MessageAcceptance.Accepted, receipt.Acceptance);
       executionId = Assert.IsType<Guid>(receipt.ExecutionId);
       Guid acceptedExecution = executionId.Value;
@@ -191,7 +191,7 @@ public sealed class SessionExecutionTests {
       Assert.Null(snapshot.LastSettlement);
       Assert.Null(Assert.Single(StoredExecutions.Read(database)).Outcome);
       UserMessageReceipt refused = await session.SubmitUserMessageAsync(
-          new UserMessageSubmission(Guid.NewGuid(), 0, "replacement"));
+          new UserMessageSubmission(Guid.NewGuid(), 0, "replacement", TestLlmSelection.Default));
       Assert.Equal(MessageAcceptance.Refused, refused.Acceptance);
       Assert.Equal(MessageRefusalReason.Stopping, refused.RefusalReason);
       Assert.Single(StoredExecutions.Read(database));
@@ -220,14 +220,14 @@ public sealed class SessionExecutionTests {
     var store = UrdStore.Open(database.Path);
     var disposed = Signal();
     var client = new ScriptedChatClient(token => WriteAndCleanupFailureResponse(disposed, token));
-    var session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid()), store, client);
+    var session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid()), store, _ => client);
     Guid? executionId = null;
     try {
       database.Execute("""
         CREATE TRIGGER reject_output BEFORE INSERT ON execution_output
         BEGIN SELECT RAISE(ABORT, 'Injected output write failure'); END;
         """);
-      UserMessageReceipt receipt = await session.SubmitUserMessageAsync(new UserMessageSubmission(Guid.NewGuid(), 0, "go"));
+      UserMessageReceipt receipt = await session.SubmitUserMessageAsync(new UserMessageSubmission(Guid.NewGuid(), 0, "go", TestLlmSelection.Default));
       Assert.Equal(MessageAcceptance.Accepted, receipt.Acceptance);
       executionId = receipt.ExecutionId;
       Guid acceptedExecution = Assert.IsType<Guid>(executionId);
@@ -248,7 +248,7 @@ public sealed class SessionExecutionTests {
       Assert.Null(Assert.Single(StoredExecutions.Read(database)).Outcome);
       Assert.Null(Assert.Single(StoredExecutions.ReadRequests(database)).Outcome);
       UserMessageReceipt refused = await session.SubmitUserMessageAsync(
-          new UserMessageSubmission(Guid.NewGuid(), 0, "replacement"));
+          new UserMessageSubmission(Guid.NewGuid(), 0, "replacement", TestLlmSelection.Default));
       Assert.Equal(MessageAcceptance.Refused, refused.Acceptance);
       Assert.Equal(MessageRefusalReason.Stopping, refused.RefusalReason);
       Assert.Null(refused.ExecutionId);
@@ -279,9 +279,9 @@ public sealed class SessionExecutionTests {
     var store = UrdStore.Open(database.Path);
     var cleaned = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
     var client = new ScriptedChatClient(token => WriteFailureResponse(cleaned, token));
-    var session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid()), store, client);
+    var session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid()), store, _ => client);
     Guid? executionId = null;
-    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "go");
+    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "go", TestLlmSelection.Default);
     try {
       database.Execute("""
         CREATE TRIGGER reject_output BEFORE INSERT ON execution_output
@@ -305,7 +305,7 @@ public sealed class SessionExecutionTests {
       Assert.Null(Assert.Single(StoredExecutions.Read(database)).Outcome);
       Assert.Null(Assert.Single(StoredExecutions.ReadRequests(database)).Outcome);
       Assert.Empty(StoredLlmResponses.Read(database));
-      UserMessageReceipt refused = await session.SubmitUserMessageAsync(new UserMessageSubmission(Guid.NewGuid(), 0, "replacement"));
+      UserMessageReceipt refused = await session.SubmitUserMessageAsync(new UserMessageSubmission(Guid.NewGuid(), 0, "replacement", TestLlmSelection.Default));
       Assert.Equal(MessageAcceptance.Refused, refused.Acceptance);
       Assert.Equal(MessageRefusalReason.Stopping, refused.RefusalReason);
       Assert.Null(refused.ExecutionId);

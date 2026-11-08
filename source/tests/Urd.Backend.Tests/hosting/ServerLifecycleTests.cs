@@ -193,11 +193,11 @@ public sealed class ServerLifecycleTests {
   private static async Task SeedHistoryAsync(TemporaryDatabase database) {
     UrdStore store = UrdStore.Open(database.Path);
     var client = new ScriptedChatClient(ScriptedResponses.Complete);
-    var manager = new SessionManager(store, client);
+    var manager = new SessionManager(store, _ => client);
     try {
       PrimarySession session = await manager.CreatePrimaryAsync().WaitAsync(TestTimeout);
       UserMessageReceipt receipt = await session.SubmitUserMessageAsync(
-          new UserMessageSubmission(Guid.NewGuid(), 0, "retained input")).WaitAsync(TestTimeout);
+          new UserMessageSubmission(Guid.NewGuid(), 0, "retained input", TestLlmSelection.Default)).WaitAsync(TestTimeout);
       Assert.Equal(MessageAcceptance.Accepted, receipt.Acceptance);
       Guid executionId = Assert.IsType<Guid>(receipt.ExecutionId);
       Assert.Equal(ExecutionOutcome.Completed,

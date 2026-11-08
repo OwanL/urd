@@ -1,0 +1,299 @@
+.composer {
+  --composer-surface: var(--surface-input, #101214);
+  --composer-popover: var(--surface-popover, #191c1f);
+  --composer-text: var(--text-primary, #e9e6df);
+  --composer-muted: var(--text-secondary, #a3a5a5);
+  --composer-border: var(--border-subtle, #34383b);
+  --composer-accent: var(--accent, #d1b880);
+  --composer-danger: var(--danger, #e59b94);
+  box-sizing: border-box;
+  position: relative;
+  margin: 0 12px 9px;
+  padding: 2px 6px 6px;
+  border: 1px solid var(--composer-border);
+  border-radius: 10px;
+  background: var(--composer-surface);
+  color: var(--composer-text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.composer *,
+.composer *::before,
+.composer *::after {
+  box-sizing: border-box;
+}
+
+.composer-input {
+  display: block;
+  width: 100%;
+  min-height: 42px;
+  max-height: min(35dvh, 14rem);
+  margin: 0;
+  padding: 10px 5px 8px;
+  border: 0;
+  border-radius: 4px;
+  outline: none;
+  background: transparent;
+  color: var(--composer-text);
+  font: inherit;
+  line-height: 1.5;
+  resize: none;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--composer-border) transparent;
+}
+
+.composer-input::placeholder {
+  color: var(--composer-muted);
+  opacity: 1;
+}
+
+.composer:focus-within {
+  border-color: var(--composer-muted);
+}
+
+.composer-controls,
+.composer-selections,
+.composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.composer-controls {
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.composer-selections {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.composer-actions {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.composer button,
+.composer select,
+.composer-model-search {
+  min-height: 30px;
+  margin: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+}
+
+.composer button,
+.composer select {
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.composer .composer-selector {
+  background: transparent;
+  color: var(--composer-muted);
+}
+
+.composer .composer-selector:hover:not(:disabled),
+.composer-model-option:hover {
+  background: color-mix(in srgb, var(--composer-text) 7%, transparent);
+  color: var(--composer-text);
+}
+
+.composer :is(button, select, input):focus-visible {
+  outline: 2px solid var(--composer-accent);
+  outline-offset: 2px;
+}
+
+.composer-input:focus-visible {
+  box-shadow: inset 2px 0 var(--composer-accent);
+}
+
+.composer :is(button, select):disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.composer .composer-send {
+  border-color: color-mix(in srgb, var(--composer-accent) 35%, transparent);
+  background: color-mix(in srgb, var(--composer-accent) 13%, var(--composer-surface));
+  color: var(--composer-accent);
+}
+
+.composer .composer-send:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--composer-accent) 22%, var(--composer-surface));
+}
+
+.composer .composer-stop {
+  background: transparent;
+  color: var(--composer-danger);
+}
+
+.composer .composer-stop:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--composer-danger) 12%, transparent);
+}
+
+.composer-model {
+  position: relative;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 16rem;
+}
+
+.composer-model-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  width: 100%;
+  max-width: 100%;
+  text-align: left;
+}
+
+.composer-model-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-chevron {
+  flex: 0 0 auto;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.composer-reasoning {
+  flex: 0 1 auto;
+  min-width: 4.8rem;
+  max-width: 8rem;
+  color-scheme: dark;
+  text-overflow: ellipsis;
+}
+
+.composer-reasoning option {
+  background: var(--composer-popover);
+  color: var(--composer-text);
+}
+
+.composer-model-popover {
+  position: absolute;
+  z-index: 20;
+  left: 0;
+  bottom: calc(100% + 8px);
+  display: flex;
+  flex-direction: column;
+  width: min(28rem, calc(100vw - 48px));
+  max-height: min(24rem, 60dvh);
+  padding: 6px;
+  border: 1px solid var(--composer-border);
+  border-radius: 8px;
+  background: var(--composer-popover);
+  box-shadow: 0 6px 24px #0006;
+}
+
+.composer .composer-model-search {
+  flex: 0 0 auto;
+  width: 100%;
+  padding: 6px 8px;
+  border-color: var(--composer-border);
+  background: var(--composer-surface);
+  color: var(--composer-text);
+}
+
+.composer-model-search::placeholder {
+  color: var(--composer-muted);
+  opacity: 1;
+}
+
+.composer-model-options {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--composer-border) transparent;
+}
+
+.composer-model-provider {
+  padding: 10px 8px 4px;
+  overflow-wrap: anywhere;
+  color: var(--composer-muted);
+  font-size: 11px;
+}
+
+.composer-model-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 32px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.composer-model-option.is-active {
+  background: color-mix(in srgb, var(--composer-accent) 12%, transparent);
+}
+
+.composer-model-option[aria-selected="true"] {
+  color: var(--composer-accent);
+}
+
+.composer-model-footer {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding-top: 6px;
+}
+
+.composer .composer-model-refresh {
+  background: transparent;
+  color: var(--composer-muted);
+}
+
+.composer .composer-model-refresh[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.composer .composer-model-refresh:hover:not([aria-disabled="true"]) {
+  background: color-mix(in srgb, var(--composer-text) 7%, transparent);
+  color: var(--composer-text);
+}
+
+.composer-model-error {
+  max-height: 6rem;
+  padding: 0 8px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  color: var(--composer-danger);
+  font-size: 12px;
+}
+
+.composer-model-empty {
+  padding: 12px 8px;
+  color: var(--composer-muted);
+  font-size: 12px;
+}
+
+@media (forced-colors: active) {
+  .composer-input:focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+
+  .composer-model-option.is-active {
+    outline: 1px solid Highlight;
+    outline-offset: -1px;
+  }
+}

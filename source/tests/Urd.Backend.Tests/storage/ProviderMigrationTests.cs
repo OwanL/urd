@@ -39,12 +39,12 @@ public sealed class ProviderMigrationTests {
     ProviderConnection connection = new(Guid.NewGuid(), "synthetic", ProviderRoute.OpenAI,
         LlmApi.OpenAIResponses, new Uri("https://api.example.invalid/v1/"), AuthenticationMethod.ApiKey);
     using (UrdStore store = UrdStore.Open(database.Path)) {
-      Assert.Equal(7L, database.Scalar("PRAGMA user_version;")); // raw-sql: successful upgrade version is the subject under test
+      Assert.Equal(8L, database.Scalar("PRAGMA user_version;")); // raw-sql: successful upgrade version is the subject under test
       AssertLegacyEvidence();
       Assert.Empty(store.Providers.List());
       Assert.Empty(StoredProviders.ReadHostIds(database));
       Assert.Equal(SchemaFiveDatabase.SessionId, Assert.Single(store.Sessions.ListPrimaryIds(null).SessionIds));
-      Assert.Equal(new UserMessageSubmission(SchemaFiveDatabase.InputId, 7, SchemaFiveDatabase.Original),
+      Assert.Equal(new UserMessageSubmission(SchemaFiveDatabase.InputId, 7, SchemaFiveDatabase.Original, null),
           store.UserMessages.ReadReceipt(SchemaFiveDatabase.SessionId, SchemaFiveDatabase.InputId)!.Submission);
       SessionSnapshot snapshot = store.Snapshots.ReadStored(SchemaFiveDatabase.SessionId);
       Assert.Equal(new[] { SchemaFiveDatabase.Original, "\0🙂" }, snapshot.Messages.Select(message => message.Preview));
@@ -74,7 +74,7 @@ public sealed class ProviderMigrationTests {
   [Theory]
   [InlineData("provider_connections")]
   [InlineData("provider_host")]
-  public void SchemaSevenVerifiesProviderTableShapeRatherThanSilentlyRecreatingIt(string table) {
+  public void SchemaEightVerifiesProviderTableShapeRatherThanSilentlyRecreatingIt(string table) {
     using var database = new TemporaryDatabase();
     using (UrdStore store = UrdStore.Open(database.Path))
       store.Sessions.CreatePrimary(SchemaFiveDatabase.SessionId);
@@ -82,7 +82,7 @@ public sealed class ProviderMigrationTests {
     Assert.Throws<SqliteException>(() => {
       using UrdStore store = UrdStore.Open(database.Path);
     });
-    Assert.Equal(7L, database.Scalar("PRAGMA user_version;")); // raw-sql: rejecting malformed current schema must not rewrite its version
+    Assert.Equal(8L, database.Scalar("PRAGMA user_version;")); // raw-sql: rejecting malformed current schema must not rewrite its version
     Assert.Equal(SchemaFiveDatabase.SessionId, Assert.Single(StoredSessions.Read(database)).Id);
   }
 }

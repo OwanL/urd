@@ -60,7 +60,7 @@ public sealed class SessionStopTests {
       Assert.True(snapshot.StopRequested);
       Assert.Equal(executionId, snapshot.UnsettledExecutionId);
       Assert.Null(snapshot.LastSettlement);
-      UserMessageReceipt refused = await fixture.Session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, "too soon"));
+      UserMessageReceipt refused = await fixture.Session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, "too soon", TestLlmSelection.Default));
       Assert.Equal(MessageRefusalReason.Stopping, refused.RefusalReason);
 
       callbackRelease.TrySetResult();
@@ -99,7 +99,7 @@ public sealed class SessionStopTests {
     await using var fixture = new ExecutionFixture(client, [step]);
     Guid executionId = await fixture.StartExecutionAsync("start");
     Task<SessionExecutionResult> settlement = fixture.Session.WaitForSettlementAsync(executionId);
-    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "pending steering");
+    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "pending steering", TestLlmSelection.Default);
     UserMessageReceipt? accepted = null;
     try {
       await entered.Task.WaitAsync(TestTimeout);
@@ -127,7 +127,7 @@ public sealed class SessionStopTests {
       Assert.True(heldTools[0].Started);
       Assert.Null(heldTools[0].ResultJson);
       Assert.False(heldTools[1].Started);
-      UserMessageReceipt refused = await fixture.Session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, "replacement"));
+      UserMessageReceipt refused = await fixture.Session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, "replacement", TestLlmSelection.Default));
       Assert.Equal(MessageRefusalReason.Stopping, refused.RefusalReason);
     } finally {
       release.TrySetResult();
@@ -171,7 +171,7 @@ public sealed class SessionStopTests {
     await using var fixture = new ExecutionFixture(client);
     Guid executionId = await fixture.StartExecutionAsync("start");
     Task<SessionExecutionResult> settlement = fixture.Session.WaitForSettlementAsync(executionId);
-    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "pending steering");
+    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "pending steering", TestLlmSelection.Default);
     UserMessageReceipt? accepted = null;
     try {
       await (finalOutput ? cleanupEntered.Task : entered.Task).WaitAsync(TestTimeout);
@@ -201,7 +201,7 @@ public sealed class SessionStopTests {
       Assert.Equal(executionId, snapshot.UnsettledExecutionId);
       Assert.Null(snapshot.LastSettlement);
       Assert.False(settlement.IsCompleted);
-      UserMessageReceipt refused = await fixture.Session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, "new work"));
+      UserMessageReceipt refused = await fixture.Session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, "new work", TestLlmSelection.Default));
       Assert.Equal(MessageAcceptance.Refused, refused.Acceptance);
       Assert.Equal(MessageRefusalReason.Stopping, refused.RefusalReason);
       Assert.Equal(accepted, await fixture.Session.SubmitUserMessageAsync(submission));
@@ -264,7 +264,7 @@ public sealed class SessionStopTests {
       return Paused(replacementEntered, replacementRelease, token);
     }
 
-    var manager = new SessionManager(store, client);
+    var manager = new SessionManager(store, _ => client);
     var executions = new List<(PrimarySession Session, Guid ExecutionId)>();
     try {
       PrimarySession target = await manager.CreatePrimaryAsync();
@@ -316,7 +316,7 @@ public sealed class SessionStopTests {
     }
 
     async Task<Guid> StartAsync(PrimarySession session, string text) {
-      UserMessageReceipt receipt = await session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, text));
+      UserMessageReceipt receipt = await session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, text, TestLlmSelection.Default));
       Guid executionId = Assert.IsType<Guid>(receipt.ExecutionId);
       executions.Add((session, executionId));
       Assert.Equal(MessageAcceptance.Accepted, receipt.Acceptance);
@@ -329,8 +329,8 @@ public sealed class SessionStopTests {
     using var database = new TemporaryDatabase();
     Guid sessionId = Guid.NewGuid();
     Guid executionId = Guid.NewGuid();
-    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "saved orphan");
-    var pending = new UserMessageSubmission(Guid.NewGuid(), 0, "unclaimed steering");
+    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "saved orphan", TestLlmSelection.Default);
+    var pending = new UserMessageSubmission(Guid.NewGuid(), 0, "unclaimed steering", TestLlmSelection.Default);
     UserMessageReceipt accepted;
     UserMessageReceipt queued;
     Guid requestId;
@@ -343,7 +343,7 @@ public sealed class SessionStopTests {
 
     using var client = new ScriptedChatClient(_ => throw new InvalidOperationException("Stop must not replay orphan work."));
     using UrdStore store = UrdStore.Open(database.Path);
-    var manager = new SessionManager(store, client);
+    var manager = new SessionManager(store, _ => client);
     try {
       PrimarySession session = await manager.GetPrimaryAsync(sessionId);
       for (int retry = 0; retry < 2; retry++)

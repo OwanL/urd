@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { SessionClient } from "../sessions/SessionClient.ts";
-import { SessionRequestError } from "../sessions/SessionRequestError.ts";
+import { RequestError } from "../http/RequestError.ts";
+import type { LlmSelection } from "../providers/LlmSelection.ts";
 import type { MessageContentCursor, MessageContentPage } from "../sessions/Messages.ts";
 import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
 import type {
@@ -27,6 +28,7 @@ const submission: UserMessageSubmission = {
   submissionId,
   expectedHistoryRevision: 7,
   text: "  unchanged\r\nUnicode: 雪 🦉\t  ",
+  llmSelection: null,
 };
 const receipt: UserMessageReceipt = {
   sessionId,
@@ -42,9 +44,24 @@ const snapshot: SessionSnapshot = {
   unsettledExecutionId: executionId,
   stopRequested: false,
   lastSettlement: null,
+  latestLlmSelection: null,
   messages: [],
   hasOlderMessages: true,
 };
+const selection: LlmSelection = {
+  connection: {
+    id: "50000000-0000-0000-0000-000000000005",
+    name: "Saved connection 雪",
+    route: "chatGpt",
+    api: "openAIResponses",
+    endpoint: "https://provider.example/v1/",
+    authentication: "oAuth",
+  },
+  modelId: "provider/model-id",
+  reasoningEffort: null,
+};
+const selectedSubmission: UserMessageSubmission = { ...submission, llmSelection: selection };
+const selectedReceipt: UserMessageReceipt = { ...receipt, submission: selectedSubmission };
 const content: MessageContentPage = {
   from: cursor,
   text: "streamed text 雪",
@@ -140,6 +157,59 @@ const mappings: MappingCase[] = [
     expected: receipt,
   },
   {
+    name: "submit roundtrips the full initiating selection without reducing its connection to an ID",
+    call: (client) => client.submitMessage(sessionId, selectedSubmission),
+    method: "POST",
+    path: `/api/sessions/${sessionId}/message-submissions`,
+    body: selectedSubmission,
+    response: selectedReceipt,
+    expected: selectedReceipt,
+  },
+  {
+    name: "selection-locked refusal preserves the exact submitted selection",
+    call: (client) => client.getMessageReceipt(sessionId, submissionId),
+    method: "GET",
+    path: `/api/sessions/${sessionId}/message-submissions/${submissionId}`,
+    response: {
+      ...selectedReceipt,
+      acceptance: "refused",
+      refusalReason: "selectionLocked",
+      executionId: null,
+    },
+    expected: {
+      ...selectedReceipt,
+      acceptance: "refused",
+      refusalReason: "selectionLocked",
+      executionId: null,
+    },
+  },
+  {
+    name: "active snapshot preserves the latest initiating selection",
+    call: (client) => client.getSnapshot(sessionId),
+    method: "GET",
+    path: `/api/sessions/${sessionId}/snapshot`,
+    response: { ...snapshot, latestLlmSelection: selection },
+    expected: { ...snapshot, latestLlmSelection: selection },
+  },
+  {
+    name: "settled snapshot retains the latest initiating selection",
+    call: (client) => client.getSnapshot(sessionId),
+    method: "GET",
+    path: `/api/sessions/${sessionId}/snapshot`,
+    response: {
+      ...snapshot,
+      unsettledExecutionId: null,
+      lastSettlement: { executionId, outcome: "completed" },
+      latestLlmSelection: selection,
+    },
+    expected: {
+      ...snapshot,
+      unsettledExecutionId: null,
+      lastSettlement: { executionId, outcome: "completed" },
+      latestLlmSelection: selection,
+    },
+  },
+  {
     name: "receipt",
     call: (client) => client.getMessageReceipt(sessionId, submissionId),
     method: "GET",
@@ -189,6 +259,42 @@ for (const mapping of mappings) {
     }
   });
 }
+
+void test("construction does no I/O and every session operation retains browser transport options", async (t) => {
+  const fetchMock = t.mock.method(
+    globalThis,
+    "fetch",
+    async () =>
+      new Response(JSON.stringify({ sessionId }), {
+        headers: { "Content-Type": "application/json" },
+      }),
+  );
+  const client = new SessionClient(new URL("https://server.example/ignored/path?ignored=query"));
+  assert.equal(fetchMock.mock.callCount(), 0);
+
+  for (const mapping of mappings) {
+    await mapping.call(client);
+    const call = fetchMock.mock.calls.at(-1);
+    assert.ok(call);
+    const [url, options] = call.arguments;
+    assert.ok(url instanceof URL);
+    assert.equal(url.origin, "https://server.example");
+    assert.equal(url.pathname, mapping.path);
+    assert.deepEqual(options, {
+      method: mapping.method,
+      headers: {
+        "X-Urd-Client": "browser",
+        Accept: "application/json",
+        ...(mapping.method === "POST" ? { "Content-Type": "application/json" } : {}),
+      },
+      cache: "no-store",
+      credentials: "omit",
+      redirect: "error",
+      ...(mapping.body === undefined ? {} : { body: JSON.stringify(mapping.body) }),
+    });
+  }
+  assert.equal(fetchMock.mock.callCount(), mappings.length);
+});
 
 void test("a missing receipt is null, not a refused submission", { timeout: 5_000 }, async (t) => {
   const refused: UserMessageReceipt = {
@@ -244,7 +350,7 @@ for (const failure of [
     await assert.rejects(
       new SessionClient(server.origin).getMessageReceipt(sessionId, submissionId),
       (error) => {
-        assert.ok(error instanceof SessionRequestError);
+        assert.ok(error instanceof RequestError);
         assert.equal(error.status, failure.status);
         assert.deepEqual(error.responseBody, failure.expected);
         return true;
@@ -312,7 +418,7 @@ void test(
     await assert.rejects(
       new SessionClient(server.origin).stopExecution(sessionId, executionId),
       (error) => {
-        assert.ok(error instanceof SessionRequestError);
+        assert.ok(error instanceof RequestError);
         assert.equal(error.status, 409);
         assert.deepEqual(error.responseBody, unavailable);
         return true;

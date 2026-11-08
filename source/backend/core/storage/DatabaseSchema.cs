@@ -4,7 +4,7 @@ namespace Urd.Core.Storage;
 
 // Initializes connection pragmas and creates, verifies, or upgrades the schema.
 internal static class DatabaseSchema {
-  private const int SchemaVersion = 7;
+  private const int SchemaVersion = 8;
 
   internal static void Initialize(SqliteConnection connection) {
     using SqliteCommand command = connection.CreateCommand();
@@ -20,35 +20,91 @@ internal static class DatabaseSchema {
   }
 
   private static void InitializeSchema(SqliteConnection connection) {
-    using SqliteTransaction transaction = connection.BeginTransaction();
     using SqliteCommand command = connection.CreateCommand();
-    command.Transaction = transaction;
-    command.CommandText = "PRAGMA user_version;";
-    long version = (long)command.ExecuteScalar()!;
-    if (version < 0 || version > SchemaVersion) {
-      throw new NotSupportedException(
-          $"Session database schema version {version} is not supported (expected {SchemaVersion}).");
-    }
+    // SQLite's table-rebuild procedure requires this outside the transaction. Keep
+    // child tables and their references intact; check every foreign key before commit.
+    command.CommandText = "PRAGMA foreign_keys = OFF;";
+    command.ExecuteNonQuery();
+    try {
+      using SqliteTransaction transaction = connection.BeginTransaction();
+      command.Transaction = transaction;
+      command.CommandText = "PRAGMA user_version;";
+      long version = (long)command.ExecuteScalar()!;
+      if (version < 0 || version > SchemaVersion) {
+        throw new NotSupportedException(
+            $"Session database schema version {version} is not supported (expected {SchemaVersion}).");
+      }
 
-    EnsureSessionSchema(command, version);
-    EnsureInputSchema(command, version);
-    EnsureExecutionSchema(connection, transaction, create: version < 2);
-    if (version < 3) {
-      command.CommandText = """
-        CREATE INDEX execution_runs_history_order
-            ON execution_runs(session_id, history_revision, ordinal DESC);
-        CREATE INDEX execution_runs_terminal_order
-            ON execution_runs(session_id, ordinal DESC) WHERE outcome IS NOT NULL;
-        PRAGMA user_version = 3;
-        """;
+      EnsureSessionSchema(command, version);
+      EnsureInputSchema(command, version);
+      EnsureExecutionSchema(connection, transaction, create: version < 2);
+      if (version < 3) {
+        command.CommandText = """
+          CREATE INDEX execution_runs_history_order
+              ON execution_runs(session_id, history_revision, ordinal DESC);
+          CREATE INDEX execution_runs_terminal_order
+              ON execution_runs(session_id, ordinal DESC) WHERE outcome IS NOT NULL;
+          PRAGMA user_version = 3;
+          """;
+        command.ExecuteNonQuery();
+      }
+
+      EnsureSteeringSchema(command, version);
+      EnsureCreationSchema(command, version);
+      EnsureProviderSchema(command, version);
+      EnsureProviderContextSchema(command, version);
+      EnsureSelectionSchema(command, version);
+      if (version < SchemaVersion) {
+        command.CommandText = "PRAGMA foreign_key_check;";
+        using SqliteDataReader reader = command.ExecuteReader();
+        if (reader.Read())
+          throw new InvalidOperationException("The session database migration would violate a foreign key.");
+      }
+
+      transaction.Commit();
+    } finally {
+      command.Transaction = null;
+      command.CommandText = "PRAGMA foreign_keys = ON;";
       command.ExecuteNonQuery();
     }
+  }
 
-    EnsureSteeringSchema(command, version);
-    EnsureCreationSchema(command, version);
-    EnsureProviderSchema(command, version);
-    EnsureProviderContextSchema(command, version);
-    transaction.Commit();
+  private static void EnsureSelectionSchema(SqliteCommand command, long version) {
+    if (version >= 8) {
+      command.CommandText = "SELECT llm_selection_json FROM input_decisions LIMIT 0;";
+      command.ExecuteNonQuery();
+      return;
+    }
+
+    // Widening a CHECK requires a rebuild, not ADD COLUMN alone. Never rename the
+    // original table: SQLite would redirect execution foreign keys to that name.
+    // input_decisions has no explicit indexes, triggers or views to recreate.
+    command.CommandText = """
+      CREATE TABLE input_decisions_v8 (
+          session_id TEXT NOT NULL REFERENCES sessions(session_id),
+          input_id TEXT NOT NULL,
+          expected_history_revision INTEGER NOT NULL CHECK (expected_history_revision >= 0),
+          original_text_utf8 BLOB NOT NULL CHECK (length(original_text_utf8) <= 16384),
+          decision INTEGER NOT NULL CHECK (decision IN (1, 2)),
+          run_id TEXT,
+          refusal_reason INTEGER CHECK (refusal_reason IN (1, 2, 3, 4)),
+          llm_selection_json TEXT,
+          PRIMARY KEY (session_id, input_id),
+          CHECK (
+              (decision = 1 AND run_id IS NOT NULL
+                  AND run_id <> '00000000-0000-0000-0000-000000000000' AND refusal_reason IS NULL)
+              OR (decision = 2 AND run_id IS NULL AND refusal_reason IS NOT NULL)
+          )
+      ) STRICT;
+      INSERT INTO input_decisions_v8 (
+          session_id, input_id, expected_history_revision, original_text_utf8, decision, run_id, refusal_reason)
+      SELECT session_id, input_id, expected_history_revision, original_text_utf8, decision, run_id, refusal_reason
+      FROM input_decisions;
+      DROP TABLE input_decisions;
+      ALTER TABLE input_decisions_v8 RENAME TO input_decisions;
+      PRAGMA user_version = 8;
+      """;
+    command.ExecuteNonQuery();
   }
 
   private static void EnsureProviderContextSchema(SqliteCommand command, long version) {
@@ -139,7 +195,7 @@ internal static class DatabaseSchema {
       return;
     }
 
-    // Rebuild both sides of the request/output relationship with foreign keys enabled.
+    // Rebuild both sides of the request/output relationship together.
     // The original tables remain intact until every row has been copied successfully.
     command.CommandText = """
       CREATE TABLE execution_requests_v4 (

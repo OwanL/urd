@@ -124,7 +124,7 @@ public sealed class ToolExecutionTests {
     });
     var client = new ScriptedChatClient(token => ToolBatch(token,
         new("first", "effect", null), new("second", "effect", null)));
-    var session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid()), store, client, [effect]);
+    var session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid()), store, _ => client, [effect]);
     if (scenario == "result-write") {
       database.Execute("""
         CREATE TRIGGER reject_tool_result BEFORE UPDATE OF result_json ON execution_tools
@@ -133,7 +133,7 @@ public sealed class ToolExecutionTests {
         """);
     }
 
-    UserMessageReceipt receipt = await session.SubmitUserMessageAsync(new UserMessageSubmission(Guid.NewGuid(), 0, "go"));
+    UserMessageReceipt receipt = await session.SubmitUserMessageAsync(new UserMessageSubmission(Guid.NewGuid(), 0, "go", TestLlmSelection.Default));
     Guid executionId = Assert.IsType<Guid>(receipt.ExecutionId);
     try {
       Exception failure = await Assert.ThrowsAnyAsync<Exception>(

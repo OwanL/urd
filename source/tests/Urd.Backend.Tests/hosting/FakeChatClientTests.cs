@@ -1,6 +1,6 @@
 using System.Text;
 using Microsoft.Extensions.AI;
-using Urd.Server;
+using Urd.Backend.Tests.Support;
 using Xunit;
 
 namespace Urd.Backend.Tests.Hosting;

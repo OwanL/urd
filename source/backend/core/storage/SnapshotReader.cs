@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Data.Common;
 using Microsoft.Data.Sqlite;
 using Urd.Core.Execution;
+using Urd.Core.Providers;
 using Urd.Core.Sessions;
 
 namespace Urd.Core.Storage;
@@ -37,6 +38,12 @@ internal sealed class SnapshotReader {
     ORDER BY ordinal DESC LIMIT 1;
     """;
 
+  internal const string SnapshotSelectionSql = """
+    SELECT d.llm_selection_json FROM execution_runs r
+    JOIN input_decisions d ON d.session_id = r.session_id AND d.input_id = r.input_id
+    WHERE r.session_id = $session AND r.run_id = $run;
+    """;
+
   internal SnapshotReader(Database database, MessageContentReader content) {
     this.database = database;
     this.content = content;
@@ -54,13 +61,15 @@ internal sealed class SnapshotReader {
     long historyRevision = ReadHistoryRevision(transaction, sessionId);
     (Guid? unsettledExecution, bool stopRequested) = ReadUnsettledExecution(transaction, sessionId);
     SessionExecutionResult? lastSettlement = ReadLastSettlement(transaction, sessionId);
+    LlmSelection? latestSelection = ReadLatestSelection(
+        transaction, sessionId, unsettledExecution ?? lastSettlement?.ExecutionId);
     List<(MessageRef Message, ExecutionOutcome? Settlement)> candidates =
         ReadCandidates(transaction, sessionId, historyRevision);
     bool hasOlder = candidates.Count > SnapshotMessageLimit;
     IReadOnlyList<MessagePreview> messages = ReadPreviews(transaction, sessionId, candidates);
     // Storage cannot establish live admission eligibility; the session replaces this fence.
     return new(sessionId, historyRevision, AdmissionFenced: true,
-        unsettledExecution, stopRequested, lastSettlement, messages, hasOlder);
+        unsettledExecution, stopRequested, lastSettlement, messages, hasOlder, latestSelection);
   }
 
   private long ReadHistoryRevision(SqliteTransaction transaction, Guid sessionId) {
@@ -83,6 +92,16 @@ internal sealed class SnapshotReader {
         ("$session", sessionId));
     using SqliteDataReader reader = terminalRead.ExecuteReader();
     return reader.Read() ? new(reader.GetGuid(0), (ExecutionOutcome)reader.GetInt32(1)) : null;
+  }
+
+  private LlmSelection? ReadLatestSelection(SqliteTransaction transaction, Guid sessionId, Guid? executionId) {
+    if (executionId is null)
+      return null;
+
+    // The initiating submission owns selection even when it is outside the message window.
+    using SqliteCommand command = database.Command(transaction, SnapshotSelectionSql,
+        ("$session", sessionId), ("$run", executionId));
+    return LlmSelectionJson.Read(command.ExecuteScalar() as string);
   }
 
   private List<(MessageRef Message, ExecutionOutcome? Settlement)> ReadCandidates(

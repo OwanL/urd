@@ -297,7 +297,7 @@ public sealed class ToolStorageTests {
 
   private static (Guid Session, Guid Execution, Guid Request) Begin(UrdStore store) {
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, execution = Guid.NewGuid();
-    store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "request"), true, execution);
+    store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "request", TestLlmSelection.Default), true, execution);
     return (session, execution, store.Executions.ClaimNextRequest(session, execution, 0)!.RequestId);
   }
 

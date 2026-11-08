@@ -15,7 +15,7 @@ public sealed class UserMessageReceiptTests {
     using var database = new TemporaryDatabase();
     Guid sessionId = Guid.NewGuid();
     Guid firstProposedExecutionId = Guid.NewGuid(), retryProposedExecutionId = Guid.NewGuid();
-    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "original \r\n e\u0301 \0 🙂");
+    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "original \r\n e\u0301 \0 🙂", TestLlmSelection.Default);
     using (UrdStore store = UrdStore.Open(database.Path)) {
       store.Sessions.CreatePrimary(sessionId);
       // Deliberately discard the committed reply, as an uncertain caller would.
@@ -42,7 +42,7 @@ public sealed class UserMessageReceiptTests {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     Guid sessionId = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
-    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "delayed original");
+    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "delayed original", TestLlmSelection.Default);
     UserMessageReceipt firstReceipt = store.UserMessages.Admit(
         sessionId, 0, submission, accepting: false, proposedExecutionId: Guid.NewGuid()).Receipt;
     database.ForceHistoryRevision(1);
@@ -63,7 +63,7 @@ public sealed class UserMessageReceiptTests {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     Guid sessionId = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
-    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "e\u0301\r\n");
+    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "e\u0301\r\n", TestLlmSelection.Default);
     UserMessageReceipt original = store.UserMessages.Admit(
         sessionId, 0, submission, accepting: false, proposedExecutionId: Guid.NewGuid()).Receipt;
     UserMessageSubmission[] conflicts =
@@ -91,7 +91,7 @@ public sealed class UserMessageReceiptTests {
     using UrdStore store = UrdStore.Open(database.Path);
     Guid first = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     Guid second = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
-    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "first session");
+    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "first session", TestLlmSelection.Default);
     UserMessageReceipt firstReceipt = store.UserMessages.Admit(
         first, 0, submission, accepting: false, proposedExecutionId: Guid.NewGuid()).Receipt;
     Assert.Null(store.UserMessages.ReadReceipt(second, submission.SubmissionId));
@@ -114,7 +114,7 @@ public sealed class UserMessageReceiptTests {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     Guid sessionId = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
-    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "rolled back");
+    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "rolled back", TestLlmSelection.Default);
     database.Execute("""
       CREATE TABLE test_parent (id INTEGER PRIMARY KEY);
       CREATE TABLE test_child (
@@ -147,7 +147,7 @@ public sealed class UserMessageReceiptTests {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     Guid sessionId = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
-    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "error distinction");
+    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "error distinction", TestLlmSelection.Default);
     Assert.Null(store.UserMessages.ReadReceipt(sessionId, submission.SubmissionId));
     database.Execute("DROP TABLE input_decisions;");
     Assert.Throws<SqliteException>(() => store.UserMessages.ReadReceipt(sessionId, submission.SubmissionId));
@@ -162,7 +162,7 @@ public sealed class UserMessageReceiptTests {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     Guid sessionId = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
-    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "valid");
+    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "valid", TestLlmSelection.Default);
     Assert.Throws<KeyNotFoundException>(() => store.UserMessages.Admit(
         Guid.NewGuid(), 0, submission, accepting: false, proposedExecutionId: Guid.NewGuid()));
     Assert.Throws<ArgumentException>(() => store.UserMessages.Admit(
@@ -200,7 +200,7 @@ public sealed class UserMessageReceiptTests {
       Assert.Null(store.UserMessages.ReadReceipt(sessionId, Guid.NewGuid()));
     }
 
-    Assert.Equal(7L, database.Scalar("PRAGMA user_version;")); // raw-sql: the migrated schema version is the subject under test
+    Assert.Equal(8L, database.Scalar("PRAGMA user_version;")); // raw-sql: the migrated schema version is the subject under test
     using UrdStore reopened = UrdStore.Open(database.Path);
     Assert.Equal(7L, reopened.Sessions.Read(sessionId)!.HistoryRevision);
   }
@@ -230,25 +230,25 @@ public sealed class UserMessageReceiptTests {
   public void OwnedExecutionAcceptsEightNonterminalSubmissionsAndRetainsRetryBeforeCapacityAndStop() {
     using var database = new TemporaryDatabase();
     Guid session = Guid.NewGuid(), execution = Guid.NewGuid();
-    var first = new UserMessageSubmission(Guid.NewGuid(), 0, "first");
-    var steering = new UserMessageSubmission(Guid.NewGuid(), 0, "steer \0 🙂");
+    var first = new UserMessageSubmission(Guid.NewGuid(), 0, "first", TestLlmSelection.Default);
+    var steering = new UserMessageSubmission(Guid.NewGuid(), 0, "steer \0 🙂", TestLlmSelection.Default);
     UserMessageReceipt retained;
     using (UrdStore store = UrdStore.Open(database.Path)) {
       store.Sessions.CreatePrimary(session);
       store.UserMessages.Admit(session, 0, first, true, execution);
       Assert.NotNull(store.Executions.ClaimNextRequest(session, execution, 0));
       Assert.Equal(MessageRefusalReason.Capacity,
-          store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "unowned"), true, Guid.NewGuid()).Receipt.RefusalReason);
+          store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "unowned", TestLlmSelection.Default), true, Guid.NewGuid()).Receipt.RefusalReason);
       Assert.Equal(MessageRefusalReason.Capacity,
-          store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "wrong owner"), true, Guid.NewGuid(), Guid.NewGuid()).Receipt.RefusalReason);
+          store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "wrong owner", TestLlmSelection.Default), true, Guid.NewGuid(), Guid.NewGuid()).Receipt.RefusalReason);
       var accepted = store.UserMessages.Admit(session, 0, steering, true, Guid.Empty, execution);
       retained = accepted.Receipt;
       Assert.True(accepted.NewlyAccepted);
       Assert.Equal(execution, retained.ExecutionId);
       for (int index = 2; index < 8; index++)
-        Assert.True(store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, $"steering {index}"), true, Guid.NewGuid(), execution).NewlyAccepted);
+        Assert.True(store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, $"steering {index}", TestLlmSelection.Default), true, Guid.NewGuid(), execution).NewlyAccepted);
       Assert.Equal(MessageRefusalReason.Capacity,
-          store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "ninth"), true, Guid.NewGuid(), execution).Receipt.RefusalReason);
+          store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "ninth", TestLlmSelection.Default), true, Guid.NewGuid(), execution).Receipt.RefusalReason);
       var retry = store.UserMessages.Admit(session, 0, steering, true, Guid.Empty, execution);
       Assert.Equal(retained, retry.Receipt);
       Assert.False(retry.NewlyAccepted);
@@ -273,8 +273,8 @@ public sealed class UserMessageReceiptTests {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, execution = Guid.NewGuid();
-    store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "first"), true, execution);
-    var steering = new UserMessageSubmission(Guid.NewGuid(), 0, "atomic steering");
+    store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "first", TestLlmSelection.Default), true, execution);
+    var steering = new UserMessageSubmission(Guid.NewGuid(), 0, "atomic steering", TestLlmSelection.Default);
     database.Execute("""
       CREATE TRIGGER reject_message BEFORE INSERT ON execution_messages
       BEGIN SELECT RAISE(ABORT, 'message write failed'); END;
@@ -296,7 +296,7 @@ public sealed class UserMessageReceiptTests {
     Guid sessionId = first.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     database.ForceHistoryRevision(1);
     Assert.Equal(1L, first.Sessions.Read(sessionId)!.HistoryRevision);
-    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "same command");
+    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "same command", TestLlmSelection.Default);
     var attempts = new[] {
             (Store: first, HistoryRevision: 0L, Accepting: false, ProposedExecutionId: Guid.NewGuid()),
             (Store: second, HistoryRevision: 0L, Accepting: true, ProposedExecutionId: Guid.NewGuid())

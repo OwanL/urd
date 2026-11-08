@@ -1,4 +1,5 @@
 using Urd.Core.Execution;
+using Urd.Core.Providers;
 
 namespace Urd.Core.Sessions;
 
@@ -6,4 +7,4 @@ namespace Urd.Core.Sessions;
 public sealed record SessionSnapshot(
     Guid SessionId, long HistoryRevision, bool AdmissionFenced,
     Guid? UnsettledExecutionId, bool StopRequested, SessionExecutionResult? LastSettlement,
-    IReadOnlyList<MessagePreview> Messages, bool HasOlderMessages);
+    IReadOnlyList<MessagePreview> Messages, bool HasOlderMessages, LlmSelection? LatestLlmSelection = null);

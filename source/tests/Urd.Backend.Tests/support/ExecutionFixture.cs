@@ -16,14 +16,14 @@ internal sealed class ExecutionFixture : IAsyncDisposable {
     this.client = client;
     Database = new TemporaryDatabase();
     store = UrdStore.Open(Database.Path);
-    Session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid()), store, client, tools);
+    Session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid()), store, _ => client, tools);
   }
 
   internal TemporaryDatabase Database { get; }
   internal PrimarySession Session { get; }
 
   internal async Task<Guid> StartExecutionAsync(string text) {
-    UserMessageReceipt receipt = await Session.SubmitUserMessageAsync(new UserMessageSubmission(Guid.NewGuid(), 0, text));
+    UserMessageReceipt receipt = await Session.SubmitUserMessageAsync(new UserMessageSubmission(Guid.NewGuid(), 0, text, TestLlmSelection.Default));
     Assert.Equal(MessageAcceptance.Accepted, receipt.Acceptance);
     Guid executionId = Assert.IsType<Guid>(receipt.ExecutionId);
     executions.Add(executionId);

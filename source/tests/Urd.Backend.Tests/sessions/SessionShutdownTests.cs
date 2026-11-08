@@ -18,7 +18,7 @@ public sealed class SessionShutdownTests {
     using var database = new TemporaryDatabase();
     using var client = new ScriptedChatClient(Complete);
     using UrdStore store = UrdStore.Open(database.Path);
-    var manager = new SessionManager(store, client);
+    var manager = new SessionManager(store, _ => client);
 
     await manager.ShutdownSessionsAsync().WaitAsync(TestTimeout);
     await manager.ShutdownSessionsAsync().WaitAsync(TestTimeout);
@@ -35,13 +35,13 @@ public sealed class SessionShutdownTests {
     var database = new TemporaryDatabase();
     UrdStore store = UrdStore.Open(database.Path);
     var client = new ScriptedChatClient(Complete);
-    var manager = new SessionManager(store, client);
+    var manager = new SessionManager(store, _ => client);
     var ownedExecutions = new List<(PrimarySession Session, Guid ExecutionId)>();
     bool shutdownComplete = false;
     try {
       PrimarySession active = await manager.CreatePrimaryAsync();
       PrimarySession idle = await manager.CreatePrimaryAsync();
-      var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "complete before shutdown");
+      var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "complete before shutdown", TestLlmSelection.Default);
       UserMessageReceipt accepted = await active.SubmitUserMessageAsync(submission);
       Guid executionId = Assert.IsType<Guid>(accepted.ExecutionId);
       ownedExecutions.Add((active, executionId));
@@ -57,12 +57,12 @@ public sealed class SessionShutdownTests {
 
       Assert.Equal(accepted, await active.SubmitUserMessageAsync(submission));
       Assert.Equal(accepted, await active.GetUserMessageReceiptAsync(submission.SubmissionId));
-      var refusedSubmission = new UserMessageSubmission(Guid.NewGuid(), 0, "new input after shutdown");
+      var refusedSubmission = new UserMessageSubmission(Guid.NewGuid(), 0, "new input after shutdown", TestLlmSelection.Default);
       UserMessageReceipt refused = await active.SubmitUserMessageAsync(refusedSubmission);
       Assert.Equal(MessageAcceptance.Refused, refused.Acceptance);
       Assert.Equal(MessageRefusalReason.Stopping, refused.RefusalReason);
       Assert.Null(refused.ExecutionId);
-      var idleSubmission = new UserMessageSubmission(Guid.NewGuid(), 0, "idle handle after shutdown");
+      var idleSubmission = new UserMessageSubmission(Guid.NewGuid(), 0, "idle handle after shutdown", TestLlmSelection.Default);
       UserMessageReceipt idleRefusal = await idle.SubmitUserMessageAsync(idleSubmission);
       Assert.Equal(MessageAcceptance.Refused, idleRefusal.Acceptance);
       Assert.Equal(MessageRefusalReason.Stopping, idleRefusal.RefusalReason);
@@ -76,7 +76,7 @@ public sealed class SessionShutdownTests {
 
       store.Dispose();
       store = UrdStore.Open(database.Path);
-      var reopenedManager = new SessionManager(store, client);
+      var reopenedManager = new SessionManager(store, _ => client);
       PrimarySession reopened = await reopenedManager.GetPrimaryAsync(active.Id);
       SessionSnapshot reopenedSnapshot = await reopened.ReadSnapshotAsync();
       Assert.False(reopenedSnapshot.AdmissionFenced);
@@ -125,7 +125,7 @@ public sealed class SessionShutdownTests {
         try {
           PrimarySession other = sessions[1 - index];
           SessionSnapshot snapshot = other.ReadSnapshotAsync().WaitAsync(TestTimeout).GetAwaiter().GetResult();
-          var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "callback reentry");
+          var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "callback reentry", TestLlmSelection.Default);
           UserMessageReceipt refusal = other.SubmitUserMessageAsync(submission).WaitAsync(TestTimeout).GetAwaiter().GetResult();
           Exception? getFailure = null;
           try {
@@ -156,11 +156,11 @@ public sealed class SessionShutdownTests {
     var client = new ScriptedChatClient(token => Response(token));
     var ownedExecutions = new List<(PrimarySession Session, Guid ExecutionId)>();
     try {
-      manager = new SessionManager(store, client);
+      manager = new SessionManager(store, _ => client);
       sessions = [await manager.CreatePrimaryAsync(), await manager.CreatePrimaryAsync()];
       for (int index = 0; index < sessions.Length; index++) {
         UserMessageReceipt receipt = await sessions[index].SubmitUserMessageAsync(
-            new UserMessageSubmission(Guid.NewGuid(), 0, $"active {index}"));
+            new UserMessageSubmission(Guid.NewGuid(), 0, $"active {index}", TestLlmSelection.Default));
         ownedExecutions.Add((sessions[index], Assert.IsType<Guid>(receipt.ExecutionId)));
         await entered[index].Task.WaitAsync(TestTimeout);
       }
@@ -221,12 +221,12 @@ public sealed class SessionShutdownTests {
     var llmTokens = new CancellationToken[1];
     var client = new ScriptedChatClient(token => CancellationGatedResponse(
         0, entered, cleanupEntered, cleanupRelease.Task, llmTokens, token));
-    var manager = new SessionManager(store, client);
+    var manager = new SessionManager(store, _ => client);
     PrimarySession? session = null;
     Guid? executionId = null;
     try {
       session = await manager.CreatePrimaryAsync();
-      UserMessageReceipt receipt = await session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, "active"));
+      UserMessageReceipt receipt = await session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, "active", TestLlmSelection.Default));
       executionId = Assert.IsType<Guid>(receipt.ExecutionId);
       await entered.Task.WaitAsync(TestTimeout);
 
@@ -270,13 +270,13 @@ public sealed class SessionShutdownTests {
       return CancellationGatedResponse(index, entered[index], cleanupEntered[index], cleanupRelease[index].Task,
           llmTokens, token);
     });
-    var manager = new SessionManager(store, client);
+    var manager = new SessionManager(store, _ => client);
     var ownedExecutions = new List<(PrimarySession Session, Guid ExecutionId)>();
     try {
       PrimarySession[] sessions = [await manager.CreatePrimaryAsync(), await manager.CreatePrimaryAsync()];
       for (int index = 0; index < sessions.Length; index++) {
         UserMessageReceipt receipt = await sessions[index].SubmitUserMessageAsync(
-            new UserMessageSubmission(Guid.NewGuid(), 0, $"active {index}"));
+            new UserMessageSubmission(Guid.NewGuid(), 0, $"active {index}", TestLlmSelection.Default));
         ownedExecutions.Add((sessions[index], Assert.IsType<Guid>(receipt.ExecutionId)));
         await entered[index].Task.WaitAsync(TestTimeout);
       }
@@ -346,7 +346,7 @@ public sealed class SessionShutdownTests {
         ? Complete(token)
         : CancellationGatedResponse(1, healthyEntered, healthyCleanupEntered,
             healthyCleanupRelease.Task, llmTokens, token));
-    var manager = new SessionManager(store, client);
+    var manager = new SessionManager(store, _ => client);
     PrimarySession faultedSession = null!;
     PrimarySession healthySession = null!;
     Guid? faultedExecution = null;
@@ -360,7 +360,7 @@ public sealed class SessionShutdownTests {
         BEGIN SELECT RAISE(ABORT, 'Injected run settlement failure'); END;
         """);
       UserMessageReceipt failedReceipt = await faultedSession.SubmitUserMessageAsync(
-          new UserMessageSubmission(Guid.NewGuid(), 0, "fault completion"));
+          new UserMessageSubmission(Guid.NewGuid(), 0, "fault completion", TestLlmSelection.Default));
       faultedExecution = Assert.IsType<Guid>(failedReceipt.ExecutionId);
       Exception executionFailure = await ExpectFailureAsync(faultedSession.WaitForSettlementAsync(faultedExecution.Value));
       Assert.Contains(FlattenFailures(executionFailure), error => error is SqliteException { SqliteErrorCode: 19 });
@@ -370,7 +370,7 @@ public sealed class SessionShutdownTests {
 
       database.Execute("DROP TRIGGER reject_settlement;");
       UserMessageReceipt healthyReceipt = await healthySession.SubmitUserMessageAsync(
-          new UserMessageSubmission(Guid.NewGuid(), 0, "drain healthy run"));
+          new UserMessageSubmission(Guid.NewGuid(), 0, "drain healthy run", TestLlmSelection.Default));
       healthyExecution = Assert.IsType<Guid>(healthyReceipt.ExecutionId);
       await healthyEntered.Task.WaitAsync(TestTimeout);
 
@@ -409,7 +409,7 @@ public sealed class SessionShutdownTests {
     using var database = new TemporaryDatabase();
     Guid sessionId = Guid.NewGuid();
     Guid executionId = Guid.NewGuid();
-    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "retained orphan");
+    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "retained orphan", TestLlmSelection.Default);
     UserMessageReceipt accepted;
     Guid requestId;
     using (UrdStore original = UrdStore.Open(database.Path)) {
@@ -421,7 +421,7 @@ public sealed class SessionShutdownTests {
     using var client = new ScriptedChatClient(_ =>
         throw new InvalidOperationException("Shutdown must not replay an orphaned run."));
     using UrdStore store = UrdStore.Open(database.Path);
-    var manager = new SessionManager(store, client);
+    var manager = new SessionManager(store, _ => client);
     PrimarySession session = await manager.GetPrimaryAsync(sessionId);
     await manager.ShutdownSessionsAsync().WaitAsync(TestTimeout);
 
@@ -429,7 +429,7 @@ public sealed class SessionShutdownTests {
     Assert.True(snapshot.AdmissionFenced);
     Assert.Equal(executionId, snapshot.UnsettledExecutionId);
     Assert.Equal(accepted, await session.SubmitUserMessageAsync(submission));
-    var newSubmission = new UserMessageSubmission(Guid.NewGuid(), 0, "new orphan input");
+    var newSubmission = new UserMessageSubmission(Guid.NewGuid(), 0, "new orphan input", TestLlmSelection.Default);
     UserMessageReceipt refused = await session.SubmitUserMessageAsync(newSubmission);
     Assert.Equal(MessageAcceptance.Refused, refused.Acceptance);
     Assert.Equal(MessageRefusalReason.Stopping, refused.RefusalReason);

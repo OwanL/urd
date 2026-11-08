@@ -18,7 +18,7 @@ public sealed class StopStorageTests {
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     Guid otherSession = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     Guid execution = Guid.NewGuid(), missing = Guid.NewGuid();
-    store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "untouched"), true, execution);
+    store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "untouched", TestLlmSelection.Default), true, execution);
     StoredExecution savedExecution = Assert.Single(StoredExecutions.Read(database));
     StoredDelivery delivery = Assert.Single(StoredDeliveries.Read(database));
     RejectUpdates(database);
@@ -39,7 +39,7 @@ public sealed class StopStorageTests {
     Guid session = Guid.NewGuid(), execution = Guid.NewGuid();
     using (UrdStore store = UrdStore.Open(database.Path)) {
       store.Sessions.CreatePrimary(session);
-      store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "orphaned input"), true, execution);
+      store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "orphaned input", TestLlmSelection.Default), true, execution);
       if (stopping)
         Assert.Equal(StopStatus.Requested, store.Executions.RequestStop(session, execution, ownsExecution: true).Status);
     }
@@ -66,12 +66,12 @@ public sealed class StopStorageTests {
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     Guid otherSession = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     Guid execution = Guid.NewGuid(), replacement = Guid.NewGuid();
-    store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "settled"), true, execution);
+    store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "settled", TestLlmSelection.Default), true, execution);
     LlmRequest request = store.Executions.ClaimNextRequest(session, execution, 0)!;
     Assert.True(store.LlmResponses.Append(session, execution, 0, new(request.RequestId, Guid.NewGuid(), 0, "answer", true)));
     Assert.True(store.LlmResponses.CompleteRequest(session, execution, 0, new(request.RequestId, outcome)));
     Assert.Equal(outcome, store.Executions.TrySettle(session, execution, outcome)!.Outcome);
-    store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "replacement"), true, replacement);
+    store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "replacement", TestLlmSelection.Default), true, replacement);
     StoredExecution[] executions = StoredExecutions.Read(database).ToArray();
     StoredDelivery[] deliveries = StoredDeliveries.Read(database).ToArray();
     RejectUpdates(database);
@@ -90,9 +90,9 @@ public sealed class StopStorageTests {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, execution = Guid.NewGuid();
-    var initial = new UserMessageSubmission(Guid.NewGuid(), 0, "claimed");
-    var pending = new UserMessageSubmission(Guid.NewGuid(), 0, "pending one");
-    var another = new UserMessageSubmission(Guid.NewGuid(), 0, "pending two");
+    var initial = new UserMessageSubmission(Guid.NewGuid(), 0, "claimed", TestLlmSelection.Default);
+    var pending = new UserMessageSubmission(Guid.NewGuid(), 0, "pending one", TestLlmSelection.Default);
+    var another = new UserMessageSubmission(Guid.NewGuid(), 0, "pending two", TestLlmSelection.Default);
     UserMessageReceipt initialReceipt = store.UserMessages.Admit(session, 0, initial, true, execution).Receipt;
     LlmRequest request = store.Executions.ClaimNextRequest(session, execution, 0)!;
     UserMessageReceipt pendingReceipt = store.UserMessages.Admit(session, 0, pending, true, Guid.NewGuid(), execution).Receipt;
@@ -128,7 +128,7 @@ public sealed class StopStorageTests {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, execution = Guid.NewGuid();
-    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "unclaimed");
+    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "unclaimed", TestLlmSelection.Default);
     UserMessageReceipt accepted = store.UserMessages.Admit(session, 0, submission, true, execution).Receipt;
     // raw-sql: establish an existing Stop flag with an unretired delivery to exercise the retry invariant.
     database.Execute("""
@@ -154,9 +154,9 @@ public sealed class StopStorageTests {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, execution = Guid.NewGuid();
-    store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "claimed"), true, execution);
+    store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "claimed", TestLlmSelection.Default), true, execution);
     store.Executions.ClaimNextRequest(session, execution, 0);
-    var pending = new UserMessageSubmission(Guid.NewGuid(), 0, "pending");
+    var pending = new UserMessageSubmission(Guid.NewGuid(), 0, "pending", TestLlmSelection.Default);
     UserMessageReceipt receipt = store.UserMessages.Admit(session, 0, pending, true, Guid.NewGuid(), execution).Receipt;
     StoredExecution savedExecution = Assert.Single(StoredExecutions.Read(database));
     StoredDelivery[] deliveries = StoredDeliveries.Read(database).ToArray();

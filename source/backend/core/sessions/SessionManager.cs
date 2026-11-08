@@ -1,27 +1,28 @@
 using Microsoft.Extensions.AI;
 using Urd.Core.Storage;
+using Urd.Core.Providers;
 
 namespace Urd.Core.Sessions;
 
 // Creates, discovers and opens sessions, keeping one live instance per opened session ID.
 public sealed class SessionManager {
   private readonly UrdStore store;
-  private readonly IChatClient chatClient;
+  private readonly Func<ProviderConnection, IChatClient> createChatClient;
   private readonly IReadOnlyList<AIFunction> tools;
   private readonly AsyncLock gate = new();
   private readonly Dictionary<Guid, PrimarySession> sessions = new();
   private TaskCompletionSource? sessionShutdown;
 
-  public SessionManager(UrdStore store, IChatClient chatClient, IReadOnlyList<AIFunction>? tools = null) {
+  public SessionManager(UrdStore store, Func<ProviderConnection, IChatClient> createChatClient, IReadOnlyList<AIFunction>? tools = null) {
     ArgumentNullException.ThrowIfNull(store);
-    ArgumentNullException.ThrowIfNull(chatClient);
+    ArgumentNullException.ThrowIfNull(createChatClient);
     AIFunction[] configured = tools?.ToArray() ?? [];
     if (configured.Any(tool => tool is null || string.IsNullOrWhiteSpace(tool.Name))
         || configured.Select(tool => tool.Name).Distinct(StringComparer.Ordinal).Count() != configured.Length)
       throw new ArgumentException("Tools require distinct nonempty names.", nameof(tools));
 
     this.store = store;
-    this.chatClient = chatClient;
+    this.createChatClient = createChatClient;
     this.tools = Array.AsReadOnly(configured);
   }
 
@@ -29,7 +30,7 @@ public sealed class SessionManager {
     using var held = await gate.AcquireAsync();
     ThrowIfShuttingDown();
     SessionRecord record = store.Sessions.CreatePrimary(Guid.NewGuid());
-    return Track(new PrimarySession(record, store, chatClient, tools));
+    return Track(new PrimarySession(record, store, createChatClient, tools));
   }
 
   public async Task<PrimarySession> GetPrimaryAsync(Guid sessionId) {
@@ -40,7 +41,7 @@ public sealed class SessionManager {
 
     SessionRecord record = store.Sessions.Read(sessionId)
         ?? throw new KeyNotFoundException($"Session '{sessionId}' does not exist.");
-    return Track(new PrimarySession(record, store, chatClient, tools));
+    return Track(new PrimarySession(record, store, createChatClient, tools));
   }
 
   // Discovers saved identities without opening handles or starting execution.

@@ -149,14 +149,14 @@ public sealed class SessionListingStorageTests {
     using (UrdStore store = UrdStore.Open(database.Path)) {
       Assert.Equal(new[] { Id(3), Id(2), Id(1) }, store.Sessions.ListPrimaryIds(null).SessionIds);
       Assert.Equal(new long[] { 1, 2, 3 }, StoredSessions.ReadCreation(database).Select(row => row.Ordinal));
-      Assert.Equal(new UserMessageSubmission(Id(11), 7, Original), store.UserMessages.ReadReceipt(Id(1), Id(11))!.Submission);
+      Assert.Equal(new UserMessageSubmission(Id(11), 7, Original, null), store.UserMessages.ReadReceipt(Id(1), Id(11))!.Submission);
       Assert.Equal(ExecutionOutcome.Failed, store.Executions.ReadSettlement(Id(1), Id(12))!.Outcome);
       AssertLegacyEvidence(database);
       store.Sessions.CreatePrimary(Id(4));
       Assert.Equal(new[] { Id(4), Id(3), Id(2), Id(1) }, store.Sessions.ListPrimaryIds(null).SessionIds);
     }
 
-    Assert.Equal(7L, database.Scalar("PRAGMA user_version;")); // raw-sql: successful schema-four upgrade applies the current schema
+    Assert.Equal(8L, database.Scalar("PRAGMA user_version;")); // raw-sql: successful schema-four upgrade applies the current schema
     Assert.Equal(root, database.Scalar("SELECT rootpage FROM sqlite_schema WHERE name = 'sessions';")); // raw-sql: existing root table was not rebuilt
     Assert.Null(database.Scalar("PRAGMA foreign_key_check;")); // raw-sql: original execution evidence and new metadata retain valid foreign keys
     using UrdStore reopened = UrdStore.Open(database.Path);
@@ -171,7 +171,7 @@ public sealed class SessionListingStorageTests {
       store.Sessions.CreatePrimary(Id(1));
     database.Execute("DROP TABLE session_creation; CREATE TABLE session_creation (unrelated TEXT);");
     Assert.Throws<SqliteException>(() => UrdStore.Open(database.Path));
-    Assert.Equal(7L, database.Scalar("PRAGMA user_version;")); // raw-sql: invalid current schema must not be silently recreated
+    Assert.Equal(8L, database.Scalar("PRAGMA user_version;")); // raw-sql: invalid current schema must not be silently recreated
     Assert.Equal(Id(1), Assert.Single(StoredSessions.Read(database)).Id);
   }
 

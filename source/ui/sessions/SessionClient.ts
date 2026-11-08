@@ -1,6 +1,6 @@
+import { requestJson } from "../http/requestJson.ts";
 import type { MessageContentCursor, MessageContentPage } from "./Messages.ts";
 import type { SessionIdPage } from "./SessionIdPage.ts";
-import { SessionRequestError } from "./SessionRequestError.ts";
 import type { SessionSnapshot } from "./SessionSnapshot.ts";
 import type { StopReceipt } from "./Stop.ts";
 import type { UserMessageReceipt, UserMessageSubmission } from "./UserMessageSubmission.ts";
@@ -16,11 +16,11 @@ export class SessionClient {
   list(cursor?: string, signal?: AbortSignal): Promise<SessionIdPage> {
     const url = this.url("");
     if (cursor !== undefined) url.searchParams.set("cursor", cursor);
-    return this.request(url, "GET", undefined, signal);
+    return requestJson(url, "GET", undefined, signal);
   }
 
   async create(): Promise<string> {
-    const result = await this.request<{ sessionId: string }>(this.url(""), "POST", {});
+    const result = await requestJson<{ sessionId: string }>(this.url(""), "POST", {});
     const id = result?.sessionId;
     if (
       typeof id !== "string" ||
@@ -32,7 +32,7 @@ export class SessionClient {
   }
 
   getSnapshot(sessionId: string, signal?: AbortSignal): Promise<SessionSnapshot> {
-    return this.request(
+    return requestJson(
       this.url(`/${encodeURIComponent(sessionId)}/snapshot`),
       "GET",
       undefined,
@@ -55,11 +55,12 @@ export class SessionClient {
       segmentIndex: String(segmentIndex),
       utf8Offset: String(utf8Offset),
     }).toString();
-    return this.request(url, "GET", undefined, signal);
+    return requestJson(url, "GET", undefined, signal);
   }
 
   submitMessage(sessionId: string, submission: UserMessageSubmission): Promise<UserMessageReceipt> {
-    return this.request(
+    // A caller must match the full original submission before resolving an unknown Send.
+    return requestJson(
       this.url(`/${encodeURIComponent(sessionId)}/message-submissions`),
       "POST",
       submission,
@@ -72,67 +73,15 @@ export class SessionClient {
     signal?: AbortSignal,
   ): Promise<UserMessageReceipt | null> {
     const path = `/${encodeURIComponent(sessionId)}/message-submissions/${encodeURIComponent(submissionId)}`;
-    return this.request(this.url(path), "GET", undefined, signal);
+    return requestJson(this.url(path), "GET", undefined, signal);
   }
 
   stopExecution(sessionId: string, executionId: string): Promise<StopReceipt> {
     const path = `/${encodeURIComponent(sessionId)}/executions/${encodeURIComponent(executionId)}/stop`;
-    return this.request(this.url(path), "POST", {});
+    return requestJson(this.url(path), "POST", {});
   }
 
   private url(path: string): URL {
     return new URL(`/api/sessions${path}`, this.origin);
-  }
-
-  private async request<T>(
-    url: URL,
-    method: "GET" | "POST",
-    body?: unknown,
-    signal?: AbortSignal,
-  ): Promise<T> {
-    const headers: Record<string, string> = {
-      "X-Urd-Client": "browser",
-      Accept: "application/json",
-    };
-    const options: RequestInit = {
-      method,
-      headers,
-      cache: "no-store",
-      credentials: "omit",
-      redirect: "error",
-    };
-    if (method === "POST") {
-      headers["Content-Type"] = "application/json";
-      options.body = JSON.stringify(body);
-    }
-    if (signal !== undefined) options.signal = signal;
-
-    const response = await fetch(url, options);
-    if (!response.ok)
-      throw new SessionRequestError(response.status, await this.readErrorBody(response));
-    const mediaType = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
-    if (mediaType !== "application/json") {
-      await response.body?.cancel();
-      throw new TypeError("Server returned a non-JSON session response.");
-    }
-    // These wire types describe our server, not a general runtime schema validator.
-    // A caller must match the full original submission before resolving an unknown Send.
-    return (await response.json()) as T;
-  }
-
-  private async readErrorBody(response: Response): Promise<unknown> {
-    let text: string;
-    try {
-      text = await response.text();
-    } catch {
-      // Even a broken error body must not erase an already-received HTTP status.
-      return undefined;
-    }
-    if (!text) return text;
-    try {
-      return JSON.parse(text) as unknown;
-    } catch {
-      return text;
-    }
   }
 }

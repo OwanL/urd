@@ -1,7 +1,10 @@
+using Urd.Core.Providers;
+
 namespace Urd.Core.Sessions;
 
 // Original decoded user message submission. Retries must repeat every member unchanged.
-public sealed record UserMessageSubmission(Guid SubmissionId, long ExpectedHistoryRevision, string Text);
+public sealed record UserMessageSubmission(Guid SubmissionId, long ExpectedHistoryRevision, string Text,
+    LlmSelection? LlmSelection = null);
 
 // First saved acceptance/refusal for an exact original submission. Acceptance associates
 // the submission with an execution; it does not mean an LLM request has started or an answer has succeeded.
@@ -22,5 +25,6 @@ public enum MessageAcceptance {
 public enum MessageRefusalReason {
   StaleRevision = 1,
   Capacity = 2,
-  Stopping = 3
+  Stopping = 3,
+  SelectionLocked = 4
 }

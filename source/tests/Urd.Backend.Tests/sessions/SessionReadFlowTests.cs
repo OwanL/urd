@@ -34,7 +34,7 @@ public sealed class SessionReadFlowTests {
     var database = new TemporaryDatabase();
     var client = new ScriptedChatClient(token => new HeldDisposal(Response(token), cleanupEntered, cleanupRelease.Task));
     var store = UrdStore.Open(database.Path);
-    PrimarySession session = await new SessionManager(store, client).CreatePrimaryAsync();
+    PrimarySession session = await new SessionManager(store, _ => client).CreatePrimaryAsync();
     Guid? ownedExecution = null;
     try {
       SessionSnapshot idle = await session.ReadSnapshotAsync();
@@ -43,7 +43,7 @@ public sealed class SessionReadFlowTests {
       Assert.Empty(idle.Messages);
       Assert.Equal(0, client.Calls);
 
-      UserMessageReceipt receipt = await session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, submission));
+      UserMessageReceipt receipt = await session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, submission, TestLlmSelection.Default));
       ownedExecution = receipt.ExecutionId;
       Guid executionId = Assert.IsType<Guid>(ownedExecution);
       await sourceWaiting.Task.WaitAsync(TestTimeout);
@@ -120,7 +120,7 @@ public sealed class SessionReadFlowTests {
     using (UrdStore original = UrdStore.Open(database.Path)) {
       sessionId = original.Sessions.CreatePrimary(Guid.NewGuid()).Id;
       cleanId = original.Sessions.CreatePrimary(Guid.NewGuid()).Id;
-      original.UserMessages.Admit(sessionId, 0, new(Guid.NewGuid(), 0, "retained input"), true, executionId);
+      original.UserMessages.Admit(sessionId, 0, new(Guid.NewGuid(), 0, "retained input", TestLlmSelection.Default), true, executionId);
       LlmRequest request = original.Executions.ClaimNextRequest(sessionId, executionId, 0)!;
       Assert.True(original.LlmResponses.Append(sessionId, executionId, 0, new(request.RequestId, outputId, 0, "partial\0🙂", false)));
     }
@@ -128,7 +128,7 @@ public sealed class SessionReadFlowTests {
     using var client = new ScriptedChatClient(_ =>
         throw new InvalidOperationException("Reads must not start a llm request."));
     using UrdStore store = UrdStore.Open(database.Path);
-    var manager = new SessionManager(store, client);
+    var manager = new SessionManager(store, _ => client);
     PrimarySession session = await manager.GetPrimaryAsync(sessionId);
     SessionSnapshot retained = await session.ReadSnapshotAsync();
     Assert.True(retained.AdmissionFenced);

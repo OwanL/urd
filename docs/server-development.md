@@ -4,9 +4,10 @@ The local ASP.NET Core server composes Urd's existing Core and SQLite; it is not
 second backend. It now exposes seven operations: **create, list saved primary IDs, Send,
 receipt lookup, snapshot polling, content reads and addressed Stop**. The owner-approved
 listing slice is implemented and tested; verification evidence is below.
-UI, static assets and startup recovery remain outside this checkpoint. Separate
-[headless provider management](provider-management.md) now supports ChatGPT sign-in,
-OpenAI API keys and custom-compatible connections; chat execution still uses the fake client.
+The first [browser screen](browser-development.md) is served from built static assets.
+[Provider management](provider-management.md) supports ChatGPT sign-in, OpenAI API keys
+and custom-compatible connections; production chat now borrows real provider-managed clients.
+Provider setup remains headless, and startup recovery is not implemented.
 Core now provides default durable safe-boundary steering
 for busy Sends in the owned execution; real tools, tool-inspection UI/API and an explicit after-execution
 queue remain deferred.
@@ -25,6 +26,8 @@ Choose your own absolute data directory. Both arguments are required; either ord
 accepted. Port `0` lets the OS select an available port; an explicit port must be within
 `1..65535`. Unknown, duplicate or malformed options fail before opening data.
 There is no bootstrap, wrapper script or automatic browser launch in this slice.
+To include the browser, first run `npm run build` in `source/ui/`; the Server build
+stages that bundle into `wwwroot`. Backend-only builds need no npm step.
 
 After SQLite opens and Kestrel binds, stdout contains exactly one readiness record,
 for example:
@@ -55,6 +58,9 @@ and Core shutdown operations both finish; it has no forced cleanup timeout.
   not native programs. API responses use `Cache-Control: no-store`, including rejections.
 - Before readiness and once shutdown admission closes, the gate returns 503. These checks
   restrict ordinary foreign browser access, not trusted native/local programs.
+- Built HTML/static assets pass the same gate, without the private API marker. HTML uses
+  `no-store`; hashed `/assets` files are immutable. Missing assets and unknown API paths
+  remain 404, not an HTML fallback.
 
 ## Session HTTP contract
 
@@ -69,19 +75,52 @@ and Core shutdown operations both finish; it has no forced cleanup timeout.
 | GET `/api/sessions/{sessionId}/content` | 200 `MessageContentPage` |
 
 **Breaking vocabulary change:** there are no legacy route/member aliases.
-A submission body is `{submissionId, expectedHistoryRevision, text}`. A receipt is
-`{sessionId, submission:{submissionId,expectedHistoryRevision,text}, acceptance, refusalReason, executionId}`.
+A submission body is `{submissionId, expectedHistoryRevision, text, llmSelection}`.
+A receipt is `{sessionId, submission, acceptance, refusalReason, executionId}`, retaining
+that entire original submission, including its complete selected connection binding.
 `acceptance` is `accepted` or `refused`; accepted receipts have an execution ID, refused
 receipts have a refusal reason and null execution ID. Stop receipts and
 `SessionExecutionResult` use `executionId`; snapshots use `unsettledExecutionId` and
 `MessageRef` (including nested content cursors) uses `executionId`.
-Existing saved IDs, revisions, SQL identifiers/schema 5, decisions and exact-retry/Stop
-semantics are unchanged. All seven operations retain their existing validation, local
-admission gates, status mapping, no-store and read-only request-cancellation rules.
+The vocabulary cleanup preserved saved IDs, revisions, SQL identifiers and decisions.
+Selection adds the schema-8 migration described below; the seven operations retain their
+local admission gates, status mapping, no-store and read-only request-cancellation rules.
 The naming and structure cleanup passed locked restore and **296/296 Release tests** without warnings,
 plus independent acceptance review. Raw HTTP checks verify the renamed receipt, Stop,
 snapshot and nested cursor fields, and reject legacy routes and required field names.
 Counts below describe the earlier feature checkpoints.
+
+### Frozen LLM selection
+
+New Sends require `llmSelection: {connection, modelId, reasoningEffort}`. `connection`
+is the full saved secret-free `ProviderConnection`, including route, API, endpoint
+and authentication kind, not credentials. A stale/removed binding is not replaced
+by a lookup or fallback. The provider factory runs lazily outside admission/storage
+locks; inability to create/use the selected client settles the execution as Failed,
+not as a fabricated refused admission.
+
+Null effort requests the provider default. Explicit standard values are `none`,
+`low`, `medium`, `high`, `extraHigh`; validation is not a claim that a particular
+model supports every effort. The execution freezes the choice through every tool
+and steering continuation. Busy steering may tolerate a connection display-name
+change, but any operational choice change durably refuses `selectionLocked`.
+Idle switching preserves visible history; native-context compatibility remains the
+provider layer's responsibility.
+
+Snapshots include `latestLlmSelection`, taken from the initiating submission of the
+newest execution even when it is outside the recent message window. It is not a
+separate mutable preference. Schema 8 stores nullable selection JSON and widens the
+refusal check with a transactional table rebuild and foreign-key verification.
+Legacy decisions retain null; their exact retries are resolved before fresh-Send
+validation, without inventing a provider choice or replaying work. A reused ID with
+changed text, revision **or any original selection member** remains a 409 conflict.
+
+This Core/HTTP checkpoint passed locked restore, independent source/test review and
+**583/583 Release tests**, including factory reentrancy/failure, frozen continuations,
+selection outside the preview window, actual provider-manager stale bindings with
+injected transport, raw HTTP validation/reopen, schema-7 migration and rollback.
+No live account/model calls or rendered browser qualification are implied by that
+checkpoint.
 
 Listing calls `SessionManager.ListPrimaryIdsAsync` and returns at most 60 IDs in newest-created
 order, without handles, summaries, titles, history loading or execution. Empty and retained
@@ -106,13 +145,18 @@ Content GET requires six query fields: `executionId`, `messageId`, `role` (`user
 cursor; offsets are bytes, not string indices. Snapshot/content bounds and the distinct
 closed/final-output/settlement facts are unchanged from [Core](backend-development.md).
 
-In another terminal, set `$origin` to the actual readiness origin, then:
+In another terminal, set `$origin` to the actual readiness origin and choose
+`$connectionId` and `$modelId` from your configured provider/catalog. This sends a
+real request and may incur provider usage; use the isolated browser fixture for
+offline checks instead.
 
 ```powershell
 $headers = @{ 'X-Urd-Client' = 'browser' }
 $chat = Invoke-RestMethod "$origin/api/sessions" -Method Post -Headers $headers -ContentType 'application/json' -Body '{}'
 $view = Invoke-RestMethod "$origin/api/sessions/$($chat.sessionId)/snapshot" -Headers $headers
-$submission = @{ submissionId = [guid]::NewGuid().ToString(); expectedHistoryRevision = $view.historyRevision; text = 'Hello' } | ConvertTo-Json
+$connection = Invoke-RestMethod "$origin/api/providers/$connectionId" -Headers $headers
+$selection = @{ connection = $connection; modelId = $modelId; reasoningEffort = $null }
+$submission = @{ submissionId = [guid]::NewGuid().ToString(); expectedHistoryRevision = $view.historyRevision; text = 'Hello'; llmSelection = $selection } | ConvertTo-Json -Depth 8
 $receipt = Invoke-RestMethod "$origin/api/sessions/$($chat.sessionId)/message-submissions" -Method Post -Headers $headers -ContentType 'application/json' -Body $submission
 $receipt # A durable admission decision, not a completed answer.
 ```
@@ -143,7 +187,7 @@ Errors: 400 malformed input/cursor, 413 oversized body/text, 415 non-JSON POST o
 `UserMessageConflictException`, not exception text or every `InvalidOperationException`.
 None of these errors—or an absent receipt—proves an earlier Send was durably refused.
 Only a receipt matching the session and entire original submission resolves unknown admission.
-An explicit retry repeats the exact ID/text/revision; no server mutation retries occur.
+An explicit retry repeats the exact ID/text/revision/selection; no server mutation retries occur.
 Lost creation acknowledgement remains unknown. Listing can rediscover saved IDs, but cannot
 associate any returned ID with that unacknowledged create or justify automatic retry.
 Do not automatically create another chat to hide that uncertainty.
@@ -153,10 +197,11 @@ Do not automatically create another chat to hide that uncertainty.
 `Program.RunServerAsync(ServerOptions, Action<Uri>, CancellationToken)` owns one run.
 `ServerOptions` validates paths/ports without I/O. The run creates the explicit directory,
 opens `urd.lock` with exclusive sharing, then opens `urd.sqlite` and composes one store,
-manager and deterministic streaming `FakeChatClient`. Constructors do not start LLM work.
-The fake client returns `Hello from Urd.`; no health/read request invokes it.
-An internal overload accepts a client factory for controlled composition tests. The run
-constructs and owns that client inside the same lifetime; CLI behavior is unchanged.
+session manager and provider manager. Production sessions borrow
+`ProviderManager.CreateChatClient(expectedBinding)` clients, without disposing them.
+Constructors and health/read requests do not start LLM work. An internal overload
+accepts an owned client factory only for controlled composition tests; it is not a
+CLI fake-provider mode. Those clients are disposed only after successful drain.
 
 Request cancellation applies to listing/receipt/snapshot/content reads, not accepted LLM work.
 Listing's `RequestAborted` owns only that bounded read, never execution; cancellation may abandon
@@ -183,8 +228,8 @@ Stop retires pending steering without rewriting Accepted receipts or automatical
 it into another execution. Separate independent worker chats continue; bounded-descendant ownership
 requirements remain in [architecture](ARCHITECTURE.md) and [session design](SESSION-DESIGN.md),
 not a new child runtime. Stop cannot undo effects or forcibly kill arbitrary in-process functions.
-The CLI still configures only its deterministic text client, not tools. No schema, framework or UI
-change accompanies public Stop.
+The CLI configures real selected provider clients, but not application tools. Public
+Stop does not add a second execution loop or change provider/tool ownership.
 
 ## Verification and review
 
@@ -232,7 +277,8 @@ failures. That earlier evidence did not qualify queue/steering. Neither it nor t
 fake-tool checkpoint qualifies browser behavior, load or real tools/providers.
 
 Review `source/hosting/server/Program.cs` first, then `ServerOptions.cs`,
-`LocalBrowserGate.cs`, `SessionRoutes.cs` and `FakeChatClient.cs`. Tests are in
+`LocalBrowserGate.cs`, `SessionRoutes.cs` and `ProviderRoutes.cs`. The fake client lives
+only in test support. Tests are in
 `source/tests/Urd.Backend.Tests/hosting/`, using `support/RunningServer.cs`,
 `support/ServerProcess.cs` and the existing SQLite evidence readers. In particular,
 `SessionRoutesTests.cs` includes the busy-Send steering flow; `SessionHttpLifetimeTests.cs`

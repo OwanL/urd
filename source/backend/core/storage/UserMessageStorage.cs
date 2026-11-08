@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using Urd.Core.Providers;
 using Urd.Core.Sessions;
 
 namespace Urd.Core.Storage;
@@ -8,7 +9,7 @@ internal sealed class UserMessageStorage(Database database) {
   internal (UserMessageReceipt Receipt, bool NewlyAccepted) Admit(
       Guid sessionId, long historyRevision, UserMessageSubmission submission, bool accepting, Guid proposedExecutionId,
       Guid? activeExecutionId = null) {
-    Validate(sessionId, submission);
+    ArgumentNullException.ThrowIfNull(submission);
     return database.Write(transaction => {
       UserMessageReceipt? retained = ReadReceipt(sessionId, submission.SubmissionId, transaction);
       if (retained is not null) {
@@ -16,6 +17,7 @@ internal sealed class UserMessageStorage(Database database) {
         return (retained, false);
       }
 
+      Validate(sessionId, submission);
       long actualRevision = ReadRevision(transaction, sessionId);
       MessageRefusalReason? refusal = DecideRefusal(
           transaction, sessionId, actualRevision, historyRevision, submission, accepting, activeExecutionId);
@@ -61,7 +63,8 @@ internal sealed class UserMessageStorage(Database database) {
 
   private UserMessageReceipt? ReadReceipt(Guid sessionId, Guid submissionId, SqliteTransaction? transaction) {
     using SqliteCommand command = database.Command(transaction, """
-      SELECT expected_history_revision, original_text_utf8, decision, run_id, refusal_reason FROM input_decisions
+      SELECT expected_history_revision, original_text_utf8, decision, run_id, refusal_reason, llm_selection_json
+      FROM input_decisions
       WHERE session_id = $session AND input_id = $input;
       """,
         ("$session", sessionId),
@@ -76,7 +79,8 @@ internal sealed class UserMessageStorage(Database database) {
     var acceptance = (MessageAcceptance)reader.GetInt32(2);
     Guid? executionId = reader.IsDBNull(3) ? null : reader.GetGuid(3);
     MessageRefusalReason? refusalReason = reader.IsDBNull(4) ? null : (MessageRefusalReason)reader.GetInt32(4);
-    var original = new UserMessageSubmission(submissionId, expectedRevision, originalText);
+    LlmSelection? selection = LlmSelectionJson.Read(reader.IsDBNull(5) ? null : reader.GetString(5));
+    var original = new UserMessageSubmission(submissionId, expectedRevision, originalText, selection);
     return new UserMessageReceipt(sessionId, original, acceptance, refusalReason, executionId);
   }
 
@@ -112,7 +116,17 @@ internal sealed class UserMessageStorage(Database database) {
     using SqliteCommand count = database.Command(transaction,
         "SELECT COUNT(*) FROM execution_inputs WHERE run_id = $run AND outcome IS NULL;",
         ("$run", currentExecutionId));
-    return (long)count.ExecuteScalar()! >= 8 ? MessageRefusalReason.Capacity : null;
+    if ((long)count.ExecuteScalar()! >= 8)
+      return MessageRefusalReason.Capacity;
+
+    using SqliteCommand selectionRead = database.Command(transaction, """
+      SELECT d.llm_selection_json FROM execution_runs r
+      JOIN input_decisions d ON d.session_id = r.session_id AND d.input_id = r.input_id
+      WHERE r.session_id = $session AND r.run_id = $run;
+      """, ("$session", sessionId), ("$run", currentExecutionId));
+    LlmSelection? initiatingSelection = LlmSelectionJson.Read(selectionRead.ExecuteScalar() as string);
+    return LlmSelectionJson.SameOperation(initiatingSelection, submission.LlmSelection)
+        ? null : MessageRefusalReason.SelectionLocked;
   }
 
   private Guid? ReadActiveExecution(SqliteTransaction transaction, Guid sessionId) {
@@ -126,8 +140,9 @@ internal sealed class UserMessageStorage(Database database) {
     // Length-bearing UTF-8 bytes preserve embedded NUL as well as exact Unicode.
     using SqliteCommand insert = database.Command(transaction, """
       INSERT INTO input_decisions (
-          session_id, input_id, expected_history_revision, original_text_utf8, decision, run_id, refusal_reason)
-      SELECT session_id, $input, $revision, $text, $decision, $run, $reason
+          session_id, input_id, expected_history_revision, original_text_utf8, decision, run_id, refusal_reason,
+          llm_selection_json)
+      SELECT session_id, $input, $revision, $text, $decision, $run, $reason, $selection
       FROM sessions WHERE session_id = $session;
       """,
         ("$session", receipt.SessionId),
@@ -136,7 +151,8 @@ internal sealed class UserMessageStorage(Database database) {
         ("$text", StorageText.StrictUtf8.GetBytes(receipt.Submission.Text)),
         ("$decision", (int)receipt.Acceptance),
         ("$run", receipt.ExecutionId),
-        ("$reason", receipt.RefusalReason is { } reason ? (int)reason : null));
+        ("$reason", receipt.RefusalReason is { } reason ? (int)reason : null),
+        ("$selection", LlmSelectionJson.Write(receipt.Submission.LlmSelection)));
     if (insert.ExecuteNonQuery() == 0)
       throw new KeyNotFoundException($"Session {receipt.SessionId} does not exist.");
   }
@@ -147,13 +163,28 @@ internal sealed class UserMessageStorage(Database database) {
   }
 
   private static void Validate(Guid sessionId, UserMessageSubmission submission) {
-    // Submissions come from public session APIs.
-    ArgumentNullException.ThrowIfNull(submission);
+    // Fresh submissions only: retained legacy decisions can have no selection.
     if (sessionId == Guid.Empty)
       throw new ArgumentException("Session ID cannot be empty.", nameof(sessionId));
 
     if (submission.SubmissionId == Guid.Empty)
       throw new ArgumentException("Submission ID cannot be empty.", nameof(submission));
+
+    if (submission.LlmSelection is not { Connection: not null } selection)
+      throw new ArgumentException("An LLM selection and connection are required.", nameof(submission));
+
+    if (selection.Connection.Id == Guid.Empty)
+      throw new ArgumentException("Connection ID cannot be empty.", nameof(submission));
+
+    if (string.IsNullOrWhiteSpace(selection.ModelId))
+      throw new ArgumentException("Model ID cannot be empty or whitespace.", nameof(submission));
+
+    _ = selection.ReadReasoningEffort();
+    if (!Enum.IsDefined(selection.Connection.Route) || !Enum.IsDefined(selection.Connection.Api)
+        || !Enum.IsDefined(selection.Connection.Authentication) || selection.Connection.Name is null
+        || selection.Connection.Endpoint is not { IsAbsoluteUri: true } endpoint
+        || (endpoint.Scheme != Uri.UriSchemeHttps && endpoint.Scheme != Uri.UriSchemeHttp))
+      throw new ArgumentException("The selected connection binding is invalid.", nameof(submission));
 
     ArgumentOutOfRangeException.ThrowIfNegative(submission.ExpectedHistoryRevision);
     if (StorageText.StrictUtf8.GetByteCount(submission.Text) > StorageText.MaximumBytes) {

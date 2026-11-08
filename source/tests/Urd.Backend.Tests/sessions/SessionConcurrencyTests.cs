@@ -53,9 +53,9 @@ public sealed class SessionConcurrencyTests {
     var database = new TemporaryDatabase();
     var client = new ScriptedChatClient(Response);
     var store = UrdStore.Open(database.Path);
-    var manager = new SessionManager(store, client);
+    var manager = new SessionManager(store, _ => client);
     PrimarySession session = await manager.CreatePrimaryAsync();
-    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "concurrent exact retry");
+    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "concurrent exact retry", TestLlmSelection.Default);
     Task<UserMessageReceipt>[] submissions = Enumerable.Range(0, 2).Select(_ => Task.Run(async () => {
       if (Interlocked.Increment(ref waiting) == 2)
         ready.TrySetResult();
@@ -117,12 +117,12 @@ public sealed class SessionConcurrencyTests {
     var database = new TemporaryDatabase();
     var client = new ScriptedChatClient(Response);
     var store = UrdStore.Open(database.Path);
-    var manager = new SessionManager(store, client);
+    var manager = new SessionManager(store, _ => client);
     PrimarySession session = await manager.CreatePrimaryAsync();
     Guid? ownedExecution = null;
     using var waitCancellation = new CancellationTokenSource();
     try {
-      UserMessageReceipt receipt = await session.SubmitUserMessageAsync(new UserMessageSubmission(Guid.NewGuid(), 0, "go"));
+      UserMessageReceipt receipt = await session.SubmitUserMessageAsync(new UserMessageSubmission(Guid.NewGuid(), 0, "go", TestLlmSelection.Default));
       ownedExecution = receipt.ExecutionId;
       Assert.Equal(MessageAcceptance.Accepted, receipt.Acceptance);
       Guid executionId = Assert.IsType<Guid>(ownedExecution);

@@ -1,6 +1,7 @@
 using System.Runtime.ExceptionServices;
 using Microsoft.Extensions.AI;
 using Urd.Core.Sessions;
+using Urd.Core.Providers;
 
 namespace Urd.Core.Execution;
 
@@ -8,16 +9,20 @@ namespace Urd.Core.Execution;
 // The session owns locking and storage; this class owns the LLM call and its cleanup.
 internal sealed class SessionExecution : IDisposable {
   private readonly SessionBase session;
-  private readonly IChatClient chatClient; // Borrowed from the session; never disposed here.
+  private readonly Func<ProviderConnection, IChatClient> createChatClient; // Returns borrowed clients.
+  private readonly LlmSelection selection;
+  private IChatClient? chatClient;
   private readonly IReadOnlyList<AIFunction> tools; // Borrowed; the manager owns the snapshot.
   private readonly CancellationTokenSource stop = new();
   private Task? stopCallbacks;
 
-  internal SessionExecution(Guid executionId, SessionBase session, IChatClient chatClient,
+  internal SessionExecution(Guid executionId, SessionBase session, Func<ProviderConnection, IChatClient> createChatClient,
+      LlmSelection selection,
       IReadOnlyList<AIFunction>? tools = null) {
     ExecutionId = executionId;
     this.session = session;
-    this.chatClient = chatClient;
+    this.createChatClient = createChatClient;
+    this.selection = selection;
     this.tools = tools ?? [];
   }
 
@@ -101,8 +106,15 @@ internal sealed class SessionExecution : IDisposable {
     try {
       CancellationToken stopToken = stop.Token;
       stopToken.ThrowIfCancellationRequested();
+      chatClient ??= createChatClient(selection.Connection);
+      var options = new ChatOptions {
+        ModelId = selection.ModelId,
+        Reasoning = selection.ReadReasoningEffort() is { } effort
+            ? new ReasoningOptions { Effort = effort } : null,
+        Tools = [.. tools]
+      };
       updates = chatClient
-          .GetStreamingResponseAsync(request.Messages, new ChatOptions { Tools = [.. tools] }, requestStop.Token)
+          .GetStreamingResponseAsync(request.Messages, options, requestStop.Token)
           .GetAsyncEnumerator(requestStop.Token);
 
       while (await WaitForNextUpdateAsync(writer, pendingRead ??= updates.MoveNextAsync().AsTask())) {

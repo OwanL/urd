@@ -27,7 +27,7 @@ public sealed class SteeringMigrationTests {
     CreateLegacy(database, version, outcome);
     using (UrdStore store = UrdStore.Open(database.Path)) {
       UserMessageReceipt receipt = store.UserMessages.ReadReceipt(Session, Submission)!;
-      Assert.Equal(new UserMessageSubmission(Submission, 7, Original), receipt.Submission);
+      Assert.Equal(new UserMessageSubmission(Submission, 7, Original, null), receipt.Submission);
       Assert.Equal(MessageAcceptance.Accepted, receipt.Acceptance);
       Assert.Equal(Execution, receipt.ExecutionId);
       Assert.Equal(outcome, store.Executions.ReadSettlement(Session, Execution)!.Outcome);
@@ -50,7 +50,7 @@ public sealed class SteeringMigrationTests {
       Assert.Equal(Submission, Assert.Single(messages, message => message.Role == ChatRole.User).MessageId);
       Assert.Equal(Output, Assert.Single(messages, message => message.Role == ChatRole.Assistant).MessageId);
       Assert.Null(database.Scalar("PRAGMA foreign_key_check;")); // raw-sql: migration must preserve referential integrity
-      Assert.Equal(7L, database.Scalar("PRAGMA user_version;")); // raw-sql: the upgraded schema version is under test
+      Assert.Equal(8L, database.Scalar("PRAGMA user_version;")); // raw-sql: the upgraded schema version is under test
     }
 
     using UrdStore reopened = UrdStore.Open(database.Path);
@@ -68,14 +68,14 @@ public sealed class SteeringMigrationTests {
       Assert.Null(store.Executions.ReadSettlement(Session, Execution));
       Assert.Null(store.Executions.ClaimNextRequest(Session, Execution, 7));
       Assert.Equal(MessageRefusalReason.Capacity, store.UserMessages.Admit(Session, 7,
-          new(Guid.NewGuid(), 7, "unowned"), true, Guid.NewGuid()).Receipt.RefusalReason);
+          new(Guid.NewGuid(), 7, "unowned", TestLlmSelection.Default), true, Guid.NewGuid()).Receipt.RefusalReason);
       Assert.Null(Assert.Single(StoredDeliveries.Read(database)).Outcome);
     }
 
     using UrdStore reopened = UrdStore.Open(database.Path);
     Assert.Null(reopened.Executions.ClaimNextRequest(Session, Execution, 7));
     Assert.Equal(Request, Assert.Single(StoredExecutions.ReadRequests(database)).RequestId);
-    Assert.False(reopened.UserMessages.Admit(Session, 7, new(Submission, 7, Original), false, Guid.Empty).NewlyAccepted);
+    Assert.False(reopened.UserMessages.Admit(Session, 7, new(Submission, 7, Original, null), false, Guid.Empty).NewlyAccepted);
   }
 
   [Fact]

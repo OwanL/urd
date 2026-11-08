@@ -15,7 +15,7 @@ public sealed class LlmProviderContextMigrationTests {
   public void SchemaSixMigrationPreservesGenericEvidenceAndRollsBackOnTableCollision(bool failMigration) {
     using var database = new TemporaryDatabase();
     Guid session = Guid.NewGuid(), execution = Guid.NewGuid(), response = Guid.NewGuid(), request;
-    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "legacy input \0 🙂\r\n");
+    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "legacy input \0 🙂\r\n", TestLlmSelection.Default);
     const string answer = "legacy answer \0 🙂\r\n";
     var provider = new ProviderConnection(Guid.NewGuid(), "synthetic", ProviderRoute.Custom,
         LlmApi.OpenAIResponses, new Uri("https://provider.example.invalid/v1/"), AuthenticationMethod.ApiKey);
@@ -33,8 +33,8 @@ public sealed class LlmProviderContextMigrationTests {
       hostId = store.Providers.GetOrCreateHostId();
     }
 
-    // Schema six differs only by the absence of native provider context.
-    database.Execute("DROP TABLE execution_provider_context; PRAGMA user_version = 6;");
+    // Restore schema six without native provider context or persisted LLM selection.
+    MakeSchemaSix(database);
     Assert.Equal(6L, database.Scalar("PRAGMA user_version;")); // raw-sql: fixture must have the actual previous schema version
     Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM sqlite_schema WHERE name = 'execution_provider_context';")); // raw-sql: fixture must lack the new table
     var sessions = StoredSessions.Read(database);
@@ -66,11 +66,12 @@ public sealed class LlmProviderContextMigrationTests {
     AssertUpgraded(reopened);
 
     void AssertUpgraded(UrdStore store) {
-      Assert.Equal(7L, database.Scalar("PRAGMA user_version;")); // raw-sql: successful migration version is under test
+      Assert.Equal(8L, database.Scalar("PRAGMA user_version;")); // raw-sql: successful migration version is under test
       Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM execution_provider_context;")); // raw-sql: generic legacy requests must not acquire native context
       AssertLegacyEvidence();
       AssertForeignKeysRemainEnforced(database);
-      Assert.Equal(submission, store.UserMessages.ReadReceipt(session, submission.SubmissionId)!.Submission);
+      Assert.Equal(new UserMessageSubmission(submission.SubmissionId, 0, submission.Text, null),
+          store.UserMessages.ReadReceipt(session, submission.SubmissionId)!.Submission);
       Assert.Equal(execution, store.UserMessages.ReadReceipt(session, submission.SubmissionId)!.ExecutionId);
       Assert.Equal(ExecutionOutcome.Completed, store.Executions.ReadSettlement(session, execution)!.Outcome);
       Assert.Null(store.Executions.ClaimNextRequest(session, execution, 0));
@@ -103,7 +104,7 @@ public sealed class LlmProviderContextMigrationTests {
   }
 
   [Fact]
-  public void SchemaSevenRejectsMalformedProviderContextWithoutRewritingEvidence() {
+  public void SchemaEightRejectsMalformedProviderContextWithoutRewritingEvidence() {
     using var database = new TemporaryDatabase();
     Guid session = Guid.NewGuid();
     using (UrdStore store = UrdStore.Open(database.Path))
@@ -113,11 +114,34 @@ public sealed class LlmProviderContextMigrationTests {
     Assert.Throws<SqliteException>(() => {
       using UrdStore store = UrdStore.Open(database.Path);
     });
-    Assert.Equal(7L, database.Scalar("PRAGMA user_version;")); // raw-sql: rejecting malformed current schema must not rewrite its version
+    Assert.Equal(8L, database.Scalar("PRAGMA user_version;")); // raw-sql: rejecting malformed current schema must not rewrite its version
     Assert.Equal("retained", database.Scalar("SELECT witness FROM execution_provider_context;")); // raw-sql: malformed table must not be silently recreated
     Assert.Equal(session, Assert.Single(StoredSessions.Read(database)).Id);
     Assert.Null(database.Scalar("PRAGMA foreign_key_check;")); // raw-sql: rejection must preserve existing relationships
   }
+
+  private static void MakeSchemaSix(TemporaryDatabase database) => database.Execute("""
+    PRAGMA foreign_keys = OFF;
+    BEGIN;
+    DROP TABLE execution_provider_context;
+    CREATE TABLE input_decisions_v6 (
+        session_id TEXT NOT NULL REFERENCES sessions(session_id), input_id TEXT NOT NULL,
+        expected_history_revision INTEGER NOT NULL CHECK (expected_history_revision >= 0),
+        original_text_utf8 BLOB NOT NULL CHECK (length(original_text_utf8) <= 16384),
+        decision INTEGER NOT NULL CHECK (decision IN (1, 2)), run_id TEXT,
+        refusal_reason INTEGER CHECK (refusal_reason IN (1, 2, 3)), PRIMARY KEY (session_id, input_id),
+        CHECK ((decision = 1 AND run_id IS NOT NULL AND run_id <> '00000000-0000-0000-0000-000000000000'
+            AND refusal_reason IS NULL) OR (decision = 2 AND run_id IS NULL AND refusal_reason IS NOT NULL))
+    ) STRICT;
+    INSERT INTO input_decisions_v6
+    SELECT session_id, input_id, expected_history_revision, original_text_utf8, decision, run_id, refusal_reason
+    FROM input_decisions;
+    DROP TABLE input_decisions;
+    ALTER TABLE input_decisions_v6 RENAME TO input_decisions;
+    PRAGMA user_version = 6;
+    COMMIT;
+    PRAGMA foreign_keys = ON;
+    """);
 
   private static void AssertForeignKeysRemainEnforced(TemporaryDatabase database) {
     using var connection = new SqliteConnection(new SqliteConnectionStringBuilder {

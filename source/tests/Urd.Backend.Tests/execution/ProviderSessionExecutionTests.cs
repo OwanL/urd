@@ -241,21 +241,11 @@ public sealed class ProviderSessionExecutionTests {
     return responses;
   }
 
-  // SessionExecution supplies tools only until model selection is wired into the UI.
-  private sealed class FixtureModelClient(IChatClient inner) : DelegatingChatClient(inner) {
-    public override IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
-        ChatOptions? options = null, CancellationToken cancellationToken = default) {
-      ChatOptions selected = options?.Clone() ?? new();
-      selected.ModelId = "fixture-model";
-      return base.GetStreamingResponseAsync(messages, selected, cancellationToken);
-    }
-  }
-
   // Own the real bridge and execution together so even assertion failures join work before SQLite closes.
   private sealed class ManagedSession : IAsyncDisposable {
     private readonly UrdStore store;
     private readonly ProviderManager manager;
-    private FixtureModelClient? client;
+    private IChatClient? client;
     private PrimarySession? session;
 
     internal ManagedSession(TemporaryDatabase database, HttpMessageHandler handler) {
@@ -271,15 +261,15 @@ public sealed class ProviderSessionExecutionTests {
       Connection = connectionId is { } savedConnection
           ? await manager.GetAsync(savedConnection)
           : await manager.AddCustomAsync(new("managed execution", api, new Uri("https://fixture.invalid/v1/"), AuthenticationMethod.None));
-      client = new FixtureModelClient(manager.CreateChatClient(Connection));
+      client = manager.CreateChatClient(Connection);
       SessionRecord record = sessionId is { } savedSession
           ? Assert.IsType<SessionRecord>(store.Sessions.Read(savedSession))
           : store.Sessions.CreatePrimary(Guid.NewGuid());
-      session = new(record, store, client, tools);
+      session = new(record, store, _ => client, tools);
     }
 
     internal async Task SendAsync(string text, ExecutionOutcome outcome = ExecutionOutcome.Completed) {
-      UserMessageReceipt receipt = await Session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, text));
+      UserMessageReceipt receipt = await Session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, text, TestLlmSelection.Create(Connection)));
       Assert.Equal(MessageAcceptance.Accepted, receipt.Acceptance);
       Guid executionId = Assert.IsType<Guid>(receipt.ExecutionId);
       Assert.Equal(outcome, (await Session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout)).Outcome);

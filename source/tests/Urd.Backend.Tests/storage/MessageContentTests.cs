@@ -218,7 +218,7 @@ public sealed class MessageContentTests {
     using (UrdStore store = UrdStore.Open(database.Path)) {
       first = StartExecution(store, "origin\0🙂");
       steering = new(first.Execution, Guid.NewGuid(), MessageRole.User, 0);
-      Assert.True(store.UserMessages.Admit(first.Session, 0, new(steering.MessageId, 0, "steering\0é"), true,
+      Assert.True(store.UserMessages.Admit(first.Session, 0, new(steering.MessageId, 0, "steering\0é", TestLlmSelection.Default), true,
           Guid.NewGuid(), activeExecutionId: first.Execution).NewlyAccepted);
       MessageContentPage pending = store.Content.Read(first.Session, new(steering, 0, 0));
       Assert.Equal("steering\0é", pending.Text);
@@ -236,7 +236,7 @@ public sealed class MessageContentTests {
       Assert.True(store.LlmResponses.Append(first.Session, first.Execution, 0,
           new(next.RequestId, secondOutput.MessageId, 0, "second\0🙂", false)));
       undelivered = new(first.Execution, Guid.NewGuid(), MessageRole.User, 0);
-      Assert.True(store.UserMessages.Admit(first.Session, 0, new(undelivered.MessageId, 0, "not delivered"), true,
+      Assert.True(store.UserMessages.Admit(first.Session, 0, new(undelivered.MessageId, 0, "not delivered", TestLlmSelection.Default), true,
           Guid.NewGuid(), activeExecutionId: first.Execution).NewlyAccepted);
       Assert.Equal(new[] { first.User, steering, first.Assistant, secondOutput, undelivered },
           store.Snapshots.ReadStored(first.Session).Messages.Select(message => message.Message));
@@ -313,7 +313,7 @@ public sealed class MessageContentTests {
 
   private static TestExecution StartExecution(UrdStore store, string text = "input") {
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, execution = Guid.NewGuid();
-    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, text);
+    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, text, TestLlmSelection.Default);
     Assert.True(store.UserMessages.Admit(session, 0, submission, true, execution).NewlyAccepted);
     LlmRequest request = store.Executions.ClaimNextRequest(session, execution, 0)!;
     return new(session, execution, request.RequestId,

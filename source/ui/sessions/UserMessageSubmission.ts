@@ -1,8 +1,11 @@
+import type { LlmSelection } from "../providers/LlmSelection.ts";
+
 // Original submission; an explicit retry must preserve every member unchanged.
 export interface UserMessageSubmission {
   readonly submissionId: string;
   readonly expectedHistoryRevision: number;
   readonly text: string;
+  readonly llmSelection: LlmSelection | null;
 }
 
 // A saved admission decision, not evidence that the model consumed or completed the work.
@@ -18,4 +21,4 @@ export interface UserMessageReceipt {
 export type MessageAcceptance = "accepted" | "refused";
 
 // The saved reason a submission was refused.
-export type MessageRefusalReason = "staleRevision" | "capacity" | "stopping";
+export type MessageRefusalReason = "staleRevision" | "capacity" | "stopping" | "selectionLocked";

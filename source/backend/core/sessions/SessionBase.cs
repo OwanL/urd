@@ -2,6 +2,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.AI;
 using Urd.Core.Execution;
 using Urd.Core.Storage;
+using Urd.Core.Providers;
 
 namespace Urd.Core.Sessions;
 
@@ -9,7 +10,7 @@ namespace Urd.Core.Sessions;
 // LLM work and stop callbacks always run outside it.
 public abstract class SessionBase {
   private readonly UrdStore store;
-  private readonly IChatClient chatClient;
+  private readonly Func<ProviderConnection, IChatClient> createChatClient;
   private readonly IReadOnlyList<AIFunction> tools;
   private readonly AsyncLock gate = new();
   private bool acceptingUserMessages = true;
@@ -17,12 +18,12 @@ public abstract class SessionBase {
   private TaskCompletionSource<SessionExecutionResult>? settlement;
   private Task? executionTask;
 
-  private protected SessionBase(SessionRecord record, UrdStore store, IChatClient chatClient,
+  private protected SessionBase(SessionRecord record, UrdStore store, Func<ProviderConnection, IChatClient> createChatClient,
       IReadOnlyList<AIFunction>? tools = null) {
     Id = record.Id;
     HistoryRevision = record.HistoryRevision;
     this.store = store;
-    this.chatClient = chatClient;
+    this.createChatClient = createChatClient;
     this.tools = tools ?? [];
   }
 
@@ -62,7 +63,7 @@ public abstract class SessionBase {
       // Steering joins the owned execution; neither it nor a retained receipt starts another driver.
       if (newlyAccepted && execution is null) {
         lockReleased = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        StartExecution(receipt.ExecutionId!.Value, lockReleased.Task);
+        StartExecution(receipt.ExecutionId!.Value, receipt.Submission.LlmSelection!, lockReleased.Task);
       }
     }
 
@@ -167,8 +168,8 @@ public abstract class SessionBase {
   }
 
   // Caller holds the lock.
-  private void StartExecution(Guid executionId, Task lockReleased) {
-    var newExecution = new SessionExecution(executionId, this, chatClient, tools);
+  private void StartExecution(Guid executionId, LlmSelection selection, Task lockReleased) {
+    var newExecution = new SessionExecution(executionId, this, createChatClient, selection, tools);
     var newSettlement = new TaskCompletionSource<SessionExecutionResult>(TaskCreationOptions.RunContinuationsAsynchronously);
     execution = newExecution;
     settlement = newSettlement;

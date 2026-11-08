@@ -18,17 +18,17 @@ public sealed class SessionIdentityTests {
     using var client = IdentityClient();
     PrimarySession created;
     using (UrdStore store = UrdStore.Open(database.Path)) {
-      var manager = new SessionManager(store, client);
+      var manager = new SessionManager(store, _ => client);
       created = await manager.CreatePrimaryAsync();
       Assert.NotEqual(Guid.Empty, created.Id);
       Assert.Equal(0L, created.HistoryRevision);
       Assert.Equal(created.Id, store.Sessions.Read(created.Id)!.Id);
     }
 
-    Assert.Equal(7L, database.Scalar("PRAGMA user_version;")); // raw-sql: applied schema version is the subject under test
+    Assert.Equal(8L, database.Scalar("PRAGMA user_version;")); // raw-sql: applied schema version is the subject under test
     Assert.Equal("wal", database.Scalar("PRAGMA journal_mode;")); // raw-sql: journal mode is database configuration under test
     using UrdStore reopened = UrdStore.Open(database.Path);
-    var reopenedManager = new SessionManager(reopened, client);
+    var reopenedManager = new SessionManager(reopened, _ => client);
     PrimarySession loaded = await reopenedManager.GetPrimaryAsync(created.Id);
     Assert.Equal(created.Id, loaded.Id);
     Assert.Equal(created.HistoryRevision, loaded.HistoryRevision);
@@ -41,7 +41,7 @@ public sealed class SessionIdentityTests {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     using var client = IdentityClient();
-    var manager = new SessionManager(store, client);
+    var manager = new SessionManager(store, _ => client);
     Guid missing = Guid.NewGuid();
     await Assert.ThrowsAsync<KeyNotFoundException>(() => manager.GetPrimaryAsync(missing));
     Assert.Null(store.Sessions.Read(missing));
@@ -63,7 +63,7 @@ public sealed class SessionIdentityTests {
     using UrdStore store = UrdStore.Open(database.Path);
     SessionRecord saved = store.Sessions.CreatePrimary(Guid.NewGuid());
     using var client = IdentityClient();
-    var manager = new SessionManager(store, client);
+    var manager = new SessionManager(store, _ => client);
     var start = Signal();
     Task<(PrimarySession Created, PrimarySession Loaded)>[] tasks = Enumerable.Range(0, 8)
         .Select(_ => Task.Run(async () => {
@@ -101,7 +101,7 @@ public sealed class SessionIdentityTests {
     }
 
     using var client = IdentityClient();
-    var session = new PrimarySession(loaded, borrowedStore, client);
+    var session = new PrimarySession(loaded, borrowedStore, _ => client);
     Assert.Equal(id, session.Id);
     Assert.Equal(7L, session.HistoryRevision);
     Assert.Equal(0, client.Calls);
@@ -127,13 +127,13 @@ public sealed class SessionIdentityTests {
       store.Sessions.CreatePrimary(Guid.NewGuid());
     }
 
-    database.Execute("PRAGMA user_version = 8;");
+    database.Execute("PRAGMA user_version = 9;");
     Assert.Throws<NotSupportedException>(() => UrdStore.Open(database.Path));
     using (FileStream file = File.Open(database.Path, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) {
       Assert.True(file.Length > 0);
     }
 
-    Assert.Equal(8L, database.Scalar("PRAGMA user_version;")); // raw-sql: rejecting a newer schema must not rewrite it
+    Assert.Equal(9L, database.Scalar("PRAGMA user_version;")); // raw-sql: rejecting a newer schema must not rewrite it
     Assert.Single(StoredSessions.Read(database));
   }
 

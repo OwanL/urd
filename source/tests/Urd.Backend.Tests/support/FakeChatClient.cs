@@ -1,7 +1,7 @@
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.AI;
 
-namespace Urd.Server;
+namespace Urd.Backend.Tests.Support;
 
 // Deterministic streaming client for local integration; never calls a provider or network.
 internal sealed class FakeChatClient : IChatClient {

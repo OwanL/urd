@@ -6,5 +6,7 @@
   <ItemGroup>
     <ProjectReference Include="../../backend/Urd.Core.csproj" />
     <InternalsVisibleTo Include="Urd.Backend.Tests" />
+    <Content Include="../../ui/dist/**/*" Link="wwwroot/%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

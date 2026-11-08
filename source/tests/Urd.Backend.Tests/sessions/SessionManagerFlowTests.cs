@@ -29,11 +29,11 @@ public sealed class SessionManagerFlowTests {
     var executions = new List<(PrimarySession Session, Guid ExecutionId)>();
     try {
       store = UrdStore.Open(database.Path);
-      var manager = new SessionManager(store, client);
+      var manager = new SessionManager(store, _ => client);
       PrimarySession[] sessions = [await manager.CreatePrimaryAsync(), await manager.CreatePrimaryAsync()];
       Assert.NotEqual(sessions[0].Id, sessions[1].Id);
       Guid submissionId = Guid.NewGuid();
-      UserMessageSubmission[] submissions = [new(submissionId, 0, "first chat"), new(submissionId, 0, "second chat")];
+      UserMessageSubmission[] submissions = [new(submissionId, 0, "first chat", TestLlmSelection.Default), new(submissionId, 0, "second chat", TestLlmSelection.Default)];
       var receipts = new UserMessageReceipt[2];
       for (int i = 0; i < sessions.Length; i++) {
         Assert.Same(sessions[i], await manager.GetPrimaryAsync(sessions[i].Id));
@@ -65,7 +65,7 @@ public sealed class SessionManagerFlowTests {
       Assert.Equal(0, client.DisposeCalls);
 
       store = UrdStore.Open(database.Path);
-      var reopenedManager = new SessionManager(store, client);
+      var reopenedManager = new SessionManager(store, _ => client);
       for (int i = 0; i < sessions.Length; i++) {
         PrimarySession loaded = await reopenedManager.GetPrimaryAsync(sessions[i].Id);
         Assert.NotSame(sessions[i], loaded);

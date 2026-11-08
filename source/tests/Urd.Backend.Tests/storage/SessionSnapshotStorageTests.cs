@@ -70,7 +70,7 @@ public sealed class SessionSnapshotStorageTests {
     for (int index = 1; index <= requestCount; index++) {
       Guid submission = Guid.NewGuid();
       submissions.Add(submission);
-      Assert.True(store.UserMessages.Admit(session, 0, new(submission, 0, $"input {index}"), true,
+      Assert.True(store.UserMessages.Admit(session, 0, new(submission, 0, $"input {index}", TestLlmSelection.Default), true,
           index == 1 ? execution : Guid.NewGuid(), activeExecutionId: index == 1 ? null : execution).NewlyAccepted);
       LlmRequest request = store.Executions.ClaimNextRequest(session, execution, 0)!;
       requests.Add(request.RequestId);
@@ -137,9 +137,9 @@ public sealed class SessionSnapshotStorageTests {
     Guid session, terminal = Guid.NewGuid(), active = Guid.NewGuid();
     using (UrdStore store = UrdStore.Open(database.Path)) {
       session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
-      store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "terminal"), true, terminal);
+      store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "terminal", TestLlmSelection.Default), true, terminal);
       store.Executions.TrySettle(session, terminal, ExecutionOutcome.Failed);
-      store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "unsettled"), true, active);
+      store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "unsettled", TestLlmSelection.Default), true, active);
       store.Executions.RequestStop(session, active, ownsExecution: true);
     }
 
@@ -160,7 +160,7 @@ public sealed class SessionSnapshotStorageTests {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, execution = Guid.NewGuid(), output = Guid.NewGuid();
-    store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, new string('a', 255) + "🙂\0tail"), true, execution);
+    store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, new string('a', 255) + "🙂\0tail", TestLlmSelection.Default), true, execution);
     LlmRequest request = store.Executions.ClaimNextRequest(session, execution, 0)!;
     Assert.Single(store.Snapshots.ReadStored(session).Messages); // Claim alone has no assistant row.
     store.LlmResponses.Append(session, execution, 0, new(request.RequestId, output, 0, new string('é', 300), false));
@@ -251,9 +251,9 @@ public sealed class SessionSnapshotStorageTests {
     UserMessageReceipt refusedReceipt;
     using (UrdStore store = UrdStore.Open(database.Path)) {
       session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
-      refusedReceipt = store.UserMessages.Admit(session, 0, new(refusedSubmissionId, 0, "refused\0🙂"),
+      refusedReceipt = store.UserMessages.Admit(session, 0, new(refusedSubmissionId, 0, "refused\0🙂", TestLlmSelection.Default),
           accepting: false, proposedExecutionId: refusedProposedExecutionId).Receipt;
-      store.UserMessages.Admit(session, 0, new(acceptedSubmissionId, 0, "accepted\0🙂"), true, execution);
+      store.UserMessages.Admit(session, 0, new(acceptedSubmissionId, 0, "accepted\0🙂", TestLlmSelection.Default), true, execution);
       request = store.Executions.ClaimNextRequest(session, execution, 0)!.RequestId;
       store.LlmResponses.Append(session, execution, 0, new(request, output, 0, "partial\0🙂", false));
       store.Executions.RequestStop(session, execution, ownsExecution: true);
@@ -261,9 +261,9 @@ public sealed class SessionSnapshotStorageTests {
 
     MakeVersionTwo(database);
     using UrdStore migrated = UrdStore.Open(database.Path);
-    Assert.Equal(7L, database.Scalar("PRAGMA user_version;")); // raw-sql: the migrated schema version is the subject under test
+    Assert.Equal(8L, database.Scalar("PRAGMA user_version;")); // raw-sql: the migrated schema version is the subject under test
     UserMessageReceipt migratedRefusal = migrated.UserMessages.ReadReceipt(session, refusedSubmissionId)!;
-    Assert.Equal(refusedReceipt, migratedRefusal);
+    Assert.Equal(refusedReceipt with { Submission = new(refusedSubmissionId, 0, "refused\0🙂", null) }, migratedRefusal);
     Assert.Equal(MessageAcceptance.Refused, migratedRefusal.Acceptance);
     Assert.Equal(MessageRefusalReason.Stopping, migratedRefusal.RefusalReason);
     Assert.Null(migratedRefusal.ExecutionId);
@@ -306,6 +306,7 @@ public sealed class SessionSnapshotStorageTests {
   }
 
   private static void MakeVersionTwo(TemporaryDatabase database) => database.Execute("""
+    PRAGMA foreign_keys = OFF;
     BEGIN;
     DROP TABLE execution_provider_context;
     DROP TABLE provider_connections;
@@ -314,6 +315,20 @@ public sealed class SessionSnapshotStorageTests {
     DROP TABLE execution_tools;
     DROP TABLE execution_messages;
     DROP TABLE execution_inputs;
+    CREATE TABLE input_decisions_v2 (
+        session_id TEXT NOT NULL REFERENCES sessions(session_id), input_id TEXT NOT NULL,
+        expected_history_revision INTEGER NOT NULL CHECK (expected_history_revision >= 0),
+        original_text_utf8 BLOB NOT NULL CHECK (length(original_text_utf8) <= 16384),
+        decision INTEGER NOT NULL CHECK (decision IN (1, 2)), run_id TEXT,
+        refusal_reason INTEGER CHECK (refusal_reason IN (1, 2, 3)), PRIMARY KEY (session_id, input_id),
+        CHECK ((decision = 1 AND run_id IS NOT NULL AND run_id <> '00000000-0000-0000-0000-000000000000'
+            AND refusal_reason IS NULL) OR (decision = 2 AND run_id IS NULL AND refusal_reason IS NOT NULL))
+    ) STRICT;
+    INSERT INTO input_decisions_v2
+    SELECT session_id, input_id, expected_history_revision, original_text_utf8, decision, run_id, refusal_reason
+    FROM input_decisions;
+    DROP TABLE input_decisions;
+    ALTER TABLE input_decisions_v2 RENAME TO input_decisions;
     CREATE TABLE execution_requests_v2 (
         request_id TEXT PRIMARY KEY NOT NULL,
         run_id TEXT NOT NULL UNIQUE REFERENCES execution_runs(run_id),
@@ -341,6 +356,7 @@ public sealed class SessionSnapshotStorageTests {
     DROP INDEX execution_runs_terminal_order;
     PRAGMA user_version = 2;
     COMMIT;
+    PRAGMA foreign_keys = ON;
     """);
 
   private static string[] Explain(TemporaryDatabase database, string sql, Guid session, long revision) {
@@ -361,7 +377,8 @@ public sealed class SessionSnapshotStorageTests {
     database.Execute($"""
       BEGIN;
       WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x + 1 FROM n WHERE x < {executionCount})
-      INSERT INTO input_decisions
+      INSERT INTO input_decisions (
+          session_id, input_id, expected_history_revision, original_text_utf8, decision, run_id, refusal_reason)
       SELECT '{session:D}', '{submissionIdPrefix}' || printf('%012d', x), {revision}, CAST('input ' || x AS BLOB),
           1, '{executionIdPrefix}' || printf('%012d', x), NULL FROM n;
       INSERT INTO execution_runs (session_id, run_id, history_revision, input_id, outcome)

@@ -927,6 +927,30 @@ boundary. [Execution design](EXECUTION-DESIGN.md) records evidence and remaining
 gates; the older [C# discovery](GO-DOTNET-DISCOVERY.md) remains historical candidate
 evidence, not a wider package selection.
 
+### Provider-specific context choices
+
+**Owner alignment (2026-11-08):** For now, prefer the standard/lower-context
+option where a provider documents distinct choices; do not automatically opt into
+extended context. Leave room for a later low/high-context selector, but do not add
+unused request fields or infer modes from model names. This does not authorize
+silently trimming history, imposing a guessed token cap or adding Copilot support.
+
+Keep advertised model limits, selectable provider modes, Urd's context budget and
+usage-based pricing separate. A larger available window does not by itself mean a
+more expensive request; lower-context speed/cost advantages are provider-specific,
+not guarantees. Future supported context or processing settings belong in the
+immutable request selection and its exact-retry/active-execution checks, with
+explicit adapter mappings rather than an unrestricted options bag. Their UI and
+implementation remain deferred; the first chat selection uses connection binding,
+model and reasoning effort, fixed while the execution is working.
+
+[Copilot documents default and 1M context choices](https://docs.github.com/en/copilot/reference/ai-models/supported-models#models-with-extended-capabilities),
+including newer GPT-5.6 Luna/GPT-6 offerings. Its
+[pricing thresholds](https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing#pricing-tables)
+and OpenAI's [context-length and processing prices](https://developers.openai.com/api/docs/pricing)
+are distinct from evidence of a portable request parameter. Specific hardware
+selection and exact future request mappings have not been qualified for Urd.
+
 ### Image attachments: files with stored references
 
 **Direction (2026-11-04):** Keep retained image bytes as files in Urd's managed

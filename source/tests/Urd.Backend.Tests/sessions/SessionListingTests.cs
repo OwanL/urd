@@ -17,7 +17,7 @@ public sealed class SessionListingTests {
         throw new InvalidOperationException("Discovery must not start llm work."));
     Guid first = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     Guid second = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
-    var manager = new SessionManager(store, client);
+    var manager = new SessionManager(store, _ => client);
     SessionIdPage page = await manager.ListPrimaryIdsAsync();
     Assert.Equal(new[] { second, first }, page.SessionIds);
     Assert.Null(page.NextCursor);
@@ -41,7 +41,7 @@ public sealed class SessionListingTests {
   public async Task ListingReopenedOrphansKeepsReceiptsOutputAndUnsettledEvidenceWithoutReplay() {
     using var database = new TemporaryDatabase();
     Guid sessionId = Guid.NewGuid(), emptyId = Guid.NewGuid(), executionId = Guid.NewGuid();
-    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "retained input");
+    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "retained input", TestLlmSelection.Default);
     UserMessageReceipt accepted;
     LlmRequest request;
     using (UrdStore original = UrdStore.Open(database.Path)) {
@@ -60,7 +60,7 @@ public sealed class SessionListingTests {
     using UrdStore store = UrdStore.Open(database.Path);
     using var client = new ScriptedChatClient(_ =>
         throw new InvalidOperationException("Listing must not replay an orphaned run."));
-    var manager = new SessionManager(store, client);
+    var manager = new SessionManager(store, _ => client);
     Assert.Equal(new[] { emptyId, sessionId }, (await manager.ListPrimaryIdsAsync()).SessionIds);
     PrimarySession opened = await manager.GetPrimaryAsync(sessionId);
     SessionSnapshot snapshot = await opened.ReadSnapshotAsync();
@@ -88,11 +88,11 @@ public sealed class SessionListingTests {
       return ScriptedResponses.Paused(waiting, release, token);
     });
     using UrdStore store = UrdStore.Open(database.Path);
-    var manager = new SessionManager(store, client);
+    var manager = new SessionManager(store, _ => client);
     PrimarySession active = await manager.CreatePrimaryAsync();
     PrimarySession idle = await manager.CreatePrimaryAsync();
     try {
-      UserMessageReceipt accepted = await active.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, "first"));
+      UserMessageReceipt accepted = await active.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, "first", TestLlmSelection.Default));
       Guid executionId = Assert.IsType<Guid>(accepted.ExecutionId);
       await waiting.Task.WaitAsync(TestTimeout);
       using var cancelled = new CancellationTokenSource();

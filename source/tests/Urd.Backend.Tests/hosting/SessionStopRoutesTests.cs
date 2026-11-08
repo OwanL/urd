@@ -55,11 +55,11 @@ public sealed class SessionStopRoutesTests {
     await using var server = new RunningServer(Options(database), createClient: () => llm);
     Uri origin = await server.WaitForReadyAsync();
     Guid sessionId = await CreateAsync(server.Client);
-    UserMessageReceipt accepted = await SubmitAsync(server.Client, sessionId, new(Guid.NewGuid(), 0, "start"));
+    UserMessageReceipt accepted = await SubmitAsync(server.Client, sessionId, new(Guid.NewGuid(), 0, "start", TestLlmSelection.Default));
     Guid executionId = accepted.ExecutionId!.Value;
     try {
       await entered.Task.WaitAsync(TestTimeout);
-      var steering = new UserMessageSubmission(Guid.NewGuid(), 0, "pending steering");
+      var steering = new UserMessageSubmission(Guid.NewGuid(), 0, "pending steering", TestLlmSelection.Default);
       UserMessageReceipt queued = await SubmitAsync(server.Client, sessionId, steering);
       Assert.Equal(MessageAcceptance.Accepted, queued.Acceptance);
       Assert.Equal(executionId, queued.ExecutionId);
@@ -79,7 +79,7 @@ public sealed class SessionStopRoutesTests {
       Assert.Equal(executionId, held.UnsettledExecutionId);
       Assert.True(held.StopRequested);
       Assert.Null(held.LastSettlement);
-      UserMessageReceipt refused = await SubmitAsync(server.Client, sessionId, new(Guid.NewGuid(), 0, "too soon"));
+      UserMessageReceipt refused = await SubmitAsync(server.Client, sessionId, new(Guid.NewGuid(), 0, "too soon", TestLlmSelection.Default));
       Assert.Equal(MessageAcceptance.Refused, refused.Acceptance);
       Assert.Equal(MessageRefusalReason.Stopping, refused.RefusalReason);
 
@@ -130,11 +130,11 @@ public sealed class SessionStopRoutesTests {
     try {
       Guid target = await CreateAsync(server.Client);
       Guid independent = await CreateAsync(server.Client);
-      Guid original = (await SubmitAsync(server.Client, target, new(Guid.NewGuid(), 0, "original"))).ExecutionId!.Value;
+      Guid original = (await SubmitAsync(server.Client, target, new(Guid.NewGuid(), 0, "original", TestLlmSelection.Default))).ExecutionId!.Value;
       await SettledAsync(server.Client, target, original);
-      Guid otherExecution = (await SubmitAsync(server.Client, independent, new(Guid.NewGuid(), 0, "independent"))).ExecutionId!.Value;
+      Guid otherExecution = (await SubmitAsync(server.Client, independent, new(Guid.NewGuid(), 0, "independent", TestLlmSelection.Default))).ExecutionId!.Value;
       await independentEntered.Task.WaitAsync(TestTimeout);
-      Guid replacement = (await SubmitAsync(server.Client, target, new(Guid.NewGuid(), 0, "replacement"))).ExecutionId!.Value;
+      Guid replacement = (await SubmitAsync(server.Client, target, new(Guid.NewGuid(), 0, "replacement", TestLlmSelection.Default))).ExecutionId!.Value;
       await replacementEntered.Task.WaitAsync(TestTimeout);
 
       Assert.Equal(new StopReceipt(original, StopStatus.Settled, ExecutionOutcome.Completed),
@@ -173,9 +173,9 @@ public sealed class SessionStopRoutesTests {
     Guid executionId = Guid.NewGuid();
     using (UrdStore store = UrdStore.Open(database.Path)) {
       store.Sessions.CreatePrimary(sessionId);
-      store.UserMessages.Admit(sessionId, 0, new(Guid.NewGuid(), 0, "orphan"), true, executionId);
+      store.UserMessages.Admit(sessionId, 0, new(Guid.NewGuid(), 0, "orphan", TestLlmSelection.Default), true, executionId);
       Assert.NotNull(store.Executions.ClaimNextRequest(sessionId, executionId, 0));
-      store.UserMessages.Admit(sessionId, 0, new(Guid.NewGuid(), 0, "pending"), true, Guid.NewGuid(), executionId);
+      store.UserMessages.Admit(sessionId, 0, new(Guid.NewGuid(), 0, "pending", TestLlmSelection.Default), true, Guid.NewGuid(), executionId);
     }
     List<StoredExecution> executions = StoredExecutions.Read(database);
     List<StoredRequest> requests = StoredExecutions.ReadRequests(database);
@@ -220,7 +220,7 @@ public sealed class SessionStopRoutesTests {
     await using var server = new RunningServer(Options(database), createClient: () => llm);
     await server.WaitForReadyAsync();
     Guid sessionId = await CreateAsync(server.Client);
-    Guid executionId = (await SubmitAsync(server.Client, sessionId, new(Guid.NewGuid(), 0, "start"))).ExecutionId!.Value;
+    Guid executionId = (await SubmitAsync(server.Client, sessionId, new(Guid.NewGuid(), 0, "start", TestLlmSelection.Default))).ExecutionId!.Value;
     try {
       await entered.Task.WaitAsync(TestTimeout);
       database.Execute("""
@@ -240,7 +240,7 @@ public sealed class SessionStopRoutesTests {
       Assert.True(snapshot.StopRequested);
       Assert.Equal(executionId, snapshot.UnsettledExecutionId);
       Assert.Null(snapshot.LastSettlement);
-      UserMessageReceipt refused = await SubmitAsync(server.Client, sessionId, new(Guid.NewGuid(), 0, "must not run"));
+      UserMessageReceipt refused = await SubmitAsync(server.Client, sessionId, new(Guid.NewGuid(), 0, "must not run", TestLlmSelection.Default));
       Assert.Equal(MessageAcceptance.Refused, refused.Acceptance);
       Assert.Equal(MessageRefusalReason.Stopping, refused.RefusalReason);
     } finally {
@@ -270,7 +270,7 @@ public sealed class SessionStopRoutesTests {
     await using var server = new RunningServer(Options(database), createClient: () => llm);
     await server.WaitForReadyAsync();
     Guid sessionId = await CreateAsync(server.Client);
-    Guid executionId = (await SubmitAsync(server.Client, sessionId, new(Guid.NewGuid(), 0, "keep running"))).ExecutionId!.Value;
+    Guid executionId = (await SubmitAsync(server.Client, sessionId, new(Guid.NewGuid(), 0, "keep running", TestLlmSelection.Default))).ExecutionId!.Value;
     string path = StopPath(sessionId, executionId);
     try {
       await entered.Task.WaitAsync(TestTimeout);

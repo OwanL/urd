@@ -32,7 +32,7 @@ public sealed class SessionRoutesTests {
     Assert.NotEqual(first, second);
     Assert.Empty((await SnapshotAsync(other, second)).Messages);
 
-    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "one addressed input");
+    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "one addressed input", TestLlmSelection.Default);
     UserMessageReceipt[] receipts = await Task.WhenAll(SubmitAsync(server.Client, first, submission),
         SubmitAsync(other, first, submission));
     Assert.Equal(receipts[0], receipts[1]);
@@ -57,7 +57,7 @@ public sealed class SessionRoutesTests {
     await using var server = new RunningServer(Options(database));
     await server.WaitForReadyAsync();
     Guid sessionId = await CreateAsync(server.Client);
-    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "original\0🙂");
+    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "original\0🙂", TestLlmSelection.Default);
     Assert.Null(await ReceiptAsync(server.Client, sessionId, submission.SubmissionId));
     // The caller deliberately discards an acknowledgement, then reconciles through the read route.
     using (HttpResponseMessage ignored = await RequestAsync(server.Client, HttpMethod.Post,
@@ -99,9 +99,9 @@ public sealed class SessionRoutesTests {
     await server.WaitForReadyAsync();
     try {
       Guid sessionId = await CreateAsync(server.Client);
-      UserMessageReceipt origin = await SubmitAsync(server.Client, sessionId, new(Guid.NewGuid(), 0, "start"));
+      UserMessageReceipt origin = await SubmitAsync(server.Client, sessionId, new(Guid.NewGuid(), 0, "start", TestLlmSelection.Default));
       await entered.Task.WaitAsync(TestTimeout);
-      var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "steer through HTTP");
+      var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "steer through HTTP", TestLlmSelection.Default);
       UserMessageReceipt[] receipts = await Task.WhenAll(SubmitAsync(server.Client, sessionId, submission),
           SubmitAsync(server.Client, sessionId, submission));
       Assert.Equal(receipts[0], receipts[1]);
@@ -132,7 +132,7 @@ public sealed class SessionRoutesTests {
     await using var server = new RunningServer(Options(database));
     await server.WaitForReadyAsync();
     Guid sessionId = await CreateAsync(server.Client);
-    var stale = new UserMessageSubmission(Guid.NewGuid(), 1, "wrong revision");
+    var stale = new UserMessageSubmission(Guid.NewGuid(), 1, "wrong revision", TestLlmSelection.Default);
     UserMessageReceipt refused = await SubmitAsync(server.Client, sessionId, stale);
     Assert.Equal(MessageAcceptance.Refused, refused.Acceptance);
     Assert.Equal(MessageRefusalReason.StaleRevision, refused.RefusalReason);
@@ -140,7 +140,7 @@ public sealed class SessionRoutesTests {
     Assert.Empty(StoredExecutions.Read(database));
     Assert.Empty((await SnapshotAsync(server.Client, sessionId)).Messages);
 
-    UserMessageReceipt accepted = await SubmitAsync(server.Client, sessionId, new(Guid.NewGuid(), 0, "fresh command"));
+    UserMessageReceipt accepted = await SubmitAsync(server.Client, sessionId, new(Guid.NewGuid(), 0, "fresh command", TestLlmSelection.Default));
     await SettledAsync(server.Client, sessionId, accepted.ExecutionId!.Value);
     Assert.Equal(refused, await SubmitAsync(server.Client, sessionId, stale));
     Assert.Equal(refused, await ReceiptAsync(server.Client, sessionId, stale.SubmissionId));
@@ -157,7 +157,7 @@ public sealed class SessionRoutesTests {
     Guid sessionId = await CreateAsync(server.Client);
     Guid otherId = await CreateAsync(server.Client);
     string text = "start\0" + string.Concat(Enumerable.Repeat("é🙂", 2000));
-    UserMessageReceipt accepted = await SubmitAsync(server.Client, sessionId, new(Guid.NewGuid(), 0, text));
+    UserMessageReceipt accepted = await SubmitAsync(server.Client, sessionId, new(Guid.NewGuid(), 0, text, TestLlmSelection.Default));
     SessionSnapshot snapshot = await SettledAsync(server.Client, sessionId, accepted.ExecutionId!.Value);
     MessagePreview user = Assert.Single(snapshot.Messages, row => row.Message.Role == MessageRole.User);
     Assert.True(user.Truncated);
@@ -202,9 +202,10 @@ public sealed class SessionRoutesTests {
         JsonBody("{"));
     await AssertStatusAsync(server.Client, HttpMethod.Post, "/api/sessions", HttpStatusCode.BadRequest,
         JsonBody("null"));
-    foreach (string body in new[] { "{}", "null", "[]", "{", "{\"text\":\"missing IDs\"}",
-        $"{{\"submissionId\":\"{Guid.NewGuid()}\",\"text\":\"missing revision\"}}",
-        $"{{\"submissionId\":\"{Guid.NewGuid()}\",\"expectedHistoryRevision\":0}}" }) {
+    string selection = JsonSerializer.Serialize(TestLlmSelection.Default, json);
+    foreach (string body in new[] { "{}", "null", "[]", "{", $"{{\"text\":\"missing IDs\",\"llmSelection\":{selection}}}",
+        $"{{\"submissionId\":\"{Guid.NewGuid()}\",\"text\":\"missing revision\",\"llmSelection\":{selection}}}",
+        $"{{\"submissionId\":\"{Guid.NewGuid()}\",\"expectedHistoryRevision\":0,\"llmSelection\":{selection}}}" }) {
       await AssertStatusAsync(server.Client, HttpMethod.Post, SubmissionsPath(sessionId), HttpStatusCode.BadRequest,
           JsonBody(body));
     }
@@ -213,7 +214,7 @@ public sealed class SessionRoutesTests {
     foreach (string charset in new[] { "bogus", "utf-7" }) {
       foreach (string path in new[] { "/api/sessions", SubmissionsPath(sessionId) }) {
         string body = path == "/api/sessions" ? "{}"
-            : JsonSerializer.Serialize(new UserMessageSubmission(Guid.NewGuid(), 0, "not admitted"), json);
+            : JsonSerializer.Serialize(new UserMessageSubmission(Guid.NewGuid(), 0, "not admitted", TestLlmSelection.Default), json);
         StringContent content = JsonBody(body);
         content.Headers.ContentType!.CharSet = charset;
         await AssertStatusAsync(server.Client, HttpMethod.Post, path, HttpStatusCode.UnsupportedMediaType, content);
@@ -233,7 +234,7 @@ public sealed class SessionRoutesTests {
       AssertPrivateResponse(created);
       using JsonDocument body = JsonDocument.Parse(await created.Content.ReadAsStringAsync());
       Guid createdId = body.RootElement.GetProperty("sessionId").GetGuid();
-      var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "supported é🙂");
+      var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "supported é🙂", TestLlmSelection.Default);
       var submissionContent = new StringContent(JsonSerializer.Serialize(submission, json), encoding, "application/json");
       submissionContent.Headers.ContentType!.CharSet = charset;
       using HttpResponseMessage submitted = await RequestAsync(server.Client, HttpMethod.Post,
@@ -258,12 +259,12 @@ public sealed class SessionRoutesTests {
       AssertPrivateResponse(response);
     }
     await AssertStatusAsync(server.Client, HttpMethod.Post, SubmissionsPath(sessionId), HttpStatusCode.RequestEntityTooLarge,
-        JsonContent.Create(new UserMessageSubmission(Guid.NewGuid(), 0, new string('é', 8193)), options: json));
+        JsonContent.Create(new UserMessageSubmission(Guid.NewGuid(), 0, new string('é', 8193), TestLlmSelection.Default), options: json));
     Assert.Empty(StoredSubmissions.Read(database));
     Assert.Single(StoredSessions.Read(database));
 
     UserMessageReceipt boundary = await SubmitAsync(server.Client, sessionId,
-        new(Guid.NewGuid(), 0, new string('é', 8192)));
+        new(Guid.NewGuid(), 0, new string('é', 8192), TestLlmSelection.Default));
     Assert.Equal(MessageAcceptance.Accepted, boundary.Acceptance);
     await SettledAsync(server.Client, sessionId, boundary.ExecutionId!.Value);
     Assert.Single(StoredSubmissions.Read(database));
@@ -286,9 +287,9 @@ public sealed class SessionRoutesTests {
     await AssertStatusAsync(server.Client, HttpMethod.Get, $"{SubmissionsPath(sessionId)}/{Guid.NewGuid()}", HttpStatusCode.BadRequest,
         new StringContent("body"));
     await AssertStatusAsync(server.Client, HttpMethod.Post, SubmissionsPath(sessionId), HttpStatusCode.BadRequest,
-        JsonContent.Create(new UserMessageSubmission(Guid.Empty, 0, "empty ID"), options: json));
+        JsonContent.Create(new UserMessageSubmission(Guid.Empty, 0, "empty ID", TestLlmSelection.Default), options: json));
     await AssertStatusAsync(server.Client, HttpMethod.Post, SubmissionsPath(sessionId), HttpStatusCode.BadRequest,
-        JsonContent.Create(new UserMessageSubmission(Guid.NewGuid(), -1, "negative revision"), options: json));
+        JsonContent.Create(new UserMessageSubmission(Guid.NewGuid(), -1, "negative revision", TestLlmSelection.Default), options: json));
     Assert.Empty(StoredSubmissions.Read(database));
     Assert.Empty(StoredExecutions.Read(database));
   }
@@ -299,7 +300,7 @@ public sealed class SessionRoutesTests {
     await using var server = new RunningServer(Options(database));
     await server.WaitForReadyAsync();
     Guid sessionId = await CreateAsync(server.Client);
-    UserMessageReceipt accepted = await SubmitAsync(server.Client, sessionId, new(Guid.NewGuid(), 0, "private text"));
+    UserMessageReceipt accepted = await SubmitAsync(server.Client, sessionId, new(Guid.NewGuid(), 0, "private text", TestLlmSelection.Default));
     SessionSnapshot snapshot = await SettledAsync(server.Client, sessionId, accepted.ExecutionId!.Value);
     MessagePreview user = Assert.Single(snapshot.Messages, row => row.Message.Role == MessageRole.User);
     List<StoredSessionRow> sessions = StoredSessions.Read(database);
@@ -324,7 +325,7 @@ public sealed class SessionRoutesTests {
       Assert.Equal(HttpStatusCode.Forbidden, simple.StatusCode);
       AssertPrivateResponse(simple);
       using HttpResponseMessage foreign = await RequestAsync(server.Client, HttpMethod.Post, path,
-          JsonContent.Create(new UserMessageSubmission(Guid.NewGuid(), 0, "forbidden"), options: json),
+          JsonContent.Create(new UserMessageSubmission(Guid.NewGuid(), 0, "forbidden", TestLlmSelection.Default), options: json),
           suppliedOrigin: "http://foreign.example");
       Assert.Equal(HttpStatusCode.Forbidden, foreign.StatusCode);
       AssertPrivateResponse(foreign);
@@ -359,13 +360,13 @@ public sealed class SessionRoutesTests {
     UserMessageReceipt accepted, refused;
     SessionSnapshot before;
     Guid sessionId;
-    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "retained over restart\0🙂");
+    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "retained over restart\0🙂", TestLlmSelection.Default);
     await using (var first = new RunningServer(Options(database))) {
       await first.WaitForReadyAsync();
       sessionId = await CreateAsync(first.Client);
       accepted = await SubmitAsync(first.Client, sessionId, submission);
       before = await SettledAsync(first.Client, sessionId, accepted.ExecutionId!.Value);
-      refused = await SubmitAsync(first.Client, sessionId, new(Guid.NewGuid(), 1, "retained refusal"));
+      refused = await SubmitAsync(first.Client, sessionId, new(Guid.NewGuid(), 1, "retained refusal", TestLlmSelection.Default));
       Assert.Equal(MessageAcceptance.Refused, refused.Acceptance);
     }
     List<StoredExecution> executions = StoredExecutions.Read(database);
@@ -396,6 +397,7 @@ public sealed class SessionRoutesTests {
     await server.WaitForReadyAsync();
     Guid sessionId = await CreateAsync(server.Client);
     Guid submissionId = Guid.NewGuid();
+    string selection = JsonSerializer.Serialize(TestLlmSelection.Default, json);
     await AssertStatusAsync(server.Client, HttpMethod.Post, $"/api/sessions/{sessionId}/inputs",
         HttpStatusCode.NotFound, JsonBody("{}"));
     await AssertStatusAsync(server.Client, HttpMethod.Get, $"/api/sessions/{sessionId}/inputs/{submissionId}",
@@ -403,16 +405,16 @@ public sealed class SessionRoutesTests {
     await AssertStatusAsync(server.Client, HttpMethod.Post, $"/api/sessions/{sessionId}/runs/{Guid.NewGuid()}/stop",
         HttpStatusCode.NotFound, JsonBody("{}"));
     await AssertStatusAsync(server.Client, HttpMethod.Post, SubmissionsPath(sessionId), HttpStatusCode.BadRequest,
-        JsonBody($"{{\"inputId\":\"{submissionId}\",\"expectedHistoryRevision\":0,\"text\":\"legacy\"}}"));
+        JsonBody($"{{\"inputId\":\"{submissionId}\",\"expectedHistoryRevision\":0,\"text\":\"legacy\",\"llmSelection\":{selection}}}"));
     Assert.Empty(StoredSubmissions.Read(database));
     Assert.Null(await ReceiptAsync(server.Client, sessionId, submissionId));
 
     using HttpResponseMessage response = await RequestAsync(server.Client, HttpMethod.Post, SubmissionsPath(sessionId),
-        JsonBody($"{{\"submissionId\":\"{submissionId}\",\"expectedHistoryRevision\":0,\"text\":\"new wire shape\"}}"));
+        JsonBody($"{{\"submissionId\":\"{submissionId}\",\"expectedHistoryRevision\":0,\"text\":\"new wire shape\",\"llmSelection\":{selection}}}"));
     UserMessageReceipt receipt = Assert.IsType<UserMessageReceipt>(await ReadAsync<UserMessageReceipt>(response));
     using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
     AssertReceiptJson(body.RootElement, receipt);
-    Assert.Equal(new(submissionId, 0, "new wire shape"), receipt.Submission);
+    Assert.Equal(new(submissionId, 0, "new wire shape", TestLlmSelection.Default), receipt.Submission);
     SessionSnapshot snapshot = await SettledAsync(server.Client, sessionId, receipt.ExecutionId!.Value);
     MessagePreview user = Assert.Single(snapshot.Messages, row => row.Message.Role == MessageRole.User);
     string contentPath = ContentPath(sessionId, new(user.Message, 0, 0));
@@ -506,7 +508,7 @@ public sealed class SessionRoutesTests {
     using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
     JsonElement root = body.RootElement;
     AssertProperties(root, "sessionId", "historyRevision", "admissionFenced", "unsettledExecutionId",
-        "stopRequested", "lastSettlement", "messages", "hasOlderMessages");
+        "stopRequested", "lastSettlement", "messages", "hasOlderMessages", "latestLlmSelection");
     Assert.Equal(snapshot.UnsettledExecutionId, root.GetProperty("unsettledExecutionId").Deserialize<Guid?>());
     JsonElement settlement = root.GetProperty("lastSettlement");
     if (snapshot.LastSettlement is not null) {
@@ -544,10 +546,12 @@ public sealed class SessionRoutesTests {
     Assert.Equal(receipt.ExecutionId, value.GetProperty("executionId").Deserialize<Guid?>());
     Assert.Equal(receipt.RefusalReason, value.GetProperty("refusalReason").Deserialize<MessageRefusalReason?>(json));
     JsonElement submission = value.GetProperty("submission");
-    AssertProperties(submission, "submissionId", "expectedHistoryRevision", "text");
+    AssertProperties(submission, "submissionId", "expectedHistoryRevision", "text", "llmSelection");
     Assert.Equal(receipt.Submission.SubmissionId, submission.GetProperty("submissionId").GetGuid());
     Assert.Equal(receipt.Submission.ExpectedHistoryRevision, submission.GetProperty("expectedHistoryRevision").GetInt64());
     Assert.Equal(receipt.Submission.Text, submission.GetProperty("text").GetString());
+    Assert.Equal(receipt.Submission.LlmSelection,
+        submission.GetProperty("llmSelection").Deserialize<Urd.Core.Providers.LlmSelection>(json));
   }
 
   private static void AssertMessageRefJson(JsonElement value) =>

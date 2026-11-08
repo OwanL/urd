@@ -39,14 +39,14 @@ internal static class Program {
   }
 
   internal static Task RunServerAsync(ServerOptions options, Action<Uri> onReady, CancellationToken stopping) =>
-      RunServerAsync(options, onReady, static () => new FakeChatClient(), stopping);
+      RunServerAsync(options, onReady, null, stopping);
 
-  // The run constructs and owns the supplied client, including its disposal after successful drain.
-  internal static async Task RunServerAsync(ServerOptions options, Action<Uri> onReady, Func<IChatClient> createClient,
+  // Production borrows provider-managed clients. Tests may supply an owned client;
+  // the run disposes it only after successful drain, never through a session.
+  internal static async Task RunServerAsync(ServerOptions options, Action<Uri> onReady, Func<IChatClient>? createClient,
       CancellationToken stopping, Func<UrdStore, Func<Uri>, ProviderManager>? createProviders = null) {
     ArgumentNullException.ThrowIfNull(options);
     ArgumentNullException.ThrowIfNull(onReady);
-    ArgumentNullException.ThrowIfNull(createClient);
     Directory.CreateDirectory(options.DataRoot);
     // Keep the file, not a stale PID. The OS releases exclusive ownership when this handle/process exits.
     var directoryLock = new FileStream(Path.Combine(options.DataRoot, "urd.lock"),
@@ -60,11 +60,12 @@ internal static class Program {
     ExceptionDispatchInfo? runFailure = null;
     try {
       store = UrdStore.Open(Path.Combine(options.DataRoot, "urd.sqlite"));
-      client = createClient();
-      manager = new SessionManager(store, client);
+      if (createClient is not null)
+        client = createClient() ?? throw new InvalidOperationException("The client factory returned no client.");
       Uri CallbackUri() => new(Volatile.Read(ref servedOrigin)
           ?? throw new InvalidOperationException("The server is not ready."), "/auth/callback");
       providers = createProviders?.Invoke(store, CallbackUri) ?? new ProviderManager(store, CallbackUri);
+      manager = new SessionManager(store, client is { } supplied ? _ => supplied : providers.CreateChatClient);
       app = CreateApplication(options, manager, providers, () => Volatile.Read(ref servedOrigin));
       var shutdownRequested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
       using var lifetimeStop = app.Lifetime.ApplicationStopping.Register(() => shutdownRequested.TrySetResult());
@@ -130,6 +131,16 @@ internal static class Program {
     builder.Services.Configure<ConsoleLoggerOptions>(console => console.LogToStandardErrorThreshold = LogLevel.Trace);
     WebApplication app = builder.Build();
     app.Use(next => new LocalBrowserGate(next, servedOrigin).InvokeAsync);
+    if (Directory.Exists(Path.Combine(AppContext.BaseDirectory, "wwwroot"))) {
+      app.UseDefaultFiles();
+      app.UseStaticFiles(new StaticFileOptions {
+        OnPrepareResponse = context => {
+          bool asset = context.Context.Request.Path.StartsWithSegments("/assets");
+          context.Context.Response.Headers.CacheControl = asset ? "public, max-age=31536000, immutable" : "no-store";
+          context.Context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+        }
+      });
+    }
     app.MapMethods("/health", [HttpMethods.Get, HttpMethods.Head], (HttpContext context) =>
         context.Features.Get<IHttpRequestBodyDetectionFeature>()?.CanHaveBody == true
             ? Results.BadRequest() : Results.NoContent());

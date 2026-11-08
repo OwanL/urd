@@ -29,7 +29,7 @@ public sealed class LlmProviderResponseStorageTests {
     using UrdStore reopened = UrdStore.Open(database.Path);
     Assert.Null(reopened.Executions.ClaimNextRequest(session, execution, 0));
     Guid nextExecution = Guid.NewGuid();
-    reopened.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "next input"), true, nextExecution);
+    reopened.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "next input", TestLlmSelection.Default), true, nextExecution);
     LlmRequest next = Assert.IsType<LlmRequest>(reopened.Executions.ClaimNextRequest(session, nextExecution, 0));
     Assert.Equal(new[] { ChatRole.User, ChatRole.Assistant, ChatRole.User }, next.Messages.Select(message => message.Role));
     Assert.Equal(new[] { "request", "native answer", "next input" }, next.Messages.Select(message => message.Text));
@@ -169,8 +169,8 @@ public sealed class LlmProviderResponseStorageTests {
     LlmProviderResponse? response = native ? Response(toolCall: true) : null;
     Assert.True(store.LlmResponses.CompleteRequest(session, execution, 0,
         new(request, ExecutionOutcome.Completed, ToolCalls: [Call("call-one")], ProviderResponse: response)));
-    store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "steer one"), true, Guid.NewGuid(), execution);
-    store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "steer two"), true, Guid.NewGuid(), execution);
+    store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "steer one", TestLlmSelection.Default), true, Guid.NewGuid(), execution);
+    store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "steer two", TestLlmSelection.Default), true, Guid.NewGuid(), execution);
     Assert.Null(store.Executions.ClaimNextRequest(session, execution, 0));
     Assert.True(store.Tools.TryStart(session, execution, 0, request, "call-one"));
     Assert.True(store.Tools.Complete(session, execution, 0, request,
@@ -188,7 +188,7 @@ public sealed class LlmProviderResponseStorageTests {
     Assert.Equal("call-one", result.CallId);
     Assert.True(Assert.IsType<JsonElement>(result.Result).GetProperty("saved").GetBoolean());
     Assert.Equal(new[] { "steer one", "steer two" }, next.Messages.Skip(3).Select(message => message.Text));
-    store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "later steering"), true, Guid.NewGuid(), execution);
+    store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "later steering", TestLlmSelection.Default), true, Guid.NewGuid(), execution);
     FinalText(store, session, execution, next.RequestId);
     Assert.True(store.LlmResponses.CompleteRequest(session, execution, 0, new(next.RequestId, ExecutionOutcome.Completed)));
 
@@ -219,7 +219,7 @@ public sealed class LlmProviderResponseStorageTests {
 
   private static (Guid Session, Guid Execution, Guid Request) Begin(UrdStore store) {
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, execution = Guid.NewGuid();
-    store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "request"), true, execution);
+    store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "request", TestLlmSelection.Default), true, execution);
     return (session, execution, store.Executions.ClaimNextRequest(session, execution, 0)!.RequestId);
   }
 

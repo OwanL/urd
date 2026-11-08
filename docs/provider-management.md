@@ -150,6 +150,38 @@ authorization. Context reconstruction restores it instead of flattening native h
 legacy responses remain supported. Tool results remain paired and historical effects are
 never replayed to repair context. Private reasoning is not appended to public transcript text.
 
+## Browser settings
+
+The workspace gear opens a compact Settings panel following Pie's header/search/category
+composition, initially with one **Providers** page. `source/ui/settings/Settings.tsx` owns
+the shell; `source/ui/providers/settings/` owns connection forms and operation state.
+Shared UI colour tokens and popover controls keep it aligned with the workspace.
+
+The page supports ChatGPT, OpenAI API-key and custom compatible connections: create,
+rename, custom binding changes, replace-only keys, sign-in/status/cancel, disconnect,
+local removal and explicit model refresh. Binding changes, disconnect and removal require
+inline confirmation because they may cancel active work. Removal does not promise remote
+revocation. A connection status is not proof of model entitlement.
+
+The owner remains mounted when the panel closes. Reads and known-attempt sign-in polling
+stop while closed/hidden; accepted commands are not cancelled, automatically retried or
+forgotten on panel reopen. Lost acknowledgements remain uncertain until the user reads
+saved state and explicitly permits another command. This is not a durable command receipt
+across a full browser restart. The backend owns authentication regardless of panel lifetime.
+Sign-in opens through an explicit external link; completion is observed through status
+reads, not inferred from a popup closing. Key fields clear on dispatch, selection change
+and close, and are never saved in browser storage. The UI discloses plaintext local storage.
+Provider changes trigger offline catalog rereads without silently replacing chat selection.
+
+Isolated captured-server Chromium checks covered create/edit/key/disconnect/remove,
+catalog refresh, destructive confirmation, accepted Create with a lost acknowledgement,
+close/reopen, duplicate guards, search, focus restoration, retained chat drafts, mobile and
+short-height scrolling. OAuth UI transitions were intercepted with synthetic statuses;
+this UI check made **no real sign-in or inference requests**. The earlier live backend
+qualification below is separate. UI static checks, unit tests and the Vite build passed;
+independent code and visual reviews approved. The temporary fixture process/database was
+removed; shared workspace integration and palette/tab changes are coordinated separately.
+
 ## Qualification
 
 2026-11-08: the provider-management checkpoint passed **453/453 tests**. The shared-request

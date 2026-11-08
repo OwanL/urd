@@ -1,0 +1,147 @@
+import { useId } from "preact/hooks";
+import type { ProviderConnection } from "../ProviderConnection.ts";
+import type { AddDraft, ConnectionDraft } from "./ProviderSettingsController.ts";
+import type { ProviderSettingsState } from "./useProviderSettings.ts";
+
+export const providerNames = {
+  chatGpt: "ChatGPT",
+  openAI: "OpenAI API key",
+  custom: "Custom",
+} as const;
+
+export function ConnectionForm({
+  state,
+  connection,
+  disabled,
+}: {
+  state: ProviderSettingsState;
+  connection: ProviderConnection | undefined;
+  disabled: boolean;
+}) {
+  const id = useId();
+  const { actions } = state;
+  const draft = connection ? state.drafts[connection.id] : state.add;
+  if (!draft) return null;
+  const edit = (update: Partial<ConnectionDraft>) =>
+    connection ? actions.edit(connection.id, update) : actions.editAdd(update);
+
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (connection) void actions.save(connection);
+        else void actions.create();
+      }}
+    >
+      <fieldset disabled={disabled}>
+        {!connection && (
+          <fieldset class="provider-settings-choices">
+            <legend>Provider</legend>
+            {Object.entries(providerNames).map(([value, label]) => (
+              <label key={value}>
+                <input
+                  type="radio"
+                  name={`${id}-route`}
+                  value={value}
+                  checked={state.add.route === value}
+                  onChange={() => actions.editAdd({ route: value as AddDraft["route"] })}
+                />
+                {label}
+              </label>
+            ))}
+          </fieldset>
+        )}
+        <label class="provider-settings-field">
+          Name
+          <input
+            required
+            type="text"
+            value={draft.name}
+            autoComplete="off"
+            onInput={(event) => edit({ name: event.currentTarget.value })}
+          />
+        </label>
+        {(connection?.route ?? state.add.route) === "custom" && (
+          <CustomFields id={id} draft={draft} edit={edit} />
+        )}
+        {connection && connection.route !== "custom" && (
+          <p class="provider-settings-secondary">
+            {providerNames[connection.route]} ·{" "}
+            {connection.api === "openAIResponses" ? "Responses" : "Chat Completions"}
+          </p>
+        )}
+        <button type="submit" class="provider-settings-primary" disabled={!draft.name.trim()}>
+          {connection ? "Save changes" : "Add connection"}
+        </button>
+      </fieldset>
+    </form>
+  );
+}
+
+function CustomFields({
+  id,
+  draft,
+  edit,
+}: {
+  id: string;
+  draft: ConnectionDraft;
+  edit: (update: Partial<ConnectionDraft>) => void;
+}) {
+  return (
+    <>
+      <label class="provider-settings-field">
+        Endpoint
+        <input
+          type="url"
+          required
+          value={draft.endpoint}
+          autoComplete="off"
+          spellcheck={false}
+          placeholder="https://example.com/v1/"
+          onInput={(event) => edit({ endpoint: event.currentTarget.value })}
+        />
+      </label>
+      <fieldset class="provider-settings-choices">
+        <legend>API</legend>
+        {(
+          [
+            ["openAIResponses", "Responses"],
+            ["openAIChatCompletions", "Chat Completions"],
+          ] as const
+        ).map(([value, label]) => (
+          <label key={value}>
+            <input
+              type="radio"
+              name={`${id}-api`}
+              checked={draft.api === value}
+              onChange={() => edit({ api: value })}
+            />
+            {label}
+          </label>
+        ))}
+      </fieldset>
+      <fieldset class="provider-settings-choices">
+        <legend>Authentication</legend>
+        {(
+          [
+            ["apiKey", "API key"],
+            ["none", "None"],
+          ] as const
+        ).map(([value, label]) => (
+          <label key={value}>
+            <input
+              type="radio"
+              name={`${id}-auth`}
+              checked={draft.authentication === value}
+              onChange={() => edit({ authentication: value })}
+            />
+            {label}
+          </label>
+        ))}
+      </fieldset>
+      {draft.endpoint.trim().toLowerCase().startsWith("http:") && (
+        <p class="provider-settings-warning">HTTP does not protect keys or requests in transit.</p>
+      )}
+    </>
+  );
+}

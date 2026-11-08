@@ -173,6 +173,15 @@ Proposed route: `GET /api/sessions/{sessionId}/history`, one reader with modes:
 - Writers never wait for subscribers: a slow or vanished client only misses
   intermediate versions. Bound watchers per page and pages per process; drop on
   disconnect.
+- **Session creation is announced on the same stream** — one tiny event carrying the
+  new session's identity. The tab bar learns about agent-created sessions live,
+  without list polling; the page adds the session to its open set and receives its
+  status handshake like any other open session. For subagent cards (decision 21)
+  this is only an early-existence hint: the card is *positioned* by its entry in
+  the parent's history index, which arrives through the parent's ordinary content
+  notice; the creation notice lets the page watch the child's stream before that
+  entry lands. On reconnect the page re-reads the session list once to catch
+  creations missed while disconnected — a reconnection read, not polling.
 - On connect/reconnect, open sessions receive fresh status events and watched
   sessions repeat the handshake below, then read their snapshot + visible history.
   For watched content the stream only says "something changed". A hidden page holds
@@ -286,7 +295,9 @@ Reuse `SessionSnapshotStorageTests` seeding/poisoned-body/query-plan helpers,
   sessions cost no work for unwatched content; a final settlement committed between
   watch registration and the client's first read is still displayed; a failed
   output/settlement write after subscription, with no later commit, still surfaces
-  the fenced/uncertain state. Measure commit-to-render delay and per-update request
+  the fenced/uncertain state; a session created while connected is announced and
+  receives its status handshake; creations during a disconnect are caught by the
+  reconnect list re-read. Measure commit-to-render delay and per-update request
   count against current polling on the same fixture.
 - Placement: no user entry before attempt; ordered promotion of several steering
   inputs; failure before/after hook; eager client; Stop races; exact receipt retry;

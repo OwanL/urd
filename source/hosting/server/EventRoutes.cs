@@ -8,8 +8,6 @@ namespace Urd.Server;
 // Streams bounded session notices without moving writes or request ownership into Core.
 internal static class EventRoutes {
   private static readonly JsonSerializerOptions json = new(JsonSerializerDefaults.Web);
-  private static readonly Action<ILogger, Exception?> logStorageFailure = LoggerMessage.Define(
-      LogLevel.Error, new EventId(1, "SessionEventStorageUnavailable"), "Session event registration could not read session state.");
 
   internal static RouteGroupBuilder MapEvents(this IEndpointRouteBuilder app,
       SessionManager sessions, SessionEventHub hub) {
@@ -40,9 +38,9 @@ internal static class EventRoutes {
     } catch (ArgumentException) {
       return Results.BadRequest();
     } catch (SqliteException failure) {
-      return StorageUnavailable(http, failure);
+      return HttpStorageFailure.Unavailable(http, failure);
     } catch (InvalidDataException failure) {
-      return StorageUnavailable(http, failure);
+      return HttpStorageFailure.Unavailable(http, failure);
     } catch (InvalidOperationException) when (
         http.RequestServices.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping.IsCancellationRequested) {
       return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
@@ -109,12 +107,6 @@ internal static class EventRoutes {
     string payload = JsonSerializer.Serialize(data, json);
     await http.Response.WriteAsync($"event: {name}\ndata: {payload}\n\n", http.RequestAborted);
     await http.Response.Body.FlushAsync(http.RequestAborted);
-  }
-
-  private static IResult StorageUnavailable(HttpContext http, Exception failure) {
-    ILogger logger = http.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger(typeof(EventRoutes).FullName!);
-    logStorageFailure(logger, failure);
-    return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
   }
 
   private sealed record SessionSetUpdate(Guid[]? Open, Guid[]? Watched);

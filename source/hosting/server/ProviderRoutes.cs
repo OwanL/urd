@@ -103,10 +103,10 @@ internal static class ProviderRoutes {
       return Results.StatusCode(failure.StatusCode);
     } catch (ArgumentException) {
       return Results.BadRequest();
-    } catch (SqliteException) {
-      return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
-    } catch (InvalidDataException) {
-      return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+    } catch (SqliteException failure) {
+      return HttpStorageFailure.Unavailable(http, failure);
+    } catch (InvalidDataException failure) {
+      return HttpStorageFailure.Unavailable(http, failure);
     } catch (InvalidOperationException) when (http.RequestServices.GetRequiredService<IHostApplicationLifetime>()
         .ApplicationStopping.IsCancellationRequested) {
       return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);

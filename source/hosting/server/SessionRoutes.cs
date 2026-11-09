@@ -7,9 +7,6 @@ namespace Urd.Server;
 
 // Binds session HTTP operations to Core without owning admission or execution policy.
 internal static class SessionRoutes {
-  private static readonly Action<ILogger, Exception?> logStorageFailure = LoggerMessage.Define(
-      LogLevel.Error, new EventId(1, nameof(StorageUnavailable)), "Session storage could not complete an HTTP operation.");
-
   internal static RouteGroupBuilder MapSessions(this IEndpointRouteBuilder app, SessionManager sessions) {
     ArgumentNullException.ThrowIfNull(app);
     ArgumentNullException.ThrowIfNull(sessions);
@@ -63,9 +60,9 @@ internal static class SessionRoutes {
     } catch (ArgumentException) {
       return Results.BadRequest();
     } catch (SqliteException failure) {
-      return StorageUnavailable(http, failure);
+      return HttpStorageFailure.Unavailable(http, failure);
     } catch (InvalidDataException failure) {
-      return StorageUnavailable(http, failure);
+      return HttpStorageFailure.Unavailable(http, failure);
     }
   }
 
@@ -198,12 +195,6 @@ internal static class SessionRoutes {
 
   private static bool IsStopping(HttpContext http)
       => http.RequestServices.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping.IsCancellationRequested;
-
-  private static IResult StorageUnavailable(HttpContext http, Exception failure) {
-    ILogger logger = http.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger(typeof(SessionRoutes).FullName!);
-    logStorageFailure(logger, failure);
-    return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
-  }
 
   private sealed record HistoryQuery(
       string Mode, long ExpectedHistoryRevision, Guid? ExecutionId, Guid? EntryId, string? Kind);

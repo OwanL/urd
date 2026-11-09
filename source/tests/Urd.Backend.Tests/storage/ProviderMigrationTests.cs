@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Execution;
+using Urd.Core.Sessions;
 using Urd.Core.Storage;
 using Xunit;
 
@@ -29,8 +30,10 @@ public sealed class ProviderMigrationTests {
       Assert.Equal(new[] { SchemaFiveDatabase.SessionId }, store.Sessions.ListPrimaryIds(null).SessionIds);
       Assert.Equal(SchemaFiveDatabase.Original,
           store.UserMessages.ReadReceipt(SchemaFiveDatabase.SessionId, SchemaFiveDatabase.InputId)!.Submission.Text);
-      Assert.Equal(new[] { SchemaFiveDatabase.Original, "\0🙂" },
-          store.Snapshots.ReadStored(SchemaFiveDatabase.SessionId).Messages.Select(message => message.Preview));
+      SessionSnapshot snapshot = store.Snapshots.ReadStored(SchemaFiveDatabase.SessionId);
+      Assert.Equal(SchemaFiveDatabase.Original, snapshot.FirstUserPreview);
+      Assert.Equal(3, store.History.Read(SchemaFiveDatabase.SessionId,
+          new(TranscriptHistoryMode.Latest, snapshot.HistoryRevision)).Entries.Count);
       Assert.Equal(3L, database.Scalar("SELECT COUNT(*) FROM execution_messages;")); // raw-sql: migration adds the saved tool's entry without changing legacy previews
       Assert.Equal(ExecutionOutcome.Failed, store.Executions.ReadSettlement(
           SchemaFiveDatabase.SessionId, SchemaFiveDatabase.RunId)!.Outcome);

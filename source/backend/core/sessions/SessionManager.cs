@@ -13,6 +13,10 @@ public sealed class SessionManager {
   private readonly Dictionary<Guid, PrimarySession> sessions = new();
   private TaskCompletionSource? sessionShutdown;
 
+  public Guid Boot { get; } = Guid.NewGuid();
+
+  public event Action<Guid>? SessionCreated;
+
   public SessionManager(UrdStore store, Func<ProviderConnection, IChatClient> createChatClient, IReadOnlyList<AIFunction>? tools = null) {
     ArgumentNullException.ThrowIfNull(store);
     ArgumentNullException.ThrowIfNull(createChatClient);
@@ -27,10 +31,15 @@ public sealed class SessionManager {
   }
 
   public async Task<PrimarySession> CreatePrimaryAsync() {
-    using var held = await gate.AcquireAsync();
-    ThrowIfShuttingDown();
-    SessionRecord record = store.Sessions.CreatePrimary(Guid.NewGuid());
-    return Track(new PrimarySession(record, store, createChatClient, tools));
+    PrimarySession session;
+    using (await gate.AcquireAsync()) {
+      ThrowIfShuttingDown();
+      SessionRecord record = store.Sessions.CreatePrimary(Guid.NewGuid());
+      session = Track(new PrimarySession(record, store, createChatClient, tools));
+    }
+
+    NotifySessionCreated(session.Id);
+    return session;
   }
 
   public async Task<PrimarySession> GetPrimaryAsync(Guid sessionId) {
@@ -97,5 +106,20 @@ public sealed class SessionManager {
   private PrimarySession Track(PrimarySession session) {
     sessions.Add(session.Id, session);
     return session;
+  }
+
+  // Subscribers should enqueue the notice without blocking; creation is already durable here.
+  private void NotifySessionCreated(Guid sessionId) {
+    Action<Guid>? callbacks = SessionCreated;
+    if (callbacks is null)
+      return;
+
+    foreach (Delegate callback in callbacks.GetInvocationList()) {
+      try {
+        ((Action<Guid>)callback)(sessionId);
+      } catch (Exception) {
+        // Session creation is already durable; subscriber failures do not undo it.
+      }
+    }
   }
 }

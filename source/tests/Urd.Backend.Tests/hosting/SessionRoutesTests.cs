@@ -78,9 +78,11 @@ public sealed class SessionRoutesTests {
 
     SessionSnapshot snapshot = await HttpTest.SettledAsync(receipt.ExecutionId!.Value, () => ReadSnapshotAsync(server.Client, sessionId));
     Assert.Equal(selection, snapshot.LatestLlmSelection);
-    MessagePreview user = Assert.Single(snapshot.Messages, row => row.Message.Role == MessageRole.User);
-    Assert.True(user.Truncated);
-    var cursor = new MessageContentCursor(user.Message, 0, 0);
+    Assert.NotNull(snapshot.FirstUserPreview);
+    Assert.InRange(snapshot.FirstUserPreview.Length, 1, 256);
+    Assert.StartsWith(snapshot.FirstUserPreview, text, StringComparison.Ordinal);
+    var message = new MessageRef(receipt.ExecutionId.Value, submission.SubmissionId, MessageRole.User, snapshot.HistoryRevision);
+    var cursor = new MessageContentCursor(message, 0, 0);
     string contentPath = $"/api/sessions/{sessionId}/content?executionId={cursor.Message.ExecutionId}"
         + $"&messageId={cursor.Message.MessageId}&role=user&historyRevision={cursor.Message.HistoryRevision}"
         + "&segmentIndex=0&utf8Offset=0";

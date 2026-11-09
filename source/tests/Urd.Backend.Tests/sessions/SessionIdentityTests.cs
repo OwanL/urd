@@ -13,6 +13,9 @@ public sealed class SessionIdentityTests {
     using var client = new ScriptedChatClient(_ =>
         throw new InvalidOperationException("Identity operations must not start a request."));
     var manager = new SessionManager(store, _ => client);
+    var createdNotices = new List<Guid>();
+    manager.SessionCreated += createdNotices.Add;
+    Assert.NotEqual(Guid.Empty, manager.Boot);
     Guid missing = Guid.NewGuid();
 
     await Assert.ThrowsAsync<KeyNotFoundException>(() => manager.GetPrimaryAsync(missing));
@@ -20,6 +23,7 @@ public sealed class SessionIdentityTests {
 
     PrimarySession created = await manager.CreatePrimaryAsync();
     Assert.Same(created, await manager.GetPrimaryAsync(created.Id));
+    Assert.Equal(new[] { created.Id }, createdNotices);
     Assert.Single(StoredSessions.Read(database));
     Assert.Equal(0, client.Calls);
   }

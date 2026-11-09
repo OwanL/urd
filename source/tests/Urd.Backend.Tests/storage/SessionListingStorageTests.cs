@@ -55,7 +55,9 @@ public sealed class SessionListingStorageTests {
       Assert.Equal(new[] { Id(3), Id(2), Id(1) }, store.Sessions.ListPrimaryIds(null).SessionIds);
       Assert.Equal(Original, store.UserMessages.ReadReceipt(Id(1), Id(11))!.Submission.Text);
       Assert.Equal(ExecutionOutcome.Failed, store.Executions.ReadSettlement(Id(1), Id(12))!.Outcome);
-      Assert.Equal(new[] { Original, "\0🙂" }, store.Snapshots.ReadStored(Id(1)).Messages.Select(message => message.Preview));
+      SessionSnapshot snapshot = store.Snapshots.ReadStored(Id(1));
+      Assert.Equal(Original, snapshot.FirstUserPreview);
+      Assert.Equal(2, store.History.Read(Id(1), new(TranscriptHistoryMode.Latest, snapshot.HistoryRevision)).Entries.Count);
       store.Sessions.CreatePrimary(Id(4));
       Assert.Equal(new[] { Id(4), Id(3), Id(2), Id(1) }, store.Sessions.ListPrimaryIds(null).SessionIds);
     }

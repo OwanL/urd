@@ -1,5 +1,5 @@
-using System.Collections.ObjectModel;
-using System.Data.Common;
+using System.Buffers;
+using System.Text;
 using Microsoft.Data.Sqlite;
 using Urd.Core.Execution;
 using Urd.Core.Providers;
@@ -7,24 +7,30 @@ using Urd.Core.Sessions;
 
 namespace Urd.Core.Storage;
 
-// Projects a bounded session history and its current execution state.
+// Reads small session facts without loading a transcript window.
 internal sealed class SnapshotReader {
-  private const int SnapshotMessageLimit = 60;
   private const int PreviewUtf16Limit = 256;
+  private const int PendingInputLimit = 8;
   private readonly Database database;
   private readonly MessageContentReader content;
 
-  // Select identities before joining lifecycle facts or reading any message bodies.
-  // One execution can contain arbitrarily many messages; only this index window is bounded.
-  internal const string SnapshotMessagesSql = """
-    SELECT m.run_id, m.role, m.message_id, r.outcome
-    FROM (
-        SELECT ordinal, run_id, role, message_id FROM execution_messages
-        WHERE session_id = $session AND history_revision = $revision AND role IN (0, 1)
-        ORDER BY ordinal DESC LIMIT 61
-    ) m
-    JOIN execution_runs r ON r.run_id = m.run_id
-    ORDER BY m.ordinal DESC;
+  internal const string FirstUserSql = """
+    SELECT m.run_id, m.message_id FROM execution_messages m
+    JOIN execution_inputs i ON i.session_id = m.session_id AND i.run_id = m.run_id
+        AND i.input_id = m.input_id
+    WHERE m.session_id = $session AND m.history_revision = $revision AND m.role = 0
+        AND i.request_id IS NOT NULL
+    ORDER BY m.ordinal LIMIT 1;
+    """;
+
+  internal const string PendingInputsSql = """
+    SELECT i.input_id, coalesce(substr(d.original_text_utf8, 1, $bytes), X'')
+    FROM execution_inputs i
+    JOIN input_decisions d ON d.session_id = i.session_id AND d.input_id = i.input_id
+    WHERE i.run_id = (
+        SELECT run_id FROM execution_runs WHERE session_id = $session AND outcome IS NULL
+    ) AND i.request_id IS NULL AND i.outcome IS NULL
+    ORDER BY i.ordinal LIMIT $limit;
     """;
 
   internal const string SnapshotUnsettledSql = """
@@ -63,13 +69,12 @@ internal sealed class SnapshotReader {
     SessionExecutionResult? lastSettlement = ReadLastSettlement(transaction, sessionId);
     LlmSelection? latestSelection = ReadLatestSelection(
         transaction, sessionId, unsettledExecution ?? lastSettlement?.ExecutionId);
-    List<(MessageRef Message, ExecutionOutcome? Settlement)> candidates =
-        ReadCandidates(transaction, sessionId, historyRevision);
-    bool hasOlder = candidates.Count > SnapshotMessageLimit;
-    IReadOnlyList<MessagePreview> messages = ReadPreviews(transaction, sessionId, candidates);
+    string? firstUserPreview = ReadFirstUserPreview(transaction, sessionId, historyRevision);
+    PendingInputPreview[] pendingInputs = ReadPendingInputs(transaction, sessionId);
+
     // Storage cannot establish live admission eligibility; the session replaces this fence.
     return new(sessionId, historyRevision, AdmissionFenced: true,
-        unsettledExecution, stopRequested, lastSettlement, messages, hasOlder, latestSelection);
+        unsettledExecution, stopRequested, lastSettlement, firstUserPreview, pendingInputs, latestSelection);
   }
 
   private long ReadHistoryRevision(SqliteTransaction transaction, Guid sessionId) {
@@ -104,32 +109,48 @@ internal sealed class SnapshotReader {
     return LlmSelectionJson.Read(command.ExecuteScalar() as string);
   }
 
-  private List<(MessageRef Message, ExecutionOutcome? Settlement)> ReadCandidates(
-      SqliteTransaction transaction, Guid sessionId, long historyRevision) {
-    // Newest admission/response first. Previews reverse this bounded window.
-    using SqliteCommand messagesRead = database.Command(transaction, SnapshotMessagesSql,
-        ("$session", sessionId),
-        ("$revision", historyRevision));
-    using SqliteDataReader reader = messagesRead.ExecuteReader();
-    return reader.Cast<DbDataRecord>()
-        .Select(row => (
-            Message: new MessageRef(Guid.Parse(row.GetString(0)), Guid.Parse(row.GetString(2)),
-                (MessageRole)row.GetInt64(1), historyRevision),
-            Settlement: row.IsDBNull(3) ? (ExecutionOutcome?)null : (ExecutionOutcome)row.GetInt64(3)))
-        .ToList();
+  private string? ReadFirstUserPreview(SqliteTransaction transaction, Guid sessionId, long historyRevision) {
+    using SqliteCommand firstUser = database.Command(transaction, FirstUserSql,
+        ("$session", sessionId), ("$revision", historyRevision));
+    using SqliteDataReader reader = firstUser.ExecuteReader();
+    if (!reader.Read())
+      return null;
+
+    var message = new MessageRef(reader.GetGuid(0), reader.GetGuid(1), MessageRole.User, historyRevision);
+    reader.Close();
+    return content.ReadPreview(transaction, sessionId, message, PreviewUtf16Limit).Text;
   }
 
-  private ReadOnlyCollection<MessagePreview> ReadPreviews(SqliteTransaction transaction, Guid sessionId,
-      List<(MessageRef Message, ExecutionOutcome? Settlement)> candidates) {
-    return candidates
-        .Take(SnapshotMessageLimit)
-        .Reverse()
-        .Select(candidate => {
-          MessageContentPage prefix = content.ReadPreview(transaction, sessionId, candidate.Message, PreviewUtf16Limit);
-          return new MessagePreview(candidate.Message, prefix.Text, prefix.HasMore, prefix.AvailableThrough,
-              prefix.FinalOutputCommitted, candidate.Settlement);
-        })
-        .ToList()
-        .AsReadOnly();
+  private PendingInputPreview[] ReadPendingInputs(SqliteTransaction transaction, Guid sessionId) {
+    using SqliteCommand pendingRead = database.Command(transaction, PendingInputsSql,
+        ("$session", sessionId), ("$limit", PendingInputLimit),
+        ("$bytes", PreviewUtf16Limit * 3 + 3));
+    using SqliteDataReader reader = pendingRead.ExecuteReader();
+    var inputs = new List<PendingInputPreview>(PendingInputLimit);
+    while (reader.Read())
+      inputs.Add(new(reader.GetGuid(0), ReadPreview((byte[])reader.GetValue(1))));
+
+    return inputs.ToArray();
+  }
+
+  private static string ReadPreview(byte[] utf8) {
+    var text = new StringBuilder(Math.Min(PreviewUtf16Limit, utf8.Length));
+    Span<char> scalar = stackalloc char[2];
+    int offset = 0;
+    while (offset < utf8.Length && text.Length < PreviewUtf16Limit) {
+      OperationStatus status = Rune.DecodeFromUtf8(utf8.AsSpan(offset), out Rune rune, out int bytes);
+      if (status == OperationStatus.NeedMoreData)
+        break;
+      if (status != OperationStatus.Done)
+        throw new InvalidDataException("A pending input contains invalid UTF-8.");
+      if (rune.Utf16SequenceLength > PreviewUtf16Limit - text.Length)
+        break;
+
+      int units = rune.EncodeToUtf16(scalar);
+      text.Append(scalar[..units]);
+      offset += bytes;
+    }
+
+    return text.ToString();
   }
 }

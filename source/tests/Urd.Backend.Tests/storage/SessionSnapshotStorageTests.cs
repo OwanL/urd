@@ -9,7 +9,7 @@ namespace Urd.Backend.Tests.Storage;
 
 public sealed class SessionSnapshotStorageTests {
   [Fact]
-  public void MixedLargeHistoriesSelectOnlyTheIndexedRecentWindow() {
+  public void LargeHistoriesReadOnlyTheIndexedFirstUserPreview() {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
@@ -22,32 +22,63 @@ public sealed class SessionSnapshotStorageTests {
     // Omitted bodies are invalid UTF-8; selecting all history before trimming would fail.
     database.Execute($"""
       UPDATE input_decisions SET original_text_utf8 = X'FF'
-      WHERE session_id = '{session:D}' AND input_id IN (
-          SELECT input_id FROM execution_runs WHERE session_id = '{session:D}' ORDER BY ordinal LIMIT 4000);
+      WHERE session_id = '{session:D}' AND input_id <> (
+          SELECT message_id FROM execution_messages WHERE session_id = '{session:D}'
+              AND history_revision = 1 AND role = 0 ORDER BY ordinal LIMIT 1);
       UPDATE execution_output SET text_utf8 = X'FF' WHERE request_id IN (
           SELECT q.request_id FROM execution_requests q JOIN execution_runs r ON r.run_id = q.run_id
-          WHERE r.session_id = '{session:D}' ORDER BY r.ordinal LIMIT 4000);
+          WHERE r.session_id = '{session:D}');
       """);
 
     SessionSnapshot snapshot = store.Snapshots.ReadStored(session);
-    Assert.Equal(60, snapshot.Messages.Count);
-    Assert.True(snapshot.HasOlderMessages);
-    Assert.Equal("input 2971", snapshot.Messages[0].Preview);
-    Assert.Equal("output 3000", snapshot.Messages[^1].Preview);
-    Assert.All(snapshot.Messages, message => Assert.Equal(1, message.Message.HistoryRevision));
+    Assert.Equal("input 1", snapshot.FirstUserPreview);
+    Assert.Empty(snapshot.PendingInputs);
     Assert.NotNull(snapshot.LastSettlement);
-    Assert.Equal(snapshot.Messages[^1].Message.ExecutionId, snapshot.LastSettlement.ExecutionId);
 
-    string[] plan = Explain(database, SnapshotReader.SnapshotMessagesSql, session, 1);
-    Assert.Contains(plan, step => step.Contains("SEARCH execution_messages USING INDEX execution_messages_history_order", StringComparison.Ordinal));
+    string[] plan = Explain(database, SnapshotReader.FirstUserSql, session, 1);
+    Assert.Contains(plan, step => step.Contains("execution_messages_history_order", StringComparison.Ordinal));
     Assert.DoesNotContain(plan, step => step.Contains("SCAN execution_messages", StringComparison.Ordinal));
-    Assert.DoesNotContain(plan, step => step.Contains("execution_requests", StringComparison.Ordinal));
+    string[] pending = ExplainPending(database, session);
+    Assert.Contains(pending, step => step.Contains("nonterminal_execution_inputs", StringComparison.Ordinal));
+    Assert.DoesNotContain(pending, step => step.Contains("SCAN execution_inputs", StringComparison.Ordinal));
     string[] settlement = Explain(database, SnapshotReader.SnapshotSettlementSql, session, 1);
     Assert.Contains(settlement, step => step.Contains("USING INDEX execution_runs_terminal_order", StringComparison.Ordinal));
     Assert.DoesNotContain(settlement, step => step.Contains("TEMP B-TREE", StringComparison.Ordinal));
     string[] active = Explain(database, SnapshotReader.SnapshotUnsettledSql, session, 1);
     Assert.Contains(active, step => step.Contains("USING INDEX one_active_execution", StringComparison.Ordinal));
     Assert.DoesNotContain(active, step => step.Contains("SCAN", StringComparison.Ordinal));
+  }
+
+  [Fact]
+  public void SnapshotContainsOnlyBoundedIdentityAndPreviewForUnclaimedInputs() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
+    string text = string.Concat(Enumerable.Repeat("pending 🙂", 40));
+    Guid input = Guid.NewGuid();
+    store.UserMessages.Admit(session, 0,
+        new(input, 0, text, TestLlmSelection.Default), true, Guid.NewGuid());
+    database.Execute($"DELETE FROM execution_messages WHERE session_id = '{session:D}' AND message_id = '{input:D}';");
+
+    SessionSnapshot snapshot = store.Snapshots.ReadStored(session);
+    Assert.Null(snapshot.FirstUserPreview);
+    PendingInputPreview pending = Assert.Single(snapshot.PendingInputs);
+    Assert.Equal(input, pending.SubmissionId);
+    Assert.Equal(text[..256], pending.Preview);
+  }
+
+  private static string[] ExplainPending(TemporaryDatabase database, Guid session) {
+    using var connection = new SqliteConnection(new SqliteConnectionStringBuilder {
+      DataSource = database.Path, Pooling = false
+    }.ToString());
+    connection.Open();
+    using SqliteCommand command = connection.CreateCommand();
+    command.CommandText = "EXPLAIN QUERY PLAN " + SnapshotReader.PendingInputsSql;
+    command.Parameters.AddWithValue("$session", session.ToString("D"));
+    command.Parameters.AddWithValue("$limit", 8);
+    command.Parameters.AddWithValue("$bytes", 256 * 3 + 3);
+    using SqliteDataReader reader = command.ExecuteReader();
+    return reader.Cast<DbDataRecord>().Select(row => row.GetString(3)).ToArray();
   }
 
   private static string[] Explain(TemporaryDatabase database, string sql, Guid session, long revision) {

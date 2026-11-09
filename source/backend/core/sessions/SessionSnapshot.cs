@@ -7,4 +7,8 @@ namespace Urd.Core.Sessions;
 public sealed record SessionSnapshot(
     Guid SessionId, long HistoryRevision, bool AdmissionFenced,
     Guid? UnsettledExecutionId, bool StopRequested, SessionExecutionResult? LastSettlement,
-    IReadOnlyList<MessagePreview> Messages, bool HasOlderMessages, LlmSelection? LatestLlmSelection = null);
+    string? FirstUserPreview, IReadOnlyList<PendingInputPreview> PendingInputs,
+    LlmSelection? LatestLlmSelection = null);
+
+// A bounded preview of an accepted input that has not yet been assigned to a request.
+public sealed record PendingInputPreview(Guid SubmissionId, string Preview);

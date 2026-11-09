@@ -115,8 +115,10 @@ public sealed class SessionStopTests {
       Assert.Null(snapshot.LastSettlement);
       Assert.False(settlement.IsCompleted);
       Assert.Null(Assert.Single(StoredExecutions.Read(fixture.Database)).Outcome);
-      Assert.Null(Assert.Single(snapshot.Messages,
-          message => message.Message.MessageId == submission.SubmissionId).Settlement); // The run is not settled yet.
+      TranscriptHistoryPage history = await fixture.Session.ReadHistoryAsync(
+          new(TranscriptHistoryMode.Latest, snapshot.HistoryRevision));
+      Assert.Contains(history.Entries, entry => entry.Entry.EntryId == submission.SubmissionId);
+      Assert.Empty(history.Settlements); // The run is not settled yet.
       StoredDelivery retired = Assert.Single(StoredDeliveries.Read(fixture.Database), row => row.SubmissionId == submission.SubmissionId);
       Assert.Null(retired.RequestId);
       Assert.Equal(ExecutionOutcome.Cancelled, retired.Outcome); // Retired in the acknowledgement transaction.
@@ -235,8 +237,10 @@ public sealed class SessionStopTests {
     Assert.Equal(1, client.Calls);
     Assert.Equal(accepted, await fixture.Session.GetUserMessageReceiptAsync(submission.SubmissionId));
     SessionSnapshot settled = await fixture.Session.ReadSnapshotAsync();
-    Assert.Equal(ExecutionOutcome.Cancelled, Assert.Single(settled.Messages,
-        message => message.Message.MessageId == submission.SubmissionId).Settlement);
+    Assert.Equal(ExecutionOutcome.Cancelled, settled.LastSettlement!.Outcome);
+    TranscriptHistoryPage history = await fixture.Session.ReadHistoryAsync(
+        new(TranscriptHistoryMode.Latest, settled.HistoryRevision));
+    Assert.Contains(history.Entries, entry => entry.Entry.EntryId == submission.SubmissionId);
   }
 
   [Fact]

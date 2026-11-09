@@ -205,11 +205,23 @@ public sealed class ProviderSessionExecutionTests {
     SessionSnapshot snapshot = await session.ReadSnapshotAsync();
     Assert.False(snapshot.AdmissionFenced);
     Assert.Null(snapshot.UnsettledExecutionId);
-    Assert.Equal(expected, snapshot.Messages.Where(message => message.Message.Role == MessageRole.Assistant)
-        .Select(message => message.Preview));
-    Assert.All(snapshot.Messages, message => {
-      Assert.DoesNotContain("thought", message.Preview);
-      Assert.DoesNotContain("private-reasoning", message.Preview);
+    TranscriptHistoryPage history = await session.ReadHistoryAsync(
+        new(TranscriptHistoryMode.Latest, snapshot.HistoryRevision));
+    List<string> textRuns = [];
+    foreach (TranscriptEntryDescriptor entry in history.Entries.Where(entry => entry.Entry.Kind == TranscriptEntryKind.Text)) {
+      MessageContentPage page = await session.ReadMessageContentAsync(entry.Text!.From);
+      var text = new System.Text.StringBuilder(page.Text);
+      while (page.HasMore) {
+        page = await session.ReadMessageContentAsync(page.Next);
+        text.Append(page.Text);
+      }
+      textRuns.Add(text.ToString());
+    }
+
+    Assert.Equal(expected, textRuns);
+    Assert.All(textRuns, text => {
+      Assert.DoesNotContain("thought", text);
+      Assert.DoesNotContain("private-reasoning", text);
     });
   }
 

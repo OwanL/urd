@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.AI;
 using Urd.Core.Execution;
@@ -13,7 +14,15 @@ public abstract class SessionBase {
   private readonly Func<ProviderConnection, IChatClient> createChatClient;
   private readonly IReadOnlyList<AIFunction> tools;
   private readonly AsyncLock gate = new();
+  private readonly ConcurrentDictionary<long, SessionObserver> observers = new();
   private bool acceptingUserMessages = true;
+  private bool needsAttention;
+  private bool hasUnownedExecution;
+  private bool historyRevisionChanged;
+  private long version;
+  private long nextObserverId;
+  private string? currentStatus;
+  private SessionExecutionResult? lastSettlement;
   private SessionExecution? execution;
   private TaskCompletionSource<SessionExecutionResult>? settlement;
   private Task? executionTask;
@@ -38,12 +47,26 @@ public abstract class SessionBase {
 
   public async Task<SessionSnapshot> ReadSnapshotAsync(CancellationToken cancellation = default) {
     using var held = await gate.AcquireAsync(cancellation);
+    return ApplyLiveState(store.Snapshots.ReadStored(Id));
+  }
+
+  public async Task<IDisposable> SubscribeAsync(Action<SessionChange> observer, bool watched,
+      CancellationToken cancellation = default) {
+    ArgumentNullException.ThrowIfNull(observer);
+    using var held = await gate.AcquireAsync(cancellation);
     SessionSnapshot stored = store.Snapshots.ReadStored(Id);
-    bool executionOwnedElsewhere = stored.UnsettledExecutionId is { } executionId && !IsCurrentExecution(executionId);
-    bool fenced = !acceptingUserMessages || stored.HistoryRevision != HistoryRevision || executionOwnedElsewhere;
-    bool stopping = stored.StopRequested
-        || (stored.UnsettledExecutionId is { } activeExecution && IsCurrentExecution(activeExecution) && execution!.IsStopping);
-    return stored with { AdmissionFenced = fenced, StopRequested = stopping };
+    hasUnownedExecution = stored.UnsettledExecutionId is { } executionId && !IsCurrentExecution(executionId);
+    historyRevisionChanged = stored.HistoryRevision != HistoryRevision;
+    lastSettlement = stored.LastSettlement;
+    currentStatus = GetStatus(ApplyLiveState(stored));
+
+    long observerId = Interlocked.Increment(ref nextObserverId);
+    var subscription = new SessionObserver(observer, watched, () => observers.TryRemove(observerId, out _));
+    observers.TryAdd(observerId, subscription);
+    subscription.Notify(new SessionChange(Id, version, currentStatus));
+    if (watched)
+      subscription.Notify(new SessionChange(Id, version));
+    return subscription;
   }
 
   public async Task<MessageContentPage> ReadMessageContentAsync(
@@ -67,9 +90,12 @@ public abstract class SessionBase {
           () => store.UserMessages.Admit(Id, HistoryRevision, submission, acceptingUserMessages, Guid.NewGuid(), execution?.ExecutionId));
 
       // Steering joins the owned execution; neither it nor a retained receipt starts another driver.
-      if (newlyAccepted && execution is null) {
-        lockReleased = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        StartExecution(receipt.ExecutionId!.Value, receipt.Submission.LlmSelection!, lockReleased.Task);
+      if (newlyAccepted) {
+        if (execution is null) {
+          lockReleased = new(TaskCreationOptions.RunContinuationsAsynchronously);
+          StartExecution(receipt.ExecutionId!.Value, receipt.Submission.LlmSelection!, lockReleased.Task);
+        }
+        PublishChange();
       }
     }
 
@@ -79,7 +105,10 @@ public abstract class SessionBase {
 
   internal async Task FenceUserMessagesAsync() {
     using var held = await gate.AcquireAsync();
-    acceptingUserMessages = false;
+    if (acceptingUserMessages) {
+      acceptingUserMessages = false;
+      PublishChange();
+    }
   }
 
   // Called after all manager-owned sessions have fenced user messages. A failed Stop write
@@ -94,7 +123,10 @@ public abstract class SessionBase {
       pendingSettlement = settlement?.Task ?? Task.CompletedTask;
       if (execution is not null) {
         try {
-          WriteToStore(() => store.Executions.RequestStop(Id, execution.ExecutionId, ownsExecution: true));
+          StopReceipt stop = WriteToStore(
+              () => store.Executions.RequestStop(Id, execution.ExecutionId, ownsExecution: true));
+          if (stop.Status == StopStatus.Requested)
+            PublishChange();
         } catch (Exception failure) {
           stopFailure = failure;
         }
@@ -123,7 +155,10 @@ public abstract class SessionBase {
     if (ownsExecution)
       _ = execution!.StopAsync();
 
-    return WriteToStore(() => store.Executions.RequestStop(Id, executionId, ownsExecution));
+    StopReceipt receipt = WriteToStore(() => store.Executions.RequestStop(Id, executionId, ownsExecution));
+    if (receipt.Status == StopStatus.Requested)
+      PublishChange();
+    return receipt;
   }
 
   internal async Task<SessionExecutionResult> WaitForSettlementAsync(Guid executionId, CancellationToken cancellation = default) {
@@ -145,38 +180,63 @@ public abstract class SessionBase {
 
   internal async Task<LlmRequest?> ClaimNextRequestAsync(Guid executionId) {
     using var held = await gate.AcquireAsync();
-    return IsCurrentExecution(executionId) && !execution!.IsStopping
-        ? store.Executions.ClaimNextRequest(Id, executionId, HistoryRevision) : null;
+    if (!IsCurrentExecution(executionId) || execution!.IsStopping)
+      return null;
+
+    LlmRequest? request = store.Executions.ClaimNextRequest(Id, executionId, HistoryRevision);
+    if (request is not null)
+      PublishChange();
+    return request;
   }
 
   internal async Task<bool> RecordOutputAsync(Guid executionId, LlmResponseChunk chunk) {
     using var held = await gate.AcquireAsync();
-    return IsCurrentExecution(executionId) && !execution!.IsStopping
-        && store.LlmResponses.Append(Id, executionId, HistoryRevision, chunk);
+    if (!IsCurrentExecution(executionId) || execution!.IsStopping
+        || !store.LlmResponses.Append(Id, executionId, HistoryRevision, chunk))
+      return false;
+
+    PublishChange();
+    return true;
   }
 
   internal async Task<bool> ObserveToolAsync(Guid executionId, Guid requestId, string callId, string? name) {
     using var held = await gate.AcquireAsync();
-    return IsCurrentExecution(executionId) && !execution!.IsStopping
-        && store.LlmResponses.ObserveTool(Id, executionId, HistoryRevision, requestId, callId, name);
+    if (!IsCurrentExecution(executionId) || execution!.IsStopping
+        || !store.LlmResponses.ObserveTool(Id, executionId, HistoryRevision, requestId, callId, name))
+      return false;
+
+    PublishChange();
+    return true;
   }
 
   internal async Task<bool> CompleteRequestAsync(Guid executionId, LlmRequestResult outcome) {
     using var held = await gate.AcquireAsync();
-    return IsCurrentExecution(executionId)
-        && (outcome.Outcome != ExecutionOutcome.Completed || !execution!.IsStopping)
-        && store.LlmResponses.CompleteRequest(Id, executionId, HistoryRevision, outcome);
+    if (!IsCurrentExecution(executionId)
+        || (outcome.Outcome == ExecutionOutcome.Completed && execution!.IsStopping)
+        || !store.LlmResponses.CompleteRequest(Id, executionId, HistoryRevision, outcome))
+      return false;
+
+    PublishChange();
+    return true;
   }
 
   internal async Task<bool> TryStartToolAsync(Guid executionId, Guid requestId, string callId) {
     using var held = await gate.AcquireAsync();
-    return IsCurrentExecution(executionId) && !execution!.IsStopping
-        && store.Tools.TryStart(Id, executionId, HistoryRevision, requestId, callId);
+    if (!IsCurrentExecution(executionId) || execution!.IsStopping
+        || !store.Tools.TryStart(Id, executionId, HistoryRevision, requestId, callId))
+      return false;
+
+    PublishChange();
+    return true;
   }
 
   internal async Task<bool> CompleteToolAsync(Guid executionId, Guid requestId, LlmToolResult result) {
     using var held = await gate.AcquireAsync();
-    return IsCurrentExecution(executionId) && store.Tools.Complete(Id, executionId, HistoryRevision, requestId, result);
+    if (!IsCurrentExecution(executionId) || !store.Tools.Complete(Id, executionId, HistoryRevision, requestId, result))
+      return false;
+
+    PublishChange();
+    return true;
   }
 
   // Caller holds the lock.
@@ -209,7 +269,7 @@ public abstract class SessionBase {
       // The execution's saved state is uncertain, so keep it unsettled and refuse new user messages.
       // The execution and its resources stay in place for later recovery.
       using var held = await gate.AcquireAsync();
-      acceptingUserMessages = false;
+      MarkNeedsAttention();
       settlement.TrySetException(failure);
       _ = settlement.Task.Exception; // Observed even if nobody is waiting yet.
     }
@@ -237,8 +297,10 @@ public abstract class SessionBase {
       TaskCompletionSource<SessionExecutionResult> settlement, ExecutionOutcome outcome) {
     if (outcome == ExecutionOutcome.Completed && !execution.IsStopping) {
       LlmRequest? next = store.Executions.ClaimNextRequest(Id, execution.ExecutionId, HistoryRevision);
-      if (next is not null)
+      if (next is not null) {
+        PublishChange();
         return next;
+      }
     }
 
     Settle(execution, settlement, outcome);
@@ -255,18 +317,97 @@ public abstract class SessionBase {
     execution.Dispose();
     this.execution = null;
     this.settlement = null;
+    hasUnownedExecution = false;
+    lastSettlement = saved;
+    PublishChange();
     settlement.TrySetResult(saved);
   }
 
   private bool IsCurrentExecution(Guid executionId) => execution?.ExecutionId == executionId;
+
+  private SessionSnapshot ApplyLiveState(SessionSnapshot stored) {
+    bool executionOwnedElsewhere = stored.UnsettledExecutionId is { } executionId && !IsCurrentExecution(executionId);
+    bool fenced = !acceptingUserMessages || stored.HistoryRevision != HistoryRevision || executionOwnedElsewhere;
+    bool stopping = stored.StopRequested
+        || (stored.UnsettledExecutionId is { } activeExecution && IsCurrentExecution(activeExecution) && execution!.IsStopping);
+    return stored with { AdmissionFenced = fenced, StopRequested = stopping };
+  }
+
+  private string GetStatus(SessionSnapshot snapshot) {
+    if (needsAttention)
+      return "needs-attention";
+    if (snapshot.AdmissionFenced || (snapshot.UnsettledExecutionId is { } executionId
+        && !IsCurrentExecution(executionId)))
+      return "fenced";
+    if (execution is not null)
+      return "running";
+    return snapshot.LastSettlement?.Outcome == ExecutionOutcome.Failed ? "failed" : "idle";
+  }
+
+  // Caller holds the session gate. Observers are expected to enqueue into bounded server queues.
+  private void PublishChange() {
+    version = checked(version + 1);
+    if (observers.IsEmpty)
+      return;
+
+    string status = GetCurrentStatus();
+    bool statusChanged = currentStatus is not null && currentStatus != status;
+    currentStatus = status;
+    foreach (SessionObserver observer in observers.Values) {
+      if (statusChanged)
+        observer.Notify(new SessionChange(Id, version, status));
+      if (observer.Watched)
+        observer.Notify(new SessionChange(Id, version));
+    }
+  }
+
+  private string GetCurrentStatus() {
+    if (needsAttention)
+      return "needs-attention";
+    if (!acceptingUserMessages || hasUnownedExecution || historyRevisionChanged)
+      return "fenced";
+    if (execution is not null)
+      return "running";
+    return lastSettlement?.Outcome == ExecutionOutcome.Failed ? "failed" : "idle";
+  }
+
+  private void MarkNeedsAttention() {
+    if (needsAttention && !acceptingUserMessages)
+      return;
+
+    needsAttention = true;
+    acceptingUserMessages = false;
+    PublishChange();
+  }
 
   // A failed write may still have been committed, so refuse new user messages rather than guess.
   private T WriteToStore<T>(Func<T> write) {
     try {
       return write();
     } catch (SqliteException) {
-      acceptingUserMessages = false;
+      MarkNeedsAttention();
       throw;
+    }
+  }
+
+  private sealed class SessionObserver(Action<SessionChange> callback, bool watched, Action unsubscribe) : IDisposable {
+    private int disposed;
+
+    internal bool Watched { get; } = watched;
+
+    internal void Notify(SessionChange change) {
+      if (Volatile.Read(ref disposed) != 0)
+        return;
+      try {
+        callback(change);
+      } catch (Exception) {
+        // Subscriber failure must not turn a saved session change into an execution failure.
+      }
+    }
+
+    public void Dispose() {
+      if (Interlocked.Exchange(ref disposed, 1) == 0)
+        unsubscribe();
     }
   }
 }

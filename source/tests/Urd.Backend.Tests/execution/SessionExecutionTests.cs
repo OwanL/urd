@@ -95,8 +95,10 @@ public sealed class SessionExecutionTests {
       Assert.True(snapshot.AdmissionFenced);
       Assert.Equal(acceptedExecution, snapshot.UnsettledExecutionId);
       Assert.Null(snapshot.LastSettlement);
-      Assert.Single(snapshot.Messages, row => row.Message.Role == MessageRole.User);
-      Assert.DoesNotContain(snapshot.Messages, row => row.Message.Role == MessageRole.Assistant);
+      Assert.Equal("go", snapshot.FirstUserPreview);
+      TranscriptHistoryPage history = await session.ReadHistoryAsync(
+          new(TranscriptHistoryMode.Latest, snapshot.HistoryRevision));
+      Assert.Single(history.Entries, entry => entry.Entry.Kind == TranscriptEntryKind.User);
       Assert.Null(Assert.Single(StoredExecutions.Read(database)).Outcome);
       Assert.Null(Assert.Single(StoredExecutions.ReadRequests(database)).Outcome);
       Assert.Empty(StoredLlmResponses.Read(database));

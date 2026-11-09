@@ -55,6 +55,7 @@ internal static class Program {
     IChatClient? client = null;
     SessionManager? manager = null;
     ProviderManager? providers = null;
+    SessionEventHub? eventHub = null;
     WebApplication? app = null;
     Uri? servedOrigin = null;
     ExceptionDispatchInfo? runFailure = null;
@@ -66,7 +67,8 @@ internal static class Program {
           ?? throw new InvalidOperationException("The server is not ready."), "/auth/callback");
       providers = createProviders?.Invoke(store, CallbackUri) ?? new ProviderManager(store, CallbackUri);
       manager = new SessionManager(store, client is { } supplied ? _ => supplied : providers.CreateChatClient);
-      app = CreateApplication(options, manager, providers, () => Volatile.Read(ref servedOrigin));
+      eventHub = new SessionEventHub(manager);
+      app = CreateApplication(options, manager, providers, eventHub, () => Volatile.Read(ref servedOrigin));
       var shutdownRequested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
       using var lifetimeStop = app.Lifetime.ApplicationStopping.Register(() => shutdownRequested.TrySetResult());
       using var callerStop = stopping.Register(app.Lifetime.StopApplication);
@@ -85,6 +87,7 @@ internal static class Program {
     }
 
     Volatile.Write(ref servedOrigin, null);
+    eventHub?.Dispose();
     Task drained = Task.WhenAll(manager?.ShutdownSessionsAsync(CancellationToken.None) ?? Task.CompletedTask,
         providers?.ShutdownAsync() ?? Task.CompletedTask,
         app?.StopAsync(CancellationToken.None) ?? Task.CompletedTask);
@@ -107,7 +110,7 @@ internal static class Program {
   }
 
   private static WebApplication CreateApplication(ServerOptions options, SessionManager manager,
-      ProviderManager providers, Func<Uri?> servedOrigin) {
+      ProviderManager providers, SessionEventHub eventHub, Func<Uri?> servedOrigin) {
     // No default appsettings/environment/URL providers: Kestrel configuration can otherwise add listeners.
     WebApplicationBuilder builder = WebApplication.CreateEmptyBuilder(new WebApplicationOptions {
       ApplicationName = typeof(Program).Assembly.GetName().Name,
@@ -145,6 +148,7 @@ internal static class Program {
         context.Features.Get<IHttpRequestBodyDetectionFeature>()?.CanHaveBody == true
             ? Results.BadRequest() : Results.NoContent());
     app.MapSessions(manager);
+    app.MapEvents(manager, eventHub);
     app.MapProviders(providers);
     return app;
   }

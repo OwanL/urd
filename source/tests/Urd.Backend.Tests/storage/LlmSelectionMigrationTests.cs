@@ -46,7 +46,9 @@ public sealed class LlmSelectionMigrationTests {
       Assert.Equal(text, receipt.Submission.Text);
       SessionSnapshot snapshot = migrated.Snapshots.ReadStored(session);
       Assert.Null(snapshot.LatestLlmSelection);
-      Assert.Equal(new[] { text, "legacy answer 🙂" }, snapshot.Messages.Select(message => message.Preview));
+      Assert.Equal(text, snapshot.FirstUserPreview);
+      Assert.Equal(2, migrated.History.Read(session,
+          new(TranscriptHistoryMode.Latest, 0)).Entries.Count);
       Assert.Equal(new SessionExecutionResult(execution, ExecutionOutcome.Completed), snapshot.LastSettlement);
       Assert.Equal(request, Assert.Single(StoredExecutions.ReadRequests(database)).RequestId);
     }

@@ -12,6 +12,7 @@ const statusLabels: Record<string, string> = {
   failed: "Failed",
   fenced: "Fenced",
   "needs-attention": "Needs attention",
+  "updates-paused": "Updates paused",
 };
 
 export interface ChatTabsProps {

@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { SessionClient } from "../sessions/SessionClient.ts";
 import { SessionEvents } from "../sessions/SessionEvents.ts";
 import type { WorkspaceCommandAccess } from "./WorkspaceCommands.ts";
 import { newChat } from "./WorkspaceState.ts";
+
+const maxObservedSessions = 128;
 
 // Page lifetime owns the stream; mounted conversations only consume handshakes.
 export function useSessionEvents(
@@ -17,8 +19,16 @@ export function useSessionEvents(
   const [statuses, setStatuses] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const transport = useRef<SessionEvents | null>(null);
-  const desired = useRef({ open, active });
-  desired.current = { open, active };
+  // Match the server's per-page bound without dropping tabs, drafts or the active view.
+  const observed = useMemo(
+    () =>
+      open.length <= maxObservedSessions
+        ? open
+        : [...new Set([...(active ? [active] : []), ...open])].slice(0, maxObservedSessions),
+    [open, active],
+  );
+  const desired = useRef({ open: observed, active });
+  desired.current = { open: observed, active };
   const [watched, setWatched] = useState<string | null>(null);
 
   useEffect(() => {
@@ -98,14 +108,25 @@ export function useSessionEvents(
       setWatched(active);
     }
     setStatuses((previous) =>
-      Object.fromEntries(Object.entries(previous).filter(([session]) => open.includes(session))),
+      Object.fromEntries(
+        Object.entries(previous).filter(([session]) => observed.includes(session)),
+      ),
     );
-    transport.current?.update(open, active ? [active] : []);
-  }, [open, active, watched]);
+    transport.current?.update(observed, active ? [active] : []);
+  }, [observed, active, watched]);
 
   return {
     notice: watched === active && active ? (notices[active] ?? null) : null,
-    statuses,
-    error,
+    statuses: Object.fromEntries(
+      open.map((session) => [
+        session,
+        observed.includes(session) ? statuses[session] : "updates-paused",
+      ]),
+    ),
+    error:
+      error ??
+      (open.length > observed.length
+        ? `Live updates cover ${maxObservedSessions} tabs, including the active tab. Other tabs are marked Updates paused. Close tabs to restore updates for all.`
+        : null),
   };
 }

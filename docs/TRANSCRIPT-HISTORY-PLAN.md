@@ -179,7 +179,11 @@ Proposed route: `GET /api/sessions/{sessionId}/history`, one reader with modes:
   process so restarts force a full resync. Nothing is persisted.
 - Writers never wait for subscribers: a slow or vanished client only misses
   intermediate versions. Bound watchers per page and pages per process; drop on
-  disconnect.
+  disconnect. Owner-approved overflow policy (2026-11-10): retain the implemented
+  128-session subscription bound. Keep all tabs and drafts, always subscribe the
+  active tab, and explicitly mark excess tabs `Updates paused` instead of showing
+  stale status. Selecting one resynchronizes it; closing tabs restores coverage.
+  Explain the limit without reconnecting or disrupting the subscribed tabs.
 - **Session creation is announced on the same stream** — one tiny event carrying the
   new session's identity. The tab bar learns about agent-created sessions live,
   without list polling; the page adds the session to its open set and receives its

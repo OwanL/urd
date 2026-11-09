@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { chromium, type Page } from "playwright";
 import { SessionClient } from "../sessions/SessionClient.ts";
+import { encodeWorkspace, newChat } from "../app/WorkspaceState.ts";
 import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
 import type {
   UserMessageReceipt,
@@ -714,6 +715,88 @@ void test("browser event streams handshake, track sessions, and resynchronize af
         window as unknown as { __urdEventFixture: { controller: AbortController } }
       ).__urdEventFixture.controller.abort();
     });
+  });
+});
+
+void test("excess tabs pause explicitly while the active tab keeps live updates", async () => {
+  await withOfflineBrowser(async ({ model, server, page, connection }) => {
+    const sessions = new SessionClient(server.origin);
+    const ids: string[] = [];
+    for (let index = 0; index < 128; index++) ids.push(await sessions.create());
+    const first = ids[0]!;
+    const saved = encodeWorkspace({
+      version: 1,
+      tabs: ids,
+      activeId: first,
+      chats: Object.fromEntries(
+        ids.map((id) => [id, { ...newChat(null), draft: "retained draft" }]),
+      ),
+      lastSelection: null,
+    });
+    await page.addInitScript((value) => sessionStorage.setItem("urd.workspace.v1", value), saved);
+    let streams = 0;
+    const registrations: number[] = [];
+    page.on("response", (response) => {
+      const path = new URL(response.url()).pathname;
+      if (path === "/api/events") streams++;
+      if (path.startsWith("/api/events/")) registrations.push(response.status());
+    });
+    await page.goto(server.origin.href);
+    await waitForCondition(() => registrations.includes(204), "initial tab registration");
+    const overflow = await sessions.create();
+    const warning = page.getByRole("alert").filter({ hasText: "Live updates cover 128 tabs" });
+    await warning.waitFor();
+    const overflowTab = page.locator(`#tab-${overflow}`);
+    await overflowTab.locator('[aria-label="Updates paused"]').waitFor();
+    assert.equal(await page.getByRole("tab").count(), 129);
+
+    model.enqueue({ text: "output produced while updates were paused" });
+    const receipt = await sessions.submitMessage(overflow, {
+      submissionId: randomUUID(),
+      expectedHistoryRevision: 0,
+      text: "overflow prompt",
+      llmSelection: { connection, modelId: "fixture-a", reasoningEffort: null },
+    });
+    await waitForSnapshot(
+      sessions,
+      overflow,
+      (snapshot) => snapshot.lastSettlement?.executionId === receipt.executionId,
+      "paused session settlement",
+    );
+    await overflowTab.click();
+    await page
+      .locator(".message-text")
+      .getByText("output produced while updates were paused", { exact: true })
+      .waitFor();
+    await overflowTab.locator('[aria-label="Updates paused"]').waitFor({ state: "detached" });
+    const paused = ids[127]!;
+    await page.locator(`#tab-${paused} [aria-label="Updates paused"]`).waitFor();
+
+    model.enqueue({ text: "live output after selecting the overflow tab" });
+    await sessions.submitMessage(overflow, {
+      submissionId: randomUUID(),
+      expectedHistoryRevision: 0,
+      text: "now watched",
+      llmSelection: { connection, modelId: "fixture-a", reasoningEffort: null },
+    });
+    await page
+      .locator(".message-text")
+      .getByText("live output after selecting the overflow tab", { exact: true })
+      .waitFor();
+    await page
+      .locator(`[data-tab-id="${paused}"]`)
+      .getByRole("button", { name: "Close New chat", exact: true })
+      .click();
+    await warning.waitFor({ state: "detached" });
+    assert.equal(await page.getByRole("tab").count(), 128);
+    assert.equal(await page.locator('[aria-label="Updates paused"]').count(), 0);
+    await page.locator(`#tab-${first}`).click();
+    assert.equal(
+      await page.getByRole("textbox", { name: "Message" }).inputValue(),
+      "retained draft",
+    );
+    assert.equal(streams, 1, "changing overflow selection must not reconnect");
+    assert.ok(registrations.length > 1 && registrations.every((status) => status === 204));
   });
 });
 

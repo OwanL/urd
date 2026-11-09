@@ -350,14 +350,10 @@ public abstract class SessionBase {
   }
 
   private string GetStatus(SessionSnapshot snapshot) {
-    if (needsAttention)
-      return "needs-attention";
-    if (snapshot.AdmissionFenced || (snapshot.UnsettledExecutionId is { } executionId
-        && !IsCurrentExecution(executionId)))
-      return "fenced";
-    if (execution is not null)
-      return "running";
-    return snapshot.LastSettlement?.Outcome == ExecutionOutcome.Failed ? "failed" : "idle";
+    bool admissionFenced = snapshot.AdmissionFenced || (snapshot.UnsettledExecutionId is { } executionId
+        && !IsCurrentExecution(executionId));
+    return GetStatus(needsAttention, admissionFenced, isRunning: execution is not null,
+        lastOutcome: snapshot.LastSettlement?.Outcome);
   }
 
   // Caller holds the session gate. Observers are expected to enqueue into bounded server queues.
@@ -377,14 +373,18 @@ public abstract class SessionBase {
     }
   }
 
-  private string GetCurrentStatus() {
+  private string GetCurrentStatus() => GetStatus(needsAttention,
+      admissionFenced: !acceptingUserMessages || hasUnownedExecution || historyRevisionChanged,
+      isRunning: execution is not null, lastOutcome: lastSettlement?.Outcome);
+
+  private static string GetStatus(bool needsAttention, bool admissionFenced, bool isRunning, ExecutionOutcome? lastOutcome) {
     if (needsAttention)
       return "needs-attention";
-    if (!acceptingUserMessages || hasUnownedExecution || historyRevisionChanged)
+    if (admissionFenced)
       return "fenced";
-    if (execution is not null)
+    if (isRunning)
       return "running";
-    return lastSettlement?.Outcome == ExecutionOutcome.Failed ? "failed" : "idle";
+    return lastOutcome == ExecutionOutcome.Failed ? "failed" : "idle";
   }
 
   private void MarkNeedsAttention() {

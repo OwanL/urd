@@ -7,6 +7,8 @@ import type {
   UserMessageSubmission,
 } from "../sessions/UserMessageSubmission.ts";
 import type { WorkspaceCommands } from "./WorkspaceCommands.ts";
+import { notSentResendMessage, resolveNotSentResendOutcome } from "./NotSentResendOutcome.ts";
+import type { NotSentResendOutcome } from "./NotSentResendOutcome.ts";
 
 interface NotSentInputsProps {
   client: SessionClient;
@@ -41,8 +43,7 @@ export function NotSentInputs({
   const [resending, setResending] = useState<string | null>(null);
   const [resendResult, setResendResult] = useState<{
     id: string;
-    submissionId: string | null;
-    message: string;
+    outcome: NotSentResendOutcome;
   } | null>(null);
   const listController = useRef<AbortController | null>(null);
   const receiptController = useRef<AbortController | null>(null);
@@ -165,14 +166,19 @@ export function NotSentInputs({
       const result = await commands.resendNotSent(sessionId, snapshot, source.submission);
       setResendResult({
         id: source.submissionId,
-        submissionId: result?.submissionId ?? null,
-        message: resendMessage(result?.receipt ?? null, sessionId, result?.submissionId ?? null),
+        outcome: resolveNotSentResendOutcome(
+          result?.receipt ?? null,
+          sessionId,
+          result?.submissionId ?? null,
+        ),
       });
     } catch (cause) {
       setResendResult({
         id: source.submissionId,
-        submissionId: null,
-        message: `Resend uncertain: ${cause instanceof Error ? cause.message : String(cause)}`,
+        outcome: {
+          status: "uncertain",
+          error: cause instanceof Error ? cause.message : String(cause),
+        },
       });
     } finally {
       setResending(null);
@@ -204,8 +210,8 @@ export function NotSentInputs({
                 {page.inputs.map((input) => {
                   const source = retrieved?.submissionId === input.submissionId ? retrieved : null;
                   const resendState = resendResult?.id === input.submissionId ? resendResult : null;
-                  const resent = resendState?.message;
-                  const accepted = resent === "Resend accepted.";
+                  const resent = resendState ? notSentResendMessage(resendState.outcome) : null;
+                  const accepted = resendState?.outcome.status === "accepted";
                   return (
                     <li key={input.submissionId}>
                       <span>{input.preview}</span>{" "}
@@ -266,20 +272,4 @@ function isMatchingReceipt(
     receipt.executionId === input.executionId &&
     receipt.submission.submissionId === input.submissionId
   );
-}
-
-function resendMessage(
-  receipt: UserMessageReceipt | null,
-  sessionId: string,
-  submissionId: string | null,
-): string {
-  if (
-    receipt === null ||
-    submissionId === null ||
-    receipt.sessionId !== sessionId ||
-    receipt.submission.submissionId !== submissionId
-  )
-    return "Resend uncertain.";
-  if (receipt.acceptance === "accepted") return "Resend accepted.";
-  return `Not resent: ${receipt.refusalReason}.`;
 }

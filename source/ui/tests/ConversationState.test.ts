@@ -35,8 +35,8 @@ function snapshot(overrides: Partial<SessionSnapshot> = {}): SessionSnapshot {
     stopRequested: false,
     lastSettlement: null,
     latestLlmSelection: latestSelection,
-    messages: [],
-    hasOlderMessages: false,
+    firstUserPreview: null,
+    pendingInputs: [],
     ...overrides,
   };
 }

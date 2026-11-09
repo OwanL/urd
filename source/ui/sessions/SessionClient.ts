@@ -10,7 +10,7 @@ import type { SessionSnapshot } from "./SessionSnapshot.ts";
 import type { StopReceipt } from "./Stop.ts";
 import type { UserMessageReceipt, UserMessageSubmission } from "./UserMessageSubmission.ts";
 
-// Typed HTTP access only. Callers own polling, exact-receipt reconciliation and UI state.
+// Typed bounded HTTP reads and commands. Page events and receipt reconciliation stay with callers.
 export class SessionClient {
   private readonly origin: string;
 

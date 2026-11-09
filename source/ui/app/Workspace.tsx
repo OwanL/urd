@@ -14,6 +14,7 @@ import type { ReadingPosition } from "./Transcript.tsx";
 import { usePersistedWorkspace } from "./usePersistedWorkspace.ts";
 import { useWorkspaceModels } from "./useWorkspaceModels.ts";
 import { useWorkspaceNavigation } from "./useWorkspaceNavigation.ts";
+import { useSessionEvents } from "./useSessionEvents.ts";
 import "./workspace.css";
 
 const sessions = new SessionClient(new URL(window.location.href));
@@ -53,15 +54,27 @@ export function Workspace() {
   const settingsAnchor = useRef<HTMLButtonElement>(null);
   const newChatButton = useRef<HTMLButtonElement>(null);
   const { activeId, chats, tabs } = workspace.state;
+  const events = useSessionEvents(
+    sessions,
+    workspace.access,
+    navigation.discovered,
+    navigation.ready,
+    tabs,
+    activeId,
+  );
   const chat = activeId ? chats[activeId] : undefined;
   const canPersist = workspace.access.canPersist();
-  const error = commandError || navigation.error;
+  const error = commandError || navigation.error || events.error;
 
   return (
     <main class="workspace">
       <header class="top-strip">
         <ChatTabs
-          tabs={tabs.map((id) => ({ id, title: chats[id]?.title ?? "Chat" }))}
+          tabs={tabs.map((id) => ({
+            id,
+            title: chats[id]?.title ?? "Chat",
+            status: events.statuses[id],
+          }))}
           activeId={activeId}
           onOpen={navigation.open}
           onClose={navigation.close}
@@ -140,6 +153,7 @@ export function Workspace() {
           models={models}
           ready={navigation.ready}
           canPersist={canPersist}
+          notice={events.notice}
           refresh={refresh}
           onRefresh={refreshSnapshot}
           editDraft={workspace.editDraft}

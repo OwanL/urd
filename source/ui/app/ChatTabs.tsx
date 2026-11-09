@@ -6,8 +6,16 @@ import { moveTab } from "./TabOrder.ts";
 import { useTabDrag } from "./useTabDrag.ts";
 import "./chat-tabs.css";
 
+const statusLabels: Record<string, string> = {
+  running: "Running",
+  idle: "Idle",
+  failed: "Failed",
+  fenced: "Fenced",
+  "needs-attention": "Needs attention",
+};
+
 export interface ChatTabsProps {
-  tabs: readonly { id: string; title: string }[];
+  tabs: readonly { id: string; title: string; status?: string | undefined }[];
   activeId: string | null;
   emptyFocusTarget: RefObject<HTMLButtonElement | null>;
   onOpen(id: string): void;
@@ -101,7 +109,7 @@ export function ChatTabs({
         focusTab(id);
       }}
     >
-      {tabs.map(({ id, title }) => (
+      {tabs.map(({ id, title, status }) => (
         <div
           key={id}
           data-tab-id={id}
@@ -113,6 +121,7 @@ export function ChatTabs({
             content={
               <>
                 {title}
+                {status && <span class="tooltip-detail">{statusLabels[status] ?? status}</span>}
                 <span class="tooltip-detail">
                   Move tab <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>← / →</kbd>
                 </span>
@@ -139,6 +148,11 @@ export function ChatTabs({
               }}
             >
               {title}
+              {status && status !== "idle" && (
+                <span class="tab-status" aria-label={statusLabels[status] ?? status}>
+                  {status === "running" ? " ·" : " !"}
+                </span>
+              )}
             </button>
           </Tooltip>
           <IconButton

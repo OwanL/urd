@@ -51,8 +51,8 @@ void test("causal snapshot reads release accepted work outside the recent window
     stopRequested: false,
     lastSettlement: { executionId: newer, outcome: "completed" },
     latestLlmSelection: selection,
-    messages: [],
-    hasOlderMessages: true,
+    firstUserPreview: "first user input",
+    pendingInputs: [],
   };
   assert.equal(executionSettled(snapshot, executionId, null), false);
   assert.equal(executionSettled(snapshot, executionId, newer), false);

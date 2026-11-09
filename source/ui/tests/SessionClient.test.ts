@@ -45,8 +45,8 @@ const snapshot: SessionSnapshot = {
   stopRequested: false,
   lastSettlement: null,
   latestLlmSelection: null,
-  messages: [],
-  hasOlderMessages: true,
+  firstUserPreview: "first input preview",
+  pendingInputs: [{ submissionId, preview: "queued follow-up" }],
 };
 const selection: LlmSelection = {
   connection: {

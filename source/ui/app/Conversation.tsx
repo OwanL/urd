@@ -31,6 +31,7 @@ interface ConversationProps {
   ready: boolean;
   canPersist: boolean;
   refresh: number;
+  notice: string | null;
   onRefresh(): void;
   editDraft(id: string, text: string): boolean;
   selectModel(id: string, selection: LlmSelection): boolean;
@@ -50,6 +51,7 @@ export function Conversation({
   ready,
   canPersist,
   refresh,
+  notice,
   onRefresh,
   editDraft,
   selectModel,
@@ -63,6 +65,7 @@ export function Conversation({
   );
   const {
     snapshot,
+    history,
     error: readError,
     visible,
   } = useSessionSnapshot(
@@ -72,6 +75,7 @@ export function Conversation({
     chat.knownExecutionId,
     chat.pending?.status === "sending",
     observeSnapshot,
+    notice,
   );
   const state = deriveConversationState(chat, snapshot, stop, ready, canPersist);
   const selection = state.selection;
@@ -85,9 +89,9 @@ export function Conversation({
     <section id="chat-view" class="chat-view" role="tabpanel" aria-labelledby={`tab-${sessionId}`}>
       <Transcript
         client={client}
-        snapshot={snapshot}
+        history={history}
         sessionId={sessionId}
-        visible={visible}
+        visible={visible && notice !== null}
         position={position}
         onPositionChange={onPositionChange}
       />

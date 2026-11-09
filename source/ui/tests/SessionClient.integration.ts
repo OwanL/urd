@@ -75,8 +75,8 @@ void test(
       stopRequested: false,
       lastSettlement: null,
       latestLlmSelection: null,
-      messages: [],
-      hasOlderMessages: false,
+      firstUserPreview: null,
+      pendingInputs: [],
     });
 
     // Deliberately retain whitespace, CRLF, non-ASCII and astral scalars, well beyond the preview.
@@ -113,61 +113,56 @@ void test(
     assert.equal(settled.unsettledExecutionId, null);
     assert.equal(settled.stopRequested, false);
     assert.deepEqual(settled.lastSettlement, { executionId, outcome: "completed" });
-    assert.equal(settled.hasOlderMessages, false);
+    assert.deepEqual(settled.pendingInputs, []);
     assert.deepEqual(settled.latestLlmSelection, submission.llmSelection);
+    assert.ok(settled.firstUserPreview);
+    assert.ok(
+      settled.firstUserPreview.length > 0 &&
+        settled.firstUserPreview.length < submission.text.length,
+    );
+    assert.ok(submission.text.startsWith(settled.firstUserPreview));
     assert.equal(model.calls.length, 1, "An exact retry must not make another provider request");
     assert.equal(model.calls[0]!.request.model, "fixture-a");
     assert.equal(model.calls[0]!.request.reasoning_effort, "high");
-    assert.equal(settled.messages.length, 2);
-    const user = settled.messages.find((message) => message.message.role === "user");
-    const assistant = settled.messages.find((message) => message.message.role === "assistant");
-    assert.ok(user);
-    assert.ok(assistant);
-    assert.equal(user.message.executionId, executionId);
-    assert.equal(user.message.messageId, submission.submissionId);
-    assert.equal(user.message.historyRevision, initial.historyRevision);
-    assert.equal(user.truncated, true);
-    assert.ok(user.preview.length > 0 && user.preview.length < submission.text.length);
-    assert.ok(submission.text.startsWith(user.preview));
-    assert.equal(user.settlement, "completed");
-    assert.equal(assistant.settlement, "completed");
-    assert.equal(assistant.finalOutputCommitted, true);
 
-    // Cursors contain a nested MessageRef; offsets are UTF-8 bytes, not JS string lengths.
-    const from = {
-      message: user.message,
-      segmentIndex: 0,
-      utf8Offset: Buffer.byteLength(user.preview, "utf8"),
-    };
-    const remainder = await request(client.getMessageContent(id, from, signal));
-    assert.deepEqual(remainder.from, from);
-    assert.equal(user.preview + remainder.text, submission.text);
-    assert.equal(remainder.hasMore, false);
-    assert.equal(remainder.isClosed, true);
-    assert.equal(remainder.finalOutputCommitted, false);
-    assert.deepEqual(remainder.availableThrough, user.availableThrough);
-    assert.deepEqual(remainder.next, remainder.availableThrough);
-    const tail = await request(client.getMessageContent(id, remainder.next, signal));
-    assert.deepEqual(tail.from, remainder.next);
-    assert.deepEqual(tail.next, remainder.next);
-    assert.equal(tail.text, "");
-    assert.equal(tail.hasMore, false);
-    const output = await request(
-      client.getMessageContent(
+    const history = await request(
+      client.getHistory(
         id,
-        {
-          message: assistant.message,
-          segmentIndex: 0,
-          utf8Offset: 0,
-        },
+        { mode: "latest", expectedHistoryRevision: initial.historyRevision },
         signal,
       ),
     );
+    assert.equal(history.sessionId, id);
+    assert.equal(history.historyRevision, initial.historyRevision);
+    assert.equal(history.hasBefore, false);
+    assert.equal(history.hasAfter, false);
+    assert.deepEqual(history.settlements, [{ executionId, outcome: "completed" }]);
+    const user = history.entries.find((entry) => entry.entry.kind === "user");
+    const assistant = history.entries.find((entry) => entry.entry.kind === "text");
+    assert.ok(user?.text);
+    assert.ok(assistant?.text);
+    assert.equal(user.entry.executionId, executionId);
+    assert.equal(user.entry.entryId, submission.submissionId);
+    assert.equal(user.entry.historyRevision, initial.historyRevision);
+    assert.equal(user.text.isClosed, true);
+    assert.equal(user.text.finalOutputCommitted, false);
+
+    // Metadata stays in history; full text is read through UTF-8 byte cursors.
+    const userContent = await request(client.getMessageContent(id, user.text.from, signal));
+    assert.deepEqual(userContent.from, user.text.from);
+    assert.equal(userContent.text, submission.text);
+    assert.equal(userContent.hasMore, false);
+    assert.equal(userContent.isClosed, true);
+    assert.equal(userContent.finalOutputCommitted, false);
+    assert.deepEqual(userContent.availableThrough, user.text.availableThrough);
+    assert.deepEqual(userContent.next, userContent.availableThrough);
+
+    const output = await request(client.getMessageContent(id, assistant.text.from, signal));
     assert.equal(output.text, "Hello from Urd.");
     assert.equal(output.hasMore, false);
     assert.equal(output.isClosed, true);
     assert.equal(output.finalOutputCommitted, true);
-    assert.deepEqual(output.next, assistant.availableThrough);
+    assert.deepEqual(output.next, assistant.text.availableThrough);
 
     assert.deepEqual(await request(client.stopExecution(id, executionId)), {
       executionId,

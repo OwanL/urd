@@ -52,9 +52,6 @@ export function executionSettled(
 ): boolean {
   return (
     snapshot.lastSettlement?.executionId === executionId ||
-    snapshot.messages.some(
-      (message) => message.message.executionId === executionId && message.settlement !== null,
-    ) ||
     (knownWhenRead === executionId && snapshot.unsettledExecutionId !== executionId)
   );
 }

@@ -84,8 +84,8 @@ export class WorkspaceCommands {
       this.access.save({
         ...state,
         activeId: id,
-        tabs: [...state.tabs, id],
-        chats: { ...state.chats, [id]: newChat(state.lastSelection) },
+        tabs: state.tabs.includes(id) ? state.tabs : [...state.tabs, id],
+        chats: { ...state.chats, [id]: state.chats[id] ?? newChat(state.lastSelection) },
       });
     } catch (cause) {
       this.reportError(`Chat creation is uncertain: ${description(cause)}`);
@@ -123,10 +123,6 @@ export class WorkspaceCommands {
     };
     const persisted = this.access.updateChat(id, (previous) => ({
       ...beginSubmission(previous, original),
-      title:
-        previous.title === "New chat"
-          ? [...original.text.trim()].slice(0, 48).join("")
-          : previous.title,
     }));
     if (!persisted) {
       this.access.updateChat(id, (previous) =>
@@ -220,9 +216,8 @@ export class WorkspaceCommands {
 
   observeSnapshot(snapshot: SessionSnapshot, knownWhenRead: string | null): void {
     const saved = this.access.read().chats[snapshot.sessionId];
-    if (saved?.title === "New chat" && snapshot.messages.length > 0) {
-      const prompt = snapshot.messages.find((message) => message.message.role === "user");
-      const title = [...(prompt?.preview.trim() ?? "Chat")].slice(0, 48).join("");
+    if (saved?.title === "New chat" && snapshot.firstUserPreview !== null) {
+      const title = [...snapshot.firstUserPreview.trim()].slice(0, 48).join("");
       this.access.updateChat(snapshot.sessionId, (previous) => ({
         ...previous,
         title: title || "Chat",

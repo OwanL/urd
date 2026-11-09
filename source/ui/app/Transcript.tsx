@@ -1,14 +1,20 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { SessionClient } from "../sessions/SessionClient.ts";
+import type { SessionClient } from "../sessions/SessionClient.ts";
 import { IconButton } from "../components/IconButton.tsx";
-import type { MessageContentCursor, MessagePreview } from "../sessions/Messages.ts";
-import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
+import { TranscriptContentReader } from "./TranscriptContentReader.ts";
+import type {
+  MessageContentCursor,
+  TranscriptEntryRef,
+  TranscriptHistoryPage,
+  TranscriptTextFacts,
+  TranscriptToolFacts,
+} from "../sessions/Messages.ts";
 import "../chat/transcript.css";
 
-function sameCursor(left: MessageContentCursor, right: MessageContentCursor): boolean {
+const contentReader = new TranscriptContentReader();
+
+function sameMessage(left: MessageContentCursor, right: MessageContentCursor): boolean {
   return (
-    left.segmentIndex === right.segmentIndex &&
-    left.utf8Offset === right.utf8Offset &&
     left.message.executionId === right.message.executionId &&
     left.message.messageId === right.message.messageId &&
     left.message.role === right.message.role &&
@@ -16,39 +22,61 @@ function sameCursor(left: MessageContentCursor, right: MessageContentCursor): bo
   );
 }
 
+function sameCursor(left: MessageContentCursor, right: MessageContentCursor): boolean {
+  return (
+    sameMessage(left, right) &&
+    left.segmentIndex === right.segmentIndex &&
+    left.utf8Offset === right.utf8Offset
+  );
+}
+
+function cursorBefore(left: MessageContentCursor, right: MessageContentCursor): boolean {
+  return (
+    sameMessage(left, right) &&
+    (left.segmentIndex < right.segmentIndex ||
+      (left.segmentIndex === right.segmentIndex && left.utf8Offset < right.utf8Offset))
+  );
+}
+
 function MessageBody({
   client,
+  contentReader,
   sessionId,
-  preview,
+  entry,
+  text,
   root,
   paused,
 }: {
   client: SessionClient;
+  contentReader: TranscriptContentReader;
   sessionId: string;
-  preview: MessagePreview;
+  entry: TranscriptEntryRef;
+  text: TranscriptTextFacts;
   root: HTMLElement | null;
   paused: boolean;
 }) {
   const row = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
-  const [body, setBody] = useState(() => ({
-    text: preview.truncated ? "" : preview.preview,
-    cursor: preview.truncated
-      ? { message: preview.message, segmentIndex: 0, utf8Offset: 0 }
-      : preview.availableThrough,
-  }));
+  const [body, setBody] = useState(() => ({ text: "", cursor: text.from }));
   const committed = useRef(body);
   committed.current = body;
-  const latest = useRef(preview);
-  latest.current = preview;
+  function commitBody(next: typeof body) {
+    committed.current = next;
+    setBody(next);
+  }
+  const latest = useRef(text);
+  latest.current = text;
   const [error, setError] = useState<string | null>(null);
   const [batch, setBatch] = useState(0);
   const [more, setMore] = useState(false);
+  const reader = useRef<{ notice: () => void; request: () => void } | null>(null);
+  const handledBatch = useRef(batch);
+
   useEffect(() => {
     const node = row.current;
     if (!node) return;
     const observer = new IntersectionObserver(
-      ([entry]) => setVisible(entry?.isIntersecting ?? false),
+      ([intersection]) => setVisible(intersection?.isIntersecting ?? false),
       { root },
     );
     observer.observe(node);
@@ -56,66 +84,125 @@ function MessageBody({
   }, [root]);
 
   useEffect(() => {
-    if (!visible || paused || document.hidden) return;
-    const target = latest.current;
-    let current = committed.current;
-    if (current.cursor.message.historyRevision !== target.message.historyRevision) {
-      current = {
-        text: target.truncated ? "" : target.preview,
-        cursor: target.truncated
-          ? { message: target.message, segmentIndex: 0, utf8Offset: 0 }
-          : target.availableThrough,
-      };
-    }
-    const tail = target.availableThrough;
-    if (
-      current.cursor.segmentIndex > tail.segmentIndex ||
-      (current.cursor.segmentIndex === tail.segmentIndex &&
-        current.cursor.utf8Offset >= tail.utf8Offset)
-    ) {
-      if (current !== committed.current) setBody(current);
-      return;
-    }
+    if (!visible || paused) return;
+
     const controller = new AbortController();
-    async function read() {
+    let stopped = false;
+    let reading = false;
+    let trailing = false;
+    let current = committed.current;
+    let noticedThrough = latest.current.availableThrough;
+
+    async function readPass() {
+      if (stopped) return;
+      if (reading) {
+        trailing = true;
+        return;
+      }
+      reading = true;
       try {
-        let hasMore = false;
-        for (let pageCount = 0; pageCount < 4; pageCount++) {
-          const page = await client.getMessageContent(sessionId, current.cursor, controller.signal);
+        const target = latest.current;
+        if (!sameMessage(current.cursor, target.from) || cursorBefore(current.cursor, target.from))
+          current = { text: "", cursor: target.from };
+        const tail = target.availableThrough;
+        if (!cursorBefore(current.cursor, tail)) {
+          if (current !== committed.current) commitBody(current);
+          setMore(false);
+          return;
+        }
+
+        let contentHasMore = true;
+        for (let pageCount = 0; pageCount < 4 && cursorBefore(current.cursor, tail); pageCount++) {
+          const page = await contentReader.read(sessionId, controller.signal, () =>
+            client.getMessageContent(sessionId, current.cursor, controller.signal),
+          );
+          if (controller.signal.aborted) return;
           if (!sameCursor(page.from, current.cursor))
             throw new Error("Content cursor did not match.");
-          if (controller.signal.aborted) return;
           if (sameCursor(page.next, current.cursor) && page.hasMore)
             throw new Error("Content did not advance.");
           current = { text: current.text + page.text, cursor: page.next };
-          hasMore = page.hasMore;
-          if (!hasMore) break;
+          contentHasMore = page.hasMore;
+          if (!contentHasMore) break;
         }
         if (controller.signal.aborted) return;
-        setBody(current);
-        setMore(hasMore);
+        commitBody(current);
+        setMore(contentHasMore && cursorBefore(current.cursor, tail));
         setError(null);
       } catch (cause) {
-        if (!controller.signal.aborted)
+        if (!controller.signal.aborted) {
+          current = committed.current;
           setError(cause instanceof Error ? cause.message : "Content read failed.");
+        }
+      } finally {
+        reading = false;
+        if (trailing && !stopped) {
+          trailing = false;
+          void readPass();
+        }
       }
     }
-    void read();
-    return () => controller.abort();
+
+    function request() {
+      if (stopped) return;
+      if (reading) trailing = true;
+      else void readPass();
+    }
+
+    const activeReader = {
+      notice() {
+        const target = latest.current.availableThrough;
+        if (sameCursor(noticedThrough, target)) return;
+        noticedThrough = target;
+        request();
+      },
+      request,
+    };
+    reader.current = activeReader;
+    void readPass();
+    return () => {
+      stopped = true;
+      if (reader.current === activeReader) reader.current = null;
+      controller.abort();
+    };
   }, [
     client,
+    contentReader,
     sessionId,
     visible,
     paused,
-    preview.availableThrough.segmentIndex,
-    preview.availableThrough.utf8Offset,
-    preview.message.historyRevision,
-    batch,
+    entry.executionId,
+    entry.entryId,
+    entry.historyRevision,
+    text.from.message.executionId,
+    text.from.message.messageId,
+    text.from.message.role,
+    text.from.message.historyRevision,
+    text.from.segmentIndex,
+    text.from.utf8Offset,
   ]);
 
+  useEffect(() => {
+    reader.current?.notice();
+  }, [
+    text.availableThrough.message.executionId,
+    text.availableThrough.message.messageId,
+    text.availableThrough.message.role,
+    text.availableThrough.message.historyRevision,
+    text.availableThrough.segmentIndex,
+    text.availableThrough.utf8Offset,
+  ]);
+
+  useEffect(() => {
+    if (handledBatch.current === batch) return;
+    handledBatch.current = batch;
+    reader.current?.request();
+  }, [batch]);
+
+  const role = entry.kind === "user" ? "user" : "assistant";
   return (
-    <div ref={row} class={`message message-${preview.message.role}`}>
-      <div class="message-text">{body.text || preview.preview}</div>
+    <div ref={row} class={`message message-${role}`}>
+      <div class="message-text">{body.text}</div>
       {more && (
         <button class="quiet-action" onClick={() => setBatch((value) => value + 1)}>
           Read more
@@ -130,6 +217,18 @@ function MessageBody({
   );
 }
 
+function ToolEntry({ tool }: { tool: TranscriptToolFacts }) {
+  const status =
+    tool.outcome ?? (tool.started ? "Running" : tool.isClosed ? "Not started" : "Waiting");
+  return (
+    <div class="message message-assistant">
+      <div class="message-text">
+        {tool.name ?? "Tool"} · {status}
+      </div>
+    </div>
+  );
+}
+
 export interface ReadingPosition {
   following: boolean;
   anchor: { key: string; top: number } | null;
@@ -137,29 +236,41 @@ export interface ReadingPosition {
 
 export function Transcript({
   client,
-  snapshot,
+  history,
   sessionId,
   visible,
   position,
   onPositionChange,
 }: {
   client: SessionClient;
-  snapshot: SessionSnapshot | null;
+  history: TranscriptHistoryPage | null;
   sessionId: string;
   visible: boolean;
   position: ReadingPosition | undefined;
   onPositionChange: (position: ReadingPosition) => void;
 }) {
   const scroll = useRef<HTMLDivElement>(null);
+  const [documentHidden, setDocumentHidden] = useState(
+    () => typeof document !== "undefined" && document.hidden,
+  );
   const following = useRef(position?.following ?? true);
   const anchor = useRef<ReadingPosition["anchor"]>(position?.anchor ?? null);
   const [root, setRoot] = useState<HTMLDivElement | null>(null);
   const [jump, setJump] = useState(!(position?.following ?? true));
   const [selecting, setSelecting] = useState(false);
-  const [shown, setShown] = useState(snapshot);
+  const [shown, setShown] = useState(history);
+  const visibleHistory = shown?.sessionId === sessionId ? shown : null;
   const mountScroll = useCallback((node: HTMLDivElement | null) => {
     scroll.current = node;
     setRoot(node);
+  }, []);
+
+  useEffect(() => {
+    function updateDocumentVisibility() {
+      setDocumentHidden(document.hidden);
+    }
+    document.addEventListener("visibilitychange", updateDocumentVisibility);
+    return () => document.removeEventListener("visibilitychange", updateDocumentVisibility);
   }, []);
 
   useEffect(() => {
@@ -175,8 +286,8 @@ export function Transcript({
     return () => document.removeEventListener("selectionchange", selectionChanged);
   }, []);
   useEffect(() => {
-    if (!selecting) setShown(snapshot);
-  }, [snapshot, selecting]);
+    if (!selecting) setShown(history);
+  }, [history, selecting]);
   useLayoutEffect(() => {
     const node = scroll.current;
     if (!node) return;
@@ -190,8 +301,9 @@ export function Transcript({
       }
     });
     if (node.firstElementChild) observer.observe(node.firstElementChild);
+    for (const item of node.querySelectorAll<HTMLElement>("[data-message]")) observer.observe(item);
     return () => observer.disconnect();
-  }, [selecting]);
+  }, [selecting, visibleHistory]);
   useLayoutEffect(() => {
     const node = scroll.current;
     if (!node || selecting) return;
@@ -218,6 +330,7 @@ export function Transcript({
       : null;
     onPositionChange({ following: following.current, anchor: anchor.current });
   }
+
   return (
     <div class="transcript-area">
       <div
@@ -229,18 +342,25 @@ export function Transcript({
         tabIndex={0}
       >
         <div class="messages">
-          {shown?.hasOlderMessages && <p class="history-note">Earlier messages are not shown.</p>}
-          {shown?.messages.map((preview) => {
-            const key = `${preview.message.executionId}/${preview.message.messageId}/${preview.message.role}`;
+          {visibleHistory?.hasBefore && <p class="history-note">Earlier messages are not shown.</p>}
+          {visibleHistory?.entries.map((descriptor) => {
+            const entry = descriptor.entry;
+            const key = `${entry.executionId}/${entry.entryId}/${entry.kind}`;
             return (
               <div key={key} data-message={key}>
-                <MessageBody
-                  client={client}
-                  sessionId={sessionId}
-                  preview={preview}
-                  root={root}
-                  paused={selecting || !visible}
-                />
+                {descriptor.text ? (
+                  <MessageBody
+                    client={client}
+                    contentReader={contentReader}
+                    sessionId={sessionId}
+                    entry={entry}
+                    text={descriptor.text}
+                    root={root}
+                    paused={selecting || !visible || documentHidden}
+                  />
+                ) : descriptor.tool ? (
+                  <ToolEntry tool={descriptor.tool} />
+                ) : null}
               </div>
             );
           })}

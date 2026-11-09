@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "preact/hooks";
+import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import type { SessionClient } from "../sessions/SessionClient.ts";
 import { moveTab } from "./TabOrder.ts";
 import { newChat } from "./WorkspaceState.ts";
@@ -13,6 +13,7 @@ export function useWorkspaceNavigation(
   create: () => Promise<void>,
 ) {
   const [ready, setReady] = useState(false);
+  const discovered = useRef(new Set<string>());
   const [error, setError] = useState<string | null>(null);
   const open = useCallback(
     (id: string) => {
@@ -64,6 +65,14 @@ export function useWorkspaceNavigation(
       try {
         const page = await client.list(undefined, controller.signal);
         if (controller.signal.aborted) return;
+        for (const id of page.sessionIds) discovered.current.add(id);
+        let cursor = page.nextCursor;
+        while (cursor !== null) {
+          const next = await client.list(cursor, controller.signal);
+          if (controller.signal.aborted) return;
+          for (const id of next.sessionIds) discovered.current.add(id);
+          cursor = next.nextCursor;
+        }
         const hash = window.location.hash.slice(1);
         if (idPattern.test(hash)) open(hash);
         else if (loaded!.first) {
@@ -104,5 +113,5 @@ export function useWorkspaceNavigation(
     return () => window.removeEventListener("hashchange", hashChanged);
   }, [open]);
 
-  return { ready, error, open, close, reorder };
+  return { ready, error, open, close, reorder, discovered: discovered.current };
 }

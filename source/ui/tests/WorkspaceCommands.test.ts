@@ -44,8 +44,8 @@ function snapshot(overrides: Partial<SessionSnapshot> = {}): SessionSnapshot {
     stopRequested: false,
     lastSettlement: null,
     latestLlmSelection: selection,
-    messages: [],
-    hasOlderMessages: false,
+    firstUserPreview: null,
+    pendingInputs: [],
     ...overrides,
   };
 }
@@ -187,6 +187,7 @@ void test("retry resends a saved uncertain original while retaining a newer draf
 
   await initial.send(sessionId, snapshot(), false, true);
   assert.equal(firstJournaledBeforeDispatch, true);
+  assert.equal(workspace.read().chats[sessionId]?.title, "New chat");
   assert.equal(workspace.durable().chats[sessionId]?.pending?.status, "uncertain");
   assert.equal(workspace.reload().chats[sessionId]?.pending?.status, "uncertain");
   workspace.access.updateChat(sessionId, (previous) => editDraft(previous, "newer draft"));
@@ -208,6 +209,23 @@ void test("retry resends a saved uncertain original while retaining a newer draf
   assert.equal(journaledBeforeDispatch, true);
   assert.equal(workspace.read().chats[sessionId]?.pending, null);
   assert.equal(workspace.read().chats[sessionId]?.draft, "newer draft");
+});
+
+void test("session metadata, not Send dispatch, names a new chat", async () => {
+  const workspace = fixture();
+  const coordinator = commands(
+    workspace.access,
+    emptyClient(async (_id, submission) => receipt(submission)),
+  );
+
+  await coordinator.send(sessionId, snapshot(), false, true);
+  assert.equal(workspace.read().chats[sessionId]?.title, "New chat");
+
+  coordinator.observeSnapshot(
+    snapshot({ firstUserPreview: "  First user prompt is authoritative  " }),
+    null,
+  );
+  assert.equal(workspace.read().chats[sessionId]?.title, "First user prompt is authoritative");
 });
 
 void test("a late Stop failure for an earlier execution cannot replace or block Stop for its successor", async () => {

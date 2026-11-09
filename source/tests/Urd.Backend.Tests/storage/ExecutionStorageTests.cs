@@ -36,6 +36,31 @@ public sealed class ExecutionStorageTests {
   }
 
   [Fact]
+  public void ToolObservationRetriesRemainScopedAndCannotChangeFactsAfterStop() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
+    Guid otherSession = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
+    Guid execution = Guid.NewGuid();
+    store.UserMessages.Admit(session, 0,
+        new(Guid.NewGuid(), 0, "input", TestLlmSelection.Default), true, execution);
+    Guid request = store.Executions.ClaimNextRequest(session, execution, 0)!.RequestId;
+    Assert.True(store.LlmResponses.ObserveTool(session, execution, 0, request, "call", null));
+    Assert.True(store.LlmResponses.ObserveTool(session, execution, 0, request, "call", null));
+    Assert.False(store.LlmResponses.ObserveTool(otherSession, execution, 0, request, "call", "foreign"));
+    Assert.False(store.LlmResponses.ObserveTool(session, Guid.NewGuid(), 0, request, "call", "foreign"));
+    Assert.False(store.LlmResponses.ObserveTool(session, execution, 1, request, "call", "stale"));
+    store.Executions.RequestStop(session, execution, ownsExecution: true);
+    Assert.False(store.LlmResponses.ObserveTool(session, execution, 0, request, "call", "late"));
+    TranscriptEntryDescriptor reserved = Assert.Single(store.History.Read(session,
+        new(TranscriptHistoryMode.Latest, 0)).Entries, entry => entry.Entry.Kind == TranscriptEntryKind.Tool);
+    Assert.Null(reserved.Tool!.Name);
+    Assert.False(reserved.Tool.Started);
+    Assert.True(reserved.Tool.IsClosed);
+    Assert.Empty(StoredTools.Read(database));
+  }
+
+  [Fact]
   public void OutputIdentityAndOrderedContextSurviveReopen() {
     using var database = new TemporaryDatabase();
     Guid session = Guid.NewGuid(), execution = Guid.NewGuid(), output = Guid.NewGuid();

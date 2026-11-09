@@ -90,6 +90,19 @@ internal sealed class LlmResponseStorage(Database database) {
       throw new ArgumentException("A tool name must be nonempty when supplied.", nameof(name));
 
     return database.Write(transaction => {
+      using SqliteCommand allowed = database.Command(transaction, """
+        SELECT EXISTS (SELECT 1 FROM execution_requests q
+            JOIN execution_runs r ON r.run_id = q.run_id JOIN sessions s ON s.session_id = r.session_id
+            WHERE q.request_id = $request AND q.run_id = $run AND q.outcome IS NULL AND q.output_final = 0
+                AND r.session_id = $session AND r.history_revision = $revision AND s.history_revision = $revision
+                AND r.stopping = 0 AND r.outcome IS NULL
+                AND NOT EXISTS (SELECT 1 FROM execution_requests later
+                    WHERE later.run_id = $run AND later.request_index > q.request_index));
+        """, ("$session", sessionId), ("$run", executionId), ("$revision", historyRevision),
+          ("$request", requestId));
+      if ((long)allowed.ExecuteScalar()! == 0)
+        return false;
+
       using (SqliteCommand existing = database.Command(transaction, """
         SELECT tool_name FROM execution_messages
         WHERE request_id = $request AND role = 2 AND call_id = $call;
@@ -110,19 +123,6 @@ internal sealed class LlmResponseStorage(Database database) {
           return true;
         }
       }
-
-      using SqliteCommand allowed = database.Command(transaction, """
-        SELECT EXISTS (SELECT 1 FROM execution_requests q
-            JOIN execution_runs r ON r.run_id = q.run_id JOIN sessions s ON s.session_id = r.session_id
-            WHERE q.request_id = $request AND q.run_id = $run AND q.outcome IS NULL AND q.output_final = 0
-                AND r.session_id = $session AND r.history_revision = $revision AND s.history_revision = $revision
-                AND r.stopping = 0 AND r.outcome IS NULL
-                AND NOT EXISTS (SELECT 1 FROM execution_requests later
-                    WHERE later.run_id = $run AND later.request_index > q.request_index));
-        """, ("$session", sessionId), ("$run", executionId), ("$revision", historyRevision),
-          ("$request", requestId));
-      if ((long)allowed.ExecuteScalar()! == 0)
-        return false;
 
       using SqliteCommand closeRun = database.Command(transaction, """
         UPDATE execution_messages SET end_batch_index = (

@@ -14,6 +14,9 @@
 - One type per file, except small data-only types (records, enums) of one concept, which share a file named for that concept.
 - Code should be performant. Urd needs to have a low memory overhead, and be snappy, and quick.
 - Follow existing codebase conventions. Ground yourself in this before writing any code.
+- Where it makes sense to do so, use Linq / Plinq. It in my opinion reads nicer than complicated for loops.
+- Use https://github.com/OwanL/chess-swing roughly as a code style guide (instructions here take precedence however)
+- Pay close attention to class, variable, endpoint and file naming and such, it is important we have good naming, so we are able to have our code document itself.
 
 # UI guidance
 

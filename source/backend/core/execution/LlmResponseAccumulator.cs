@@ -7,13 +7,13 @@ namespace Urd.Core.Execution;
 // Keeps visible text separate from completed calls and opaque provider continuation state.
 internal sealed class LlmResponseAccumulator(LlmResponseWriter writer) {
   private const int ToolCallLimit = 16;
-  private const int JsonByteLimit = 16 * 1024;
   private readonly List<LlmToolCall> calls = [];
   private readonly HashSet<string> callIds = new(StringComparer.Ordinal);
   private ChatFinishReason? finishReason;
   private bool hasReasoning;
 
   internal IReadOnlyList<LlmToolCall> ToolCalls => calls.ToArray();
+  internal UsageDetails? Usage { get; private set; }
   internal LlmProviderResponse? ProviderResponse { get; private set; }
 
   internal async Task AppendAsync(ChatResponseUpdate update) {
@@ -24,8 +24,10 @@ internal sealed class LlmResponseAccumulator(LlmResponseWriter writer) {
       throw new InvalidDataException("Provider context requires one final response update.");
 
     foreach (AIContent content in update.Contents) {
-      if (content is UsageContent)
+      if (content is UsageContent usage) {
+        (Usage ??= new()).Add(usage.Details);
         continue;
+      }
       if (content is TextReasoningContent) {
         hasReasoning = true;
         if (finishReason is not null)
@@ -44,7 +46,7 @@ internal sealed class LlmResponseAccumulator(LlmResponseWriter writer) {
       if (content is not FunctionCallContent call || finishReason is not null)
         throw new InvalidDataException("The response contained unsupported content.");
 
-      AddCall(call);
+      await AddCallAsync(call);
     }
 
     if (update.FinishReason is not { } reason)
@@ -72,12 +74,15 @@ internal sealed class LlmResponseAccumulator(LlmResponseWriter writer) {
     return writer.FinishResponseAsync();
   }
 
-  private void AddCall(FunctionCallContent call) {
-    if (call.InformationalOnly || call.Exception is not null ||
-        string.IsNullOrWhiteSpace(call.CallId) || string.IsNullOrWhiteSpace(call.Name))
-      throw new InvalidDataException("The response contained an incomplete or informational tool call.");
+  private async Task AddCallAsync(FunctionCallContent call) {
+    if (string.IsNullOrWhiteSpace(call.CallId))
+      throw new InvalidDataException("The response contained a tool call without an ID.");
     if (calls.Count == ToolCallLimit || !callIds.Add(call.CallId))
       throw new InvalidDataException("The response contained too many tool calls or duplicate call IDs.");
+
+    await writer.ObserveToolAsync(call.CallId, string.IsNullOrWhiteSpace(call.Name) ? null : call.Name);
+    if (call.InformationalOnly || call.Exception is not null || string.IsNullOrWhiteSpace(call.Name))
+      throw new InvalidDataException("The response contained an incomplete or informational tool call.");
 
     JsonElement arguments = FreezeJson(call.Arguments ?? new Dictionary<string, object?>());
     if (arguments.ValueKind != JsonValueKind.Object)
@@ -86,34 +91,12 @@ internal sealed class LlmResponseAccumulator(LlmResponseWriter writer) {
     calls.Add(new(call.CallId, call.Name, arguments));
   }
 
-  // Freeze borrowed values and reject oversized JSON before it can be persisted or dispatched.
+  // Freeze borrowed values before they are persisted or dispatched.
   // Result serialization uses this too, outside the invocation-error catch.
   internal static JsonElement FreezeJson(object? value) {
-    using var bytes = new BoundedJsonStream();
+    using var bytes = new MemoryStream();
     JsonSerializer.Serialize(bytes, value, value?.GetType() ?? typeof(object));
     using JsonDocument document = JsonDocument.Parse(bytes.GetBuffer().AsMemory(0, (int)bytes.Length));
     return document.RootElement.Clone();
-  }
-
-  private sealed class BoundedJsonStream() : MemoryStream(JsonByteLimit) {
-    public override void Write(byte[] buffer, int offset, int count) {
-      CheckLength(count);
-      base.Write(buffer, offset, count);
-    }
-
-    public override void Write(ReadOnlySpan<byte> buffer) {
-      CheckLength(buffer.Length);
-      // MemoryStream's span overload delegates back to Write on subclasses.
-      // Copy directly into its fixed-capacity buffer instead.
-      int offset = (int)Length;
-      SetLength(Length + buffer.Length);
-      buffer.CopyTo(GetBuffer().AsSpan(offset));
-      Position = Length;
-    }
-
-    private void CheckLength(int count) {
-      if (Length + count > JsonByteLimit)
-        throw new InvalidDataException("Tool JSON exceeds the 16 KiB limit.");
-    }
   }
 }

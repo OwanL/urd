@@ -98,7 +98,8 @@ internal sealed class SessionExecution : IDisposable {
   }
 
   private async Task<LlmRequestResult> SendRequestAsync(LlmRequest request, CancellationTokenSource requestStop) {
-    var writer = new LlmResponseWriter(request.RequestId, SaveChunkAsync);
+    var writer = new LlmResponseWriter(request.RequestId, SaveChunkAsync,
+        (callId, name) => ObserveToolAsync(request.RequestId, callId, name));
     var response = new LlmResponseAccumulator(writer);
     IAsyncEnumerator<ChatResponseUpdate>? updates = null;
     Task<bool>? pendingRead = null;
@@ -132,9 +133,11 @@ internal sealed class SessionExecution : IDisposable {
 
     await CleanUpAsync(requestStop, pendingRead, updates, failure);
     LlmRequestResult outcome = ToRequestResult(request.RequestId, failure);
-    return outcome.Outcome == ExecutionOutcome.Completed
-        ? outcome with { ToolCalls = response.ToolCalls, ProviderResponse = response.ProviderResponse }
-        : outcome;
+    return outcome with {
+      ToolCalls = outcome.Outcome == ExecutionOutcome.Completed ? response.ToolCalls : null,
+      ProviderResponse = outcome.Outcome == ExecutionOutcome.Completed ? response.ProviderResponse : null,
+      Usage = response.Usage
+    };
   }
 
   private async Task<bool> WaitForNextUpdateAsync(LlmResponseWriter writer, Task<bool> pendingRead) {
@@ -170,6 +173,18 @@ internal sealed class SessionExecution : IDisposable {
     bool saved;
     try {
       saved = await session.RecordOutputAsync(ExecutionId, chunk);
+    } catch (Exception exception) {
+      throw new OutputSaveException(exception);
+    }
+
+    if (!saved)
+      throw new OutputRejectedException();
+  }
+
+  private async Task ObserveToolAsync(Guid requestId, string callId, string? name) {
+    bool saved;
+    try {
+      saved = await session.ObserveToolAsync(ExecutionId, requestId, callId, name);
     } catch (Exception exception) {
       throw new OutputSaveException(exception);
     }

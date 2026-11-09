@@ -149,6 +149,12 @@ public abstract class SessionBase {
         && store.LlmResponses.Append(Id, executionId, HistoryRevision, chunk);
   }
 
+  internal async Task<bool> ObserveToolAsync(Guid executionId, Guid requestId, string callId, string? name) {
+    using var held = await gate.AcquireAsync();
+    return IsCurrentExecution(executionId) && !execution!.IsStopping
+        && store.LlmResponses.ObserveTool(Id, executionId, HistoryRevision, requestId, callId, name);
+  }
+
   internal async Task<bool> CompleteRequestAsync(Guid executionId, LlmRequestResult outcome) {
     using var held = await gate.AcquireAsync();
     return IsCurrentExecution(executionId)

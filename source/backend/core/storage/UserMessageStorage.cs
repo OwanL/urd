@@ -48,11 +48,13 @@ internal sealed class UserMessageStorage(Database database) {
 
       using SqliteCommand insert = database.Command(transaction, """
         INSERT INTO execution_inputs (session_id, input_id, run_id) VALUES ($session, $input, $run);
-        INSERT INTO execution_messages (session_id, history_revision, run_id, role, message_id, input_id)
-        VALUES ($session, $revision, $run, 0, $input, $input);
+        INSERT INTO execution_messages (
+            session_id, history_revision, run_id, role, message_id, input_id, created_at)
+        VALUES ($session, $revision, $run, 0, $input, $input, $created);
         """,
           ("$session", sessionId), ("$run", executionId),
-          ("$revision", actualRevision), ("$input", submission.SubmissionId));
+          ("$revision", actualRevision), ("$input", submission.SubmissionId),
+          ("$created", StorageText.UtcTimestamp()));
       insert.ExecuteNonQuery();
       return (accepted, true);
     });
@@ -187,9 +189,6 @@ internal sealed class UserMessageStorage(Database database) {
       throw new ArgumentException("The selected connection binding is invalid.", nameof(submission));
 
     ArgumentOutOfRangeException.ThrowIfNegative(submission.ExpectedHistoryRevision);
-    if (StorageText.StrictUtf8.GetByteCount(submission.Text) > StorageText.MaximumBytes) {
-      throw new ArgumentException(
-          $"Submission text cannot exceed {StorageText.MaximumBytes} UTF-8 bytes.", nameof(submission));
-    }
+    _ = StorageText.StrictUtf8.GetByteCount(submission.Text);
   }
 }

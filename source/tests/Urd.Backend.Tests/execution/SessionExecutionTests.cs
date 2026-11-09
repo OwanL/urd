@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.AI;
 using Urd.Backend.Tests.Support;
@@ -25,6 +26,7 @@ public sealed class SessionExecutionTests {
         (await fixture.Session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout)).Outcome);
     Assert.Equal(ExecutionOutcome.Failed, Assert.Single(StoredExecutions.ReadRequests(fixture.Database)).Outcome);
     Assert.All(StoredLlmResponses.Read(fixture.Database), row => Assert.False(row.Final));
+    Assert.Equal(0L, fixture.Database.Scalar("SELECT count(*) FROM execution_requests WHERE usage_json IS NOT NULL;")); // raw-sql: missing provider usage must remain unknown on request rows
     Assert.Equal(1, client.Calls);
     Assert.Equal(0, client.DisposeCalls);
   }
@@ -35,10 +37,14 @@ public sealed class SessionExecutionTests {
       await Task.CompletedTask;
       token.ThrowIfCancellationRequested();
       yield return new() {
-        Contents = [new TextContent("answer")],
+        Contents = [new TextContent("answer"), new UsageContent(new UsageDetails {
+          InputTokenCount = 12, OutputTokenCount = 3, TotalTokenCount = 15
+        })],
         FinishReason = ChatFinishReason.Stop
       };
-      yield return new() { Contents = [new UsageContent(), new TextContent("")] };
+      yield return new() { Contents = [new UsageContent(new UsageDetails {
+        InputTokenCount = 2, OutputTokenCount = 1, TotalTokenCount = 3
+      }), new TextContent("")] };
     }
 
     var client = new ScriptedChatClient(Response);
@@ -49,6 +55,16 @@ public sealed class SessionExecutionTests {
         (await fixture.Session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout)).Outcome);
     Assert.Equal("answer", StoredLlmResponses.ReadText(fixture.Database));
     Assert.Single(StoredLlmResponses.Read(fixture.Database), chunk => chunk.Final);
+    using (SqliteConnection connection = fixture.Database.OpenReadOnlyConnection())
+    using (SqliteCommand command = connection.CreateCommand()) {
+      command.CommandText = "SELECT usage_json FROM execution_requests;";
+      using SqliteDataReader reader = await command.ExecuteReaderAsync();
+      Assert.True(await reader.ReadAsync());
+      using JsonDocument usage = JsonDocument.Parse(reader.GetString(0));
+      Assert.Equal(14, usage.RootElement.GetProperty("InputTokenCount").GetInt64());
+      Assert.Equal(4, usage.RootElement.GetProperty("OutputTokenCount").GetInt64());
+      Assert.Equal(18, usage.RootElement.GetProperty("TotalTokenCount").GetInt64());
+    }
     Assert.Equal(1, client.Calls);
   }
 

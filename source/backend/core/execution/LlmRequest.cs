@@ -25,4 +25,5 @@ internal sealed record LlmRequestResult(
     ExecutionOutcome Outcome,
     string? Error = null,
     IReadOnlyList<LlmToolCall>? ToolCalls = null,
-    LlmProviderResponse? ProviderResponse = null);
+    LlmProviderResponse? ProviderResponse = null,
+    UsageDetails? Usage = null);

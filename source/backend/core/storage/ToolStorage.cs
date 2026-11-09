@@ -8,7 +8,7 @@ internal sealed class ToolStorage(Database database) {
   internal bool TryStart(Guid sessionId, Guid executionId, long revision, Guid requestId, string callId) {
     return database.Write(transaction => {
       using SqliteCommand start = database.Command(transaction, """
-        UPDATE execution_tools SET started = 1
+        UPDATE execution_tools SET started = 1, started_at = $started
         WHERE request_id = $request AND run_id = $run AND call_id = $call
             AND started = 0 AND outcome IS NULL AND result_json IS NULL
             AND NOT EXISTS (SELECT 1 FROM execution_tools earlier
@@ -24,7 +24,8 @@ internal sealed class ToolStorage(Database database) {
                         WHERE later.run_id = $run AND later.request_index > q.request_index));
         """,
           ("$session", sessionId), ("$run", executionId), ("$revision", revision),
-          ("$request", requestId), ("$call", callId), ("$completed", (int)ExecutionOutcome.Completed));
+          ("$request", requestId), ("$call", callId), ("$started", StorageText.UtcTimestamp()),
+          ("$completed", (int)ExecutionOutcome.Completed));
       return start.ExecuteNonQuery() == 1;
     });
   }
@@ -61,11 +62,11 @@ internal sealed class ToolStorage(Database database) {
       }
 
       using SqliteCommand save = database.Command(transaction, """
-        UPDATE execution_tools SET outcome = $outcome, result_json = $result, error = $error
+        UPDATE execution_tools SET outcome = $outcome, result_json = $result, error = $error, ended_at = $ended
         WHERE request_id = $request AND call_id = $call;
         """,
           ("$request", requestId), ("$call", result.CallId), ("$outcome", (int)result.Outcome),
-          ("$result", json), ("$error", result.Error));
+          ("$result", json), ("$error", result.Error), ("$ended", StorageText.UtcTimestamp()));
       return save.ExecuteNonQuery() == 1;
     });
   }

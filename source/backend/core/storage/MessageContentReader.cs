@@ -33,7 +33,8 @@ internal sealed class MessageContentReader {
   private MessageContentPage ReadValidated(SqliteTransaction transaction, Guid sessionId, MessageContentCursor cursor,
       int maximumUtf16Units) {
     MessageMetadata metadata = ReadMetadata(transaction, sessionId, cursor.Message);
-    ValidateCommittedTail(cursor, metadata.SegmentCount);
+    cursor = NormalizeCursor(cursor, metadata.FirstBatchIndex);
+    ValidateCommittedTail(cursor, metadata.FirstBatchIndex, metadata.EndBatchIndex);
     return ReadSegments(transaction, sessionId, cursor, metadata, maximumUtf16Units);
   }
 
@@ -50,7 +51,6 @@ internal sealed class MessageContentReader {
     ArgumentOutOfRangeException.ThrowIfNegative(message.HistoryRevision);
     ArgumentOutOfRangeException.ThrowIfNegative(cursor.SegmentIndex);
     ArgumentOutOfRangeException.ThrowIfNegative(cursor.Utf8Offset);
-    ArgumentOutOfRangeException.ThrowIfGreaterThan(cursor.Utf8Offset, StorageText.MaximumBytes);
     ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumUtf16Units);
   }
 
@@ -77,12 +77,12 @@ internal sealed class MessageContentReader {
       WHERE m.session_id = $session AND m.run_id = $run AND m.role = $role
           AND m.message_id = $message AND m.history_revision = $revision;
       """ : """
-      SELECT q.request_id, q.next_batch_index, q.output_final, q.outcome, r.stopping, r.outcome
+      SELECT q.request_id, m.first_batch_index, coalesce(m.end_batch_index, q.next_batch_index),
+          m.end_batch_index, q.output_final, q.outcome, r.stopping, r.outcome, q.next_batch_index
       FROM execution_messages m
       JOIN execution_runs r ON r.run_id = m.run_id AND r.session_id = m.session_id
           AND r.history_revision = m.history_revision
       JOIN execution_requests q ON q.request_id = m.request_id AND q.run_id = m.run_id
-          AND q.output_id = m.message_id
       WHERE m.session_id = $session AND m.run_id = $run AND m.role = $role
           AND m.message_id = $message AND m.history_revision = $revision;
       """;
@@ -98,26 +98,35 @@ internal sealed class MessageContentReader {
 
     if (message.Role == MessageRole.User) {
       Guid? claimedRequest = reader.IsDBNull(1) ? null : reader.GetGuid(1);
-      return new(reader.GetGuid(0), claimedRequest, SegmentCount: 1, IsClosed: true,
+      return new(reader.GetGuid(0), claimedRequest, FirstBatchIndex: 0, EndBatchIndex: 1, IsClosed: true,
           FinalOutputCommitted: false);
     }
 
     Guid requestId = reader.GetGuid(0);
-    long segmentCount = reader.GetInt64(1);
-    bool finalOutputCommitted = reader.GetInt32(2) != 0;
-    bool requestEnded = !reader.IsDBNull(3);
-    bool stopRequested = reader.GetInt32(4) != 0;
-    bool executionSettled = !reader.IsDBNull(5);
-    if (segmentCount <= 0)
-      throw new InvalidDataException("An output message has no committed segments.");
+    long firstBatchIndex = reader.GetInt64(1);
+    long endBatchIndex = reader.GetInt64(2);
+    bool runClosed = !reader.IsDBNull(3);
+    bool finalOutputCommitted = reader.GetInt32(4) != 0
+        && endBatchIndex == reader.GetInt64(8);
+    bool requestEnded = !reader.IsDBNull(5);
+    bool stopRequested = reader.GetInt32(6) != 0;
+    bool executionSettled = !reader.IsDBNull(7);
+    if (firstBatchIndex < 0 || endBatchIndex <= firstBatchIndex)
+      throw new InvalidDataException("An output message has an invalid committed range.");
 
-    bool isClosed = finalOutputCommitted || stopRequested || executionSettled || requestEnded;
-    return new(Guid.Empty, requestId, segmentCount, isClosed, finalOutputCommitted);
+    bool isClosed = runClosed || finalOutputCommitted || stopRequested || executionSettled || requestEnded;
+    return new(Guid.Empty, requestId, firstBatchIndex, endBatchIndex, isClosed, finalOutputCommitted);
   }
 
-  private static void ValidateCommittedTail(MessageContentCursor cursor, long segmentCount) {
-    if (cursor.SegmentIndex > segmentCount || (cursor.SegmentIndex == segmentCount && cursor.Utf8Offset != 0))
-      throw new ArgumentException("The cursor is beyond the committed message tail.", nameof(cursor));
+  private static MessageContentCursor NormalizeCursor(MessageContentCursor cursor, long firstBatchIndex) =>
+      cursor.SegmentIndex == 0 && firstBatchIndex > 0 && cursor.Utf8Offset == 0
+          ? cursor with { SegmentIndex = firstBatchIndex }
+          : cursor;
+
+  private static void ValidateCommittedTail(MessageContentCursor cursor, long firstBatchIndex, long endBatchIndex) {
+    if (cursor.SegmentIndex < firstBatchIndex || cursor.SegmentIndex > endBatchIndex
+        || (cursor.SegmentIndex == endBatchIndex && cursor.Utf8Offset != 0))
+      throw new ArgumentException("The cursor is outside the committed message range.", nameof(cursor));
   }
 
   private MessageContentPage ReadSegments(SqliteTransaction transaction, Guid sessionId, MessageContentCursor cursor,
@@ -126,7 +135,7 @@ internal sealed class MessageContentReader {
     long segmentIndex = cursor.SegmentIndex;
     int utf8Offset = cursor.Utf8Offset;
     int utf8Bytes = 0;
-    for (int examined = 0; segmentIndex < metadata.SegmentCount && examined < StorageText.MaximumSegments; examined++) {
+    for (int examined = 0; segmentIndex < metadata.EndBatchIndex && examined < StorageText.MaximumSegments; examined++) {
       // Exhausted text budgets still permit length probes to normalize empty final segments.
       // These probes share the same segment budget.
       int remainingBytes = StorageText.MaximumBytes - utf8Bytes;
@@ -150,8 +159,8 @@ internal sealed class MessageContentReader {
     }
 
     var next = new MessageContentCursor(cursor.Message, segmentIndex, utf8Offset);
-    var availableThrough = new MessageContentCursor(cursor.Message, metadata.SegmentCount, 0);
-    return new(cursor, text.ToString(), next, availableThrough, segmentIndex < metadata.SegmentCount,
+    var availableThrough = new MessageContentCursor(cursor.Message, metadata.EndBatchIndex, 0);
+    return new(cursor, text.ToString(), next, availableThrough, segmentIndex < metadata.EndBatchIndex,
         metadata.IsClosed, metadata.FinalOutputCommitted);
   }
 
@@ -180,8 +189,8 @@ internal sealed class MessageContentReader {
       throw new InvalidDataException("A committed message segment is missing.");
 
     long segmentByteLength = reader.GetInt64(0);
-    if (segmentByteLength > StorageText.MaximumBytes)
-      throw new InvalidDataException("A message segment exceeds the storage limit.");
+    if (cursor.Message.Role == MessageRole.Assistant && segmentByteLength > StorageText.MaximumBytes)
+      throw new InvalidDataException("An output segment exceeds the storage limit.");
 
     if (utf8Offset > segmentByteLength)
       throw new ArgumentException("The cursor offset is beyond its segment.", nameof(cursor));
@@ -213,5 +222,6 @@ internal sealed class MessageContentReader {
 
   // Describes committed message segments and their completion state.
   private sealed record MessageMetadata(
-      Guid SubmissionId, Guid? RequestId, long SegmentCount, bool IsClosed, bool FinalOutputCommitted);
+      Guid SubmissionId, Guid? RequestId, long FirstBatchIndex, long EndBatchIndex,
+      bool IsClosed, bool FinalOutputCommitted);
 }

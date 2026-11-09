@@ -10,8 +10,9 @@ internal sealed class LlmResponseWriter {
   private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 
   private readonly Guid requestId;
-  private readonly Guid responseId = Guid.NewGuid();
+  private Guid responseId = Guid.NewGuid();
   private readonly Func<LlmResponseChunk, Task> saveChunkAsync;
+  private readonly Func<string, string?, Task> observeToolAsync;
 
   private readonly StringBuilder chunk = new();
   private int chunkUtf8Bytes;
@@ -21,9 +22,11 @@ internal sealed class LlmResponseWriter {
   // Completes when the oldest unsaved text is due; null while nothing is waiting.
   internal Task? FlushDelay { get; private set; }
 
-  internal LlmResponseWriter(Guid requestId, Func<LlmResponseChunk, Task> saveChunkAsync) {
+  internal LlmResponseWriter(Guid requestId, Func<LlmResponseChunk, Task> saveChunkAsync,
+      Func<string, string?, Task> observeToolAsync) {
     this.requestId = requestId;
     this.saveChunkAsync = saveChunkAsync;
+    this.observeToolAsync = observeToolAsync;
   }
 
   internal async Task AppendTextAsync(string text) {
@@ -54,6 +57,16 @@ internal sealed class LlmResponseWriter {
   }
 
   internal Task FlushAsync() => SaveChunkAsync(isFinal: false);
+
+  // Reserves the call after closing the current text run; later text gets a new identity.
+  internal async Task ObserveToolAsync(string callId, string? name) {
+    if (pendingHighSurrogate is not null)
+      throw new InvalidDataException("A text run ends with an incomplete Unicode scalar.");
+
+    await FlushAsync();
+    await observeToolAsync(callId, name);
+    responseId = Guid.NewGuid();
+  }
 
   // Closes the response text, not the request or execution.
   internal Task FinishResponseAsync() => SaveChunkAsync(isFinal: true);

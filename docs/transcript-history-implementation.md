@@ -242,3 +242,100 @@ browser suite passed 10/10 runs**. UI checks passed, including **148/148 unit te
 Vite and Release server builds completed with zero warnings/errors. The older
 revision's 0/20 is a local comparison, not a guarantee for other schedules or
 transcript shapes.
+
+## Packet 1C — send-attempt placement (2026-11-09)
+
+Packet 1C is implemented; this supersedes the opening status excluding 1C. Packets
+1A/1B were retained, including their history reads, notice transport and transcript
+anchor handling. The unrelated local `AGENTS.md` change remains untouched.
+
+### Plan §4 — execution and placement
+
+Admission now retains the receipt and input without inserting a transcript entry.
+A claimed input remains pending through client/options preparation. The awaited
+`SessionBase.StartRequestAsync` acquires the session gate immediately before
+`IChatClient.GetStreamingResponseAsync`, including eager client implementations.
+It refuses after Stop or settlement and fences revisions/session ownership.
+The storage transaction marks the request attempted and inserts every assigned user
+entry in admission order, linked to that request. Repeating the hook does not allocate
+new entries. Placement publishes the packet-1B change notice at the state-change site.
+
+Marker-save exceptions escape provider-error classification and leave the execution
+unsettled/fenced with a needs-attention notice; the provider is not called. A committed
+attempt is not delivery evidence: a crash between commit and the provider call stays
+uncertain. Failure after the hook retains placed input and any committed partial
+output, without requeueing or automatic resubmission. Execution context excludes
+prior requests known never attempted, but includes the current claim for preparation;
+legacy unknown and attempted failures remain eligible with no outcome filter.
+
+Snapshots contain only pending identity and a scalar-safe preview of at most 256
+UTF-16 units, including assigned-but-not-attempted inputs. Full source remains on the
+exact retained receipt route. Terminal inputs known never attempted enter a sparse
+projection in the same transaction that makes them terminal (Stop, request completion
+or settlement). `GET /api/sessions/{sessionId}/not-sent?cursor=...` reads at most 60
+identity/execution/preview records, newest first, with a positive Int64 decimal
+`nextCursor` or null. Its partial index skips sent history; no OFFSET/count scan or
+unbounded body read is used. Receipt retry never starts a replacement execution.
+
+The client separates pending previews and offers user-invoked, paged not-sent reads
+and receipt retrieval. Explicit resend journals a new submission ID through the
+existing uncertain-send reconciliation path; it never replaces the draft and does
+not resubmit automatically. An accepted source can be explicitly resent again;
+there is no new persistent resend-retention policy. Presentation is deliberately
+minimal; no richer transcript layout or animation decision was made.
+
+### Plan §5 — schema v10
+
+The v10 migration adds `execution_requests.attempt` (0 legacy unknown, 1 known not
+attempted, 2 attempted), and an `execution_inputs.not_sent` projection flag plus its
+sparse `(session_id, ordinal)` partial index. Claims explicitly insert attempt 1;
+existing rows retain 0 and are not guessed to be not sent.
+
+Following the v9 rebuild precedent, `execution_messages` is rebuilt to permit a
+request link on user rows while retaining legacy null links. All existing ordinals,
+identities, times, ranges, unique keys, foreign keys and both explicit message indexes
+are preserved. The AUTOINCREMENT high-water is retained even after deleted rows.
+Foreign keys are disabled outside the migration transaction, checked before commit,
+and restored afterwards. Genuine frozen v8/v9 fixtures cover upgrade and rollback;
+legacy order, times, usage and attempt provenance are not invented. No live database
+was opened or migrated.
+
+### Plan §§6–7 — verification
+
+- Release backend suite: **145/145 passed**; zero build warnings/errors.
+- UI formatting, lint and TypeScript checks passed; **153/153** unit tests passed.
+- Vite and Release server builds passed; offline SDK integration **1/1 passed**.
+- Full browser suite **10/10 passed**, including pending promotion while reading
+  (same execution, exact submission identity, unchanged 2 px anchor tolerance),
+  not-sent retrieval/resend with draft preservation, and existing 1B stream/anchor
+  regressions. The promotion scenario also passed five additional isolated runs.
+- New backend coverage: no user entry during preparation; eager provider visibility;
+  ordered multi-input promotion; idempotency and wrong-session/revision/Stop rejection;
+  placement rollback; before/after-hook failures; deferred-constraint marker commit
+  failure with no provider call and preserved uncertainty/status notice; exact receipt
+  retry; context exclusion of never-attempted input and retention of attempted failed
+  partial output; sparse pagination after later runs/reopen; bounded previews and full
+  receipt source; HTTP invalid cursors and missing sessions; frozen-schema rollback.
+- Independent read-only acceptance review found no supported correctness gaps.
+  `git diff --check` passed.
+
+Qualification reran the owned 100,000-entry / 249,975,000-body-byte backend fixture:
+latest-history first SQLite-page-cache read **10.168 ms**, warm median (nine reads)
+**0.431 ms**. The OS file cache was not flushed. A separate small browser benchmark
+observed push commit-to-render bounds **37.8–99.0 / 48.6–94.0 ms**, three GETs per held
+marker versus seven for the test-side polling renderer; these are not per-second or
+25× measurements. Browser promotion had an earlier timing/setup failure (the test
+incorrectly expected a new execution for steering, waited only about as long as
+its delayed reply, and initially required observing the short-lived second request
+before settlement). It now accepts the same execution's settlement and checks the
+exact submission entry. The final full suite and five isolated promotion runs passed.
+One intermediate full run also timed out in the existing 1B push/polling benchmark's
+prefix-render wait; its isolated rerun and final full run passed without changing
+that scenario. The intermittent timeout's cause was not established.
+
+No contract deviations or implementation blockers. Broader stage-1 qualification
+is still incomplete: the five-tab 25× browser idle/switch/long-task/request-rate and
+browser/backend memory-cycle baseline remains unmeasured. Existing fixtures do not
+supply the scaled browser seed/instrumentation; no broader benchmark tooling was added
+in this bounded packet. This delivery proves placement contracts, not completion of
+all stage-1 performance qualification or rich-transcript behavior.

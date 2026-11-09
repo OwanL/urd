@@ -333,6 +333,11 @@ One intermediate full run also timed out in the existing 1B push/polling benchma
 prefix-render wait; its isolated rerun and final full run passed without changing
 that scenario. The intermittent timeout's cause was not established.
 
+Receipt reconciliation follow-up: not-sent resend presentation now accepts only the exact
+resubmission ID's accepted receipt; unrelated pending/execution activity cannot upgrade
+an uncertain resend. The regression suite covers an unacknowledged resend followed by
+an unrelated successful Send, alongside the existing exact-accepted browser scenario.
+
 No contract deviations or implementation blockers. Broader stage-1 qualification
 is still incomplete: the five-tab 25× browser idle/switch/long-task/request-rate and
 browser/backend memory-cycle baseline remains unmeasured. Existing fixtures do not

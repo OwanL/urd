@@ -275,6 +275,38 @@ void test("an accepted not-sent resend gets a new ID and can be explicitly repea
   assert.equal(workspace.read().chats[sessionId]?.draft, "submitted text");
 });
 
+void test("an unacknowledged resend remains uncertain after an unrelated Send succeeds", async () => {
+  const workspace = fixture();
+  const source: UserMessageSubmission = {
+    submissionId: "30000000-0000-0000-0000-000000000097",
+    expectedHistoryRevision: 3,
+    text: "submitted text",
+    llmSelection: selection,
+  };
+  const coordinator = commands(
+    workspace.access,
+    emptyClient(async () => {
+      throw new Error("acknowledgement lost");
+    }),
+  );
+
+  const uncertain = await coordinator.resendNotSent(sessionId, snapshot(), source);
+  assert.equal(uncertain?.receipt, null);
+  assert.equal(workspace.read().chats[sessionId]?.pending?.status, "uncertain");
+  workspace.access.updateChat(sessionId, (previous) => ({ ...previous, pending: null }));
+
+  const unrelatedSend = commands(
+    workspace.access,
+    emptyClient(async (_id, submission) => ({
+      ...receipt(submission),
+      executionId: nextExecutionId,
+    })),
+  );
+  await unrelatedSend.send(sessionId, snapshot(), false, true);
+  assert.equal(workspace.read().chats[sessionId]?.knownExecutionId, nextExecutionId);
+  assert.equal(workspace.read().chats[sessionId]?.pending, null);
+});
+
 void test("uncertain not-sent resend reloads with its new ID and reconciles the exact receipt", async () => {
   const workspace = fixture();
   const source: UserMessageSubmission = {

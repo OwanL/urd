@@ -169,8 +169,6 @@ export function Conversation({
           snapshot={snapshot}
           commands={commands}
           canResend={canResendNotSent}
-          pendingSubmissionId={chat.pending?.original.submissionId ?? null}
-          knownExecutionId={chat.knownExecutionId}
         />
       </div>
       <Composer

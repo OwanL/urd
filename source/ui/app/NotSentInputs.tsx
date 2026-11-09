@@ -14,8 +14,6 @@ interface NotSentInputsProps {
   snapshot: SessionSnapshot | null;
   commands: WorkspaceCommands;
   canResend: boolean;
-  pendingSubmissionId: string | null;
-  knownExecutionId: string | null;
 }
 
 interface RetrievedInput {
@@ -29,8 +27,6 @@ export function NotSentInputs({
   snapshot,
   commands,
   canResend,
-  pendingSubmissionId,
-  knownExecutionId,
 }: NotSentInputsProps) {
   const [open, setOpen] = useState(false);
   const [page, setPage] = useState<NotSentPage | null>(null);
@@ -46,7 +42,6 @@ export function NotSentInputs({
   const [resendResult, setResendResult] = useState<{
     id: string;
     submissionId: string | null;
-    previousExecutionId: string | null;
     message: string;
   } | null>(null);
   const listController = useRef<AbortController | null>(null);
@@ -171,14 +166,12 @@ export function NotSentInputs({
       setResendResult({
         id: source.submissionId,
         submissionId: result?.submissionId ?? null,
-        previousExecutionId: knownExecutionId,
-        message: resendMessage(result?.receipt ?? null),
+        message: resendMessage(result?.receipt ?? null, sessionId, result?.submissionId ?? null),
       });
     } catch (cause) {
       setResendResult({
         id: source.submissionId,
         submissionId: null,
-        previousExecutionId: knownExecutionId,
         message: `Resend uncertain: ${cause instanceof Error ? cause.message : String(cause)}`,
       });
     } finally {
@@ -211,14 +204,7 @@ export function NotSentInputs({
                 {page.inputs.map((input) => {
                   const source = retrieved?.submissionId === input.submissionId ? retrieved : null;
                   const resendState = resendResult?.id === input.submissionId ? resendResult : null;
-                  const reconciledAccepted = Boolean(
-                    resendState?.message === "Resend uncertain." &&
-                    resendState.submissionId !== null &&
-                    pendingSubmissionId === null &&
-                    knownExecutionId !== null &&
-                    knownExecutionId !== resendState.previousExecutionId,
-                  );
-                  const resent = reconciledAccepted ? "Resend accepted." : resendState?.message;
+                  const resent = resendState?.message;
                   const accepted = resent === "Resend accepted.";
                   return (
                     <li key={input.submissionId}>
@@ -282,8 +268,18 @@ function isMatchingReceipt(
   );
 }
 
-function resendMessage(receipt: UserMessageReceipt | null): string {
-  if (receipt === null) return "Resend uncertain.";
+function resendMessage(
+  receipt: UserMessageReceipt | null,
+  sessionId: string,
+  submissionId: string | null,
+): string {
+  if (
+    receipt === null ||
+    submissionId === null ||
+    receipt.sessionId !== sessionId ||
+    receipt.submission.submissionId !== submissionId
+  )
+    return "Resend uncertain.";
   if (receipt.acceptance === "accepted") return "Resend accepted.";
   return `Not resent: ${receipt.refusalReason}.`;
 }

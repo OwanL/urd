@@ -136,8 +136,9 @@ Snapshots now contain session/history/execution status, initiating model selecti
 60-message preview window nor full pending text. The transcript reads packet-1A
 history descriptors and existing bounded content cursors. `WorkspaceCommands`
 names sessions only from the first user preview, never from Send dispatch or a
-pending preview; otherwise the title remains `New chat`. The discovered-session
-rendered regression passes. Packet 1A entry placement is not reworked.
+pending preview; otherwise the title remains `New chat`. A rendered regression
+verifies that a session present before page load is discovered from the session list
+and named from its first-user preview. Packet 1A entry placement is not reworked.
 
 ## Packet 1B local acceptance (§7)
 
@@ -153,10 +154,11 @@ Final local verification (Release, owned temporary databases, no live data):
   status/ack ordering, unsubscribe, EOF/reconnect, same-version/new-connection
   notices, watchdog and abort cleanup. Content coordination tests enforce one
   active read per session and cancellation before dispatch.
-- Rendered Chromium: **7/7** browser regressions, including hidden-page cleanup,
-  reconnect creation/status catch-up, live discovery, one stream across tab changes,
-  unwatched-tab status without snapshot reads, a held read followed by settlement,
-  selection/anchor preservation and discovered-session naming.
+- Rendered Chromium: **8/8** browser regressions, including hidden-page cleanup,
+  reconnect creation/status catch-up, live discovery, initial-list discovery named
+  from the first-user preview, one stream across tab changes, unwatched-tab status
+  without snapshot reads, a held read followed by settlement, and selection/anchor
+  preservation.
 - Real-server typed-client integration: **1/1**. Vite and Release server builds pass
   with no warnings/errors. Build Vite before the server: UI assets are embedded.
 

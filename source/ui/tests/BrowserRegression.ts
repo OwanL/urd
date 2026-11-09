@@ -578,6 +578,35 @@ void test("model and reasoning popovers focus options and restore their triggers
   });
 });
 
+void test("a session discovered on initial load is named from its first-user preview", async () => {
+  await withOfflineBrowser(async ({ model, server, page, connection }) => {
+    const sessions = new SessionClient(server.origin);
+    const sessionId = await sessions.create();
+    const preview = "Discovered session preview title";
+    model.enqueue({ text: "fixture reply", delayMs: 10, chunkSize: 8 });
+    const receipt = await sessions.submitMessage(sessionId, {
+      submissionId: randomUUID(),
+      expectedHistoryRevision: 0,
+      text: preview,
+      llmSelection: { connection, modelId: "fixture-a", reasoningEffort: null },
+    });
+    assert.equal(receipt.acceptance, "accepted");
+    await waitForSnapshot(
+      sessions,
+      sessionId,
+      (snapshot) => snapshot.lastSettlement?.executionId === receipt.executionId,
+      "the preloaded session to settle",
+    );
+    assert.equal((await sessions.getSnapshot(sessionId)).firstUserPreview, preview);
+
+    await page.goto(server.origin.href);
+    const tab = page.locator(`#tab-${sessionId}`);
+    await tab.waitFor();
+    await page.getByRole("tab", { name: preview }).waitFor();
+    assert.equal(await tab.innerText(), preview);
+  });
+});
+
 void test("browser event streams handshake, track sessions, and resynchronize after reconnect", async () => {
   await withOfflineBrowser(async ({ model, server, page, connection }) => {
     await page.goto(server.origin.href);

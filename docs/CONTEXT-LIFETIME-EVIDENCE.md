@@ -3,7 +3,7 @@
 **2026-11-04 — bounded research and one synthetic adapter experiment.** No context
 engine, production schema/API, reset policy or package pin is selected here.
 [ARCHITECTURE](ARCHITECTURE.md#preserve-model-visible-prefixes-during-ordinary-continuation-and-discovery)
-owns the requirements; [Discovery Design](DISCOVERY-DESIGN.md) owns the existing
+owns the requirements; [Discovery Design](discovery-design.md) owns the existing
 exposure direction. Direct `IChatClient`, retained AI pruning and **qualified native
 additions, otherwise an initial stable wrapper** remain intact.
 
@@ -65,7 +65,7 @@ These are source/contract observations, not installed-host or provider-cache pro
 
 ## New experiment: already-sent results → reload → next request
 
-[Execution Design's composed probe](EXECUTION-DESIGN.md#composed-follow-up-adapter--guarded-urd-loop--sqlite--continuation)
+[Execution Design's composed probe](execution-design.md#composed-follow-up-adapter--guarded-urd-loop--sqlite--continuation)
 reloaded **before the first transmission of its tool result**. Its unchanged-prefix
 check covered the first three input items; its result check JSON-decoded the output
 string. That established useful composition but not exact preservation of a result

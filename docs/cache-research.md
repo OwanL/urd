@@ -224,5 +224,5 @@ Verified verbatim on 2026-11-03 against live official docs:
 
 Urd context consulted (not edited):
 [ARCHITECTURE.md](ARCHITECTURE.md) (preserve-model-visible-prefixes direction),
-[MODEL-INTERFACE-RESEARCH.md](MODEL-INTERFACE-RESEARCH.md) (adapter capabilities for
+[model-interface-research.md](model-interface-research.md) (adapter capabilities for
 raw/native discovery), [README.md](../README.md) (direction authority).

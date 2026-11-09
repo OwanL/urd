@@ -2,8 +2,11 @@
 
 ## Status and scope
 
-This is a living design record, not an implemented architecture. The project
-purpose and strategic constraints are owned by [README.md](../README.md).
+This is a living decision record, not a complete description of implemented behavior.
+[Product direction](product-direction.md) owns purpose and strategic constraints;
+[development guides](README.md#current-guides) own the current operating instructions.
+Historical experiments below retain their original scope; production integration and
+qualification have since advanced in the guides.
 
 The review includes feature value as well as interfaces, data models,
 dependencies, class/module structure, ownership, coupling, failure behaviour
@@ -13,6 +16,19 @@ all valid outcomes when explicitly justified.
 
 Only decisions recorded as agreed are settled. Review topics, observations
 about Pie and recommendations do not select an implementation by themselves.
+
+## Terms used in the design records
+
+- **Admission:** deciding durably whether to accept input; acceptance is not completion.
+- **Settlement:** saving the final outcome after owned work and cleanup finish.
+- **Fence:** prevent new or replacement work while an outcome or cleanup is uncertain.
+- **Positive terminal evidence:** a provider explicitly reported successful completion;
+  a closed stream or complete-looking tool arguments are not enough.
+- **Native context:** provider-specific reasoning, identifiers and other data needed
+  to continue a conversation, distinct from the user's visible text.
+- **Current authority:** a tool must still be allowed when invoked, even if an old
+  description remains in the model's context.
+- **Qualification:** testing a specific route and scope, not a blanket compatibility claim.
 
 ## Review method
 
@@ -119,94 +135,32 @@ as the design becomes concrete; introduce interfaces and shared abstractions whe
 actual boundaries or reuse justify them, not as a framework imposed in advance.
 No concrete class layout is approved by this decision.
 
-**Owner alignment (2026-11-04):** Involve the owner in overall application,
-class and file structure before treating a design as agreed. Class responsibilities
-and relationships should drive the filesystem layout, not the other way around.
-Use concrete flows and small sketches to discuss meaningful alternatives; parallel
-investigations and experimental code do not approve a production scaffold or
-project/folder split.
+**Structure and naming:** classes and state ownership should determine files, not the
+other way around. The owner rejected project-first and vague `systems/` layouts because
+they hid actual responsibilities. The accepted [application plan](application-plan.md)
+is a revisable component-led starting point, not a hierarchy of new managers or one
+project per concern. It separates authored `guidance/` from `guidance-loading/`, uses
+`execution` for the narrow model/tool loop, and names messaging, assignments and wakeups
+for their distinct purposes. Shared provider/MCP lifetimes and backend usage capture do
+not become execution-owned just because they support agents.
 
-**Owner correction (2026-11-05):** the owner rejected the proposed directory sketch
-organized mainly as `app/Urd.Core`, `Urd.Server`, `Urd.Web` and tests, asking to
-separate Urd's major components/parts according to separation of concerns. Make
-functional responsibilities and dependencies explicit before mapping folders;
-project names alone are not that design. This does not select one assembly/process
-per component or specifically reverse the existing Core/Server dependency boundary.
-The subsequent six-way map was also incomplete. The owner explicitly distinguished
-agent tools, harness-supporting systems (such as provider management), the harness
-itself, editable agent guidance, UI, hosting and persistence/transcript management,
-and said the list could continue. These are organizing concerns, not a closed
-hierarchy or one project each. Borrow useful organization/responsibilities from Pie,
-not its historical coupling or every feature/mechanism.
+Flat docs, optional pending `docs/scratch/`, `scripts/` for automation and no in-repository
+experiments are accepted. The [experiment archive](product-direction.md#experimental-source-archive)
+preserves provenance. Shared assets remain conditional. New application/settings/platform
+areas can remain unfinished rather than being hidden in a generic bucket.
 
-**Guidance authoring direction:** provide a centralized, user-editable place for
-bundled Markdown system prompts, skills and similar guidance. Authored content and
-the code that discovers/loads/assembles it are separate concerns. This does not move
-existing user/project guidance into that location, choose exact paths, or settle
-reload timing. Configuration, context/catalog management, coordination/deferred work,
-usage/accounting and source customization must also stay visible in the wider design.
-After agreeing with this broader direction, the owner requested a new design, then
-rejected the resulting [application proposal](APPLICATION-PLAN.md): **“Systems is
-far too vague”**, and requested actual research and brainstorming. That layout is
-withdrawn, including its project-file placement workaround. The subsequent
-[source investigation and alternatives](STRUCTURE-RESEARCH.md) compare concrete
-state/lifetime owners in Pie, OpenCode and Codex, and domain modules versus feature
-slices versus a reusable harness split. Its working recommendation and class sketches
-are proposals, not new decisions. Do not merely rename or flatten a catch-all bucket;
-prove that changes have understandable owners. The selected Core/Server boundary
-remains; no final structure or production scaffold is approved.
-
-**Subsequent structure feedback (2026-11-05):** the owner finds the later component-led
-tree broadly acceptable structurally, but requests clearer names and grouping. In
-particular, `guidance/` versus `agent-instructions/` does not distinguish authored
-content from loader code clearly; “agent instructions” is not the preferred top-level
-name for the editable Markdown/skills collection either. LLM context, agent tools
-and similar responsibilities belong under the broader harness, rather than requiring
-peer folders beside it. Use `execution` for the narrow LLM/tool loop. The owner
-subsequently accepted this nesting, rejected `agent-content/` as misleading, and prefers
-“guidance”, “instructions” or similar with matching loader terminology. “Collaboration”
-and “follow-ups” also need concrete names. Usage accounting is expected within the
-harness; session storage placement is acknowledged as arguable. The owner warns that
-harness detail must not masquerade as a complete application design: less-developed
-areas can be marked TBD.
-
-**Rough-structure acceptance (2026-11-05):** the owner accepts the resulting tree as a
-decent starting point, explicitly open to correction during implementation, and asks
-for centralized repository areas similar to Pie, particularly `docs/`. The
-[application plan](APPLICATION-PLAN.md) is now the canonical working layout: guidance
-with matching loader terminology, session messaging/assignments/wakeups, and harness
-storage/usage. The previous project-first and `systems/` designs remain superseded.
-The owner subsequently requests flat `docs/`, optionally `docs/scratch/`, rejects
-`development/` as vague and drops `experiments/` from the target layout. The baseline
-uses `scripts/` for executable automation; shared assets remain conditional. The
-owner subsequently authorized moving the existing experimental tree to machine-local
-scratch; [the verified archive](../README.md#experimental-source-archive) preserves its
-files and provenance. Documentation remains in place. Routine naming/nesting corrections
-can follow real implementation needs; this is not a frozen class, project or persistence
-contract.
-
-UI, hosting, other application-level concerns and development/delivery internals remain
-explicitly TBD where not worked out; existing technology and behavioral decisions
-still stand. Component state ownership, shared lifetimes and the Core/Server boundary
-are unchanged. Rough-layout approval is not authorization for a production scaffold.
-
-The [working session sketch](SESSION-DESIGN.md) below records subsequent owner
-input, including the selected, revisable Core/Server boundary; it does not approve
-final APIs, broader base-class scope, fine file/folder layout or a production scaffold.
-
-**Subsequent owner alignment:** .NET 10 LTS is the backend version direction,
-not an exact SDK pin or approval of the complete build baseline.
-
-**Still open:** exact .NET SDK pin, provider-specific integrations, execution
-topology and desktop host. Shared SQLite, `IChatClient` and TypeScript/Preact are
-selected below; the narrow Urd-owned loop is provisional. These directions do not
-qualify performance, provider coverage, packaging or cross-platform behaviour.
+The initial Core/Server/browser implementation now exists. The [session sketch](session-design.md)
+retains proposed wider APIs; its scoped decisions and the selected Core-without-ASP.NET /
+Server → Core boundary are not approval of every future class. Routine changes follow the
+established implementation; new meaningful responsibilities and public contracts still
+need scoped review. Exact tool pins are recorded in the development guides. Execution
+topology, desktop host, wider provider coverage and packaging remain open.
 
 ### ASP.NET Core hosting and HTTP
 
 **Decision (2026-11-03):** Use ASP.NET Core with its standard Kestrel server for
-backend hosting and HTTP. The hosting comparison is settled; see
-[the research](HOSTING-RESEARCH.md) for alternatives and evidence.
+backend hosting and HTTP. The standard hosting stack avoids a separate HTTP framework
+without requiring MVC or a generic hosting abstraction.
 
 The owner's acceptance criterion is working behaviour, not Microsoft's support
 commitment for a particular deployment. The macOS production-hosting policy note
@@ -214,22 +168,22 @@ is not evidence that LAN/Tailscale connections fail and must not be treated as a
 selection blocker. Verify the actual supported Urd workflows on each OS; remote
 access on macOS remains intended scope. No macOS runtime test has been performed.
 
-Minimal APIs remain the recommended initial endpoint approach, not a separately
-locked choice. Exact .NET SDK pin, endpoint/event protocol, remote access policy, packaging
-and process topology remain open. Agent work must retain its own lifetime rather
-than being cancelled by an HTTP request or client disconnect.
+The current Server uses Minimal APIs and a page-level server-sent event stream;
+[server development](server-development.md) records the implemented local contract.
+Remote access policy, packaging and process topology remain open. Agent work retains
+its own lifetime rather than being cancelled by an HTTP request or client disconnect.
 
 ### MCP client library and revisiting library choices
 
 **Decision (2026-11-04):** Use the official C# MCP SDK's
 `ModelContextProtocol.Core` for MCP client protocol and transport mechanics.
-[The research](MCP-LIBRARY-RESEARCH.md) found no evidence-based blocker; qualify
+[The research](mcp-library-research.md) found no evidence-based blocker; qualify
 required servers and transports during implementation. Its MEAI abstractions
 dependency does not select an LLM/tool loop or LLM exposure policy; the
 separate `IChatClient` decision is recorded below.
 Urd retains connection lifetime, credentials, permissions and discovery/exposure
 responsibilities. The inspected package version is not a locked dependency version.
-[Bounded SDK qualification](MCP-QUALIFICATION.md) exercises real Core 2.3.1 with
+[Bounded SDK qualification](mcp-qualification.md) exercises real Core 2.3.1 with
 fake stdio peers: explicit 2025 handshake, result/error fidelity, current-authority
 checks and local cancellation/disposal. Default 2026 negotiation/fallback,
 real-server interoperability and production lifetime integration remain untested.
@@ -273,15 +227,12 @@ alongside .NET; prebuilt UI assets do not require a Node application server.
 [Browser design](BROWSER-DESIGN.md) records a bounded synthetic transcript/streaming
 experiment and a small Blazor contrast, not a production performance comparison.
 Real SQLite/agents, rich rendering, network access and host reuse remain unqualified.
-**Subsequent owner alignment:** Vite for frontend builds; npm is the preferred,
-revisable package-manager route after “Lean toward npm”, not an unconditional
-full-baseline selection. Node version, exact pins and setup mechanisms remain open;
-see [repository foundations](REPO-FOUNDATIONS.md).
-
-**Not selected:** CSS, remaining build-tooling details/pins, transport, desktop host,
-client-state classes/responsibilities or project/folder layout. The proposed client-state
-split was not clear to the owner and remains explicitly provisional; review a concrete
-example rather than interpreting non-objection as approval.
+**Build direction:** Vite with npm is the preferred, revisable route. Current Node,
+SDK and package pins, CSS and client ownership live in [browser development](browser-development.md)
+and the source. The early proposed client-state split was not approved as a whole;
+implemented feature owners are not permission for a generic state framework.
+[Source setup and packaging](repo-foundations.md) still need qualification. Desktop
+host, remote transport and later host integration remain open.
 
 ### Operating-system rollout: Windows, then macOS, then Linux
 
@@ -293,9 +244,8 @@ Evaluate portability of the complete stack, not only its language/runtime:
 backend and UI reuse, desktop hosts, credentials, shell/process management,
 background controls, browser/desktop automation, packaging and local source builds.
 OS-specific APIs are legitimate integration points, not evidence that the shared
-core must be platform-specific. The first foundation ranking was Windows-centric;
-its existing scores do not qualify the full rollout. See
-[the portability correction](FOUNDATION-RANKING.md#portability-correction-windows--macos--linux).
+core must be platform-specific. Early comparisons were Windows-centric and do not qualify the full rollout;
+verify the complete retained capability set on each OS.
 
 ### Independent client navigation: conditional on minimal cost
 
@@ -529,19 +479,21 @@ layer; do not assume an SDK for API-key requests also handles subscription
 sign-in. First-party harness ownership does not require hand-writing all provider
 code, and these requirements do not select a language or SDK.
 
-[Provider research](PROVIDER-RESEARCH.md) compares LLM-client approaches and
+[Provider research](provider-research.md) compares LLM-client approaches and
 subscription integration seams. Current OpenAI documentation offers a public
 ChatGPT-plan Responses API flow; Pi's existing Codex route is not the only option.
 GitHub's documented Copilot SDK instead embeds its agent runtime, so it must not
 be mistaken for a neutral LLM client. These are source findings, not qualified
 Urd integrations or a reason to select a library prematurely.
 
-[Provider qualification](PROVIDER-QUALIFICATION.md) records the later focused
+[Provider qualification](provider-qualification.md) records the later focused
 route/authentication findings. ChatGPT-plan Responses is a recommended first
-integration, with Ollama also acceptable to the owner; no live sign-in, entitlement
-or inference/tool round trip has been qualified. Its plan-route restrictions must
-not be inferred from generic API-key Responses capabilities. The report now includes
-[offline candidate OAuth/refresh evidence](PROVIDER-QUALIFICATION.md#offline-auth-follow-up--2026-11-04),
+integration, with Ollama also acceptable to the owner. Later separately authorized
+ChatGPT and Ollama route/model checks are recorded in that report and
+[provider management](provider-management.md#qualification); they do not qualify every
+model, refresh case or billing behavior. Plan-route restrictions must not be inferred
+from generic API-key Responses capabilities. The report now includes
+[offline candidate OAuth/refresh evidence](provider-qualification.md#offline-auth-follow-up--2026-11-04),
 not production dependency approval; live access, refresh identity/races, credential
 storage and revocation remain separate gates.
 
@@ -633,7 +585,7 @@ need not block for confirmation merely because the old provider's private reason
 cannot transfer. This does not permit losing visible messages, tool results or
 attachments, replaying tools, automatic provider fallback or widening billing scope.
 No particular warning UI or running-turn change rule was selected. See
-[discovery design](DISCOVERY-DESIGN.md) for the scoped owner answer.
+[discovery design](discovery-design.md) for the scoped owner answer.
 
 **Project-instruction loading:** the owner first preferred ignoring edits until
 explicit reload, then deferred exact loading/reload behavior to the simplest
@@ -641,7 +593,7 @@ implementation once the trade-off is concrete. Reload remains a simple candidate
 not a newly mandated per-chat feature or fixed scope. No watcher, live-loading
 subsystem or frozen-forever session policy was approved. Ordinary prefix stability,
 readable originals, deliberate context changes and current permission enforcement
-remain distinct constraints; see [discovery design](DISCOVERY-DESIGN.md).
+remain distinct constraints; see [discovery design](discovery-design.md).
 
 Pie freezes its native catalog and appends recovered tool descriptions, routing
 calls through a fixed wrapper; see `docs/plans/IMMUTABLE-MODEL-CONTEXT.md` in Pie.
@@ -659,7 +611,7 @@ cache reuse needs provider evidence. The later interface and exposure decisions
 below do not qualify every route. Cached descriptions must not override current
 execution permissions.
 
-**Follow-up alignment (2026-11-03):** The [cache investigation](CACHE-RESEARCH.md)
+**Follow-up alignment (2026-11-03):** The [cache investigation](cache-research.md)
 supports the original concern: changing early tool definitions generally loses
 prefix reuse across the later conversation, not necessarily the earlier unchanged
 prefix or the old cache entry itself. Urd-specific savings remain unmeasured.
@@ -678,7 +630,7 @@ current-permission execution path; preserve outer call and resolved tool identit
 This supersedes the earlier open fallback comparison, not the qualification gates.
 Wrapper reliability, native-provider acceptance and cache savings remain unmeasured;
 no generic discovery framework or particular beta adapter is approved. See
-[execution evidence](EXECUTION-DESIGN.md) and [discovery design](DISCOVERY-DESIGN.md).
+[execution evidence](execution-design.md) and [discovery design](discovery-design.md).
 This tool-invocation wrapper is distinct from an LLM-client facade.
 
 **Owner decision (2026-11-04): adopt `Microsoft.Extensions.AI.Abstractions` and
@@ -694,7 +646,7 @@ This interface decision does **not** select the full `Microsoft.Extensions.AI`
 package, `FunctionInvokingChatClient`, provider-specific SDKs/adapters or
 authentication flows. The separate provisional loop direction and exposure policy
 are recorded here; neither follows automatically from `IChatClient`. The
-[discovery design](DISCOVERY-DESIGN.md) records adapter/restart-representation gaps;
+[discovery design](discovery-design.md) records adapter/restart-representation gaps;
 address them without silently broadening the interface selection.
 
 ### Keep original chat history until the session closes
@@ -771,14 +723,13 @@ The backend language is settled above. Low harness CPU/memory cost, installation
 library reuse and maintenance remain requirements. Source-bundled customisation
 must work on users' own machines; prebuilt-release convenience does not establish
 that the source-build workflow is acceptable. The accepted
-[source-distribution direction](REPO-FOUNDATIONS.md#owner-outcome) requires matching
+[source-distribution direction](repo-foundations.md#owner-outcome) requires matching
 editable source and build instructions with distributable builds, including modified
 source in custom packages. It does not require repackaging every compile or select
 physical packaging, SDK/cache bundling, tooling or activation mechanics.
 
-[Foundation research](FOUNDATION-RESEARCH.md) preserves the earlier language
-comparison and local-build considerations; its shortlist is now historical.
-[Focused Go/C# discovery](GO-DOTNET-DISCOVERY.md) established small streaming/tool/
+Earlier language shortlists are superseded; no language stereotype establishes
+resource superiority. [Focused Go/C# discovery](go-dotnet-discovery.md) established small streaming/tool/
 control paths using real loop libraries and fake LLMs in both languages. These
 remain feasibility observations, not provider, packaging, resource or cross-platform
 qualification. Further qualification should focus on the selected C#/.NET backend.
@@ -794,7 +745,7 @@ that insufficient reason for the dependency. This is **not a production LOC or
 maintenance estimate**. Reconsider if real integration recreates substantial
 library machinery; reuse focused libraries and Abstractions helpers where useful.
 
-[Execution design](EXECUTION-DESIGN.md) now also exercises the real Responses
+[Execution design](execution-design.md) now also exercises the real Responses
 adapter + terminal guard + Urd loop + harmless tool through SQLite reload and
 continuation. This closes the bounded local composition gap using a **whole-history
 test envelope**, not the actual session/message-row owner. Process-kill recovery,
@@ -825,7 +776,7 @@ justify it. External commands and selected integrations can still run in their
 own processes. Keeping the option open is not a reason to implement both
 execution models or add speculative process-abstraction layers now.
 
-[Backend lifecycle evidence](BACKEND-LIFECYCLE.md) exercises competing launchers,
+[Backend lifecycle evidence](backend-lifecycle.md) exercises competing launchers,
 verified attachment, stale discovery and owned-process exit on Windows. It does
 not select portable locking, packaged daemon lifetime, authentication, shutdown
 policy or topology; one backend remains a working default.
@@ -846,11 +797,11 @@ abstract SessionBase
 Both share core execution/history rules without separate engines. A composed
 `SessionExecution` represents temporary active work; its name/API and exact base
 scope remain provisional. Titles, compaction and pruning use shared LLM I/O,
-not additional full-session subtypes. [Session design](SESSION-DESIGN.md) owns the
+not additional full-session subtypes. [Session design](session-design.md) owns the
 responsibility/lifetime walkthrough and acceptance proposals. It separates durable
 history/assignment facts, live execution and client presentation; finished work,
 explicit task results and final closure are not interchangeable.
-[Disposable flow tests](SESSION-DESIGN.md#7-disposable-session-flow-qualification)
+[Disposable flow tests](session-design.md#7-disposable-session-flow-qualification)
 now exercise guarded admission/Stop, edit/close and retained assignment results,
 including owned-child exit/reopen. They do not validate the hierarchy, bounded-child
 lifecycle, HTTP/client integration or composition with the native execution fixture.
@@ -868,7 +819,7 @@ detachment, relative `parent` addressing and exact creation/delivery APIs are no
 selected. Stable IDs independent of mutable titles are recommended in the sketch,
 not a requirement to wait for title inference. Parent/child addressing cannot
 replace durable assignment/results. After the initial layout deferral, the owner
-selected the revisable [`Urd.Server → Urd.Core` boundary](SESSION-DESIGN.md#5-coreserver-project-boundary--selected-revisable):
+selected the revisable [`Urd.Server → Urd.Core` boundary](session-design.md#5-coreserver-project-boundary--selected-revisable):
 Core owns session/execution/storage logic without ASP.NET; Server owns hosting,
 HTTP entrypoints and composition. Fine file/folder layout and exact APIs remain
 unapproved, and the coarse example does not authorize production scaffolding.
@@ -888,7 +839,7 @@ normal-use steering and follow-up input remain retained. Do not turn that test-s
 detail into another owner questionnaire or a product feature cut. Choose the bounded
 checkpoint within a concrete, structurally aligned implementation plan, not by
 promoting the draft or fixtures into implementation permission. See
-[the scoped review](SESSION-DESIGN.md#8-resumed-inputrecovery-review--2026-11-05).
+[the scoped review](session-design.md#8-resumed-inputrecovery-review--2026-11-05).
 
 <a id="model-call-reuse-and-composition-design-alignment"></a>
 
@@ -923,8 +874,8 @@ Shared client use does not mean a process-wide serial executor or shared mutable
 request state. Provider fidelity, caller-specific retry/fallback policy and
 cancellation still need qualification; auxiliary calls do not acquire the tool
 loop. The provisional cycle direction above is separate from this composition
-boundary. [Execution design](EXECUTION-DESIGN.md) records evidence and remaining
-gates; the older [C# discovery](GO-DOTNET-DISCOVERY.md) remains historical candidate
+boundary. [Execution design](execution-design.md) records evidence and remaining
+gates; the older [C# discovery](go-dotnet-discovery.md) remains historical candidate
 evidence, not a wider package selection.
 
 ### Provider-specific context choices
@@ -993,7 +944,7 @@ not invent, reorder or duplicate records. A missing acknowledgement does not
 prove that a transaction failed or that retrying it is safe.
 
 **Rejected alternatives** (evidence in [STORAGE-RESEARCH.md](STORAGE-RESEARCH.md),
-[STORAGE-EXPERIMENT.md](STORAGE-EXPERIMENT.md), the binding review and harness
+[storage-experiment.md](storage-experiment.md), the binding review and harness
 run records):
 
 - *Pure JSONL/files and segmented binary logs:* bounded reads tie with SQLite,
@@ -1027,12 +978,12 @@ pathology: unbounded WAL/vacuum cost at the largest fixture tiers, or a
 concurrency failure under multiple active writers in Stage 2. Internal schema,
 driver pinning and process placement remain ordinary design work, not new
 decisions. Prior sections of [STORAGE-RESEARCH.md](STORAGE-RESEARCH.md) and
-[STORAGE-EXPERIMENT.md](STORAGE-EXPERIMENT.md) that describe storage as
+[storage-experiment.md](storage-experiment.md) that describe storage as
 unselected are historical as of this date.
 
-[First-slice SQLite validation](SQLITE-VALIDATION.md) subsequently exercised
+[First-slice SQLite validation](sqlite-validation.md) subsequently exercised
 bounded concurrent activity and signalled process-kill boundaries. Its
-[preview follow-up](SQLITE-VALIDATION.md#preview-fix-follow-up--2026-11-04) fixes
+[preview follow-up](sqlite-validation.md#preview-fix-follow-up--2026-11-04) fixes
 snapshot consistency, empty-message visibility and Unicode boundaries in the
 experimental adapter; separate `PageOlder`/`ReadRange` snapshot races remain.
 Its conditional go supports the engine choice, not promotion of the reduced

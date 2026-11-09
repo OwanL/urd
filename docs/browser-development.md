@@ -1,19 +1,22 @@
 # Browser development
 
-Tests and helpers share the repository-wide [hard size budget](testing.md).
-Historical test counts below are checkpoint evidence, not the current suite size.
+Tests and helpers share the repository-wide [hard size budget](testing.md); historical
+checkpoint totals are not current suite counts.
 
 The browser uses Preact components and ordinary state/effects over typed
 `SessionClient` and `ProviderClient` HTTP access. Vite builds static assets served
 by the same loopback Server; there is no second production server, API proxy or
-browser-side provider SDK. Provider credentials remain in the backend.
+browser-side provider SDK. Provider credentials remain in the backend. Live session
+changes arrive through a bounded server-sent event stream; the browser then reads slim
+snapshot/history metadata and loads message text on demand.
 
 The workspace has closable, reorderable local tabs, transcript, model and reasoning
-selectors, Send and Stop, and [provider settings](provider-management.md#browser-settings).
-Snooze remains unavailable. Older-history navigation, Markdown and tool inspectors
-are not implemented yet. Closing a tab hides the view; it does not stop work, close
-a backend session or delete history. Components and effects stay with their feature;
-hooks are extracted for actual responsibilities, not a state framework.
+selectors, Send, Stop and integrated [provider settings](provider-management.md#browser-settings).
+Snooze remains unavailable. The UI displays the latest bounded history page and tool status;
+older-page navigation, Markdown and tool arguments/results are not implemented. The history
+API supports anchored pages. Closing a tab hides the view; it does not stop work, close a
+backend session or delete history. Components and effects stay with their feature; hooks are
+extracted for actual responsibilities, not a state framework.
 
 Drag tabs with a pointer, or focus a tab and use Alt+Shift+Left/Right to move it.
 The held tab follows the pointer; neighbours move aside when its facing edge crosses
@@ -39,7 +42,8 @@ retry. If cleanup alone fails after a successful save, the saved state remains u
 and cleanup can be retried. A failed initial read stays fail-closed until retry restores
 the workspace; corrupt data is never silently replaced.
 The palette uses neutral black/charcoal surfaces and grey controls; semantic error
-colours remain distinct. Rich transcript architecture is a separate workstream.
+colours remain distinct. Transcript rows render plain text and tool status; richer formatting
+and tool argument/result inspection remain future work.
 
 ## Workspace composition
 
@@ -51,6 +55,7 @@ It does not implement storage recovery, navigation or catalog request lifecycles
 | `usePersistedWorkspace` | Owns the current workspace and synchronous updates, draft/root persistence, storage failures and explicit recovery. Its stable command access reads the latest state; successful-load identity changes only on read recovery, not ordinary edits. |
 | `useWorkspaceNavigation` | Discovers the initial workspace after a successful read, applies deep links, opens/closes/reorders tabs and synchronizes the URL. It calls the existing Create command; it never stops backend work. |
 | `useWorkspaceModels` | Owns cached catalog loading, refresh state and invalidation at workspace lifetime, using `WorkspaceModels` for request publication ordering. |
+| `useSessionEvents` | Owns the page-lifetime event stream, saved-ID discovery, open/watched registrations and per-tab status/change notices. |
 | `WorkspaceCommands` | Owns Create, Send/retry, receipt reconciliation and Stop across conversation switches. Create still journals before dispatch and opens the acknowledged session against current state. |
 | `Conversation` | Mounts only for the active chat; composes snapshot observation, transcript, status and composer. Its snapshot hook owns cancellable reads, not command lifetime. |
 | `ConversationState` | Derives selection, Send eligibility and execution status from existing facts; it stores no additional state. |
@@ -68,10 +73,10 @@ Use Node **24.16.0** (`source/ui/.node-version`) and npm **11.13.0**
 (`source/ui/package.json`); no global installation or PATH change is required.
 Pinned tools are native TypeScript **7.0.2**, Oxlint **1.92.0** with
 **oxlint-tsgolint 7.0.2006**, and independently Oxfmt **0.77.0**. Node type definitions
-remain **24.19.2**. Rendering/build pins are **Preact 11.2.0** and **Vite 8.3.6**,
-without React compatibility or compiler plugins. Keep optional native packages
-installed. Node runs tests with native TypeScript stripping; strict compilation is
-separate.
+remain **24.19.2**. Rendering/build pins are **Preact 11.2.0**, **Vite 8.3.6** and
+Playwright **1.65.0**, without React compatibility or compiler plugins. Keep optional
+native packages installed. Node runs tests with native TypeScript stripping; strict
+compilation is separate.
 
 From `source/ui/`:
 
@@ -89,7 +94,7 @@ npm run build
 | `npm run lint` / `npm run lint:fast` | Combined typed lint / syntax-only feedback. |
 | `npm run typecheck` / `npm run typecheck:watch` | Strict compiler once / persistent watch. |
 | `npm test` | Fast Node unit tests discovered from `tests/**/*.test.ts`; no frontend component framework. |
-| `npm run test:browser` | Headless Playwright regression against the temporary real Server and offline loopback model fixture. |
+| `node --test tests/BrowserRegression.ts` | Headless Playwright regression against the temporary real Server and offline loopback model fixture. |
 | `npm run build` / `npm run build:watch` | Bundle once / watch into `source/ui/dist`; neither runs a server. |
 | `npm run test:integration` | Real Server and SDK-to-loopback-provider test; requires built UI assets and the Release backend build. |
 | `npm run test:browser:host` | Explicit temporary browser fixture host; real Urd plus a credential-free loopback model fixture, never saved accounts. |
@@ -129,7 +134,7 @@ The fixture launches the built Server with its own temporary data root and port
 refreshes only that fixture's catalog. It exercises the real managed provider, SDK,
 execution and SQLite path, not a production fake-client flag. Install the pinned
 Playwright Chromium once with `npx playwright install chromium`, then run
-`npm run test:browser` for the headless draft/reload/send/recovery regression. For
+`node --test tests/BrowserRegression.ts` for the headless browser regressions. For
 manual inspection, run `npm run test:browser:host` and open its printed Urd origin.
 Ctrl+C or POST to
 the printed model origin's `/__shutdown` closes the fixture. Test-control routes
@@ -192,34 +197,25 @@ account requests were made for these checks; screenshots stay in an owned temp f
 The [context-choice alignment](ARCHITECTURE.md#provider-specific-context-choices)
 keeps future provider context modes separate from limits, Urd's context budget and
 pricing. This slice adds no context-tier selector, inferred limit or silent history
-truncation. Display remains the bounded recent snapshot plus on-demand message
-content, not a claim of full-history navigation.
+truncation. Snapshots contain slim current facts; the history API pages transcript metadata,
+and the browser loads visible message content on demand. Older transcript pages remain
+available through the API but are not yet navigable in the UI.
 
-## First workspace qualification
+## Earlier workspace qualification
 
-The integrated Windows Release checkpoint passed **591 backend tests**, **85 UI
-unit tests**, the full UI static gate, Vite build and the real-server/loopback-SDK
-integration test, with no build warnings. Chromium rendered checks covered actual
-model/effort delivery, Send/Stop, exact retry and reload reconciliation, foreign
-receipts, newer drafts, closing a busy tab, failed/lost Stop acknowledgements and
-stopping a successor while an earlier Stop acknowledgement remained pending.
-
-Two-client checks covered selection-lock refusals and accepted work falling out of
-the recent message window (using a bounded-response fixture). Reading anchors,
-streaming text selection, idle polling, model refresh/search, keyboard tabs,
-Enter/Shift+Enter and the IME guard were checked. Desktop, 390 px mobile, overflowing
-tabs and a 200%-equivalent viewport passed rendered/visual review. Screenshots stay
-local; Pie was only a visual reference, not a source of copied code or styles.
-These are manual Chromium fixture checks, not an automated browser suite or cross-browser,
-native-IME, live-account or full-history-navigation qualification.
+An earlier integrated Windows checkpoint combined the Release backend, UI static gate,
+Vite build, real-server/loopback-SDK integration and rendered Chromium checks. Those checks
+covered model/effort delivery, Send/Stop, retry/reload reconciliation, foreign receipts,
+drafts, closing a busy tab, reading anchors, model refresh/search, keyboard tabs and narrow
+viewports. They were fixture checks, not cross-browser, native-IME, live-account or
+full-history-navigation qualification. Screenshots stayed local; Pie was a visual reference,
+not a source of copied code or styles.
 
 ## Historical qualification
 
-The original transport checkpoint passed locked npm installation, strict
-compilation, **36/36 HTTP boundary tests**, real-server integration and **296/296
-Release backend tests**, without build warnings. That checkpoint used the original
-fake-client Server composition; it did not qualify provider execution or render a
-UI. The current loopback-provider fixture replaces that composition in integration.
+The original transport checkpoint used the earlier fake-client Server composition and
+predated provider execution and the rendered UI. Current integration uses the loopback-provider
+fixture; these historical checkpoint notes do not describe the current test suite.
 
 The tooling study used 11 good TS/TSX files (756 lines) on Windows x64. TS7 preserved
 seeded strict diagnostics; combined Oxlint caught all nine selected lint seeds.
@@ -230,14 +226,10 @@ not a scale, editor/LSP, browser or cross-platform qualification. TS7 lacks the 
 compiler API; compiler-API plugins need separate qualification. Oxfmt is 0.x:
 keep pins and review upgrades rather than assuming universal compatibility.
 
-The adopted tooling then passed a fresh locked, script-disabled install, the full
-static gate, **36/36 unit tests** and real-server wire integration. Fourteen isolated
-good/bad checks verified configured diagnostics and formatting, including promises
-inside test bodies. Independent review approved. `npm run check` took **1.13 s
-median** across five fresh processes (1.08–1.19 s; first measured run 1.39 s),
-including npm/shell startup and all three checks. This is a baseline, not a fixed
-budget or a claim about future application performance. Linux verification was not run
-locally for that checkpoint.
+The adopted tooling was checked with a locked, script-disabled install, the static
+gate, unit tests and real-server wire integration. Isolated good/bad checks exercised
+configured diagnostics and formatting, including promises inside test bodies. These
+historical results are not a cross-platform or future-performance guarantee.
 
 The Preact/Vite preparation passed locked script-disabled installation and a
 separate OS-temp TSX fixture: strict compilation, invalid-prop diagnostics, HTML/CSS

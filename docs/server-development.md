@@ -1,16 +1,12 @@
 # Local server development
 
-The local ASP.NET Core server composes Urd's existing Core and SQLite; it is not a
-second backend. It now exposes seven operations: **create, list saved primary IDs, Send,
-receipt lookup, snapshot polling, content reads and addressed Stop**. The owner-approved
-listing slice is implemented and tested; verification evidence is below.
-The first [browser screen](browser-development.md) is served from built static assets.
-[Provider management](provider-management.md) supports ChatGPT sign-in, OpenAI API keys
-and custom-compatible connections; production chat now borrows real provider-managed clients.
-Provider setup remains headless, and startup recovery is not implemented.
-Core now provides default durable safe-boundary steering
-for busy Sends in the owned execution; real tools, tool-inspection UI/API and an explicit after-execution
-queue remain deferred.
+The local ASP.NET Core server composes Urd's Core, SQLite and provider manager; it is not a
+second backend. Session routes cover creation, saved-ID listing, Send/receipt, addressed Stop,
+slim snapshots, paged transcript history, not-sent inputs and bounded content reads. Separate
+event routes provide server-sent updates for the browser workspace. Provider management and
+its settings UI are integrated; production sessions borrow provider-managed clients. Startup
+recovery and an explicit after-execution queue are not implemented. Real application tools,
+tool arguments and results are not exposed to the browser.
 
 ## Run
 
@@ -71,8 +67,20 @@ and Core shutdown operations both finish; it has no forced cleanup timeout.
 | POST `/api/sessions/{sessionId}/message-submissions` | `UserMessageSubmission` → 200 `UserMessageReceipt`, Accepted **or** Refused |
 | GET `/api/sessions/{sessionId}/message-submissions/{submissionId}` | 200 receipt or literal JSON `null` |
 | POST `/api/sessions/{sessionId}/executions/{executionId}/stop` | Empty JSON object `{}` → 200 `StopReceipt` for Requested or Settled |
-| GET `/api/sessions/{sessionId}/snapshot` | 200 `SessionSnapshot` |
-| GET `/api/sessions/{sessionId}/content` | 200 `MessageContentPage` |
+| GET `/api/sessions/{sessionId}/snapshot` | 200 slim `SessionSnapshot` |
+| GET `/api/sessions/{sessionId}/history` | Mode/revision and optional entry anchor → 200 bounded `TranscriptHistoryPage` |
+| GET `/api/sessions/{sessionId}/not-sent?cursor=...` | Optional opaque cursor → 200 page of known-not-sent inputs |
+| GET `/api/sessions/{sessionId}/content` | Segment-local cursor → 200 `MessageContentPage` |
+
+### Browser event stream
+
+`GET /api/events` opens a transient server-sent event stream. Its `connected` event provides
+stream and process-boot IDs. Register a page's open and watched session IDs with
+`POST /api/events/{streamId}` using `{open, watched}`; the server emits `status` for open
+sessions, `change` for watched sessions, and `session-created` hints. Heartbeats keep the
+stream active. Status events update tab status; change notices prompt bounded snapshot/history
+reads. Events are not durable history or message payloads. Reconnect performs saved-ID
+discovery again. The existing local API marker and gates apply.
 
 **Breaking vocabulary change:** there are no legacy route/member aliases.
 A submission body is `{submissionId, expectedHistoryRevision, text, llmSelection}`.
@@ -83,12 +91,11 @@ receipts have a refusal reason and null execution ID. Stop receipts and
 `SessionExecutionResult` use `executionId`; snapshots use `unsettledExecutionId` and
 `MessageRef` (including nested content cursors) uses `executionId`.
 The vocabulary cleanup preserved saved IDs, revisions, SQL identifiers and decisions.
-Selection adds the schema-8 migration described below; the seven operations retain their
-local admission gates, status mapping, no-store and read-only request-cancellation rules.
-The naming and structure cleanup passed locked restore and **296/296 Release tests** without warnings,
-plus independent acceptance review. Raw HTTP checks verify the renamed receipt, Stop,
-snapshot and nested cursor fields, and reject legacy routes and required field names.
-Counts below describe the earlier feature checkpoints.
+Frozen selection was introduced by schema 8; schema 9 added transcript metadata and request
+usage, and schema 10 added attempt provenance and not-sent tracking. Session routes retain
+their local admission gates, status mapping, no-store and read-cancellation rules. Historical
+wire checks covered the renamed receipt, Stop, snapshot and cursor fields and rejected legacy
+routes and required field names.
 
 ### Frozen LLM selection
 
@@ -108,19 +115,16 @@ Idle switching preserves visible history; native-context compatibility remains t
 provider layer's responsibility.
 
 Snapshots include `latestLlmSelection`, taken from the initiating submission of the
-newest execution even when it is outside the recent message window. It is not a
-separate mutable preference. Schema 8 stores nullable selection JSON and widens the
-refusal check with a transactional table rebuild and foreign-key verification.
+newest execution, independent of the transcript page being viewed. It is not a separate
+mutable preference. Schema 8 stores nullable selection JSON and widens the refusal check
+with a transactional table rebuild and foreign-key verification.
 Legacy decisions retain null; their exact retries are resolved before fresh-Send
 validation, without inventing a provider choice or replaying work. A reused ID with
 changed text, revision **or any original selection member** remains a 409 conflict.
 
-This Core/HTTP checkpoint passed locked restore, independent source/test review and
-**583/583 Release tests**, including factory reentrancy/failure, frozen continuations,
-selection outside the preview window, actual provider-manager stale bindings with
-injected transport, raw HTTP validation/reopen, schema-7 migration and rollback.
-No live account/model calls or rendered browser qualification are implied by that
-checkpoint.
+Historical Core/HTTP verification covered factory reentrancy/failure, frozen continuations,
+actual provider-manager stale bindings with injected transport, raw HTTP validation/reopen,
+and schema migration/rollback. This is not live account/model or browser qualification.
 
 Listing calls `SessionManager.ListPrimaryIdsAsync` and returns at most 60 IDs in newest-created
 order, without handles, summaries, titles, history loading or execution. Empty and retained
@@ -134,16 +138,21 @@ loopback/Host/Origin/client-marker/no-store gate and no-body GET rule apply; shu
 failures remain 503. Core's schema-5 ordering metadata and atomic create are described in
 [backend development](backend-development.md#saved-primary-id-discovery).
 Legacy rows use a fixed descending binary-ID fallback, not recovered creation chronology.
-No last-used tracking, full-history navigation or automatic recovery is added.
+The listing adds no last-used tracking or automatic recovery. Transcript history has a separate
+bounded API; the browser currently displays its latest page but does not navigate older pages.
 
 POST requires JSON. Encoded bodies are limited to 128 KiB, including chunked requests;
-decoded submission text is limited to 16 KiB of strict UTF-8. Missing required submission members,
+Core no longer applies the old separate 16 KiB submission-text cap. Missing required submission members,
 null text, empty/malformed GUIDs and invalid cursors are rejected before admission.
 JSON uses camelCase properties and enum names, string GUIDs and integer revisions.
-Content GET requires six query fields: `executionId`, `messageId`, `role` (`user` or `assistant`),
-`historyRevision`, `segmentIndex`, `utf8Offset`. These directly describe Core's segment-local
-cursor; offsets are bytes, not string indices. Snapshot/content bounds and the distinct
-closed/final-output/settlement facts are unchanged from [Core](backend-development.md).
+History GET requires `mode` and `expectedHistoryRevision`; `before`, `after` and `around` also
+require the exact `executionId`, `entryId` and `kind` anchor. Pages contain at most 60 entry
+metadata records, not text bodies. Not-sent GET accepts an optional opaque positive-ordinal
+cursor and returns bounded previews; the browser retrieves the retained receipt before offering
+an explicit resend. Content GET requires `executionId`, `messageId`, `role` (`user` or `assistant`),
+`historyRevision`, `segmentIndex` and `utf8Offset`. Offsets are bytes, not string indices.
+Snapshots contain slim current facts; history metadata and content use their own bounded reads.
+Closed, final-output and settlement facts remain distinct; see [Core](backend-development.md).
 
 In another terminal, set `$origin` to the actual readiness origin and choose
 `$connectionId` and `$modelId` from your configured provider/catalog. This sends a
@@ -161,13 +170,15 @@ $receipt = Invoke-RestMethod "$origin/api/sessions/$($chat.sessionId)/message-su
 $receipt # A durable admission decision, not a completed answer.
 ```
 
-Poll the snapshot to observe committed text and settlement; use content reads beyond previews.
+Status events update tab status; change notices trigger snapshot/history reads. Read transcript
+metadata through `/history` and message bytes through `/content`.
 A distinct busy Send can receive an Accepted receipt for durable steering in the owned execution,
 up to eight nonterminal input deliveries. At the next safe request boundary, tool results
 precede separate user messages in admission order; pending steering also continues after a
 successful no-tool response. Already-claimed requests are unchanged. The HTTP layer adds no
 busy policy or steering-specific routes and does not turn a durable refusal into an HTTP error.
-Public reads remain user/assistant text only; there is no tool-inspection endpoint.
+History entries include tool names and execution status, but there is no endpoint for tool
+arguments or results.
 
 Stop addresses the observed execution ID, never a replacement: `Requested` acknowledges committed
 intent and pending-steering retirement, not finished cleanup; `Settled` includes the saved
@@ -203,12 +214,13 @@ Constructors and health/read requests do not start LLM work. An internal overloa
 accepts an owned client factory only for controlled composition tests; it is not a
 CLI fake-provider mode. Those clients are disposed only after successful drain.
 
-Request cancellation applies to listing/receipt/snapshot/content reads, not accepted LLM work.
-Listing's `RequestAborted` owns only that bounded read, never execution; cancellation may abandon
-its guard wait or precede the synchronous read, not interrupt an in-progress SQLite query.
-Create/Send handlers return after admission and Stop after intent acknowledgement, without waiting
-for settlement. Stop body validation may use request cancellation, but no `RequestAborted` token
-enters Core Stop; closing a connection does not own cancellation of the session.
+Request cancellation applies to bounded session/provider reads, plus event-stream lifetime and
+event registration. It does not cancel accepted LLM work. A read's `RequestAborted` owns only
+that read; cancellation may abandon its guard wait or precede the synchronous SQLite read, not
+interrupt a query already in progress. Create/Send return after admission and Stop after intent
+acknowledgement, without waiting for settlement. Stop body
+validation may use request cancellation, but no `RequestAborted` token enters Core Stop; closing
+a connection does not own cancellation of the session.
 
 A second Urd host for that directory fails before opening SQLite. The lock file is retained;
 its open handle, not its contents or a PID, conveys ownership. Separate data roots can run
@@ -226,62 +238,25 @@ Normal reopen preserves saved history and does not replay work. Opening a databa
 **not** recover orphan executions or make a previously fenced conversation usable again.
 Stop retires pending steering without rewriting Accepted receipts or automatically carrying
 it into another execution. Separate independent worker chats continue; bounded-descendant ownership
-requirements remain in [architecture](ARCHITECTURE.md) and [session design](SESSION-DESIGN.md),
+requirements remain in [architecture](ARCHITECTURE.md) and [session design](session-design.md),
 not a new child runtime. Stop cannot undo effects or forcibly kill arbitrary in-process functions.
 The CLI configures real selected provider clients, but not application tools. Public
 Stop does not add a second execution loop or change provider/tool ownership.
 
 ## Verification and review
 
-The listing slice passed locked restore, independent review and **295/295 Release tests**, without
-warnings. Real Kestrel/SQLite tests cover multiple pages, another client, reopen/cursor reuse,
-invalid cursors, local gates/no-store/no-body rules and storage failures, with no LLM calls.
-Core/storage tests cover migration/rollback, no hydration/replay and cancellation isolation;
-see [backend evidence](backend-development.md#saved-primary-id-discovery). No UI qualification is implied.
-
-The historical public Stop slice passed locked restore, independent review and the full **281/281 Release tests**,
-without warnings. `SessionStopRoutesTests` exercises real Kestrel/SQLite acknowledgements while
-callbacks/cleanup remain held, unread acknowledgements, repeated and stale Stops, independent
-sessions, orphan 409 responses, failed persistence with local cancellation, and validation/gates.
-Core tests cover uncooperative fake tools, late-write rejection, rollback and callback failures.
-These do not qualify real tools, subprocess termination or subagent-runtime cancellation.
-The previous steering/fake-tool checkpoint passed locked restore and the full Release
-solution suite: **259/259** tests, with no warnings. Its real Kestrel/SQLite
-`BusyHttpSendsBecomeDurableSteeringWithoutChangingTheRoutes` case verifies Accepted busy
-Sends, receipt lookup/exact retry and ordered continuation in the same execution through the
-existing routes. Core tests cover fake-tool execution and lifecycle/fault boundaries;
-HTTP does not expose tool inspection or configure real tools.
-
-### Historical hosting evidence
-
-The earlier five-operation HTTP slice passed **210/210** tests with no compiler or
-analyzer warnings. The original 72 hosting cases covered startup/lifetime; 26 added cases
-cover API marker/cache behavior and the five-operation HTTP path. Real Kestrel/SQLite tests
-exercise two clients/chats, exact concurrent retries, retained refusal, Unicode content and
-cursors, JSON/media/size limits (including chunked bodies), rejection before read/write
-side effects, and restart without replay. Child-process tests cover CLI readiness, paths
-with spaces, hostile ambient listener configuration and competing-process ownership.
-In an isolated copy, those child tests also rejected deliberate regressions that enabled
-ambient listener configuration or shared the directory lease; restored sources passed again.
-The HTTP route tests also rejected deliberate regressions allowing unmarked private reads
-or turning a saved refusal into HTTP 409; the restored nine-test route suite passed again.
-
-The child readiness test explicitly terminates its own process after health checks;
-that is **not** evidence of graceful shutdown. Separate in-process tests use the actual
-server's stop token and await completion. A gated LLM now proves that HTTP-admitted work
-keeps shutdown, the client and directory lease live until LLM cleanup releases and
-settlement saves. A sender that closes without reading its acknowledgement can retrieve
-and retry its retained receipt while the LLM continues; this does not force a precise
-in-flight `RequestAborted` race. Core tests independently cover callbacks and persistence
-failures. That earlier evidence did not qualify queue/steering. Neither it nor the current
-fake-tool checkpoint qualifies browser behavior, load or real tools/providers.
+Current ownership and deliberate coverage reductions are listed in
+[the test scope](testing.md). Route-level checks use real Kestrel/SQLite for session,
+provider and event contracts; they do not imply live provider calls or qualification of
+arbitrary tools, subprocess termination or subagent-runtime cancellation. Earlier hosting
+checkpoints covered startup/lifetime, local admission, retries, content cursors, request
+limits and shutdown draining. Their test totals and five-operation route description are
+historical and are omitted here.
 
 Review `source/hosting/server/Program.cs` first, then `ServerOptions.cs`,
-`LocalBrowserGate.cs`, `SessionRoutes.cs` and `ProviderRoutes.cs`. The fake client lives
-only in test support. Tests are in
-`source/tests/Urd.Backend.Tests/hosting/`, using `support/RunningServer.cs`,
-`support/ServerProcess.cs` and the existing SQLite evidence readers. In particular,
-`SessionRoutesTests.cs` includes the busy-Send steering flow; `SessionHttpLifetimeTests.cs`
-retains the active-work shutdown and disconnected-sender checks.
-The [hosting design record](scratch/initial-ui-hosting-design.md) separates this approval
-from future Core/transport/UI work.
+`LocalBrowserGate.cs`, `SessionRoutes.cs`, `EventRoutes.cs` and `ProviderRoutes.cs`.
+Tests are in `source/tests/Urd.Backend.Tests/hosting/`; `SessionRoutesTests.cs`,
+`TranscriptHistoryRoutesTests.cs` and `SessionEventRoutesTests.cs` cover current session,
+history and event routes. `SessionHttpLifetimeTests.cs` covers host drain and retained
+receipt reads while accepted work continues. The current route inventory is above;
+old hosting proposals are recoverable from Git history.

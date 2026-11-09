@@ -9,11 +9,11 @@
 > **Current direction:** `Microsoft.Extensions.AI.Abstractions` and `IChatClient`
 > are selected in [ARCHITECTURE.md](ARCHITECTURE.md). The owner accepts a configured
 > request-only client directly for session execution and auxiliary operations,
-> without a mandatory Urd facade ([Session Design](SESSION-DESIGN.md)). A narrow
+> without a mandatory Urd facade ([Session Design](session-design.md)). A narrow
 > Urd-owned cycle is the provisional direction. Discovery uses qualified native
 > appended definitions, otherwise a stable invocation wrapper present from the
-> initial catalog for recovered tools. [Execution Design](EXECUTION-DESIGN.md)
-> records the owner decisions and bounded fixture evidence; [Provider qualification](PROVIDER-QUALIFICATION.md)
+> initial catalog for recovered tools. [Execution Design](execution-design.md)
+> records the owner decisions and bounded fixture evidence; [Provider qualification](provider-qualification.md)
 > owns route limits. Local adapter/loop/SQLite test-envelope composition is now
 > exercised; actual session-store integration and live access remain unqualified.
 
@@ -30,7 +30,7 @@ Evidence classes used below:
 - **provider-doc-supported** — current official provider documentation; not version-
   pinned, recheck before implementation.
 - **not provider-tested** — nothing here has run against a real provider.
-  [Execution Design](EXECUTION-DESIGN.md#what-was-actually-exercised) adds local
+  [Execution Design](execution-design.md#what-was-actually-exercised) adds local
   HTTP/SSE adapter checks and composed guarded-loop/SQLite test-envelope reload.
   These are bounded mechanics, not provider acceptance, actual session-store
   integration, process-kill recovery or production streaming qualification.
@@ -108,7 +108,7 @@ Key per-adapter findings:
 | Concern | OpenAI Chat Completions | OpenAI Responses (experimental) | Anthropic 13.4.0 | OllamaSharp 5.5.0 |
 | --- | --- | --- | --- | --- |
 | Reasoning surface | Non-standard `reasoning_content` (DeepSeek/vLLM-style) only | `ReasoningResponseItem`; `EncryptedContent` → `ProtectedData`; item id in `AdditionalProperties["reasoningItemId"]` | `ThinkingBlock` → `TextReasoningContent{ProtectedData=signature}`; redacted thinking preserved | `Message.Thinking` → `TextReasoningContent` |
-| Reasoning replay | **Dropped** (no API slot) | Replayed incl. encrypted/id for store=false replay | Replayed (thinking/signature, redacted) | **Dropped by the inspected adapter**; current Ollama guidance supports replaying `thinking` (see [correction](PROVIDER-QUALIFICATION.md#reuse-only-where-it-helps)) |
+| Reasoning replay | **Dropped** (no API slot) | Replayed incl. encrypted/id for store=false replay | Replayed (thinking/signature, redacted) | **Dropped by the inspected adapter**; current Ollama guidance supports replaying `thinking` (see [correction](provider-qualification.md#reuse-only-where-it-helps)) |
 | Tool identity round-trip | CallId/Name/args preserved | CallId/Name/args preserved; streamed native function-item ID needs raw event capture (below) | preserved | **Call ids invented per replay** (Ollama has none) |
 | Raw escape hatch | request Patch / policies | unknown ResponseItems → `AIContent{RawRepresentation=item}`, replayed **verbatim at position** | raw `ToolUnion` passthrough; per-block `RawRepresentation is ContentBlockParam` replay; `RawRepresentationFactory` → `MessageCreateParams` | `RawRepresentationFactory` → `ChatRequest` |
 | Cache controls | n/a | caller-set | `anthropic:cache_control` AdditionalProperties helper; tool-def cache breakpoint; **not on thinking blocks** | none |
@@ -138,7 +138,7 @@ beta-header/AdditionalProperties convention** (source-supported).
   The plan route requires namespaces or `additional_tools` for function exposure
   and forbids `tool_search`, including client-executed search. Source-supported
   plus newer local scripted adapter evidence; **provider qualification pending**
-  (no live calls). [Provider qualification](PROVIDER-QUALIFICATION.md#first-route-exact-auth--request--tool-continuation)
+  (no live calls). [Provider qualification](provider-qualification.md#first-route-exact-auth--request--tool-continuation)
   owns the current request restrictions.
 - **Copilot**: no adapter exists anywhere in MEAI/OpenAI/Anthropic/OllamaSharp, and
   there is no public raw inference contract; Urd would own a thin custom transport
@@ -205,7 +205,7 @@ wrapper overhead/reliability nor Urd cache savings is measured here.
   owned reconstruction, not a qualified native discovery integration. Its
   `tool_search_output` was codec stress only, invalid as a ChatGPT-plan example.
   Original fixture artifacts: `%TEMP%\urd-meai-roundtrip\` (`Program.cs`, run log);
-  newer evidence: [Execution Design](EXECUTION-DESIGN.md#real-adapter--local-httpsse--file-reload-seven-requests-passed).
+  newer evidence: [Execution Design](execution-design.md#real-adapter--local-httpsse--file-reload-seven-requests-passed).
 - **Claude (source-supported):** Anthropic SDK **13.4.0** ships typed models for the
   beta (tool_addition/tool_definition, `AnthropicBeta.InlineTools2026_09_15`) only in
   its **Beta** namespace, plus a helper runner that explicitly does *not* add the
@@ -239,7 +239,7 @@ wrapper overhead/reliability nor Urd cache savings is measured here.
   IDs/payload/order through indexed reconstruction after file reload; encrypted
   reasoning and reasoning-item ID already survive ordinary JSON via `ProtectedData`
   and `AdditionalProperties`. The later
-  [composed fixture](EXECUTION-DESIGN.md#composed-follow-up-adapter--guarded-urd-loop--sqlite--continuation)
+  [composed fixture](execution-design.md#composed-follow-up-adapter--guarded-urd-loop--sqlite--continuation)
   adds atomic whole-history test-envelope storage/reload in SQLite, not the actual
   session/message-row owner or process-kill recovery. That owner still needs to
   preserve the necessary native data.
@@ -248,7 +248,7 @@ wrapper overhead/reliability nor Urd cache savings is measured here.
   captured definition without re-listing; no SDK-internal listing cache. Descriptors
   vs native appends are Urd's choice (source-supported,
   [McpClientTool.cs](https://github.com/modelcontextprotocol/csharp-sdk/blob/61420937cbef3eab895cafc8a89418811fb71f54/src/ModelContextProtocol.Core/Client/McpClientTool.cs)).
-  [Later SDK tests](MCP-QUALIFICATION.md) confirm that retained handles still invoke
+  [Later SDK tests](mcp-qualification.md) confirm that retained handles still invoke
   removed tools unless Urd checks current authority. Fake stdio peers used an
   explicit 2025 handshake, not default 2026 negotiation/fallback.
 
@@ -291,13 +291,13 @@ and `IChatClient` are selected**. The owner accepts direct use of a configured,
 request-only `IChatClient` by session execution and title/compaction/pruning
 operations; no additional Urd client facade is mandatory. Request configuration
 and provider fidelity do not themselves supply a tool loop or durable session.
-[Session Design](SESSION-DESIGN.md) owns that integration, not this research.
+[Session Design](session-design.md) owns that integration, not this research.
 
 **A narrow Urd-owned cycle is the provisional direction**, after the owner rejected
 adding the optional function-loop dependency for about **20 lines saved in the
 incomplete disposable comparison**. This is not a production implementation or
 maintenance-cost estimate, nor evidence that `FunctionInvokingChatClient` cannot
-meet Urd's needs. [Execution Design](EXECUTION-DESIGN.md#recommendation-and-owner-decisions)
+meet Urd's needs. [Execution Design](execution-design.md#recommendation-and-owner-decisions)
 records the comparison and decision; reconsider if real implementation recreates
 substantial library machinery.
 
@@ -314,12 +314,12 @@ framework nor a Claude beta adapter is approved by this direction.
 
 **Evidence and remaining gates:**
 
-- [Execution Design](EXECUTION-DESIGN.md#what-was-actually-exercised) now includes
+- [Execution Design](execution-design.md#what-was-actually-exercised) now includes
   composed real-adapter/terminal-guard/Urd-cycle/harmless-tool continuation through
   a SQLite whole-history test envelope. Actual session/record-owner integration,
   process-kill recovery and production streaming/cancellation remain outstanding;
   fixture details and reproduction belong there, not duplicated here.
-- [Offline OAuth/refresh checks](PROVIDER-QUALIFICATION.md#offline-auth-follow-up--2026-11-04)
+- [Offline OAuth/refresh checks](provider-qualification.md#offline-auth-follow-up--2026-11-04)
   establish candidate mechanics, including scope-preserving refresh—not production
   auth selection, live access or credential-storage/race qualification.
 - Live ChatGPT-plan registration/entitlement/inference/tool continuation still
@@ -327,7 +327,7 @@ framework nor a Claude beta adapter is approved by this direction.
   additional-tools fixture acceptance is not provider acceptance.
 - Claude inline-tool fidelity and Ollama server/model/adapter behavior remain
   unqualified; Copilot still has a separate authorization/support-contract gap.
-  [Provider qualification](PROVIDER-QUALIFICATION.md) owns those route gates.
+  [Provider qualification](provider-qualification.md) owns those route gates.
 - Wrapper reliability/cost, native provider acceptance and actual cache savings
   remain unmeasured. Ordinary-list updates are an alternative, not the selected
   fallback, and no automatic retry/fallback or tool replay is authorized.
@@ -368,7 +368,7 @@ Pinned source (all fetched 2026-11-03):
   `cc82abb0f317f31341d3a6f12aa1545f6be1fbea` (in the Pie repository).
 - Urd context: [ARCHITECTURE.md](ARCHITECTURE.md) (model-call composition alignment;
   preserve-model-visible-prefixes direction; provider-access decision),
-  [GO-DOTNET-DISCOVERY.md](GO-DOTNET-DISCOVERY.md) (prior offline MEAI loop probes),
-  [PROVIDER-RESEARCH.md](PROVIDER-RESEARCH.md) (subscription route seams).
+  [go-dotnet-discovery.md](go-dotnet-discovery.md) (prior offline MEAI loop probes),
+  [provider-research.md](provider-research.md) (subscription route seams).
 - Offline fixture artifacts: `%TEMP%\urd-meai-roundtrip\` (program + csproj); evidence
   files cached by this research under `%TEMP%\urd-mcai-research\`.

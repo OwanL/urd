@@ -1,7 +1,7 @@
 # Repository foundations: source customization and stage-3 review
 
 **2026-11-05 — owner direction plus proposals, not scaffold approval.**
-[README](../README.md) owns product intent; [Session Design](SESSION-DESIGN.md)
+[README](../README.md) owns product intent; [Session Design](session-design.md)
 records the selected, revisable Core-without-ASP.NET / Server → Core boundary.
 This review does not change those responsibilities or select frontend internals.
 
@@ -59,11 +59,12 @@ npm/pnpm setup comparison, the owner answered **“Lean toward npm”**. Record 
 as the preferred route, not an unconditional or irreversible manager selection.
 The earlier proposed .NET/Node/pnpm/Vite bundle was not approved as a whole.
 
-**Still open:** Node version, exact SDK/package pins, tool-acquisition mechanism,
-physical source/distribution format, exact source/data paths, SDK/cache shipping
-and activation mechanics. Test runners and formatters remain engineering work,
-not individual owner votes. No production configuration, scripts or scaffold are
-authorized by this review.
+**Current implementation:** SDK/Node/package pins, test runners and formatters are
+recorded in [backend](backend-development.md) and [browser development](browser-development.md).
+The initial Core/Server/browser foundation is implemented; the trial below retains its
+original scope. Tool acquisition, physical source/distribution format, exact packaged
+source/data paths, SDK/cache shipping and activation remain open. This record does not
+authorize new packaging or setup implementation.
 
 ## Research recommendation — conventional source distribution
 
@@ -111,10 +112,10 @@ checks, standard formatters, clear responsibility names and reviewed dependency
 locks/upgrades. Scope production SDK/MSBuild/package/format settings deliberately:
 root policies and command working directories can otherwise change experiments.
 
-Proposed tests: fake `IChatClient` behaviour; real SQLite guarded mutation/reopen
-flows; one real browser/Kestrel/SQLite smoke using the fake model. Keep fast editing
-checks separate from browser downloads, integration and packaging checks. Test the
-actual production paths, not just experimental fixtures; runner choice is still open.
+Production checks now cover synthetic provider calls, real SQLite mutation/reopen and
+browser/Kestrel flows; see [test scope](testing.md). Keep fast editing checks separate
+from browser downloads, integration and packaging checks. Test actual production paths,
+not just experimental fixtures.
 
 **Source-workflow acceptance:** start from distributed source without `.git`, build
 with documented prerequisites, make an observable edit/addition, package again,

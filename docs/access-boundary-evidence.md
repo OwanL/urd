@@ -66,7 +66,7 @@ provider tokens through the UI, or assume a device-code alternative exists for
 this route. A separately documented/qualified forwarding or other flow would be
 new evidence, not something this test establishes.
 
-[PROVIDER-QUALIFICATION.md](PROVIDER-QUALIFICATION.md) already covers candidate
+[provider-qualification.md](provider-qualification.md) already covers candidate
 offline OAuth/refresh glue and its limits. Authentication, model entitlement and
 inference remain separate. Copilot's supported standalone route is still a gap;
 its device OAuth documentation is not qualification of a ChatGPT flow or neutral
@@ -175,8 +175,8 @@ Before normal use: qualify real client bootstrap and credential lifetime; reject
 unauthorized reads/commands/streams through the chosen production path; test the
 actual credential store/backend identity and provider onboarding separately. Later
 remote/desktop/editor tests must use those real surfaces and preserve backend-local
-execution. Prior [browser](BROWSER-DESIGN.md), [backend lifecycle](BACKEND-LIFECYCLE.md)
-and [provider](PROVIDER-QUALIFICATION.md) evidence does not close these gates.
+execution. Prior [browser](BROWSER-DESIGN.md), [backend lifecycle](backend-lifecycle.md)
+and [provider](provider-qualification.md) evidence does not close these gates.
 
 ## Official sources
 

@@ -1,38 +1,37 @@
 # Backend development
 
-The current [test scope and hard size budget](testing.md) supersedes the suite
-coverage/counts in historical checkpoints below. Application contracts are unchanged.
+The current [test scope and hard size budget](testing.md) describes retained coverage;
+checkpoint totals are historical, not the current suite size.
 
-The current Core checkpoint includes session identity, durable user-Send decisions,
-fake-text/tool execution with default durable steering, bounded snapshot/content reads
-through real SQLite, graceful session shutdown, public addressed Stop and owner-approved
-saved-primary-ID discovery. The current listing increment passed locked restore and
-**295/295 Release tests**, without warnings, plus independent review.
 Core remains an ASP.NET-free .NET library. The [local Server](server-development.md)
-now exposes seven chat HTTP operations over it; UI is not implemented yet.
+composes it with the shared SQLite store and provider manager. The current flow includes
+saved-primary-ID discovery, durable Send decisions, safe-boundary steering, addressed
+Stop, bounded snapshot/history/content reads, known-not-sent discovery and graceful
+shutdown. The browser workspace is implemented and served as static assets by the Server.
 
-The separate [headless provider-management slice](provider-management.md) adds saved
-ChatGPT/OpenAI/custom connections, authentication, model discovery and explicit response
-diagnostics. `UrdStore` is the mechanically renamed shared database owner; schema 6 adds
-provider tables without changing session SQL/evidence. Real providers are not wired into
-chat execution. Historical checkpoint counts below predate this provider slice.
+`UrdStore` owns the shared database, currently schema 10. It records whether a request
+started sending and pages inputs known not to have been sent, so users can retrieve
+and explicitly resend them. Snapshots stay slim; transcript metadata and
+content use separate bounded reads, and reported usage is persisted per request. Provider
+settings are available in the browser workspace, and production sessions borrow clients from
+`ProviderManager`. See [provider management](provider-management.md) for connection and
+credential behavior.
 
 ## Naming and structure cleanup
 
 Core and HTTP now use **user message submission / acceptance / session execution**:
-`UserMessageSubmission(SubmissionId, ExpectedHistoryRevision, Text)` and
+`UserMessageSubmission(SubmissionId, ExpectedHistoryRevision, Text, LlmSelection?)` and
 `UserMessageReceipt(SessionId, Submission, Acceptance, RefusalReason, ExecutionId)`;
 `MessageAcceptance` and `MessageRefusalReason` retain the existing enum values/meanings.
 `GetUserMessageReceiptAsync(submissionId)` reads the retained receipt or null.
 Execution identities are `ExecutionId`, including `StopReceipt`, `SessionExecutionResult`
 and `MessageRef`; snapshots use `UnsettledExecutionId`.
-This is a breaking vocabulary change, with **no legacy aliases**. Saved IDs, revisions,
-SQL identifiers/schema 5, decisions and exact-retry semantics are unchanged.
-[Server](server-development.md#session-http-contract) records the renamed wire contract.
-The naming and structure cleanup passed locked restore and **296/296 Release tests** without warnings;
-independent acceptance review found no blockers. Raw HTTP assertions verify the renamed
-JSON members and reject legacy routes/required field names, alongside existing retry,
-reopen, migration, Stop and bounded-read checks. Counts below describe earlier checkpoints.
+This is a breaking vocabulary change, with **no legacy aliases**. At that checkpoint,
+saved IDs, revisions, SQL identifiers/schema 5, decisions and exact-retry semantics were
+unchanged. [Server](server-development.md#session-http-contract) records the wire contract.
+Historical verification included raw HTTP assertions for the renamed JSON members and
+rejection of legacy routes/required field names, alongside retry, reopen, migration, Stop
+and bounded-read checks.
 `SessionSnapshot` is now the single snapshot shape. `SnapshotReader.ReadStored` supplies
 stored facts with a conservative admission fence; `SessionBase.ReadSnapshotAsync` applies
 the same live admission/Stop rules under its existing lock before returning an immutable
@@ -43,9 +42,10 @@ classes remain separate by responsibility; no lifecycle or schema redesign accom
 
 ## Checkpoint scope
 
-- `SessionManager(store, client, IReadOnlyList<AIFunction>? tools = null)` passes borrowed
-  dependencies to canonical session handles. It snapshots the optional tool list, not the
-  functions themselves; the caller owns store, client and functions. Constructors start no work.
+- `SessionManager(store, createChatClient, IReadOnlyList<AIFunction>? tools = null)` passes the
+  borrowed store and client factory to canonical session handles. It snapshots the optional tool
+  list, not the functions themselves; the host owns the store, factory and functions. The factory
+  receives the frozen selected connection binding. Constructors start no work.
 - `PrimarySession.SubmitUserMessageAsync(submission)` returns a durable acceptance/refusal receipt,
   not an LLM answer. Acceptance and execution identity commit together. Exact retries return
   the original decision; neither lookup nor retained acceptance starts work. Refusal fences delayed originals.
@@ -74,16 +74,19 @@ classes remain separate by responsibility; no lifecycle or schema redesign accom
   Pending steering also continues after a successful no-tool response at the safe boundary.
   Claiming the next request or settling happens under the same guard, so racing admission cannot
   strand accepted input. Capacity, revision and Stopping refusals remain durable decisions.
-- Fake-tool batches are authorized only after successful response completion and provider cleanup;
-  calls execute sequentially, at most 16 per response, with 16 KiB JSON arguments/results per call.
+- Configured tool batches are authorized only after successful response completion and provider cleanup;
+  calls execute sequentially, at most 16 per response. The old 16 KiB tool JSON write caps
+  are removed; bounded reads protect display paths instead.
   Ordinary tool errors become feedback and remaining calls/LLM continuation proceed, including
   failures inside an opaque `AIFunction`'s binding/marshalling. Such errors do not guarantee no effects.
   Core-owned result encoding, persistence or cleanup faults fence uncertain work instead of
-  being converted into ordinary tool errors.
+  being converted into ordinary tool errors. Reported usage is accumulated and persisted with its
+  request completion when supplied; missing usage remains unknown.
 - Stop retires pending deliveries without rewriting Accepted receipts or automatically carrying
   them into another execution. No explicit after-execution queue is implemented.
-- Public snapshot/content reads expose committed state without starting work; cancelled reads
-  do not cancel execution. Reopened orphan executions and live persistence faults are reported as fenced.
+- Public snapshot, history, not-sent and content reads expose committed state without starting
+  work; cancelled reads do not cancel execution. Reopened orphan executions and live persistence
+  faults are reported as fenced.
 - `SessionManager.ShutdownSessionsAsync(waitCancellation)` fences creation/lookup/listing and input on every
   held handle, then stops and drains owned executions through cleanup and saved settlement. Concurrent/repeated
   calls join one retained outcome; cancellation abandons only the caller's wait, not shutdown. A failed
@@ -94,85 +97,30 @@ classes remain separate by responsibility; no lifecycle or schema redesign accom
   Cancellation callbacks may reenter reads/admission, but must not await shutdown or their own settlement.
 - Settlement waiting remains internal; public snapshots observe stopping and saved settlement.
   Unowned orphan Stop does not mutate/recover/replay the execution or fabricate settlement.
-  Public reads expose user/assistant text only; tool-inspection UI/API, push subscriptions,
-  real tools/providers and provider-native
-  context fidelity remain deferred. An admission receipt is not completion.
+  Content reads expose user/assistant text; history pages also expose bounded tool-entry status
+  and names, but not tool arguments or results. An admission receipt is not completion.
 - Normal terminal close/reopen is tested without replay. Nonterminal rows survive reopening
   and block new admission; startup interruption/recovery is **not** implemented.
 
-Public Stop passed independent production/test review and the full **281/281** Release suite.
-Real SQLite and HTTP checks cover prompt acknowledgement during held callbacks/cleanup,
-uncooperative fake tools, immutable steering receipts, stale/wrong-session Stop isolation,
-unowned orphans, lost acknowledgements, rollback and local cancellation after a failed save.
-In an isolated copy, tests rejected deliberate removal of local Stop write guards and the
-callback join; all four restored controls passed. No real-process or subagent termination
-qualification is implied. Review `sessions/SessionStopTests.cs`,
-`storage/StopStorageTests.cs` and `hosting/SessionStopRoutesTests.cs` under
-`source/tests/Urd.Backend.Tests/`; shared `support/HeldDisposal.cs` holds provider cleanup
-without duplicating the existing content-read test machinery.
+Earlier Stop and steering checkpoints used real SQLite and HTTP with held callbacks/cleanup,
+uncooperative fake tools, immutable receipts, stale/wrong-session Stop isolation, unowned
+orphans, lost acknowledgements, rollback, local cancellation after failed saves, and safe-boundary
+continuation. Those are historical results, not current suite totals or coverage claims.
+No real-process or subagent termination qualification is implied. Review
+`sessions/SessionStopTests.cs`, `storage/StopStorageTests.cs` and
+`hosting/SessionStopRoutesTests.cs` under `source/tests/Urd.Backend.Tests/` for retained
+representative cases. Full bounded-descendant ownership/join requirements remain in
+[architecture](ARCHITECTURE.md) and [session design](session-design.md). Functions must honor
+cancellation and join their owned work; Stop neither undoes effects nor forcibly kills
+arbitrary in-process functions.
 
-The previous steering/fake-tool checkpoint passed locked restore and the full Release
-suite: **259/259** tests, with no warnings.
-Coverage adds durable busy admission and bounds,
-ordered tool-result/steering continuation (including no-tool boundaries), claim-or-settle races,
-Stop/shutdown retirement, ordinary tool errors versus uncertain-effect fencing, transactional
-schema-4 migration/rollback and real HTTP busy Sends through the unchanged routes.
-In an isolated copy, focused tests rejected deliberate regressions that dropped no-tool
-continuation or blocked continuation on a saved tool error; both restored controls passed.
-These are fake-client/tool checks, not real-tool/provider or UI qualification.
-Public Stop adds no schema, framework, UI, real tools or child runtime. Full bounded-descendant
-ownership/join requirements remain in [architecture](ARCHITECTURE.md) and
-[session design](SESSION-DESIGN.md); separately opened independent worker chats continue.
-Functions must honor cancellation and join their owned work; Stop neither undoes effects nor
-forcibly kills arbitrary in-process functions. No subagent-runtime qualification is claimed.
+### Earlier checkpoints
 
-### Historical checkpoint evidence
-
-The following counts and measurements describe earlier slices, not the current total.
-At Core checkpoint `06c1c3d`, locked restore and the Release suite passed **35/35** tests,
-with no build warnings/errors.
-Coverage includes shared-client concurrent chats, exact retry/reopen, transactional rollback,
-UTF-8 batching, positive terminal evidence, held cleanup and persistence-failure fencing.
-The approved read increment passed **61/61** Release tests after locked restore, with no
-build warnings/errors. Coverage adds scalar-safe full-content paging, committed tail following,
-final output during held cleanup, reopened/faulted fences, exact recent-window boundaries,
-indexed selection over 9,000 mixed-history runs, and atomic version-2-to-3 migration/rollback.
-The subsequent naming/decision-readability pass passed **66/66** Release tests after
-locked restore, including five cases covering overlapping admission-refusal conditions;
-that pass changed no behavior or schema.
-The owner-approved execution redesign passes **73/73** Release tests after locked restore,
-with no build warnings/errors. Added coverage exercises invalid/incomplete Unicode, empty and
-exact-size final chunks, reentrant/held cancellation callbacks, repeated and stale Stops,
-and callback-failure fencing. The redesign changes internal lifetime coordination, not schema.
-The readability review passes **86/86** Release tests after locked restore. Added cases cover
-unsupported content, updates after Stop, trailing usage, repeated high surrogates and immutable
-completion retries after settlement. SQL, transactions and lifecycle ownership remain unchanged;
-clearer diagnostic wording from the earlier refactor is retained for new failures.
-The follow-up smell pass passes **90/90** Release tests, adding coverage for awaited chunk saves,
-write-failure ordering, cancelled lock waiters and stored preview identities. It removes per-character
-async work, avoidable allocations and repeated revision queries within a snapshot transaction.
-The response-batching optimization passes **101/101** Release tests. It counts strict UTF-8
-and appends bounded spans, retaining scalar handling for single units and Unicode/chunk boundaries.
-An additional temporary differential check matched the prior writer on 541 fragmented valid and
-malformed inputs. A local .NET 10 Release microbenchmark (64 warmups, nine alternating samples of
-64 responses, prebuilt text and synchronous no-I/O saves) measured roughly **4.5–5.6×** faster
-batching for 32-character updates and **9–11×** for oversized ASCII/mixed text. Single-character
-updates were roughly unchanged; measured allocations did not increase. These are isolated writer
-measurements with default runtime settings, not end-to-end provider or storage speedups.
-The graceful session-shutdown slice passes **112/112** Release tests after locked restore,
-with no build warnings/errors. Eight added cases cover empty/completed/active managers,
-all-handle fencing before reentrant callbacks, held cleanup/callbacks, cancelled/repeated waits,
-failed Stop writes (including failures in multiple sessions), already-faulted settlement,
-borrowed resources and reopen without recovery or replay. In an isolated copy, the new tests
-also rejected deliberate regressions that dropped concurrent-session failures or skipped a
-failed run's drain; the restored copy passed again. No schema or dependency changes.
-These are fake-client/Core checks, not browser polling, load or real-provider qualification.
-This is a Core review checkpoint, not the browser-to-Core milestone or a complete hosting API.
-The subsequent health-only Server slice passes **184/184** Release tests after locked restore;
-its 72 added cases and narrower hosting evidence are recorded in [server development](server-development.md).
-The five-operation HTTP slice passes **210/210** Release tests after locked restore, adding 26
-hosting cases and a typed input-conflict error without changing Core policy, schema or dependencies.
-See that same record for the real HTTP flow, controlled active-work shutdown evidence and limits.
+Earlier feature checkpoints covered concurrent clients, exact retries/reopen, transactional
+rollback, Unicode-safe streaming, cleanup and persistence failures, bounded content/listing
+reads, Stop/shutdown races, steering and real HTTP behavior. Their test totals and several
+intermediate feature descriptions no longer describe the current suite. See
+[the current test scope](testing.md) for retained coverage owners and deliberate reductions.
 
 ## Saved-primary-ID discovery
 
@@ -201,20 +149,16 @@ returned/tracked only after commit. Ordinals are not reused after deletion; gaps
 The cascade does not add a public delete/close operation; `SessionRecord` is unchanged.
 
 GET `/api/sessions?cursor=...` exposes the page through the existing local gates/no-store/no-body
-GET rule; see [Server](server-development.md). IDs are discovery only: existing explicit
-snapshot/content/receipt reads supply details. No summaries, titles, full-history navigation,
-last-used tracking, UI or automatic recovery is added. An ID proves neither usability nor stopped
-work. Listing can rediscover saved IDs, but cannot associate one with a lost create acknowledgement
-or justify automatic create retry.
+GET rule; see [Server](server-development.md). The API returns IDs only: it adds no summaries,
+titles or last-used tracking. The browser uses IDs to reconcile saved chats, while transcript
+history and content have separate bounded reads. An ID proves neither usability nor stopped work.
+Listing cannot associate a returned ID with a lost create acknowledgement or justify automatic
+create retry.
 
-Locked restore and **295/295 Release tests** pass without warnings; independent review found
-no blockers. `SessionListingStorageTests` covers atomic creation, genuine schema-4 migration and
-rollback, preserved evidence, paging across inserts/reopen/deleted boundaries and ordinal nonreuse.
-`SessionListingTests` verifies no handle hydration/replay, independent cancellation and unchanged
-creation order during execution. `SessionListingRoutesTests` exercises real HTTP/SQLite discovery
-across clients/reopen plus validation, admission gates and storage failure. In an isolated copy,
-storage and HTTP tests both rejected an inclusive-cursor regression; both restored controls passed.
-These qualify ID discovery, not UI, activity tracking or a complete summary API.
+`SessionListingStorageTests` covers atomic creation, schema upgrade/rollback, preserved evidence,
+paging across inserts/reopen/deleted boundaries and ordinal nonreuse. Session and HTTP coverage
+checks no handle hydration/replay, cancellation, gates and storage failures. These qualify ID
+discovery, not activity tracking or a complete summary API.
 
 ## Read contract and incremental review order
 
@@ -223,33 +167,34 @@ These qualify ID discovery, not UI, activity tracking or a complete summary API.
    `SessionExecutionResult`/`ExecutionOutcome` in [SessionExecutionResult.cs](../source/backend/core/execution/SessionExecutionResult.cs)
    are public, not duplicated. `ExecutionOutcome` describes an LLM request attempt, a tool invocation
    or a whole session execution; a successful request/tool does not imply settled execution.
-2. [SessionBase.cs](../source/backend/core/sessions/SessionBase.cs) — the two public read methods
-   take the existing guard; snapshots merge live admission fencing/local Stop intent with one committed view.
-3. [SnapshotReader.cs](../source/backend/core/storage/SnapshotReader.cs), then
-   [MessageContentReader.cs](../source/backend/core/storage/MessageContentReader.cs) — bounded queries
-   in short read transactions. [DatabaseSchema.cs](../source/backend/core/storage/DatabaseSchema.cs)
-   now uses schema version 5: version 4 added delivery/tool facts, sequential requests and a
-   message-order index; version 5 adds only creation-order metadata. Migrations from versions
-   0–4 preserve existing IDs, bytes and content cursors.
+2. [SessionBase.cs](../source/backend/core/sessions/SessionBase.cs) — public snapshot, history,
+   not-sent and content reads take the existing guard; snapshots merge live admission fencing/local
+   Stop intent with one committed view.
+3. [SnapshotReader.cs](../source/backend/core/storage/SnapshotReader.cs),
+   [TranscriptHistoryReader.cs](../source/backend/core/storage/TranscriptHistoryReader.cs) and
+   [MessageContentReader.cs](../source/backend/core/storage/MessageContentReader.cs) — separate
+   bounded reads in short transactions. [DatabaseSchema.cs](../source/backend/core/storage/DatabaseSchema.cs)
+   is at schema version 10. Earlier versions added creation order, provider state/native context,
+   frozen selection, transcript metadata and request usage; version 10 adds request-attempt and
+   not-sent facts while preserving transcript ordering.
 4. [MessageContentTests.cs](../source/tests/Urd.Backend.Tests/storage/MessageContentTests.cs) and
    [SessionSnapshotStorageTests.cs](../source/tests/Urd.Backend.Tests/storage/SessionSnapshotStorageTests.cs).
 
-Snapshots select at most 60 recent current-revision user/assistant text messages through the
-message-order index, not an unbounded expansion of recent executions. Each preview is at most 256 UTF-16
-units without splitting a scalar (under 64 KiB aggregate preview UTF-8). `HasOlderMessages`
-labels omission; older-history navigation is not implemented. Latest settlement and unsettled
-execution/Stop facts are queried independently of the recent window.
+Snapshots are slim committed facts: identity/revision and admission/Stop/settlement state,
+latest selection, a short first-user preview, and up to eight pending-input previews. They do not
+contain a recent transcript window. The `/history` read returns at most 60 entry descriptors
+with text cursors or tool status; `/content` fetches message bytes separately. The browser shows
+the latest history page and loads visible text on demand; older-page navigation is not exposed
+in the UI yet.
 
 Call `ReadMessageContentAsync` with `new MessageContentCursor(messageRef, 0, 0)`.
-Each page returns at most 16 KiB of original UTF-8 and examines at most 16 immutable segments. Follow `Next` while
-`HasMore`; a false value means the current committed tail, not necessarily final output.
-Poll snapshots and resume from that tail only when availability changes. Segment-local byte
-offsets preserve Unicode and embedded NUL; stale revisions throw `HistoryRevisionConflictException`.
-`Truncated` means the preview did not reach the committed segment endpoint within its budget.
-`IsClosed` concerns further bytes; `FinalOutputCommitted` is a saved final marker. Neither
-means successful execution settlement or finished cleanup. Continue status reads until settlement
-or a diagnosed fence. HTTP read cancellation is wired; browser poll scheduling, client-side
-cancellation and rendering are not built yet.
+Each page returns at most 16 KiB of original UTF-8 and examines at most 16 immutable segments.
+Follow `Next` while `HasMore`; a false value means the current committed tail, not necessarily
+final output. Segment-local byte offsets preserve Unicode and embedded NUL; stale revisions
+throw `HistoryRevisionConflictException`. `IsClosed` concerns further bytes;
+`FinalOutputCommitted` is a saved final marker. Neither means successful execution settlement or
+finished cleanup. The browser observes bounded server events, then refreshes snapshot/history
+metadata and reads message content on demand.
 
 ## Review order
 
@@ -275,7 +220,7 @@ share a file per concept. Read them alongside their owners.
    `LlmRequest`, `LlmResponseChunk` and `LlmRequestResult`; [SessionExecutionResult.cs](../source/backend/core/execution/SessionExecutionResult.cs)
    holds the saved whole-execution `SessionExecutionResult` and `ExecutionOutcome`. Their comments identify
    producer/consumer roles and lifecycle guarantees.
-4. [SessionStore.cs](../source/backend/core/storage/SessionStore.cs) — opens the database and exposes
+4. [UrdStore.cs](../source/backend/core/storage/UrdStore.cs) — opens the database and exposes
    focused parts: [Database.cs](../source/backend/core/storage/Database.cs) (connection, lock,
    transactions), [DatabaseSchema.cs](../source/backend/core/storage/DatabaseSchema.cs) (migrations),
    [SessionStorage.cs](../source/backend/core/storage/SessionStorage.cs),
@@ -285,7 +230,7 @@ share a file per concept. Read them alongside their owners.
    these are exposed internally as `UserMessages`, `Executions` and `LlmResponses`.
    [ToolStorage.cs](../source/backend/core/storage/ToolStorage.cs) — dispatch claims and retained results;
    [LlmContextReader.cs](../source/backend/core/storage/LlmContextReader.cs) — claimed submissions and
-   ordered assistant/tool context, distinct from the public text-only read projection.
+   ordered assistant/tool context, distinct from the public transcript metadata/content projection.
 5. [SessionConcurrencyTests.cs](../source/tests/Urd.Backend.Tests/sessions/SessionConcurrencyTests.cs),
    [SessionShutdownTests.cs](../source/tests/Urd.Backend.Tests/sessions/SessionShutdownTests.cs),
    [LlmResponseWriterTests.cs](../source/tests/Urd.Backend.Tests/execution/LlmResponseWriterTests.cs) and
@@ -330,11 +275,12 @@ Test also builds Core, Server and tests with nullable checking and the code-qual
 The command avoids persistent build/compiler servers and limits build parallelism.
 
 `Microsoft.Data.Sqlite` **10.0.14** follows the stable .NET 10 provider line and
-includes its SQLite native bundle. `Microsoft.Extensions.AI.Abstractions` **10.11.0** supplies
-only the request interface/data types; no provider adapter or middleware is installed.
-Tests use xUnit **2.9.3**'s ordinary `[Fact]` /
-`Assert` API, runner **4.0.1** (supports xUnit v2 and .NET 8+) and Microsoft.NET.Test.Sdk
-**18.11.0** (.NET 8+ assets). SonarAnalyzer.CSharp **10.35.0.4138** is shared through
+includes its SQLite native bundle. `Microsoft.Extensions.AI.Abstractions` and
+`Microsoft.Extensions.AI.OpenAI` **10.11.0** provide the request abstraction and adapter;
+OpenAI **2.14.0**, Duende OIDC **7.1.1**, Duende IdentityModel **8.1.0**, and
+Microsoft.IdentityModel.JsonWebTokens **8.23.0** are pinned in `Urd.Core.csproj`.
+Tests use xUnit **2.9.3**, runner **4.0.1**, and Microsoft.NET.Test.Sdk **18.11.0**.
+SonarAnalyzer.CSharp **10.35.0.4138** is shared through
 `source/Directory.Build.props` with `PrivateAssets="all"`; it is a build-time dependency,
 not part of the application API/runtime dependency graph. Versions live at these package
 references; lockfiles retain the transitive graph and content hashes.

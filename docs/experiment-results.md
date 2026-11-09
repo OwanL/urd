@@ -1,6 +1,6 @@
 # Small-operation experiments — Windows first round
 
-**Status:** executed 2026-11-03 on one active Windows 11 development machine. This is an exploratory comparison, **not** a foundation, UI, storage, packaging or cross-platform selection. The approved [proposal](EXPERIMENT-PROPOSAL.md) and its measured implementation are distinct. The optional child-process check and macOS/Linux executions were **not** run.
+**Status:** executed 2026-11-03 on one active Windows 11 development machine. This is an exploratory comparison, **not** a foundation, UI, storage, packaging or cross-platform selection. The approved [proposal](experiment-proposal.md) and its measured implementation are distinct. The optional child-process check and macOS/Linux executions were **not** run.
 
 ## Method and setup
 

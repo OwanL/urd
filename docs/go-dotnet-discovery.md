@@ -5,9 +5,8 @@
 > recommendation below are historical; qualification gaps remain relevant.
 > See [the agreed decision](ARCHITECTURE.md#c-backend-and-class-design).
 
-Research and Windows probes: **2026-11-03**. This advances the comparison in
-[FOUNDATION-RANKING.md](FOUNDATION-RANKING.md); this investigation selected no
-stack, storage, UI or loop ownership. The owner requested research and small experiments.
+Research and Windows probes: **2026-11-03**. This followed an exploratory language
+comparison; this investigation selected no stack, storage, UI or loop ownership. The owner requested research and small experiments.
 [README.md](../README.md) and [ARCHITECTURE.md](ARCHITECTURE.md) remain authoritative.
 
 ## Bottom line
@@ -94,7 +93,7 @@ and [published package](https://www.nuget.org/packages/Anthropic/13.4.0).
 
 Generic OAuth, a configurable bearer token and an SDK's provider list do not
 establish subscription entitlement or exact request compatibility.
-[PROVIDER-RESEARCH.md](PROVIDER-RESEARCH.md) records the ChatGPT sign-in/Responses
+[provider-research.md](provider-research.md) records the ChatGPT sign-in/Responses
 route and remaining raw Copilot qualification gap; Claude stays API-only.
 Neither experiment used accounts, credentials or real model requests.
 

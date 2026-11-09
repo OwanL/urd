@@ -31,9 +31,8 @@ this does not protect secrets accidentally committed to Git. Encryption may be r
 The owner also approved the authentication operation surface and library-first direction:
 official OpenAI .NET SDK, Duende's focused OAuth/OIDC packages and Microsoft's JWT validation,
 retaining the selected Microsoft.Extensions.AI boundary rather than adding an agent runtime.
-The [provider management design](scratch/provider-management-design.md) records the approved
-bites and their limits. The owner subsequently requested the execution plan and approved
-implementation, selecting ChatGPT as the first complete headless path. The implemented
+The owner approved implementation with ChatGPT as the first complete headless path.
+The later browser settings UI builds on that backend; the implemented
 [provider-management contract](provider-management.md) records HTTP, persistence and
 lifecycle behavior; its tests use synthetic transports and local SQLite/Kestrel only.
 The offline suite is not live qualification evidence. At initial delivery, no live sign-in,
@@ -323,7 +322,7 @@ restores them; function `call_id` survives but the native item ID must be captur
 from raw streaming events before coalescing; encrypted reasoning/ID survives;
 errors are not necessarily exceptions. These are **mock transport mechanics**, not
 OpenAI acceptance or entitlement. Final fixture evidence belongs in
-[EXECUTION-DESIGN.md](EXECUTION-DESIGN.md), not duplicated provider test claims.
+[execution-design.md](execution-design.md), not duplicated provider test claims.
 
 1. **Before login:** finish fixture coverage for the restricted plan request,
    ordered native items, malformed/failed/incomplete/truncated streams, cancellation
@@ -465,6 +464,6 @@ All live documents accessed 2026-11-04; pinned source links fix the inspected co
 - **A1:** OpenAI [API authentication](https://developers.openai.com/api/reference/overview), [Responses streaming](https://developers.openai.com/api/docs/guides/streaming-responses), functions in O6.
 - **A2:** Anthropic [API auth/base URL](https://platform.claude.com/docs/en/api/overview), [versioning](https://platform.claude.com/docs/en/api/versioning), [Messages streaming](https://platform.claude.com/docs/en/build-with-claude/streaming), [tools](https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview).
 - **M1:** Ollama [local/cloud authentication](https://docs.ollama.com/api/authentication), [chat API](https://docs.ollama.com/api/chat), [streaming/tool continuation](https://docs.ollama.com/capabilities/tool-calling), [Qwen3:8b](https://ollama.com/library/qwen3:8b).
-- **L1:** [MODEL-INTERFACE-RESEARCH.md](MODEL-INTERFACE-RESEARCH.md) for pinned OpenAI/Anthropic/OllamaSharp adapters, with the Ollama correction above.
+- **L1:** [model-interface-research.md](model-interface-research.md) for pinned OpenAI/Anthropic/OllamaSharp adapters, with the Ollama correction above.
 - **L2:** MEAI [Responses adapter at v10.11.0](https://github.com/dotnet/extensions/blob/25f07afa51034e37b334210642d7dc5f191c142d/src/Libraries/Microsoft.Extensions.AI.OpenAI/OpenAIResponsesChatClient.cs); [OpenAI .NET 2.14.0 source](https://github.com/openai/openai-dotnet/tree/2e77b08828145f658ec04e49aec87abb1543c553).
 - **L3:** Duende [7.1.1 package/source metadata](https://api.nuget.org/v3-flatcontainer/duende.identitymodel.oidcclient/7.1.1/duende.identitymodel.oidcclient.nuspec), [manual flow](https://docs.duendesoftware.com/identitymodel-oidcclient/manual/); pinned [AuthorizeClient](https://github.com/DuendeSoftware/foss/blob/ab00474eb5311c3b4431b992e7296e779f5904aa/identity-model-oidc-client/src/IdentityModel.OidcClient/AuthorizeClient.cs), [ResponseProcessor](https://github.com/DuendeSoftware/foss/blob/ab00474eb5311c3b4431b992e7296e779f5904aa/identity-model-oidc-client/src/IdentityModel.OidcClient/ResponseProcessor.cs), [Policy](https://github.com/DuendeSoftware/foss/blob/ab00474eb5311c3b4431b992e7296e779f5904aa/identity-model-oidc-client/src/IdentityModel.OidcClient/Policy.cs), [decode-only fallback](https://github.com/DuendeSoftware/foss/blob/ab00474eb5311c3b4431b992e7296e779f5904aa/identity-model-oidc-client/src/IdentityModel.OidcClient/NoValidationIdentityTokenValidator.cs), [Apache-2.0 license](https://github.com/DuendeSoftware/foss/blob/ab00474eb5311c3b4431b992e7296e779f5904aa/LICENSE).

@@ -35,15 +35,15 @@ behavior, not a final Urd API; **C** = mechanism candidate, not approval;
   “Keep original chat history”, “Keep tool input/output inspection”, “Scheduled
   follow-ups”, “Image attachments” and “Session storage”. Full README/architecture
   and the three owning reports below were read, not just recent packaging work.
-- **S:** [Session design](SESSION-DESIGN.md) §§1, 3–4, 6–7. Its **42-assertion**
+- **S:** [Session design](session-design.md) §§1, 3–4, 6–7. Its **42-assertion**
   fixture establishes guarded edits/close and one result surviving worker close/
   restart; it explicitly excludes notifications, follow-ups, attachments, bounded
   children, compaction and reference cleanup.
-- **E:** [Execution design](EXECUTION-DESIGN.md), “Composed follow-up”. Its
+- **E:** [Execution design](execution-design.md), “Composed follow-up”. Its
   **47-assertion** fixture preserves a recorded result and blocks an unresolved
   call after a rolled-back result write. Whole-history test envelope, in-process
   reload; not the actual session owner or a process-kill qualification.
-- **Q:** [SQLite validation](SQLITE-VALIDATION.md), “Failure boundaries” and
+- **Q:** [SQLite validation](sqlite-validation.md), “Failure boundaries” and
   “Experimental-contract and integration gaps”. Bounded process interruption
   supports database transactions; attachment publication/cleanup, delivery evidence
   and compact final usage are absent. The reduced adapter is not the domain model.

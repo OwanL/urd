@@ -17,7 +17,7 @@ Delegated work for all experiment stages uses **Ollama for every role,
 including review; there is no Codex or other fallback**. This is a standing
 execution control for the programme.
 
-**Amended 2026-11-04** after the [binding review](STORAGE-BINDING-REVIEW.md):
+**Amended 2026-11-04** after the [binding review](storage-binding-review.md):
 family sketches were corrected against source/binding evidence, the oracle and
 kill semantics were tightened, and setup-gate wording was simplified. SQLite,
 LMDB and RocksDB probes passed Windows basic operations; LiteDB remains
@@ -36,7 +36,7 @@ decision's revisit conditions explicitly anticipate.
   one shared harness, then converge on a shortlist. The shared runner is the
   authority; families must not quietly diverge in workload or measurement.
 - Deliverable of the programme: recorded evidence in a results document,
-  following the conventions of [EXPERIMENT-RESULTS.md](EXPERIMENT-RESULTS.md).
+  following the conventions of [experiment-results.md](experiment-results.md).
   Not deliverables: production schemas, adapter code shipped as application
   code, or premature selection.
 - Out of scope: UI/transport/rendering, model loop and providers, compaction
@@ -44,7 +44,7 @@ decision's revisit conditions explicitly anticipate.
   (Windows first; later OS runs stay unexecuted until machines and approval
   exist), and replacement of the earlier microbenchmarks.
 - **Binding viability is now established by the [binding
-  review](STORAGE-BINDING-REVIEW.md):** `Microsoft.Data.Sqlite`, `LightningDB`
+  review](storage-binding-review.md):** `Microsoft.Data.Sqlite`, `LightningDB`
   (LMDB) and `RocksDB` probes all passed Windows basic operations on .NET 10,
   so those families proceed; LiteDB is fully managed but stayed unprobed and is
   provisional; Tsavorite has no official standalone package. That review's
@@ -199,7 +199,7 @@ demonstrated.
 ### Code ownership and boundaries
 
 These are the historical experiment programme rules. The experimental source was
-subsequently [archived outside the checkout](../README.md#experimental-source-archive)
+subsequently [archived outside the checkout](product-direction.md#experimental-source-archive)
 with owner authorization; the paths below describe its former repository location.
 
 - A single harness-owner session owns `experiments/transcript-harness/` —

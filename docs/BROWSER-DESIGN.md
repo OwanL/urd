@@ -163,7 +163,7 @@ current saved history/status and separately identified provisional output → sw
 to B without stopping A → reconnect by reading current truth. Late A responses
 cannot select A or overwrite B. Reconnection does not replay commands; unknown
 acknowledgements remain unresolved until reconciled. Busy-Send and recovery policy
-belong to [Session Design](SESSION-DESIGN.md), not a new client-side rule here.
+belong to [Session Design](session-design.md), not a new client-side rule here.
 
 HTTP queries/commands plus one bounded view stream remains a reasonable candidate.
 Fresh snapshots and bounded coalesced updates avoid a durable event-replay system;
@@ -192,7 +192,7 @@ PC does not imply that two copies should attach to one backend/data instance.
 
 ### Evidence limits and bounded next step
 
-[Overnight access evidence](ACCESS-BOUNDARY-EVIDENCE.md) used injected synthetic
+[Overnight access evidence](access-boundary-evidence.md) used injected synthetic
 credentials, one-event streams and Windows/headless Chromium. It established
 cookie port-sharing, native EventSource's header limitation and the no-CORS effect
 counterexample—not onboarding, sustained reconnect, LAN/Tailscale or production
@@ -489,7 +489,8 @@ First-slice acceptance checks:
    component reuse under actual desktop/VS Code resource/CSP constraints; no claim
    of already-qualified hosts. Fan-out qualification remains a separate workload.
 
-Sources: [existing ranking](FOUNDATION-RANKING.md#ui-ranking-the-strongest-architectural-result),
+Sources: the owner selected TypeScript/Preact for shared ordinary UI components;
+synthetic evidence above does not qualify real host reuse.
 [Blazor hosting](https://learn.microsoft.com/en-us/aspnet/core/blazor/hosting-models?view=aspnetcore-10.0),
 [render modes](https://learn.microsoft.com/en-us/aspnet/core/blazor/components/render-modes?view=aspnetcore-10.0),
 [VS Code webviews](https://code.visualstudio.com/api/extension-guides/webview).

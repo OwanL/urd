@@ -117,8 +117,9 @@ owner. Do not expose unreviewed drafts as ready for approval or ask the owner to
 these guidelines. Implementation also needs tests and independent code review.
 
 Do not specify every private helper in advance or invent classes for UI hooks/scripts.
-The first [Core proposal](scratch/initial-core-design.md) starts this process; UI/hosting
-and build/startup boundaries follow without reopening the directory tree.
+The initial Core/Server/browser foundation is implemented; use the
+[application plan](application-plan.md#initial-implementation-owner-design-review-first)
+for the continuing review boundary, not obsolete class drafts.
 
 Approval is scoped. After the initial base is accepted, agents should extend its
 conventions and tests; ask again for meaningful boundary/behavior changes, not routine

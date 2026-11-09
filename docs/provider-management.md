@@ -1,18 +1,18 @@
-# Headless provider management
+# Provider management
 
 The local server manages saved **ChatGPT subscription**, **OpenAI API-key** and
 **custom OpenAI-compatible** connections. ChatGPT uses Responses; custom endpoints
-choose Responses or Chat Completions, with an API key or no authentication.
-A shared request-only model client now supports conversation consumers as well as future
-pruning, compaction and title operations. Provider selection/HTTP/UI composition is a separate
-integration checkpoint; this does not add those auxiliary operations, discovery tools,
-other subscription providers or native Ollama/Anthropic adapters.
+choose Responses or Chat Completions, with an API key or no authentication. The shared
+request client powers chat execution; the provider settings UI is integrated into the browser
+workspace. Future pruning, compaction and title operations remain separate consumers. This
+adds no discovery tools, other subscription providers or native Ollama/Anthropic adapters.
 
 ## Storage and ownership
 
-`UrdStore` replaces the former `SessionStore` name and owns the same SQLite database.
-Schema 6 adds provider connections and a lazily created host identity; the transactional
-schema-5 migration leaves session evidence intact. There is no second database or lease.
+`UrdStore` replaces the former `SessionStore` name and owns the shared SQLite database.
+The current schema is version 10: provider connections and host identity began in schema 6;
+subsequent versions added native provider context, frozen selections, transcript metadata and
+request usage, then attempt provenance and not-sent tracking. There is no second database or lease.
 `ProviderManager` borrows the store, owns its HTTP transport, and drains requests,
 sign-ins and refresh/revocation work before disposal. The host joins this drain with
 its existing HTTP/session shutdown barrier.
@@ -216,37 +216,32 @@ These layout checks do not add backend or live-authentication qualification.
 The temporary fixture process/database was
 removed; shared workspace integration and palette/tab changes are coordinated separately.
 
-## Provider removal and future usage accounting
+## Usage and provider removal
 
 A connection is mutable configuration, not the identity store for historical usage.
-Current-format submitted selections already snapshot the connection ID, route, API,
-endpoint, requested model and reasoning option independently of `provider_connections`.
-Removing or editing that connection does not rewrite the snapshot or delete session
-receipts. `LlmSelectionTests.SavedBindingCannotFollowAnEndpointChangeAndReceiptsSurviveProviderRemoval`
-covers removal and reopen without resolving a live provider; this focused Release regression
-was rerun successfully during the UI refinement. Hostnames and display labels
-are not unique accounting keys; recreating the same host must not merge distinct connections.
+Submitted selections snapshot the connection ID, route, API, endpoint, requested model and
+reasoning option independently of `provider_connections`. Removing or editing a connection
+does not rewrite that snapshot or delete session receipts. Hostnames and display labels are
+not unique accounting keys; recreating the same host must not merge distinct connections.
 
-Future compact usage records must capture their own secret-free attribution at the request
-boundary and survive both provider removal and conversation cleanup. Preserve the stable
-connection ID and provider/API/endpoint/model snapshot, plus reported usage and its provenance.
-Account attribution and provider-resolved model IDs need an explicit design when accounting
-is implemented; neither is established by the current selection snapshot. Do not depend on
-retaining credentials, OAuth registration, model catalogs or native response envelopes.
-This follows the [compact post-closure summary policy](ARCHITECTURE.md#keep-small-usage-summaries-after-closure),
-not a requirement to retain conversations or add a deleted-provider registry now.
+For chat requests, when a provider response reports usage, Core accumulates and persists
+the usage details with that request's completion in `execution_requests.usage_json`. These
+values are not exposed as a summary or price. Missing values remain unknown, never guessed from a live connection
+or silently counted as zero. The submitted selection preserves its secret-free provider/API/
+endpoint/model binding, but account attribution and provider-resolved model IDs are not
+established by the current usage record. Credentials, OAuth registration, catalogs and native
+response envelopes are not required for usage retention.
 
-Token usage is not recorded by the session accumulator yet. Legacy selections may be null;
-missing identity, resolved-model data or token counts must stay explicitly unknown, never
-be guessed from a live connection or silently counted as zero. Current snapshots preserve
-the future integration seam, not retrospective billing completeness.
+A compact post-closure summary still needs its own design and attribution contract; follow the
+[compact post-closure summary policy](ARCHITECTURE.md#keep-small-usage-summaries-after-closure).
+This does not require retaining conversations or adding a deleted-provider registry now.
 
 ## Qualification
 
-2026-11-08: the provider-management checkpoint passed **453/453 tests**. The shared-request
-and native-session checkpoint, including both live-discovered compatibility fixes,
-passed locked restore, a zero-warning .NET 10.0.403 Release build and **573/573 tests** in
-an isolated source archive. Independent acceptance reviews approved the changes.
+2026-11-08: the provider-management checkpoint passed **453/453 tests**. A later shared-request
+and native-session checkpoint, including live-discovered compatibility fixes, passed locked
+restore and a zero-warning .NET 10.0.403 Release build in an isolated source archive.
+Independent acceptance reviews approved the changes.
 
 Offline tests exercise the actual Duende, Microsoft JWT and official OpenAI SDK paths
 against socket-free synthetic transports, plus real local Kestrel and SQLite workflows.
@@ -257,9 +252,9 @@ Separately authorized live checks completed fresh ChatGPT OAuth and then qualifi
 owner-selected `gpt-6-luna` Responses path: catalog retrieval, streamed text, a harmless
 function/result round trip, SQLite continuation without repeating the effect, and public
 Stop through cancelled settlement. The live tool check exposed a required namespace
-description missing from the request; the fix passed both regression tests and the real
-round trip. Revocation was acknowledged, local credentials cleared and the temporary
-ChatGPT database deleted afterward. No existing credentials or personal chats were used.
+description missing from the request; the fix passed its regression and the real round trip.
+Revocation was acknowledged, local credentials cleared and the temporary ChatGPT database
+deleted afterward. No existing credentials or personal chats were used.
 
 The existing local Ollama 0.40.13 `qwen3.5:9b` also passed streaming, tool/result,
 SQLite continuation and Stop through compatible Chat Completions. Its `reasoning` alias
@@ -268,6 +263,6 @@ the final continuation retained three reasoning-bearing envelopes without repeat
 lookup effect. Temporary harness data was removed; the borrowed Ollama service was not
 reconfigured or stopped.
 
-See [provider qualification](PROVIDER-QUALIFICATION.md#live-shared-request-qualification--2026-11-08)
+See [provider qualification](provider-qualification.md#live-shared-request-qualification--2026-11-08)
 for exact evidence and limits. This is not blanket model/reasoning, forced-refresh, billing,
 UI or failure-mode qualification.

@@ -7,10 +7,11 @@ class/file layout. `IChatClient` / `Microsoft.Extensions.AI.Abstractions` remain
 selected. Only two loop candidates were compared: a small Urd-controlled cycle and
 `FunctionInvokingChatClient` (MEAI 10.11.0).
 
-## Current Core increment — 2026-11-07
+## Implemented Core
 
-The approved minimal Urd-owned cycle is implemented with real SQLite and configured fake
-`AIFunction`s, using only Abstractions. Busy steering is delivered as separate user messages
+The approved Urd-owned cycle now uses provider-managed clients and real SQLite, with
+optional configured `AIFunction`s. Production Server does not register application tools;
+its cycle uses Abstractions, not the optional library-owned function loop. Busy steering is delivered as separate user messages
 following the next tool-result batch, or after a no-tool response finishes. Claims, call/result
 records and settlement are durable; reopening never automatically invokes historical tools.
 
@@ -23,8 +24,9 @@ Core-owned result encoding/save and cleanup failures instead fence continuation.
 invocation feedback, not evidence of no effect or permission for automatic replay.
 
 See [backend development](backend-development.md) for the tested scope and limitations.
-The older experiments below remain research evidence, not real-provider qualification of
-this implementation. Their deliberately terminal ordinary-tool-error policy is not the
+The older experiments below remain research evidence. Later separately authorized
+live-provider evidence is in [provider qualification](provider-qualification.md#live-shared-request-qualification--2026-11-08);
+those route/model checks do not qualify every provider or tool. Their deliberately terminal ordinary-tool-error policy is not the
 current policy.
 
 ## Recommendation and owner decisions
@@ -74,8 +76,8 @@ wrapper or rerun tools.
 
 ## What was actually exercised
 
-Earlier [Go/.NET discovery](GO-DOTNET-DISCOVERY.md) ran real loop libraries with
-**in-process fake LLMs**. Earlier [LLM-interface research](MODEL-INTERFACE-RESEARCH.md)
+Earlier [Go/.NET discovery](go-dotnet-discovery.md) ran real loop libraries with
+**in-process fake LLMs**. Earlier [LLM-interface research](model-interface-research.md)
 only round-tripped native SDK JSON. Both artifact sets survived and were reused:
 source patterns, exact cached dependencies and raw-item reconstruction. They were
 not mistaken for new HTTP or provider evidence.
@@ -126,7 +128,7 @@ receipt; even the final successful assistant response must be recorded separatel
 ### Real adapter + local HTTP/SSE + file reload: seven requests passed
 
 This is **adapter-level scripted transport evidence**, not a live-provider round
-trip. [Provider Access](PROVIDER-QUALIFICATION.md) selected public ChatGPT-plan
+trip. [Provider Access](provider-qualification.md) selected public ChatGPT-plan
 Responses as the representative route (owner: either ChatGPT or Ollama is fine).
 Its current restrictions require `store:false`, `stream:true`, full input history,
 no `previous_response_id`, and functions in namespaces or `additional_tools`.

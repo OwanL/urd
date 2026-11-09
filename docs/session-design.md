@@ -131,7 +131,7 @@ are justified. Execution Design reports the owner's preference to omit the full
 optional MEAI loop for its modest probe-code saving; the recommendation is one
 small Urd-owned cycle over `IChatClient`, not a different loop per kind. Production
 code savings and final APIs remain unqualified; see
-[EXECUTION-DESIGN.md](EXECUTION-DESIGN.md).
+[execution-design.md](execution-design.md).
 
 ### Relationships are not all parenthood
 
@@ -196,12 +196,12 @@ snapshot. An append is not the same invalidation as suffix replacement; assignme
 revision is not a transport sequence. Shared SQLite validation reproduced a
 count/window cursor race, freely overwritten task results and append-after-delete
 recreation in the reduced experimental contract. **Do not copy that contract as
-Urd's domain model**; see [SQLITE-VALIDATION.md](SQLITE-VALIDATION.md).
+Urd's domain model**; see [sqlite-validation.md](sqlite-validation.md).
 
 Preserve provider-specific context/call IDs and exposed-definition order where
 needed. `IChatClient` is not a durable serialization format: default serialization
 of provider `RawRepresentation` is insufficient. This follows the
-[discovery](DISCOVERY-DESIGN.md) and [provider](PROVIDER-QUALIFICATION.md) findings.
+[discovery](discovery-design.md) and [provider](provider-qualification.md) findings.
 Execution Design's newer owner alignment narrows the earlier discovery proposal:
 use qualified native appended definitions without an upfront invocation wrapper;
 otherwise include a stable invocation wrapper from the initial catalog for
@@ -252,8 +252,8 @@ API, **not** a published SDK, interfaces for every class, additional processes o
 frozen methods. Both projects can evolve together. One project remains simpler
 plumbing, but is not the selected starting point.
 
-**Historical coarse source mapping:** the later [application plan](APPLICATION-PLAN.md)
-now owns the rough layout, and [experimental source has been archived](../README.md#experimental-source-archive).
+**Historical coarse source mapping:** the later [application plan](application-plan.md)
+now owns the rough layout, and [experimental source has been archived](product-direction.md#experimental-source-archive).
 The earlier sketch below did not approve every filename, frontend structure or
 test-project arrangement:
 
@@ -336,7 +336,7 @@ disposable fixtures authorizes production implementation.
 
 **2026-11-05 process update:** the owner wants the first class structures, important
 members and method signatures proposed for review before implementation; see the
-[initial design gate](APPLICATION-PLAN.md#initial-implementation-owner-design-review-first).
+[initial design gate](application-plan.md#initial-implementation-owner-design-review-first).
 This supersedes treating all initial API details as delegated implementation work.
 After the relevant structure is accepted, routine helpers, local names, lock primitives
 and batching details can follow evidence without a method-by-method questionnaire.
@@ -385,7 +385,7 @@ synthetic chunk, closed tombstones and an interrupted admission gate are test
 mechanisms—not selected batching, schema, permanent tombstone retention or resume
 UX. Parent closure remains an owner gate; this test closes only an explicitly
 addressed individual session. No new product or structural decision was made.
-[Composed execution](EXECUTION-DESIGN.md) separately qualifies bounded native/tool
+[Composed execution](execution-design.md) separately qualifies bounded native/tool
 recording mechanics; combining that with these session guards remains untested.
 
 **Reproduction/evidence:**

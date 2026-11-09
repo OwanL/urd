@@ -32,19 +32,19 @@ concrete provider adapters, discovery triggers, class APIs or a production schem
    to repair the transcript. Remembered work is not replay permission.
 
 This **tool-invocation wrapper** is not a mandatory model-client facade.
-[Session design](SESSION-DESIGN.md) composes request-only `IChatClient` directly
+[Session design](session-design.md) composes request-only `IChatClient` directly
 for execution and auxiliary operations. Both exposure routes share execution;
 no per-provider session engine or general discovery framework is selected.
 
 ## Route evidence and gaps
 
 Pins and detailed source findings remain in
-[model-interface research](MODEL-INTERFACE-RESEARCH.md). These findings qualify
+[model-interface research](model-interface-research.md). These findings qualify
 specific mechanics, not live-provider acceptance or cache savings.
 
 | Route | Native path and established evidence | Fallback / remaining qualification |
 | --- | --- | --- |
-| **OpenAI Responses** | `additional_tools` can represent appended client-executable definitions. OpenAI .NET 2.14.0 lacks public typed support; MEAI 10.11.0 uses raw unknown items. The [composed execution fixture](EXECUTION-DESIGN.md#composed-follow-up-adapter--guarded-urd-loop--sqlite--continuation) exercises the real adapter/terminal guard/loop/tool with ordered native reconstruction through SQLite test-envelope reload. | Experimental adapter; native IDs, terminal status and raw persistence need explicit handling. Actual session-store integration, process-kill recovery, production streaming and native provider acceptance remain unqualified. Use the initial wrapper on routes without qualified native support. |
+| **OpenAI Responses** | `additional_tools` can represent appended client-executable definitions. OpenAI .NET 2.14.0 lacks public typed support; MEAI 10.11.0 uses raw unknown items. The [composed execution fixture](execution-design.md#composed-follow-up-adapter--guarded-urd-loop--sqlite--continuation) exercises the real adapter/terminal guard/loop/tool with ordered native reconstruction through SQLite test-envelope reload. | Experimental adapter; native IDs, terminal status and raw persistence need explicit handling. Actual session-store integration, process-kill recovery, production streaming and native provider acceptance remain unqualified. Use the initial wrapper on routes without qualified native support. |
 | **Anthropic / Claude** | Provider documents inline `tool_addition`/`tool_definition` beta blocks, subject to model/placement restrictions. SDK 13.4.0 has typed beta models, but its ordinary `AsIChatClient` adapter drops those blocks despite preserving mid-conversation system text. | Native append needs separate adapter qualification; no Claude beta adapter is approved here. Stable wrapper is the selected fallback, not ordinary-list updates. |
 | **OllamaSharp / local models** | The inspected 5.5.0 adapter maps ordinary function declarations; no native append equivalent was established for that route. Actual tool support, thinking replay and call identity require server/model/adapter testing. | Include the stable wrapper initially for recovered tools where function calling works. Wrapper reliability is untested; do not generalize this adapter finding to every local/OpenAI-compatible server. |
 | **Other routes** | Native appends require exact provider+adapter evidence; none is implied by implementing `IChatClient`. | Initial-wrapper fallback also needs tool/model qualification; unsupported tool calling is not repaired by a wrapper. |
@@ -52,7 +52,7 @@ specific mechanics, not live-provider acceptance or cache savings.
 **Route distinction:** OpenAI `tool_search` is a separate hosted/client-executed
 facility on eligible routes, not equivalent to Urd's client-controlled appended
 exposure. The documented **ChatGPT-plan route forbids `tool_search`**, while
-allowing `additional_tools`; see [provider qualification](PROVIDER-QUALIFICATION.md).
+allowing `additional_tools`; see [provider qualification](provider-qualification.md).
 Execution's synthetic `tool_search_output` item tests an unknown-item codec only,
 not a valid plan request. The original SDK JSON-only fixture was weaker than the
 later adapter fixture; neither is a real-provider round trip.
@@ -208,7 +208,7 @@ coherent continuation, not exact token retention or a workflow-replay engine.
   injected precommit failure leaves an unresolved effect. Qualify the actual
   session/record owner; in-process reload is not process-kill recovery or production
   streaming evidence.
-- **Revocation/reset:** [MCP SDK tests](MCP-QUALIFICATION.md) exercise local current-
+- **Revocation/reset:** [MCP SDK tests](mcp-qualification.md) exercise local current-
   authority checks with immutable exposure and fake stdio peers; production catalog
   freshness and concurrent changes remain unqualified. Define provider/model-switch
   and compaction reset boundaries without late-wrapper insertion or blind retries.
@@ -219,16 +219,16 @@ coherent continuation, not exact token retention or a workflow-replay engine.
 
 ## Evidence anchors
 
-- [Execution design](EXECUTION-DESIGN.md): owner fallback wording, provisional loop
+- [Execution design](execution-design.md): owner fallback wording, provisional loop
   and composed adapter/guard/SQLite test-envelope evidence; actual session-store
   integration and live-provider gates remain open.
-- [MCP qualification](MCP-QUALIFICATION.md): actual SDK, fake stdio peers and explicit
+- [MCP qualification](mcp-qualification.md): actual SDK, fake stdio peers and explicit
   2025 handshake—not default 2026 negotiation/fallback or model reliability.
-- [Session design](SESSION-DESIGN.md): direct request-only client composition and
+- [Session design](session-design.md): direct request-only client composition and
   durable/live/client ownership; class and file layout approval limits.
-- [Model-interface research](MODEL-INTERFACE-RESEARCH.md): pinned MEAI 10.11.0,
+- [Model-interface research](model-interface-research.md): pinned MEAI 10.11.0,
   OpenAI .NET 2.14.0, Anthropic 13.4.0 and OllamaSharp 5.5.0 findings. Research pins,
   not selected package versions.
-- [Provider qualification](PROVIDER-QUALIFICATION.md): route-specific restrictions
-  and authentication/entitlement limits; [cache research](CACHE-RESEARCH.md):
+- [Provider qualification](provider-qualification.md): route-specific restrictions
+  and authentication/entitlement limits; [cache research](cache-research.md):
   documented prefix behaviour, not Urd cache-hit measurements.

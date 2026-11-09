@@ -1,7 +1,7 @@
 # Small-operation technology experiments — revised proposal
 
 Status: approved and executed for the Windows first round on 2026-11-03; see
-[observations and limits](EXPERIMENT-RESULTS.md). This replaces the earlier
+[observations and limits](experiment-results.md). This replaces the earlier
 session/UI/model-loop proposal, which was too application-shaped and too narrow
 in its initial candidates. Two bounded design passes informed this revision.
 The planned macOS/Linux executions and optional process check remain unexecuted.
@@ -127,5 +127,5 @@ and caveats. These are heuristics for data handling, runtime overhead, local edi
 and basic portability—not UI responsiveness, production storage, agent fan-out,
 provider compatibility or long-term maintenance predictions. Results should identify
 which tiny follow-up is worth doing, not select Urd's foundation by JSON speed.
-The fuller [foundation measurement plan](FOUNDATION-RESEARCH.md#bounded-measurement-contract-for-finalists)
-remains deferred; none of its larger scenarios is part of this first round.
+Larger whole-product performance qualification remains separate. This first round does
+not measure full agent workloads, resource cleanup, source distribution or client latency.

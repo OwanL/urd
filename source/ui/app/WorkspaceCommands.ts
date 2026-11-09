@@ -144,7 +144,7 @@ export class WorkspaceCommands {
       );
       return;
     }
-    await this.reconcile(id, true);
+    await this.retryOriginalSubmission(id);
   }
 
   async resendNotSent(
@@ -178,11 +178,19 @@ export class WorkspaceCommands {
       );
       return null;
     }
-    const receipt = await this.reconcile(id, true);
+    const receipt = await this.retryOriginalSubmission(id);
     return { submissionId: submission.submissionId, receipt };
   }
 
-  async reconcile(id: string, retry: boolean): Promise<UserMessageReceipt | null> {
+  checkReceipt(id: string): Promise<UserMessageReceipt | null> {
+    return this.reconcile(id, false);
+  }
+
+  retryOriginalSubmission(id: string): Promise<UserMessageReceipt | null> {
+    return this.reconcile(id, true);
+  }
+
+  private async reconcile(id: string, retry: boolean): Promise<UserMessageReceipt | null> {
     const original = this.access.read().chats[id]?.pending?.original;
     if (
       !original ||
@@ -295,7 +303,7 @@ export class WorkspaceCommands {
         return;
       }
       for (const [id, chat] of Object.entries(this.access.read().chats))
-        if (chat.pending?.status === "uncertain") void this.reconcile(id, false);
+        if (chat.pending?.status === "uncertain") void this.checkReceipt(id);
     };
     checkPending();
     window.addEventListener("focus", checkPending);

@@ -131,7 +131,7 @@ export function Conversation({
                 <button
                   disabled={checking}
                   onClick={() => {
-                    void commands.reconcile(sessionId, false);
+                    void commands.checkReceipt(sessionId);
                   }}
                 >
                   Check receipt
@@ -139,7 +139,7 @@ export function Conversation({
                 <button
                   disabled={!canPersist || checking}
                   onClick={() => {
-                    void commands.reconcile(sessionId, true);
+                    void commands.retryOriginalSubmission(sessionId);
                   }}
                 >
                   Retry original

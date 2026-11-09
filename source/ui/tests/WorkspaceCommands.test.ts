@@ -217,7 +217,7 @@ void test("retry resends a saved uncertain original while retaining a newer draf
     }),
   );
 
-  await retry.reconcile(sessionId, true);
+  await retry.retryOriginalSubmission(sessionId);
 
   assert.deepEqual(dispatched, original);
   assert.equal(journaledBeforeDispatch, true);
@@ -348,7 +348,7 @@ void test("uncertain not-sent resend reloads with its new ID and reconciles the 
     },
   });
   assert.equal(await recovery.resendNotSent(sessionId, snapshot(), source), null);
-  const reconciled = await withVisibleDocument(() => recovery.reconcile(sessionId, false));
+  const reconciled = await withVisibleDocument(() => recovery.checkReceipt(sessionId));
   assert.equal(reconciled?.acceptance, "accepted");
   assert.deepEqual(receiptReads, [recoveredSubmission.submissionId]);
   assert.equal(dispatched.length, 1);

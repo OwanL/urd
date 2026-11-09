@@ -195,7 +195,7 @@ void test("lost acknowledgement auto-reads but still requires explicit permissio
   state.select(null);
   await state.create();
   assert.equal(state.snapshot.uncertain, true);
-  assert.equal(state.snapshot.reviewed, true);
+  assert.equal(state.snapshot.connectionsReloadedAfterUncertainty, true);
   assert.equal(notifications(), 1);
   await state.create();
   assert.equal(creates, 1);

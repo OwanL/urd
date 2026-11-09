@@ -342,7 +342,7 @@ export function ProviderSettings({ state, search }: ProviderSettingsProps) {
             {notice}
           </p>
         )}
-        {state.uncertain && state.reviewed && (
+        {state.uncertain && state.connectionsReloadedAfterUncertainty && (
           <div class="provider-settings-warning">
             <p>Review the saved connections and status. Another add may create a duplicate.</p>
             <button type="button" onClick={() => actions.allowNewCommands()}>

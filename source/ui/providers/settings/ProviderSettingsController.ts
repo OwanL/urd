@@ -66,7 +66,7 @@ export interface ProviderSettingsSnapshot {
   readonly pending: ProviderSettingsOperation | null;
   readonly notice: ProviderSettingsNotice | null;
   readonly uncertain: boolean;
-  readonly reviewed: boolean;
+  readonly connectionsReloadedAfterUncertainty: boolean;
   readonly errors: Readonly<Record<string, string>>;
   readonly credentials: Readonly<Record<string, ProviderCredentialStatus>>;
   readonly catalogs: Readonly<Record<string, ProviderModelCatalog>>;
@@ -144,7 +144,7 @@ export class ProviderSettingsController {
     pending: null,
     notice: null,
     uncertain: false,
-    reviewed: false,
+    connectionsReloadedAfterUncertainty: false,
     errors: {},
     credentials: {},
     catalogs: {},
@@ -240,8 +240,8 @@ export class ProviderSettingsController {
   }
 
   allowNewCommands(): void {
-    if (this.snapshot.uncertain && this.snapshot.reviewed)
-      this.patch({ uncertain: false, reviewed: false, notice: null });
+    if (this.snapshot.uncertain && this.snapshot.connectionsReloadedAfterUncertainty)
+      this.patch({ uncertain: false, connectionsReloadedAfterUncertainty: false, notice: null });
   }
 
   async read(): Promise<void> {
@@ -282,7 +282,7 @@ export class ProviderSettingsController {
             drafts,
             selectedId,
             loaded: true,
-            reviewed: this.snapshot.uncertain,
+            connectionsReloadedAfterUncertainty: this.snapshot.uncertain,
             credentials: Object.fromEntries(
               Object.entries(this.snapshot.credentials).filter(([id]) => ids.has(id)),
             ),
@@ -453,7 +453,7 @@ export class ProviderSettingsController {
                 ...(error instanceof RequestError ? { httpStatus: error.status } : {}),
               },
               uncertain: true,
-              reviewed: false,
+              connectionsReloadedAfterUncertainty: false,
             },
       );
       changed = !rejected;

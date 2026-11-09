@@ -14,13 +14,11 @@ export function ConnectionForm({
   connection,
   disabled,
   onCreate,
-  onCancel,
 }: {
   state: ProviderSettingsState;
   connection?: ProviderConnection;
   disabled: boolean;
   onCreate?: () => void;
-  onCancel?: () => void;
 }) {
   const id = useId();
   const { actions } = state;
@@ -52,11 +50,6 @@ export function ConnectionForm({
         <button type="submit" class="provider-settings-primary" disabled={disabled}>
           {connection ? "Save changes" : "Add provider"}
         </button>
-        {onCancel && (
-          <button type="button" onClick={onCancel}>
-            Cancel
-          </button>
-        )}
       </div>
     </form>
   );

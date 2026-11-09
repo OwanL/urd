@@ -1,4 +1,3 @@
-using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Data.Sqlite;
@@ -8,8 +7,6 @@ namespace Urd.Server;
 
 // Binds session HTTP operations to Core without owning admission or execution policy.
 internal static class SessionRoutes {
-  private const int MaximumSubmissionBytes = 16 * 1024;
-  private static readonly UTF8Encoding strictUtf8 = new(false, true);
   private static readonly Action<ILogger, Exception?> logStorageFailure = LoggerMessage.Define(
       LogLevel.Error, new EventId(1, nameof(StorageUnavailable)), "Session storage could not complete an HTTP operation.");
 
@@ -29,6 +26,8 @@ internal static class SessionRoutes {
     routes.MapGet("/{sessionId}/snapshot", (HttpContext http, Guid sessionId) =>
         WithSessionAsync(http, sessions, sessionId, async session =>
             Results.Ok(await session.ReadSnapshotAsync(http.RequestAborted))));
+    routes.MapGet("/{sessionId}/history", (HttpContext http, Guid sessionId, [AsParameters] HistoryQuery query) =>
+        ReadHistoryAsync(http, sessions, sessionId, query));
     routes.MapGet("/{sessionId}/content", (HttpContext http, Guid sessionId, [AsParameters] ContentQuery query) =>
         ReadContentAsync(http, sessions, sessionId, query));
     return routes;
@@ -97,9 +96,6 @@ internal static class SessionRoutes {
         || submission.Text is null)
       return Results.BadRequest();
 
-    if (strictUtf8.GetByteCount(submission.Text) > MaximumSubmissionBytes)
-      return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
-
     return await WithSessionAsync(http, sessions, sessionId, async session => {
       // Core retains the decision; a disconnected request never owns accepted work.
       UserMessageReceipt receipt = await session.SubmitUserMessageAsync(submission);
@@ -137,6 +133,34 @@ internal static class SessionRoutes {
       // Absence is not a refusal decision, and must be JSON null rather than an empty response.
       return receipt is null ? Results.Content("null", "application/json") : Results.Ok(receipt);
     });
+  }
+
+  private static Task<IResult> ReadHistoryAsync(
+      HttpContext http, SessionManager sessions, Guid sessionId, HistoryQuery query) {
+    TranscriptHistoryMode? mode = query.Mode switch {
+      "latest" => TranscriptHistoryMode.Latest,
+      "before" => TranscriptHistoryMode.Before,
+      "after" => TranscriptHistoryMode.After,
+      "around" => TranscriptHistoryMode.Around,
+      _ => null
+    };
+    TranscriptEntryKind? kind = query.Kind switch {
+      "user" => TranscriptEntryKind.User,
+      "text" => TranscriptEntryKind.Text,
+      "tool" => TranscriptEntryKind.Tool,
+      _ => null
+    };
+    if (mode is null || query.ExpectedHistoryRevision < 0)
+      return Task.FromResult<IResult>(Results.BadRequest());
+    bool hasAnchor = query.ExecutionId is not null || query.EntryId is not null || query.Kind is not null;
+    if ((mode == TranscriptHistoryMode.Latest && hasAnchor)
+        || (mode != TranscriptHistoryMode.Latest && (query.ExecutionId is null || query.EntryId is null || kind is null)))
+      return Task.FromResult<IResult>(Results.BadRequest());
+    TranscriptEntryRef? anchor = hasAnchor
+        ? new(query.ExecutionId!.Value, query.EntryId!.Value, kind!.Value, query.ExpectedHistoryRevision) : null;
+    var history = new TranscriptHistoryQuery(mode.Value, query.ExpectedHistoryRevision, anchor);
+    return WithSessionAsync(http, sessions, sessionId, async session =>
+        Results.Ok(await session.ReadHistoryAsync(history, http.RequestAborted)));
   }
 
   private static Task<IResult> ReadContentAsync(
@@ -179,6 +203,9 @@ internal static class SessionRoutes {
     logStorageFailure(logger, failure);
     return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
   }
+
+  private sealed record HistoryQuery(
+      string Mode, long ExpectedHistoryRevision, Guid? ExecutionId, Guid? EntryId, string? Kind);
 
   // Flat, required query members construct Core's segment-local content cursor.
   private sealed record ContentQuery(

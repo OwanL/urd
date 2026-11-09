@@ -1,5 +1,10 @@
 import { requestJson } from "../http/requestJson.ts";
-import type { MessageContentCursor, MessageContentPage } from "./Messages.ts";
+import type {
+  MessageContentCursor,
+  MessageContentPage,
+  TranscriptHistoryPage,
+  TranscriptHistoryQuery,
+} from "./Messages.ts";
 import type { SessionIdPage } from "./SessionIdPage.ts";
 import type { SessionSnapshot } from "./SessionSnapshot.ts";
 import type { StopReceipt } from "./Stop.ts";
@@ -38,6 +43,25 @@ export class SessionClient {
       undefined,
       signal,
     );
+  }
+
+  getHistory(
+    sessionId: string,
+    query: TranscriptHistoryQuery,
+    signal?: AbortSignal,
+  ): Promise<TranscriptHistoryPage> {
+    const url = this.url(`/${encodeURIComponent(sessionId)}/history`);
+    url.searchParams.set("mode", query.mode);
+    url.searchParams.set("expectedHistoryRevision", String(query.expectedHistoryRevision));
+    if (query.mode !== "latest") {
+      const { anchor } = query;
+      if (anchor.historyRevision !== query.expectedHistoryRevision)
+        throw new TypeError("History anchor must belong to the expected revision.");
+      url.searchParams.set("executionId", anchor.executionId);
+      url.searchParams.set("entryId", anchor.entryId);
+      url.searchParams.set("kind", anchor.kind);
+    }
+    return requestJson(url, "GET", undefined, signal);
   }
 
   getMessageContent(

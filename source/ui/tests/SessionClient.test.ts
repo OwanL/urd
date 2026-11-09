@@ -141,6 +141,40 @@ const mappings: MappingCase[] = [
     path: `/api/sessions/${sessionId}/snapshot`,
     response: snapshot,
   },
+  ...(["latest", "before", "after", "around"] as const).map((mode): MappingCase => ({
+    name: `history ${mode} preserves its exact reference`,
+    call: (client) =>
+      client.getHistory(
+        sessionId,
+        mode === "latest"
+          ? { mode, expectedHistoryRevision: 7 }
+          : {
+              mode,
+              expectedHistoryRevision: 7,
+              anchor: {
+                executionId,
+                entryId: submissionId,
+                kind: "tool",
+                historyRevision: 7,
+              },
+            },
+      ),
+    method: "GET",
+    path: `/api/sessions/${sessionId}/history`,
+    query: {
+      mode,
+      expectedHistoryRevision: "7",
+      ...(mode === "latest" ? {} : { executionId, entryId: submissionId, kind: "tool" }),
+    },
+    response: {
+      sessionId,
+      historyRevision: 7,
+      entries: [],
+      hasBefore: true,
+      hasAfter: false,
+      settlements: [],
+    },
+  })),
   {
     name: "content flattens every cursor member",
     call: (client) => client.getMessageContent(sessionId, cursor),
@@ -351,6 +385,11 @@ const reads: {
 }[] = [
   { name: "list", call: (client, signal) => client.list(undefined, signal) },
   { name: "snapshot", call: (client, signal) => client.getSnapshot(sessionId, signal) },
+  {
+    name: "history",
+    call: (client, signal) =>
+      client.getHistory(sessionId, { mode: "latest", expectedHistoryRevision: 7 }, signal),
+  },
   {
     name: "content",
     call: (client, signal) => client.getMessageContent(sessionId, cursor, signal),

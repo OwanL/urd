@@ -52,6 +52,12 @@ public abstract class SessionBase {
     return store.Content.Read(Id, cursor);
   }
 
+  public async Task<TranscriptHistoryPage> ReadHistoryAsync(
+      TranscriptHistoryQuery query, CancellationToken cancellation = default) {
+    using var held = await gate.AcquireAsync(cancellation);
+    return store.History.Read(Id, query);
+  }
+
   private protected async Task<UserMessageReceipt> AdmitUserMessageAsync(UserMessageSubmission submission) {
     // A new execution starts only after the lock is released.
     TaskCompletionSource? lockReleased = null;

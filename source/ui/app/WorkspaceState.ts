@@ -37,11 +37,9 @@ const refusalErrors: Record<MessageRefusalReason, string> = {
   selectionLocked: "The model selection is locked for this execution.",
 };
 
-// Match the server's strict UTF-8 text limit without trimming or replacing input.
+// Reject malformed UTF-16 without trimming or replacing input.
 export function submissionTextError(text: string): string | null {
   if (/[\uD800-\uDFFF]/u.test(text)) return "Message contains an incomplete Unicode character.";
-  if (new TextEncoder().encode(text).byteLength > 16 * 1024)
-    return "Message exceeds the 16 KiB UTF-8 limit.";
   return null;
 }
 

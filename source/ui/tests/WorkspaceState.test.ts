@@ -19,10 +19,10 @@ import type {
   UserMessageSubmission,
 } from "../sessions/UserMessageSubmission.ts";
 
-void test("text validation uses strict Unicode and the server's UTF-8 byte limit without trimming", () => {
+void test("text validation accepts large submissions and rejects incomplete Unicode without trimming", () => {
   assert.equal(submissionTextError("  \r\n雪 🦉  "), null);
   assert.equal(submissionTextError("🦉".repeat(4096)), null);
-  assert.match(submissionTextError("🦉".repeat(4096) + " ") ?? "", /16 KiB/);
+  assert.equal(submissionTextError("🦉".repeat(4096) + " "), null);
   for (const text of ["\ud800", "\udfff", "x\ud800y", "\udfff🦉"])
     assert.match(submissionTextError(text) ?? "", /Unicode/);
 });

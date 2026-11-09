@@ -41,7 +41,7 @@ public sealed class SessionRoutesTests {
     }
 
     LlmSelection selection = TestLlmSelection.Default with { ReasoningEffort = "high" };
-    string text = string.Concat(Enumerable.Repeat("wire content é🙂", 40));
+    string text = string.Concat(Enumerable.Repeat("wire content é🙂", 1200));
     var submission = new UserMessageSubmission(Guid.NewGuid(), 0, text, selection);
     using HttpResponseMessage sent = await RequestAsync(server.Client, HttpMethod.Post,
         $"/api/sessions/{sessionId}/message-submissions", JsonContent.Create(submission, options: json));
@@ -89,8 +89,21 @@ public sealed class SessionRoutesTests {
     AssertPrivateResponse(content);
     MessageContentPage page = Assert.IsType<MessageContentPage>(await content.Content.ReadFromJsonAsync<MessageContentPage>(json));
     Assert.Equal(cursor, page.From);
-    Assert.Equal(text, page.Text);
-    Assert.False(page.HasMore);
+    Assert.InRange(System.Text.Encoding.UTF8.GetByteCount(page.Text), 1, 16 * 1024);
+    Assert.True(page.HasMore);
+    var savedText = new System.Text.StringBuilder(page.Text);
+    while (page.HasMore) {
+      MessageContentCursor next = page.Next;
+      string nextPath = $"/api/sessions/{sessionId}/content?executionId={next.Message.ExecutionId}"
+          + $"&messageId={next.Message.MessageId}&role=user&historyRevision={next.Message.HistoryRevision}"
+          + $"&segmentIndex={next.SegmentIndex}&utf8Offset={next.Utf8Offset}";
+      using HttpResponseMessage remainder = await RequestAsync(server.Client, HttpMethod.Get, nextPath);
+      Assert.Equal(HttpStatusCode.OK, remainder.StatusCode);
+      page = Assert.IsType<MessageContentPage>(await remainder.Content.ReadFromJsonAsync<MessageContentPage>(json));
+      Assert.InRange(System.Text.Encoding.UTF8.GetByteCount(page.Text), 1, 16 * 1024);
+      savedText.Append(page.Text);
+    }
+    Assert.Equal(text, savedText.ToString());
   }
 
   private static ServerOptions Options(TemporaryDatabase database) => new(Path.GetDirectoryName(database.Path)!, 0);

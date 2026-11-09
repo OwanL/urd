@@ -12,7 +12,7 @@ using ChatMessage = Microsoft.Extensions.AI.ChatMessage;
 namespace Urd.Core.Providers;
 
 // Bounded completed state, never a transcript of streaming updates. Native terminals authorize completion.
-internal sealed class ProviderStreamState(LlmProviderScope scope, IEnumerable<AITool>? tools, bool plan) {
+internal sealed class ProviderStreamState(LlmProviderScope scope, IEnumerable<AITool>? tools, bool isChatGpt) {
   private readonly HashSet<string> allowedFunctions = tools?.Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal) ?? [];
   private readonly SortedDictionary<int, string> completedItems = [];
   private readonly HashSet<int> chatCallIndexes = [];
@@ -199,7 +199,7 @@ internal sealed class ProviderStreamState(LlmProviderScope scope, IEnumerable<AI
     } else if (type is "function_call") {
       if (root.TryGetProperty("status", out var status) && status.GetString() != "completed") throw Invalid();
       string? functionNamespace = root.TryGetProperty("namespace", out var ns) ? ns.GetString() : null;
-      if (plan ? functionNamespace != "urd" : functionNamespace is not null) throw Invalid();
+      if (isChatGpt ? functionNamespace != "urd" : functionNamespace is not null) throw Invalid();
     } else if (type != "reasoning") {
       throw Invalid();
     }

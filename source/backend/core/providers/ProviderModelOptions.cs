@@ -29,11 +29,11 @@ internal static class ProviderModelOptions {
     if (connection.Api == LlmApi.OpenAIResponses &&
         (options.FrequencyPenalty is not null || options.PresencePenalty is not null || options.Seed is not null || options.StopSequences is { Count: > 0 }))
       throw Invalid();
-    bool plan = connection.Route == ProviderRoute.ChatGpt;
+    bool isChatGpt = connection.Route == ProviderRoute.ChatGpt;
     // Namespace wrapping bypasses MEAI's strict-schema transformation; do not silently ignore it.
-    if (plan && options.Tools?.Any(tool => tool.AdditionalProperties.ContainsKey("strict")) == true)
+    if (isChatGpt && options.Tools?.Any(tool => tool.AdditionalProperties.ContainsKey("strict")) == true)
       throw Invalid();
-    if (plan && (connection.Api != LlmApi.OpenAIResponses || options.Temperature is not null || options.TopP is not null ||
+    if (isChatGpt && (connection.Api != LlmApi.OpenAIResponses || options.Temperature is not null || options.TopP is not null ||
         options.MaxOutputTokens is not null || options.FrequencyPenalty is not null || options.PresencePenalty is not null ||
         options.Seed is not null || options.StopSequences is { Count: > 0 } || options.AllowMultipleToolCalls is not null ||
         options.ToolMode is not null and not AutoChatToolMode))
@@ -44,14 +44,14 @@ internal static class ProviderModelOptions {
       // Only our factory can supply SDK options. Callers cannot enable storage, continuation or hosted tools.
       result.RawRepresentationFactory = _ => ModelReaderWriter.Read<CreateResponseOptions>(BinaryData.FromString(
           """{"store":false,"stream":true,"include":["reasoning.encrypted_content"]}"""))!;
-      if (plan && options.Tools is { Count: > 0 }) result.Tools = [PlanTools(options.Tools).AsAITool()];
+      if (isChatGpt && options.Tools is { Count: > 0 }) result.Tools = [CreateNamespacedTools(options.Tools).AsAITool()];
     } else {
       result.RawRepresentationFactory = _ => new ChatCompletionOptions { StoredOutputEnabled = false };
     }
     return result;
   }
 
-  private static ResponseTool PlanTools(IEnumerable<AITool> tools) {
+  private static ResponseTool CreateNamespacedTools(IEnumerable<AITool> tools) {
     using var buffer = new MemoryStream();
     using (var writer = new Utf8JsonWriter(buffer)) {
       writer.WriteStartObject();

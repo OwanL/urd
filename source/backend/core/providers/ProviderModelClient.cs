@@ -67,7 +67,7 @@ internal sealed class ProviderModelClient(HttpClient httpClient) {
 
   private IChatClient CreateClient(ProviderState state, string model) {
     var connection = state.Connection;
-    var authentication = Authentication(connection, state.Credentials);
+    var authentication = ProviderSdkAuthentication.Create(connection, state.Credentials);
     return connection.Api switch {
       LlmApi.OpenAIResponses => new ResponsesClient(authentication, new ResponsesClientOptions {
         Endpoint = connection.Endpoint,
@@ -83,17 +83,6 @@ internal sealed class ProviderModelClient(HttpClient httpClient) {
       }).AsIChatClient(),
       _ => throw new ProviderOperationException(ProviderFailure.InvalidProviderResponse)
     };
-  }
-
-  private static AuthenticationPolicy Authentication(ProviderConnection connection, ProviderCredentials? credentials) {
-    if (connection.Authentication == AuthenticationMethod.None) return KeylessAuthenticationPolicy.Instance;
-    string? token = connection.Authentication switch {
-      AuthenticationMethod.ApiKey => credentials?.ApiKey,
-      AuthenticationMethod.OAuth when credentials?.RequiresSignIn == false => credentials.AccessToken,
-      _ => null
-    };
-    if (string.IsNullOrWhiteSpace(token)) throw new ProviderOperationException(ProviderFailure.AuthenticationRequired);
-    return ApiKeyAuthenticationPolicy.CreateBearerAuthorizationPolicy(new ApiKeyCredential(token));
   }
 
   private static async ValueTask<bool> MoveNextAsync(IAsyncEnumerator<ChatResponseUpdate> stream, CancellationToken ct) {

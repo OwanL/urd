@@ -20,7 +20,7 @@ internal sealed class OpenAIProviderClient(HttpClient httpClient) {
       ProviderCredentials? credentials, CancellationToken ct) {
     try {
       ct.ThrowIfCancellationRequested();
-      var client = new OpenAIModelClient(Authentication(connection, credentials), Options(connection));
+      var client = new OpenAIModelClient(ProviderSdkAuthentication.Create(connection, credentials), Options(connection));
       if (connection.Route == ProviderRoute.ChatGpt) {
         var result = await client.GetModelsAsync(new RequestOptions { CancellationToken = ct }).ConfigureAwait(false);
         using var response = result.GetRawResponse();
@@ -59,7 +59,7 @@ internal sealed class OpenAIProviderClient(HttpClient httpClient) {
 
   private async Task<ProviderModelTestResult> TestResponsesAsync(ProviderConnection connection,
       ProviderCredentials? credentials, string modelId, CancellationToken ct) {
-    var client = new ResponsesClient(Authentication(connection, credentials), new ResponsesClientOptions {
+    var client = new ResponsesClient(ProviderSdkAuthentication.Create(connection, credentials), new ResponsesClientOptions {
       Endpoint = connection.Endpoint,
       Transport = new HttpClientPipelineTransport(httpClient),
       RetryPolicy = new ClientRetryPolicy(0)
@@ -100,7 +100,7 @@ internal sealed class OpenAIProviderClient(HttpClient httpClient) {
 
   private async Task<ProviderModelTestResult> TestChatAsync(ProviderConnection connection,
       ProviderCredentials? credentials, string modelId, CancellationToken ct) {
-    var client = new ChatClient(modelId, Authentication(connection, credentials), Options(connection));
+    var client = new ChatClient(modelId, ProviderSdkAuthentication.Create(connection, credentials), Options(connection));
     var options = new ChatCompletionOptions { StoredOutputEnabled = false };
     var text = new StringBuilder();
     bool truncated = false;
@@ -126,17 +126,6 @@ internal sealed class OpenAIProviderClient(HttpClient httpClient) {
     Transport = new HttpClientPipelineTransport(httpClient),
     RetryPolicy = new ClientRetryPolicy(0)
   };
-
-  private static AuthenticationPolicy Authentication(ProviderConnection connection, ProviderCredentials? credentials) {
-    if (connection.Authentication == AuthenticationMethod.None) return KeylessAuthenticationPolicy.Instance;
-    string? token = connection.Authentication switch {
-      AuthenticationMethod.ApiKey => credentials?.ApiKey,
-      AuthenticationMethod.OAuth when credentials?.RequiresSignIn == false => credentials.AccessToken,
-      _ => null
-    };
-    if (string.IsNullOrWhiteSpace(token)) throw new ProviderOperationException(ProviderFailure.AuthenticationRequired);
-    return ApiKeyAuthenticationPolicy.CreateBearerAuthorizationPolicy(new ApiKeyCredential(token));
-  }
 
   private static ProviderModel[] ReadPlanModels(JsonElement envelope) => RequireArray(envelope, "models")
       .EnumerateArray()

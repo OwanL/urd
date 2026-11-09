@@ -62,7 +62,7 @@ public sealed class SessionListingStorageTests {
       Assert.Equal(new[] { Id(4), Id(3), Id(2), Id(1) }, store.Sessions.ListPrimaryIds(null).SessionIds);
     }
 
-    Assert.Equal(9L, database.Scalar("PRAGMA user_version;")); // raw-sql: verify the committed migration version
+    Assert.Equal(10L, database.Scalar("PRAGMA user_version;")); // raw-sql: verify the committed migration version
     Assert.Null(database.Scalar("PRAGMA foreign_key_check;")); // raw-sql: verify migrated referential integrity
   }
 

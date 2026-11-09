@@ -19,6 +19,7 @@ public sealed class LlmSelectionMigrationTests {
       Assert.True(store.UserMessages.Admit(session, 0,
           new(input, 0, text, TestLlmSelection.Default), true, execution).NewlyAccepted);
       request = store.Executions.ClaimNextRequest(session, execution, 0)!.RequestId;
+      Assert.True(store.Executions.StartRequest(session, execution, 0, request));
       Assert.True(store.LlmResponses.Append(session, execution, 0,
           new(request, Guid.NewGuid(), 0, "legacy answer 🙂", true)));
       Assert.True(store.LlmResponses.CompleteRequest(session, execution, 0,
@@ -40,7 +41,7 @@ public sealed class LlmSelectionMigrationTests {
 
     database.Execute("DROP TABLE input_decisions_v8;");
     using (UrdStore migrated = UrdStore.Open(database.Path)) {
-      Assert.Equal(9L, database.Scalar("PRAGMA user_version;")); // raw-sql: verify the committed migration version
+      Assert.Equal(10L, database.Scalar("PRAGMA user_version;")); // raw-sql: verify the committed migration version
       UserMessageReceipt receipt = migrated.UserMessages.ReadReceipt(session, input)!;
       Assert.Null(receipt.Submission.LlmSelection);
       Assert.Equal(text, receipt.Submission.Text);

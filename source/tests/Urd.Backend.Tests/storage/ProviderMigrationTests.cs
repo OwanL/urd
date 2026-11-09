@@ -25,7 +25,7 @@ public sealed class ProviderMigrationTests {
     database.Execute("DROP TABLE provider_host;");
 
     using (UrdStore store = UrdStore.Open(database.Path)) {
-      Assert.Equal(9L, database.Scalar("PRAGMA user_version;")); // raw-sql: verify the committed migration version
+      Assert.Equal(10L, database.Scalar("PRAGMA user_version;")); // raw-sql: verify the committed migration version
       Assert.Empty(store.Providers.List());
       Assert.Equal(new[] { SchemaFiveDatabase.SessionId }, store.Sessions.ListPrimaryIds(null).SessionIds);
       Assert.Equal(SchemaFiveDatabase.Original,

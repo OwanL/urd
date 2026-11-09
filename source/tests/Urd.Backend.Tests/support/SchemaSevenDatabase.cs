@@ -1,10 +1,14 @@
 namespace Urd.Backend.Tests.Support;
 
-// Keeps current execution/provider evidence, restoring only schema seven's receipt shape.
+// Keeps current execution/provider evidence while restoring the schema-seven shapes that migrations alter.
 internal static class SchemaSevenDatabase {
   internal static void Downgrade(TemporaryDatabase database) => database.Execute("""
     PRAGMA foreign_keys = OFF;
     BEGIN;
+    UPDATE execution_messages SET request_id = NULL WHERE role = 0;
+    DROP INDEX execution_inputs_not_sent_order;
+    ALTER TABLE execution_inputs DROP COLUMN not_sent;
+    ALTER TABLE execution_requests DROP COLUMN attempt;
     CREATE TABLE input_decisions_v7 (
         session_id TEXT NOT NULL REFERENCES sessions(session_id), input_id TEXT NOT NULL,
         expected_history_revision INTEGER NOT NULL CHECK (expected_history_revision >= 0),

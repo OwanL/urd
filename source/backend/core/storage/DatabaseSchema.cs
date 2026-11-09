@@ -4,7 +4,7 @@ namespace Urd.Core.Storage;
 
 // Initializes connection pragmas and creates, verifies, or upgrades the schema.
 internal static class DatabaseSchema {
-  private const int SchemaVersion = 9;
+  private const int SchemaVersion = 10;
 
   internal static void Initialize(SqliteConnection connection) {
     using SqliteCommand command = connection.CreateCommand();
@@ -55,6 +55,7 @@ internal static class DatabaseSchema {
       EnsureProviderContextSchema(command, version);
       EnsureSelectionSchema(command, version);
       EnsureTranscriptSchema(connection, transaction, version);
+      EnsureSendAttemptSchema(connection, transaction, version);
       if (version < SchemaVersion) {
         command.CommandText = "PRAGMA foreign_key_check;";
         using SqliteDataReader reader = command.ExecuteReader();
@@ -214,6 +215,85 @@ internal static class DatabaseSchema {
           ON execution_messages(request_id, role, first_batch_index);
       PRAGMA user_version = 9;
       """;
+    command.ExecuteNonQuery();
+  }
+
+  private static void EnsureSendAttemptSchema(SqliteConnection connection, SqliteTransaction transaction, long version) {
+    using SqliteCommand command = connection.CreateCommand();
+    command.Transaction = transaction;
+    if (version >= 10) {
+      command.CommandText = "SELECT attempt FROM execution_requests LIMIT 0;";
+      command.ExecuteNonQuery();
+      command.CommandText = "SELECT not_sent FROM execution_inputs LIMIT 0;";
+      command.ExecuteNonQuery();
+      command.CommandText = "SELECT ordinal, request_id FROM execution_messages LIMIT 0;";
+      command.ExecuteNonQuery();
+      return;
+    }
+
+    command.CommandText = """
+      SELECT MAX(COALESCE((SELECT seq FROM sqlite_sequence WHERE name = 'execution_messages'), 0),
+          COALESCE((SELECT MAX(ordinal) FROM execution_messages), 0));
+      """;
+    long highWater = (long)command.ExecuteScalar()!;
+
+    // Attempt: 0 = legacy unknown, 1 = known not attempted, 2 = attempted (not proof of delivery).
+    // New claims explicitly write 1; existing requests retain unknown provenance.
+    command.CommandText = """
+      ALTER TABLE execution_requests ADD COLUMN attempt INTEGER NOT NULL DEFAULT 0 CHECK (attempt IN (0, 1, 2));
+      ALTER TABLE execution_inputs ADD COLUMN not_sent INTEGER NOT NULL DEFAULT 0 CHECK (not_sent IN (0, 1));
+      CREATE INDEX execution_inputs_not_sent_order ON execution_inputs(session_id, ordinal) WHERE not_sent = 1;
+
+      CREATE TABLE execution_messages_v10 (
+          ordinal INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id TEXT NOT NULL REFERENCES sessions(session_id),
+          history_revision INTEGER NOT NULL CHECK (history_revision >= 0),
+          run_id TEXT NOT NULL REFERENCES execution_runs(run_id),
+          role INTEGER NOT NULL CHECK (role IN (0, 1, 2)),
+          message_id TEXT NOT NULL,
+          input_id TEXT,
+          request_id TEXT REFERENCES execution_requests(request_id),
+          first_batch_index INTEGER NOT NULL DEFAULT 0 CHECK (first_batch_index >= 0),
+          end_batch_index INTEGER,
+          created_at TEXT,
+          call_id TEXT,
+          tool_name TEXT,
+          UNIQUE (run_id, role, message_id),
+          UNIQUE (request_id, call_id),
+          FOREIGN KEY (session_id, input_id) REFERENCES input_decisions(session_id, input_id),
+          CHECK (end_batch_index IS NULL OR end_batch_index >= first_batch_index),
+          CHECK ((role = 0 AND input_id IS NOT NULL AND call_id IS NULL
+                      AND tool_name IS NULL AND end_batch_index IS NULL)
+              OR (role = 1 AND input_id IS NULL AND request_id IS NOT NULL AND call_id IS NULL
+                      AND tool_name IS NULL)
+              OR (role = 2 AND input_id IS NULL AND request_id IS NOT NULL AND end_batch_index IS NULL
+                      AND call_id IS NOT NULL))
+      ) STRICT;
+      INSERT INTO execution_messages_v10 (
+          ordinal, session_id, history_revision, run_id, role, message_id, input_id, request_id,
+          first_batch_index, end_batch_index, created_at, call_id, tool_name)
+      SELECT ordinal, session_id, history_revision, run_id, role, message_id, input_id, request_id,
+          first_batch_index, end_batch_index, created_at, call_id, tool_name
+      FROM execution_messages ORDER BY ordinal;
+      DROP TABLE execution_messages;
+      ALTER TABLE execution_messages_v10 RENAME TO execution_messages;
+      CREATE INDEX execution_messages_history_order
+          ON execution_messages(session_id, history_revision, ordinal DESC);
+      CREATE INDEX execution_messages_request_order
+          ON execution_messages(request_id, role, first_batch_index);
+      """;
+    command.ExecuteNonQuery();
+
+    command.CommandText = """
+      UPDATE sqlite_sequence SET seq = $high_water
+          WHERE name = 'execution_messages' AND seq < $high_water;
+      INSERT INTO sqlite_sequence (name, seq)
+          SELECT 'execution_messages', $high_water
+          WHERE $high_water > 0 AND NOT EXISTS (
+              SELECT 1 FROM sqlite_sequence WHERE name = 'execution_messages');
+      PRAGMA user_version = 10;
+      """;
+    command.Parameters.AddWithValue("$high_water", highWater);
     command.ExecuteNonQuery();
   }
 

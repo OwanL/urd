@@ -307,8 +307,10 @@ export function Transcript({
     const node = scroll.current;
     if (!node) return;
     const observer = new ResizeObserver(() => {
-      if (following.current && !selecting) node.scrollTop = node.scrollHeight;
-      else if (anchor.current) {
+      if (following.current && !selecting) {
+        node.scrollTop = node.scrollHeight;
+        adjustedScrollTop.current = node.scrollTop;
+      } else if (anchor.current) {
         keepAnchorInPlace(node);
       }
     });
@@ -319,8 +321,10 @@ export function Transcript({
   useLayoutEffect(() => {
     const node = scroll.current;
     if (!node || selecting) return;
-    if (following.current) node.scrollTop = node.scrollHeight;
-    else if (anchor.current) {
+    if (following.current) {
+      node.scrollTop = node.scrollHeight;
+      adjustedScrollTop.current = node.scrollTop;
+    } else if (anchor.current) {
       keepAnchorInPlace(node);
     }
   }, [keepAnchorInPlace, shown, selecting]);
@@ -329,8 +333,9 @@ export function Transcript({
     const node = scroll.current;
     if (!node) return;
     const expectedScrollTop = adjustedScrollTop.current;
-    adjustedScrollTop.current = null;
+    // Lazy bodies can expand between a follow adjustment and its queued scroll events.
     if (expectedScrollTop !== null && node.scrollTop === expectedScrollTop) return;
+    adjustedScrollTop.current = null;
     following.current = node.scrollHeight - node.scrollTop - node.clientHeight < 40;
     setJump(!following.current);
     const top = node.getBoundingClientRect().top;
@@ -386,7 +391,10 @@ export function Transcript({
           onClick={() => {
             following.current = true;
             onPositionChange({ following: true, anchor: null });
-            if (scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight;
+            if (scroll.current) {
+              scroll.current.scrollTop = scroll.current.scrollHeight;
+              adjustedScrollTop.current = scroll.current.scrollTop;
+            }
             setJump(false);
           }}
         />

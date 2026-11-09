@@ -1212,7 +1212,7 @@ void test("workspace read recovery reconciles a hidden uncertain send", async ()
     await page.getByRole("button", { name: "Send" }).click();
     await page.getByText("Send uncertain.", { exact: false }).waitFor();
 
-    await page.getByRole("button", { name: "New chat" }).click();
+    await page.getByRole("button", { name: "New chat", exact: true }).click();
     await page.waitForFunction(() => document.querySelectorAll('[role="tab"]').length === 2);
     await page.waitForFunction((id) => location.hash.slice(1) !== id, originalId);
     const secondId = new URL(page.url()).hash.slice(1);
@@ -1604,6 +1604,148 @@ void test(
   },
 );
 
+void test("delayed follow scrolls survive lazy expansion but user scroll-away keeps its anchor", async () => {
+  await withOfflineBrowser(async ({ model, server, page, connection }) => {
+    const pageErrors: string[] = [];
+    page.on("pageerror", (error) => pageErrors.push(error.message));
+    const sessions = new SessionClient(server.origin);
+    const sessionId = await sessions.create();
+    const lines = (marker: string) =>
+      `${marker}\n${Array.from({ length: 30 }, (_, index) => `${marker} line ${index}`).join("\n")}`;
+    for (const [prompt, reply] of [
+      [lines("first-lazy-body"), lines("second-lazy-body")],
+      ["latest prompt", "latest-lazy-marker"],
+    ] as const) {
+      model.enqueue({ text: reply });
+      const receipt = await sessions.submitMessage(sessionId, {
+        submissionId: randomUUID(),
+        expectedHistoryRevision: 0,
+        text: prompt,
+        llmSelection: { connection, modelId: "fixture-a", reasoningEffort: null },
+      });
+      await waitForSnapshot(
+        sessions,
+        sessionId,
+        (snapshot) => snapshot.lastSettlement?.executionId === receipt.executionId,
+        "the lazy-body fixture to settle",
+      );
+    }
+    const history = await sessions.getHistory(sessionId, {
+      mode: "latest",
+      expectedHistoryRevision: 0,
+    });
+    let firstBodyOnly = true;
+    // Advertise the other bodies after the first follow, independent of native IO callback order.
+    await page.route(`**/api/sessions/${sessionId}/history?*`, async (route) => {
+      if (!firstBodyOnly) return route.continue();
+      await route.fulfill({
+        json: {
+          ...history,
+          entries: history.entries.map((entry, index) => ({
+            ...entry,
+            text:
+              index > 0 && entry.text
+                ? { ...entry.text, availableThrough: entry.text.from }
+                : entry.text,
+          })),
+        },
+      });
+    });
+    await page.addInitScript(() => {
+      const state = { held: false, replayed: false, gap: 0 };
+      (window as unknown as { __urdDelayedScroll: typeof state }).__urdDelayedScroll = state;
+      let held: Event | null = null;
+      let target: HTMLElement | null = null;
+      // Delay one real follow scroll until the next lazy body commits. IO/RO remain native.
+      document.addEventListener(
+        "scroll",
+        (event) => {
+          const node = event.target;
+          if (
+            state.held ||
+            !(node instanceof HTMLElement) ||
+            !node.matches(".transcript") ||
+            node.scrollTop === 0 ||
+            !node.textContent?.includes("first-lazy-body")
+          )
+            return;
+          event.stopImmediatePropagation();
+          state.held = true;
+          held = event;
+          target = node;
+        },
+        true,
+      );
+      new MutationObserver(() => {
+        if (!held || !target?.textContent?.includes("second-lazy-body")) return;
+        state.gap = target.scrollHeight - target.scrollTop - target.clientHeight;
+        const event = held;
+        held = null;
+        target.dispatchEvent(event);
+        state.replayed = true;
+      }).observe(document, { childList: true, characterData: true, subtree: true });
+    });
+
+    await page.goto(`${server.origin.href}#${sessionId}`);
+    await page.waitForFunction(
+      () =>
+        (window as unknown as { __urdDelayedScroll: { held: boolean } }).__urdDelayedScroll.held,
+    );
+    firstBodyOnly = false;
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await page.waitForFunction(
+      () =>
+        (window as unknown as { __urdDelayedScroll: { replayed: boolean } }).__urdDelayedScroll
+          .replayed,
+    );
+    const delayedGap = await page.evaluate(
+      () => (window as unknown as { __urdDelayedScroll: { gap: number } }).__urdDelayedScroll.gap,
+    );
+    assert.ok(delayedGap > 40, "the held follow scroll must arrive after another body expands");
+    await page.getByText("latest-lazy-marker", { exact: true }).waitFor();
+    const conversation = page.getByRole("region", { name: "Conversation" });
+    await page.waitForFunction(() => {
+      const node = document.querySelector<HTMLElement>(".transcript");
+      return node && node.scrollHeight - node.scrollTop - node.clientHeight <= 1;
+    });
+    assert.equal(await page.getByRole("button", { name: "Jump to latest" }).count(), 0);
+
+    await conversation.hover();
+    await page.mouse.wheel(0, -240);
+    await page.getByRole("button", { name: "Jump to latest" }).waitFor();
+    const anchorBefore = await conversation.evaluate((node) => {
+      const top = node.getBoundingClientRect().top;
+      const first = [...node.querySelectorAll<HTMLElement>("[data-message]")].find(
+        (item) => item.getBoundingClientRect().bottom > top,
+      )!;
+      return { key: first.dataset.message!, top: first.getBoundingClientRect().top };
+    });
+    model.enqueue({ text: lines("output-after-user-scroll") });
+    const receipt = await sessions.submitMessage(sessionId, {
+      submissionId: randomUUID(),
+      expectedHistoryRevision: 0,
+      text: "append while reading",
+      llmSelection: { connection, modelId: "fixture-a", reasoningEffort: null },
+    });
+    await waitForSnapshot(
+      sessions,
+      sessionId,
+      (snapshot) => snapshot.lastSettlement?.executionId === receipt.executionId,
+      "the append while reading to settle",
+    );
+    await page
+      .locator(`[data-message^="${receipt.executionId}/"][data-message$="/text"]`)
+      .waitFor();
+    const anchorAfter = await conversation
+      .locator(`[data-message="${anchorBefore.key}"]`)
+      .evaluate((node) => node.getBoundingClientRect().top);
+    assert.ok(Math.abs(anchorAfter - anchorBefore.top) <= 2);
+    await page.getByRole("button", { name: "Jump to latest" }).click();
+    await page.getByText("output-after-user-scroll line 29", { exact: false }).waitFor();
+    assert.deepEqual(pageErrors, []);
+  });
+});
+
 void test("tab changes limit session reads and preserve the reading anchor during a stream", async () => {
   await withOfflineBrowser(async ({ model, server, page }) => {
     const snapshotReads = new Map<string, number>();
@@ -1801,7 +1943,19 @@ void test("tab changes limit session reads and preserve the reading anchor durin
     assert.equal(runningOnReturn?.unsettledExecutionId, runningAway.unsettledExecutionId);
     const anchorAfterReturn = await readingAnchor.boundingBox();
     assert.ok(anchorAfterReturn);
-    assert.ok(Math.abs(anchorAfterReturn.y - anchorBefore.y) <= 2);
+    assert.ok(
+      Math.abs(anchorAfterReturn.y - anchorBefore.y) <= 2,
+      `Reading anchor moved on tab return: ${JSON.stringify({
+        anchorBefore,
+        anchorAfterReturn,
+        scrollBefore,
+        scrollAfter: await conversation.evaluate((node) => ({
+          top: node.scrollTop,
+          height: node.scrollHeight,
+          client: node.clientHeight,
+        })),
+      })}`,
+    );
 
     const runningExecutionId = runningOnReturn?.unsettledExecutionId;
     assert.ok(runningExecutionId);
@@ -1823,7 +1977,19 @@ void test("tab changes limit session reads and preserve the reading anchor durin
     await page.getByText("Running…", { exact: true }).waitFor({ state: "detached" });
     const anchorAfterStream = await readingAnchor.boundingBox();
     assert.ok(anchorAfterStream);
-    assert.ok(Math.abs(anchorAfterStream.y - anchorBefore.y) <= 2);
+    assert.ok(
+      Math.abs(anchorAfterStream.y - anchorBefore.y) <= 2,
+      `Reading anchor moved during the stream: ${JSON.stringify({
+        anchorBefore,
+        anchorAfterStream,
+        scrollBefore,
+        scrollAfter: await conversation.evaluate((node) => ({
+          top: node.scrollTop,
+          height: node.scrollHeight,
+          client: node.clientHeight,
+        })),
+      })}`,
+    );
     await page.getByRole("button", { name: "Jump to latest" }).waitFor();
     assert.equal(stopRequests, 0);
     assert.equal(sessionCreates, 2);

@@ -445,3 +445,63 @@ return-to-baseline after eviction remain unmeasured at stage 1.
 
 Tab-switch latency and streamed read amplification remain performance work, not
 claimed improvements from these fixes; the 25× baseline was not rerun.
+
+## Current-tree Stage 1 qualification and follow-up — 2026-11-10
+
+The current working tree completed the owned 25× Stage 1 fixture after the
+scroll-follow fix. This qualifies the bounded Stage 1 workload; it does not sign
+off overall transcript performance, memory recovery, end-to-end pixel latency, or
+the intermittent tab-return anchor assertion. The prior 25× run in this report is
+a historical checkpoint; the figures below are the completed current-tree run.
+
+The fixture has five heavy sessions, each with 100,000 entries, 60,000 tool calls,
+249,993,750 transcript-content bytes and 125,118,000 tool-payload bytes, plus a
+streaming session. First mount means Stage 1 remount from history; return/warm means
+another remount, **not** a retained-content warm cache. These figures do not satisfy
+or replace Stage 2 provisional warm/cold targets, which depend on retained content
+and reusable derived structures.
+
+| Measurement | Current-tree observation |
+| --- | --- |
+| First-mount tab switch | Median **112.4 ms**, range **106.1–144.9 ms** (5 tabs) |
+| Return/remount tab switch | Median **130.3 ms**, range **108.3–160.3 ms** (15 switches) |
+| Commit to DOM plus next rAF | Three uncertainty-expanded brackets: **39.6–44.9**, **36.8–42.3**, **39.4–44.8 ms**; median bracket **39.4–44.8 ms**. Not pixel/compositor latency. |
+| Streaming GET rate | **22.74/s active** (225 GETs / 9.8945 s); **23.52/s** submit-to-final-DOM observation (238 GETs / 10.1208 s). Active snapshot/history/content: 75 each; total: 80/80/78. No approved numeric request budget. |
+| Long tasks | Zero ≥50 ms during 10.12 s streaming, 4.22 s bounded-window scrolling, and heavy-tab idle. Not a frame/input-latency guarantee. |
+| Idle | Heavy tab: 16.02 s, zero requests, instrumented timer callbacks or events. Empty tab: 62.29 s, zero such work and two ~30 s heartbeat observations. |
+| Latest-60 history read at 100k entries | Typed HTTP: first-per-session median **7.24 ms** (n=5), subsequent **2.37 ms** (n=45). SQLite diagnostic: first **9.75 ms**, subsequent median **0.385 ms** (n=9). OS file cache not flushed. |
+
+Memory is process-tree Windows WorkingSet64, sampled normally without forced GC;
+heavy tabs remained open but unmounted while settling began on the initially empty
+tab. Browser/backend MiB before cycles were **220.03/84.29**, after cycles
+**283.39/95.70**, then **283.81/93.85** at 0 s, **255.04/90.45** at 5 s,
+**251.85/90.45** at 15 s, **252.04/91.50** at 30 s, and **237.27/88.29** at
+60 s. At 60 s this is still **+17.24/+4 MiB** over baseline. This shows settling
+and partial recovery only; it does not establish memory recovery, absence of a leak,
+history-length independence, or a memory budget.
+
+### Scroll-follow and browser regression follow-up
+
+Lazy transcript bodies can resize rows above the reading position. During tab
+remount, programmatic anchor restoration emits a scroll event; treating that event
+as user scrolling replaced the saved assistant-row anchor with a preceding user
+row. The subsequent lazy-row resize therefore followed the wrong anchor and caused
+the observed 21 px drift. The fix tracks the expected position of anchor-correction
+scrolls and ignores the matching programmatic event, preserving the saved anchor
+while rows resize. The corresponding browser scenario also waits for the controlled
+scroll event before switching tabs.
+
+Browser validation on the current tree: full suite **13/13**; original prefix-render
+test **15/15**; delayed-follow test **10/10**; uncertain-send locator test **10/10**.
+A later tab-return anchor assertion was observed once, but was not root-caused. It
+had **0/25** focused reproductions; two full-suite runs passed **13/13** each. New
+diagnostic assertion messages were added to make any recurrence more informative.
+These results do not sign off that intermittent assertion or establish a general
+reliability guarantee.
+
+The completed run had no timeout, but the nominal tab-switch figures remain unmet
+and the 60-second memory sample remains above baseline. End-to-end pixel latency,
+overall performance, memory recovery, and Stage 2 warm/cold target performance are
+not signed off. Stage 2 rich rendering, retained warm-content/cache paths,
+full-history virtualization, cold-disk behavior, and longer memory/eviction studies
+remain outside this Stage 1 qualification.

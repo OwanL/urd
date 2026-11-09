@@ -26,14 +26,16 @@ const groups = 20_000;
 const idleMs = 16_000;
 
 type Task = { at: number; duration: number };
+type Request = { at: number; path: string; method: string };
 type Probe = {
   timers: number;
   heartbeats: number[];
-  events: { name: string; at: number; session?: string }[];
+  events: { name: string; at: number; session?: string; status?: string }[];
   tasks: Task[];
   longTasksSupported: boolean;
 };
 type Memory = { workingSetBytes: number; processes: number; method: string };
+type Clock = { offsetMs: number; uncertaintyMs: number; roundTripMs: number };
 class ProcessExitUnconfirmed extends Error {}
 
 type Commit = { negativeStart: number; positiveEnd: number; samples: number; maxQueryMs: number };
@@ -392,12 +394,34 @@ async function installProbe(page: Page) {
   });
 }
 
-async function probe(page: Page) {
-  return page.evaluate(() => (window as unknown as { __baseline: Probe }).__baseline);
+async function calibrateClock(page: Page): Promise<Clock> {
+  const samples = [];
+  for (let sample = 0; sample < 20; sample++) {
+    const before = epoch();
+    const browserAt = await page.evaluate(() => performance.timeOrigin + performance.now());
+    const after = epoch();
+    samples.push({
+      offsetMs: (before + after) / 2 - browserAt,
+      // Include the browser's 0.1 ms timestamp precision at both bounds.
+      uncertaintyMs: (after - before) / 2 + 0.1,
+      roundTripMs: after - before,
+    });
+  }
+  return samples.reduce((best, sample) => (sample.roundTripMs < best.roundTripMs ? sample : best));
 }
 
-async function markerTime(page: Page, marker: string) {
-  return page.evaluate(
+async function probe(page: Page, clock: Clock) {
+  const value = await page.evaluate(() => (window as unknown as { __baseline: Probe }).__baseline);
+  return {
+    ...value,
+    heartbeats: value.heartbeats.map((at) => at + clock.offsetMs),
+    events: value.events.map((event) => ({ ...event, at: event.at + clock.offsetMs })),
+    tasks: value.tasks.map((task) => ({ ...task, at: task.at + clock.offsetMs })),
+  };
+}
+
+async function markerTime(page: Page, marker: string, clock: Clock) {
+  const at = await page.evaluate(
     (marker) =>
       new Promise<number>((resolve, reject) => {
         const deadline = setTimeout(() => {
@@ -422,6 +446,7 @@ async function markerTime(page: Page, marker: string) {
       }),
     marker,
   );
+  return at + clock.offsetMs;
 }
 
 function summarizeTasks(tasks: Task[], start: number, end: number) {
@@ -432,6 +457,22 @@ function summarizeTasks(tasks: Task[], start: number, end: number) {
     count: values.length,
     totalMs: values.reduce((sum, value) => sum + value, 0),
     maxMs: Math.max(0, ...values),
+  };
+}
+
+function summarizeGETs(requests: Request[], start: number, end: number) {
+  const reads = requests.filter((r) => r.method === "GET" && r.at >= start && r.at < end);
+  const seconds = (end - start) / 1000;
+  return {
+    durationMs: end - start,
+    total: reads.length,
+    perSecond: reads.length / seconds,
+    byKind: Object.fromEntries(
+      ["snapshot", "history", "content"].map((kind) => {
+        const count = reads.filter((r) => r.path.endsWith(`/${kind}`)).length;
+        return [kind, { count, perSecond: count / seconds }];
+      }),
+    ),
   };
 }
 
@@ -514,11 +555,13 @@ async function main() {
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
     page.setDefaultTimeout(30_000);
     const pageErrors: string[] = [];
+    report.pageErrors = pageErrors;
     page.on("pageerror", (error) => pageErrors.push(error.message));
-    const requests: { at: number; path: string }[] = [];
+    const requests: Request[] = [];
     page.on("request", (request) => {
       const url = new URL(request.url());
-      if (url.origin === server!.origin.origin) requests.push({ at: epoch(), path: url.pathname });
+      if (url.origin === server!.origin.origin)
+        requests.push({ at: epoch(), path: url.pathname, method: request.method() });
     });
     // Block accidental non-loopback traffic; image references deliberately never load.
     await page.route("**/*", (route) =>
@@ -542,11 +585,18 @@ async function main() {
     await page.goto(`${server.origin.href}#${streamId}`);
     await page.getByRole("textbox", { name: "Message" }).waitFor();
     await page.waitForFunction(() => document.querySelectorAll('[role="tab"]').length === 6);
+    const clock = await calibrateClock(page);
+    report.browserClock = {
+      ...clock,
+      method:
+        "Browser epoch mapped to Node epoch using midpoint of narrowest of 20 enclosing round trips; uncertainty includes round-trip half-width plus 0.1 ms browser timestamp precision. Same-host monotonic clocks, no cold-disk claim.",
+    };
     const memoryBefore = {
       browser: await processMemory(browserPid),
       backend: await processMemory(server.pid),
     };
     const switches: { kind: string; session: string; milliseconds: number }[] = [];
+    report.tabSwitches = switches;
     async function switchHeavy(index: number, kind: string) {
       const session = ids[index]!;
       // Arm before clicking and timestamp the actual browser click, excluding Playwright's
@@ -589,8 +639,19 @@ async function main() {
       );
       void timing.catch(() => {});
       await page.locator(`#tab-${session}`).click();
-      switches.push({ kind, session, milliseconds: await timing });
-      assert.equal(await page.locator(`#tab-${session}`).getAttribute("aria-selected"), "true");
+      try {
+        switches.push({ kind, session, milliseconds: await timing });
+        assert.equal(await page.locator(`#tab-${session}`).getAttribute("aria-selected"), "true");
+      } catch (error) {
+        report.tabSwitchFailure = {
+          index,
+          kind,
+          selected: await page.locator(`#tab-${session}`).getAttribute("aria-selected"),
+          textTail: (await page.locator("#chat-view").innerText()).slice(-2000),
+          recentRequests: requests.slice(-10),
+        };
+        throw error;
+      }
     }
     for (let index = 0; index < 5; index++) await switchHeavy(index, "cold-first-mount");
     for (let cycle = 0; cycle < 3; cycle++)
@@ -609,10 +670,10 @@ async function main() {
     };
     await pause(1000);
     const idleStart = epoch();
-    const idleBefore = await probe(page);
+    const idleBefore = await probe(page, clock);
     await pause(idleMs);
     const idleEnd = epoch();
-    const idleAfter = await probe(page);
+    const idleAfter = await probe(page, clock);
     const beats = idleAfter.heartbeats.filter((at) => at >= idleStart && at <= idleEnd);
     report.idle = {
       durationMs: idleEnd - idleStart,
@@ -628,6 +689,42 @@ async function main() {
 
     await page.locator(`#tab-${streamId}`).click();
     await page.getByRole("textbox", { name: "Message" }).waitFor();
+    await page.waitForFunction(
+      () => !document.querySelector("#chat-view .transcript .message-text"),
+    );
+    await pause(1000); // Exclude the tab's watch handshake and initial reads from idle accounting.
+    const settlingStart = epoch();
+    const settlingBefore = await probe(page, clock);
+    const settling = [];
+    for (const targetMs of [0, 5000, 15_000, 30_000, 60_000]) {
+      await pause(Math.max(0, settlingStart + targetMs - epoch()));
+      const sampleStart = epoch();
+      settling.push({
+        targetMs,
+        elapsedMs: sampleStart - settlingStart,
+        browser: await processMemory(browserPid),
+        backend: await processMemory(server.pid),
+        measurementMs: epoch() - sampleStart,
+      });
+    }
+    const settlingEnd = epoch();
+    const settlingAfter = await probe(page, clock);
+    const settlingBeats = settlingAfter.heartbeats.filter(
+      (at) => at >= settlingStart && at < settlingEnd,
+    );
+    report.postTabCycleSettling = {
+      scope:
+        "After the original heavy-tab idle measurement, return to the initially empty sixth session (same view as beforeTabCycles); five heavy tabs remain open but unmounted. Normal GC only; working sets do not identify retained heap or prove a leak.",
+      samples: settling,
+      idle: {
+        durationMs: settlingEnd - settlingStart,
+        sameOriginRequests: requests.filter((r) => r.at >= settlingStart && r.at < settlingEnd),
+        timerCallbacks: settlingAfter.timers - settlingBefore.timers,
+        heartbeatTimes: settlingBeats,
+        heartbeatIntervalsMs: settlingBeats.slice(1).map((at, index) => at - settlingBeats[index]!),
+        events: settlingAfter.events.filter((e) => e.at >= settlingStart && e.at < settlingEnd),
+      },
+    };
     await pause(1000);
     const pushes = [];
     for (let sample = 0; sample < 3; sample++) {
@@ -654,7 +751,7 @@ async function main() {
       });
       model.enqueue({ text: prefix + marker, chunkSize: prefix.length, delayMs: 1000 });
       const snapshot = await client.getSnapshot(streamId);
-      const renderedPromise = markerTime(page, marker);
+      const renderedPromise = markerTime(page, marker, clock);
       void renderedPromise.catch(() => {});
       const receipt = await client.submitMessage(streamId, {
         submissionId: randomUUID(),
@@ -665,8 +762,8 @@ async function main() {
       assert.equal(receipt.acceptance, "accepted");
       const [renderedAt, commit] = await Promise.all([renderedPromise, committed]);
       pushes.push({
-        lowerMs: Math.max(0, renderedAt - commit.positiveEnd),
-        upperMs: renderedAt - commit.negativeStart,
+        lowerMs: Math.max(0, renderedAt - clock.uncertaintyMs - commit.positiveEnd),
+        upperMs: renderedAt + clock.uncertaintyMs - commit.negativeStart,
         renderedAt,
         ...commit,
       });
@@ -676,7 +773,7 @@ async function main() {
     }
     report.pushCommitToDOM = {
       method:
-        "Separate readonly Node SQLite worker samples committed output every ~2ms. Commit is bracketed by last negative query start and first positive query end; DOM MutationObserver plus next rAF in same epoch clock. Not provider send time.",
+        "Separate readonly Node SQLite worker samples committed output every ~2ms. Commit is bracketed by last negative query start and first positive query end; DOM MutationObserver plus next rAF mapped to Node epoch with browserClock uncertainty included in the bracket. Not provider send time.",
       samples: pushes,
     };
     const streamText = Array.from(
@@ -685,6 +782,8 @@ async function main() {
     ).join("");
     model.enqueue({ text: streamText, chunkSize: 100, delayMs: 100 });
     const snapshot = await client.getSnapshot(streamId);
+    const finalRenderedPromise = markerTime(page, "stream-099", clock);
+    void finalRenderedPromise.catch(() => {});
     const streamStart = epoch();
     await client.submitMessage(streamId, {
       submissionId: randomUUID(),
@@ -692,11 +791,37 @@ async function main() {
       text: "ten second stream",
       llmSelection: { connection, modelId: "fixture-a", reasoningEffort: null },
     });
-    await markerTime(page, "stream-000");
-    await waitForIdle(client, streamId);
-    const streamEnd = epoch();
+    const firstRenderedAt = await markerTime(page, "stream-000", clock);
+    const [finalRenderedAt] = await Promise.all([
+      finalRenderedPromise,
+      waitForIdle(client, streamId),
+    ]);
+    // Keep browser observation ordering in one clock domain; Node receipt can precede
+    // a browser epoch timestamp by sub-millisecond clock-origin skew.
+    const streamEnd =
+      (await page.evaluate(() => performance.timeOrigin + performance.now())) + clock.offsetMs;
     await pause(200);
-    const streamProbe = await probe(page);
+    const streamProbe = await probe(page, clock);
+    const drainedAt = epoch();
+    const runningNoticeAt = streamProbe.events.find(
+      (event) =>
+        event.name === "status" &&
+        event.session === streamId &&
+        event.status === "running" &&
+        event.at >= streamStart,
+    )?.at;
+    assert.ok(runningNoticeAt !== undefined, "Missing running status during stream");
+    const idleNoticeAt = streamProbe.events.find(
+      (event) =>
+        event.name === "status" &&
+        event.session === streamId &&
+        event.status === "idle" &&
+        event.at > runningNoticeAt,
+    )?.at;
+    assert.ok(idleNoticeAt !== undefined, "Missing settlement status after stream");
+    assert.ok(streamStart < firstRenderedAt && firstRenderedAt < finalRenderedAt);
+    assert.ok(firstRenderedAt < idleNoticeAt && idleNoticeAt < drainedAt);
+    assert.ok(finalRenderedAt <= streamEnd);
     const streamRequests = requests.filter((r) => r.at >= streamStart && r.at <= streamEnd);
     report.streaming = {
       durationMs: streamEnd - streamStart,
@@ -710,6 +835,22 @@ async function main() {
           streamRequests.filter((r) => r.path === path).length,
         ]),
       ),
+      observedWindows: {
+        method:
+          "Page GET request starts only; excludes Node waitForIdle polling. Active streaming runs from first chunk DOM-plus-rAF until the page observes SSE idle status. Settlement includes subsequent reads through the existing 200 ms drain. Client-observed phases, not exact provider/commit boundaries or pure settlement CPU time; final text may render after idle status. No pixel timestamps.",
+        boundaries: {
+          streamStart,
+          runningNoticeAt,
+          firstRenderedAt,
+          finalRenderedAt,
+          idleNoticeAt,
+          streamEnd,
+          drainedAt,
+        },
+        startup: summarizeGETs(requests, streamStart, firstRenderedAt),
+        activeStreaming: summarizeGETs(requests, firstRenderedAt, idleNoticeAt),
+        settlementAndDrain: summarizeGETs(requests, idleNoticeAt, drainedAt),
+      },
       longTasksSupported: streamProbe.longTasksSupported,
       longTasks: summarizeTasks(streamProbe.tasks, streamStart, streamEnd),
     };
@@ -726,7 +867,7 @@ async function main() {
       durationMs: scrollEnd - scrollStart,
       scope:
         "Heavy session's bounded stage-1 latest window; no 100k-row virtualization or automatic older-history traversal",
-      longTasks: summarizeTasks((await probe(page)).tasks, scrollStart, scrollEnd),
+      longTasks: summarizeTasks((await probe(page, clock)).tasks, scrollStart, scrollEnd),
     };
     const http = [];
     for (const id of ids.slice(0, 5)) {

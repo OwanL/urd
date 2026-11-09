@@ -1169,6 +1169,99 @@ void test("workspace read recovery reconciles a hidden uncertain send", async ()
   });
 });
 
+void test("an unrelated successful Send cannot mark a refused resend accepted", async () => {
+  await withOfflineBrowser(async ({ model, server, page }) => {
+    const sourceSubmissionId = "30000000-0000-0000-0000-000000000003";
+    const sourceExecutionId = "20000000-0000-0000-0000-000000000002";
+    const sessions = new SessionClient(server.origin);
+    await page.goto(server.origin.href);
+    const message = page.getByRole("textbox", { name: "Message" });
+    await message.waitFor();
+    const sessionId = new URL(page.url()).hash.slice(1);
+    const snapshot = await sessions.getSnapshot(sessionId);
+    const source: UserMessageSubmission = {
+      submissionId: sourceSubmissionId,
+      expectedHistoryRevision: snapshot.historyRevision,
+      text: "Original not-sent input",
+      llmSelection: null,
+    };
+    const sourceReceipt: UserMessageReceipt = {
+      sessionId,
+      submission: source,
+      acceptance: "accepted",
+      refusalReason: null,
+      executionId: sourceExecutionId,
+    };
+    let submissions = 0;
+    await page.route("**/api/sessions/*/not-sent*", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          inputs: [
+            {
+              submissionId: sourceSubmissionId,
+              executionId: sourceExecutionId,
+              preview: "Original preview",
+            },
+          ],
+          nextCursor: null,
+        }),
+      }),
+    );
+    await page.route("**/api/sessions/*/message-submissions/*", (route) => {
+      if (route.request().method() !== "GET") return route.continue();
+      const submissionId = new URL(route.request().url()).pathname.split("/").at(-1);
+      if (submissionId === sourceSubmissionId)
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(sourceReceipt),
+        });
+      return route.fulfill({ status: 404 });
+    });
+    await page.route("**/api/sessions/*/message-submissions", async (route) => {
+      if (route.request().method() !== "POST") return route.continue();
+      submissions++;
+      if (submissions === 1) {
+        const submission = route.request().postDataJSON() as UserMessageSubmission;
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            sessionId,
+            submission,
+            acceptance: "refused",
+            refusalReason: "staleRevision",
+            executionId: null,
+          } satisfies UserMessageReceipt),
+        });
+      }
+      return route.continue();
+    });
+
+    await page.getByRole("button", { name: "Not sent" }).click();
+    const input = page.locator("li").filter({ hasText: "Original preview" });
+    await input.getByRole("button", { name: "Retrieve" }).click();
+    await input.getByText("Original not-sent input", { exact: true }).waitFor();
+    await input.getByRole("button", { name: "Resend" }).click();
+    await page.getByText("Not resent: staleRevision.", { exact: true }).waitFor();
+    assert.equal(await page.getByText("Resend accepted.", { exact: true }).count(), 0);
+    assert.equal(await input.getByRole("button", { name: "Resend" }).isEnabled(), true);
+
+    await page.getByRole("button", { name: /^Model:/ }).click();
+    await page.getByRole("option", { name: "fixture-a" }).click();
+    model.enqueue({ text: "unrelated successful reply" });
+    await message.fill("Unrelated successful Send");
+    await page.getByRole("button", { name: "Send", exact: true }).click();
+    await page.getByText("unrelated successful reply", { exact: true }).waitFor();
+    await page.getByText("Not resent: staleRevision.", { exact: true }).waitFor();
+    assert.equal(await page.getByText("Resend accepted.", { exact: true }).count(), 0);
+    assert.equal(await input.getByRole("button", { name: "Resend" }).isEnabled(), true);
+    assert.equal(submissions, 2);
+  });
+});
+
 void test("not-sent discovery is user-invoked, retrieves on demand, and resends without replacing the draft", async () => {
   await withOfflineBrowser(async ({ server, page }) => {
     const pageCursor = "next-cursor";

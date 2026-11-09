@@ -335,8 +335,11 @@ that scenario. The intermittent timeout's cause was not established.
 
 Receipt reconciliation follow-up: not-sent resend presentation now accepts only the exact
 resubmission ID's accepted receipt; unrelated pending/execution activity cannot upgrade
-an uncertain resend. The regression suite covers an unacknowledged resend followed by
-an unrelated successful Send, alongside the existing exact-accepted browser scenario.
+an uncertain resend. Browser coverage verifies that a refused resend remains refused
+after an unrelated successful Send, its Resend action remains available, and an exact
+accepted receipt renders accepted. The unrelated benchmark prefix-render flake remains
+a known non-blocking flake of unresolved cause: 15/15 isolated passes at HEAD; budgets
+are unchanged.
 
 No contract deviations or implementation blockers. Broader stage-1 qualification
 is still incomplete: the five-tab 25× browser idle/switch/long-task/request-rate and

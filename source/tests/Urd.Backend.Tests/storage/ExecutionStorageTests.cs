@@ -71,6 +71,7 @@ public sealed class ExecutionStorageTests {
           new(Guid.NewGuid(), 0, "first input", TestLlmSelection.Default), true, execution);
       LlmRequest request = store.Executions.ClaimNextRequest(session, execution, 0)!;
       requestId = request.RequestId;
+      Assert.True(store.Executions.StartRequest(session, execution, 0, requestId));
       Assert.True(store.LlmResponses.Append(session, execution, 0,
           new(requestId, output, 0, "part", false)));
       Assert.True(store.LlmResponses.Append(session, execution, 0,

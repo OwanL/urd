@@ -26,6 +26,11 @@ internal static class SessionRoutes {
     routes.MapGet("/{sessionId}/snapshot", (HttpContext http, Guid sessionId) =>
         WithSessionAsync(http, sessions, sessionId, async session =>
             Results.Ok(await session.ReadSnapshotAsync(http.RequestAborted))));
+    routes.MapGet("/{sessionId}/not-sent", (HttpContext http, Guid sessionId) =>
+        WithSessionAsync(http, sessions, sessionId, async session => {
+          string? cursor = http.Request.Query.TryGetValue("cursor", out var supplied) ? supplied.ToString() : null;
+          return Results.Ok(await session.ReadNotSentInputsAsync(cursor, http.RequestAborted));
+        }));
     routes.MapGet("/{sessionId}/history", (HttpContext http, Guid sessionId, [AsParameters] HistoryQuery query) =>
         ReadHistoryAsync(http, sessions, sessionId, query));
     routes.MapGet("/{sessionId}/content", (HttpContext http, Guid sessionId, [AsParameters] ContentQuery query) =>

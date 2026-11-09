@@ -109,14 +109,14 @@ public sealed class SessionSubscriptionTests {
       Assert.Equal(executionId, receipt.ExecutionId);
       SessionSnapshot pendingSnapshot = await fixture.Session.ReadSnapshotAsync();
       Assert.Contains(pendingSnapshot.PendingInputs, input => input.SubmissionId == pending.SubmissionId);
-      Assert.Equal(7L, watched.Last().Version);
+      Assert.Equal(8L, watched.Last().Version);
 
       Assert.Equal(new StopReceipt(executionId, StopStatus.Requested),
           await fixture.Session.RequestStopAsync(executionId).WaitAsync(TestTimeout));
       SessionSnapshot stoppingSnapshot = await fixture.Session.ReadSnapshotAsync();
       Assert.True(stoppingSnapshot.StopRequested);
       Assert.Equal(executionId, stoppingSnapshot.UnsettledExecutionId);
-      Assert.Equal(8L, watched.Last().Version);
+      Assert.Equal(9L, watched.Last().Version);
 
       toolRelease.TrySetResult();
       Assert.Equal(ExecutionOutcome.Cancelled,
@@ -131,12 +131,12 @@ public sealed class SessionSubscriptionTests {
     Assert.NotNull(completedTool.ResultJson);
 
     SessionChange[] changes = watched.ToArray();
-    Assert.Equal(Enumerable.Range(0, 11).Select(version => (long)version),
+    Assert.Equal(Enumerable.Range(0, 12).Select(version => (long)version),
         changes.Where(change => change.Status is null).Select(change => change.Version));
-    Assert.Contains(changes, change => change.Status is null && change.Version == 3); // Tool observed.
-    Assert.Contains(changes, change => change.Status is null && change.Version == 6); // Tool started.
-    Assert.Contains(changes, change => change.Status is null && change.Version == 9); // Tool completed.
-    Assert.Equal(new[] { (0L, "idle"), (1L, "running"), (10L, "idle") },
+    Assert.Contains(changes, change => change.Status is null && change.Version == 4); // Tool observed.
+    Assert.Contains(changes, change => change.Status is null && change.Version == 7); // Tool started.
+    Assert.Contains(changes, change => change.Status is null && change.Version == 10); // Tool completed.
+    Assert.Equal(new[] { (0L, "idle"), (1L, "running"), (11L, "idle") },
         changes.Where(change => change.Status is not null)
             .Select(change => (change.Version, change.Status!)));
     Assert.Equal(new[] { "idle", "running", "idle" },

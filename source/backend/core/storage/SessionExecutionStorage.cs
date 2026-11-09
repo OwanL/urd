@@ -10,9 +10,9 @@ internal sealed class SessionExecutionStorage(Database database) {
     return database.Write<LlmRequest?>(transaction => {
       Guid requestId = Guid.NewGuid();
       using SqliteCommand claim = database.Command(transaction, """
-        INSERT INTO execution_requests (request_id, run_id, request_index)
+        INSERT INTO execution_requests (request_id, run_id, request_index, attempt)
         SELECT $request, r.run_id,
-            COALESCE((SELECT MAX(request_index) + 1 FROM execution_requests WHERE run_id = r.run_id), 0)
+            COALESCE((SELECT MAX(request_index) + 1 FROM execution_requests WHERE run_id = r.run_id), 0), 1
         FROM execution_runs r JOIN sessions s ON s.session_id = r.session_id
         WHERE r.session_id = $session AND r.run_id = $run
             AND r.history_revision = $revision AND s.history_revision = $revision
@@ -41,6 +41,35 @@ internal sealed class SessionExecutionStorage(Database database) {
     });
   }
 
+  // The marker and its user entries share a transaction. A repeat hook never allocates
+  // entries again, and the stopped/settled/revision checks also apply to repeats.
+  internal bool StartRequest(Guid sessionId, Guid executionId, long historyRevision, Guid requestId) {
+    return database.Write(transaction => {
+      using SqliteCommand mark = database.Command(transaction, """
+        UPDATE execution_requests SET attempt = 2
+        WHERE request_id = $request AND run_id = $run AND outcome IS NULL AND attempt IN (1, 2)
+            AND EXISTS (SELECT 1 FROM execution_runs r JOIN sessions s ON s.session_id = r.session_id
+                WHERE r.run_id = $run AND r.session_id = $session AND r.history_revision = $revision
+                    AND s.history_revision = $revision AND r.stopping = 0 AND r.outcome IS NULL);
+        """, ("$session", sessionId), ("$run", executionId), ("$revision", historyRevision), ("$request", requestId));
+      if (mark.ExecuteNonQuery() == 0)
+        return false;
+
+      using SqliteCommand place = database.Command(transaction, """
+        INSERT INTO execution_messages (
+            session_id, history_revision, run_id, role, message_id, input_id, request_id, created_at)
+        SELECT i.session_id, $revision, i.run_id, 0, i.input_id, i.input_id, $request, $created
+        FROM execution_inputs i WHERE i.run_id = $run AND i.request_id = $request
+            AND NOT EXISTS (SELECT 1 FROM execution_messages m
+                WHERE m.run_id = i.run_id AND m.role = 0 AND m.message_id = i.input_id)
+        ORDER BY i.ordinal;
+        """, ("$run", executionId), ("$revision", historyRevision), ("$request", requestId),
+          ("$created", StorageText.UtcTimestamp()));
+      place.ExecuteNonQuery();
+      return true;
+    });
+  }
+
   internal StopReceipt RequestStop(Guid sessionId, Guid executionId, bool ownsExecution) {
     return database.Write(transaction => {
       using SqliteCommand read = database.Command(transaction,
@@ -59,7 +88,10 @@ internal sealed class SessionExecutionStorage(Database database) {
       using SqliteCommand command = database.Command(transaction, """
         UPDATE execution_runs SET stopping = 1
         WHERE session_id = $session AND run_id = $run AND stopping = 0 AND outcome IS NULL;
-        UPDATE execution_inputs SET outcome = 1
+        UPDATE execution_inputs SET outcome = 1,
+            not_sent = CASE WHEN NOT EXISTS (SELECT 1 FROM execution_messages m
+                WHERE m.run_id = execution_inputs.run_id AND m.role = 0
+                    AND m.input_id = execution_inputs.input_id) THEN 1 ELSE 0 END
         WHERE session_id = $session AND run_id = $run AND request_id IS NULL AND outcome IS NULL
             AND EXISTS (SELECT 1 FROM execution_runs WHERE run_id = $run AND stopping = 1 AND outcome IS NULL);
         """, ("$session", sessionId), ("$run", executionId));
@@ -92,7 +124,12 @@ internal sealed class SessionExecutionStorage(Database database) {
 
       using SqliteCommand settle = database.Command(transaction, """
         UPDATE execution_requests SET outcome = $outcome WHERE run_id = $run AND outcome IS NULL;
-        UPDATE execution_inputs SET outcome = $outcome WHERE run_id = $run AND outcome IS NULL;
+        UPDATE execution_inputs SET outcome = $outcome,
+            not_sent = CASE WHEN (request_id IS NULL OR EXISTS (
+                SELECT 1 FROM execution_requests q WHERE q.request_id = execution_inputs.request_id AND q.attempt = 1))
+                AND NOT EXISTS (SELECT 1 FROM execution_messages m WHERE m.run_id = execution_inputs.run_id
+                    AND m.role = 0 AND m.input_id = execution_inputs.input_id) THEN 1 ELSE 0 END
+        WHERE run_id = $run AND outcome IS NULL;
         UPDATE execution_tools SET outcome = $toolOutcome,
             error = CASE WHEN started = 0 THEN 'Tool was not executed.' ELSE 'Tool result unavailable; effects may have occurred.' END,
             result_json = CASE WHEN started = 0 THEN '{"error":"Tool was not executed."}'

@@ -48,13 +48,8 @@ internal sealed class UserMessageStorage(Database database) {
 
       using SqliteCommand insert = database.Command(transaction, """
         INSERT INTO execution_inputs (session_id, input_id, run_id) VALUES ($session, $input, $run);
-        INSERT INTO execution_messages (
-            session_id, history_revision, run_id, role, message_id, input_id, created_at)
-        VALUES ($session, $revision, $run, 0, $input, $input, $created);
         """,
-          ("$session", sessionId), ("$run", executionId),
-          ("$revision", actualRevision), ("$input", submission.SubmissionId),
-          ("$created", StorageText.UtcTimestamp()));
+          ("$session", sessionId), ("$run", executionId), ("$input", submission.SubmissionId));
       insert.ExecuteNonQuery();
       return (accepted, true);
     });

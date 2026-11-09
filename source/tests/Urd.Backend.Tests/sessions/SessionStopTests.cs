@@ -106,6 +106,8 @@ public sealed class SessionStopTests {
       accepted = await fixture.Session.SubmitUserMessageAsync(submission);
       Assert.Equal(MessageAcceptance.Accepted, accepted.Acceptance);
       Assert.Equal(executionId, accepted.ExecutionId);
+      SessionSnapshot pendingSnapshot = await fixture.Session.ReadSnapshotAsync();
+      Assert.Contains(pendingSnapshot.PendingInputs, input => input.SubmissionId == submission.SubmissionId);
       Assert.Equal(new StopReceipt(executionId, StopStatus.Requested),
           await fixture.Session.RequestStopAsync(executionId).WaitAsync(TestTimeout));
       await cancellationObserved.Task.WaitAsync(TestTimeout);
@@ -114,10 +116,11 @@ public sealed class SessionStopTests {
       Assert.Equal(executionId, snapshot.UnsettledExecutionId);
       Assert.Null(snapshot.LastSettlement);
       Assert.False(settlement.IsCompleted);
+      Assert.Empty(snapshot.PendingInputs); // Stop retires accepted inputs that never reached a send.
       Assert.Null(Assert.Single(StoredExecutions.Read(fixture.Database)).Outcome);
       TranscriptHistoryPage history = await fixture.Session.ReadHistoryAsync(
           new(TranscriptHistoryMode.Latest, snapshot.HistoryRevision));
-      Assert.Contains(history.Entries, entry => entry.Entry.EntryId == submission.SubmissionId);
+      Assert.DoesNotContain(history.Entries, entry => entry.Entry.EntryId == submission.SubmissionId);
       Assert.Empty(history.Settlements); // The run is not settled yet.
       StoredDelivery retired = Assert.Single(StoredDeliveries.Read(fixture.Database), row => row.SubmissionId == submission.SubmissionId);
       Assert.Null(retired.RequestId);
@@ -202,6 +205,7 @@ public sealed class SessionStopTests {
       Assert.True(snapshot.StopRequested); // Local intent must not be hidden by the failed write.
       Assert.Equal(executionId, snapshot.UnsettledExecutionId);
       Assert.Null(snapshot.LastSettlement);
+      Assert.Contains(snapshot.PendingInputs, input => input.SubmissionId == submission.SubmissionId);
       Assert.False(settlement.IsCompleted);
       UserMessageReceipt refused = await fixture.Session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, "new work", TestLlmSelection.Default));
       Assert.Equal(MessageAcceptance.Refused, refused.Acceptance);
@@ -238,9 +242,10 @@ public sealed class SessionStopTests {
     Assert.Equal(accepted, await fixture.Session.GetUserMessageReceiptAsync(submission.SubmissionId));
     SessionSnapshot settled = await fixture.Session.ReadSnapshotAsync();
     Assert.Equal(ExecutionOutcome.Cancelled, settled.LastSettlement!.Outcome);
+    Assert.Empty(settled.PendingInputs);
     TranscriptHistoryPage history = await fixture.Session.ReadHistoryAsync(
         new(TranscriptHistoryMode.Latest, settled.HistoryRevision));
-    Assert.Contains(history.Entries, entry => entry.Entry.EntryId == submission.SubmissionId);
+    Assert.DoesNotContain(history.Entries, entry => entry.Entry.EntryId == submission.SubmissionId);
   }
 
   [Fact]

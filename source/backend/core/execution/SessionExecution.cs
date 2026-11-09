@@ -114,6 +114,7 @@ internal sealed class SessionExecution : IDisposable {
             ? new ReasoningOptions { Effort = effort } : null,
         Tools = [.. tools]
       };
+      await StartRequestAsync(request.RequestId);
       updates = chatClient
           .GetStreamingResponseAsync(request.Messages, options, requestStop.Token)
           .GetAsyncEnumerator(requestStop.Token);
@@ -154,7 +155,7 @@ internal sealed class SessionExecution : IDisposable {
 
   private LlmRequestResult ToRequestResult(Guid requestId, Exception? failure) {
     // A failed save is a session failure, not a failed LLM request.
-    if (failure is OutputSaveException)
+    if (failure is OutputSaveException or RequestStartSaveException)
       ExceptionDispatchInfo.Throw(failure);
 
     bool stopped = stop.IsCancellationRequested;
@@ -167,6 +168,18 @@ internal sealed class SessionExecution : IDisposable {
     };
     string? error = outcome == ExecutionOutcome.Failed ? failure!.Message : null;
     return new(requestId, outcome, error);
+  }
+
+  private async Task StartRequestAsync(Guid requestId) {
+    bool started;
+    try {
+      started = await session.StartRequestAsync(ExecutionId, requestId);
+    } catch (Exception exception) {
+      throw new RequestStartSaveException(exception);
+    }
+
+    if (!started)
+      throw new OutputRejectedException();
   }
 
   private async Task SaveChunkAsync(LlmResponseChunk chunk) {
@@ -226,5 +239,7 @@ internal sealed class SessionExecution : IDisposable {
   private sealed class OutputRejectedException : Exception;
 
   private sealed class OutputSaveException(Exception inner) : Exception("Saving response output failed.", inner);
+
+  private sealed class RequestStartSaveException(Exception inner) : Exception("Saving the request attempt failed.", inner);
 #pragma warning restore S3871
 }

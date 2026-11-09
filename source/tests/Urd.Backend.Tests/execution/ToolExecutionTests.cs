@@ -287,6 +287,7 @@ public sealed class ToolExecutionTests {
     store.UserMessages.Admit(session, 0,
         new(Guid.NewGuid(), 0, "request", TestLlmSelection.Default), true, execution);
     Guid request = store.Executions.ClaimNextRequest(session, execution, 0)!.RequestId;
+    Assert.True(store.Executions.StartRequest(session, execution, 0, request));
     var call = new LlmToolCall("never-started", "fake", JsonSerializer.SerializeToElement(new { }));
     Assert.True(store.LlmResponses.Append(session, execution, 0, new(request, Guid.NewGuid(), 0, "", true)));
     Assert.True(store.LlmResponses.CompleteRequest(session, execution, 0,

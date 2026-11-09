@@ -29,7 +29,8 @@ internal sealed class SnapshotReader {
     JOIN input_decisions d ON d.session_id = i.session_id AND d.input_id = i.input_id
     WHERE i.run_id = (
         SELECT run_id FROM execution_runs WHERE session_id = $session AND outcome IS NULL
-    ) AND i.request_id IS NULL AND i.outcome IS NULL
+    ) AND i.outcome IS NULL AND (i.request_id IS NULL OR EXISTS (
+        SELECT 1 FROM execution_requests q WHERE q.request_id = i.request_id AND q.attempt = 1))
     ORDER BY i.ordinal LIMIT $limit;
     """;
 
@@ -133,7 +134,7 @@ internal sealed class SnapshotReader {
     return inputs.ToArray();
   }
 
-  private static string ReadPreview(byte[] utf8) {
+  internal static string ReadPreview(byte[] utf8) {
     var text = new StringBuilder(Math.Min(PreviewUtf16Limit, utf8.Length));
     Span<char> scalar = stackalloc char[2];
     int offset = 0;

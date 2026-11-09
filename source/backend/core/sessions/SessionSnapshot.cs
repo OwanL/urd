@@ -10,5 +10,5 @@ public sealed record SessionSnapshot(
     string? FirstUserPreview, IReadOnlyList<PendingInputPreview> PendingInputs,
     LlmSelection? LatestLlmSelection = null);
 
-// A bounded preview of an accepted input that has not yet been assigned to a request.
+// A bounded preview of an accepted input whose containing request has not started sending.
 public sealed record PendingInputPreview(Guid SubmissionId, string Preview);

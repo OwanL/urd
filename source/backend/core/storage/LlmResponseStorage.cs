@@ -231,7 +231,10 @@ internal sealed class LlmResponseStorage(Database database) {
     using SqliteCommand update = database.Command(transaction, """
       UPDATE execution_requests SET outcome = $outcome, error = $error, usage_json = $usage
       WHERE request_id = $request;
-      UPDATE execution_inputs SET outcome = $outcome WHERE request_id = $request;
+      UPDATE execution_inputs SET outcome = $outcome,
+          not_sent = CASE WHEN EXISTS (SELECT 1 FROM execution_requests q
+              WHERE q.request_id = $request AND q.attempt = 1) THEN 1 ELSE 0 END
+      WHERE request_id = $request;
       """,
         ("$outcome", (int)completion.Outcome),
         ("$error", completion.Error),

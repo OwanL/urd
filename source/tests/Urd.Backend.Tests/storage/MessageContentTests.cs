@@ -68,6 +68,7 @@ public sealed class MessageContentTests {
     var submission = new UserMessageSubmission(Guid.NewGuid(), 0, text, TestLlmSelection.Default);
     Assert.True(store.UserMessages.Admit(session, 0, submission, true, execution).NewlyAccepted);
     LlmRequest request = store.Executions.ClaimNextRequest(session, execution, 0)!;
+    Assert.True(store.Executions.StartRequest(session, execution, 0, request.RequestId));
     return new(session, execution, request.RequestId,
         new(execution, submission.SubmissionId, MessageRole.User, 0),
         new(execution, Guid.NewGuid(), MessageRole.Assistant, 0));

@@ -45,6 +45,11 @@ public abstract class SessionBase {
     return store.UserMessages.ReadReceipt(Id, submissionId);
   }
 
+  public async Task<NotSentPage> ReadNotSentInputsAsync(string? cursor = null, CancellationToken cancellation = default) {
+    using var held = await gate.AcquireAsync(cancellation);
+    return store.NotSentInputs.Read(Id, cursor);
+  }
+
   public async Task<SessionSnapshot> ReadSnapshotAsync(CancellationToken cancellation = default) {
     using var held = await gate.AcquireAsync(cancellation);
     return ApplyLiveState(store.Snapshots.ReadStored(Id));
@@ -187,6 +192,17 @@ public abstract class SessionBase {
     if (request is not null)
       PublishChange();
     return request;
+  }
+
+  internal async Task<bool> StartRequestAsync(Guid executionId, Guid requestId) {
+    using var held = await gate.AcquireAsync();
+    if (!IsCurrentExecution(executionId) || execution!.IsStopping)
+      return false;
+
+    bool started = WriteToStore(() => store.Executions.StartRequest(Id, executionId, HistoryRevision, requestId));
+    if (started)
+      PublishChange();
+    return started;
   }
 
   internal async Task<bool> RecordOutputAsync(Guid executionId, LlmResponseChunk chunk) {

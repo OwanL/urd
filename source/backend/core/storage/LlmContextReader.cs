@@ -7,7 +7,8 @@ using Urd.Core.Providers;
 
 namespace Urd.Core.Storage;
 
-// Admission order is readable history; only claimed submissions belong in LLM context.
+// Execution owns context eligibility: never-attempted history is excluded, while the
+// current claim is included to prepare its send. Attempted failures and legacy data stay eligible.
 internal sealed class LlmContextReader(Database database) {
   internal ReadOnlyCollection<ChatMessage> Read(SqliteTransaction transaction, Guid sessionId,
       Guid executionId, long historyRevision, Guid requestId) {
@@ -17,6 +18,7 @@ internal sealed class LlmContextReader(Database database) {
           JOIN execution_requests q ON q.run_id = r.run_id
           WHERE r.session_id = $session AND r.history_revision = $revision
               AND r.ordinal <= (SELECT ordinal FROM execution_runs WHERE run_id = $run)
+              AND (q.attempt <> 1 OR q.request_id = $request)
               AND (r.run_id <> $run OR q.request_index <=
                   (SELECT request_index FROM execution_requests WHERE request_id = $request))
       ), contents AS (

@@ -76,7 +76,9 @@ public sealed class LlmProviderResponseStorageTests {
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, execution = Guid.NewGuid();
     store.UserMessages.Admit(session, 0,
         new(Guid.NewGuid(), 0, "request", TestLlmSelection.Default), true, execution);
-    return (session, execution, store.Executions.ClaimNextRequest(session, execution, 0)!.RequestId);
+    Guid request = store.Executions.ClaimNextRequest(session, execution, 0)!.RequestId;
+    Assert.True(store.Executions.StartRequest(session, execution, 0, request));
+    return (session, execution, request);
   }
 
   private static void FinalText(UrdStore store, Guid session, Guid execution, Guid request) =>

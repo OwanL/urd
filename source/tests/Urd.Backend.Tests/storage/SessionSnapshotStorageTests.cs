@@ -50,21 +50,26 @@ public sealed class SessionSnapshotStorageTests {
   }
 
   [Fact]
-  public void SnapshotContainsOnlyBoundedIdentityAndPreviewForUnclaimedInputs() {
+  public void SnapshotContainsOnlyBoundedIdentityAndPreviewUntilAttemptStarts() {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
-    string text = string.Concat(Enumerable.Repeat("pending 🙂", 40));
-    Guid input = Guid.NewGuid();
+    string text = string.Concat(Enumerable.Repeat("pending 🙂", 4000));
+    Guid input = Guid.NewGuid(), run = Guid.NewGuid();
     store.UserMessages.Admit(session, 0,
-        new(input, 0, text, TestLlmSelection.Default), true, Guid.NewGuid());
-    database.Execute($"DELETE FROM execution_messages WHERE session_id = '{session:D}' AND message_id = '{input:D}';");
+        new(input, 0, text, TestLlmSelection.Default), true, run);
+    Assert.Equal(0L, database.Scalar($"SELECT COUNT(*) FROM execution_messages WHERE session_id = '{session:D}' AND message_id = '{input:D}';")); // raw-sql: admission does not place a user entry before the request starts
 
     SessionSnapshot snapshot = store.Snapshots.ReadStored(session);
     Assert.Null(snapshot.FirstUserPreview);
     PendingInputPreview pending = Assert.Single(snapshot.PendingInputs);
     Assert.Equal(input, pending.SubmissionId);
     Assert.Equal(text[..256], pending.Preview);
+    Guid request = store.Executions.ClaimNextRequest(session, run, 0)!.RequestId;
+    Assert.Equal(pending, Assert.Single(store.Snapshots.ReadStored(session).PendingInputs));
+    Assert.Equal(text, store.UserMessages.ReadReceipt(session, input)!.Submission.Text);
+    Assert.True(store.Executions.StartRequest(session, run, 0, request));
+    Assert.Empty(store.Snapshots.ReadStored(session).PendingInputs);
   }
 
   private static string[] ExplainPending(TemporaryDatabase database, Guid session) {

@@ -16,6 +16,7 @@ public sealed class UrdStore : IDisposable {
     Content = new(database);
     Snapshots = new(database, Content);
     History = new(database);
+    NotSentInputs = new(database);
     Providers = new(database);
   }
 
@@ -28,6 +29,7 @@ public sealed class UrdStore : IDisposable {
   internal SnapshotReader Snapshots { get; }
   internal MessageContentReader Content { get; }
   internal TranscriptHistoryReader History { get; }
+  internal NotSentInputReader NotSentInputs { get; }
 
   public static UrdStore Open(string databasePath) {
     ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);

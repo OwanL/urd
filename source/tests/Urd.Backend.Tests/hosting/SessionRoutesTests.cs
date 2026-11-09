@@ -6,6 +6,7 @@ using Urd.Backend.Tests.Support;
 using Urd.Core.Execution;
 using Urd.Core.Providers;
 using Urd.Core.Sessions;
+using Urd.Core.Storage;
 using Urd.Server;
 using Xunit;
 using static Urd.Backend.Tests.Support.HttpTest;
@@ -106,6 +107,58 @@ public sealed class SessionRoutesTests {
       savedText.Append(page.Text);
     }
     Assert.Equal(text, savedText.ToString());
+  }
+
+  [Fact]
+  public async Task NotSentListingSurvivesLaterRunAndReloadWithSourceOnlyOnReceiptRoute() {
+    using var database = new TemporaryDatabase();
+    Guid sessionId, run = Guid.NewGuid();
+    string text = string.Concat(Enumerable.Repeat("not sent 🙂", 4000));
+    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, text, TestLlmSelection.Default);
+    UserMessageReceipt receipt;
+    using (UrdStore store = UrdStore.Open(database.Path)) {
+      sessionId = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
+      receipt = store.UserMessages.Admit(sessionId, 0, submission, true, run).Receipt;
+      Guid request = store.Executions.ClaimNextRequest(sessionId, run, 0)!.RequestId;
+      Assert.True(store.LlmResponses.CompleteRequest(sessionId, run, 0, new(request, ExecutionOutcome.Failed)));
+      Assert.NotNull(store.Executions.TrySettle(sessionId, run, ExecutionOutcome.Failed));
+    }
+
+    await using var server = new RunningServer(Options(database));
+    await server.WaitForReadyAsync();
+    var later = new UserMessageSubmission(Guid.NewGuid(), 0, "later run", TestLlmSelection.Default);
+    using (HttpResponseMessage accepted = await RequestAsync(server.Client, HttpMethod.Post,
+        $"/api/sessions/{sessionId}/message-submissions", JsonContent.Create(later, options: json))) {
+      UserMessageReceipt next = (await accepted.Content.ReadFromJsonAsync<UserMessageReceipt>(json))!;
+      await HttpTest.SettledAsync(next.ExecutionId!.Value, () => ReadSnapshotAsync(server.Client, sessionId));
+    }
+    using (HttpResponseMessage response = await RequestAsync(server.Client, HttpMethod.Get,
+        $"/api/sessions/{sessionId}/not-sent")) {
+      Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+      AssertPrivateResponse(response);
+      NotSentPage page = (await response.Content.ReadFromJsonAsync<NotSentPage>(json))!;
+      NotSentInput input = Assert.Single(page.Inputs);
+      Assert.Equal(submission.SubmissionId, input.SubmissionId);
+      Assert.Equal(run, input.ExecutionId);
+      Assert.InRange(input.Preview.Length, 1, 256);
+      Assert.StartsWith(input.Preview, text, StringComparison.Ordinal);
+      Assert.Null(page.NextCursor);
+      Assert.DoesNotContain(text, await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+    }
+    using (HttpResponseMessage source = await RequestAsync(server.Client, HttpMethod.Get,
+        $"/api/sessions/{sessionId}/message-submissions/{submission.SubmissionId}"))
+      Assert.Equal(receipt, await source.Content.ReadFromJsonAsync<UserMessageReceipt>(json));
+    using (HttpResponseMessage retry = await RequestAsync(server.Client, HttpMethod.Post,
+        $"/api/sessions/{sessionId}/message-submissions", JsonContent.Create(submission, options: json)))
+      Assert.Equal(receipt, await retry.Content.ReadFromJsonAsync<UserMessageReceipt>(json));
+    foreach (string cursor in new[] { "", "-1", "0", "9223372036854775808" }) {
+      using HttpResponseMessage invalid = await RequestAsync(server.Client, HttpMethod.Get,
+          $"/api/sessions/{sessionId}/not-sent?cursor={cursor}");
+      Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+    }
+    using HttpResponseMessage missing = await RequestAsync(server.Client, HttpMethod.Get,
+        $"/api/sessions/{Guid.NewGuid()}/not-sent");
+    Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
   }
 
   private static ServerOptions Options(TemporaryDatabase database) => new(Path.GetDirectoryName(database.Path)!, 0);

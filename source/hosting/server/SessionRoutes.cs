@@ -80,9 +80,7 @@ internal static class SessionRoutes {
   }
 
   private static async Task<IResult> CreateAsync(HttpContext http, SessionManager sessions) {
-    JsonElement body = await http.Request.ReadFromJsonAsync<JsonElement>(http.RequestAborted);
-    if (body.ValueKind != JsonValueKind.Object || body.EnumerateObject().Any())
-      return Results.BadRequest();
+    await HttpJson.RequireEmptyAsync(http.Request, http.RequestAborted);
 
     PrimarySession session;
     try {
@@ -112,9 +110,7 @@ internal static class SessionRoutes {
     if (executionId == Guid.Empty)
       return Results.BadRequest();
 
-    JsonElement body = await http.Request.ReadFromJsonAsync<JsonElement>(http.RequestAborted);
-    if (body.ValueKind != JsonValueKind.Object || body.EnumerateObject().Any())
-      return Results.BadRequest();
+    await HttpJson.RequireEmptyAsync(http.Request, http.RequestAborted);
 
     return await WithSessionAsync(http, sessions, sessionId, async session => {
       // Disconnecting cannot undo admitted Stop intent; cleanup remains owned by Core.

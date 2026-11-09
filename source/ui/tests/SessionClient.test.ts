@@ -86,6 +86,10 @@ interface MappingCase {
 
 const opaqueCursor = "opaque /+?&=#%雪";
 const page = { sessionIds: [sessionId], nextCursor: opaqueCursor };
+const notSentPage = {
+  inputs: [{ submissionId, executionId, preview: "not-sent preview" }],
+  nextCursor: opaqueCursor,
+};
 const stopReceipt = { executionId, status: "requested", outcome: null };
 const selectedRefusal: UserMessageReceipt = {
   ...selectedReceipt,
@@ -140,6 +144,21 @@ const mappings: MappingCase[] = [
     method: "GET",
     path: `/api/sessions/${sessionId}/snapshot`,
     response: snapshot,
+  },
+  {
+    name: "not-sent without a cursor",
+    call: (client) => client.getNotSent(sessionId),
+    method: "GET",
+    path: `/api/sessions/${sessionId}/not-sent`,
+    response: notSentPage,
+  },
+  {
+    name: "not-sent preserves an opaque cursor",
+    call: (client) => client.getNotSent(sessionId, opaqueCursor),
+    method: "GET",
+    path: `/api/sessions/${sessionId}/not-sent`,
+    query: { cursor: opaqueCursor },
+    response: notSentPage,
   },
   ...(["latest", "before", "after", "around"] as const).map((mode): MappingCase => ({
     name: `history ${mode} preserves its exact reference`,
@@ -385,6 +404,10 @@ const reads: {
 }[] = [
   { name: "list", call: (client, signal) => client.list(undefined, signal) },
   { name: "snapshot", call: (client, signal) => client.getSnapshot(sessionId, signal) },
+  {
+    name: "not-sent",
+    call: (client, signal) => client.getNotSent(sessionId, undefined, signal),
+  },
   {
     name: "history",
     call: (client, signal) =>

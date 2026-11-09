@@ -4,6 +4,10 @@ import test from "node:test";
 import { chromium, type Page } from "playwright";
 import { SessionClient } from "../sessions/SessionClient.ts";
 import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
+import type {
+  UserMessageReceipt,
+  UserMessageSubmission,
+} from "../sessions/UserMessageSubmission.ts";
 import { startLocalModelServer } from "./LocalModelServer.ts";
 import { ServerProcess } from "./ServerProcess.ts";
 
@@ -1164,6 +1168,265 @@ void test("workspace read recovery reconciles a hidden uncertain send", async ()
     assert.equal(submissions, 1);
   });
 });
+
+void test("not-sent discovery is user-invoked, retrieves on demand, and resends without replacing the draft", async () => {
+  await withOfflineBrowser(async ({ server, page }) => {
+    const pageCursor = "next-cursor";
+    const firstSubmissionId = "30000000-0000-0000-0000-000000000003";
+    const firstExecutionId = "20000000-0000-0000-0000-000000000002";
+    const resendExecutionId = "20000000-0000-0000-0000-000000000004";
+    const sourceText = "Full original text, shown only after retrieval.";
+    const sessions = new SessionClient(server.origin);
+    const reads: (string | null)[] = [];
+    const resent: UserMessageSubmission[] = [];
+    const pageErrors: string[] = [];
+    page.on("pageerror", (error) => pageErrors.push(error.message));
+    await page.goto(server.origin.href);
+    const message = page.getByRole("textbox", { name: "Message" });
+    await message.waitFor();
+    const sessionId = new URL(page.url()).hash.slice(1);
+    const snapshot = await sessions.getSnapshot(sessionId);
+    const original: UserMessageSubmission = {
+      submissionId: firstSubmissionId,
+      expectedHistoryRevision: snapshot.historyRevision,
+      text: sourceText,
+      llmSelection: null,
+    };
+    const originalReceipt: UserMessageReceipt = {
+      sessionId,
+      submission: original,
+      acceptance: "accepted",
+      refusalReason: null,
+      executionId: firstExecutionId,
+    };
+
+    await page.route("**/api/sessions/*/not-sent*", async (route) => {
+      const url = new URL(route.request().url());
+      reads.push(url.searchParams.get("cursor"));
+      const result =
+        url.searchParams.get("cursor") === pageCursor
+          ? {
+              inputs: [
+                {
+                  submissionId: "30000000-0000-0000-0000-000000000005",
+                  executionId: "20000000-0000-0000-0000-000000000006",
+                  preview: "Second page preview",
+                },
+              ],
+              nextCursor: null,
+            }
+          : {
+              inputs: [
+                {
+                  submissionId: firstSubmissionId,
+                  executionId: firstExecutionId,
+                  preview: "Preview only",
+                },
+              ],
+              nextCursor: pageCursor,
+            };
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(result),
+      });
+    });
+    await page.route("**/api/sessions/*/message-submissions/*", async (route) => {
+      if (route.request().method() !== "GET") return route.continue();
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(originalReceipt),
+      });
+    });
+    await page.route("**/api/sessions/*/message-submissions", async (route) => {
+      if (route.request().method() !== "POST") return route.continue();
+      const submission = route.request().postDataJSON() as UserMessageSubmission;
+      resent.push(submission);
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          sessionId,
+          submission,
+          acceptance: "accepted",
+          refusalReason: null,
+          executionId: resendExecutionId,
+        } satisfies UserMessageReceipt),
+      });
+    });
+
+    await message.fill("Keep this unrelated draft.");
+    await waitForQuietCount(() => reads.length, 250, 2_000, "not-sent discovery to remain idle");
+    assert.equal(reads.length, 0, "not-sent discovery must wait for an explicit request");
+    await page.getByRole("button", { name: "Not sent" }).click();
+    await page.getByText("Preview only", { exact: true }).waitFor();
+    assert.equal(await page.getByText(sourceText, { exact: true }).count(), 0);
+    assert.deepEqual(reads, [null]);
+
+    const firstInput = page.locator("li").filter({ hasText: "Preview only" });
+    await firstInput.getByRole("button", { name: "Retrieve" }).click();
+    await page.locator("pre").getByText(sourceText, { exact: true }).waitFor();
+    assert.equal(await message.inputValue(), "Keep this unrelated draft.");
+    await firstInput.getByRole("button", { name: "Resend" }).click();
+    await page.getByText("Resend accepted.", { exact: true }).waitFor();
+    assert.equal(await firstInput.getByRole("button", { name: "Accepted" }).isDisabled(), true);
+    assert.equal(resent.length, 1);
+    assert.notEqual(resent[0]?.submissionId, firstSubmissionId);
+    assert.equal(resent[0]?.expectedHistoryRevision, snapshot.historyRevision);
+    assert.equal(resent[0]?.text, sourceText);
+    assert.equal(await message.inputValue(), "Keep this unrelated draft.");
+
+    await page.getByRole("button", { name: "Next page" }).click();
+    await waitForCondition(() => reads.length >= 2, "the next not-sent page read");
+    assert.deepEqual(reads, [null, pageCursor]);
+    await page.getByText("Second page preview", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "Previous page" }).click();
+    await page.getByText("Preview only", { exact: true }).waitFor();
+    assert.equal(reads.at(-1), null);
+
+    await page.reload();
+    await message.waitFor();
+    await waitForQuietCount(() => reads.length, 250, 2_000, "reload to remain on demand");
+    assert.equal(reads.length, 3);
+    await page.getByRole("button", { name: "Not sent" }).click();
+    await page.getByText("Preview only", { exact: true }).waitFor();
+    assert.equal(reads.length, 4, "a later browser run can discover not-sent inputs again");
+    const reloadedInput = page.locator("li").filter({ hasText: "Preview only" });
+    await reloadedInput.getByRole("button", { name: "Retrieve" }).click();
+    await page.locator("pre").getByText(sourceText, { exact: true }).waitFor();
+    assert.equal(resent.length, 1, "reload must not automatically resend the source");
+    await reloadedInput.getByRole("button", { name: "Resend" }).click();
+    await page.getByText("Resend accepted.", { exact: true }).waitFor();
+    assert.equal(resent.length, 2);
+    assert.notEqual(resent[1]?.submissionId, resent[0]?.submissionId);
+    assert.notEqual(resent[1]?.submissionId, firstSubmissionId);
+    assert.equal(await message.inputValue(), "Keep this unrelated draft.");
+    assert.deepEqual(pageErrors, []);
+  });
+});
+
+void test(
+  "pending input promotion appends history without moving the reading anchor",
+  { timeout: 45_000 },
+  async () => {
+    await withOfflineBrowser(async ({ model, server, page }) => {
+      const pageErrors: string[] = [];
+      page.on("pageerror", (error) => pageErrors.push(error.message));
+      await page.goto(server.origin.href);
+      const message = page.getByRole("textbox", { name: "Message" });
+      await message.waitFor();
+      await page.getByRole("button", { name: /^Model:/ }).click();
+      await page.getByRole("option", { name: "fixture-a" }).click();
+      const send = page.getByRole("button", { name: "Send" });
+      const sessions = new SessionClient(server.origin);
+
+      model.enqueue({
+        text: `bootstrap-anchor\n${Array.from(
+          { length: 18 },
+          (_, index) => `history line ${index} ${"context ".repeat(4)}`,
+        ).join("\n")}`,
+      });
+      await message.fill("initialize promotion transcript");
+      await send.click();
+      await page.getByText("history line 17", { exact: false }).waitFor();
+
+      const sessionId = new URL(page.url()).hash.slice(1);
+      model.enqueue({ text: `first long reply ${"x".repeat(500)}`, chunkSize: 1, delayMs: 5 });
+      await message.fill("first execution before queued input");
+      await send.click();
+      await page.getByRole("button", { name: "Stop" }).waitFor();
+      const firstRunning = await waitForSnapshot(
+        sessions,
+        sessionId,
+        (snapshot) => snapshot.unsettledExecutionId !== null,
+        "the first execution to run",
+      );
+      const firstExecutionId = firstRunning.unsettledExecutionId;
+      assert.ok(firstExecutionId);
+      await waitForCondition(() => model.calls.length >= 2, "the first provider request");
+      model.enqueue({ text: "reply after pending input promotion" });
+
+      const pendingText = "queued input is promoted here";
+      await message.fill(pendingText);
+      await page.waitForFunction(() => {
+        const button = document.querySelector<HTMLButtonElement>('button[aria-label="Send"]');
+        return button !== null && !button.disabled;
+      });
+      await send.click();
+      const pendingSnapshot = await waitForSnapshot(
+        sessions,
+        sessionId,
+        (snapshot) => snapshot.pendingInputs.some((input) => input.preview === pendingText),
+        "the queued input to appear separately from history",
+      );
+      assert.equal(pendingSnapshot.pendingInputs.length, 1);
+      const pendingSubmissionId = pendingSnapshot.pendingInputs[0]!.submissionId;
+      const pendingSummary = page.getByText("Pending (1)", { exact: true });
+      await pendingSummary.waitFor();
+      await pendingSummary.click();
+      await page.locator("details").getByText(pendingText, { exact: true }).waitFor();
+      const conversation = page.getByRole("region", { name: "Conversation" });
+      assert.equal(await conversation.getByText(pendingText, { exact: true }).count(), 0);
+
+      const anchor = page.getByText("bootstrap-anchor", { exact: false });
+      const anchorBox = await anchor.boundingBox();
+      const conversationBox = await conversation.boundingBox();
+      assert.ok(anchorBox);
+      assert.ok(conversationBox);
+      await conversation.evaluate((node, top) => {
+        node.scrollTop = Math.max(0, top - node.getBoundingClientRect().top - 12);
+      }, anchorBox.y);
+      await page.getByRole("button", { name: "Jump to latest" }).waitFor();
+      await conversation.evaluate(
+        () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+      );
+      const anchorBefore = await anchor.boundingBox();
+      assert.ok(anchorBefore);
+
+      const promotedSnapshot = await waitForSnapshot(
+        sessions,
+        sessionId,
+        (snapshot) =>
+          (snapshot.unsettledExecutionId === firstExecutionId ||
+            snapshot.lastSettlement?.executionId === firstExecutionId) &&
+          snapshot.pendingInputs.length === 0,
+        "the queued input to promote into the current execution",
+      );
+      const promotedReceipt = await sessions.getMessageReceipt(sessionId, pendingSubmissionId);
+      assert.equal(promotedReceipt?.submission.submissionId, pendingSubmissionId);
+      assert.equal(promotedReceipt?.executionId, firstExecutionId);
+      const history = await sessions.getHistory(sessionId, {
+        mode: "latest",
+        expectedHistoryRevision: promotedSnapshot.historyRevision,
+      });
+      const promotedUser = history.entries.find(
+        (entry) =>
+          entry.entry.kind === "user" &&
+          entry.entry.executionId === promotedReceipt.executionId &&
+          entry.entry.entryId === pendingSubmissionId,
+      );
+      assert.ok(promotedUser?.text, "the pending submission's user input must be in history");
+      assert.equal(
+        (await sessions.getMessageContent(sessionId, promotedUser.text.from)).text,
+        pendingText,
+      );
+      const promotedKey = `${promotedUser.entry.executionId}/${promotedUser.entry.entryId}/${promotedUser.entry.kind}`;
+      await page.waitForFunction(
+        (key) =>
+          [...document.querySelectorAll<HTMLElement>("#chat-view .transcript [data-message]")].some(
+            (item) => item.dataset.message === key,
+          ),
+        promotedKey,
+      );
+      await page.getByText("Pending (1)", { exact: true }).waitFor({ state: "detached" });
+      const anchorAfter = await anchor.boundingBox();
+      assert.ok(anchorAfter);
+      assert.ok(Math.abs(anchorAfter.y - anchorBefore.y) <= 2);
+      assert.deepEqual(pageErrors, []);
+    });
+  },
+);
 
 void test("tab changes limit session reads and preserve the reading anchor during a stream", async () => {
   await withOfflineBrowser(async ({ model, server, page }) => {

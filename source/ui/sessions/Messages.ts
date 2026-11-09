@@ -60,6 +60,17 @@ export interface TranscriptHistoryPage {
   readonly settlements: readonly SessionExecutionResult[];
 }
 
+export interface NotSentInput {
+  readonly submissionId: string;
+  readonly executionId: string;
+  readonly preview: string;
+}
+
+export interface NotSentPage {
+  readonly inputs: readonly NotSentInput[];
+  readonly nextCursor: string | null;
+}
+
 // Who wrote a displayed message.
 export type MessageRole = "user" | "assistant";
 

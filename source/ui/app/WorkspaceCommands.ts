@@ -8,7 +8,10 @@ import {
 import type { ChatState, WorkspaceState } from "./WorkspaceState.ts";
 import type { SessionClient } from "../sessions/SessionClient.ts";
 import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
-import type { UserMessageSubmission } from "../sessions/UserMessageSubmission.ts";
+import type {
+  UserMessageReceipt,
+  UserMessageSubmission,
+} from "../sessions/UserMessageSubmission.ts";
 
 export interface WorkspaceStopState {
   readonly executionId: string;
@@ -20,6 +23,11 @@ export interface WorkspaceCommandState {
   readonly creating: boolean;
   readonly stopping: Readonly<Record<string, WorkspaceStopState>>;
   readonly checking: Readonly<Record<string, boolean>>;
+}
+
+export interface NotSentResendResult {
+  readonly submissionId: string;
+  readonly receipt: UserMessageReceipt | null;
 }
 
 export interface WorkspaceCommandAccess {
@@ -139,7 +147,42 @@ export class WorkspaceCommands {
     await this.reconcile(id, true);
   }
 
-  async reconcile(id: string, retry: boolean): Promise<void> {
+  async resendNotSent(
+    id: string,
+    snapshot: SessionSnapshot,
+    source: UserMessageSubmission,
+  ): Promise<NotSentResendResult | null> {
+    const latest = this.access.read().chats[id];
+    if (snapshot.sessionId !== id || !latest || latest.pending || !this.access.canPersist())
+      return null;
+
+    const submission: UserMessageSubmission = {
+      submissionId: crypto.randomUUID(),
+      expectedHistoryRevision: snapshot.historyRevision,
+      text: source.text,
+      llmSelection: source.llmSelection,
+    };
+    if (
+      !this.access.updateChat(id, (previous) =>
+        previous.pending ? previous : beginSubmission(previous, submission, true),
+      )
+    ) {
+      this.access.updateChat(id, (previous) =>
+        previous.pending
+          ? {
+              ...previous,
+              pending: { ...previous.pending, status: "uncertain" },
+              error: "Resend was not dispatched because the journal could not be saved.",
+            }
+          : previous,
+      );
+      return null;
+    }
+    const receipt = await this.reconcile(id, true);
+    return { submissionId: submission.submissionId, receipt };
+  }
+
+  async reconcile(id: string, retry: boolean): Promise<UserMessageReceipt | null> {
     const original = this.access.read().chats[id]?.pending?.original;
     if (
       !original ||
@@ -147,7 +190,7 @@ export class WorkspaceCommands {
       (retry && !this.access.canPersist()) ||
       (!retry && document.hidden)
     )
-      return;
+      return null;
 
     const controller = retry ? null : new AbortController();
     if (controller) this.receiptReads.set(id, controller);
@@ -168,8 +211,9 @@ export class WorkspaceCommands {
         : await this.client.getMessageReceipt(id, original.submissionId, controller?.signal);
       if (receipt === null) throw new Error("No receipt found. Send remains uncertain.");
       this.access.updateChat(id, (previous) => applyReceipt(previous, id, receipt));
+      return receipt;
     } catch (cause) {
-      if (controller?.signal.aborted) return;
+      if (controller?.signal.aborted) return null;
       this.access.updateChat(id, (previous) =>
         previous.pending
           ? {
@@ -179,6 +223,7 @@ export class WorkspaceCommands {
             }
           : previous,
       );
+      return null;
     } finally {
       this.checks.delete(id);
       this.receiptReads.delete(id);

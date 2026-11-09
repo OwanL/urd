@@ -147,6 +147,20 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+async function withVisibleDocument<T>(action: () => Promise<T>): Promise<T> {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "document");
+  Object.defineProperty(globalThis, "document", {
+    configurable: true,
+    value: { hidden: false },
+  });
+  try {
+    return await action();
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "document", previous);
+    else Reflect.deleteProperty(globalThis, "document");
+  }
+}
+
 void test("a failed synchronous Send journal stays unsaved and dispatches nothing", async () => {
   const workspace = fixture();
   workspace.setWritable(false);
@@ -209,6 +223,106 @@ void test("retry resends a saved uncertain original while retaining a newer draf
   assert.equal(journaledBeforeDispatch, true);
   assert.equal(workspace.read().chats[sessionId]?.pending, null);
   assert.equal(workspace.read().chats[sessionId]?.draft, "newer draft");
+});
+
+void test("an accepted not-sent resend gets a new ID and can be explicitly repeated", async () => {
+  const workspace = fixture();
+  const source: UserMessageSubmission = {
+    submissionId: "30000000-0000-0000-0000-000000000099",
+    expectedHistoryRevision: 4,
+    text: "submitted text",
+    llmSelection: selection,
+  };
+  const dispatched: UserMessageSubmission[] = [];
+  let journaledBeforeDispatch = true;
+  const coordinator = commands(
+    workspace.access,
+    emptyClient(async (_id, submission) => {
+      dispatched.push(submission);
+      journaledBeforeDispatch &&=
+        workspace.durable().chats[sessionId]?.pending?.preserveDraft === true;
+      return receipt(submission);
+    }),
+  );
+
+  const first = await coordinator.resendNotSent(
+    sessionId,
+    snapshot({ historyRevision: 12 }),
+    source,
+  );
+
+  assert.equal(first?.receipt?.acceptance, "accepted");
+  assert.equal(first?.submissionId, dispatched[0]?.submissionId);
+  assert.notEqual(dispatched[0]?.submissionId, source.submissionId);
+  assert.equal(dispatched[0]?.expectedHistoryRevision, 12);
+  assert.equal(dispatched[0]?.text, source.text);
+  assert.deepEqual(dispatched[0]?.llmSelection, source.llmSelection);
+  assert.equal(journaledBeforeDispatch, true);
+  assert.equal(workspace.read().chats[sessionId]?.draft, "submitted text");
+  assert.equal(workspace.read().chats[sessionId]?.pending, null);
+
+  workspace.reload();
+  const second = await coordinator.resendNotSent(
+    sessionId,
+    snapshot({ historyRevision: 13 }),
+    source,
+  );
+  assert.equal(second?.receipt?.acceptance, "accepted");
+  assert.equal(second?.submissionId, dispatched[1]?.submissionId);
+  assert.notEqual(dispatched[1]?.submissionId, dispatched[0]?.submissionId);
+  assert.equal(dispatched[1]?.expectedHistoryRevision, 13);
+  assert.equal(dispatched.length, 2);
+  assert.equal(workspace.read().chats[sessionId]?.draft, "submitted text");
+});
+
+void test("uncertain not-sent resend reloads with its new ID and reconciles the exact receipt", async () => {
+  const workspace = fixture();
+  const source: UserMessageSubmission = {
+    submissionId: "30000000-0000-0000-0000-000000000098",
+    expectedHistoryRevision: 3,
+    text: "submitted text",
+    llmSelection: selection,
+  };
+  const dispatched: UserMessageSubmission[] = [];
+  const first = commands(
+    workspace.access,
+    emptyClient(async (_id, submission) => {
+      dispatched.push(submission);
+      throw new Error("acknowledgement lost");
+    }),
+  );
+
+  const uncertain = await first.resendNotSent(sessionId, snapshot(), source);
+  assert.equal(uncertain?.receipt, null);
+  assert.notEqual(uncertain?.submissionId, source.submissionId);
+  workspace.reload();
+  const recoveredSubmission = workspace.read().chats[sessionId]?.pending?.original;
+  assert.ok(recoveredSubmission);
+  assert.equal(recoveredSubmission.submissionId, uncertain?.submissionId);
+  assert.deepEqual(recoveredSubmission, dispatched[0]);
+  assert.equal(workspace.read().chats[sessionId]?.pending?.status, "uncertain");
+  assert.equal(workspace.read().chats[sessionId]?.draft, "submitted text");
+
+  const receiptReads: string[] = [];
+  const recovery = commands(workspace.access, {
+    ...emptyClient(async () => {
+      throw new Error("uncertain resend must not be automatically dispatched again");
+    }),
+    getMessageReceipt: async (_id, submissionId) => {
+      receiptReads.push(submissionId);
+      return submissionId === recoveredSubmission.submissionId
+        ? receipt(recoveredSubmission)
+        : null;
+    },
+  });
+  assert.equal(await recovery.resendNotSent(sessionId, snapshot(), source), null);
+  const reconciled = await withVisibleDocument(() => recovery.reconcile(sessionId, false));
+  assert.equal(reconciled?.acceptance, "accepted");
+  assert.deepEqual(receiptReads, [recoveredSubmission.submissionId]);
+  assert.equal(dispatched.length, 1);
+  assert.equal(workspace.read().chats[sessionId]?.pending, null);
+  assert.equal(workspace.read().chats[sessionId]?.knownExecutionId, firstExecutionId);
+  assert.equal(workspace.read().chats[sessionId]?.draft, "submitted text");
 });
 
 void test("session metadata, not Send dispatch, names a new chat", async () => {

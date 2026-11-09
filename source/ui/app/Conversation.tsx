@@ -4,6 +4,7 @@ import type { LlmSelection } from "../providers/LlmSelection.ts";
 import type { SessionClient } from "../sessions/SessionClient.ts";
 import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
 import { deriveConversationState } from "./ConversationState.ts";
+import { NotSentInputs } from "./NotSentInputs.tsx";
 import { Transcript } from "./Transcript.tsx";
 import type { ReadingPosition } from "./Transcript.tsx";
 import type { WorkspaceCommands, WorkspaceStopState } from "./WorkspaceCommands.ts";
@@ -78,6 +79,17 @@ export function Conversation({
     notice,
   );
   const state = deriveConversationState(chat, snapshot, stop, ready, canPersist);
+  const canResendNotSent = Boolean(
+    snapshot &&
+    canPersist &&
+    !chat.pending &&
+    !snapshot.admissionFenced &&
+    !snapshot.stopRequested &&
+    !state.stopId &&
+    (!chat.knownExecutionId ||
+      snapshot.unsettledExecutionId === chat.knownExecutionId ||
+      snapshot.lastSettlement?.executionId === chat.knownExecutionId),
+  );
   const selection = state.selection;
   const modelKey = selection ? `${selection.connection.id}/${selection.modelId}` : null;
   const error = readError || chat.error || stop?.error;
@@ -137,6 +149,29 @@ export function Conversation({
           </span>
         )}
         {state.textError && <span class="inline-error">{state.textError}</span>}
+      </div>
+      {snapshot && snapshot.pendingInputs.length > 0 && (
+        <div class="chat-status">
+          <details>
+            <summary>Pending ({snapshot.pendingInputs.length})</summary>
+            <ol>
+              {snapshot.pendingInputs.map((input) => (
+                <li key={input.submissionId}>{input.preview}</li>
+              ))}
+            </ol>
+          </details>
+        </div>
+      )}
+      <div class="chat-status">
+        <NotSentInputs
+          client={client}
+          sessionId={sessionId}
+          snapshot={snapshot}
+          commands={commands}
+          canResend={canResendNotSent}
+          pendingSubmissionId={chat.pending?.original.submissionId ?? null}
+          knownExecutionId={chat.knownExecutionId}
+        />
       </div>
       <Composer
         text={chat.draft}

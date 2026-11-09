@@ -2,6 +2,7 @@ import { requestJson } from "../http/requestJson.ts";
 import type {
   MessageContentCursor,
   MessageContentPage,
+  NotSentPage,
   TranscriptHistoryPage,
   TranscriptHistoryQuery,
 } from "./Messages.ts";
@@ -43,6 +44,12 @@ export class SessionClient {
       undefined,
       signal,
     );
+  }
+
+  getNotSent(sessionId: string, cursor?: string, signal?: AbortSignal): Promise<NotSentPage> {
+    const url = this.url(`/${encodeURIComponent(sessionId)}/not-sent`);
+    if (cursor !== undefined) url.searchParams.set("cursor", cursor);
+    return requestJson(url, "GET", undefined, signal);
   }
 
   getHistory(

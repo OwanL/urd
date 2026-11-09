@@ -20,6 +20,7 @@ export interface PendingSubmission {
   original: UserMessageSubmission;
   draftVersion: number;
   status: "sending" | "uncertain";
+  preserveDraft?: boolean;
 }
 
 export interface WorkspaceState {
@@ -77,7 +78,11 @@ export function editDraft(chat: ChatState, text: string): ChatState {
   return { ...chat, draft: text, draftVersion: chat.draftVersion + 1 };
 }
 
-export function beginSubmission(chat: ChatState, original: UserMessageSubmission): ChatState {
+export function beginSubmission(
+  chat: ChatState,
+  original: UserMessageSubmission,
+  preserveDraft = false,
+): ChatState {
   if (!isSubmission(original)) throw new TypeError("Invalid original submission.");
   return {
     ...chat,
@@ -85,6 +90,7 @@ export function beginSubmission(chat: ChatState, original: UserMessageSubmission
       original: copySubmission(original),
       draftVersion: chat.draftVersion,
       status: "sending",
+      ...(preserveDraft ? { preserveDraft: true } : {}),
     },
     error: null,
   };
@@ -99,7 +105,10 @@ export function applyReceipt(chat: ChatState, sessionId: string, receipt: unknow
 
   const accepted = receipt.acceptance === "accepted";
   const clearDraft =
-    accepted && pending.draftVersion === chat.draftVersion && chat.draft === pending.original.text;
+    pending.preserveDraft !== true &&
+    accepted &&
+    pending.draftVersion === chat.draftVersion &&
+    chat.draft === pending.original.text;
   return {
     ...chat,
     draft: clearDraft ? "" : chat.draft,
@@ -237,6 +246,7 @@ function isChat(value: unknown): value is ChatState {
         isSubmission(pending.original) &&
         isRevision(pending.draftVersion) &&
         pending.draftVersion <= value.draftVersion &&
+        (pending.preserveDraft === undefined || typeof pending.preserveDraft === "boolean") &&
         (pending.status === "sending" || pending.status === "uncertain")))
   );
 }

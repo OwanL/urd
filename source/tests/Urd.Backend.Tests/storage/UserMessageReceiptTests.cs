@@ -26,7 +26,7 @@ public sealed class UserMessageReceiptTests {
       receipt = store.UserMessages.Admit(session, 7,
           new(Guid.NewGuid(), 7, "retained after migration", TestLlmSelection.Default),
           accepting: false, proposedExecutionId: Guid.NewGuid()).Receipt;
-      Assert.Equal(8L, database.Scalar("PRAGMA user_version;")); // raw-sql: the migrated schema version is the subject under test
+      Assert.Equal(9L, database.Scalar("PRAGMA user_version;")); // raw-sql: the migrated schema version is the subject under test
     }
 
     using UrdStore reopened = UrdStore.Open(database.Path);

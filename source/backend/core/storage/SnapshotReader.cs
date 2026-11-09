@@ -20,7 +20,7 @@ internal sealed class SnapshotReader {
     SELECT m.run_id, m.role, m.message_id, r.outcome
     FROM (
         SELECT ordinal, run_id, role, message_id FROM execution_messages
-        WHERE session_id = $session AND history_revision = $revision
+        WHERE session_id = $session AND history_revision = $revision AND role IN (0, 1)
         ORDER BY ordinal DESC LIMIT 61
     ) m
     JOIN execution_runs r ON r.run_id = m.run_id

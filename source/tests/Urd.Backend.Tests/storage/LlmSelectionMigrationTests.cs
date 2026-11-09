@@ -40,7 +40,7 @@ public sealed class LlmSelectionMigrationTests {
 
     database.Execute("DROP TABLE input_decisions_v8;");
     using (UrdStore migrated = UrdStore.Open(database.Path)) {
-      Assert.Equal(8L, database.Scalar("PRAGMA user_version;")); // raw-sql: verify the committed migration version
+      Assert.Equal(9L, database.Scalar("PRAGMA user_version;")); // raw-sql: verify the committed migration version
       UserMessageReceipt receipt = migrated.UserMessages.ReadReceipt(session, input)!;
       Assert.Null(receipt.Submission.LlmSelection);
       Assert.Equal(text, receipt.Submission.Text);

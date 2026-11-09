@@ -4,7 +4,7 @@ namespace Urd.Core.Storage;
 
 // Initializes connection pragmas and creates, verifies, or upgrades the schema.
 internal static class DatabaseSchema {
-  private const int SchemaVersion = 8;
+  private const int SchemaVersion = 9;
 
   internal static void Initialize(SqliteConnection connection) {
     using SqliteCommand command = connection.CreateCommand();
@@ -54,6 +54,7 @@ internal static class DatabaseSchema {
       EnsureProviderSchema(command, version);
       EnsureProviderContextSchema(command, version);
       EnsureSelectionSchema(command, version);
+      EnsureTranscriptSchema(connection, transaction, version);
       if (version < SchemaVersion) {
         command.CommandText = "PRAGMA foreign_key_check;";
         using SqliteDataReader reader = command.ExecuteReader();
@@ -105,6 +106,223 @@ internal static class DatabaseSchema {
       PRAGMA user_version = 8;
       """;
     command.ExecuteNonQuery();
+  }
+
+  private static void EnsureTranscriptSchema(SqliteConnection connection, SqliteTransaction transaction, long version) {
+    using SqliteCommand command = connection.CreateCommand();
+    command.Transaction = transaction;
+    if (version >= 9) {
+      command.CommandText = "SELECT role, message_id, input_id, request_id, first_batch_index, end_batch_index, created_at, call_id, tool_name FROM execution_messages LIMIT 0;";
+      command.ExecuteNonQuery();
+      command.CommandText = "SELECT started_at, ended_at FROM execution_tools LIMIT 0;";
+      command.ExecuteNonQuery();
+      command.CommandText = "SELECT usage_json FROM execution_requests LIMIT 0;";
+      command.ExecuteNonQuery();
+      return;
+    }
+
+    command.CommandText = """
+      CREATE TABLE input_decisions_v9 (
+          session_id TEXT NOT NULL REFERENCES sessions(session_id),
+          input_id TEXT NOT NULL,
+          expected_history_revision INTEGER NOT NULL CHECK (expected_history_revision >= 0),
+          original_text_utf8 BLOB NOT NULL,
+          decision INTEGER NOT NULL CHECK (decision IN (1, 2)),
+          run_id TEXT,
+          refusal_reason INTEGER CHECK (refusal_reason IN (1, 2, 3, 4)),
+          llm_selection_json TEXT,
+          PRIMARY KEY (session_id, input_id),
+          CHECK (
+              (decision = 1 AND run_id IS NOT NULL
+                  AND run_id <> '00000000-0000-0000-0000-000000000000' AND refusal_reason IS NULL)
+              OR (decision = 2 AND run_id IS NULL AND refusal_reason IS NOT NULL)
+          )
+      ) STRICT;
+      INSERT INTO input_decisions_v9
+      SELECT session_id, input_id, expected_history_revision, original_text_utf8, decision, run_id,
+          refusal_reason, llm_selection_json
+      FROM input_decisions;
+      DROP TABLE input_decisions;
+      ALTER TABLE input_decisions_v9 RENAME TO input_decisions;
+
+      CREATE TABLE execution_tools_v9 (
+          run_id TEXT NOT NULL REFERENCES execution_runs(run_id),
+          request_id TEXT NOT NULL REFERENCES execution_requests(request_id),
+          call_index INTEGER NOT NULL CHECK (call_index >= 0),
+          call_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          arguments_json TEXT NOT NULL,
+          started INTEGER NOT NULL DEFAULT 0 CHECK (started IN (0, 1)),
+          outcome INTEGER CHECK (outcome IN (0, 1, 2)),
+          result_json TEXT,
+          error TEXT,
+          started_at TEXT,
+          ended_at TEXT,
+          PRIMARY KEY (request_id, call_id),
+          UNIQUE (request_id, call_index),
+          UNIQUE (run_id, call_id)
+      ) STRICT;
+      INSERT INTO execution_tools_v9 (
+          run_id, request_id, call_index, call_id, name, arguments_json, started, outcome, result_json, error)
+      SELECT run_id, request_id, call_index, call_id, name, arguments_json, started, outcome, result_json, error
+      FROM execution_tools;
+      DROP TABLE execution_tools;
+      ALTER TABLE execution_tools_v9 RENAME TO execution_tools;
+
+      CREATE TABLE execution_messages_v9 (
+          ordinal INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id TEXT NOT NULL REFERENCES sessions(session_id),
+          history_revision INTEGER NOT NULL CHECK (history_revision >= 0),
+          run_id TEXT NOT NULL REFERENCES execution_runs(run_id),
+          role INTEGER NOT NULL CHECK (role IN (0, 1, 2)),
+          message_id TEXT NOT NULL,
+          input_id TEXT,
+          request_id TEXT REFERENCES execution_requests(request_id),
+          first_batch_index INTEGER NOT NULL DEFAULT 0 CHECK (first_batch_index >= 0),
+          end_batch_index INTEGER,
+          created_at TEXT,
+          call_id TEXT,
+          tool_name TEXT,
+          UNIQUE (run_id, role, message_id),
+          UNIQUE (request_id, call_id),
+          FOREIGN KEY (session_id, input_id) REFERENCES input_decisions(session_id, input_id),
+          CHECK (end_batch_index IS NULL OR end_batch_index >= first_batch_index),
+          CHECK ((role = 0 AND input_id IS NOT NULL AND request_id IS NULL AND call_id IS NULL
+                      AND tool_name IS NULL AND end_batch_index IS NULL)
+              OR (role = 1 AND input_id IS NULL AND request_id IS NOT NULL AND call_id IS NULL
+                      AND tool_name IS NULL)
+              OR (role = 2 AND input_id IS NULL AND request_id IS NOT NULL AND end_batch_index IS NULL
+                      AND call_id IS NOT NULL))
+      ) STRICT;
+      """;
+    command.ExecuteNonQuery();
+
+    command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('execution_requests') WHERE name = 'usage_json';";
+    if ((long)command.ExecuteScalar()! == 0) {
+      command.CommandText = "ALTER TABLE execution_requests ADD COLUMN usage_json TEXT;";
+      command.ExecuteNonQuery();
+    }
+
+    CopyTranscriptEntries(connection, transaction);
+
+    command.CommandText = """
+      DROP TABLE execution_messages;
+      ALTER TABLE execution_messages_v9 RENAME TO execution_messages;
+      CREATE INDEX execution_messages_history_order
+          ON execution_messages(session_id, history_revision, ordinal DESC);
+      CREATE INDEX execution_messages_request_order
+          ON execution_messages(request_id, role, first_batch_index);
+      PRAGMA user_version = 9;
+      """;
+    command.ExecuteNonQuery();
+  }
+
+  private static void CopyTranscriptEntries(SqliteConnection connection, SqliteTransaction transaction) {
+    using SqliteCommand read = connection.CreateCommand();
+    read.Transaction = transaction;
+    // Anchor tool-only requests around neighboring text requests, but keep legacy ordinals authoritative
+    // when request indexes contradict the recorded message order.
+    read.CommandText = """
+      SELECT session_id, history_revision, run_id, role, message_id, input_id, request_id,
+          first_batch_index, end_batch_index, created_at, call_id, tool_name
+      FROM (
+          SELECT 0 AS position_group, m.ordinal AS position_order, 0 AS position_kind,
+              0 AS tool_order, 0 AS call_order,
+              m.session_id, m.history_revision, m.run_id, m.role, m.message_id, m.input_id, m.request_id,
+              0 AS first_batch_index,
+              CASE WHEN m.role = 1 AND (q.outcome IS NOT NULL OR q.output_final = 1
+                      OR r.stopping = 1 OR r.outcome IS NOT NULL)
+                  THEN q.next_batch_index END AS end_batch_index,
+              NULL AS created_at, NULL AS call_id, NULL AS tool_name
+          FROM execution_messages m
+          LEFT JOIN execution_requests q ON q.request_id = m.request_id
+          LEFT JOIN execution_runs r ON r.run_id = m.run_id
+          UNION ALL
+          SELECT 0, m.ordinal, 1, t.call_index, 0,
+              r.session_id, r.history_revision, t.run_id, 2, NULL, NULL, t.request_id,
+              0, NULL, NULL, t.call_id, t.name
+          FROM execution_messages m
+          JOIN execution_tools t ON t.request_id = m.request_id AND t.run_id = m.run_id
+          JOIN execution_runs r ON r.run_id = t.run_id
+          WHERE m.role = 1
+          UNION ALL
+          SELECT CASE WHEN next_message.ordinal IS NOT NULL OR previous_message.ordinal IS NOT NULL
+                      OR user_message.ordinal IS NOT NULL THEN 0 ELSE 1 END,
+              COALESCE(next_message.ordinal, previous_message.ordinal, user_message.ordinal, r.ordinal),
+              CASE WHEN next_message.ordinal IS NOT NULL THEN -1 ELSE 2 END,
+              q.request_index, t.call_index,
+              r.session_id, r.history_revision, t.run_id, 2, NULL, NULL, t.request_id,
+              0, NULL, NULL, t.call_id, t.name
+          FROM execution_tools t
+          JOIN execution_requests q ON q.request_id = t.request_id AND q.run_id = t.run_id
+          JOIN execution_runs r ON r.run_id = t.run_id
+          LEFT JOIN execution_messages next_message ON next_message.ordinal = (
+              SELECT m.ordinal
+              FROM execution_messages m
+              JOIN execution_requests next_request ON next_request.request_id = m.request_id
+              WHERE m.role = 1 AND m.run_id = t.run_id AND next_request.request_index > q.request_index
+              ORDER BY next_request.request_index
+              LIMIT 1
+          )
+          LEFT JOIN execution_messages previous_message ON previous_message.ordinal = (
+              SELECT m.ordinal
+              FROM execution_messages m
+              JOIN execution_requests previous_request ON previous_request.request_id = m.request_id
+              WHERE m.role = 1 AND m.run_id = t.run_id AND previous_request.request_index < q.request_index
+              ORDER BY previous_request.request_index DESC
+              LIMIT 1
+          )
+          LEFT JOIN execution_messages user_message ON user_message.ordinal = (
+              SELECT MAX(m.ordinal) FROM execution_messages m
+              WHERE m.role = 0 AND m.run_id = t.run_id
+          )
+          WHERE NOT EXISTS (
+              SELECT 1 FROM execution_messages m
+              WHERE m.role = 1 AND m.request_id = t.request_id AND m.run_id = t.run_id
+          )
+      )
+      ORDER BY position_group, position_order, position_kind, tool_order, call_order;
+      """;
+
+    using SqliteDataReader reader = read.ExecuteReader();
+    using SqliteCommand insert = connection.CreateCommand();
+    insert.Transaction = transaction;
+    insert.CommandText = """
+      INSERT INTO execution_messages_v9 (
+          session_id, history_revision, run_id, role, message_id, input_id, request_id,
+          first_batch_index, end_batch_index, created_at, call_id, tool_name)
+      VALUES ($session, $revision, $run, $role, $message, $input, $request,
+          $first, $end, $created, $call, $name);
+      """;
+    SqliteParameter session = insert.Parameters.Add("$session", SqliteType.Text);
+    SqliteParameter revision = insert.Parameters.Add("$revision", SqliteType.Integer);
+    SqliteParameter run = insert.Parameters.Add("$run", SqliteType.Text);
+    SqliteParameter role = insert.Parameters.Add("$role", SqliteType.Integer);
+    SqliteParameter message = insert.Parameters.Add("$message", SqliteType.Text);
+    SqliteParameter input = insert.Parameters.Add("$input", SqliteType.Text);
+    SqliteParameter request = insert.Parameters.Add("$request", SqliteType.Text);
+    SqliteParameter first = insert.Parameters.Add("$first", SqliteType.Integer);
+    SqliteParameter end = insert.Parameters.Add("$end", SqliteType.Integer);
+    SqliteParameter created = insert.Parameters.Add("$created", SqliteType.Text);
+    SqliteParameter call = insert.Parameters.Add("$call", SqliteType.Text);
+    SqliteParameter name = insert.Parameters.Add("$name", SqliteType.Text);
+
+    while (reader.Read()) {
+      int kind = reader.GetInt32(3);
+      session.Value = reader.GetString(0);
+      revision.Value = reader.GetInt64(1);
+      run.Value = reader.GetString(2);
+      role.Value = kind;
+      message.Value = kind == 2 ? Guid.NewGuid().ToString("D") : reader.GetString(4);
+      input.Value = reader.IsDBNull(5) ? DBNull.Value : reader.GetString(5);
+      request.Value = reader.IsDBNull(6) ? DBNull.Value : reader.GetString(6);
+      first.Value = reader.GetInt32(7);
+      end.Value = reader.IsDBNull(8) ? DBNull.Value : reader.GetInt32(8);
+      created.Value = reader.IsDBNull(9) ? DBNull.Value : reader.GetString(9);
+      call.Value = reader.IsDBNull(10) ? DBNull.Value : reader.GetString(10);
+      name.Value = reader.IsDBNull(11) ? DBNull.Value : reader.GetString(11);
+      insert.ExecuteNonQuery();
+    }
   }
 
   private static void EnsureProviderContextSchema(SqliteCommand command, long version) {

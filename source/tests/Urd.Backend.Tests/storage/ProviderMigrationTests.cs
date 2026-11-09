@@ -24,13 +24,14 @@ public sealed class ProviderMigrationTests {
     database.Execute("DROP TABLE provider_host;");
 
     using (UrdStore store = UrdStore.Open(database.Path)) {
-      Assert.Equal(8L, database.Scalar("PRAGMA user_version;")); // raw-sql: verify the committed migration version
+      Assert.Equal(9L, database.Scalar("PRAGMA user_version;")); // raw-sql: verify the committed migration version
       Assert.Empty(store.Providers.List());
       Assert.Equal(new[] { SchemaFiveDatabase.SessionId }, store.Sessions.ListPrimaryIds(null).SessionIds);
       Assert.Equal(SchemaFiveDatabase.Original,
           store.UserMessages.ReadReceipt(SchemaFiveDatabase.SessionId, SchemaFiveDatabase.InputId)!.Submission.Text);
       Assert.Equal(new[] { SchemaFiveDatabase.Original, "\0🙂" },
           store.Snapshots.ReadStored(SchemaFiveDatabase.SessionId).Messages.Select(message => message.Preview));
+      Assert.Equal(3L, database.Scalar("SELECT COUNT(*) FROM execution_messages;")); // raw-sql: migration adds the saved tool's entry without changing legacy previews
       Assert.Equal(ExecutionOutcome.Failed, store.Executions.ReadSettlement(
           SchemaFiveDatabase.SessionId, SchemaFiveDatabase.RunId)!.Outcome);
     }

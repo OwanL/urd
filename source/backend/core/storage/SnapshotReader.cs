@@ -15,12 +15,9 @@ internal sealed class SnapshotReader {
   private readonly MessageContentReader content;
 
   internal const string FirstUserSql = """
-    SELECT m.run_id, m.message_id FROM execution_messages m
-    JOIN execution_inputs i ON i.session_id = m.session_id AND i.run_id = m.run_id
-        AND i.input_id = m.input_id
-    WHERE m.session_id = $session AND m.history_revision = $revision AND m.role = 0
-        AND i.request_id IS NOT NULL
-    ORDER BY m.ordinal LIMIT 1;
+    SELECT run_id, message_id FROM execution_messages
+    WHERE session_id = $session AND history_revision = $revision AND role = 0
+    ORDER BY ordinal LIMIT 1;
     """;
 
   internal const string PendingInputsSql = """

@@ -11,9 +11,15 @@ public sealed class TranscriptSchemaMigrationTests {
     using var database = new TemporaryDatabase();
     SchemaEightDatabase.Create(database);
     Assert.Equal(8L, database.Scalar("PRAGMA user_version;")); // raw-sql: verify fixture, upgrade and rollback schema versions
+    // Legacy visible input need not have been claimed by a request.
+    database.Execute($"""
+      INSERT INTO execution_inputs (session_id, input_id, run_id)
+      VALUES ('{SchemaEightDatabase.SessionId:D}', '{SchemaEightDatabase.FirstInputId:D}', '{SchemaEightDatabase.ActiveRunId:D}');
+      """);
 
     using (UrdStore store = UrdStore.Open(database.Path)) {
       Assert.Equal(10L, database.Scalar("PRAGMA user_version;")); // raw-sql: verify fixture, upgrade and rollback schema versions
+      Assert.Equal("input 1", store.Snapshots.ReadStored(SchemaEightDatabase.SessionId).FirstUserPreview);
       IReadOnlyList<TranscriptEntry> entries = ReadEntries(database, SchemaEightDatabase.SessionId);
       Assert.Equal(new (int Role, string? MessageId, string? CallId)[] {
         (0, SchemaEightDatabase.FirstInputId.ToString("D"), null),

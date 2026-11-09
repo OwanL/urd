@@ -2,12 +2,7 @@ import { useId } from "preact/hooks";
 import type { ProviderConnection } from "../ProviderConnection.ts";
 import type { ConnectionDraft } from "./ProviderSettingsController.ts";
 import type { ProviderSettingsState } from "./useProviderSettings.ts";
-
-export const providerNames = {
-  chatGpt: "ChatGPT",
-  openAI: "OpenAI",
-  custom: "Custom",
-} as const;
+import { providerNames } from "./ProviderSettingsPresentation.ts";
 
 export function ConnectionForm({
   state,

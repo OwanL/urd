@@ -217,3 +217,26 @@ reads/notices. Notices during an active read collapse to one trailing pass. The
 full 100,000-entry browser memory/tab-cycle/long-task baseline belongs to completing
 stage 1 and remains unmeasured in packet 1B; packet 1A's history-read baseline above
 remains the scale evidence. No packet-1C placement/attempt work was introduced.
+
+## Packet 1B browser regression follow-up — lazy transcript anchor handoff
+
+The tab-return anchor scenario failed **7/20** runs at packet-1B HEAD (`0536afa`),
+while the matching pre-1B polling scenario passed **20/20** at `f225fa4`. Packet 1B
+replaced snapshot previews with lazy history bodies. On remount, anchor restoration
+scrolls programmatically; its ensuing `scroll` event was mistaken for user input and
+re-anchored to a preceding user row as its lazy body appeared. That replaced the
+saved assistant-row anchor and left the measured text **21 px** lower. The existing
+resize observer then followed the replacement anchor instead of preserving the
+reading position.
+
+`Transcript` now records the expected scroll position for anchor corrections and
+ignores the matching programmatic scroll event, retaining the saved anchor while
+lazy rows resize. The browser scenario also waits for its controlled scroll event
+before switching tabs, ensuring the intended starting position has been recorded;
+the original 2 px assertion remains unchanged.
+
+After the fix, the affected scenario passed **20/20** runs and the full **7-test
+browser suite passed 10/10 runs**. UI checks passed, including **148/148 unit tests**;
+Vite and Release server builds completed with zero warnings/errors. The older
+revision's 0/20 is a local comparison, not a guarantee for other schedules or
+transcript shapes.

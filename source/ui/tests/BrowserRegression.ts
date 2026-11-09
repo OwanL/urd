@@ -1254,9 +1254,23 @@ void test("tab changes limit session reads and preserve the reading anchor durin
     const conversationBox = await conversation.boundingBox();
     assert.ok(anchorBox);
     assert.ok(conversationBox);
-    await conversation.evaluate((node, top) => {
-      node.scrollTop = Math.max(0, top - node.getBoundingClientRect().top - 12);
-    }, anchorBox.y);
+    await conversation.evaluate(
+      (node, top) =>
+        new Promise<void>((resolve) => {
+          const target = Math.max(0, top - node.getBoundingClientRect().top - 12);
+          const finish = () => {
+            node.removeEventListener("scroll", onScroll);
+            requestAnimationFrame(() => resolve());
+          };
+          const onScroll = () => finish();
+          if (node.scrollTop === target) finish();
+          else {
+            node.addEventListener("scroll", onScroll, { once: true });
+            node.scrollTop = target;
+          }
+        }),
+      anchorBox.y,
+    );
     await page.getByRole("button", { name: "Jump to latest" }).waitFor();
     const anchorBefore = await readingAnchor.boundingBox();
     const scrollBefore = await conversation.evaluate((node) => node.scrollTop);

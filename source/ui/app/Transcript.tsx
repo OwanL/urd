@@ -255,6 +255,7 @@ export function Transcript({
   );
   const following = useRef(position?.following ?? true);
   const anchor = useRef<ReadingPosition["anchor"]>(position?.anchor ?? null);
+  const adjustedScrollTop = useRef<number | null>(null);
   const [root, setRoot] = useState<HTMLDivElement | null>(null);
   const [jump, setJump] = useState(!(position?.following ?? true));
   const [selecting, setSelecting] = useState(false);
@@ -263,6 +264,20 @@ export function Transcript({
   const mountScroll = useCallback((node: HTMLDivElement | null) => {
     scroll.current = node;
     setRoot(node);
+  }, []);
+
+  const keepAnchorInPlace = useCallback((node: HTMLDivElement) => {
+    const position = anchor.current;
+    if (!position) return;
+    const target = Array.from(node.querySelectorAll<HTMLElement>("[data-message]")).find(
+      (item) => item.dataset.message === position.key,
+    );
+    if (!target) return;
+
+    const nextScrollTop = node.scrollTop + target.getBoundingClientRect().top - position.top;
+    if (nextScrollTop === node.scrollTop) return;
+    node.scrollTop = nextScrollTop;
+    adjustedScrollTop.current = node.scrollTop;
   }, []);
 
   useEffect(() => {
@@ -294,31 +309,28 @@ export function Transcript({
     const observer = new ResizeObserver(() => {
       if (following.current && !selecting) node.scrollTop = node.scrollHeight;
       else if (anchor.current) {
-        const target = Array.from(node.querySelectorAll<HTMLElement>("[data-message]")).find(
-          (item) => item.dataset.message === anchor.current?.key,
-        );
-        if (target) node.scrollTop += target.getBoundingClientRect().top - anchor.current.top;
+        keepAnchorInPlace(node);
       }
     });
     if (node.firstElementChild) observer.observe(node.firstElementChild);
     for (const item of node.querySelectorAll<HTMLElement>("[data-message]")) observer.observe(item);
     return () => observer.disconnect();
-  }, [selecting, visibleHistory]);
+  }, [keepAnchorInPlace, selecting, visibleHistory]);
   useLayoutEffect(() => {
     const node = scroll.current;
     if (!node || selecting) return;
     if (following.current) node.scrollTop = node.scrollHeight;
     else if (anchor.current) {
-      const target = Array.from(node.querySelectorAll<HTMLElement>("[data-message]")).find(
-        (item) => item.dataset.message === anchor.current?.key,
-      );
-      if (target) node.scrollTop += target.getBoundingClientRect().top - anchor.current.top;
+      keepAnchorInPlace(node);
     }
-  }, [shown, selecting]);
+  }, [keepAnchorInPlace, shown, selecting]);
 
   function rememberPosition() {
     const node = scroll.current;
     if (!node) return;
+    const expectedScrollTop = adjustedScrollTop.current;
+    adjustedScrollTop.current = null;
+    if (expectedScrollTop !== null && node.scrollTop === expectedScrollTop) return;
     following.current = node.scrollHeight - node.scrollTop - node.clientHeight < 40;
     setJump(!following.current);
     const top = node.getBoundingClientRect().top;

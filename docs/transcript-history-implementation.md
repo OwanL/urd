@@ -341,9 +341,87 @@ accepted receipt renders accepted. The unrelated benchmark prefix-render flake r
 a known non-blocking flake of unresolved cause: 15/15 isolated passes at HEAD; budgets
 are unchanged.
 
-No contract deviations or implementation blockers. Broader stage-1 qualification
-is still incomplete: the five-tab 25× browser idle/switch/long-task/request-rate and
-browser/backend memory-cycle baseline remains unmeasured. Existing fixtures do not
-supply the scaled browser seed/instrumentation; no broader benchmark tooling was added
-in this bounded packet. This delivery proves placement contracts, not completion of
-all stage-1 performance qualification or rich-transcript behavior.
+## Stage-1 25× performance baseline (§7)
+
+The remaining stage-1 performance acceptance item was measured on **2026-11-09**
+with the built stage-1 UI and Release backend. These are local observations, not
+product guarantees. The repeatable fixture generator and measurement script is
+[`source/ui/tests/TranscriptBaseline.ts`](../source/ui/tests/TranscriptBaseline.ts);
+run from `source/ui` with `node tests/TranscriptBaseline.ts` after building the Vite
+UI and Release server. It is a standalone dev script, not included in the regular UI
+or browser test suites. It initializes schema 10 through the real server, creates
+six sessions, stops the server, seeds only a fresh database under the OS temp
+folder, checks its foreign keys, then restarts the server. Owned processes and the
+temporary fixture are removed after successful shutdown. No live application or
+`C:/dev/data/urd` data is used.
+
+Each of the five heavy tabs has 20,000 synthetic runs: 100,000 entries (20,000 user,
+20,000 text and 60,000 tool entries), 60,000 tool calls, and **249,993,750 bytes**
+of user-plus-assistant transcript bodies. Each includes a 5,000,000-byte reply
+stored as one text entry split into 306 legal output segments, and a 5,000,000-byte
+tool result. The complete stored text and tool payload is 375,111,750 bytes per
+heavy session (including ordinary tool arguments/results). There is one additional,
+initially empty session for streaming. Each heavy session also has 1,000 external
+image URL references in a temporary sidecar manifest (5,000 total); these are not
+image bodies, are not stored in the database or fetched by the browser, and are not
+rendered by stage 1.
+
+| Metric | Baseline observation |
+| --- | --- |
+| Idle work | Over 16.02 s: **0** same-origin page requests, instrumented JS timer callbacks or session events. Three SSE heartbeats; the two intervals were **5.014 s** and **5.014 s**. |
+| Push commit-to-render | Three samples; median commit bracket to DOM-plus-next-rAF was **39.7–41.9 ms** (all observed bounds: **35.0–48.2 ms**). This is not a pixel/compositor timestamp. |
+| Tab switch | First mount: median **123.4 ms** (5 tabs, range 111.7–147.7 ms). Return/remount: median **114.5 ms** (15 switches, range 112.3–131.7 ms). |
+| Main-thread long tasks | **0** tasks ≥50 ms during the 10.96 s streamed reply and **0** during 4.44 s of scrolling. The observer reported long-task support. |
+| Requests per streamed second | **307** same-origin requests / 10.96 s = **28.0/s**: 103 snapshot, 103 history and 101 content GETs. The run streamed 10,000 bytes of plain text in 100 × 100-byte chunks at 100 ms intervals, then settled; its already-open SSE connection and offline model request are not counted. |
+| Process-tree working set before → after tab cycles | Browser: **234.9 → 297.0 MiB**; backend: **84.2 → 95.9 MiB**. Samples bracketed three cycles through all five heavy tabs. |
+| `latest` history read at 100k entries | Loopback typed HTTP read (60 descriptors): first read per heavy session median **1.57 ms** (range 1.24–4.25 ms); 45 subsequent reads median **1.13 ms** (range 0.83–3.24 ms). Direct SQLite query: first sample **4.00 ms**, then warm median **0.259 ms** (9 samples). |
+
+### Method, machine and limits
+
+The browser run used one headless Chromium page at 1280×800, the real local Release
+server, and the existing offline loopback model fixture. A read-only Node SQLite
+worker sampled the stream session's output about every 2 ms; the last negative
+query start and first positive query end bracket commit. A DOM `MutationObserver`
+followed by `requestAnimationFrame` timestamped rendering. Tab timings run from the
+actual click event through the target session's latest text appearing in the DOM
+and a frame opportunity. Request counts are Playwright same-origin request starts.
+The long-task observer reports browser tasks of at least 50 ms. Idle timer counts
+come from instrumented page `setTimeout`/`setInterval` callbacks, not total CPU
+activity. Memory is the sum of Windows process-tree `WorkingSet64` values (browser
+four processes, backend two); shared pages can be counted more than once, and no
+forced GC was performed. The direct query and `EXPLAIN QUERY PLAN` diagnostic uses
+Node's read-only SQLite connection; it is not backend query instrumentation.
+
+Machine context: Windows 11 Business build 10.0.26300; AMD Ryzen 9 6900HX, 16
+logical CPUs, 16 GiB RAM (about 1.73 GiB free at measurement start); Node 24.16.0,
+.NET SDK 10.0.403, and headless Chromium 158.0.8127.18. Vite production assets were
+built before the Release server. The OS file cache was not flushed, so neither the
+SQLite first samples nor the tab's first mount claim cold-disk behavior.
+
+At this scale the latest-window plan searches `execution_messages` through
+`execution_messages_history_order` with the session, revision and ordinal bounds;
+execution/request/tool metadata are keyed index lookups. `EXPLAIN QUERY PLAN` shows
+`SCAN m` only over the bounded 60-row window CTE, and the two `hasBefore`/`hasAfter`
+lookaheads use covering searches on the history-order index. There is no base-table
+scan, `OFFSET` or `COUNT` path, and the history query selects no body columns.
+
+Stage-1 tab semantics remain simple: `Conversation` remounts on each switch and only
+the latest 60 metadata entries with bounded visible bodies are loaded. Thus “cold”
+and “warm” here mean first mount versus a return remount after prior reads, not the
+stage-2 virtualized/retained-content paths; those timings are not comparable to the
+provisional warm/cold switch targets. Scrolling exercised only the bounded latest
+window, not 100,000 mounted rows. The 5 MB reply and tool result were seeded outside
+the latest window and their full display/inspection paths are not present in stage
+1, so their rendering cost was not measured. Likewise, stage 4 image decoding,
+fetching and rendering are unmeasured; the manifest contains references only.
+
+Two observations merit owner review when setting decision-18 targets: the live SSE
+heartbeat is about 5 s (more frequent than the provisional ~30 s idle cadence),
+although the idle page made no periodic reads; and process working sets were higher
+after tab cycles by about 62 MiB in the browser and 11.7 MiB in the backend. The
+latter is not evidence of a leak or failure to recover: this run did not force GC or
+measure post-eviction settling. The streamed request rate is about three GETs per
+output update, including settlement reads. These numbers seed decision-18 target
+setting with the owner; they do not select budgets or promises. Full-history scroll
+geometry, rich rendering, image costs, cold-disk latency, total idle CPU and memory
+return-to-baseline after eviction remain unmeasured at stage 1.

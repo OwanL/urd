@@ -23,7 +23,7 @@ interface RegistrationHandshake {
 }
 
 const maxFrameLength = 64 * 1024;
-const heartbeatTimeout = 30_000;
+const heartbeatTimeout = 90_000;
 const initialRetryDelay = 250;
 const maxRetryDelay = 5_000;
 

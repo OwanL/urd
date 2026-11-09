@@ -542,14 +542,17 @@ void test("heartbeat resets the watchdog and stop cancels its retry", async (t) 
   await flush();
   assert.equal(getCount, 1);
 
-  t.mock.timers.tick(20_000);
+  t.mock.timers.tick(30_000);
   streamController?.enqueue(encoder.encode(": heartbeat\n\n"));
   await flush();
-  t.mock.timers.tick(20_000);
+  t.mock.timers.tick(30_000);
+  streamController?.enqueue(encoder.encode(": heartbeat\n\n"));
+  await flush();
+  t.mock.timers.tick(89_999);
   await flush();
   assert.deepEqual(errors, []);
 
-  t.mock.timers.tick(10_000);
+  t.mock.timers.tick(1);
   await flush();
   assert.deepEqual(errors, ["Session event stream timed out without a heartbeat."]);
   assert.equal(disconnected, 1);

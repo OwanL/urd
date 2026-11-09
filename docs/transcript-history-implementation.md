@@ -1,9 +1,9 @@
 # Transcript stage-1 implementation
 
 Implemented against the approved [stage-1 plan](TRANSCRIPT-HISTORY-PLAN.md).
-Packets 1A and 1B are implemented; 1C (send-attempt placement) is not included.
-User entries still enter history at admission. Packet 1A's storage/read contract is
-unchanged; packet 1B replaces transcript snapshot previews and polling as described below.
+Packets 1A–1C are implemented. User entries enter history at send-attempt start.
+Packet sections below record historical checkpoints; the audit follow-up records
+subsequent corrections. Performance observations are baselines, not target guarantees.
 
 ## Packet 1A
 
@@ -425,3 +425,23 @@ output update, including settlement reads. These numbers seed decision-18 target
 setting with the owner; they do not select budgets or promises. Full-history scroll
 geometry, rich rendering, image costs, cold-disk latency, total idle CPU and memory
 return-to-baseline after eviction remain unmeasured at stage 1.
+
+## Audit follow-up — 2026-11-10
+
+- Preserve the server's 128-session subscription bound without letting excess tabs
+  break the whole page's stream. All tabs/drafts remain; the active tab always has
+  live updates, excess tabs explicitly show `Updates paused`, and a warning explains
+  the limit. Selecting a paused tab resynchronizes it; closing tabs restores coverage.
+  This overflow policy was selected by the owner, not a larger subscription limit.
+- First-user naming now reads the first visible user entry regardless of whether
+  a legacy input was claimed by a request. Pending new input still has no history
+  entry and cannot name a tab. A frozen-v8 migration regression covers this distinction.
+- Idle heartbeats now use the agreed 30-second cadence; the client watchdog allows
+  90 seconds before reconnecting. The earlier 5-second baseline remains historical.
+- Local verification: 145 backend tests, 154 UI unit tests, offline integration,
+  and 12 rendered browser regressions passed, including overflow discovery, selection,
+  live delivery, recovery below the limit and draft preservation on one stream.
+  Static checks and Vite/Release builds passed. No live data was migrated or host activated.
+
+Tab-switch latency and streamed read amplification remain performance work, not
+claimed improvements from these fixes; the 25× baseline was not rerun.

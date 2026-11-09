@@ -4,7 +4,7 @@ namespace Urd.Server;
 
 // One browser page's multiplexed stream and mutable open/watch subscriptions.
 internal sealed class SessionEventPage : IDisposable {
-  internal static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(5);
+  internal static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(30);
   private readonly object gate = new();
   private readonly SemaphoreSlim updateGate = new(1, 1);
   private readonly Dictionary<Guid, Registration> registrations = new();

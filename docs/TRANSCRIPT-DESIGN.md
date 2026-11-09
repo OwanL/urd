@@ -1,9 +1,10 @@
 # Transcript engineering — working design
 
-**Status: requirements agreed in discussion; architecture under examination.**
-**Updated: 2026-11-09.** No renderer, virtualizer, transport, cache budgets,
-new schema or implementation milestones have been selected. This document is the
-working record for continued design discussion, including after context compaction.
+**Status: Stage 1 plan approved; Stage 2 scope, packets and qualification gates
+recorded.**
+**Updated: 2026-11-10.** Stage 2 package, renderer, virtualizer, persistent projection,
+schema and cache-budget choices remain unselected. Implementation is not authorized
+by this design record.
 
 ## Purpose and authority
 
@@ -27,9 +28,11 @@ Distinguish throughout:
 
 ## Agreed requirements and workload
 
-- Rich Markdown/code, embedded images and image viewing; extensible to further
-  structured content without treating everything as specially formatted text.
-  Initial scope is Markdown, code, tables and images. Maths and diagrams are deferred;
+- Rich Markdown/code, tables and images; extensible to further structured content
+  without treating everything as specially formatted text. Stage 2 core qualifies
+  Markdown text/code/tables and entry plus intra-message virtualization. External
+  linked Markdown images are a separate fast-follow after core qualification;
+  managed attachments and viewers remain Stage 4. Maths and diagrams are deferred;
   check rendering-stack compatibility now and preserve simple extension points,
   without building a general plugin framework or adding their runtime dependencies.
 - Long-running sessions mixing hundreds of tool calls, substantial reasoning,
@@ -86,6 +89,8 @@ Distinguish throughout:
   save-picture feature is not required initially. Owner approved automatic lazy
   loading as external images approach the viewport, including requests to their
   hosts. This is not background fetching of all history or managed-copy retention.
+  Implement this as a separate fast-follow after Stage 2 core qualification, not as
+  part of the core text/code/table gate; managed attachments and viewers remain Stage 4.
 - Provider-supplied formatted reasoning summaries appear inline, visually muted
   but readable. Unsummarized reasoning exposed by a provider is collapsed and
   inspectable. Opaque/encrypted continuation state is not public transcript content.
@@ -603,18 +608,16 @@ its dialect, projection format or a browser virtualizer.
    per-reply usage; metadata-only latest/anchor/neighbor reads; one multiplexed push
    stream per browser page replacing snapshot polling; conversation placement at
    send-attempt start, preserving durable receipts and failed-attempt history. Whole-history
-   position lookup is deferred to stage 2's weighted index. Verify revision fencing,
-   mixed kinds, notice coalescing and query cost without reading bodies. Do not
-   weaken existing delivery/Stop guarantees.
-2. **Formatted, virtualized text path end to end.** Derive reusable structure outside
-   execution/storage locks; serve consistent ranges; render Markdown/code/tables and
-   external images in the browser. Virtualize between messages and within huge blocks.
-   Integrate the shared position model, anchor restoration across reload, following
-   intent, bounded warm cache and native selected-span retention. Use formatted
-   catch-up under streaming load. Establish source-to-rendered mappings and whole-item
-   copy correctness; do not call a top-level-block-only renderer complete for giant
-   code/table content. Test native selection during implementation rather than
-   launching a separate selection research project.
+   position lookup is deferred to Stage 2. Verify revision fencing, mixed kinds,
+   notice coalescing and query cost without reading bodies. Do not weaken existing
+   delivery/Stop guarantees.
+2. **Stage 2 core — formatted, virtualized text.** Qualify Markdown text, code and
+   tables; virtualize between entries and within large messages/blocks. Preserve the
+   approved backend semantic-structure/browser-rendering split, with formatted catch-up
+   and no raw-Markdown flash. External linked Markdown images are a separate
+   fast-follow after core qualification. Managed attachments and viewers remain
+   Stage 4. Deliver through the small reviewable packets and gates below; this is not
+   a package, projection-format or implementation approval.
 3. **Typed tool/reasoning content.** Add provisional call observation and snapshot
    recovery without weakening terminal validation or execution authority. Project
    model-facing input/results, statuses and explicit reasoning categories. Fetch
@@ -627,17 +630,75 @@ its dialect, projection format or a browser virtualizer.
    not proof obtained from rendering a picture. This slice may need broader execution
    and model-context changes; bound and approve those before starting rather than
    treating the feature as a transcript-only frontend patch.
-5. **Composed qualification and tuning.** Repeated long-session navigation, concurrent
-   streaming, many tool calls and screenshots under realistic resource contention.
-   Measure both browser and backend, warm and cold paths, persistent index cost and
-   post-eviction memory. Derive concrete cache/concurrency/latency targets from this
-   evidence with the owner; the synthetic parser sizes and safeguards are not limits.
+5. **Later cross-stage qualification and tuning.** Repeated long-session navigation,
+   concurrent streaming, many tool calls and screenshots under realistic resource
+   contention. Measure both browser and backend, warm and cold paths, persistent index
+   cost and post-eviction memory. Derive concrete cache/concurrency/latency targets
+   from this evidence with the owner; synthetic parser sizes and safeguards are not limits.
 
-Every slice includes meaningful local tests, failure-path checks and independent
-review where practical. Step 5 composes already-tested paths; it is not permission
-to postpone memory/latency checks in steps 1–4. A completed intermediate source
-slice is not automatically an approved replacement for the running user application.
-No production activation, user-data migration or live-model test follows from this plan.
+### Stage 2 packets and acceptance gates
+
+These are small, reviewable packets with non-overlapping questions, not authorization
+for a broad rewrite. Owning code areas are named to guide later coordination; no
+speculative API, schema or class design is implied.
+
+1. **Decision probes** — Own the temporary parser/slicing/highlighting/cache matrix
+   in isolated fixtures, with findings summarized in
+   [parser evidence](TRANSCRIPT-PARSER-EVIDENCE.md). The released Markdig probe is
+   useful preliminary evidence, not this full gate. Check semantic correctness and
+   detached source ranges for streaming/fences/references/lists/tables, code/table
+   slices, backend-versus-browser highlighting, and source/projection/highlight cache
+   reuse and release. Confirm cost as well as correctness. Do not select packages or
+   persist formatted projections until the matrix supports them; release parser trees
+   and backing source, and do not treat a queued-job cancellation as stopping a parse.
+2. **Navigation/read contracts and pure viewport model** — Own contracts in this
+   design; backend read ownership in `core/sessions/` and `core/storage/`; the pure
+   viewport/anchor model in `source/ui/sessions/`. Define whole-conversation position,
+   approximate prompt markers, source anchors, follow intent, reflow correction and
+   revision fallback without coupling identity to pixels. Gate: model tests cover
+   distant jumps, append/revision changes and height corrections while preserving the
+   visible source anchor/following state; reads stay bounded and do not fetch intervening
+   bodies or all entry descriptors.
+3. **Storage position lookup** — Own the first implementation/benchmark in
+   `core/storage/` and its focused storage tests. At 100,000 entries, first benchmark
+   the simplest correct SQLite weighted-position lookup with materialized weights,
+   including lookup latency and the write/storage cost of maintaining weights. Do not
+   mandate a fixed-fanout tree. Gate: approximate whole-history lookup and marker-to-entry
+   resolution are correct without body reads or repeated whole-history scans. Add a
+   hierarchy or persistent derived structure only if measured query/write costs require
+   it, and record the evidence that triggers that complexity.
+4. **Display integration** — Own source/read integration in `core/storage/`, with
+   the backend semantic-derivation owner selected after the probes within `core/`;
+   own display/viewport integration in `source/ui/app/Transcript.tsx` and
+   `source/ui/sessions/`. Gate: Markdown text, code and tables render correctly;
+   both entry and intra-message virtualization work, including very large code/table
+   content; source-to-rendered anchors and whole-item source reads remain correct;
+   byte/piece reads remain bounded. Streaming never flashes raw Markdown. Preserve
+   native selection with temporary selected-span retention, keyboard/focus and
+   accessibility, and keep input/scrolling/execution responsive.
+5. **Bounded shared cache and durable return** — Own browser content/derived-resource
+   lifetimes and local navigation state in `source/ui/sessions/` and the existing
+   transcript/workspace owners. Gate: share useful derived work across views without
+   retaining one full transcript per tab; evicted sessions restore the saved source
+   anchor and following intent after tab return and browser reload; selection pins only
+   what native selection needs and releases it when cleared. Exercise repeated tab and
+   eviction cycles. Set absolute cache/memory budgets only after the probes; do not
+   infer a budget from the Stage 1 sample.
+6. **Composed qualification** — Own local backend/UI tests and the synthetic browser
+   fixture for the complete Stage 2 path. Compose the 100k-entry position case with
+   five heavy tabs, one stream, large code/table content, scrolling/reflow, selection,
+   reload and eviction. Report backend and browser costs separately and end to end;
+   include failures and contention. Gate: check the provisional input, visibility,
+   long-task and warm/derived-cold targets below, plus bounded reads, accessibility,
+   source-anchor/follow preservation, no raw-Markdown flash and memory release. A failed
+   target remains open evidence for tuning/review, not an automatic relaxation.
+
+Every packet includes meaningful local tests, failure-path checks and independent
+review where practical. Composed Stage 2 qualification does not postpone memory/latency
+checks in earlier packets. Later cross-stage qualification is not permission to defer
+Stage 2 acceptance. A completed intermediate source slice is not automatically an
+approved replacement for the running user application. No production activation,
+user-data migration or live-model test follows from this plan.
 
 Still unqualified before claiming the overall design works: scrollbar geometry and
 anchor stability under reflow; very large individual inline/table-cell structures;
@@ -660,23 +721,37 @@ Requirements check additions (2026-11-09), owned by the named stage:
   - Backend: transcript formatting runs as one low-priority shared job and never
     delays model or tool execution; large messages wait instead.
   - Memory: transcript memory independent of history length and returning to
-    baseline after detail close/tab cycles. Absolute browser/backend numbers are
-    set after stage 1 baseline measurement, not guessed now.
+    baseline after detail close/tab cycles. Stage 1 now has a bounded baseline, but
+    it does not establish recovery or an absolute budget; defer numeric cache/memory
+    budgets until Stage 2 probes and composed evidence.
 - **Animation constraints for the future UI design (stages 2–3):** performance
   rules, not visual choices. Animate transform/opacity only; never animate height
   inside the virtualized list without anchoring the reader; state changes are not
   delayed by animation; reduced motion honoured. Measure dropped frames while
   streaming, expanding rows and promoting pending input.
-- **Small-message latency (stage 2):** most replies are small. Measure time from
+- **Small-message latency (Stage 2):** most replies are small. Measure time from
   committed text to formatted display through the backend-structure path; the
   large-message design must not make the common case sluggish.
-- **Syntax highlighting ownership (stage 2):** unassigned. Decide backend tokens vs
-  browser highlighter, including memory for large code blocks and lazy highlighting
-  of offscreen ranges, before choosing a library.
+- **Syntax highlighting ownership (Stage 2):** unassigned. Compare backend tokens
+  with browser highlighting, including large-code-block cost and lazy offscreen ranges,
+  in the probe matrix before choosing a library.
 - **Tool payload size (stage 3):** stored tool arguments/results are currently capped
   at 16 KiB each, below real model-facing results (decision 26). Inspection needs
   bounded reads once that execution-layer limit is raised; do not design for small
   payloads only.
+
+### Current Stage 1 baseline and open limits
+
+The current-tree 25× Stage 1 run is a baseline, not sign-off. The five heavy sessions
+used 100,000 entries each. The implementation report records first-mount switch
+median **112.4 ms**, return/remount median **130.3 ms**, commit-to-DOM-plus-next-rAF
+bracket **39.4–44.8 ms**, **22.74 active GET/s**, and at 60 seconds **+17.24 MiB
+browser / +4 MiB backend** over baseline. The commit bracket is not pixel latency;
+the remounts are not Stage 2 warm-cache measurements. An intermittent tab-return
+anchor assertion remains unroot-caused (0/25 focused reproductions); it is not signed
+off. These observations establish neither memory recovery nor overall performance.
+See the [current Stage 1 implementation report](transcript-history-implementation.md)
+for methods, ranges and caveats.
 
 ## Verification approach — broader work proposed; isolated parser probe completed
 
@@ -771,8 +846,8 @@ shared-reference and cleanup failure cases; those are not implemented guarantees
   placement and muted inline reasoning. It did not qualify live draft streaming,
   expansion behavior or underlying architecture/performance. No Pie source/styles
   were inspected/copied. Temporary browser/computer sessions were closed.
-- No source implementation, dependencies, cache budgets, schema, worker design or
-  runtime performance guarantee has been approved here. Push change notices are
+- No Stage 2 source implementation, dependency, cache budget, schema, worker design
+  or runtime performance guarantee has been approved here. Push change notices are
   agreed in principle (decision 16); their implementation is not yet approved.
 - Grilling decision 15 (requirements check, 2026-11-09): owner reconfirmed tool
   details show **model-facing** input/results only, not process I/O. “Raw tool IO”
@@ -781,16 +856,20 @@ shared-reference and cleanup failure cases; those are not implemented guarantees
   lightweight server-pushed change notices in stage 1. Notices say “changed”;
   content is still read on demand. Polling lag and repeated preview rereads
   contradicted snappy streaming and low overhead.
-- Grilling decision 17: images stay in stage 4. Urd is not yet used for real work;
-  the goal is a strong foundation rather than early daily-use features.
+- Grilling decision 17: managed attachment images and viewers stay in Stage 4;
+  external linked Markdown images are a separate Stage 2 fast-follow after core text,
+  code and table qualification. Urd is not yet used for real work; the goal is a
+  strong foundation rather than early daily-use features.
 - Grilling decision 18: owner adopted the tightened provisional performance targets
-  listed under "Requirements check additions"; absolute memory budgets follow stage 1
-  measurements. Owner accepted that tighter streaming latency may cost more writes.
+  listed under "Requirements check additions"; absolute memory budgets follow Stage 2
+  probes, not assumptions from the Stage 1 baseline. Owner accepted that tighter
+  streaming latency may cost more writes.
 - Requirements check found stage 1 indexed only text messages, so tool calls (the
   dominant row type) had no anchors/order. Stage 1 now indexes kind-tagged entries.
   Dense message ranks and a persisted change version were dropped from stage 1:
   rank is not scroll geometry, and per-chunk summary writes cost the hot path.
-  Weighted position lookup is designed once in stage 2.
+  Stage 2 first benchmarks weighted-position lookup at 100,000 entries before adding
+  any hierarchy or other persistent derived structure.
 - Grilling decision 19 (second requirements pass, 2026-11-09): a model reply's
   text runs, tool calls and (later) reasoning are separate entries **in the order
   the provider produced them**, e.g. text → call → text → call. One reply is not
@@ -883,41 +962,26 @@ shared-reference and cleanup failure cases; those are not implemented guarantees
 
 ## Continuation and safety
 
-Current task: engineering grilling and durable planning, not implementation.
-Navigation semantics (#1 above) is resolved: whole conversation, with future
-prompt markers sharing the position model. Inactive-content eviction is approved;
-hover warming is desired direction. Local reading anchors/following intent must
-survive browser reload/restart. Tool inspection defaults to model-facing content
-including reductions, not raw execution I/O. Pruner/producer owns omission and
-recall policy; do not expand this work into a pruning system. Pending user input
-must remain separate until sending a containing model request begins; a subsequent
-failure stays in the conversation rather than requeueing the input. Full-history
-search is deferred. Selection direction is the simplest native-selection approach
-with temporary selected-span retention, tested during implementation. Do not add a
-custom selection engine or separate prototype phase without demonstrated need.
-External Markdown images load automatically near the viewport without managed
-retention. Existing architecture already permits losing unfinished tool drafts on
-backend crash; do not ask to redesign that recovery contract. Maths/diagrams are
-approved for compatibility checks now, feature implementation later. Current work:
-qualify parser capabilities for the approved backend-semantic-structure/browser-layout
-split. Candidate source research and proposed derived-state/read lifecycle are now
-recorded. The approved isolated parser probe has completed its runs successfully;
-independent final evidence review passed. Production integration, browser behavior
-and scheduling remain unqualified. No production implementation/dependency selection
-is approved. Formatted catch-up updates are now agreed: do not flash raw Markdown
-when parsing lags. Next consolidate the agreed boundaries into a bounded proposed
-implementation sequence and explicit remaining qualification gates. Owner approved
-planning stage 1; the concrete proposal is in TRANSCRIPT-HISTORY-PLAN.md. Review
-found that historical never-sent input needs bounded discovery after later
-runs/reload; the proposal includes that path. Requirements checks (decisions 15–30)
-revised stage 1 to: kind-tagged entries in observed order with entry facts;
-anchor-window reads; one multiplexed push stream per page replacing polling;
-send-attempt placement. Packets are 1A entries/reads, 1B push, 1C placement. The
-revised stage 1 scope was approved 2026-11-09 after the wider-requirements review
-(usage capture harness-owned, no usage read contract, cost deferred; pending inputs
-preview-only in the snapshot; migration stated as a table rebuild; session-created
-notices; typed stream messages; generic title until first send), and packet 1A
-(entry index and history reads) was issued.
+Current design state: Stage 2 scope and review packets are recorded; qualification
+remains future work. Navigation covers the whole conversation; future prompt markers
+share its estimated position model. Inactive-content eviction is approved; hover warming remains a hint,
+not a requirement to mount or retain content. Small local reading anchors/following
+intent survive browser reload/restart. Tool inspection defaults to model-facing
+content including reductions, not raw execution I/O; the pruner owns omission/recall.
+Pending user input promotes when sending a containing request starts; failure does
+not automatically requeue it. Full-history search remains deferred. Preserve native
+selection with temporary selected-span retention; do not add a custom selection engine
+without demonstrated need. External linked Markdown images load automatically near
+the viewport, but only as a fast-follow after Stage 2 core qualification; managed
+attachments/viewers remain Stage 4. Existing unfinished tool-draft crash behavior,
+formatted catch-up (never flash raw Markdown), and optional math/diagram compatibility
+remain unchanged. Stage 2's approved direction is backend semantic structure with
+browser rendering/layout; the parser probe is preliminary evidence, not package or
+persistent-projection selection. Its bounded packets, 100k-entry SQLite position
+lookup baseline, gates and current Stage 1 measurements are recorded above. Stage 1's
+current-tree 25× run qualifies only that bounded workload; its tab-return anchor
+assertion remains unroot-caused and its memory sample is not recovery sign-off. Stage 2
+integration, browser behavior, scheduling and cache budgets remain unqualified.
 Do not invent a custom parser or treat sampled sizes as hard limits. Do not keep
 asking minor product questions that can be resolved through existing requirements.
 Ask only unresolved questions,

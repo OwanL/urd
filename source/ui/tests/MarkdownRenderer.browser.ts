@@ -1,26 +1,16 @@
 import assert from "node:assert/strict";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { chromium, type JSHandle, type Page } from "playwright";
 import { createServer } from "vite";
 import { safeMarkdownLink } from "../markdown-rendering/MarkdownLinkPolicy.ts";
-import type {
-  MarkdownPieceInterval,
-  MarkdownRenderSnapshot,
-} from "../markdown-rendering/MarkdownRenderModel.ts";
+import type { MarkdownRendererHarness } from "./MarkdownRendererHarness.tsx";
 
 declare global {
   interface Window {
-    markdownRendererHarness: {
-      readonly links: string[];
-      readonly snapshot: MarkdownRenderSnapshot;
-      readonly selectionChanges: number;
-      readSelectionPins(): readonly MarkdownPieceInterval[];
-      trim(active: MarkdownPieceInterval): Promise<void>;
-      disposeSelectionPins(): void;
-      append(): Promise<void>;
-      unmountRemount(): void;
-      duplicate(): void;
-    };
+    markdownRendererHarness: MarkdownRendererHarness;
   }
 }
 
@@ -154,25 +144,22 @@ void test("standalone Markdown renderer in Chromium", async (t) => {
     await t.test("content-page updates preserve native selection and existing nodes", async () => {
       await page.getByText("Stable", { exact: true }).dblclick();
       await page.keyboard.press("Shift+ArrowLeft");
-      await page.evaluate(async () => {
-        const originals = [...document.querySelectorAll<HTMLElement>("[data-piece]")].map(
-          (node) => ({
-            node,
-            text: node.firstChild,
-          }),
+      const originals = await pieceNodeSnapshot(page);
+      assert.equal(await page.evaluate(() => getSelection()!.toString()), "Stable");
+      for (let index = 0; index < 2; index++) {
+        await page.evaluate(() => window.markdownRendererHarness.append());
+        assert.equal(
+          await pieceNodesRetained(page, originals),
+          true,
+          "Append replaced an existing node",
         );
-        const selection = getSelection()!;
-        if (selection.toString() !== "Stable") throw new Error("Expected native selection");
-        for (let page = 0; page < 2; page++) {
-          await window.markdownRendererHarness.append();
-          for (const original of originals) {
-            const current = document.querySelector(`[data-piece="${original.node.dataset.piece}"]`);
-            if (current !== original.node || current?.firstChild !== original.text)
-              throw new Error("Appended page replaced an existing node");
-          }
-          if (selection.toString() !== "Stable") throw new Error("Selection lost on append");
-        }
-      });
+        assert.equal(
+          await page.evaluate(() => getSelection()!.toString()),
+          "Stable",
+          "Selection lost on append",
+        );
+      }
+      await originals.dispose();
       assert.ok(await page.getByText("later page appended.").count());
     });
     await t.test("selection pins preserve native ranges through bounded trim", async () => {
@@ -247,7 +234,7 @@ void test("standalone Markdown renderer in Chromium", async (t) => {
               focusOffset: selection.focusOffset,
             };
           });
-          assert.equal(await selectedPieceCount(page, nodes), next - first);
+          assert.equal(await nodes.evaluate((pieces) => pieces.length), next - first);
           await page.evaluate(() => window.markdownRendererHarness.trim({ from: 10, next: 20 }));
           const retained = await page.evaluate(() => ({
             selected: getSelection()!.toString(),
@@ -266,15 +253,11 @@ void test("standalone Markdown renderer in Chromium", async (t) => {
           }));
           assert.equal(normalizeSelection(retained.selected), normalizeSelection(selected));
           assert.equal(
-            await page.evaluate((before) => {
-              const current = getSelection()!;
-              return (
-                current.anchorNode === before.anchorNode &&
-                current.anchorOffset === before.anchorOffset &&
-                current.focusNode === before.focusNode &&
-                current.focusOffset === before.focusOffset
-              );
-            }, endpoints),
+            await endpoints.evaluate((before) =>
+              Object.entries(before).every(
+                ([key, value]) => getSelection()![key as keyof Selection] === value,
+              ),
+            ),
             true,
             "Trim preserves native selection endpoints",
           );
@@ -282,7 +265,7 @@ void test("standalone Markdown renderer in Chromium", async (t) => {
           assert.ok(retained.elements <= 20 && retained.contextElements <= 30);
           assert.deepEqual(retained.active, [10, 20]);
           assert.ok(retained.ranges.some((range) => range.from <= first && range.next >= next));
-          assert.equal(await selectedPiecesRetained(page, nodes), true);
+          assert.equal(await pieceNodesRetained(page, nodes), true);
           assert.equal(await page.locator('[data-piece="100"]').count(), 0);
           assert.equal(normalizeSelection(await copySelection(page)), normalizeSelection(selected));
           await endpoints.dispose();
@@ -329,10 +312,10 @@ void test("standalone Markdown renderer in Chromium", async (t) => {
           "Selection pins intersecting root content even when an endpoint is outside it",
         );
         const crossingNodes = await selectedPieceNodes(page, 340, 345);
-        assert.equal(await selectedPieceCount(page, crossingNodes), 5);
+        assert.equal(await crossingNodes.evaluate((pieces) => pieces.length), 5);
         await page.evaluate(() => window.markdownRendererHarness.trim({ from: 10, next: 20 }));
         assert.equal(await page.evaluate(() => getSelection()!.toString()), outsideSelection);
-        assert.equal(await selectedPiecesRetained(page, crossingNodes), true);
+        assert.equal(await pieceNodesRetained(page, crossingNodes), true);
         await crossingNodes.dispose();
         await page.evaluate(() => window.markdownRendererHarness.disposeSelectionPins());
         const disposed = await page.evaluate(() => window.markdownRendererHarness.selectionChanges);
@@ -457,6 +440,15 @@ void test("standalone Markdown renderer in Chromium", async (t) => {
         assert.equal(new URL(page.url()).hash, "#local");
       },
     );
+    const evidenceDirectory = await mkdtemp(join(tmpdir(), "urd-markdown-renderer-"));
+    const longWindowEvidence: unknown[] = [];
+    for (const mode of ["long-code", "long-table"] as const)
+      await t.test(`${mode} remains bounded through forward and backward traversal`, async () => {
+        longWindowEvidence.push(await exerciseLongWindow(page, mode, evidenceDirectory, open));
+      });
+    const evidencePath = join(evidenceDirectory, "long-window-evidence.json");
+    await writeFile(evidencePath, JSON.stringify(longWindowEvidence, null, 2));
+    console.log(`Markdown long-window evidence: ${evidencePath}`);
     await t.test(
       "middle window hydrates detached headers and complete ancestry with isolated IDs",
       async () => {
@@ -487,41 +479,316 @@ void test("standalone Markdown renderer in Chromium", async (t) => {
   }
 });
 
+type LongWindowMode = "long-code" | "long-table";
+
+async function exerciseLongWindow(
+  page: Page,
+  mode: LongWindowMode,
+  evidenceDirectory: string,
+  open: (mode: string) => Promise<void>,
+) {
+  await page.setViewportSize({ width: 1000, height: 900 });
+  await open(mode);
+  const unit = mode === "long-code" ? 1 : 4;
+  const inspect = async () => {
+    const state = await page.evaluate((kind) => {
+      const snapshot = window.markdownRendererHarness.snapshot;
+      const root = document.querySelector<HTMLElement>(".markdown-renderer")!;
+      const gaps = [...root.querySelectorAll<HTMLElement>("[data-markdown-gap]")];
+      const code = kind === "long-code";
+      const gapsValid = gaps.every((gap) => {
+        const cell = gap.firstElementChild as HTMLTableCellElement | null;
+        return (
+          gap.tagName === (code ? "SPAN" : "TR") &&
+          gap.parentElement?.tagName === (code ? "CODE" : "TBODY") &&
+          !gap.textContent &&
+          !gap.hasAttribute("data-source-start") &&
+          !gap.hasAttribute("data-source-end") &&
+          gap.getAttribute("aria-hidden") === "true" &&
+          getComputedStyle(gap).userSelect === "none" &&
+          (code || (cell?.tagName === "TD" && cell.colSpan === 4 && gap.children.length === 1))
+        );
+      });
+      const rows = [...root.querySelectorAll<HTMLElement>("tbody > tr:not([data-markdown-gap])")];
+      const lines = [...root.querySelectorAll<HTMLElement>('[data-kind="codeLine"]')];
+      const headers = [...root.querySelectorAll<HTMLElement>("thead th")];
+      return {
+        from: snapshot.from,
+        next: snapshot.next,
+        pieces: snapshot.pieces.size,
+        contexts: snapshot.contexts.size,
+        domPieces: root.querySelectorAll("[data-piece]").length,
+        domContexts: root.querySelectorAll("[data-context]").length,
+        rows: rows.length,
+        lines: lines.length,
+        gaps: gaps.length,
+        gapsValid,
+        widths: headers.map((header) => header.getBoundingClientRect().width),
+        headerIds: headers.map((header) => header.id),
+        headerRowPosition: Number(root.querySelector("thead tr")?.getAttribute("data-position")),
+        firstBodyPosition: Number(rows[0]?.dataset.position),
+        pageSize: window.markdownRendererHarness.pageSize,
+        pieceCount: window.markdownRendererHarness.pieceCount,
+        requestCount: window.markdownRendererHarness.pageCursors.length,
+        pageCursorsValid: window.markdownRendererHarness.pageCursors.every(
+          (cursor) => cursor % (kind === "long-code" ? 1 : 4) === 0,
+        ),
+        emptyCells: [...root.querySelectorAll("tbody tr td:nth-child(4)")].filter(
+          (cell) => !cell.closest("[data-markdown-gap]") && cell.textContent === "",
+        ).length,
+        positioned: [...(kind === "long-code" ? lines : rows)].every(
+          (item) =>
+            Number.isInteger(Number(item.dataset.position)) &&
+            (kind === "long-code" || Number(item.dataset.position) >= 1),
+        ),
+        documentWidth: document.documentElement.scrollWidth,
+        viewportWidth: innerWidth,
+      };
+    }, mode);
+    const activeUnits = Math.ceil((state.next - state.from) / unit);
+    assert.ok(activeUnits <= 49, JSON.stringify({ mode, state, activeUnits }));
+    const bounds = mode === "long-code" ? [52, 56, 56, 60] : [202, 260, 208, 268];
+    [state.pieces, state.contexts, state.domPieces, state.domContexts].forEach((count, index) =>
+      assert.ok(count <= bounds[index]!, JSON.stringify(state)),
+    );
+    assert.ok(state.documentWidth <= state.viewportWidth, "Document overflows horizontally");
+    assert.equal(state.positioned, true, "Windowed source lines/rows expose data-position");
+    assert.ok(state.gapsValid, "Gaps retain native structure and are hidden/non-selectable");
+    assert.equal(state.pageSize % unit, 0, "Source page ends on a complete unit");
+    assert.equal(state.pageCursorsValid, true, "Source reads start on complete units");
+    if (mode === "long-code") assert.ok(state.lines <= 49, JSON.stringify(state));
+    else {
+      assert.ok(state.rows <= 49, JSON.stringify(state));
+      assert.equal(state.headerRowPosition, 0, "Header row has position zero");
+      assert.ok(state.emptyCells > 0, "Long table retains empty cells");
+      assert.equal(new Set(state.headerIds).size, 4, "Table headers have unique IDs");
+      await assertHeaders(page);
+    }
+    return state;
+  };
+  const initial = await inspect();
+  assert.ok(initial.gaps > 0, "Long content exposes native gap placeholders");
+  assert.ok(
+    mode === "long-code" ? initial.lines >= 24 : initial.rows >= 24,
+    JSON.stringify(initial),
+  );
+  if (mode === "long-table")
+    assert.equal(initial.firstBodyPosition, 1, "First body row follows header position zero");
+  if (mode === "long-code") await assertLocalOverflow(page);
+  let stableWidths = initial.widths;
+  const anchorErrors: number[] = [];
+  const directions = { forward: 0, backward: 0 };
+  const headerNodes =
+    mode === "long-table"
+      ? await page.evaluateHandle(() => [...document.querySelectorAll<HTMLElement>("thead th")])
+      : null;
+  const pinId = mode === "long-code" ? 2 : 12;
+  const pinnedText = await page.evaluate((id) => {
+    const piece = document.querySelector<HTMLElement>(`[data-piece="${id}"]`)!;
+    const range = document.createRange();
+    range.selectNodeContents(piece);
+    getSelection()!.removeAllRanges();
+    getSelection()!.addRange(range);
+    return getSelection()!.toString();
+  }, pinId);
+  const pinnedNodes = await selectedPieceNodes(page, pinId, pinId + 1);
+  const windowState = () =>
+    page.evaluate(() => ({
+      from: window.markdownRendererHarness.snapshot.from,
+      next: window.markdownRendererHarness.snapshot.next,
+    }));
+  const move = async (direction: "forward" | "backward") => {
+    const before = await windowState();
+    const anchorId = direction === "forward" ? before.next - 12 * unit : before.from + 12 * unit;
+    const anchor = page.locator(`[data-piece="${anchorId}"]`);
+    await anchor.scrollIntoViewIfNeeded();
+    const top = (await anchor.boundingBox())!.y;
+    await page.evaluate((value) => window.markdownRendererHarness.moveWindow(value), direction);
+    const after = await anchor.boundingBox();
+    assert.ok(after, `${mode} anchor ${anchorId} was evicted`);
+    const error = Math.abs(after!.y - top);
+    anchorErrors.push(error);
+    // Layout and scrollTop use different subpixel rounding; one CSS pixel is ample.
+    assert.ok(error <= 1, `${mode} anchor moved ${error}px`);
+    const state = await inspect();
+    if (state.from !== before.from || state.next !== before.next) directions[direction]++;
+    const overlap = Math.min(before.next, state.next) - Math.max(before.from, state.from);
+    assert.ok(overlap >= 20 * unit, `${mode} window overlap was ${overlap}`);
+    assert.equal(
+      await pieceNodesRetained(page, pinnedNodes),
+      true,
+      "Windowing replaced a selected node",
+    );
+    if (mode === "long-table") {
+      assert.equal(state.widths.length, stableWidths.length);
+      state.widths.forEach((width, index) =>
+        assert.ok(Math.abs(width - stableWidths[index]!) <= 1, `Column ${index} width changed`),
+      );
+      assert.equal(
+        await page.evaluate(
+          (before) =>
+            [...document.querySelectorAll("thead th")].every(
+              (node, index) => node === before[index],
+            ),
+          headerNodes!,
+        ),
+        true,
+        "Windowing preserves header nodes",
+      );
+    }
+    return state;
+  };
+  for (let step = 0; step < 4; step++) await move("forward");
+  const pinned = await page.evaluate(() => ({
+    text: getSelection()!.toString(),
+    ranges: window.markdownRendererHarness.snapshot.displayRanges,
+  }));
+  assert.equal(pinned.text, pinnedText, "Disjoint selection remains native");
+  assert.ok(pinned.ranges.some(({ from, next }) => from <= pinId && next > pinId));
+  assert.equal(await pinnedNodes.evaluate((pieces) => pieces.length), 1);
+  assert.equal(await pieceNodesRetained(page, pinnedNodes), true);
+  assert.equal(await page.locator('[data-piece="40"]').count(), 0, "Unrelated source was evicted");
+  const active = await windowState();
+  assert.deepEqual(
+    await page
+      .locator("[data-markdown-gap]")
+      .evaluateAll((gaps) =>
+        gaps.map((gap) => [
+          Number(gap.getAttribute("data-gap-from")),
+          Number(gap.getAttribute("data-gap-next")),
+        ]),
+      ),
+    [
+      [mode === "long-code" ? 0 : 1, pinId / unit],
+      [pinId / unit + 1, active.from / unit],
+      [active.next / unit, mode === "long-code" ? 512 : 513],
+    ],
+    "Leading, interior and trailing gaps exactly partition omitted units",
+  );
+  await move("backward");
+  const resizeId = (await windowState()).from + 20 * unit;
+  const resizeAnchor = page.locator(`[data-piece="${resizeId}"]`);
+  await resizeAnchor.scrollIntoViewIfNeeded();
+  const resizeTop = (await resizeAnchor.boundingBox())!.y;
+  await page.evaluate(() => window.markdownRendererHarness.captureAnchor());
+  await page.setViewportSize({ width: 640, height: 900 });
+  await page.evaluate(() => window.markdownRendererHarness.reconfigureGeometry());
+  const resizeError = Math.abs((await resizeAnchor.boundingBox())!.y - resizeTop);
+  anchorErrors.push(resizeError);
+  assert.ok(resizeError <= 1, `${mode} resize anchor moved`);
+  stableWidths = (await inspect()).widths;
+  const widthScreenshot = join(evidenceDirectory, `${mode}-width-640.png`);
+  await page.screenshot({ path: widthScreenshot, fullPage: true });
+  let longTasks: number[] = [];
+  const supported = await page.evaluate(() =>
+    PerformanceObserver.supportedEntryTypes.includes("longtask"),
+  );
+  if (supported)
+    await page.evaluate(() => {
+      const durations: number[] = [];
+      const observer = new PerformanceObserver((entries) =>
+        durations.push(...entries.getEntries().map((entry) => entry.duration)),
+      );
+      observer.observe({ type: "longtask", buffered: false });
+      Object.assign(window, {
+        markdownLongTaskObserver: observer,
+        markdownLongTaskDurations: durations,
+      });
+    });
+  const traversed: (typeof initial)[] = [];
+  for (const direction of ["forward", "backward"] as const)
+    for (let step = 0; step < 12; step++) traversed.push(await move(direction));
+  let state = traversed.at(-1)!;
+  for (const direction of ["forward", "backward"] as const) {
+    const remaining = () => (direction === "forward" ? state.pieceCount - state.next : state.from);
+    while (remaining() > 0) {
+      const previous = remaining();
+      state = await move(direction);
+      traversed.push(state);
+      assert.ok(remaining() < previous, `${direction} traversal did not advance`);
+    }
+    const requests = state.requestCount;
+    state = await move(direction);
+    traversed.push(state);
+    assert.equal(remaining(), 0, `${direction} traversal stays at its boundary`);
+    assert.equal(state.requestCount, requests, "Boundary does not request another page");
+  }
+  if (supported)
+    longTasks = await page.evaluate(async () => {
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      );
+      const target = window as unknown as Window & {
+        markdownLongTaskObserver: PerformanceObserver;
+        markdownLongTaskDurations: number[];
+      };
+      target.markdownLongTaskObserver.disconnect();
+      return target.markdownLongTaskDurations;
+    });
+  assert.deepEqual(longTasks, [], `${mode} produced >50ms long tasks`);
+  assert.ok(traversed.some(({ next }) => next / unit > 360));
+  assert.ok(traversed.some(({ from }) => from > 0));
+  const afterScreenshot = join(evidenceDirectory, `${mode}-after.png`);
+  await page.screenshot({ path: afterScreenshot, fullPage: true });
+  await pinnedNodes.dispose();
+  await headerNodes?.dispose();
+  return {
+    mode,
+    screenshots: { width: widthScreenshot, after: afterScreenshot },
+    directions,
+    initial: {
+      pieces: initial.pieces,
+      contexts: initial.contexts,
+      lines: initial.lines,
+      rows: initial.rows,
+    },
+    maximumAnchorError: Math.max(...anchorErrors),
+    maximum: {
+      pieces: Math.max(...traversed.map(({ pieces }) => pieces)),
+      contexts: Math.max(...traversed.map(({ contexts }) => contexts)),
+      domPieces: Math.max(...traversed.map(({ domPieces }) => domPieces)),
+      domContexts: Math.max(...traversed.map(({ domContexts }) => domContexts)),
+    },
+    longTaskObserverSupported: supported,
+    longTasks,
+  };
+}
+
 type SelectedPiece = { id: string; element: HTMLElement; text: Node | null };
 
-async function selectedPieceNodes(
+async function pieceNodeSnapshot(
   page: Page,
-  from = 0,
-  next = Number.MAX_SAFE_INTEGER,
+  range?: { from: number; next: number },
 ): Promise<JSHandle<SelectedPiece[]>> {
   return page.evaluateHandle(
-    ({ from, next }) => {
-      const selection = getSelection();
-      if (!selection?.rangeCount) throw new Error("Expected selected pieces");
-      const range = selection.getRangeAt(0);
+    ({ from, next, selected }) => {
+      const selection = selected ? getSelection() : null;
+      if (selected && !selection?.rangeCount) throw new Error("Expected selected pieces");
+      const selectedRange = selection?.getRangeAt(0);
       return [...document.querySelectorAll<HTMLElement>(".markdown-renderer [data-piece]")]
         .filter((piece) => {
           const id = Number(piece.dataset.piece);
-          return id >= from && id < next && range.intersectsNode(piece);
+          return id >= from && id < next && (!selectedRange || selectedRange.intersectsNode(piece));
         })
         .map((element) => ({ id: element.dataset.piece!, element, text: element.firstChild }));
     },
-    { from, next },
+    {
+      from: range?.from ?? 0,
+      next: range?.next ?? Number.MAX_SAFE_INTEGER,
+      selected: range !== undefined,
+    },
   );
+}
+
+function selectedPieceNodes(page: Page, from = 0, next = Number.MAX_SAFE_INTEGER) {
+  return pieceNodeSnapshot(page, { from, next });
 }
 
 function normalizeSelection(text: string): string {
   return text.replace(/\r\n/gu, "\n");
 }
 
-async function selectedPieceCount(page: Page, pieces: JSHandle<SelectedPiece[]>): Promise<number> {
-  return page.evaluate((selected) => selected.length, pieces);
-}
-
-async function selectedPiecesRetained(
-  page: Page,
-  pieces: JSHandle<SelectedPiece[]>,
-): Promise<boolean> {
+async function pieceNodesRetained(page: Page, pieces: JSHandle<SelectedPiece[]>): Promise<boolean> {
   return page.evaluate(
     (selected) =>
       selected.every(({ id, element, text }) => {

@@ -87,7 +87,24 @@
 }
 
 .markdown-renderer pre code {
+  display: block;
   white-space: pre;
+}
+.markdown-renderer [data-kind="codeLine"] {
+  display: block;
+  min-height: 1lh;
+}
+.markdown-renderer-gap {
+  user-select: none;
+  pointer-events: none;
+}
+.markdown-renderer code > .markdown-renderer-gap {
+  display: block;
+}
+.markdown-renderer .markdown-renderer-gap > td {
+  padding: 0;
+  border: 0;
+  line-height: 0;
 }
 .markdown-renderer a {
   color: inherit;
@@ -109,18 +126,24 @@
   overflow-x: auto;
 }
 .markdown-renderer table {
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
+  border: solid var(--border-subtle, #303030);
+  border-width: 0 1px 1px 0;
+  table-layout: fixed;
+  width: 100%;
   min-width: min(100%, 24rem);
 }
 .markdown-renderer :is(th, td) {
   padding: 0.45em 0.8em;
-  border: 1px solid var(--border-subtle, #303030);
+  border: solid var(--border-subtle, #303030);
+  border-width: 1px 0 0 1px;
   text-align: left;
   vertical-align: top;
 }
 .markdown-renderer th {
   font-weight: 650;
-  overflow-wrap: normal;
+  overflow-wrap: anywhere;
   background: var(--surface-input, #141414);
 }
 .markdown-renderer td > p {

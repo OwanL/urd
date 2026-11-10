@@ -14,6 +14,15 @@ export interface MarkdownFixtureContext {
   readonly values?: readonly MarkdownValueFragment[];
 }
 
+export type MarkdownContextDescriptor = Partial<
+  Omit<MarkdownRenderContext, "id" | "firstChild" | "childCount" | "firstPiece" | "pieceCount">
+> & {
+  readonly id?: number;
+  readonly children?: readonly [firstChild: number, childCount: number];
+  readonly pieces?: readonly [firstPiece: number, pieceCount: number];
+  readonly values?: readonly MarkdownValueFragment[];
+};
+
 export interface MarkdownRenderFixtureOptions {
   readonly generation?: string;
   readonly piecePageSize?: number;
@@ -98,11 +107,22 @@ export class SyntheticMarkdownPageSource implements MarkdownPageSource {
 
   constructor(
     pieces: readonly MarkdownTextPiece[],
-    contexts: readonly MarkdownFixtureContext[],
+    contexts: readonly (MarkdownFixtureContext | MarkdownContextDescriptor)[],
     options: MarkdownRenderFixtureOptions = {},
   ) {
     this.pieces = pieces;
-    this.contexts = contexts;
+    this.contexts = contexts.map((entry, index) => {
+      if ("context" in entry) return entry;
+      const { id = index, children, pieces, values, ...overrides } = entry;
+      return {
+        context: createMarkdownContext(id, {
+          ...overrides,
+          ...(children ? { firstChild: children[0], childCount: children[1] } : {}),
+          ...(pieces ? { firstPiece: pieces[0], pieceCount: pieces[1] } : {}),
+        }),
+        ...(values === undefined ? {} : { values }),
+      };
+    });
     this.options = options;
     this.generation = options.generation ?? "fixture-generation";
     this.manifest = Object.freeze({
@@ -112,13 +132,13 @@ export class SyntheticMarkdownPageSource implements MarkdownPageSource {
         Math.max(
           0,
           ...pieces.map((piece) => piece.source.end),
-          ...contexts.map((entry) => entry.context.source.end),
+          ...this.contexts.map((entry) => entry.context.source.end),
         ),
       pieceCount:
         options.pieceCount ?? pieces.reduce((count, piece) => Math.max(count, piece.id + 1), 0),
       contextCount:
         options.contextCount ??
-        contexts.reduce((count, entry) => Math.max(count, entry.context.id + 1), 0),
+        this.contexts.reduce((count, entry) => Math.max(count, entry.context.id + 1), 0),
     });
     this.piecePageSize = options.piecePageSize ?? Number.POSITIVE_INFINITY;
     this.valuePageSize = options.valuePageSize ?? Number.POSITIVE_INFINITY;

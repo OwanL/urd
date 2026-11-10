@@ -7,6 +7,12 @@ import type {
   MarkdownTextPiece,
 } from "./MarkdownRenderModel.ts";
 import { safeMarkdownLink } from "./MarkdownLinkPolicy.ts";
+import {
+  markdownChildGaps,
+  markdownTableColumns,
+  requireMarkdownWindowUnits,
+  type MarkdownWindowGeometry,
+} from "./MarkdownWindowGeometry.ts";
 import "./markdown-renderer.css";
 
 type Entry = { at: number; order: number; node: VNode };
@@ -36,7 +42,13 @@ function pieceNode(piece: MarkdownTextPiece) {
 }
 
 // Deliberately unactivated: callers must provide an assembled, normalized window.
-export function MarkdownRenderer({ snapshot }: { snapshot: MarkdownRenderSnapshot }) {
+export function MarkdownRenderer({
+  snapshot,
+  geometry,
+}: {
+  snapshot: MarkdownRenderSnapshot;
+  geometry?: MarkdownWindowGeometry | undefined;
+}) {
   const instance = useId();
   const children = new Map<number, AssembledMarkdownContext[]>();
   const pieces = new Map<number, MarkdownTextPiece[]>();
@@ -68,16 +80,68 @@ export function MarkdownRenderer({ snapshot }: { snapshot: MarkdownRenderSnapsho
     return entries.sort((a, b) => a.at - b.at || a.order - b.order).map((entry) => entry.node);
   }
 
-  function markdownContextNode({ context, values }: AssembledMarkdownContext): VNode {
+  // Only complete positional units have gap geometry. Paragraph fragments, cells,
+  // metadata and partial producer lines remain the caller's responsibility.
+  function windowedChildren(
+    parent: AssembledMarkdownContext,
+    rows: AssembledMarkdownContext[],
+    columns = 1,
+  ): ComponentChildren {
+    if (geometry)
+      requireMarkdownWindowUnits(snapshot, parent, children.get(parent.context.id) ?? []);
+    const kind = parent.context.kind === "code" ? "code" : "table";
+    const start =
+      kind === "table"
+        ? (children.get(parent.context.id) ?? []).filter((row) => row.context.header).length
+        : 0;
+    const result: Entry[] = rows.map((row) => ({
+      at: row.context.position,
+      order: 0,
+      node: markdownContextNode(row),
+    }));
+    const gaps = markdownChildGaps(
+      parent.context.childCount,
+      rows.map((row) => row.context.position),
+      start,
+    );
+    for (const { from, next } of gaps) {
+      const height =
+        geometry?.gapHeight(kind, parent.context.id, from, next, snapshot.generation) ??
+        (next - from) * (kind === "code" ? 24 : 40);
+      const attributes = {
+        key: `g${parent.context.id}-${from}`,
+        "data-markdown-gap": kind,
+        "data-gap-from": from,
+        "data-gap-next": next,
+        "aria-hidden": "true" as const,
+        className: "markdown-renderer-gap",
+      };
+      const node =
+        kind === "code" ? (
+          <span {...attributes} style={{ height }} />
+        ) : (
+          <tr {...attributes}>
+            <td colSpan={columns} style={{ height }} aria-hidden="true" />
+          </tr>
+        );
+      result.push({ at: from, order: 0, node });
+    }
+    return result.sort((a, b) => a.at - b.at).map((entry) => entry.node);
+  }
+
+  function markdownContextNode(entry: AssembledMarkdownContext): VNode {
+    const { context, values } = entry;
     const key = `c${context.id}`;
     const attributes = {
       ...rangeAttributes(context.source),
       "data-context": context.id,
       "data-kind": context.kind,
+      "data-position": context.position,
       "data-mapping": "container",
     };
     // Tables group rows below; do not construct their entire subtree twice.
-    const content = context.kind === "table" ? null : contents(context.id);
+    const content =
+      context.kind === "table" || context.kind === "code" ? null : contents(context.id);
     const parent = snapshot.contexts.get(context.parent);
     switch (context.kind) {
       case "document":
@@ -133,7 +197,9 @@ export function MarkdownRenderer({ snapshot }: { snapshot: MarkdownRenderSnapsho
       case "code":
         return (
           <pre key={key} {...attributes} tabIndex={0} aria-label="Code">
-            <code data-language={values.language}>{content}</code>
+            <code data-language={values.language}>
+              {windowedChildren(entry, children.get(context.id) ?? [])}
+            </code>
           </pre>
         );
       case "codeLine":
@@ -178,6 +244,16 @@ export function MarkdownRenderer({ snapshot }: { snapshot: MarkdownRenderSnapsho
         const rows = [...(children.get(context.id) ?? [])].sort(
           (a, b) => a.context.position - b.context.position,
         );
+        const headers = rows.filter((row) => row.context.header);
+        const headerCells = headers.flatMap((row) => children.get(row.context.id) ?? []);
+        const lengths = new Map<number, number>();
+        for (const { context: cell } of headerCells) {
+          let length = 0;
+          for (let id = cell.firstPiece; id < cell.firstPiece + cell.pieceCount; id++)
+            length += snapshot.pieces.get(id)?.text.length ?? 0;
+          lengths.set(cell.id, length);
+        }
+        const widths = markdownTableColumns(headerCells, lengths);
         return (
           <div
             key={key}
@@ -187,8 +263,19 @@ export function MarkdownRenderer({ snapshot }: { snapshot: MarkdownRenderSnapsho
             aria-label="Table"
           >
             <table {...attributes}>
-              <thead>{rows.filter((row) => row.context.header).map(markdownContextNode)}</thead>
-              <tbody>{rows.filter((row) => !row.context.header).map(markdownContextNode)}</tbody>
+              <colgroup>
+                {widths.map((width, position) => (
+                  <col key={position} style={{ width: `${width}%` }} />
+                ))}
+              </colgroup>
+              <thead>{headers.map(markdownContextNode)}</thead>
+              <tbody>
+                {windowedChildren(
+                  entry,
+                  rows.filter((row) => !row.context.header),
+                  widths.length,
+                )}
+              </tbody>
             </table>
           </div>
         );
@@ -220,7 +307,11 @@ export function MarkdownRenderer({ snapshot }: { snapshot: MarkdownRenderSnapsho
   }
 
   return (
-    <div className="markdown-renderer" key={snapshot.generation}>
+    <div
+      className="markdown-renderer"
+      key={snapshot.generation}
+      data-markdown-generation={snapshot.generation}
+    >
       {(children.get(-1) ?? [])
         .sort((a, b) => a.context.id - b.context.id)
         .map(markdownContextNode)}

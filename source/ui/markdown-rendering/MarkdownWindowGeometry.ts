@@ -1,0 +1,211 @@
+import type { AssembledMarkdownContext, MarkdownRenderSnapshot } from "./MarkdownRenderModel.ts";
+
+// Disposable browser geometry for complete code lines and table body rows only.
+// A caller owns scrolling: capture before mutation, render, measure/re-render, restore.
+// Measurement replaces a shell estimate; it never accumulates historical corrections.
+export interface MarkdownWindowAnchor {
+  readonly generation: string;
+  readonly piece: string;
+  readonly start: string;
+  readonly end: string;
+  readonly offset: number;
+}
+
+type ShellKind = "code" | "table";
+type Estimate = { kind: ShellKind; height: number };
+
+// Positions are ordinals among all direct children, including table headers.
+// Only absence of complete siblings is represented: no fabricated source ranges.
+export function markdownChildGaps(
+  childCount: number,
+  positions: readonly number[],
+  from = 0,
+): readonly { from: number; next: number }[] {
+  const gaps: { from: number; next: number }[] = [];
+  let next = from;
+  for (const position of [...new Set(positions)].sort((a, b) => a - b)) {
+    if (position < from || position >= childCount) continue;
+    if (position > next) gaps.push({ from: next, next: position });
+    next = position + 1;
+  }
+  if (next < childCount) gaps.push({ from: next, next: childCount });
+  return gaps;
+}
+
+// Opt-in geometry cannot silently turn a partial producer line/cell into a full unit.
+// The owner must align reads and selection retention to these complete intervals.
+export function requireMarkdownWindowUnits(
+  snapshot: MarkdownRenderSnapshot,
+  parent: AssembledMarkdownContext,
+  units: readonly AssembledMarkdownContext[],
+): void {
+  if (parent.context.kind !== "code" && parent.context.kind !== "table")
+    throw new Error("Markdown geometry only supports code and table shells.");
+  const kind = parent.context.kind === "code" ? "codeLine" : "row";
+  const positions = new Set<number>();
+  for (const { context } of units) {
+    if (
+      context.kind !== kind ||
+      context.parent !== parent.context.id ||
+      context.position >= parent.context.childCount ||
+      positions.has(context.position)
+    )
+      throw new Error("Markdown geometry requires unique, positional code lines or table rows.");
+    positions.add(context.position);
+    for (let id = context.firstPiece; id < context.firstPiece + context.pieceCount; id++)
+      if (!snapshot.pieces.has(id))
+        throw new Error("Markdown geometry requires complete code lines and table rows.");
+    if (kind !== "row") continue;
+    const cells = [...snapshot.contexts.values()].filter(
+      (entry) => entry.context.parent === context.id,
+    );
+    if (cells.length !== context.childCount)
+      throw new Error("Markdown geometry requires complete table row structure.");
+    const columns = new Set<number>();
+    for (const { context: cell } of cells) {
+      if (
+        cell.kind !== "cell" ||
+        cell.position >= context.childCount ||
+        columns.has(cell.position) ||
+        cell.header !== context.header
+      )
+        throw new Error("Markdown geometry requires unique, positional table cells.");
+      columns.add(cell.position);
+    }
+  }
+}
+
+export function markdownTableColumns(
+  cells: readonly AssembledMarkdownContext[],
+  lengths: ReadonlyMap<number, number>,
+): readonly number[] {
+  const count = Math.max(1, ...cells.map(({ context }) => context.position + 1));
+  // Complete header text determines weights, never the currently mounted body.
+  // Clamp extremes so one long heading cannot make sibling columns unusable.
+  const weights = Array.from({ length: count }, (_, position) => {
+    const cell = cells.find(({ context }) => context.position === position);
+    return Math.min(32, Math.max(4, cell ? (lengths.get(cell.context.id) ?? 0) : 0));
+  });
+  const total = weights.reduce((sum, weight) => sum + weight, 0);
+  return weights.map((weight) => (weight / total) * 100);
+}
+
+export class MarkdownWindowGeometry {
+  private generation = "";
+  private width = 0;
+  private profile = "";
+  private readonly estimates = new Map<number, Estimate>();
+
+  configure(generation: string, width: number, profile: string): void {
+    if (!generation || !Number.isFinite(width) || width <= 0)
+      throw new Error("Markdown geometry requires a generation and a positive layout width.");
+    if (generation === this.generation && width === this.width && profile === this.profile) return;
+    this.generation = generation;
+    this.width = width;
+    this.profile = profile;
+    this.estimates.clear();
+  }
+
+  gapHeight(
+    kind: ShellKind,
+    parent: number,
+    from: number,
+    next: number,
+    generation = this.generation,
+  ): number {
+    const estimate = generation === this.generation ? this.estimates.get(parent) : undefined;
+    const height = estimate?.kind === kind ? estimate.height : kind === "code" ? 24 : 40;
+    return Math.max(0, next - from) * height;
+  }
+
+  measure(root: HTMLElement): boolean {
+    if (!this.matches(root)) return false;
+    const viewport = root.getBoundingClientRect();
+    const samples = new Map<number, { kind: ShellKind; total: number; count: number }>();
+    for (const element of root.querySelectorAll<HTMLElement>(
+      '[data-kind="codeLine"], tbody > [data-kind="row"]',
+    )) {
+      const rect = element.getBoundingClientRect();
+      if (rect.bottom <= viewport.top || rect.top >= viewport.bottom || rect.height <= 0) continue;
+      const shell = element.closest<HTMLElement>('[data-kind="code"], [data-kind="table"]');
+      if (!shell) continue;
+      const kind = shell.dataset.kind as ShellKind;
+      const parent = Number(shell.dataset.context);
+      const sample = samples.get(parent) ?? { kind, total: 0, count: 0 };
+      sample.total += rect.height;
+      sample.count++;
+      samples.set(parent, sample);
+    }
+    let changed = false;
+    // Keep one estimate per currently mounted shell, never a row/line history.
+    const mounted = new Set(
+      [...root.querySelectorAll<HTMLElement>('[data-kind="code"], [data-kind="table"]')].map(
+        (shell) => Number(shell.dataset.context),
+      ),
+    );
+    for (const parent of this.estimates.keys())
+      if (!mounted.has(parent)) this.estimates.delete(parent);
+    for (const [parent, sample] of samples) {
+      const height = sample.total / sample.count;
+      const prior = this.estimates.get(parent);
+      if (prior?.kind === sample.kind && Math.abs(prior.height - height) < 0.01) continue;
+      this.estimates.set(parent, { kind: sample.kind, height });
+      changed = true;
+    }
+    return changed;
+  }
+
+  capture(owner: HTMLElement): MarkdownWindowAnchor | null {
+    if (!this.matches(owner)) return null;
+    const viewport = owner.getBoundingClientRect();
+    for (const element of owner.querySelectorAll<HTMLElement>("[data-piece]")) {
+      const rect = this.textRect(element);
+      if (!rect || rect.top < viewport.top || rect.top >= viewport.bottom) continue;
+      if (rect.right <= viewport.left || rect.left >= viewport.right) continue;
+      return {
+        generation: this.generation,
+        piece: element.dataset.piece!,
+        start: element.dataset.sourceStart!,
+        end: element.dataset.sourceEnd!,
+        offset: rect.top - viewport.top,
+      };
+    }
+    return null;
+  }
+
+  restore(owner: HTMLElement, anchor: MarkdownWindowAnchor | null): boolean {
+    if (!anchor || anchor.generation !== this.generation || !this.matches(owner)) return false;
+    // No selector interpolation: even caller-supplied anchor IDs remain inert.
+    const element = [...owner.querySelectorAll<HTMLElement>("[data-piece]")].find(
+      (piece) =>
+        piece.dataset.piece === anchor.piece &&
+        piece.dataset.sourceStart === anchor.start &&
+        piece.dataset.sourceEnd === anchor.end,
+    );
+    if (!element) return false;
+    const rect = this.textRect(element);
+    if (!rect) return false;
+    const delta = rect.top - owner.getBoundingClientRect().top - anchor.offset;
+    owner.scrollTop += delta;
+    const restored = this.textRect(element);
+    return (
+      restored !== null &&
+      Math.abs(restored.top - owner.getBoundingClientRect().top - anchor.offset) <= 1
+    );
+  }
+
+  private matches(root: HTMLElement): boolean {
+    return (
+      root.dataset.markdownGeneration === this.generation &&
+      Math.abs(root.getBoundingClientRect().width - this.width) <= 1
+    );
+  }
+
+  private textRect(element: HTMLElement): DOMRect | null {
+    if (!element.textContent || !element.dataset.sourceStart || !element.dataset.sourceEnd)
+      return null;
+    const range = element.ownerDocument.createRange();
+    range.selectNodeContents(element);
+    return range.getClientRects()[0] ?? null;
+  }
+}

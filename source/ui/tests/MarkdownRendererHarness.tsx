@@ -2,6 +2,8 @@ import { render } from "preact";
 import { MarkdownRenderer } from "../markdown-rendering/MarkdownRenderer.tsx";
 import { MarkdownSelectionPins } from "../markdown-rendering/MarkdownSelectionPins.ts";
 import { MarkdownWindowAssembler } from "../markdown-rendering/MarkdownWindowAssembler.ts";
+import { MarkdownWindowGeometry } from "../markdown-rendering/MarkdownWindowGeometry.ts";
+import type { MarkdownWindowAnchor } from "../markdown-rendering/MarkdownWindowGeometry.ts";
 import type {
   MarkdownPieceInterval,
   MarkdownRenderContext,
@@ -110,7 +112,47 @@ const links = [
 const mode = new URLSearchParams(location.search).get("mode");
 const documentId = node("document", -1);
 let detachedFrom = 0;
-if (mode === "links") {
+function tableWithHeaders(labels: string[]) {
+  const table = node("table", documentId);
+  const header = node("row", table, { header: true });
+  const headers = labels.map((label, position) =>
+    leaf("cell", header, label, {
+      position,
+      header: true,
+      headerCell: contexts.length,
+      alignment: position === 2 ? "right" : "none",
+    }),
+  );
+  return { table, headers };
+}
+if (mode === "long-code") {
+  const code = node("code", documentId, {}, { language: "typescript" });
+  for (let position = 0; position < 512; position++) {
+    const line = node("codeLine", code, { position });
+    text(
+      line,
+      `const entry_${String(position).padStart(4, "0")} = "${"long_identifier_".repeat(8)}";\n`,
+      "code",
+    );
+  }
+} else if (mode === "long-table") {
+  const { table, headers } = tableWithHeaders(["Name", "Description", "Count", "Notes"]);
+  for (let position = 0; position < 512; position++) {
+    const row = node("row", table, { position: position + 1 });
+    [
+      `Row ${String(position).padStart(4, "0")}`,
+      `Windowed row ${position} retains source-backed text and its table structure.`,
+      String(position),
+      "",
+    ].forEach((value, cellPosition) =>
+      leaf("cell", row, value, {
+        position: cellPosition,
+        headerCell: headers[cellPosition]!,
+        alignment: cellPosition === 2 ? "right" : "none",
+      }),
+    );
+  }
+} else if (mode === "links") {
   links.forEach((destination, index) =>
     link(node("paragraph", documentId), `link-${index}`, destination),
   );
@@ -156,18 +198,9 @@ if (mode === "links") {
     text(node("thematicBreak", documentId), "", "thematicBreak");
   }
   if (mode !== "selection") {
-    const table = node("table", documentId);
-    const header = node("row", table, { header: true });
-    const headers = ["Name", "Description", "Count"].map((label, position) =>
-      leaf("cell", header, label, {
-        position,
-        header: true,
-        headerCell: contexts.length,
-        alignment: position === 2 ? "right" : "none",
-      }),
-    );
+    const { table, headers } = tableWithHeaders(["Name", "Description", "Count"]);
     detachedFrom = pieces.length;
-    const row = node("row", table, { position: 8 });
+    const row = node("row", table, { position: 1 });
     ["Middle-window row", "A detached header remains associated.", "42"].forEach(
       (value, position) =>
         leaf("cell", row, value, {
@@ -198,7 +231,13 @@ if (mode === "links") {
 }
 const source = new SyntheticMarkdownPageSource(pieces, contexts, {
   piecePageSize:
-    mode === "selection" || mode === "detached" || mode === "links" ? 1000 : pieces.length - 2,
+    mode === "long-code"
+      ? 24
+      : mode === "long-table"
+        ? 104
+        : mode === "selection" || mode === "detached" || mode === "links"
+          ? 1000
+          : pieces.length - 2,
 });
 const assembler = new MarkdownWindowAssembler(
   source,
@@ -206,15 +245,29 @@ const assembler = new MarkdownWindowAssembler(
   mode === "detached" ? detachedFrom : 0,
 );
 const root = document.querySelector("#markdown-renderer")!;
+const longWindow = mode === "long-code" || mode === "long-table";
+root.toggleAttribute("data-windowed", longWindow);
+const geometry = longWindow ? new MarkdownWindowGeometry() : null;
+const geometryProfile = mode ?? "default";
+function owner() {
+  return root.querySelector<HTMLElement>(".markdown-renderer")!;
+}
 function paint() {
-  render(<MarkdownRenderer snapshot={assembler.snapshot} />, root);
+  render(<MarkdownRenderer snapshot={assembler.snapshot} geometry={geometry ?? undefined} />, root);
+}
+function paintMeasured(anchor: MarkdownWindowAnchor | null) {
+  paint();
+  if (!geometry) return;
+  if (geometry.measure(owner())) paint();
+  geometry.restore(owner(), anchor);
 }
 await assembler.append(new AbortController().signal);
-paint();
+if (geometry) geometry.configure(assembler.snapshot.generation, root.clientWidth, geometryProfile);
+paintMeasured(null);
 let selectionChanges = 0;
 const rendererRoot = root.querySelector<HTMLElement>(".markdown-renderer")!;
 let selectionPins: MarkdownSelectionPins | null = null;
-if (mode === "selection")
+if (mode === "selection" || longWindow)
   selectionPins = new MarkdownSelectionPins(
     rendererRoot,
     () => assembler.snapshot,
@@ -223,46 +276,96 @@ if (mode === "selection")
       selectionPins?.read();
     },
   );
-Object.assign(window, {
-  markdownRendererHarness: {
-    links,
-    get selectionChanges() {
-      return selectionChanges;
+let pendingGeometryAnchor: MarkdownWindowAnchor | null = null;
+async function moveWindow(direction: "forward" | "backward") {
+  if (!geometry) throw new Error("A long-window mode is required.");
+  const anchor = geometry.capture(owner());
+  if (direction === "forward") await assembler.append(new AbortController().signal);
+  else await assembler.prepend(new AbortController().signal);
+  const snapshot = assembler.snapshot;
+  const pieceSize = mode === "long-code" ? 48 : 48 * 4;
+  const minimum = mode === "long-code" ? 0 : 4;
+  const active =
+    direction === "forward"
+      ? { from: Math.max(minimum, snapshot.next - pieceSize), next: snapshot.next }
+      : { from: snapshot.from, next: Math.min(snapshot.next, snapshot.from + pieceSize) };
+  await assembler.trim(
+    {
+      generation: snapshot.generation,
+      active,
+      retain: (selectionPins?.read() ?? []).map(({ from, next }) => {
+        const unit = mode === "long-code" ? 1 : 4;
+        return { from: Math.floor(from / unit) * unit, next: Math.ceil(next / unit) * unit };
+      }),
     },
-    readSelectionPins() {
-      return selectionPins?.read() ?? [];
-    },
-    trim(active: MarkdownPieceInterval) {
-      if (!selectionPins) throw new Error("Selection mode is required.");
-      const snapshot = assembler.snapshot;
-      const retain = selectionPins.read();
-      return assembler
-        .trim({ generation: snapshot.generation, active, retain }, new AbortController().signal)
-        .then(paint);
-    },
-    disposeSelectionPins() {
-      selectionPins?.dispose();
-    },
-    get snapshot() {
-      return assembler.snapshot;
-    },
-    append() {
-      return assembler.append(new AbortController().signal).then(paint);
-    },
-    unmountRemount() {
-      render(null, root);
-      paint();
-    },
-    duplicate() {
-      const snapshot = { ...assembler.snapshot, generation: "replacement generation" };
-      render(
-        <>
-          <MarkdownRenderer snapshot={snapshot} />
-          <MarkdownRenderer snapshot={snapshot} />
-        </>,
-        root,
-      );
-    },
+    new AbortController().signal,
+  );
+  paintMeasured(anchor);
+}
+const harness = {
+  get pageSize() {
+    return mode === "long-code" ? 24 : mode === "long-table" ? 104 : 0;
   },
-});
+  get pieceCount() {
+    return source.manifest.pieceCount;
+  },
+  get pageCursors() {
+    return [
+      ...source.pieceRequests.map(({ index }) => index),
+      ...source.beforePieceRequests.map(({ index }) => index),
+    ];
+  },
+  moveWindow,
+  captureAnchor() {
+    if (!geometry) throw new Error("A long-window mode is required.");
+    pendingGeometryAnchor = geometry.capture(owner());
+  },
+  reconfigureGeometry() {
+    if (!geometry) throw new Error("A long-window mode is required.");
+    geometry.configure(assembler.snapshot.generation, root.clientWidth, geometryProfile);
+    if (geometry.measure(owner())) paint();
+    geometry.restore(owner(), pendingGeometryAnchor);
+    pendingGeometryAnchor = null;
+  },
+  links,
+  get selectionChanges() {
+    return selectionChanges;
+  },
+  readSelectionPins() {
+    return selectionPins?.read() ?? [];
+  },
+  trim(active: MarkdownPieceInterval) {
+    if (!selectionPins) throw new Error("Selection mode is required.");
+    const snapshot = assembler.snapshot;
+    const retain = selectionPins.read();
+    return assembler
+      .trim({ generation: snapshot.generation, active, retain }, new AbortController().signal)
+      .then(paint);
+  },
+  disposeSelectionPins() {
+    selectionPins?.dispose();
+  },
+  get snapshot() {
+    return assembler.snapshot;
+  },
+  append() {
+    return assembler.append(new AbortController().signal).then(paint);
+  },
+  unmountRemount() {
+    render(null, root);
+    paint();
+  },
+  duplicate() {
+    const snapshot = { ...assembler.snapshot, generation: "replacement generation" };
+    render(
+      <>
+        <MarkdownRenderer snapshot={snapshot} />
+        <MarkdownRenderer snapshot={snapshot} />
+      </>,
+      root,
+    );
+  },
+};
+export type MarkdownRendererHarness = typeof harness;
+Object.assign(window, { markdownRendererHarness: harness });
 document.documentElement.dataset.ready = "true";

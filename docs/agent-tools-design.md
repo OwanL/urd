@@ -86,7 +86,7 @@ Related: [execution](execution-design.md), [sessions](session-design.md), [disco
 
 ## Open
 
-- Remaining class structure: waiting/delivery/Stop, storage and crash reporting, composition.
+- Remaining class structure: none; all ten pieces approved.
 - Transcript presentation of tool rows and pending background calls.
 - Compaction design.
 
@@ -165,3 +165,54 @@ internal sealed class ShellProcess : IAsyncDisposable {
 }
 internal sealed class BashTool(ChatProcesses processes, GitBash bash) : AgentTool { ... }  // bash(command, timeout?)
 ```
+
+**Waiting, completion delivery and Stop** (existing `SessionBase`).
+
+```csharp
+internal Task BackgroundToolCompletedAsync(Guid requestId, string callId);
+private Task<LlmRequest?> AdvanceExecutionAsync(SessionExecution execution,
+  TaskCompletionSource<SessionExecutionResult> settlement, ExecutionOutcome outcome);
+internal Task StopExecutionAsync();
+private string GetStatus(SessionSnapshot snapshot);  // gains "waiting"
+```
+- Pending background calls with no next turn: status `waiting`, Stop available. A completion or
+  user input wakes the run. Context preparation is the hook for later compaction.
+- A background result reaches the model after all direct results as a labelled tool-completion
+  envelope (origin, call identity, outcome, result marked as untrusted data), never as a human
+  message. The transcript shows it as its own row type.
+- Stop cancels the run's provider, foreground and background work and waits for processes and
+  saves to finish. Processes left by earlier `&` commands survive. Hiding a tab stops nothing.
+
+**Storage and crash recovery.** No new types.
+
+```csharp
+internal bool TryStart(Guid sessionId, Guid executionId, long revision,
+  Guid requestId, string callId, bool background);                       // ToolStorage
+internal bool Complete(Guid sessionId, Guid executionId, long revision,
+  Guid requestId, LlmToolResult result);                                 // ToolStorage
+public void RecoverInterruptedExecutions();                              // SessionExecutionStorage
+```
+- A background call is a saved call with `background = true`; its placeholder is generated from
+  that flag, not stored. `Complete` saves a background result and its completion message in one
+  transaction; the next-request claim includes waiting completions after direct results.
+- Startup marks calls running at crash time "interrupted, possibly partly applied"; nothing re-runs.
+
+**Composition.**
+
+```csharp
+public sealed record AgentToolSettings(
+  string WorkingDirectory, string? GitBashPath, IReadOnlyDictionary<string, string> Environment);
+public SessionManager(UrdStore store, Func<ProviderConnection, IChatClient> createChatClient,
+  AgentToolSettings? toolSettings = null);
+```
+- Core builds the shared file queue and each chat's catalog, pending list, processes and tools.
+  No settings means no tools. Each chat saves its working folder at creation (v1: the server's
+  configured folder; per-chat choice later).
+- Shutdown kills chat processes. Final close does not exist yet; when built it kills the chat's
+  processes. Until then `&` processes live until Urd exits.
+
+**Implementation notes from review.** `FileMutationQueue` keys paths by canonical identity
+(existing ancestor for new files, Windows case-insensitive, `/c/...` equals `C:\...`). Before
+building process handling, qualify real Git Bash and job-object behavior with a minimal fixture:
+foreground Stop, survivor after shell exit, sibling isolation, chat/backend termination,
+inherited pipes, spaces/Unicode, path forms and encoding.

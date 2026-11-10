@@ -57,7 +57,12 @@ serves bounded forward/backward pages and manifests, and `MessageMarkdownSchedul
 coordinates source capture, queued parsing and two BelowNormal lanes (one large, one
 small). `MessageMarkdownLease` keeps a generation readable during handoff; pinned
 generations and leases still count against explicit cache budgets. Explicit limits
-remain required. The pipeline is not wired into session ownership or HTTP routes.
+remain required. `MessageMarkdownService` resolves exact positioned text entries and
+returns independently owned public leases. `MarkdownRenderJson.Options` is the shared,
+immutable wire-size contract. The page-scoped HTTP bridge is available only through an
+explicit internal composition factory for qualification; ordinary startup does not map
+its routes. SSE disconnect cancels pending opens and releases delivered leases. Shutdown
+drains the service and HTTP requests before disposing their shared storage.
 
 ## Checkpoint scope
 

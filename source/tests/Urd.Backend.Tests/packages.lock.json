@@ -49,6 +49,11 @@
           "Microsoft.Extensions.Logging.Abstractions": "10.0.13"
         }
       },
+      "Markdig": {
+        "type": "Transitive",
+        "resolved": "1.6.0",
+        "contentHash": "rJEpDfPM8wrfXUgkNejjg2bJN9bciy44uVyRwKUI+92CnSmbaLeJTLPYcCdvgM4RFsKrhs8d2H2hO78yZpMl3g=="
+      },
       "Microsoft.Bcl.Cryptography": {
         "type": "Transitive",
         "resolved": "10.0.2",
@@ -295,6 +300,7 @@
         "dependencies": {
           "Duende.IdentityModel": "[8.1.0, )",
           "Duende.IdentityModel.OidcClient": "[7.1.1, )",
+          "Markdig": "[1.6.0, 1.6.0]",
           "Microsoft.Data.Sqlite": "[10.0.14, )",
           "Microsoft.Extensions.AI.Abstractions": "[10.11.0, )",
           "Microsoft.Extensions.AI.OpenAI": "[10.11.0, )",

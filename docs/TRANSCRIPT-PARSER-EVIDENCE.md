@@ -254,3 +254,43 @@ implementation only**, subject to those gates; it does not choose a production
 highlighter, persistent-cache mechanism, or package choices for highlighting/cache.
 The selected GFM behavior is qualified only in the six fixture cases, not in a
 production parser.
+
+## Current production-display builder probe — 2026-11-10
+
+This bounded local probe compiled the unchanged current production builder, source
+map, index, range reader, cache and DTO implementations into an isolated Release
+fixture. All 12 cases completed without guard trips; no production service, database,
+app or provider was started. Each fresh process warmed on 1 KiB, then measured one
+synchronous whole-source Build, including parsing and detached index construction.
+These are builder timings, not parse-only timings. Build allocation is current-thread
+churn; accounted index bytes are the implementation's retention formula, not CLR
+heap size. Peak working set includes runtime, source and transient work.
+
+| Case | Source bytes | Build ms | Build allocated bytes | Index accounted bytes | Peak working set bytes |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Common | 870 | 0.56 | 90,264 | 16,998 | 40,755,200 |
+| Table | 524,282 | 465.9 | 159,126,984 | 23,100,100 | 137,715,712 |
+| Code | 2,097,105 | 129.5 | 60,086,808 | 16,852,416 | 74,682,368 |
+| Mixed | 2,097,010 | 1,549.6 | 324,132,448 | 55,365,948 | 238,186,496 |
+
+Retention is strongly shape-dependent: for ~512 KiB, accounted index bytes ranged
+from ~1.12 MB for a giant line to 4.21 MB for code, 13.84 MB for mixed Markdown and
+23.10 MB for a table. Thus no numeric cache defaults are selected. A per-entry
+retention estimate alone also misses the potentially substantial cost of building
+one accepted source. Numeric entries/bytes/pending-work defaults need a coherent
+server working-set, scheduler/concurrency and deployment-headroom basis.
+
+Middle-page results were bounded (about 16 KiB); warmed read-plus-serialize medians
+were about 0.22–0.26 ms for the large code, mixed and table cases (30 samples each).
+Actual cache Add/Find/Get reuse, one-entry eviction, stale-handle rejection, session
+invalidation, Clear and post-scope full-GC index weak-reference release all passed.
+These are single-entry/release checks, not multi-message cache stability or proof of
+memory recovery.
+
+The source report and retained raw records are in
+[`%TEMP%/urd-display-production-f50fc475-835d-469c-92b6-a552fa6cea93/REPORT.md`](file:///C:/Users/OwanLazic/AppData/Local/Temp/urd-display-production-f50fc475-835d-469c-92b6-a552fa6cea93/REPORT.md)
+and that directory's `all-metrics.json`, `process-results.json`, per-case JSON/Markdown
+and production snapshots. This evidence supports bounded production-builder index
+reads and tested cache release only. It is not end-to-end, memory-recovery or
+streaming sign-off. Server activation still needs coherent multi-message working-set,
+scheduler/contention and browser evidence.

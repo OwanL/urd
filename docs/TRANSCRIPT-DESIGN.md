@@ -508,6 +508,23 @@ A generating indicator acknowledges ongoing work independently; input, scrolling
 and execution remain responsive. Refresh cadence and acceptable lag need measured
 qualification, not an arbitrary interval or indefinite starvation.
 
+### Current production-display builder probe — evidence only
+
+The isolated probe of current production builder/index/cache code recorded in
+[parser evidence](TRANSCRIPT-PARSER-EVIDENCE.md#current-production-display-builder-probe--2026-11-10)
+found strongly shape-dependent retained-index accounting: 870 B common input
+accounted for 16,998 B; a 512 KiB table for 23,100,100 B and 465.9 ms Build; 2 MiB
+code for 16,852,416 B and 129.5 ms; and 2 MiB mixed Markdown for 55,365,948 B,
+1,549.6 ms and 238,186,496 B peak working set. Middle-page reads were about 16 KiB
+with ~0.22–0.26 ms warmed read+serialize medians for the large code/mixed/table
+cases. Cache eviction/invalidation/Clear and released-index weak-reference checks
+passed, but these do not establish memory recovery. No numeric cache defaults are
+selected: shape variation and missing multi-message/scheduler evidence prevent a
+coherent server budget. This is not end-to-end, streaming or memory-recovery
+sign-off; production activation still needs multi-message working-set,
+scheduler/contention and browser evidence. Raw report and records are linked from
+the evidence document.
+
 ### On-demand details and images
 
 A compact tool descriptor must not carry full input/output in every history update.

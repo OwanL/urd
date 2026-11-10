@@ -20,7 +20,8 @@ current suite size. Git history retains deleted drafts and superseded comparison
 - [Application structure](application-plan.md): current/planned owners and scoped review.
 - [Sessions](session-design.md), [execution](execution-design.md) and
   [discovery](discovery-design.md): lifetime, model/tool calls and capability exposure.
-- [Agent tools](agent-tools-design.md): tool set, surfaces, parallel/background calls (in review).
+- [Agent tools](agent-tools-design.md): tool set, parallel/background calls, approved class shapes.
+- [Compaction](compaction-design.md): history compaction direction (copy Pi); shapes pending.
 - [Browser](BROWSER-DESIGN.md): shared UI, local access and remaining host/closure choices.
 - [Transcript](TRANSCRIPT-DESIGN.md) and [stage-1 plan](TRANSCRIPT-HISTORY-PLAN.md):
   approved requirements and staged work. [Implementation evidence](transcript-history-implementation.md)

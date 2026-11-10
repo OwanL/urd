@@ -35,6 +35,8 @@ current suite size. Git history retains deleted drafts and superseded comparison
 These records preserve measurements, source findings or constraints still used by decisions.
 Experimental source is [archived outside the checkout](product-direction.md#experimental-source-archive).
 
+- [Agent-tool qualification](agent-tools-qualification.md): Windows job ownership and offline
+  background-result/image adapter probes; not production integration or live provider acceptance.
 - [Provider qualification](provider-qualification.md): offline and separately authorized live route/model checks.
 - [Model interface](model-interface-research.md), [provider research](provider-research.md),
   [context lifetime](CONTEXT-LIFETIME-EVIDENCE.md) and [cache behavior](cache-research.md).

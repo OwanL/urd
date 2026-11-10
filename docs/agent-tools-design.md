@@ -4,6 +4,8 @@
 made, and the approved class shapes. Implementation follows these shapes, subject to the
 qualification gates below; approval is not evidence that the integration already works.
 Related: [execution](execution-design.md), [sessions](session-design.md), [discovery](discovery-design.md).
+[Qualification evidence](agent-tools-qualification.md) records the bounded process and adapter
+probes and their remaining integration limits.
 
 ## Agreed
 
@@ -91,6 +93,12 @@ Related: [execution](execution-design.md), [sessions](session-design.md), [disco
     rollback. Processes deliberately left running by already-completed bash calls remain
     chat-owned and unaffected. The already-approved context-overflow compaction/retry is a
     handled recovery path, not terminal failure; if that recovery fails, cancel owned work.
+19. **Completion origin is not a provider role** (owner review 2026-11-10). A background
+    completion remains a tool-origin event in storage, transcript and model context, never a
+    human submission. The provider adapter may carry its labelled envelope and images through
+    the ordinary `user` input channel. Preserve origin, call identity and untrusted-result
+    labelling; do not promote tool output to `developer` instructions merely to avoid the word
+    `user` on the wire. Qualify this mapping per supported provider route.
 
 ## Open
 
@@ -188,7 +196,8 @@ private string GetStatus(SessionSnapshot snapshot);  // gains "waiting"
   user input wakes the run. Context preparation is the hook for later compaction.
 - A background result reaches the model after all direct results as a labelled tool-completion
   envelope (origin, call identity, outcome, result marked as untrusted data), never as a human
-  message. The transcript shows it as its own row type.
+  submission. The transcript shows it as its own row type. Provider wire roles may differ from
+  Urd authorship; item 19 permits the ordinary input channel without changing the event's origin.
 - Stop cancels the run's provider, foreground and background work and waits for processes and
   saves to finish. Processes left by earlier `&` commands survive. Hiding a tab stops nothing.
 
@@ -224,7 +233,12 @@ public SessionManager(UrdStore store, Func<ProviderConnection, IChatClient> crea
 (existing ancestor for new files, Windows case-insensitive, `/c/...` equals `C:\...`). Before
 building process handling, qualify real Git Bash and job-object behavior with a minimal fixture:
 foreground Stop, survivor after shell exit, sibling isolation, chat/backend termination,
-inherited pipes, spaces/Unicode, path forms and encoding.
+inherited pipes, spaces/Unicode, path forms and encoding. The first
+[process probe](agent-tools-qualification.md#windows-process-ownership) passed its scoped
+lifecycle checks: create suspended, assign both jobs, then resume; wait on the shell handle
+for ordinary completion, but verify the call job is empty for cancellation cleanup. Retain
+surviving call jobs under the chat owner without migrating descendants; reclaim empty jobs.
+This is fixture evidence, not qualification of the integrated process implementation.
 
 ## Implementation-readiness review — 2026-11-10
 

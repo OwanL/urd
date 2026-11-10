@@ -245,7 +245,7 @@ Independent acceptance reviews approved the changes.
 
 Offline tests exercise the actual Duende, Microsoft JWT and official OpenAI SDK paths
 against socket-free synthetic transports, plus real local Kestrel and SQLite workflows.
-They cover signed sign-in, refresh/disconnect races, stale results, storage migration,
+They cover signed sign-in, refresh/disconnect races, stale results, current-schema storage,
 reopen, terminal/error streaming and shutdown ownership.
 
 Separately authorized live checks completed fresh ChatGPT OAuth and then qualified the

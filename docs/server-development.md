@@ -91,8 +91,8 @@ receipts have a refusal reason and null execution ID. Stop receipts and
 `SessionExecutionResult` use `executionId`; snapshots use `unsettledExecutionId` and
 `MessageRef` (including nested content cursors) uses `executionId`.
 The vocabulary cleanup preserved saved IDs, revisions, SQL identifiers and decisions.
-Frozen selection was introduced by schema 8; schema 9 added transcript metadata and request
-usage, and schema 10 added attempt provenance and not-sent tracking. Session routes retain
+Schema 11 stores frozen selection, transcript metadata, request usage, known send-attempt
+provenance and not-sent tracking. Earlier pre-release schemas must be reset, not migrated. Session routes retain
 their local admission gates, status mapping, no-store and read-cancellation rules. Historical
 wire checks covered the renamed receipt, Stop, snapshot and cursor fields and rejected legacy
 routes and required field names.
@@ -116,10 +116,8 @@ provider layer's responsibility.
 
 Snapshots include `latestLlmSelection`, taken from the initiating submission of the
 newest execution, independent of the transcript page being viewed. It is not a separate
-mutable preference. Schema 8 stores nullable selection JSON and widens the refusal check
-with a transactional table rebuild and foreign-key verification.
-Legacy decisions retain null; their exact retries are resolved before fresh-Send
-validation, without inventing a provider choice or replaying work. A reused ID with
+mutable preference. Receipt selection JSON is required; an empty session still reports null.
+Exact retries resolve the original decision without replaying work. A reused ID with
 changed text, revision **or any original selection member** remains a 409 conflict.
 
 Historical Core/HTTP verification covered factory reentrancy/failure, frozen continuations,

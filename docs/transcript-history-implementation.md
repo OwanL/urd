@@ -505,3 +505,28 @@ overall performance, memory recovery, and Stage 2 warm/cold target performance a
 not signed off. Stage 2 rich rendering, retained warm-content/cache paths,
 full-history virtualization, cold-disk behavior, and longer memory/eviction studies
 remain outside this Stage 1 qualification.
+
+## Pre-release schema reset — 2026-11-10
+
+The current schema is **11**. It is created atomically on a fresh/version-0 database;
+version 11 reopens, and any other version fails with manual reset instructions. Stop
+Urd, delete `urd.sqlite`, `urd.sqlite-wal` and `urd.sqlite-shm`, then restart.
+No database files are deleted automatically. Historical upgrade/rebuild/backfill
+code and fixtures are removed. Earlier packet and performance observations above
+remain dated evidence, not a compatibility promise.
+
+Requests now have only known not-attempted (1) or attempted (2) provenance. User
+transcript rows require request links; receipts require their original selection.
+Storage names are `response_id`/`response_final` and request-global chunk indexes.
+The standalone baseline fixture follows the current schema. Browser workspace
+version 2 stores explicit title provenance and discards incompatible saved state
+rather than migrating it. The pre-release policy is recorded in `AGENTS.md`.
+
+Local reset verification passed: Release backend **141/141**, UI static checks and
+**162/162** unit tests, rebuilt Vite/Release assets, offline integration **1/1** and
+rendered browser regressions **14/14**, including provider-settings focus/navigation
+and not-sent resend outcomes. The standalone current-schema baseline completed all
+five 100,000-entry fixtures and 21 tab switches with no page errors; its temporary
+data was removed. This verifies fixture compatibility, not new performance budgets.
+Independent review's unversioned-nonempty database finding was fixed and covered;
+follow-up review found no supported issues.

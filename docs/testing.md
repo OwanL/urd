@@ -18,7 +18,7 @@ in maintenance cost and must not be used to evade the budget.
 | Boundary | Representative guarantees |
 | --- | --- |
 | Storage | Admission/receipt atomicity, durable output ordering, Stop retirement rollback, tool claim/result failure, provider/native-context rollback, Unicode content paging, indexed recent history and keyset listing. |
-| Migrations | Frozen schema 1, 4, 5 and 7 upgrade/rollback anchors, including retained identity/history and the latest selection migration. |
+| Schema | Fresh version-11 creation, reopen, refusal of incompatible versions with manual reset instructions, current constraints and large payload retention. No pre-release migrations. |
 | Sessions | Concurrent exact retries, canonical handles, initiating selection, safe-boundary steering, stale Stop isolation, held cleanup/callbacks, failed Stop writes and multi-session shutdown. |
 | Execution | Positive completion evidence, buffered Unicode output/deadline flush, write-failure fencing, tool failure/continuation and cleanup before effects. Real SDK loops exercise both provider APIs, native context persistence and reopen. |
 | Providers | Issued identity/state/account binding, private context scope, uncertain refresh persistence/recovery, credential mutation and cancellation drain, representative rejected native output and secret-safe errors. |
@@ -41,14 +41,14 @@ It preserves representative risk boundaries rather than every previous scenario:
 - Reduced exhaustive per-field/per-error validation, native codec/output shapes,
   provider grants/rotation races, CLI options and HTTP malformed-request matrices.
 - Dropped isolated schema 2/3/6 migration fixtures and broad current-schema
-  corruption checks. The retained older-version upgrades still traverse later
-  migration steps, but do not replace every former fixture/failure point.
+  corruption checks. A later pre-release schema reset removed the remaining historical
+  upgrades/fixtures; current creation, constraints and version-refusal checks replace them.
 - Removed several combined-failure, timer/cancellation-origin, lifecycle and
   exact-buffer-partition variations. Distinct representative rollback, cleanup,
   concurrency and uncertainty tests remain, not exhaustive combinations.
 
-These changes remove test coverage, not application behavior, validation or data
-compatibility. Old test counts in development guides describe historical
+The budget changes removed test coverage, not application behavior or validation.
+The later pre-release reset deliberately drops old database compatibility. Old test counts in development guides describe historical
 checkpoints; they are not evidence that every old scenario remains in the current
 suite. New regressions should replace a weak scenario or extend an existing
 behavioral owner where possible, while respecting the hard budget.

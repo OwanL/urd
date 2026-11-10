@@ -9,13 +9,22 @@ saved-primary-ID discovery, durable Send decisions, safe-boundary steering, addr
 Stop, bounded snapshot/history/content reads, known-not-sent discovery and graceful
 shutdown. The browser workspace is implemented and served as static assets by the Server.
 
-`UrdStore` owns the shared database, currently schema 10. It records whether a request
+`UrdStore` owns the shared database, currently schema 11. It records whether a request
 started sending and pages inputs known not to have been sent, so users can retrieve
 and explicitly resend them. Snapshots stay slim; transcript metadata and
 content use separate bounded reads, and reported usage is persisted per request. Provider
 settings are available in the browser workspace, and production sessions borrow clients from
 `ProviderManager`. See [provider management](provider-management.md) for connection and
 credential behavior.
+
+Before the supported public data baseline, schema changes replace the schema rather than
+migrating it. A fresh/version-0 database creates all current tables and indexes in one
+transaction; version 11 reopens normally. Other versions fail with reset instructions:
+stop Urd, delete `urd.sqlite`, `urd.sqlite-wal` and `urd.sqlite-shm`, then restart.
+Urd never deletes these files automatically. Requests have only known not-attempted (1)
+or attempted (2) provenance; transcript user entries require request links and receipts
+require their original model selection. Empty sessions still have no selection.
+Storage uses `response_id`/`response_final` and request-global chunk indexes.
 
 ## Naming and structure cleanup
 
@@ -138,13 +147,8 @@ not a boundary-ID lookup or offset. Boundary deletion does not invalidate paging
 stay ahead of continuation pages. Each query observes committed state, not a frozen multi-page
 snapshot; refresh the first page to discover new chats. No total count or configurable limit.
 
-Schema 5 adds `session_creation`: an AUTOINCREMENT ordinal and unique session-ID foreign key
-with cascading metadata cleanup. Migration follows existing upgrades in their transaction,
-preserving identities, revisions, history and execution/receipt/tool evidence without rebuilding
-the root sessions table or disabling foreign keys. Legacy rows have no recorded creation
-chronology: ascending `session_id COLLATE BINARY` assigns a fixed fallback, returned in descending
-binary-ID order, **not recovered chronology**. Subsequent creations sort ahead of that legacy band.
-Identity and ordering metadata insert atomically in the existing create transaction; handles are
+`session_creation` stores an AUTOINCREMENT ordinal and unique session-ID foreign key
+with cascading metadata cleanup. Identity and ordering metadata insert atomically in the existing create transaction; handles are
 returned/tracked only after commit. Ordinals are not reused after deletion; gaps are harmless.
 The cascade does not add a public delete/close operation; `SessionRecord` is unchanged.
 
@@ -222,7 +226,7 @@ share a file per concept. Read them alongside their owners.
    producer/consumer roles and lifecycle guarantees.
 4. [UrdStore.cs](../source/backend/core/storage/UrdStore.cs) — opens the database and exposes
    focused parts: [Database.cs](../source/backend/core/storage/Database.cs) (connection, lock,
-   transactions), [DatabaseSchema.cs](../source/backend/core/storage/DatabaseSchema.cs) (migrations),
+   transactions), [DatabaseSchema.cs](../source/backend/core/storage/DatabaseSchema.cs) (current schema creation),
    [SessionStorage.cs](../source/backend/core/storage/SessionStorage.cs),
    [UserMessageStorage.cs](../source/backend/core/storage/UserMessageStorage.cs) (receipts),
    [SessionExecutionStorage.cs](../source/backend/core/storage/SessionExecutionStorage.cs) and
@@ -337,7 +341,7 @@ readers (`StoredExecutions`, `StoredSubmissions`, `StoredLlmResponses`, `StoredS
 not ad-hoc SQL, so schema evolution
 touches one reader instead of every test. Raw `Scalar(...)` observation inside a `*Tests.cs`
 file needs a same-line `// raw-sql:` justification, which the pre-commit hook enforces on
-staged files; schema-migration checks and fixture-owned witness tables are the expected
+staged files; current-schema constraint checks and fixture-owned witness tables are the expected
 exceptions. Forging state the API would never produce (stale revisions, corrupt bytes,
 rollback witnesses) stays in arrangement code, shared where repeated (for example
 `TemporaryDatabase.ForceHistoryRevision`). Coverage helps find untested paths; it is not a quality score

@@ -2,6 +2,10 @@
 
 - Keep verification local. Do not add CI workflows or CI-only tooling unless the owner explicitly requests it.
 
+Before the first supported public release, schema changes replace the current schema, bump its version and require local database recreation. Do not add migrations, legacy readers or compatibility aliases. Mismatched databases fail with clear reset instructions. This policy ends only when the owner explicitly establishes a supported durable-data baseline; migration support starts from that baseline.
+
+Apply the same no-migration policy to browser-persisted state: version its shape and discard incompatible saved state rather than migrating it.
+
 # style guide
 
 - Use plain code documentation, avoid xml docs.

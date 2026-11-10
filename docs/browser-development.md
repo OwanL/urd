@@ -39,8 +39,10 @@ draft record. A full workspace save folds in and then removes stale draft record
 newer draft overlay is retained. Command journals synchronously save the complete
 workspace before dispatch. Failed reads/writes block commands and offer an explicit
 retry. If cleanup alone fails after a successful save, the saved state remains usable
-and cleanup can be retried. A failed initial read stays fail-closed until retry restores
-the workspace; corrupt data is never silently replaced.
+and cleanup can be retried. Storage access failures stay fail-closed until retry succeeds.
+Before the supported public data baseline, incompatible or malformed saved workspace/draft
+shapes are discarded, not migrated. Workspace version 2 records explicit placeholder/derived
+title provenance, so an actual first message of `New chat` is not mistaken for an unnamed tab.
 The palette uses neutral black/charcoal surfaces and grey controls; semantic error
 colours remain distinct. Transcript rows render plain text and tool status; richer formatting
 and tool argument/result inspection remain future work.
@@ -189,7 +191,7 @@ account requests were made for these checks; screenshots stay in an owned temp f
   active choice; conflicting selection is a durable `selectionLocked` refusal.
   Local unsent choices are not a separate mutable server-settings endpoint.
 - `latestLlmSelection` is the initiating choice of the newest execution, active or
-  settled. Null represents fresh/legacy history, not a fake model default for new
+  settled. Null represents an empty session, not a fake model default for new
   Sends. Null reasoning means provider default; explicit efforts are `none`, `low`,
   `medium`, `high`, `extraHigh`. Those are request values, not a claim that every
   model supports them. Current catalogs provide IDs/names, not reasoning capability.

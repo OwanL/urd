@@ -650,15 +650,18 @@ These are small, reviewable packets with non-overlapping questions, not authoriz
 for a broad rewrite. Owning code areas are named to guide later coordination; no
 speculative API, schema or class design is implied.
 
-1. **Decision probes** — The bounded Stage 2 decision probe is recorded in
-   [parser evidence](TRANSCRIPT-PARSER-EVIDENCE.md) and raw evidence at
-   `%TEMP%/urd-stage2-decisions-20261110-4f84ef2a/REPORT.md`. It supports keeping the
-   backend-structure/browser-rendering direction, bounded process-local reuse, and
-   context-aware demand-driven highlighting; it rejects naive stateless window
-   highlighting. Fidelity was 8/11, so this is not packet 1 sign-off. No package or
-   persistent projection/cache is selected. Remaining parser, fidelity, indexed-range,
-   scheduling, memory and composed qualification gates remain open as listed in the
-   evidence report; queued-job replacement does not stop an in-flight parse.
+1. **Decision probes** — The bounded Stage 2 decision probe and targeted fidelity
+   follow-up are recorded in [parser evidence](TRANSCRIPT-PARSER-EVIDENCE.md), with
+   raw reports at `%TEMP%/urd-stage2-decisions-20261110-4f84ef2a/REPORT.md` and
+   `%TEMP%/urd-stage2-fidelity-20261110-250eb606/FOLLOWUP-REPORT.md`. The follow-up
+   records 6/6 bounded GFM table cases, 132/132 browser assertions and 2/2 native
+   selection gestures retaining selection after visible append-only updates. This
+   supports an initial Markdig semantic-derivation implementation only; it is not
+   packet 1, sanitizer or composed Stage 2 sign-off, and does not select highlighting
+   or persistent-cache package/mechanism choices. Broader fidelity, security,
+   indexed-range, scheduling, memory and composed qualification gates remain open as
+   listed in the evidence report; queued-job replacement does not stop an in-flight
+   parse.
 2. **Navigation/read contracts and pure viewport model** — Own contracts in this
    design; backend read ownership in `core/sessions/` and `core/storage/`; the pure
    viewport/anchor model in `source/ui/sessions/`. Define whole-conversation position,

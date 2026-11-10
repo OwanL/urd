@@ -157,7 +157,9 @@ reported from the parent session's tool evidence.
 This isolated decision probe extends, but does not supersede, the released-parser
 measurements above. It used pinned Markdig 1.6.0, markdown-it 14.1.0, Roslyn
 CSharp 4.14.0 and highlight.js 11.11.1, temporary fixtures and synthetic inputs.
-Images were literal/deferred. **Browser canonical DOM fidelity matched 8/11 cases.**
+Images were literal/deferred. Its initial **8/11 browser canonical DOM fidelity**
+result and provisional differences below are superseded by the targeted fidelity
+follow-up at the end of this document.
 The exact three differences were: nested-list newline/text-selection equivalence;
 permissive pipe-table handling of an unescaped pipe in code versus markdown-it row
 splitting; and rejected JavaScript-link Markdown remaining literal in markdown-it
@@ -208,3 +210,47 @@ cache eviction during selection; browser baseline recovery; and composed Stage 2
 targets. No live provider,
 production integration, virtualized UI, actual browser paint timing or production
 package evaluation was performed. Raw report and full fixture: `%TEMP%/urd-stage2-decisions-20261110-4f84ef2a/REPORT.md` and neighboring records.
+
+## Targeted fidelity follow-up — 2026-11-10
+
+The isolated follow-up report is
+`%TEMP%/urd-stage2-fidelity-20261110-250eb606/FOLLOWUP-REPORT.md` (reproduction
+instructions and hashes are alongside it). It refines the earlier fidelity probes;
+it does **not** qualify packet 1, a production parser, or sanitizer/security behavior.
+
+- **GFM table cases: 6/6 passed.** Markdig 1.6.0's strict
+  `PipeTableOptions.UseGfmRules=true` option was documented, compiled and exercised
+  in the fixture. Cases cover unescaped pipes inside code spans splitting cells,
+  escaped pipes remaining content, plain escaped pipes, padding/truncation,
+  alignment, and invalid/empty delimiter rows. This is a narrow set of explicit
+  expectations, not general GFM conformance or production-parser qualification.
+- **Browser: 132/132 assertions passed** over 24 fixtures and five selection cases.
+  Native Chromium pointer drag and Shift+click each passed (2/2), preserving selected
+  text and native selection endpoints after a visible append-only update. Retention
+  was demonstrated only when unchanged existing DOM/text nodes were retained and new
+  children appended. Full remount lost selection. A pure-keyboard exploratory
+  attempt in a non-editable focused element created no selection and is not a
+  keyboard qualification.
+- **Unsafe Markdown labels/raw HTML:** tested rejected destinations rendered label
+  children in inert `span` elements without anchor/href/link role/tab stop.
+  JavaScript variants, data, VBScript and protocol-relative destinations were
+  exercised; safe links and escaped cases remained correct. Raw inline/block HTML,
+  comments, iframe/srcdoc and SVG were rendered as literal text; pre-wrapped spans
+  preserved exact source, visible text and native selected text including newlines.
+  No source-created executable/resource elements, event attributes or execution
+  sentinel activation occurred. This corpus is **not sanitizer sign-off** or
+  comprehensive hostile-URL testing.
+
+Remaining limits are exact: keyboard-created selection; arbitrary
+updates/remounts or insertions affecting selected content; clipboard behavior and
+other browsers; broader Markdown/GFM and URL/security coverage; and composed
+streaming/display/highlighting qualification (including actual visibility latency,
+contention, cancellation/staleness/failure, resource bounds/recovery, and
+stateful/off-thread highlighting). Images remain deferred. The report does not sign
+off packet 1, sanitizer behavior, production activation, or composed Stage 2 targets.
+
+This evidence now supports an **initial Markdig semantic-derivation
+implementation only**, subject to those gates; it does not choose a production
+highlighter, persistent-cache mechanism, or package choices for highlighting/cache.
+The selected GFM behavior is qualified only in the six fixture cases, not in a
+production parser.

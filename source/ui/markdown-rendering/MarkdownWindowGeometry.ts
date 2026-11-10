@@ -1,6 +1,7 @@
 import type { AssembledMarkdownContext, MarkdownRenderSnapshot } from "./MarkdownRenderModel.ts";
 
 // Disposable browser geometry for complete code lines and table body rows only.
+// The scrollport defaults to the renderer root for standalone, self-scrolling callers.
 // A caller owns scrolling: capture before mutation, render, measure/re-render, restore.
 // Measurement replaces a shell estimate; it never accumulates historical corrections.
 export interface MarkdownWindowAnchor {
@@ -118,15 +119,23 @@ export class MarkdownWindowGeometry {
     return Math.max(0, next - from) * height;
   }
 
-  measure(root: HTMLElement): boolean {
+  measure(root: HTMLElement, scrollport: HTMLElement = root): boolean {
     if (!this.matches(root)) return false;
-    const viewport = root.getBoundingClientRect();
+    const viewport = this.visibleBounds(root, scrollport);
+    if (!viewport) return false;
     const samples = new Map<number, { kind: ShellKind; total: number; count: number }>();
     for (const element of root.querySelectorAll<HTMLElement>(
       '[data-kind="codeLine"], tbody > [data-kind="row"]',
     )) {
       const rect = element.getBoundingClientRect();
-      if (rect.bottom <= viewport.top || rect.top >= viewport.bottom || rect.height <= 0) continue;
+      if (
+        rect.bottom <= viewport.top ||
+        rect.top >= viewport.bottom ||
+        rect.right <= viewport.left ||
+        rect.left >= viewport.right ||
+        rect.height <= 0
+      )
+        continue;
       const shell = element.closest<HTMLElement>('[data-kind="code"], [data-kind="table"]');
       if (!shell) continue;
       const kind = shell.dataset.kind as ShellKind;
@@ -155,10 +164,11 @@ export class MarkdownWindowGeometry {
     return changed;
   }
 
-  capture(owner: HTMLElement): MarkdownWindowAnchor | null {
-    if (!this.matches(owner)) return null;
-    const viewport = owner.getBoundingClientRect();
-    for (const element of owner.querySelectorAll<HTMLElement>("[data-piece]")) {
+  capture(root: HTMLElement, scrollport: HTMLElement = root): MarkdownWindowAnchor | null {
+    if (!this.matches(root)) return null;
+    const viewport = this.visibleBounds(root, scrollport);
+    if (!viewport) return null;
+    for (const element of root.querySelectorAll<HTMLElement>("[data-piece]")) {
       const rect = this.textRect(element);
       if (!rect || rect.top < viewport.top || rect.top >= viewport.bottom) continue;
       if (rect.right <= viewport.left || rect.left >= viewport.right) continue;
@@ -173,10 +183,16 @@ export class MarkdownWindowGeometry {
     return null;
   }
 
-  restore(owner: HTMLElement, anchor: MarkdownWindowAnchor | null): boolean {
-    if (!anchor || anchor.generation !== this.generation || !this.matches(owner)) return false;
+  restore(
+    root: HTMLElement,
+    anchor: MarkdownWindowAnchor | null,
+    scrollport: HTMLElement = root,
+  ): boolean {
+    if (!anchor || anchor.generation !== this.generation || !this.matches(root)) return false;
+    const viewport = this.visibleBounds(root, scrollport);
+    if (!viewport) return false;
     // No selector interpolation: even caller-supplied anchor IDs remain inert.
-    const element = [...owner.querySelectorAll<HTMLElement>("[data-piece]")].find(
+    const element = [...root.querySelectorAll<HTMLElement>("[data-piece]")].find(
       (piece) =>
         piece.dataset.piece === anchor.piece &&
         piece.dataset.sourceStart === anchor.start &&
@@ -185,13 +201,30 @@ export class MarkdownWindowGeometry {
     if (!element) return false;
     const rect = this.textRect(element);
     if (!rect) return false;
-    const delta = rect.top - owner.getBoundingClientRect().top - anchor.offset;
-    owner.scrollTop += delta;
+    const delta = rect.top - viewport.top - anchor.offset;
+    scrollport.scrollTop += delta;
     const restored = this.textRect(element);
+    const restoredViewport = this.visibleBounds(root, scrollport);
     return (
       restored !== null &&
-      Math.abs(restored.top - owner.getBoundingClientRect().top - anchor.offset) <= 1
+      restoredViewport !== null &&
+      Math.abs(restored.top - restoredViewport.top - anchor.offset) <= 1
     );
+  }
+
+  private visibleBounds(
+    root: HTMLElement,
+    scrollport: HTMLElement,
+  ): { top: number; right: number; bottom: number; left: number } | null {
+    const rootBounds = root.getBoundingClientRect();
+    const portBounds = scrollport.getBoundingClientRect();
+    const bounds = {
+      top: Math.max(rootBounds.top, portBounds.top),
+      right: Math.min(rootBounds.right, portBounds.right),
+      bottom: Math.min(rootBounds.bottom, portBounds.bottom),
+      left: Math.max(rootBounds.left, portBounds.left),
+    };
+    return bounds.bottom > bounds.top && bounds.right > bounds.left ? bounds : null;
   }
 
   private matches(root: HTMLElement): boolean {

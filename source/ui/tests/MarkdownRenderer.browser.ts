@@ -494,6 +494,7 @@ async function exerciseLongWindow(
     const state = await page.evaluate((kind) => {
       const snapshot = window.markdownRendererHarness.snapshot;
       const root = document.querySelector<HTMLElement>(".markdown-renderer")!;
+      const scrollport = document.querySelector<HTMLElement>("#transcript-scrollport")!;
       const gaps = [...root.querySelectorAll<HTMLElement>("[data-markdown-gap]")];
       const code = kind === "long-code";
       const gapsValid = gaps.every((gap) => {
@@ -543,6 +544,14 @@ async function exerciseLongWindow(
         ),
         documentWidth: document.documentElement.scrollWidth,
         viewportWidth: innerWidth,
+        rootScrollTop: root.scrollTop,
+        scrollportScrollTop: scrollport.scrollTop,
+        scrollportScrollHeight: scrollport.scrollHeight,
+        scrollportClientHeight: scrollport.clientHeight,
+        neighbors: [...scrollport.querySelectorAll<HTMLElement>(".neighbor-content")].map(
+          (neighbor) => neighbor.textContent,
+        ),
+        selectionPins: window.markdownRendererHarness.readSelectionPins(),
       };
     }, mode);
     const activeUnits = Math.ceil((state.next - state.from) / unit);
@@ -567,6 +576,9 @@ async function exerciseLongWindow(
     return state;
   };
   const initial = await inspect();
+  assert.equal(initial.rootScrollTop, 0, "Markdown renderer root is not a scrollport");
+  assert.ok(initial.scrollportScrollHeight > initial.scrollportClientHeight);
+  assert.deepEqual(initial.neighbors, ["Earlier transcript content", "Later transcript content"]);
   assert.ok(initial.gaps > 0, "Long content exposes native gap placeholders");
   assert.ok(
     mode === "long-code" ? initial.lines >= 24 : initial.rows >= 24,
@@ -603,6 +615,11 @@ async function exerciseLongWindow(
     const anchor = page.locator(`[data-piece="${anchorId}"]`);
     await anchor.scrollIntoViewIfNeeded();
     const top = (await anchor.boundingBox())!.y;
+    if (directions.forward === 0 && directions.backward === 0)
+      assert.ok(
+        await page.locator("#transcript-scrollport").evaluate((el) => el.scrollTop > 0),
+        "The shared transcript scrollport moves to the anchor",
+      );
     await page.evaluate((value) => window.markdownRendererHarness.moveWindow(value), direction);
     const after = await anchor.boundingBox();
     assert.ok(after, `${mode} anchor ${anchorId} was evicted`);
@@ -611,6 +628,11 @@ async function exerciseLongWindow(
     // Layout and scrollTop use different subpixel rounding; one CSS pixel is ample.
     assert.ok(error <= 1, `${mode} anchor moved ${error}px`);
     const state = await inspect();
+    assert.equal(state.rootScrollTop, 0, "Geometry never scrolls the Markdown renderer root");
+    assert.ok(
+      state.selectionPins.some(({ from, next }) => from <= pinId && next > pinId),
+      "The native selection remains pinned through windowing",
+    );
     if (state.from !== before.from || state.next !== before.next) directions[direction]++;
     const overlap = Math.min(before.next, state.next) - Math.max(before.from, state.from);
     assert.ok(overlap >= 20 * unit, `${mode} window overlap was ${overlap}`);
@@ -676,7 +698,10 @@ async function exerciseLongWindow(
   const resizeError = Math.abs((await resizeAnchor.boundingBox())!.y - resizeTop);
   anchorErrors.push(resizeError);
   assert.ok(resizeError <= 1, `${mode} resize anchor moved`);
-  stableWidths = (await inspect()).widths;
+  const afterResize = await inspect();
+  assert.equal(afterResize.rootScrollTop, 0, "Resize does not scroll the Markdown renderer root");
+  assert.ok(afterResize.selectionPins.some(({ from, next }) => from <= pinId && next > pinId));
+  stableWidths = afterResize.widths;
   const widthScreenshot = join(evidenceDirectory, `${mode}-width-640.png`);
   await page.screenshot({ path: widthScreenshot, fullPage: true });
   let longTasks: number[] = [];

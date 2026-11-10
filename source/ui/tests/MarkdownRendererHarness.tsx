@@ -244,13 +244,15 @@ const assembler = new MarkdownWindowAssembler(
   source.manifest,
   mode === "detached" ? detachedFrom : 0,
 );
-const root = document.querySelector("#markdown-renderer")!;
+const root = document.querySelector<HTMLElement>("#markdown-renderer")!;
 const longWindow = mode === "long-code" || mode === "long-table";
-root.toggleAttribute("data-windowed", longWindow);
 const geometry = longWindow ? new MarkdownWindowGeometry() : null;
 const geometryProfile = mode ?? "default";
 function owner() {
   return root.querySelector<HTMLElement>(".markdown-renderer")!;
+}
+function scrollport() {
+  return document.querySelector<HTMLElement>("#transcript-scrollport")!;
 }
 function paint() {
   render(<MarkdownRenderer snapshot={assembler.snapshot} geometry={geometry ?? undefined} />, root);
@@ -258,12 +260,18 @@ function paint() {
 function paintMeasured(anchor: MarkdownWindowAnchor | null) {
   paint();
   if (!geometry) return;
-  if (geometry.measure(owner())) paint();
-  geometry.restore(owner(), anchor);
+  if (geometry.measure(owner(), scrollport())) paint();
+  geometry.restore(owner(), anchor, scrollport());
 }
 await assembler.append(new AbortController().signal);
-if (geometry) geometry.configure(assembler.snapshot.generation, root.clientWidth, geometryProfile);
-paintMeasured(null);
+paint();
+if (geometry)
+  geometry.configure(
+    assembler.snapshot.generation,
+    owner().getBoundingClientRect().width,
+    geometryProfile,
+  );
+if (geometry?.measure(owner(), scrollport())) paint();
 let selectionChanges = 0;
 const rendererRoot = root.querySelector<HTMLElement>(".markdown-renderer")!;
 let selectionPins: MarkdownSelectionPins | null = null;
@@ -279,7 +287,7 @@ if (mode === "selection" || longWindow)
 let pendingGeometryAnchor: MarkdownWindowAnchor | null = null;
 async function moveWindow(direction: "forward" | "backward") {
   if (!geometry) throw new Error("A long-window mode is required.");
-  const anchor = geometry.capture(owner());
+  const anchor = geometry.capture(owner(), scrollport());
   if (direction === "forward") await assembler.append(new AbortController().signal);
   else await assembler.prepend(new AbortController().signal);
   const snapshot = assembler.snapshot;
@@ -318,13 +326,17 @@ const harness = {
   moveWindow,
   captureAnchor() {
     if (!geometry) throw new Error("A long-window mode is required.");
-    pendingGeometryAnchor = geometry.capture(owner());
+    pendingGeometryAnchor = geometry.capture(owner(), scrollport());
   },
   reconfigureGeometry() {
     if (!geometry) throw new Error("A long-window mode is required.");
-    geometry.configure(assembler.snapshot.generation, root.clientWidth, geometryProfile);
-    if (geometry.measure(owner())) paint();
-    geometry.restore(owner(), pendingGeometryAnchor);
+    geometry.configure(
+      assembler.snapshot.generation,
+      owner().getBoundingClientRect().width,
+      geometryProfile,
+    );
+    if (geometry.measure(owner(), scrollport())) paint();
+    geometry.restore(owner(), pendingGeometryAnchor, scrollport());
     pendingGeometryAnchor = null;
   },
   links,

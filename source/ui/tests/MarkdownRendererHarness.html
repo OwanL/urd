@@ -21,15 +21,29 @@
         margin: auto;
         min-width: 0;
       }
-      [data-windowed] > .markdown-renderer {
+      #transcript-scrollport {
         height: 320px;
         overflow: auto;
         overflow-anchor: none;
       }
+      .neighbor-content {
+        box-sizing: border-box;
+        min-height: 120px;
+        padding: 16px;
+      }
+      .neighbor-content[data-neighbor="after"] {
+        min-height: 180px;
+      }
     </style>
   </head>
   <body>
-    <main id="markdown-renderer"></main>
+    <main>
+      <div id="transcript-scrollport" role="region" aria-label="Transcript">
+        <div class="neighbor-content" data-neighbor="before">Earlier transcript content</div>
+        <div id="markdown-renderer"></div>
+        <div class="neighbor-content" data-neighbor="after">Later transcript content</div>
+      </div>
+    </main>
     <script type="module" src="/tests/MarkdownRendererHarness.tsx"></script>
   </body>
 </html>

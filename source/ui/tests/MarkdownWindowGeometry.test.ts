@@ -72,11 +72,11 @@ void test("measurements replace estimates and fence generation, width and layout
   const shell = { dataset: { context: "1", kind: "code" } };
   const line = {
     closest: () => shell,
-    getBoundingClientRect: () => ({ top: 0, bottom: height, height }),
+    getBoundingClientRect: () => ({ top: 0, right: 800, bottom: height, left: 0, height }),
   };
   const root = {
     dataset: { markdownGeneration: "g" },
-    getBoundingClientRect: () => ({ top: 0, bottom: 100, width: 800 }),
+    getBoundingClientRect: () => ({ top: 0, right: 800, bottom: 100, left: 0, width: 800 }),
     querySelectorAll: (selector: string) => (selector.includes("codeLine") ? [line] : [shell]),
   } as unknown as HTMLElement;
   geometry.configure("g", 800, "a");
@@ -95,4 +95,61 @@ void test("measurements replace estimates and fence generation, width and layout
     assert.equal(geometry.gapHeight("code", 1, 0, 3), 72);
     assert.equal(geometry.measure(root), accepted);
   }
+});
+
+void test("shared scrollport clips geometry and restores without scrolling the renderer root", () => {
+  const geometry = new MarkdownWindowGeometry();
+  const shell = { dataset: { context: "1", kind: "code" } };
+  const visibleLine = {
+    closest: () => shell,
+    getBoundingClientRect: () => ({ top: 90, right: 800, bottom: 110, left: 0, height: 20 }),
+  };
+  const clippedLine = {
+    closest: () => shell,
+    getBoundingClientRect: () => ({ top: 20, right: 800, bottom: 40, left: 0, height: 20 }),
+  };
+  let textTop = 120;
+  const piece = {
+    dataset: { piece: "7", sourceStart: "14", sourceEnd: "21" },
+    textContent: "anchor",
+    ownerDocument: {
+      createRange: () => ({
+        selectNodeContents: () => undefined,
+        getClientRects: () => {
+          const top = textTop - scrollport.scrollTop;
+          return [{ top, right: 200, bottom: top + 10, left: 100 }];
+        },
+      }),
+    },
+  };
+  const root = {
+    dataset: { markdownGeneration: "g" },
+    scrollTop: 0,
+    getBoundingClientRect: () => ({ top: 50, right: 900, bottom: 900, left: 100, width: 800 }),
+    querySelectorAll: (selector: string) => {
+      if (selector.includes("codeLine")) return [visibleLine, clippedLine];
+      if (selector.includes('[data-kind="code"]')) return [shell];
+      return [piece];
+    },
+  } as unknown as HTMLElement;
+  const scrollport = {
+    scrollTop: 0,
+    getBoundingClientRect: () => ({ top: 100, right: 920, bottom: 400, left: 80, width: 840 }),
+  } as unknown as HTMLElement;
+  geometry.configure("g", 800, "default");
+  assert.equal(geometry.measure(root, scrollport), true);
+  assert.equal(geometry.gapHeight("code", 1, 0, 2), 40);
+
+  const anchor = geometry.capture(root, scrollport);
+  assert.deepEqual(anchor, {
+    generation: "g",
+    piece: "7",
+    start: "14",
+    end: "21",
+    offset: 20,
+  });
+  textTop = 190;
+  assert.equal(geometry.restore(root, anchor, scrollport), true);
+  assert.equal(scrollport.scrollTop, 70);
+  assert.equal(root.scrollTop, 0);
 });

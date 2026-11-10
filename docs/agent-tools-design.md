@@ -46,10 +46,13 @@ Related: [execution](execution-design.md), [sessions](session-design.md), [disco
 10. **Stop** cancels the current run's work including its pending background calls; it does not
     kill processes deliberately left running by earlier bash calls.
 
+11. **Tool behavior details** (output truncation and spill files, `read` paging and images,
+    `write` folder creation, `edit` exact-match rules, timeouts) copy Pi as-is.
+12. **Crash.** A call interrupted by an Urd crash, background or not, is reported to the model
+    as interrupted and possibly partly applied. It is never re-run.
+
 ## Open
 
-- Output limits returned to the model, `read` paging and images, `edit` semantics, timeouts.
-- Calls interrupted by a crash (reported, never re-run) and their presentation.
 - Model-family metadata location and the initial families.
 - Class structure and contracts: tool, surface, background-call registry, process ownership.
 - Transcript presentation of tool rows and pending background calls.

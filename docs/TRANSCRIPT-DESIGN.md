@@ -332,6 +332,12 @@ Clipboard operations themselves may need transient full payload memory.
 
 ### Markdown and large payloads
 
+**Table dialect decision:** use standard GFM table semantics. Within a table cell,
+unescaped pipes inside code spans still delimit cells; escaped pipes remain cell
+content. Markdig's permissive pipe-table behavior is not the selected dialect. This
+resolves the dialect choice only: it does not qualify that behavior in a production
+parser or select a parser/package.
+
 Transport pages are not independent Markdown documents. Fences, lists, tables and
 reference definitions can cross boundaries; later content may change earlier
 interpretation. Investigate parsing correctness, work scheduling and retained
@@ -462,7 +468,8 @@ released Markdig 1.6.0, as recorded below, not an unpinned main build.
 - [Custom renderers](https://xoofx.github.io/markdig/docs/advanced/renderers/) and
   parser extensions support non-HTML output and future math handling. Check
   [table options](https://xoofx.github.io/markdig/docs/extensions/tables/) explicitly:
-  permissive pipe tables and strict GFM are not interchangeable dialect choices.
+  the probe's permissive pipe-table behavior differs from the selected standard GFM
+  dialect and is not itself the chosen behavior.
 
 Implication: this candidate supports the chosen ownership split structurally, but
 whole-message parse cost and streaming reuse remain the qualification gate. Do not
@@ -567,9 +574,10 @@ source, not by asking the owner. Update this document immediately after decision
    reconnect/current provisional state from committed history and terminal facts.
 5. **Large-item correctness — current engineering branch:** optional math/diagram
    compatibility now and implementation later is approved; no general plugin
-   framework. Determine Markdown semantics, code/table virtualization, streaming
-   parse strategy and memory ownership before choosing dependencies. In particular,
-   arbitrary transport pages cannot be parsed as independent Markdown documents.
+   framework. Use the recorded standard GFM table dialect; determine remaining
+   Markdown semantics, code/table virtualization, streaming parse strategy and
+   memory ownership before choosing dependencies. In particular, arbitrary transport
+   pages cannot be parsed as independent Markdown documents.
    Owner approved backend reusable semantic structure with browser layout/rendering.
    Next check existing parser capabilities against the split, especially streaming
    reuse and sub-block ranges, before selecting a package or projection format.
@@ -600,8 +608,8 @@ message-rank navigation distinct from stage 2's estimated rendered geometry.
 These are bounded delivery slices, not authorization to implement the entire design.
 Before the first source edits, settle its concrete read contract and ownership,
 coordinate active Workspace/CSS/storage work, and choose only the dependencies that
-slice requires. Markdig remains a candidate; the parser probe alone does not select
-its dialect, projection format or a browser virtualizer.
+slice requires. Markdig remains a candidate; the parser probe does not select a
+production parser, projection format or a browser virtualizer.
 
 1. **History, live-update and placement foundation.** Kind-tagged entry index
    (user, text run, tool) in observed order, with entry times, tool start/end and

@@ -195,10 +195,16 @@ clearing and bulk browser DOM release, but not baseline memory recovery or a mem
 ceiling. In-flight synchronous parsing was not cancelled by replacing stale queued
 work.
 
-Remaining gates include semantic/dialect and unsafe-markup fallback policy; broader
-constructs and source/revision/ancestor-aware indexed slices; scheduled parse through
-actual visibility under execution-write contention and memory pressure; stateful,
-off-thread highlighting; huge inline/table-cell cases; cache eviction during
-selection; browser baseline recovery; and composed Stage 2 targets. No live provider,
+The table dialect decision is now standard GFM: unescaped pipes inside table code
+spans delimit cells, while escaped pipes remain content. The permissive Markdig
+behavior measured by this probe is not the selected dialect, and this GFM behavior
+has not been implemented or qualified in a production parser. The unsafe-link/raw-HTML
+handling and fallback policy remains open, as does list-selection fidelity.
+
+Remaining gates include broader constructs and source/revision/ancestor-aware indexed
+slices; scheduled parse through actual visibility under execution-write contention
+and memory pressure; stateful, off-thread highlighting; huge inline/table-cell cases;
+cache eviction during selection; browser baseline recovery; and composed Stage 2
+targets. No live provider,
 production integration, virtualized UI, actual browser paint timing or production
 package evaluation was performed. Raw report and full fixture: `%TEMP%/urd-stage2-decisions-20261110-4f84ef2a/REPORT.md` and neighboring records.

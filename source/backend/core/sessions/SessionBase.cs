@@ -1,14 +1,15 @@
 using System.Collections.Concurrent;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.AI;
+using Urd.Core.Display;
 using Urd.Core.Execution;
 using Urd.Core.Storage;
 using Urd.Core.Providers;
 
 namespace Urd.Core.Sessions;
 
-// Owns one session's state. Every read and write goes through this class's lock;
-// LLM work and stop callbacks always run outside it.
+// Owns one session's state. State reads and writes go through this class's lock;
+// fixed-extent source assembly, LLM work and stop callbacks run outside it.
 public abstract class SessionBase {
   private readonly UrdStore store;
   private readonly Func<ProviderConnection, IChatClient> createChatClient;
@@ -78,6 +79,20 @@ public abstract class SessionBase {
       MessageContentCursor cursor, CancellationToken cancellation = default) {
     using var held = await gate.AcquireAsync(cancellation);
     return store.Content.Read(Id, cursor);
+  }
+
+  internal async Task<MessageDisplaySource> ReadMessageDisplaySourceAsync(
+      MessageRef message, CancellationToken cancellation = default) {
+    MessageContentExtent extent;
+    using (await gate.AcquireAsync(cancellation))
+      extent = store.Content.CaptureClosedSourceExtent(Id, message);
+
+    MessageDisplaySource source = MessageDisplaySourceReader.Read(store.Content, extent, cancellation);
+
+    using (await gate.AcquireAsync(cancellation)) {
+      store.Content.ValidateSourceExtent(extent);
+      return source;
+    }
   }
 
   public async Task<TranscriptHistoryPage> ReadHistoryAsync(

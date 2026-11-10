@@ -21,6 +21,55 @@ internal sealed class MessageContentReader {
     });
   }
 
+  // Called under the session gate. Resolve only fixed metadata, never source bytes.
+  internal MessageContentExtent CaptureClosedSourceExtent(Guid sessionId, MessageRef message) {
+    var cursor = new MessageContentCursor(message, 0, 0);
+    ValidateCursorAndLimit(sessionId, cursor, int.MaxValue);
+    return database.Read(transaction => {
+      CheckHistoryRevision(transaction, sessionId, message.HistoryRevision);
+      MessageMetadata metadata = ReadMetadata(transaction, sessionId, message);
+      if (!metadata.IsClosed)
+        throw new InvalidOperationException("Display source requires closed message content.");
+
+      return new MessageContentExtent(sessionId, NormalizeCursor(cursor, metadata.FirstChunkIndex),
+          new(message, metadata.EndChunkIndex, 0), metadata.IsClosed, metadata.FinalOutputCommitted,
+          metadata.SubmissionId, metadata.RequestId);
+    });
+  }
+
+  // The captured end, not a fresh request tail, bounds every read. Only a bounded
+  // BLOB prefix is copied under the database lock; decoding happens in the caller.
+  internal MessageContentSegment ReadSourceSegment(MessageContentExtent extent, MessageContentCursor cursor) {
+    ValidateCursorAndLimit(extent.SessionId, cursor, int.MaxValue);
+    if (cursor.Message != extent.From.Message)
+      throw new ArgumentException("The cursor does not belong to the captured message.", nameof(cursor));
+    ValidateCommittedTail(cursor, extent.From.SegmentIndex, extent.AvailableThrough.SegmentIndex);
+    if (cursor.SegmentIndex == extent.AvailableThrough.SegmentIndex)
+      throw new ArgumentException("The cursor is at the captured message end.", nameof(cursor));
+
+    return database.Read(transaction => {
+      var metadata = new MessageMetadata(extent.SubmissionId, extent.RequestId, extent.From.SegmentIndex,
+          extent.AvailableThrough.SegmentIndex, extent.IsClosed, extent.FinalOutputCommitted);
+      var segment = ReadSegment(transaction, extent.SessionId, cursor, metadata,
+          cursor.SegmentIndex, cursor.Utf8Offset, StorageText.MaximumBytes + 3);
+      return new MessageContentSegment(segment.ByteLength, segment.Prefix);
+    });
+  }
+
+  // Called under the session gate before publishing the assembled source. Later
+  // appends may extend the request, but cannot change the captured identity/bounds.
+  internal void ValidateSourceExtent(MessageContentExtent extent) {
+    database.Read(transaction => {
+      CheckHistoryRevision(transaction, extent.SessionId, extent.From.Message.HistoryRevision);
+      MessageMetadata metadata = ReadMetadata(transaction, extent.SessionId, extent.From.Message);
+      if (metadata.SubmissionId != extent.SubmissionId || metadata.RequestId != extent.RequestId
+          || metadata.FirstChunkIndex != extent.From.SegmentIndex
+          || metadata.EndChunkIndex < extent.AvailableThrough.SegmentIndex || !metadata.IsClosed)
+        throw new InvalidOperationException("The captured message source is no longer available.");
+      return true;
+    });
+  }
+
   // SnapshotReader already selected messages from the current revision in this
   // transaction. Do not query that same revision again for every preview.
   internal MessageContentPage ReadPreview(SqliteTransaction transaction, Guid sessionId, MessageRef message,

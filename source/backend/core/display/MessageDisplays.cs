@@ -2,18 +2,18 @@ using Urd.Core.Sessions;
 
 namespace Urd.Core.Display;
 
-// One instance is intended to be shared by the future session owner. This service
-// is deliberately unactivated: no manager, route or session creates it.
-// Only lightweight captures are queued. Synchronous Markdig work runs on this
-// dedicated below-normal thread, never under a session/database gate.
+// Unactivated shared service: captures are queued, detached derivation runs on one
+// below-normal thread, never under a session/database gate. Publication and pinning
+// share this gate with cancellation, invalidation, eviction and lease release.
 internal sealed class MessageDisplays : IAsyncDisposable {
   readonly object gate = new();
   readonly MessageDisplayCacheLimits limits;
   readonly MessageDisplayCache cache;
-  readonly Func<MessageDisplaySource, MessageDisplayIndex> build;
+  Func<MessageDisplaySource, MessageDisplayIndex>? build;
   readonly LinkedList<Work> pending = [];
   readonly CancellationTokenSource shutdown = new();
   readonly TaskCompletionSource stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
+  Task shutdownCallbacks = Task.CompletedTask;
   Work? active;
   bool disposed;
 
@@ -27,15 +27,14 @@ internal sealed class MessageDisplays : IAsyncDisposable {
     worker.Start();
   }
 
-  // The caller supplies the exact extent and completion facts from bounded metadata.
-  // Capture/validation is deferred to the worker, including on a cache miss only.
-  internal Task<MessageDisplayReady> RequestAsync(MessageDisplayKey key, SessionBase session,
+  // The caller supplies exact committed extents; capture happens only on a miss.
+  internal Task<MessageDisplayLease> RequestAsync(MessageDisplayKey key, SessionBase session,
       CancellationToken cancellation = default) {
     if (session.Id != key.SessionId) throw new ArgumentException("The session does not match the display key.", nameof(session));
     return RequestAsync(key, token => session.ReadMessageDisplaySourceAsync(key, token), cancellation);
   }
 
-  internal Task<MessageDisplayReady> RequestAsync(MessageDisplayKey key,
+  internal Task<MessageDisplayLease> RequestAsync(MessageDisplayKey key,
       Func<CancellationToken, Task<MessageDisplaySource>> capture, CancellationToken cancellation = default) {
     ArgumentNullException.ThrowIfNull(key);
     ArgumentNullException.ThrowIfNull(capture);
@@ -45,80 +44,78 @@ internal sealed class MessageDisplays : IAsyncDisposable {
       throw new ArgumentException("The display key has an unsupported pipeline or invalid extent.", nameof(key));
     lock (gate) {
       ThrowIfDisposed();
-      if (cache.Find(key) is { } ready) return Task.FromResult(ready);
-      if (active is { Invalidated: false } && !active.Completion.Task.IsCompleted && active.Key == key)
+      if (cache.Find(key) is { } entry) {
+        cache.Reserve(entry);
+        return Task.FromResult(Lease(entry));
+      }
+      if (active is { Invalidated: false, Accepting: true } && active.Key == key)
         return Observe(active, cancellation);
       var existing = pending.First;
       while (existing is not null && !Compatible(existing.Value.Key, key)) existing = existing.Next;
       if (existing?.Value.Key == key) return Observe(existing.Value, cancellation);
       if (existing is not null) {
         if (AtLeastAsRecent(existing.Value.Key, key))
-          return Task.FromException<MessageDisplayReady>(new DisplaySupersededException());
-        // Preserve queue position: repeated extent updates cannot starve other keys.
+          return Task.FromException<MessageDisplayLease>(new DisplaySupersededException());
+        // Keep queue position so repeated updates cannot starve other keys.
         var previous = existing.Value;
-        previous.Capture = null;
-        previous.Completion.TrySetException(new DisplaySupersededException());
         var replacement = new Work(key, capture);
         existing.Value = replacement;
-        return Observe(replacement, cancellation);
+        Fail(previous, new DisplaySupersededException());
+        try {
+          return Observe(replacement, cancellation);
+        } catch {
+          pending.Remove(existing);
+          throw;
+        }
       }
       if (pending.Count >= limits.PendingKeys) throw new DisplayQueueFullException();
       var work = new Work(key, capture);
-      pending.AddLast(work);
+      var result = Observe(work, cancellation);
+      if (work.Interests.Count > 0) pending.AddLast(work);
       Monitor.Pulse(gate);
-      return Observe(work, cancellation);
+      return result;
     }
   }
 
-  internal DisplayPage Read(MessageDisplayReady ready, DisplayCursor cursor, DisplayPageLimits? limits = null) {
-    lock (gate) {
-      ThrowIfDisposed();
-      return MessageDisplayReader.Read(cache.Get(ready), cursor, limits);
-    }
+  // Valid leases remain readable through invalidation and shutdown. Shutdown drains
+  // work, not consumer-owned views; their accounting ends only on explicit release.
+  internal DisplayPage Read(MessageDisplayLease lease, DisplayCursor cursor, DisplayPageLimits? limits = null) {
+    lock (gate) return MessageDisplayReader.Read(cache.Get(lease.Get(this)), cursor, limits);
   }
 
-  internal DisplayContextPage ReadContext(MessageDisplayReady ready, int context, DisplayCursor cursor,
+  internal DisplayContextPage ReadContext(MessageDisplayLease lease, int context, DisplayCursor cursor,
       DisplayPageLimits? limits = null) {
+    lock (gate) return MessageDisplayReader.ReadContext(cache.Get(lease.Get(this)), context, cursor, limits);
+  }
+
+  internal DisplayCursor Locate(MessageDisplayLease lease, int sourceUtf8Offset) {
+    lock (gate) return cache.Get(lease.Get(this)).Locate(sourceUtf8Offset);
+  }
+
+  internal MessageContentCursor SourceCursor(MessageDisplayLease lease, int sourceUtf8Offset) {
+    lock (gate) return cache.SourceCursor(lease.Get(this), sourceUtf8Offset);
+  }
+
+  internal void Release(MessageDisplayLease lease) {
     lock (gate) {
-      ThrowIfDisposed();
-      return MessageDisplayReader.ReadContext(cache.Get(ready), context, cursor, limits);
+      if (lease.Entry is not { } entry) return;
+      lease.Get(this);
+      lease.Clear();
+      cache.Release(entry);
     }
   }
 
-  internal DisplayCursor Locate(MessageDisplayReady ready, int sourceUtf8Offset) {
-    lock (gate) {
-      ThrowIfDisposed();
-      return cache.Get(ready).Locate(sourceUtf8Offset);
-    }
-  }
-
-  internal MessageContentCursor SourceCursor(MessageDisplayReady ready, int sourceUtf8Offset) {
-    lock (gate) {
-      ThrowIfDisposed();
-      return cache.SourceCursor(ready, sourceUtf8Offset);
-    }
-  }
-
-  // Future history/deletion owner must call this before serving a changed session.
-  // In-flight synchronous work finishes, but cannot publish into the new generation.
+  // The future history/deletion owner must fence changed sessions before serving.
   internal void Invalidate(Guid sessionId) {
     lock (gate) {
       ThrowIfDisposed();
       cache.Invalidate(sessionId);
       if (active?.Key.SessionId == sessionId) {
         active.Invalidated = true;
-        active.Completion.TrySetException(new DisplayUnavailableException());
+        Fail(active, new DisplayUnavailableException());
       }
-      var node = pending.First;
-      while (node is not null) {
-        var next = node.Next;
-        if (node.Value.Key.SessionId == sessionId) {
-          pending.Remove(node);
-          node.Value.Capture = null;
-          node.Value.Completion.TrySetException(new DisplayUnavailableException());
-        }
-        node = next;
-      }
+      foreach (var work in pending.Where(work => work.Key.SessionId == sessionId).ToArray())
+        Fail(work, new DisplayUnavailableException());
     }
   }
 
@@ -127,51 +124,75 @@ internal sealed class MessageDisplays : IAsyncDisposable {
   }
 
   public ValueTask DisposeAsync() {
-    bool stop;
     lock (gate) {
-      stop = !disposed;
-      disposed = true;
-      if (stop) {
+      if (!disposed) {
+        disposed = true;
         cache.Clear();
-        foreach (var work in pending) {
-          work.Capture = null;
-          work.Completion.TrySetException(new ObjectDisposedException(nameof(MessageDisplays)));
-        }
-        pending.Clear();
-        active?.Completion.TrySetException(new ObjectDisposedException(nameof(MessageDisplays)));
+        foreach (var work in pending.ToArray()) Fail(work, new ObjectDisposedException(nameof(MessageDisplays)));
+        if (active is not null) Fail(active, new ObjectDisposedException(nameof(MessageDisplays)));
+        // Only the worker disposes this source, after synchronous work returns.
+        shutdownCallbacks = shutdown.CancelAsync();
         Monitor.Pulse(gate);
       }
     }
-    if (stop) shutdown.Cancel();
     return new(stopped.Task);
   }
 
-  async Task<MessageDisplayReady> Observe(Work work, CancellationToken cancellation) {
-    work.Interests++;
-    try {
-      return await work.Completion.Task.WaitAsync(cancellation).ConfigureAwait(false);
-    } finally {
-      lock (gate) {
-        work.Interests--;
-        if (work.Interests == 0 && !ReferenceEquals(active, work)) {
-          pending.Remove(work);
-          work.Capture = null;
-        }
-      }
+  Task<MessageDisplayLease> Observe(Work work, CancellationToken cancellation) {
+    cache.Reserve();
+    var interest = new Interest(work, cancellation);
+    work.Interests.Add(interest);
+    interest.Registration = cancellation.UnsafeRegister(_ => Cancel(interest), null);
+    if (interest.Completion.Task.IsCompleted) interest.Registration.Unregister();
+    return interest.Completion.Task;
+  }
+
+  void Cancel(Interest interest) {
+    lock (gate) {
+      if (!Detach(interest)) return;
+      cache.ReleaseReservation();
+      interest.Completion.TrySetCanceled(interest.Cancellation);
+    }
+  }
+
+  bool Detach(Interest interest) {
+    if (!interest.Work.Interests.Remove(interest)) return false;
+    interest.Registration.Unregister();
+    if (interest.Work.Interests.Count == 0 && !ReferenceEquals(active, interest.Work)) {
+      pending.Remove(interest.Work);
+      interest.Work.Capture = null;
+    }
+    return true;
+  }
+
+  void Fail(Work work, Exception error) {
+    work.Accepting = false;
+    foreach (var interest in work.Interests.ToArray()) {
+      Detach(interest);
+      cache.ReleaseReservation();
+      interest.Completion.TrySetException(error);
+    }
+  }
+
+  MessageDisplayLease Lease(MessageDisplayCache.Entry entry) {
+    entry.Pins++;
+    return new(this, entry);
+  }
+
+  Work? TakeNext() {
+    lock (gate) {
+      while (!disposed && pending.Count == 0) Monitor.Wait(gate);
+      // Shutdown must publish its cancellation task before the worker can exit.
+      if (disposed) return null;
+      active = pending.First!.Value;
+      pending.RemoveFirst();
+      return active;
     }
   }
 
   void Run() {
     try {
-      while (true) {
-        Work work;
-        lock (gate) {
-          while (!disposed && pending.Count == 0) Monitor.Wait(gate);
-          if (disposed) return;
-          work = pending.First!.Value;
-          pending.RemoveFirst();
-          active = work;
-        }
+      while (TakeNext() is { } work) {
         Process(work);
         lock (gate) {
           work.Capture = null;
@@ -179,7 +200,16 @@ internal sealed class MessageDisplays : IAsyncDisposable {
         }
       }
     } finally {
-      stopped.TrySetResult();
+      build = null;
+      Exception? failure = null;
+      try {
+        shutdownCallbacks.GetAwaiter().GetResult();
+      } catch (Exception error) {
+        failure = error;
+      }
+      shutdown.Dispose();
+      if (failure is null) stopped.TrySetResult();
+      else stopped.TrySetException(failure);
     }
   }
 
@@ -187,17 +217,23 @@ internal sealed class MessageDisplays : IAsyncDisposable {
     try {
       var source = work.Capture!(shutdown.Token).GetAwaiter().GetResult();
       if (!work.Key.Matches(source)) throw new DisplayUnavailableException();
-      var index = build(source); // Intentionally non-cancellable synchronous parsing.
+      var index = build!(source); // Synchronous parsing is deliberately non-cancellable.
       if (index.SourceUtf8Bytes != source.Utf8Bytes) throw new DisplayUnavailableException();
       lock (gate) {
         if (disposed || work.Invalidated) return;
-        // A newer pending extent never suppresses an already completed result.
-        var ready = cache.Add(work.Key, source, index);
-        work.Completion.TrySetResult(ready);
+        work.Accepting = false;
+        foreach (var interest in work.Interests.ToArray())
+          if (interest.Cancellation.IsCancellationRequested) Cancel(interest);
+        if (work.Interests.Count == 0) return;
+        var entry = cache.Add(work.Key, source, index);
+        foreach (var interest in work.Interests.ToArray()) {
+          var lease = Lease(entry); // Pin before completing any observer's task.
+          Detach(interest);
+          interest.Completion.TrySetResult(lease);
+        }
       }
     } catch (Exception error) {
-      // No negative retention: storage/parse failures are explicit and retryable.
-      work.Completion.TrySetException(error);
+      lock (gate) Fail(work, error);
     }
   }
 
@@ -215,8 +251,15 @@ internal sealed class MessageDisplays : IAsyncDisposable {
   sealed class Work(MessageDisplayKey key, Func<CancellationToken, Task<MessageDisplaySource>> capture) {
     internal MessageDisplayKey Key { get; } = key;
     internal Func<CancellationToken, Task<MessageDisplaySource>>? Capture { get; set; } = capture;
-    internal TaskCompletionSource<MessageDisplayReady> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    internal int Interests { get; set; }
+    internal List<Interest> Interests { get; } = [];
     internal bool Invalidated { get; set; }
+    internal bool Accepting { get; set; } = true;
+  }
+
+  sealed class Interest(Work work, CancellationToken cancellation) {
+    internal Work Work { get; } = work;
+    internal CancellationToken Cancellation { get; } = cancellation;
+    internal CancellationTokenRegistration Registration { get; set; }
+    internal TaskCompletionSource<MessageDisplayLease> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
   }
 }

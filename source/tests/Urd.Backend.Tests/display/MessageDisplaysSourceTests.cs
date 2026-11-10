@@ -18,7 +18,7 @@ public sealed class MessageDisplaysSourceTests {
     var session = await manager.GetPrimaryAsync(key.SessionId);
     await using var displays = CreateDisplays();
 
-    var ready = await displays.RequestAsync(key, session);
+    using var ready = await displays.RequestAsync(key, session);
     var page = displays.Read(ready, displays.Locate(ready, 0));
 
     Assert.Equal("café boldlate", string.Concat(page.Pieces.Select(piece => piece.Text)));
@@ -58,7 +58,7 @@ public sealed class MessageDisplaysSourceTests {
       Assert.Equal(1, extent.AvailableThrough.SegmentIndex);
       Assert.False(request.IsCompleted);
       release.Set();
-      await request;
+      using var ready = await request;
     } finally {
       release.Set();
       await displays.DisposeAsync();
@@ -66,7 +66,7 @@ public sealed class MessageDisplaysSourceTests {
   }
 
   static MessageDisplays CreateDisplays(Func<MessageDisplaySource, MessageDisplayIndex>? build = null) =>
-      new(new(64, 64 * 1024 * 1024, 32), build);
+      new(new(64, 64 * 1024 * 1024, 32, 64), build);
 
   static MessageDisplayKey Admit(UrdStore store, string text) {
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;

@@ -2,50 +2,65 @@ using Urd.Core.Sessions;
 
 namespace Urd.Core.Display;
 
-// Access is serialized by MessageDisplays. Entries retain only detached records,
-// owned strings and scalar source addresses, never captures, source text or ASTs.
+// Serialized by MessageDisplays. Detached generations stay accounted until both
+// cache ownership and every lease are gone; stale generations are never cache hits.
 internal sealed class MessageDisplayCache(MessageDisplayCacheLimits limits) {
+  // Conservative allowance for each lease or queued task/interest/registration.
+  internal const int LeaseBytes = 512;
   readonly Dictionary<MessageDisplayKey, LinkedListNode<Entry>> entries = [];
   readonly LinkedList<Entry> recent = [];
-  internal int Count => entries.Count;
+  int reservations;
+  internal int Count { get; private set; }
   internal long RetainedBytes { get; private set; }
 
-  internal MessageDisplayReady? Find(MessageDisplayKey key) {
+  internal void Reserve(Entry? protectedEntry = null) {
+    if (reservations >= limits.Leases) throw new DisplayCacheFullException();
+    MakeRoom(0, LeaseBytes, protectedEntry);
+    reservations++;
+    RetainedBytes += LeaseBytes;
+  }
+
+  internal void ReleaseReservation() {
+    reservations--;
+    RetainedBytes -= LeaseBytes;
+  }
+
+  internal Entry? Find(MessageDisplayKey key) {
     if (!entries.TryGetValue(key, out var node)) return null;
     Touch(node);
-    return node.Value.Ready;
+    return node.Value;
   }
 
-  internal MessageDisplayReady Add(MessageDisplayKey key, MessageDisplaySource source, MessageDisplayIndex index) {
-    // Include the key, handle, LRU/dictionary bookkeeping, source cursor records,
-    // segment array/references/records and pipeline string in addition to the index.
-    // This is explicit conservative accounting, not a claim about exact CLR memory.
+  internal Entry Add(MessageDisplayKey key, MessageDisplaySource source, MessageDisplayIndex index) {
+    // Conservative accounting includes identity, LRU/dictionary and source mapping;
+    // each independent lease/queued interest is accounted separately.
     long bytes = checked(index.AccountedBytes + 512 + 2L * key.Pipeline.Length + 24 + source.Segments.Count * 40L);
-    if (bytes > limits.RetainedBytes) throw new DisplayTooLargeException();
-    Remove(key);
-    while (entries.Count >= limits.Entries || RetainedBytes > limits.RetainedBytes - bytes)
-      Remove(recent.Last!.Value.Ready.Key);
-    var ready = new MessageDisplayReady(key, index.Generation, index.SourceUtf8Bytes);
-    var entry = new Entry(ready, index, source.Segments.ToArray(), bytes);
+    if (bytes > limits.RetainedBytes - LeaseBytes) throw new DisplayTooLargeException();
+    MakeRoom(1, bytes);
+    var entry = new Entry(key, index, source.Segments.ToArray(), bytes);
     entries.Add(key, recent.AddFirst(entry));
+    Count++;
     RetainedBytes += bytes;
-    return ready;
+    return entry;
   }
 
-  internal MessageDisplayIndex Get(MessageDisplayReady ready) {
-    var node = GetEntry(ready);
-    Touch(node);
-    return node.Value.Index;
+  internal void Release(Entry entry) {
+    entry.Pins--;
+    if (!entry.Cached && entry.Pins == 0) Forget(entry);
+    ReleaseReservation();
   }
 
-  internal MessageContentCursor SourceCursor(MessageDisplayReady ready, int utf8Offset) {
-    var node = GetEntry(ready);
-    var entry = node.Value;
-    if (utf8Offset < 0 || utf8Offset > entry.Index.SourceUtf8Bytes)
+  internal MessageDisplayIndex Get(Entry entry) {
+    if (entry.Cached) Touch(entries[entry.Key]);
+    return entry.Index;
+  }
+
+  internal MessageContentCursor SourceCursor(Entry entry, int utf8Offset) {
+    var index = Get(entry);
+    if (utf8Offset < 0 || utf8Offset > index.SourceUtf8Bytes)
       throw new ArgumentOutOfRangeException(nameof(utf8Offset));
-    Touch(node);
-    if (utf8Offset == entry.Index.SourceUtf8Bytes)
-      return new(ready.Key.Message, ready.Key.ThroughSegment, 0);
+    if (utf8Offset == index.SourceUtf8Bytes)
+      return new(entry.Key.Message, entry.Key.ThroughSegment, 0);
     int low = 0, high = entry.Segments.Length;
     while (low < high) {
       int middle = low + (high - low) / 2;
@@ -53,23 +68,34 @@ internal sealed class MessageDisplayCache(MessageDisplayCacheLimits limits) {
       else high = middle;
     }
     var segment = entry.Segments[low - 1];
-    return new(ready.Key.Message, segment.SegmentIndex, utf8Offset - segment.Utf8Start);
+    return new(entry.Key.Message, segment.SegmentIndex, utf8Offset - segment.Utf8Start);
   }
 
   internal void Invalidate(Guid sessionId) {
-    foreach (var key in entries.Keys.Where(key => key.SessionId == sessionId).ToArray()) Remove(key);
+    foreach (var node in entries.Values.Where(node => node.Value.Key.SessionId == sessionId).ToArray()) Remove(node);
   }
 
   internal void Clear() {
-    entries.Clear();
-    recent.Clear();
-    RetainedBytes = 0;
+    while (recent.Last is { } node) Remove(node);
   }
 
-  LinkedListNode<Entry> GetEntry(MessageDisplayReady ready) {
-    if (!entries.TryGetValue(ready.Key, out var node) || node.Value.Index.Generation != ready.Generation)
-      throw new DisplayUnavailableException();
-    return node;
+  void MakeRoom(int count, long bytes, Entry? protectedEntry = null) {
+    if (Count <= limits.Entries - count && RetainedBytes <= limits.RetainedBytes - bytes) return;
+    int removableCount = 0;
+    long removableBytes = 0;
+    foreach (var entry in recent.Where(entry => entry.Pins == 0 && entry != protectedEntry)) {
+      removableCount++;
+      removableBytes += entry.Bytes;
+    }
+    if (Count - removableCount > limits.Entries - count
+        || RetainedBytes - removableBytes > limits.RetainedBytes - bytes)
+      throw new DisplayCacheFullException();
+    var node = recent.Last;
+    while (Count > limits.Entries - count || RetainedBytes > limits.RetainedBytes - bytes) {
+      var previous = node!.Previous;
+      if (node.Value.Pins == 0 && node.Value != protectedEntry) Remove(node);
+      node = previous;
+    }
   }
 
   void Touch(LinkedListNode<Entry> node) {
@@ -77,11 +103,24 @@ internal sealed class MessageDisplayCache(MessageDisplayCacheLimits limits) {
     recent.AddFirst(node);
   }
 
-  void Remove(MessageDisplayKey key) {
-    if (!entries.Remove(key, out var node)) return;
+  void Remove(LinkedListNode<Entry> node) {
+    entries.Remove(node.Value.Key);
     recent.Remove(node);
-    RetainedBytes -= node.Value.Bytes;
+    node.Value.Cached = false;
+    if (node.Value.Pins == 0) Forget(node.Value);
   }
 
-  sealed record Entry(MessageDisplayReady Ready, MessageDisplayIndex Index, DisplaySourceSegment[] Segments, long Bytes);
+  void Forget(Entry entry) {
+    Count--;
+    RetainedBytes -= entry.Bytes;
+  }
+
+  internal sealed class Entry(MessageDisplayKey key, MessageDisplayIndex index, DisplaySourceSegment[] segments, long bytes) {
+    internal MessageDisplayKey Key { get; } = key;
+    internal MessageDisplayIndex Index { get; } = index;
+    internal DisplaySourceSegment[] Segments { get; } = segments;
+    internal long Bytes { get; } = bytes;
+    internal int Pins { get; set; }
+    internal bool Cached { get; set; } = true;
+  }
 }

@@ -18,16 +18,17 @@ internal sealed record MessageDisplayKey(
       && FinalOutputCommitted == source.FinalOutputCommitted && Pipeline == MessageDisplayIndex.PipelineVersion;
 }
 
-// Consumers receive a handle, not the index: eviction must invalidate old cursors.
-internal sealed record MessageDisplayReady(MessageDisplayKey Key, Guid Generation, int SourceUtf8Bytes);
-internal sealed record MessageDisplayCacheLimits(int Entries, long RetainedBytes, int PendingKeys) {
+// Limits include stale pinned generations and independent interests/leases.
+internal sealed record MessageDisplayCacheLimits(int Entries, long RetainedBytes, int PendingKeys, int Leases) {
   internal void Validate() {
     ArgumentOutOfRangeException.ThrowIfLessThan(Entries, 1);
     ArgumentOutOfRangeException.ThrowIfLessThan(RetainedBytes, 1);
     ArgumentOutOfRangeException.ThrowIfLessThan(PendingKeys, 1);
+    ArgumentOutOfRangeException.ThrowIfLessThan(Leases, 1);
   }
 }
 
+internal sealed class DisplayCacheFullException() : InvalidOperationException("The display cache is pinned or its lease limit is full. Release unused leases and retry; keep the previous formatted view.");
 internal sealed class DisplayQueueFullException() : InvalidOperationException("The display queue is full.");
 internal sealed class DisplaySupersededException() : InvalidOperationException("A newer pending display request replaced this extent.");
 internal sealed class DisplayUnavailableException() : InvalidOperationException("The display generation is no longer available. Rebuild from a source anchor.");

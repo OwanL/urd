@@ -1,7 +1,7 @@
 # Agent tools — design decisions
 
-**Status: in owner design review (started 2026-11-10).** Records agreed decisions as they are
-made. Class shapes and contracts are still to be proposed; no implementation is authorized yet.
+**Status: design approved by the owner 2026-11-10.** Records agreed decisions as they were
+made, and the approved class shapes. Implementation follows these shapes.
 Related: [execution](execution-design.md), [sessions](session-design.md), [discovery](discovery-design.md).
 
 ## Agreed

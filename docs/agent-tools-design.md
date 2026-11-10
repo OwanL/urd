@@ -48,7 +48,9 @@ Related: [execution](execution-design.md), [sessions](session-design.md), [disco
     kill processes deliberately left running by earlier bash calls.
 
 11. **Tool behavior details** (output truncation and spill files, `read` paging and images,
-    `write` folder creation, `edit` exact-match rules, timeouts) copy Pi as-is.
+    `write` folder creation, timeouts) copy Pi. Exception: `edit` uses exact matching only,
+    treating CRLF/LF as equal; no fuzzy fallback (Pi's normalizes whole lines and can change
+    text the model never targeted), and it never rewrites invalid UTF-8 silently.
 12. **Crash.** A call interrupted by an Urd crash, background or not, is reported to the model
     as interrupted and possibly partly applied. It is never re-run.
 13. **Tool shape (approved code).** One class per model-facing tool name; shared behavior lives
@@ -76,12 +78,17 @@ Related: [execution](execution-design.md), [sessions](session-design.md), [disco
     Completion wakes the agent and the chat returns to running.
 15. **Model family** is Urd-owned metadata on the model's saved settings: OpenAI, Anthropic,
     Google, Other.
+16. **Context overflow** is handled by automatic history compaction (summarizing older
+    conversation), which is distinct from tool-result pruning (see ARCHITECTURE.md). Compaction
+    is the next design topic after tools; tools are not ready for normal use without it.
+17. **Background on every tool** was re-examined after review and kept: every tool may run in
+    the background, including future tools.
 
 ## Open
 
-- Remaining class structure: catalog, parallel dispatch, file queue, background registry and
-  delivery, process ownership, the four core tools, storage, composition.
+- Remaining class structure: waiting/delivery/Stop, storage and crash reporting, composition.
 - Transcript presentation of tool rows and pending background calls.
+- Compaction design.
 
 ## Approved code shapes
 
@@ -120,6 +127,27 @@ internal sealed class FileMutationQueue {
 internal sealed class ReadTool(FileMutationQueue files) : AgentTool { ... }   // read(path, offset?, limit?)
 internal sealed class WriteTool(FileMutationQueue files) : AgentTool { ... }  // write(path, content)
 internal sealed class EditTool(FileMutationQueue files) : AgentTool { ... }   // edit(path, edits)
+```
+
+**Parallel dispatch** (existing `SessionExecution`): save the reply's calls, start all, save
+each result independently, return results in call order. A tool error is that call's result.
+The harness adds and strips the `background` field; only tools offered to this chat's model run.
+
+**Pending background calls.**
+
+```csharp
+internal sealed class PendingToolCalls {
+  public void Add(Guid executionId, Guid requestId, LlmToolCall call,
+    Task completion, CancellationTokenSource cancellation);
+  public IReadOnlyList<PendingToolCall> List();
+  public int RequestCancelAll(Guid callerRequestId, string callerCallId);
+  public void RequestCancelExecution(Guid executionId);
+  public Task JoinExecutionAsync(Guid executionId);
+}
+internal sealed record PendingToolCall(
+  Guid RequestId, string CallId, string Name, DateTimeOffset StartedAt, bool CancellationRequested);
+internal sealed class ListPendingCallsTool(PendingToolCalls pending) : AgentTool { ... }
+internal sealed class CancelPendingCallsTool(PendingToolCalls pending) : AgentTool { ... }
 ```
 
 **Bash and processes.** One Windows job object per chat; a nested job per call.

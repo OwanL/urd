@@ -370,3 +370,15 @@ The full report and raw records are temporary at
 `C:/Users/OwanLazic/AppData/Local/Temp/urd-markdown-composed-f16e8e19-07e7-4c1c-8728-add556b521c6/REPORT.md`
 (and neighboring files). This path is a local reproduction artifact, not durable
 evidence storage.
+
+## Real-parser two-lane follow-up — 2026-11-10
+
+The temporary report is `%TEMP%/urd-two-lane-9e4c421d-0fc8-4b4e-bf5b-1804de189961/REPORT.md` (with raw records and reproduction artifacts alongside it). The probe compiled an unchanged production snapshot at HEAD `acca084eb8899e2a4a5ab079798a78bfd91a6ab7`; all 79 copied production inputs matched HEAD blobs and before/after hashes. It used the real production scheduler, cache, Markdig parser/index builder and page reader, with a synthetic capture delegate.
+
+After 3 warmups, all 25 measured synthetic request-to-lease short requests completed below 100 ms: p50 **0.4479 ms**, p95 **0.7947 ms**, max **0.8279 ms**. Short own-parse p50 was **0.2341 ms**, max **0.5838 ms**. The large parse took about **1.22 s** (p50 1,221.0931 ms; max 1,338.8267 ms) and allocated about **323 MB cumulatively** (max 323,369,368 bytes). Runtime Markdig-allocation evidence verified each short arrival occurred while the large parse was active; arrivals were near parse start, not randomized across parse progress. One large and one small BelowNormal production scheduler thread handled the work, with no same-lane overlap. All **1,208 assertions** passed.
+
+The probe used a **384 MiB hard GC heap cap** and a sampled **500 MiB private-byte guard**; neither tripped. OS peak working set was **273,088,512 bytes**. The probe-only limits were Entries=1, RetainedBytes=64 MiB, PendingKeys=2, Leases=4 and SmallMessageUtf8Bytes=65,536; these are not production defaults. Accounting returned to zero after each iteration (entries, retained bytes, pending keys, external pins and interests), so large indices did not accumulate in retained cache ownership. This is not per-iteration accounting of all process memory.
+
+After release/drain/disposal, natural memory recovery had **not** occurred by 30 seconds: no later gen2 collection was observed, and one tracked index and one source weak reference were still alive at the final unforced-GC check. Zero cache accounting is not immediate CLR reclamation. This does not establish a leak or that all objects remain alive.
+
+This is synthetic request-to-lease evidence, **not DOM/E2E or commit-to-visible latency**. It is not a production SLA, confidence interval, randomized contention study, production-default recommendation, or proof that cache byte bounds cap transient/process memory. Temporary artifacts are not durable evidence storage.

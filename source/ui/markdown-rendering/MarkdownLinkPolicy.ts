@@ -1,6 +1,6 @@
 // Destinations are already decoded by the parser. Do not HTML-decode again.
 // Recheck at the DOM boundary even when the producer filtered destinations.
-export function safeDisplayLink(destination: string | undefined): string | undefined {
+export function safeMarkdownLink(destination: string | undefined): string | undefined {
   if (
     destination === undefined ||
     /[\s\u0000-\u001f\u007f-\u009f\\]/u.test(destination) ||

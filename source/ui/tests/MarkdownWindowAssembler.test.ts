@@ -1,19 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DisplayAssembler } from "../display/DisplayAssembler.ts";
-import { safeDisplayLink } from "../display/DisplayLink.ts";
+import { MarkdownWindowAssembler } from "../markdown-rendering/MarkdownWindowAssembler.ts";
+import { safeMarkdownLink } from "../markdown-rendering/MarkdownLinkPolicy.ts";
 import {
-  createDisplayContext,
-  createDisplayPiece,
-  createDisplayValue,
-  SyntheticDisplaySource,
-} from "./DisplayFixture.ts";
+  createMarkdownContext,
+  createMarkdownPiece,
+  createMarkdownValue,
+  SyntheticMarkdownPageSource,
+} from "./MarkdownRenderFixture.ts";
 
 function signal() {
   return new AbortController().signal;
 }
 
-function assertUncommitted(assembler: DisplayAssembler, from: number) {
+function assertUncommitted(assembler: MarkdownWindowAssembler, from: number) {
   const snapshot = assembler.snapshot;
   assert.equal(snapshot.from, from);
   assert.equal(snapshot.next, from);
@@ -22,14 +22,14 @@ function assertUncommitted(assembler: DisplayAssembler, from: number) {
 }
 
 void test("assembles continued values and pieces across appended pages", async () => {
-  const source = new SyntheticDisplaySource(
+  const source = new SyntheticMarkdownPageSource(
     [
-      createDisplayPiece(0, 1, "first ", { part: 0, continued: true }),
-      createDisplayPiece(1, 1, "second", { part: 1 }),
+      createMarkdownPiece(0, 1, "first ", { part: 0, continued: true }),
+      createMarkdownPiece(1, 1, "second", { part: 1 }),
     ],
     [
       {
-        context: createDisplayContext(0, {
+        context: createMarkdownContext(0, {
           kind: "document",
           firstChild: 1,
           firstPiece: 0,
@@ -37,21 +37,21 @@ void test("assembles continued values and pieces across appended pages", async (
         }),
       },
       {
-        context: createDisplayContext(1, {
+        context: createMarkdownContext(1, {
           parent: 0,
           firstPiece: 0,
           pieceCount: 2,
           valueCount: 2,
         }),
         values: [
-          createDisplayValue("destination", "/example/", 0, true),
-          createDisplayValue("destination", "target", 1),
+          createMarkdownValue("destination", "/example/", 0, true),
+          createMarkdownValue("destination", "target", 1),
         ],
       },
     ],
     { piecePageSize: 1, valuePageSize: 1 },
   );
-  const assembler = new DisplayAssembler(source, "fixture-generation");
+  const assembler = new MarkdownWindowAssembler(source, "fixture-generation");
 
   const first = await assembler.append(signal());
   assert.equal(first.next, 1);
@@ -70,14 +70,14 @@ void test("assembles continued values and pieces across appended pages", async (
 });
 
 void test("accepts a middle-window initial part and continues it on the next append", async () => {
-  const source = new SyntheticDisplaySource(
+  const source = new SyntheticMarkdownPageSource(
     [
-      createDisplayPiece(3, 1, "middle ", { part: 4, continued: true }),
-      createDisplayPiece(4, 1, "end", { part: 5 }),
+      createMarkdownPiece(3, 1, "middle ", { part: 4, continued: true }),
+      createMarkdownPiece(4, 1, "end", { part: 5 }),
     ],
     [
       {
-        context: createDisplayContext(0, {
+        context: createMarkdownContext(0, {
           kind: "document",
           firstChild: 1,
           firstPiece: 3,
@@ -85,12 +85,12 @@ void test("accepts a middle-window initial part and continues it on the next app
         }),
       },
       {
-        context: createDisplayContext(1, { parent: 0, firstPiece: 3, pieceCount: 2 }),
+        context: createMarkdownContext(1, { parent: 0, firstPiece: 3, pieceCount: 2 }),
       },
     ],
     { piecePageSize: 1 },
   );
-  const assembler = new DisplayAssembler(source, "fixture-generation", 3);
+  const assembler = new MarkdownWindowAssembler(source, "fixture-generation", 3);
 
   const middle = await assembler.append(signal());
   assert.equal(middle.from, 3);
@@ -102,20 +102,20 @@ void test("accepts a middle-window initial part and continues it on the next app
   assert.equal(end.hasMore, false);
   assert.deepEqual([...end.pieces.keys()], [3, 4]);
 
-  const invalid = new SyntheticDisplaySource(
-    [createDisplayPiece(0, 1, "continued", { part: 1 })],
+  const invalid = new SyntheticMarkdownPageSource(
+    [createMarkdownPiece(0, 1, "continued", { part: 1 })],
     [],
   );
   await assert.rejects(
-    new DisplayAssembler(invalid, "fixture-generation").append(signal()),
-    /incomplete piece/u,
+    new MarkdownWindowAssembler(invalid, "fixture-generation").append(signal()),
+    /incomplete text piece/u,
   );
 });
 
 void test("hydrates middle ancestry and a detached table header cell and its pieces", async () => {
   const contexts = [
     {
-      context: createDisplayContext(0, {
+      context: createMarkdownContext(0, {
         kind: "document",
         firstChild: 1,
         firstPiece: 2,
@@ -123,7 +123,7 @@ void test("hydrates middle ancestry and a detached table header cell and its pie
       }),
     },
     {
-      context: createDisplayContext(1, {
+      context: createMarkdownContext(1, {
         kind: "table",
         parent: 0,
         firstChild: 2,
@@ -132,7 +132,7 @@ void test("hydrates middle ancestry and a detached table header cell and its pie
       }),
     },
     {
-      context: createDisplayContext(2, {
+      context: createMarkdownContext(2, {
         kind: "row",
         parent: 1,
         firstChild: 3,
@@ -143,7 +143,7 @@ void test("hydrates middle ancestry and a detached table header cell and its pie
       }),
     },
     {
-      context: createDisplayContext(3, {
+      context: createMarkdownContext(3, {
         kind: "cell",
         parent: 2,
         firstPiece: 2,
@@ -153,7 +153,7 @@ void test("hydrates middle ancestry and a detached table header cell and its pie
       }),
     },
     {
-      context: createDisplayContext(4, {
+      context: createMarkdownContext(4, {
         kind: "row",
         parent: 1,
         firstChild: 5,
@@ -162,7 +162,7 @@ void test("hydrates middle ancestry and a detached table header cell and its pie
       }),
     },
     {
-      context: createDisplayContext(5, {
+      context: createMarkdownContext(5, {
         kind: "cell",
         parent: 4,
         firstPiece: 10,
@@ -172,13 +172,13 @@ void test("hydrates middle ancestry and a detached table header cell and its pie
     },
   ];
   const headerPieces = Array.from({ length: 8 }, (_, offset) =>
-    createDisplayPiece(2 + offset, 3, offset === 0 ? "heading" : " header"),
+    createMarkdownPiece(2 + offset, 3, offset === 0 ? "heading" : " header"),
   );
-  const source = new SyntheticDisplaySource(
-    [...headerPieces, createDisplayPiece(10, 5, "value")],
+  const source = new SyntheticMarkdownPageSource(
+    [...headerPieces, createMarkdownPiece(10, 5, "value")],
     contexts,
   );
-  const assembler = new DisplayAssembler(source, "fixture-generation", 10);
+  const assembler = new MarkdownWindowAssembler(source, "fixture-generation", 10);
 
   const snapshot = await assembler.append(signal());
 
@@ -188,53 +188,53 @@ void test("hydrates middle ancestry and a detached table header cell and its pie
 });
 
 void test("rejects a piece page from another generation without committing", async () => {
-  const source = new SyntheticDisplaySource(
-    [createDisplayPiece(0, 1, "text")],
-    [{ context: createDisplayContext(1, { firstPiece: 0, pieceCount: 1 }) }],
+  const source = new SyntheticMarkdownPageSource(
+    [createMarkdownPiece(0, 1, "text")],
+    [{ context: createMarkdownContext(1, { firstPiece: 0, pieceCount: 1 }) }],
     { pieceGeneration: "stale-generation" },
   );
-  const assembler = new DisplayAssembler(source, "fixture-generation");
+  const assembler = new MarkdownWindowAssembler(source, "fixture-generation");
 
   await assert.rejects(assembler.append(signal()));
   assertUncommitted(assembler, 0);
 });
 
 void test("rejects a context page from another generation without committing", async () => {
-  const source = new SyntheticDisplaySource(
-    [createDisplayPiece(0, 1, "text")],
+  const source = new SyntheticMarkdownPageSource(
+    [createMarkdownPiece(0, 1, "text")],
     [
       {
-        context: createDisplayContext(1, { firstPiece: 0, pieceCount: 1, valueCount: 1 }),
-        values: [createDisplayValue("destination", "/target")],
+        context: createMarkdownContext(1, { firstPiece: 0, pieceCount: 1, valueCount: 1 }),
+        values: [createMarkdownValue("destination", "/target")],
       },
     ],
     { contextGeneration: "stale-generation" },
   );
-  const assembler = new DisplayAssembler(source, "fixture-generation");
+  const assembler = new MarkdownWindowAssembler(source, "fixture-generation");
 
   await assert.rejects(assembler.append(signal()));
   assertUncommitted(assembler, 0);
 });
 
 void test("rejects a nonadvancing piece page without committing", async () => {
-  const source = new SyntheticDisplaySource([], [], {
+  const source = new SyntheticMarkdownPageSource([], [], {
     transformPiecePage: (page) => ({ ...page, next: page.from, hasMore: true }),
   });
-  const assembler = new DisplayAssembler(source, "fixture-generation");
+  const assembler = new MarkdownWindowAssembler(source, "fixture-generation");
 
   await assert.rejects(assembler.append(signal()));
   assertUncommitted(assembler, 0);
 });
 
 void test("rejects a nonadvancing context page without committing", async () => {
-  const source = new SyntheticDisplaySource(
-    [createDisplayPiece(0, 1, "text")],
+  const source = new SyntheticMarkdownPageSource(
+    [createMarkdownPiece(0, 1, "text")],
     [
       {
-        context: createDisplayContext(1, { firstPiece: 0, pieceCount: 1, valueCount: 2 }),
+        context: createMarkdownContext(1, { firstPiece: 0, pieceCount: 1, valueCount: 2 }),
         values: [
-          createDisplayValue("destination", "/first/", 0, true),
-          createDisplayValue("destination", "last", 1),
+          createMarkdownValue("destination", "/first/", 0, true),
+          createMarkdownValue("destination", "last", 1),
         ],
       },
     ],
@@ -243,49 +243,49 @@ void test("rejects a nonadvancing context page without committing", async () => 
       transformContextPage: (page) => ({ ...page, next: page.from, hasMore: true }),
     },
   );
-  const assembler = new DisplayAssembler(source, "fixture-generation");
+  const assembler = new MarkdownWindowAssembler(source, "fixture-generation");
 
   await assert.rejects(assembler.append(signal()));
   assertUncommitted(assembler, 0);
 });
 
 void test("rejects skipped piece IDs without committing", async () => {
-  const source = new SyntheticDisplaySource(
-    [createDisplayPiece(0, 1, "first"), createDisplayPiece(2, 1, "skipped")],
+  const source = new SyntheticMarkdownPageSource(
+    [createMarkdownPiece(0, 1, "first"), createMarkdownPiece(2, 1, "skipped")],
     [
       {
-        context: createDisplayContext(0, {
+        context: createMarkdownContext(0, {
           kind: "document",
           firstChild: 1,
           firstPiece: 0,
           pieceCount: 3,
         }),
       },
-      { context: createDisplayContext(1, { parent: 0, firstPiece: 0, pieceCount: 3 }) },
+      { context: createMarkdownContext(1, { parent: 0, firstPiece: 0, pieceCount: 3 }) },
     ],
     { transformPiecePage: (page) => ({ ...page, next: page.from + page.pieces.length }) },
   );
-  const assembler = new DisplayAssembler(source, "fixture-generation");
+  const assembler = new MarkdownWindowAssembler(source, "fixture-generation");
 
   await assert.rejects(assembler.append(signal()));
   assertUncommitted(assembler, 0);
 });
 
 void test("rejects discontinuous context value parts without committing", async () => {
-  const source = new SyntheticDisplaySource(
-    [createDisplayPiece(0, 1, "text")],
+  const source = new SyntheticMarkdownPageSource(
+    [createMarkdownPiece(0, 1, "text")],
     [
       {
-        context: createDisplayContext(1, { firstPiece: 0, pieceCount: 1, valueCount: 2 }),
+        context: createMarkdownContext(1, { firstPiece: 0, pieceCount: 1, valueCount: 2 }),
         values: [
-          createDisplayValue("destination", "/first/", 0, true),
-          createDisplayValue("destination", "last", 2),
+          createMarkdownValue("destination", "/first/", 0, true),
+          createMarkdownValue("destination", "last", 2),
         ],
       },
     ],
     { valuePageSize: 1 },
   );
-  const assembler = new DisplayAssembler(source, "fixture-generation");
+  const assembler = new MarkdownWindowAssembler(source, "fixture-generation");
 
   await assert.rejects(assembler.append(signal()));
   assertUncommitted(assembler, 0);
@@ -294,7 +294,7 @@ void test("rejects discontinuous context value parts without committing", async 
 void test("rejects a header reference from another table", async () => {
   const contexts = [
     {
-      context: createDisplayContext(0, {
+      context: createMarkdownContext(0, {
         kind: "document",
         firstChild: 1,
         firstPiece: 0,
@@ -302,7 +302,7 @@ void test("rejects a header reference from another table", async () => {
       }),
     },
     {
-      context: createDisplayContext(1, {
+      context: createMarkdownContext(1, {
         kind: "table",
         parent: 0,
         firstChild: 2,
@@ -310,7 +310,7 @@ void test("rejects a header reference from another table", async () => {
       }),
     },
     {
-      context: createDisplayContext(2, {
+      context: createMarkdownContext(2, {
         kind: "row",
         parent: 1,
         firstChild: 3,
@@ -318,11 +318,11 @@ void test("rejects a header reference from another table", async () => {
         header: true,
       }),
     },
-    { context: createDisplayContext(3, { kind: "cell", parent: 2, header: true, headerCell: 3 }) },
-    { context: createDisplayContext(4, { kind: "row", parent: 1, firstChild: 5 }) },
-    { context: createDisplayContext(5, { kind: "cell", parent: 4, headerCell: 3 }) },
+    { context: createMarkdownContext(3, { kind: "cell", parent: 2, header: true, headerCell: 3 }) },
+    { context: createMarkdownContext(4, { kind: "row", parent: 1, firstChild: 5 }) },
+    { context: createMarkdownContext(5, { kind: "cell", parent: 4, headerCell: 3 }) },
     {
-      context: createDisplayContext(6, {
+      context: createMarkdownContext(6, {
         kind: "table",
         parent: 0,
         firstChild: 7,
@@ -331,7 +331,7 @@ void test("rejects a header reference from another table", async () => {
       }),
     },
     {
-      context: createDisplayContext(7, {
+      context: createMarkdownContext(7, {
         kind: "row",
         parent: 6,
         firstChild: 8,
@@ -340,7 +340,7 @@ void test("rejects a header reference from another table", async () => {
       }),
     },
     {
-      context: createDisplayContext(8, {
+      context: createMarkdownContext(8, {
         kind: "cell",
         parent: 7,
         firstPiece: 0,
@@ -349,8 +349,8 @@ void test("rejects a header reference from another table", async () => {
       }),
     },
   ];
-  const source = new SyntheticDisplaySource([createDisplayPiece(0, 8, "body")], contexts);
-  const assembler = new DisplayAssembler(source, "fixture-generation");
+  const source = new SyntheticMarkdownPageSource([createMarkdownPiece(0, 8, "body")], contexts);
+  const assembler = new MarkdownWindowAssembler(source, "fixture-generation");
 
   await assert.rejects(assembler.append(signal()), /different table/u);
   assertUncommitted(assembler, 0);
@@ -360,22 +360,25 @@ void test("keeps UTF-8 source ranges opaque and detaches page records", async ()
   const text = "A😀";
   const contextRange = { start: 0, end: new TextEncoder().encode(text).length };
   const pieceRange = { start: 1, end: new TextEncoder().encode(text).length };
-  const root = createDisplayContext(0, {
+  const root = createMarkdownContext(0, {
     kind: "document",
     firstChild: 1,
     firstPiece: 0,
     pieceCount: 1,
     source: contextRange,
   });
-  const paragraph = createDisplayContext(1, {
+  const paragraph = createMarkdownContext(1, {
     parent: 0,
     firstPiece: 0,
     pieceCount: 1,
     source: contextRange,
   });
-  const piece = createDisplayPiece(0, 1, "😀", { source: pieceRange });
-  const source = new SyntheticDisplaySource([piece], [{ context: root }, { context: paragraph }]);
-  const assembler = new DisplayAssembler(source, "fixture-generation");
+  const piece = createMarkdownPiece(0, 1, "😀", { source: pieceRange });
+  const source = new SyntheticMarkdownPageSource(
+    [piece],
+    [{ context: root }, { context: paragraph }],
+  );
+  const assembler = new MarkdownWindowAssembler(source, "fixture-generation");
 
   const snapshot = await assembler.append(signal());
   contextRange.end = 2;
@@ -387,11 +390,11 @@ void test("keeps UTF-8 source ranges opaque and detaches page records", async ()
 });
 
 void test("rejects a context descriptor that changes between value pages", async () => {
-  const source = new SyntheticDisplaySource(
-    [createDisplayPiece(0, 1, "text")],
+  const source = new SyntheticMarkdownPageSource(
+    [createMarkdownPiece(0, 1, "text")],
     [
       {
-        context: createDisplayContext(0, {
+        context: createMarkdownContext(0, {
           kind: "document",
           firstChild: 1,
           firstPiece: 0,
@@ -399,15 +402,15 @@ void test("rejects a context descriptor that changes between value pages", async
         }),
       },
       {
-        context: createDisplayContext(1, {
+        context: createMarkdownContext(1, {
           parent: 0,
           firstPiece: 0,
           pieceCount: 1,
           valueCount: 2,
         }),
         values: [
-          createDisplayValue("destination", "/first/", 0, true),
-          createDisplayValue("destination", "last", 1),
+          createMarkdownValue("destination", "/first/", 0, true),
+          createMarkdownValue("destination", "last", 1),
         ],
       },
     ],
@@ -417,13 +420,13 @@ void test("rejects a context descriptor that changes between value pages", async
         page.from === 1 ? { ...page, context: { ...page.context, position: 1 } } : page,
     },
   );
-  const assembler = new DisplayAssembler(source, "fixture-generation");
+  const assembler = new MarkdownWindowAssembler(source, "fixture-generation");
 
   await assert.rejects(assembler.append(signal()), /context changed/u);
   assertUncommitted(assembler, 0);
 });
 
-void test("allows only safe absolute and relative display links", () => {
+void test("allows only safe absolute and relative Markdown links", () => {
   for (const destination of [
     "https://example.test/path",
     "HTTP://example.test/path",
@@ -433,7 +436,7 @@ void test("allows only safe absolute and relative display links", () => {
     "?query=1",
     "#section",
   ])
-    assert.equal(safeDisplayLink(destination), destination);
+    assert.equal(safeMarkdownLink(destination), destination);
 
   for (const destination of [
     undefined,
@@ -446,12 +449,12 @@ void test("allows only safe absolute and relative display links", () => {
     "https://example.test/\u0000",
     "https://example.test/\u0085",
   ])
-    assert.equal(safeDisplayLink(destination), undefined);
+    assert.equal(safeMarkdownLink(destination), undefined);
 });
 
 void test("accepts an empty terminal piece page", async () => {
-  const source = new SyntheticDisplaySource([], []);
-  const assembler = new DisplayAssembler(source, "fixture-generation", 7);
+  const source = new SyntheticMarkdownPageSource([], []);
+  const assembler = new MarkdownWindowAssembler(source, "fixture-generation", 7);
 
   const snapshot = await assembler.append(signal());
 

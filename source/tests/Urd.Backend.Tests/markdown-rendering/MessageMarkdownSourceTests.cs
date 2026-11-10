@@ -1,14 +1,14 @@
 using System.Text;
 using Urd.Backend.Tests.Support;
-using Urd.Core.Display;
+using Urd.Core.MarkdownRendering;
 using Urd.Core.Execution;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
 using Xunit;
 
-namespace Urd.Backend.Tests.Display;
+namespace Urd.Backend.Tests.MarkdownRendering;
 
-public sealed class MessageDisplaySourceTests {
+public sealed class MessageMarkdownSourceTests {
   [Fact]
   public void CapturesExactSourceAndMapsUnicodeAcrossEmptySegments() {
     using var database = new TemporaryDatabase();
@@ -19,8 +19,8 @@ public sealed class MessageDisplaySourceTests {
     for (int index = 0; index < parts.Length; index++)
       Append(store, execution, index, parts[index], final: index == parts.Length - 1);
 
-    MessageDisplaySource user = ReadSource(store, execution, execution.User);
-    MessageDisplaySource assistant = ReadSource(store, execution, execution.Assistant);
+    MessageMarkdownSource user = ReadSource(store, execution, execution.User);
+    MessageMarkdownSource assistant = ReadSource(store, execution, execution.Assistant);
 
     Assert.Equal(userText, user.Source);
     Assert.Equal(Encoding.UTF8.GetByteCount(userText), user.Utf8Bytes);
@@ -33,7 +33,7 @@ public sealed class MessageDisplaySourceTests {
     Assert.True(assistant.IsClosed);
     Assert.True(assistant.FinalOutputCommitted);
     Assert.Equal(execution.Assistant, assistant.Message);
-    Assert.Equal(parts.Select((_, index) => new DisplaySourceSegment(
+    Assert.Equal(parts.Select((_, index) => new MarkdownSourceSegment(
         Encoding.UTF8.GetByteCount(string.Concat(parts.Take(index))), index)), assistant.Segments);
     Assert.Equal(new(execution.Assistant, 0, 0), assistant.ContentCursor(0));
     Assert.Equal(new(execution.Assistant, 2, 0), assistant.ContentCursor(1));
@@ -49,7 +49,7 @@ public sealed class MessageDisplaySourceTests {
     using UrdStore store = UrdStore.Open(database.Path);
     string text = new string('x', 16383) + "🙂" + new string('y', 17000);
     TestExecution execution = StartExecution(store, text);
-    MessageDisplaySource source = ReadSource(store, execution, execution.User);
+    MessageMarkdownSource source = ReadSource(store, execution, execution.User);
 
     Assert.True(source.Utf8Bytes > 16 * 1024);
     Assert.Equal(text, source.Source);
@@ -76,7 +76,7 @@ public sealed class MessageDisplaySourceTests {
       Append(store, execution, 4, "last", final: true);
     else
       Assert.True(store.LlmResponses.ObserveTool(execution.Session, execution.Execution, 0, execution.Request, "call", "tool"));
-    MessageDisplaySource source = MessageDisplaySourceReader.Read(store.Content, extent);
+    MessageMarkdownSource source = MessageMarkdownSourceReader.Read(store.Content, extent);
     store.Content.ValidateSourceExtent(extent);
 
     Assert.Equal("before🙂é\0", source.Source);
@@ -107,7 +107,7 @@ public sealed class MessageDisplaySourceTests {
     }
     MessageContentExtent extent = Capture(store, execution, execution.Assistant);
     if (!failed) Append(store, execution, 2, "after", output: Guid.NewGuid());
-    MessageDisplaySource source = MessageDisplaySourceReader.Read(store.Content, extent);
+    MessageMarkdownSource source = MessageMarkdownSourceReader.Read(store.Content, extent);
     store.Content.ValidateSourceExtent(extent);
 
     Assert.Equal(new(execution.Assistant, 1, 0), source.From);
@@ -115,7 +115,7 @@ public sealed class MessageDisplaySourceTests {
     Assert.Equal("partial🙂", source.Source);
     Assert.True(source.IsClosed);
     Assert.False(source.FinalOutputCommitted);
-    Assert.Equal(new DisplaySourceSegment(0, 1), Assert.Single(source.Segments));
+    Assert.Equal(new MarkdownSourceSegment(0, 1), Assert.Single(source.Segments));
   }
 
   [Fact]
@@ -124,18 +124,18 @@ public sealed class MessageDisplaySourceTests {
     using UrdStore store = UrdStore.Open(database.Path);
     TestExecution execution = StartExecution(store);
     Append(store, execution, 0, "read🙂");
-    var key = new MessageDisplayKey(execution.Session, execution.Assistant, 0, 1, false, false);
+    var key = new MessageMarkdownKey(execution.Session, execution.Assistant, 0, 1, false, false);
     Append(store, execution, 1, "later", final: true);
-    using var client = new ScriptedChatClient(_ => throw new InvalidOperationException("Display reads must not start execution."));
+    using var client = new ScriptedChatClient(_ => throw new InvalidOperationException("Markdown reads must not start execution."));
     var session = await new SessionManager(store, _ => client).GetPrimaryAsync(execution.Session);
-    MessageDisplaySource source = await session.ReadMessageDisplaySourceAsync(key);
+    MessageMarkdownSource source = await session.ReadMessageMarkdownSourceAsync(key);
 
     Assert.Equal("read🙂", source.Source);
     Assert.True(key.Matches(source));
     Assert.False(source.IsClosed);
     Assert.False(source.FinalOutputCommitted);
     Assert.Equal(0, client.Calls);
-    await Assert.ThrowsAsync<ArgumentException>(() => session.ReadMessageDisplaySourceAsync(key with { SessionId = Guid.NewGuid() }));
+    await Assert.ThrowsAsync<ArgumentException>(() => session.ReadMessageMarkdownSourceAsync(key with { SessionId = Guid.NewGuid() }));
   }
 
   [Fact]
@@ -191,8 +191,8 @@ public sealed class MessageDisplaySourceTests {
   static MessageContentExtent Capture(UrdStore store, TestExecution execution, MessageRef message) =>
       store.Content.CaptureSourceExtent(execution.Session, message, Facts(store, execution, message));
 
-  static MessageDisplaySource ReadSource(UrdStore store, TestExecution execution, MessageRef message) =>
-      MessageDisplaySourceReader.Read(store.Content, Capture(store, execution, message));
+  static MessageMarkdownSource ReadSource(UrdStore store, TestExecution execution, MessageRef message) =>
+      MessageMarkdownSourceReader.Read(store.Content, Capture(store, execution, message));
 
   static void Append(UrdStore store, TestExecution execution, int index, string text, bool final = false, Guid? output = null) =>
       Assert.True(store.LlmResponses.Append(execution.Session, execution.Execution, 0,

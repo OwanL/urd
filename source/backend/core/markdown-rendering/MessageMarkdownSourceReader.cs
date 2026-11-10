@@ -3,15 +3,15 @@ using System.Text;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
 
-namespace Urd.Core.Display;
+namespace Urd.Core.MarkdownRendering;
 
 // Deliberately synchronous and unscheduled. Never call under a session/database
 // gate. Storage releases its lock after each bounded read, before any decoding.
-internal static class MessageDisplaySourceReader {
-  internal static MessageDisplaySource Read(MessageContentReader reader, MessageContentExtent extent,
+internal static class MessageMarkdownSourceReader {
+  internal static MessageMarkdownSource Read(MessageContentReader reader, MessageContentExtent extent,
       CancellationToken cancellation = default) {
     var source = new StringBuilder();
-    var segments = new List<DisplaySourceSegment>();
+    var segments = new List<MarkdownSourceSegment>();
     MessageContentCursor cursor = extent.From;
     int bytes = 0;
     while (cursor.SegmentIndex < extent.AvailableThrough.SegmentIndex) {

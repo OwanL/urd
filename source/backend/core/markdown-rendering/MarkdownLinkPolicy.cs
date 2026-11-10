@@ -1,6 +1,6 @@
-namespace Urd.Core.Display;
+namespace Urd.Core.MarkdownRendering;
 
-internal static class DisplayLinkPolicy {
+internal static class MarkdownLinkPolicy {
   // Operates on Markdig's decoded destination. No URL is fetched here.
   internal static bool IsAllowed(string destination) {
     if (destination.Any(c => char.IsControl(c) || char.IsWhiteSpace(c) || c == '\\')) return false;

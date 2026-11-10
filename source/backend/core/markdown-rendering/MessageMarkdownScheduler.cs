@@ -1,15 +1,15 @@
 using Urd.Core.Sessions;
 
-namespace Urd.Core.Display;
+namespace Urd.Core.MarkdownRendering;
 
 // Unactivated shared service: captures are queued, detached derivation runs on one
 // below-normal thread, never under a session/database gate. Publication and pinning
 // share this gate with cancellation, invalidation, eviction and lease release.
-internal sealed class MessageDisplays : IAsyncDisposable {
+internal sealed class MessageMarkdownScheduler : IAsyncDisposable {
   readonly object gate = new();
-  readonly MessageDisplayCacheLimits limits;
-  readonly MessageDisplayCache cache;
-  Func<MessageDisplaySource, MessageDisplayIndex>? build;
+  readonly MessageMarkdownCacheLimits limits;
+  readonly MessageMarkdownCache cache;
+  Func<MessageMarkdownSource, MarkdownRenderIndex>? parse;
   readonly LinkedList<Work> pending = [];
   readonly CancellationTokenSource shutdown = new();
   readonly TaskCompletionSource stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -17,31 +17,31 @@ internal sealed class MessageDisplays : IAsyncDisposable {
   Work? active;
   bool disposed;
 
-  internal MessageDisplays(MessageDisplayCacheLimits limits,
-      Func<MessageDisplaySource, MessageDisplayIndex>? build = null) {
+  internal MessageMarkdownScheduler(MessageMarkdownCacheLimits limits,
+      Func<MessageMarkdownSource, MarkdownRenderIndex>? parse = null) {
     this.limits = limits ?? throw new ArgumentNullException(nameof(limits));
     this.limits.Validate();
     cache = new(this.limits);
-    this.build = build ?? (source => MessageDisplayBuilder.Build(source.Source));
-    var worker = new Thread(Run) { IsBackground = true, Name = "Message displays", Priority = ThreadPriority.BelowNormal };
+    this.parse = parse ?? (source => MarkdownParser.Parse(source.Source));
+    var worker = new Thread(Run) { IsBackground = true, Name = "Message markdown scheduler", Priority = ThreadPriority.BelowNormal };
     worker.Start();
   }
 
   // The caller supplies exact committed extents; capture happens only on a miss.
-  internal Task<MessageDisplayLease> RequestAsync(MessageDisplayKey key, SessionBase session,
+  internal Task<MessageMarkdownLease> RequestAsync(MessageMarkdownKey key, SessionBase session,
       CancellationToken cancellation = default) {
-    if (session.Id != key.SessionId) throw new ArgumentException("The session does not match the display key.", nameof(session));
-    return RequestAsync(key, token => session.ReadMessageDisplaySourceAsync(key, token), cancellation);
+    if (session.Id != key.SessionId) throw new ArgumentException("The session does not match the markdown key.", nameof(session));
+    return RequestAsync(key, token => session.ReadMessageMarkdownSourceAsync(key, token), cancellation);
   }
 
-  internal Task<MessageDisplayLease> RequestAsync(MessageDisplayKey key,
-      Func<CancellationToken, Task<MessageDisplaySource>> capture, CancellationToken cancellation = default) {
+  internal Task<MessageMarkdownLease> RequestAsync(MessageMarkdownKey key,
+      Func<CancellationToken, Task<MessageMarkdownSource>> capture, CancellationToken cancellation = default) {
     ArgumentNullException.ThrowIfNull(key);
     ArgumentNullException.ThrowIfNull(capture);
     cancellation.ThrowIfCancellationRequested();
-    if (key.Pipeline != MessageDisplayIndex.PipelineVersion || key.FromSegment < 0 || key.ThroughSegment <= key.FromSegment
+    if (key.Pipeline != MarkdownRenderIndex.PipelineVersion || key.FromSegment < 0 || key.ThroughSegment <= key.FromSegment
         || (key.FinalOutputCommitted && !key.IsClosed))
-      throw new ArgumentException("The display key has an unsupported pipeline or invalid extent.", nameof(key));
+      throw new ArgumentException("The markdown key has an unsupported pipeline or invalid extent.", nameof(key));
     lock (gate) {
       ThrowIfDisposed();
       if (cache.Find(key) is { } entry) {
@@ -55,12 +55,12 @@ internal sealed class MessageDisplays : IAsyncDisposable {
       if (existing?.Value.Key == key) return Observe(existing.Value, cancellation);
       if (existing is not null) {
         if (AtLeastAsRecent(existing.Value.Key, key))
-          return Task.FromException<MessageDisplayLease>(new DisplaySupersededException());
+          return Task.FromException<MessageMarkdownLease>(new MarkdownSupersededException());
         // Keep queue position so repeated updates cannot starve other keys.
         var previous = existing.Value;
         var replacement = new Work(key, capture);
         existing.Value = replacement;
-        Fail(previous, new DisplaySupersededException());
+        Fail(previous, new MarkdownSupersededException());
         try {
           return Observe(replacement, cancellation);
         } catch {
@@ -68,7 +68,7 @@ internal sealed class MessageDisplays : IAsyncDisposable {
           throw;
         }
       }
-      if (pending.Count >= limits.PendingKeys) throw new DisplayQueueFullException();
+      if (pending.Count >= limits.PendingKeys) throw new MarkdownQueueFullException();
       var work = new Work(key, capture);
       var result = Observe(work, cancellation);
       if (work.Interests.Count > 0) pending.AddLast(work);
@@ -79,24 +79,24 @@ internal sealed class MessageDisplays : IAsyncDisposable {
 
   // Valid leases remain readable through invalidation and shutdown. Shutdown drains
   // work, not consumer-owned views; their accounting ends only on explicit release.
-  internal DisplayPage Read(MessageDisplayLease lease, DisplayCursor cursor, DisplayPageLimits? limits = null) {
-    lock (gate) return MessageDisplayReader.Read(cache.Get(lease.Get(this)), cursor, limits);
+  internal MarkdownPiecePage Read(MessageMarkdownLease lease, MarkdownRenderCursor cursor, MarkdownPageLimits? limits = null) {
+    lock (gate) return MarkdownPageReader.Read(cache.Get(lease.Get(this)), cursor, limits);
   }
 
-  internal DisplayContextPage ReadContext(MessageDisplayLease lease, int context, DisplayCursor cursor,
-      DisplayPageLimits? limits = null) {
-    lock (gate) return MessageDisplayReader.ReadContext(cache.Get(lease.Get(this)), context, cursor, limits);
+  internal MarkdownContextPage ReadContext(MessageMarkdownLease lease, int context, MarkdownRenderCursor cursor,
+      MarkdownPageLimits? limits = null) {
+    lock (gate) return MarkdownPageReader.ReadContext(cache.Get(lease.Get(this)), context, cursor, limits);
   }
 
-  internal DisplayCursor Locate(MessageDisplayLease lease, int sourceUtf8Offset) {
+  internal MarkdownRenderCursor Locate(MessageMarkdownLease lease, int sourceUtf8Offset) {
     lock (gate) return cache.Get(lease.Get(this)).Locate(sourceUtf8Offset);
   }
 
-  internal MessageContentCursor SourceCursor(MessageDisplayLease lease, int sourceUtf8Offset) {
+  internal MessageContentCursor SourceCursor(MessageMarkdownLease lease, int sourceUtf8Offset) {
     lock (gate) return cache.SourceCursor(lease.Get(this), sourceUtf8Offset);
   }
 
-  internal void Release(MessageDisplayLease lease) {
+  internal void Release(MessageMarkdownLease lease) {
     lock (gate) {
       if (lease.Entry is not { } entry) return;
       lease.Get(this);
@@ -112,10 +112,10 @@ internal sealed class MessageDisplays : IAsyncDisposable {
       cache.Invalidate(sessionId);
       if (active?.Key.SessionId == sessionId) {
         active.Invalidated = true;
-        Fail(active, new DisplayUnavailableException());
+        Fail(active, new MarkdownUnavailableException());
       }
       foreach (var work in pending.Where(work => work.Key.SessionId == sessionId).ToArray())
-        Fail(work, new DisplayUnavailableException());
+        Fail(work, new MarkdownUnavailableException());
     }
   }
 
@@ -128,8 +128,8 @@ internal sealed class MessageDisplays : IAsyncDisposable {
       if (!disposed) {
         disposed = true;
         cache.Clear();
-        foreach (var work in pending.ToArray()) Fail(work, new ObjectDisposedException(nameof(MessageDisplays)));
-        if (active is not null) Fail(active, new ObjectDisposedException(nameof(MessageDisplays)));
+        foreach (var work in pending.ToArray()) Fail(work, new ObjectDisposedException(nameof(MessageMarkdownScheduler)));
+        if (active is not null) Fail(active, new ObjectDisposedException(nameof(MessageMarkdownScheduler)));
         // Only the worker disposes this source, after synchronous work returns.
         shutdownCallbacks = shutdown.CancelAsync();
         Monitor.Pulse(gate);
@@ -138,7 +138,7 @@ internal sealed class MessageDisplays : IAsyncDisposable {
     return new(stopped.Task);
   }
 
-  Task<MessageDisplayLease> Observe(Work work, CancellationToken cancellation) {
+  Task<MessageMarkdownLease> Observe(Work work, CancellationToken cancellation) {
     cache.Reserve();
     var interest = new Interest(work, cancellation);
     work.Interests.Add(interest);
@@ -174,7 +174,7 @@ internal sealed class MessageDisplays : IAsyncDisposable {
     }
   }
 
-  MessageDisplayLease Lease(MessageDisplayCache.Entry entry) {
+  MessageMarkdownLease Lease(MessageMarkdownCache.Entry entry) {
     entry.Pins++;
     return new(this, entry);
   }
@@ -200,7 +200,7 @@ internal sealed class MessageDisplays : IAsyncDisposable {
         }
       }
     } finally {
-      build = null;
+      parse = null;
       Exception? failure = null;
       try {
         shutdownCallbacks.GetAwaiter().GetResult();
@@ -216,9 +216,9 @@ internal sealed class MessageDisplays : IAsyncDisposable {
   void Process(Work work) {
     try {
       var source = work.Capture!(shutdown.Token).GetAwaiter().GetResult();
-      if (!work.Key.Matches(source)) throw new DisplayUnavailableException();
-      var index = build!(source); // Synchronous parsing is deliberately non-cancellable.
-      if (index.SourceUtf8Bytes != source.Utf8Bytes) throw new DisplayUnavailableException();
+      if (!work.Key.Matches(source)) throw new MarkdownUnavailableException();
+      var index = parse!(source); // Synchronous parsing is deliberately non-cancellable.
+      if (index.SourceUtf8Bytes != source.Utf8Bytes) throw new MarkdownUnavailableException();
       lock (gate) {
         if (disposed || work.Invalidated) return;
         work.Accepting = false;
@@ -237,20 +237,20 @@ internal sealed class MessageDisplays : IAsyncDisposable {
     }
   }
 
-  static bool Compatible(MessageDisplayKey left, MessageDisplayKey right) =>
+  static bool Compatible(MessageMarkdownKey left, MessageMarkdownKey right) =>
       left.SessionId == right.SessionId && left.Message == right.Message
       && left.FromSegment == right.FromSegment && left.Pipeline == right.Pipeline
       && (AtLeastAsRecent(left, right) || AtLeastAsRecent(right, left));
 
-  static bool AtLeastAsRecent(MessageDisplayKey candidate, MessageDisplayKey previous) =>
+  static bool AtLeastAsRecent(MessageMarkdownKey candidate, MessageMarkdownKey previous) =>
       candidate.ThroughSegment >= previous.ThroughSegment && (candidate.IsClosed || !previous.IsClosed)
       && (candidate.FinalOutputCommitted || !previous.FinalOutputCommitted);
 
   void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(disposed, this);
 
-  sealed class Work(MessageDisplayKey key, Func<CancellationToken, Task<MessageDisplaySource>> capture) {
-    internal MessageDisplayKey Key { get; } = key;
-    internal Func<CancellationToken, Task<MessageDisplaySource>>? Capture { get; set; } = capture;
+  sealed class Work(MessageMarkdownKey key, Func<CancellationToken, Task<MessageMarkdownSource>> capture) {
+    internal MessageMarkdownKey Key { get; } = key;
+    internal Func<CancellationToken, Task<MessageMarkdownSource>>? Capture { get; set; } = capture;
     internal List<Interest> Interests { get; } = [];
     internal bool Invalidated { get; set; }
     internal bool Accepting { get; set; } = true;
@@ -260,6 +260,6 @@ internal sealed class MessageDisplays : IAsyncDisposable {
     internal Work Work { get; } = work;
     internal CancellationToken Cancellation { get; } = cancellation;
     internal CancellationTokenRegistration Registration { get; set; }
-    internal TaskCompletionSource<MessageDisplayLease> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    internal TaskCompletionSource<MessageMarkdownLease> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
   }
 }

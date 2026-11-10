@@ -1,30 +1,37 @@
 import { render } from "preact";
-import { SemanticDisplay } from "../display/SemanticDisplay.tsx";
-import { DisplayAssembler } from "../display/DisplayAssembler.ts";
-import type { DisplayContext, DisplayPiece, ValueKind } from "../display/DisplayModel.ts";
+import { MarkdownRenderer } from "../markdown-rendering/MarkdownRenderer.tsx";
+import { MarkdownWindowAssembler } from "../markdown-rendering/MarkdownWindowAssembler.ts";
+import type {
+  MarkdownRenderContext,
+  MarkdownTextPiece,
+  MarkdownValueKind,
+} from "../markdown-rendering/MarkdownRenderModel.ts";
 import {
-  createDisplayContext,
-  createDisplayPiece,
-  createDisplayValue,
-  SyntheticDisplaySource,
-} from "./DisplayFixture.ts";
+  createMarkdownContext,
+  createMarkdownPiece,
+  createMarkdownValue,
+  SyntheticMarkdownPageSource,
+} from "./MarkdownRenderFixture.ts";
 
-const contexts: { context: DisplayContext; values: ReturnType<typeof createDisplayValue>[] }[] = [];
-const pieces: DisplayPiece[] = [];
+const contexts: {
+  context: MarkdownRenderContext;
+  values: ReturnType<typeof createMarkdownValue>[];
+}[] = [];
+const pieces: MarkdownTextPiece[] = [];
 const lastChild = new Map<number, number>();
 let byte = 0;
 function node(
-  kind: DisplayContext["kind"],
+  kind: MarkdownRenderContext["kind"],
   parent: number,
-  options: Partial<DisplayContext> = {},
-  values: Partial<Record<ValueKind, string>> = {},
+  options: Partial<MarkdownRenderContext> = {},
+  values: Partial<Record<MarkdownValueKind, string>> = {},
 ) {
   const id = contexts.length;
   const entries = Object.entries(values).map(([key, value]) =>
-    createDisplayValue(key as ValueKind, value),
+    createMarkdownValue(key as MarkdownValueKind, value),
   );
   contexts.push({
-    context: createDisplayContext(id, {
+    context: createMarkdownContext(id, {
       kind,
       parent,
       firstPiece: pieces.length,
@@ -45,14 +52,14 @@ function node(
 function text(
   parent: number,
   value: string,
-  kind: DisplayPiece["kind"] = "text",
+  kind: MarkdownTextPiece["kind"] = "text",
   continued = false,
   part = 0,
 ) {
   const start = byte;
   byte += new TextEncoder().encode(value).length;
   pieces.push(
-    createDisplayPiece(pieces.length, parent, value, {
+    createMarkdownPiece(pieces.length, parent, value, {
       kind,
       source: { start, end: byte },
       mapping: kind === "literal" ? "containing" : "exact",
@@ -70,10 +77,10 @@ function text(
   }
 }
 function leaf(
-  kind: DisplayContext["kind"],
+  kind: MarkdownRenderContext["kind"],
   parent: number,
   value: string,
-  options: Partial<DisplayContext> = {},
+  options: Partial<MarkdownRenderContext> = {},
 ) {
   const id = node(kind, parent, options);
   text(id, value);
@@ -168,22 +175,22 @@ if (mode === "links") {
     text(continued, "later page appended.", "text", false, 1);
   }
 }
-const source = new SyntheticDisplaySource(pieces, contexts, {
+const source = new SyntheticMarkdownPageSource(pieces, contexts, {
   piecePageSize: mode === "detached" || mode === "links" ? 1000 : pieces.length - 1,
 });
-const assembler = new DisplayAssembler(
+const assembler = new MarkdownWindowAssembler(
   source,
   "fixture-generation",
   mode === "detached" ? detachedFrom : 0,
 );
-const root = document.querySelector("#display")!;
+const root = document.querySelector("#markdown-renderer")!;
 function paint() {
-  render(<SemanticDisplay snapshot={assembler.snapshot} />, root);
+  render(<MarkdownRenderer snapshot={assembler.snapshot} />, root);
 }
 await assembler.append(new AbortController().signal);
 paint();
 Object.assign(window, {
-  semanticHarness: {
+  markdownRendererHarness: {
     links,
     get snapshot() {
       return assembler.snapshot;
@@ -196,8 +203,8 @@ Object.assign(window, {
       const snapshot = { ...assembler.snapshot, generation: "replacement generation" };
       render(
         <>
-          <SemanticDisplay snapshot={snapshot} />
-          <SemanticDisplay snapshot={snapshot} />
+          <MarkdownRenderer snapshot={snapshot} />
+          <MarkdownRenderer snapshot={snapshot} />
         </>,
         root,
       );

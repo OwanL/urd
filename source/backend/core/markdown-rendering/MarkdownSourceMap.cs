@@ -1,11 +1,11 @@
 using System.Buffers;
 using System.Text;
 
-namespace Urd.Core.Display;
+namespace Urd.Core.MarkdownRendering;
 
 // One ordered scalar walk, not a prefix byte count for every parser node.
 // The temporary map is released after projection; no source string is retained.
-internal static class DisplaySourceMap {
+internal static class MarkdownSourceMap {
   internal static Dictionary<int, int> Convert(string source, IEnumerable<int> positions) {
     var boundaries = positions.Append(0).Append(source.Length).Distinct().Order().ToArray();
     var result = new Dictionary<int, int>(boundaries.Length);
@@ -17,7 +17,7 @@ internal static class DisplaySourceMap {
       while (position < boundary) {
         var status = Rune.DecodeFromUtf16(source.AsSpan(position), out var rune, out var consumed);
         if (status != OperationStatus.Done)
-          throw new ArgumentException("Display source must contain valid Unicode scalars.", nameof(source));
+          throw new ArgumentException("Markdown source must contain valid Unicode scalars.", nameof(source));
         position += consumed;
         bytes = checked(bytes + rune.Utf8SequenceLength);
       }

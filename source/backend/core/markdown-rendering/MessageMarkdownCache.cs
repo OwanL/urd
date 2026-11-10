@@ -1,20 +1,20 @@
 using Urd.Core.Sessions;
 
-namespace Urd.Core.Display;
+namespace Urd.Core.MarkdownRendering;
 
-// Serialized by MessageDisplays. Detached generations stay accounted until both
+// Serialized by MessageMarkdownScheduler. Detached generations stay accounted until both
 // cache ownership and every lease are gone; stale generations are never cache hits.
-internal sealed class MessageDisplayCache(MessageDisplayCacheLimits limits) {
+internal sealed class MessageMarkdownCache(MessageMarkdownCacheLimits limits) {
   // Conservative allowance for each lease or queued task/interest/registration.
   internal const int LeaseBytes = 512;
-  readonly Dictionary<MessageDisplayKey, LinkedListNode<Entry>> entries = [];
+  readonly Dictionary<MessageMarkdownKey, LinkedListNode<Entry>> entries = [];
   readonly LinkedList<Entry> recent = [];
   int reservations;
   internal int Count { get; private set; }
   internal long RetainedBytes { get; private set; }
 
   internal void Reserve(Entry? protectedEntry = null) {
-    if (reservations >= limits.Leases) throw new DisplayCacheFullException();
+    if (reservations >= limits.Leases) throw new MarkdownCacheFullException();
     MakeRoom(0, LeaseBytes, protectedEntry);
     reservations++;
     RetainedBytes += LeaseBytes;
@@ -25,17 +25,17 @@ internal sealed class MessageDisplayCache(MessageDisplayCacheLimits limits) {
     RetainedBytes -= LeaseBytes;
   }
 
-  internal Entry? Find(MessageDisplayKey key) {
+  internal Entry? Find(MessageMarkdownKey key) {
     if (!entries.TryGetValue(key, out var node)) return null;
     Touch(node);
     return node.Value;
   }
 
-  internal Entry Add(MessageDisplayKey key, MessageDisplaySource source, MessageDisplayIndex index) {
+  internal Entry Add(MessageMarkdownKey key, MessageMarkdownSource source, MarkdownRenderIndex index) {
     // Conservative accounting includes identity, LRU/dictionary and source mapping;
     // each independent lease/queued interest is accounted separately.
     long bytes = checked(index.AccountedBytes + 512 + 2L * key.Pipeline.Length + 24 + source.Segments.Count * 40L);
-    if (bytes > limits.RetainedBytes - LeaseBytes) throw new DisplayTooLargeException();
+    if (bytes > limits.RetainedBytes - LeaseBytes) throw new MarkdownTooLargeException();
     MakeRoom(1, bytes);
     var entry = new Entry(key, index, source.Segments.ToArray(), bytes);
     entries.Add(key, recent.AddFirst(entry));
@@ -50,7 +50,7 @@ internal sealed class MessageDisplayCache(MessageDisplayCacheLimits limits) {
     ReleaseReservation();
   }
 
-  internal MessageDisplayIndex Get(Entry entry) {
+  internal MarkdownRenderIndex Get(Entry entry) {
     if (entry.Cached) Touch(entries[entry.Key]);
     return entry.Index;
   }
@@ -89,7 +89,7 @@ internal sealed class MessageDisplayCache(MessageDisplayCacheLimits limits) {
     }
     if (Count - removableCount > limits.Entries - count
         || RetainedBytes - removableBytes > limits.RetainedBytes - bytes)
-      throw new DisplayCacheFullException();
+      throw new MarkdownCacheFullException();
     var node = recent.Last;
     while (Count > limits.Entries - count || RetainedBytes > limits.RetainedBytes - bytes) {
       var previous = node!.Previous;
@@ -115,10 +115,10 @@ internal sealed class MessageDisplayCache(MessageDisplayCacheLimits limits) {
     RetainedBytes -= entry.Bytes;
   }
 
-  internal sealed class Entry(MessageDisplayKey key, MessageDisplayIndex index, DisplaySourceSegment[] segments, long bytes) {
-    internal MessageDisplayKey Key { get; } = key;
-    internal MessageDisplayIndex Index { get; } = index;
-    internal DisplaySourceSegment[] Segments { get; } = segments;
+  internal sealed class Entry(MessageMarkdownKey key, MarkdownRenderIndex index, MarkdownSourceSegment[] segments, long bytes) {
+    internal MessageMarkdownKey Key { get; } = key;
+    internal MarkdownRenderIndex Index { get; } = index;
+    internal MarkdownSourceSegment[] Segments { get; } = segments;
     internal long Bytes { get; } = bytes;
     internal int Pins { get; set; }
     internal bool Cached { get; set; } = true;

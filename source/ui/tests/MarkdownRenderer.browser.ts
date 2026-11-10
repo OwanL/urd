@@ -2,21 +2,21 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { chromium, type Page } from "playwright";
 import { createServer } from "vite";
-import { safeDisplayLink } from "../display/DisplayLink.ts";
-import type { DisplaySnapshot } from "../display/DisplayModel.ts";
+import { safeMarkdownLink } from "../markdown-rendering/MarkdownLinkPolicy.ts";
+import type { MarkdownRenderSnapshot } from "../markdown-rendering/MarkdownRenderModel.ts";
 
 declare global {
   interface Window {
-    semanticHarness: {
+    markdownRendererHarness: {
       readonly links: string[];
-      readonly snapshot: DisplaySnapshot;
+      readonly snapshot: MarkdownRenderSnapshot;
       append(): Promise<void>;
       duplicate(): void;
     };
   }
 }
 
-void test("standalone semantic renderer in Chromium", async (t) => {
+void test("standalone Markdown renderer in Chromium", async (t) => {
   const server = await createServer({
     configFile: false,
     server: { host: "127.0.0.1", port: 0 },
@@ -38,7 +38,7 @@ void test("standalone semantic renderer in Chromium", async (t) => {
       else await route.abort();
     });
     async function open(mode = "") {
-      await page.goto(`${origin}tests/SemanticDisplayHarness.html${mode ? `?mode=${mode}` : ""}`);
+      await page.goto(`${origin}tests/MarkdownRendererHarness.html${mode ? `?mode=${mode}` : ""}`);
       await page.waitForSelector('html[data-ready="true"]');
       await page.evaluate(() => document.fonts.ready);
     }
@@ -58,18 +58,18 @@ void test("standalone semantic renderer in Chromium", async (t) => {
         "table > thead > tr > th",
         "table > tbody > tr > td",
       ])
-        assert.ok(await page.locator(`.semantic-display ${selector}`).count(), selector);
+        assert.ok(await page.locator(`.markdown-renderer ${selector}`).count(), selector);
       assert.equal(await page.locator("ol > li").nth(1).getAttribute("value"), "8");
       const lines = await page.locator("p").first().innerText();
       assert.ok(lines.includes("Soft line, then a hard break.\nNext line."));
       assert.equal(
         await page
-          .locator(".semantic-display img, .semantic-display script, .semantic-display iframe")
+          .locator(".markdown-renderer img, .markdown-renderer script, .markdown-renderer iframe")
           .count(),
         0,
       );
       await page.evaluate(() => {
-        const { snapshot } = window.semanticHarness;
+        const { snapshot } = window.markdownRendererHarness;
         for (const piece of snapshot.pieces.values()) {
           if (piece.kind === "thematicBreak") continue;
           const el = document.querySelector(`[data-piece="${piece.id}"]`)!;
@@ -122,7 +122,7 @@ void test("standalone semantic renderer in Chromium", async (t) => {
           const selection = getSelection()!;
           selection.removeAllRanges();
           selection.addRange(range);
-          await window.semanticHarness.append();
+          await window.markdownRendererHarness.append();
           for (const original of originals) {
             const current = document.querySelector(
               `[data-piece="${original.node.getAttribute("data-piece")}"]`,
@@ -150,10 +150,10 @@ void test("standalone semantic renderer in Chromium", async (t) => {
       "link elements follow the pure policy exactly; activation remains native",
       async () => {
         await open("links");
-        const destinations = await page.evaluate(() => window.semanticHarness.links);
+        const destinations = await page.evaluate(() => window.markdownRendererHarness.links);
         for (const [index, destination] of destinations.entries()) {
           const label = page.getByText(`link-${index}`, { exact: true });
-          const expected = safeDisplayLink(destination);
+          const expected = safeMarkdownLink(destination);
           assert.equal(
             await label.evaluate((el) => el.parentElement!.tagName),
             expected === undefined ? "SPAN" : "A",
@@ -182,10 +182,10 @@ void test("standalone semantic renderer in Chromium", async (t) => {
         assert.equal(await page.locator("tbody td").last().innerText(), "");
         await assertHeaders(page);
         assert.equal(
-          await page.locator("[data-kind=document] > .semantic-display-table > table").count(),
+          await page.locator("[data-kind=document] > .markdown-renderer-table > table").count(),
           1,
         );
-        await page.evaluate(() => window.semanticHarness.duplicate());
+        await page.evaluate(() => window.markdownRendererHarness.duplicate());
         const ids = await page.locator("th").evaluateAll((headers) => headers.map((el) => el.id));
         assert.ok(ids.every((id) => !/\s/u.test(id)));
         await assertHeaders(page);

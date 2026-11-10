@@ -1,21 +1,21 @@
 import { createElement, type ComponentChildren, type VNode } from "preact";
 import { useId } from "preact/hooks";
 import type {
-  AssembledContext,
-  DisplayPiece,
-  DisplaySnapshot,
-  SourceRange,
-} from "./DisplayModel.ts";
-import { safeDisplayLink } from "./DisplayLink.ts";
-import "./semantic-display.css";
+  AssembledMarkdownContext,
+  MarkdownRenderSnapshot,
+  MarkdownSourceRange,
+  MarkdownTextPiece,
+} from "./MarkdownRenderModel.ts";
+import { safeMarkdownLink } from "./MarkdownLinkPolicy.ts";
+import "./markdown-renderer.css";
 
 type Entry = { at: number; order: number; node: VNode };
 
-function rangeAttributes(source: SourceRange) {
+function rangeAttributes(source: MarkdownSourceRange) {
   return { "data-source-start": source.start, "data-source-end": source.end };
 }
 
-function pieceNode(piece: DisplayPiece) {
+function pieceNode(piece: MarkdownTextPiece) {
   const attributes = {
     ...rangeAttributes(piece.source),
     "data-piece": piece.id,
@@ -36,10 +36,10 @@ function pieceNode(piece: DisplayPiece) {
 }
 
 // Deliberately unactivated: callers must provide an assembled, normalized window.
-export function SemanticDisplay({ snapshot }: { snapshot: DisplaySnapshot }) {
+export function MarkdownRenderer({ snapshot }: { snapshot: MarkdownRenderSnapshot }) {
   const instance = useId();
-  const children = new Map<number, AssembledContext[]>();
-  const pieces = new Map<number, DisplayPiece[]>();
+  const children = new Map<number, AssembledMarkdownContext[]>();
+  const pieces = new Map<number, MarkdownTextPiece[]>();
   for (const entry of snapshot.contexts.values()) {
     const siblings = children.get(entry.context.parent) ?? [];
     siblings.push(entry);
@@ -59,7 +59,7 @@ export function SemanticDisplay({ snapshot }: { snapshot: DisplaySnapshot }) {
       entries.push({
         at: child.context.firstPiece,
         order: child.context.id,
-        node: contextNode(child),
+        node: markdownContextNode(child),
       });
     for (const piece of pieces.get(id) ?? []) {
       const node = pieceNode(piece);
@@ -68,7 +68,7 @@ export function SemanticDisplay({ snapshot }: { snapshot: DisplaySnapshot }) {
     return entries.sort((a, b) => a.at - b.at || a.order - b.order).map((entry) => entry.node);
   }
 
-  function contextNode({ context, values }: AssembledContext): VNode {
+  function markdownContextNode({ context, values }: AssembledMarkdownContext): VNode {
     const attributes = {
       key: `c${context.id}`,
       ...rangeAttributes(context.source),
@@ -128,7 +128,7 @@ export function SemanticDisplay({ snapshot }: { snapshot: DisplaySnapshot }) {
       case "strong":
         return <strong {...attributes}>{content}</strong>;
       case "link": {
-        const href = safeDisplayLink(values.destination);
+        const href = safeMarkdownLink(values.destination);
         return href === undefined ? (
           <span {...attributes}>{content}</span>
         ) : (
@@ -146,14 +146,14 @@ export function SemanticDisplay({ snapshot }: { snapshot: DisplaySnapshot }) {
         return (
           <div
             key={`c${context.id}`}
-            className="semantic-display-table"
+            className="markdown-renderer-table"
             tabIndex={0}
             role="region"
             aria-label="Table"
           >
             <table {...attributes}>
-              <thead>{rows.filter((row) => row.context.header).map(contextNode)}</thead>
-              <tbody>{rows.filter((row) => !row.context.header).map(contextNode)}</tbody>
+              <thead>{rows.filter((row) => row.context.header).map(markdownContextNode)}</thead>
+              <tbody>{rows.filter((row) => !row.context.header).map(markdownContextNode)}</tbody>
             </table>
           </div>
         );
@@ -180,8 +180,10 @@ export function SemanticDisplay({ snapshot }: { snapshot: DisplaySnapshot }) {
   }
 
   return (
-    <div className="semantic-display" key={snapshot.generation}>
-      {(children.get(-1) ?? []).sort((a, b) => a.context.id - b.context.id).map(contextNode)}
+    <div className="markdown-renderer" key={snapshot.generation}>
+      {(children.get(-1) ?? [])
+        .sort((a, b) => a.context.id - b.context.id)
+        .map(markdownContextNode)}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.AI;
-using Urd.Core.Display;
+using Urd.Core.MarkdownRendering;
 using Urd.Core.Execution;
 using Urd.Core.Storage;
 using Urd.Core.Providers;
@@ -81,15 +81,15 @@ public abstract class SessionBase {
     return store.Content.Read(Id, cursor);
   }
 
-  internal async Task<MessageDisplaySource> ReadMessageDisplaySourceAsync(
-      MessageDisplayKey key, CancellationToken cancellation = default) {
+  internal async Task<MessageMarkdownSource> ReadMessageMarkdownSourceAsync(
+      MessageMarkdownKey key, CancellationToken cancellation = default) {
     if (key.SessionId != Id)
-      throw new ArgumentException("The session does not match the display key.", nameof(key));
+      throw new ArgumentException("The session does not match the markdown key.", nameof(key));
     MessageContentExtent extent;
     using (await gate.AcquireAsync(cancellation))
       extent = store.Content.CaptureSourceExtent(Id, key.Message, key.TextFacts);
 
-    MessageDisplaySource source = MessageDisplaySourceReader.Read(store.Content, extent, cancellation);
+    MessageMarkdownSource source = MessageMarkdownSourceReader.Read(store.Content, extent, cancellation);
 
     using (await gate.AcquireAsync(cancellation)) {
       store.Content.ValidateSourceExtent(extent);

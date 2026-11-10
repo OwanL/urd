@@ -1,10 +1,10 @@
-namespace Urd.Core.Display;
+namespace Urd.Core.MarkdownRendering;
 
-internal sealed class MessageDisplayIndex {
+internal sealed class MarkdownRenderIndex {
   internal const string PipelineVersion = "markdig-1.6.0-commonmark-gfm-tables-display-1";
-  readonly DisplayPiece[] pieces;
-  readonly DisplayContext[] contexts;
-  readonly DisplayValue[] values;
+  readonly MarkdownTextPiece[] pieces;
+  readonly MarkdownRenderContext[] contexts;
+  readonly MarkdownValueFragment[] values;
   readonly (int Start, int Piece)[] anchors;
 
   internal Guid Generation { get; } = Guid.NewGuid();
@@ -17,8 +17,8 @@ internal sealed class MessageDisplayIndex {
   // strings are deliberately charged per occurrence rather than undercounted.
   internal long AccountedBytes { get; }
 
-  internal MessageDisplayIndex(int sourceUtf8Bytes, DisplayPiece[] pieces,
-      DisplayContext[] contexts, DisplayValue[] values) {
+  internal MarkdownRenderIndex(int sourceUtf8Bytes, MarkdownTextPiece[] pieces,
+      MarkdownRenderContext[] contexts, MarkdownValueFragment[] values) {
     SourceUtf8Bytes = sourceUtf8Bytes;
     this.pieces = pieces;
     this.contexts = contexts;
@@ -32,13 +32,13 @@ internal sealed class MessageDisplayIndex {
         + anchors.Length * 8L;
   }
 
-  internal DisplayPiece Piece(int index) => pieces[index];
-  internal DisplayContext Context(int id) => contexts[id];
-  internal DisplayValue Value(int index) => values[index];
+  internal MarkdownTextPiece Piece(int index) => pieces[index];
+  internal MarkdownRenderContext Context(int id) => contexts[id];
+  internal MarkdownValueFragment Value(int index) => values[index];
 
   // A source anchor resolves to the first fragment at the nearest preceding
   // source start. Transformed fragments share a containing range, not fake offsets.
-  internal DisplayCursor Locate(int sourceUtf8Offset) {
+  internal MarkdownRenderCursor Locate(int sourceUtf8Offset) {
     if (sourceUtf8Offset < 0 || sourceUtf8Offset > SourceUtf8Bytes)
       throw new ArgumentOutOfRangeException(nameof(sourceUtf8Offset));
     if (anchors.Length == 0) return new(Generation, 0);

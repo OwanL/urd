@@ -47,6 +47,14 @@ The palette uses neutral black/charcoal surfaces and grey controls; semantic err
 colours remain distinct. Transcript rows render plain text and tool status; richer formatting
 and tool argument/result inspection remain future work.
 
+## Markdown rendering
+
+`source/ui/markdown-rendering/` contains the standalone `MarkdownRenderer` and
+`MarkdownWindowAssembler`. The assembler reads bounded semantic pages through
+`MarkdownPageSource`; the renderer turns its snapshot into HTML while retaining
+source ranges. This pipeline is not yet connected to the transcript. Run its
+standalone Chromium checks with `npm run test:markdown-rendering` from `source/ui/`.
+
 ## Workspace composition
 
 `app/Workspace.tsx` connects the behavioral owners and renders the workspace shell.

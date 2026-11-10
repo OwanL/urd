@@ -1,32 +1,32 @@
 import type {
-  ContextPage,
-  DisplayContext,
-  DisplayCursor,
-  DisplayPiece,
-  DisplaySource,
-  DisplayValue,
-  PiecePage,
-} from "../display/DisplayModel.ts";
+  MarkdownContextPage,
+  MarkdownRenderContext,
+  MarkdownRenderCursor,
+  MarkdownTextPiece,
+  MarkdownPageSource,
+  MarkdownValueFragment,
+  MarkdownPiecePage,
+} from "../markdown-rendering/MarkdownRenderModel.ts";
 
-export interface FixtureContext {
-  readonly context: DisplayContext;
-  readonly values?: readonly DisplayValue[];
+export interface MarkdownFixtureContext {
+  readonly context: MarkdownRenderContext;
+  readonly values?: readonly MarkdownValueFragment[];
 }
 
-export interface DisplayFixtureOptions {
+export interface MarkdownRenderFixtureOptions {
   readonly generation?: string;
   readonly piecePageSize?: number;
   readonly valuePageSize?: number;
   readonly pieceGeneration?: string;
   readonly contextGeneration?: string;
-  readonly transformPiecePage?: (page: PiecePage) => PiecePage;
-  readonly transformContextPage?: (page: ContextPage) => ContextPage;
+  readonly transformPiecePage?: (page: MarkdownPiecePage) => MarkdownPiecePage;
+  readonly transformContextPage?: (page: MarkdownContextPage) => MarkdownContextPage;
 }
 
-export function createDisplayContext(
+export function createMarkdownContext(
   id: number,
-  overrides: Partial<Omit<DisplayContext, "id">> = {},
-): DisplayContext {
+  overrides: Partial<Omit<MarkdownRenderContext, "id">> = {},
+): MarkdownRenderContext {
   return {
     id,
     kind: "paragraph",
@@ -48,12 +48,12 @@ export function createDisplayContext(
   };
 }
 
-export function createDisplayPiece(
+export function createMarkdownPiece(
   id: number,
   context: number,
   text: string,
-  overrides: Partial<Omit<DisplayPiece, "id" | "context" | "text">> = {},
-): DisplayPiece {
+  overrides: Partial<Omit<MarkdownTextPiece, "id" | "context" | "text">> = {},
+): MarkdownTextPiece {
   return {
     id,
     context,
@@ -67,30 +67,30 @@ export function createDisplayPiece(
   };
 }
 
-export function createDisplayValue(
-  kind: DisplayValue["kind"],
+export function createMarkdownValue(
+  kind: MarkdownValueFragment["kind"],
   text: string,
   part = 0,
   continued = false,
-): DisplayValue {
+): MarkdownValueFragment {
   return { kind, text, part, continued };
 }
 
-export class SyntheticDisplaySource implements DisplaySource {
-  readonly pieceRequests: DisplayCursor[] = [];
-  readonly contextRequests: { readonly id: number; readonly cursor: DisplayCursor }[] = [];
+export class SyntheticMarkdownPageSource implements MarkdownPageSource {
+  readonly pieceRequests: MarkdownRenderCursor[] = [];
+  readonly contextRequests: { readonly id: number; readonly cursor: MarkdownRenderCursor }[] = [];
 
   private readonly generation: string;
   private readonly piecePageSize: number;
   private readonly valuePageSize: number;
-  readonly pieces: readonly DisplayPiece[];
-  readonly contexts: readonly FixtureContext[];
-  private readonly options: DisplayFixtureOptions;
+  readonly pieces: readonly MarkdownTextPiece[];
+  readonly contexts: readonly MarkdownFixtureContext[];
+  private readonly options: MarkdownRenderFixtureOptions;
 
   constructor(
-    pieces: readonly DisplayPiece[],
-    contexts: readonly FixtureContext[],
-    options: DisplayFixtureOptions = {},
+    pieces: readonly MarkdownTextPiece[],
+    contexts: readonly MarkdownFixtureContext[],
+    options: MarkdownRenderFixtureOptions = {},
   ) {
     this.pieces = pieces;
     this.contexts = contexts;
@@ -99,16 +99,16 @@ export class SyntheticDisplaySource implements DisplaySource {
     this.piecePageSize = options.piecePageSize ?? Number.POSITIVE_INFINITY;
     this.valuePageSize = options.valuePageSize ?? Number.POSITIVE_INFINITY;
     if (this.piecePageSize <= 0 || this.valuePageSize <= 0)
-      throw new RangeError("Fixture page sizes must be positive");
+      throw new RangeError("Markdown render fixture page sizes must be positive");
   }
 
-  async readPieces(cursor: DisplayCursor, signal: AbortSignal): Promise<PiecePage> {
+  async readPieces(cursor: MarkdownRenderCursor, signal: AbortSignal): Promise<MarkdownPiecePage> {
     signal.throwIfAborted();
     this.pieceRequests.push({ ...cursor });
     const available = this.pieces.filter((piece) => piece.id >= cursor.index);
     const pagePieces = available.slice(0, this.piecePageSize);
     const next = pagePieces.length ? pagePieces.at(-1)!.id + 1 : cursor.index;
-    const page: PiecePage = {
+    const page: MarkdownPiecePage = {
       generation: this.options.pieceGeneration ?? this.generation,
       from: cursor.index,
       next,
@@ -118,16 +118,20 @@ export class SyntheticDisplaySource implements DisplaySource {
     return this.options.transformPiecePage?.(page) ?? page;
   }
 
-  async readContext(id: number, cursor: DisplayCursor, signal: AbortSignal): Promise<ContextPage> {
+  async readContext(
+    id: number,
+    cursor: MarkdownRenderCursor,
+    signal: AbortSignal,
+  ): Promise<MarkdownContextPage> {
     signal.throwIfAborted();
     this.contextRequests.push({ id, cursor: { ...cursor } });
     const fixture = this.contexts.find((entry) => entry.context.id === id);
-    if (!fixture) throw new Error(`Unknown fixture context ${id}`);
+    if (!fixture) throw new Error(`Unknown Markdown render fixture context ${id}`);
 
     const values = fixture.values ?? [];
     const pageValues = values.slice(cursor.index, cursor.index + this.valuePageSize);
     const next = cursor.index + pageValues.length;
-    const page: ContextPage = {
+    const page: MarkdownContextPage = {
       generation: this.options.contextGeneration ?? this.generation,
       context: fixture.context,
       from: cursor.index,

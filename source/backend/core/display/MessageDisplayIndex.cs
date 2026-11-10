@@ -12,6 +12,11 @@ internal sealed class MessageDisplayIndex {
   internal int PieceCount => pieces.Length;
   internal int ContextCount => contexts.Length;
 
+  // Retention accounting, not exact CLR heap size. Charge every array, record,
+  // reference, UTF-16 string (including variable metadata), and anchor. Shared
+  // strings are deliberately charged per occurrence rather than undercounted.
+  internal long AccountedBytes { get; }
+
   internal MessageDisplayIndex(int sourceUtf8Bytes, DisplayPiece[] pieces,
       DisplayContext[] contexts, DisplayValue[] values) {
     SourceUtf8Bytes = sourceUtf8Bytes;
@@ -20,6 +25,11 @@ internal sealed class MessageDisplayIndex {
     this.values = values;
     anchors = pieces.Select(p => (Start: p.Source.Start, Piece: p.Id))
       .OrderBy(p => p.Start).ThenBy(p => p.Piece).ToArray();
+    AccountedBytes = 128L + 4 * 24
+        + contexts.Length * (96L + 8)
+        + pieces.Sum(piece => 80L + 8 + 24 + 2L * piece.Text.Length)
+        + values.Sum(value => 40L + 8 + 24 + 2L * value.Text.Length)
+        + anchors.Length * 8L;
   }
 
   internal DisplayPiece Piece(int index) => pieces[index];

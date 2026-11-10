@@ -1,10 +1,34 @@
 # Transcript engineering — working design
 
-**Status: Stage 1 plan approved; Stage 2 scope, packets and qualification gates
-recorded.**
-**Updated: 2026-11-10.** Stage 2 package, renderer, virtualizer, persistent projection,
-schema and cache-budget choices remain unselected. Implementation is not authorized
-by this design record.
+**Status: Stage 1 delivered; Stage 2 implementation and composed qualification in progress.**
+**Updated: 2026-11-10.** The owner has directed continuing through a usable real-GUI
+transcript, rather than handing over another standalone demo. Markdig derivation,
+weighted positions, standalone rendering and generation handoff are implemented;
+production display remains inactive pending the gates below. Earlier "not selected"
+and planning-only statements in the discussion record describe their historical
+checkpoint, not the present source tree. Production cache limits remain unselected.
+
+## Current delivery sequence
+
+1. Replace serial per-context HTTP reads with bounded descriptor batches, preserving
+   fragmented metadata and atomic generation-fenced assembly. Re-run the composed
+   fixture before claiming a latency improvement.
+2. Connect authoritative entry lookup and public Core generation ownership to HTTP.
+   Lease ownership follows the existing page event stream: disconnect and shutdown
+   reclaim generations, including late opens. Explicit release remains awaitable;
+   a generation identity is not an independent ownership token. Keep this bridge
+   unactivated while its lifetime/failure paths are verified.
+3. Compose the actual browser transcript with the HTTP adapter, entry and intra-message
+   windows, source anchors, selected-span retention and persisted reading intent.
+   Exercise the real app against isolated stored fixtures, not live provider accounts.
+4. Qualify common-message latency, large-message catch-up, contention, navigation,
+   lifecycle and memory on that composition; select explicit limits from the evidence.
+   Only then stage a real-GUI build worth owner evaluation. A fixture improvement or
+   completed module is not a substitute for this gate.
+
+Stages 3–4 (tool/reasoning detail and managed media) retain their separate ownership
+and requirements. This delivery sequence does not authorize bypassing Stage 2
+performance/selection gates or adding migrations.
 
 ## Purpose and authority
 

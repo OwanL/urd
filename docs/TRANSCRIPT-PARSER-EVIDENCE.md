@@ -442,3 +442,20 @@ acceptance. No live history invalidation, provider streaming, concurrent parse s
 production cache defaults are established. The report, raw evidence and reproduction are
 at `C:/Users/OwanLazic/AppData/Local/Temp/urd-composed-1697571-o3wCsY/`; earlier flawed
 attempts and the pre-sentinel clipboard run are preserved as non-qualifying attempts.
+
+### Bounded descriptor-batch follow-up
+
+The same frozen baseline plus five captured batch-source files reduced descriptor-related
+HTTP requests from **1,387 to 148** for code and **10,304 to 486** for tables. Single-run
+initial open/assembly changed from 407.9 to **374 ms**, and 1,119.4 to **184.5 ms**,
+respectively. A 40-ID batch paged as 32 + 8 descriptors within 16 KiB; variable metadata
+remained separately paged. Both fixtures retained their 512-unit forward/backward traversal,
+selection/clipboard, trim/rehydrate, ten handoffs and stale-open cleanup checks.
+
+This is not the full current checkout: later public Core facade/serializer changes were
+excluded. One **65 ms** table long task was observed. Actual hidden visibility and
+freeze/resume remained unqualified (46 timer ticks during the freeze command), so lifecycle
+acceptance is still blocked. No production latency, memory budget or activation follows.
+The owned processes stopped, leases were released and the original evidence was unchanged.
+Report, input hashes, measured results and cleanup proof:
+`C:/Users/OwanLazic/AppData/Local/Temp/urd-batched-context-qual-qZWACy/`.

@@ -4,6 +4,7 @@ import type {
   MarkdownRenderCursor,
   MarkdownTextPiece,
   MarkdownPageSource,
+  MarkdownRenderManifest,
   MarkdownValueFragment,
   MarkdownPiecePage,
 } from "../markdown-rendering/MarkdownRenderModel.ts";
@@ -18,8 +19,13 @@ export interface MarkdownRenderFixtureOptions {
   readonly piecePageSize?: number;
   readonly valuePageSize?: number;
   readonly pieceGeneration?: string;
+  readonly beforePieceGeneration?: string;
   readonly contextGeneration?: string;
+  readonly pieceCount?: number;
+  readonly contextCount?: number;
+  readonly sourceUtf8Bytes?: number;
   readonly transformPiecePage?: (page: MarkdownPiecePage) => MarkdownPiecePage;
+  readonly transformBeforePiecePage?: (page: MarkdownPiecePage) => MarkdownPiecePage;
   readonly transformContextPage?: (page: MarkdownContextPage) => MarkdownContextPage;
 }
 
@@ -33,6 +39,7 @@ export function createMarkdownContext(
     parent: -1,
     firstChild: -1,
     nextSibling: -1,
+    childCount: 0,
     source: { start: 0, end: 0 },
     firstPiece: 0,
     pieceCount: 0,
@@ -77,7 +84,9 @@ export function createMarkdownValue(
 }
 
 export class SyntheticMarkdownPageSource implements MarkdownPageSource {
+  readonly manifest: MarkdownRenderManifest;
   readonly pieceRequests: MarkdownRenderCursor[] = [];
+  readonly beforePieceRequests: MarkdownRenderCursor[] = [];
   readonly contextRequests: { readonly id: number; readonly cursor: MarkdownRenderCursor }[] = [];
 
   private readonly generation: string;
@@ -96,6 +105,21 @@ export class SyntheticMarkdownPageSource implements MarkdownPageSource {
     this.contexts = contexts;
     this.options = options;
     this.generation = options.generation ?? "fixture-generation";
+    this.manifest = Object.freeze({
+      generation: this.generation,
+      sourceUtf8Bytes:
+        options.sourceUtf8Bytes ??
+        Math.max(
+          0,
+          ...pieces.map((piece) => piece.source.end),
+          ...contexts.map((entry) => entry.context.source.end),
+        ),
+      pieceCount:
+        options.pieceCount ?? pieces.reduce((count, piece) => Math.max(count, piece.id + 1), 0),
+      contextCount:
+        options.contextCount ??
+        contexts.reduce((count, entry) => Math.max(count, entry.context.id + 1), 0),
+    });
     this.piecePageSize = options.piecePageSize ?? Number.POSITIVE_INFINITY;
     this.valuePageSize = options.valuePageSize ?? Number.POSITIVE_INFINITY;
     if (this.piecePageSize <= 0 || this.valuePageSize <= 0)
@@ -107,15 +131,34 @@ export class SyntheticMarkdownPageSource implements MarkdownPageSource {
     this.pieceRequests.push({ ...cursor });
     const available = this.pieces.filter((piece) => piece.id >= cursor.index);
     const pagePieces = available.slice(0, this.piecePageSize);
-    const next = pagePieces.length ? pagePieces.at(-1)!.id + 1 : cursor.index;
+    const next = cursor.index + pagePieces.length;
     const page: MarkdownPiecePage = {
       generation: this.options.pieceGeneration ?? this.generation,
       from: cursor.index,
       next,
-      hasMore: available.length > pagePieces.length,
+      hasMore: next < this.manifest.pieceCount,
       pieces: pagePieces,
     };
     return this.options.transformPiecePage?.(page) ?? page;
+  }
+
+  async readPiecesBefore(
+    cursor: MarkdownRenderCursor,
+    signal: AbortSignal,
+  ): Promise<MarkdownPiecePage> {
+    signal.throwIfAborted();
+    this.beforePieceRequests.push({ ...cursor });
+    const available = this.pieces.filter((piece) => piece.id < cursor.index);
+    const pagePieces = available.slice(-this.piecePageSize);
+    const from = cursor.index - pagePieces.length;
+    const page: MarkdownPiecePage = {
+      generation: this.options.beforePieceGeneration ?? this.generation,
+      from,
+      next: cursor.index,
+      hasMore: cursor.index < this.manifest.pieceCount,
+      pieces: pagePieces,
+    };
+    return this.options.transformBeforePiecePage?.(page) ?? page;
   }
 
   async readContext(

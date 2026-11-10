@@ -32,6 +32,12 @@ export interface MarkdownSourceRange {
   readonly start: number;
   readonly end: number;
 }
+export interface MarkdownRenderManifest {
+  readonly generation: string;
+  readonly sourceUtf8Bytes: number;
+  readonly pieceCount: number;
+  readonly contextCount: number;
+}
 export interface MarkdownRenderCursor {
   readonly generation: string;
   readonly index: number;
@@ -52,6 +58,7 @@ export interface MarkdownRenderContext {
   readonly parent: number;
   readonly firstChild: number;
   readonly nextSibling: number;
+  readonly childCount: number;
   readonly source: MarkdownSourceRange;
   readonly firstPiece: number;
   readonly pieceCount: number;
@@ -87,6 +94,7 @@ export interface MarkdownContextPage {
 }
 export interface MarkdownPageSource {
   readPieces(cursor: MarkdownRenderCursor, signal: AbortSignal): Promise<MarkdownPiecePage>;
+  readPiecesBefore(cursor: MarkdownRenderCursor, signal: AbortSignal): Promise<MarkdownPiecePage>;
   readContext(
     id: number,
     cursor: MarkdownRenderCursor,

@@ -44,8 +44,14 @@ function node(
   const previous = lastChild.get(parent);
   if (previous !== undefined)
     contexts[previous]!.context = { ...contexts[previous]!.context, nextSibling: id };
-  else if (parent >= 0)
-    contexts[parent]!.context = { ...contexts[parent]!.context, firstChild: id };
+  if (parent >= 0) {
+    const parentContext = contexts[parent]!.context;
+    contexts[parent]!.context = {
+      ...parentContext,
+      firstChild: parentContext.firstChild < 0 ? id : parentContext.firstChild,
+      childCount: parentContext.childCount + 1,
+    };
+  }
   lastChild.set(parent, id);
   return id;
 }
@@ -187,7 +193,7 @@ const source = new SyntheticMarkdownPageSource(pieces, contexts, {
 });
 const assembler = new MarkdownWindowAssembler(
   source,
-  "fixture-generation",
+  source.manifest,
   mode === "detached" ? detachedFrom : 0,
 );
 const root = document.querySelector("#markdown-renderer")!;

@@ -8,6 +8,7 @@ import type {
   MarkdownPageSource,
   MarkdownValueFragment,
   MarkdownPiecePage,
+  MarkdownRenderManifest,
   MarkdownValueKind,
 } from "./MarkdownRenderModel.ts";
 
@@ -74,8 +75,15 @@ function requireMarkdownPage(
 
 function copyMarkdownSourceRange(
   range: MarkdownRenderContext["source"],
+  manifest: MarkdownRenderManifest,
 ): MarkdownRenderContext["source"] {
-  if (!range || !isIndex(range.start) || !isIndex(range.end) || range.end < range.start)
+  if (
+    !range ||
+    !isIndex(range.start) ||
+    !isIndex(range.end) ||
+    range.end < range.start ||
+    range.end > manifest.sourceUtf8Bytes
+  )
     throw new Error("Invalid Markdown source range.");
   return Object.freeze({ start: range.start, end: range.end });
 }
@@ -83,10 +91,12 @@ function copyMarkdownSourceRange(
 function copyMarkdownContext(
   context: MarkdownRenderContext,
   expectedId: number,
+  manifest: MarkdownRenderManifest,
 ): MarkdownRenderContext {
   if (
     !context ||
     !isIndex(context.id) ||
+    context.id >= manifest.contextCount ||
     context.id !== expectedId ||
     !markdownElementKinds.has(context.kind) ||
     !Number.isSafeInteger(context.parent) ||
@@ -94,13 +104,17 @@ function copyMarkdownContext(
     context.parent >= context.id ||
     !Number.isSafeInteger(context.firstChild) ||
     context.firstChild < -1 ||
-    (context.firstChild >= 0 && context.firstChild <= context.id) ||
+    (context.firstChild >= 0 &&
+      (context.firstChild <= context.id || context.firstChild >= manifest.contextCount)) ||
     !Number.isSafeInteger(context.nextSibling) ||
     context.nextSibling < -1 ||
-    (context.nextSibling >= 0 && context.nextSibling <= context.id) ||
+    (context.nextSibling >= 0 &&
+      (context.nextSibling <= context.id || context.nextSibling >= manifest.contextCount)) ||
+    !isIndex(context.childCount) ||
     !isIndex(context.firstPiece) ||
     !isIndex(context.pieceCount) ||
     !Number.isSafeInteger(context.firstPiece + context.pieceCount) ||
+    context.firstPiece + context.pieceCount > manifest.pieceCount ||
     !isIndex(context.valueCount) ||
     !isIndex(context.position) ||
     !isIndex(context.level) ||
@@ -110,7 +124,10 @@ function copyMarkdownContext(
     !alignments.has(context.alignment) ||
     !Number.isSafeInteger(context.headerCell) ||
     context.headerCell < -1 ||
-    (context.headerCell >= 0 && (context.kind !== "cell" || context.headerCell > context.id)) ||
+    (context.headerCell >= 0 &&
+      (context.kind !== "cell" ||
+        context.headerCell > context.id ||
+        context.headerCell >= manifest.contextCount)) ||
     (context.kind === "cell" &&
       (context.header ? context.headerCell !== context.id : context.headerCell === context.id))
   )
@@ -120,7 +137,10 @@ function copyMarkdownContext(
     (context.id > 0 && context.parent < 0)
   )
     throw new Error("Markdown render context has invalid ancestry.");
-  return Object.freeze({ ...context, source: copyMarkdownSourceRange(context.source) });
+  return Object.freeze({
+    ...context,
+    source: copyMarkdownSourceRange(context.source, manifest),
+  });
 }
 
 function sameMarkdownContext(left: MarkdownRenderContext, right: MarkdownRenderContext): boolean {
@@ -130,6 +150,7 @@ function sameMarkdownContext(left: MarkdownRenderContext, right: MarkdownRenderC
     left.parent === right.parent &&
     left.firstChild === right.firstChild &&
     left.nextSibling === right.nextSibling &&
+    left.childCount === right.childCount &&
     left.source.start === right.source.start &&
     left.source.end === right.source.end &&
     left.firstPiece === right.firstPiece &&
@@ -145,11 +166,16 @@ function sameMarkdownContext(left: MarkdownRenderContext, right: MarkdownRenderC
   );
 }
 
-function copyMarkdownTextPiece(piece: MarkdownTextPiece): MarkdownTextPiece {
+function copyMarkdownTextPiece(
+  piece: MarkdownTextPiece,
+  manifest: MarkdownRenderManifest,
+): MarkdownTextPiece {
   if (
     !piece ||
     !isIndex(piece.id) ||
+    piece.id >= manifest.pieceCount ||
     !isIndex(piece.context) ||
+    piece.context >= manifest.contextCount ||
     !markdownTextKinds.has(piece.kind) ||
     typeof piece.text !== "string" ||
     !sourceMappings.has(piece.mapping) ||
@@ -157,15 +183,76 @@ function copyMarkdownTextPiece(piece: MarkdownTextPiece): MarkdownTextPiece {
     typeof piece.continued !== "boolean"
   )
     throw new Error("Invalid Markdown text piece.");
-  return Object.freeze({ ...piece, source: copyMarkdownSourceRange(piece.source) });
+  return Object.freeze({
+    ...piece,
+    source: copyMarkdownSourceRange(piece.source, manifest),
+  });
 }
 
 function copyMarkdownPiecePage(
   page: MarkdownPiecePage,
   cursor: MarkdownRenderCursor,
+  manifest: MarkdownRenderManifest,
 ): MarkdownPiecePage {
-  requireMarkdownPage(page, cursor, page.pieces);
-  return Object.freeze({ ...page, pieces: Object.freeze(page.pieces.map(copyMarkdownTextPiece)) });
+  if (!page || !Array.isArray(page.pieces)) throw new Error("Invalid Markdown page.");
+  const next = page.from + page.pieces.length;
+  if (page.generation !== cursor.generation)
+    throw new Error("Markdown render generation changed; restart from the source anchor.");
+  if (
+    page.from !== cursor.index ||
+    !Number.isSafeInteger(next) ||
+    page.next !== next ||
+    !isIndex(page.next) ||
+    page.next > manifest.pieceCount ||
+    typeof page.hasMore !== "boolean" ||
+    page.hasMore !== page.next < manifest.pieceCount ||
+    (page.hasMore && page.next <= page.from)
+  )
+    throw new Error("Markdown page did not advance consistently.");
+  return Object.freeze({
+    ...page,
+    pieces: Object.freeze(page.pieces.map((piece) => copyMarkdownTextPiece(piece, manifest))),
+  });
+}
+
+function copyMarkdownPiecePageBefore(
+  page: MarkdownPiecePage,
+  cursor: MarkdownRenderCursor,
+  manifest: MarkdownRenderManifest,
+): MarkdownPiecePage {
+  if (!page || !Array.isArray(page.pieces)) throw new Error("Invalid Markdown page.");
+  const count = page.pieces.length;
+  if (page.generation !== cursor.generation)
+    throw new Error("Markdown render generation changed; restart from the source anchor.");
+  if (
+    page.next !== cursor.index ||
+    !isIndex(page.from) ||
+    !isIndex(page.next) ||
+    page.from > page.next ||
+    page.next > manifest.pieceCount ||
+    page.next - page.from !== count ||
+    typeof page.hasMore !== "boolean" ||
+    page.hasMore !== page.next < manifest.pieceCount ||
+    (cursor.index > 0 && count === 0)
+  )
+    throw new Error("Markdown preceding page did not match its cursor.");
+  return Object.freeze({
+    ...page,
+    pieces: Object.freeze(page.pieces.map((piece) => copyMarkdownTextPiece(piece, manifest))),
+  });
+}
+
+function copyMarkdownManifest(manifest: MarkdownRenderManifest): MarkdownRenderManifest {
+  if (
+    !manifest ||
+    typeof manifest.generation !== "string" ||
+    manifest.generation.length === 0 ||
+    !isIndex(manifest.sourceUtf8Bytes) ||
+    !isIndex(manifest.pieceCount) ||
+    !isIndex(manifest.contextCount)
+  )
+    throw new Error("Invalid Markdown render manifest.");
+  return Object.freeze({ ...manifest });
 }
 
 function sameMarkdownTextPiece(left: MarkdownTextPiece, right: MarkdownTextPiece): boolean {
@@ -195,20 +282,23 @@ function copyMarkdownValueFragment(value: MarkdownValueFragment): MarkdownValueF
 }
 
 // One assembler owns one disposable generation/window. Pages commit atomically;
-// failure/abort leaves the last snapshot usable. Concurrent appends are rejected.
+// failure/abort leaves the last snapshot usable. Concurrent reads are rejected.
 export class MarkdownWindowAssembler {
   private current: MarkdownRenderSnapshot;
   private reading = false;
+  private readonly manifest: MarkdownRenderManifest;
   private readonly source: MarkdownPageSource;
 
-  constructor(source: MarkdownPageSource, generation: string, from = 0) {
-    if (!generation || !isIndex(from)) throw new Error("Invalid Markdown render window.");
+  constructor(source: MarkdownPageSource, manifest: MarkdownRenderManifest, from = 0) {
+    this.manifest = copyMarkdownManifest(manifest);
+    if (!isIndex(from) || from > this.manifest.pieceCount)
+      throw new Error("Invalid Markdown render window.");
     this.source = source;
     this.current = {
-      generation,
+      generation: this.manifest.generation,
       from,
       next: from,
-      hasMore: true,
+      hasMore: from < this.manifest.pieceCount,
       contexts: new Map(),
       pieces: new Map(),
     };
@@ -224,9 +314,13 @@ export class MarkdownWindowAssembler {
     signal.throwIfAborted();
     this.reading = true;
     try {
-      const read = new AssemblyRead(this.source, this.current, signal);
+      const read = new AssemblyRead(this.source, this.current, this.manifest, signal);
       const cursor = { generation: this.current.generation, index: this.current.next };
-      const page = copyMarkdownPiecePage(await this.source.readPieces(cursor, signal), cursor);
+      const page = copyMarkdownPiecePage(
+        await this.source.readPieces(cursor, signal),
+        cursor,
+        this.manifest,
+      );
       await read.add(page);
       signal.throwIfAborted();
       this.current = {
@@ -241,18 +335,52 @@ export class MarkdownWindowAssembler {
       this.reading = false;
     }
   }
+
+  async prepend(signal: AbortSignal): Promise<MarkdownRenderSnapshot> {
+    if (this.reading) throw new Error("A Markdown render read is already pending.");
+    if (this.current.from === 0) return this.current;
+    signal.throwIfAborted();
+    this.reading = true;
+    try {
+      const read = new AssemblyRead(this.source, this.current, this.manifest, signal);
+      const cursor = { generation: this.current.generation, index: this.current.from };
+      const page = copyMarkdownPiecePageBefore(
+        await this.source.readPiecesBefore(cursor, signal),
+        cursor,
+        this.manifest,
+      );
+      await read.add(page);
+      signal.throwIfAborted();
+      this.current = {
+        ...this.current,
+        from: page.from,
+        pieces: read.pieces,
+        contexts: read.contexts,
+      };
+      return this.current;
+    } finally {
+      this.reading = false;
+    }
+  }
 }
 
 class AssemblyRead {
   readonly pieces: Map<number, MarkdownTextPiece>;
   readonly contexts: Map<number, AssembledMarkdownContext>;
   private readonly rows = new Map<number, readonly number[]>();
+  private readonly manifest: MarkdownRenderManifest;
   private readonly source: MarkdownPageSource;
   private readonly generation: string;
   private readonly signal: AbortSignal;
 
-  constructor(source: MarkdownPageSource, snapshot: MarkdownRenderSnapshot, signal: AbortSignal) {
+  constructor(
+    source: MarkdownPageSource,
+    snapshot: MarkdownRenderSnapshot,
+    manifest: MarkdownRenderManifest,
+    signal: AbortSignal,
+  ) {
     this.source = source;
+    this.manifest = manifest;
     this.generation = snapshot.generation;
     this.signal = signal;
     this.pieces = new Map(snapshot.pieces);
@@ -310,7 +438,7 @@ class AssemblyRead {
       const cursor = { generation: this.generation, index };
       const page = await this.source.readContext(id, cursor, this.signal);
       requireMarkdownPage(page, cursor, page.values);
-      const receivedContext = copyMarkdownContext(page.context, id);
+      const receivedContext = copyMarkdownContext(page.context, id, this.manifest);
       if (descriptor && !sameMarkdownContext(descriptor, receivedContext))
         throw new Error("Markdown render context changed between pages.");
       descriptor = receivedContext;
@@ -419,6 +547,7 @@ class AssemblyRead {
         const page = copyMarkdownPiecePage(
           await this.source.readPieces(cursor, this.signal),
           cursor,
+          this.manifest,
         );
         if (page.next <= index) throw new Error("Detached header read did not advance.");
         for (const [offset, piece] of page.pieces.entries()) {

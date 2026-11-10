@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { MarkdownWindowAssembler } from "../markdown-rendering/MarkdownWindowAssembler.ts";
+import type { MarkdownPiecePage } from "../markdown-rendering/MarkdownRenderModel.ts";
 import { safeMarkdownLink } from "../markdown-rendering/MarkdownLinkPolicy.ts";
 import {
   createMarkdownContext,
   createMarkdownPiece,
   createMarkdownValue,
   SyntheticMarkdownPageSource,
+  type MarkdownRenderFixtureOptions,
 } from "./MarkdownRenderFixture.ts";
 
 function signal() {
@@ -19,6 +21,32 @@ function assertUncommitted(assembler: MarkdownWindowAssembler, from: number) {
   assert.equal(snapshot.next, from);
   assert.equal(snapshot.pieces.size, 0);
   assert.equal(snapshot.contexts.size, 0);
+}
+
+function linearSource(
+  pieces: ReturnType<typeof createMarkdownPiece>[],
+  options: MarkdownRenderFixtureOptions = {},
+) {
+  const pieceCount =
+    options.pieceCount ?? pieces.reduce((count, piece) => Math.max(count, piece.id + 1), 0);
+  return new SyntheticMarkdownPageSource(
+    pieces,
+    [
+      {
+        context: createMarkdownContext(0, {
+          kind: "document",
+          firstChild: 1,
+          childCount: 1,
+          firstPiece: 0,
+          pieceCount,
+        }),
+      },
+      {
+        context: createMarkdownContext(1, { parent: 0, firstPiece: 0, pieceCount }),
+      },
+    ],
+    options,
+  );
 }
 
 void test("assembles continued values and pieces across appended pages", async () => {
@@ -51,7 +79,7 @@ void test("assembles continued values and pieces across appended pages", async (
     ],
     { piecePageSize: 1, valuePageSize: 1 },
   );
-  const assembler = new MarkdownWindowAssembler(source, "fixture-generation");
+  const assembler = new MarkdownWindowAssembler(source, source.manifest);
 
   const first = await assembler.append(signal());
   assert.equal(first.next, 1);
@@ -90,7 +118,7 @@ void test("accepts a middle-window initial part and continues it on the next app
     ],
     { piecePageSize: 1 },
   );
-  const assembler = new MarkdownWindowAssembler(source, "fixture-generation", 3);
+  const assembler = new MarkdownWindowAssembler(source, source.manifest, 3);
 
   const middle = await assembler.append(signal());
   assert.equal(middle.from, 3);
@@ -105,11 +133,153 @@ void test("accepts a middle-window initial part and continues it on the next app
   const invalid = new SyntheticMarkdownPageSource(
     [createMarkdownPiece(0, 1, "continued", { part: 1 })],
     [],
+    { contextCount: 2 },
   );
   await assert.rejects(
-    new MarkdownWindowAssembler(invalid, "fixture-generation").append(signal()),
+    new MarkdownWindowAssembler(invalid, invalid.manifest).append(signal()),
     /incomplete text piece/u,
   );
+});
+
+void test("prepends ascending pages and validates continuation across the window seam", async () => {
+  const source = linearSource(
+    Array.from({ length: 5 }, (_, id) =>
+      createMarkdownPiece(id, 1, `part-${id}`, { part: id, continued: id < 4 }),
+    ),
+    { piecePageSize: 1 },
+  );
+  const assembler = new MarkdownWindowAssembler(source, source.manifest, 3);
+
+  await assembler.append(signal());
+  await assembler.append(signal());
+  const initial = assembler.snapshot;
+  assert.equal(initial.from, 3);
+  assert.equal(initial.next, 5);
+  assert.equal(initial.hasMore, false);
+
+  const last = await assembler.prepend(signal());
+  assert.equal(last.from, 2);
+  assert.equal(last.next, 5);
+  assert.equal(last.hasMore, false);
+  const middle = await assembler.prepend(signal());
+  const first = await assembler.prepend(signal());
+  assert.equal(middle.from, 1);
+  assert.equal(first.from, 0);
+  assert.deepEqual(
+    [...first.pieces.keys()].sort((left, right) => left - right),
+    [0, 1, 2, 3, 4],
+  );
+  assert.deepEqual(
+    source.beforePieceRequests.map((cursor) => cursor.index),
+    [3, 2, 1],
+  );
+  assert.equal(await assembler.prepend(signal()), first);
+});
+
+void test("failed prepend leaves its prior snapshot usable", async () => {
+  const cases = [
+    {
+      name: "stale generation",
+      options: { beforePieceGeneration: "stale-generation" },
+      message: /generation changed/u,
+    },
+    {
+      name: "malformed cursor",
+      options: {
+        transformBeforePiecePage: (page: MarkdownPiecePage) => ({ ...page, next: page.next - 1 }),
+      },
+      message: /preceding page/u,
+    },
+    {
+      name: "continuation seam",
+      options: {},
+      message: /continuation is discontinuous/u,
+    },
+  ] as const;
+
+  for (const { name, options, message } of cases) {
+    const source = linearSource(
+      [
+        createMarkdownPiece(0, 1, "first", { part: 0, continued: true }),
+        createMarkdownPiece(1, 1, "middle", { part: name === "continuation seam" ? 2 : 1 }),
+        createMarkdownPiece(2, 1, "last", { part: name === "continuation seam" ? 3 : 2 }),
+      ],
+      { piecePageSize: 1, ...options },
+    );
+    const assembler = new MarkdownWindowAssembler(source, source.manifest, 2);
+    await assembler.append(signal());
+    const prior = assembler.snapshot;
+
+    await assert.rejects(assembler.prepend(signal()), message, name);
+    assert.equal(assembler.snapshot, prior);
+    assert.deepEqual([...prior.pieces.keys()], [2]);
+  }
+});
+
+void test("aborted prepend preserves the snapshot", async () => {
+  const source = linearSource([
+    createMarkdownPiece(0, 1, "first"),
+    createMarkdownPiece(1, 1, "last"),
+  ]);
+  let release!: () => void;
+  let entered!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const started = new Promise<void>((resolve) => (entered = resolve));
+  const heldSource = {
+    readPieces: source.readPieces.bind(source),
+    async readPiecesBefore(cursor: Parameters<typeof source.readPiecesBefore>[0]) {
+      entered();
+      await gate;
+      return source.readPiecesBefore(cursor, signal());
+    },
+    readContext: source.readContext.bind(source),
+  };
+  const assembler = new MarkdownWindowAssembler(heldSource, source.manifest, 1);
+  await assembler.append(signal());
+  const prior = assembler.snapshot;
+  const controller = new AbortController();
+  const pending = assembler.prepend(controller.signal);
+  await started;
+  controller.abort();
+  release();
+
+  await assert.rejects(pending);
+  assert.equal(assembler.snapshot, prior);
+});
+
+void test("prepend and append share one pending read", async () => {
+  const source = linearSource([
+    createMarkdownPiece(0, 1, "first"),
+    createMarkdownPiece(1, 1, "last"),
+  ]);
+  let release!: () => void;
+  let entered!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const started = new Promise<void>((resolve) => (entered = resolve));
+  const heldSource = {
+    manifest: source.manifest,
+    pieces: source.pieces,
+    contexts: source.contexts,
+    pieceRequests: source.pieceRequests,
+    beforePieceRequests: source.beforePieceRequests,
+    contextRequests: source.contextRequests,
+    readPieces: source.readPieces.bind(source),
+    async readPiecesBefore(
+      cursor: Parameters<typeof source.readPiecesBefore>[0],
+      signal: AbortSignal,
+    ) {
+      entered();
+      await gate;
+      return source.readPiecesBefore(cursor, signal);
+    },
+    readContext: source.readContext.bind(source),
+  };
+  const assembler = new MarkdownWindowAssembler(heldSource, source.manifest, 1);
+  const pending = assembler.prepend(signal());
+  await started;
+  await assert.rejects(assembler.append(signal()), /already pending/u);
+  release();
+  assert.equal((await pending).from, 0);
 });
 
 void test("hydrates middle ancestry and a detached table header cell and its pieces", async () => {
@@ -178,7 +348,7 @@ void test("hydrates middle ancestry and a detached table header cell and its pie
     [...headerPieces, createMarkdownPiece(10, 5, "value")],
     contexts,
   );
-  const assembler = new MarkdownWindowAssembler(source, "fixture-generation", 10);
+  const assembler = new MarkdownWindowAssembler(source, source.manifest, 10);
 
   const snapshot = await assembler.append(signal());
 
@@ -193,7 +363,7 @@ void test("rejects a piece page from another generation without committing", asy
     [{ context: createMarkdownContext(1, { firstPiece: 0, pieceCount: 1 }) }],
     { pieceGeneration: "stale-generation" },
   );
-  const assembler = new MarkdownWindowAssembler(source, "fixture-generation");
+  const assembler = new MarkdownWindowAssembler(source, source.manifest);
 
   await assert.rejects(assembler.append(signal()));
   assertUncommitted(assembler, 0);
@@ -210,7 +380,7 @@ void test("rejects a context page from another generation without committing", a
     ],
     { contextGeneration: "stale-generation" },
   );
-  const assembler = new MarkdownWindowAssembler(source, "fixture-generation");
+  const assembler = new MarkdownWindowAssembler(source, source.manifest);
 
   await assert.rejects(assembler.append(signal()));
   assertUncommitted(assembler, 0);
@@ -218,9 +388,10 @@ void test("rejects a context page from another generation without committing", a
 
 void test("rejects a nonadvancing piece page without committing", async () => {
   const source = new SyntheticMarkdownPageSource([], [], {
+    pieceCount: 1,
     transformPiecePage: (page) => ({ ...page, next: page.from, hasMore: true }),
   });
-  const assembler = new MarkdownWindowAssembler(source, "fixture-generation");
+  const assembler = new MarkdownWindowAssembler(source, source.manifest);
 
   await assert.rejects(assembler.append(signal()));
   assertUncommitted(assembler, 0);
@@ -243,7 +414,7 @@ void test("rejects a nonadvancing context page without committing", async () => 
       transformContextPage: (page) => ({ ...page, next: page.from, hasMore: true }),
     },
   );
-  const assembler = new MarkdownWindowAssembler(source, "fixture-generation");
+  const assembler = new MarkdownWindowAssembler(source, source.manifest);
 
   await assert.rejects(assembler.append(signal()));
   assertUncommitted(assembler, 0);
@@ -265,7 +436,7 @@ void test("rejects skipped piece IDs without committing", async () => {
     ],
     { transformPiecePage: (page) => ({ ...page, next: page.from + page.pieces.length }) },
   );
-  const assembler = new MarkdownWindowAssembler(source, "fixture-generation");
+  const assembler = new MarkdownWindowAssembler(source, source.manifest);
 
   await assert.rejects(assembler.append(signal()));
   assertUncommitted(assembler, 0);
@@ -285,7 +456,7 @@ void test("rejects discontinuous context value parts without committing", async 
     ],
     { valuePageSize: 1 },
   );
-  const assembler = new MarkdownWindowAssembler(source, "fixture-generation");
+  const assembler = new MarkdownWindowAssembler(source, source.manifest);
 
   await assert.rejects(assembler.append(signal()));
   assertUncommitted(assembler, 0);
@@ -350,7 +521,7 @@ void test("rejects a header reference from another table", async () => {
     },
   ];
   const source = new SyntheticMarkdownPageSource([createMarkdownPiece(0, 8, "body")], contexts);
-  const assembler = new MarkdownWindowAssembler(source, "fixture-generation");
+  const assembler = new MarkdownWindowAssembler(source, source.manifest);
 
   await assert.rejects(assembler.append(signal()), /different table/u);
   assertUncommitted(assembler, 0);
@@ -378,7 +549,7 @@ void test("keeps UTF-8 source ranges opaque and detaches page records", async ()
     [piece],
     [{ context: root }, { context: paragraph }],
   );
-  const assembler = new MarkdownWindowAssembler(source, "fixture-generation");
+  const assembler = new MarkdownWindowAssembler(source, source.manifest);
 
   const snapshot = await assembler.append(signal());
   contextRange.end = 2;
@@ -417,10 +588,10 @@ void test("rejects a context descriptor that changes between value pages", async
     {
       valuePageSize: 1,
       transformContextPage: (page) =>
-        page.from === 1 ? { ...page, context: { ...page.context, position: 1 } } : page,
+        page.from === 1 ? { ...page, context: { ...page.context, childCount: 1 } } : page,
     },
   );
-  const assembler = new MarkdownWindowAssembler(source, "fixture-generation");
+  const assembler = new MarkdownWindowAssembler(source, source.manifest);
 
   await assert.rejects(assembler.append(signal()), /context changed/u);
   assertUncommitted(assembler, 0);
@@ -453,8 +624,8 @@ void test("allows only safe absolute and relative Markdown links", () => {
 });
 
 void test("accepts an empty terminal piece page", async () => {
-  const source = new SyntheticMarkdownPageSource([], []);
-  const assembler = new MarkdownWindowAssembler(source, "fixture-generation", 7);
+  const source = new SyntheticMarkdownPageSource([], [], { pieceCount: 7 });
+  const assembler = new MarkdownWindowAssembler(source, source.manifest, 7);
 
   const snapshot = await assembler.append(signal());
 

@@ -82,3 +82,58 @@ Related: [execution](execution-design.md), [sessions](session-design.md), [disco
 - Remaining class structure: catalog, parallel dispatch, file queue, background registry and
   delivery, process ownership, the four core tools, storage, composition.
 - Transcript presentation of tool rows and pending background calls.
+
+## Approved code shapes
+
+Item 13 holds `AgentTool` and `ToolCatalog`. Further approved pieces, owner-reviewed one at a time:
+
+**Call input and output.**
+
+```csharp
+internal sealed record ToolContext(
+  string WorkingDirectory, Guid RequestId, string CallId,
+  bool ModelAcceptsImages, Action<ToolOutput> ReportProgress);
+
+internal sealed record ToolOutput(
+  string Text, IReadOnlyList<DataContent> Images,
+  JsonElement? Details = null, bool IsError = false);
+```
+
+**Model settings.** Version 1 offers the generic tools to every family; a family without its own
+tool falls back to the generic one. Family-specific tools (e.g. `apply_patch`) come later.
+
+```csharp
+public enum ModelFamily { OpenAI, Anthropic, Google, Other }
+public sealed record ModelSettings(Guid ConnectionId, string ModelId, ModelFamily Family);
+public sealed record LlmSelection(
+  ProviderConnection Connection, string ModelId, string? ReasoningEffort, ModelFamily Family);
+```
+
+**File tools.** Each tool owns its logic; extract shared helpers only when a second user exists.
+The queue is shared by all chats and coordinates Urd's own tools only.
+
+```csharp
+internal sealed class FileMutationQueue {
+  public Task<T> ChangeAsync<T>(string path, Func<CancellationToken, Task<T>> change, CancellationToken cancellation);
+  public Task<T> ReadAsync<T>(string path, Func<CancellationToken, Task<T>> read, CancellationToken cancellation);
+}
+internal sealed class ReadTool(FileMutationQueue files) : AgentTool { ... }   // read(path, offset?, limit?)
+internal sealed class WriteTool(FileMutationQueue files) : AgentTool { ... }  // write(path, content)
+internal sealed class EditTool(FileMutationQueue files) : AgentTool { ... }   // edit(path, edits)
+```
+
+**Bash and processes.** One Windows job object per chat; a nested job per call.
+
+```csharp
+internal sealed class ChatProcesses : IAsyncDisposable {
+  public ShellProcess StartBash(string command, string directory,
+    IReadOnlyDictionary<string, string> environment, Action<ReadOnlyMemory<byte>> receiveOutput);
+  public Task KillAllAsync();
+}
+internal sealed class ShellProcess : IAsyncDisposable {
+  public Task<int?> WaitForExitAsync();
+  public Task CancelAsync();
+  public void LeaveBackgroundProcesses();
+}
+internal sealed class BashTool(ChatProcesses processes, GitBash bash) : AgentTool { ... }  // bash(command, timeout?)
+```

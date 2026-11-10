@@ -55,7 +55,8 @@ and tool argument/result inspection remain future work.
 while retaining source ranges. Dependency-aware trimming separates display from support
 ranges. Native selection/focus pins defer trimming; complete code lines and table rows
 have placeholders and source-anchor geometry, while arbitrary giant paragraphs, lines,
-cells and metadata are not bounded. Generation handoff tracks drain and disposal. This
+cells and metadata are not bounded. Generation handoff awaits read drain and generation
+release before another open or final disposal. This
 is still not activated in Transcript or routes. Catch-up can be deferred by selection,
 and unmounting loses selection. The standalone durable suite has 196 UI unit tests and
 12 Chromium tests; an exhaustive composed handoff probe is temporary evidence, not a

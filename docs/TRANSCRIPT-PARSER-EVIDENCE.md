@@ -415,3 +415,30 @@ recovery is not guaranteed by a deadline. The exact temporary reports/evidence a
 - `C:/Users/OwanLazic/AppData/Local/Temp/urd-exact-candidate-23d2a970-5fd6-4787-a6a5-3be67b72aa99/`
 - `C:/Users/OwanLazic/AppData/Local/Temp/urd-exact-candidate-12x12-56975e8e-8602-4028-813f-550005c09e87/`
 - `C:/Users/OwanLazic/AppData/Local/Temp/urd-exact-candidate-12x12-160mib-01641b5b-b008-40b2-bbe5-b00a647aca3e/`
+
+## Fixture HTTP/browser composition at HEAD 1697571 — 2026-11-11
+
+A temporary fixture host connected real stored Markdown capture, the scheduler, Markdig
+and page reader through Kestrel JSON to the standalone browser renderer. It did not map
+production routes or modify `Transcript.tsx`. Code and table fixtures each traversed 512
+units in both directions. Peak piece/context/DOM counts were 208/72/284 for code and
+212/569/794 for tables; maximum piece response bodies were 6,382 and 5,478 bytes.
+Initial open and assembly took 407.90 ms for code and 1,119.40 ms for tables. Publish to
+the next animation frame peaked at 5.20 and 8.50 ms respectively, with no observed long
+tasks. These are fixture timings, not a 100 ms end-to-end small-message result: serial
+context HTTP reads dominated, including 1,387 code and 10,304 table requests.
+
+Ten changed-source publications retained the old generation until replacement, suppressed
+a stale candidate and awaited release. Thirteen opens had thirteen releases. Consumer
+release left the expected twelve-entry warm cache; explicit disposal returned leases,
+entries, retained bytes and pending keys to zero. Chromium heap fell between the 5- and
+15-second unforced samples, but neither recovery deadlines nor leak freedom are claimed.
+Native Ctrl+C replaced a distinct clipboard sentinel with the selected source text.
+
+Actual tab hiding and suspension remain unqualified: focusing a second headless page did
+not hide the document. CDP accepted frozen/active commands, but no freeze/resume events
+occurred and the page timer continued. The runner therefore reports `blocked`, not full
+acceptance. No live history invalidation, provider streaming, concurrent parse stress or
+production cache defaults are established. The report, raw evidence and reproduction are
+at `C:/Users/OwanLazic/AppData/Local/Temp/urd-composed-1697571-o3wCsY/`; earlier flawed
+attempts and the pre-sentinel clipboard run are preserved as non-qualifying attempts.

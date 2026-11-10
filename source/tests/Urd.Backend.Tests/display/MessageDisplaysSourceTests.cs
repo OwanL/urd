@@ -53,7 +53,7 @@ public sealed class MessageDisplaysSourceTests {
       await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
       using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(5));
       await session.ReadSnapshotAsync(cancellation.Token);
-      var extent = await Task.Run(() => store.Content.CaptureClosedSourceExtent(key.SessionId, key.Message))
+      var extent = await Task.Run(() => store.Content.CaptureSourceExtent(key.SessionId, key.Message, key.TextFacts))
           .WaitAsync(cancellation.Token);
       Assert.Equal(1, extent.AvailableThrough.SegmentIndex);
       Assert.False(request.IsCompleted);
@@ -75,6 +75,6 @@ public sealed class MessageDisplaysSourceTests {
         new(submission, 0, text, TestLlmSelection.Default), true, execution).NewlyAccepted);
     var request = store.Executions.ClaimNextRequest(session, execution, 0)!;
     Assert.True(store.Executions.StartRequest(session, execution, 0, request.RequestId));
-    return new(session, new(execution, submission, MessageRole.User, 0), 0, 1, false);
+    return new(session, new(execution, submission, MessageRole.User, 0), 0, 1, true, false);
   }
 }

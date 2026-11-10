@@ -70,11 +70,21 @@ public sealed class MessageDisplaysTests {
     }
   }
 
-  [Fact]
-  public async Task BoundsPendingWorkReplacesLatestExtentAndPublishesCompletedRunningExtent() {
-    var activeKey = CreateKey();
-    var pendingKey = activeKey with { ThroughSegment = 2 };
-    var newestKey = activeKey with { ThroughSegment = 3 };
+  [Theory]
+  [InlineData(false, 0)]
+  [InlineData(true, 0)]
+  [InlineData(false, 1)]
+  [InlineData(true, 1)]
+  [InlineData(false, 2)]
+  [InlineData(true, 2)]
+  public async Task BoundsPendingWorkKeepsLatestExtentAndPublishesCompletedRunningExtent(bool reverse, int progress) {
+    var activeKey = CreateKey() with { IsClosed = false };
+    var pendingKey = activeKey with { ThroughSegment = 2, IsClosed = progress == 2 };
+    var newestKey = pendingKey with {
+      ThroughSegment = progress == 0 ? 3 : 2,
+      IsClosed = progress != 0,
+      FinalOutputCommitted = progress == 2
+    };
     var otherKey = CreateKey();
     var activeSource = CreateSource(activeKey, "active");
     var pendingSource = CreateSource(pendingKey, "superseded");
@@ -93,14 +103,19 @@ public sealed class MessageDisplaysTests {
     try {
       Task<MessageDisplayReady> running = displays.RequestAsync(activeKey, Capture(activeSource));
       await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
-      Task<MessageDisplayReady> superseded = displays.RequestAsync(pendingKey, _ => {
+      Task<MessageDisplayReady> RequestOlder() => displays.RequestAsync(pendingKey, _ => {
         Interlocked.Increment(ref supersededCaptures);
         return Task.FromResult(pendingSource);
       });
-      Task<MessageDisplayReady> newest = displays.RequestAsync(newestKey, _ => {
+      Task<MessageDisplayReady> RequestNewer() => displays.RequestAsync(newestKey, _ => {
         Interlocked.Increment(ref newestCaptures);
         return Task.FromResult(newestSource);
       });
+      Task<MessageDisplayReady> first = reverse ? RequestNewer() : RequestOlder();
+      Task<MessageDisplayReady> second = reverse ? RequestOlder() : RequestNewer();
+      Task<MessageDisplayReady> superseded = reverse ? second : first;
+      Task<MessageDisplayReady> newest = reverse ? first : second;
+      Task<MessageDisplayReady> duplicate = displays.RequestAsync(newestKey, Capture(newestSource));
 
       await Assert.ThrowsAsync<DisplaySupersededException>(async () => await superseded);
       Assert.Equal(0, Volatile.Read(ref supersededCaptures));
@@ -111,6 +126,7 @@ public sealed class MessageDisplaysTests {
       release.Set();
       MessageDisplayReady runningReady = await running;
       MessageDisplayReady newestReady = await newest;
+      Assert.Same(newestReady, await duplicate);
 
       Assert.Equal("active", DisplayText(displays, runningReady));
       Assert.Equal("newest", DisplayText(displays, newestReady));
@@ -123,30 +139,46 @@ public sealed class MessageDisplaysTests {
     }
   }
 
-  [Fact]
-  public async Task EvictsLeastRecentlyUsedEntriesByCountAndRetainedBytes() {
-    var countDisplays = CreateDisplays(entries: 2, retainedBytes: 1_000_000);
+  [Theory]
+  [InlineData(false)]
+  [InlineData(true)]
+  public async Task DifferentRevisionsAndStartsRemainIndependent(bool revision) {
+    var key = CreateKey();
+    var independent = revision
+        ? key with { Message = key.Message with { HistoryRevision = 1 } }
+        : key with { FromSegment = 1, ThroughSegment = 2 };
+    var blocker = CreateKey();
+    var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var release = new TaskCompletionSource<MessageDisplaySource>(TaskCreationOptions.RunContinuationsAsynchronously);
+    var displays = CreateDisplays();
     try {
-      var firstKey = CreateKey();
-      var secondKey = CreateKey();
-      var thirdKey = CreateKey();
-      MessageDisplayReady first = await Ready(countDisplays, firstKey, "same");
-      MessageDisplayReady second = await Ready(countDisplays, secondKey, "same");
-      Assert.Equal("same", DisplayText(countDisplays, first));
-      MessageDisplayReady third = await Ready(countDisplays, thirdKey, "same");
-
-      Assert.Equal(2, countDisplays.Usage.Entries);
-      Assert.Equal("same", DisplayText(countDisplays, first));
-      Assert.Equal("same", DisplayText(countDisplays, third));
-      Assert.Throws<DisplayUnavailableException>(() => DisplayText(countDisplays, second));
+      var running = displays.RequestAsync(blocker, _ => {
+        entered.SetResult();
+        return release.Task;
+      });
+      await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+      var first = Ready(displays, key, "first");
+      var second = Ready(displays, independent, "independent");
+      Assert.Equal(2, displays.Usage.PendingKeys);
+      await Assert.ThrowsAsync<ArgumentException>(() => displays.RequestAsync(key with { Pipeline = "other" }, Capture(CreateSource(key, "bad"))));
+      release.SetResult(CreateSource(blocker, "blocker"));
+      await running;
+      Assert.Equal("first", DisplayText(displays, await first));
+      Assert.Equal("independent", DisplayText(displays, await second));
     } finally {
-      await countDisplays.DisposeAsync();
+      release.TrySetResult(CreateSource(blocker, "blocker"));
+      await displays.DisposeAsync();
     }
+  }
 
+  [Theory]
+  [InlineData(false)]
+  [InlineData(true)]
+  public async Task EvictsLeastRecentlyUsedEntriesByCountAndRetainedBytes(bool byBytes) {
     var templateKey = CreateKey();
     var templateSource = CreateSource(templateKey, "same");
     long oneEntryBytes = AccountedBytes(templateKey, templateSource, Build(templateSource));
-    var byteDisplays = CreateDisplays(entries: 8, retainedBytes: oneEntryBytes * 2);
+    var byteDisplays = CreateDisplays(entries: byBytes ? 8 : 2, retainedBytes: byBytes ? oneEntryBytes * 2 : 1_000_000);
     try {
       var firstKey = CreateKey();
       var secondKey = CreateKey();
@@ -187,10 +219,24 @@ public sealed class MessageDisplaysTests {
     }
   }
 
-  [Fact]
-  public async Task RejectsCapturedSourceThatDoesNotMatchRequestedKey() {
+  [Theory]
+  [InlineData(0)]
+  [InlineData(1)]
+  [InlineData(2)]
+  [InlineData(3)]
+  [InlineData(4)]
+  [InlineData(5)]
+  public async Task RejectsCapturedSourceThatDoesNotMatchRequestedKey(int mismatch) {
     var key = CreateKey();
-    var wrongSource = CreateSource(key, "wrong") with { SessionId = Guid.NewGuid() };
+    var source = CreateSource(key, "wrong");
+    var wrongSource = mismatch switch {
+      0 => source with { SessionId = Guid.NewGuid() },
+      1 => source with { Message = key.Message with { HistoryRevision = 1 } },
+      2 => source with { IsClosed = !key.IsClosed },
+      3 => source with { FinalOutputCommitted = !key.FinalOutputCommitted },
+      4 => source with { From = source.From with { Message = key.Message with { MessageId = Guid.NewGuid() } } },
+      _ => source with { AvailableThrough = source.AvailableThrough with { SegmentIndex = 2 } }
+    };
     int builds = 0;
     var displays = CreateDisplays(build: source => {
       Interlocked.Increment(ref builds);
@@ -293,25 +339,18 @@ public sealed class MessageDisplaysTests {
     var key = CreateKey();
     var source = CreateSource(key, "retry");
     int targetBuilds = 0;
-    var displays = CreateDisplays(build: message => {
-      if (message.SessionId == key.SessionId && Interlocked.Increment(ref targetBuilds) == 1)
+    await using var displays = CreateDisplays(build: message => {
+      if (Interlocked.Increment(ref targetBuilds) == 1)
         throw new InvalidOperationException("controlled build failure");
       return Build(message);
     });
-    try {
-      await Assert.ThrowsAsync<InvalidOperationException>(async () =>
-          await displays.RequestAsync(key, Capture(source)));
+    await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        await displays.RequestAsync(key, Capture(source)));
+    Assert.Equal(0, displays.Usage.Entries);
+    MessageDisplayReady retried = await Ready(displays, key, "retry");
 
-      // A distinct queued build proves the failed work left the active slot before retry.
-      var barrierKey = CreateKey();
-      await Ready(displays, barrierKey, "barrier");
-      MessageDisplayReady retried = await Ready(displays, key, "retry");
-
-      Assert.Equal(2, Volatile.Read(ref targetBuilds));
-      Assert.Equal("retry", DisplayText(displays, retried));
-    } finally {
-      await displays.DisposeAsync();
-    }
+    Assert.Equal(2, Volatile.Read(ref targetBuilds));
+    Assert.Equal("retry", DisplayText(displays, retried));
   }
 
   [Fact]
@@ -477,12 +516,12 @@ public sealed class MessageDisplaysTests {
 
   static MessageDisplayKey CreateKey(long throughSegment = 1) => new(
       Guid.NewGuid(), new(Guid.NewGuid(), Guid.NewGuid(), MessageRole.Assistant, 0),
-      0, throughSegment, false);
+      0, throughSegment, true, false);
 
   static MessageDisplaySource CreateSource(MessageDisplayKey key, string text) => new(
       key.SessionId, key.Message,
       new(key.Message, key.FromSegment, 0), new(key.Message, key.ThroughSegment, 0),
-      Encoding.UTF8.GetByteCount(text), true, key.FinalOutputCommitted, text,
+      Encoding.UTF8.GetByteCount(text), key.IsClosed, key.FinalOutputCommitted, text,
       [new(0, key.FromSegment)]);
 
   static Func<CancellationToken, Task<MessageDisplaySource>> Capture(MessageDisplaySource source) =>

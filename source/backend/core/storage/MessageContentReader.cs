@@ -22,18 +22,22 @@ internal sealed class MessageContentReader {
   }
 
   // Called under the session gate. Resolve only fixed metadata, never source bytes.
-  internal MessageContentExtent CaptureClosedSourceExtent(Guid sessionId, MessageRef message) {
-    var cursor = new MessageContentCursor(message, 0, 0);
-    ValidateCursorAndLimit(sessionId, cursor, int.MaxValue);
+  internal MessageContentExtent CaptureSourceExtent(Guid sessionId, MessageRef message, TranscriptTextFacts expected) {
+    ArgumentNullException.ThrowIfNull(expected);
+    ValidateCursorAndLimit(sessionId, expected.From, int.MaxValue);
+    ValidateCursorAndLimit(sessionId, expected.AvailableThrough, int.MaxValue);
+    if (expected.From.Message != message || expected.AvailableThrough.Message != message
+        || expected.From.Utf8Offset != 0 || expected.AvailableThrough.Utf8Offset != 0
+        || expected.AvailableThrough.SegmentIndex <= expected.From.SegmentIndex
+        || (expected.FinalOutputCommitted && !expected.IsClosed))
+      throw new ArgumentException("Display source requires an exact committed message extent.", nameof(expected));
     return database.Read(transaction => {
       CheckHistoryRevision(transaction, sessionId, message.HistoryRevision);
       MessageMetadata metadata = ReadMetadata(transaction, sessionId, message);
-      if (!metadata.IsClosed)
-        throw new InvalidOperationException("Display source requires closed message content.");
-
-      return new MessageContentExtent(sessionId, NormalizeCursor(cursor, metadata.FirstChunkIndex),
-          new(message, metadata.EndChunkIndex, 0), metadata.IsClosed, metadata.FinalOutputCommitted,
-          metadata.SubmissionId, metadata.RequestId);
+      var extent = new MessageContentExtent(sessionId, expected.From, expected.AvailableThrough,
+          expected.IsClosed, expected.FinalOutputCommitted, metadata.SubmissionId, metadata.RequestId);
+      ValidateSourceMetadata(extent, metadata);
+      return extent;
     });
   }
 
@@ -62,12 +66,18 @@ internal sealed class MessageContentReader {
     database.Read(transaction => {
       CheckHistoryRevision(transaction, extent.SessionId, extent.From.Message.HistoryRevision);
       MessageMetadata metadata = ReadMetadata(transaction, extent.SessionId, extent.From.Message);
-      if (metadata.SubmissionId != extent.SubmissionId || metadata.RequestId != extent.RequestId
-          || metadata.FirstChunkIndex != extent.From.SegmentIndex
-          || metadata.EndChunkIndex < extent.AvailableThrough.SegmentIndex || !metadata.IsClosed)
-        throw new InvalidOperationException("The captured message source is no longer available.");
+      ValidateSourceMetadata(extent, metadata);
       return true;
     });
+  }
+
+  private static void ValidateSourceMetadata(MessageContentExtent extent, MessageMetadata metadata) {
+    if (metadata.SubmissionId != extent.SubmissionId || metadata.RequestId != extent.RequestId
+        || metadata.FirstChunkIndex != extent.From.SegmentIndex
+        || metadata.EndChunkIndex < extent.AvailableThrough.SegmentIndex
+        || (extent.IsClosed && (!metadata.IsClosed || metadata.EndChunkIndex != extent.AvailableThrough.SegmentIndex))
+        || (extent.FinalOutputCommitted && !metadata.FinalOutputCommitted))
+      throw new InvalidOperationException("The captured message source is no longer available.");
   }
 
   // SnapshotReader already selected messages from the current revision in this

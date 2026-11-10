@@ -82,10 +82,12 @@ public abstract class SessionBase {
   }
 
   internal async Task<MessageDisplaySource> ReadMessageDisplaySourceAsync(
-      MessageRef message, CancellationToken cancellation = default) {
+      MessageDisplayKey key, CancellationToken cancellation = default) {
+    if (key.SessionId != Id)
+      throw new ArgumentException("The session does not match the display key.", nameof(key));
     MessageContentExtent extent;
     using (await gate.AcquireAsync(cancellation))
-      extent = store.Content.CaptureClosedSourceExtent(Id, message);
+      extent = store.Content.CaptureSourceExtent(Id, key.Message, key.TextFacts);
 
     MessageDisplaySource source = MessageDisplaySourceReader.Read(store.Content, extent, cancellation);
 

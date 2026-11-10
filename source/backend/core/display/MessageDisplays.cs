@@ -27,12 +27,12 @@ internal sealed class MessageDisplays : IAsyncDisposable {
     worker.Start();
   }
 
-  // The caller supplies the expected closed extent, obtained from bounded metadata.
+  // The caller supplies the exact extent and completion facts from bounded metadata.
   // Capture/validation is deferred to the worker, including on a cache miss only.
   internal Task<MessageDisplayReady> RequestAsync(MessageDisplayKey key, SessionBase session,
       CancellationToken cancellation = default) {
     if (session.Id != key.SessionId) throw new ArgumentException("The session does not match the display key.", nameof(session));
-    return RequestAsync(key, token => session.ReadMessageDisplaySourceAsync(key.Message, token), cancellation);
+    return RequestAsync(key, token => session.ReadMessageDisplaySourceAsync(key, token), cancellation);
   }
 
   internal Task<MessageDisplayReady> RequestAsync(MessageDisplayKey key,
@@ -40,7 +40,8 @@ internal sealed class MessageDisplays : IAsyncDisposable {
     ArgumentNullException.ThrowIfNull(key);
     ArgumentNullException.ThrowIfNull(capture);
     cancellation.ThrowIfCancellationRequested();
-    if (key.Pipeline != MessageDisplayIndex.PipelineVersion || key.FromSegment < 0 || key.ThroughSegment < key.FromSegment)
+    if (key.Pipeline != MessageDisplayIndex.PipelineVersion || key.FromSegment < 0 || key.ThroughSegment <= key.FromSegment
+        || (key.FinalOutputCommitted && !key.IsClosed))
       throw new ArgumentException("The display key has an unsupported pipeline or invalid extent.", nameof(key));
     lock (gate) {
       ThrowIfDisposed();
@@ -48,9 +49,11 @@ internal sealed class MessageDisplays : IAsyncDisposable {
       if (active is { Invalidated: false } && !active.Completion.Task.IsCompleted && active.Key == key)
         return Observe(active, cancellation);
       var existing = pending.First;
-      while (existing is not null && !SameMessage(existing.Value.Key, key)) existing = existing.Next;
+      while (existing is not null && !Compatible(existing.Value.Key, key)) existing = existing.Next;
       if (existing?.Value.Key == key) return Observe(existing.Value, cancellation);
       if (existing is not null) {
+        if (AtLeastAsRecent(existing.Value.Key, key))
+          return Task.FromException<MessageDisplayReady>(new DisplaySupersededException());
         // Preserve queue position: repeated extent updates cannot starve other keys.
         var previous = existing.Value;
         previous.Capture = null;
@@ -198,9 +201,14 @@ internal sealed class MessageDisplays : IAsyncDisposable {
     }
   }
 
-  static bool SameMessage(MessageDisplayKey left, MessageDisplayKey right) =>
-      left.SessionId == right.SessionId && left.Message.ExecutionId == right.Message.ExecutionId
-      && left.Message.MessageId == right.Message.MessageId && left.Message.Role == right.Message.Role;
+  static bool Compatible(MessageDisplayKey left, MessageDisplayKey right) =>
+      left.SessionId == right.SessionId && left.Message == right.Message
+      && left.FromSegment == right.FromSegment && left.Pipeline == right.Pipeline
+      && (AtLeastAsRecent(left, right) || AtLeastAsRecent(right, left));
+
+  static bool AtLeastAsRecent(MessageDisplayKey candidate, MessageDisplayKey previous) =>
+      candidate.ThroughSegment >= previous.ThroughSegment && (candidate.IsClosed || !previous.IsClosed)
+      && (candidate.FinalOutputCommitted || !previous.FinalOutputCommitted);
 
   void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(disposed, this);
 

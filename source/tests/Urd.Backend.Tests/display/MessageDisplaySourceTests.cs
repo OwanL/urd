@@ -10,17 +10,17 @@ namespace Urd.Backend.Tests.Display;
 
 public sealed class MessageDisplaySourceTests {
   [Fact]
-  public void CapturesExactUserAndAssistantSourceAcrossUnicodeSegments() {
+  public void CapturesExactSourceAndMapsUnicodeAcrossEmptySegments() {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     const string userText = "user\r\n🙂\0é";
     TestExecution execution = StartExecution(store, userText);
-    string[] parts = ["assistant🙂", "\r\n", "\0", "é", ""];
+    string[] parts = ["a", "", "🙂", "", "é\r\n\0", ""];
     for (int index = 0; index < parts.Length; index++)
       Append(store, execution, index, parts[index], final: index == parts.Length - 1);
 
-    MessageDisplaySource user = ReadSource(store, execution.Session, execution.User);
-    MessageDisplaySource assistant = ReadSource(store, execution.Session, execution.Assistant);
+    MessageDisplaySource user = ReadSource(store, execution, execution.User);
+    MessageDisplaySource assistant = ReadSource(store, execution, execution.Assistant);
 
     Assert.Equal(userText, user.Source);
     Assert.Equal(Encoding.UTF8.GetByteCount(userText), user.Utf8Bytes);
@@ -28,17 +28,19 @@ public sealed class MessageDisplaySourceTests {
     Assert.False(user.FinalOutputCommitted);
     Assert.Equal(0, user.HistoryRevision);
     Assert.Equal(execution.User, user.Message);
-    Assert.Equal("assistant🙂\r\n\0é", assistant.Source);
+    Assert.Equal(string.Concat(parts), assistant.Source);
     Assert.Equal(Encoding.UTF8.GetByteCount(assistant.Source), assistant.Utf8Bytes);
     Assert.True(assistant.IsClosed);
     Assert.True(assistant.FinalOutputCommitted);
     Assert.Equal(execution.Assistant, assistant.Message);
-    Assert.Equal(0, assistant.Segments[0].Utf8Start);
-    Assert.Equal(parts.Length, assistant.Segments.Count);
-    Assert.Equal(Enumerable.Range(0, parts.Length).Select(index => (long)index),
-        assistant.Segments.Select(segment => segment.SegmentIndex));
-    Assert.Equal(parts.Select((_, index) => Encoding.UTF8.GetByteCount(string.Concat(parts.Take(index)))),
-        assistant.Segments.Select(segment => segment.Utf8Start));
+    Assert.Equal(parts.Select((_, index) => new DisplaySourceSegment(
+        Encoding.UTF8.GetByteCount(string.Concat(parts.Take(index))), index)), assistant.Segments);
+    Assert.Equal(new(execution.Assistant, 0, 0), assistant.ContentCursor(0));
+    Assert.Equal(new(execution.Assistant, 2, 0), assistant.ContentCursor(1));
+    Assert.Equal(new(execution.Assistant, 4, 0), assistant.ContentCursor(5));
+    Assert.Equal(assistant.AvailableThrough, assistant.ContentCursor(assistant.Utf8Bytes));
+    Assert.Equal((new MessageContentCursor(execution.Assistant, 2, 0),
+        new MessageContentCursor(execution.Assistant, 4, 0)), assistant.ContentRange(new(1, 5)));
   }
 
   [Fact]
@@ -47,8 +49,7 @@ public sealed class MessageDisplaySourceTests {
     using UrdStore store = UrdStore.Open(database.Path);
     string text = new string('x', 16383) + "🙂" + new string('y', 17000);
     TestExecution execution = StartExecution(store, text);
-
-    MessageDisplaySource source = ReadSource(store, execution.Session, execution.User);
+    MessageDisplaySource source = ReadSource(store, execution, execution.User);
 
     Assert.True(source.Utf8Bytes > 16 * 1024);
     Assert.Equal(text, source.Source);
@@ -57,19 +58,57 @@ public sealed class MessageDisplaySourceTests {
     Assert.Equal(new(execution.User, 0, 16387), source.ContentCursor(16387));
   }
 
-  [Fact]
-  public void CapturesClosedFailedPartialFromNormalizedNonzeroSegment() {
+  [Theory]
+  [InlineData(false)]
+  [InlineData(true)]
+  public void OpenCaptureKeepsSnapshotDuringAppendAndClosure(bool final) {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    TestExecution execution = StartExecution(store);
+    Append(store, execution, 0, "");
+    Append(store, execution, 1, "before🙂");
+    Append(store, execution, 2, "é\0");
+    TranscriptTextFacts snapshot = Facts(store, execution, execution.Assistant);
+    Append(store, execution, 3, "later");
+    MessageContentExtent extent = store.Content.CaptureSourceExtent(execution.Session, execution.Assistant, snapshot);
+    Assert.NotEmpty(store.Content.ReadSourceSegment(extent, extent.From).Prefix);
+    if (final)
+      Append(store, execution, 4, "last", final: true);
+    else
+      Assert.True(store.LlmResponses.ObserveTool(execution.Session, execution.Execution, 0, execution.Request, "call", "tool"));
+    MessageDisplaySource source = MessageDisplaySourceReader.Read(store.Content, extent);
+    store.Content.ValidateSourceExtent(extent);
+
+    Assert.Equal("before🙂é\0", source.Source);
+    Assert.Equal(new(execution.Assistant, 1, 0), source.From);
+    Assert.Equal(new(execution.Assistant, 3, 0), source.AvailableThrough);
+    Assert.Equal(2, source.Segments.Count);
+    Assert.False(source.IsClosed);
+    Assert.False(source.FinalOutputCommitted);
+    Assert.True(Facts(store, execution, execution.Assistant).IsClosed);
+    Assert.Equal(extent, store.Content.CaptureSourceExtent(execution.Session, execution.Assistant, snapshot));
+  }
+
+  [Theory]
+  [InlineData(false)]
+  [InlineData(true)]
+  public void CapturesClosedPartialAndIgnoresLaterSameRequestOutput(bool failed) {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     TestExecution execution = StartExecution(store);
     Append(store, execution, 0, "");
     Append(store, execution, 1, "partial🙂");
-    Assert.True(store.LlmResponses.CompleteRequest(execution.Session, execution.Execution, 0,
-        new(execution.Request, ExecutionOutcome.Failed, "provider failed")));
-    Assert.NotNull(store.Executions.TrySettle(execution.Session, execution.Execution, ExecutionOutcome.Failed));
-
-    MessageContentExtent extent = store.Content.CaptureClosedSourceExtent(execution.Session, execution.Assistant);
+    if (failed) {
+      Assert.True(store.LlmResponses.CompleteRequest(execution.Session, execution.Execution, 0,
+          new(execution.Request, ExecutionOutcome.Failed, "provider failed")));
+      Assert.NotNull(store.Executions.TrySettle(execution.Session, execution.Execution, ExecutionOutcome.Failed));
+    } else {
+      Assert.True(store.LlmResponses.ObserveTool(execution.Session, execution.Execution, 0, execution.Request, "call", "tool"));
+    }
+    MessageContentExtent extent = Capture(store, execution, execution.Assistant);
+    if (!failed) Append(store, execution, 2, "after", output: Guid.NewGuid());
     MessageDisplaySource source = MessageDisplaySourceReader.Read(store.Content, extent);
+    store.Content.ValidateSourceExtent(extent);
 
     Assert.Equal(new(execution.Assistant, 1, 0), source.From);
     Assert.Equal(new(execution.Assistant, 2, 0), source.AvailableThrough);
@@ -80,136 +119,84 @@ public sealed class MessageDisplaySourceTests {
   }
 
   [Fact]
-  public void CapturesClosedBeforeToolAndIgnoresLaterSameRequestOutput() {
+  public async Task SessionEntryPointUsesRequestedOpenSnapshotWithoutStartingLlm() {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     TestExecution execution = StartExecution(store);
-    Append(store, execution, 0, "");
-    Append(store, execution, 1, "before🙂");
-    Assert.True(store.LlmResponses.ObserveTool(execution.Session, execution.Execution, 0,
-        execution.Request, "call", "tool"));
+    Append(store, execution, 0, "read🙂");
+    var key = new MessageDisplayKey(execution.Session, execution.Assistant, 0, 1, false, false);
+    Append(store, execution, 1, "later", final: true);
+    using var client = new ScriptedChatClient(_ => throw new InvalidOperationException("Display reads must not start execution."));
+    var session = await new SessionManager(store, _ => client).GetPrimaryAsync(execution.Session);
+    MessageDisplaySource source = await session.ReadMessageDisplaySourceAsync(key);
 
-    MessageContentExtent extent = store.Content.CaptureClosedSourceExtent(execution.Session, execution.Assistant);
-    Append(store, execution, 2, "after", output: Guid.NewGuid());
-    MessageDisplaySource source = MessageDisplaySourceReader.Read(store.Content, extent);
-    store.Content.ValidateSourceExtent(extent);
-
-    Assert.Equal(new(execution.Assistant, 1, 0), source.From);
-    Assert.Equal(new(execution.Assistant, 2, 0), source.AvailableThrough);
-    Assert.Equal("before🙂", source.Source);
-    Assert.True(source.IsClosed);
+    Assert.Equal("read🙂", source.Source);
+    Assert.True(key.Matches(source));
+    Assert.False(source.IsClosed);
     Assert.False(source.FinalOutputCommitted);
+    Assert.Equal(0, client.Calls);
+    await Assert.ThrowsAsync<ArgumentException>(() => session.ReadMessageDisplaySourceAsync(key with { SessionId = Guid.NewGuid() }));
   }
 
   [Fact]
-  public void RejectsWrongSessionStaleRevisionAndOpenAssistantMessages() {
-    using var database = new TemporaryDatabase();
-    using UrdStore store = UrdStore.Open(database.Path);
-    TestExecution closed = StartExecution(store, "closed input");
-    Append(store, closed, 0, "closed", final: true);
-    Guid otherSession = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
-
-    Assert.Throws<KeyNotFoundException>(() => store.Content.CaptureClosedSourceExtent(otherSession, closed.Assistant));
-    Assert.Throws<HistoryRevisionConflictException>(() => store.Content.CaptureClosedSourceExtent(
-        closed.Session, closed.Assistant with { HistoryRevision = 1 }));
-
-    TestExecution open = StartExecution(store, "open input");
-    Append(store, open, 0, "still streaming");
-    Assert.Throws<InvalidOperationException>(() => store.Content.CaptureClosedSourceExtent(open.Session, open.Assistant));
-  }
-
-  [Fact]
-  public void MapsScalarAlignedDisplayRangesAcrossEmptySegments() {
+  public void RejectsUncommittedBoundsWrongIdentityAndImpossibleCompletionFacts() {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     TestExecution execution = StartExecution(store);
-    string[] parts = ["a", "", "🙂", "", "z", ""];
-    for (int index = 0; index < parts.Length; index++)
-      Append(store, execution, index, parts[index], final: index == parts.Length - 1);
-
-    MessageDisplaySource source = ReadSource(store, execution.Session, execution.Assistant);
-
-    Assert.Equal("a🙂z", source.Source);
-    Assert.Equal(new[] {
-      new DisplaySourceSegment(0, 0),
-      new DisplaySourceSegment(1, 1),
-      new DisplaySourceSegment(1, 2),
-      new DisplaySourceSegment(5, 3),
-      new DisplaySourceSegment(5, 4),
-      new DisplaySourceSegment(6, 5)
-    }, source.Segments);
-    Assert.Equal(new(execution.Assistant, 0, 0), source.ContentCursor(0));
-    Assert.Equal(new(execution.Assistant, 2, 0), source.ContentCursor(1));
-    Assert.Equal(new(execution.Assistant, 4, 0), source.ContentCursor(5));
-    Assert.Equal(source.AvailableThrough, source.ContentCursor(6));
-    Assert.Equal((new MessageContentCursor(execution.Assistant, 2, 0),
-        new MessageContentCursor(execution.Assistant, 4, 0)), source.ContentRange(new(1, 5)));
+    Append(store, execution, 0, "open");
+    TranscriptTextFacts facts = Facts(store, execution, execution.Assistant);
+    Guid other = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
+    Assert.Throws<KeyNotFoundException>(() => store.Content.CaptureSourceExtent(other, execution.Assistant, facts));
+    Assert.Throws<ArgumentException>(() => store.Content.CaptureSourceExtent(execution.Session, execution.User, facts));
+    Assert.Throws<InvalidOperationException>(() => store.Content.CaptureSourceExtent(execution.Session, execution.Assistant,
+        facts with { AvailableThrough = facts.AvailableThrough with { SegmentIndex = 2 } }));
+    Assert.Throws<InvalidOperationException>(() => store.Content.CaptureSourceExtent(execution.Session, execution.Assistant,
+        facts with { IsClosed = true }));
+    Assert.Throws<ArgumentException>(() => store.Content.CaptureSourceExtent(execution.Session, execution.Assistant,
+        facts with { FinalOutputCommitted = true }));
   }
 
-  [Fact]
-  public async Task SessionEntryPointReturnsValidatedDisplaySourceWithoutStartingLlm() {
+  [Theory]
+  [InlineData(false)]
+  [InlineData(true)]
+  public void CaptureAndValidationFenceStaleRevisionAndDeletedIdentity(bool revision) {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
-    TestExecution execution = StartExecution(store, "session source");
-    Append(store, execution, 0, "read through session", final: true);
-    using var client = new ScriptedChatClient(_ =>
-        throw new InvalidOperationException("Reading display source must not start an LLM request."));
-    var manager = new SessionManager(store, _ => client);
-    PrimarySession session = await manager.GetPrimaryAsync(execution.Session);
-
-    MessageDisplaySource source = await session.ReadMessageDisplaySourceAsync(execution.Assistant);
-
-    Assert.Equal(execution.Session, source.SessionId);
-    Assert.Equal(execution.Assistant, source.Message);
-    Assert.Equal("read through session", source.Source);
-    Assert.True(source.IsClosed);
-    Assert.True(source.FinalOutputCommitted);
-    Assert.Equal(0, client.Calls);
+    TestExecution execution = StartExecution(store);
+    Append(store, execution, 0, "identity");
+    TranscriptTextFacts facts = Facts(store, execution, execution.Assistant);
+    MessageContentExtent extent = Capture(store, execution, execution.Assistant);
+    if (revision) database.ForceHistoryRevision(1);
+    else database.Execute($"DELETE FROM execution_messages WHERE session_id = '{execution.Session:D}' "
+        + $"AND run_id = '{execution.Execution:D}' AND role = 1 AND message_id = '{execution.Assistant.MessageId:D}';");
+    Type error = revision ? typeof(HistoryRevisionConflictException) : typeof(KeyNotFoundException);
+    Assert.Throws(error, () => store.Content.ValidateSourceExtent(extent));
+    Assert.Throws(error, () => store.Content.CaptureSourceExtent(execution.Session, execution.Assistant, facts));
   }
 
-  [Fact]
-  public void ValidationRejectsStaleRevisionAndDeletedMessageIdentity() {
-    using (var database = new TemporaryDatabase()) {
-      using UrdStore store = UrdStore.Open(database.Path);
-      TestExecution execution = StartExecution(store);
-      Append(store, execution, 0, "revision", final: true);
-      MessageContentExtent extent = store.Content.CaptureClosedSourceExtent(execution.Session, execution.Assistant);
-
-      database.ForceHistoryRevision(1);
-
-      Assert.Throws<HistoryRevisionConflictException>(() => store.Content.ValidateSourceExtent(extent));
-    }
-
-    using (var database = new TemporaryDatabase()) {
-      using UrdStore store = UrdStore.Open(database.Path);
-      TestExecution execution = StartExecution(store);
-      Append(store, execution, 0, "identity", final: true);
-      MessageContentExtent extent = store.Content.CaptureClosedSourceExtent(execution.Session, execution.Assistant);
-      database.Execute($"DELETE FROM execution_messages WHERE session_id = '{execution.Session:D}' "
-          + $"AND run_id = '{execution.Execution:D}' AND role = 1 AND message_id = '{execution.Assistant.MessageId:D}';");
-
-      Assert.Throws<KeyNotFoundException>(() => store.Content.ValidateSourceExtent(extent));
-    }
-  }
-
-  private static TestExecution StartExecution(UrdStore store, string text = "input") {
+  static TestExecution StartExecution(UrdStore store, string text = "input") {
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, execution = Guid.NewGuid();
     var submission = new UserMessageSubmission(Guid.NewGuid(), 0, text, TestLlmSelection.Default);
     Assert.True(store.UserMessages.Admit(session, 0, submission, true, execution).NewlyAccepted);
     LlmRequest request = store.Executions.ClaimNextRequest(session, execution, 0)!;
     Assert.True(store.Executions.StartRequest(session, execution, 0, request.RequestId));
     return new(session, execution, request.RequestId,
-        new(execution, submission.SubmissionId, MessageRole.User, 0),
-        new(execution, Guid.NewGuid(), MessageRole.Assistant, 0));
+        new(execution, submission.SubmissionId, MessageRole.User, 0), new(execution, Guid.NewGuid(), MessageRole.Assistant, 0));
   }
 
-  private static MessageDisplaySource ReadSource(UrdStore store, Guid sessionId, MessageRef message) =>
-      MessageDisplaySourceReader.Read(store.Content, store.Content.CaptureClosedSourceExtent(sessionId, message));
+  static TranscriptTextFacts Facts(UrdStore store, TestExecution execution, MessageRef message) =>
+      store.History.Read(execution.Session, new(TranscriptHistoryMode.Latest, 0)).Entries
+          .Single(entry => entry.Text?.From.Message == message).Text!;
 
-  private static void Append(UrdStore store, TestExecution execution, int index, string text, bool final = false,
-      Guid? output = null) =>
+  static MessageContentExtent Capture(UrdStore store, TestExecution execution, MessageRef message) =>
+      store.Content.CaptureSourceExtent(execution.Session, message, Facts(store, execution, message));
+
+  static MessageDisplaySource ReadSource(UrdStore store, TestExecution execution, MessageRef message) =>
+      MessageDisplaySourceReader.Read(store.Content, Capture(store, execution, message));
+
+  static void Append(UrdStore store, TestExecution execution, int index, string text, bool final = false, Guid? output = null) =>
       Assert.True(store.LlmResponses.Append(execution.Session, execution.Execution, 0,
           new(execution.Request, output ?? execution.Assistant.MessageId, index, text, final)));
 
-  private sealed record TestExecution(Guid Session, Guid Execution, Guid Request, MessageRef User, MessageRef Assistant);
+  sealed record TestExecution(Guid Session, Guid Execution, Guid Request, MessageRef User, MessageRef Assistant);
 }

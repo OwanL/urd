@@ -1,7 +1,8 @@
 # Agent tools — design decisions
 
 **Status: design approved by the owner 2026-11-10.** Records agreed decisions as they were
-made, and the approved class shapes. Implementation follows these shapes.
+made, and the approved class shapes. Implementation follows these shapes, subject to the
+qualification gates below; approval is not evidence that the integration already works.
 Related: [execution](execution-design.md), [sessions](session-design.md), [discovery](discovery-design.md).
 
 ## Agreed
@@ -83,12 +84,20 @@ Related: [execution](execution-design.md), [sessions](session-design.md), [disco
     is the next design topic after tools; tools are not ready for normal use without it.
 17. **Background on every tool** was re-examined after review and kept: every tool may run in
     the background, including future tools.
+18. **Terminal provider failure ends owned work** (owner review 2026-11-10). If a model request
+    fails terminally while background calls are pending, cancel those calls and join their
+    cleanup and result saves before settling the run. Their completion does not restart the
+    agent. Keep recorded results and acknowledge possible partial effects; cancellation is not
+    rollback. Processes deliberately left running by already-completed bash calls remain
+    chat-owned and unaffected. The already-approved context-overflow compaction/retry is a
+    handled recovery path, not terminal failure; if that recovery fails, cancel owned work.
 
 ## Open
 
-- Remaining class structure: none; all ten pieces approved.
+- Class shapes are approved; provider-result encoding and process-lifetime mechanics still
+  require the qualifications below. Do not invent another framework to close those seams.
 - Transcript presentation of tool rows and pending background calls.
-- Compaction design.
+- Compaction class shapes and storage (direction is already approved).
 
 ## Approved code shapes
 
@@ -216,3 +225,70 @@ public SessionManager(UrdStore store, Func<ProviderConnection, IChatClient> crea
 building process handling, qualify real Git Bash and job-object behavior with a minimal fixture:
 foreground Stop, survivor after shell exit, sibling isolation, chat/backend termination,
 inherited pipes, spaces/Unicode, path forms and encoding.
+
+## Implementation-readiness review — 2026-11-10
+
+Read-only source review found integration gaps, not evidence that the selected capabilities
+need replacing. The current loop runs fake tools sequentially; its guarantees must be adapted,
+not simply removed. These are engineering checks against the agreed behavior, not extra
+product scope or approval of new class shapes.
+
+### Background delivery and settlement
+
+- Keep the original placeholder stable when reconstructing context, even after completion.
+  Append the actual completion separately, after a complete direct-result batch; never replace
+  an already-sent placeholder or emit a second function result for the same call. Choose and
+  qualify the provider encoding of the non-human completion envelope before integrating it.
+- Claim completion messages into a specific next request durably. A result arriving during a
+  provider request belongs to a later request, not a retroactive insertion into its input.
+  Repeated notifications must not cause duplicate deliveries or competing drivers.
+- A pending call remains owned through cleanup and the result/completion-message commit.
+  Coordinate completion, waiting, next-request claims and settlement through the session gate;
+  join tasks outside that gate. Stop/terminal provider failure prevents wakeup and joins saves before
+  settlement. Save/cleanup failure keeps the run fenced rather than claiming successful Stop.
+- `ToolStorage.Complete` currently rejects results after any newer request exists. Background
+  calls need an exception to that request-order rule, not to session/run/revision identity or
+  settlement checks. Stop must still permit saving actual results before settlement.
+- Verify completion before placeholder delivery, during the next provider request, while
+  waiting, and racing user input/Stop/provider failure. Exercise multiple completions,
+  duplicate notifications and failed result commits with deterministic fake tools.
+
+### Result fidelity, including images
+
+- `LlmContextReader` currently restores JSON-only function results; `LlmProviderContext` rejects
+  multimodal tool-result content. Adding `ToolOutput.Images` alone does not provide image input.
+  Qualify text plus image through actual storage, context reconstruction and the supported
+  provider adapter, for both direct results and background completion envelopes.
+- Establish the source of `ModelAcceptsImages` and the explicit text-only-model response using
+  the selected Pi behavior. Preserve saved images without turning base64 into model-facing
+  text or silently claiming the model saw them. Reload must retain the original result.
+
+### Crash recovery
+
+- Recover the enclosing requests, inputs and run as well as unfinished tool calls, so a fresh
+  user instruction can proceed after restart. Preserve completed results; distinguish calls
+  never started from started calls with unknown effects. Recovery starts no model/tool work.
+- Verify restart before a call starts, after effects but before result commit, and after a
+  background completion commit but before delivery. Retain undelivered completion data for
+  deliberate continuation; never repeat the effect to repair missing history.
+
+### File ordering and process qualification
+
+- Make same-path queue admission deterministic in emitted call order within a reply, including
+  reads waiting on earlier mutations. Queue before asynchronous execution can reorder admission.
+  This is not general dependency ordering; dependent commands still use separate replies/bash.
+  Reads waiting on mutations are Urd's agreed behavior, not Pi's mutation-only queue behavior.
+- Test path aliases, cancellation while queued and concurrent distinct files. The queue does
+  not coordinate bash or outside editors; do not present it as filesystem-wide isolation.
+- Qualify the nested-job mechanism before treating `LeaveBackgroundProcesses` as proven.
+  Specify the ownership handoff on shell exit and retain chat ownership of survivors; timeout
+  or cancellation of an unfinished call must kill/join that call's tree, not earlier survivors.
+  A nonzero shell exit is still an exit, not proof that its descendants stopped.
+- The fixture must prove backend-crash cleanup and that inherited output pipes do not keep a
+  completed shell call alive. Do not assume descendants can be moved between Windows jobs.
+
+**Delivery gates:** qualify process ownership and provider result encoding first; then integrate
+foreground tools/parallel dispatch and their storage checks; then background delivery, waiting
+and recovery. This names the foreground and background phases referred to by the compaction
+plan; it does not defer the selected background capability. Compaction follows the background
+phase. Tool-row presentation and compaction remain gates for normal-use readiness.

@@ -105,10 +105,11 @@ export interface MarkdownPageSource {
   ): Promise<MarkdownContextPage>;
 }
 // Ownership transfers on delivery, including delivery after cancellation. dispose is called
-// exactly once, after owned reads drain; a descriptor owns anything not yet delivered.
+// exactly once after owned reads drain; the handoff awaits settlement before another open or
+// final disposal. A descriptor owns anything not yet delivered.
 export interface MarkdownOwnedGeneration extends MarkdownPageSource {
   readonly manifest: MarkdownRenderManifest;
-  dispose(): void;
+  dispose(): void | Promise<void>;
 }
 export interface MarkdownGenerationRequest {
   open(signal: AbortSignal): Promise<MarkdownOwnedGeneration>;

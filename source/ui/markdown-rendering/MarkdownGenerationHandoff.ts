@@ -35,6 +35,7 @@ export class MarkdownGenerationHandoff {
   private activeWindowOpen = true;
   private candidateWork: Promise<void> | null = null;
   private disposal: Promise<void> | null = null;
+  private releaseFailure: { error: unknown } | null = null;
   private disposed = false;
 
   // Transfers ownership of the initial source and displayed, idle window.
@@ -91,13 +92,13 @@ export class MarkdownGenerationHandoff {
   // Called by MarkdownSelectionPins' selectionchange/focus notifications.
   resume(): void {
     if (this.disposed || !this.candidate) return;
+    const candidate = this.candidate;
     if (this.view.pinned()) {
       this.reading?.abort();
       return;
     }
     if (this.reading) return;
     const controller = new AbortController();
-    const candidate = this.candidate;
     this.reading = controller;
     let finish!: () => void;
     const work = new Promise<void>((resolve) => (finish = resolve));
@@ -156,7 +157,23 @@ export class MarkdownGenerationHandoff {
 
   private async releaseAfterDrain(candidateWork: Promise<void> | null): Promise<void> {
     await Promise.all([this.quiesceActiveWindow(), candidateWork]);
-    this.active.dispose();
+    await this.disposeOwned(this.active);
+    if (this.releaseFailure) throw this.releaseFailure.error;
+  }
+
+  private async disposeOwned(source: MarkdownOwnedGeneration): Promise<void> {
+    try {
+      await source.dispose();
+    } catch (error) {
+      this.releaseFailure ??= { error };
+    }
+  }
+
+  private reject(candidate: Candidate, error: unknown): void {
+    if (this.candidate !== candidate) return;
+    this.candidate = null;
+    candidate.detach();
+    candidate.reject(error);
   }
 
   private async replace(candidate: Candidate, controller: AbortController): Promise<void> {
@@ -164,6 +181,7 @@ export class MarkdownGenerationHandoff {
     const signal = controller.signal;
     try {
       signal.throwIfAborted();
+      if (this.releaseFailure) throw this.releaseFailure.error;
       const prior = this.snapshot;
       const anchor = this.view.capture();
       const oldPiece = anchor?.generation === prior.generation ? Number(anchor.piece) : prior.from;
@@ -243,16 +261,12 @@ export class MarkdownGenerationHandoff {
       candidate.detach();
       this.view.publish(window.snapshot, replacement);
       source = null;
-      previous.dispose();
       candidate.resolve("published");
+      await this.disposeOwned(previous);
     } catch (error) {
-      if (this.candidate === candidate && !signal.aborted) {
-        this.candidate = null;
-        candidate.detach();
-        candidate.reject(error);
-      }
+      if (!signal.aborted) this.reject(candidate, error);
     } finally {
-      source?.dispose();
+      if (source) await this.disposeOwned(source);
       if (this.reading === controller) this.reading = null;
       if (!this.disposed) this.activeWindowOpen = true;
       this.resume();

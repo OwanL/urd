@@ -67,6 +67,16 @@ function gateRead(backing: SyntheticMarkdownPageSource) {
     drained: drained.promise,
   };
 }
+function gateDispose(backing: SyntheticMarkdownPageSource) {
+  const started = deferred<void>(),
+    gate = deferred<void>();
+  (backing as MarkdownOwnedGeneration).dispose = async () => {
+    started.resolve();
+    await gate.promise;
+    backing.disposals++;
+  };
+  return { started: started.promise, release: () => gate.resolve() };
+}
 const anchor = (
   generation: string,
   piece: string,
@@ -131,17 +141,28 @@ void test("keeps the old window until ready, restores its anchor, and releases i
       3,
     );
   const gate = gateRead(next),
-    pending = handoff.request({ open: async () => gate.source });
+    release = gateDispose(old),
+    publication = new AbortController(),
+    pending = handoff.request({ open: async () => gate.source }, publication.signal);
   await gate.started;
   assert.equal(handoff.snapshot, prior);
   assert.equal(old.disposals, 0);
   gate.release();
   assert.equal(await pending, "published");
-  assert.deepEqual(published[0], ["next", anchor("next", "3", "6", 17)]);
+  await release.started;
+  assert.equal(handoff.snapshot.generation, "next");
+  assert.equal(handoff.snapshot.pieces.get(2)?.text, "p2");
+  let opened = false;
+  publication.abort();
+  const queued = requestSource(handoff, "queued", () => (opened = true));
+  assert.equal(opened, false);
   assert.deepEqual(
     [handoff.snapshot.from, handoff.snapshot.next, ...handoff.snapshot.pieces.keys()],
     [2, 4, 2, 3],
   );
+  release.release();
+  assert.equal(await queued, "published");
+  assert.deepEqual(published[0], ["next", anchor("next", "3", "6", 17)]);
   assert.equal(old.disposals, 1);
 });
 
@@ -206,11 +227,17 @@ void test("dispose waits for a gated active append before releasing its source",
 
 void test("publication quiesces active reads before releasing the old window", async () => {
   const old = source("old", [0, 1, 2], 1),
+    failure = new Error("release failed"),
     { handoff, published } = await setup(old),
     gate = gateRead(old);
+  (old as MarkdownOwnedGeneration).dispose = async () => {
+    old.disposals++;
+    throw failure;
+  };
   const append = handoff.append(signal());
   await gate.started;
-  const replacement = requestSource(handoff, "next");
+  const active = source("next"),
+    replacement = handoff.request({ open: async () => active });
   await gate.aborted;
   assert.deepEqual([old.disposals, published.length, handoff.snapshot.generation], [0, 0, "old"]);
   await assert.rejects(handoff.append(signal()), { name: "AbortError" });
@@ -220,6 +247,13 @@ void test("publication quiesces active reads before releasing the old window", a
   await assert.rejects(append, { name: "AbortError" });
   assert.equal(await replacement, "published");
   assert.deepEqual([old.disposals, published[0]?.[0]], [1, "next"]);
+  let opened = false;
+  await assert.rejects(
+    requestSource(handoff, "blocked", () => (opened = true)),
+    (error) => error === failure,
+  );
+  await assert.rejects(handoff.dispose(), (error) => error === failure);
+  assert.deepEqual([opened, active.disposals], [false, 1]);
 });
 
 void test("dispose waits for and releases a source delivered by a late open", async () => {

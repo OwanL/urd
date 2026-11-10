@@ -93,6 +93,9 @@ export interface MarkdownContextPage {
   readonly values: readonly MarkdownValueFragment[];
 }
 export interface MarkdownPageSource {
+  // Nearest preceding source start, first piece on ties; before-first and empty use 0.
+  // Offsets are inclusive [0, sourceUtf8Bytes]; the returned cursor is generation-local.
+  locate(sourceUtf8Offset: number, signal: AbortSignal): Promise<MarkdownRenderCursor>;
   readPieces(cursor: MarkdownRenderCursor, signal: AbortSignal): Promise<MarkdownPiecePage>;
   readPiecesBefore(cursor: MarkdownRenderCursor, signal: AbortSignal): Promise<MarkdownPiecePage>;
   readContext(
@@ -100,6 +103,15 @@ export interface MarkdownPageSource {
     cursor: MarkdownRenderCursor,
     signal: AbortSignal,
   ): Promise<MarkdownContextPage>;
+}
+// Ownership transfers on delivery, including delivery after cancellation. dispose is called
+// exactly once, after owned reads drain; a descriptor owns anything not yet delivered.
+export interface MarkdownOwnedGeneration extends MarkdownPageSource {
+  readonly manifest: MarkdownRenderManifest;
+  dispose(): void;
+}
+export interface MarkdownGenerationRequest {
+  open(signal: AbortSignal): Promise<MarkdownOwnedGeneration>;
 }
 export interface AssembledMarkdownContext {
   readonly context: MarkdownRenderContext;

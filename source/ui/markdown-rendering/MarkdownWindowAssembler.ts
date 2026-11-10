@@ -244,7 +244,7 @@ function copyMarkdownPiecePageBefore(
   });
 }
 
-function copyMarkdownManifest(manifest: MarkdownRenderManifest): MarkdownRenderManifest {
+export function copyMarkdownManifest(manifest: MarkdownRenderManifest): MarkdownRenderManifest {
   if (
     !manifest ||
     typeof manifest.generation !== "string" ||

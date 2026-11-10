@@ -95,6 +95,8 @@ export function createMarkdownValue(
 export class SyntheticMarkdownPageSource implements MarkdownPageSource {
   readonly manifest: MarkdownRenderManifest;
   readonly pieceRequests: MarkdownRenderCursor[] = [];
+  readonly locateRequests: number[] = [];
+  disposals = 0;
   readonly beforePieceRequests: MarkdownRenderCursor[] = [];
   readonly contextRequests: { readonly id: number; readonly cursor: MarkdownRenderCursor }[] = [];
 
@@ -144,6 +146,28 @@ export class SyntheticMarkdownPageSource implements MarkdownPageSource {
     this.valuePageSize = options.valuePageSize ?? Number.POSITIVE_INFINITY;
     if (this.piecePageSize <= 0 || this.valuePageSize <= 0)
       throw new RangeError("Markdown render fixture page sizes must be positive");
+  }
+
+  dispose(): void {
+    this.disposals++;
+  }
+
+  async locate(sourceUtf8Offset: number, signal: AbortSignal): Promise<MarkdownRenderCursor> {
+    signal.throwIfAborted();
+    if (
+      !Number.isSafeInteger(sourceUtf8Offset) ||
+      sourceUtf8Offset < 0 ||
+      sourceUtf8Offset > this.manifest.sourceUtf8Bytes
+    )
+      throw new RangeError("Invalid Markdown source offset.");
+    this.locateRequests.push(sourceUtf8Offset);
+    const anchors = [...this.pieces].sort((a, b) => a.source.start - b.source.start || a.id - b.id);
+    const preceding = anchors.filter((piece) => piece.source.start <= sourceUtf8Offset).at(-1);
+    const start = preceding?.source.start ?? anchors[0]?.source.start;
+    return {
+      generation: this.generation,
+      index: anchors.find((piece) => piece.source.start === start)?.id ?? 0,
+    };
   }
 
   async readPieces(cursor: MarkdownRenderCursor, signal: AbortSignal): Promise<MarkdownPiecePage> {

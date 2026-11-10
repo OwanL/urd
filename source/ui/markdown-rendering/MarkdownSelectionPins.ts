@@ -18,6 +18,8 @@ export class MarkdownSelectionPins {
     this.generation = snapshot().generation;
     this.changed = changed;
     root.ownerDocument.addEventListener("selectionchange", this.onSelectionChange);
+    root.ownerDocument.addEventListener("focusin", this.onSelectionChange);
+    root.ownerDocument.addEventListener("focusout", this.onSelectionChange);
   }
 
   read(): readonly MarkdownPieceInterval[] {
@@ -73,14 +75,28 @@ export class MarkdownSelectionPins {
     }, []);
   }
 
+  // Native selection (including collapsed caret) and keyboard focus defer catch-up.
+  // There is no selection-size cap; a full unmount still loses native selection.
+  blocked(): boolean {
+    return (
+      !this.disposed &&
+      (this.contains(this.root.ownerDocument.activeElement) || this.read().length > 0)
+    );
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
     this.root.ownerDocument.removeEventListener("selectionchange", this.onSelectionChange);
+    this.root.ownerDocument.removeEventListener("focusin", this.onSelectionChange);
+    this.root.ownerDocument.removeEventListener("focusout", this.onSelectionChange);
   }
 
   private readonly onSelectionChange = (): void => {
-    if (!this.disposed) this.changed();
+    // focusout fires before activeElement settles; recheck without retaining an event.
+    queueMicrotask(() => {
+      if (!this.disposed) this.changed();
+    });
   };
 
   private contains(node: Node | null): node is Node {

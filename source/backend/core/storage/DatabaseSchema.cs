@@ -4,7 +4,7 @@ namespace Urd.Core.Storage;
 
 // Creates the current pre-release schema; incompatible databases require a manual reset.
 internal static class DatabaseSchema {
-  private const int SchemaVersion = 11;
+  private const int SchemaVersion = 12;
 
   internal static void Initialize(SqliteConnection connection) {
     using SqliteCommand command = connection.CreateCommand();
@@ -40,7 +40,8 @@ internal static class DatabaseSchema {
     command.CommandText = """
       CREATE TABLE sessions (
           session_id TEXT NOT NULL PRIMARY KEY,
-          history_revision INTEGER NOT NULL CHECK (history_revision >= 0)
+          history_revision INTEGER NOT NULL CHECK (history_revision >= 0),
+          position_version INTEGER NOT NULL DEFAULT 0 CHECK (position_version >= 0)
       ) STRICT;
       CREATE TABLE session_creation (
           ordinal INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -118,6 +119,7 @@ internal static class DatabaseSchema {
           created_at TEXT,
           call_id TEXT,
           tool_name TEXT,
+          layout_weight INTEGER NOT NULL DEFAULT 256 CHECK (layout_weight > 0),
           UNIQUE (run_id, role, message_id),
           UNIQUE (request_id, call_id),
           FOREIGN KEY (session_id, input_id) REFERENCES input_decisions(session_id, input_id),
@@ -129,6 +131,52 @@ internal static class DatabaseSchema {
               OR (role = 2 AND input_id IS NULL AND request_id IS NOT NULL AND end_chunk_index IS NULL
                       AND call_id IS NOT NULL))
       ) STRICT;
+      CREATE TABLE transcript_position_totals (
+          session_id TEXT NOT NULL REFERENCES sessions(session_id),
+          history_revision INTEGER NOT NULL CHECK (history_revision >= 0),
+          entry_count INTEGER NOT NULL CHECK (entry_count >= 0),
+          total_weight INTEGER NOT NULL CHECK (total_weight >= 0),
+          PRIMARY KEY (session_id, history_revision)
+      ) STRICT;
+      CREATE TABLE transcript_positions (
+          entry_ordinal INTEGER PRIMARY KEY REFERENCES execution_messages(ordinal) ON DELETE CASCADE,
+          session_id TEXT NOT NULL REFERENCES sessions(session_id),
+          history_revision INTEGER NOT NULL CHECK (history_revision >= 0),
+          rank INTEGER NOT NULL CHECK (rank >= 0),
+          kind INTEGER NOT NULL CHECK (kind IN (0, 1, 2)),
+          weight INTEGER NOT NULL CHECK (weight > 0),
+          prefix_weight INTEGER NOT NULL CHECK (prefix_weight >= 0),
+          UNIQUE (session_id, history_revision, rank)
+      ) STRICT;
+      CREATE INDEX transcript_positions_weight ON transcript_positions(session_id, history_revision, prefix_weight);
+      CREATE INDEX transcript_positions_prompts ON transcript_positions(session_id, history_revision, rank) WHERE kind = 0;
+      -- All entry writers, including multi-input placement, publish positions atomically.
+      CREATE TRIGGER transcript_position_append AFTER INSERT ON execution_messages BEGIN
+          INSERT INTO transcript_position_totals (session_id, history_revision, entry_count, total_weight)
+          VALUES (NEW.session_id, NEW.history_revision, 0, 0) ON CONFLICT DO NOTHING;
+          INSERT INTO transcript_positions (entry_ordinal, session_id, history_revision, rank, kind, weight, prefix_weight)
+          SELECT NEW.ordinal, NEW.session_id, NEW.history_revision, entry_count, NEW.role, NEW.layout_weight, total_weight
+          FROM transcript_position_totals
+          WHERE session_id = NEW.session_id AND history_revision = NEW.history_revision;
+          UPDATE transcript_position_totals SET entry_count = entry_count + 1, total_weight = total_weight + NEW.layout_weight
+          WHERE session_id = NEW.session_id AND history_revision = NEW.history_revision;
+          UPDATE sessions SET position_version = position_version + 1 WHERE session_id = NEW.session_id;
+      END;
+      -- Streaming changes only the active tail: no suffix maintenance or historical correction API.
+      CREATE TRIGGER transcript_position_tail AFTER UPDATE OF layout_weight ON execution_messages BEGIN
+          SELECT RAISE(ABORT, 'Only the transcript tail weight can change.')
+          WHERE EXISTS (SELECT 1 FROM transcript_positions p JOIN transcript_position_totals t
+              ON t.session_id = p.session_id AND t.history_revision = p.history_revision
+              WHERE p.entry_ordinal = NEW.ordinal AND p.rank <> t.entry_count - 1);
+          UPDATE transcript_positions SET weight = NEW.layout_weight WHERE entry_ordinal = NEW.ordinal;
+          UPDATE transcript_position_totals SET total_weight = total_weight + NEW.layout_weight - OLD.layout_weight
+          WHERE session_id = NEW.session_id AND history_revision = NEW.history_revision;
+          UPDATE sessions SET position_version = position_version + 1 WHERE session_id = NEW.session_id;
+      END;
+      CREATE TRIGGER transcript_position_revision AFTER UPDATE OF history_revision ON sessions
+      WHEN NEW.history_revision <> OLD.history_revision BEGIN
+          UPDATE sessions SET position_version = position_version + 1 WHERE session_id = NEW.session_id;
+      END;
       CREATE TABLE execution_tools (
           run_id TEXT NOT NULL REFERENCES execution_runs(run_id),
           request_id TEXT NOT NULL REFERENCES execution_requests(request_id),
@@ -179,7 +227,7 @@ internal static class DatabaseSchema {
       CREATE INDEX execution_inputs_not_sent_order ON execution_inputs(session_id, ordinal) WHERE not_sent = 1;
       CREATE INDEX execution_messages_history_order ON execution_messages(session_id, history_revision, ordinal DESC);
       CREATE INDEX execution_messages_request_order ON execution_messages(request_id, role, first_chunk_index);
-      PRAGMA user_version = 11;
+      PRAGMA user_version = 12;
       """;
     command.ExecuteNonQuery();
     transaction.Commit();

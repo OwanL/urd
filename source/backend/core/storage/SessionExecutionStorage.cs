@@ -57,9 +57,11 @@ internal sealed class SessionExecutionStorage(Database database) {
 
       using SqliteCommand place = database.Command(transaction, """
         INSERT INTO execution_messages (
-            session_id, history_revision, run_id, role, message_id, input_id, request_id, created_at)
-        SELECT i.session_id, $revision, i.run_id, 0, i.input_id, i.input_id, $request, $created
-        FROM execution_inputs i WHERE i.run_id = $run AND i.request_id = $request
+            session_id, history_revision, run_id, role, message_id, input_id, request_id, created_at, layout_weight)
+        SELECT i.session_id, $revision, i.run_id, 0, i.input_id, i.input_id, $request, $created,
+            256 + length(d.original_text_utf8)
+        FROM execution_inputs i JOIN input_decisions d ON d.session_id = i.session_id AND d.input_id = i.input_id
+        WHERE i.run_id = $run AND i.request_id = $request
             AND NOT EXISTS (SELECT 1 FROM execution_messages m
                 WHERE m.run_id = i.run_id AND m.role = 0 AND m.message_id = i.input_id)
         ORDER BY i.ordinal;

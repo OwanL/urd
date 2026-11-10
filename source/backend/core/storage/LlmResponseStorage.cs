@@ -57,15 +57,28 @@ internal sealed class LlmResponseStorage(Database database) {
         using SqliteCommand index = database.Command(transaction, """
           INSERT INTO execution_messages (
               session_id, history_revision, run_id, role, message_id, request_id,
-              first_chunk_index, created_at)
-          SELECT $session, $revision, $run, 1, $output, $request, $index, $created
+              first_chunk_index, created_at, layout_weight)
+          SELECT $session, $revision, $run, 1, $output, $request, $index, $created, 256 + $bytes
           WHERE NOT EXISTS (SELECT 1 FROM execution_messages
               WHERE request_id = $request AND role = 1 AND message_id = $output);
           """,
             ("$session", sessionId), ("$revision", historyRevision), ("$run", executionId),
             ("$output", chunk.ResponseId), ("$request", chunk.RequestId), ("$index", chunk.ChunkIndex),
-            ("$created", StorageText.UtcTimestamp()));
-        index.ExecuteNonQuery();
+            ("$created", StorageText.UtcTimestamp()), ("$bytes", StorageText.StrictUtf8.GetByteCount(chunk.Text)));
+        if (index.ExecuteNonQuery() == 0) {
+          using SqliteCommand grow = database.Command(transaction, """
+            UPDATE execution_messages SET layout_weight = layout_weight + $bytes
+            WHERE request_id = $request AND role = 1 AND message_id = $output;
+            """, ("$request", chunk.RequestId), ("$output", chunk.ResponseId),
+              ("$bytes", StorageText.StrictUtf8.GetByteCount(chunk.Text)));
+          grow.ExecuteNonQuery();
+        }
+      } else {
+        // Empty committed segments still advance source cursors in this history revision.
+        using SqliteCommand touch = database.Command(transaction,
+            "UPDATE sessions SET position_version = position_version + 1 WHERE session_id = $session;",
+            ("$session", sessionId));
+        touch.ExecuteNonQuery();
       }
 
       if (chunk.IsFinal) {

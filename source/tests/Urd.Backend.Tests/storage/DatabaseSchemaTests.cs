@@ -10,19 +10,19 @@ public sealed class DatabaseSchemaTests {
   public void FreshDatabaseCreatesAndReopensCurrentSchema() {
     using var database = new TemporaryDatabase();
     using (UrdStore store = UrdStore.Open(database.Path)) {
-      Assert.Equal(11L, database.Scalar("PRAGMA user_version;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
+      Assert.Equal(12L, database.Scalar("PRAGMA user_version;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
       store.Sessions.CreatePrimary(Guid.NewGuid());
     }
 
     using UrdStore reopened = UrdStore.Open(database.Path);
-    Assert.Equal(11L, database.Scalar("PRAGMA user_version;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
+    Assert.Equal(12L, database.Scalar("PRAGMA user_version;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
     Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM sessions;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
   }
 
   [Fact]
   public void OldDatabaseIsRejectedWithManualResetInstructions() {
     using var database = new TemporaryDatabase();
-    database.Execute("PRAGMA user_version = 10;");
+    database.Execute("PRAGMA user_version = 11;");
 
     NotSupportedException error = Assert.Throws<NotSupportedException>(() => UrdStore.Open(database.Path));
 
@@ -33,7 +33,7 @@ public sealed class DatabaseSchemaTests {
     Assert.Contains("-shm", error.Message, StringComparison.OrdinalIgnoreCase);
     Assert.Contains("restart", error.Message, StringComparison.OrdinalIgnoreCase);
     Assert.True(File.Exists(database.Path));
-    Assert.Equal(10L, database.Scalar("PRAGMA user_version;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
+    Assert.Equal(11L, database.Scalar("PRAGMA user_version;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
   }
 
   [Fact]

@@ -224,6 +224,18 @@ public sealed class TranscriptHistoryTests(ITestOutputHelper output) {
       coldMilliseconds = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
       Assert.Equal(60, cold.Entries.Count);
 
+      long positionStarted = Stopwatch.GetTimestamp();
+      TranscriptPositionWindow distant = store.Positions.Locate(session, 0, 50_000L * 256);
+      double positionMilliseconds = Stopwatch.GetElapsedTime(positionStarted).TotalMilliseconds;
+      Assert.Equal(100_000L, distant.State.EntryCount);
+      Assert.Equal(50_000L, distant.Target!.Rank);
+      Assert.Equal(60, distant.Entries.Count);
+      TranscriptPromptPage prompts = store.Positions.Prompts(session, 0, distant.Target.Rank);
+      Assert.Equal(60, prompts.Prompts.Count);
+      TranscriptPositionWindow exact = store.Positions.ActivatePrompt(session, 0, prompts.Prompts[^1].Entry);
+      Assert.Equal(prompts.Prompts[^1], exact.Target);
+      output.WriteLine($"Weighted distant lookup (100,000 synthetic fixed-weight entries, first position read): {positionMilliseconds:F3} ms; marker page and exact activation verified.");
+
       double[] warmSamples = new double[9];
       for (int sample = 0; sample < warmSamples.Length; sample++) {
         started = Stopwatch.GetTimestamp();

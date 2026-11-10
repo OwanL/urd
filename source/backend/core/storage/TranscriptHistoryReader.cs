@@ -45,7 +45,7 @@ internal sealed class TranscriptHistoryReader(Database database) {
     return database.Read(transaction => Read(transaction, sessionId, query));
   }
 
-  private TranscriptHistoryPage Read(SqliteTransaction transaction, Guid sessionId, TranscriptHistoryQuery query) {
+  internal TranscriptHistoryPage Read(SqliteTransaction transaction, Guid sessionId, TranscriptHistoryQuery query) {
     using SqliteCommand revisionRead = database.Command(transaction,
         "SELECT history_revision FROM sessions WHERE session_id = $session;", ("$session", sessionId));
     if (revisionRead.ExecuteScalar() is not long revision)

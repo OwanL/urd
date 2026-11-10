@@ -12,6 +12,7 @@ using Urd.Core.MarkdownRendering;
 using Urd.Core.Providers;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
+using Urd.Core.Tools;
 
 namespace Urd.Server;
 
@@ -23,7 +24,7 @@ internal static class Program {
       options = ServerOptions.Parse(args);
     } catch (ArgumentException failure) {
       await Console.Error.WriteLineAsync(failure.Message);
-      await Console.Error.WriteLineAsync("Usage: Urd.Server --data-root <absolute directory> --port <0..65535>");
+      await Console.Error.WriteLineAsync("Usage: Urd.Server --data-root <absolute directory> --port <0..65535> [--working-directory <absolute directory>] [--git-bash <absolute executable>]");
       return 2;
     }
 
@@ -69,7 +70,12 @@ internal static class Program {
       Uri CallbackUri() => new(Volatile.Read(ref servedOrigin)
           ?? throw new InvalidOperationException("The server is not ready."), "/auth/callback");
       providers = createProviders?.Invoke(store, CallbackUri) ?? new ProviderManager(store, CallbackUri);
-      manager = new SessionManager(store, client is { } supplied ? _ => supplied : providers.CreateChatClient);
+      AgentToolSettings? tools = options.WorkingDirectory is { } directory
+          ? new AgentToolSettings(directory, options.GitBashPath,
+              Environment.GetEnvironmentVariables().Cast<System.Collections.DictionaryEntry>()
+                  .ToDictionary(entry => (string)entry.Key, entry => (string)entry.Value!, StringComparer.OrdinalIgnoreCase))
+          : null;
+      manager = new SessionManager(store, client is { } supplied ? _ => supplied : providers.CreateChatClient, tools);
       eventHub = new SessionEventHub(manager);
       // Qualification may supply explicit limits; normal startup leaves Markdown inactive.
       markdown = createMarkdown?.Invoke();

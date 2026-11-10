@@ -9,7 +9,7 @@ saved-primary-ID discovery, durable Send decisions, safe-boundary steering, addr
 Stop, bounded snapshot/history/content reads, known-not-sent discovery and graceful
 shutdown. The browser workspace is implemented and served as static assets by the Server.
 
-`UrdStore` owns the shared database, currently schema 12. It records whether a request
+`UrdStore` owns the shared database, currently schema 13. It records whether a request
 started sending and pages inputs known not to have been sent, so users can retrieve
 and explicitly resend them. Snapshots stay slim; transcript metadata and
 content use separate bounded reads, and reported usage is persisted per request. Provider
@@ -19,7 +19,7 @@ credential behavior.
 
 Before the supported public data baseline, schema changes replace the schema rather than
 migrating it. A fresh/version-0 database creates all current tables and indexes in one
-transaction; version 12 reopens normally. Other versions fail with reset instructions:
+transaction; version 13 reopens normally. Other versions fail with reset instructions:
 stop Urd, delete `urd.sqlite`, `urd.sqlite-wal` and `urd.sqlite-shm`, then restart.
 Urd never deletes these files automatically. Requests have only known not-attempted (1)
 or attempted (2) provenance; transcript user entries require request links and receipts
@@ -61,10 +61,11 @@ remain required. The pipeline is not wired into session ownership or HTTP routes
 
 ## Checkpoint scope
 
-- `SessionManager(store, createChatClient, IReadOnlyList<AIFunction>? tools = null)` passes the
-  borrowed store and client factory to canonical session handles. It snapshots the optional tool
-  list, not the functions themselves; the host owns the store, factory and functions. The factory
-  receives the frozen selected connection binding. Constructors start no work.
+- `SessionManager(store, createChatClient, AgentToolSettings? toolSettings = null)` passes the
+  borrowed store and client factory to canonical session handles. Optional settings enable the
+  generic read/write/edit/bash catalog; no settings means no tools. Each chat retains its saved
+  working directory and owns its shell processes; file mutations share the manager's ordering
+  queue. The factory receives the frozen selected connection binding. Constructors start no work.
 - `PrimarySession.SubmitUserMessageAsync(submission)` returns a durable acceptance/refusal receipt,
   not an LLM answer. Acceptance and execution identity commit together. Exact retries return
   the original decision; neither lookup nor retained acceptance starts work. Refusal fences delayed originals.
@@ -94,13 +95,14 @@ remain required. The pipeline is not wired into session ownership or HTTP routes
   Claiming the next request or settling happens under the same guard, so racing admission cannot
   strand accepted input. Capacity, revision and Stopping refusals remain durable decisions.
 - Configured tool batches are authorized only after successful response completion and provider cleanup;
-  calls execute sequentially, at most 16 per response. The old 16 KiB tool JSON write caps
-  are removed; bounded reads protect display paths instead.
-  Ordinary tool errors become feedback and remaining calls/LLM continuation proceed, including
-  failures inside an opaque `AIFunction`'s binding/marshalling. Such errors do not guarantee no effects.
-  Core-owned result encoding, persistence or cleanup faults fence uncertain work instead of
-  being converted into ordinary tool errors. Reported usage is accumulated and persisted with its
-  request completion when supplied; missing usage remains unknown.
+  up to 16 calls launch in emitted order and run in parallel. All launched calls join before
+  continuation; dependencies require separate replies or a chained shell command. Bounded reads
+  protect display paths rather than imposing a 16 KiB tool JSON write cap.
+  Ordinary argument/execution errors become feedback and do not cancel siblings. Such errors do
+  not guarantee no effects. Core-owned result encoding, persistence or cleanup faults fence
+  uncertain work instead of becoming ordinary tool errors. Saved results retain text, inspection
+  details and content-addressed processed image bytes; the selected model's explicit image flag
+  filters only outgoing context. Reported usage remains unknown when the provider omits it.
 - Stop retires pending deliveries without rewriting Accepted receipts or automatically carrying
   them into another execution. No explicit after-execution queue is implemented.
 - Public snapshot, history, not-sent and content reads expose committed state without starting
@@ -112,7 +114,9 @@ remain required. The pipeline is not wired into session ownership or HTTP routes
   Stop write still triggers local cancellation and draining, and the shutdown failure remains visible.
 - The caller gates/drains external operations before disposing the borrowed store/client. Handle reads
   and retained receipts remain available during shutdown; new inputs receive durable Stopping refusals.
-  Shutdown does not close saved conversations, recover orphan executions or shut down the host itself.
+  After draining executions, shutdown kills each chat's remaining shell descendants. Ordinary Stop
+  preserves descendants deliberately retained by completed shell calls. Shutdown does not close
+  saved conversations, recover orphan executions or shut down the host itself.
   Cancellation callbacks may reenter reads/admission, but must not await shutdown or their own settlement.
 - Settlement waiting remains internal; public snapshots observe stopping and saved settlement.
   Unowned orphan Stop does not mutate/recover/replay the execution or fabricate settlement.
@@ -287,12 +291,17 @@ files. A mismatch fails instead of silently upgrading. Restore needs public NuGe
 access or already cached packages; it does not require personal credentials.
 Test also builds Core, Server and tests with nullable checking and the code-quality gate below.
 The command avoids persistent build/compiler servers and limits build parallelism.
+If a running development server owns the normal Release files, preserve it and add
+`-p:BaseOutputPath=bin/Verification/` to build/test commands. This stages isolated per-project
+outputs without changing restore paths. Browser integration can target that server assembly
+with `URD_TEST_SERVER_ASSEMBLY`; never point its temporary test data at a personal profile.
 
 `Microsoft.Data.Sqlite` **10.0.14** follows the stable .NET 10 provider line and
 includes its SQLite native bundle. `Microsoft.Extensions.AI.Abstractions` and
 `Microsoft.Extensions.AI.OpenAI` **10.11.0** provide the request abstraction and adapter;
 OpenAI **2.14.0**, Duende OIDC **7.1.1**, Duende IdentityModel **8.1.0**, and
 Microsoft.IdentityModel.JsonWebTokens **8.23.0** are pinned in `Urd.Core.csproj`.
+SkiaSharp **4.155.0** supplies bounded tool-image decoding, orientation and conversion.
 Tests use xUnit **2.9.3**, runner **4.0.1**, and Microsoft.NET.Test.Sdk **18.11.0**.
 SonarAnalyzer.CSharp **10.35.0.4138** is shared through
 `source/Directory.Build.props` with `PrivateAssets="all"`; it is a build-time dependency,

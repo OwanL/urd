@@ -28,6 +28,8 @@ public sealed class LlmSelectionTests {
     ProviderConnection connection = selection.Connection;
     LlmSelection[] changed = [
       selection with { ModelId = "another-model" },
+      selection with { Family = ModelFamily.Anthropic },
+      selection with { SupportsImages = !selection.SupportsImages },
       selection with { Connection = connection with { Endpoint = new Uri("https://changed.invalid/v1/") } }
     ];
     foreach (LlmSelection choice in changed) {
@@ -62,7 +64,7 @@ public sealed class LlmSelectionTests {
       Assert.Equal(selection.Connection, binding);
       Assert.Equal(selection, session!.ReadSnapshotAsync().WaitAsync(TestTimeout).GetAwaiter().GetResult().LatestLlmSelection);
       return client;
-    }, [AIFunctionFactory.Create((int number) => number, name: "step")]);
+    }, [new TestAgentTool(AIFunctionFactory.Create((int number) => number, name: "step"))], Path.GetDirectoryName(database.Path)!);
     try {
       session = await manager.CreatePrimaryAsync();
       Assert.Equal(0, factories);

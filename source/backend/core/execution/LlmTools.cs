@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Urd.Core.Tools;
 
 namespace Urd.Core.Execution;
 
@@ -7,4 +8,4 @@ internal sealed record LlmToolCall(string CallId, string Name, JsonElement Argum
 
 // A completed invocation or error result, not a claim that a command's intended effect succeeded.
 internal sealed record LlmToolResult(
-    string CallId, ExecutionOutcome Outcome, JsonElement Result, string? Error = null);
+    string CallId, ExecutionOutcome Outcome, ToolOutput Output);

@@ -5,6 +5,7 @@ import { ProviderClient } from "../providers/ProviderClient.ts";
 import type { ProviderConnection } from "../providers/ProviderConnection.ts";
 import type { ProviderCredentialStatus } from "../providers/ProviderCredentials.ts";
 import type { ProviderSignIn } from "../providers/ProviderSignIn.ts";
+import type { ModelSettings } from "../providers/ModelSettings.ts";
 import {
   credentialState,
   matchesConnection,
@@ -62,6 +63,7 @@ function setup(overrides: Partial<ProviderClient> = {}) {
       list: async () => [connection],
       getCredentials: async () => credential,
       getModels: async () => emptyCatalog,
+      getModelSettings: async () => [],
       getSignIn: async () => pending,
     },
     overrides,
@@ -575,6 +577,129 @@ void test("an older disconnect reconciliation cannot overwrite a newer uncertain
   assert.equal(state.snapshot.notice?.operation, "refreshModels");
   assert.equal(state.snapshot.notice?.outcome, "uncertain");
   state.setActivity(false, false);
+});
+
+void test("model metadata drafts survive reads, refresh and disconnect; saves are explicit and removal clears them", async (context) => {
+  let records: readonly ModelSettings[] = [
+    {
+      connectionId: "one",
+      modelId: "opaque",
+      family: "anthropic",
+      supportsImages: true,
+    },
+  ];
+  let connections = [connection];
+  const writes: ModelSettings[] = [];
+  const { state } = setup({
+    list: async () => connections,
+    getModelSettings: async () => records,
+    saveModelSettings: async (settings) => {
+      writes.push(settings);
+      records = [settings];
+      return settings;
+    },
+    refreshModels: async () => emptyCatalog,
+    disconnect: async () => ({
+      connectionId: "one",
+      localCredentialsCleared: true,
+      remoteRevocationConfirmed: false,
+    }),
+    remove: async () => {
+      connections = [];
+    },
+  });
+  context.after(() => state.setActivity(false, false));
+  state.setActivity(true, true);
+  await flush();
+  const initial = records[0]!;
+  state.editModel(initial, { family: "google" });
+  await state.read();
+  await state.refreshModels(connection);
+  state.requestConfirmation("disconnect", connection);
+  await state.confirm();
+  assert.deepEqual(state.snapshot.modelSettings.one, [initial]);
+  assert.equal(state.snapshot.modelDrafts.one?.[0]?.family, "google");
+  assert.equal(writes.length, 0);
+  const draft = state.snapshot.modelDrafts.one![0]!;
+  await state.saveModelSettings(draft);
+  assert.deepEqual(writes, [{ ...initial, family: "google" }]);
+  assert.deepEqual(state.snapshot.modelSettings.one, writes);
+  assert.deepEqual(state.snapshot.modelDrafts.one, []);
+  state.requestConfirmation("remove", connection);
+  await state.confirm();
+  assert.equal(state.snapshot.modelSettings.one, undefined);
+  assert.equal(state.snapshot.modelDrafts.one, undefined);
+});
+
+void test("aborted model settings reads cannot publish over a newer read", async (context) => {
+  const stale = deferred<readonly ModelSettings[]>();
+  const current: ModelSettings = {
+    connectionId: "one",
+    modelId: "opaque",
+    family: "other",
+    supportsImages: false,
+  };
+  let signal: AbortSignal | undefined;
+  const { state, client } = setup({
+    getModelSettings: (_id, readSignal) => {
+      signal = readSignal;
+      return stale.promise;
+    },
+  });
+  context.after(() => state.setActivity(false, false));
+  state.setActivity(true, true);
+  await flush();
+  state.setActivity(true, false);
+  assert.equal(signal?.aborted, true);
+  client.getModelSettings = async () => [current];
+  state.setActivity(true, true);
+  await flush();
+  stale.resolve([{ ...current, family: "openAI", supportsImages: true }]);
+  await flush();
+  assert.deepEqual(state.snapshot.modelSettings.one, [current]);
+});
+
+void test("unknown model settings writes are not retried and require metadata reread before allowing commands", async (context) => {
+  const record: ModelSettings = {
+    connectionId: "one",
+    modelId: "opaque",
+    family: "other",
+    supportsImages: false,
+  };
+  let readsFail = false;
+  let writes = 0;
+  const { state, client } = setup({
+    getModelSettings: async () => {
+      if (readsFail) throw new TypeError("offline");
+      return [record];
+    },
+    saveModelSettings: async () => {
+      writes++;
+      readsFail = true;
+      throw new TypeError("acknowledgement lost");
+    },
+  });
+  context.after(() => state.setActivity(false, false));
+  state.setActivity(true, true);
+  await flush();
+  const draft = { ...record, supportsImages: true };
+  state.editModel(record, { supportsImages: true });
+  await state.saveModelSettings(draft);
+  assert.equal(state.snapshot.uncertain, true);
+  assert.equal(state.snapshot.connectionsReloadedAfterUncertainty, false);
+  assert.deepEqual(state.snapshot.modelSettings.one, [record]);
+  assert.ok(state.snapshot.errors["modelSettings:one"]);
+  state.allowNewCommands();
+  await state.saveModelSettings(draft);
+  assert.equal(writes, 1);
+  client.getModelSettings = async () => [draft];
+  await state.read();
+  assert.equal(state.snapshot.connectionsReloadedAfterUncertainty, true);
+  assert.equal(state.snapshot.errors["modelSettings:one"], undefined);
+  assert.equal(state.snapshot.uncertain, true);
+  state.allowNewCommands();
+  assert.equal(state.snapshot.uncertain, false);
+  assert.equal(writes, 1);
 });
 
 void test("model discovery is explicit and status text does not imply model entitlement", async (context) => {

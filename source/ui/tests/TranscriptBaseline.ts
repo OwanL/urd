@@ -536,6 +536,8 @@ async function main() {
           Authentication: 0,
         },
         ModelId: "fixture-a",
+        Family: 3,
+        SupportsImages: false,
         ReasoningEffort: null,
       }),
     );
@@ -588,7 +590,7 @@ async function main() {
     await installProbe(page);
     const streamId = ids[5]!;
     const workspace = encodeWorkspace({
-      version: 2,
+      version: 3,
       tabs: ids,
       activeId: streamId,
       chats: Object.fromEntries(ids.map((id) => [id, newChat(null)])),
@@ -773,7 +775,13 @@ async function main() {
         submissionId: randomUUID(),
         expectedHistoryRevision: snapshot.historyRevision,
         text: `measure commit ${sample}`,
-        llmSelection: { connection, modelId: "fixture-a", reasoningEffort: null },
+        llmSelection: {
+          connection,
+          modelId: "fixture-a",
+          family: "other",
+          supportsImages: false,
+          reasoningEffort: null,
+        },
       });
       assert.equal(receipt.acceptance, "accepted");
       const [renderedAt, commit] = await Promise.all([renderedPromise, committed]);
@@ -805,7 +813,13 @@ async function main() {
       submissionId: randomUUID(),
       expectedHistoryRevision: snapshot.historyRevision,
       text: "ten second stream",
-      llmSelection: { connection, modelId: "fixture-a", reasoningEffort: null },
+      llmSelection: {
+        connection,
+        modelId: "fixture-a",
+        family: "other",
+        supportsImages: false,
+        reasoningEffort: null,
+      },
     });
     const firstRenderedAt = await markerTime(page, "stream-000", clock);
     const [finalRenderedAt] = await Promise.all([

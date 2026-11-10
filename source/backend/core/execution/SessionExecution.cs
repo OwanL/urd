@@ -2,23 +2,24 @@ using System.Runtime.ExceptionServices;
 using Microsoft.Extensions.AI;
 using Urd.Core.Sessions;
 using Urd.Core.Providers;
+using Urd.Core.Tools;
 
 namespace Urd.Core.Execution;
 
-// Sends an execution's requests to the LLM and executes each authorized fake-tool batch.
+// Sends an execution's requests to the LLM and joins each authorized parallel tool batch.
 // The session owns locking and storage; this class owns the LLM call and its cleanup.
 internal sealed class SessionExecution : IDisposable {
   private readonly SessionBase session;
   private readonly Func<ProviderConnection, IChatClient> createChatClient; // Returns borrowed clients.
   private readonly LlmSelection selection;
   private IChatClient? chatClient;
-  private readonly IReadOnlyList<AIFunction> tools; // Borrowed; the manager owns the snapshot.
+  private readonly IReadOnlyList<AgentTool> tools; // Frozen offered capabilities for this execution.
   private readonly CancellationTokenSource stop = new();
   private Task? stopCallbacks;
 
   internal SessionExecution(Guid executionId, SessionBase session, Func<ProviderConnection, IChatClient> createChatClient,
       LlmSelection selection,
-      IReadOnlyList<AIFunction>? tools = null) {
+      IReadOnlyList<AgentTool>? tools = null) {
     ExecutionId = executionId;
     this.session = session;
     this.createChatClient = createChatClient;
@@ -55,46 +56,81 @@ internal sealed class SessionExecution : IDisposable {
     if (outcome.Outcome != ExecutionOutcome.Completed)
       return outcome.Outcome;
 
-    foreach (LlmToolCall call in outcome.ToolCalls ?? []) {
-      if (IsStopping || !await session.TryStartToolAsync(ExecutionId, request.RequestId, call.CallId))
-        return ExecutionOutcome.Cancelled;
+    return await RunToolsAsync(request.RequestId, outcome.ToolCalls ?? []);
+  }
 
-      LlmToolResult result = await InvokeToolAsync(call);
-      // A rejected or failed result save leaves effects uncertain. Never turn it into
-      // an ordinary tool error or allow an LLM continuation.
-      if (!await session.CompleteToolAsync(ExecutionId, request.RequestId, result))
-        throw new InvalidOperationException("The tool result could not be saved.");
+  private async Task<ExecutionOutcome> RunToolsAsync(Guid requestId, IReadOnlyList<LlmToolCall> calls) {
+    var pending = new List<Task>(calls.Count);
+    var failures = new List<Exception>();
+    try {
+      foreach (LlmToolCall call in calls) {
+        if (IsStopping)
+          break;
+        if (!await session.TryStartToolAsync(ExecutionId, requestId, call.CallId)) {
+          if (IsStopping)
+            break;
+          throw new InvalidOperationException("The tool call could not be started.");
+        }
+
+        // Invoke immediately, before claiming the next call. File tools admit to their
+        // shared path queue synchronously, preserving emitted order without Task.Run.
+        pending.Add(InvokeAndSaveToolAsync(requestId, call));
+      }
+    } catch (Exception failure) {
+      failures.Add(failure);
     }
+
+    // Even a failed start/save/encoding must join all launched siblings before fencing.
+    Task joined = Task.WhenAll(pending);
+    try {
+      await joined;
+    } catch (Exception failure) {
+      failures.Add(joined.Exception ?? failure);
+    }
+    if (failures.Count != 0)
+      throw new AggregateException("The tool batch could not be completed safely.", failures);
 
     return IsStopping ? ExecutionOutcome.Cancelled : ExecutionOutcome.Completed;
   }
 
-  private async Task<LlmToolResult> InvokeToolAsync(LlmToolCall call) {
-    object? value;
+  private async Task InvokeAndSaveToolAsync(Guid requestId, LlmToolCall call) {
+    LlmToolResult result = await InvokeToolAsync(requestId, call);
+    // A rejected or failed save leaves effects uncertain, never an ordinary tool error.
+    if (!await session.CompleteToolAsync(ExecutionId, requestId, result))
+      throw new InvalidOperationException("The tool result could not be saved.");
+  }
+
+  private async Task<LlmToolResult> InvokeToolAsync(Guid requestId, LlmToolCall call) {
+    ToolOutput output;
     try {
       stop.Token.ThrowIfCancellationRequested();
-      AIFunction function = tools.FirstOrDefault(tool =>
+      AgentTool tool = tools.FirstOrDefault(tool =>
           string.Equals(tool.Name, call.Name, StringComparison.Ordinal))
           ?? throw new InvalidOperationException($"Unknown tool '{call.Name}'.");
-      var arguments = new AIFunctionArguments(call.Arguments.EnumerateObject()
-          .ToDictionary(property => property.Name, property => (object?)property.Value, StringComparer.Ordinal));
-      // A function may also bind or marshal internally; its failures cannot prove no effects.
-      value = await function.InvokeAsync(arguments, stop.Token);
+      string directory = session.WorkingDirectory
+          ?? throw new InvalidOperationException("The chat has no saved working folder.");
+      // Progress is intentionally inert until transcript progress integration is available.
+      var context = new ToolContext(directory, requestId, call.CallId, selection.SupportsImages, static _ => { });
+      output = await tool.RunAsync(call.Arguments, context, stop.Token);
     } catch (OperationCanceledException) when (IsStopping) {
       return ToolError(call, ExecutionOutcome.Cancelled,
           "Tool execution was cancelled; effects may have occurred.");
-    } catch (Exception exception) {
+    } catch (Exception exception) when (exception is not ToolCleanupException) {
       return ToolError(call, ExecutionOutcome.Failed, exception.Message);
     }
 
-    // Serialization owned here can fail after an effect. Let that uncertainty fence the execution.
-    return new(call.CallId, ExecutionOutcome.Completed, LlmResponseAccumulator.FreezeJson(value));
+    // Storage freezes output and publishes images outside the ordinary invocation-error catch.
+    // A tool may return an error instead of throwing after cancellation; Stop still takes priority.
+    ExecutionOutcome outcome = output.IsError ? ExecutionOutcome.Failed : ExecutionOutcome.Completed;
+    if (IsStopping)
+      outcome = ExecutionOutcome.Cancelled;
+    return new(call.CallId, outcome, output);
   }
 
   private static LlmToolResult ToolError(LlmToolCall call, ExecutionOutcome outcome, string message) {
     // Bound even arbitrary exception messages, allowing for JSON escaping overhead.
     string error = message[..Math.Min(message.Length, 1024)];
-    return new(call.CallId, outcome, LlmResponseAccumulator.FreezeJson(new { error }), error);
+    return new(call.CallId, outcome, new ToolOutput(error, [], IsError: true));
   }
 
   private async Task<LlmRequestResult> SendRequestAsync(LlmRequest request, CancellationTokenSource requestStop) {
@@ -112,11 +148,11 @@ internal sealed class SessionExecution : IDisposable {
         ModelId = selection.ModelId,
         Reasoning = selection.ReadReasoningEffort() is { } effort
             ? new ReasoningOptions { Effort = effort } : null,
-        Tools = [.. tools]
+        Tools = [.. tools.Select(AgentToolDeclaration.Create)]
       };
       await StartRequestAsync(request.RequestId);
       updates = chatClient
-          .GetStreamingResponseAsync(request.Messages, options, requestStop.Token)
+          .GetStreamingResponseAsync(LlmProviderContext.ForModel(request.Messages, selection.SupportsImages), options, requestStop.Token)
           .GetAsyncEnumerator(requestStop.Token);
 
       while (await WaitForNextUpdateAsync(writer, pendingRead ??= updates.MoveNextAsync().AsTask())) {

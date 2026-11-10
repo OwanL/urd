@@ -4,6 +4,7 @@ import { RequestError } from "../http/RequestError.ts";
 import { ProviderClient } from "../providers/ProviderClient.ts";
 import type { ProviderConnection } from "../providers/ProviderConnection.ts";
 import type { ProviderModelCatalog } from "../providers/ProviderModels.ts";
+import type { ModelSettings } from "../providers/ModelSettings.ts";
 import { startHttpServer } from "./HttpTestServer.ts";
 
 const connectionId = "50000000-0000-0000-0000-000000000005";
@@ -40,6 +41,13 @@ const refreshed: ProviderModelCatalog = {
   models: [{ id: "provider/model 雪", name: "Display name 雪" }],
 };
 
+const modelSettings: ModelSettings = {
+  connectionId,
+  modelId: "opaque-model 雪",
+  family: "anthropic",
+  supportsImages: true,
+};
+
 const mappings = [
   {
     name: "list connections",
@@ -61,6 +69,21 @@ const mappings = [
     method: "POST",
     path: `/api/providers/${connectionId}/models/refresh`,
     response: refreshed,
+  },
+  {
+    name: "read explicit model settings without discovery",
+    call: (client: ProviderClient) => client.getModelSettings(connectionId),
+    method: "GET",
+    path: `/api/providers/${connectionId}/model-settings`,
+    response: [modelSettings],
+  },
+  {
+    name: "save the complete model settings record",
+    call: (client: ProviderClient) => client.saveModelSettings(modelSettings),
+    method: "POST",
+    path: `/api/providers/${connectionId}/model-settings`,
+    body: modelSettings,
+    response: modelSettings,
   },
 ];
 
@@ -87,7 +110,10 @@ for (const mapping of mappings) {
       request.headers["content-type"],
       mapping.method === "POST" ? "application/json" : undefined,
     );
-    assert.equal(request.body, mapping.method === "POST" ? "{}" : "");
+    assert.equal(
+      request.body,
+      mapping.method === "POST" ? JSON.stringify("body" in mapping ? mapping.body : {}) : "",
+    );
   });
 }
 
@@ -108,11 +134,15 @@ void test("connection IDs remain a single encoded path segment", { timeout: 5_00
 
   await client.getModels(id);
   await client.refreshModels(id);
+  await client.getModelSettings(id);
+  await client.saveModelSettings({ ...modelSettings, connectionId: id });
   assert.deepEqual(
     server.requests.map((request) => request.url),
     [
       `/api/providers/${encodeURIComponent(id)}/models`,
       `/api/providers/${encodeURIComponent(id)}/models/refresh`,
+      `/api/providers/${encodeURIComponent(id)}/model-settings`,
+      `/api/providers/${encodeURIComponent(id)}/model-settings`,
     ],
   );
 });
@@ -125,6 +155,10 @@ const reads: {
   {
     name: "cached catalog",
     call: (client, signal) => client.getModels(connectionId, signal),
+  },
+  {
+    name: "model settings",
+    call: (client, signal) => client.getModelSettings(connectionId, signal),
   },
 ];
 for (const read of reads) {

@@ -127,7 +127,7 @@ public sealed class SessionSubscriptionTests {
 
     StoredTool completedTool = Assert.Single(StoredTools.Read(fixture.Database));
     Assert.True(completedTool.Started);
-    Assert.Equal(ExecutionOutcome.Completed, completedTool.Outcome);
+    Assert.Equal(ExecutionOutcome.Cancelled, completedTool.Outcome);
     Assert.NotNull(completedTool.ResultJson);
 
     SessionChange[] changes = watched.ToArray();

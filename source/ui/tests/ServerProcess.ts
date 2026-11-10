@@ -5,9 +5,11 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
-const assembly = fileURLToPath(
-  new URL("../../hosting/server/bin/Release/net10.0/Urd.Server.dll", import.meta.url),
-);
+const assembly =
+  process.env.URD_TEST_SERVER_ASSEMBLY ??
+  fileURLToPath(
+    new URL("../../hosting/server/bin/Release/net10.0/Urd.Server.dll", import.meta.url),
+  );
 
 // Owns only this child and its temporary data. Termination is not a graceful shutdown test.
 export class ServerProcess {

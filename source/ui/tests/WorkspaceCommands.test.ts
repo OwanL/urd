@@ -32,6 +32,8 @@ const selection: LlmSelection = {
     authentication: "none",
   },
   modelId: "model-id",
+  family: "other",
+  supportsImages: false,
   reasoningEffort: null,
 };
 

@@ -9,5 +9,5 @@ internal static class TestLlmSelection {
       LlmApi.OpenAIResponses, new Uri("https://fixture.invalid/v1/"), AuthenticationMethod.None));
 
   internal static LlmSelection Create(ProviderConnection connection, string modelId = "fixture-model")
-      => new(connection, modelId, null);
+      => new(connection, modelId, null, ModelFamily.Other, false);
 }

@@ -1,10 +1,38 @@
 # Agent-tool process and result qualification
 
-**2026-11-10.** Disposable local probes for two gates in the
-[agent-tool plan](agent-tools-design.md). No production implementation, live model requests,
-credentials, personal databases, installations or desktop control. Builds/runs used the
-exclusive `urd:dotnet` resource. Independent review checked fixture source and captured
-results; it did not independently rerun them.
+Evidence for the [agent-tool plan](agent-tools-design.md), separating integrated source
+qualification from earlier disposable probes. No live model requests, personal databases,
+installations or desktop control. Builds/runs used the exclusive `urd:dotnet` resource.
+
+## Integrated foreground checkpoint — 2026-11-11
+
+Generic read/write/edit/bash, parallel dispatch, explicit model metadata and processed-image
+storage/context are implemented. Local verification passed:
+
+- Release solution build and analyzers: zero warnings/errors; **292 backend tests** passed.
+- UI formatting, typed lint and typecheck; **222 unit tests**, real-server/SDK integration and
+  **14 headless browser regressions** passed. Vite production build passed.
+- Real Git Bash tests exercised supplied environment, Unicode/quoting, nonzero exits,
+  inherited-pipe survivors, timeout/cancellation isolation, chat shutdown and output faults.
+  Earlier crash evidence remains the disposable fixture below, not an integrated crash test.
+- File/queue tests exercised emitted-order admission, queued cancellation, exact edits,
+  untouched mixed endings/BOM, strict UTF-8 and bounded paging. The symbolic-link subcase was
+  unavailable on this host because Windows link privilege is absent; lexical/case/drive aliases ran.
+- Image tests exercised orientation/resize, BMP conversion, exact inline-size boundaries,
+  JPEG fallback and retained originals. Offline **Responses and Chat Completions** SDK captures
+  verified actual PNG image parts, result ordering, save/reopen fidelity and text-only omission.
+- Session/storage tests exercised parallel siblings, failed start/result saves, cleanup-failure
+  fencing, Stop returning cancelled results without claiming rollback, and saved-folder reuse
+  when host defaults change. Independent source reviews approved the bounded implementation.
+
+Verification used `bin/Tools-4d11e9d/Release/net10.0` outputs and owned temporary data. The
+running development server and its schema-12 data were not restarted or reset. Schema 13
+requires deliberate data recreation before activation; browser state is version 3.
+
+**Still pending:** integrated background completion/waiting/recovery, live-provider acceptance,
+rich tool-result inspection and compaction. Foreground qualification is not normal-use readiness.
+The following **2026-11-10 probes** establish only their stated fixture boundaries; independent
+review checked their source/captures but did not independently rerun them.
 
 ## Windows process ownership
 
@@ -70,7 +98,7 @@ stores the call, unchanged placeholder, separate completion event and image byte
 - The pinned adapter serialized the reloaded envelope plus a genuine `input_image`; its data
   decoded to the persisted PNG. Origin, call identity, outcome and untrusted-result labelling
   survived the capture. This was adapter serialization evidence, not live provider acceptance.
-- Urd's current context guard still rejected image-bearing content before HTTP, including
+- At that probe checkpoint, Urd's context guard rejected image-bearing content before HTTP, including
   the user-channel completion. The image capture bypassed that guard deliberately; the test
   does **not** establish integrated Urd image delivery.
 - Negative controls retained the developer-role image rejection/omission: bypassing Urd's

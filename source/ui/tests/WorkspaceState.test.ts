@@ -39,6 +39,8 @@ const selection: LlmSelection = {
     authentication: "oAuth",
   },
   modelId: "provider/model-id",
+  family: "openAI",
+  supportsImages: false,
   reasoningEffort: null,
 };
 void test("causal snapshot reads release accepted work outside the recent window without trusting an earlier read", () => {
@@ -95,7 +97,7 @@ function sending(submission = original) {
 
 function workspace(): WorkspaceState {
   return {
-    version: 2,
+    version: 3,
     tabs: [sessionId],
     activeId: sessionId,
     chats: { [sessionId]: sending() },
@@ -105,7 +107,7 @@ function workspace(): WorkspaceState {
 
 void test("new state is independent, empty and does not invent a selection", () => {
   assert.deepEqual(emptyWorkspace(), {
-    version: 2,
+    version: 3,
     tabs: [],
     activeId: null,
     chats: {},
@@ -222,6 +224,8 @@ void test("foreign sessions, absent pending submissions and full original mismat
     { text: original.text.trim() },
     { text: original.text.replace("\r\n", "\n") },
     { llmSelection: { ...selection, modelId: "another-model" } },
+    { llmSelection: { ...selection, family: "anthropic" } },
+    { llmSelection: { ...selection, supportsImages: true } },
     { llmSelection: { ...selection, reasoningEffort: "high" } },
     ...Object.entries({
       id: "another-connection",
@@ -246,6 +250,8 @@ void test("foreign sessions, absent pending submissions and full original mismat
 void test("original matching is independent of JSON property order", () => {
   const submission = {
     llmSelection: {
+      supportsImages: selection.supportsImages,
+      family: selection.family,
       reasoningEffort: selection.reasoningEffort,
       modelId: selection.modelId,
       connection: Object.fromEntries(Object.entries(selection.connection).reverse()),
@@ -317,15 +323,8 @@ void test("reload retains later edits while reconciling an uncertain submission"
   assert.equal(resolved.pending, null);
 });
 
-void test("old saved workspaces without title provenance are discarded, not migrated", () => {
-  const saved = {
-    version: 1,
-    tabs: [sessionId],
-    activeId: sessionId,
-    chats: { [sessionId]: { ...sending(), title: "New chat", titleProvenance: undefined } },
-    lastSelection: selection,
-  };
-  // JSON.stringify omits the provenance member, leaving the previous sentinel shape.
+void test("version 2 saved workspaces are discarded, not migrated", () => {
+  const saved = { ...workspace(), version: 2 };
   assert.throws(() => decodeWorkspace(JSON.stringify(saved)), TypeError);
 });
 
@@ -335,7 +334,8 @@ void test("corrupt saved structure throws instead of resetting or discarding dra
 
   const invalid: unknown[] = [
     { ...workspace(), version: 1 },
-    { ...workspace(), version: 3 },
+    { ...workspace(), version: 2 },
+    { ...workspace(), version: 4 },
     { ...workspace(), tabs: [sessionId, sessionId] },
     { ...workspace(), tabs: ["missing"] },
     { ...workspace(), tabs: [1] },
@@ -343,6 +343,10 @@ void test("corrupt saved structure throws instead of resetting or discarding dra
     { ...workspace(), chats: [] },
     { ...workspace(), lastSelection: undefined },
     { ...workspace(), lastSelection: { ...selection, connection: { id: "x" } } },
+    { ...workspace(), lastSelection: { ...selection, family: "invalid" } },
+    { ...workspace(), lastSelection: { ...selection, supportsImages: "yes" } },
+    { ...workspace(), lastSelection: { ...selection, family: undefined } },
+    { ...workspace(), lastSelection: { ...selection, supportsImages: undefined } },
   ];
   const badChatMembers: Record<string, unknown>[] = [
     { draft: null },
@@ -351,6 +355,8 @@ void test("corrupt saved structure throws instead of resetting or discarding dra
     { draftVersion: Number.MAX_SAFE_INTEGER + 1 },
     { selection: undefined },
     { selection: { ...selection, connection: { ...selection.connection, route: "unknown" } } },
+    { selection: { ...selection, family: "invalid" } },
+    { selection: { ...selection, supportsImages: 1 } },
     { selection: { ...selection, reasoningEffort: 3 } },
     { knownExecutionId: false },
     { title: null },

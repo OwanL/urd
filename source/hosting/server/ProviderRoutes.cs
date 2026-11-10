@@ -56,6 +56,14 @@ internal static class ProviderRoutes {
     });
     routes.MapGet("/{connectionId:guid}/models", async (HttpContext http, Guid connectionId) =>
         Results.Ok(await providers.GetModelCatalogAsync(connectionId, http.RequestAborted)));
+    routes.MapGet("/{connectionId:guid}/model-settings", async (HttpContext http, Guid connectionId) =>
+        Results.Ok(await providers.GetModelSettingsAsync(connectionId, http.RequestAborted)));
+    routes.MapPost("/{connectionId:guid}/model-settings", async (HttpContext http, Guid connectionId) => {
+      ModelSettings settings = await ReadAsync<ModelSettings>(http);
+      if (settings.ConnectionId != connectionId)
+        return Results.BadRequest();
+      return Results.Ok(await providers.SaveModelSettingsAsync(settings));
+    });
     routes.MapPost("/{connectionId:guid}/models/refresh", async (HttpContext http, Guid connectionId) => {
       await HttpJson.RequireEmptyAsync(http.Request, http.RequestAborted);
       return Results.Ok(await providers.RefreshModelCatalogAsync(connectionId));

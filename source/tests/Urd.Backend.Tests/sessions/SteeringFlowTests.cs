@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
-using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Execution;
@@ -57,7 +56,7 @@ public sealed class SteeringFlowTests {
           continued.Select(message => message.Role));
       FunctionResultContent[] results = continued[2].Contents.OfType<FunctionResultContent>().ToArray();
       Assert.Equal(new[] { "first", "second" }, results.Select(result => result.CallId));
-      Assert.Equal(new[] { 1, 2 }, results.Select(result => Assert.IsType<JsonElement>(result.Result).GetInt32()));
+      Assert.Equal(new[] { "1", "2" }, results.Select(result => Assert.IsType<string>(result.Result)));
       Assert.Equal(new[] { "start", first.Text, second.Text }, Users(continued));
 
       IEnumerable<ChatMessage> inFlight = client.LastRequestSource;

@@ -58,6 +58,8 @@ Paths below start with `/api/providers`:
 | POST `/{id}/disconnect` | `{}` → `{connectionId, localCredentialsCleared, remoteRevocationConfirmed}` |
 | GET `/{id}/models` | Last successful catalog, including `refreshedAt`, or an empty unsampled catalog |
 | POST `/{id}/models/refresh` | `{}` → fetched and saved catalog |
+| GET `/{id}/model-settings` | Saved per-model family/image-support records; no network request |
+| POST `/{id}/model-settings` | `{connectionId, modelId, family, supportsImages}` → saved record |
 | POST `/{id}/model-tests` | `{modelId}` → response preview and available usage |
 
 A connection is `{id, name, route, api, endpoint, authentication}`. Custom `api` is
@@ -137,6 +139,11 @@ rejected rather than silently omitted, including named speakers, hosted tools, r
 factories and explicit strict-function schema settings on the plan namespace path.
 Protocol support for a reasoning effort does not establish support by a particular model;
 current ID/name catalogs leave that compatibility unknown. No model-name heuristic fills it in.
+
+Model family and image support are explicit local settings, independent of catalog refresh and
+credentials. Unconfigured models default to `other` and `supportsImages: false`. Saved records
+survive refresh/disconnect and are deleted only with their connection. Each submission freezes
+these values; changing settings never rewrites a running execution or an existing selection.
 
 `LlmProviderContext` captures a versioned native response scoped to connection ID, binding
 generation, API and exact **requested** model ID, not the provider's resolved alias.

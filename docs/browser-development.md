@@ -41,8 +41,9 @@ workspace before dispatch. Failed reads/writes block commands and offer an expli
 retry. If cleanup alone fails after a successful save, the saved state remains usable
 and cleanup can be retried. Storage access failures stay fail-closed until retry succeeds.
 Before the supported public data baseline, incompatible or malformed saved workspace/draft
-shapes are discarded, not migrated. Workspace version 2 records explicit placeholder/derived
-title provenance, so an actual first message of `New chat` is not mistaken for an unnamed tab.
+shapes are discarded, not migrated. Workspace version 3 preserves explicit model-family/image
+settings in each selection alongside placeholder/derived title provenance, so an actual first
+message of `New chat` is not mistaken for an unnamed tab. Version-2 state is discarded.
 The palette uses neutral black/charcoal surfaces and grey controls; semantic error
 colours remain distinct. Transcript rows render plain text and tool status; richer formatting
 and tool argument/result inspection remain future work.

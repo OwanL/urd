@@ -9,7 +9,7 @@ namespace Urd.Core.Storage;
 
 // Execution owns context eligibility: never-attempted history is excluded, while the
 // current claim is included to prepare its send. Attempted failures stay eligible.
-internal sealed class LlmContextReader(Database database) {
+internal sealed class LlmContextReader(Database database, ToolResultCodec toolResults) {
   internal ReadOnlyCollection<ChatMessage> Read(SqliteTransaction transaction, Guid sessionId,
       Guid executionId, long historyRevision, Guid requestId) {
     using SqliteCommand read = database.Command(transaction, """
@@ -78,7 +78,7 @@ internal sealed class LlmContextReader(Database database) {
           break;
         case 3:
           results.Add(new FunctionResultContent(reader.GetString(3),
-              JsonSerializer.Deserialize<JsonElement>(reader.GetString(5))));
+              toolResults.ReadModelResult(reader.GetString(5))));
           break;
         case 4:
           providerMessage = LlmProviderContext.Restore(

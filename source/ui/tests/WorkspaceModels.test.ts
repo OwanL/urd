@@ -3,6 +3,7 @@ import test from "node:test";
 import { WorkspaceModels } from "../app/WorkspaceModels.ts";
 import type { ProviderConnection } from "../providers/ProviderConnection.ts";
 import type { ProviderModelCatalog } from "../providers/ProviderModels.ts";
+import type { ModelSettings } from "../providers/ModelSettings.ts";
 
 const firstConnection: ProviderConnection = {
   id: "10000000-0000-0000-0000-000000000001",
@@ -35,6 +36,7 @@ void test("cached reads do not discover models; explicit refresh does", async ()
       cachedReads++;
       return catalog(firstConnection.id, "cached", "Cached model");
     },
+    getModelSettings: async () => [],
     refreshModels: async () => {
       discoveries++;
       return catalog(firstConnection.id, "discovered", "Discovered model");
@@ -44,6 +46,8 @@ void test("cached reads do not discover models; explicit refresh does", async ()
   const cached = await models.readCached(new AbortController().signal);
   assert.equal(cached.options?.[0]?.key, `${firstConnection.id}/cached`);
   assert.equal(cached.options?.[0]?.providerLabel, "First provider");
+  assert.equal(cached.options?.[0]?.selection.family, "other");
+  assert.equal(cached.options?.[0]?.selection.supportsImages, false);
   assert.equal(cachedReads, 1);
   assert.equal(discoveries, 0);
 
@@ -59,6 +63,7 @@ void test("provider changes prevent an older manual refresh from publishing over
   const models = new WorkspaceModels({
     list: async () => [listCalls++ === 0 ? firstConnection : currentConnection],
     getModels: async () => catalog(currentConnection.id, "cached", "Cached model"),
+    getModelSettings: async () => [],
     refreshModels: async () => {
       discoveryStarted.resolve();
       return discovery.promise;
@@ -76,4 +81,57 @@ void test("provider changes prevent an older manual refresh from publishing over
   const oldRefresh = await manual;
   assert.equal(models.isCurrent(oldRefresh.revision), false);
   assert.equal(oldRefresh.options, null);
+});
+
+void test("configured metadata is matched by connection and model without inference or mutation", async () => {
+  const connection = Object.freeze({ ...firstConnection });
+  const settings: readonly ModelSettings[] = Object.freeze([
+    Object.freeze({
+      connectionId: connection.id,
+      modelId: "gpt-configured",
+      family: "anthropic" as const,
+      supportsImages: true,
+    }),
+    Object.freeze({
+      connectionId: "another-connection",
+      modelId: "gpt-unconfigured",
+      family: "google" as const,
+      supportsImages: true,
+    }),
+  ]);
+  let records = settings;
+  const models = new WorkspaceModels({
+    list: async () => [connection],
+    getModels: async () => ({
+      connectionId: connection.id,
+      refreshedAt: null,
+      models: Object.freeze([
+        Object.freeze({ id: "gpt-configured", name: "GPT configured" }),
+        Object.freeze({ id: "claude-default", name: "Claude default" }),
+        Object.freeze({ id: "gpt-unconfigured", name: "GPT unmatched" }),
+      ]),
+    }),
+    getModelSettings: async () => records,
+    refreshModels: async () => catalog(connection.id, "unused", "Unused"),
+  });
+
+  const result = await models.readCached(new AbortController().signal);
+  assert.deepEqual(
+    result.options?.map(({ selection }) => [selection.family, selection.supportsImages]),
+    [
+      ["anthropic", true],
+      ["other", false],
+      ["other", false],
+    ],
+  );
+  assert.equal(result.options?.[0]?.selection.connection, connection);
+  assert.equal(Object.isFrozen(connection), true);
+  assert.equal(Object.isFrozen(settings[0]), true);
+  const chosen = result.options![0]!.selection;
+  records = [{ ...settings[0]!, family: "google", supportsImages: false }];
+  const updated = await models.readCached(new AbortController().signal);
+  assert.equal(updated.options?.[0]?.selection.family, "google");
+  assert.equal(updated.options?.[0]?.selection.supportsImages, false);
+  assert.equal(chosen.family, "anthropic");
+  assert.equal(chosen.supportsImages, true);
 });

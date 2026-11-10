@@ -21,6 +21,8 @@ const selection: LlmSelection = {
     authentication: "none",
   },
   modelId: "saved-model",
+  family: "other",
+  supportsImages: false,
   reasoningEffort: null,
 };
 const latestSelection: LlmSelection = { ...selection, modelId: "latest-model" };

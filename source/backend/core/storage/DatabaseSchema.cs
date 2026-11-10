@@ -4,7 +4,7 @@ namespace Urd.Core.Storage;
 
 // Creates the current pre-release schema; incompatible databases require a manual reset.
 internal static class DatabaseSchema {
-  private const int SchemaVersion = 12;
+  private const int SchemaVersion = 13;
 
   internal static void Initialize(SqliteConnection connection) {
     using SqliteCommand command = connection.CreateCommand();
@@ -41,6 +41,7 @@ internal static class DatabaseSchema {
       CREATE TABLE sessions (
           session_id TEXT NOT NULL PRIMARY KEY,
           history_revision INTEGER NOT NULL CHECK (history_revision >= 0),
+          working_directory TEXT,
           position_version INTEGER NOT NULL DEFAULT 0 CHECK (position_version >= 0)
       ) STRICT;
       CREATE TABLE session_creation (
@@ -213,6 +214,13 @@ internal static class DatabaseSchema {
           catalog_json TEXT,
           CHECK (route <> 2 OR authentication IN (0, 1))
       ) STRICT;
+      CREATE TABLE model_settings (
+          connection_id TEXT NOT NULL REFERENCES provider_connections(connection_id) ON DELETE CASCADE,
+          model_id TEXT NOT NULL,
+          family INTEGER NOT NULL CHECK (family IN (0, 1, 2, 3)),
+          supports_images INTEGER NOT NULL CHECK (supports_images IN (0, 1)),
+          PRIMARY KEY (connection_id, model_id)
+      ) STRICT;
       CREATE TABLE provider_host (
           singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
           host_id TEXT NOT NULL
@@ -227,7 +235,7 @@ internal static class DatabaseSchema {
       CREATE INDEX execution_inputs_not_sent_order ON execution_inputs(session_id, ordinal) WHERE not_sent = 1;
       CREATE INDEX execution_messages_history_order ON execution_messages(session_id, history_revision, ordinal DESC);
       CREATE INDEX execution_messages_request_order ON execution_messages(request_id, role, first_chunk_index);
-      PRAGMA user_version = 12;
+      PRAGMA user_version = 13;
       """;
     command.ExecuteNonQuery();
     transaction.Commit();

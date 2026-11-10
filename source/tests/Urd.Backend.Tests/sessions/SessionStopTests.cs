@@ -79,15 +79,15 @@ public sealed class SessionStopTests {
   }
 
   [Fact]
-  public async Task NoncooperatingFakeToolRemainsStoppingUntilReleasedWithoutFollowingToolOrLlmWork() {
+  public async Task NoncooperatingParallelToolsKeepStopPendingUntilAllReturnWithoutLlmContinuation() {
     var entered = Signal();
     var release = Signal();
     var cancellationObserved = Signal();
     int effects = 0;
     async Task<int> Step(int number, CancellationToken token) {
-      Interlocked.Increment(ref effects);
       using CancellationTokenRegistration registration = token.Register(() => cancellationObserved.TrySetResult());
-      entered.TrySetResult();
+      if (Interlocked.Increment(ref effects) == 2)
+        entered.TrySetResult();
       await release.Task; // Deliberately ignores cancellation; Stop cannot forcibly kill a function.
       return number;
     }
@@ -126,12 +126,12 @@ public sealed class SessionStopTests {
       Assert.Null(retired.RequestId);
       Assert.Equal(ExecutionOutcome.Cancelled, retired.Outcome); // Retired in the acknowledgement transaction.
       Assert.Equal(accepted, await fixture.Session.SubmitUserMessageAsync(submission));
-      Assert.Equal(1, Volatile.Read(ref effects));
+      Assert.Equal(2, Volatile.Read(ref effects));
       Assert.Equal(1, client.Calls);
-      StoredTool[] heldTools = StoredTools.Read(fixture.Database).ToArray();
-      Assert.True(heldTools[0].Started);
-      Assert.Null(heldTools[0].ResultJson);
-      Assert.False(heldTools[1].Started);
+      Assert.All(StoredTools.Read(fixture.Database), tool => {
+        Assert.True(tool.Started);
+        Assert.Null(tool.ResultJson);
+      });
       UserMessageReceipt refused = await fixture.Session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, "replacement", TestLlmSelection.Default));
       Assert.Equal(MessageRefusalReason.Stopping, refused.RefusalReason);
     } finally {
@@ -141,14 +141,13 @@ public sealed class SessionStopTests {
     }
 
     Assert.Equal(ExecutionOutcome.Cancelled, (await settlement).Outcome);
-    Assert.Equal(1, Volatile.Read(ref effects));
+    Assert.Equal(2, Volatile.Read(ref effects));
     Assert.Equal(1, client.Calls);
-    StoredTool[] tools = StoredTools.Read(fixture.Database).ToArray();
-    Assert.Equal(ExecutionOutcome.Completed, tools[0].Outcome); // Preserve actual effects, not a fictitious cancellation.
-    Assert.NotNull(tools[0].ResultJson);
-    Assert.False(tools[1].Started);
-    Assert.Equal(ExecutionOutcome.Cancelled, tools[1].Outcome);
-    Assert.NotNull(tools[1].ResultJson);
+    Assert.All(StoredTools.Read(fixture.Database), tool => {
+      Assert.True(tool.Started); // Cancelled means Stop was observed, not that effects rolled back.
+      Assert.Equal(ExecutionOutcome.Cancelled, tool.Outcome);
+      Assert.NotNull(tool.ResultJson);
+    });
     Assert.Equal(accepted, await fixture.Session.GetUserMessageReceiptAsync(submission.SubmissionId));
   }
 

@@ -7,6 +7,7 @@ import type {
 } from "../ProviderConnection.ts";
 import type { ProviderCredentialStatus, ProviderDisconnectResult } from "../ProviderCredentials.ts";
 import type { ProviderModelCatalog } from "../ProviderModels.ts";
+import type { ModelSettings } from "../ModelSettings.ts";
 import type { ProviderSignIn } from "../ProviderSignIn.ts";
 
 export type ConnectionDraft = CustomProviderSettings;
@@ -24,7 +25,8 @@ export type ProviderSettingsOperation =
   | "replaceApiKey"
   | "beginSignIn"
   | "cancelSignIn"
-  | "refreshModels";
+  | "refreshModels"
+  | "saveModelSettings";
 
 export type ProviderSettingsNotice =
   | {
@@ -70,6 +72,8 @@ export interface ProviderSettingsSnapshot {
   readonly errors: Readonly<Record<string, string>>;
   readonly credentials: Readonly<Record<string, ProviderCredentialStatus>>;
   readonly catalogs: Readonly<Record<string, ProviderModelCatalog>>;
+  readonly modelSettings: Readonly<Record<string, readonly ModelSettings[]>>;
+  readonly modelDrafts: Readonly<Record<string, readonly ModelSettings[]>>;
   readonly signIns: Readonly<Record<string, ProviderSignIn>>;
   readonly drafts: Readonly<Record<string, ConnectionDraft>>;
   readonly add: AddDraft;
@@ -148,6 +152,8 @@ export class ProviderSettingsController {
     errors: {},
     credentials: {},
     catalogs: {},
+    modelSettings: {},
+    modelDrafts: {},
     signIns: {},
     drafts: {},
     add: {
@@ -161,6 +167,7 @@ export class ProviderSettingsController {
     confirmation: null,
   };
 
+  private uncertainModelConnectionId: string | null = null;
   private active = false;
   private visible = false;
   private readAbort: AbortController | null = null;
@@ -231,6 +238,24 @@ export class ProviderSettingsController {
     this.patch({ drafts: { ...this.snapshot.drafts, [id]: { ...draft, ...update } } });
   }
 
+  editModel(
+    settings: ModelSettings,
+    update: Partial<Pick<ModelSettings, "family" | "supportsImages">>,
+  ): void {
+    if (!this.canMutate || !this.snapshot.modelSettings[settings.connectionId]) return;
+    const drafts = this.snapshot.modelDrafts[settings.connectionId] ?? [];
+    const draft = drafts.find((item) => item.modelId === settings.modelId) ?? settings;
+    this.patch({
+      modelDrafts: {
+        ...this.snapshot.modelDrafts,
+        [settings.connectionId]: [
+          ...drafts.filter((item) => item.modelId !== settings.modelId),
+          { ...draft, ...update },
+        ],
+      },
+    });
+  }
+
   setApiKey(apiKey: string): void {
     this.patch({ apiKey });
   }
@@ -240,8 +265,10 @@ export class ProviderSettingsController {
   }
 
   allowNewCommands(): void {
-    if (this.snapshot.uncertain && this.snapshot.connectionsReloadedAfterUncertainty)
+    if (this.snapshot.uncertain && this.snapshot.connectionsReloadedAfterUncertainty) {
+      this.uncertainModelConnectionId = null;
       this.patch({ uncertain: false, connectionsReloadedAfterUncertainty: false, notice: null });
+    }
   }
 
   async read(): Promise<void> {
@@ -282,12 +309,21 @@ export class ProviderSettingsController {
             drafts,
             selectedId,
             loaded: true,
-            connectionsReloadedAfterUncertainty: this.snapshot.uncertain,
+            connectionsReloadedAfterUncertainty:
+              this.snapshot.uncertain &&
+              (this.uncertainModelConnectionId === null ||
+                !ids.has(this.uncertainModelConnectionId)),
             credentials: Object.fromEntries(
               Object.entries(this.snapshot.credentials).filter(([id]) => ids.has(id)),
             ),
             catalogs: Object.fromEntries(
               Object.entries(this.snapshot.catalogs).filter(([id]) => ids.has(id)),
+            ),
+            modelSettings: Object.fromEntries(
+              Object.entries(this.snapshot.modelSettings).filter(([id]) => ids.has(id)),
+            ),
+            modelDrafts: Object.fromEntries(
+              Object.entries(this.snapshot.modelDrafts).filter(([id]) => ids.has(id)),
             ),
             errors: Object.fromEntries(
               Object.entries(this.snapshot.errors).filter(
@@ -302,13 +338,18 @@ export class ProviderSettingsController {
         },
       );
       if (!current()) return;
-      const jobs = this.snapshot.connections.map((connection) =>
+      const jobs = this.snapshot.connections.flatMap((connection) => [
         observe(
           `credentials:${connection.id}`,
           () => this.client.getCredentials(connection.id, abort.signal),
           (status) => this.storeCredentials(status),
         ),
-      );
+        observe(
+          `modelSettings:${connection.id}`,
+          () => this.client.getModelSettings(connection.id, abort.signal),
+          (settings) => this.storeModelSettings(connection.id, settings),
+        ),
+      ]);
       const selectedId = this.snapshot.selectedId;
       if (selectedId)
         jobs.push(
@@ -320,6 +361,15 @@ export class ProviderSettingsController {
         );
       await Promise.all(jobs);
       if (!current()) return;
+      const uncertainId = this.uncertainModelConnectionId;
+      if (
+        this.snapshot.uncertain &&
+        uncertainId &&
+        !this.snapshot.errors.connections &&
+        !this.snapshot.errors[`modelSettings:${uncertainId}`] &&
+        this.snapshot.modelSettings[uncertainId]
+      )
+        this.patch({ connectionsReloadedAfterUncertainty: true });
       await Promise.all(
         Object.values(this.snapshot.signIns)
           .filter(signInPending)
@@ -362,6 +412,10 @@ export class ProviderSettingsController {
 
   private storeCatalog(catalog: ProviderModelCatalog): void {
     this.patch({ catalogs: { ...this.snapshot.catalogs, [catalog.connectionId]: catalog } });
+  }
+
+  private storeModelSettings(connectionId: string, settings: readonly ModelSettings[]): void {
+    this.patch({ modelSettings: { ...this.snapshot.modelSettings, [connectionId]: settings } });
   }
 
   private storeSignIn(signIn: ProviderSignIn): void {
@@ -418,6 +472,7 @@ export class ProviderSettingsController {
     operation: ProviderSettingsOperation,
     run: () => Promise<T>,
     apply: (value: T) => ProviderDisconnectResult | void,
+    modelConnectionId: string | null = null,
   ): Promise<void> {
     if (!this.canMutate) return;
     this.stopReads();
@@ -437,6 +492,7 @@ export class ProviderSettingsController {
     } catch (error) {
       const rejected =
         error instanceof RequestError && [400, 404, 409, 415, 422].includes(error.status);
+      if (!rejected) this.uncertainModelConnectionId = modelConnectionId;
       this.patch(
         rejected
           ? {
@@ -543,10 +599,16 @@ export class ProviderSettingsController {
           const connections = this.snapshot.connections.filter((item) => item.id !== connection.id);
           this.forgetStatus(connection.id);
           const drafts = { ...this.snapshot.drafts };
+          const modelSettings = { ...this.snapshot.modelSettings };
+          const modelDrafts = { ...this.snapshot.modelDrafts };
           delete drafts[connection.id];
+          delete modelSettings[connection.id];
+          delete modelDrafts[connection.id];
           this.patch({
             connections,
             drafts,
+            modelSettings,
+            modelDrafts,
             selectedId:
               this.snapshot.selectedId === connection.id
                 ? (connections[0]?.id ?? null)
@@ -605,6 +667,30 @@ export class ProviderSettingsController {
       "cancelSignIn",
       () => this.client.cancelSignIn(signIn.id),
       (updated) => this.storeSignIn(updated),
+    );
+  }
+
+  async saveModelSettings(settings: ModelSettings): Promise<void> {
+    if (!this.snapshot.modelSettings[settings.connectionId]) return;
+    await this.command(
+      "saveModelSettings",
+      () => this.client.saveModelSettings(settings),
+      (saved) => {
+        const records = this.snapshot.modelSettings[saved.connectionId] ?? [];
+        this.storeModelSettings(saved.connectionId, [
+          ...records.filter((item) => item.modelId !== saved.modelId),
+          saved,
+        ]);
+        this.patch({
+          modelDrafts: {
+            ...this.snapshot.modelDrafts,
+            [saved.connectionId]: (this.snapshot.modelDrafts[saved.connectionId] ?? []).filter(
+              (item) => item.modelId !== saved.modelId,
+            ),
+          },
+        });
+      },
+      settings.connectionId,
     );
   }
 

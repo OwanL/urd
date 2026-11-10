@@ -3,6 +3,7 @@ import type { CustomProviderSettings, ProviderConnection } from "./ProviderConne
 import type { ProviderCredentialStatus, ProviderDisconnectResult } from "./ProviderCredentials.ts";
 import type { ProviderSignIn } from "./ProviderSignIn.ts";
 import type { ProviderModelCatalog } from "./ProviderModels.ts";
+import type { ModelSettings } from "./ModelSettings.ts";
 
 // Offline reads never trigger discovery; only explicit refresh fetches a new catalog.
 export class ProviderClient {
@@ -99,6 +100,23 @@ export class ProviderClient {
 
   refreshModels(connectionId: string): Promise<ProviderModelCatalog> {
     return requestJson(this.url(`/${encodeURIComponent(connectionId)}/models/refresh`), "POST", {});
+  }
+
+  getModelSettings(connectionId: string, signal?: AbortSignal): Promise<readonly ModelSettings[]> {
+    return requestJson(
+      this.url(`/${encodeURIComponent(connectionId)}/model-settings`),
+      "GET",
+      undefined,
+      signal,
+    );
+  }
+
+  saveModelSettings(settings: ModelSettings): Promise<ModelSettings> {
+    return requestJson(
+      this.url(`/${encodeURIComponent(settings.connectionId)}/model-settings`),
+      "POST",
+      settings,
+    );
   }
 
   private url(path: string): URL {

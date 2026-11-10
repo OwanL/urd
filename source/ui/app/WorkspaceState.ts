@@ -28,7 +28,7 @@ export interface PendingSubmission {
 }
 
 export interface WorkspaceState {
-  version: 2;
+  version: 3;
   tabs: string[];
   activeId: string | null;
   chats: Record<string, ChatState>;
@@ -62,7 +62,7 @@ export function executionSettled(
 }
 
 export function emptyWorkspace(): WorkspaceState {
-  return { version: 2, tabs: [], activeId: null, chats: {}, lastSelection: null };
+  return { version: 3, tabs: [], activeId: null, chats: {}, lastSelection: null };
 }
 
 export function newChat(selection: LlmSelection | null): ChatState {
@@ -176,6 +176,11 @@ function isSelection(value: unknown): value is LlmSelection | null {
       connection.authentication === "apiKey" ||
       connection.authentication === "oAuth") &&
     isId(value.modelId) &&
+    (value.family === "openAI" ||
+      value.family === "anthropic" ||
+      value.family === "google" ||
+      value.family === "other") &&
+    typeof value.supportsImages === "boolean" &&
     isNullableString(value.reasoningEffort)
   );
 }
@@ -215,6 +220,8 @@ function sameSelection(left: LlmSelection | null, right: LlmSelection | null): b
   if (left === null || right === null) return left === right;
   return (
     left.modelId === right.modelId &&
+    left.family === right.family &&
+    left.supportsImages === right.supportsImages &&
     left.reasoningEffort === right.reasoningEffort &&
     left.connection.id === right.connection.id &&
     left.connection.name === right.connection.name &&
@@ -266,7 +273,7 @@ function isChat(value: unknown): value is ChatState {
 function isWorkspace(value: unknown): value is WorkspaceState {
   if (
     !isRecord(value) ||
-    value.version !== 2 ||
+    value.version !== 3 ||
     !Array.isArray(value.tabs) ||
     !value.tabs.every(isId) ||
     !isRecord(value.chats) ||

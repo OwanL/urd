@@ -5,6 +5,7 @@ using Urd.Core.MarkdownRendering;
 using Urd.Core.Execution;
 using Urd.Core.Storage;
 using Urd.Core.Providers;
+using Urd.Core.Tools;
 
 namespace Urd.Core.Sessions;
 
@@ -13,7 +14,8 @@ namespace Urd.Core.Sessions;
 public abstract class SessionBase {
   private readonly UrdStore store;
   private readonly Func<ProviderConnection, IChatClient> createChatClient;
-  private readonly IReadOnlyList<AIFunction> tools;
+  private readonly ToolCatalog tools;
+  private readonly ChatProcesses? processes;
   private readonly AsyncLock gate = new();
   private readonly ConcurrentDictionary<long, SessionObserver> observers = new();
   private bool acceptingUserMessages = true;
@@ -29,17 +31,24 @@ public abstract class SessionBase {
   private Task? executionTask;
 
   private protected SessionBase(SessionRecord record, UrdStore store, Func<ProviderConnection, IChatClient> createChatClient,
-      IReadOnlyList<AIFunction>? tools = null) {
+      ToolCatalog? tools = null, ChatProcesses? processes = null) {
     Id = record.Id;
     HistoryRevision = record.HistoryRevision;
+    WorkingDirectory = record.WorkingDirectory;
     this.store = store;
     this.createChatClient = createChatClient;
-    this.tools = tools ?? [];
+    this.tools = tools ?? new ToolCatalog([]);
+    this.processes = processes;
   }
 
   public Guid Id { get; }
 
   internal long HistoryRevision { get; }
+  internal string? WorkingDirectory { get; }
+
+  // Manager shutdown joins executions before terminating deliberately retained processes.
+  internal Task KillProcessesAsync() => OperatingSystem.IsWindows() && processes is not null
+      ? processes.KillAllAsync() : Task.CompletedTask;
 
   public async Task<UserMessageReceipt?> GetUserMessageReceiptAsync(Guid submissionId, CancellationToken cancellation = default) {
     using var held = await gate.AcquireAsync(cancellation);
@@ -305,7 +314,7 @@ public abstract class SessionBase {
 
   // Caller holds the lock.
   private void StartExecution(Guid executionId, LlmSelection selection, Task lockReleased) {
-    var newExecution = new SessionExecution(executionId, this, createChatClient, selection, tools);
+    var newExecution = new SessionExecution(executionId, this, createChatClient, selection, tools.For(selection.Family));
     var newSettlement = new TaskCompletionSource<SessionExecutionResult>(TaskCreationOptions.RunContinuationsAsynchronously);
     execution = newExecution;
     settlement = newSettlement;

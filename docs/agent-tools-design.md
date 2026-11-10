@@ -5,7 +5,9 @@ made, and the approved class shapes. Implementation follows these shapes, subjec
 qualification gates below; approval is not evidence that the integration already works.
 Related: [execution](execution-design.md), [sessions](session-design.md), [discovery](discovery-design.md).
 [Qualification evidence](agent-tools-qualification.md) records the bounded process and adapter
-probes and their remaining integration limits.
+probes and their remaining integration limits. The 2026-11-11 foreground checkpoint now
+qualifies generic tools, parallel dispatch, explicit metadata and persisted image results;
+background lifecycle/recovery remains the next implementation phase.
 
 ## Agreed
 
@@ -83,8 +85,10 @@ probes and their remaining integration limits.
 14. **Waiting on background calls.** When the agent's reply has ended but background calls are
     pending, the chat shows a waiting status and Stop remains available; Stop cancels them.
     Completion wakes the agent and the chat returns to running.
-15. **Model family** is Urd-owned metadata on the model's saved settings: OpenAI, Anthropic,
-    Google, Other.
+15. **Model metadata** is Urd-owned and saved per provider connection/model: family
+    (OpenAI, Anthropic, Google, Other) and whether the model supports images. Image support
+    is explicit, not guessed from model names; unconfigured models default to Other/text-only.
+    Each run freezes these settings in its model selection (owner clarification 2026-11-10).
 16. **Context overflow** is handled by automatic history compaction (summarizing older
     conversation), which is distinct from tool-result pruning (see ARCHITECTURE.md). Compaction
     is the next design topic after tools; tools are not ready for normal use without it.
@@ -132,9 +136,11 @@ tool falls back to the generic one. Family-specific tools (e.g. `apply_patch`) c
 
 ```csharp
 public enum ModelFamily { OpenAI, Anthropic, Google, Other }
-public sealed record ModelSettings(Guid ConnectionId, string ModelId, ModelFamily Family);
+public sealed record ModelSettings(
+  Guid ConnectionId, string ModelId, ModelFamily Family, bool SupportsImages);
 public sealed record LlmSelection(
-  ProviderConnection Connection, string ModelId, string? ReasoningEffort, ModelFamily Family);
+  ProviderConnection Connection, string ModelId, string? ReasoningEffort,
+  ModelFamily Family, bool SupportsImages);
 ```
 
 **File tools.** Each tool owns its logic; extract shared helpers only when a second user exists.
@@ -184,7 +190,8 @@ internal sealed class ShellProcess : IAsyncDisposable {
   public Task CancelAsync();
   public void LeaveBackgroundProcesses();
 }
-internal sealed class BashTool(ChatProcesses processes, GitBash bash) : AgentTool { ... }  // bash(command, timeout?)
+internal sealed class BashTool(ChatProcesses processes, GitBash bash,
+  IReadOnlyDictionary<string, string> environment) : AgentTool { ... }  // bash(command, timeout?)
 ```
 
 **Waiting, completion delivery and Stop** (existing `SessionBase`).
@@ -246,8 +253,8 @@ This is fixture evidence, not qualification of the integrated process implementa
 
 ## Implementation-readiness review — 2026-11-10
 
-Read-only source review found integration gaps, not evidence that the selected capabilities
-need replacing. The current loop runs fake tools sequentially; its guarantees must be adapted,
+At this historical checkpoint, read-only source review found integration gaps, not evidence
+that the selected capabilities need replacing. The loop ran fake tools sequentially; its guarantees had to be adapted,
 not simply removed. These are engineering checks against the agreed behavior, not extra
 product scope or approval of new class shapes.
 

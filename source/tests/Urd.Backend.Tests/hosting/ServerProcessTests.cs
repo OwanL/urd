@@ -8,6 +8,20 @@ namespace Urd.Backend.Tests.Hosting;
 
 public sealed class ServerProcessTests {
   [Fact]
+  public void ToolOptionsRequireExplicitAbsoluteWorkingFolder() {
+    string root = Path.GetFullPath(Path.GetTempPath());
+    string[] basic = ["--data-root", root, "--port", "0"];
+    Assert.Null(ServerOptions.Parse(basic).WorkingDirectory);
+    ServerOptions tools = ServerOptions.Parse([.. basic, "--working-directory", root]);
+    Assert.Equal(root, tools.WorkingDirectory);
+    Assert.Null(tools.GitBashPath);
+    Assert.Throws<ArgumentException>(() => ServerOptions.Parse([.. basic, "--working-directory", "relative"]));
+    Assert.Throws<ArgumentException>(() => ServerOptions.Parse([.. basic, "--git-bash", Path.Combine(root, "bash.exe")]));
+    Assert.Throws<ArgumentException>(() => ServerOptions.Parse([
+        .. basic, "--working-directory", root, "--working-directory", root]));
+  }
+
+  [Fact]
   public async Task AnotherProcessCannotOpenTheRunningServersDataDirectory() {
     using var database = new TemporaryDatabase("urd exclusive process data");
     await using var owner = new RunningServer(new ServerOptions(Path.GetDirectoryName(database.Path)!, 0));

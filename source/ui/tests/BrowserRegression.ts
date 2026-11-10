@@ -618,7 +618,13 @@ void test("a session discovered on initial load is named from its first-user pre
       submissionId: randomUUID(),
       expectedHistoryRevision: 0,
       text: preview,
-      llmSelection: { connection, modelId: "fixture-a", reasoningEffort: null },
+      llmSelection: {
+        connection,
+        modelId: "fixture-a",
+        family: "other",
+        supportsImages: false,
+        reasoningEffort: null,
+      },
     });
     assert.equal(receipt.acceptance, "accepted");
     await waitForSnapshot(
@@ -669,7 +675,13 @@ void test("browser event streams handshake, track sessions, and resynchronize af
       submissionId: randomUUID(),
       expectedHistoryRevision: 0,
       text: "event-stream fixture prompt",
-      llmSelection: { connection, modelId: "fixture-a", reasoningEffort: null },
+      llmSelection: {
+        connection,
+        modelId: "fixture-a",
+        family: "other",
+        supportsImages: false,
+        reasoningEffort: null,
+      },
     });
     assert.equal(receipt.acceptance, "accepted");
     assert.ok(receipt.executionId);
@@ -712,7 +724,13 @@ void test("browser event streams handshake, track sessions, and resynchronize af
       submissionId: randomUUID(),
       expectedHistoryRevision: current.historyRevision,
       text: "unwatched prompt",
-      llmSelection: { connection, modelId: "fixture-a", reasoningEffort: null },
+      llmSelection: {
+        connection,
+        modelId: "fixture-a",
+        family: "other",
+        supportsImages: false,
+        reasoningEffort: null,
+      },
     });
     assert.equal(secondReceipt.acceptance, "accepted");
     assert.equal((await waitForBrowserEvent(page, "status")).data.status, "running");
@@ -750,7 +768,7 @@ void test("excess tabs pause explicitly while the active tab keeps live updates"
     for (let index = 0; index < 128; index++) ids.push(await sessions.create());
     const first = ids[0]!;
     const saved = encodeWorkspace({
-      version: 2,
+      version: 3,
       tabs: ids,
       activeId: first,
       chats: Object.fromEntries(
@@ -780,7 +798,13 @@ void test("excess tabs pause explicitly while the active tab keeps live updates"
       submissionId: randomUUID(),
       expectedHistoryRevision: 0,
       text: "overflow prompt",
-      llmSelection: { connection, modelId: "fixture-a", reasoningEffort: null },
+      llmSelection: {
+        connection,
+        modelId: "fixture-a",
+        family: "other",
+        supportsImages: false,
+        reasoningEffort: null,
+      },
     });
     await waitForSnapshot(
       sessions,
@@ -802,7 +826,13 @@ void test("excess tabs pause explicitly while the active tab keeps live updates"
       submissionId: randomUUID(),
       expectedHistoryRevision: 0,
       text: "now watched",
-      llmSelection: { connection, modelId: "fixture-a", reasoningEffort: null },
+      llmSelection: {
+        connection,
+        modelId: "fixture-a",
+        family: "other",
+        supportsImages: false,
+        reasoningEffort: null,
+      },
     });
     await page
       .locator(".message-text")
@@ -904,7 +934,13 @@ void test(
         submissionId: randomUUID(),
         expectedHistoryRevision: initial.historyRevision,
         text: "render push stream state",
-        llmSelection: { connection, modelId: "fixture-a", reasoningEffort: null },
+        llmSelection: {
+          connection,
+          modelId: "fixture-a",
+          family: "other",
+          supportsImages: false,
+          reasoningEffort: null,
+        },
       });
       assert.equal(receipt.acceptance, "accepted");
       const running = page.locator(`#tab-${sessionId} [aria-label="Running"]`);
@@ -998,7 +1034,13 @@ void test(
           submissionId: randomUUID(),
           expectedHistoryRevision: beforeBenchmark.historyRevision,
           text: `measure push delivery ${sample}`,
-          llmSelection: { connection, modelId: "fixture-a", reasoningEffort: null },
+          llmSelection: {
+            connection,
+            modelId: "fixture-a",
+            family: "other",
+            supportsImages: false,
+            reasoningEffort: null,
+          },
         });
         assert.equal(benchmarkReceipt.acceptance, "accepted");
         assert.ok(benchmarkReceipt.executionId);
@@ -1291,7 +1333,13 @@ void test("an unrelated successful Send cannot mark a refused resend accepted", 
       submissionId: sourceSubmissionId,
       expectedHistoryRevision: snapshot.historyRevision,
       text: "Original not-sent input",
-      llmSelection: { connection, modelId: "fixture-a", reasoningEffort: null },
+      llmSelection: {
+        connection,
+        modelId: "fixture-a",
+        family: "other",
+        supportsImages: false,
+        reasoningEffort: null,
+      },
     };
     const sourceReceipt: UserMessageReceipt = {
       sessionId,
@@ -1391,7 +1439,13 @@ void test("not-sent discovery is user-invoked, retrieves on demand, and resends 
       submissionId: firstSubmissionId,
       expectedHistoryRevision: snapshot.historyRevision,
       text: sourceText,
-      llmSelection: { connection, modelId: "fixture-a", reasoningEffort: null },
+      llmSelection: {
+        connection,
+        modelId: "fixture-a",
+        family: "other",
+        supportsImages: false,
+        reasoningEffort: null,
+      },
     };
     const originalReceipt: UserMessageReceipt = {
       sessionId,
@@ -1646,7 +1700,13 @@ void test("delayed follow scrolls survive lazy expansion but user scroll-away ke
         submissionId: randomUUID(),
         expectedHistoryRevision: 0,
         text: prompt,
-        llmSelection: { connection, modelId: "fixture-a", reasoningEffort: null },
+        llmSelection: {
+          connection,
+          modelId: "fixture-a",
+          family: "other",
+          supportsImages: false,
+          reasoningEffort: null,
+        },
       });
       await waitForSnapshot(
         sessions,
@@ -1750,7 +1810,13 @@ void test("delayed follow scrolls survive lazy expansion but user scroll-away ke
       submissionId: randomUUID(),
       expectedHistoryRevision: 0,
       text: "append while reading",
-      llmSelection: { connection, modelId: "fixture-a", reasoningEffort: null },
+      llmSelection: {
+        connection,
+        modelId: "fixture-a",
+        family: "other",
+        supportsImages: false,
+        reasoningEffort: null,
+      },
     });
     await waitForSnapshot(
       sessions,

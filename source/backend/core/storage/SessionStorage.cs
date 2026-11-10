@@ -6,16 +6,16 @@ namespace Urd.Core.Storage;
 
 // Creates and reads durable session identities, creation order and history revisions.
 internal sealed class SessionStorage(Database database) {
-  internal SessionRecord CreatePrimary(Guid sessionId) {
+  internal SessionRecord CreatePrimary(Guid sessionId, string? workingDirectory = null) {
     if (sessionId == Guid.Empty)
       throw new ArgumentException("Session ID cannot be empty.", nameof(sessionId));
 
     return database.Write(transaction => {
       using SqliteCommand command = database.Command(transaction, """
-        INSERT INTO sessions (session_id, history_revision) VALUES ($id, 0);
+        INSERT INTO sessions (session_id, history_revision, working_directory) VALUES ($id, 0, $directory);
         INSERT INTO session_creation (session_id) VALUES ($id);
-        SELECT session_id, history_revision FROM sessions WHERE session_id = $id;
-        """, ("$id", sessionId));
+        SELECT session_id, history_revision, working_directory FROM sessions WHERE session_id = $id;
+        """, ("$id", sessionId), ("$directory", workingDirectory));
       using SqliteDataReader reader = command.ExecuteReader();
       reader.Read();
       return ReadRecord(reader);
@@ -51,12 +51,12 @@ internal sealed class SessionStorage(Database database) {
   internal SessionRecord? Read(Guid sessionId) {
     return database.Guarded<SessionRecord?>(() => {
       using SqliteCommand command = database.Command(null,
-          "SELECT session_id, history_revision FROM sessions WHERE session_id = $id;", ("$id", sessionId));
+          "SELECT session_id, history_revision, working_directory FROM sessions WHERE session_id = $id;", ("$id", sessionId));
       using SqliteDataReader reader = command.ExecuteReader();
       return reader.Read() ? ReadRecord(reader) : null;
     });
   }
 
   private static SessionRecord ReadRecord(SqliteDataReader reader)
-      => new(reader.GetGuid(0), reader.GetInt64(1));
+      => new(reader.GetGuid(0), reader.GetInt64(1), reader.IsDBNull(2) ? null : reader.GetString(2));
 }

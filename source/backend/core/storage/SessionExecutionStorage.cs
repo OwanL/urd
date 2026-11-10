@@ -5,7 +5,7 @@ using Urd.Core.Sessions;
 namespace Urd.Core.Storage;
 
 // Claims execution work and retains stop and settlement facts. The caller joins request cleanup first.
-internal sealed class SessionExecutionStorage(Database database) {
+internal sealed class SessionExecutionStorage(Database database, ToolResultCodec toolResults) {
   internal LlmRequest? ClaimNextRequest(Guid sessionId, Guid executionId, long historyRevision) {
     return database.Write<LlmRequest?>(transaction => {
       Guid requestId = Guid.NewGuid();
@@ -37,7 +37,7 @@ internal sealed class SessionExecutionStorage(Database database) {
         """, ("$run", executionId), ("$request", requestId));
       assign.ExecuteNonQuery();
       return new LlmRequest(requestId,
-          new LlmContextReader(database).Read(transaction, sessionId, executionId, historyRevision, requestId));
+          new LlmContextReader(database, toolResults).Read(transaction, sessionId, executionId, historyRevision, requestId));
     });
   }
 
@@ -134,12 +134,13 @@ internal sealed class SessionExecutionStorage(Database database) {
         WHERE run_id = $run AND outcome IS NULL;
         UPDATE execution_tools SET outcome = $toolOutcome,
             error = CASE WHEN started = 0 THEN 'Tool was not executed.' ELSE 'Tool result unavailable; effects may have occurred.' END,
-            result_json = CASE WHEN started = 0 THEN '{"error":"Tool was not executed."}'
-                ELSE '{"error":"Tool result unavailable; effects may have occurred."}' END
+            result_json = CASE WHEN started = 0 THEN $unstartedResult ELSE $unknownResult END
         WHERE run_id = $run AND result_json IS NULL;
         UPDATE execution_runs SET outcome = $outcome WHERE session_id = $session AND run_id = $run;
         """,
           ("$session", sessionId), ("$run", executionId), ("$outcome", (int)settlement.Outcome),
+          ("$unstartedResult", toolResults.Error("Tool was not executed.")),
+          ("$unknownResult", toolResults.Error("Tool result unavailable; effects may have occurred.")),
           ("$toolOutcome", (int)(settlement.Outcome == ExecutionOutcome.Cancelled
               ? ExecutionOutcome.Cancelled : ExecutionOutcome.Failed)));
       settle.ExecuteNonQuery();

@@ -8,6 +8,7 @@ using Urd.Backend.Tests.Support;
 using Urd.Core.Execution;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
+using Urd.Core.Tools;
 using Xunit;
 using static Urd.Backend.Tests.Support.ScriptedResponses;
 using static Urd.Backend.Tests.Support.TestAsync;
@@ -16,12 +17,17 @@ namespace Urd.Backend.Tests.Execution;
 
 public sealed class ToolExecutionTests {
   [Fact]
-  public async Task OrdinaryToolErrorDoesNotPreventLaterCallsOrLlmContinuation() {
+  public async Task ParallelToolErrorDoesNotPreventSiblingsAndResultsRemainInCallOrder() {
     int invoked = 0;
-    AIFunction count = AIFunctionFactory.Create((int amount) => {
-      invoked++;
-      if (amount == 1)
+    var secondEntered = Signal();
+    var firstRelease = Signal();
+    AIFunction count = AIFunctionFactory.Create(async (int amount, CancellationToken cancellation) => {
+      Interlocked.Increment(ref invoked);
+      if (amount == 1) {
+        await firstRelease.Task.WaitAsync(cancellation);
         throw new InvalidOperationException("Invalid command.");
+      }
+      secondEntered.TrySetResult();
       return amount;
     }, name: "count");
     int requests = 0;
@@ -32,22 +38,189 @@ public sealed class ToolExecutionTests {
         : Complete(token));
     await using var fixture = new ExecutionFixture(client, tools: [count]);
     Guid executionId = await fixture.StartExecutionAsync("go");
+    Task<SessionExecutionResult> settlement = fixture.Session.WaitForSettlementAsync(executionId);
+    try {
+      // The second invocation must start while the first is held; no provider continuation may escape.
+      await secondEntered.Task.WaitAsync(TestTimeout);
+      Assert.Equal(2, Volatile.Read(ref invoked));
+      Assert.False(settlement.IsCompleted);
+      Assert.Equal(1, client.Calls);
+    } finally {
+      firstRelease.TrySetResult();
+      await settlement.WaitAsync(TestTimeout);
+    }
 
-    Assert.Equal(ExecutionOutcome.Completed,
-        (await fixture.Session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout)).Outcome);
+    Assert.Equal(ExecutionOutcome.Completed, (await settlement).Outcome);
     Assert.Equal(2, invoked);
     Assert.Equal(2, client.Calls);
-    Assert.All(client.Options, options => Assert.Same(count, Assert.Single(options!.Tools!)));
+    Assert.All(client.Options, options => {
+      AIFunctionDeclaration declaration = Assert.IsAssignableFrom<AIFunctionDeclaration>(Assert.Single(options!.Tools!));
+      Assert.False(declaration is AIFunction);
+      Assert.Equal(count.Name, declaration.Name);
+      Assert.Equal(count.JsonSchema.GetRawText(), declaration.JsonSchema.GetRawText());
+    });
     FunctionResultContent[] results = client.LastRequest.SelectMany(message => message.Contents)
         .OfType<FunctionResultContent>().ToArray();
     Assert.Equal(2, results.Length);
     Assert.Equal("first", results[0].CallId);
-    Assert.False(string.IsNullOrEmpty(Assert.IsType<JsonElement>(results[0].Result).GetProperty("error").GetString()));
+    Assert.Contains("Invalid command.", Assert.IsType<string>(results[0].Result));
     Assert.Equal("second", results[1].CallId);
-    Assert.Equal(2, Assert.IsType<JsonElement>(results[1].Result).GetInt32());
+    Assert.Equal("2", Assert.IsType<string>(results[1].Result));
     List<StoredTool> tools = StoredTools.Read(fixture.Database);
     Assert.Single(tools, tool => tool.Outcome == ExecutionOutcome.Failed);
     Assert.Equal(2, tools.Count(tool => tool.ResultJson is not null));
+  }
+
+  [Theory]
+  [InlineData("start")]
+  [InlineData("save")]
+  [InlineData("encoding")]
+  [InlineData("cleanup")]
+  public async Task HarnessFailureJoinsLaunchedSiblingsBeforeFencing(string failurePoint) {
+    var database = new TemporaryDatabase();
+    UrdStore store = UrdStore.Open(database.Path);
+    var firstEntered = Signal();
+    var firstRelease = Signal();
+    var failureReached = Signal();
+    var tool = new TestAgentTool("effect", async (_, context, cancellation) => {
+      if (context.CallId == "first") {
+        firstEntered.TrySetResult();
+        await firstRelease.Task.WaitAsync(cancellation);
+        return new ToolOutput("first saved", []);
+      }
+      failureReached.TrySetResult();
+      if (failurePoint == "cleanup")
+        throw new ToolCleanupException("Injected cleanup failure.", new IOException("unfinished cleanup"));
+      if (failurePoint != "encoding")
+        return new ToolOutput("second", []);
+      var invalid = JsonDocument.Parse("{}");
+      JsonElement details = invalid.RootElement;
+      invalid.Dispose();
+      return new ToolOutput("invalid encoding", [], details);
+    });
+    if (failurePoint is "start" or "save") {
+      string column = failurePoint == "start" ? "started" : "result_json";
+      database.Execute($"""
+        CREATE TRIGGER reject_second AFTER UPDATE OF {column} ON execution_tools
+        WHEN NEW.call_id = 'second'
+        BEGIN SELECT RAISE(ABORT, 'Injected tool failure'); END;
+        """);
+    }
+    var client = new ScriptedChatClient(token => ToolBatch(token,
+        new("first", "effect", null), new("second", "effect", null)));
+    var session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid(), Path.GetDirectoryName(database.Path)),
+        store, _ => client, new ToolCatalog([tool]));
+    UserMessageReceipt receipt = await session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, "go", TestLlmSelection.Default));
+    Guid execution = receipt.ExecutionId!.Value;
+    Task<SessionExecutionResult> settlement = session.WaitForSettlementAsync(execution);
+    bool drained = false;
+    try {
+      try {
+        await firstEntered.Task.WaitAsync(TestTimeout);
+        if (failurePoint != "start")
+          await failureReached.Task.WaitAsync(TestTimeout);
+        Assert.False(settlement.IsCompleted);
+        Assert.Equal(1, client.Calls);
+      } finally {
+        firstRelease.TrySetResult();
+        // A timeout is not accepted as permission to close resources underneath owned work.
+        Exception failure = await Assert.ThrowsAnyAsync<Exception>(() => settlement.WaitAsync(TestTimeout));
+        Assert.IsNotType<TimeoutException>(failure);
+        drained = true;
+      }
+      SessionSnapshot snapshot = await session.ReadSnapshotAsync();
+      Assert.True(snapshot.AdmissionFenced);
+      Assert.Equal(execution, snapshot.UnsettledExecutionId);
+      Assert.Null(snapshot.LastSettlement);
+      Assert.NotNull(Assert.Single(StoredTools.Read(database), call => call.CallId == "first").ResultJson);
+      Assert.Equal(1, client.Calls);
+    } finally {
+      if (drained) {
+        store.Dispose();
+        client.Dispose();
+        database.Dispose();
+      }
+    }
+  }
+
+  [Theory]
+  [InlineData(false)]
+  [InlineData(true)]
+  public async Task ReturnedOutputAfterStopHasCancelledOutcomeRegardlessOfErrorFlag(bool isError) {
+    var entered = Signal();
+    var tool = new TestAgentTool("cancelled", async (_, _, cancellation) => {
+      var stopped = Signal();
+      using CancellationTokenRegistration registration = cancellation.Register(() => stopped.TrySetResult());
+      entered.TrySetResult();
+      await stopped.Task;
+      return new ToolOutput("returned after cancellation", [], IsError: isError);
+    });
+    var client = new ScriptedChatClient(token => ToolBatch(token, new FunctionCallContent("cancel", "cancelled", null)));
+    await using var fixture = new ExecutionFixture(client, tools: [tool]);
+    Guid execution = await fixture.StartExecutionAsync("go");
+    await entered.Task.WaitAsync(TestTimeout);
+    await fixture.Session.RequestStopAsync(execution);
+    Assert.Equal(ExecutionOutcome.Cancelled,
+        (await fixture.Session.WaitForSettlementAsync(execution).WaitAsync(TestTimeout)).Outcome);
+    Assert.Equal(ExecutionOutcome.Cancelled, Assert.Single(StoredTools.Read(fixture.Database)).Outcome);
+    Assert.Equal(1, client.Calls);
+  }
+
+  [Fact]
+  public async Task ReplyOrderAdmitsSamePathMutationsAndReadsWithSavedInvocationContext() {
+    var files = new FileMutationQueue();
+    var entered = Signal();
+    var release = Signal();
+    var readAdmitted = Signal();
+    var effects = new List<string>();
+    var admissions = new List<string>();
+    int requests = 0;
+    string? directory = null;
+    Guid? requestId = null;
+    var tool = new TestAgentTool("ordered", (_, context, cancellation) => {
+      Assert.Equal(directory, context.WorkingDirectory);
+      requestId ??= context.RequestId;
+      Assert.Equal(requestId, context.RequestId);
+      Assert.NotEqual(Guid.Empty, context.RequestId);
+      Assert.False(context.ModelAcceptsImages);
+      context.ReportProgress(new ToolOutput("progress", []));
+      admissions.Add(context.CallId);
+      string path = Path.Combine(context.WorkingDirectory, "same-file");
+      if (context.CallId == "read") {
+        Task<ToolOutput> result = files.ReadAsync(path, token =>
+            Task.FromResult(new ToolOutput(string.Join(",", effects), [])), cancellation);
+        readAdmitted.TrySetResult();
+        return result;
+      }
+      return files.ChangeAsync(path, async token => {
+        if (context.CallId == "first") {
+          entered.TrySetResult();
+          await release.Task.WaitAsync(token);
+        }
+        effects.Add(context.CallId);
+        return new ToolOutput(context.CallId, []);
+      }, cancellation);
+    });
+    var client = new ScriptedChatClient(token => Interlocked.Increment(ref requests) == 1
+        ? ToolBatch(token, new("first", "ordered", null), new("second", "ordered", null), new("read", "ordered", null))
+        : Complete(token));
+    await using var fixture = new ExecutionFixture(client, tools: [tool]);
+    directory = Path.GetDirectoryName(fixture.Database.Path)!;
+    Guid execution = await fixture.StartExecutionAsync("go");
+    Task<SessionExecutionResult> settlement = fixture.Session.WaitForSettlementAsync(execution);
+    try {
+      await entered.Task.WaitAsync(TestTimeout);
+      await readAdmitted.Task.WaitAsync(TestTimeout);
+      Assert.Equal(new[] { "first", "second", "read" }, admissions);
+      Assert.Empty(effects);
+    } finally {
+      release.TrySetResult();
+      await settlement.WaitAsync(TestTimeout);
+    }
+    Assert.Equal(new[] { "first", "second" }, effects);
+    FunctionResultContent read = Assert.Single(client.LastRequest.SelectMany(message => message.Contents)
+        .OfType<FunctionResultContent>(), result => result.CallId == "read");
+    Assert.Equal("first,second", Assert.IsType<string>(read.Result));
   }
 
   [Fact]
@@ -220,7 +393,7 @@ public sealed class ToolExecutionTests {
     FunctionCallContent savedCall = Assert.Single(continuation.SelectMany(message => message.Contents).OfType<FunctionCallContent>());
     Assert.Equal(largeArgument, Assert.IsType<JsonElement>(savedCall.Arguments!["payload"]).GetString());
     FunctionResultContent savedResult = Assert.Single(continuation.SelectMany(message => message.Contents).OfType<FunctionResultContent>());
-    Assert.Equal(largeResult, Assert.IsType<JsonElement>(savedResult.Result).GetString());
+    Assert.Equal(largeResult, Assert.IsType<string>(savedResult.Result));
 
     StoredTool tool = Assert.Single(StoredTools.Read(fixture.Database));
     Assert.True(System.Text.Encoding.UTF8.GetByteCount(tool.ArgumentsJson) > 16 * 1024);

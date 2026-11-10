@@ -319,6 +319,50 @@
   font-size: 12px;
 }
 
+.provider-settings .provider-settings-model-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 10px;
+}
+
+.provider-settings .provider-settings-model-controls label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+}
+
+.provider-settings input[type="checkbox"] {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.provider-settings .provider-model-family {
+  display: grid;
+  gap: 4px;
+  padding: 6px;
+}
+
+.provider-settings .provider-model-family button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  text-align: left;
+}
+
+.provider-settings .provider-model-family .icon {
+  width: 14px;
+  height: 14px;
+}
+
+.provider-settings .provider-model-family button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--surface-hover);
+}
+
 .provider-settings summary {
   cursor: pointer;
   overflow-wrap: anywhere;

@@ -10,6 +10,7 @@ namespace Urd.Core.Providers;
 public sealed class ProviderManager : IDisposable {
   private static readonly Uri OpenAIEndpoint = new("https://api.openai.com/v1/");
   private readonly ProviderStorage storage;
+  private readonly ModelSettingsStorage modelSettings;
   private readonly AsyncLock gate = new();
   private readonly HttpMessageHandler handler;
   private readonly HttpClient client;
@@ -33,6 +34,7 @@ public sealed class ProviderManager : IDisposable {
     ArgumentNullException.ThrowIfNull(callbackUri);
     ArgumentNullException.ThrowIfNull(handler);
     storage = store.Providers;
+    modelSettings = store.ModelSettings;
     this.handler = handler;
     client = new(handler, disposeHandler: false) { Timeout = Timeout.InfiniteTimeSpan };
     authentication = new(handler, issuer);
@@ -178,6 +180,19 @@ public sealed class ProviderManager : IDisposable {
     using var held = await gate.AcquireAsync(cancellationToken);
     ObjectDisposedException.ThrowIf(disposed, this);
     return storage.Get(connectionId).Catalog ?? new(connectionId, null, []);
+  }
+
+  public async Task<IReadOnlyList<ModelSettings>> GetModelSettingsAsync(
+      Guid connectionId, CancellationToken cancellationToken = default) {
+    using var held = await gate.AcquireAsync(cancellationToken);
+    ObjectDisposedException.ThrowIf(disposed, this);
+    return modelSettings.List(connectionId);
+  }
+
+  public async Task<ModelSettings> SaveModelSettingsAsync(ModelSettings settings) {
+    using var held = await gate.AcquireAsync();
+    ThrowIfStopping();
+    return modelSettings.Save(settings);
   }
 
   public Task<ProviderModelCatalog> RefreshModelCatalogAsync(Guid connectionId) => RunRequestAsync(connectionId,

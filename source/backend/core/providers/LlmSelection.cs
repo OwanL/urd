@@ -3,7 +3,8 @@ using Microsoft.Extensions.AI;
 namespace Urd.Core.Providers;
 
 // The complete secret-free choice frozen by an initiating Send, not a live connection lookup.
-public sealed record LlmSelection(ProviderConnection Connection, string ModelId, string? ReasoningEffort) {
+public sealed record LlmSelection(
+    ProviderConnection Connection, string ModelId, string? ReasoningEffort, ModelFamily Family, bool SupportsImages) {
   // These are the standard effort levels in the pinned MEAI SDK, not model capabilities.
   internal Microsoft.Extensions.AI.ReasoningEffort? ReadReasoningEffort() => ReasoningEffort switch {
     null => null,

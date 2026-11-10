@@ -5,8 +5,13 @@ namespace Urd.Core.Storage;
 
 // Retains the complete secret-free selection, including the original display name.
 internal static class LlmSelectionJson {
+  private static readonly JsonSerializerOptions Options = new() {
+    RespectRequiredConstructorParameters = true,
+    RespectNullableAnnotations = true
+  };
+
   internal static LlmSelection? Read(string? json)
-      => json is null ? null : JsonSerializer.Deserialize<LlmSelection>(json);
+      => json is null ? null : JsonSerializer.Deserialize<LlmSelection>(json, Options);
 
   internal static string? Write(LlmSelection? selection)
       => selection is null ? null : JsonSerializer.Serialize(selection);

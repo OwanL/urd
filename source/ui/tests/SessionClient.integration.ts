@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { SessionClient } from "../sessions/SessionClient.ts";
+import type { UserMessageSubmission } from "../sessions/UserMessageSubmission.ts";
 import { RequestError } from "../http/RequestError.ts";
 import { ServerProcess } from "./ServerProcess.ts";
 import { startLocalModelServer } from "./LocalModelServer.ts";
@@ -80,10 +81,16 @@ void test(
     });
 
     // Deliberately retain whitespace, CRLF, non-ASCII and astral scalars, well beyond the preview.
-    const submission = {
+    const submission: UserMessageSubmission = {
       submissionId: randomUUID(),
       expectedHistoryRevision: initial.historyRevision,
-      llmSelection: { connection, modelId: "fixture-a", reasoningEffort: "high" },
+      llmSelection: {
+        connection,
+        modelId: "fixture-a",
+        family: "other",
+        supportsImages: false,
+        reasoningEffort: "high",
+      },
       text:
         "\n  Original café 東京 🧭\r\n" + "line: é / 🦉 / 漢字\n".repeat(200) + "  final line\n",
     };

@@ -134,10 +134,10 @@ void test("cleanup failure keeps the durable workspace usable and can be retried
 void test("old saved workspaces and their draft overlays are discarded", () => {
   const storage = new MemoryStorage();
   const sentinel = {
-    version: 1,
+    version: 2,
     tabs: [sessionId],
     activeId: sessionId,
-    chats: { [sessionId]: { ...newChat(null), titleProvenance: undefined } },
+    chats: { [sessionId]: newChat(null) },
     lastSelection: null,
   };
   const raw = JSON.stringify(sentinel);
@@ -214,7 +214,7 @@ void test("workspace writes validate and propagate storage failures", () => {
   const storage = new MemoryStorage();
   const saved = persistence(storage);
   const invalid = emptyWorkspace();
-  invalid.version = 1 as 2;
+  invalid.version = 2 as 3;
   assert.throws(() => saved.save(invalid), /Invalid workspace/);
 
   storage.setItem = () => {

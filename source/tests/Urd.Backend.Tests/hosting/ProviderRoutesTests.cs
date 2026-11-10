@@ -47,6 +47,17 @@ public sealed class ProviderRoutesTests {
     Assert.Empty(empty.Models);
     Assert.Empty(handler.Requests);
 
+    string settingsPath = PathFor(connection, "/model-settings");
+    Assert.Empty(await GetAsync<ModelSettings[]>(server.Client, settingsPath));
+    var settings = new ModelSettings(connection.Id, "fixture-model", ModelFamily.OpenAI, true);
+    Assert.Equal(settings, await PostAsync<ModelSettings>(server.Client, settingsPath, settings));
+    Assert.Equal(settings, Assert.Single(await GetAsync<ModelSettings[]>(server.Client, settingsPath)));
+    using HttpResponseMessage wrongIdentity = await SendAsync(server.Client, HttpMethod.Post, settingsPath,
+        settings with { ConnectionId = Guid.NewGuid() }, HttpStatusCode.BadRequest);
+    using HttpResponseMessage missingCapability = await SendAsync(server.Client, HttpMethod.Post, settingsPath,
+        new { connectionId = connection.Id, modelId = "missing-capability", family = "other" }, HttpStatusCode.BadRequest);
+    Assert.Empty(handler.Requests);
+
     ProviderModelCatalog refreshed = await PostAsync<ProviderModelCatalog>(server.Client,
         PathFor(connection, "/models/refresh"));
     Assert.NotNull(refreshed.RefreshedAt);
@@ -57,6 +68,7 @@ public sealed class ProviderRoutesTests {
     Assert.Equal($"Bearer {Secret}", request.Authorization);
     Assert.Equal(refreshed.Models, (await GetAsync<ProviderModelCatalog>(server.Client, PathFor(connection, "/models"))).Models);
     Assert.Single(handler.Requests);
+    Assert.Equal(settings, Assert.Single(await GetAsync<ModelSettings[]>(server.Client, settingsPath)));
 
     ProviderConnection renamed = await PostAsync<ProviderConnection>(server.Client,
         PathFor(connection, "/rename"), new { name = "Renamed fixture" });

@@ -71,6 +71,7 @@ export const operationLabels: Record<ProviderSettingsOperation, string> = {
   beginSignIn: "Begin sign-in",
   cancelSignIn: "Cancel sign-in",
   refreshModels: "Refresh models",
+  saveModelSettings: "Save model settings",
 };
 
 export function noticeText(notice: ProviderSettingsNotice): string | null {

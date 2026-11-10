@@ -66,6 +66,8 @@ const selection: LlmSelection = {
     authentication: "oAuth",
   },
   modelId: "provider/model-id",
+  family: "other",
+  supportsImages: false,
   reasoningEffort: null,
 };
 const selectedSubmission: UserMessageSubmission = { ...submission, llmSelection: selection };

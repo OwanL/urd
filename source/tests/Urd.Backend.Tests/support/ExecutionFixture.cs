@@ -1,6 +1,7 @@
 using Microsoft.Extensions.AI;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
+using Urd.Core.Tools;
 using Xunit;
 using static Urd.Backend.Tests.Support.TestAsync;
 
@@ -12,11 +13,18 @@ internal sealed class ExecutionFixture : IAsyncDisposable {
   private readonly ScriptedChatClient client;
   private readonly List<Guid> executions = [];
 
-  internal ExecutionFixture(ScriptedChatClient client, IReadOnlyList<AIFunction>? tools = null) {
+  internal ExecutionFixture(ScriptedChatClient client, IReadOnlyList<AIFunction>? tools = null)
+      : this(client, TestAgentTool.Catalog(tools)) { }
+
+  internal ExecutionFixture(ScriptedChatClient client, IReadOnlyList<AgentTool> tools)
+      : this(client, new ToolCatalog(tools)) { }
+
+  private ExecutionFixture(ScriptedChatClient client, ToolCatalog tools) {
     this.client = client;
     Database = new TemporaryDatabase();
     store = UrdStore.Open(Database.Path);
-    Session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid()), store, _ => client, tools);
+    Session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid(),
+        Path.GetDirectoryName(Database.Path)), store, _ => client, tools);
   }
 
   internal TemporaryDatabase Database { get; }

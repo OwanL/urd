@@ -21,6 +21,14 @@ From `source/`, with `$dotnet` set to that SDK's executable:
 Choose your own absolute data directory. Both arguments are required; either order is
 accepted. Port `0` lets the OS select an available port; an explicit port must be within
 `1..65535`. Unknown, duplicate or malformed options fail before opening data.
+Add `--working-directory 'C:\dev\repos\your-project'` to enable the four agent tools.
+This is a relative-path default, not a sandbox: tools have the server user's full access,
+without per-call approvals. New chats save this folder; reopening preserves it. Existing
+chats without a folder require a new chat before tools can run. Optional `--git-bash`
+selects an absolute Git for Windows Bash executable; otherwise Urd locates Git Bash.
+Without `--working-directory`, no tools are configured. Shells receive a startup snapshot
+of the server environment and run non-login `bash -c`.
+
 There is no bootstrap, wrapper script or automatic browser launch in this slice.
 To include the browser, first run `npm run build` in `source/ui/`; the Server build
 stages that bundle into `wwwroot`. Backend-only builds need no npm step.
@@ -99,7 +107,7 @@ routes and required field names.
 
 ### Frozen LLM selection
 
-New Sends require `llmSelection: {connection, modelId, reasoningEffort}`. `connection`
+New Sends require `llmSelection: {connection, modelId, reasoningEffort, family, supportsImages}`. `connection`
 is the full saved secret-free `ProviderConnection`, including route, API, endpoint
 and authentication kind, not credentials. A stale/removed binding is not replaced
 by a lookup or fallback. The provider factory runs lazily outside admission/storage
@@ -162,7 +170,7 @@ $headers = @{ 'X-Urd-Client' = 'browser' }
 $chat = Invoke-RestMethod "$origin/api/sessions" -Method Post -Headers $headers -ContentType 'application/json' -Body '{}'
 $view = Invoke-RestMethod "$origin/api/sessions/$($chat.sessionId)/snapshot" -Headers $headers
 $connection = Invoke-RestMethod "$origin/api/providers/$connectionId" -Headers $headers
-$selection = @{ connection = $connection; modelId = $modelId; reasoningEffort = $null }
+$selection = @{ connection = $connection; modelId = $modelId; reasoningEffort = $null; family = 'other'; supportsImages = $false }
 $submission = @{ submissionId = [guid]::NewGuid().ToString(); expectedHistoryRevision = $view.historyRevision; text = 'Hello'; llmSelection = $selection } | ConvertTo-Json -Depth 8
 $receipt = Invoke-RestMethod "$origin/api/sessions/$($chat.sessionId)/message-submissions" -Method Post -Headers $headers -ContentType 'application/json' -Body $submission
 $receipt # A durable admission decision, not a completed answer.

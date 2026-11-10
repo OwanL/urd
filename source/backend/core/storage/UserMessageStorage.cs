@@ -177,6 +177,8 @@ internal sealed class UserMessageStorage(Database database) {
       throw new ArgumentException("Model ID cannot be empty or whitespace.", nameof(submission));
 
     _ = selection.ReadReasoningEffort();
+    if (!Enum.IsDefined(selection.Family))
+      throw new ArgumentException("The selected model family is invalid.", nameof(submission));
     if (!Enum.IsDefined(selection.Connection.Route) || !Enum.IsDefined(selection.Connection.Api)
         || !Enum.IsDefined(selection.Connection.Authentication) || selection.Connection.Name is null
         || selection.Connection.Endpoint is not { IsAbsoluteUri: true } endpoint

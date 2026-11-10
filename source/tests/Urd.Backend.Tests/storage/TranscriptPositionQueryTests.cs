@@ -158,6 +158,48 @@ public sealed class TranscriptPositionQueryTests {
   }
 
   [Fact]
+  public void ExactEntryPositioningSupportsEveryKindAndFencesInvalidIdentity() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    Guid session = Guid.NewGuid(), otherSession = Guid.NewGuid();
+    store.Sessions.CreatePrimary(session);
+    store.Sessions.CreatePrimary(otherSession);
+    TranscriptEntryRef[] entries = SeedMixedEntries(database, session, 0);
+    TranscriptEntryRef foreignEntry = SeedMixedEntries(database, otherSession, 0)[0];
+
+    for (int index = 0; index < entries.Length; index++) {
+      TranscriptEntryRef entry = entries[index];
+      TranscriptPositionWindow window = store.Positions.LocateEntry(session, 0, entry);
+      Assert.Equal(entry, window.Target!.Entry);
+      Assert.Equal((long)index, window.Target.Rank);
+      Assert.Contains(window.Entries, positioned => positioned.Descriptor.Entry == entry
+          && positioned.Position.Entry == entry);
+      Assert.Equal((TranscriptEntryKind)index, window.Target.Entry.Kind);
+    }
+
+    Assert.Throws<KeyNotFoundException>(() => store.Positions.LocateEntry(session, 0, foreignEntry));
+    Assert.Throws<KeyNotFoundException>(() => store.Positions.LocateEntry(session, 0,
+        entries[1] with { Kind = TranscriptEntryKind.Tool }));
+    Assert.Throws<KeyNotFoundException>(() => store.Positions.LocateEntry(session, 0,
+        entries[1] with { EntryId = Guid.NewGuid() }));
+    Assert.Throws<ArgumentException>(() => store.Positions.LocateEntry(session, 0,
+        entries[1] with { ExecutionId = Guid.Empty }));
+    Assert.Throws<ArgumentException>(() => store.Positions.LocateEntry(session, 0,
+        entries[1] with { EntryId = Guid.Empty }));
+    Assert.Throws<ArgumentException>(() => store.Positions.LocateEntry(session, 0,
+        entries[1] with { Kind = (TranscriptEntryKind)99 }));
+    Assert.Throws<ArgumentException>(() => store.Positions.LocateEntry(session, 0,
+        entries[1] with { HistoryRevision = 1 }));
+    Assert.Throws<ArgumentException>(() => store.Positions.ActivatePrompt(session, 0, entries[1]));
+
+    database.Execute($"UPDATE sessions SET history_revision = 1 WHERE session_id = '{session:D}';");
+    HistoryRevisionConflictException conflict = Assert.Throws<HistoryRevisionConflictException>(() =>
+        store.Positions.LocateEntry(session, 0, entries[2]));
+    Assert.Equal(0L, conflict.ExpectedRevision);
+    Assert.Equal(1L, conflict.ActualRevision);
+  }
+
+  [Fact]
   public void PositionQueriesUseIndexedPlansWithoutScansOffsetsOrBodyReads() {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
@@ -168,7 +210,8 @@ public sealed class TranscriptPositionQueryTests {
         ("$session", session), ("$revision", 0L), ("$offset", 0L)
       }),
       (Sql: TranscriptPositionReader.AnchorSql, Index: "execution_messages", Parameters: new (string, object)[] {
-        ("$run", entry.ExecutionId), ("$entry", entry.EntryId), ("$session", session), ("$revision", 0L)
+        ("$run", entry.ExecutionId), ("$kind", (int)entry.Kind), ("$entry", entry.EntryId),
+        ("$session", session), ("$revision", 0L)
       }),
       (Sql: TranscriptPositionReader.PromptsSql, Index: "transcript_positions_prompts", Parameters: new (string, object)[] {
         ("$session", session), ("$revision", 0L), ("$after", -1L), ("$limit", 61)
@@ -227,6 +270,41 @@ public sealed class TranscriptPositionQueryTests {
 
     return seeded.Select(entry => new TranscriptEntryRef(
         entry.RunId, entry.InputId, TranscriptEntryKind.User, revision)).ToArray();
+  }
+
+  private static TranscriptEntryRef[] SeedMixedEntries(TemporaryDatabase database, Guid session, long revision) {
+    Guid input = Guid.NewGuid(), run = Guid.NewGuid(), request = Guid.NewGuid();
+    Guid text = Guid.NewGuid(), tool = Guid.NewGuid();
+    database.Execute($"""
+      BEGIN;
+      INSERT INTO input_decisions
+          (session_id, input_id, expected_history_revision, original_text_utf8, decision, run_id, llm_selection_json)
+      VALUES ('{session:D}', '{input:D}', {revision}, X'69', 1, '{run:D}', '{System.Text.Json.JsonSerializer.Serialize(TestLlmSelection.Default)}');
+      INSERT INTO execution_runs (session_id, run_id, history_revision, input_id)
+      VALUES ('{session:D}', '{run:D}', {revision}, '{input:D}');
+      INSERT INTO execution_requests (request_id, run_id, next_chunk_index, response_final)
+      VALUES ('{request:D}', '{run:D}', 1, 1);
+      INSERT INTO execution_tools (run_id, request_id, call_index, call_id, name, arguments_json)
+      VALUES ('{run:D}', '{request:D}', 0, 'call', 'shell', json_object());
+      INSERT INTO execution_output (request_id, chunk_index, text_utf8, is_final)
+      VALUES ('{request:D}', 0, X'6f6b', 1);
+      INSERT INTO execution_messages
+          (session_id, history_revision, run_id, role, message_id, input_id, request_id)
+      VALUES ('{session:D}', {revision}, '{run:D}', 0, '{input:D}', '{input:D}', '{request:D}');
+      INSERT INTO execution_messages
+          (session_id, history_revision, run_id, role, message_id, request_id, end_chunk_index)
+      VALUES ('{session:D}', {revision}, '{run:D}', 1, '{text:D}', '{request:D}', 1);
+      INSERT INTO execution_messages
+          (session_id, history_revision, run_id, role, message_id, request_id, call_id, tool_name)
+      VALUES ('{session:D}', {revision}, '{run:D}', 2, '{tool:D}', '{request:D}', 'call', 'shell');
+      COMMIT;
+      """);
+
+    return [
+      new(run, input, TranscriptEntryKind.User, revision),
+      new(run, text, TranscriptEntryKind.Text, revision),
+      new(run, tool, TranscriptEntryKind.Tool, revision)
+    ];
   }
 
   private static string[] Explain(TemporaryDatabase database, string sql, (string Name, object Value)[] parameters) {

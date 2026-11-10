@@ -128,6 +128,12 @@ public abstract class SessionBase {
     return store.Positions.ActivatePrompt(Id, expectedHistoryRevision, prompt);
   }
 
+  public async Task<TranscriptPositionWindow> ReadTranscriptEntryPositionAsync(
+      long expectedHistoryRevision, TranscriptEntryRef entry, CancellationToken cancellation = default) {
+    using var held = await gate.AcquireAsync(cancellation);
+    return store.Positions.LocateEntry(Id, expectedHistoryRevision, entry);
+  }
+
   private protected async Task<UserMessageReceipt> AdmitUserMessageAsync(UserMessageSubmission submission) {
     // A new execution starts only after the lock is released.
     TaskCompletionSource? lockReleased = null;

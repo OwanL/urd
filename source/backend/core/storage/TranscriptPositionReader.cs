@@ -16,7 +16,7 @@ internal sealed class TranscriptPositionReader(Database database, TranscriptHist
   internal const string AnchorSql = """
     SELECT p.rank, p.weight, p.prefix_weight, m.run_id, m.message_id, p.kind
     FROM execution_messages m JOIN transcript_positions p ON p.entry_ordinal = m.ordinal
-    WHERE m.run_id = $run AND m.role = 0 AND m.message_id = $entry
+    WHERE m.run_id = $run AND m.role = $kind AND m.message_id = $entry
         AND m.session_id = $session AND m.history_revision = $revision;
     """;
   internal const string PromptsSql = """
@@ -90,7 +90,17 @@ internal sealed class TranscriptPositionReader(Database database, TranscriptHist
   }
 
   // Exact identity resolution, state, weights and descriptors share one read snapshot.
-  // Marker approximation never substitutes a neighboring entry for the requested user.
+  internal TranscriptPositionWindow LocateEntry(Guid sessionId, long expectedHistoryRevision,
+      TranscriptEntryRef entry) {
+    Validate(sessionId, expectedHistoryRevision);
+    ArgumentNullException.ThrowIfNull(entry);
+    if (entry.ExecutionId == Guid.Empty || entry.EntryId == Guid.Empty || !Enum.IsDefined(entry.Kind)
+        || entry.HistoryRevision != expectedHistoryRevision)
+      throw new ArgumentException("Transcript positioning requires an exact entry in the expected revision.", nameof(entry));
+    return LocateEntry(sessionId, expectedHistoryRevision, entry, "The entry does not belong to this session history.");
+  }
+
+  // Prompt activation remains deliberately user-only; general positioning shares its exact resolver.
   internal TranscriptPositionWindow ActivatePrompt(Guid sessionId, long expectedHistoryRevision,
       TranscriptEntryRef prompt) {
     Validate(sessionId, expectedHistoryRevision);
@@ -98,20 +108,23 @@ internal sealed class TranscriptPositionReader(Database database, TranscriptHist
     if (prompt.Kind != TranscriptEntryKind.User || prompt.ExecutionId == Guid.Empty || prompt.EntryId == Guid.Empty
         || prompt.HistoryRevision != expectedHistoryRevision)
       throw new ArgumentException("Prompt activation requires an exact user entry in the expected revision.", nameof(prompt));
-    return database.Read(transaction => {
-      TranscriptPositionState state = State(transaction, sessionId, expectedHistoryRevision);
-      using SqliteCommand command = database.Command(transaction, AnchorSql,
-          ("$run", prompt.ExecutionId), ("$entry", prompt.EntryId),
-          ("$session", sessionId), ("$revision", state.HistoryRevision));
-      TranscriptPosition target;
-      using (SqliteDataReader reader = command.ExecuteReader()) {
-        if (!reader.Read())
-          throw new KeyNotFoundException("The prompt does not belong to this session history.");
-        target = Position(reader, state.HistoryRevision);
-      }
-      return Around(transaction, state, target);
-    });
+    return LocateEntry(sessionId, expectedHistoryRevision, prompt, "The prompt does not belong to this session history.");
   }
+
+  private TranscriptPositionWindow LocateEntry(Guid sessionId, long expectedHistoryRevision,
+      TranscriptEntryRef entry, string missingEntryMessage) => database.Read(transaction => {
+    TranscriptPositionState state = State(transaction, sessionId, expectedHistoryRevision);
+    using SqliteCommand command = database.Command(transaction, AnchorSql,
+        ("$run", entry.ExecutionId), ("$kind", (int)entry.Kind), ("$entry", entry.EntryId),
+        ("$session", sessionId), ("$revision", state.HistoryRevision));
+    TranscriptPosition target;
+    using (SqliteDataReader reader = command.ExecuteReader()) {
+      if (!reader.Read())
+        throw new KeyNotFoundException(missingEntryMessage);
+      target = Position(reader, state.HistoryRevision);
+    }
+    return Around(transaction, state, target);
+  });
 
   private TranscriptPositionWindow Locate(SqliteTransaction transaction, TranscriptPositionState state, long weightOffset) {
     if (state.EntryCount == 0)

@@ -33,6 +33,28 @@ public sealed class SessionRoutesTests {
     Guid sessionId = createdBody.RootElement.GetProperty("sessionId").GetGuid();
     Assert.Equal($"/api/sessions/{sessionId}/snapshot", created.Headers.Location?.OriginalString);
 
+    using (HttpResponseMessage emptySummary = await RequestAsync(server.Client, HttpMethod.Get,
+        $"/api/sessions/{sessionId}/positions?expectedHistoryRevision=0")) {
+      Assert.Equal(HttpStatusCode.OK, emptySummary.StatusCode);
+      using JsonDocument body = JsonDocument.Parse(await emptySummary.Content.ReadAsStringAsync());
+      Assert.Equal(0L, body.RootElement.GetProperty("entryCount").GetInt64());
+      Assert.Equal(0L, body.RootElement.GetProperty("totalWeight").GetInt64());
+    }
+    using (HttpResponseMessage emptyLocate = await RequestAsync(server.Client, HttpMethod.Get,
+        $"/api/sessions/{sessionId}/positions/locate?expectedHistoryRevision=0&fraction=1")) {
+      Assert.Equal(HttpStatusCode.OK, emptyLocate.StatusCode);
+      using JsonDocument body = JsonDocument.Parse(await emptyLocate.Content.ReadAsStringAsync());
+      Assert.Equal(JsonValueKind.Null, body.RootElement.GetProperty("target").ValueKind);
+      Assert.Empty(body.RootElement.GetProperty("entries").EnumerateArray());
+    }
+    using (HttpResponseMessage emptyPrompts = await RequestAsync(server.Client, HttpMethod.Get,
+        $"/api/sessions/{sessionId}/positions/prompts?expectedHistoryRevision=0")) {
+      Assert.Equal(HttpStatusCode.OK, emptyPrompts.StatusCode);
+      using JsonDocument body = JsonDocument.Parse(await emptyPrompts.Content.ReadAsStringAsync());
+      Assert.Empty(body.RootElement.GetProperty("prompts").EnumerateArray());
+      Assert.Equal(JsonValueKind.Null, body.RootElement.GetProperty("nextAfterRank").ValueKind);
+    }
+
     using (HttpResponseMessage absent = await RequestAsync(server.Client, HttpMethod.Get,
         $"/api/sessions/{sessionId}/message-submissions/{Guid.NewGuid()}")) {
       Assert.Equal(HttpStatusCode.OK, absent.StatusCode);
@@ -82,6 +104,95 @@ public sealed class SessionRoutesTests {
     Assert.NotNull(snapshot.FirstUserPreview);
     Assert.InRange(snapshot.FirstUserPreview.Length, 1, 256);
     Assert.StartsWith(snapshot.FirstUserPreview, text, StringComparison.Ordinal);
+
+    string positionPath = $"/api/sessions/{sessionId}/positions?expectedHistoryRevision={snapshot.HistoryRevision}";
+    using HttpResponseMessage summaryResponse = await RequestAsync(server.Client, HttpMethod.Get, positionPath);
+    Assert.Equal(HttpStatusCode.OK, summaryResponse.StatusCode);
+    AssertPrivateResponse(summaryResponse);
+    using JsonDocument summary = JsonDocument.Parse(await summaryResponse.Content.ReadAsStringAsync());
+    JsonElement state = summary.RootElement;
+    Assert.Equal(sessionId, state.GetProperty("sessionId").GetGuid());
+    Assert.Equal(snapshot.HistoryRevision, state.GetProperty("historyRevision").GetInt64());
+    Assert.True(state.GetProperty("positionVersion").GetInt64() > 0);
+    Assert.True(state.GetProperty("entryCount").GetInt64() > 0);
+    Assert.True(state.GetProperty("totalWeight").GetInt64() > 0);
+
+    using HttpResponseMessage located = await RequestAsync(server.Client, HttpMethod.Get,
+        $"/api/sessions/{sessionId}/positions/locate?expectedHistoryRevision={snapshot.HistoryRevision}&fraction=0");
+    Assert.Equal(HttpStatusCode.OK, located.StatusCode);
+    AssertPrivateResponse(located);
+    using JsonDocument locatedBody = JsonDocument.Parse(await located.Content.ReadAsStringAsync());
+    JsonElement target = locatedBody.RootElement.GetProperty("target");
+    Assert.Equal(submission.SubmissionId, target.GetProperty("entryId").GetGuid());
+    Assert.Equal("user", target.GetProperty("kind").GetString());
+    JsonElement firstPositioned = locatedBody.RootElement.GetProperty("entries")[0];
+    Assert.Equal(submission.SubmissionId,
+        firstPositioned.GetProperty("descriptor").GetProperty("entry").GetProperty("entryId").GetGuid());
+    Assert.True(firstPositioned.GetProperty("position").GetProperty("rank").GetInt64() >= 0);
+
+    using HttpResponseMessage weighted = await RequestAsync(server.Client, HttpMethod.Get,
+        $"/api/sessions/{sessionId}/positions/locate?expectedHistoryRevision={snapshot.HistoryRevision}&fraction=0.5");
+    Assert.Equal(HttpStatusCode.OK, weighted.StatusCode);
+    using JsonDocument weightedBody = JsonDocument.Parse(await weighted.Content.ReadAsStringAsync());
+    JsonElement weightedTarget = weightedBody.RootElement.GetProperty("target");
+    long offset = (long)Math.Floor(state.GetProperty("totalWeight").GetInt64() * 0.5);
+    long prefixWeight = weightedTarget.GetProperty("prefixWeight").GetInt64();
+    long targetWeight = weightedTarget.GetProperty("weight").GetInt64();
+    Assert.InRange(offset, prefixWeight, prefixWeight + targetWeight - 1);
+
+    using HttpResponseMessage prompts = await RequestAsync(server.Client, HttpMethod.Get,
+        $"/api/sessions/{sessionId}/positions/prompts?expectedHistoryRevision={snapshot.HistoryRevision}&limit=1");
+    Assert.Equal(HttpStatusCode.OK, prompts.StatusCode);
+    AssertPrivateResponse(prompts);
+    using JsonDocument promptBody = JsonDocument.Parse(await prompts.Content.ReadAsStringAsync());
+    JsonElement prompt = Assert.Single(promptBody.RootElement.GetProperty("prompts").EnumerateArray());
+    Assert.Equal(receipt.ExecutionId, prompt.GetProperty("executionId").GetGuid());
+    Assert.Equal(submission.SubmissionId, prompt.GetProperty("entryId").GetGuid());
+    Assert.Equal(JsonValueKind.Null, promptBody.RootElement.GetProperty("nextAfterRank").ValueKind);
+
+    using HttpResponseMessage activated = await RequestAsync(server.Client, HttpMethod.Get,
+        $"/api/sessions/{sessionId}/positions/prompts/{receipt.ExecutionId}/{submission.SubmissionId}"
+        + $"?expectedHistoryRevision={snapshot.HistoryRevision}");
+    Assert.Equal(HttpStatusCode.OK, activated.StatusCode);
+    AssertPrivateResponse(activated);
+    using JsonDocument activatedBody = JsonDocument.Parse(await activated.Content.ReadAsStringAsync());
+    Assert.Equal(submission.SubmissionId, activatedBody.RootElement.GetProperty("target").GetProperty("entryId").GetGuid());
+
+    foreach (string fraction in new[] { "-0.1", "1.1", "NaN", "Infinity" }) {
+      using HttpResponseMessage invalid = await RequestAsync(server.Client, HttpMethod.Get,
+          $"/api/sessions/{sessionId}/positions/locate?expectedHistoryRevision={snapshot.HistoryRevision}&fraction={fraction}");
+      Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+    }
+    foreach (string query in new[] { "limit=0", "limit=61", "limit=", "afterRank=-1", "afterRank=" }) {
+      using HttpResponseMessage invalid = await RequestAsync(server.Client, HttpMethod.Get,
+          $"/api/sessions/{sessionId}/positions/prompts?expectedHistoryRevision={snapshot.HistoryRevision}&{query}");
+      Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+    }
+    using (HttpResponseMessage stale = await RequestAsync(server.Client, HttpMethod.Get,
+        $"/api/sessions/{sessionId}/positions?expectedHistoryRevision={snapshot.HistoryRevision + 1}"))
+      Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+    using (HttpResponseMessage missingSession = await RequestAsync(server.Client, HttpMethod.Get,
+        $"/api/sessions/{Guid.NewGuid()}/positions?expectedHistoryRevision=0"))
+      Assert.Equal(HttpStatusCode.NotFound, missingSession.StatusCode);
+    using HttpResponseMessage otherCreated = await RequestAsync(server.Client, HttpMethod.Post,
+        "/api/sessions", JsonBody("{}"));
+    using JsonDocument otherSessionBody = JsonDocument.Parse(await otherCreated.Content.ReadAsStringAsync());
+    Guid otherSessionId = otherSessionBody.RootElement.GetProperty("sessionId").GetGuid();
+    using (HttpResponseMessage wrongSession = await RequestAsync(server.Client, HttpMethod.Get,
+        $"/api/sessions/{otherSessionId}/positions/prompts/{receipt.ExecutionId}/{submission.SubmissionId}"
+        + $"?expectedHistoryRevision=0"))
+      Assert.Equal(HttpStatusCode.NotFound, wrongSession.StatusCode);
+
+    using HttpResponseMessage historyResponse = await RequestAsync(server.Client, HttpMethod.Get,
+        $"/api/sessions/{sessionId}/history?mode=latest&expectedHistoryRevision={snapshot.HistoryRevision}");
+    TranscriptHistoryPage history = (await historyResponse.Content.ReadFromJsonAsync<TranscriptHistoryPage>(json))!;
+    TranscriptEntryRef textEntry = Assert.Single(history.Entries,
+        entry => entry.Entry.Kind == TranscriptEntryKind.Text).Entry;
+    using (HttpResponseMessage wrongKind = await RequestAsync(server.Client, HttpMethod.Get,
+        $"/api/sessions/{sessionId}/positions/prompts/{textEntry.ExecutionId}/{textEntry.EntryId}"
+        + $"?expectedHistoryRevision={snapshot.HistoryRevision}"))
+      Assert.Equal(HttpStatusCode.NotFound, wrongKind.StatusCode);
+
     var message = new MessageRef(receipt.ExecutionId.Value, submission.SubmissionId, MessageRole.User, snapshot.HistoryRevision);
     var cursor = new MessageContentCursor(message, 0, 0);
     string contentPath = $"/api/sessions/{sessionId}/content?executionId={cursor.Message.ExecutionId}"

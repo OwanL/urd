@@ -86,6 +86,31 @@ public abstract class SessionBase {
     return store.History.Read(Id, query);
   }
 
+  public async Task<TranscriptPositionState> ReadTranscriptPositionSummaryAsync(
+      long expectedHistoryRevision, CancellationToken cancellation = default) {
+    using var held = await gate.AcquireAsync(cancellation);
+    return store.Positions.Summary(Id, expectedHistoryRevision);
+  }
+
+  public async Task<TranscriptPositionWindow> LocateTranscriptPositionAsync(
+      long expectedHistoryRevision, double fraction, CancellationToken cancellation = default) {
+    using var held = await gate.AcquireAsync(cancellation);
+    return store.Positions.LocateFraction(Id, expectedHistoryRevision, fraction);
+  }
+
+  public async Task<TranscriptPromptPage> ReadTranscriptPromptPageAsync(
+      long expectedHistoryRevision, long? afterRank = null, int limit = 60,
+      CancellationToken cancellation = default) {
+    using var held = await gate.AcquireAsync(cancellation);
+    return store.Positions.Prompts(Id, expectedHistoryRevision, afterRank, limit);
+  }
+
+  public async Task<TranscriptPositionWindow> ActivateTranscriptPromptAsync(
+      long expectedHistoryRevision, TranscriptEntryRef prompt, CancellationToken cancellation = default) {
+    using var held = await gate.AcquireAsync(cancellation);
+    return store.Positions.ActivatePrompt(Id, expectedHistoryRevision, prompt);
+  }
+
   private protected async Task<UserMessageReceipt> AdmitUserMessageAsync(UserMessageSubmission submission) {
     // A new execution starts only after the lock is released.
     TaskCompletionSource? lockReleased = null;

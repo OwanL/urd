@@ -3,7 +3,15 @@ import test from "node:test";
 import { RequestError } from "../http/RequestError.ts";
 import { SessionClient } from "../sessions/SessionClient.ts";
 import type { LlmSelection } from "../providers/LlmSelection.ts";
-import type { MessageContentCursor, MessageContentPage } from "../sessions/Messages.ts";
+import type {
+  MessageContentCursor,
+  MessageContentPage,
+  TranscriptEntryRef,
+  TranscriptPosition,
+  TranscriptPositionSummary,
+  TranscriptPositionWindow,
+  TranscriptPromptPage,
+} from "../sessions/Messages.ts";
 import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
 import type {
   UserMessageReceipt,
@@ -70,6 +78,43 @@ const content: MessageContentPage = {
   hasMore: false,
   isClosed: false,
   finalOutputCommitted: false,
+};
+const promptRef: TranscriptEntryRef = {
+  executionId,
+  entryId: submissionId,
+  kind: "user",
+  historyRevision: 7,
+};
+const position: TranscriptPosition = {
+  ...promptRef,
+  rank: 3,
+  weight: 288,
+  prefixWeight: 900,
+};
+const positionSummary: TranscriptPositionSummary = {
+  sessionId,
+  historyRevision: 7,
+  positionVersion: 12,
+  entryCount: 8,
+  totalWeight: 2300,
+};
+const positionWindow: TranscriptPositionWindow = {
+  state: positionSummary,
+  target: position,
+  entries: [
+    {
+      descriptor: { entry: promptRef, createdAt: null, text: null, tool: null },
+      position,
+    },
+  ],
+  hasBefore: true,
+  hasAfter: false,
+  settlements: [],
+};
+const promptPage: TranscriptPromptPage = {
+  state: positionSummary,
+  prompts: [position],
+  nextAfterRank: 3,
 };
 
 interface MappingCase {
@@ -195,6 +240,39 @@ const mappings: MappingCase[] = [
     },
   })),
   {
+    name: "position summary is fenced by history revision",
+    call: (client) => client.getPositionSummary(sessionId, 7),
+    method: "GET",
+    path: `/api/sessions/${sessionId}/positions`,
+    query: { expectedHistoryRevision: "7" },
+    response: positionSummary,
+  },
+  {
+    name: "weighted locate sends a normalized fraction",
+    call: (client) => client.locatePosition(sessionId, 7, 0.625),
+    method: "GET",
+    path: `/api/sessions/${sessionId}/positions/locate`,
+    query: { expectedHistoryRevision: "7", fraction: "0.625" },
+    response: positionWindow,
+  },
+  {
+    name: "prompt pages send a bounded keyset cursor",
+    call: (client) =>
+      client.getPromptMarkers(sessionId, { expectedHistoryRevision: 7, afterRank: 2, limit: 20 }),
+    method: "GET",
+    path: `/api/sessions/${sessionId}/positions/prompts`,
+    query: { expectedHistoryRevision: "7", afterRank: "2", limit: "20" },
+    response: promptPage,
+  },
+  {
+    name: "prompt activation uses exact stable user identity",
+    call: (client) => client.activatePrompt(sessionId, promptRef),
+    method: "GET",
+    path: `/api/sessions/${sessionId}/positions/prompts/${executionId}/${submissionId}`,
+    query: { expectedHistoryRevision: "7" },
+    response: positionWindow,
+  },
+  {
     name: "content flattens every cursor member",
     call: (client) => client.getMessageContent(sessionId, cursor),
     method: "GET",
@@ -298,6 +376,24 @@ for (const mapping of mappings) {
 void test("construction does no I/O", (t) => {
   const fetchMock = t.mock.method(globalThis, "fetch", async () => new Response("null"));
   new SessionClient(new URL("https://server.example"));
+  assert.equal(fetchMock.mock.callCount(), 0);
+});
+
+void test("position client rejects invalid fractions, cursors, limits and prompt kinds", (t) => {
+  const fetchMock = t.mock.method(globalThis, "fetch", async () => new Response("null"));
+  const client = new SessionClient(new URL("https://server.example"));
+
+  for (const fraction of [-0.1, 1.1, Number.NaN, Number.POSITIVE_INFINITY])
+    assert.throws(() => client.locatePosition(sessionId, 7, fraction), TypeError);
+  assert.throws(
+    () => client.getPromptMarkers(sessionId, { expectedHistoryRevision: 7, afterRank: -1 }),
+    TypeError,
+  );
+  assert.throws(
+    () => client.getPromptMarkers(sessionId, { expectedHistoryRevision: 7, limit: 61 }),
+    TypeError,
+  );
+  assert.throws(() => client.activatePrompt(sessionId, { ...promptRef, kind: "text" }), TypeError);
   assert.equal(fetchMock.mock.callCount(), 0);
 });
 
@@ -412,6 +508,23 @@ const reads: {
     name: "history",
     call: (client, signal) =>
       client.getHistory(sessionId, { mode: "latest", expectedHistoryRevision: 7 }, signal),
+  },
+  {
+    name: "position summary",
+    call: (client, signal) => client.getPositionSummary(sessionId, 7, signal),
+  },
+  {
+    name: "weighted locate",
+    call: (client, signal) => client.locatePosition(sessionId, 7, 0.5, signal),
+  },
+  {
+    name: "prompt markers",
+    call: (client, signal) =>
+      client.getPromptMarkers(sessionId, { expectedHistoryRevision: 7 }, signal),
+  },
+  {
+    name: "prompt activation",
+    call: (client, signal) => client.activatePrompt(sessionId, promptRef, signal),
   },
   {
     name: "content",

@@ -23,7 +23,7 @@ internal sealed class TranscriptPositionReader(Database database, TranscriptHist
     SELECT p.rank, p.weight, p.prefix_weight, m.run_id, m.message_id, p.kind
     FROM transcript_positions p JOIN execution_messages m ON m.ordinal = p.entry_ordinal
     WHERE p.session_id = $session AND p.history_revision = $revision AND p.kind = 0 AND p.rank > $after
-    ORDER BY p.rank LIMIT 61;
+    ORDER BY p.rank LIMIT $limit;
     """;
   internal const string WindowSql = """
     SELECT p.rank, p.weight, p.prefix_weight, m.run_id, m.message_id, p.kind
@@ -32,39 +32,57 @@ internal sealed class TranscriptPositionReader(Database database, TranscriptHist
     ORDER BY p.rank LIMIT 60;
     """;
 
+  // Position state changes on appends as well as history replacement. The expected history
+  // revision fences identity; positionVersion reports which same-revision state was read.
+  internal TranscriptPositionState Summary(Guid sessionId, long expectedHistoryRevision) {
+    Validate(sessionId, expectedHistoryRevision);
+    return database.Read(transaction => State(transaction, sessionId, expectedHistoryRevision));
+  }
+
   // Offset is a nonnegative abstract weight offset. Stale totals/end offsets clamp to
-  // the current tail; state tags the result with the version actually read. Only the
-  // history revision fences identity. PositionVersion changes even on same-revision appends.
+  // the current tail. Fraction resolution and lookup share a snapshot so concurrent appends
+  // cannot change the target halfway through a normalized seek.
   internal TranscriptPositionWindow Locate(Guid sessionId, long expectedHistoryRevision, long weightOffset) {
     Validate(sessionId, expectedHistoryRevision);
     ArgumentOutOfRangeException.ThrowIfNegative(weightOffset);
     return database.Read(transaction => {
       TranscriptPositionState state = State(transaction, sessionId, expectedHistoryRevision);
-      if (state.EntryCount == 0)
-        return new(state, null, [], false, false, []);
-      using SqliteCommand command = database.Command(transaction, LocateSql,
-          ("$session", sessionId), ("$revision", state.HistoryRevision),
-          ("$offset", Math.Min(weightOffset, state.TotalWeight - 1)));
-      TranscriptPosition target;
-      using (SqliteDataReader reader = command.ExecuteReader()) {
-        reader.Read();
-        target = Position(reader, state.HistoryRevision);
-      }
-      return Around(transaction, state, target);
+      return Locate(transaction, state, weightOffset);
     });
   }
 
-  internal TranscriptPromptPage Prompts(Guid sessionId, long expectedHistoryRevision, long? afterRank = null) {
+  internal TranscriptPositionWindow LocateFraction(Guid sessionId, long expectedHistoryRevision, double fraction) {
+    Validate(sessionId, expectedHistoryRevision);
+    if (!double.IsFinite(fraction) || fraction is < 0 or > 1)
+      throw new ArgumentOutOfRangeException(nameof(fraction));
+    return database.Read(transaction => {
+      TranscriptPositionState state = State(transaction, sessionId, expectedHistoryRevision);
+      long offset = 0;
+      if (state.EntryCount != 0 && fraction > 0) {
+        if (fraction >= 1)
+          offset = state.TotalWeight - 1;
+        else
+          offset = (long)Math.Floor(fraction * state.TotalWeight);
+      }
+      return Locate(transaction, state, offset);
+    });
+  }
+
+  internal TranscriptPromptPage Prompts(Guid sessionId, long expectedHistoryRevision,
+      long? afterRank = null, int limit = 60) {
     Validate(sessionId, expectedHistoryRevision);
     if (afterRank is < 0)
       throw new ArgumentOutOfRangeException(nameof(afterRank));
+    if (limit is < 1 or > 60)
+      throw new ArgumentOutOfRangeException(nameof(limit));
     return database.Read<TranscriptPromptPage>(transaction => {
       TranscriptPositionState state = State(transaction, sessionId, expectedHistoryRevision);
       using SqliteCommand command = database.Command(transaction, PromptsSql,
-          ("$session", sessionId), ("$revision", state.HistoryRevision), ("$after", afterRank ?? -1));
+          ("$session", sessionId), ("$revision", state.HistoryRevision), ("$after", afterRank ?? -1),
+          ("$limit", limit + 1));
       using SqliteDataReader reader = command.ExecuteReader();
-      var prompts = new List<TranscriptPosition>(60);
-      while (prompts.Count < 60 && reader.Read())
+      var prompts = new List<TranscriptPosition>(limit);
+      while (prompts.Count < limit && reader.Read())
         prompts.Add(Position(reader, state.HistoryRevision));
       long? next = reader.Read() ? prompts[^1].Rank : null;
       return new(state, prompts, next);
@@ -93,6 +111,20 @@ internal sealed class TranscriptPositionReader(Database database, TranscriptHist
       }
       return Around(transaction, state, target);
     });
+  }
+
+  private TranscriptPositionWindow Locate(SqliteTransaction transaction, TranscriptPositionState state, long weightOffset) {
+    if (state.EntryCount == 0)
+      return new(state, null, [], false, false, []);
+    using SqliteCommand command = database.Command(transaction, LocateSql,
+        ("$session", state.SessionId), ("$revision", state.HistoryRevision),
+        ("$offset", Math.Min(weightOffset, state.TotalWeight - 1)));
+    TranscriptPosition target;
+    using (SqliteDataReader reader = command.ExecuteReader()) {
+      reader.Read();
+      target = Position(reader, state.HistoryRevision);
+    }
+    return Around(transaction, state, target);
   }
 
   private TranscriptPositionWindow Around(SqliteTransaction transaction, TranscriptPositionState state,

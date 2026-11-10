@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Data.Sqlite;
+using Urd.Core.Execution;
 using Urd.Core.Sessions;
 
 namespace Urd.Server;
@@ -30,6 +31,15 @@ internal static class SessionRoutes {
         }));
     routes.MapGet("/{sessionId}/history", (HttpContext http, Guid sessionId, [AsParameters] HistoryQuery query) =>
         ReadHistoryAsync(http, sessions, sessionId, query));
+    routes.MapGet("/{sessionId}/positions", (HttpContext http, Guid sessionId,
+        [AsParameters] PositionSummaryQuery query) => ReadPositionSummaryAsync(http, sessions, sessionId, query));
+    routes.MapGet("/{sessionId}/positions/locate", (HttpContext http, Guid sessionId,
+        [AsParameters] PositionLocateQuery query) => LocatePositionAsync(http, sessions, sessionId, query));
+    routes.MapGet("/{sessionId}/positions/prompts", (HttpContext http, Guid sessionId,
+        [AsParameters] PromptPageQuery query) => ReadPromptPageAsync(http, sessions, sessionId, query));
+    routes.MapGet("/{sessionId}/positions/prompts/{executionId}/{entryId}", (HttpContext http, Guid sessionId,
+        Guid executionId, Guid entryId, [AsParameters] PromptActivationQuery query) =>
+        ActivatePromptAsync(http, sessions, sessionId, executionId, entryId, query));
     routes.MapGet("/{sessionId}/content", (HttpContext http, Guid sessionId, [AsParameters] ContentQuery query) =>
         ReadContentAsync(http, sessions, sessionId, query));
     return routes;
@@ -161,6 +171,73 @@ internal static class SessionRoutes {
         Results.Ok(await session.ReadHistoryAsync(history, http.RequestAborted)));
   }
 
+  private static Task<IResult> ReadPositionSummaryAsync(
+      HttpContext http, SessionManager sessions, Guid sessionId, PositionSummaryQuery query) {
+    if (query.ExpectedHistoryRevision < 0)
+      return Task.FromResult<IResult>(Results.BadRequest());
+
+    return WithSessionAsync(http, sessions, sessionId, async session => {
+      TranscriptPositionState state = await session.ReadTranscriptPositionSummaryAsync(
+          query.ExpectedHistoryRevision, http.RequestAborted);
+      return Results.Ok(ToPositionSummary(state));
+    });
+  }
+
+  private static Task<IResult> LocatePositionAsync(
+      HttpContext http, SessionManager sessions, Guid sessionId, PositionLocateQuery query) {
+    if (query.ExpectedHistoryRevision < 0 || query.Fraction is not double fraction
+        || !double.IsFinite(fraction) || fraction is < 0 or > 1)
+      return Task.FromResult<IResult>(Results.BadRequest());
+
+    return WithSessionAsync(http, sessions, sessionId, async session => {
+      TranscriptPositionWindow window = await session.LocateTranscriptPositionAsync(
+          query.ExpectedHistoryRevision, fraction, http.RequestAborted);
+      return Results.Ok(ToPositionWindow(window));
+    });
+  }
+
+  private static Task<IResult> ReadPromptPageAsync(
+      HttpContext http, SessionManager sessions, Guid sessionId, PromptPageQuery query) {
+    int limit = query.Limit ?? 60;
+    bool missingCursorValue = http.Request.Query.ContainsKey("afterRank") && query.AfterRank is null;
+    bool missingLimitValue = http.Request.Query.ContainsKey("limit") && query.Limit is null;
+    if (query.ExpectedHistoryRevision < 0 || missingCursorValue || missingLimitValue
+        || query.AfterRank is < 0 || limit is < 1 or > 60)
+      return Task.FromResult<IResult>(Results.BadRequest());
+
+    return WithSessionAsync(http, sessions, sessionId, async session => {
+      TranscriptPromptPage page = await session.ReadTranscriptPromptPageAsync(
+          query.ExpectedHistoryRevision, query.AfterRank, limit, http.RequestAborted);
+      return Results.Ok(new PromptPageDto(ToPositionSummary(page.State),
+          page.Prompts.Select(ToPosition).ToArray(), page.NextAfterRank));
+    });
+  }
+
+  private static Task<IResult> ActivatePromptAsync(HttpContext http, SessionManager sessions, Guid sessionId,
+      Guid executionId, Guid entryId, PromptActivationQuery query) {
+    if (executionId == Guid.Empty || entryId == Guid.Empty || query.ExpectedHistoryRevision < 0)
+      return Task.FromResult<IResult>(Results.BadRequest());
+    var prompt = new TranscriptEntryRef(executionId, entryId, TranscriptEntryKind.User, query.ExpectedHistoryRevision);
+
+    return WithSessionAsync(http, sessions, sessionId, async session => {
+      TranscriptPositionWindow window = await session.ActivateTranscriptPromptAsync(
+          query.ExpectedHistoryRevision, prompt, http.RequestAborted);
+      return Results.Ok(ToPositionWindow(window));
+    });
+  }
+
+  private static PositionSummaryDto ToPositionSummary(TranscriptPositionState state) => new(
+      state.SessionId, state.HistoryRevision, state.PositionVersion, state.EntryCount, state.TotalWeight);
+
+  private static TranscriptPositionDto ToPosition(TranscriptPosition position) => new(
+      position.Entry.ExecutionId, position.Entry.EntryId, position.Entry.Kind,
+      position.Entry.HistoryRevision, position.Rank, position.Weight, position.PrefixWeight);
+
+  private static PositionWindowDto ToPositionWindow(TranscriptPositionWindow window) => new(
+      ToPositionSummary(window.State), window.Target is null ? null : ToPosition(window.Target),
+      window.Entries.Select(entry => new PositionedEntryDto(entry.Descriptor, ToPosition(entry.Position))).ToArray(),
+      window.HasBefore, window.HasAfter, window.Settlements);
+
   private static Task<IResult> ReadContentAsync(
       HttpContext http, SessionManager sessions, Guid sessionId, ContentQuery query) {
     MessageRole? role = query.Role switch {
@@ -198,6 +275,28 @@ internal static class SessionRoutes {
 
   private sealed record HistoryQuery(
       string Mode, long ExpectedHistoryRevision, Guid? ExecutionId, Guid? EntryId, string? Kind);
+
+  private sealed record PositionSummaryQuery(long ExpectedHistoryRevision);
+  private sealed record PositionLocateQuery(long ExpectedHistoryRevision, double? Fraction);
+  private sealed record PromptPageQuery(
+      long ExpectedHistoryRevision, long? AfterRank, int? Limit);
+  private sealed record PromptActivationQuery(long ExpectedHistoryRevision);
+
+  private sealed record PositionSummaryDto(
+      Guid SessionId, long HistoryRevision, long PositionVersion, long EntryCount, long TotalWeight);
+
+  private sealed record TranscriptPositionDto(
+      Guid ExecutionId, Guid EntryId, TranscriptEntryKind Kind, long HistoryRevision,
+      long Rank, long Weight, long PrefixWeight);
+
+  private sealed record PositionedEntryDto(TranscriptEntryDescriptor Descriptor, TranscriptPositionDto Position);
+
+  private sealed record PositionWindowDto(
+      PositionSummaryDto State, TranscriptPositionDto? Target, IReadOnlyList<PositionedEntryDto> Entries,
+      bool HasBefore, bool HasAfter, IReadOnlyList<SessionExecutionResult> Settlements);
+
+  private sealed record PromptPageDto(
+      PositionSummaryDto State, IReadOnlyList<TranscriptPositionDto> Prompts, long? NextAfterRank);
 
   // Flat, required query members construct Core's segment-local content cursor.
   private sealed record ContentQuery(

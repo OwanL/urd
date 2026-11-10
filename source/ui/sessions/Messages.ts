@@ -60,6 +60,50 @@ export interface TranscriptHistoryPage {
   readonly settlements: readonly SessionExecutionResult[];
 }
 
+export interface TranscriptPositionSummary {
+  readonly sessionId: string;
+  readonly historyRevision: number;
+  readonly positionVersion: number;
+  readonly entryCount: number;
+  readonly totalWeight: number;
+}
+
+export interface TranscriptPosition {
+  readonly executionId: string;
+  readonly entryId: string;
+  readonly kind: TranscriptEntryKind;
+  readonly historyRevision: number;
+  readonly rank: number;
+  readonly weight: number;
+  readonly prefixWeight: number;
+}
+
+export interface TranscriptPositionedEntry {
+  readonly descriptor: TranscriptEntryDescriptor;
+  readonly position: TranscriptPosition;
+}
+
+export interface TranscriptPositionWindow {
+  readonly state: TranscriptPositionSummary;
+  readonly target: TranscriptPosition | null;
+  readonly entries: readonly TranscriptPositionedEntry[];
+  readonly hasBefore: boolean;
+  readonly hasAfter: boolean;
+  readonly settlements: readonly SessionExecutionResult[];
+}
+
+export interface TranscriptPromptPage {
+  readonly state: TranscriptPositionSummary;
+  readonly prompts: readonly TranscriptPosition[];
+  readonly nextAfterRank: number | null;
+}
+
+export interface TranscriptPromptPageQuery {
+  readonly expectedHistoryRevision: number;
+  readonly afterRank?: number;
+  readonly limit?: number;
+}
+
 export interface NotSentInput {
   readonly submissionId: string;
   readonly executionId: string;

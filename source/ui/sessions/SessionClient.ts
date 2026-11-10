@@ -3,8 +3,13 @@ import type {
   MessageContentCursor,
   MessageContentPage,
   NotSentPage,
+  TranscriptEntryRef,
   TranscriptHistoryPage,
   TranscriptHistoryQuery,
+  TranscriptPositionSummary,
+  TranscriptPositionWindow,
+  TranscriptPromptPage,
+  TranscriptPromptPageQuery,
 } from "./Messages.ts";
 import type { SessionIdPage } from "./SessionIdPage.ts";
 import type { SessionSnapshot } from "./SessionSnapshot.ts";
@@ -68,6 +73,73 @@ export class SessionClient {
       url.searchParams.set("entryId", anchor.entryId);
       url.searchParams.set("kind", anchor.kind);
     }
+    return requestJson(url, "GET", undefined, signal);
+  }
+
+  getPositionSummary(
+    sessionId: string,
+    expectedHistoryRevision: number,
+    signal?: AbortSignal,
+  ): Promise<TranscriptPositionSummary> {
+    const url = this.url(`/${encodeURIComponent(sessionId)}/positions`);
+    url.searchParams.set("expectedHistoryRevision", String(expectedHistoryRevision));
+    return requestJson(url, "GET", undefined, signal);
+  }
+
+  locatePosition(
+    sessionId: string,
+    expectedHistoryRevision: number,
+    fraction: number,
+    signal?: AbortSignal,
+  ): Promise<TranscriptPositionWindow> {
+    if (!Number.isFinite(fraction) || fraction < 0 || fraction > 1)
+      throw new TypeError("Position fraction must be between 0 and 1.");
+    const url = this.url(`/${encodeURIComponent(sessionId)}/positions/locate`);
+    url.search = new URLSearchParams({
+      expectedHistoryRevision: String(expectedHistoryRevision),
+      fraction: String(fraction),
+    }).toString();
+    return requestJson(url, "GET", undefined, signal);
+  }
+
+  getPromptMarkers(
+    sessionId: string,
+    query: TranscriptPromptPageQuery,
+    signal?: AbortSignal,
+  ): Promise<TranscriptPromptPage> {
+    if (
+      query.afterRank !== undefined &&
+      (!Number.isSafeInteger(query.afterRank) || query.afterRank < 0)
+    )
+      throw new TypeError("Prompt cursor must be a nonnegative rank.");
+    if (
+      query.limit !== undefined &&
+      (!Number.isInteger(query.limit) || query.limit < 1 || query.limit > 60)
+    )
+      throw new TypeError("Prompt page limit must be between 1 and 60.");
+    const url = this.url(`/${encodeURIComponent(sessionId)}/positions/prompts`);
+    url.searchParams.set("expectedHistoryRevision", String(query.expectedHistoryRevision));
+    if (query.afterRank !== undefined) url.searchParams.set("afterRank", String(query.afterRank));
+    if (query.limit !== undefined) url.searchParams.set("limit", String(query.limit));
+    return requestJson(url, "GET", undefined, signal);
+  }
+
+  activatePrompt(
+    sessionId: string,
+    prompt: TranscriptEntryRef,
+    signal?: AbortSignal,
+  ): Promise<TranscriptPositionWindow> {
+    if (
+      prompt.kind !== "user" ||
+      !Number.isSafeInteger(prompt.historyRevision) ||
+      prompt.historyRevision < 0
+    )
+      throw new TypeError("Prompt activation requires a user entry from a valid history revision.");
+    const path =
+      `/${encodeURIComponent(sessionId)}/positions/prompts/${encodeURIComponent(prompt.executionId)}` +
+      `/${encodeURIComponent(prompt.entryId)}`;
+    const url = this.url(path);
+    url.searchParams.set("expectedHistoryRevision", String(prompt.historyRevision));
     return requestJson(url, "GET", undefined, signal);
   }
 

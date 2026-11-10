@@ -23,6 +23,12 @@ public sealed class TranscriptPositionQueryTests {
     database.Execute($"UPDATE sessions SET history_revision = 1 WHERE session_id = '{session:D}';");
     TranscriptEntryRef[] currentEntries = SeedUsers(database, session, 1, 13, 17);
 
+    TranscriptPositionState summary = store.Positions.Summary(session, 1);
+    Assert.Equal(session, summary.SessionId);
+    Assert.Equal(1L, summary.HistoryRevision);
+    Assert.Equal(2L, summary.EntryCount);
+    Assert.Equal(30L, summary.TotalWeight);
+
     TranscriptPosition[] sessionOne = store.Positions.Prompts(session, 1).Prompts.ToArray();
     TranscriptPosition[] sessionTwo = store.Positions.Prompts(otherSession, 0).Prompts.ToArray();
     Assert.Equal(currentEntries, sessionOne.Select(position => position.Entry));
@@ -117,6 +123,9 @@ public sealed class TranscriptPositionQueryTests {
     Assert.Equal(119L, second.NextAfterRank);
     Assert.Null(third.NextAfterRank);
     Assert.All(new[] { first, second, third }, page => Assert.InRange(page.Prompts.Count, 0, 60));
+    TranscriptPromptPage bounded = store.Positions.Prompts(session, 0, limit: 7);
+    Assert.Equal(entries[..7], bounded.Prompts.Select(prompt => prompt.Entry));
+    Assert.Equal(6L, bounded.NextAfterRank);
   }
 
   [Fact]
@@ -162,7 +171,7 @@ public sealed class TranscriptPositionQueryTests {
         ("$run", entry.ExecutionId), ("$entry", entry.EntryId), ("$session", session), ("$revision", 0L)
       }),
       (Sql: TranscriptPositionReader.PromptsSql, Index: "transcript_positions_prompts", Parameters: new (string, object)[] {
-        ("$session", session), ("$revision", 0L), ("$after", -1L)
+        ("$session", session), ("$revision", 0L), ("$after", -1L), ("$limit", 61)
       }),
       (Sql: TranscriptPositionReader.WindowSql, Index: "transcript_positions", Parameters: new (string, object)[] {
         ("$session", session), ("$revision", 0L), ("$first", 0L)

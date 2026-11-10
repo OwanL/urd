@@ -642,15 +642,15 @@ These are small, reviewable packets with non-overlapping questions, not authoriz
 for a broad rewrite. Owning code areas are named to guide later coordination; no
 speculative API, schema or class design is implied.
 
-1. **Decision probes** — Own the temporary parser/slicing/highlighting/cache matrix
-   in isolated fixtures, with findings summarized in
-   [parser evidence](TRANSCRIPT-PARSER-EVIDENCE.md). The released Markdig probe is
-   useful preliminary evidence, not this full gate. Check semantic correctness and
-   detached source ranges for streaming/fences/references/lists/tables, code/table
-   slices, backend-versus-browser highlighting, and source/projection/highlight cache
-   reuse and release. Confirm cost as well as correctness. Do not select packages or
-   persist formatted projections until the matrix supports them; release parser trees
-   and backing source, and do not treat a queued-job cancellation as stopping a parse.
+1. **Decision probes** — The bounded Stage 2 decision probe is recorded in
+   [parser evidence](TRANSCRIPT-PARSER-EVIDENCE.md) and raw evidence at
+   `%TEMP%/urd-stage2-decisions-20261110-4f84ef2a/REPORT.md`. It supports keeping the
+   backend-structure/browser-rendering direction, bounded process-local reuse, and
+   context-aware demand-driven highlighting; it rejects naive stateless window
+   highlighting. Fidelity was 8/11, so this is not packet 1 sign-off. No package or
+   persistent projection/cache is selected. Remaining parser, fidelity, indexed-range,
+   scheduling, memory and composed qualification gates remain open as listed in the
+   evidence report; queued-job replacement does not stop an in-flight parse.
 2. **Navigation/read contracts and pure viewport model** — Own contracts in this
    design; backend read ownership in `core/sessions/` and `core/storage/`; the pure
    viewport/anchor model in `source/ui/sessions/`. Define whole-conversation position,
@@ -659,14 +659,15 @@ speculative API, schema or class design is implied.
    distant jumps, append/revision changes and height corrections while preserving the
    visible source anchor/following state; reads stay bounded and do not fetch intervening
    bodies or all entry descriptors.
-3. **Storage position lookup** — Own the first implementation/benchmark in
-   `core/storage/` and its focused storage tests. At 100,000 entries, first benchmark
-   the simplest correct SQLite weighted-position lookup with materialized weights,
-   including lookup latency and the write/storage cost of maintaining weights. Do not
-   mandate a fixed-fanout tree. Gate: approximate whole-history lookup and marker-to-entry
-   resolution are correct without body reads or repeated whole-history scans. Add a
-   hierarchy or persistent derived structure only if measured query/write costs require
-   it, and record the evidence that triggers that complexity.
+3. **Storage position lookup** — The 100k-per-session flat weighted-position probe
+   is recorded in [position evidence](TRANSCRIPT-POSITION-EVIDENCE.md), with raw
+   evidence at `%TEMP%/urd-position-probe-5ba1aec72fc9/REPORT.md`. Its indexed
+   lookup and marker resolution were correct and fast without body reads or repeated
+   whole-history scans; the measured lookup does not justify a hierarchy. The flat
+   layout remains a viable baseline, not a production schema selection. Historical
+   weight corrections rewrote suffixes at material cost, so maintenance under required
+   update patterns remains an unresolved gate. Preserve bounded reads and qualify
+   actual write/contention behavior before selecting persistent structure.
 4. **Display integration** — Own source/read integration in `core/storage/`, with
    the backend semantic-derivation owner selected after the probes within `core/`;
    own display/viewport integration in `source/ui/app/Transcript.tsx` and
@@ -742,8 +743,11 @@ Requirements check additions (2026-11-09), owned by the named stage:
 
 ### Current Stage 1 baseline and open limits
 
-The current-tree 25× Stage 1 run is a baseline, not sign-off. The five heavy sessions
-used 100,000 entries each. The implementation report records first-mount switch
+The Stage 2 position probe used 100,000 entries in each of five interleaved sessions;
+see [position evidence](TRANSCRIPT-POSITION-EVIDENCE.md) for lookup, storage and
+historical-correction costs. It supports no hierarchy for lookup, but does not resolve
+historical-maintenance requirements. The current-tree 25× Stage 1 run is a baseline,
+not sign-off. The five heavy sessions used 100,000 entries each. The implementation report records first-mount switch
 median **112.4 ms**, return/remount median **130.3 ms**, commit-to-DOM-plus-next-rAF
 bracket **39.4–44.8 ms**, **22.74 active GET/s**, and at 60 seconds **+17.24 MiB
 browser / +4 MiB backend** over baseline. The commit bracket is not pixel latency;
@@ -962,8 +966,12 @@ shared-reference and cleanup failure cases; those are not implemented guarantees
 
 ## Continuation and safety
 
-Current design state: Stage 2 scope and review packets are recorded; qualification
-remains future work. Navigation covers the whole conversation; future prompt markers
+Current design state: Stage 2 scope and review packets are recorded. Bounded parser
+and weighted-position probes now support process-local reuse/context-aware highlighting
+and a flat lookup baseline without a hierarchy; neither packet is signed off, and
+historical position-maintenance requirements remain unresolved. See [parser evidence](TRANSCRIPT-PARSER-EVIDENCE.md)
+and [position evidence](TRANSCRIPT-POSITION-EVIDENCE.md), including links to raw
+reports. All remaining qualification targets remain open. Navigation covers the whole conversation; future prompt markers
 share its estimated position model. Inactive-content eviction is approved; hover warming remains a hint,
 not a requirement to mount or retain content. Small local reading anchors/following
 intent survive browser reload/restart. Tool inspection defaults to model-facing

@@ -151,3 +151,54 @@ review recomputed the summaries from raw records, checked the fixture and guards
 and approved the claims/limits with no actionable findings. It did not rerun the
 fixture or independently inspect the lease; resource ownership/cleanup above is
 reported from the parent session's tool evidence.
+
+## Bounded Stage 2 follow-up — 2026-11-10
+
+This isolated decision probe extends, but does not supersede, the released-parser
+measurements above. It used pinned Markdig 1.6.0, markdown-it 14.1.0, Roslyn
+CSharp 4.14.0 and highlight.js 11.11.1, temporary fixtures and synthetic inputs.
+Images were literal/deferred. **Browser canonical DOM fidelity matched 8/11 cases.**
+The exact three differences were: nested-list newline/text-selection equivalence;
+permissive pipe-table handling of an unescaped pipe in code versus markdown-it row
+splitting; and rejected JavaScript-link Markdown remaining literal in markdown-it
+versus backend label semantics without an executable href (block-HTML wrapping also
+differed in that safety case). Both tested paths emitted no script/image elements,
+event attributes or JavaScript hrefs, but this narrow corpus is not a sanitizer or
+conformance qualification. Resolve dialect and fallback/fidelity policy before
+integration; do not call this packet 1 sign-off.
+
+The fixture confirmed useful transfer reduction: middle payloads were **988–2,008
+bytes** versus full projections of **2.14–3.76 MB**, though initial derivation was
+still required and the helper scanned/materialized projections rather than providing
+an indexed range read. The first 1 KiB serialization was 56.4 ms; warmed common-case
+parse+projection+serialization component sums were **0.79–1.29 ms**. Browser
+projection decoding was 0–0.5 ms, DOM construction 0.2–0.7 ms, and mount plus two
+animation frames 26–30 ms. These are component observations, not commit-to-paint or
+end-to-end latency. Diagnostic browser batches produced 60–98 ms Markdown long
+tasks; large/highlight diagnostics also exceeded the 50 ms main-thread target.
+
+Highlighting is context-stateful: isolated-window highlight.js lost an opening
+comment and all 3,800 tested visible UTF-16 units had scopes differing from full
+context. Full-context browser and backend lexical ranges agreed in that window;
+category taxonomies differ elsewhere. Prefer demand-driven context-aware derivation
+and transfer only needed ranges; reject naive stateless arbitrary-window highlighting.
+No production highlighter selected. Same-process reuse improved a synthetic repeated
+request sequence, supporting bounded process-local caching, but fixed ordering and
+warmup confounded totals. There is **no persistent-cache justification** from these
+restart/revisit observations; no persistence or package selection follows.
+
+In a 512 KiB replay, the latest parse completed **103 ms after final source arrival**,
+before projection/display; this does not pass the ≤100 ms visibility gate or measure
+actual visibility. Single-worker synthetic contention showed increased wake lateness,
+not Urd storage/execution lock contention. Release probes showed tracked references
+clearing and bulk browser DOM release, but not baseline memory recovery or a memory
+ceiling. In-flight synchronous parsing was not cancelled by replacing stale queued
+work.
+
+Remaining gates include semantic/dialect and unsafe-markup fallback policy; broader
+constructs and source/revision/ancestor-aware indexed slices; scheduled parse through
+actual visibility under execution-write contention and memory pressure; stateful,
+off-thread highlighting; huge inline/table-cell cases; cache eviction during
+selection; browser baseline recovery; and composed Stage 2 targets. No live provider,
+production integration, virtualized UI, actual browser paint timing or production
+package evaluation was performed. Raw report and full fixture: `%TEMP%/urd-stage2-decisions-20261110-4f84ef2a/REPORT.md` and neighboring records.

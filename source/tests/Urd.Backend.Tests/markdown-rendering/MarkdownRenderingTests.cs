@@ -228,6 +228,32 @@ public sealed class MarkdownRenderingTests {
     GC.KeepAlive(index);
   }
 
+  [Fact]
+  public async Task ConcurrentSharedParserMatchesSerialContextsPiecesMetadataAndSourceRanges() {
+    string[] corpus = [
+      "# café 😀\n\n> **bold** &amp; [late][ref]\n\n[ref]: https://example.test/é \"title\"\n",
+      "| A | B |\n| :--- | ---: |\n| `é\\|β` | **tail** |\n",
+      "3. parent\n\n   - child\n\n```csharp\nvar x = 1;\n```\n",
+      "<div>literal</div>\n\n![alt](https://example.test/image)\n",
+      string.Concat(Enumerable.Repeat("paragraph *é🙂* [link](../local)\n\n", 512))
+    ];
+    string Snapshot(MarkdownRenderIndex index) => JsonSerializer.Serialize(new {
+      index.SourceUtf8Bytes, index.AccountedBytes, Contexts = Contexts(index), Pieces = Pieces(index),
+      Values = Enumerable.Range(0, index.ContextCount).Select(id => ReadValues(index, id)).ToArray()
+    });
+    var expected = corpus.Select(source => Snapshot(MarkdownParser.Parse(source))).ToArray();
+    using var start = new Barrier(2);
+    var workers = Enumerable.Range(0, 2).Select(lane => Task.Factory.StartNew(() => {
+      for (int iteration = 0; iteration < 20; iteration++) {
+        int sample = (iteration + lane) % corpus.Length;
+        Assert.True(start.SignalAndWait(TimeSpan.FromSeconds(10)));
+        var actual = MarkdownParser.Parse(corpus[sample]);
+        Assert.Equal(expected[sample], Snapshot(actual));
+      }
+    }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default)).ToArray();
+    await Task.WhenAll(workers).WaitAsync(TimeSpan.FromSeconds(30));
+  }
+
   [MethodImpl(MethodImplOptions.NoInlining)]
   static (MarkdownRenderIndex Index, WeakReference[] References) Detached() {
     var source = "retained é😀 " + new string('a', 4000);

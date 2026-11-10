@@ -9,6 +9,7 @@ internal sealed class MessageMarkdownCache(MessageMarkdownCacheLimits limits) {
   internal const int LeaseBytes = 512;
   readonly Dictionary<MessageMarkdownKey, LinkedListNode<Entry>> entries = [];
   readonly LinkedList<Entry> recent = [];
+  readonly HashSet<Entry> retained = [];
   int reservations;
   internal int Count { get; private set; }
   internal long RetainedBytes { get; private set; }
@@ -25,6 +26,10 @@ internal sealed class MessageMarkdownCache(MessageMarkdownCacheLimits limits) {
     RetainedBytes -= LeaseBytes;
   }
 
+  internal void ValidateSize(MessageMarkdownKey key) {
+    foreach (var entry in retained) key.ValidateSize(entry.Key);
+  }
+
   internal Entry? Find(MessageMarkdownKey key) {
     if (!entries.TryGetValue(key, out var node)) return null;
     Touch(node);
@@ -39,6 +44,7 @@ internal sealed class MessageMarkdownCache(MessageMarkdownCacheLimits limits) {
     MakeRoom(1, bytes);
     var entry = new Entry(key, index, source.Segments.ToArray(), bytes);
     entries.Add(key, recent.AddFirst(entry));
+    retained.Add(entry);
     Count++;
     RetainedBytes += bytes;
     return entry;
@@ -111,6 +117,7 @@ internal sealed class MessageMarkdownCache(MessageMarkdownCacheLimits limits) {
   }
 
   void Forget(Entry entry) {
+    retained.Remove(entry);
     Count--;
     RetainedBytes -= entry.Bytes;
   }

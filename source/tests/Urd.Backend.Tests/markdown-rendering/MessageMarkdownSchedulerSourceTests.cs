@@ -66,7 +66,7 @@ public sealed class MessageMarkdownSchedulerSourceTests {
   }
 
   static MessageMarkdownScheduler CreateScheduler(Func<MessageMarkdownSource, MarkdownRenderIndex>? build = null) =>
-      new(new(64, 64 * 1024 * 1024, 32, 64), build);
+      new(new(64, 64 * 1024 * 1024, 32, 64, 1024), build);
 
   static MessageMarkdownKey Admit(UrdStore store, string text) {
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
@@ -75,6 +75,7 @@ public sealed class MessageMarkdownSchedulerSourceTests {
         new(submission, 0, text, TestLlmSelection.Default), true, execution).NewlyAccepted);
     var request = store.Executions.ClaimNextRequest(session, execution, 0)!;
     Assert.True(store.Executions.StartRequest(session, execution, 0, request.RequestId));
-    return new(session, new(execution, submission, MessageRole.User, 0), 0, 1, true, false);
+    var positioned = store.Positions.Locate(session, 0, 0).Entries.Single();
+    return MessageMarkdownKey.FromPositionedEntry(session, positioned);
   }
 }

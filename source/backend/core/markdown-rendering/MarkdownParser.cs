@@ -11,9 +11,9 @@ namespace Urd.Core.MarkdownRendering;
 internal sealed class MarkdownParser {
   internal const int FragmentChars = 128;
   const int MaximumDepth = 128;
-  static readonly MarkdownPipeline pipeline = new MarkdownPipelineBuilder()
-    .UsePipeTables(new PipeTableOptions { UseGfmRules = true })
-    .UsePreciseSourceLocation().Build();
+  // Markdig pipelines own parser instances. Isolate them per calling thread so
+  // concurrent scheduler lanes never share mutable extension/parser state.
+  [ThreadStatic] static MarkdownPipeline? pipeline;
   readonly string source;
   readonly List<MarkdownRenderContext> contexts = [];
   readonly List<MarkdownTextPiece> pieces = [];
@@ -24,6 +24,9 @@ internal sealed class MarkdownParser {
 
   internal static MarkdownRenderIndex Parse(string source) {
     ArgumentNullException.ThrowIfNull(source);
+    pipeline ??= new MarkdownPipelineBuilder()
+      .UsePipeTables(new PipeTableOptions { UseGfmRules = true })
+      .UsePreciseSourceLocation().Build();
     return Extract(source, Markdown.Parse(source, pipeline));
   }
 

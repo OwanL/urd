@@ -124,7 +124,7 @@ public sealed class MessageMarkdownSourceTests {
     using UrdStore store = UrdStore.Open(database.Path);
     TestExecution execution = StartExecution(store);
     Append(store, execution, 0, "read🙂");
-    var key = new MessageMarkdownKey(execution.Session, execution.Assistant, 0, 1, false, false);
+    var key = new MessageMarkdownKey(execution.Session, execution.Assistant, 0, 1, false, false, 8);
     Append(store, execution, 1, "later", final: true);
     using var client = new ScriptedChatClient(_ => throw new InvalidOperationException("Markdown reads must not start execution."));
     var session = await new SessionManager(store, _ => client).GetPrimaryAsync(execution.Session);

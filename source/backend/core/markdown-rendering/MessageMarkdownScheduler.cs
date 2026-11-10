@@ -2,8 +2,8 @@ using Urd.Core.Sessions;
 
 namespace Urd.Core.MarkdownRendering;
 
-// Unactivated shared service: captures are queued, detached derivation runs on one
-// below-normal thread, never under a session/database gate. Publication and pinning
+// Unactivated shared service: one large and one small below-normal worker capture
+// and derive outside session/database gates. No captured sources queue. Publication and pinning
 // share this gate with cancellation, invalidation, eviction and lease release.
 internal sealed class MessageMarkdownScheduler : IAsyncDisposable {
   readonly object gate = new();
@@ -14,7 +14,8 @@ internal sealed class MessageMarkdownScheduler : IAsyncDisposable {
   readonly CancellationTokenSource shutdown = new();
   readonly TaskCompletionSource stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
   Task shutdownCallbacks = Task.CompletedTask;
-  Work? active;
+  readonly Work?[] active = new Work?[2];
+  int remainingWorkers = 2;
   bool disposed;
 
   internal MessageMarkdownScheduler(MessageMarkdownCacheLimits limits,
@@ -23,8 +24,14 @@ internal sealed class MessageMarkdownScheduler : IAsyncDisposable {
     this.limits.Validate();
     cache = new(this.limits);
     this.parse = parse ?? (source => MarkdownParser.Parse(source.Source));
-    var worker = new Thread(Run) { IsBackground = true, Name = "Message markdown scheduler", Priority = ThreadPriority.BelowNormal };
-    worker.Start();
+    // An injected delegate must support concurrent calls, just like MarkdownParser.
+    for (int lane = 0; lane < active.Length; lane++) {
+      int selected = lane;
+      var worker = new Thread(() => Run(selected)) {
+        IsBackground = true, Name = $"Message markdown {(lane == 0 ? "large" : "small")}", Priority = ThreadPriority.BelowNormal
+      };
+      worker.Start();
+    }
   }
 
   // The caller supplies exact committed extents; capture happens only on a miss.
@@ -39,17 +46,17 @@ internal sealed class MessageMarkdownScheduler : IAsyncDisposable {
     ArgumentNullException.ThrowIfNull(key);
     ArgumentNullException.ThrowIfNull(capture);
     cancellation.ThrowIfCancellationRequested();
-    if (key.Pipeline != MarkdownRenderIndex.PipelineVersion || key.FromSegment < 0 || key.ThroughSegment <= key.FromSegment
-        || (key.FinalOutputCommitted && !key.IsClosed))
-      throw new ArgumentException("The markdown key has an unsupported pipeline or invalid extent.", nameof(key));
+    key.Validate();
     lock (gate) {
       ThrowIfDisposed();
+      cache.ValidateSize(key);
+      foreach (var retained in active.Concat(pending).OfType<Work>()) key.ValidateSize(retained.Key);
       if (cache.Find(key) is { } entry) {
         cache.Reserve(entry);
         return Task.FromResult(Lease(entry));
       }
-      if (active is { Invalidated: false, Accepting: true } && active.Key == key)
-        return Observe(active, cancellation);
+      var running = active.FirstOrDefault(work => work is { Invalidated: false, Accepting: true } && work.Key == key);
+      if (running is not null) return Observe(running, cancellation);
       var existing = pending.First;
       while (existing is not null && !Compatible(existing.Value.Key, key)) existing = existing.Next;
       if (existing?.Value.Key == key) return Observe(existing.Value, cancellation);
@@ -62,7 +69,9 @@ internal sealed class MessageMarkdownScheduler : IAsyncDisposable {
         existing.Value = replacement;
         Fail(previous, new MarkdownSupersededException());
         try {
-          return Observe(replacement, cancellation);
+          var observation = Observe(replacement, cancellation);
+          Monitor.PulseAll(gate);
+          return observation;
         } catch {
           pending.Remove(existing);
           throw;
@@ -72,7 +81,7 @@ internal sealed class MessageMarkdownScheduler : IAsyncDisposable {
       var work = new Work(key, capture);
       var result = Observe(work, cancellation);
       if (work.Interests.Count > 0) pending.AddLast(work);
-      Monitor.Pulse(gate);
+      Monitor.PulseAll(gate);
       return result;
     }
   }
@@ -110,9 +119,9 @@ internal sealed class MessageMarkdownScheduler : IAsyncDisposable {
     lock (gate) {
       ThrowIfDisposed();
       cache.Invalidate(sessionId);
-      if (active?.Key.SessionId == sessionId) {
-        active.Invalidated = true;
-        Fail(active, new MarkdownUnavailableException());
+      foreach (var work in active.OfType<Work>().Where(work => work.Key.SessionId == sessionId)) {
+        work.Invalidated = true;
+        Fail(work, new MarkdownUnavailableException());
       }
       foreach (var work in pending.Where(work => work.Key.SessionId == sessionId).ToArray())
         Fail(work, new MarkdownUnavailableException());
@@ -129,10 +138,10 @@ internal sealed class MessageMarkdownScheduler : IAsyncDisposable {
         disposed = true;
         cache.Clear();
         foreach (var work in pending.ToArray()) Fail(work, new ObjectDisposedException(nameof(MessageMarkdownScheduler)));
-        if (active is not null) Fail(active, new ObjectDisposedException(nameof(MessageMarkdownScheduler)));
-        // Only the worker disposes this source, after synchronous work returns.
+        foreach (var work in active.OfType<Work>()) Fail(work, new ObjectDisposedException(nameof(MessageMarkdownScheduler)));
+        // Only the last worker disposes this source, after both synchronous parses return.
         shutdownCallbacks = shutdown.CancelAsync();
-        Monitor.Pulse(gate);
+        Monitor.PulseAll(gate);
       }
     }
     return new(stopped.Task);
@@ -158,7 +167,7 @@ internal sealed class MessageMarkdownScheduler : IAsyncDisposable {
   bool Detach(Interest interest) {
     if (!interest.Work.Interests.Remove(interest)) return false;
     interest.Registration.Unregister();
-    if (interest.Work.Interests.Count == 0 && !ReferenceEquals(active, interest.Work)) {
+    if (interest.Work.Interests.Count == 0 && !active.Contains(interest.Work)) {
       pending.Remove(interest.Work);
       interest.Work.Capture = null;
     }
@@ -179,27 +188,40 @@ internal sealed class MessageMarkdownScheduler : IAsyncDisposable {
     return new(this, entry);
   }
 
-  Work? TakeNext() {
+  Work? TakeNext(int lane) {
     lock (gate) {
-      while (!disposed && pending.Count == 0) Monitor.Wait(gate);
-      // Shutdown must publish its cancellation task before the worker can exit.
-      if (disposed) return null;
-      active = pending.First!.Value;
-      pending.RemoveFirst();
-      return active;
+      while (!disposed) {
+        var next = pending.First;
+        while (next is not null && Lane(next.Value.Key) != lane) next = next.Next;
+        if (next is not null) {
+          active[lane] = next.Value;
+          pending.Remove(next);
+          return active[lane];
+        }
+        Monitor.Wait(gate);
+      }
+      return null;
     }
   }
 
-  void Run() {
+  int Lane(MessageMarkdownKey key) => key.SourceUtf8Bytes <= limits.SmallMessageUtf8Bytes ? 1 : 0;
+
+  void Run(int lane) {
     try {
-      while (TakeNext() is { } work) {
+      while (TakeNext(lane) is { } work) {
         Process(work);
         lock (gate) {
           work.Capture = null;
-          active = null;
+          active[lane] = null;
         }
       }
     } finally {
+      WorkerStopped();
+    }
+  }
+
+  void WorkerStopped() {
+    if (Interlocked.Decrement(ref remainingWorkers) == 0) {
       parse = null;
       Exception? failure = null;
       try {

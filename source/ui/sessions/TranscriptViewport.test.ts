@@ -23,9 +23,11 @@ function geometry(
   historyRevision = 1,
   estimatedTotalHeight = entryCount * 100,
   weightedRanks: readonly number[] = [],
+  positionVersion = 0,
 ): TranscriptViewportGeometry {
   return {
     historyRevision,
+    positionVersion,
     entryCount,
     estimatedTotalHeight,
     weightedPositions: weightedRanks.map((rank) => ({
@@ -101,7 +103,7 @@ void test("revised estimates compensate geometry changes above the source anchor
   const viewport = new TranscriptViewport(original);
   const visible = anchor(5);
   assert.equal(viewport.recordUserScroll(visible, false), true);
-  const revised = geometry(10, 1, 1_200, [0, 5, 9]);
+  const revised = geometry(10, 1, 1_200, [0, 5, 9], 1);
   const changed = {
     ...revised,
     weightedPositions: revised.weightedPositions.map((position) =>
@@ -118,7 +120,7 @@ void test("revised estimates compensate geometry changes above the source anchor
 
 void test("appends move followers to the new tail without moving readers", () => {
   const original = geometry(2, 1, 200, [0, 1]);
-  const appended = geometry(3, 1, 300, [0, 1, 2]);
+  const appended = geometry(3, 1, 300, [0, 1, 2], 1);
   const follower = new TranscriptViewport(original);
   const reader = new TranscriptViewport(original);
   const readingAnchor = anchor(0);
@@ -133,6 +135,31 @@ void test("appends move followers to the new tail without moving readers", () =>
   assert.equal(readingUpdate.followsLatest, false);
   assert.deepEqual(readingUpdate.anchor, readingAnchor);
   assert.equal(readingUpdate.latestPosition, null);
+});
+
+void test("same-revision geometry rejects stale append and estimate versions", () => {
+  const viewport = new TranscriptViewport(geometry(2, 1, 200, [0, 1], 4));
+  const readingAnchor = anchor(0);
+  assert.equal(viewport.recordUserScroll(readingAnchor, false), true);
+
+  const appended = viewport.updateGeometry(geometry(3, 1, 300, [0, 1, 2], 6));
+  assert.equal(appended.anchor?.entry.entryId, readingAnchor.entry.entryId);
+  assert.equal(appended.followsLatest, false);
+
+  const beforeStaleEstimate = viewport.snapshot();
+  const staleEstimate = viewport.updateGeometry(geometry(3, 1, 900, [0, 1, 2], 5));
+  assert.deepEqual(viewport.snapshot(), beforeStaleEstimate);
+  assert.deepEqual(staleEstimate.anchor, readingAnchor);
+  assert.equal(staleEstimate.scrollAdjustment, 0);
+
+  const acceptedEstimate = viewport.updateGeometry(geometry(3, 1, 360, [0, 1, 2], 7));
+  assert.equal(viewport.snapshot().estimatedTotalHeight, 360);
+  assert.equal(acceptedEstimate.followsLatest, false);
+  assert.deepEqual(acceptedEstimate.anchor, readingAnchor);
+
+  const duplicateVersion = viewport.updateGeometry(geometry(3, 1, 500, [0, 1, 2], 7));
+  assert.equal(viewport.snapshot().estimatedTotalHeight, 360);
+  assert.equal(duplicateVersion.scrollAdjustment, 0);
 });
 
 void test("width changes invalidate measurements while preserving anchor and follow intent", () => {

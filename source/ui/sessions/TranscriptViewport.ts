@@ -22,6 +22,8 @@ export interface WeightedEntryPosition {
 
 export interface TranscriptViewportGeometry {
   readonly historyRevision: number;
+  // Monotonic within a history revision; independent from local measurement invalidation.
+  readonly positionVersion: number;
   readonly entryCount: number;
   readonly estimatedTotalHeight: number;
   readonly weightedPositions: readonly WeightedEntryPosition[];
@@ -119,6 +121,9 @@ export class TranscriptViewport {
     if (next.historyRevision < this.geometry.historyRevision) return this.updateResult(0);
 
     const revisionChanged = next.historyRevision !== this.geometry.historyRevision;
+    if (!revisionChanged && next.positionVersion <= this.geometry.positionVersion)
+      return this.updateResult(0);
+
     const oldAnchorTop =
       !revisionChanged && this.anchor !== null
         ? basePrefixHeight(this.geometry, this.anchor.rank)
@@ -401,6 +406,8 @@ function copyAndValidateGeometry(geometry: TranscriptViewportGeometry): Transcri
   if (
     !Number.isSafeInteger(geometry.historyRevision) ||
     geometry.historyRevision < 0 ||
+    !Number.isSafeInteger(geometry.positionVersion) ||
+    geometry.positionVersion < 0 ||
     !Number.isSafeInteger(geometry.entryCount) ||
     geometry.entryCount < 0 ||
     !Number.isFinite(geometry.estimatedTotalHeight) ||

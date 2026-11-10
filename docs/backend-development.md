@@ -53,11 +53,11 @@ classes remain separate by responsibility; no lifecycle or schema redesign accom
 
 `source/backend/core/markdown-rendering/` owns the detached Markdown rendering
 pipeline: `MarkdownParser` produces a `MarkdownRenderIndex`, `MarkdownPageReader`
-serves bounded pages, and `MessageMarkdownScheduler` coordinates source capture,
-queued parsing and the bounded `MessageMarkdownCache`. `MessageMarkdownLease`
-keeps a generation readable during handoff; pinned generations and leases still
-count against the explicit cache budgets. This pipeline is not yet wired into
-session ownership or HTTP routes.
+serves bounded forward/backward pages and manifests, and `MessageMarkdownScheduler`
+coordinates source capture, queued parsing and two BelowNormal lanes (one large, one
+small). `MessageMarkdownLease` keeps a generation readable during handoff; pinned
+generations and leases still count against explicit cache budgets. Explicit limits
+remain required. The pipeline is not wired into session ownership or HTTP routes.
 
 ## Checkpoint scope
 

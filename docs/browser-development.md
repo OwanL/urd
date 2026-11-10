@@ -49,11 +49,17 @@ and tool argument/result inspection remain future work.
 
 ## Markdown rendering
 
-`source/ui/markdown-rendering/` contains the standalone `MarkdownRenderer` and
-`MarkdownWindowAssembler`. The assembler reads bounded semantic pages through
-`MarkdownPageSource`; the renderer turns its snapshot into HTML while retaining
-source ranges. This pipeline is not yet connected to the transcript. Run its
-standalone Chromium checks with `npm run test:markdown-rendering` from `source/ui/`.
+`source/ui/markdown-rendering/` contains a standalone virtualized Markdown pipeline:
+`MarkdownWindowAssembler` reads bounded forward/backward semantic pages through
+`MarkdownPageSource`, and `MarkdownRenderer` turns manifests and snapshots into HTML
+while retaining source ranges. Dependency-aware trimming separates display from support
+ranges. Native selection/focus pins defer trimming; complete code lines and table rows
+have placeholders and source-anchor geometry, while arbitrary giant paragraphs, lines,
+cells and metadata are not bounded. Generation handoff tracks drain and disposal. This
+is still not activated in Transcript or routes. Catch-up can be deferred by selection,
+and unmounting loses selection. The standalone durable suite has 196 UI unit tests and
+12 Chromium tests; an exhaustive composed handoff probe is temporary evidence, not a
+routine test. Run `npm run test:markdown-rendering` from `source/ui/`.
 
 ## Workspace composition
 
@@ -210,6 +216,17 @@ pricing. This slice adds no context-tier selector, inferred limit or silent hist
 truncation. Snapshots contain slim current facts; the history API pages transcript metadata,
 and the browser loads visible message content on demand. Older transcript pages remain
 available through the API but are not yet navigable in the UI.
+
+## Standalone virtualized Markdown qualification
+
+The pipeline was checked independently of the live transcript: 512 units were
+traversed in both directions; peak rendered code content was 49 pieces with 51
+contexts, and tables were 200 pieces with 252 contexts. Maximum source-anchor error was
+0.422 px for code and 0 px for tables; no task exceeded 50 ms. Visual review approved
+the result. A separate composed generation-handoff probe measured 0 px anchor error
+and no long tasks; selection/focus pins correctly deferred catch-up. It is temporary
+fixture evidence, not live UI, route activation or a routine-suite guarantee. Arbitrary
+large paragraphs/lines/cells/metadata remain unbounded, and selection is lost on unmount.
 
 ## Earlier workspace qualification
 

@@ -382,3 +382,36 @@ The probe used a **384 MiB hard GC heap cap** and a sampled **500 MiB private-by
 After release/drain/disposal, natural memory recovery had **not** occurred by 30 seconds: no later gen2 collection was observed, and one tracked index and one source weak reference were still alive at the final unforced-GC check. Zero cache accounting is not immediate CLR reclamation. This does not establish a leak or that all objects remain alive.
 
 This is synthetic request-to-lease evidence, **not DOM/E2E or commit-to-visible latency**. It is not a production SLA, confidence interval, randomized contention study, production-default recommendation, or proof that cache byte bounds cap transient/process memory. Temporary artifacts are not durable evidence storage.
+
+## Standalone virtualized browser and generation-handoff evidence — 2026-11-11
+
+The standalone browser pipeline traversed **512 units forward and backward**. Peak
+rendering was 49 code pieces with 51 contexts and 200 table pieces with 252 contexts;
+maximum source-anchor error was 0.422 px for code and 0 px for tables. There were no
+long tasks above 50 ms, and visual review approved the result. The composed generation
+handoff probe measured 0 px anchor error and no long tasks; native selection/focus
+pins deferred catch-up as intended. This is standalone synthetic evidence, not a live
+Transcript/routes activation. Only complete code lines and table rows are bounded;
+arbitrary giant paragraphs, lines, cells and metadata are not. Selection can defer
+catch-up, and unmount loses selection.
+
+## Synthetic cache-candidate qualification at HEAD 7f461c8
+
+The exact candidate sequence was: **8/8/128 MiB failed before handoff** because of
+slots; **12/12/128 MiB achieved 0/5 handoffs**, below the required 138,335,594 bytes;
+**12/12/160 MiB passed 5/5**, with target 155,660,064 bytes, observed projection
+155,663,760 bytes and 12,108,400 bytes headroom. The code cache entry was evicted at
+first handoff; a third mixed projection of 195,490,320 bytes was rejected with readable
+old/new generations. Small cache misses completed in 0.48–2.99 ms. Sampled private bytes
+were 417,193,984 and working set 448,159,744. Weak references were dead by 30 seconds and
+cache accounting was zero.
+
+This candidate is qualified only for synthetic composition and is **not selected as a
+production default**. A cache bound is not a process/transient-memory bound, and natural
+recovery is not guaranteed by a deadline. The exact temporary reports/evidence are in:
+
+- `C:/Users/OwanLazic/AppData/Local/Temp/urd-markdown-renderer-GbOjhQ/`
+- `C:/Users/OwanLazic/AppData/Local/Temp/urd-generation-handoff-qualification-20261111-042836-7972/`
+- `C:/Users/OwanLazic/AppData/Local/Temp/urd-exact-candidate-23d2a970-5fd6-4787-a6a5-3be67b72aa99/`
+- `C:/Users/OwanLazic/AppData/Local/Temp/urd-exact-candidate-12x12-56975e8e-8602-4028-813f-550005c09e87/`
+- `C:/Users/OwanLazic/AppData/Local/Temp/urd-exact-candidate-12x12-160mib-01641b5b-b008-40b2-bbe5-b00a647aca3e/`

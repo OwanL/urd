@@ -166,6 +166,35 @@ void test("keeps the old window until ready, restores its anchor, and releases i
   assert.equal(old.disposals, 1);
 });
 
+void test("publishes a same-generation reconnect and releases the old lease once", async () => {
+  const old = source("same"),
+    { handoff, published } = await setup(old),
+    reconnect = source("same");
+
+  assert.equal(await handoff.request({ open: async () => reconnect }), "published");
+  assert.deepEqual(
+    [handoff.snapshot.generation, reconnect.disposals, old.disposals],
+    ["same", 0, 1],
+  );
+  assert.equal(published.length, 1);
+  await handoff.dispose();
+  assert.deepEqual([old.disposals, reconnect.disposals], [1, 1]);
+});
+
+void test("rejects a contradictory same-generation manifest without replacing the active lease", async () => {
+  const old = source("same"),
+    { handoff, published } = await setup(old),
+    contradictory = source("same", [0], Infinity, { sourceUtf8Bytes: 2 });
+
+  await assert.rejects(handoff.request({ open: async () => contradictory }), /manifest differs/);
+  assert.deepEqual(
+    [handoff.snapshot.generation, published.length, old.disposals, contradictory.disposals],
+    ["same", 0, 0, 1],
+  );
+  await handoff.dispose();
+  assert.equal(old.disposals, 1);
+});
+
 void test("defers pinned requests and opens only the latest descriptor on resume", async () => {
   let pin: "selection" | "focus" | null = "selection",
     firstOpens = 0,

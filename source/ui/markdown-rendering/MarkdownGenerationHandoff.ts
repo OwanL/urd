@@ -190,8 +190,13 @@ export class MarkdownGenerationHandoff {
       source = await candidate.request.open(signal);
       signal.throwIfAborted();
       const manifest = copyMarkdownManifest(source.manifest);
-      if (manifest.generation === prior.generation)
-        throw new Error("Markdown replacement must have a new generation.");
+      if (
+        manifest.generation === prior.generation &&
+        (manifest.sourceUtf8Bytes !== this.active.manifest.sourceUtf8Bytes ||
+          manifest.pieceCount !== this.active.manifest.pieceCount ||
+          manifest.contextCount !== this.active.manifest.contextCount)
+      )
+        throw new Error("Markdown replacement manifest differs from the active generation.");
       const cursor = await source.locate(Math.min(sourceOffset, manifest.sourceUtf8Bytes), signal);
       signal.throwIfAborted();
       if (

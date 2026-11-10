@@ -1,0 +1,128 @@
+.semantic-display {
+  min-width: 0;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.semantic-display :where(p, blockquote, ul, ol, pre, hr, .semantic-display-table) {
+  margin: 0 0 1em;
+}
+
+.semantic-display :is(h1, h2, h3, h4, h5, h6) {
+  margin: 1.1em 0 0.5em;
+  line-height: 1.3;
+  font-weight: 650;
+}
+
+.semantic-display h1 {
+  font-size: 1.6em;
+}
+.semantic-display h2 {
+  font-size: 1.35em;
+}
+.semantic-display :is(h3, h4, h5, h6) {
+  font-size: 1.1em;
+}
+.semantic-display [data-kind="document"] > :first-child {
+  margin-top: 0;
+}
+.semantic-display :is(li, th, td, blockquote) > :last-child {
+  margin-bottom: 0;
+}
+
+.semantic-display blockquote {
+  border-left: 2px solid var(--border-subtle, #454545);
+  padding-left: 1em;
+  color: var(--text-secondary, #a0a0a0);
+}
+
+.semantic-display :is(ul, ol) {
+  padding-left: 1.8em;
+}
+.semantic-display li {
+  padding-left: 0.2em;
+}
+.semantic-display li > :is(ul, ol) {
+  margin: 0.4em 0;
+}
+.semantic-display [data-loose="false"] > li > p {
+  margin-bottom: 0;
+}
+.semantic-display [data-loose="true"] > li + li {
+  margin-top: 0.7em;
+}
+.semantic-display [data-text-kind="literal"] {
+  white-space: pre-wrap;
+}
+.semantic-display [data-text-kind="softBreak"] {
+  white-space: pre-line;
+}
+
+.semantic-display code {
+  font:
+    0.94em/1.6 ui-monospace,
+    Consolas,
+    monospace;
+  white-space: pre-wrap;
+}
+
+.semantic-display :not(pre) > code {
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
+  background: var(--surface-input, #141414);
+}
+
+.semantic-display pre {
+  max-width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  overflow: auto;
+  padding: 0.8em 1em;
+  border: 1px solid var(--border-subtle, #303030);
+  border-radius: 4px;
+  background: var(--surface-input, #141414);
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+.semantic-display pre code {
+  white-space: pre;
+}
+.semantic-display a {
+  color: inherit;
+  text-underline-offset: 3px;
+}
+.semantic-display a:focus-visible,
+.semantic-display :is(pre, .semantic-display-table):focus-visible {
+  outline: 2px solid var(--accent, #c6c6c6);
+  outline-offset: 2px;
+}
+
+.semantic-display hr {
+  border: 0;
+  border-top: 1px solid var(--border-subtle, #303030);
+}
+
+.semantic-display-table {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.semantic-display table {
+  border-collapse: collapse;
+  min-width: min(100%, 24rem);
+}
+.semantic-display :is(th, td) {
+  padding: 0.45em 0.8em;
+  border: 1px solid var(--border-subtle, #303030);
+  text-align: left;
+  vertical-align: top;
+}
+.semantic-display th {
+  font-weight: 650;
+  overflow-wrap: normal;
+  background: var(--surface-input, #141414);
+}
+.semantic-display td > p {
+  margin-bottom: 0;
+}

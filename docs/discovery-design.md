@@ -9,9 +9,11 @@ to use ordinary tools-list updates as the portable fallback. It does not select
 concrete provider adapters, discovery triggers, class APIs or a production schema.
 
 **Initial implementation scope (owner clarification 2026-11-10):** Dynamic tool discovery
-and tool/skill pruning come later. For now, all configured tools are available up front;
-see [agent tools](agent-tools-design.md). The direction below is retained for that later work,
-not a prerequisite for the initial tool implementation.
+and tool/skill pruning come later. For now, all configured tool capabilities are available
+up front through their selected surfaces, not every variant. Future model-family aliases
+replace their generic surfaces; see [agent tools](agent-tools-design.md). The direction below
+is retained for that later discovery/pruning work, not a prerequisite for the initial tool
+implementation.
 
 ## One execution path, two exposure routes
 

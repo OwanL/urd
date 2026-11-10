@@ -13,15 +13,17 @@ probes and their remaining integration limits.
    A chat's working folder is the default for relative paths, not a boundary. Approval, if ever
    wanted, is a pre-dispatch check added later; it is not designed now.
 2. **Starting tool set.** Follow Pi: `bash`, `read`, `write`, `edit`. Copy Pi's behavior where
-   it is clear-cut. All configured tools are available to the model up front. Dynamic tool
-   discovery and tool/skill pruning come later, not in this initial implementation
+   it is clear-cut. All configured tool capabilities are available to the model up front,
+   using one selected surface per tool, not every variant (see 3). Dynamic tool discovery and
+   tool/skill pruning come later, not in this initial implementation
    (owner clarification 2026-11-10).
 3. **One implementation, per-family surfaces.** Models carry model-family metadata. A tool has
    one implementation; core tools (`read`, `write`, `edit`, possibly `bash`) may own an opt-in,
    lightweight surface per family (name, schema, description, argument/result translation) so
-   each family gets the shape it was trained on. Bespoke tools have one simple, well-documented
-   surface. Context pruning must account for surfaces. Implemented as separate tool classes
-   per name; see 13.
+   each family gets the shape it was trained on. When introduced, a model-family alias replaces
+   the generic tool's schema and model-facing surface; do not expose both. Without an alias,
+   use the generic surface. Bespoke tools have one simple, well-documented surface. Context
+   pruning must account for surfaces. Implemented as separate tool classes per name; see 13.
 4. **Raw calls only.** Store each call as the model emitted it. The stored tool name identifies
    the surface, and that surface interprets its own raw calls for the UI and pruning. No
    canonical copy. Switching model family mid-chat is allowed and is the user's responsibility;

@@ -13,7 +13,9 @@ probes and their remaining integration limits.
    A chat's working folder is the default for relative paths, not a boundary. Approval, if ever
    wanted, is a pre-dispatch check added later; it is not designed now.
 2. **Starting tool set.** Follow Pi: `bash`, `read`, `write`, `edit`. Copy Pi's behavior where
-   it is clear-cut.
+   it is clear-cut. All configured tools are available to the model up front. Dynamic tool
+   discovery and tool/skill pruning come later, not in this initial implementation
+   (owner clarification 2026-11-10).
 3. **One implementation, per-family surfaces.** Models carry model-family metadata. A tool has
    one implementation; core tools (`read`, `write`, `edit`, possibly `bash`) may own an opt-in,
    lightweight surface per family (name, schema, description, argument/result translation) so

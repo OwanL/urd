@@ -110,7 +110,8 @@ if (mode === "links") {
   if (mode !== "detached") {
     leaf("heading", documentId, "Renderer sample", { level: 2 });
     const paragraph = node("paragraph", documentId);
-    text(paragraph, "Readable UTF-8: café 🧭. ");
+    text(paragraph, "Readable");
+    text(paragraph, " UTF-8: café 🧭. ");
     leaf("emphasis", paragraph, "Emphasis");
     text(paragraph, ", ");
     leaf("strong", paragraph, "strong");
@@ -123,7 +124,9 @@ if (mode === "links") {
     text(paragraph, "Next line.");
     const tight = node("list", documentId);
     const first = node("item", tight);
-    leaf("paragraph", first, "First tight item");
+    const firstParagraph = node("paragraph", first);
+    text(firstParagraph, "First");
+    text(firstParagraph, " tight item");
     const nested = node("list", first);
     leaf("paragraph", node("item", nested), "Nested first");
     leaf("paragraph", node("item", nested, { position: 1 }), "Nested second");
@@ -135,7 +138,9 @@ if (mode === "links") {
     leaf("paragraph", node("item", loose, { position: 1 }), "Second loose item");
     leaf("paragraph", node("quote", documentId), "A quote retains its native structure.");
     const code = node("code", documentId, {}, { language: "typescript", fenceInfo: "inert" });
-    text(node("codeLine", code), "const compass = '🧭';\n", "code");
+    const firstCodeLine = node("codeLine", code);
+    text(firstCodeLine, "const", "code");
+    text(firstCodeLine, " compass = '🧭';\n", "code");
     text(node("codeLine", code, { position: 1 }), `  ${"long_identifier_".repeat(16)}\n`, "code");
     text(node("thematicBreak", documentId), "", "thematicBreak");
   }
@@ -171,12 +176,14 @@ if (mode === "links") {
     text(paragraph, " · ");
     link(paragraph, "Unsafe label", "javascript:alert(1)");
     const continued = node("paragraph", documentId);
-    text(continued, "Stable fragment 🧭 — ", "text", true);
-    text(continued, "later page appended.", "text", false, 1);
+    text(continued, "Stable", "text", true);
+    text(continued, " fragment 🧭 — ", "text", true, 1);
+    text(continued, "later page ", "text", true, 2);
+    text(continued, "appended.", "text", false, 3);
   }
 }
 const source = new SyntheticMarkdownPageSource(pieces, contexts, {
-  piecePageSize: mode === "detached" || mode === "links" ? 1000 : pieces.length - 1,
+  piecePageSize: mode === "detached" || mode === "links" ? 1000 : pieces.length - 2,
 });
 const assembler = new MarkdownWindowAssembler(
   source,
@@ -195,8 +202,11 @@ Object.assign(window, {
     get snapshot() {
       return assembler.snapshot;
     },
-    async append() {
-      await assembler.append(new AbortController().signal);
+    append() {
+      return assembler.append(new AbortController().signal).then(paint);
+    },
+    unmountRemount() {
+      render(null, root);
       paint();
     },
     duplicate() {

@@ -11,6 +11,7 @@ declare global {
       readonly links: string[];
       readonly snapshot: MarkdownRenderSnapshot;
       append(): Promise<void>;
+      unmountRemount(): void;
       duplicate(): void;
     };
   }
@@ -26,7 +27,11 @@ void test("standalone Markdown renderer in Chromium", async (t) => {
   const origin = server.resolvedUrls!.local[0]!;
   const browser = await chromium.launch();
   try {
-    const page = await browser.newPage({ viewport: { width: 1000, height: 900 } });
+    const context = await browser.newContext({ viewport: { width: 1000, height: 900 } });
+    await context.grantPermissions(["clipboard-read", "clipboard-write"], {
+      origin: new URL(origin).origin,
+    });
+    const page = await context.newPage();
     const errors: string[] = [];
     const unexpected: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
@@ -110,29 +115,131 @@ void test("standalone Markdown renderer in Chromium", async (t) => {
       assert.equal(nested.tightMargin, "0px");
     });
     await t.test(
-      "later-page append preserves existing wrappers, text nodes and selection",
+      "keyboard extension creates native selection across inline semantics",
       async () => {
-        await page.evaluate(async () => {
-          const nodes = [...document.querySelectorAll("[data-piece]")];
-          const originals = nodes.map((node) => ({ node, text: node.firstChild }));
-          const last = nodes.at(-1)!;
-          const range = document.createRange();
-          range.setStart(last.firstChild!, 0);
-          range.setEnd(last.firstChild!, 6);
-          const selection = getSelection()!;
-          selection.removeAllRanges();
-          selection.addRange(range);
+        await page.getByText("Readable", { exact: true }).dblclick();
+        await page.keyboard.press("Shift+End");
+        const selection = await page.evaluate(() => {
+          const selected = getSelection()!;
+          const range = selected.getRangeAt(0);
+          return {
+            text: selected.toString(),
+            pieces: [...document.querySelectorAll<HTMLElement>(".markdown-renderer [data-piece]")]
+              .filter((piece) => range.intersectsNode(piece))
+              .map((piece) => piece.dataset.mapping),
+            contexts: [
+              ...document.querySelectorAll<HTMLElement>(".markdown-renderer [data-context]"),
+            ]
+              .filter((context) => range.intersectsNode(context))
+              .map((context) => context.dataset.kind),
+          };
+        });
+        for (const text of ["Readable", "Emphasis", "strong", "inline_code"])
+          assert.ok(selection.text.includes(text), selection.text);
+        for (const kind of ["emphasis", "strong", "inlineCode"])
+          assert.ok(selection.contexts.includes(kind), selection.contexts.join(","));
+        assert.ok(
+          selection.pieces.length > 1 && selection.pieces.every((mapping) => mapping === "exact"),
+        );
+      },
+    );
+    await t.test("content-page updates preserve native selection and existing nodes", async () => {
+      await page.getByText("Stable", { exact: true }).dblclick();
+      await page.keyboard.press("Shift+ArrowLeft");
+      await page.evaluate(async () => {
+        const originals = [...document.querySelectorAll<HTMLElement>("[data-piece]")].map(
+          (node) => ({
+            node,
+            text: node.firstChild,
+          }),
+        );
+        const selection = getSelection()!;
+        if (selection.toString() !== "Stable") throw new Error("Expected native selection");
+        for (let page = 0; page < 2; page++) {
           await window.markdownRendererHarness.append();
           for (const original of originals) {
-            const current = document.querySelector(
-              `[data-piece="${original.node.getAttribute("data-piece")}"]`,
-            );
+            const current = document.querySelector(`[data-piece="${original.node.dataset.piece}"]`);
             if (current !== original.node || current?.firstChild !== original.text)
               throw new Error("Appended page replaced an existing node");
           }
           if (selection.toString() !== "Stable") throw new Error("Selection lost on append");
+        }
+      });
+      assert.ok(await page.getByText("later page appended.").count());
+    });
+    await t.test(
+      "full unmount/remount drops native selection but keeps exact source mapping",
+      async () => {
+        await page.getByText("Stable", { exact: true }).dblclick();
+        await page.keyboard.press("Shift+ArrowLeft");
+        const before = await page.evaluate(() => {
+          const selected = getSelection()!;
+          const piece = (selected.anchorNode as Element).parentElement!.closest<HTMLElement>(
+            "[data-piece]",
+          )!;
+          return {
+            text: selected.toString(),
+            id: piece.dataset.piece,
+            start: piece.dataset.sourceStart,
+            end: piece.dataset.sourceEnd,
+            mapping: piece.dataset.mapping,
+          };
         });
-        assert.ok(await page.getByText("later page appended.").count());
+        assert.equal(before.text, "Stable");
+        assert.equal(before.mapping, "exact");
+        await page.evaluate(() => window.markdownRendererHarness.unmountRemount());
+        const after = await page.evaluate((id) => {
+          const piece = document.querySelector<HTMLElement>(`[data-piece="${id}"]`)!;
+          return {
+            text: getSelection()!.toString(),
+            start: piece.dataset.sourceStart,
+            end: piece.dataset.sourceEnd,
+            mapping: piece.dataset.mapping,
+          };
+        }, before.id);
+        assert.equal(
+          after.text,
+          "",
+          "Native selection cannot survive component removal without owner restoration",
+        );
+        assert.deepEqual(
+          { start: after.start, end: after.end, mapping: after.mapping },
+          { start: before.start, end: before.end, mapping: "exact" },
+        );
+      },
+    );
+    await t.test(
+      "native clipboard copy preserves plain text for inline, list, table and code",
+      async () => {
+        await page.getByText("Readable", { exact: true }).dblclick();
+        await page.keyboard.press("Shift+End");
+        const inline = await page.evaluate(() => getSelection()!.toString());
+        for (const text of ["Readable", "Emphasis", "strong", "inline_code"])
+          assert.ok(inline.includes(text), inline);
+        assert.equal(await copySelection(page), inline);
+
+        await page.getByText("First", { exact: true }).dblclick();
+        await page.keyboard.press("Shift+End");
+        assert.equal(await copySelection(page), "First tight item");
+
+        const firstCell = page.locator("tbody tr").first().locator("td [data-piece]").first();
+        const lastCell = page.locator("tbody tr").first().locator("td [data-piece]").nth(2);
+        const firstBox = (await firstCell.boundingBox())!;
+        const lastBox = (await lastCell.boundingBox())!;
+        const y = firstBox.y + firstBox.height / 2;
+        await page.mouse.move(firstBox.x + 1, y);
+        await page.mouse.down();
+        await page.mouse.move(lastBox.x + lastBox.width - 1, lastBox.y + lastBox.height / 2, {
+          steps: 12,
+        });
+        await page.mouse.up();
+        const row = await page.evaluate(() => getSelection()!.toString());
+        assert.equal(row, "Middle-window row\tA detached header remains associated.\t42");
+        assert.equal(await copySelection(page), row);
+
+        await page.getByText("const", { exact: true }).dblclick();
+        await page.keyboard.press("Shift+End");
+        assert.equal(await copySelection(page), "const compass = '🧭';");
       },
     );
     await t.test("keyboard focus, local overflow and narrow/zoom-equivalent layout", async () => {
@@ -201,6 +308,11 @@ void test("standalone Markdown renderer in Chromium", async (t) => {
     await server.close();
   }
 });
+
+async function copySelection(page: Page): Promise<string> {
+  await page.keyboard.press("Control+C");
+  return page.evaluate(() => navigator.clipboard.readText());
+}
 
 async function assertHeaders(page: Page) {
   await page.locator("tbody td[headers]").evaluateAll((cells) => {

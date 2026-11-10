@@ -20,6 +20,7 @@ internal sealed class SessionEventPage : IDisposable {
 
   internal Guid Id { get; } = Guid.NewGuid();
   internal Guid Boot => boot;
+  internal MarkdownPageLeases MarkdownLeases { get; } = new();
   internal bool IsClosed {
     get {
       lock (gate)
@@ -108,6 +109,7 @@ internal sealed class SessionEventPage : IDisposable {
       queue.Close();
     }
 
+    MarkdownLeases.Close();
     foreach (Registration registration in current)
       registration.Deactivate();
   }

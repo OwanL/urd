@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using Urd.Core.MarkdownRendering;
 using Urd.Core.Providers;
 using Urd.Core.Storage;
 using Urd.Server;
@@ -15,13 +16,13 @@ internal sealed class RunningServer : IAsyncDisposable {
 
   internal RunningServer(ServerOptions options, Action<Uri>? onReady = null,
       Func<IChatClient>? createClient = null, Func<UrdStore, Func<Uri>, ProviderManager>? createProviders = null,
-      CancellationToken cancellationToken = default) {
+      Func<MessageMarkdownService>? createMarkdown = null, CancellationToken cancellationToken = default) {
     stopping = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
     Client = new HttpClient(new SocketsHttpHandler { UseProxy = false }) { Timeout = TestTimeout };
     run = Program.RunServerAsync(options, origin => {
       onReady?.Invoke(origin);
       ready.TrySetResult(origin);
-    }, createClient ?? (static () => new FakeChatClient()), stopping.Token, createProviders);
+    }, createClient ?? (static () => new FakeChatClient()), stopping.Token, createProviders, createMarkdown);
   }
 
   internal HttpClient Client { get; }

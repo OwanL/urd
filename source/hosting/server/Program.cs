@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging.Console;
+using Urd.Core.MarkdownRendering;
 using Urd.Core.Providers;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
@@ -44,7 +45,8 @@ internal static class Program {
   // Production borrows provider-managed clients. Tests may supply an owned client;
   // the run disposes it only after successful drain, never through a session.
   internal static async Task RunServerAsync(ServerOptions options, Action<Uri> onReady, Func<IChatClient>? createClient,
-      CancellationToken stopping, Func<UrdStore, Func<Uri>, ProviderManager>? createProviders = null) {
+      CancellationToken stopping, Func<UrdStore, Func<Uri>, ProviderManager>? createProviders = null,
+      Func<MessageMarkdownService>? createMarkdown = null) {
     ArgumentNullException.ThrowIfNull(options);
     ArgumentNullException.ThrowIfNull(onReady);
     Directory.CreateDirectory(options.DataRoot);
@@ -56,6 +58,7 @@ internal static class Program {
     SessionManager? manager = null;
     ProviderManager? providers = null;
     SessionEventHub? eventHub = null;
+    MessageMarkdownService? markdown = null;
     WebApplication? app = null;
     Uri? servedOrigin = null;
     ExceptionDispatchInfo? runFailure = null;
@@ -68,7 +71,9 @@ internal static class Program {
       providers = createProviders?.Invoke(store, CallbackUri) ?? new ProviderManager(store, CallbackUri);
       manager = new SessionManager(store, client is { } supplied ? _ => supplied : providers.CreateChatClient);
       eventHub = new SessionEventHub(manager);
-      app = CreateApplication(options, manager, providers, eventHub, () => Volatile.Read(ref servedOrigin));
+      // Qualification may supply explicit limits; normal startup leaves Markdown inactive.
+      markdown = createMarkdown?.Invoke();
+      app = CreateApplication(options, manager, providers, eventHub, markdown, () => Volatile.Read(ref servedOrigin));
       var shutdownRequested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
       using var lifetimeStop = app.Lifetime.ApplicationStopping.Register(() => shutdownRequested.TrySetResult());
       using var callerStop = stopping.Register(app.Lifetime.StopApplication);
@@ -90,6 +95,7 @@ internal static class Program {
     eventHub?.Dispose();
     Task drained = Task.WhenAll(manager?.ShutdownSessionsAsync(CancellationToken.None) ?? Task.CompletedTask,
         providers?.ShutdownAsync() ?? Task.CompletedTask,
+        markdown?.DisposeAsync().AsTask() ?? Task.CompletedTask,
         app?.StopAsync(CancellationToken.None) ?? Task.CompletedTask);
     try {
       await drained;
@@ -110,7 +116,7 @@ internal static class Program {
   }
 
   private static WebApplication CreateApplication(ServerOptions options, SessionManager manager,
-      ProviderManager providers, SessionEventHub eventHub, Func<Uri?> servedOrigin) {
+      ProviderManager providers, SessionEventHub eventHub, MessageMarkdownService? markdown, Func<Uri?> servedOrigin) {
     // No default appsettings/environment/URL providers: Kestrel configuration can otherwise add listeners.
     WebApplicationBuilder builder = WebApplication.CreateEmptyBuilder(new WebApplicationOptions {
       ApplicationName = typeof(Program).Assembly.GetName().Name,
@@ -149,6 +155,8 @@ internal static class Program {
             ? Results.BadRequest() : Results.NoContent());
     app.MapSessions(manager);
     app.MapEvents(manager, eventHub);
+    if (markdown is not null)
+      app.MapMarkdown(manager, eventHub, markdown);
     app.MapProviders(providers);
     return app;
   }

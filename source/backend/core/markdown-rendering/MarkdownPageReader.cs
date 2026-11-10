@@ -16,15 +16,37 @@ internal static class MarkdownPageReader {
     // Max-width Next and false (longer than true) conservatively cover the envelope.
     var bytes = Size(new MarkdownPiecePage(index.Generation, cursor.Index, int.MaxValue, false, []));
     while (next < index.PieceCount && pieces.Count < limits.Records) {
-      var piece = index.Piece(next);
-      var size = Size(piece) + (pieces.Count == 0 ? 0 : 1);
+      var size = index.PieceUtf8Bytes(next) + (pieces.Count == 0 ? 0 : 1);
       if (bytes + size > limits.Utf8Bytes) break;
-      pieces.Add(piece);
+      pieces.Add(index.Piece(next));
       bytes += size;
       next++;
     }
     EnsureAdvance(cursor.Index, next, index.PieceCount);
     return new(index.Generation, cursor.Index, next, next < index.PieceCount, pieces.AsReadOnly());
+  }
+
+  internal static MarkdownPiecePage ReadBefore(MarkdownRenderIndex index,
+      MarkdownRenderCursor exclusiveEndCursor, MarkdownPageLimits? limits = null) {
+    limits ??= new();
+    limits.Validate();
+    Validate(index, exclusiveEndCursor, index.PieceCount);
+    var pieces = new List<MarkdownTextPiece>();
+    var from = exclusiveEndCursor.Index;
+    var hasMore = exclusiveEndCursor.Index < index.PieceCount;
+    // From is not known until the reverse walk completes; reserve its widest JSON form.
+    var bytes = Size(new MarkdownPiecePage(index.Generation, int.MaxValue, exclusiveEndCursor.Index, hasMore, []));
+    while (from > 0 && pieces.Count < limits.Records) {
+      var size = index.PieceUtf8Bytes(from - 1) + (pieces.Count == 0 ? 0 : 1);
+      if (bytes + size > limits.Utf8Bytes) break;
+      pieces.Add(index.Piece(from - 1));
+      bytes += size;
+      from--;
+    }
+    if (from == exclusiveEndCursor.Index && exclusiveEndCursor.Index > 0)
+      throw new InvalidOperationException("Markdown record cannot fit within the page limits.");
+    pieces.Reverse();
+    return new(index.Generation, from, exclusiveEndCursor.Index, hasMore, pieces.AsReadOnly());
   }
 
   // Fetch a single constant-size context by ID and bounded variable metadata.
@@ -50,6 +72,8 @@ internal static class MarkdownPageReader {
     EnsureAdvance(cursor.Index, next, context.ValueCount);
     return new(index.Generation, context, cursor.Index, next, next < context.ValueCount, values.AsReadOnly());
   }
+
+  internal static int MeasurePiece(MarkdownTextPiece piece) => Size(piece);
 
   static int Size<T>(T value) => JsonSerializer.SerializeToUtf8Bytes(value, JsonOptions).Length;
 

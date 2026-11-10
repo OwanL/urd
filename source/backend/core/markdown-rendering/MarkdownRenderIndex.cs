@@ -3,6 +3,7 @@ namespace Urd.Core.MarkdownRendering;
 internal sealed class MarkdownRenderIndex {
   internal const string PipelineVersion = "markdig-1.6.0-commonmark-gfm-tables-display-1";
   readonly MarkdownTextPiece[] pieces;
+  readonly int[] pieceUtf8Bytes;
   readonly MarkdownRenderContext[] contexts;
   readonly MarkdownValueFragment[] values;
   readonly (int Start, int Piece)[] anchors;
@@ -11,6 +12,7 @@ internal sealed class MarkdownRenderIndex {
   internal int SourceUtf8Bytes { get; }
   internal int PieceCount => pieces.Length;
   internal int ContextCount => contexts.Length;
+  internal MarkdownRenderManifest Manifest { get; }
 
   // Retention accounting, not exact CLR heap size. Charge every array, record,
   // reference, UTF-16 string (including variable metadata), and anchor. Shared
@@ -21,23 +23,52 @@ internal sealed class MarkdownRenderIndex {
       MarkdownRenderContext[] contexts, MarkdownValueFragment[] values) {
     SourceUtf8Bytes = sourceUtf8Bytes;
     this.pieces = pieces;
+    pieceUtf8Bytes = pieces.Select(MarkdownPageReader.MeasurePiece).ToArray();
     this.contexts = contexts;
     this.values = values;
+    ValidateContexts(contexts);
+    Manifest = new(Generation, sourceUtf8Bytes, pieces.Length, contexts.Length);
     anchors = pieces.Select(p => (Start: p.Source.Start, Piece: p.Id))
       .OrderBy(p => p.Start).ThenBy(p => p.Piece).ToArray();
-    AccountedBytes = 128L + 4 * 24
-        + contexts.Length * (96L + 8)
-        + pieces.Sum(piece => 80L + 8 + 24 + 2L * piece.Text.Length)
+    AccountedBytes = 160L + 5 * 24
+        + contexts.Length * (100L + 8)
+        + pieces.Sum(piece => 80L + 8 + 24 + 4 + 2L * piece.Text.Length)
         + values.Sum(value => 40L + 8 + 24 + 2L * value.Text.Length)
         + anchors.Length * 8L;
   }
 
   internal MarkdownTextPiece Piece(int index) => pieces[index];
+  internal int PieceUtf8Bytes(int index) => pieceUtf8Bytes[index];
   internal MarkdownRenderContext Context(int id) => contexts[id];
   internal MarkdownValueFragment Value(int index) => values[index];
 
   // A source anchor resolves to the first fragment at the nearest preceding
   // source start. Transformed fragments share a containing range, not fake offsets.
+  static void ValidateContexts(MarkdownRenderContext[] contexts) {
+    if (contexts.Length == 0) throw new InvalidOperationException("A Markdown index must have a document context.");
+    var linked = new bool[contexts.Length];
+    for (var id = 0; id < contexts.Length; id++) {
+      var context = contexts[id];
+      if (context.Id != id || context.ChildCount < 0 || context.ChildCount > contexts.Length
+          || (id == 0 && context.Parent != -1) || (id > 0 && (context.Parent < 0 || context.Parent >= id)))
+        throw new InvalidOperationException("Markdown context identity or child count is invalid.");
+      if ((context.ChildCount == 0) != (context.FirstChild == -1))
+        throw new InvalidOperationException("Markdown context child links do not match its child count.");
+      var childId = context.FirstChild;
+      for (var childIndex = 0; childIndex < context.ChildCount; childIndex++) {
+        if (childId <= id || childId >= contexts.Length || linked[childId])
+          throw new InvalidOperationException("Markdown context child links are invalid.");
+        var child = contexts[childId];
+        if (child.Parent != id) throw new InvalidOperationException("Markdown context parent and child links disagree.");
+        linked[childId] = true;
+        childId = child.NextSibling;
+      }
+      if (childId != -1) throw new InvalidOperationException("Markdown context sibling links exceed its child count.");
+    }
+    for (var id = 1; id < contexts.Length; id++)
+      if (!linked[id]) throw new InvalidOperationException("Markdown context is missing from its parent's child links.");
+  }
+
   internal MarkdownRenderCursor Locate(int sourceUtf8Offset) {
     if (sourceUtf8Offset < 0 || sourceUtf8Offset > SourceUtf8Bytes)
       throw new ArgumentOutOfRangeException(nameof(sourceUtf8Offset));

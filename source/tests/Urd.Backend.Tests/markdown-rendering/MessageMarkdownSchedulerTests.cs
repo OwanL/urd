@@ -45,6 +45,22 @@ public sealed class MessageMarkdownSchedulerTests {
     Assert.Equal(2, worker.Threads.Count(thread => thread.Name == "Message markdown large"));
   }
 
+  [Fact]
+  public async Task LeaseExposesRenderManifestAndFencesBackwardReads() {
+    await using var scheduler = CreateScheduler();
+    using var lease = await Ready(scheduler, Key(Small), Small);
+    var expected = MarkdownParser.Parse(Small);
+    Assert.Equal(new MarkdownRenderManifest(lease.Generation, expected.SourceUtf8Bytes,
+        expected.PieceCount, expected.ContextCount), lease.Manifest);
+    var page = scheduler.ReadBefore(lease, new(lease.Generation, lease.Manifest.PieceCount));
+    Assert.Equal(lease.Manifest.PieceCount, page.Next);
+    Assert.Equal(Small, string.Concat(page.Pieces.Select(piece => piece.Text)));
+
+    await using var other = CreateScheduler();
+    Assert.Throws<MarkdownUnavailableException>(() => other.ReadBefore(lease,
+        new(lease.Generation, lease.Manifest.PieceCount)));
+  }
+
   [Theory]
   [InlineData(false)]
   [InlineData(true)]

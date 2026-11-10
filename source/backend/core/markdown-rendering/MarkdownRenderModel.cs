@@ -14,12 +14,13 @@ internal enum MarkdownTableAlignment { None, Left, Center, Right }
 
 internal readonly record struct MarkdownSourceRange(int Start, int End);
 internal readonly record struct MarkdownRenderCursor(Guid Generation, int Index);
+internal readonly record struct MarkdownRenderManifest(Guid Generation, int SourceUtf8Bytes, int PieceCount, int ContextCount);
 
 // Parent/child/sibling links provide ancestry and header access without repeating
 // arbitrarily large ancestor chains, headers or column arrays in a page.
 // Source is always a structural containing range, never a character mapping.
 internal sealed record MarkdownRenderContext(
-    int Id, MarkdownElementKind Kind, int Parent, int FirstChild, int NextSibling,
+    int Id, MarkdownElementKind Kind, int Parent, int FirstChild, int NextSibling, int ChildCount,
     MarkdownSourceRange Source, int FirstPiece, int PieceCount,
     int FirstValue, int ValueCount, int Position = 0, int Level = 0,
     bool Ordered = false, bool Loose = false, bool Header = false,

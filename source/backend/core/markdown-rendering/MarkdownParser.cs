@@ -251,12 +251,15 @@ internal sealed class MarkdownParser {
 
   int Open(MarkdownElementKind kind, int parent, MarkdownSourceRange range) {
     var id = contexts.Count;
-    contexts.Add(new(id, kind, parent, -1, -1, range, pieces.Count, 0, values.Count, 0));
+    contexts.Add(new(id, kind, parent, -1, -1, 0, range, pieces.Count, 0, values.Count, 0));
     if (parent < 0) return id;
+    var parentContext = contexts[parent];
     if (lastChildren.TryGetValue(parent, out var previous))
       contexts[previous] = contexts[previous] with { NextSibling = id };
-    else
-      contexts[parent] = contexts[parent] with { FirstChild = id };
+    contexts[parent] = parentContext with {
+      FirstChild = parentContext.ChildCount == 0 ? id : parentContext.FirstChild,
+      ChildCount = checked(parentContext.ChildCount + 1)
+    };
     lastChildren[parent] = id;
     return id;
   }

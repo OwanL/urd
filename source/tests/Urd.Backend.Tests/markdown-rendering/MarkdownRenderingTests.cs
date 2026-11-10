@@ -37,6 +37,31 @@ public sealed class MarkdownRenderingTests {
     Assert.DoesNotContain(pieces, p => p.Text.Contains("[ref]:", StringComparison.Ordinal));
   }
 
+  [Fact]
+  public void ChildCountsManifestAndContextJsonMatchTheDetachedIndex() {
+    var index = MarkdownParser.Parse("# heading\n\n> quote\n\n| a | b |\n| --- | --- |\n| c | d |\n");
+    Assert.Equal(new MarkdownRenderManifest(index.Generation, index.SourceUtf8Bytes, index.PieceCount, index.ContextCount), index.Manifest);
+    foreach (var context in Contexts(index)) {
+      var childId = context.FirstChild;
+      var count = 0;
+      while (childId >= 0) {
+        var child = Context(index, childId);
+        Assert.Equal(context.Id, child.Parent);
+        childId = child.NextSibling;
+        count++;
+      }
+      Assert.Equal(context.ChildCount, count);
+      using var json = JsonDocument.Parse(JsonSerializer.Serialize(context, MarkdownPageReader.JsonOptions));
+      Assert.Equal(context.ChildCount, json.RootElement.GetProperty("childCount").GetInt32());
+    }
+
+    var root = new MarkdownRenderContext(0, MarkdownElementKind.Document, -1, 1, -1, 0,
+        new(0, 0), 0, 0, 0, 0);
+    var invalidChild = new MarkdownRenderContext(1, MarkdownElementKind.Paragraph, 0, -1, -1, 0,
+        new(0, 0), 0, 0, 0, 0);
+    Assert.Throws<InvalidOperationException>(() => new MarkdownRenderIndex(0, [], [root, invalidChild], []));
+  }
+
   [Theory]
   [InlineData("javascript:alert(1)", false)]
   [InlineData("JaVaScRiPt&#58;alert(1)", false)]
@@ -162,6 +187,62 @@ public sealed class MarkdownRenderingTests {
     Assert.Throws<ArgumentOutOfRangeException>(() => MarkdownPageReader.Read(index, cursor, new(4096, 1)));
     var empty = MarkdownParser.Parse("");
     Assert.Empty(MarkdownPageReader.Read(empty, new(empty.Generation, 0)).Pieces);
+  }
+
+  [Fact]
+  public void ReadBeforeReturnsAscendingBoundedContinuationAndHandlesEnds() {
+    var index = MarkdownParser.Parse(string.Join("\n\n", Enumerable.Range(0, 10).Select(i => $"paragraph {i}")));
+    var atStart = MarkdownPageReader.ReadBefore(index, new(index.Generation, 0));
+    Assert.Equal((0, 0, index.PieceCount > 0), (atStart.From, atStart.Next, atStart.HasMore));
+    Assert.Empty(atStart.Pieces);
+
+    var cursor = new MarkdownRenderCursor(index.Generation, index.PieceCount);
+    var backwards = new List<MarkdownTextPiece>();
+    while (true) {
+      var page = MarkdownPageReader.ReadBefore(index, cursor, new(4096, 2));
+      Assert.Equal(cursor.Index, page.Next);
+      Assert.Equal(page.Next < index.PieceCount, page.HasMore);
+      Assert.True(page.Pieces.Count <= 2);
+      Assert.True(JsonSerializer.SerializeToUtf8Bytes(page, MarkdownPageReader.JsonOptions).Length <= 4096);
+      Assert.Equal(Enumerable.Range(page.From, page.Next - page.From), page.Pieces.Select(piece => piece.Id));
+      backwards.InsertRange(0, page.Pieces);
+      if (page.From == 0) break;
+      cursor = new(index.Generation, page.From);
+    }
+    Assert.Equal(Enumerable.Range(0, index.PieceCount), backwards.Select(piece => piece.Id));
+    Assert.Equal(string.Concat(Pieces(index).Select(piece => piece.Text)), string.Concat(backwards.Select(piece => piece.Text)));
+    var empty = MarkdownParser.Parse("");
+    var emptyPage = MarkdownPageReader.ReadBefore(empty, new(empty.Generation, 0));
+    Assert.Empty(emptyPage.Pieces);
+    Assert.False(emptyPage.HasMore);
+    Assert.Throws<ArgumentException>(() => MarkdownPageReader.ReadBefore(index, new(Guid.NewGuid(), index.PieceCount)));
+    Assert.Throws<ArgumentOutOfRangeException>(() => MarkdownPageReader.ReadBefore(index, new(index.Generation, index.PieceCount + 1)));
+  }
+
+  [Fact]
+  public void ReadBeforeHonorsByteBoundaryAndRejectsOneOversizedRecord() {
+    var index = MarkdownParser.Parse(string.Join("\n\n", Enumerable.Range(0, 80).Select(i => new string((char)('a' + i % 20), 128))));
+    var page = MarkdownPageReader.ReadBefore(index, new(index.Generation, index.PieceCount), new(4096, 100));
+    Assert.InRange(page.Pieces.Count, 1, 99);
+    Assert.True(JsonSerializer.SerializeToUtf8Bytes(page, MarkdownPageReader.JsonOptions).Length <= 4096);
+    var previous = index.Piece(page.From - 1);
+    var withPrevious = page with { From = page.From - 1, Pieces = new[] { previous }.Concat(page.Pieces).ToArray() };
+    Assert.True(JsonSerializer.SerializeToUtf8Bytes(withPrevious, MarkdownPageReader.JsonOptions).Length > 4096);
+
+    var context = new MarkdownRenderContext(0, MarkdownElementKind.Document, -1, -1, -1, 0,
+        new(0, 0), 0, 0, 0, 0);
+    var oversizedPiece = new MarkdownTextPiece(0, 0, MarkdownTextKind.Text, new string('x', 5000),
+        new(0, 0), MarkdownSourceMapping.Containing, 0, false);
+    var oversized = new MarkdownRenderIndex(0, [oversizedPiece], [context], []);
+    Assert.Throws<InvalidOperationException>(() => MarkdownPageReader.ReadBefore(oversized,
+        new(oversized.Generation, 1), new(4096, 2)));
+    var trailing = new MarkdownTextPiece(1, 0, MarkdownTextKind.Text, "fits",
+        new(0, 0), MarkdownSourceMapping.Containing, 0, false);
+    var withUnreturnedOversized = new MarkdownRenderIndex(0, [oversizedPiece, trailing], [context], []);
+    var trailingPage = MarkdownPageReader.ReadBefore(withUnreturnedOversized,
+        new(withUnreturnedOversized.Generation, 2), new(4096, 2));
+    Assert.Equal([trailing], trailingPage.Pieces);
+    Assert.Equal(1, trailingPage.From);
   }
 
   [Theory]

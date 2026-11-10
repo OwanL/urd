@@ -6,15 +6,15 @@ internal sealed class MessageMarkdownLease : IDisposable {
   MessageMarkdownScheduler? owner;
   internal MessageMarkdownCache.Entry? Entry { get; private set; }
   internal MessageMarkdownKey Key { get; }
-  internal Guid Generation { get; }
-  internal int SourceUtf8Bytes { get; }
+  internal MarkdownRenderManifest Manifest { get; }
+  internal Guid Generation => Manifest.Generation;
+  internal int SourceUtf8Bytes => Manifest.SourceUtf8Bytes;
 
   internal MessageMarkdownLease(MessageMarkdownScheduler owner, MessageMarkdownCache.Entry entry) {
     this.owner = owner;
     Entry = entry;
     Key = entry.Key;
-    Generation = entry.Index.Generation;
-    SourceUtf8Bytes = entry.Index.SourceUtf8Bytes;
+    Manifest = entry.Index.Manifest;
   }
 
   internal MessageMarkdownCache.Entry Get(MessageMarkdownScheduler expectedOwner) {

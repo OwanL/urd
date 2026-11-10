@@ -335,6 +335,8 @@ public sealed class MessageMarkdownSchedulerTests {
     Assert.Equal(anchor, scheduler.Locate(old, 3));
     var strong = Assert.Single(page.Pieces, piece => piece.Text == "café");
     Assert.Equal(MarkdownElementKind.Strong, scheduler.ReadContext(old, strong.Context, new(old.Generation, 0)).Context.Kind);
+    var descriptors = scheduler.ReadContexts(old, [strong.Context, 0], new(old.Generation, 0));
+    Assert.Equal(new[] { strong.Context, 0 }, descriptors.Contexts.Select(context => context.Id));
     Assert.Equal(new(key.Message, 1, 2), scheduler.SourceCursor(old, 11));
     Assert.Equal(new(key.Message, 2, 0), scheduler.SourceCursor(old, old.SourceUtf8Bytes));
     Assert.Throws<ArgumentException>(() => scheduler.Read(fresh, anchor));

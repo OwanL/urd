@@ -34,6 +34,33 @@ public sealed class MessageMarkdownSchedulerSourceTests {
   }
 
   [Fact]
+  public async Task PublicServiceUsesPositionedSourceAndReleasesItsLease() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    const string text = "# café **bold**\n\n[late][ref]\n\n[ref]: https://example.test/é\n";
+    var key = Admit(store, text);
+    using var client = new ScriptedChatClient(_ => throw new InvalidOperationException("Markdown reads must not start execution."));
+    var manager = new SessionManager(store, _ => client);
+    var session = await manager.GetPrimaryAsync(key.SessionId);
+    var entry = new TranscriptEntryRef(key.Message.ExecutionId, key.Message.MessageId,
+        key.Message.Role == MessageRole.User ? TranscriptEntryKind.User : TranscriptEntryKind.Text,
+        key.Message.HistoryRevision);
+    await using var service = new MessageMarkdownService(new(64, 64 * 1024 * 1024, 32, 64, 1024));
+
+    await Assert.ThrowsAsync<KeyNotFoundException>(() => service.OpenAsync(session, entry with { EntryId = Guid.NewGuid() }));
+    var lease = await service.OpenAsync(session, entry);
+    var cursor = lease.Locate(0);
+    Assert.Equal(key.TextFacts, lease.Source);
+    Assert.Equal("café boldlate", string.Concat(lease.ReadPieces(cursor).Pieces.Select(piece => piece.Text)));
+    Assert.Equal(0, client.Calls);
+
+    await service.DisposeAsync();
+    Assert.Equal("café boldlate", string.Concat(lease.ReadPieces(cursor).Pieces.Select(piece => piece.Text)));
+    lease.Dispose();
+    Assert.Throws<MarkdownUnavailableException>(() => lease.ReadPieces(cursor));
+  }
+
+  [Fact]
   public async Task SynchronousBuildDoesNotHoldSessionOrDatabaseGate() {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);

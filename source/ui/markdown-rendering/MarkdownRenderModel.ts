@@ -92,6 +92,13 @@ export interface MarkdownContextPage {
   readonly hasMore: boolean;
   readonly values: readonly MarkdownValueFragment[];
 }
+export interface MarkdownContextDescriptorPage {
+  readonly generation: string;
+  readonly from: number;
+  readonly next: number;
+  readonly hasMore: boolean;
+  readonly contexts: readonly MarkdownRenderContext[];
+}
 export interface MarkdownPageSource {
   // Nearest preceding source start, first piece on ties; before-first and empty use 0.
   // Offsets are inclusive [0, sourceUtf8Bytes]; the returned cursor is generation-local.
@@ -103,6 +110,11 @@ export interface MarkdownPageSource {
     cursor: MarkdownRenderCursor,
     signal: AbortSignal,
   ): Promise<MarkdownContextPage>;
+  readContexts(
+    ids: readonly number[],
+    cursor: MarkdownRenderCursor,
+    signal: AbortSignal,
+  ): Promise<MarkdownContextDescriptorPage>;
 }
 // Ownership transfers on delivery, including delivery after cancellation. dispose is called
 // exactly once after owned reads drain; the handoff awaits settlement before another open or

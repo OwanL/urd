@@ -5,8 +5,6 @@ namespace Urd.Core.MarkdownRendering;
 // Bounded indexed reads only: no tree walk, whole-projection scan or source read.
 // The serialization options are part of this internal byte-ceiling contract.
 internal static class MarkdownPageReader {
-  internal static JsonSerializerOptions JsonOptions { get; } = new(JsonSerializerDefaults.Web);
-
   internal static MarkdownPiecePage Read(MarkdownRenderIndex index, MarkdownRenderCursor cursor, MarkdownPageLimits? limits = null) {
     limits ??= new();
     limits.Validate();
@@ -49,6 +47,37 @@ internal static class MarkdownPageReader {
     return new(index.Generation, from, exclusiveEndCursor.Index, hasMore, pieces.AsReadOnly());
   }
 
+  // Fetch requested constant-size context descriptors in request order. Metadata values
+  // remain an explicit follow-up read through ReadContext.
+  internal static MarkdownContextDescriptorPage ReadContexts(MarkdownRenderIndex index,
+      IReadOnlyList<int> contextIds, MarkdownRenderCursor cursor, MarkdownPageLimits? limits = null) {
+    ArgumentNullException.ThrowIfNull(contextIds);
+    limits ??= new();
+    limits.Validate();
+    if (contextIds.Count > 256) throw new ArgumentOutOfRangeException(nameof(contextIds), "At most 256 context IDs may be requested.");
+    var distinct = new HashSet<int>();
+    foreach (var contextId in contextIds) {
+      if (contextId < 0 || contextId >= index.ContextCount)
+        throw new ArgumentOutOfRangeException(nameof(contextIds), contextId, "Context ID is outside this derivation.");
+      if (!distinct.Add(contextId)) throw new ArgumentException("Context IDs must be distinct.", nameof(contextIds));
+    }
+    Validate(index, cursor, contextIds.Count);
+    var contexts = new List<MarkdownRenderContext>();
+    var next = cursor.Index;
+    // Reserve the widest Next and HasMore envelope while bounding the actual JSON page.
+    var bytes = Size(new MarkdownContextDescriptorPage(index.Generation, cursor.Index, int.MaxValue, false, []));
+    while (next < contextIds.Count && contexts.Count < limits.Records) {
+      var context = index.Context(contextIds[next]);
+      var size = Size(context) + (contexts.Count == 0 ? 0 : 1);
+      if (bytes + size > limits.Utf8Bytes) break;
+      contexts.Add(context);
+      bytes += size;
+      next++;
+    }
+    EnsureAdvance(cursor.Index, next, contextIds.Count);
+    return new(index.Generation, cursor.Index, next, next < contextIds.Count, contexts.AsReadOnly());
+  }
+
   // Fetch a single constant-size context by ID and bounded variable metadata.
   // Parent, sibling, header-cell and piece ranges are explicit follow-up addresses.
   internal static MarkdownContextPage ReadContext(MarkdownRenderIndex index, int contextId,
@@ -75,7 +104,7 @@ internal static class MarkdownPageReader {
 
   internal static int MeasurePiece(MarkdownTextPiece piece) => Size(piece);
 
-  static int Size<T>(T value) => JsonSerializer.SerializeToUtf8Bytes(value, JsonOptions).Length;
+  static int Size<T>(T value) => JsonSerializer.SerializeToUtf8Bytes(value, MarkdownRenderJson.Options).Length;
 
   static void Validate(MarkdownRenderIndex index, MarkdownRenderCursor cursor, int count) {
     if (cursor.Generation != index.Generation) throw new ArgumentException("Markdown cursor belongs to a different derivation.", nameof(cursor));

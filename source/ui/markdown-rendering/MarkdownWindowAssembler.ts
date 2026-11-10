@@ -1,6 +1,7 @@
 import type {
   AssembledMarkdownContext,
   MarkdownContextPage,
+  MarkdownContextDescriptorPage,
   MarkdownRenderContext,
   MarkdownRenderCursor,
   MarkdownTextPiece,
@@ -142,6 +143,50 @@ function copyMarkdownContext(
   return Object.freeze({
     ...context,
     source: copyMarkdownSourceRange(context.source, manifest),
+  });
+}
+
+function copyMarkdownContextDescriptorPage(
+  page: MarkdownContextDescriptorPage,
+  ids: readonly number[],
+  cursor: MarkdownRenderCursor,
+  manifest: MarkdownRenderManifest,
+): MarkdownContextDescriptorPage {
+  if (!page || typeof page !== "object" || !Array.isArray(page.contexts))
+    throw new Error("Invalid Markdown context descriptor page.");
+  if ("values" in page)
+    throw new Error("Markdown context descriptor page must not include values.");
+  if (
+    page.contexts.some((context) => context && typeof context === "object" && "values" in context)
+  )
+    throw new Error("Markdown context descriptor page must not include values.");
+  if (page.generation !== cursor.generation)
+    throw new Error("Markdown render generation changed; restart from the source anchor.");
+  const next = page.from + page.contexts.length;
+  if (
+    ids.length > 256 ||
+    !isIndex(cursor.index) ||
+    cursor.index >= ids.length ||
+    page.from !== cursor.index ||
+    !Number.isSafeInteger(next) ||
+    page.next !== next ||
+    page.next <= cursor.index ||
+    !isIndex(page.next) ||
+    page.next > ids.length ||
+    typeof page.hasMore !== "boolean" ||
+    page.hasMore !== page.next < ids.length
+  )
+    throw new Error("Markdown context descriptor page did not match its request.");
+  return Object.freeze({
+    generation: page.generation,
+    from: page.from,
+    next: page.next,
+    hasMore: page.hasMore,
+    contexts: Object.freeze(
+      page.contexts.map((context, offset) =>
+        copyMarkdownContext(context, ids[cursor.index + offset]!, manifest),
+      ),
+    ),
   });
 }
 
@@ -445,6 +490,7 @@ function normalizeRanges(
 class AssemblyRead {
   readonly pieces: Map<number, MarkdownTextPiece>;
   readonly contexts: Map<number, AssembledMarkdownContext>;
+  private readonly descriptors = new Map<number, MarkdownRenderContext>();
   private readonly rows = new Map<number, readonly number[]>();
   private readonly manifest: MarkdownRenderManifest;
   private readonly source: MarkdownPageSource;
@@ -466,6 +512,9 @@ class AssemblyRead {
     this.signal = signal;
     this.pieces = new Map(snapshot.pieces);
     this.contexts = new Map(snapshot.contexts);
+    for (const { context } of this.contexts.values()) this.descriptors.set(context.id, context);
+    for (const { context } of available?.contexts.values() ?? [])
+      if (!this.descriptors.has(context.id)) this.descriptors.set(context.id, context);
   }
 
   snapshotRanges(ranges: readonly MarkdownPieceInterval[]) {
@@ -485,12 +534,13 @@ class AssemblyRead {
         throw new Error("Markdown text piece IDs are not contiguous.");
       last = piece;
       this.addPiece(piece);
-      await this.ancestry(piece.context, piece.id);
     }
     const prior = this.pieces.get(page.from - 1);
     if (!page.hasMore && (last?.continued ?? prior?.continued))
       throw new Error("Markdown text piece continuation is incomplete.");
 
+    await this.prefetchDescriptors(page.pieces.map((piece) => piece.context));
+    for (const piece of page.pieces) await this.ancestry(piece.context, piece.id);
     await this.hydrateRows();
   }
 
@@ -498,9 +548,52 @@ class AssemblyRead {
     for (const piece of pieces) {
       this.signal.throwIfAborted();
       this.addPiece(piece);
-      await this.ancestry(piece.context, piece.id);
     }
+    await this.prefetchDescriptors(pieces.map((piece) => piece.context));
+    for (const piece of pieces) await this.ancestry(piece.context, piece.id);
     await this.hydrateRows();
+  }
+
+  private async prefetchDescriptors(seeds: readonly number[]): Promise<void> {
+    let pending = [...new Set(seeds)];
+    while (pending.length > 0) {
+      this.signal.throwIfAborted();
+      const requested = [...new Set(pending)].filter((id) => !this.descriptors.has(id));
+      pending = [];
+      for (const id of requested)
+        if (!isIndex(id) || id >= this.manifest.contextCount)
+          throw new Error("Invalid Markdown render context.");
+
+      for (let offset = 0; offset < requested.length; offset += 32) {
+        const ids = Object.freeze(requested.slice(offset, offset + 32));
+        let index = 0;
+        while (index < ids.length) {
+          this.signal.throwIfAborted();
+          const cursor = { generation: this.generation, index };
+          const response = await this.source.readContexts(ids, cursor, this.signal);
+          this.signal.throwIfAborted();
+          const page = copyMarkdownContextDescriptorPage(response, ids, cursor, this.manifest);
+          for (const context of page.contexts) {
+            const existing = this.descriptors.get(context.id);
+            if (existing && !sameMarkdownContext(existing, context))
+              throw new Error("Markdown render context changed between descriptor pages.");
+            this.descriptors.set(context.id, context);
+          }
+          index = page.next;
+        }
+      }
+
+      for (const id of requested) {
+        const context = this.descriptors.get(id);
+        if (!context) throw new Error("Markdown context descriptor was not returned.");
+        if (context.parent >= 0) pending.push(context.parent);
+        if (context.kind === "row" && context.firstChild >= 0) pending.push(context.firstChild);
+        if (context.kind === "cell") {
+          if (context.nextSibling >= 0) pending.push(context.nextSibling);
+          if (context.headerCell >= 0) pending.push(context.headerCell);
+        }
+      }
+    }
   }
 
   private async hydrateRows(): Promise<void> {
@@ -530,12 +623,19 @@ class AssemblyRead {
     const existing = this.contexts.get(id) ?? this.available?.contexts.get(id);
     if (existing) {
       this.contexts.set(id, existing);
+      this.descriptors.set(id, existing.context);
       return existing.context;
     }
-    if (!isIndex(id)) throw new Error("Invalid Markdown render context.");
+    if (!isIndex(id) || id >= this.manifest.contextCount)
+      throw new Error("Invalid Markdown render context.");
+
+    let descriptor = this.descriptors.get(id);
+    if (descriptor?.valueCount === 0) {
+      this.contexts.set(id, Object.freeze({ context: descriptor, values: Object.freeze({}) }));
+      return descriptor;
+    }
 
     let index = 0;
-    let descriptor: MarkdownRenderContext | undefined;
     let previous: MarkdownValueFragment | undefined;
     const values: Partial<Record<MarkdownValueKind, string>> = Object.create(null) as Partial<
       Record<MarkdownValueKind, string>
@@ -549,6 +649,7 @@ class AssemblyRead {
       if (descriptor && !sameMarkdownContext(descriptor, receivedContext))
         throw new Error("Markdown render context changed between pages.");
       descriptor = receivedContext;
+      this.descriptors.set(id, descriptor);
       if (page.next > descriptor.valueCount || page.hasMore !== page.next < descriptor.valueCount)
         throw new Error("Markdown value count is inconsistent.");
 

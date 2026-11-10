@@ -1,5 +1,6 @@
 import type {
   MarkdownContextPage,
+  MarkdownContextDescriptorPage,
   MarkdownRenderContext,
   MarkdownRenderCursor,
   MarkdownTextPiece,
@@ -27,15 +28,20 @@ export interface MarkdownRenderFixtureOptions {
   readonly generation?: string;
   readonly piecePageSize?: number;
   readonly valuePageSize?: number;
+  readonly contextDescriptorPageSize?: number;
   readonly pieceGeneration?: string;
   readonly beforePieceGeneration?: string;
   readonly contextGeneration?: string;
+  readonly contextDescriptorGeneration?: string;
   readonly pieceCount?: number;
   readonly contextCount?: number;
   readonly sourceUtf8Bytes?: number;
   readonly transformPiecePage?: (page: MarkdownPiecePage) => MarkdownPiecePage;
   readonly transformBeforePiecePage?: (page: MarkdownPiecePage) => MarkdownPiecePage;
   readonly transformContextPage?: (page: MarkdownContextPage) => MarkdownContextPage;
+  readonly transformContextDescriptorPage?: (
+    page: MarkdownContextDescriptorPage,
+  ) => MarkdownContextDescriptorPage;
 }
 
 export function createMarkdownContext(
@@ -99,10 +105,15 @@ export class SyntheticMarkdownPageSource implements MarkdownPageSource {
   disposals = 0;
   readonly beforePieceRequests: MarkdownRenderCursor[] = [];
   readonly contextRequests: { readonly id: number; readonly cursor: MarkdownRenderCursor }[] = [];
+  readonly contextDescriptorRequests: {
+    readonly ids: readonly number[];
+    readonly cursor: MarkdownRenderCursor;
+  }[] = [];
 
   private readonly generation: string;
   private readonly piecePageSize: number;
   private readonly valuePageSize: number;
+  private readonly contextDescriptorPageSize: number;
   readonly pieces: readonly MarkdownTextPiece[];
   readonly contexts: readonly MarkdownFixtureContext[];
   private readonly options: MarkdownRenderFixtureOptions;
@@ -144,7 +155,8 @@ export class SyntheticMarkdownPageSource implements MarkdownPageSource {
     });
     this.piecePageSize = options.piecePageSize ?? Number.POSITIVE_INFINITY;
     this.valuePageSize = options.valuePageSize ?? Number.POSITIVE_INFINITY;
-    if (this.piecePageSize <= 0 || this.valuePageSize <= 0)
+    this.contextDescriptorPageSize = options.contextDescriptorPageSize ?? Number.POSITIVE_INFINITY;
+    if (this.piecePageSize <= 0 || this.valuePageSize <= 0 || this.contextDescriptorPageSize <= 0)
       throw new RangeError("Markdown render fixture page sizes must be positive");
   }
 
@@ -203,6 +215,31 @@ export class SyntheticMarkdownPageSource implements MarkdownPageSource {
       pieces: pagePieces,
     };
     return this.options.transformBeforePiecePage?.(page) ?? page;
+  }
+
+  async readContexts(
+    ids: readonly number[],
+    cursor: MarkdownRenderCursor,
+    signal: AbortSignal,
+  ): Promise<MarkdownContextDescriptorPage> {
+    signal.throwIfAborted();
+    this.contextDescriptorRequests.push({ ids: [...ids], cursor: { ...cursor } });
+    const contexts = ids
+      .slice(cursor.index, cursor.index + this.contextDescriptorPageSize)
+      .map((id) => {
+        const fixture = this.contexts.find((entry) => entry.context.id === id);
+        if (!fixture) throw new Error(`Unknown Markdown render fixture context ${id}`);
+        return fixture.context;
+      });
+    const next = cursor.index + contexts.length;
+    const page: MarkdownContextDescriptorPage = {
+      generation: this.options.contextDescriptorGeneration ?? this.generation,
+      from: cursor.index,
+      next,
+      hasMore: next < ids.length,
+      contexts,
+    };
+    return this.options.transformContextDescriptorPage?.(page) ?? page;
   }
 
   async readContext(

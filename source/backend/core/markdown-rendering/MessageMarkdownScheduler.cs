@@ -97,6 +97,11 @@ internal sealed class MessageMarkdownScheduler : IAsyncDisposable {
     lock (gate) return MarkdownPageReader.ReadBefore(cache.Get(lease.Get(this)), exclusiveEndCursor, limits);
   }
 
+  internal MarkdownContextDescriptorPage ReadContexts(MessageMarkdownLease lease, IReadOnlyList<int> contextIds,
+      MarkdownRenderCursor cursor, MarkdownPageLimits? limits = null) {
+    lock (gate) return MarkdownPageReader.ReadContexts(cache.Get(lease.Get(this)), contextIds, cursor, limits);
+  }
+
   internal MarkdownContextPage ReadContext(MessageMarkdownLease lease, int context, MarkdownRenderCursor cursor,
       MarkdownPageLimits? limits = null) {
     lock (gate) return MarkdownPageReader.ReadContext(cache.Get(lease.Get(this)), context, cursor, limits);

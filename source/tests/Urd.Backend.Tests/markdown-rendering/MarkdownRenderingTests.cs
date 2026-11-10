@@ -51,7 +51,7 @@ public sealed class MarkdownRenderingTests {
         count++;
       }
       Assert.Equal(context.ChildCount, count);
-      using var json = JsonDocument.Parse(JsonSerializer.Serialize(context, MarkdownPageReader.JsonOptions));
+      using var json = JsonDocument.Parse(JsonSerializer.Serialize(context, MarkdownRenderJson.Options));
       Assert.Equal(context.ChildCount, json.RootElement.GetProperty("childCount").GetInt32());
     }
 
@@ -190,6 +190,57 @@ public sealed class MarkdownRenderingTests {
   }
 
   [Fact]
+  public void ReadContextsReturnsRequestedDescriptorsInBoundedContinuations() {
+    var index = MarkdownParser.Parse(string.Join("\n\n", Enumerable.Range(0, 20).Select(i => $"paragraph {i}")));
+    int[] ids = [20, 0, 5, 3, 2];
+    var expected = ids.Select(id => Context(index, id)).ToArray();
+    var contexts = new List<MarkdownRenderContext>();
+    var cursor = new MarkdownRenderCursor(index.Generation, 0);
+    while (true) {
+      var page = MarkdownPageReader.ReadContexts(index, ids, cursor, new(4096, 2));
+      Assert.Equal(cursor.Index, page.From);
+      Assert.Equal(page.From + page.Contexts.Count, page.Next);
+      Assert.Equal(page.Next < ids.Length, page.HasMore);
+      Assert.InRange(page.Contexts.Count, 1, 2);
+      Assert.True(JsonSerializer.SerializeToUtf8Bytes(page, MarkdownRenderJson.Options).Length <= 4096);
+      Assert.Equal(ids.Skip(page.From).Take(page.Contexts.Count), page.Contexts.Select(context => context.Id));
+      contexts.AddRange(page.Contexts);
+      if (!page.HasMore) break;
+      Assert.True(page.Next > cursor.Index);
+      cursor = new(index.Generation, page.Next);
+    }
+    Assert.Equal(expected, contexts);
+  }
+
+  [Fact]
+  public void ReadContextsHonorsByteLimitAndRejectsInvalidRequests() {
+    var index = MarkdownParser.Parse(string.Join("\n\n", Enumerable.Range(0, 300).Select(i => $"paragraph {i}")));
+    int[] ids = Enumerable.Range(0, 256).ToArray();
+    var contexts = new List<MarkdownRenderContext>();
+    var cursor = new MarkdownRenderCursor(index.Generation, 0);
+    while (true) {
+      var page = MarkdownPageReader.ReadContexts(index, ids, cursor, new(4096, 256));
+      Assert.True(JsonSerializer.SerializeToUtf8Bytes(page, MarkdownRenderJson.Options).Length <= 4096);
+      Assert.InRange(page.Contexts.Count, 1, 256);
+      Assert.Equal(page.From + page.Contexts.Count, page.Next);
+      Assert.Equal(ids.Skip(page.From).Take(page.Contexts.Count), page.Contexts.Select(context => context.Id));
+      if (contexts.Count == 0) Assert.True(page.HasMore);
+      contexts.AddRange(page.Contexts);
+      if (!page.HasMore) break;
+      Assert.True(page.Next > cursor.Index);
+      cursor = new(index.Generation, page.Next);
+    }
+    Assert.Equal(ids, contexts.Select(context => context.Id));
+    Assert.Throws<ArgumentOutOfRangeException>(() => MarkdownPageReader.ReadContexts(index, [-1], new(index.Generation, 0)));
+    Assert.Throws<ArgumentOutOfRangeException>(() => MarkdownPageReader.ReadContexts(index, [index.ContextCount], new(index.Generation, 0)));
+    Assert.Throws<ArgumentException>(() => MarkdownPageReader.ReadContexts(index, [0, 0], new(index.Generation, 0)));
+    Assert.Throws<ArgumentOutOfRangeException>(() => MarkdownPageReader.ReadContexts(index,
+        Enumerable.Range(0, 257).ToArray(), new(index.Generation, 0)));
+    Assert.Throws<ArgumentException>(() => MarkdownPageReader.ReadContexts(index, [0], new(Guid.NewGuid(), 0)));
+    Assert.Throws<ArgumentOutOfRangeException>(() => MarkdownPageReader.ReadContexts(index, [0], new(index.Generation, 2)));
+  }
+
+  [Fact]
   public void ReadBeforeReturnsAscendingBoundedContinuationAndHandlesEnds() {
     var index = MarkdownParser.Parse(string.Join("\n\n", Enumerable.Range(0, 10).Select(i => $"paragraph {i}")));
     var atStart = MarkdownPageReader.ReadBefore(index, new(index.Generation, 0));
@@ -203,7 +254,7 @@ public sealed class MarkdownRenderingTests {
       Assert.Equal(cursor.Index, page.Next);
       Assert.Equal(page.Next < index.PieceCount, page.HasMore);
       Assert.True(page.Pieces.Count <= 2);
-      Assert.True(JsonSerializer.SerializeToUtf8Bytes(page, MarkdownPageReader.JsonOptions).Length <= 4096);
+      Assert.True(JsonSerializer.SerializeToUtf8Bytes(page, MarkdownRenderJson.Options).Length <= 4096);
       Assert.Equal(Enumerable.Range(page.From, page.Next - page.From), page.Pieces.Select(piece => piece.Id));
       backwards.InsertRange(0, page.Pieces);
       if (page.From == 0) break;
@@ -224,10 +275,10 @@ public sealed class MarkdownRenderingTests {
     var index = MarkdownParser.Parse(string.Join("\n\n", Enumerable.Range(0, 80).Select(i => new string((char)('a' + i % 20), 128))));
     var page = MarkdownPageReader.ReadBefore(index, new(index.Generation, index.PieceCount), new(4096, 100));
     Assert.InRange(page.Pieces.Count, 1, 99);
-    Assert.True(JsonSerializer.SerializeToUtf8Bytes(page, MarkdownPageReader.JsonOptions).Length <= 4096);
+    Assert.True(JsonSerializer.SerializeToUtf8Bytes(page, MarkdownRenderJson.Options).Length <= 4096);
     var previous = index.Piece(page.From - 1);
     var withPrevious = page with { From = page.From - 1, Pieces = new[] { previous }.Concat(page.Pieces).ToArray() };
-    Assert.True(JsonSerializer.SerializeToUtf8Bytes(withPrevious, MarkdownPageReader.JsonOptions).Length > 4096);
+    Assert.True(JsonSerializer.SerializeToUtf8Bytes(withPrevious, MarkdownRenderJson.Options).Length > 4096);
 
     var context = new MarkdownRenderContext(0, MarkdownElementKind.Document, -1, -1, -1, 0,
         new(0, 0), 0, 0, 0, 0);
@@ -365,7 +416,7 @@ public sealed class MarkdownRenderingTests {
     var cursor = new MarkdownRenderCursor(index.Generation, 0);
     while (true) {
       var page = MarkdownPageReader.Read(index, cursor, limits);
-      Assert.True(JsonSerializer.SerializeToUtf8Bytes(page, MarkdownPageReader.JsonOptions).Length <= limits.Utf8Bytes);
+      Assert.True(JsonSerializer.SerializeToUtf8Bytes(page, MarkdownRenderJson.Options).Length <= limits.Utf8Bytes);
       Assert.True(page.Pieces.Count <= limits.Records);
       result.AddRange(page.Pieces);
       if (!page.HasMore) return result.ToArray();
@@ -380,7 +431,7 @@ public sealed class MarkdownRenderingTests {
     var cursor = new MarkdownRenderCursor(index.Generation, 0);
     while (true) {
       var page = MarkdownPageReader.ReadContext(index, id, cursor, limits);
-      Assert.True(JsonSerializer.SerializeToUtf8Bytes(page, MarkdownPageReader.JsonOptions).Length <= limits.Utf8Bytes);
+      Assert.True(JsonSerializer.SerializeToUtf8Bytes(page, MarkdownRenderJson.Options).Length <= limits.Utf8Bytes);
       Assert.True(page.Values.Count + 1 <= limits.Records);
       result.AddRange(page.Values);
       if (!page.HasMore) return result.ToArray();

@@ -125,7 +125,7 @@ internal sealed record MessageMarkdownKey(
 
 // Limits include stale pinned generations and independent interests/leases.
 // Transient source, parser trees and unpublished indices on the two workers are separate.
-internal sealed record MessageMarkdownCacheLimits(
+public sealed record MessageMarkdownCacheLimits(
     int Entries, long RetainedBytes, int PendingKeys, int Leases, int SmallMessageUtf8Bytes) {
   internal void Validate() {
     ArgumentOutOfRangeException.ThrowIfLessThan(Entries, 1);
@@ -136,8 +136,8 @@ internal sealed record MessageMarkdownCacheLimits(
   }
 }
 
-internal sealed class MarkdownCacheFullException() : InvalidOperationException("The Markdown cache is pinned or its lease limit is full. Release unused leases and retry; keep the previous formatted Markdown view.");
-internal sealed class MarkdownQueueFullException() : InvalidOperationException("The Markdown queue is full.");
-internal sealed class MarkdownSupersededException() : InvalidOperationException("A newer pending Markdown request replaced this extent.");
-internal sealed class MarkdownUnavailableException() : InvalidOperationException("The Markdown generation is no longer available. Rebuild from a source anchor.");
-internal sealed class MarkdownTooLargeException() : InvalidOperationException("The derived Markdown render index exceeds the cache byte limit.");
+public sealed class MarkdownCacheFullException() : InvalidOperationException("The Markdown cache is pinned or its lease limit is full. Release unused leases and retry; keep the previous formatted Markdown view.");
+public sealed class MarkdownQueueFullException() : InvalidOperationException("The Markdown queue is full.");
+public sealed class MarkdownSupersededException() : InvalidOperationException("A newer pending Markdown request replaced this extent.");
+public sealed class MarkdownUnavailableException() : InvalidOperationException("The Markdown generation is no longer available. Rebuild from a source anchor.");
+public sealed class MarkdownTooLargeException() : InvalidOperationException("The derived Markdown render index exceeds the cache byte limit.");

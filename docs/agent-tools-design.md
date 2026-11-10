@@ -15,7 +15,8 @@ Related: [execution](execution-design.md), [sessions](session-design.md), [disco
    one implementation; core tools (`read`, `write`, `edit`, possibly `bash`) may own an opt-in,
    lightweight surface per family (name, schema, description, argument/result translation) so
    each family gets the shape it was trained on. Bespoke tools have one simple, well-documented
-   surface. Context pruning must account for surfaces.
+   surface. Context pruning must account for surfaces. Implemented as separate tool classes
+   per name; see 13.
 4. **Raw calls only.** Store each call as the model emitted it. The stored tool name identifies
    the surface, and that surface interprets its own raw calls for the UI and pruning. No
    canonical copy. Switching model family mid-chat is allowed and is the user's responsibility;
@@ -50,9 +51,34 @@ Related: [execution](execution-design.md), [sessions](session-design.md), [disco
     `write` folder creation, `edit` exact-match rules, timeouts) copy Pi as-is.
 12. **Crash.** A call interrupted by an Urd crash, background or not, is reported to the model
     as interrupted and possibly partly applied. It is never re-run.
+13. **Tool shape (approved code).** One class per model-facing tool name; shared behavior lives
+    in ordinary helpers (e.g. `FileEditor` used by both `EditTool` and `ApplyPatchTool`). No
+    separate "surface" abstraction. A `ToolCatalog` picks the tools a chat offers per model
+    family and finds any tool by name for saved calls. Urd owns `AgentTool` rather than using
+    `AIFunction` directly, converting to provider declarations at the edge.
+
+    ```csharp
+    internal abstract class AgentTool {
+      public abstract string Name { get; }
+      public abstract string Description { get; }
+      public abstract JsonElement ParametersSchema { get; }
+      public abstract Task<ToolOutput> RunAsync(
+        JsonElement arguments, ToolContext context, CancellationToken cancellation);
+    }
+
+    internal sealed class ToolCatalog {
+      public IReadOnlyList<AgentTool> For(ModelFamily family);
+      public AgentTool? Find(string name);
+    }
+    ```
+14. **Waiting on background calls.** When the agent's reply has ended but background calls are
+    pending, the chat shows a waiting status and Stop remains available; Stop cancels them.
+    Completion wakes the agent and the chat returns to running.
+15. **Model family** is Urd-owned metadata on the model's saved settings: OpenAI, Anthropic,
+    Google, Other.
 
 ## Open
 
-- Model-family metadata location and the initial families.
-- Class structure and contracts: tool, surface, background-call registry, process ownership.
+- Remaining class structure: catalog, parallel dispatch, file queue, background registry and
+  delivery, process ownership, the four core tools, storage, composition.
 - Transcript presentation of tool rows and pending background calls.

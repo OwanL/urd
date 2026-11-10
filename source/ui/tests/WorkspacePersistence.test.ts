@@ -131,11 +131,41 @@ void test("cleanup failure keeps the durable workspace usable and can be retried
   assert.equal(storage.getItem(`${key}.draft.${sessionId}`), null);
 });
 
-void test("corrupt workspace or draft data stays unreadable instead of resetting saved state", () => {
+void test("old saved workspaces and their draft overlays are discarded", () => {
+  const storage = new MemoryStorage();
+  const sentinel = {
+    version: 1,
+    tabs: [sessionId],
+    activeId: sessionId,
+    chats: { [sessionId]: { ...newChat(null), titleProvenance: undefined } },
+    lastSelection: null,
+  };
+  const raw = JSON.stringify(sentinel);
+  storage.values.set(key, raw);
+  storage.values.set(
+    `${key}.draft.${sessionId}`,
+    JSON.stringify({ draft: "stale", draftVersion: 1 }),
+  );
+
+  const saved = persistence(storage);
+  const loaded = saved.load();
+
+  assert.equal(loaded.first, true);
+  assert.deepEqual(loaded.state, emptyWorkspace());
+  assert.equal(loaded.error, null);
+  assert.equal(storage.getItem(key), null);
+  assert.equal(storage.getItem(`${key}.draft.${sessionId}`), null);
+  assert.deepEqual(saved.load(), { state: emptyWorkspace(), first: true, error: null });
+});
+
+void test("corrupt workspace and draft data are discarded with their overlays", () => {
   const storage = new MemoryStorage();
   storage.values.set(key, "{");
-  assert.match(persistence(storage).load().error ?? "", /could not be read/);
-  assert.equal(storage.getItem(key), "{");
+  storage.values.set(`${key}.draft.${sessionId}`, "stale overlay");
+  const saved = persistence(storage);
+  assert.deepEqual(saved.load(), { state: emptyWorkspace(), first: true, error: null });
+  assert.equal(storage.getItem(key), null);
+  assert.equal(storage.getItem(`${key}.draft.${sessionId}`), null);
 
   const valid = emptyWorkspace();
   valid.tabs = [sessionId];
@@ -143,15 +173,48 @@ void test("corrupt workspace or draft data stays unreadable instead of resetting
   valid.chats[sessionId] = newChat(null);
   storage.values.set(key, JSON.stringify(valid));
   storage.values.set(`${key}.draft.${sessionId}`, "{");
-  assert.match(persistence(storage).load().error ?? "", /could not be read/);
-  assert.equal(storage.getItem(key), JSON.stringify(valid));
+  assert.deepEqual(saved.load(), { state: emptyWorkspace(), first: true, error: null });
+  assert.equal(storage.getItem(key), null);
+  assert.equal(storage.getItem(`${key}.draft.${sessionId}`), null);
+});
+
+void test("workspace and draft storage access or discard failures remain errors", () => {
+  const storage = new MemoryStorage();
+  const saved = persistence(storage);
+  storage.getItem = () => {
+    throw new Error("storage read unavailable");
+  };
+  assert.match(saved.load().error ?? "", /storage read unavailable/);
+
+  storage.getItem = MemoryStorage.prototype.getItem.bind(storage);
+  storage.values.set(key, "{");
+  storage.removeItem = () => {
+    throw new Error("storage removal unavailable");
+  };
+  assert.match(saved.load().error ?? "", /storage removal unavailable/);
+
+  storage.values.set(
+    key,
+    JSON.stringify({
+      ...emptyWorkspace(),
+      tabs: [sessionId],
+      activeId: sessionId,
+      chats: { [sessionId]: newChat(null) },
+    }),
+  );
+  const getItem = MemoryStorage.prototype.getItem.bind(storage);
+  storage.getItem = (itemKey) => {
+    if (itemKey.startsWith(`${key}.draft.`)) throw new Error("draft read unavailable");
+    return getItem(itemKey);
+  };
+  assert.match(saved.load().error ?? "", /draft read unavailable/);
 });
 
 void test("workspace writes validate and propagate storage failures", () => {
   const storage = new MemoryStorage();
   const saved = persistence(storage);
   const invalid = emptyWorkspace();
-  invalid.version = 2 as 1;
+  invalid.version = 1 as 2;
   assert.throws(() => saved.save(invalid), /Invalid workspace/);
 
   storage.setItem = () => {

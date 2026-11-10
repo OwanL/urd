@@ -357,7 +357,7 @@ void test("uncertain not-sent resend reloads with its new ID and reconciles the 
   assert.equal(workspace.read().chats[sessionId]?.draft, "submitted text");
 });
 
-void test("session metadata, not Send dispatch, names a new chat", async () => {
+void test("session metadata, not Send dispatch, names a new chat exactly once", async () => {
   const workspace = fixture();
   const coordinator = commands(
     workspace.access,
@@ -366,12 +366,30 @@ void test("session metadata, not Send dispatch, names a new chat", async () => {
 
   await coordinator.send(sessionId, snapshot(), false, true);
   assert.equal(workspace.read().chats[sessionId]?.title, "New chat");
+  assert.equal(workspace.read().chats[sessionId]?.titleProvenance, "placeholder");
 
   coordinator.observeSnapshot(
     snapshot({ firstUserPreview: "  First user prompt is authoritative  " }),
     null,
   );
   assert.equal(workspace.read().chats[sessionId]?.title, "First user prompt is authoritative");
+  assert.equal(workspace.read().chats[sessionId]?.titleProvenance, "derived");
+
+  coordinator.observeSnapshot(snapshot({ firstUserPreview: "A later prompt cannot rename" }), null);
+  assert.equal(workspace.read().chats[sessionId]?.title, "First user prompt is authoritative");
+});
+
+void test("a first prompt literally reading New chat names the chat and cannot be renamed later", async () => {
+  const workspace = fixture();
+  const coordinator = commands(workspace.access, emptyClient());
+  await coordinator.send(sessionId, snapshot(), false, true);
+
+  coordinator.observeSnapshot(snapshot({ firstUserPreview: "New chat" }), null);
+  assert.equal(workspace.read().chats[sessionId]?.title, "New chat");
+  assert.equal(workspace.read().chats[sessionId]?.titleProvenance, "derived");
+
+  coordinator.observeSnapshot(snapshot({ firstUserPreview: "A later prompt" }), null);
+  assert.equal(workspace.read().chats[sessionId]?.title, "New chat");
 });
 
 void test("a late Stop failure for an earlier execution cannot replace or block Stop for its successor", async () => {

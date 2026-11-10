@@ -23,15 +23,15 @@ internal sealed class TranscriptHistoryReader(Database database) {
   internal static string WindowSql(bool ascending) => $$"""
     WITH window AS (
         SELECT ordinal, run_id, role, message_id, input_id, request_id,
-            first_batch_index, end_batch_index, created_at, call_id, tool_name
+            first_chunk_index, end_chunk_index, created_at, call_id, tool_name
         FROM execution_messages
         WHERE session_id = $session AND history_revision = $revision
             AND ordinal {{(ascending ? ">=" : "<=")}} $boundary
         ORDER BY ordinal {{(ascending ? "ASC" : "DESC")}} LIMIT $limit
     )
     SELECT m.ordinal, m.run_id, m.role, m.message_id, m.created_at,
-        m.request_id, m.first_batch_index, m.end_batch_index,
-        q.next_batch_index, q.output_final, q.outcome, r.stopping, r.outcome,
+        m.request_id, m.first_chunk_index, m.end_chunk_index,
+        q.next_chunk_index, q.response_final, q.outcome, r.stopping, r.outcome,
         m.call_id, m.tool_name, t.started, t.outcome, t.started_at, t.ended_at
     FROM window m
     JOIN execution_runs r ON r.run_id = m.run_id

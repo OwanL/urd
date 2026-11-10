@@ -18,9 +18,9 @@ internal static class StoredLlmResponses {
     using SqliteConnection connection = database.OpenReadOnlyConnection();
     using SqliteCommand command = connection.CreateCommand();
     command.CommandText = """
-      SELECT o.request_id, q.output_id, o.batch_index, o.text_utf8, o.is_final
+      SELECT o.request_id, q.response_id, o.chunk_index, o.text_utf8, o.is_final
       FROM execution_output o JOIN execution_requests q ON q.request_id = o.request_id
-      ORDER BY o.request_id, o.batch_index;
+      ORDER BY o.request_id, o.chunk_index;
       """;
     using SqliteDataReader reader = command.ExecuteReader();
     return reader.Cast<DbDataRecord>()

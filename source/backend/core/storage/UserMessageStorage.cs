@@ -76,7 +76,8 @@ internal sealed class UserMessageStorage(Database database) {
     var acceptance = (MessageAcceptance)reader.GetInt32(2);
     Guid? executionId = reader.IsDBNull(3) ? null : reader.GetGuid(3);
     MessageRefusalReason? refusalReason = reader.IsDBNull(4) ? null : (MessageRefusalReason)reader.GetInt32(4);
-    LlmSelection? selection = LlmSelectionJson.Read(reader.IsDBNull(5) ? null : reader.GetString(5));
+    LlmSelection selection = LlmSelectionJson.Read(reader.GetString(5))
+        ?? throw new InvalidOperationException("The retained receipt has no LLM selection.");
     var original = new UserMessageSubmission(submissionId, expectedRevision, originalText, selection);
     return new UserMessageReceipt(sessionId, original, acceptance, refusalReason, executionId);
   }
@@ -160,7 +161,6 @@ internal sealed class UserMessageStorage(Database database) {
   }
 
   private static void Validate(Guid sessionId, UserMessageSubmission submission) {
-    // Fresh submissions only: retained legacy decisions can have no selection.
     if (sessionId == Guid.Empty)
       throw new ArgumentException("Session ID cannot be empty.", nameof(sessionId));
 

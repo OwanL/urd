@@ -1,4 +1,5 @@
 using System.Data.Common;
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Sessions;
@@ -105,17 +106,19 @@ public sealed class SessionSnapshotStorageTests {
     string executionPrefix = Guid.NewGuid().ToString("D")[..24];
     string requestPrefix = Guid.NewGuid().ToString("D")[..24];
     string outputPrefix = Guid.NewGuid().ToString("D")[..24];
+    string selection = JsonSerializer.Serialize(TestLlmSelection.Default);
     database.Execute($"""
       BEGIN;
       WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x + 1 FROM n WHERE x < {count})
       INSERT INTO input_decisions
-          (session_id, input_id, expected_history_revision, original_text_utf8, decision, run_id, refusal_reason)
+          (session_id, input_id, expected_history_revision, original_text_utf8, decision, run_id, refusal_reason,
+              llm_selection_json)
       SELECT '{session:D}', '{submissionPrefix}' || printf('%012d', x), {revision}, CAST('input ' || x AS BLOB),
-          1, '{executionPrefix}' || printf('%012d', x), NULL FROM n;
+          1, '{executionPrefix}' || printf('%012d', x), NULL, '{selection}' FROM n;
       INSERT INTO execution_runs (session_id, run_id, history_revision, input_id, outcome)
       SELECT session_id, run_id, expected_history_revision, input_id, 0 FROM input_decisions
       WHERE session_id = '{session:D}' AND input_id LIKE '{submissionPrefix}%' ORDER BY input_id;
-      INSERT INTO execution_requests (request_id, run_id, output_id, next_batch_index, output_final, outcome)
+      INSERT INTO execution_requests (request_id, run_id, response_id, next_chunk_index, response_final, outcome)
       SELECT '{requestPrefix}' || substr(input_id, 25), run_id, '{outputPrefix}' || substr(input_id, 25), 1, 1, 0
       FROM execution_runs WHERE session_id = '{session:D}' AND input_id LIKE '{submissionPrefix}%';
       INSERT INTO execution_output
@@ -127,11 +130,12 @@ public sealed class SessionSnapshotStorageTests {
       WHERE r.session_id = '{session:D}' AND r.input_id LIKE '{submissionPrefix}%' ORDER BY r.ordinal;
       INSERT INTO execution_messages (session_id, history_revision, run_id, role, message_id, input_id, request_id)
       SELECT session_id, history_revision, run_id, role, message_id, input_id, request_id FROM (
-          SELECT ordinal AS run_ordinal, session_id, history_revision, run_id,
-              0 AS role, input_id AS message_id, input_id, NULL AS request_id
-          FROM execution_runs WHERE session_id = '{session:D}' AND input_id LIKE '{submissionPrefix}%'
+          SELECT r.ordinal AS run_ordinal, r.session_id, r.history_revision, r.run_id,
+              0 AS role, r.input_id AS message_id, r.input_id, q.request_id
+          FROM execution_runs r JOIN execution_requests q ON q.run_id = r.run_id
+          WHERE r.session_id = '{session:D}' AND r.input_id LIKE '{submissionPrefix}%'
           UNION ALL
-          SELECT r.ordinal, r.session_id, r.history_revision, r.run_id, 1, q.output_id, NULL, q.request_id
+          SELECT r.ordinal, r.session_id, r.history_revision, r.run_id, 1, q.response_id, NULL, q.request_id
           FROM execution_runs r JOIN execution_requests q ON q.run_id = r.run_id
           WHERE r.session_id = '{session:D}' AND r.input_id LIKE '{submissionPrefix}%'
       ) ORDER BY run_ordinal, role;

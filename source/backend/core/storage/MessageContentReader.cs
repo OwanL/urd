@@ -33,8 +33,8 @@ internal sealed class MessageContentReader {
   private MessageContentPage ReadValidated(SqliteTransaction transaction, Guid sessionId, MessageContentCursor cursor,
       int maximumUtf16Units) {
     MessageMetadata metadata = ReadMetadata(transaction, sessionId, cursor.Message);
-    cursor = NormalizeCursor(cursor, metadata.FirstBatchIndex);
-    ValidateCommittedTail(cursor, metadata.FirstBatchIndex, metadata.EndBatchIndex);
+    cursor = NormalizeCursor(cursor, metadata.FirstChunkIndex);
+    ValidateCommittedTail(cursor, metadata.FirstChunkIndex, metadata.EndChunkIndex);
     return ReadSegments(transaction, sessionId, cursor, metadata, maximumUtf16Units);
   }
 
@@ -68,7 +68,7 @@ internal sealed class MessageContentReader {
   private MessageMetadata ReadMetadata(SqliteTransaction transaction, Guid sessionId, MessageRef message) {
     // Resolve the exact indexed identity, never the first request or submission of an execution.
     string sourceSql = message.Role == MessageRole.User ? """
-      SELECT i.input_id, i.request_id
+      SELECT i.input_id, m.request_id
       FROM execution_messages m
       JOIN execution_runs r ON r.run_id = m.run_id AND r.session_id = m.session_id
           AND r.history_revision = m.history_revision
@@ -77,8 +77,8 @@ internal sealed class MessageContentReader {
       WHERE m.session_id = $session AND m.run_id = $run AND m.role = $role
           AND m.message_id = $message AND m.history_revision = $revision;
       """ : """
-      SELECT q.request_id, m.first_batch_index, coalesce(m.end_batch_index, q.next_batch_index),
-          m.end_batch_index, q.output_final, q.outcome, r.stopping, r.outcome, q.next_batch_index
+      SELECT q.request_id, m.first_chunk_index, coalesce(m.end_chunk_index, q.next_chunk_index),
+          m.end_chunk_index, q.response_final, q.outcome, r.stopping, r.outcome, q.next_chunk_index
       FROM execution_messages m
       JOIN execution_runs r ON r.run_id = m.run_id AND r.session_id = m.session_id
           AND r.history_revision = m.history_revision
@@ -97,35 +97,34 @@ internal sealed class MessageContentReader {
       throw new KeyNotFoundException("The message does not belong to this session history.");
 
     if (message.Role == MessageRole.User) {
-      Guid? claimedRequest = reader.IsDBNull(1) ? null : reader.GetGuid(1);
-      return new(reader.GetGuid(0), claimedRequest, FirstBatchIndex: 0, EndBatchIndex: 1, IsClosed: true,
+      return new(reader.GetGuid(0), reader.GetGuid(1), FirstChunkIndex: 0, EndChunkIndex: 1, IsClosed: true,
           FinalOutputCommitted: false);
     }
 
     Guid requestId = reader.GetGuid(0);
-    long firstBatchIndex = reader.GetInt64(1);
-    long endBatchIndex = reader.GetInt64(2);
+    long firstChunkIndex = reader.GetInt64(1);
+    long endChunkIndex = reader.GetInt64(2);
     bool runClosed = !reader.IsDBNull(3);
     bool finalOutputCommitted = reader.GetInt32(4) != 0
-        && endBatchIndex == reader.GetInt64(8);
+        && endChunkIndex == reader.GetInt64(8);
     bool requestEnded = !reader.IsDBNull(5);
     bool stopRequested = reader.GetInt32(6) != 0;
     bool executionSettled = !reader.IsDBNull(7);
-    if (firstBatchIndex < 0 || endBatchIndex <= firstBatchIndex)
+    if (firstChunkIndex < 0 || endChunkIndex <= firstChunkIndex)
       throw new InvalidDataException("An output message has an invalid committed range.");
 
     bool isClosed = runClosed || finalOutputCommitted || stopRequested || executionSettled || requestEnded;
-    return new(Guid.Empty, requestId, firstBatchIndex, endBatchIndex, isClosed, finalOutputCommitted);
+    return new(Guid.Empty, requestId, firstChunkIndex, endChunkIndex, isClosed, finalOutputCommitted);
   }
 
-  private static MessageContentCursor NormalizeCursor(MessageContentCursor cursor, long firstBatchIndex) =>
-      cursor.SegmentIndex == 0 && firstBatchIndex > 0 && cursor.Utf8Offset == 0
-          ? cursor with { SegmentIndex = firstBatchIndex }
+  private static MessageContentCursor NormalizeCursor(MessageContentCursor cursor, long firstChunkIndex) =>
+      cursor.SegmentIndex == 0 && firstChunkIndex > 0 && cursor.Utf8Offset == 0
+          ? cursor with { SegmentIndex = firstChunkIndex }
           : cursor;
 
-  private static void ValidateCommittedTail(MessageContentCursor cursor, long firstBatchIndex, long endBatchIndex) {
-    if (cursor.SegmentIndex < firstBatchIndex || cursor.SegmentIndex > endBatchIndex
-        || (cursor.SegmentIndex == endBatchIndex && cursor.Utf8Offset != 0))
+  private static void ValidateCommittedTail(MessageContentCursor cursor, long firstChunkIndex, long endChunkIndex) {
+    if (cursor.SegmentIndex < firstChunkIndex || cursor.SegmentIndex > endChunkIndex
+        || (cursor.SegmentIndex == endChunkIndex && cursor.Utf8Offset != 0))
       throw new ArgumentException("The cursor is outside the committed message range.", nameof(cursor));
   }
 
@@ -135,7 +134,7 @@ internal sealed class MessageContentReader {
     long segmentIndex = cursor.SegmentIndex;
     int utf8Offset = cursor.Utf8Offset;
     int utf8Bytes = 0;
-    for (int examined = 0; segmentIndex < metadata.EndBatchIndex && examined < StorageText.MaximumSegments; examined++) {
+    for (int examined = 0; segmentIndex < metadata.EndChunkIndex && examined < StorageText.MaximumSegments; examined++) {
       // Exhausted text budgets still permit length probes to normalize empty final segments.
       // These probes share the same segment budget.
       int remainingBytes = StorageText.MaximumBytes - utf8Bytes;
@@ -159,8 +158,8 @@ internal sealed class MessageContentReader {
     }
 
     var next = new MessageContentCursor(cursor.Message, segmentIndex, utf8Offset);
-    var availableThrough = new MessageContentCursor(cursor.Message, metadata.EndBatchIndex, 0);
-    return new(cursor, text.ToString(), next, availableThrough, segmentIndex < metadata.EndBatchIndex,
+    var availableThrough = new MessageContentCursor(cursor.Message, metadata.EndChunkIndex, 0);
+    return new(cursor, text.ToString(), next, availableThrough, segmentIndex < metadata.EndChunkIndex,
         metadata.IsClosed, metadata.FinalOutputCommitted);
   }
 
@@ -178,7 +177,7 @@ internal sealed class MessageContentReader {
             ("$count", prefixBytes))
         : database.Command(transaction, """
           SELECT length(text_utf8), coalesce(substr(text_utf8, $offset + 1, $count), X'')
-          FROM execution_output WHERE request_id = $request AND batch_index = $segment;
+          FROM execution_output WHERE request_id = $request AND chunk_index = $segment;
           """,
             ("$request", metadata.RequestId),
             ("$segment", segmentIndex),
@@ -222,6 +221,6 @@ internal sealed class MessageContentReader {
 
   // Describes committed message segments and their completion state.
   private sealed record MessageMetadata(
-      Guid SubmissionId, Guid? RequestId, long FirstBatchIndex, long EndBatchIndex,
+      Guid SubmissionId, Guid RequestId, long FirstChunkIndex, long EndChunkIndex,
       bool IsClosed, bool FinalOutputCommitted);
 }

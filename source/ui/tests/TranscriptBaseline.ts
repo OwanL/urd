@@ -112,22 +112,22 @@ async function startServer(root: string) {
   }
 }
 
-function seed(path: string, ids: string[]) {
+function seed(path: string, ids: string[], selection: string) {
   const db = new DatabaseSync(path);
   try {
-    assert.equal(db.prepare("PRAGMA user_version").get()?.user_version, 10);
+    assert.equal(db.prepare("PRAGMA user_version").get()?.user_version, 11);
     db.exec("PRAGMA foreign_keys=ON; PRAGMA cache_size=-8192; PRAGMA synchronous=NORMAL;");
     const input = db.prepare(`INSERT INTO input_decisions
-      (session_id,input_id,expected_history_revision,original_text_utf8,decision,run_id) VALUES (?,?,0,?,1,?)`);
+      (session_id,input_id,expected_history_revision,original_text_utf8,decision,run_id,llm_selection_json) VALUES (?,?,0,?,1,?,?)`);
     const run = db.prepare(`INSERT INTO execution_runs
       (session_id,run_id,history_revision,input_id,outcome) VALUES (?,?,0,?,0)`);
     const request = db.prepare(`INSERT INTO execution_requests
-      (request_id,run_id,request_index,output_id,next_batch_index,output_final,outcome,attempt)
+      (request_id,run_id,request_index,response_id,next_chunk_index,response_final,outcome,attempt)
       VALUES (?,?,0,?,?,1,0,2)`);
     const assigned = db.prepare(`INSERT INTO execution_inputs
       (session_id,input_id,run_id,request_id,outcome) VALUES (?,?,?,?,0)`);
     const message = db.prepare(`INSERT INTO execution_messages
-      (session_id,history_revision,run_id,role,message_id,input_id,request_id,first_batch_index,end_batch_index,call_id,tool_name)
+      (session_id,history_revision,run_id,role,message_id,input_id,request_id,first_chunk_index,end_chunk_index,call_id,tool_name)
       VALUES (?,0,?,?,?,?,?,0,?,?,?)`);
     const output = db.prepare("INSERT INTO execution_output VALUES (?,?,?,?)");
     const tool = db.prepare(`INSERT INTO execution_tools
@@ -155,7 +155,7 @@ function seed(path: string, ids: string[]) {
               ? Buffer.from(`baseline-heavy-${index}-latest ${"r".repeat(6226)}`)
               : ordinaryReply;
         const segments = Math.ceil(body.byteLength / 16_384);
-        input.run(session, inputId, userBody, runId);
+        input.run(session, inputId, userBody, runId, selection);
         run.run(session, runId, inputId);
         request.run(requestId, runId, replyId, segments);
         assigned.run(session, inputId, runId, requestId);
@@ -513,14 +513,32 @@ async function main() {
   try {
     await mkdir(data);
     await mkdir(browserTemp);
-    server = await startServer(data); // Real application initializes schema 10.
+    server = await startServer(data); // Real application initializes the current schema.
+    model = await startLocalModelServer();
+    const connection = await model.install(server.origin);
     const sessions = new SessionClient(server.origin);
     const ids: string[] = [];
     for (let index = 0; index < 6; index++) ids.push(await sessions.create());
     await server.stop();
     server = undefined;
     const path = join(data, "urd.sqlite");
-    report.fixtures = seed(path, ids.slice(0, 5));
+    report.fixtures = seed(
+      path,
+      ids.slice(0, 5),
+      // Internal storage uses CLR member names and numeric enums, not HTTP JSON.
+      JSON.stringify({
+        Connection: {
+          Id: connection.id,
+          Name: connection.name,
+          Route: 2,
+          Api: 1,
+          Endpoint: connection.endpoint,
+          Authentication: 0,
+        },
+        ModelId: "fixture-a",
+        ReasoningEffort: null,
+      }),
+    );
     await writeFile(
       join(root, "image-references.json"),
       JSON.stringify(
@@ -540,8 +558,6 @@ async function main() {
     );
     report.queryBehavior = await queryPlans(path, ids[0]!);
     server = await startServer(data);
-    model = await startLocalModelServer();
-    const connection = await model.install(server.origin);
     const client = new SessionClient(server.origin);
     const beforeBrowser = await processMemory(server.pid);
     browserServer = await chromium.launchServer({
@@ -572,7 +588,7 @@ async function main() {
     await installProbe(page);
     const streamId = ids[5]!;
     const workspace = encodeWorkspace({
-      version: 1,
+      version: 2,
       tabs: ids,
       activeId: streamId,
       chats: Object.fromEntries(ids.map((id) => [id, newChat(null)])),
@@ -937,7 +953,7 @@ function observeCommit() {
   db.exec("PRAGMA query_only=ON; PRAGMA cache_size=-2048; PRAGMA busy_timeout=1000");
   const query =
     db.prepare(`SELECT o.text_utf8 FROM execution_output o JOIN execution_requests q USING(request_id)
-    JOIN execution_runs r USING(run_id) WHERE r.session_id=? ORDER BY r.ordinal,q.request_index,o.batch_index`);
+    JOIN execution_runs r USING(run_id) WHERE r.session_id=? ORDER BY r.ordinal,q.request_index,o.chunk_index`);
   let negativeStart = epoch(),
     next = epoch(),
     samples = 0,

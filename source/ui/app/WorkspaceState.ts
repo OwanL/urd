@@ -13,8 +13,12 @@ export interface ChatState {
   pending: PendingSubmission | null;
   knownExecutionId: string | null;
   title: string;
+  titleProvenance: TitleProvenance;
   error: string | null;
 }
+
+// Distinguishes the untitled placeholder from a title derived from the first prompt.
+export type TitleProvenance = "placeholder" | "derived";
 
 export interface PendingSubmission {
   original: UserMessageSubmission;
@@ -24,7 +28,7 @@ export interface PendingSubmission {
 }
 
 export interface WorkspaceState {
-  version: 1;
+  version: 2;
   tabs: string[];
   activeId: string | null;
   chats: Record<string, ChatState>;
@@ -58,7 +62,7 @@ export function executionSettled(
 }
 
 export function emptyWorkspace(): WorkspaceState {
-  return { version: 1, tabs: [], activeId: null, chats: {}, lastSelection: null };
+  return { version: 2, tabs: [], activeId: null, chats: {}, lastSelection: null };
 }
 
 export function newChat(selection: LlmSelection | null): ChatState {
@@ -69,6 +73,7 @@ export function newChat(selection: LlmSelection | null): ChatState {
     pending: null,
     knownExecutionId: null,
     title: "New chat",
+    titleProvenance: "placeholder",
     error: null,
   };
 }
@@ -190,7 +195,13 @@ function isRefusalReason(value: unknown): value is MessageRefusalReason {
 }
 
 function isReceipt(value: unknown): value is UserMessageReceipt {
-  if (!isRecord(value) || !isId(value.sessionId) || !isSubmission(value.submission)) return false;
+  if (
+    !isRecord(value) ||
+    !isId(value.sessionId) ||
+    !isSubmission(value.submission) ||
+    value.submission.llmSelection === null
+  )
+    return false;
   if (value.acceptance === "accepted")
     return value.refusalReason === null && isId(value.executionId);
   return (
@@ -240,6 +251,7 @@ function isChat(value: unknown): value is ChatState {
     isSelection(value.selection) &&
     (value.knownExecutionId === null || isId(value.knownExecutionId)) &&
     typeof value.title === "string" &&
+    (value.titleProvenance === "placeholder" || value.titleProvenance === "derived") &&
     isNullableString(value.error) &&
     (pending === null ||
       (isRecord(pending) &&
@@ -254,7 +266,7 @@ function isChat(value: unknown): value is ChatState {
 function isWorkspace(value: unknown): value is WorkspaceState {
   if (
     !isRecord(value) ||
-    value.version !== 1 ||
+    value.version !== 2 ||
     !Array.isArray(value.tabs) ||
     !value.tabs.every(isId) ||
     !isRecord(value.chats) ||

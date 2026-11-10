@@ -95,7 +95,7 @@ function sending(submission = original) {
 
 function workspace(): WorkspaceState {
   return {
-    version: 1,
+    version: 2,
     tabs: [sessionId],
     activeId: sessionId,
     chats: { [sessionId]: sending() },
@@ -105,7 +105,7 @@ function workspace(): WorkspaceState {
 
 void test("new state is independent, empty and does not invent a selection", () => {
   assert.deepEqual(emptyWorkspace(), {
-    version: 1,
+    version: 2,
     tabs: [],
     activeId: null,
     chats: {},
@@ -120,6 +120,7 @@ void test("new state is independent, empty and does not invent a selection", () 
   assert.equal(chat.knownExecutionId, null);
   assert.equal(chat.error, null);
   assert.equal(typeof chat.title, "string");
+  assert.equal(chat.titleProvenance, "placeholder");
   assert.deepEqual(decodeWorkspace(encodeWorkspace(emptyWorkspace())), emptyWorkspace());
 });
 
@@ -159,17 +160,15 @@ void test("an exact accepted receipt clears only the submitted draft and records
   assert.notEqual(chat.pending, null);
 });
 
-void test("a null initiating selection is preserved and matched, not replaced by the current selection", () => {
+void test("a receipt without its original selection cannot resolve an uncertain Send", () => {
   const submission = { ...original, llmSelection: null };
-  const chat = { ...sending(submission), selection };
-  const updated = applyReceipt(chat, sessionId, { ...receipt, submission });
-  assert.equal(updated.draft, "");
-  assert.equal(updated.selection, selection);
-  assert.throws(() => applyReceipt(chat, sessionId, receipt), /original submission/);
+  const chat = sending(submission);
   assert.throws(
-    () => applyReceipt(sending(), sessionId, { ...receipt, submission }),
-    /original submission/,
+    () => applyReceipt(chat, sessionId, { ...receipt, submission }),
+    /Invalid message receipt/,
   );
+  assert.equal(chat.pending?.status, "sending");
+  assert.equal(chat.draft, submission.text);
 });
 
 void test("a later edit is preserved even when its text is changed back to the original", () => {
@@ -222,7 +221,6 @@ void test("foreign sessions, absent pending submissions and full original mismat
     { expectedHistoryRevision: 8 },
     { text: original.text.trim() },
     { text: original.text.replace("\r\n", "\n") },
-    { llmSelection: null },
     { llmSelection: { ...selection, modelId: "another-model" } },
     { llmSelection: { ...selection, reasoningEffort: "high" } },
     ...Object.entries({
@@ -302,6 +300,8 @@ void test("reload keeps the complete original but marks every saved Send uncerta
     assert.deepEqual(after.pending?.original, before.pending?.original);
     assert.equal(after.pending?.draftVersion, before.pending?.draftVersion);
     assert.equal(after.draft, before.draft);
+    assert.equal(after.title, before.title);
+    assert.equal(after.titleProvenance, before.titleProvenance);
   }
   assert.equal(state.chats[sessionId]?.pending?.status, "sending");
   assert.deepEqual(decodeWorkspace(encodeWorkspace(reloaded)), reloaded);
@@ -317,12 +317,25 @@ void test("reload retains later edits while reconciling an uncertain submission"
   assert.equal(resolved.pending, null);
 });
 
+void test("old saved workspaces without title provenance are discarded, not migrated", () => {
+  const saved = {
+    version: 1,
+    tabs: [sessionId],
+    activeId: sessionId,
+    chats: { [sessionId]: { ...sending(), title: "New chat", titleProvenance: undefined } },
+    lastSelection: selection,
+  };
+  // JSON.stringify omits the provenance member, leaving the previous sentinel shape.
+  assert.throws(() => decodeWorkspace(JSON.stringify(saved)), TypeError);
+});
+
 void test("corrupt saved structure throws instead of resetting or discarding drafts", () => {
   for (const raw of ["", "{", "null", "[]", "{}", '"workspace"'])
     assert.throws(() => decodeWorkspace(raw));
 
   const invalid: unknown[] = [
-    { ...workspace(), version: 2 },
+    { ...workspace(), version: 1 },
+    { ...workspace(), version: 3 },
     { ...workspace(), tabs: [sessionId, sessionId] },
     { ...workspace(), tabs: ["missing"] },
     { ...workspace(), tabs: [1] },
@@ -341,6 +354,9 @@ void test("corrupt saved structure throws instead of resetting or discarding dra
     { selection: { ...selection, reasoningEffort: 3 } },
     { knownExecutionId: false },
     { title: null },
+    { titleProvenance: "renamed" },
+    { titleProvenance: null },
+    { titleProvenance: 1 },
     { error: {} },
     { pending: {} },
     { pending: { original, draftVersion: 1, status: "accepted" } },

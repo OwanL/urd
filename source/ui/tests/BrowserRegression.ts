@@ -583,6 +583,31 @@ void test("model and reasoning popovers focus options and restore their triggers
   });
 });
 
+void test("provider settings preserve detail navigation and return keyboard focus", async () => {
+  await withOfflineBrowser(async ({ server, page, connection }) => {
+    await page.goto(server.origin.href);
+    await page.getByRole("textbox", { name: "Message" }).waitFor();
+    const trigger = page.getByRole("button", { name: "Settings", exact: true });
+    await trigger.click();
+    const settings = page.getByRole("dialog", { name: "Settings", exact: true });
+    const title = new URL(connection.endpoint).hostname;
+    const provider = settings.getByRole("button", { name: title, exact: true });
+    await provider.click();
+    await settings.getByRole("heading", { name: title, exact: true }).waitFor();
+    const back = settings.getByRole("button", { name: "Back to providers", exact: true });
+    await back.click();
+    assert.equal(await provider.evaluate((element) => document.activeElement === element), true);
+    await provider.click();
+    await settings.getByRole("button", { name: "Close settings" }).click();
+    assert.equal(await trigger.evaluate((element) => document.activeElement === element), true);
+    await trigger.click();
+    await settings.getByRole("heading", { name: title, exact: true }).waitFor();
+    await page.keyboard.press("Escape");
+    assert.equal(await settings.isVisible(), false);
+    assert.equal(await trigger.evaluate((element) => document.activeElement === element), true);
+  });
+});
+
 void test("a session discovered on initial load is named from its first-user preview", async () => {
   await withOfflineBrowser(async ({ model, server, page, connection }) => {
     const sessions = new SessionClient(server.origin);
@@ -725,7 +750,7 @@ void test("excess tabs pause explicitly while the active tab keeps live updates"
     for (let index = 0; index < 128; index++) ids.push(await sessions.create());
     const first = ids[0]!;
     const saved = encodeWorkspace({
-      version: 1,
+      version: 2,
       tabs: ids,
       activeId: first,
       chats: Object.fromEntries(
@@ -1253,7 +1278,7 @@ void test("workspace read recovery reconciles a hidden uncertain send", async ()
 });
 
 void test("an unrelated successful Send cannot mark a refused resend accepted", async () => {
-  await withOfflineBrowser(async ({ model, server, page }) => {
+  await withOfflineBrowser(async ({ model, server, page, connection }) => {
     const sourceSubmissionId = "30000000-0000-0000-0000-000000000003";
     const sourceExecutionId = "20000000-0000-0000-0000-000000000002";
     const sessions = new SessionClient(server.origin);
@@ -1266,7 +1291,7 @@ void test("an unrelated successful Send cannot mark a refused resend accepted", 
       submissionId: sourceSubmissionId,
       expectedHistoryRevision: snapshot.historyRevision,
       text: "Original not-sent input",
-      llmSelection: null,
+      llmSelection: { connection, modelId: "fixture-a", reasoningEffort: null },
     };
     const sourceReceipt: UserMessageReceipt = {
       sessionId,
@@ -1346,7 +1371,7 @@ void test("an unrelated successful Send cannot mark a refused resend accepted", 
 });
 
 void test("not-sent discovery is user-invoked, retrieves on demand, and resends without replacing the draft", async () => {
-  await withOfflineBrowser(async ({ server, page }) => {
+  await withOfflineBrowser(async ({ server, page, connection }) => {
     const pageCursor = "next-cursor";
     const firstSubmissionId = "30000000-0000-0000-0000-000000000003";
     const firstExecutionId = "20000000-0000-0000-0000-000000000002";
@@ -1366,7 +1391,7 @@ void test("not-sent discovery is user-invoked, retrieves on demand, and resends 
       submissionId: firstSubmissionId,
       expectedHistoryRevision: snapshot.historyRevision,
       text: sourceText,
-      llmSelection: null,
+      llmSelection: { connection, modelId: "fixture-a", reasoningEffort: null },
     };
     const originalReceipt: UserMessageReceipt = {
       sessionId,

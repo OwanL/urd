@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Execution;
@@ -256,22 +257,28 @@ public sealed class TranscriptHistoryTests(ITestOutputHelper output) {
   }
 
   private static TranscriptEntryRef[] SeedUsers(TemporaryDatabase database, Guid session, long revision, int count) {
-    string inputPrefix = Prefix(), runPrefix = Prefix();
+    string inputPrefix = Prefix(), runPrefix = Prefix(), requestPrefix = Prefix();
+    string selection = JsonSerializer.Serialize(TestLlmSelection.Default);
     database.Execute($"""
       BEGIN;
       WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x + 1 FROM n WHERE x < {count})
       INSERT INTO input_decisions
-          (session_id, input_id, expected_history_revision, original_text_utf8, decision, run_id, refusal_reason)
+          (session_id, input_id, expected_history_revision, original_text_utf8, decision, run_id, refusal_reason,
+              llm_selection_json)
       SELECT '{session:D}', '{inputPrefix}' || printf('%012d', x), {revision}, CAST('input ' || x AS BLOB),
-          1, '{runPrefix}' || printf('%012d', x), NULL FROM n;
+          1, '{runPrefix}' || printf('%012d', x), NULL, '{selection}' FROM n;
       INSERT INTO execution_runs (session_id, run_id, history_revision, input_id, outcome)
       SELECT session_id, '{runPrefix}' || substr(input_id, 25), {revision}, input_id, 0
       FROM input_decisions WHERE session_id = '{session:D}' AND input_id LIKE '{inputPrefix}%'
       ORDER BY input_id;
-      INSERT INTO execution_messages (session_id, history_revision, run_id, role, message_id, input_id)
-      SELECT session_id, history_revision, run_id, 0, input_id, input_id
-      FROM execution_runs WHERE session_id = '{session:D}' AND input_id LIKE '{inputPrefix}%'
-      ORDER BY ordinal;
+      INSERT INTO execution_requests (request_id, run_id)
+      SELECT '{requestPrefix}' || substr(input_id, 25), run_id FROM execution_runs
+      WHERE session_id = '{session:D}' AND input_id LIKE '{inputPrefix}%';
+      INSERT INTO execution_messages (session_id, history_revision, run_id, role, message_id, input_id, request_id)
+      SELECT r.session_id, r.history_revision, r.run_id, 0, r.input_id, r.input_id, q.request_id
+      FROM execution_runs r JOIN execution_requests q ON q.run_id = r.run_id
+      WHERE r.session_id = '{session:D}' AND r.input_id LIKE '{inputPrefix}%'
+      ORDER BY r.ordinal;
       COMMIT;
       """);
 
@@ -282,6 +289,7 @@ public sealed class TranscriptHistoryTests(ITestOutputHelper output) {
 
   private static RichFixture SeedRichHistory(TemporaryDatabase database, Guid session, Guid otherSession) {
     const long revision = 3;
+    string selection = JsonSerializer.Serialize(TestLlmSelection.Default);
     Guid firstExecution = Guid.NewGuid(), firstInput = Guid.NewGuid(), firstRequest = Guid.NewGuid();
     Guid firstOutput = Guid.NewGuid(), userMessage = firstInput, firstText = Guid.NewGuid(), secondText = Guid.NewGuid();
     Guid toolOnlyExecution = Guid.NewGuid(), toolOnlyInput = Guid.NewGuid(), toolOnlyRequest = Guid.NewGuid();
@@ -290,24 +298,25 @@ public sealed class TranscriptHistoryTests(ITestOutputHelper output) {
 
     database.Execute($"""
       INSERT INTO input_decisions
-          (session_id, input_id, expected_history_revision, original_text_utf8, decision, run_id, refusal_reason)
-      VALUES ('{session:D}', '{firstInput:D}', {revision}, X'FF', 1, '{firstExecution:D}', NULL);
+          (session_id, input_id, expected_history_revision, original_text_utf8, decision, run_id, refusal_reason,
+              llm_selection_json)
+      VALUES ('{session:D}', '{firstInput:D}', {revision}, X'FF', 1, '{firstExecution:D}', NULL, '{selection}');
       INSERT INTO execution_runs (session_id, run_id, history_revision, input_id, outcome)
       VALUES ('{session:D}', '{firstExecution:D}', {revision}, '{firstInput:D}', 0);
       INSERT INTO execution_requests
-          (request_id, run_id, output_id, next_batch_index, output_final, outcome)
+          (request_id, run_id, response_id, next_chunk_index, response_final, outcome)
       VALUES ('{firstRequest:D}', '{firstExecution:D}', '{firstOutput:D}', 3, 1, 0);
-      INSERT INTO execution_output (request_id, batch_index, text_utf8, is_final)
+      INSERT INTO execution_output (request_id, chunk_index, text_utf8, is_final)
       VALUES ('{firstRequest:D}', 0, X'FF', 0), ('{firstRequest:D}', 1, X'FF', 0), ('{firstRequest:D}', 2, X'FF', 1);
       INSERT INTO execution_tools
           (run_id, request_id, call_index, call_id, name, arguments_json, started, outcome, result_json, started_at, ended_at)
       VALUES ('{firstExecution:D}', '{firstRequest:D}', 0, 'call-a', 'first-tool', 'not-json', 1, 0, 'not-json',
           '2026-11-09T12:00:00+00:00', '2026-11-09T12:00:01+00:00');
       INSERT INTO execution_messages
-          (session_id, history_revision, run_id, role, message_id, input_id)
-      VALUES ('{session:D}', {revision}, '{firstExecution:D}', 0, '{userMessage:D}', '{firstInput:D}');
+          (session_id, history_revision, run_id, role, message_id, input_id, request_id)
+      VALUES ('{session:D}', {revision}, '{firstExecution:D}', 0, '{userMessage:D}', '{firstInput:D}', '{firstRequest:D}');
       INSERT INTO execution_messages
-          (session_id, history_revision, run_id, role, message_id, request_id, first_batch_index, end_batch_index, created_at)
+          (session_id, history_revision, run_id, role, message_id, request_id, first_chunk_index, end_chunk_index, created_at)
       VALUES ('{session:D}', {revision}, '{firstExecution:D}', 1, '{firstText:D}', '{firstRequest:D}', 0, 1,
           '2026-11-09T11:59:59+00:00');
       """);
@@ -320,38 +329,40 @@ public sealed class TranscriptHistoryTests(ITestOutputHelper output) {
       VALUES ('{session:D}', {revision}, '{firstExecution:D}', 2, '{Guid.NewGuid():D}', '{firstRequest:D}',
           'call-a', 'first-tool', '2026-11-09T12:00:00+00:00');
       INSERT INTO execution_messages
-          (session_id, history_revision, run_id, role, message_id, request_id, first_batch_index, end_batch_index, created_at)
+          (session_id, history_revision, run_id, role, message_id, request_id, first_chunk_index, end_chunk_index, created_at)
       VALUES ('{session:D}', {revision}, '{firstExecution:D}', 1, '{secondText:D}', '{firstRequest:D}', 2, 3,
           '2026-11-09T12:00:02+00:00');
 
       INSERT INTO input_decisions
-          (session_id, input_id, expected_history_revision, original_text_utf8, decision, run_id, refusal_reason)
-      VALUES ('{session:D}', '{toolOnlyInput:D}', {revision}, X'FF', 1, '{toolOnlyExecution:D}', NULL);
+          (session_id, input_id, expected_history_revision, original_text_utf8, decision, run_id, refusal_reason,
+              llm_selection_json)
+      VALUES ('{session:D}', '{toolOnlyInput:D}', {revision}, X'FF', 1, '{toolOnlyExecution:D}', NULL, '{selection}');
       INSERT INTO execution_runs (session_id, run_id, history_revision, input_id, outcome)
       VALUES ('{session:D}', '{toolOnlyExecution:D}', {revision}, '{toolOnlyInput:D}', 0);
-      INSERT INTO execution_requests (request_id, run_id, next_batch_index, output_final, outcome)
+      INSERT INTO execution_requests (request_id, run_id, next_chunk_index, response_final, outcome)
       VALUES ('{toolOnlyRequest:D}', '{toolOnlyExecution:D}', 0, 0, 0);
       INSERT INTO execution_tools (run_id, request_id, call_index, call_id, name, arguments_json, result_json)
       VALUES ('{toolOnlyExecution:D}', '{toolOnlyRequest:D}', 0, 'tool-only-call', 'tool-only', 'not-json', 'not-json');
-      INSERT INTO execution_messages (session_id, history_revision, run_id, role, message_id, input_id)
-      VALUES ('{session:D}', {revision}, '{toolOnlyExecution:D}', 0, '{toolOnlyInput:D}', '{toolOnlyInput:D}');
+      INSERT INTO execution_messages (session_id, history_revision, run_id, role, message_id, input_id, request_id)
+      VALUES ('{session:D}', {revision}, '{toolOnlyExecution:D}', 0, '{toolOnlyInput:D}', '{toolOnlyInput:D}', '{toolOnlyRequest:D}');
       INSERT INTO execution_messages (session_id, history_revision, run_id, role, message_id, request_id, call_id, tool_name)
       VALUES ('{session:D}', {revision}, '{toolOnlyExecution:D}', 2, '{toolOnlyText:D}', '{toolOnlyRequest:D}',
           'tool-only-call', 'tool-only');
 
       INSERT INTO input_decisions
-          (session_id, input_id, expected_history_revision, original_text_utf8, decision, run_id, refusal_reason)
-      VALUES ('{session:D}', '{activeInput:D}', {revision}, X'FF', 1, '{activeExecution:D}', NULL);
+          (session_id, input_id, expected_history_revision, original_text_utf8, decision, run_id, refusal_reason,
+              llm_selection_json)
+      VALUES ('{session:D}', '{activeInput:D}', {revision}, X'FF', 1, '{activeExecution:D}', NULL, '{selection}');
       INSERT INTO execution_runs (session_id, run_id, history_revision, input_id)
       VALUES ('{session:D}', '{activeExecution:D}', {revision}, '{activeInput:D}');
-      INSERT INTO execution_requests (request_id, run_id, output_id, next_batch_index, output_final)
+      INSERT INTO execution_requests (request_id, run_id, response_id, next_chunk_index, response_final)
       VALUES ('{activeRequest:D}', '{activeExecution:D}', '{activeOutput:D}', 1, 0);
-      INSERT INTO execution_output (request_id, batch_index, text_utf8, is_final)
+      INSERT INTO execution_output (request_id, chunk_index, text_utf8, is_final)
       VALUES ('{activeRequest:D}', 0, X'FF', 0);
-      INSERT INTO execution_messages (session_id, history_revision, run_id, role, message_id, input_id)
-      VALUES ('{session:D}', {revision}, '{activeExecution:D}', 0, '{activeInput:D}', '{activeInput:D}');
+      INSERT INTO execution_messages (session_id, history_revision, run_id, role, message_id, input_id, request_id)
+      VALUES ('{session:D}', {revision}, '{activeExecution:D}', 0, '{activeInput:D}', '{activeInput:D}', '{activeRequest:D}');
       INSERT INTO execution_messages
-          (session_id, history_revision, run_id, role, message_id, request_id, first_batch_index)
+          (session_id, history_revision, run_id, role, message_id, request_id, first_chunk_index)
       VALUES ('{session:D}', {revision}, '{activeExecution:D}', 1, '{activeText:D}', '{activeRequest:D}', 0);
       """);
 
@@ -376,21 +387,23 @@ public sealed class TranscriptHistoryTests(ITestOutputHelper output) {
     const int outputBytes = 2_778;
     string inputPrefix = Prefix(), runPrefix = Prefix(), requestPrefix = Prefix();
     string outputPrefix = Prefix(), toolEntryPrefix = Prefix();
+    string selection = JsonSerializer.Serialize(TestLlmSelection.Default);
     database.Execute($"""
       BEGIN;
       WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x + 1 FROM n WHERE x < {runs})
       INSERT INTO input_decisions
-          (session_id, input_id, expected_history_revision, original_text_utf8, decision, run_id, refusal_reason)
+          (session_id, input_id, expected_history_revision, original_text_utf8, decision, run_id, refusal_reason,
+              llm_selection_json)
       SELECT '{session:D}', '{inputPrefix}' || printf('%012d', x), 0, zeroblob({inputBytes}), 1,
-          '{runPrefix}' || printf('%012d', x), NULL FROM n;
+          '{runPrefix}' || printf('%012d', x), NULL, '{selection}' FROM n;
       INSERT INTO execution_runs (session_id, run_id, history_revision, input_id, outcome)
       SELECT session_id, run_id, expected_history_revision, input_id, 0 FROM input_decisions
       WHERE session_id = '{session:D}' AND input_id LIKE '{inputPrefix}%' ORDER BY input_id;
-      INSERT INTO execution_requests (request_id, run_id, request_index, output_id, next_batch_index, output_final, outcome)
+      INSERT INTO execution_requests (request_id, run_id, request_index, response_id, next_chunk_index, response_final, outcome)
       SELECT '{requestPrefix}' || substr(input_id, 25), run_id, 0,
           '{outputPrefix}' || substr(input_id, 25), 1, 1, 0
       FROM execution_runs WHERE session_id = '{session:D}' AND input_id LIKE '{inputPrefix}%';
-      INSERT INTO execution_output (request_id, batch_index, text_utf8, is_final)
+      INSERT INTO execution_output (request_id, chunk_index, text_utf8, is_final)
       SELECT request_id, 0, zeroblob({outputBytes}), 1 FROM execution_requests
       WHERE request_id LIKE '{requestPrefix}%';
       INSERT INTO execution_inputs (session_id, input_id, run_id, request_id, outcome)
@@ -407,16 +420,17 @@ public sealed class TranscriptHistoryTests(ITestOutputHelper output) {
           AND CAST(substr(r.input_id, 25) AS INTEGER) % 4 = 0;
       INSERT INTO execution_messages
           (session_id, history_revision, run_id, role, message_id, input_id, request_id,
-              first_batch_index, end_batch_index, call_id, tool_name)
+              first_chunk_index, end_chunk_index, call_id, tool_name)
       SELECT session_id, 0, run_id, role, message_id, input_id, request_id,
-          first_batch_index, end_batch_index, call_id, tool_name
+          first_chunk_index, end_chunk_index, call_id, tool_name
       FROM (
           SELECT r.ordinal AS run_order, 0 AS entry_order, r.session_id, r.run_id, 0 AS role,
-              r.input_id AS message_id, r.input_id, NULL AS request_id, 0 AS first_batch_index,
-              NULL AS end_batch_index, NULL AS call_id, NULL AS tool_name
-          FROM execution_runs r WHERE r.session_id = '{session:D}' AND r.input_id LIKE '{inputPrefix}%'
+              r.input_id AS message_id, r.input_id, q.request_id, 0 AS first_chunk_index,
+              NULL AS end_chunk_index, NULL AS call_id, NULL AS tool_name
+          FROM execution_runs r JOIN execution_requests q ON q.run_id = r.run_id
+          WHERE r.session_id = '{session:D}' AND r.input_id LIKE '{inputPrefix}%'
           UNION ALL
-          SELECT r.ordinal, 1, r.session_id, r.run_id, 1, q.output_id, NULL, q.request_id, 0, 1, NULL, NULL
+          SELECT r.ordinal, 1, r.session_id, r.run_id, 1, q.response_id, NULL, q.request_id, 0, 1, NULL, NULL
           FROM execution_runs r JOIN execution_requests q ON q.run_id = r.run_id
           WHERE r.session_id = '{session:D}' AND r.input_id LIKE '{inputPrefix}%'
           UNION ALL

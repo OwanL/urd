@@ -269,11 +269,12 @@ export class WorkspaceCommands {
 
   observeSnapshot(snapshot: SessionSnapshot, knownWhenRead: string | null): void {
     const saved = this.access.read().chats[snapshot.sessionId];
-    if (saved?.title === "New chat" && snapshot.firstUserPreview !== null) {
+    if (saved?.titleProvenance === "placeholder" && snapshot.firstUserPreview !== null) {
       const title = [...snapshot.firstUserPreview.trim()].slice(0, 48).join("");
       this.access.updateChat(snapshot.sessionId, (previous) => ({
         ...previous,
         title: title || "Chat",
+        titleProvenance: "derived",
       }));
     }
     if (

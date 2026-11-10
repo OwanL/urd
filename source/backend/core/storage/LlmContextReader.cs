@@ -8,7 +8,7 @@ using Urd.Core.Providers;
 namespace Urd.Core.Storage;
 
 // Execution owns context eligibility: never-attempted history is excluded, while the
-// current claim is included to prepare its send. Attempted failures and legacy data stay eligible.
+// current claim is included to prepare its send. Attempted failures stay eligible.
 internal sealed class LlmContextReader(Database database) {
   internal ReadOnlyCollection<ChatMessage> Read(SqliteTransaction transaction, Guid sessionId,
       Guid executionId, long historyRevision, Guid requestId) {
@@ -18,7 +18,7 @@ internal sealed class LlmContextReader(Database database) {
           JOIN execution_requests q ON q.run_id = r.run_id
           WHERE r.session_id = $session AND r.history_revision = $revision
               AND r.ordinal <= (SELECT ordinal FROM execution_runs WHERE run_id = $run)
-              AND (q.attempt <> 1 OR q.request_id = $request)
+              AND (q.attempt = 2 OR q.request_id = $request)
               AND (r.run_id <> $run OR q.request_index <=
                   (SELECT request_index FROM execution_requests WHERE request_id = $request))
       ), contents AS (
@@ -27,7 +27,7 @@ internal sealed class LlmContextReader(Database database) {
           FROM requests q JOIN execution_inputs i ON i.request_id = q.request_id
           JOIN input_decisions d ON d.session_id = i.session_id AND d.input_id = i.input_id
           UNION ALL
-          SELECT q.run_ordinal, q.request_index, q.request_id, 1, o.batch_index, o.text_utf8, NULL, NULL, NULL
+          SELECT q.run_ordinal, q.request_index, q.request_id, 1, o.chunk_index, o.text_utf8, NULL, NULL, NULL
           FROM requests q JOIN execution_output o ON o.request_id = q.request_id
           WHERE NOT EXISTS (SELECT 1 FROM execution_provider_context c WHERE c.request_id = q.request_id)
           UNION ALL

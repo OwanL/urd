@@ -16,17 +16,17 @@ internal sealed class LlmResponseStorage(Database database) {
 
     return database.Write(transaction => {
       using SqliteCommand advance = database.Command(transaction, """
-        UPDATE execution_requests SET next_batch_index = next_batch_index + 1,
-            output_id = CASE WHEN output_id IS NULL AND $hasText = 1 THEN $output ELSE output_id END,
-            output_final = $final
+        UPDATE execution_requests SET next_chunk_index = next_chunk_index + 1,
+            response_id = CASE WHEN response_id IS NULL AND $hasText = 1 THEN $output ELSE response_id END,
+            response_final = $final
         WHERE request_id = $request AND run_id = $run AND outcome IS NULL
-            AND next_batch_index = $index AND output_final = 0
+            AND next_chunk_index = $index AND response_final = 0
             AND NOT EXISTS (SELECT 1 FROM execution_messages m
-                WHERE m.request_id = $request AND m.role = 1 AND m.end_batch_index IS NULL
+                WHERE m.request_id = $request AND m.role = 1 AND m.end_chunk_index IS NULL
                     AND m.message_id <> $output)
             AND NOT EXISTS (SELECT 1 FROM execution_messages m
                 WHERE m.request_id = $request AND m.role = 1 AND m.message_id = $output
-                    AND m.end_batch_index IS NOT NULL)
+                    AND m.end_chunk_index IS NOT NULL)
             AND EXISTS (SELECT 1 FROM execution_runs r JOIN sessions s ON s.session_id = r.session_id
                 WHERE r.run_id = $run AND r.session_id = $session AND r.history_revision = $revision
                     AND s.history_revision = $revision AND r.stopping = 0 AND r.outcome IS NULL);
@@ -43,7 +43,7 @@ internal sealed class LlmResponseStorage(Database database) {
         return false;
 
       using SqliteCommand append = database.Command(transaction, """
-        INSERT INTO execution_output (request_id, batch_index, text_utf8, is_final)
+        INSERT INTO execution_output (request_id, chunk_index, text_utf8, is_final)
         VALUES ($request, $index, $text, $final);
         """,
           ("$request", chunk.RequestId),
@@ -52,12 +52,12 @@ internal sealed class LlmResponseStorage(Database database) {
           ("$final", chunk.IsFinal ? 1 : 0));
       append.ExecuteNonQuery();
 
-      bool createsTextRun = chunk.Text.Length > 0;
-      if (createsTextRun) {
+      bool hasText = chunk.Text.Length > 0;
+      if (hasText) {
         using SqliteCommand index = database.Command(transaction, """
           INSERT INTO execution_messages (
               session_id, history_revision, run_id, role, message_id, request_id,
-              first_batch_index, created_at)
+              first_chunk_index, created_at)
           SELECT $session, $revision, $run, 1, $output, $request, $index, $created
           WHERE NOT EXISTS (SELECT 1 FROM execution_messages
               WHERE request_id = $request AND role = 1 AND message_id = $output);
@@ -70,8 +70,8 @@ internal sealed class LlmResponseStorage(Database database) {
 
       if (chunk.IsFinal) {
         using SqliteCommand close = database.Command(transaction, """
-          UPDATE execution_messages SET end_batch_index = $end
-          WHERE request_id = $request AND role = 1 AND message_id = $output AND end_batch_index IS NULL;
+          UPDATE execution_messages SET end_chunk_index = $end
+          WHERE request_id = $request AND role = 1 AND message_id = $output AND end_chunk_index IS NULL;
           """,
             ("$end", chunk.ChunkIndex + 1), ("$request", chunk.RequestId), ("$output", chunk.ResponseId));
         close.ExecuteNonQuery();
@@ -93,7 +93,7 @@ internal sealed class LlmResponseStorage(Database database) {
       using SqliteCommand allowed = database.Command(transaction, """
         SELECT EXISTS (SELECT 1 FROM execution_requests q
             JOIN execution_runs r ON r.run_id = q.run_id JOIN sessions s ON s.session_id = r.session_id
-            WHERE q.request_id = $request AND q.run_id = $run AND q.outcome IS NULL AND q.output_final = 0
+            WHERE q.request_id = $request AND q.run_id = $run AND q.outcome IS NULL AND q.response_final = 0
                 AND r.session_id = $session AND r.history_revision = $revision AND s.history_revision = $revision
                 AND r.stopping = 0 AND r.outcome IS NULL
                 AND NOT EXISTS (SELECT 1 FROM execution_requests later
@@ -125,9 +125,9 @@ internal sealed class LlmResponseStorage(Database database) {
       }
 
       using SqliteCommand closeRun = database.Command(transaction, """
-        UPDATE execution_messages SET end_batch_index = (
-            SELECT next_batch_index FROM execution_requests WHERE request_id = $request)
-        WHERE request_id = $request AND role = 1 AND end_batch_index IS NULL;
+        UPDATE execution_messages SET end_chunk_index = (
+            SELECT next_chunk_index FROM execution_requests WHERE request_id = $request)
+        WHERE request_id = $request AND role = 1 AND end_chunk_index IS NULL;
         """, ("$request", requestId));
       closeRun.ExecuteNonQuery();
 
@@ -176,7 +176,7 @@ internal sealed class LlmResponseStorage(Database database) {
       string? providerResponseJson, string? usageJson) {
     bool alreadyCompleted;
     using (SqliteCommand read = database.Command(transaction, """
-      SELECT q.outcome, q.error, q.output_final, r.stopping, r.outcome,
+      SELECT q.outcome, q.error, q.response_final, r.stopping, r.outcome,
           EXISTS (SELECT 1 FROM execution_requests later
               WHERE later.run_id = $run AND later.request_index > q.request_index), c.response_json, q.usage_json
       FROM execution_requests q JOIN execution_runs r ON r.run_id = q.run_id
@@ -242,9 +242,9 @@ internal sealed class LlmResponseStorage(Database database) {
         ("$request", completion.RequestId));
     update.ExecuteNonQuery();
     using (SqliteCommand closeRun = database.Command(transaction, """
-      UPDATE execution_messages SET end_batch_index = (
-          SELECT next_batch_index FROM execution_requests WHERE request_id = $request)
-      WHERE request_id = $request AND role = 1 AND end_batch_index IS NULL;
+      UPDATE execution_messages SET end_chunk_index = (
+          SELECT next_chunk_index FROM execution_requests WHERE request_id = $request)
+      WHERE request_id = $request AND role = 1 AND end_chunk_index IS NULL;
       """, ("$request", completion.RequestId)))
       closeRun.ExecuteNonQuery();
     if (providerResponseJson is not null) {

@@ -68,33 +68,30 @@ public sealed class SendAttemptStorageTests {
   }
 
   [Fact]
-  public void ContextExcludesNeverAttemptedButRetainsAttemptedFailuresAndLegacyUnknown() {
+  public void ContextExcludesUnsentAndRetainsAttemptedFailures() {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
-    Finish("never sent", attempt: false, partial: null);
-    Finish("attempted failed", attempt: true, partial: "committed partial");
-    Guid legacy = Finish("legacy unknown", attempt: false, partial: null);
-    database.Execute($"UPDATE execution_requests SET attempt = 0 WHERE run_id = '{legacy:D}';");
+    Finish("never sent", startRequest: false, partial: null);
+    Finish("attempted failed", startRequest: true, partial: "committed partial");
     Guid run = Guid.NewGuid();
     Admit(store, session, run, Input("current claim"));
     LlmRequest next = store.Executions.ClaimNextRequest(session, run, 0)!;
-    Assert.Equal(new[] { "attempted failed", "committed partial", "legacy unknown", "current claim" },
+    Assert.Equal(new[] { "attempted failed", "committed partial", "current claim" },
         next.Messages.Select(message => message.Text));
-    Assert.Equal(new[] { ChatRole.User, ChatRole.Assistant, ChatRole.User, ChatRole.User },
+    Assert.Equal(new[] { ChatRole.User, ChatRole.Assistant, ChatRole.User },
         next.Messages.Select(message => message.Role));
 
-    Guid Finish(string text, bool attempt, string? partial) {
+    void Finish(string text, bool startRequest, string? partial) {
       Guid execution = Guid.NewGuid();
       Admit(store, session, execution, Input(text));
       Guid request = store.Executions.ClaimNextRequest(session, execution, 0)!.RequestId;
-      if (attempt)
+      if (startRequest)
         Assert.True(store.Executions.StartRequest(session, execution, 0, request));
       if (partial is not null)
         Assert.True(store.LlmResponses.Append(session, execution, 0, new(request, Guid.NewGuid(), 0, partial, false)));
       Assert.True(store.LlmResponses.CompleteRequest(session, execution, 0, new(request, ExecutionOutcome.Failed, "failure")));
       Assert.NotNull(store.Executions.TrySettle(session, execution, ExecutionOutcome.Failed));
-      return execution;
     }
   }
 

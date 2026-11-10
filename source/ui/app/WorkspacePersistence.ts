@@ -28,12 +28,25 @@ export class WorkspacePersistence {
       const raw = storage.getItem(this.key);
       if (raw === null) return { state: emptyWorkspace(), first: true, error: null };
 
-      const state = decodeWorkspace(raw);
+      let state: WorkspaceState;
+      try {
+        state = decodeWorkspace(raw);
+      } catch {
+        this.discard(storage);
+        return { state: emptyWorkspace(), first: true, error: null };
+      }
+
       const chats = { ...state.chats };
       for (const [id, chat] of Object.entries(chats)) {
         const saved = storage.getItem(this.draftKey(id));
         if (saved === null) continue;
-        const draft = decodeDraft(saved);
+        let draft: SavedDraft;
+        try {
+          draft = decodeDraft(saved);
+        } catch {
+          this.discard(storage);
+          return { state: emptyWorkspace(), first: true, error: null };
+        }
         if (draft.draftVersion > chat.draftVersion)
           chats[id] = { ...chat, draft: draft.draft, draftVersion: draft.draftVersion };
       }
@@ -67,6 +80,17 @@ export class WorkspacePersistence {
   saveDraft(id: string, chat: ChatState): void {
     const draft: SavedDraft = { draft: chat.draft, draftVersion: chat.draftVersion };
     this.storage().setItem(this.draftKey(id), JSON.stringify(draft));
+  }
+
+  private discard(storage: Storage): void {
+    const draftPrefix = `${this.key}.draft.`;
+    const draftKeys: string[] = [];
+    for (let index = 0; index < storage.length; index++) {
+      const candidate = storage.key(index);
+      if (candidate?.startsWith(draftPrefix)) draftKeys.push(candidate);
+    }
+    for (const draftKey of draftKeys) storage.removeItem(draftKey);
+    storage.removeItem(this.key);
   }
 
   private draftKey(id: string): string {

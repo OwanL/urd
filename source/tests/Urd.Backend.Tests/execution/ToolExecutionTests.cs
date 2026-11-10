@@ -265,7 +265,7 @@ public sealed class ToolExecutionTests {
     command.CommandText = """
       SELECT m.role, m.message_id, m.call_id, m.created_at,
           CASE WHEN m.role = 1 THEN CAST((SELECT text_utf8 FROM execution_output
-              WHERE request_id = m.request_id AND batch_index = m.first_batch_index) AS TEXT) ELSE m.call_id END
+              WHERE request_id = m.request_id AND chunk_index = m.first_chunk_index) AS TEXT) ELSE m.call_id END
       FROM execution_messages m ORDER BY m.ordinal;
       """;
     using SqliteDataReader reader = command.ExecuteReader();

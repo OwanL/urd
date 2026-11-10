@@ -294,3 +294,79 @@ and production snapshots. This evidence supports bounded production-builder inde
 reads and tested cache release only. It is not end-to-end, memory-recovery or
 streaming sign-off. Server activation still needs coherent multi-message working-set,
 scheduler/contention and browser evidence.
+
+## Composed production parser/cache working-set probe — 2026-11-10
+
+This final synthetic, in-process probe compiled unchanged production backend sources
+at exact HEAD `e4f5ecc97bd954d23e45a176244df89617bf6fa3` and exercised the real
+`MarkdownParser`, scheduler, cache, leases, page reader, source map and DTOs. It
+passed **1,943 assertions**; all four owned child processes exited 0. No repository
+source was modified for the probe. The deterministic capture delegate is synthetic:
+there was no database, storage/session capture path, application service, UI, browser,
+live session or provider. This is bounded fixture evidence, not E2E or a production
+benchmark.
+
+### Composed working set and parser cost
+
+| Source | Actual UTF-8 bytes | Parse + index ms | Managed allocated bytes |
+| --- | ---: | ---: | ---: |
+| Common cold message | 870 | 72.5913 | 151,736 |
+| Table | 524,282 | 572.6632 | 159,159,768 |
+| Code | 2,097,105 | 181.2655 | 60,090,352 |
+| Mixed, old generation | 2,097,010 | 1,709.4371 | 324,255,664 |
+| Mixed, appended generation | 2,097,053 | 1,467.3978 | 323,370,080 |
+| Mixed contention specimen | 2,097,010 | 1,085.3008 | 323,365,592 |
+
+The largest named composed handoff retained **64 entries / 151,748,836 accounted
+bytes**, with both old and appended mixed generations pinned; accounted bytes are the
+cache's conservative retention formula, not CLR heap or transient parser memory.
+The composed process OS peak working set was **426,971,136 bytes** (sampled maximum
+private bytes 384,081,920). The short common miss arrived during an actual large
+synchronous parse: its request-to-lease wait was **1,066.4388 ms**, while its own
+parse took **0.2616 ms**. This demonstrates head-of-line waiting in this fixture,
+not a service/UI latency or a production target. Marker timing includes a small
+pre-call harness offset and scheduling/publication.
+
+All 60 repeated common requests hit cached generations. Under both entry and byte
+pressure, admission of the appended generation failed with the expected
+`MarkdownCacheFullException` while the old pinned pages remained readable and
+accounting unchanged; releasing the old lease allowed eviction/retry, and generation
+checks distinguished rebuild from a warm hit. The queue case verified supersession,
+duplicate joining, unrelated-key `MarkdownQueueFullException`, delivery/release of
+independent leases, and zero final accounting. These correctness cases do not imply
+that retention limits cap parse work or transient memory: each pressure process
+allocated about **1.688 billion managed bytes** across five whole mixed parses,
+including rejected publications.
+
+After composed release/drain/disposal, entries, accounted bytes, external pins and
+interests were zero. Without forced GC, estimated managed memory remained about
+189.9 MB through 15 seconds, then was about 0.99 MB at 30 seconds and 1.02 MB at
+60 seconds; working set fell from 268.1 MB at 0 seconds to 54.4 MB at 30 seconds.
+A natural collection occurred between 15 and 30 seconds in this run, not on a
+guaranteed deadline. At final measurement all tracked source/index weak references
+were dead. Pressure/queue immediate snapshots with zero accounting do not establish
+immediate collection; some weak references remained alive before collection.
+Explicit-GC diagnostic measurements are not a production recovery proposal.
+
+### Streaming and qualification limits
+
+A separate read-only Markdig 1.6.0 feasibility inspection found public low-level
+line-continuation support, but no safe resumable document/checkpoint API. Backward
+invalidation and potentially unbounded parse tails prevent treating that primitive
+as safe incremental document parsing; whole-source parsing remains the current
+approach. This is a feasibility finding, not approval of a fast lane or a change to
+design invariants.
+
+The append fixture added only **43 bytes** to an identical committed prefix. It does
+not qualify repeated streaming growth, bounded memory/latency, or arbitrary edits.
+The probe does not set production defaults or recommend its generous probe limits.
+No DB/UI/E2E, production-default or streaming-growth qualification follows. Timing and
+memory depend on fixture shape, runtime, diagnostics, GC and host scheduling; managed
+allocation is cumulative churn, not live memory.
+
+### Evidence and reproduction
+
+The full report and raw records are temporary at
+`C:/Users/OwanLazic/AppData/Local/Temp/urd-markdown-composed-f16e8e19-07e7-4c1c-8728-add556b521c6/REPORT.md`
+(and neighboring files). This path is a local reproduction artifact, not durable
+evidence storage.

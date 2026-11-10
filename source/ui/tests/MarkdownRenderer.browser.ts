@@ -1,15 +1,22 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { chromium, type Page } from "playwright";
+import { chromium, type JSHandle, type Page } from "playwright";
 import { createServer } from "vite";
 import { safeMarkdownLink } from "../markdown-rendering/MarkdownLinkPolicy.ts";
-import type { MarkdownRenderSnapshot } from "../markdown-rendering/MarkdownRenderModel.ts";
+import type {
+  MarkdownPieceInterval,
+  MarkdownRenderSnapshot,
+} from "../markdown-rendering/MarkdownRenderModel.ts";
 
 declare global {
   interface Window {
     markdownRendererHarness: {
       readonly links: string[];
       readonly snapshot: MarkdownRenderSnapshot;
+      readonly selectionChanges: number;
+      readSelectionPins(): readonly MarkdownPieceInterval[];
+      trim(active: MarkdownPieceInterval): Promise<void>;
+      disposeSelectionPins(): void;
       append(): Promise<void>;
       unmountRemount(): void;
       duplicate(): void;
@@ -141,6 +148,7 @@ void test("standalone Markdown renderer in Chromium", async (t) => {
         assert.ok(
           selection.pieces.length > 1 && selection.pieces.every((mapping) => mapping === "exact"),
         );
+        assert.equal(await copySelection(page), selection.text);
       },
     );
     await t.test("content-page updates preserve native selection and existing nodes", async () => {
@@ -166,6 +174,183 @@ void test("standalone Markdown renderer in Chromium", async (t) => {
         }
       });
       assert.ok(await page.getByText("later page appended.").count());
+    });
+    await t.test("selection pins preserve native ranges through bounded trim", async () => {
+      try {
+        await open("selection");
+        const pinIntervals = () =>
+          page.evaluate(() => window.markdownRendererHarness.readSelectionPins());
+        const select = async (from: number, to: number) => {
+          const first = page.locator(`[data-piece="${from}"]`);
+          const last = page.locator(`[data-piece="${to}"]`);
+          await first.scrollIntoViewIfNeeded();
+          const a = (await first.boundingBox())!;
+          const b = (await last.boundingBox())!;
+          const reverse = from > to;
+          await page.mouse.move(reverse ? a.x + a.width - 1 : a.x + 1, a.y + a.height / 2);
+          await page.mouse.down();
+          await page.mouse.move(reverse ? b.x + 1 : b.x + b.width - 1, b.y + b.height / 2, {
+            steps: 10,
+          });
+          await page.mouse.up();
+          assert.notEqual(await page.evaluate(() => getSelection()!.isCollapsed), true);
+        };
+
+        await page.evaluate(() => {
+          const text = document.querySelector('[data-piece="300"]')!.firstChild!;
+          const range = document.createRange();
+          range.setStart(text, 0);
+          const selection = getSelection()!;
+          selection.removeAllRanges();
+          selection.addRange(range);
+          const pins = window.markdownRendererHarness.readSelectionPins();
+          if (pins.length !== 1 || pins[0]!.from !== 300 || pins[0]!.next !== 301)
+            throw new Error("Collapsed native focus must pin its complete piece");
+          range.setEnd(text, "Selection ".length);
+        });
+        assert.equal(await page.evaluate(() => getSelection()!.toString()), "Selection ");
+        assert.deepEqual(await pinIntervals(), [{ from: 300, next: 301 }]);
+        await page.keyboard.press("Shift+ArrowRight");
+        assert.equal(await page.evaluate(() => getSelection()!.toString()), "Selection p");
+        await page.evaluate(() => window.markdownRendererHarness.trim({ from: 10, next: 20 }));
+        assert.equal(await page.evaluate(() => getSelection()!.toString()), "Selection p");
+        assert.deepEqual(await pinIntervals(), [{ from: 300, next: 301 }]);
+        await page.keyboard.press("Shift+ArrowRight");
+        assert.equal(await page.evaluate(() => getSelection()!.toString()), "Selection pa");
+        assert.deepEqual(await pinIntervals(), [{ from: 300, next: 301 }]);
+        assert.equal(await copySelection(page), "Selection pa");
+
+        const assertDirectionalTrim = async (from: number, to: number) => {
+          await open("selection");
+          const before = await page.evaluate(() => window.markdownRendererHarness.selectionChanges);
+          await select(from, to);
+          await page.waitForFunction(
+            (previous) => window.markdownRendererHarness.selectionChanges > previous,
+            before,
+          );
+          const first = Math.min(from, to);
+          const next = Math.max(from, to) + 1;
+          const selected = await page.evaluate(() => getSelection()!.toString());
+          assert.ok(
+            selected.includes(`Selection paragraph ${first}.`) &&
+              selected.includes(`Selection paragraph ${next - 1}.`),
+          );
+          assert.deepEqual(await pinIntervals(), [{ from: first, next }]);
+          assert.equal(normalizeSelection(await copySelection(page)), normalizeSelection(selected));
+          const nodes = await selectedPieceNodes(page, first, next);
+          const endpoints = await page.evaluateHandle(() => {
+            const selection = getSelection()!;
+            return {
+              anchorNode: selection.anchorNode,
+              anchorOffset: selection.anchorOffset,
+              focusNode: selection.focusNode,
+              focusOffset: selection.focusOffset,
+            };
+          });
+          assert.equal(await selectedPieceCount(page, nodes), next - first);
+          await page.evaluate(() => window.markdownRendererHarness.trim({ from: 10, next: 20 }));
+          const retained = await page.evaluate(() => ({
+            selected: getSelection()!.toString(),
+            pieces: window.markdownRendererHarness.snapshot.pieces.size,
+            contexts: window.markdownRendererHarness.snapshot.contexts.size,
+            elements: document.querySelectorAll(".markdown-renderer [data-piece]").length,
+            contextElements: document.querySelectorAll(".markdown-renderer [data-context]").length,
+            active: [
+              window.markdownRendererHarness.snapshot.from,
+              window.markdownRendererHarness.snapshot.next,
+            ],
+            ranges: [
+              ...window.markdownRendererHarness.snapshot.displayRanges,
+              ...window.markdownRendererHarness.snapshot.supportRanges,
+            ],
+          }));
+          assert.equal(normalizeSelection(retained.selected), normalizeSelection(selected));
+          assert.equal(
+            await page.evaluate((before) => {
+              const current = getSelection()!;
+              return (
+                current.anchorNode === before.anchorNode &&
+                current.anchorOffset === before.anchorOffset &&
+                current.focusNode === before.focusNode &&
+                current.focusOffset === before.focusOffset
+              );
+            }, endpoints),
+            true,
+            "Trim preserves native selection endpoints",
+          );
+          assert.ok(retained.pieces <= 20 && retained.contexts <= 30);
+          assert.ok(retained.elements <= 20 && retained.contextElements <= 30);
+          assert.deepEqual(retained.active, [10, 20]);
+          assert.ok(retained.ranges.some((range) => range.from <= first && range.next >= next));
+          assert.equal(await selectedPiecesRetained(page, nodes), true);
+          assert.equal(await page.locator('[data-piece="100"]').count(), 0);
+          assert.equal(normalizeSelection(await copySelection(page)), normalizeSelection(selected));
+          await endpoints.dispose();
+          await nodes.dispose();
+
+          const changes = await page.evaluate(
+            () => window.markdownRendererHarness.selectionChanges,
+          );
+          await page.evaluate(() => getSelection()!.removeAllRanges());
+          await page.waitForFunction(
+            (previous) => window.markdownRendererHarness.selectionChanges > previous,
+            changes,
+          );
+          assert.deepEqual(await pinIntervals(), []);
+          await page.evaluate(() => window.markdownRendererHarness.trim({ from: 10, next: 20 }));
+          assert.equal(await page.locator(`[data-piece="${first}"]`).count(), 0);
+          assert.ok(
+            await page.evaluate(() => window.markdownRendererHarness.snapshot.pieces.size <= 10),
+          );
+        };
+
+        for (const [from, to] of [
+          [340, 344],
+          [355, 351],
+        ] as const)
+          await assertDirectionalTrim(from, to);
+
+        await open("selection");
+        const outsideSelection = await page.evaluate(() => {
+          const root = document.querySelector<HTMLElement>(".markdown-renderer")!;
+          const text = document.querySelector('[data-piece="344"]')!.firstChild!;
+          const parent = root.parentNode!;
+          const range = document.createRange();
+          range.setStart(parent, [...parent.childNodes].indexOf(root));
+          range.setEnd(text, text.textContent!.length);
+          const selection = getSelection()!;
+          selection.removeAllRanges();
+          selection.addRange(range);
+          return selection.toString();
+        });
+        assert.ok(outsideSelection.includes("Selection paragraph 344."));
+        assert.ok(
+          (await pinIntervals()).some(({ from, next }) => from <= 340 && next >= 345),
+          "Selection pins intersecting root content even when an endpoint is outside it",
+        );
+        const crossingNodes = await selectedPieceNodes(page, 340, 345);
+        assert.equal(await selectedPieceCount(page, crossingNodes), 5);
+        await page.evaluate(() => window.markdownRendererHarness.trim({ from: 10, next: 20 }));
+        assert.equal(await page.evaluate(() => getSelection()!.toString()), outsideSelection);
+        assert.equal(await selectedPiecesRetained(page, crossingNodes), true);
+        await crossingNodes.dispose();
+        await page.evaluate(() => window.markdownRendererHarness.disposeSelectionPins());
+        const disposed = await page.evaluate(() => window.markdownRendererHarness.selectionChanges);
+        await page.evaluate(() => {
+          const text = document.querySelector('[data-piece="12"]')!.firstChild!;
+          const range = document.createRange();
+          range.setStart(text, 0);
+          range.collapse(true);
+          getSelection()!.addRange(range);
+        });
+        await page.waitForTimeout(50);
+        assert.equal(
+          await page.evaluate(() => window.markdownRendererHarness.selectionChanges),
+          disposed,
+        );
+      } finally {
+        await open();
+      }
     });
     await t.test(
       "full unmount/remount drops native selection but keeps exact source mapping",
@@ -209,15 +394,8 @@ void test("standalone Markdown renderer in Chromium", async (t) => {
       },
     );
     await t.test(
-      "native clipboard copy preserves plain text for inline, list, table and code",
+      "native clipboard copy preserves plain text for list, table and code",
       async () => {
-        await page.getByText("Readable", { exact: true }).dblclick();
-        await page.keyboard.press("Shift+End");
-        const inline = await page.evaluate(() => getSelection()!.toString());
-        for (const text of ["Readable", "Emphasis", "strong", "inline_code"])
-          assert.ok(inline.includes(text), inline);
-        assert.equal(await copySelection(page), inline);
-
         await page.getByText("First", { exact: true }).dblclick();
         await page.keyboard.press("Shift+End");
         assert.equal(await copySelection(page), "First tight item");
@@ -308,6 +486,51 @@ void test("standalone Markdown renderer in Chromium", async (t) => {
     await server.close();
   }
 });
+
+type SelectedPiece = { id: string; element: HTMLElement; text: Node | null };
+
+async function selectedPieceNodes(
+  page: Page,
+  from = 0,
+  next = Number.MAX_SAFE_INTEGER,
+): Promise<JSHandle<SelectedPiece[]>> {
+  return page.evaluateHandle(
+    ({ from, next }) => {
+      const selection = getSelection();
+      if (!selection?.rangeCount) throw new Error("Expected selected pieces");
+      const range = selection.getRangeAt(0);
+      return [...document.querySelectorAll<HTMLElement>(".markdown-renderer [data-piece]")]
+        .filter((piece) => {
+          const id = Number(piece.dataset.piece);
+          return id >= from && id < next && range.intersectsNode(piece);
+        })
+        .map((element) => ({ id: element.dataset.piece!, element, text: element.firstChild }));
+    },
+    { from, next },
+  );
+}
+
+function normalizeSelection(text: string): string {
+  return text.replace(/\r\n/gu, "\n");
+}
+
+async function selectedPieceCount(page: Page, pieces: JSHandle<SelectedPiece[]>): Promise<number> {
+  return page.evaluate((selected) => selected.length, pieces);
+}
+
+async function selectedPiecesRetained(
+  page: Page,
+  pieces: JSHandle<SelectedPiece[]>,
+): Promise<boolean> {
+  return page.evaluate(
+    (selected) =>
+      selected.every(({ id, element, text }) => {
+        const current = document.querySelector(`[data-piece="${id}"]`);
+        return current === element && current?.firstChild === text;
+      }),
+    pieces,
+  );
+}
 
 async function copySelection(page: Page): Promise<string> {
   await page.keyboard.press("Control+C");

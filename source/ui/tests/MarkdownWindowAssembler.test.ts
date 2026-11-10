@@ -23,6 +23,32 @@ function assertUncommitted(assembler: MarkdownWindowAssembler, from: number) {
   assert.equal(snapshot.contexts.size, 0);
 }
 
+async function assertAppendRejected(
+  source: SyntheticMarkdownPageSource,
+  message: RegExp = /Markdown/u,
+): Promise<void> {
+  const assembler = new MarkdownWindowAssembler(source, source.manifest);
+  await assert.rejects(assembler.append(signal()), message);
+  assertUncommitted(assembler, 0);
+}
+
+type TrimRequest = Parameters<MarkdownWindowAssembler["trim"]>[0];
+
+function trim(
+  assembler: MarkdownWindowAssembler,
+  active: TrimRequest["active"],
+  retain?: TrimRequest["retain"],
+) {
+  return assembler.trim(
+    {
+      generation: assembler.snapshot.generation,
+      active,
+      ...(retain ? { retain } : {}),
+    },
+    signal(),
+  );
+}
+
 function linearSource(
   pieces: ReturnType<typeof createMarkdownPiece>[],
   options: MarkdownRenderFixtureOptions = {},
@@ -49,6 +75,91 @@ function linearSource(
   );
 }
 
+function contextEntry(id: number, overrides: Parameters<typeof createMarkdownContext>[1]) {
+  return { context: createMarkdownContext(id, overrides) };
+}
+
+function tableSource(options: MarkdownRenderFixtureOptions = {}) {
+  return new SyntheticMarkdownPageSource(
+    [
+      createMarkdownPiece(0, 3, "header"),
+      createMarkdownPiece(1, 3, ""),
+      ...Array.from({ length: 4 }, (_, offset) =>
+        createMarkdownPiece(offset + 2, 6, `body-${offset}`),
+      ),
+      createMarkdownPiece(6, 7, "outside"),
+    ],
+    [
+      contextEntry(0, {
+        kind: "document",
+        firstChild: 1,
+        childCount: 2,
+        firstPiece: 0,
+        pieceCount: 7,
+      }),
+      contextEntry(1, {
+        kind: "table",
+        parent: 0,
+        firstChild: 2,
+        nextSibling: 7,
+        childCount: 2,
+        firstPiece: 0,
+        pieceCount: 6,
+      }),
+      contextEntry(2, {
+        kind: "row",
+        parent: 1,
+        firstChild: 3,
+        nextSibling: 5,
+        childCount: 2,
+        firstPiece: 0,
+        pieceCount: 2,
+        header: true,
+      }),
+      {
+        ...contextEntry(3, {
+          kind: "cell",
+          parent: 2,
+          nextSibling: 4,
+          firstPiece: 0,
+          pieceCount: 2,
+          valueCount: 2,
+          header: true,
+          headerCell: 3,
+        }),
+        values: [
+          createMarkdownValue("title", "column ", 0, true),
+          createMarkdownValue("title", "name", 1),
+        ],
+      },
+      contextEntry(4, {
+        kind: "cell",
+        parent: 2,
+        firstPiece: 2,
+        header: true,
+        headerCell: 4,
+      }),
+      contextEntry(5, {
+        kind: "row",
+        parent: 1,
+        firstChild: 6,
+        childCount: 1,
+        firstPiece: 2,
+        pieceCount: 4,
+      }),
+      contextEntry(6, {
+        kind: "cell",
+        parent: 5,
+        firstPiece: 2,
+        pieceCount: 4,
+        headerCell: 3,
+      }),
+      contextEntry(7, { parent: 0, firstPiece: 6, pieceCount: 1 }),
+    ],
+    options,
+  );
+}
+
 void test("assembles continued values and pieces across appended pages", async () => {
   const source = new SyntheticMarkdownPageSource(
     [
@@ -56,21 +167,9 @@ void test("assembles continued values and pieces across appended pages", async (
       createMarkdownPiece(1, 1, "second", { part: 1 }),
     ],
     [
+      contextEntry(0, { kind: "document", firstChild: 1, firstPiece: 0, pieceCount: 2 }),
       {
-        context: createMarkdownContext(0, {
-          kind: "document",
-          firstChild: 1,
-          firstPiece: 0,
-          pieceCount: 2,
-        }),
-      },
-      {
-        context: createMarkdownContext(1, {
-          parent: 0,
-          firstPiece: 0,
-          pieceCount: 2,
-          valueCount: 2,
-        }),
+        ...contextEntry(1, { parent: 0, firstPiece: 0, pieceCount: 2, valueCount: 2 }),
         values: [
           createMarkdownValue("destination", "/example/", 0, true),
           createMarkdownValue("destination", "target", 1),
@@ -104,17 +203,8 @@ void test("accepts a middle-window initial part and continues it on the next app
       createMarkdownPiece(4, 1, "end", { part: 5 }),
     ],
     [
-      {
-        context: createMarkdownContext(0, {
-          kind: "document",
-          firstChild: 1,
-          firstPiece: 3,
-          pieceCount: 2,
-        }),
-      },
-      {
-        context: createMarkdownContext(1, { parent: 0, firstPiece: 3, pieceCount: 2 }),
-      },
+      contextEntry(0, { kind: "document", firstChild: 1, firstPiece: 3, pieceCount: 2 }),
+      contextEntry(1, { parent: 0, firstPiece: 3, pieceCount: 2 }),
     ],
     { piecePageSize: 1 },
   );
@@ -216,21 +306,28 @@ void test("failed prepend leaves its prior snapshot usable", async () => {
   }
 });
 
-void test("aborted prepend preserves the snapshot", async () => {
+void test("aborted reads stay atomic and release the shared read lock", async () => {
   const source = linearSource([
     createMarkdownPiece(0, 1, "first"),
     createMarkdownPiece(1, 1, "last"),
   ]);
   let release!: () => void;
   let entered!: () => void;
+  let holdRead = true;
   const gate = new Promise<void>((resolve) => (release = resolve));
   const started = new Promise<void>((resolve) => (entered = resolve));
   const heldSource = {
     readPieces: source.readPieces.bind(source),
-    async readPiecesBefore(cursor: Parameters<typeof source.readPiecesBefore>[0]) {
-      entered();
-      await gate;
-      return source.readPiecesBefore(cursor, signal());
+    async readPiecesBefore(
+      cursor: Parameters<typeof source.readPiecesBefore>[0],
+      signal: AbortSignal,
+    ) {
+      if (holdRead) {
+        holdRead = false;
+        entered();
+        await gate;
+      }
+      return source.readPiecesBefore(cursor, signal);
     },
     readContext: source.readContext.bind(source),
   };
@@ -240,206 +337,79 @@ void test("aborted prepend preserves the snapshot", async () => {
   const controller = new AbortController();
   const pending = assembler.prepend(controller.signal);
   await started;
+  await assert.rejects(assembler.append(signal()), /already pending/u);
+  await assert.rejects(trim(assembler, { from: 1, next: 2 }), /already pending/u);
   controller.abort();
   release();
 
   await assert.rejects(pending);
   assert.equal(assembler.snapshot, prior);
+  assert.equal((await assembler.prepend(signal())).from, 0);
+  await trim(assembler, { from: 0, next: 2 });
 });
 
-void test("prepend and append share one pending read", async () => {
-  const source = linearSource([
-    createMarkdownPiece(0, 1, "first"),
-    createMarkdownPiece(1, 1, "last"),
-  ]);
-  let release!: () => void;
-  let entered!: () => void;
-  const gate = new Promise<void>((resolve) => (release = resolve));
-  const started = new Promise<void>((resolve) => (entered = resolve));
-  const heldSource = {
-    manifest: source.manifest,
-    pieces: source.pieces,
-    contexts: source.contexts,
-    pieceRequests: source.pieceRequests,
-    beforePieceRequests: source.beforePieceRequests,
-    contextRequests: source.contextRequests,
-    readPieces: source.readPieces.bind(source),
-    async readPiecesBefore(
-      cursor: Parameters<typeof source.readPiecesBefore>[0],
-      signal: AbortSignal,
-    ) {
-      entered();
-      await gate;
-      return source.readPiecesBefore(cursor, signal);
-    },
-    readContext: source.readContext.bind(source),
-  };
-  const assembler = new MarkdownWindowAssembler(heldSource, source.manifest, 1);
-  const pending = assembler.prepend(signal());
-  await started;
-  await assert.rejects(assembler.append(signal()), /already pending/u);
-  release();
-  assert.equal((await pending).from, 0);
-});
-
-void test("hydrates middle ancestry and a detached table header cell and its pieces", async () => {
-  const contexts = [
-    {
-      context: createMarkdownContext(0, {
-        kind: "document",
-        firstChild: 1,
-        firstPiece: 2,
-        pieceCount: 9,
-      }),
-    },
-    {
-      context: createMarkdownContext(1, {
-        kind: "table",
-        parent: 0,
-        firstChild: 2,
-        firstPiece: 2,
-        pieceCount: 9,
-      }),
-    },
-    {
-      context: createMarkdownContext(2, {
-        kind: "row",
-        parent: 1,
-        firstChild: 3,
-        nextSibling: 4,
-        firstPiece: 2,
-        pieceCount: 8,
-        header: true,
-      }),
-    },
-    {
-      context: createMarkdownContext(3, {
-        kind: "cell",
-        parent: 2,
-        firstPiece: 2,
-        pieceCount: 8,
-        header: true,
-        headerCell: 3,
-      }),
-    },
-    {
-      context: createMarkdownContext(4, {
-        kind: "row",
-        parent: 1,
-        firstChild: 5,
-        firstPiece: 10,
-        pieceCount: 1,
-      }),
-    },
-    {
-      context: createMarkdownContext(5, {
-        kind: "cell",
-        parent: 4,
-        firstPiece: 10,
-        pieceCount: 1,
-        headerCell: 3,
-      }),
-    },
-  ];
-  const headerPieces = Array.from({ length: 8 }, (_, offset) =>
-    createMarkdownPiece(2 + offset, 3, offset === 0 ? "heading" : " header"),
-  );
-  const source = new SyntheticMarkdownPageSource(
-    [...headerPieces, createMarkdownPiece(10, 5, "value")],
-    contexts,
-  );
-  const assembler = new MarkdownWindowAssembler(source, source.manifest, 10);
+void test("hydrates detached table headers, cell values, and empty cells", async () => {
+  const source = tableSource({ piecePageSize: 1, valuePageSize: 1 });
+  const assembler = new MarkdownWindowAssembler(source, source.manifest, 2);
 
   const snapshot = await assembler.append(signal());
 
-  for (const id of [0, 1, 2, 3, 4, 5]) assert.ok(snapshot.contexts.has(id), `context ${id}`);
-  assert.ok(snapshot.pieces.has(2), "detached header piece");
-  assert.ok(snapshot.pieces.has(10), "window piece");
-});
-
-void test("rejects a piece page from another generation without committing", async () => {
-  const source = new SyntheticMarkdownPageSource(
-    [createMarkdownPiece(0, 1, "text")],
-    [{ context: createMarkdownContext(1, { firstPiece: 0, pieceCount: 1 }) }],
-    { pieceGeneration: "stale-generation" },
+  for (const id of [0, 1, 2, 3, 4, 5, 6]) assert.ok(snapshot.contexts.has(id), `context ${id}`);
+  assert.deepEqual(
+    [...snapshot.pieces.keys()].sort((left, right) => left - right),
+    [0, 1, 2],
   );
-  const assembler = new MarkdownWindowAssembler(source, source.manifest);
-
-  await assert.rejects(assembler.append(signal()));
-  assertUncommitted(assembler, 0);
+  assert.equal(snapshot.contexts.get(3)?.values.title, "column name");
 });
 
-void test("rejects a context page from another generation without committing", async () => {
-  const source = new SyntheticMarkdownPageSource(
-    [createMarkdownPiece(0, 1, "text")],
-    [
+void test("rejects stale-generation and nonadvancing pages without committing", async () => {
+  const cases = [
+    new SyntheticMarkdownPageSource(
+      [createMarkdownPiece(0, 1, "text")],
+      [{ context: createMarkdownContext(1, { firstPiece: 0, pieceCount: 1 }) }],
+      { pieceGeneration: "stale-generation" },
+    ),
+    new SyntheticMarkdownPageSource(
+      [createMarkdownPiece(0, 1, "text")],
+      [
+        {
+          context: createMarkdownContext(1, { firstPiece: 0, pieceCount: 1, valueCount: 1 }),
+          values: [createMarkdownValue("destination", "/target")],
+        },
+      ],
+      { contextGeneration: "stale-generation" },
+    ),
+    new SyntheticMarkdownPageSource([], [], {
+      pieceCount: 1,
+      transformPiecePage: (page) => ({ ...page, next: page.from, hasMore: true }),
+    }),
+    new SyntheticMarkdownPageSource(
+      [createMarkdownPiece(0, 1, "text")],
+      [
+        {
+          context: createMarkdownContext(1, { firstPiece: 0, pieceCount: 1, valueCount: 2 }),
+          values: [
+            createMarkdownValue("destination", "/first/", 0, true),
+            createMarkdownValue("destination", "last", 1),
+          ],
+        },
+      ],
       {
-        context: createMarkdownContext(1, { firstPiece: 0, pieceCount: 1, valueCount: 1 }),
-        values: [createMarkdownValue("destination", "/target")],
+        valuePageSize: 1,
+        transformContextPage: (page) => ({ ...page, next: page.from, hasMore: true }),
       },
-    ],
-    { contextGeneration: "stale-generation" },
-  );
-  const assembler = new MarkdownWindowAssembler(source, source.manifest);
+    ),
+  ];
 
-  await assert.rejects(assembler.append(signal()));
-  assertUncommitted(assembler, 0);
-});
-
-void test("rejects a nonadvancing piece page without committing", async () => {
-  const source = new SyntheticMarkdownPageSource([], [], {
-    pieceCount: 1,
-    transformPiecePage: (page) => ({ ...page, next: page.from, hasMore: true }),
-  });
-  const assembler = new MarkdownWindowAssembler(source, source.manifest);
-
-  await assert.rejects(assembler.append(signal()));
-  assertUncommitted(assembler, 0);
-});
-
-void test("rejects a nonadvancing context page without committing", async () => {
-  const source = new SyntheticMarkdownPageSource(
-    [createMarkdownPiece(0, 1, "text")],
-    [
-      {
-        context: createMarkdownContext(1, { firstPiece: 0, pieceCount: 1, valueCount: 2 }),
-        values: [
-          createMarkdownValue("destination", "/first/", 0, true),
-          createMarkdownValue("destination", "last", 1),
-        ],
-      },
-    ],
-    {
-      valuePageSize: 1,
-      transformContextPage: (page) => ({ ...page, next: page.from, hasMore: true }),
-    },
-  );
-  const assembler = new MarkdownWindowAssembler(source, source.manifest);
-
-  await assert.rejects(assembler.append(signal()));
-  assertUncommitted(assembler, 0);
+  for (const source of cases) await assertAppendRejected(source);
 });
 
 void test("rejects skipped piece IDs without committing", async () => {
-  const source = new SyntheticMarkdownPageSource(
+  const source = linearSource(
     [createMarkdownPiece(0, 1, "first"), createMarkdownPiece(2, 1, "skipped")],
-    [
-      {
-        context: createMarkdownContext(0, {
-          kind: "document",
-          firstChild: 1,
-          firstPiece: 0,
-          pieceCount: 3,
-        }),
-      },
-      { context: createMarkdownContext(1, { parent: 0, firstPiece: 0, pieceCount: 3 }) },
-    ],
     { transformPiecePage: (page) => ({ ...page, next: page.from + page.pieces.length }) },
   );
-  const assembler = new MarkdownWindowAssembler(source, source.manifest);
-
-  await assert.rejects(assembler.append(signal()));
-  assertUncommitted(assembler, 0);
+  await assertAppendRejected(source);
 });
 
 void test("rejects discontinuous context value parts without committing", async () => {
@@ -456,75 +426,35 @@ void test("rejects discontinuous context value parts without committing", async 
     ],
     { valuePageSize: 1 },
   );
-  const assembler = new MarkdownWindowAssembler(source, source.manifest);
-
-  await assert.rejects(assembler.append(signal()));
-  assertUncommitted(assembler, 0);
+  await assertAppendRejected(source);
 });
 
 void test("rejects a header reference from another table", async () => {
   const contexts = [
-    {
-      context: createMarkdownContext(0, {
-        kind: "document",
-        firstChild: 1,
-        firstPiece: 0,
-        pieceCount: 1,
-      }),
-    },
-    {
-      context: createMarkdownContext(1, {
-        kind: "table",
-        parent: 0,
-        firstChild: 2,
-        nextSibling: 6,
-      }),
-    },
-    {
-      context: createMarkdownContext(2, {
-        kind: "row",
-        parent: 1,
-        firstChild: 3,
-        nextSibling: 4,
-        header: true,
-      }),
-    },
-    { context: createMarkdownContext(3, { kind: "cell", parent: 2, header: true, headerCell: 3 }) },
-    { context: createMarkdownContext(4, { kind: "row", parent: 1, firstChild: 5 }) },
-    { context: createMarkdownContext(5, { kind: "cell", parent: 4, headerCell: 3 }) },
-    {
-      context: createMarkdownContext(6, {
-        kind: "table",
-        parent: 0,
-        firstChild: 7,
-        firstPiece: 0,
-        pieceCount: 1,
-      }),
-    },
-    {
-      context: createMarkdownContext(7, {
-        kind: "row",
-        parent: 6,
-        firstChild: 8,
-        firstPiece: 0,
-        pieceCount: 1,
-      }),
-    },
-    {
-      context: createMarkdownContext(8, {
-        kind: "cell",
-        parent: 7,
-        firstPiece: 0,
-        pieceCount: 1,
-        headerCell: 3,
-      }),
-    },
+    contextEntry(0, { kind: "document", firstChild: 1, firstPiece: 0, pieceCount: 1 }),
+    contextEntry(1, { kind: "table", parent: 0, firstChild: 2, nextSibling: 6 }),
+    contextEntry(2, { kind: "row", parent: 1, firstChild: 3, nextSibling: 4, header: true }),
+    contextEntry(3, { kind: "cell", parent: 2, header: true, headerCell: 3 }),
+    contextEntry(4, { kind: "row", parent: 1, firstChild: 5 }),
+    contextEntry(5, { kind: "cell", parent: 4, headerCell: 3 }),
+    contextEntry(6, {
+      kind: "table",
+      parent: 0,
+      firstChild: 7,
+      firstPiece: 0,
+      pieceCount: 1,
+    }),
+    contextEntry(7, { kind: "row", parent: 6, firstChild: 8, firstPiece: 0, pieceCount: 1 }),
+    contextEntry(8, {
+      kind: "cell",
+      parent: 7,
+      firstPiece: 0,
+      pieceCount: 1,
+      headerCell: 3,
+    }),
   ];
   const source = new SyntheticMarkdownPageSource([createMarkdownPiece(0, 8, "body")], contexts);
-  const assembler = new MarkdownWindowAssembler(source, source.manifest);
-
-  await assert.rejects(assembler.append(signal()), /different table/u);
-  assertUncommitted(assembler, 0);
+  await assertAppendRejected(source, /different table/u);
 });
 
 void test("keeps UTF-8 source ranges opaque and detaches page records", async () => {
@@ -591,10 +521,7 @@ void test("rejects a context descriptor that changes between value pages", async
         page.from === 1 ? { ...page, context: { ...page.context, childCount: 1 } } : page,
     },
   );
-  const assembler = new MarkdownWindowAssembler(source, source.manifest);
-
-  await assert.rejects(assembler.append(signal()), /context changed/u);
-  assertUncommitted(assembler, 0);
+  await assertAppendRejected(source, /context changed/u);
 });
 
 void test("allows only safe absolute and relative Markdown links", () => {
@@ -621,6 +548,158 @@ void test("allows only safe absolute and relative Markdown links", () => {
     "https://example.test/\u0085",
   ])
     assert.equal(safeMarkdownLink(destination), undefined);
+});
+
+void test("trims to normalized disjoint display ranges while preserving the active window", async () => {
+  const source = linearSource(
+    Array.from({ length: 12 }, (_, id) => createMarkdownPiece(id, 1, `piece-${id}`)),
+  );
+  const assembler = new MarkdownWindowAssembler(source, source.manifest);
+  await assembler.append(signal());
+
+  const snapshot = await trim(assembler, { from: 4, next: 7 }, [
+    { from: 0, next: 3 },
+    { from: 2, next: 5 },
+    { from: 9, next: 11 },
+    { from: 10, next: 12 },
+  ]);
+
+  assert.equal(snapshot.from, 4);
+  assert.equal(snapshot.next, 7);
+  assert.deepEqual(snapshot.displayRanges, [
+    { from: 0, next: 7 },
+    { from: 9, next: 12 },
+  ]);
+  assert.deepEqual(snapshot.supportRanges, []);
+  assert.deepEqual(
+    [...snapshot.pieces.keys()].sort((left, right) => left - right),
+    [0, 1, 2, 3, 4, 5, 6, 9, 10, 11],
+  );
+  assert.deepEqual(
+    [...snapshot.contexts.keys()].sort((left, right) => left - right),
+    [0, 1],
+  );
+  // Both endpoints exist, but an interior hole must not silently lose selected text.
+  await assert.rejects(
+    trim(assembler, { from: 4, next: 7 }, [{ from: 6, next: 10 }]),
+    /incomplete/u,
+  );
+  assert.equal(assembler.snapshot, snapshot);
+});
+
+void test("rejects stale, invalid, or incomplete trims without committing", async () => {
+  const source = linearSource(
+    Array.from({ length: 4 }, (_, id) => createMarkdownPiece(id, 1, `piece-${id}`)),
+    { piecePageSize: 3 },
+  );
+  const assembler = new MarkdownWindowAssembler(source, source.manifest);
+  const prior = await assembler.append(signal());
+  const rejected = async (request: Parameters<typeof assembler.trim>[0]) => {
+    await assert.rejects(assembler.trim(request, signal()));
+    assert.equal(assembler.snapshot, prior);
+  };
+
+  await rejected({
+    generation: "stale-generation",
+    active: { from: 0, next: 1 },
+  });
+  await rejected({
+    generation: source.manifest.generation,
+    active: { from: 3, next: 4 },
+  });
+  await rejected({
+    generation: source.manifest.generation,
+    active: { from: 1, next: 2 },
+    retain: [{ from: 2, next: 4 }],
+  });
+  await rejected({
+    generation: source.manifest.generation,
+    active: { from: 1, next: 2 },
+    retain: [{ from: 3, next: 2 }],
+  });
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(
+    assembler.trim(
+      { generation: source.manifest.generation, active: { from: 1, next: 2 } },
+      controller.signal,
+    ),
+  );
+  assert.equal(assembler.snapshot, prior);
+  const during = new AbortController();
+  const pending = assembler.trim(
+    { generation: prior.generation, active: { from: 1, next: 2 } },
+    during.signal,
+  );
+  during.abort();
+  await assert.rejects(pending);
+  assert.equal(assembler.snapshot, prior);
+  assert.equal((await trim(assembler, { from: 1, next: 2 })).pieces.size, 1);
+});
+
+void test("rehydrates and reclaims detached table support across prepend and trim", async () => {
+  const source = tableSource({ piecePageSize: 1, valuePageSize: 1 });
+  const assembler = new MarkdownWindowAssembler(source, source.manifest, 6);
+  await assembler.append(signal());
+
+  const body = await assembler.prepend(signal());
+  assert.equal(body.from, 5);
+  assert.equal(body.next, 7);
+  assert.deepEqual(body.displayRanges, [{ from: 5, next: 7 }]);
+  assert.deepEqual(body.supportRanges, [{ from: 0, next: 2 }]);
+  for (const id of [1, 2, 3, 4, 5, 6]) assert.ok(body.contexts.has(id), `context ${id}`);
+  assert.deepEqual(
+    [...body.pieces.keys()].sort((left, right) => left - right),
+    [0, 1, 5, 6],
+  );
+  assert.equal(body.contexts.get(3)?.values.title, "column name");
+  assert.ok(source.pieceRequests.some((request) => request.index === 0));
+
+  const requests = source.contextRequests.length;
+  const selectedBody = await trim(assembler, { from: 6, next: 7 }, [{ from: 5, next: 6 }]);
+  assert.deepEqual(selectedBody.supportRanges, [{ from: 0, next: 2 }]);
+  assert.equal(selectedBody.contexts.get(3), body.contexts.get(3));
+  assert.equal(source.contextRequests.length, requests, "Trim reuses validated loaded metadata");
+  const reclaimed = await trim(assembler, { from: 6, next: 7 });
+  assert.deepEqual(reclaimed.displayRanges, [{ from: 6, next: 7 }]);
+  assert.deepEqual(reclaimed.supportRanges, []);
+  assert.deepEqual([...reclaimed.pieces.keys()], [6]);
+  assert.deepEqual(
+    [...reclaimed.contexts.keys()].sort((left, right) => left - right),
+    [0, 7],
+  );
+
+  const previousHeaderReads = source.pieceRequests.filter((request) => request.index === 0).length;
+  const rehydrated = await assembler.prepend(signal());
+  assert.equal(rehydrated.from, 5);
+  assert.deepEqual(rehydrated.supportRanges, [{ from: 0, next: 2 }]);
+  assert.ok(
+    source.pieceRequests.filter((request) => request.index === 0).length > previousHeaderReads,
+  );
+});
+
+void test("append and prepend validate continuation seams after trimming", async () => {
+  const source = linearSource(
+    Array.from({ length: 7 }, (_, id) =>
+      createMarkdownPiece(id, 1, `part-${id}`, { part: id, continued: id < 6 }),
+    ),
+    { piecePageSize: 2 },
+  );
+  const assembler = new MarkdownWindowAssembler(source, source.manifest, 2);
+  await assembler.append(signal());
+  await assembler.append(signal());
+
+  await trim(assembler, { from: 3, next: 5 });
+  const appended = await assembler.append(signal());
+  assert.equal(appended.from, 3);
+  assert.equal(appended.next, 7);
+  const prepended = await assembler.prepend(signal());
+  assert.equal(prepended.from, 1);
+  assert.equal(prepended.next, 7);
+  assert.deepEqual(
+    [...prepended.pieces.keys()].sort((left, right) => left - right),
+    [1, 2, 3, 4, 5, 6],
+  );
 });
 
 void test("accepts an empty terminal piece page", async () => {

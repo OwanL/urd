@@ -69,8 +69,8 @@ export function MarkdownRenderer({ snapshot }: { snapshot: MarkdownRenderSnapsho
   }
 
   function markdownContextNode({ context, values }: AssembledMarkdownContext): VNode {
+    const key = `c${context.id}`;
     const attributes = {
-      key: `c${context.id}`,
       ...rangeAttributes(context.source),
       "data-context": context.id,
       "data-kind": context.kind,
@@ -81,21 +81,37 @@ export function MarkdownRenderer({ snapshot }: { snapshot: MarkdownRenderSnapsho
     const parent = snapshot.contexts.get(context.parent);
     switch (context.kind) {
       case "document":
-        return <div {...attributes}>{content}</div>;
+        return (
+          <div key={key} {...attributes}>
+            {content}
+          </div>
+        );
       case "paragraph":
-        return <p {...attributes}>{content}</p>;
+        return (
+          <p key={key} {...attributes}>
+            {content}
+          </p>
+        );
       case "heading":
-        return createElement(`h${Math.min(6, Math.max(1, context.level))}`, attributes, content);
+        return createElement(
+          `h${Math.min(6, Math.max(1, context.level))}`,
+          { ...attributes, key },
+          content,
+        );
       case "quote":
-        return <blockquote {...attributes}>{content}</blockquote>;
+        return (
+          <blockquote key={key} {...attributes}>
+            {content}
+          </blockquote>
+        );
       case "list": {
         const start = orderedStart(values.orderedStart);
         return context.ordered ? (
-          <ol {...attributes} start={start} data-loose={context.loose}>
+          <ol key={key} {...attributes} start={start} data-loose={context.loose}>
             {content}
           </ol>
         ) : (
-          <ul {...attributes} data-loose={context.loose}>
+          <ul key={key} {...attributes} data-loose={context.loose}>
             {content}
           </ul>
         );
@@ -103,6 +119,7 @@ export function MarkdownRenderer({ snapshot }: { snapshot: MarkdownRenderSnapsho
       case "item":
         return (
           <li
+            key={key}
             {...attributes}
             value={
               parent?.context.ordered
@@ -115,37 +132,55 @@ export function MarkdownRenderer({ snapshot }: { snapshot: MarkdownRenderSnapsho
         );
       case "code":
         return (
-          <pre {...attributes} tabIndex={0} aria-label="Code">
+          <pre key={key} {...attributes} tabIndex={0} aria-label="Code">
             <code data-language={values.language}>{content}</code>
           </pre>
         );
       case "codeLine":
-        return <span {...attributes}>{content}</span>;
+        return (
+          <span key={key} {...attributes}>
+            {content}
+          </span>
+        );
       case "inlineCode":
-        return <code {...attributes}>{content}</code>;
+        return (
+          <code key={key} {...attributes}>
+            {content}
+          </code>
+        );
       case "emphasis":
-        return <em {...attributes}>{content}</em>;
+        return (
+          <em key={key} {...attributes}>
+            {content}
+          </em>
+        );
       case "strong":
-        return <strong {...attributes}>{content}</strong>;
+        return (
+          <strong key={key} {...attributes}>
+            {content}
+          </strong>
+        );
       case "link": {
         const href = safeMarkdownLink(values.destination);
         return href === undefined ? (
-          <span {...attributes}>{content}</span>
+          <span key={key} {...attributes}>
+            {content}
+          </span>
         ) : (
-          <a {...attributes} href={href} title={values.title}>
+          <a key={key} {...attributes} href={href} title={values.title}>
             {content}
           </a>
         );
       }
       case "thematicBreak":
-        return <hr {...attributes} />;
+        return <hr key={key} {...attributes} />;
       case "table": {
         const rows = [...(children.get(context.id) ?? [])].sort(
           (a, b) => a.context.position - b.context.position,
         );
         return (
           <div
-            key={`c${context.id}`}
+            key={key}
             className="markdown-renderer-table"
             tabIndex={0}
             role="region"
@@ -159,15 +194,20 @@ export function MarkdownRenderer({ snapshot }: { snapshot: MarkdownRenderSnapsho
         );
       }
       case "row":
-        return <tr {...attributes}>{content}</tr>;
+        return (
+          <tr key={key} {...attributes}>
+            {content}
+          </tr>
+        );
       case "cell": {
         const style = context.alignment === "none" ? undefined : { textAlign: context.alignment };
         return context.header ? (
-          <th {...attributes} id={headerId(context.id)} scope="col" style={style}>
+          <th key={key} {...attributes} id={headerId(context.id)} scope="col" style={style}>
             {content}
           </th>
         ) : (
           <td
+            key={key}
             {...attributes}
             headers={context.headerCell >= 0 ? headerId(context.headerCell) : undefined}
             style={style}

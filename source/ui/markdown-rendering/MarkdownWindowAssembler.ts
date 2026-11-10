@@ -10,6 +10,8 @@ import type {
   MarkdownPiecePage,
   MarkdownRenderManifest,
   MarkdownValueKind,
+  MarkdownPieceInterval,
+  MarkdownTrimRequest,
 } from "./MarkdownRenderModel.ts";
 
 const markdownElementKinds = new Set<MarkdownRenderContext["kind"]>([
@@ -299,6 +301,8 @@ export class MarkdownWindowAssembler {
       from,
       next: from,
       hasMore: from < this.manifest.pieceCount,
+      displayRanges: [],
+      supportRanges: [],
       contexts: new Map(),
       pieces: new Map(),
     };
@@ -327,6 +331,10 @@ export class MarkdownWindowAssembler {
         ...this.current,
         next: page.next,
         hasMore: page.hasMore,
+        ...read.snapshotRanges([
+          ...this.current.displayRanges,
+          { from: this.current.from, next: page.next },
+        ]),
         pieces: read.pieces,
         contexts: read.contexts,
       };
@@ -354,6 +362,59 @@ export class MarkdownWindowAssembler {
       this.current = {
         ...this.current,
         from: page.from,
+        ...read.snapshotRanges([
+          ...this.current.displayRanges,
+          { from: page.from, next: this.current.next },
+        ]),
+        pieces: read.pieces,
+        contexts: read.contexts,
+      };
+      return this.current;
+    } finally {
+      this.reading = false;
+    }
+  }
+
+  async trim(request: MarkdownTrimRequest, signal: AbortSignal): Promise<MarkdownRenderSnapshot> {
+    if (this.reading) throw new Error("A Markdown render read is already pending.");
+    signal.throwIfAborted();
+    if (request.generation !== this.current.generation)
+      throw new Error("Markdown render generation changed; restart from the source anchor.");
+    const active = { ...request.active };
+    const ranges = [active, ...(request.retain ?? [])];
+    for (const range of ranges)
+      if (
+        !isIndex(range.from) ||
+        !isIndex(range.next) ||
+        range.next < range.from ||
+        range.next > this.manifest.pieceCount
+      )
+        throw new Error("Invalid Markdown retained interval.");
+    if (active.from < this.current.from || active.next > this.current.next)
+      throw new Error("Markdown trim active interval is outside the current window.");
+    const displayRanges = normalizeRanges(ranges);
+    const retained: MarkdownTextPiece[] = [];
+    for (const { from, next } of displayRanges)
+      for (let id = from; id < next; id++) {
+        const piece = this.current.pieces.get(id);
+        if (!piece)
+          throw new Error("Markdown retained interval is incomplete; load it before trimming.");
+        retained.push(piece);
+      }
+    // Start from primary pieces only. Rehydrate their closure into fresh maps rather
+    // than retaining a historical context/piece cache behind the visible window.
+    this.reading = true;
+    try {
+      const empty = { ...this.current, contexts: new Map(), pieces: new Map() };
+      const read = new AssemblyRead(this.source, empty, this.manifest, signal, this.current);
+      await read.retain(retained);
+      signal.throwIfAborted();
+      this.current = {
+        generation: this.current.generation,
+        from: active.from,
+        next: active.next,
+        hasMore: active.next < this.manifest.pieceCount,
+        ...read.snapshotRanges(displayRanges),
         pieces: read.pieces,
         contexts: read.contexts,
       };
@@ -364,6 +425,23 @@ export class MarkdownWindowAssembler {
   }
 }
 
+function normalizeRanges(
+  ranges: readonly MarkdownPieceInterval[],
+): readonly MarkdownPieceInterval[] {
+  const result: MarkdownPieceInterval[] = [];
+  for (const range of [...ranges].sort((a, b) => a.from - b.from)) {
+    if (range.from === range.next) continue;
+    const last = result.at(-1);
+    if (!last || last.next < range.from) result.push(Object.freeze({ ...range }));
+    else
+      result[result.length - 1] = Object.freeze({
+        from: last.from,
+        next: Math.max(last.next, range.next),
+      });
+  }
+  return Object.freeze(result);
+}
+
 class AssemblyRead {
   readonly pieces: Map<number, MarkdownTextPiece>;
   readonly contexts: Map<number, AssembledMarkdownContext>;
@@ -372,19 +450,32 @@ class AssemblyRead {
   private readonly source: MarkdownPageSource;
   private readonly generation: string;
   private readonly signal: AbortSignal;
+  private readonly available: MarkdownRenderSnapshot | undefined;
 
   constructor(
     source: MarkdownPageSource,
     snapshot: MarkdownRenderSnapshot,
     manifest: MarkdownRenderManifest,
     signal: AbortSignal,
+    available?: MarkdownRenderSnapshot,
   ) {
+    this.available = available;
     this.source = source;
     this.manifest = manifest;
     this.generation = snapshot.generation;
     this.signal = signal;
     this.pieces = new Map(snapshot.pieces);
     this.contexts = new Map(snapshot.contexts);
+  }
+
+  snapshotRanges(ranges: readonly MarkdownPieceInterval[]) {
+    const displayRanges = normalizeRanges(ranges);
+    const supportRanges = normalizeRanges(
+      [...this.pieces.keys()]
+        .filter((id) => !displayRanges.some(({ from, next }) => from <= id && id < next))
+        .map((id) => ({ from: id, next: id + 1 })),
+    );
+    return { displayRanges, supportRanges };
   }
 
   async add(page: MarkdownPiecePage): Promise<void> {
@@ -400,6 +491,19 @@ class AssemblyRead {
     if (!page.hasMore && (last?.continued ?? prior?.continued))
       throw new Error("Markdown text piece continuation is incomplete.");
 
+    await this.hydrateRows();
+  }
+
+  async retain(pieces: readonly MarkdownTextPiece[]): Promise<void> {
+    for (const piece of pieces) {
+      this.signal.throwIfAborted();
+      this.addPiece(piece);
+      await this.ancestry(piece.context, piece.id);
+    }
+    await this.hydrateRows();
+  }
+
+  private async hydrateRows(): Promise<void> {
     // Rows expose empty/padded cells and header references independently of pieces.
     for (const { context } of [...this.contexts.values()])
       if (context.kind === "row") await this.row(context.id);
@@ -423,8 +527,11 @@ class AssemblyRead {
   }
 
   private async context(id: number): Promise<MarkdownRenderContext> {
-    const existing = this.contexts.get(id);
-    if (existing) return existing.context;
+    const existing = this.contexts.get(id) ?? this.available?.contexts.get(id);
+    if (existing) {
+      this.contexts.set(id, existing);
+      return existing.context;
+    }
     if (!isIndex(id)) throw new Error("Invalid Markdown render context.");
 
     let index = 0;
@@ -534,8 +641,9 @@ class AssemblyRead {
       const end = cell.firstPiece + cell.pieceCount;
       let index = cell.firstPiece;
       while (index < end) {
-        const existing = this.pieces.get(index);
+        const existing = this.pieces.get(index) ?? this.available?.pieces.get(index);
         if (existing) {
+          this.addPiece(existing);
           const ancestry = await this.ancestry(existing.context, existing.id);
           if (!ancestry.some((ancestor) => ancestor.id === cell.id))
             throw new Error("Detached header piece is outside its cell.");

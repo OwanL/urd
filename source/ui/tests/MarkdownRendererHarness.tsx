@@ -1,7 +1,9 @@
 import { render } from "preact";
 import { MarkdownRenderer } from "../markdown-rendering/MarkdownRenderer.tsx";
+import { MarkdownSelectionPins } from "../markdown-rendering/MarkdownSelectionPins.ts";
 import { MarkdownWindowAssembler } from "../markdown-rendering/MarkdownWindowAssembler.ts";
 import type {
+  MarkdownPieceInterval,
   MarkdownRenderContext,
   MarkdownTextPiece,
   MarkdownValueKind,
@@ -113,7 +115,10 @@ if (mode === "links") {
     link(node("paragraph", documentId), `link-${index}`, destination),
   );
 } else {
-  if (mode !== "detached") {
+  if (mode === "selection") {
+    for (let index = 0; index < 700; index++)
+      leaf("paragraph", documentId, `Selection paragraph ${index}.`);
+  } else if (mode !== "detached") {
     leaf("heading", documentId, "Renderer sample", { level: 2 });
     const paragraph = node("paragraph", documentId);
     text(paragraph, "Readable");
@@ -150,46 +155,50 @@ if (mode === "links") {
     text(node("codeLine", code, { position: 1 }), `  ${"long_identifier_".repeat(16)}\n`, "code");
     text(node("thematicBreak", documentId), "", "thematicBreak");
   }
-  const table = node("table", documentId);
-  const header = node("row", table, { header: true });
-  const headers = ["Name", "Description", "Count"].map((label, position) =>
-    leaf("cell", header, label, {
-      position,
-      header: true,
-      headerCell: contexts.length,
-      alignment: position === 2 ? "right" : "none",
-    }),
-  );
-  detachedFrom = pieces.length;
-  const row = node("row", table, { position: 8 });
-  ["Middle-window row", "A detached header remains associated.", "42"].forEach((value, position) =>
-    leaf("cell", row, value, {
-      position,
-      headerCell: headers[position]!,
-      alignment: position === 2 ? "right" : "none",
-    }),
-  );
-  node("cell", row, { position: 3 });
-  if (mode !== "detached") {
-    leaf("paragraph", documentId, "Literal content (never parsed or fetched):");
-    text(
-      node("paragraph", documentId),
-      '<img src="https://resource.invalid/pixel.png" onerror="alert(1)">\n<script>alert(1)</script>\n![deferred image](https://resource.invalid/image.png)',
-      "literal",
+  if (mode !== "selection") {
+    const table = node("table", documentId);
+    const header = node("row", table, { header: true });
+    const headers = ["Name", "Description", "Count"].map((label, position) =>
+      leaf("cell", header, label, {
+        position,
+        header: true,
+        headerCell: contexts.length,
+        alignment: position === 2 ? "right" : "none",
+      }),
     );
-    const paragraph = node("paragraph", documentId);
-    link(paragraph, "Safe link", "https://example.test/docs");
-    text(paragraph, " · ");
-    link(paragraph, "Unsafe label", "javascript:alert(1)");
-    const continued = node("paragraph", documentId);
-    text(continued, "Stable", "text", true);
-    text(continued, " fragment 🧭 — ", "text", true, 1);
-    text(continued, "later page ", "text", true, 2);
-    text(continued, "appended.", "text", false, 3);
+    detachedFrom = pieces.length;
+    const row = node("row", table, { position: 8 });
+    ["Middle-window row", "A detached header remains associated.", "42"].forEach(
+      (value, position) =>
+        leaf("cell", row, value, {
+          position,
+          headerCell: headers[position]!,
+          alignment: position === 2 ? "right" : "none",
+        }),
+    );
+    node("cell", row, { position: 3 });
+    if (mode !== "detached") {
+      leaf("paragraph", documentId, "Literal content (never parsed or fetched):");
+      text(
+        node("paragraph", documentId),
+        '<img src="https://resource.invalid/pixel.png" onerror="alert(1)">\n<script>alert(1)</script>\n![deferred image](https://resource.invalid/image.png)',
+        "literal",
+      );
+      const paragraph = node("paragraph", documentId);
+      link(paragraph, "Safe link", "https://example.test/docs");
+      text(paragraph, " · ");
+      link(paragraph, "Unsafe label", "javascript:alert(1)");
+      const continued = node("paragraph", documentId);
+      text(continued, "Stable", "text", true);
+      text(continued, " fragment 🧭 — ", "text", true, 1);
+      text(continued, "later page ", "text", true, 2);
+      text(continued, "appended.", "text", false, 3);
+    }
   }
 }
 const source = new SyntheticMarkdownPageSource(pieces, contexts, {
-  piecePageSize: mode === "detached" || mode === "links" ? 1000 : pieces.length - 2,
+  piecePageSize:
+    mode === "selection" || mode === "detached" || mode === "links" ? 1000 : pieces.length - 2,
 });
 const assembler = new MarkdownWindowAssembler(
   source,
@@ -202,9 +211,38 @@ function paint() {
 }
 await assembler.append(new AbortController().signal);
 paint();
+let selectionChanges = 0;
+const rendererRoot = root.querySelector<HTMLElement>(".markdown-renderer")!;
+let selectionPins: MarkdownSelectionPins | null = null;
+if (mode === "selection")
+  selectionPins = new MarkdownSelectionPins(
+    rendererRoot,
+    () => assembler.snapshot,
+    () => {
+      selectionChanges++;
+      selectionPins?.read();
+    },
+  );
 Object.assign(window, {
   markdownRendererHarness: {
     links,
+    get selectionChanges() {
+      return selectionChanges;
+    },
+    readSelectionPins() {
+      return selectionPins?.read() ?? [];
+    },
+    trim(active: MarkdownPieceInterval) {
+      if (!selectionPins) throw new Error("Selection mode is required.");
+      const snapshot = assembler.snapshot;
+      const retain = selectionPins.read();
+      return assembler
+        .trim({ generation: snapshot.generation, active, retain }, new AbortController().signal)
+        .then(paint);
+    },
+    disposeSelectionPins() {
+      selectionPins?.dispose();
+    },
     get snapshot() {
       return assembler.snapshot;
     },

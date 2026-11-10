@@ -105,11 +105,25 @@ export interface AssembledMarkdownContext {
   readonly context: MarkdownRenderContext;
   readonly values: Readonly<Partial<Record<MarkdownValueKind, string>>>;
 }
+// Half-open generation-local piece IDs, not source byte offsets.
+export interface MarkdownPieceInterval {
+  readonly from: number;
+  readonly next: number;
+}
+export interface MarkdownTrimRequest {
+  readonly generation: string;
+  readonly active: MarkdownPieceInterval;
+  readonly retain?: readonly MarkdownPieceInterval[];
+}
 export interface MarkdownRenderSnapshot {
   readonly generation: string;
   readonly from: number;
   readonly next: number;
   readonly hasMore: boolean;
+  // Primary display islands include the active [from,next) and explicit retained pins.
+  readonly displayRanges: readonly MarkdownPieceInterval[];
+  // Detached dependency pieces (currently table headers), never active cursor coverage.
+  readonly supportRanges: readonly MarkdownPieceInterval[];
   readonly contexts: ReadonlyMap<number, AssembledMarkdownContext>;
   readonly pieces: ReadonlyMap<number, MarkdownTextPiece>;
 }

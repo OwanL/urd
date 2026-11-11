@@ -271,6 +271,7 @@ export function VirtualTranscript({
   const viewport = useRef<TranscriptViewportModel | null>(null);
   const [modelVersion, setModelVersion] = useState(0);
   const [scrollVersion, setScrollVersion] = useState(0);
+  const [readEpoch, setReadEpoch] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [documentInactive, setDocumentInactive] = useState(() => document.hidden);
@@ -283,6 +284,11 @@ export function VirtualTranscript({
   const pendingWidthRestoreRef = useRef<PendingWidthRestore | null>(null);
   const retainedRows = useRef(new Map<string, PositionedRow>());
   const rowRecords = useRef(new Map<string, PositionedRow>());
+  const retainedViewportRows = useRef<PositionedRow[]>([]);
+  const retainedScrollport = useRef({ top: 0, width: 0 });
+  const renderedActive = useRef(visible && !documentInactive);
+  const resumingVisibility = visible && !documentInactive && !renderedActive.current;
+  renderedActive.current = visible && !documentInactive;
   const [retainedKeys, setRetainedKeys] = useState<ReadonlySet<string>>(new Set());
   const activeRequest = useRef<AbortController | null>(null);
   const sourceRequest = useRef<AbortController | null>(null);
@@ -300,6 +306,11 @@ export function VirtualTranscript({
   const desiredFraction = useRef(1);
   const latest = useRef({ historyRevision, visible, notice });
   latest.current = { historyRevision, visible, notice };
+  if (resumingVisibility && pendingRestoreRef.current === null) {
+    const snapshot = viewport.current?.snapshot();
+    if (snapshot && !snapshot.followsLatest && snapshot.anchor?.sourceCursor)
+      pendingRestoreRef.current = snapshot.anchor;
+  }
 
   const publishNavigation = useCallback(
     (state: TranscriptNavigationState) => onNavigationChange(state),
@@ -322,8 +333,12 @@ export function VirtualTranscript({
   const resumeReads = useCallback(() => {
     if (!suspended.current) return;
     suspended.current = false;
+    if (!latest.current.visible || latest.current.historyRevision === null) return;
     const current = viewport.current?.snapshot();
-    if (!current || !latest.current.visible || latest.current.historyRevision === null) return;
+    if (!current) {
+      setReadEpoch((epoch) => epoch + 1);
+      return;
+    }
     const scrollport = scroll.current;
     const fraction = current.followsLatest
       ? 1
@@ -623,7 +638,15 @@ export function VirtualTranscript({
   }, [root, saveCurrentState]);
 
   useEffect(() => {
-    if (initialized.current || !root || !visible || historyRevision === null) return;
+    if (
+      initialized.current ||
+      suspended.current ||
+      documentInactive ||
+      !root ||
+      !visible ||
+      historyRevision === null
+    )
+      return;
     const width = root.clientWidth;
     if (width <= 0) return;
     const stored = store.load(width).value.state;
@@ -654,7 +677,17 @@ export function VirtualTranscript({
         if (activeRequest.current === controller) activeRequest.current = null;
       });
     return () => controller.abort();
-  }, [client, historyRevision, root, sessionId, setWindow, store, visible]);
+  }, [
+    client,
+    documentInactive,
+    historyRevision,
+    readEpoch,
+    root,
+    sessionId,
+    setWindow,
+    store,
+    visible,
+  ]);
 
   useEffect(() => {
     if (!initialized.current || !visible || historyRevision === null || notice === null) return;
@@ -670,7 +703,8 @@ export function VirtualTranscript({
 
   useLayoutEffect(() => {
     const node = scroll.current;
-    if (!node || !initialized.current) return;
+    if (!node || !initialized.current || !visible || documentInactive || node.clientHeight === 0)
+      return;
     const model = viewport.current;
     if (!model) return;
     if (scrollAdjustment.current !== null) {
@@ -682,6 +716,14 @@ export function VirtualTranscript({
       programmaticScroll.current = node.scrollTop;
     }
     const snapshot = model.snapshot();
+    if (
+      resumingVisibility &&
+      !snapshot.followsLatest &&
+      retainedScrollport.current.width === node.clientWidth
+    ) {
+      node.scrollTop = retainedScrollport.current.top;
+      programmaticScroll.current = node.scrollTop;
+    }
     if (snapshot.followsLatest) {
       node.scrollTop = Math.max(0, node.scrollHeight - node.clientHeight);
       programmaticScroll.current = node.scrollTop;
@@ -711,7 +753,7 @@ export function VirtualTranscript({
         }
       }
     }
-  }, [modelVersion, positionWindow, root]);
+  }, [documentInactive, modelVersion, positionWindow, resumingVisibility, root, visible]);
 
   const onSourceCapture = useCallback(
     (
@@ -745,8 +787,7 @@ export function VirtualTranscript({
         return;
       }
       const restore = pendingRestoreRef.current;
-      const currentWindow = positionWindowRef.current;
-      if (restore && currentWindow?.target && entryKey(currentWindow.target) === key) {
+      if (restore && entryKey(restore.entry) === key) {
         pendingRestoreRef.current = null;
         setPendingRestore(null);
       }
@@ -787,6 +828,11 @@ export function VirtualTranscript({
     const model = viewport.current;
     const node = scroll.current;
     if (!model || !node || !positionWindow) return [];
+    // A hidden retained panel has no layout box. Zero geometry is not a viewport
+    // change: preserve its bounded mounted window until it is shown or evicted.
+    if (!visible || documentInactive || resumingVisibility || node.clientHeight === 0)
+      return retainedViewportRows.current;
+    retainedScrollport.current = { top: node.scrollTop, width: node.clientWidth };
     const snapshot = model.snapshot();
     const maximum = Math.max(
       0,
@@ -797,13 +843,13 @@ export function VirtualTranscript({
     const nextTop = snapshot.followsLatest
       ? maximum
       : Math.max(0, Math.min(maximum, node.scrollTop + (scrollAdjustment.current ?? 0)));
-    return visibleRows(
+    return (retainedViewportRows.current = visibleRows(
       positionedRows(positionWindow),
       model,
       nextTop,
       node.clientHeight,
       retainedKeys,
-    );
+    ));
   })();
   const selectedRows = [...retainedRows.current.values()].filter(
     (row) =>
@@ -821,7 +867,14 @@ export function VirtualTranscript({
   const captureVisibleAnchor = useCallback(async () => {
     const node = scroll.current;
     const model = viewport.current;
-    if (!node || !model) return;
+    if (
+      !node ||
+      !model ||
+      suspended.current ||
+      pendingRestoreRef.current !== null ||
+      node.clientHeight === 0
+    )
+      return;
     const initial = model.snapshot();
     if (initial.followsLatest || node.clientWidth !== initial.width) return;
     const captureWidthGeneration = widthGeneration.current;
@@ -868,6 +921,9 @@ export function VirtualTranscript({
     const currentSnapshot = model.snapshot();
     if (
       viewport.current !== model ||
+      suspended.current ||
+      pendingRestoreRef.current !== null ||
+      node.clientHeight === 0 ||
       currentSnapshot.historyRevision !== initial.historyRevision ||
       !currentRow ||
       currentRow.rank !== row.rank ||
@@ -900,7 +956,15 @@ export function VirtualTranscript({
     setScrollVersion((value) => value + 1);
     const node = scroll.current;
     const model = viewport.current;
-    if (!node || !model || !positionWindowRef.current) return;
+    if (
+      !node ||
+      !model ||
+      !positionWindowRef.current ||
+      !visible ||
+      documentInactive ||
+      node.clientHeight === 0
+    )
+      return;
     const priorTarget = programmaticScroll.current;
     const actualUserScroll = priorTarget === null || priorTarget !== node.scrollTop;
     programmaticScroll.current = null;
@@ -1019,10 +1083,9 @@ export function VirtualTranscript({
         <div class="messages messages-virtual" style={{ height: `${spacerHeight}px` }}>
           {rows.map((row) => {
             const key = entryKey(row.descriptor.entry);
+            const wanted = pendingRestoreRef.current ?? pendingRestore;
             const restore =
-              pendingRestore?.entry && sameEntry(pendingRestore.entry, row.descriptor.entry)
-                ? pendingRestore
-                : null;
+              wanted?.entry && sameEntry(wanted.entry, row.descriptor.entry) ? wanted : null;
             const saved =
               restore?.sourceCursor && row.descriptor.text
                 ? {

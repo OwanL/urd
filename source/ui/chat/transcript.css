@@ -1,11 +1,14 @@
 .transcript-area {
   position: relative;
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
 }
 
 .transcript {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   padding: 0 20px;
@@ -84,9 +87,9 @@
 }
 
 .jump-latest {
-  position: absolute;
-  right: 20px;
-  bottom: 12px;
+  align-self: flex-end;
+  flex: none;
+  margin: 4px 20px 12px;
   width: 34px;
   height: 34px;
   border: 1px solid var(--border-subtle);

@@ -90,6 +90,9 @@ export function RichMessageBody(props: RichMessageBodyProps) {
       });
       await view.setPaused(paused);
       if (paused || stopped || releasing) return;
+      // A retained panel may reappear at a new width while its view was paused.
+      // Restore the parent's explicit source before testing gaps at the old scroll offset.
+      if (current.saved && view.restoreCapturedSource(current.saved)) current.onPublished?.();
       if (reading) {
         queued = true;
         return;

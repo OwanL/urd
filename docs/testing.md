@@ -18,12 +18,12 @@ in maintenance cost and must not be used to evade the budget.
 | Boundary | Representative guarantees |
 | --- | --- |
 | Storage | Admission/receipt atomicity, durable output ordering, Stop retirement rollback, tool claim/result failure, provider/native-context rollback, Unicode content paging, indexed recent history and keyset listing. |
-| Schema | Fresh version-15 creation, reopen, refusal of incompatible versions with manual reset instructions, current constraints and large payload retention. No pre-release migrations. |
+| Schema | Fresh current-schema creation, reopen, refusal of incompatible versions with manual reset instructions, current constraints and large payload retention. No pre-release migrations. |
 | Sessions | Concurrent exact retries, canonical handles, initiating selection, safe-boundary steering, stale Stop isolation, held cleanup/callbacks, failed Stop writes and multi-session shutdown. Starting-context composition and exact instruction/tool restoration across loops and reopening, without duplicate user input or stale-definition execution. |
 | Execution | Positive completion evidence, buffered Unicode output/deadline flush, write-failure fencing, parallel/background tool ownership, waiting, Stop/failure drain and explicit no-replay recovery. Real SDK loops exercise both provider APIs, direct/background image results, native context persistence and reopen. |
 | Providers | Issued identity/state/account binding, private context scope, uncertain refresh persistence/recovery, credential mutation and cancellation drain, representative rejected native output and secret-safe errors. |
 | HTTP | Representative session/provider wire/status/selection flows, browser admission, disconnected acknowledgements, host draining and exclusive process data ownership. Core policy is not replayed through every route. |
-| Browser | Shared transport behavior, client mappings, draft/receipt uncertainty and state transitions; an offline real-server/SDK integration flow. UI-specific suites own their feature state/geometry. |
+| Browser logic | Fast Node tests own shared transport, client mappings, draft/receipt uncertainty and feature state/geometry models; an offline real-server/SDK integration flow remains. No automated browser/DOM tests. |
 
 Use small data tables when cases exercise genuinely different outcomes through the
 same setup. Assert observable results, not private task identity or incidental
@@ -52,6 +52,16 @@ The later pre-release reset deliberately drops old database compatibility. Old t
 checkpoints; they are not evidence that every old scenario remains in the current
 suite. New regressions should replace a weak scenario or extend an existing
 behavioral owner where possible, while respecting the hard budget.
+
+## Browser-test removal
+
+On 2026-11-11 the owner chose to remove automated browser tests entirely, rather than
+split the large workspace/renderer suites or retain browser smoke tests. Their Playwright
+suites, synthetic browser harness and command entries are removed. Fast unit tests and
+the offline HTTP/SDK integration flow remain. This deliberately drops automated checks
+for actual DOM layout, selection, focus, clipboard and composed browser interaction;
+model tests are not equivalent coverage. Manual diagnostic/development tools remain
+separate from the routine test suite. Do not reintroduce browser tests without approval.
 
 ## Verification
 

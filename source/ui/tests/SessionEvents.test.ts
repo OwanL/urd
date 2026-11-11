@@ -112,86 +112,96 @@ void test("parses chunked SSE events and sends the browser registration", async 
   assert.ok(streamController);
 });
 
-void test("coalesces registration updates and ignores changes after unwatching", async (t) => {
-  const heldRegistration = deferred<void>();
-  let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
-  let getCount = 0;
-  let activePosts = 0;
-  let maxActivePosts = 0;
-  const registrations: Array<{ open: string[]; watched: string[] }> = [];
-  const changes: string[] = [];
+void test(
+  "coalesces registration updates and ignores changes after unwatching",
+  { timeout: 2_000 },
+  async (t) => {
+    const heldRegistration = deferred<void>();
+    const watchedChangeDelivered = deferred<void>();
+    let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
+    let getCount = 0;
+    let activePosts = 0;
+    let maxActivePosts = 0;
+    const registrations: Array<{ open: string[]; watched: string[] }> = [];
+    const changes: string[] = [];
 
-  t.mock.method(globalThis, "fetch", async (input: RequestInfo | URL, options?: RequestInit) => {
-    assert.ok(input instanceof URL);
-    if (input.pathname === "/api/events") {
-      getCount++;
-      const body = new ReadableStream<Uint8Array>({
-        start(controller) {
-          streamController = controller;
-          controller.enqueue(
-            encoder.encode('event: connected\ndata: {"stream":"stream-b","boot":"boot-b"}\n\n'),
-          );
-        },
-      });
-      return new Response(body, { headers: { "Content-Type": "text/event-stream" } });
-    }
+    t.mock.method(globalThis, "fetch", async (input: RequestInfo | URL, options?: RequestInit) => {
+      assert.ok(input instanceof URL);
+      if (input.pathname === "/api/events") {
+        getCount++;
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            streamController = controller;
+            controller.enqueue(
+              encoder.encode('event: connected\ndata: {"stream":"stream-b","boot":"boot-b"}\n\n'),
+            );
+          },
+        });
+        return new Response(body, { headers: { "Content-Type": "text/event-stream" } });
+      }
 
-    activePosts++;
-    maxActivePosts = Math.max(maxActivePosts, activePosts);
-    const registration = JSON.parse(String(options?.body)) as { open: string[]; watched: string[] };
-    registrations.push(registration);
-    try {
-      if (registration.open.includes("a")) await heldRegistration.promise;
-      return new Response(null, { status: 204 });
-    } finally {
-      activePosts--;
-    }
-  });
+      activePosts++;
+      maxActivePosts = Math.max(maxActivePosts, activePosts);
+      const registration = JSON.parse(String(options?.body)) as {
+        open: string[];
+        watched: string[];
+      };
+      registrations.push(registration);
+      try {
+        if (registration.open.includes("a")) await heldRegistration.promise;
+        return new Response(null, { status: 204 });
+      } finally {
+        activePosts--;
+      }
+    });
 
-  const events = new SessionEvents(new URL("https://server.example"), {
-    connected() {},
-    change(session) {
-      changes.push(session);
-    },
-    status() {},
-    created() {},
-    disconnected() {},
-  });
-  events.start();
-  await waitFor(() => registrations.length === 1);
-  events.update(["a"], ["a"]);
-  await waitFor(() => registrations.length === 2);
-  events.update(["a", "b"], ["b"]);
-  events.update(["b"], ["b"]);
-  streamController?.enqueue(
-    encoder.encode(
-      'event: status\ndata: {"session":"a","boot":"boot-b","version":1,"status":"running"}\n\n' +
-        'event: change\ndata: {"session":"a","boot":"boot-b","version":1}\n\n',
-    ),
-  );
-  heldRegistration.resolve();
+    const events = new SessionEvents(new URL("https://server.example"), {
+      connected() {},
+      change(session) {
+        changes.push(session);
+        if (session === "b") watchedChangeDelivered.resolve();
+      },
+      status() {},
+      created() {},
+      disconnected() {},
+    });
+    t.after(() => events.stop());
+    events.start();
+    await waitFor(() => registrations.length === 1);
+    events.update(["a"], ["a"]);
+    await waitFor(() => registrations.length === 2);
+    events.update(["a", "b"], ["b"]);
+    events.update(["b"], ["b"]);
+    streamController?.enqueue(
+      encoder.encode(
+        'event: status\ndata: {"session":"a","boot":"boot-b","version":1,"status":"running"}\n\n' +
+          'event: change\ndata: {"session":"a","boot":"boot-b","version":1}\n\n',
+      ),
+    );
+    heldRegistration.resolve();
 
-  await waitFor(() => registrations.length === 3);
-  streamController?.enqueue(
-    encoder.encode(
-      'event: status\ndata: {"session":"b","boot":"boot-b","version":2,"status":"running"}\n\n' +
-        'event: change\ndata: {"session":"b","boot":"boot-b","version":2}\n\n',
-    ),
-  );
-  await waitFor(() => changes.includes("b"));
-  await new Promise((resolve) => setTimeout(resolve, 300));
+    await waitFor(() => registrations.length === 3);
+    streamController?.enqueue(
+      encoder.encode(
+        'event: status\ndata: {"session":"b","boot":"boot-b","version":2,"status":"running"}\n\n' +
+          'event: change\ndata: {"session":"b","boot":"boot-b","version":2}\n\n',
+      ),
+    );
+    // Delivery requires both the final registration acknowledgement and its status frame.
+    await watchedChangeDelivered.promise;
 
-  assert.deepEqual(registrations, [
-    { open: [], watched: [] },
-    { open: ["a"], watched: ["a"] },
-    { open: ["b"], watched: ["b"] },
-  ]);
-  assert.deepEqual(changes, ["b"]);
-  assert.equal(maxActivePosts, 1);
-  assert.equal(getCount, 1);
+    assert.deepEqual(registrations, [
+      { open: [], watched: [] },
+      { open: ["a"], watched: ["a"] },
+      { open: ["b"], watched: ["b"] },
+    ]);
+    assert.deepEqual(changes, ["b"]);
+    assert.equal(maxActivePosts, 1);
+    assert.equal(getCount, 1);
 
-  events.stop();
-});
+    events.stop();
+  },
+);
 
 void test("retains a change received before status until both handshake steps complete", async (t) => {
   const watchedRegistration = deferred<Response>();

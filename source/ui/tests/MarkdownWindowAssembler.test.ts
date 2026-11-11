@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { MarkdownWindowAssembler } from "../markdown-rendering/MarkdownWindowAssembler.ts";
 import type { MarkdownPiecePage } from "../markdown-rendering/MarkdownRenderModel.ts";
-import { safeMarkdownLink } from "../markdown-rendering/MarkdownLinkPolicy.ts";
 import {
   createMarkdownPiece,
   createMarkdownValue,
@@ -577,32 +576,6 @@ void test("keeps UTF-8 source ranges opaque and detaches page records", async ()
   assert.equal(text.length, 3);
   assert.equal(snapshot.contexts.get(1)?.context.source.end, 5);
   assert.deepEqual(snapshot.pieces.get(0)?.source, { start: 1, end: 5 });
-});
-
-void test("allows only safe absolute and relative Markdown links", () => {
-  for (const destination of [
-    "https://example.test/path",
-    "HTTP://example.test/path",
-    "mailto:user@example.test",
-    "relative/path?query=1#section",
-    "/root/path",
-    "?query=1",
-    "#section",
-  ])
-    assert.equal(safeMarkdownLink(destination), destination);
-
-  for (const destination of [
-    undefined,
-    "javascript:alert(1)",
-    "data:text/html,unsafe",
-    "ftp://example.test/file",
-    "//example.test/path",
-    "https:\\\\example.test/path",
-    "https://example.test/line\nbreak",
-    "https://example.test/\u0000",
-    "https://example.test/\u0085",
-  ])
-    assert.equal(safeMarkdownLink(destination), undefined);
 });
 
 void test("trims to normalized disjoint display ranges while preserving the active window", async () => {

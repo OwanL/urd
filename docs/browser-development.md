@@ -41,9 +41,10 @@ workspace before dispatch. Failed reads/writes block commands and offer an expli
 retry. If cleanup alone fails after a successful save, the saved state remains usable
 and cleanup can be retried. Storage access failures stay fail-closed until retry succeeds.
 Before the supported public data baseline, incompatible or malformed saved workspace/draft
-shapes are discarded, not migrated. Workspace version 3 preserves explicit model-family/image
-settings in each selection alongside placeholder/derived title provenance, so an actual first
-message of `New chat` is not mistaken for an unnamed tab. Version-2 state is discarded.
+shapes are discarded, not migrated. The current shape in
+[`WorkspaceState.ts`](../source/ui/app/WorkspaceState.ts) preserves explicit model metadata
+alongside placeholder/derived title provenance, so an actual first message of `New chat`
+is not mistaken for an unnamed tab. Incompatible earlier state is discarded.
 The palette uses neutral black/charcoal surfaces and grey controls; semantic error
 colours remain distinct. Transcript rows render plain text and tool status; richer formatting
 and tool argument/result inspection remain future work.
@@ -61,9 +62,10 @@ release before another open or final disposal. `MarkdownClient` adapts the page-
 HTTP lease API, normalizes Core numeric enums and awaits explicit release, including
 failed opens. The bridge is test-composed with explicit limits; ordinary startup and
 `Transcript` remain inactive. Catch-up can be deferred by selection, and unmounting
-loses selection. Durable unit/browser suites cover these modules; the exhaustive
-composed handoff probes are temporary evidence, not routine tests.
-Run `npm run test:markdown-rendering` from `source/ui/`.
+loses selection. Fast unit tests cover the model, paging and handoff logic. Browser suites
+and their synthetic renderer harness were removed by owner decision on 2026-11-11;
+real layout, selection, focus and clipboard behavior no longer have automated browser
+coverage. Earlier composed browser probes remain dated evidence, not current tests.
 
 ## Workspace composition
 
@@ -114,7 +116,6 @@ npm run build
 | `npm run lint` / `npm run lint:fast` | Combined typed lint / syntax-only feedback. |
 | `npm run typecheck` / `npm run typecheck:watch` | Strict compiler once / persistent watch. |
 | `npm test` | Fast Node unit tests discovered from `tests/**/*.test.ts`; no frontend component framework. |
-| `node --test tests/BrowserRegression.ts` | Headless Playwright regression against the temporary real Server and offline loopback model fixture. |
 | `npm run build` / `npm run build:watch` | Bundle once / watch into `source/ui/dist`; neither runs a server. |
 | `npm run test:integration` | Real Server and SDK-to-loopback-provider test; requires built UI assets and the Release backend build. |
 | `npm run test:browser:host` | Explicit temporary browser fixture host; real Urd plus a credential-free loopback model fixture, never saved accounts. |
@@ -152,10 +153,11 @@ require the browser marker. Unknown API paths are not redirected to HTML.
 The fixture launches the built Server with its own temporary data root and port
 `0`, creates a custom no-auth connection to its owned loopback model endpoint, and
 refreshes only that fixture's catalog. It exercises the real managed provider, SDK,
-execution and SQLite path, not a production fake-client flag. Install the pinned
-Playwright Chromium once with `npx playwright install chromium`, then run
-`node --test tests/BrowserRegression.ts` for the headless browser regressions. For
-manual inspection, run `npm run test:browser:host` and open its printed Urd origin.
+execution and SQLite path, not a production fake-client flag. Automated browser tests are
+not retained. For manual inspection, run `npm run test:browser:host` and open its printed
+Urd origin. Despite its historical script name, this starts a development host, not tests.
+Playwright remains a dependency only for the separate manual `TranscriptBaseline.ts`
+diagnostic; install its pinned Chromium explicitly before running that tool.
 Ctrl+C or POST to
 the printed model origin's `/__shutdown` closes the fixture. Test-control routes
 belong only to the fixture process, not Urd. Only owned processes/data are cleaned

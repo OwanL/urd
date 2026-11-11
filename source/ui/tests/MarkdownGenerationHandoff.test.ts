@@ -323,28 +323,6 @@ void test("seek does not publish if retained focus or selection changes while st
   await handoff.dispose();
 });
 
-void test("locate maps UTF-8 offsets to containing pieces and honors boundaries and abort", async () => {
-  const page = new SyntheticMarkdownPageSource(
-    [
-      createMarkdownPiece(0, 0, "😀", { source: { start: 1, end: 5 } }),
-      createMarkdownPiece(1, 0, "Z", { source: { start: 5, end: 6 } }),
-    ],
-    [{ kind: "document", pieces: [0, 2] }],
-    { generation: "utf8", sourceUtf8Bytes: 6 },
-  );
-  for (const [offset, index] of [
-    [0, 0],
-    [1, 0],
-    [4, 0],
-    [5, 1],
-    [6, 1],
-  ])
-    assert.equal((await page.locate(offset!, signal())).index, index);
-  const abort = new AbortController();
-  abort.abort();
-  await assert.rejects(page.locate(0, abort.signal), { name: "AbortError" });
-});
-
 void test("keeps the old window until ready, restores its anchor, and releases it", async () => {
   const old = source("old", [0, 2, 4, 6, 8, 10]);
   const { handoff, published } = await setup(old, anchor("old", "3", "6", 17));

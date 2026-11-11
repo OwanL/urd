@@ -2,7 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import type { SessionClient } from "../sessions/SessionClient.ts";
 import { moveTab } from "./TabOrder.ts";
 import { newChat } from "./WorkspaceState.ts";
+import type { SessionIdPage } from "../sessions/SessionIdPage.ts";
 import type { PersistedWorkspace } from "./usePersistedWorkspace.ts";
+import { enumerateSessionPages } from "./enumerateSessionPages.ts";
 
 const idPattern = /^[\da-f]{8}(-[\da-f]{4}){3}-[\da-f]{12}$/i;
 
@@ -63,28 +65,24 @@ export function useWorkspaceNavigation(
     const controller = new AbortController();
     async function discover() {
       try {
-        const page = await client.list(undefined, controller.signal);
-        if (controller.signal.aborted) return;
-        for (const id of page.sessionIds) discovered.current.add(id);
-        let cursor = page.nextCursor;
-        while (cursor !== null) {
-          const next = await client.list(cursor, controller.signal);
-          if (controller.signal.aborted) return;
-          for (const id of next.sessionIds) discovered.current.add(id);
-          cursor = next.nextCursor;
+        let initialPage: SessionIdPage | undefined;
+        for await (const page of enumerateSessionPages(client, controller.signal)) {
+          initialPage ??= page;
+          for (const id of page.sessionIds) discovered.current.add(id);
         }
+        if (controller.signal.aborted || !initialPage) return;
         const hash = window.location.hash.slice(1);
         if (idPattern.test(hash)) open(hash);
         else if (loaded!.first) {
-          if (page.sessionIds.length > 0) {
+          if (initialPage.sessionIds.length > 0) {
             const workspace = access.read();
             access.save({
               ...workspace,
-              tabs: [...page.sessionIds],
-              activeId: page.sessionIds[0] ?? null,
-              chats: Object.fromEntries(page.sessionIds.map((id) => [id, newChat(null)])),
+              tabs: [...initialPage.sessionIds],
+              activeId: initialPage.sessionIds[0] ?? null,
+              chats: Object.fromEntries(initialPage.sessionIds.map((id) => [id, newChat(null)])),
             });
-          } else if (page.nextCursor === null) await create();
+          } else if (initialPage.nextCursor === null) await create();
         }
         if (!controller.signal.aborted) setReady(true);
       } catch (cause) {

@@ -3,6 +3,7 @@ import type { SessionClient } from "../sessions/SessionClient.ts";
 import { SessionEvents } from "../sessions/SessionEvents.ts";
 import type { WorkspaceCommandAccess } from "./WorkspaceCommands.ts";
 import { newChat } from "./WorkspaceState.ts";
+import { enumerateSessionPages } from "./enumerateSessionPages.ts";
 
 const maxObservedSessions = 128;
 
@@ -50,13 +51,10 @@ export function useSessionEvents(
     }
     async function discover(signal: AbortSignal) {
       try {
-        let cursor: string | undefined;
-        do {
-          const page = await client.list(cursor, signal);
+        for await (const page of enumerateSessionPages(client, signal)) {
           if (signal.aborted || disposed) return;
           for (const session of page.sessionIds) add(session);
-          cursor = page.nextCursor ?? undefined;
-        } while (cursor !== undefined);
+        }
       } catch (cause) {
         if (!signal.aborted && !disposed)
           setError(cause instanceof Error ? cause.message : "Session discovery failed.");

@@ -93,17 +93,6 @@ export function Conversation({
     transcript === undefined,
   );
   const state = deriveConversationState(chat, snapshot, stop, ready, canPersist);
-  const canResendNotSent = Boolean(
-    snapshot &&
-    canPersist &&
-    !chat.pending &&
-    !snapshot.admissionFenced &&
-    !snapshot.stopRequested &&
-    !state.stopId &&
-    (!chat.knownExecutionId ||
-      snapshot.unsettledExecutionId === chat.knownExecutionId ||
-      snapshot.lastSettlement?.executionId === chat.knownExecutionId),
-  );
   const selection = state.selection;
   const modelKey = selection ? `${selection.connection.id}/${selection.modelId}` : null;
   const error = readError || chat.error || stop?.error;
@@ -195,7 +184,7 @@ export function Conversation({
           sessionId={sessionId}
           snapshot={snapshot}
           commands={commands}
-          canResend={canResendNotSent}
+          canResend={state.canResendNotSent}
         />
       </div>
       <Composer

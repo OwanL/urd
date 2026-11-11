@@ -14,6 +14,7 @@ export interface ConversationState {
   selection: LlmSelection | null;
   textError: string | null;
   canSend: boolean;
+  canResendNotSent: boolean;
   admissionFenced: boolean;
   unsettledWhileFenced: boolean;
   executionStatus: ConversationExecutionStatus;
@@ -43,20 +44,19 @@ export function deriveConversationState(
     ? (snapshot?.latestLlmSelection ?? null)
     : (chat.selection ?? snapshot?.latestLlmSelection ?? null);
   const textError = submissionTextError(chat.draft);
-  const canSend = Boolean(
-    ready &&
+  const canResendNotSent = Boolean(
     snapshot &&
-    selection &&
-    chat.draft.trim() &&
-    !textError &&
+    canPersist &&
     !chat.pending &&
+    !snapshot.admissionFenced &&
+    !snapshot.stopRequested &&
+    !stopId &&
     (!chat.knownExecutionId ||
       snapshot.unsettledExecutionId === chat.knownExecutionId ||
-      snapshot.lastSettlement?.executionId === chat.knownExecutionId) &&
-    !snapshot.stopRequested &&
-    !snapshot.admissionFenced &&
-    !stopId &&
-    canPersist,
+      snapshot.lastSettlement?.executionId === chat.knownExecutionId),
+  );
+  const canSend = Boolean(
+    ready && snapshot && selection && chat.draft.trim() && !textError && canResendNotSent,
   );
   const admissionFenced = Boolean(snapshot?.admissionFenced);
   const unsettledWhileFenced = Boolean(snapshot?.unsettledExecutionId && admissionFenced);
@@ -81,6 +81,7 @@ export function deriveConversationState(
     selection,
     textError,
     canSend,
+    canResendNotSent,
     admissionFenced,
     unsettledWhileFenced,
     executionStatus,

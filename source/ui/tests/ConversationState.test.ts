@@ -56,11 +56,52 @@ function pendingChat(status: "sending" | "uncertain"): ChatState {
   };
 }
 
-void test("sending requires readiness and persistence", () => {
-  assert.equal(deriveConversationState(chat, snapshot(), undefined, true, true).canSend, true);
-  assert.equal(deriveConversationState(chat, snapshot(), undefined, false, true).canSend, false);
-  assert.equal(deriveConversationState(chat, snapshot(), undefined, true, false).canSend, false);
-  assert.equal(deriveConversationState(chat, null, undefined, true, true).canSend, false);
+void test("send and resend share execution gates but retain distinct input requirements", () => {
+  const available = deriveConversationState(chat, snapshot(), undefined, true, true);
+  assert.equal(available.canSend, true);
+  assert.equal(available.canResendNotSent, true);
+
+  const notReady = deriveConversationState(chat, snapshot(), undefined, false, true);
+  assert.equal(notReady.canSend, false);
+  assert.equal(notReady.canResendNotSent, true);
+
+  const noSelection = deriveConversationState(
+    { ...chat, selection: null },
+    snapshot({ latestLlmSelection: null }),
+    undefined,
+    true,
+    true,
+  );
+  assert.equal(noSelection.canSend, false);
+  assert.equal(noSelection.canResendNotSent, true);
+
+  const noDraft = deriveConversationState(
+    { ...chat, draft: "  " },
+    snapshot(),
+    undefined,
+    true,
+    true,
+  );
+  assert.equal(noDraft.canSend, false);
+  assert.equal(noDraft.canResendNotSent, true);
+
+  const invalidDraft = deriveConversationState(
+    { ...chat, draft: "\uD800" },
+    snapshot(),
+    undefined,
+    true,
+    true,
+  );
+  assert.equal(invalidDraft.canSend, false);
+  assert.equal(invalidDraft.canResendNotSent, true);
+
+  const cannotPersist = deriveConversationState(chat, snapshot(), undefined, true, false);
+  assert.equal(cannotPersist.canSend, false);
+  assert.equal(cannotPersist.canResendNotSent, false);
+
+  const noSnapshot = deriveConversationState(chat, null, undefined, true, true);
+  assert.equal(noSnapshot.canSend, false);
+  assert.equal(noSnapshot.canResendNotSent, false);
 });
 
 void test("active execution steers selection; fencing locks without steering it", () => {
@@ -89,6 +130,7 @@ void test("active execution steers selection; fencing locks without steering it"
   assert.equal(fenced.selectionLocked, true);
   assert.equal(fenced.selection, selection);
   assert.equal(fenced.canSend, false);
+  assert.equal(fenced.canResendNotSent, false);
 });
 
 void test("uncertain submissions and known executions retain their distinct status and send gates", () => {
@@ -102,6 +144,7 @@ void test("uncertain submissions and known executions retain their distinct stat
   assert.equal(uncertain.pendingStatus, "uncertain");
   assert.equal(uncertain.selectionLocked, true);
   assert.equal(uncertain.canSend, false);
+  assert.equal(uncertain.canResendNotSent, false);
 
   const known = deriveConversationState(
     { ...chat, knownExecutionId: executionId },
@@ -112,6 +155,7 @@ void test("uncertain submissions and known executions retain their distinct stat
   );
   assert.equal(known.executionStatus, "accepted");
   assert.equal(known.canSend, false);
+  assert.equal(known.canResendNotSent, false);
 
   const settled = deriveConversationState(
     { ...chat, knownExecutionId: executionId },
@@ -122,6 +166,7 @@ void test("uncertain submissions and known executions retain their distinct stat
   );
   assert.equal(settled.executionStatus, "accepted");
   assert.equal(settled.canSend, true);
+  assert.equal(settled.canResendNotSent, true);
 });
 
 void test("stopping and explicit stop state take priority over settlement facts", () => {
@@ -139,6 +184,7 @@ void test("stopping and explicit stop state take priority over settlement facts"
   assert.equal(stopping.stopId, executionId);
   assert.equal(stopping.executionStatus, "stopping");
   assert.equal(stopping.settlementStatus, null);
+  assert.equal(stopping.canResendNotSent, false);
 
   const stopRequested = deriveConversationState(
     chat,
@@ -149,6 +195,7 @@ void test("stopping and explicit stop state take priority over settlement facts"
   );
   assert.equal(stopRequested.showStopRequested, true);
   assert.equal(stopRequested.settlementStatus, null);
+  assert.equal(stopRequested.canResendNotSent, false);
 
   const failed = deriveConversationState(
     chat,

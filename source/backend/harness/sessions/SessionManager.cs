@@ -129,15 +129,13 @@ public sealed class SessionManager {
   private PrimarySession CreateSession(SessionRecord record) {
     var pending = new PendingToolCalls();
     AgentTool[] controls = [new ListPendingCallsTool(pending), new CancelPendingCallsTool(pending)];
-    if (toolSettings is null) {
+    // Chats created without tools keep their saved capabilities and remain readable.
+    if (toolSettings is null || record.WorkingDirectory is null) {
       var configured = new ToolCatalog(injectedTools.Count == 0 ? [] : [.. injectedTools, .. controls]);
       return new PrimarySession(record, store, createChatClient, configured, pending: pending);
     }
     if (!OperatingSystem.IsWindows())
       throw new PlatformNotSupportedException("Agent tools currently require Windows and Git for Windows.");
-    if (record.WorkingDirectory is null)
-      throw new InvalidOperationException("This chat has no saved working folder. Create a new chat to use agent tools.");
-
     var processes = new ChatProcesses(bash!);
     var tools = new ToolCatalog([
       new ReadTool(files), new WriteTool(files), new EditTool(files),

@@ -13,7 +13,7 @@ namespace Urd.Backend.Tests.Tools;
 
 public sealed class ToolCompositionTests {
   [Fact]
-  public async Task ReopenedChatKeepsItsSavedFolderAndOffersAllGenericTools() {
+  public async Task ReopenedChatsKeepTheirSavedFoldersAndToolAvailability() {
     if (!OperatingSystem.IsWindows())
       return;
     using var database = new TemporaryDatabase();
@@ -21,8 +21,9 @@ public sealed class ToolCompositionTests {
     string second = Path.Combine(Path.GetDirectoryName(database.Path)!, "second");
     Directory.CreateDirectory(first);
     Directory.CreateDirectory(second);
-    Guid sessionId;
+    Guid sessionId, toolFreeId;
     using (UrdStore store = UrdStore.Open(database.Path)) {
+      toolFreeId = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
       int round = 0;
       using var client = new ScriptedChatClient(token => ++round == 1
           ? ToolBatch(token, new FunctionCallContent("write", "write", new Dictionary<string, object?> {
@@ -52,6 +53,10 @@ public sealed class ToolCompositionTests {
       await SubmitAsync(loaded);
       Assert.Equal("updated", await File.ReadAllTextAsync(Path.Combine(first, "note.txt")));
       Assert.Empty(Directory.EnumerateFileSystemEntries(second));
+      PrimarySession toolFree = await loadedManager.GetPrimaryAsync(toolFreeId);
+      await SubmitAsync(toolFree);
+      Assert.Empty(nextClient.Options[^1]!.Tools!);
+      Assert.Null(reopened.Sessions.Read(toolFreeId)!.WorkingDirectory);
     } finally {
       await loadedManager.ShutdownSessionsAsync().WaitAsync(TestTimeout);
     }

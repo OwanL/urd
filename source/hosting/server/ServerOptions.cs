@@ -19,12 +19,16 @@ internal sealed record ServerOptions {
         (string.IsNullOrWhiteSpace(workingDirectory) || !Path.IsPathFullyQualified(workingDirectory)))
       throw new ArgumentException("Working directory must be a nonempty, fully qualified path.", nameof(workingDirectory));
     if (gitBashPath is not null &&
-        (workingDirectory is null || string.IsNullOrWhiteSpace(gitBashPath) || !Path.IsPathFullyQualified(gitBashPath)))
-      throw new ArgumentException("Git Bash requires --working-directory and a fully qualified executable path.", nameof(gitBashPath));
+        (string.IsNullOrWhiteSpace(gitBashPath) || !Path.IsPathFullyQualified(gitBashPath)))
+      throw new ArgumentException("Git Bash requires a fully qualified executable path.", nameof(gitBashPath));
 
     DataRoot = Path.GetFullPath(dataRoot);
     Port = port;
-    WorkingDirectory = workingDirectory is null ? null : Path.GetFullPath(workingDirectory);
+    // Application tools currently require Windows. Preserve tool-free startup elsewhere.
+    string? directory = workingDirectory;
+    if (directory is null && (OperatingSystem.IsWindows() || gitBashPath is not null))
+      directory = Path.GetPathRoot(Environment.CurrentDirectory);
+    WorkingDirectory = directory is null ? null : Path.GetFullPath(directory);
     GitBashPath = gitBashPath is null ? null : Path.GetFullPath(gitBashPath);
   }
 

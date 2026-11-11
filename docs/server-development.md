@@ -21,13 +21,18 @@ From `source/`, with `$dotnet` set to that SDK's executable:
 Choose your own absolute data directory. Both arguments are required; either order is
 accepted. Port `0` lets the OS select an available port; an explicit port must be within
 `1..65535`. Unknown, duplicate or malformed options fail before opening data.
-Add `--working-directory 'C:\dev\repos\your-project'` to enable file/shell tools and pending-call controls.
-This is a relative-path default, not a sandbox: tools have the server user's full access,
-without per-call approvals. New chats save this folder; reopening preserves it. Existing
-chats without a folder require a new chat before tools can run. Optional `--git-bash`
-selects an absolute Git for Windows Bash executable; otherwise Urd locates Git Bash.
-Without `--working-directory`, no tools are configured. Shells receive a startup snapshot
-of the server environment and run non-login `bash -c`.
+On Windows, file/shell tools and pending-call controls are enabled by default and require
+Git for Windows. Other platforms retain tool-free startup; explicitly requesting tools is
+unsupported. Without `--working-directory`, new Windows chats use the launch drive's root
+(for example `C:\`), not the launch folder or data root. Add
+`--working-directory 'C:\dev\repos\your-project'` to override this relative-path default.
+It is not a sandbox: tools have the server user's full access, without per-call approvals.
+New chats save this folder; reopening preserves it. Existing chats without a folder or
+with an empty frozen tool list remain readable and tool-free; create a new chat to use tools.
+Optional `--git-bash`
+selects an absolute Git for Windows Bash executable, independently of `--working-directory`;
+otherwise Urd locates Git Bash. Shells receive a startup snapshot of the server environment
+and run non-login `bash -c`.
 
 There is no bootstrap, wrapper script or automatic browser launch in this slice.
 To include the browser, first run `npm run build` in `source/ui/`; the Server build
@@ -262,7 +267,7 @@ Stop retires pending steering without rewriting Accepted receipts or automatical
 it into another execution. Separate independent worker chats continue; bounded-descendant ownership
 requirements remain in [architecture](ARCHITECTURE.md) and [session design](session-design.md),
 not a new child runtime. Stop cannot undo effects or forcibly kill arbitrary in-process functions.
-The CLI configures real selected provider clients and optional application tools. Public
+The CLI configures real selected provider clients and application tools. Public
 Stop cancels provider/foreground/background calls and joins cleanup through the single driver;
 processes retained by completed shell calls survive Stop until chat/backend shutdown.
 

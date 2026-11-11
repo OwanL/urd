@@ -16,13 +16,15 @@ internal sealed class WriteTool(FileMutationQueue files) : AgentTool {
   });
 
   public override string Name => "write";
-  public override string Description => "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories. Use only for new files or complete rewrites.";
+  public override string Description =>
+      "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. " +
+      "Automatically creates parent directories. Use only for new files or complete rewrites.";
   public override JsonElement ParametersSchema => schema;
 
   public override async Task<ToolOutput> RunAsync(JsonElement arguments, ToolContext context, CancellationToken cancellation) {
     try {
-      string path = arguments.GetProperty("path").GetString() ?? throw new ArgumentException("path must be a string.");
-      string content = arguments.GetProperty("content").GetString() ?? throw new ArgumentException("content must be a string.");
+      string path = ToolArguments.String(arguments, "path");
+      string content = ToolArguments.String(arguments, "content");
       string absolutePath = ToolPaths.Resolve(path, context.WorkingDirectory);
       // Admission is synchronous: no earlier await may reorder calls from one reply.
       return await files.ChangeAsync(absolutePath, async token => {

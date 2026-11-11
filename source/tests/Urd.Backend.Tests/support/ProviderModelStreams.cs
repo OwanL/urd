@@ -35,13 +35,14 @@ internal static class ProviderModelStreams {
     return stream;
   }
 
-  internal static string ChatCalls(string finish = "tool_calls", bool reasoning = false, string arguments = "{\"key\":\"abc\"}") {
+  internal static string ChatCalls(string finish = "tool_calls", bool reasoning = false,
+      string arguments = "{\"key\":\"abc\"}", string name = "lookup") {
     string Chunk(object delta, string? reason = null) => "data: " + JsonSerializer.Serialize(new {
       id = "chatcmpl_fixture", @object = "chat.completion.chunk", created = 1700000000, model = "fixture-model",
       choices = new[] { new { index = 0, delta, finish_reason = reason } }
     }) + "\n\n";
     return Chunk(new { role = "assistant", content = "hello", reasoning_content = reasoning ? "thought" : null }) +
-        Chunk(new { tool_calls = new[] { new { index = 0, id = "call_fixture", type = "function", function = new { name = "lookup", arguments = arguments[..(arguments.Length / 2)] } } } }) +
+        Chunk(new { tool_calls = new[] { new { index = 0, id = "call_fixture", type = "function", function = new { name, arguments = arguments[..(arguments.Length / 2)] } } } }) +
         Chunk(new { tool_calls = new[] { new { index = 0, function = new { arguments = arguments[(arguments.Length / 2)..] } } } }) +
         Chunk(new { }, finish) + "data: [DONE]\n\n";
   }

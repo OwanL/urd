@@ -1,8 +1,52 @@
 # Agent-tool process and result qualification
 
-Evidence for the [agent-tool plan](agent-tools-design.md), separating integrated source
-qualification from earlier disposable probes. No live model requests, personal databases,
-installations or desktop control. Builds/runs used the exclusive `urd:dotnet` resource.
+Evidence for the [agent-tool plan](agent-tools-design.md), separating live acceptance,
+integrated source qualification and earlier disposable probes. Each checkpoint states its
+boundary. No personal databases, installations or desktop control were used. .NET checks
+used `urd:dotnet`; the final acceptance also reserved `urd:heavy-local-work`.
+
+## Live tools and host recovery acceptance — 2026-11-11
+
+The frozen tool slice passed bounded real-provider checks using a **fresh, separately
+authenticated disposable profile**. ChatGPT subscription Responses, `gpt-6.1-sol`, low
+reasoning, and explicit `openAI`/image-support metadata were selected; capabilities were
+not inferred from the model name. **15 model requests** were made, without automatic
+retries. This request count is evidence, not a spending cap.
+
+| Check | Observed result |
+| --- | --- |
+| Foreground tools | `write` created a file; `edit` changed its exact value; `read` returned it. One emitted batch then exercised text read, `bash`, and image read. All five calls succeeded. |
+| Live image delivery | A generated 320×240 PNG became a persisted image result. The model correctly identified its blue background and yellow circle; those facts were not supplied in the prompt. |
+| Background waiting/wake | A background shell remained visible in `list_pending_calls`; after waiting, its completion automatically woke the execution. The model returned the random token from its result. One completion identity was published and claimed once. |
+| Explicit cancellation | `cancel_pending_calls` requested cancellation of a second chat's background shell. Its saved outcome was cancelled; the post-sleep effect did not occur. Its completion was delivered once. The concurrent successful background chat was unaffected. |
+| Addressed Stop | Stop during a real-provider-authorized foreground shell killed its known native PowerShell child and settled cancelled. The partial effect remained. Only the original model request existed: no continuation or replay. |
+| Save/reopen | Restarting only the owned idle host preserved all four settlements, frozen selections, 11 tool rows, completion identities and a SHA-256-verified image. The 14 existing model requests were unchanged. An explicit new follow-up made request 15, successfully reused saved conversation context, and ran no tools. |
+
+Live checks used the frozen `671112b` tool artifact at
+`source/hosting/server/bin/ToolRelevanceAlways-4d11e9d/Release/Urd.Server.dll`, with schema 14.
+They do **not** qualify activation of the concurrent schema-15 starting-context changes.
+The current shared source separately passed **343 offline backend tests**, including the
+new `ToolHostCrashTests` cases; both cases passed an additional focused repeat against
+matching isolated Release artifacts:
+
+- The real CLI uses an owned loopback scripted Chat Completions endpoint, starts the actual
+  `bash` tool and retains an OS handle to its native sleeping child.
+- The Stop case waits for saved cancellation and child exit. The crash case kills **only
+  the server root**, not the process tree, so fixture cleanup cannot mask job ownership.
+- Restarting that crashed disposable profile records interrupted tool/run failure. The
+  effect marker remains single and provider-call count remains one: recovery never replays.
+- Independent review approved the test and its minimal shared helpers. The shared-tree
+  physical-line check passed: **25,504 test/helper lines ≤ 27,148 application lines**.
+
+Evidence is under `%TEMP%/urd-tools-acceptance-20261111-4d11e9d/`: case JSON records,
+`reopen-report.json`, scripts and `cleanup-report.json`. The fresh grant's remote revocation
+was confirmed, local credentials cleared, its database profile deleted, both owned host
+processes stopped and their ports closed. Neither pre-existing profile was changed by
+these checks. No source/API changes or live-server activation were needed.
+
+**Remaining boundaries:** this qualifies the selected ChatGPT Responses route, not other
+models/providers or live Chat Completions compatibility. Rich tool-result inspection and
+compaction remain follow-on work; passing this slice is not whole-application readiness.
 
 ## Integrated background checkpoint — 2026-11-11
 
@@ -31,8 +75,9 @@ profiles. Verification children stopped and both resource leases were released. 
 schema-12 server/data were untouched. **Schema 14 is built, not activated**; it requires
 owner-directed data recreation, not a migration or an automatic reset.
 
-**Still pending:** live-provider acceptance, rich tool-result inspection and compaction.
-These local checks do not establish normal-use readiness or an integrated crash-process probe.
+**At this checkpoint:** live-provider acceptance and an integrated crash-process probe were
+still pending; the later acceptance above covers them. Rich tool-result inspection and
+compaction remain separate normal-use gates.
 
 ## Integrated foreground checkpoint — 2026-11-11
 

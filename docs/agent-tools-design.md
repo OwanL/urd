@@ -114,12 +114,36 @@ and explicit startup recovery. Compaction and rich tool-result inspection remain
     `ToolRelevance.When(guidance)` supplies immutable, nonblank relevance guidance for
     future pruning and dynamic discovery. This adds metadata only: no selector is
     implemented, and all configured tools remain available to the model up front.
+21. **Tool-row presentation** (owner review 2026-11-12).
+    - One fixed-height, single-line row per call: tool icon · major · minor, plus
+      right-aligned elapsed time shown only from 5 s, in whole units (`7s`, `2m 13s`).
+      Minor text never repeats the major part and is truncated at its end. Bash major is
+      the first real command (skipping `cd …&&`, assignments and wrappers); the dropped
+      prefix is visible only on inspection. Unknown/MCP tools fall back to name · compact
+      arguments. File rows show the name only; identical names are not disambiguated.
+    - A running call's icon slowly fades in and out (about a 2.4 s cycle; steady under
+      reduced motion). A failed call (including non-zero exit) has a danger-coloured icon.
+      Stopped, interrupted or never-run calls look like finished calls.
+    - Calls from one response with two or more calls share a subtle left guide with
+      `┌ ├ └` connectors; each row draws its own segment so partially loaded batches join.
+    - A background call keeps its start row (background glyph; live time while pending)
+      and gets a separate returned row where the model received the result: return
+      glyph, muted major, the call's minor, total time.
+    - The icon opens an interactive hover card with the model-facing input and output
+      JSON (scroll, select, one Copy). It loads lazily, displays a bounded preview and
+      copies the full payload.
+    - File names show their resolved absolute path on hover. A shared context menu
+      offers **Copy path** and **Reveal in Explorer** only.
+    - Summaries come from a backend presentation module beside `markdown-rendering/`,
+      not the harness or tool classes. It derives bounded per-tool summaries from stored
+      calls on read, resolves paths against the session working folder and keeps
+      history pages small. Full arguments never ship with rows. Expandable details are
+      deferred; keep row parts modular so they can be added later.
 
 ## Open
 
 - Class shapes are approved; provider-result encoding and process-lifetime mechanics still
   require the qualifications below. Do not invent another framework to close those seams.
-- Transcript presentation of tool rows and pending background calls.
 - Compaction class shapes and storage (direction is already approved).
 
 ## Approved code shapes

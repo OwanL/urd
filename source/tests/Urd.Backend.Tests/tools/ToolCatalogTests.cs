@@ -7,7 +7,7 @@ namespace Urd.Backend.Tests.Tools;
 
 public sealed class ToolCatalogTests {
   [Fact]
-  public void EveryFamilyGetsAllGenericToolsAndSavedNamesRemainFindable() {
+  public void EveryFamilyGetsTheFrozenGenericToolList() {
     AgentTool[] configured = [new TestTool("read"), new TestTool("write")];
     var catalog = new ToolCatalog(configured);
     var original = configured.ToArray();
@@ -15,18 +15,18 @@ public sealed class ToolCatalogTests {
 
     foreach (var family in Enum.GetValues<ModelFamily>())
       Assert.Equal(original, catalog.For(family));
-    Assert.Same(original[0], catalog.Find("read"));
-    Assert.Same(original[1], catalog.Find("write"));
-    Assert.Null(catalog.Find("READ"));
-    Assert.Null(catalog.Find("replacement"));
+    Assert.Throws<NotSupportedException>(() =>
+        ((IList<AgentTool>)catalog.For(ModelFamily.Other))[0] = new TestTool("replacement"));
   }
 
   [Fact]
-  public void DuplicateNamesAreRejectedButEmptyConfigurationIsValid() {
+  public void DuplicateNamesAreRejectedButCaseDistinctNamesAndEmptyConfigurationAreValid() {
     Assert.Throws<ArgumentException>(() => new ToolCatalog([new TestTool("read"), new TestTool("read")]));
+    var caseDistinct = new ToolCatalog([new TestTool("read"), new TestTool("READ")]);
+    Assert.Equal(2, caseDistinct.For(ModelFamily.Other).Count);
+
     var empty = new ToolCatalog([]);
     Assert.Empty(empty.For(ModelFamily.Other));
-    Assert.Null(empty.Find("read"));
   }
 
   private sealed class TestTool(string name) : AgentTool {

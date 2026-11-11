@@ -18,7 +18,5 @@ internal sealed class ToolUsageGuidance : ContextGuidance {
       - Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.
       - Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.
       - Use write only for new files or complete rewrites.
-      - Be concise in your responses
-      - Show file paths clearly when working with files
       """;
 }

@@ -21,8 +21,10 @@ not in the context manager.
 The working defaults/preferences, child guidance and tool-use/documentation rules
 were selected from Pie's `harness/agent-instructions/` and
 `harness/pi/packages/coding-agent/src/core/`. Source paths are recorded on each class.
-Retained text is word-for-word, including spelling and punctuation. These are local
-editable copies, not a runtime dependency or automatic synchronization with Pie.
+Retained text is word-for-word, including spelling and punctuation. Overlapping
+advice has been removed: defaults hold common rules, and preferences retain distinct
+requirements. These are local editable copies, not a runtime dependency or automatic
+synchronization with Pie.
 
 Omissions include Pie/Pi identity and documentation paths, skill/resource recovery,
 session coordination, subagent dispatch, unavailable clarification/computer-control

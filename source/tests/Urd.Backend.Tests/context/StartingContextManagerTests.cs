@@ -24,7 +24,7 @@ public sealed class StartingContextManagerTests {
     Assert.Contains("Urd", primaryText, StringComparison.Ordinal);
     Assert.Contains("Urd", subagentText, StringComparison.Ordinal);
     Assert.Contains("user", primaryText, StringComparison.OrdinalIgnoreCase);
-    Assert.Contains("assigned task", subagentText, StringComparison.OrdinalIgnoreCase);
+    Assert.Contains("task boundaries", subagentText, StringComparison.OrdinalIgnoreCase);
     Assert.Contains("result", subagentText, StringComparison.OrdinalIgnoreCase);
     Assert.Contains(assignment, primaryText, StringComparison.Ordinal);
     Assert.Contains(assignment, subagentText, StringComparison.Ordinal);

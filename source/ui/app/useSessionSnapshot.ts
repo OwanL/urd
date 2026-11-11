@@ -114,7 +114,7 @@ export function useSessionSnapshot(
     function activate() {
       setVisible(!document.hidden);
       if (document.hidden) suspend();
-      else requestRead.current();
+      else resume();
     }
 
     document.addEventListener("visibilitychange", activate);

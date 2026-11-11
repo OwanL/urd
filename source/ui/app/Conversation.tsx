@@ -133,7 +133,9 @@ export function Conversation({
           {state.showStopRequested && <span>Stop requested. </span>}
           {state.settlementStatus && (
             <span class={state.settlementStatus === "failed" ? "inline-error" : undefined}>
-              {settlementLabels[state.settlementStatus]}{" "}
+              {state.settlementStatus === "failed"
+                ? snapshot?.lastSettlement?.error || settlementLabels.failed
+                : settlementLabels.cancelled}{" "}
             </span>
           )}
           {state.pendingStatus && (

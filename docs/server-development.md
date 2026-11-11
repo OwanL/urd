@@ -75,10 +75,21 @@ and Core shutdown operations both finish; it has no forced cleanup timeout.
 | POST `/api/sessions/{sessionId}/message-submissions` | `UserMessageSubmission` → 200 `UserMessageReceipt`, Accepted **or** Refused |
 | GET `/api/sessions/{sessionId}/message-submissions/{submissionId}` | 200 receipt or literal JSON `null` |
 | POST `/api/sessions/{sessionId}/executions/{executionId}/stop` | Empty JSON object `{}` → 200 `StopReceipt` for Requested or Settled |
+| POST `/api/sessions/{sessionId}/compactions` | `CompactionSubmission` → 200 `CompactionReceipt`; 409 when admission is unavailable |
+| GET `/api/sessions/{sessionId}/compactions/operations/{operationId}` | 200 receipt or literal JSON `null` |
+| GET `/api/sessions/{sessionId}/compactions/{compactionId}` | `expectedHistoryRevision` → 200 `CompactionSummary`, or 404 |
 | GET `/api/sessions/{sessionId}/snapshot` | 200 slim `SessionSnapshot` |
 | GET `/api/sessions/{sessionId}/history` | Mode/revision and optional entry anchor → 200 bounded `TranscriptHistoryPage` |
 | GET `/api/sessions/{sessionId}/not-sent?cursor=...` | Optional opaque cursor → 200 page of known-not-sent inputs |
 | GET `/api/sessions/{sessionId}/content` | Segment-local cursor → 200 `MessageContentPage` |
+| GET `/api/sessions/{sessionId}/positions` | `expectedHistoryRevision` → 200 `TranscriptPositionSummary` |
+| GET `/api/sessions/{sessionId}/positions/locate` | `expectedHistoryRevision`, `fraction` (0–1) → 200 `TranscriptPositionWindow` |
+| GET `/api/sessions/{sessionId}/positions/entries/{executionId}/{entryId}` | `expectedHistoryRevision`, `kind` → 200 positioned entry window |
+| GET `/api/sessions/{sessionId}/positions/prompts` | `expectedHistoryRevision`, optional `afterRank` and `limit` (1–60) → 200 `TranscriptPromptPage` |
+| GET `/api/sessions/{sessionId}/positions/prompts/{executionId}/{entryId}` | `expectedHistoryRevision` → 200 positioned user-prompt window |
+
+[`SessionRoutes.cs`](../source/hosting/server/SessionRoutes.cs) owns the route inventory;
+[`SessionClient.ts`](../source/ui/sessions/SessionClient.ts) supplies the browser query shapes.
 
 ### Browser event stream
 
@@ -107,9 +118,11 @@ routes and required field names.
 
 ### Frozen LLM selection
 
-New Sends require `llmSelection: {connection, modelId, reasoningEffort, family, supportsImages}`. `connection`
-is the full saved secret-free `ProviderConnection`, including route, API, endpoint
-and authentication kind, not credentials. A stale/removed binding is not replaced
+New Sends require `llmSelection`; [`LlmSelection.ts`](../source/ui/providers/LlmSelection.ts)
+owns its browser shape and [`LlmSelection.cs`](../source/backend/core/providers/LlmSelection.cs)
+owns validation. It includes connection, model ID, reasoning effort, family, image support
+and a nullable context window. `connection` is the full saved secret-free `ProviderConnection`,
+including route, API, endpoint and authentication kind, not credentials. A stale/removed binding is not replaced
 by a lookup or fallback. The provider factory runs lazily outside admission/storage
 locks; inability to create/use the selected client settles the execution as Failed,
 not as a fabricated refused admission.

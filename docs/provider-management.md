@@ -10,9 +10,10 @@ adds no discovery tools, other subscription providers or native Ollama/Anthropic
 ## Storage and ownership
 
 `UrdStore` replaces the former `SessionStore` name and owns the shared SQLite database.
-The current schema is version 10: provider connections and host identity began in schema 6;
-subsequent versions added native provider context, frozen selections, transcript metadata and
-request usage, then attempt provenance and not-sent tracking. There is no second database or lease.
+[`DatabaseSchema.cs`](../source/backend/core/storage/DatabaseSchema.cs) owns the current schema
+and supported version. Provider connections, host identity, model settings, native context,
+frozen selections and transcript/request facts share that schema; there is no second database
+or lease. Incompatible pre-release databases require an explicit reset, not migration.
 `ProviderManager` borrows the store, owns its HTTP transport, and drains requests,
 sign-ins and refresh/revocation work before disposal. The host joins this drain with
 its existing HTTP/session shutdown barrier.

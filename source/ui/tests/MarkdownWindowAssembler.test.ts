@@ -334,6 +334,7 @@ void test("aborted descriptor batches leave the committed snapshot usable", asyn
       return source.readContexts(ids, cursor, signal);
     },
     locate: source.locate.bind(source),
+    locateChild: source.locateChild.bind(source),
   };
   const assembler = new MarkdownWindowAssembler(heldSource, source.manifest);
   const prior = await assembler.append(signal());
@@ -462,6 +463,7 @@ void test("aborted reads stay atomic and release the shared read lock", async ()
     readContext: source.readContext.bind(source),
     readContexts: source.readContexts.bind(source),
     locate: source.locate.bind(source),
+    locateChild: source.locateChild.bind(source),
   };
   const assembler = new MarkdownWindowAssembler(heldSource, source.manifest, 1);
   await assembler.append(signal());

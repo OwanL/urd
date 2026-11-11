@@ -61,6 +61,15 @@ public sealed class MarkdownRoutesTests {
       MarkdownContextPage context = (await contextResponse.Content.ReadFromJsonAsync<MarkdownContextPage>(MarkdownRenderJson.Options))!;
       Assert.Equal(MarkdownElementKind.Link, context.Context.Kind);
       Assert.Equal("https://example.invalid/0", context.Values.Single().Text);
+      Assert.NotEqual(-1, context.Context.Parent);
+      using HttpResponseMessage parentContextResponse = await RequestAsync(server.Client, HttpMethod.Get,
+          path + $"/contexts/{context.Context.Parent}" + cursor);
+      MarkdownContextPage parentContext = (await parentContextResponse.Content.ReadFromJsonAsync<MarkdownContextPage>(MarkdownRenderJson.Options))!;
+      Assert.Equal(context.Context.Id, parentContext.Context.FirstChild);
+      using HttpResponseMessage childLocationResponse = await RequestAsync(server.Client, HttpMethod.Get,
+          path + $"/contexts/{parentContext.Context.Id}/children/0");
+      MarkdownRenderCursor childLocation = await childLocationResponse.Content.ReadFromJsonAsync<MarkdownRenderCursor>(MarkdownRenderJson.Options);
+      Assert.Equal(new MarkdownRenderCursor(generation, context.Context.FirstPiece), childLocation);
       using HttpResponseMessage beforeResponse = await RequestAsync(server.Client, HttpMethod.Get,
           path + $"/pieces/before?generation={generation}&index={pieces.Next}");
       MarkdownPiecePage before = (await beforeResponse.Content.ReadFromJsonAsync<MarkdownPiecePage>(MarkdownRenderJson.Options))!;

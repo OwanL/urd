@@ -148,6 +148,29 @@ class MarkdownHttpGeneration implements MarkdownOwnedTextGeneration {
     return copyCursor(cursor, this.manifest, this.manifest.pieceCount, "located cursor");
   }
 
+  async locateChild(
+    contextId: number,
+    childIndex: number,
+    signal: AbortSignal,
+  ): Promise<MarkdownRenderCursor> {
+    this.assertReadable();
+    this.assertContextId(contextId);
+    if (!isIndex(childIndex)) throw new RangeError("Invalid Markdown child index.");
+    const cursor = await requestJson<unknown>(
+      this.path(`/contexts/${contextId}/children/${childIndex}`),
+      "GET",
+      undefined,
+      signal,
+    );
+    return copyCursor(
+      cursor,
+      this.manifest,
+      this.manifest.pieceCount,
+      "located child cursor",
+      true,
+    );
+  }
+
   async sourceCursor(sourceUtf8Offset: number, signal: AbortSignal): Promise<MessageContentCursor> {
     this.assertReadable();
     if (!isIndex(sourceUtf8Offset) || sourceUtf8Offset > this.manifest.sourceUtf8Bytes)
@@ -352,6 +375,7 @@ function copyCursor(
   manifest: MarkdownRenderManifest,
   maximum: number,
   name: string,
+  allowEnd = false,
 ): MarkdownRenderCursor {
   if (
     !isRecord(value) ||
@@ -359,7 +383,7 @@ function copyCursor(
     !isIndex(value.index) ||
     value.index > maximum ||
     (manifest.pieceCount === 0 && value.index !== 0) ||
-    (manifest.pieceCount > 0 && value.index === manifest.pieceCount)
+    (!allowEnd && manifest.pieceCount > 0 && value.index === manifest.pieceCount)
   )
     throw new TypeError(`Server returned an invalid Markdown ${name}.`);
   return { generation: manifest.generation, index: value.index };

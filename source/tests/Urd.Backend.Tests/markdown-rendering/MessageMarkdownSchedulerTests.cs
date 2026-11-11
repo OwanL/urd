@@ -46,6 +46,40 @@ public sealed class MessageMarkdownSchedulerTests {
   }
 
   [Fact]
+  public async Task LeaseLocatesDirectChildByOrdinalAcrossUnevenCodeAndTablePieces() {
+    const string text = "0123456789";
+    static int PieceContext(int id) => id switch {
+      0 => 2,
+      < 5 => 3,
+      5 => 5,
+      6 => 6,
+      _ => 7,
+    };
+    var pieces = Enumerable.Range(0, 10).Select(id => new MarkdownTextPiece(
+        id, PieceContext(id), MarkdownTextKind.Text, "x", new(id, id + 1),
+        MarkdownSourceMapping.Exact, 0, false)).ToArray();
+    var range = new MarkdownSourceRange(0, text.Length);
+    var contexts = new[] {
+      new MarkdownRenderContext(0, MarkdownElementKind.Document, -1, 1, -1, 2, range, 0, 10, 0, 0),
+      new MarkdownRenderContext(1, MarkdownElementKind.Code, 0, 2, 4, 2, range, 0, 5, 0, 0),
+      new MarkdownRenderContext(2, MarkdownElementKind.CodeLine, 1, -1, 3, 0, range, 0, 1, 0, 0),
+      new MarkdownRenderContext(3, MarkdownElementKind.CodeLine, 1, -1, -1, 0, range, 1, 4, 0, 0, Position: 1),
+      new MarkdownRenderContext(4, MarkdownElementKind.Table, 0, 5, -1, 3, range, 5, 5, 0, 0),
+      new MarkdownRenderContext(5, MarkdownElementKind.Row, 4, -1, 6, 0, range, 5, 1, 0, 0, Header: true),
+      new MarkdownRenderContext(6, MarkdownElementKind.Row, 4, -1, 7, 0, range, 6, 1, 0, 0, Position: 1),
+      new MarkdownRenderContext(7, MarkdownElementKind.Row, 4, -1, -1, 0, range, 7, 3, 0, 0, Position: 2),
+    };
+    var index = new MarkdownRenderIndex(Bytes(text), pieces, contexts, []);
+    await using var scheduler = CreateScheduler(parse: _ => index);
+    var key = Key(text);
+    using var lease = await scheduler.RequestAsync(key, _ => Task.FromResult(Source(key, text)));
+
+    Assert.Equal(new MarkdownRenderCursor(lease.Generation, 1), lease.LocateChild(1, 1));
+    Assert.Equal(new MarkdownRenderCursor(lease.Generation, 7), lease.LocateChild(4, 2));
+    Assert.Throws<ArgumentOutOfRangeException>(() => lease.LocateChild(1, 2));
+  }
+
+  [Fact]
   public async Task LeaseExposesRenderManifestAndFencesBackwardReads() {
     await using var scheduler = CreateScheduler();
     using var lease = await Ready(scheduler, Key(Small), Small);

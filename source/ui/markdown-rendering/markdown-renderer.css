@@ -104,6 +104,15 @@
   user-select: none;
   pointer-events: none;
 }
+.markdown-renderer [data-markdown-gap="ordinary"] {
+  display: block;
+  box-sizing: border-box;
+}
+.markdown-renderer li[data-markdown-gap="ordinary"] {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
 .markdown-renderer code > .markdown-renderer-gap {
   display: block;
 }

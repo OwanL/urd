@@ -18,6 +18,18 @@ import "./markdown-renderer.css";
 
 type Entry = { at: number; order: number; node: VNode };
 
+const ordinaryGapParents: ReadonlySet<string> = new Set([
+  "paragraph",
+  "heading",
+  "quote",
+  "list",
+  "item",
+  "emphasis",
+  "strong",
+  "inlineCode",
+  "link",
+]);
+
 function rangeAttributes(source: MarkdownSourceRange) {
   return { "data-source-start": source.start, "data-source-end": source.end };
 }
@@ -106,6 +118,43 @@ export function MarkdownRenderer({
             />
           ),
         });
+      }
+    } else if (parent && ordinaryGapParents.has(parent.kind)) {
+      const spans = [
+        ...(children.get(id) ?? []).map(({ context }) => context),
+        ...(pieces.get(id) ?? []).map(({ id: firstPiece }) => ({ firstPiece, pieceCount: 1 })),
+      ];
+      for (const { from, next } of markdownRootGaps(
+        parent.firstPiece,
+        parent.firstPiece + parent.pieceCount,
+        spans,
+      )) {
+        const height =
+          geometry?.rootGapHeight(from, next, snapshot.generation) ?? (next - from) * 24;
+        const attributes = {
+          key: `o${parent.id}-${from}`,
+          "data-markdown-gap": "ordinary",
+          "data-gap-from": from,
+          "data-gap-next": next,
+          "data-context": parent.id,
+          "aria-hidden": "true" as const,
+          className: "markdown-renderer-gap",
+          style: { height: `${height}px` },
+        };
+        const node =
+          parent.kind === "list" ? (
+            <li {...attributes} />
+          ) : parent.kind === "paragraph" ||
+            parent.kind === "heading" ||
+            parent.kind === "emphasis" ||
+            parent.kind === "strong" ||
+            parent.kind === "inlineCode" ||
+            parent.kind === "link" ? (
+            <span {...attributes} />
+          ) : (
+            <div {...attributes} />
+          );
+        entries.push({ at: from, order: -1, node });
       }
     }
     return entries.sort((a, b) => a.at - b.at || a.order - b.order).map((entry) => entry.node);

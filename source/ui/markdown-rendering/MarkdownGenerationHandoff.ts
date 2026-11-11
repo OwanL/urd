@@ -1,11 +1,13 @@
 import type {
   MarkdownGenerationRequest,
   MarkdownOwnedGeneration,
+  MarkdownPieceInterval,
+  MarkdownRenderCursor,
   MarkdownRenderSnapshot,
   MarkdownTrimRequest,
 } from "./MarkdownRenderModel.ts";
 import { copyMarkdownManifest, MarkdownWindowAssembler } from "./MarkdownWindowAssembler.ts";
-import type { MarkdownWindowAnchor } from "./MarkdownWindowGeometry.ts";
+import type { MarkdownWindowAnchor, MarkdownWindowSeekTarget } from "./MarkdownWindowGeometry.ts";
 
 export interface MarkdownHandoffView {
   capture(): MarkdownWindowAnchor | null;
@@ -69,6 +71,93 @@ export class MarkdownGenerationHandoff {
 
   trim(request: MarkdownTrimRequest, signal: AbortSignal): Promise<MarkdownRenderSnapshot> {
     return this.operate((window, readSignal) => window.trim(request, readSignal), signal);
+  }
+
+  seek(
+    target: MarkdownWindowSeekTarget,
+    windowSize: number,
+    retain: readonly MarkdownPieceInterval[],
+    prepare: (
+      window: MarkdownWindowAssembler,
+      cursor: MarkdownRenderCursor,
+      signal: AbortSignal,
+    ) => Promise<{ snapshot: MarkdownRenderSnapshot; anchor: MarkdownWindowAnchor | null }>,
+    isCurrent: () => boolean,
+    signal: AbortSignal,
+  ): Promise<MarkdownRenderSnapshot> {
+    if (this.disposed || !this.activeWindowOpen)
+      return Promise.reject(new DOMException("The Markdown window is unavailable.", "AbortError"));
+    if (!Number.isSafeInteger(windowSize) || windowSize < 1)
+      return Promise.reject(new RangeError("Markdown seek window size must be positive."));
+    if (target.generation !== this.active.manifest.generation)
+      return Promise.reject(
+        new Error("Markdown render generation changed; restart from the source anchor."),
+      );
+
+    const controller = new AbortController();
+    const abort = () => controller.abort(signal.reason);
+    if (signal.aborted) abort();
+    else signal.addEventListener("abort", abort, { once: true });
+    const active = this.active;
+    const previous = this.window;
+    const pending = Promise.resolve().then(async () => {
+      controller.signal.throwIfAborted();
+      if (!isCurrent())
+        throw new DOMException("The Markdown seek target changed before lookup.", "AbortError");
+      const cursor: MarkdownRenderCursor =
+        "index" in target
+          ? { generation: target.generation, index: target.index }
+          : await active.locateChild(target.contextId, target.childIndex, controller.signal);
+      controller.signal.throwIfAborted();
+      if (
+        cursor.generation !== target.generation ||
+        !Number.isSafeInteger(cursor.index) ||
+        cursor.index < 0 ||
+        cursor.index > active.manifest.pieceCount ||
+        ("index" in target && cursor.index === active.manifest.pieceCount)
+      )
+        throw new Error("Markdown seek cursor does not match its target generation.");
+      const from = seekFrom(cursor.index, active.manifest.pieceCount, windowSize);
+      const window = new MarkdownWindowAssembler(active, active.manifest, from, {
+        snapshot: previous.snapshot,
+        ranges: retain,
+      });
+      const prepared = await prepare(window, cursor, controller.signal);
+      controller.signal.throwIfAborted();
+      if (!isCurrent())
+        throw new DOMException(
+          "The Markdown seek target changed before publication.",
+          "AbortError",
+        );
+      if (
+        this.disposed ||
+        !this.activeWindowOpen ||
+        this.active !== active ||
+        this.window !== previous
+      )
+        throw new DOMException("The Markdown window changed during seek.", "AbortError");
+      if (
+        prepared.snapshot !== window.snapshot ||
+        prepared.snapshot.generation !== target.generation ||
+        (prepared.anchor && prepared.anchor.generation !== target.generation)
+      )
+        throw new Error("Markdown seek preparation did not match its generation.");
+
+      this.window = window;
+      try {
+        this.view.publish(prepared.snapshot, prepared.anchor);
+      } catch (error) {
+        this.window = previous;
+        throw error;
+      }
+      return prepared.snapshot;
+    });
+    const tracked = pending.finally(() => {
+      signal.removeEventListener("abort", abort);
+      this.activeOperations.delete(controller);
+    });
+    this.activeOperations.set(controller, tracked);
+    return tracked;
   }
 
   // Settles only on publication, cancellation or failure, never on mere deferral.
@@ -277,4 +366,9 @@ export class MarkdownGenerationHandoff {
       this.resume();
     }
   }
+}
+
+function seekFrom(index: number, pieceCount: number, windowSize: number): number {
+  const count = Math.min(pieceCount, windowSize);
+  return Math.min(Math.max(0, index - Math.floor(count / 2)), Math.max(0, pieceCount - count));
 }

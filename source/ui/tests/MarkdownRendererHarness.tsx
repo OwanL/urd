@@ -145,6 +145,34 @@ if (mode === "long-code") {
       `Root block ${position} retains its measured height.`,
       { level: (position % 6) + 1 },
     );
+} else if (mode === "ordinary-gaps") {
+  const paragraph = node("paragraph", documentId);
+  let position = 0;
+  while (position < 240) {
+    if (position === 48) {
+      const emphasis = node("emphasis", paragraph);
+      for (let index = 0; index < 96; index++)
+        text(
+          emphasis,
+          `Emphasis piece ${String(position + index).padStart(3, "0")} .\n`,
+          "softBreak",
+        );
+      position += 96;
+    } else {
+      text(paragraph, `Paragraph piece ${String(position).padStart(3, "0")} .\n`, "softBreak");
+      position++;
+    }
+  }
+  const list = node("list", documentId);
+  const outerItem = node("item", list, { position: 0 });
+  leaf("paragraph", outerItem, "Nested list intro.");
+  const nested = node("list", outerItem);
+  for (let index = 0; index < 80; index++) {
+    const item = node("item", nested, { position: index });
+    leaf("paragraph", item, `Nested item ${String(index).padStart(2, "0")}.`);
+  }
+  const finalItem = node("item", list, { position: 1 });
+  leaf("paragraph", finalItem, "Final outer item.");
 } else if (mode === "long-table") {
   const { table, headers } = tableWithHeaders(["Name", "Description", "Count", "Notes"]);
   for (let position = 0; position < 512; position++) {
@@ -170,6 +198,21 @@ if (mode === "long-code") {
   if (mode === "selection") {
     for (let index = 0; index < 700; index++)
       leaf("paragraph", documentId, `Selection paragraph ${index}.`);
+  } else if (mode === "message-seek") {
+    const paragraph = node("paragraph", documentId);
+    for (let index = 0; index < 24; index++)
+      text(paragraph, `Paragraph fragment ${String(index).padStart(2, "0")} `);
+    const code = node("code", documentId, {}, { language: "text" });
+    for (let position = 0; position < 192; position++) {
+      const line = node("codeLine", code, { position });
+      const fragments = position < 96 ? 1 : 4;
+      for (let fragment = 0; fragment < fragments; fragment++)
+        text(
+          line,
+          `${fragment === 0 ? `Code line ${String(position).padStart(3, "0")} ` : `fragment ${fragment} `}${fragment === fragments - 1 ? "\n" : ""}`,
+          "code",
+        );
+    }
   } else if (mode === "message-view") {
     for (let index = 0; index < 80; index++) leaf("paragraph", documentId, `paragraph ${index}.`);
   } else if (mode !== "detached") {
@@ -209,7 +252,7 @@ if (mode === "long-code") {
     text(node("codeLine", code, { position: 1 }), `  ${"long_identifier_".repeat(16)}\n`, "code");
     text(node("thematicBreak", documentId), "", "thematicBreak");
   }
-  if (mode !== "selection") {
+  if (mode !== "selection" && mode !== "message-seek") {
     const { table, headers } = tableWithHeaders(["Name", "Description", "Count"]);
     detachedFrom = pieces.length;
     const row = node("row", table, { position: 1 });
@@ -249,9 +292,11 @@ const source = new SyntheticMarkdownPageSource(pieces, contexts, {
         ? 104
         : mode === "selection" || mode === "detached" || mode === "links"
           ? 1000
-          : mode === "root-gaps"
-            ? 24
-            : pieces.length - 2,
+          : mode === "message-seek"
+            ? 12
+            : mode === "root-gaps" || mode === "ordinary-gaps"
+              ? 24
+              : pieces.length - 2,
 });
 const assembler = new MarkdownWindowAssembler(
   source,
@@ -259,7 +304,8 @@ const assembler = new MarkdownWindowAssembler(
   mode === "detached" ? detachedFrom : 0,
 );
 const root = document.querySelector<HTMLElement>("#markdown-renderer")!;
-const longWindow = mode === "long-code" || mode === "long-table" || mode === "root-gaps";
+const longWindow =
+  mode === "long-code" || mode === "long-table" || mode === "root-gaps" || mode === "ordinary-gaps";
 const geometry = longWindow ? new MarkdownWindowGeometry() : null;
 const geometryProfile = mode ?? "default";
 function owner() {
@@ -389,12 +435,17 @@ async function setupMessageViewHarness() {
     dispose: () => view.dispose(),
   };
 }
-const messageViewHarness = mode === "message-view" ? await setupMessageViewHarness() : undefined;
+const messageViewHarness =
+  mode === "message-view" || mode === "message-seek" ? await setupMessageViewHarness() : undefined;
 
 const harness = {
   messageView: messageViewHarness,
   get pageSize() {
-    return mode === "long-code" ? 24 : mode === "long-table" ? 104 : mode === "root-gaps" ? 24 : 0;
+    return mode === "long-code" || mode === "root-gaps" || mode === "ordinary-gaps"
+      ? 24
+      : mode === "long-table"
+        ? 104
+        : 0;
   },
   get pieceCount() {
     return source.manifest.pieceCount;

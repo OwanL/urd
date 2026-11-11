@@ -336,20 +336,46 @@ export class MarkdownWindowAssembler {
   private readonly manifest: MarkdownRenderManifest;
   private readonly source: MarkdownPageSource;
 
-  constructor(source: MarkdownPageSource, manifest: MarkdownRenderManifest, from = 0) {
+  constructor(
+    source: MarkdownPageSource,
+    manifest: MarkdownRenderManifest,
+    from = 0,
+    retained?: {
+      readonly snapshot: MarkdownRenderSnapshot;
+      readonly ranges: readonly MarkdownPieceInterval[];
+    },
+  ) {
     this.manifest = copyMarkdownManifest(manifest);
     if (!isIndex(from) || from > this.manifest.pieceCount)
       throw new Error("Invalid Markdown render window.");
+    if (retained && retained.snapshot.generation !== this.manifest.generation)
+      throw new Error("Markdown retained pieces belong to a different generation.");
+    const displayRanges = normalizeRanges(retained?.ranges ?? []);
+    const pieces = new Map<number, MarkdownTextPiece>();
+    for (const range of displayRanges) {
+      if (
+        !isIndex(range.from) ||
+        !isIndex(range.next) ||
+        range.from >= range.next ||
+        range.next > this.manifest.pieceCount
+      )
+        throw new Error("Invalid Markdown retained interval.");
+      for (let id = range.from; id < range.next; id++) {
+        const piece = retained?.snapshot.pieces.get(id);
+        if (!piece) throw new Error("Markdown retained interval is incomplete.");
+        pieces.set(id, piece);
+      }
+    }
     this.source = source;
     this.current = {
       generation: this.manifest.generation,
       from,
       next: from,
       hasMore: from < this.manifest.pieceCount,
-      displayRanges: [],
+      displayRanges,
       supportRanges: [],
       contexts: new Map(),
-      pieces: new Map(),
+      pieces,
     };
   }
 

@@ -11,6 +11,14 @@ export interface MarkdownWindowAnchor {
   readonly end: string;
   readonly offset: number;
 }
+export type MarkdownWindowSeekTarget =
+  | { readonly generation: string; readonly index: number; readonly offset: number }
+  | {
+      readonly generation: string;
+      readonly contextId: number;
+      readonly childIndex: number;
+      readonly offset: number;
+    };
 
 type ShellKind = "code" | "table";
 type Estimate = { kind: ShellKind; height: number };
@@ -155,6 +163,66 @@ export class MarkdownWindowGeometry {
     const estimate = generation === this.generation ? this.estimates.get(parent) : undefined;
     const height = estimate?.kind === kind ? estimate.height : kind === "code" ? 24 : 40;
     return Math.max(0, next - from) * height;
+  }
+
+  seekTarget(
+    root: HTMLElement,
+    scrollport: HTMLElement,
+    snapshot: MarkdownRenderSnapshot,
+  ): MarkdownWindowSeekTarget | null {
+    if (snapshot.generation !== this.generation || !this.matches(root)) return null;
+    const viewport = this.visibleBounds(root, scrollport);
+    if (!viewport) return null;
+    const targetY = viewport.top + (viewport.bottom - viewport.top) / 2;
+    const gap = [...root.querySelectorAll<HTMLElement>("[data-markdown-gap]")].find((element) => {
+      const rect = element.getBoundingClientRect();
+      return (
+        rect.bottom > targetY &&
+        rect.top <= targetY &&
+        rect.right > viewport.left &&
+        rect.left < viewport.right
+      );
+    });
+    if (!gap) return null;
+
+    const kind = gap.dataset.markdownGap;
+    const from = Number(gap.dataset.gapFrom);
+    const next = Number(gap.dataset.gapNext);
+    const rect = gap.getBoundingClientRect();
+    if (
+      !Number.isSafeInteger(from) ||
+      !Number.isSafeInteger(next) ||
+      from < 0 ||
+      next <= from ||
+      rect.height <= 0
+    )
+      return null;
+    const withinGap = Math.max(0, Math.min(1, (targetY - rect.top) / rect.height));
+    const offset = targetY - viewport.top;
+    if (kind === "root" || kind === "ordinary")
+      return {
+        generation: snapshot.generation,
+        index: Math.min(next - 1, from + Math.floor(withinGap * (next - from))),
+        offset,
+      };
+    if (kind !== "code" && kind !== "table") return null;
+
+    const shell = gap.closest<HTMLElement>(`[data-kind="${kind}"]`);
+    const context = snapshot.contexts.get(Number(shell?.dataset.context))?.context;
+    if (!shell || context?.kind !== kind || next > context.childCount) return null;
+    const firstBodyChild =
+      kind === "table"
+        ? [...snapshot.contexts.values()].filter(
+            ({ context: row }) => row.kind === "row" && row.parent === context.id && row.header,
+          ).length
+        : 0;
+    if (from < firstBodyChild) return null;
+    return {
+      generation: snapshot.generation,
+      contextId: context.id,
+      childIndex: Math.min(next - 1, from + Math.floor(withinGap * (next - from))),
+      offset,
+    };
   }
 
   measure(root: HTMLElement, scrollport: HTMLElement = root): boolean {

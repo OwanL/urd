@@ -455,9 +455,21 @@ void test("standalone Markdown renderer in Chromium", async (t) => {
         await exerciseRootGaps(page, open);
       },
     );
+    await t.test(
+      "partial paragraphs and sparse nested lists retain ordinary omitted-piece geometry",
+      async () => {
+        await exerciseOrdinaryGaps(page, open);
+      },
+    );
     await t.test("message view restores, pauses, pins and reclaims owned generations", async () => {
       await exerciseMessageView(page, open);
     });
+    await t.test(
+      "message view seeks directly through ordinary and uneven code gaps while retaining selection",
+      async () => {
+        await exerciseDistantMessageSeek(page, open);
+      },
+    );
     await t.test(
       "middle window hydrates detached headers and complete ancestry with isolated IDs",
       async () => {
@@ -534,6 +546,129 @@ async function exerciseRootGaps(page: Page, open: (mode: string) => Promise<void
   assert.ok(state.heights.every((height) => height > 0));
 }
 
+async function exerciseOrdinaryGaps(page: Page, open: (mode: string) => Promise<void>) {
+  await page.setViewportSize({ width: 1000, height: 900 });
+  await open("ordinary-gaps");
+  const inspect = () =>
+    page.evaluate(() => {
+      const snapshot = window.markdownRendererHarness.snapshot;
+      const root = document.querySelector<HTMLElement>(".markdown-renderer")!;
+      const kinds = new Map(
+        [...snapshot.contexts.values()].map(({ context }) => [context.id, context.kind]),
+      );
+      const gaps = [...root.querySelectorAll<HTMLElement>('[data-markdown-gap="ordinary"]')];
+      return {
+        active: [snapshot.from, snapshot.next],
+        gaps: gaps.map((gap) => ({
+          from: Number(gap.dataset.gapFrom),
+          next: Number(gap.dataset.gapNext),
+          kind: kinds.get(Number(gap.dataset.context)),
+          parentFirstPiece: snapshot.contexts.get(Number(gap.dataset.context))?.context.firstPiece,
+          parentKind: gap.parentElement?.dataset.kind,
+          tag: gap.tagName,
+          height: gap.getBoundingClientRect().height,
+          display: getComputedStyle(gap).display,
+          listStyle: getComputedStyle(gap).listStyleType,
+          valid:
+            gap.getAttribute("aria-hidden") === "true" &&
+            !gap.hasAttribute("data-source-start") &&
+            !gap.hasAttribute("data-source-end") &&
+            !gap.hasAttribute("data-piece") &&
+            gap.textContent === "" &&
+            gap.dataset.context === gap.parentElement?.dataset.context &&
+            gap.tagName ===
+              (gap.dataset.context && kinds.get(Number(gap.dataset.context)) === "list"
+                ? "LI"
+                : ["paragraph", "heading", "emphasis", "strong", "inlineCode", "link"].includes(
+                      kinds.get(Number(gap.dataset.context)) ?? "",
+                    )
+                  ? "SPAN"
+                  : "DIV") &&
+            getComputedStyle(gap).display === "block" &&
+            Number(gap.dataset.gapFrom) < Number(gap.dataset.gapNext),
+        })),
+        rootScrollTop: root.scrollTop,
+      };
+    });
+
+  let state = await inspect();
+  assert.deepEqual(state.active, [0, 24]);
+  assert.ok(state.gaps.some((gap) => gap.kind === "paragraph" && gap.height > 0));
+  assert.ok(state.gaps.every((gap) => gap.height > 0 && gap.valid));
+  assert.equal(state.rootScrollTop, 0, "Ordinary gaps do not create a nested scrollport");
+
+  await page.evaluate(() => {
+    const piece = document.querySelector<HTMLElement>('[data-piece="3"]')!;
+    const text = piece.firstChild!;
+    const range = document.createRange();
+    range.setStart(text, 0);
+    range.setEnd(text, text.textContent!.trimEnd().length);
+    getSelection()!.removeAllRanges();
+    getSelection()!.addRange(range);
+  });
+  const selectedText = await page.evaluate(() => getSelection()!.toString());
+  const selectedNode = await selectedPieceNodes(page, 3, 4);
+  const endpoints = await page.evaluateHandle(() => {
+    const selection = getSelection()!;
+    return {
+      anchorNode: selection.anchorNode,
+      anchorOffset: selection.anchorOffset,
+      focusNode: selection.focusNode,
+      focusOffset: selection.focusOffset,
+    };
+  });
+  try {
+    for (let index = 0; index < 5; index++)
+      await page.evaluate(() => window.markdownRendererHarness.moveWindow("forward"));
+    state = await inspect();
+    assert.deepEqual(state.active, [96, 144]);
+    assert.ok(state.gaps.every((gap) => gap.height > 0 && gap.valid));
+    assert.deepEqual(
+      state.gaps.filter((gap) => gap.kind === "paragraph").map(({ from, next }) => [from, next]),
+      [
+        [0, 3],
+        [4, 48],
+        [144, 240],
+      ],
+    );
+    assert.deepEqual(
+      state.gaps.filter((gap) => gap.kind === "emphasis").map(({ from, next }) => [from, next]),
+      [[48, 96]],
+    );
+    assert.ok(
+      state.gaps.every((gap) => gap.tag === "SPAN" || gap.tag === "DIV" || gap.tag === "LI"),
+    );
+    assert.equal(await pieceNodesRetained(page, selectedNode), true);
+    assert.equal(await page.evaluate(() => getSelection()!.toString()), selectedText);
+    assert.equal(
+      await endpoints.evaluate((before) =>
+        Object.entries(before).every(
+          ([key, value]) => getSelection()![key as keyof Selection] === value,
+        ),
+      ),
+      true,
+      "Ordinary gaps preserve native selection endpoints",
+    );
+
+    for (let index = 0; index < 6; index++)
+      await page.evaluate(() => window.markdownRendererHarness.moveWindow("forward"));
+    state = await inspect();
+    assert.deepEqual(state.active, [240, 288]);
+    const listGap = state.gaps.find((gap) => gap.kind === "list" && gap.parentFirstPiece === 241);
+    assert.ok(listGap, JSON.stringify(state.gaps));
+    assert.equal(listGap.tag, "LI");
+    assert.equal(listGap.parentKind, "list");
+    assert.equal(listGap.listStyle, "none");
+    assert.deepEqual([listGap.from, listGap.next], [288, 321]);
+    assert.ok(listGap.height > 0);
+    assert.equal(await pieceNodesRetained(page, selectedNode), true);
+    assert.equal(await page.evaluate(() => getSelection()!.toString()), selectedText);
+  } finally {
+    await selectedNode.dispose();
+    await endpoints.dispose();
+  }
+}
+
 async function exerciseMessageView(page: Page, open: (mode: string) => Promise<void>) {
   await open("message-view");
   const restored = await page.evaluate(() => {
@@ -588,13 +723,18 @@ async function exerciseMessageView(page: Page, open: (mode: string) => Promise<v
       getSelection()!.addRange(range);
       const port = document.querySelector<HTMLElement>("#transcript-scrollport")!;
       port.scrollTop = port.scrollHeight;
-      await window.markdownRendererHarness.messageView!.refreshWindow();
+      const next = await window.markdownRendererHarness.messageView!.refreshWindow();
+      const bounds = port.getBoundingClientRect();
+      const anchor = [...document.querySelectorAll<HTMLElement>("[data-piece]")].find((node) => {
+        const rect = node.getBoundingClientRect();
+        return rect.top >= bounds.top && rect.top < bounds.bottom;
+      })!;
       return [
         getSelection()!.toString(),
         document.querySelector('[data-piece="24"]') === piece,
-        !!document.querySelector('[data-piece="38"]') &&
-          !document.querySelector('[data-piece="28"]'),
-        port.scrollTop,
+        next !== null && next.from > 24 && !document.querySelector('[data-piece="28"]'),
+        anchor.dataset.piece,
+        anchor.getBoundingClientRect().top,
       ];
     });
     assert.deepEqual(
@@ -606,10 +746,11 @@ async function exerciseMessageView(page: Page, open: (mode: string) => Promise<v
     await page.waitForFunction(
       () => !document.querySelector('.markdown-renderer [data-piece="24"]'),
     );
-    assert.equal(
-      await page.locator("#transcript-scrollport").evaluate((port) => port.scrollTop),
-      selected[3],
-      "Stationary selection release reclaims the pinned piece",
+    const after = await page.locator(`[data-piece="${selected[3]}"]`).boundingBox();
+    assert.ok(after, "Selection release evicted the reading anchor");
+    assert.ok(
+      Math.abs(after.y - Number(selected[4])) <= 1,
+      "Stationary selection release moved the visible source anchor",
     );
   } finally {
     await page.evaluate(() => window.markdownRendererHarness.messageView!.dispose());
@@ -622,6 +763,125 @@ async function exerciseMessageView(page: Page, open: (mode: string) => Promise<v
     ]),
     [1, 1],
   );
+}
+
+async function exerciseDistantMessageSeek(page: Page, open: (mode: string) => Promise<void>) {
+  await open("message-seek");
+  await page.evaluate(() => {
+    const range = document.createRange();
+    range.selectNodeContents(document.querySelector('[data-piece="24"]')!);
+    getSelection()!.removeAllRanges();
+    getSelection()!.addRange(range);
+  });
+  const selected = await page.evaluate(() => getSelection()!.toString());
+  const pinned = await selectedPieceNodes(page, 24, 25);
+  const cursors = () =>
+    page.evaluate(() => {
+      const source = window.markdownRendererHarness.messageView!.initial.pageSource;
+      return [source.pieceRequests, source.beforePieceRequests].map((pages) =>
+        pages.map(({ index }) => index),
+      );
+    });
+  const positionInGap = (kind: "ordinary" | "code", fraction: number) =>
+    page.evaluate(
+      ({ kind, fraction }) => {
+        const root = document.querySelector<HTMLElement>(".markdown-renderer")!;
+        const port = document.querySelector<HTMLElement>("#transcript-scrollport")!;
+        const gap = [...root.querySelectorAll<HTMLElement>("[data-markdown-gap]")].find(
+          (item) =>
+            item.dataset.markdownGap === kind &&
+            (kind === "ordinary" || Number(item.dataset.gapFrom) > 0),
+        )!;
+        const first = gap.getBoundingClientRect();
+        const center = port.getBoundingClientRect().top + port.clientHeight / 2;
+        port.scrollTop += first.top + first.height * fraction - center;
+        const rect = gap.getBoundingClientRect();
+        const within = Math.max(0, Math.min(1, (center - rect.top) / rect.height));
+        const from = Number(gap.dataset.gapFrom);
+        const next = Number(gap.dataset.gapNext);
+        let index = from + Math.floor(within * (next - from));
+        let unitPieces = 1;
+        if (kind === "code") {
+          const id = Number(gap.closest<HTMLElement>('[data-kind="code"]')!.dataset.context);
+          const source = window.markdownRendererHarness.messageView!.initial.pageSource;
+          const position = Math.min(next - 1, from + Math.floor(within * (next - from)));
+          const line = source.contexts.find(
+            ({ context }) =>
+              context.parent === id && context.kind === "codeLine" && context.position === position,
+          )!.context;
+          index = line.firstPiece;
+          unitPieces = line.pieceCount;
+        }
+        if (center < rect.top || center > rect.bottom)
+          throw new Error("Seek target is outside its gap");
+        return { index, offset: port.clientHeight / 2, unitPieces };
+      },
+      { kind, fraction },
+    );
+  const seek = async (kind: "ordinary" | "code", fraction: number) => {
+    const target = await positionInGap(kind, fraction);
+    if (kind === "code")
+      assert.equal(target.unitPieces, 4, "Fixture must exercise uneven code lines");
+    const before = await cursors();
+    assert.ok(
+      await page.evaluate(
+        async () => (await window.markdownRendererHarness.messageView!.refreshWindow()) !== null,
+      ),
+    );
+    const after = await cursors();
+    const reads = after.flatMap((pages, index) => pages.slice(before[index]!.length));
+    assert.ok(reads.length > 0 && reads.length <= 2, `${kind} seek read pages ${reads}`);
+    assert.ok(
+      reads.some((cursor) => Math.abs(cursor - target.index) <= 12),
+      `${kind} seek walked to ${reads}`,
+    );
+    const restored = await page.evaluate((index) => {
+      const element = document.querySelector<HTMLElement>(`[data-piece="${index}"]`)!;
+      const piece = window.markdownRendererHarness.messageView!.initial.pageSource.pieces.find(
+        (candidate) => candidate.id === index,
+      )!;
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      const port = document.querySelector<HTMLElement>("#transcript-scrollport")!;
+      return {
+        id: Number(element.dataset.piece),
+        text: element.textContent,
+        source: Number(element.dataset.sourceStart),
+        expectedText: piece.text,
+        expectedSource: piece.source.start,
+        top: range.getClientRects()[0]!.top - port.getBoundingClientRect().top,
+      };
+    }, target.index);
+    assert.deepEqual(
+      [restored.id, restored.text, restored.source],
+      [target.index, restored.expectedText, restored.expectedSource],
+    );
+    assert.ok(
+      Math.abs(restored.top - target.offset) <= 1,
+      `${kind} seek restored the gap, not its source target`,
+    );
+    assert.equal(await page.evaluate(() => getSelection()!.toString()), selected);
+    assert.equal(
+      await pieceNodesRetained(page, pinned),
+      true,
+      "Seek replaced the old selection pin",
+    );
+  };
+  try {
+    await seek("ordinary", 0.5);
+    await seek("code", 0.75);
+    await page.evaluate(() => getSelection()!.removeAllRanges());
+    await page.waitForFunction(
+      () => !document.querySelector('.markdown-renderer [data-piece="24"]'),
+    );
+    assert.equal(
+      await pinned.evaluate((pieces) => pieces.every(({ element }) => !element.isConnected)),
+      true,
+    );
+  } finally {
+    await page.evaluate(() => window.markdownRendererHarness.messageView!.dispose());
+    await pinned.dispose();
+  }
 }
 
 type LongWindowMode = "long-code" | "long-table";

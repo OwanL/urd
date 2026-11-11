@@ -102,6 +102,7 @@ export class SyntheticMarkdownPageSource implements MarkdownPageSource {
   readonly manifest: MarkdownRenderManifest;
   readonly pieceRequests: MarkdownRenderCursor[] = [];
   readonly locateRequests: number[] = [];
+  readonly childLocateRequests: { readonly contextId: number; readonly childIndex: number }[] = [];
   disposals = 0;
   readonly beforePieceRequests: MarkdownRenderCursor[] = [];
   readonly contextRequests: { readonly id: number; readonly cursor: MarkdownRenderCursor }[] = [];
@@ -114,6 +115,7 @@ export class SyntheticMarkdownPageSource implements MarkdownPageSource {
   private readonly piecePageSize: number;
   private readonly valuePageSize: number;
   private readonly contextDescriptorPageSize: number;
+  private readonly childContexts: ReadonlyMap<number, readonly MarkdownRenderContext[]>;
   readonly pieces: readonly MarkdownTextPiece[];
   readonly contexts: readonly MarkdownFixtureContext[];
   private readonly options: MarkdownRenderFixtureOptions;
@@ -136,6 +138,23 @@ export class SyntheticMarkdownPageSource implements MarkdownPageSource {
         ...(values === undefined ? {} : { values }),
       };
     });
+    const contextById = new Map(this.contexts.map(({ context }) => [context.id, context]));
+    this.childContexts = new Map<number, readonly MarkdownRenderContext[]>(
+      this.contexts.flatMap(({ context }) => {
+        if (context.childCount <= 0) return [];
+        const children: MarkdownRenderContext[] = [];
+        let childId = context.firstChild;
+        for (let index = 0; index < context.childCount; index++) {
+          const child = contextById.get(childId);
+          if (!child) break;
+          children.push(child);
+          childId = child.nextSibling;
+        }
+        return children.length === context.childCount && childId === -1
+          ? [[context.id, children] as const]
+          : [];
+      }),
+    );
     this.options = options;
     this.generation = options.generation ?? "fixture-generation";
     this.manifest = Object.freeze({
@@ -180,6 +199,22 @@ export class SyntheticMarkdownPageSource implements MarkdownPageSource {
       generation: this.generation,
       index: anchors.find((piece) => piece.source.start === start)?.id ?? 0,
     };
+  }
+
+  async locateChild(
+    contextId: number,
+    childIndex: number,
+    signal: AbortSignal,
+  ): Promise<MarkdownRenderCursor> {
+    signal.throwIfAborted();
+    if (!Number.isSafeInteger(contextId) || contextId < 0)
+      throw new RangeError("Invalid Markdown context ID.");
+    if (!Number.isSafeInteger(childIndex) || childIndex < 0)
+      throw new RangeError("Invalid Markdown child index.");
+    this.childLocateRequests.push({ contextId, childIndex });
+    const child = this.childContexts.get(contextId)?.[childIndex];
+    if (!child) throw new RangeError("Unknown Markdown direct child.");
+    return { generation: this.generation, index: child.firstPiece };
   }
 
   async readPieces(cursor: MarkdownRenderCursor, signal: AbortSignal): Promise<MarkdownPiecePage> {

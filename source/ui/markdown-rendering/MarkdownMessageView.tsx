@@ -12,7 +12,7 @@ import type {
 import { MarkdownSelectionPins } from "./MarkdownSelectionPins.ts";
 import { MarkdownWindowAssembler } from "./MarkdownWindowAssembler.ts";
 import { MarkdownWindowGeometry } from "./MarkdownWindowGeometry.ts";
-import type { MarkdownWindowAnchor } from "./MarkdownWindowGeometry.ts";
+import type { MarkdownWindowAnchor, MarkdownWindowSeekTarget } from "./MarkdownWindowGeometry.ts";
 
 export type MarkdownTextRequest = MarkdownClientRequest;
 export type MarkdownSavedSourcePosition = {
@@ -45,6 +45,11 @@ export class MarkdownMessageView {
   private readonly ownedGenerations = new Set<TrackedTextGeneration>();
   private readonly mutationControllers = new Set<AbortController>();
   private readonly sourceReads = new Map<AbortController, Promise<unknown>>();
+  private lastSourceMapping: {
+    readonly source: TrackedTextGeneration;
+    readonly sourceStart: number;
+    readonly cursor: MessageContentCursor;
+  } | null = null;
   private pins: MarkdownSelectionPins | null = null;
   private rendererRoot: HTMLElement | null = null;
   private handoff: MarkdownGenerationHandoff | null = null;
@@ -143,6 +148,54 @@ export class MarkdownMessageView {
     }
   }
 
+  // Reflow of retained DOM needs no lease or new window. Only a cursor captured from
+  // this exact active source can reuse its mapping; stale/unmounted anchors fail closed.
+  restoreCapturedSource(saved: MarkdownSavedSourcePosition): boolean {
+    const root = this.rendererRoot;
+    const source = this.activeGeneration;
+    const cached = this.lastSourceMapping;
+    const snapshot = this.handoff?.snapshot;
+    if (
+      this.paused ||
+      this.disposed ||
+      !root ||
+      !source ||
+      source.isDisposed ||
+      cached?.source !== source ||
+      snapshot?.generation !== source.manifest.generation ||
+      !Number.isFinite(saved.offset)
+    )
+      return false;
+    const left = cached.cursor;
+    const right = saved.cursor;
+    if (
+      left.segmentIndex !== right.segmentIndex ||
+      left.utf8Offset !== right.utf8Offset ||
+      left.message.executionId !== right.message.executionId ||
+      left.message.messageId !== right.message.messageId ||
+      left.message.historyRevision !== right.message.historyRevision ||
+      left.message.role !== right.message.role
+    )
+      return false;
+    const piece = [...snapshot.pieces.values()].find(
+      (item) => item.source.start === cached.sourceStart,
+    );
+    const width = this.host.getBoundingClientRect().width;
+    if (!piece || width <= 0) return false;
+    this.geometry.configure(snapshot.generation, width, "message");
+    return this.geometry.restore(
+      root,
+      {
+        generation: snapshot.generation,
+        piece: String(piece.id),
+        start: String(piece.source.start),
+        end: String(piece.source.end),
+        offset: saved.offset,
+      },
+      this.scrollport,
+    );
+  }
+
   // Called by the parent at a visible scroll edge; no listener, timer or polling is installed.
   refreshWindow(): Promise<MarkdownRenderSnapshot | null> {
     return this.updateWindow(false);
@@ -158,26 +211,111 @@ export class MarkdownMessageView {
       const prior = handoff.snapshot;
       if (prior.from === prior.next) return prior;
       const version = this.publicationVersion;
-      const visible = this.visiblePieces(prior);
-      const direction = this.readDirection(prior, visible);
-      const retained = this.currentPins();
-      const loaded = trimOnly
-        ? prior
-        : direction === "forward"
-          ? await handoff.append(controller.signal)
-          : await handoff.prepend(controller.signal);
-      if (controller.signal.aborted || this.paused || this.disposed) return null;
-      if (this.publicationVersion !== version || this.handoff !== handoff) return null;
-
-      const active = trimOnly
-        ? { from: prior.from, next: prior.next }
-        : refreshRange(loaded, direction, visible, this.retainedPieceCount);
-      const trimmed = await this.alignAndTrim(handoff, loaded, active, retained, controller.signal);
-      if (controller.signal.aborted || this.paused || this.disposed) return null;
-      if (this.publicationVersion !== version || this.handoff !== handoff) return null;
       const width = this.host.getBoundingClientRect().width;
       if (this.rendererRoot && width > 0)
         this.geometry.configure(prior.generation, width, "message");
+      const seek = this.rendererRoot
+        ? this.geometry.seekTarget(this.rendererRoot, this.scrollport, prior)
+        : null;
+      const pieceCount = this.activeGeneration?.manifest.pieceCount;
+      if (
+        !trimOnly &&
+        seek?.generation === prior.generation &&
+        pieceCount !== undefined &&
+        (!("index" in seek) || (seek.index >= 0 && seek.index < pieceCount))
+      ) {
+        const currentRetained = () =>
+          normalizeIntervals(this.currentPins().map((range) => expandToUnits(prior, range, true)));
+        const retained = currentRetained();
+        const seekScrollTop = this.scrollport.scrollTop;
+        const seekRoot = this.rendererRoot;
+        const seekStillCurrent = () => {
+          if (
+            Math.abs(this.scrollport.scrollTop - seekScrollTop) >= 0.5 ||
+            !seekRoot ||
+            seekRoot !== this.rendererRoot
+          )
+            return false;
+          const current = this.geometry.seekTarget(seekRoot, this.scrollport, prior);
+          return sameSeekTarget(current, seek);
+        };
+        return await handoff.seek(
+          seek,
+          this.retainedPieceCount,
+          retained,
+          async (window, cursor, signal) => {
+            const from = window.snapshot.from;
+            const next = Math.min(pieceCount, from + this.retainedPieceCount);
+            while (window.snapshot.next < next) {
+              signal.throwIfAborted();
+              await window.append(signal);
+            }
+            const aligned = await this.alignWindow(
+              window,
+              window.snapshot,
+              { from, next },
+              retained,
+              signal,
+            );
+            const snapshot = await window.trim(
+              {
+                generation: aligned.snapshot.generation,
+                active: aligned.active,
+                retain: aligned.retain,
+              },
+              signal,
+            );
+            return {
+              snapshot,
+              anchor: this.savedAnchor(snapshot, cursor, seek.offset, aligned.active),
+            };
+          },
+          () =>
+            !this.paused &&
+            !this.disposed &&
+            this.publicationVersion === version &&
+            this.handoff === handoff &&
+            seekStillCurrent() &&
+            sameIntervals(retained, currentRetained()),
+          controller.signal,
+        );
+      }
+
+      const visible = this.visiblePieces(prior);
+      const direction = this.readDirection(prior, visible);
+      const retained = this.currentPins();
+      const active = trimOnly
+        ? { from: prior.from, next: prior.next }
+        : refreshRange(
+            await (direction === "forward"
+              ? handoff.append(controller.signal)
+              : handoff.prepend(controller.signal)),
+            direction,
+            visible,
+            this.retainedPieceCount,
+          );
+      if (controller.signal.aborted || this.paused || this.disposed) return null;
+      if (this.publicationVersion !== version || this.handoff !== handoff) return null;
+      const desiredDisplay = normalizeIntervals([active, ...retained]);
+      if (
+        trimOnly &&
+        active.from === prior.from &&
+        active.next === prior.next &&
+        sameIntervals(desiredDisplay, normalizeIntervals(prior.displayRanges))
+      )
+        return prior;
+      const loaded = handoff.snapshot;
+      const trimmed = await this.alignAndTrim(handoff, loaded, active, retained, controller.signal);
+      if (controller.signal.aborted || this.paused || this.disposed) return null;
+      if (this.publicationVersion !== version || this.handoff !== handoff) return null;
+      if (
+        trimmed.from === prior.from &&
+        trimmed.next === prior.next &&
+        trimmed.hasMore === prior.hasMore &&
+        sameIntervals(trimmed.displayRanges, normalizeIntervals(prior.displayRanges)) &&
+        sameIntervals(trimmed.supportRanges, normalizeIntervals(prior.supportRanges))
+      )
+        return trimmed;
       const anchor = this.rendererRoot
         ? this.geometry.capture(this.rendererRoot, this.scrollport)
         : null;
@@ -216,6 +354,7 @@ export class MarkdownMessageView {
       } finally {
         this.pins?.dispose();
         this.pins = null;
+        this.lastSourceMapping = null;
         this.rendererRoot = null;
         render(null, this.host);
       }
@@ -347,6 +486,8 @@ export class MarkdownMessageView {
       },
       locate: (offset, signal) => source.locate(offset, signal),
       sourceCursor: (offset, signal) => source.sourceCursor(offset, signal),
+      locateChild: (contextId, childIndex, signal) =>
+        source.locateChild(contextId, childIndex, signal),
       locateSource: (cursor, signal) => source.locateSource(cursor, signal),
       readPieces: (cursor, signal) => source.readPieces(cursor, signal),
       readPiecesBefore: (cursor, signal) => source.readPiecesBefore(cursor, signal),
@@ -384,8 +525,13 @@ export class MarkdownMessageView {
     if (!anchor) return null;
     const sourceStart = Number(anchor.start);
     if (!Number.isSafeInteger(sourceStart)) throw new Error("Markdown source anchor is invalid.");
+    const cached = this.lastSourceMapping;
+    if (cached?.source === source && cached.sourceStart === sourceStart)
+      return { cursor: cached.cursor, offset: anchor.offset };
     const cursor = await source.sourceCursor(sourceStart, signal);
     signal.throwIfAborted();
+    if (this.activeGeneration === source && !source.isDisposed)
+      this.lastSourceMapping = { source, sourceStart, cursor };
     return { cursor, offset: anchor.offset };
   }
 
@@ -556,6 +702,7 @@ export class MarkdownMessageView {
     anchor: MarkdownWindowAnchor | null,
   ): void {
     const previousGeneration = this.rendererRoot?.dataset.markdownGeneration;
+    if (this.lastSourceMapping?.source !== this.activeGeneration) this.lastSourceMapping = null;
     if (previousGeneration !== snapshot.generation) {
       this.pins?.dispose();
       this.pins = null;
@@ -606,12 +753,17 @@ export class MarkdownMessageView {
     snapshot: MarkdownRenderSnapshot,
     cursor: MarkdownRenderCursor,
     offset: number,
+    preferred?: MarkdownPieceInterval,
   ): MarkdownWindowAnchor | null {
-    const piece = [...snapshot.pieces.values()]
-      .filter((candidate) => candidate.text.length > 0)
-      .sort(
-        (left, right) => Math.abs(left.id - cursor.index) - Math.abs(right.id - cursor.index),
-      )[0];
+    const pieces = [...snapshot.pieces.values()].filter((candidate) => candidate.text.length > 0);
+    const orderByDistance = (left: (typeof pieces)[number], right: (typeof pieces)[number]) =>
+      Math.abs(left.id - cursor.index) - Math.abs(right.id - cursor.index);
+    const piece =
+      (preferred
+        ? pieces
+            .filter((candidate) => preferred.from <= candidate.id && candidate.id < preferred.next)
+            .sort(orderByDistance)[0]
+        : undefined) ?? pieces.sort(orderByDistance)[0];
     if (!piece) return null;
     return {
       generation: snapshot.generation,
@@ -630,6 +782,20 @@ export class MarkdownMessageView {
     );
     return next;
   }
+}
+
+function sameSeekTarget(
+  left: MarkdownWindowSeekTarget | null,
+  right: MarkdownWindowSeekTarget,
+): boolean {
+  if (!left || left.generation !== right.generation || Math.abs(left.offset - right.offset) >= 0.5)
+    return false;
+  if ("index" in left) return "index" in right && left.index === right.index;
+  return (
+    "contextId" in right &&
+    left.contextId === right.contextId &&
+    left.childIndex === right.childIndex
+  );
 }
 
 function initialFrom(index: number, pieceCount: number, retainedPieceCount: number): number {

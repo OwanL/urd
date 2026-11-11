@@ -151,6 +151,8 @@ void test("maps lease and page routes, bodies, and numeric Markdown enums", asyn
           },
         ],
       });
+    } else if (request.url.includes("/contexts/0/children/1")) {
+      sendJson(response, { generation, index: 2 });
     } else if (request.url.includes("/contexts/0?")) {
       sendJson(response, {
         generation,
@@ -176,6 +178,7 @@ void test("maps lease and page routes, bodies, and numeric Markdown enums", asyn
   const pieces = await owned.readPieces(cursor, signal);
   const preceding = await owned.readPiecesBefore({ generation, index: 1 }, signal);
   const contextPage = await owned.readContext(0, { generation, index: 0 }, signal);
+  const childCursor = await owned.locateChild(0, 1, signal);
   const descriptors = await owned.readContexts([0], { generation, index: 0 }, signal);
   const saved = await owned.sourceCursor(1, signal);
   assert.deepEqual(saved, sourceFacts.from);
@@ -187,6 +190,7 @@ void test("maps lease and page routes, bodies, and numeric Markdown enums", asyn
   assert.equal(preceding.pieces[0]?.kind, "text");
   assert.equal(contextPage.context.kind, "document");
   assert.equal(contextPage.context.alignment, "center");
+  assert.deepEqual(childCursor, { generation, index: 2 });
   assert.equal(contextPage.values[0]?.kind, "destination");
   assert.equal(descriptors.contexts[0]?.kind, "document");
 
@@ -212,13 +216,14 @@ void test("maps lease and page routes, bodies, and numeric Markdown enums", asyn
       `GET ${leasePath}/pieces?generation=${generation}&index=0`,
       `GET ${leasePath}/pieces/before?generation=${generation}&index=1`,
       `GET ${leasePath}/contexts/0?generation=${generation}&index=0`,
+      `GET ${leasePath}/contexts/0/children/1`,
       `POST ${leasePath}/contexts`,
       `GET ${leasePath}/source?sourceUtf8Offset=1`,
       `POST ${leasePath}/locate`,
       `POST ${leasePath}/release`,
     ],
   );
-  assert.deepEqual(JSON.parse(server.requests[5]!.body), {
+  assert.deepEqual(JSON.parse(server.requests[6]!.body), {
     generation,
     index: 0,
     ids: [0],

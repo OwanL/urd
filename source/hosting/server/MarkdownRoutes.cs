@@ -25,6 +25,9 @@ internal static class MarkdownRoutes {
         [AsParameters] CursorQuery query) => ReadPiecesBeforeAsync(http, hub, streamId, leaseId, query));
     routes.MapGet("/contexts/{id:int}", (HttpContext http, Guid streamId, Guid leaseId, int id,
         [AsParameters] CursorQuery query) => ReadContextAsync(http, hub, streamId, leaseId, id, query));
+    routes.MapGet("/contexts/{id:int}/children/{childIndex:int}", (HttpContext http,
+        Guid streamId, Guid leaseId, int id, int childIndex) =>
+        LocateChildAsync(http, hub, streamId, leaseId, id, childIndex));
     routes.MapPost("/contexts", (HttpContext http, Guid streamId, Guid leaseId) =>
         ReadContextsAsync(http, hub, streamId, leaseId));
     routes.MapGet("/locate", (HttpContext http, Guid streamId, Guid leaseId,
@@ -146,6 +149,18 @@ internal static class MarkdownRoutes {
 
     MarkdownContextPage result = page.MarkdownLeases.Read(leaseId, lease => lease.ReadContext(id, cursor));
     return Task.FromResult<IResult>(RenderJson(result));
+  }
+
+  private static Task<IResult> LocateChildAsync(HttpContext http, SessionEventHub hub,
+      Guid streamId, Guid leaseId, int contextId, int childIndex) {
+    if (streamId == Guid.Empty || leaseId == Guid.Empty || contextId < 0 || childIndex < 0)
+      return Task.FromResult<IResult>(Results.BadRequest());
+    if (!TryGetPage(hub, streamId, out SessionEventPage page))
+      return Task.FromResult(MissingPageResult(http));
+
+    MarkdownRenderCursor cursor = page.MarkdownLeases.Read(leaseId,
+        lease => lease.LocateChild(contextId, childIndex));
+    return Task.FromResult<IResult>(RenderJson(cursor));
   }
 
   private static async Task<IResult> ReadContextsAsync(HttpContext http, SessionEventHub hub,

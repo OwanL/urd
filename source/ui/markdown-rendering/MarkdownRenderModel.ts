@@ -103,6 +103,11 @@ export interface MarkdownPageSource {
   // Nearest preceding source start, first piece on ties; before-first and empty use 0.
   // Offsets are inclusive [0, sourceUtf8Bytes]; the returned cursor is generation-local.
   locate(sourceUtf8Offset: number, signal: AbortSignal): Promise<MarkdownRenderCursor>;
+  locateChild(
+    contextId: number,
+    childIndex: number,
+    signal: AbortSignal,
+  ): Promise<MarkdownRenderCursor>;
   readPieces(cursor: MarkdownRenderCursor, signal: AbortSignal): Promise<MarkdownPiecePage>;
   readPiecesBefore(cursor: MarkdownRenderCursor, signal: AbortSignal): Promise<MarkdownPiecePage>;
   readContext(

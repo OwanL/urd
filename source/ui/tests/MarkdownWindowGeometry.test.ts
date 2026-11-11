@@ -7,6 +7,7 @@ import {
   markdownTableColumns,
   requireMarkdownWindowUnits,
 } from "../markdown-rendering/MarkdownWindowGeometry.ts";
+import type { MarkdownRenderSnapshot } from "../markdown-rendering/MarkdownRenderModel.ts";
 import { MarkdownWindowAssembler } from "../markdown-rendering/MarkdownWindowAssembler.ts";
 import {
   createMarkdownContext,
@@ -51,6 +52,243 @@ void test("root piece spans leave gaps around complete loaded child extents", ()
       { from: 12, next: 14 },
       { from: 17, next: 20 },
     ],
+  );
+});
+
+void test("seek targets map root and ordinary gaps directly to piece IDs", () => {
+  const geometry = new MarkdownWindowGeometry();
+  geometry.configure("g", 800, "default");
+  const scrollport = {
+    getBoundingClientRect: () => ({ top: 100, right: 800, bottom: 300, left: 0 }),
+  } as unknown as HTMLElement;
+  const snapshot = {
+    generation: "g",
+    from: 0,
+    next: 0,
+    hasMore: true,
+    displayRanges: [],
+    supportRanges: [],
+    contexts: new Map(),
+    pieces: new Map(),
+  } satisfies MarkdownRenderSnapshot;
+
+  for (const kind of ["root", "ordinary"] as const) {
+    const gap = {
+      dataset: { markdownGap: kind, gapFrom: "20", gapNext: "40" },
+      getBoundingClientRect: () => ({ top: 150, right: 800, bottom: 250, left: 0, height: 100 }),
+    };
+    const root = {
+      dataset: { markdownGeneration: "g" },
+      getBoundingClientRect: () => ({ top: 0, right: 800, bottom: 500, left: 0, width: 800 }),
+      querySelectorAll: () => [gap],
+    } as unknown as HTMLElement;
+    assert.deepEqual(geometry.seekTarget(root, scrollport, snapshot), {
+      generation: "g",
+      index: 30,
+      offset: 100,
+    });
+  }
+});
+
+void test("seek targets map code and table unit gaps through shell piece ranges", () => {
+  const geometry = new MarkdownWindowGeometry();
+  geometry.configure("g", 800, "default");
+  const scrollport = {
+    getBoundingClientRect: () => ({ top: 100, right: 800, bottom: 300, left: 0 }),
+  } as unknown as HTMLElement;
+  const code = createMarkdownContext(7, {
+    kind: "code",
+    firstPiece: 100,
+    pieceCount: 100,
+    childCount: 10,
+  });
+  const table = createMarkdownContext(8, {
+    kind: "table",
+    firstPiece: 0,
+    pieceCount: 110,
+    childCount: 11,
+  });
+  const header = createMarkdownContext(9, {
+    kind: "row",
+    parent: 8,
+    firstPiece: 0,
+    pieceCount: 10,
+    header: true,
+  });
+  const snapshot = {
+    generation: "g",
+    from: 0,
+    next: 0,
+    hasMore: true,
+    displayRanges: [],
+    supportRanges: [],
+    contexts: new Map([
+      [7, { context: code, values: {} }],
+      [8, { context: table, values: {} }],
+      [9, { context: header, values: {} }],
+    ]),
+    pieces: new Map(),
+  } satisfies MarkdownRenderSnapshot;
+  const rootFor = (kind: "code" | "table", from: number, next: number) => {
+    const shell = { dataset: { context: kind === "code" ? "7" : "8" } };
+    const gap = {
+      dataset: { markdownGap: kind, gapFrom: String(from), gapNext: String(next) },
+      getBoundingClientRect: () => ({ top: 150, right: 800, bottom: 250, left: 0, height: 100 }),
+      closest: () => shell,
+    };
+    return {
+      dataset: { markdownGeneration: "g" },
+      getBoundingClientRect: () => ({ top: 0, right: 800, bottom: 500, left: 0, width: 800 }),
+      querySelectorAll: () => [gap],
+    } as unknown as HTMLElement;
+  };
+
+  assert.deepEqual(geometry.seekTarget(rootFor("code", 4, 6), scrollport, snapshot), {
+    generation: "g",
+    contextId: 7,
+    childIndex: 5,
+    offset: 100,
+  });
+  assert.deepEqual(geometry.seekTarget(rootFor("table", 5, 7), scrollport, snapshot), {
+    generation: "g",
+    contextId: 8,
+    childIndex: 6,
+    offset: 100,
+  });
+  assert.equal(
+    geometry.seekTarget(rootFor("code", 4, 6), scrollport, { ...snapshot, generation: "stale" }),
+    null,
+  );
+});
+
+void test("code and table gap seeks resolve uneven child extents exactly", async () => {
+  const pieces = Array.from({ length: 10 }, (_, id) =>
+    createMarkdownPiece(id, id === 0 ? 2 : id < 5 ? 3 : id === 5 ? 5 : id === 6 ? 6 : 7, `p${id}`),
+  );
+  const source = new SyntheticMarkdownPageSource(
+    pieces,
+    [
+      createMarkdownContext(0, {
+        kind: "document",
+        firstChild: 1,
+        childCount: 2,
+        pieceCount: 10,
+        nextSibling: -1,
+      }),
+      createMarkdownContext(1, {
+        kind: "code",
+        parent: 0,
+        firstChild: 2,
+        nextSibling: 4,
+        childCount: 2,
+        pieceCount: 5,
+      }),
+      createMarkdownContext(2, {
+        kind: "codeLine",
+        parent: 1,
+        nextSibling: 3,
+        firstPiece: 0,
+        pieceCount: 1,
+        position: 0,
+      }),
+      createMarkdownContext(3, {
+        kind: "codeLine",
+        parent: 1,
+        firstPiece: 1,
+        pieceCount: 4,
+        position: 1,
+      }),
+      createMarkdownContext(4, {
+        kind: "table",
+        parent: 0,
+        firstChild: 5,
+        childCount: 3,
+        firstPiece: 5,
+        pieceCount: 5,
+      }),
+      createMarkdownContext(5, {
+        kind: "row",
+        parent: 4,
+        nextSibling: 6,
+        firstPiece: 5,
+        pieceCount: 1,
+        position: 0,
+        header: true,
+      }),
+      createMarkdownContext(6, {
+        kind: "row",
+        parent: 4,
+        nextSibling: 7,
+        firstPiece: 6,
+        pieceCount: 1,
+        position: 1,
+      }),
+      createMarkdownContext(7, {
+        kind: "row",
+        parent: 4,
+        firstPiece: 7,
+        pieceCount: 3,
+        position: 2,
+      }),
+    ],
+    { generation: "g" },
+  );
+  const code = source.contexts[1]!.context;
+  const table = source.contexts[4]!.context;
+  const header = source.contexts[5]!.context;
+  const snapshot = {
+    generation: "g",
+    from: 0,
+    next: 0,
+    hasMore: true,
+    displayRanges: [],
+    supportRanges: [],
+    contexts: new Map([
+      [1, { context: code, values: {} }],
+      [4, { context: table, values: {} }],
+      [5, { context: header, values: {} }],
+    ]),
+    pieces: new Map(),
+  } satisfies MarkdownRenderSnapshot;
+  const geometry = new MarkdownWindowGeometry();
+  geometry.configure("g", 800, "default");
+  const scrollport = {
+    getBoundingClientRect: () => ({ top: 100, right: 800, bottom: 300, left: 0 }),
+  } as unknown as HTMLElement;
+  const rootFor = (kind: "code" | "table", from: number, next: number) => {
+    const shell = { dataset: { context: kind === "code" ? "1" : "4" } };
+    const gap = {
+      dataset: { markdownGap: kind, gapFrom: String(from), gapNext: String(next) },
+      getBoundingClientRect: () => ({ top: 150, right: 800, bottom: 250, left: 0, height: 100 }),
+      closest: () => shell,
+    };
+    return {
+      dataset: { markdownGeneration: "g" },
+      getBoundingClientRect: () => ({ top: 0, right: 800, bottom: 500, left: 0, width: 800 }),
+      querySelectorAll: () => [gap],
+    } as unknown as HTMLElement;
+  };
+  const codeTarget = geometry.seekTarget(rootFor("code", 0, 2), scrollport, snapshot);
+  const tableTarget = geometry.seekTarget(rootFor("table", 1, 3), scrollport, snapshot);
+  assert.deepEqual(codeTarget, { generation: "g", contextId: 1, childIndex: 1, offset: 100 });
+  assert.deepEqual(tableTarget, { generation: "g", contextId: 4, childIndex: 2, offset: 100 });
+  assert.ok(codeTarget && "contextId" in codeTarget);
+  assert.ok(tableTarget && "contextId" in tableTarget);
+  assert.deepEqual(
+    await source.locateChild(
+      codeTarget.contextId,
+      codeTarget.childIndex,
+      new AbortController().signal,
+    ),
+    { generation: "g", index: 1 },
+  );
+  assert.deepEqual(
+    await source.locateChild(
+      tableTarget.contextId,
+      tableTarget.childIndex,
+      new AbortController().signal,
+    ),
+    { generation: "g", index: 7 },
   );
 });
 

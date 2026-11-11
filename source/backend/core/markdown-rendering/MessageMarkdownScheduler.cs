@@ -118,6 +118,10 @@ internal sealed class MessageMarkdownScheduler : IAsyncDisposable {
     }
   }
 
+  internal MarkdownRenderCursor LocateChild(MessageMarkdownLease lease, int contextId, int childIndex) {
+    lock (gate) return cache.Get(lease.Get(this)).LocateChild(contextId, childIndex);
+  }
+
   internal MessageContentCursor SourceCursor(MessageMarkdownLease lease, int sourceUtf8Offset) {
     lock (gate) return cache.SourceCursor(lease.Get(this), sourceUtf8Offset);
   }

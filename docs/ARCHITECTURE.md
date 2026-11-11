@@ -149,6 +149,15 @@ experiments are accepted. The [experiment archive](product-direction.md#experime
 preserves provenance. Shared assets remain conditional. New application/settings/platform
 areas can remain unfinished rather than being hidden in a generic bucket.
 
+**Backend responsibility split (2026-11-11):** `source/backend/harness/` groups agent
+machinery; `source/backend/markdown-rendering/` owns transcript formatting outside it.
+The earlier harness-to-core folder rename aligned with an assembly name but did not
+establish that all backend responsibilities belong to the harness. Keep one `Urd.Core`
+assembly and the existing namespaces/public APIs. Markdown consumes guarded transcript
+content reads; the harness must not depend on Markdown types or assemble display source.
+Content capture and revalidation retain session/history guards, with source assembly
+outside those guards. Folder placement alone is not a dependency boundary.
+
 The initial Core/Server/browser implementation now exists. The [session sketch](session-design.md)
 retains proposed wider APIs; its scoped decisions and the selected Core-without-ASP.NET /
 Server → Core boundary are not approval of every future class. Routine changes follow the

@@ -30,7 +30,7 @@ internal sealed class MessageContentReader {
         || expected.From.Utf8Offset != 0 || expected.AvailableThrough.Utf8Offset != 0
         || expected.AvailableThrough.SegmentIndex <= expected.From.SegmentIndex
         || (expected.FinalOutputCommitted && !expected.IsClosed))
-      throw new ArgumentException("Markdown source requires an exact committed message extent.", nameof(expected));
+      throw new ArgumentException("Content source requires an exact committed message extent.", nameof(expected));
     return database.Read(transaction => {
       CheckHistoryRevision(transaction, sessionId, message.HistoryRevision);
       MessageMetadata metadata = ReadMetadata(transaction, sessionId, message);

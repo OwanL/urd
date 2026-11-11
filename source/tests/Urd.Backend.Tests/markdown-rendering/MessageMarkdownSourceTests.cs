@@ -119,7 +119,7 @@ public sealed class MessageMarkdownSourceTests {
   }
 
   [Fact]
-  public async Task SessionEntryPointUsesRequestedOpenSnapshotWithoutStartingLlm() {
+  public async Task ReadsRequestedSessionSnapshotWithoutStartingLlm() {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     TestExecution execution = StartExecution(store);
@@ -128,14 +128,20 @@ public sealed class MessageMarkdownSourceTests {
     Append(store, execution, 1, "later", final: true);
     using var client = new ScriptedChatClient(_ => throw new InvalidOperationException("Markdown reads must not start execution."));
     var session = await new SessionManager(store, _ => client).GetPrimaryAsync(execution.Session);
-    MessageMarkdownSource source = await session.Transcript.ReadMarkdownSourceAsync(key);
+    MessageMarkdownSource source = await MessageMarkdownSourceReader.ReadAsync(session, key);
 
     Assert.Equal("read🙂", source.Source);
     Assert.True(key.Matches(source));
     Assert.False(source.IsClosed);
     Assert.False(source.FinalOutputCommitted);
     Assert.Equal(0, client.Calls);
-    await Assert.ThrowsAsync<ArgumentException>(() => session.Transcript.ReadMarkdownSourceAsync(key with { SessionId = Guid.NewGuid() }));
+    await Assert.ThrowsAsync<ArgumentException>(() => MessageMarkdownSourceReader.ReadAsync(session,
+        key with { SessionId = Guid.NewGuid() }));
+
+    MessageContentExtent extent = await session.Transcript.CaptureContentExtentAsync(key.Message, key.TextFacts);
+    var other = await new SessionManager(store, _ => client).CreatePrimaryAsync();
+    Assert.Throws<ArgumentException>(() => other.Transcript.ReadContentSegment(extent, extent.From));
+    await Assert.ThrowsAsync<ArgumentException>(() => other.Transcript.ValidateContentExtentAsync(extent));
   }
 
   [Fact]
@@ -159,19 +165,21 @@ public sealed class MessageMarkdownSourceTests {
   [Theory]
   [InlineData(false)]
   [InlineData(true)]
-  public void CaptureAndValidationFenceStaleRevisionAndDeletedIdentity(bool revision) {
+  public async Task CaptureAndValidationFenceStaleRevisionAndDeletedIdentity(bool revision) {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     TestExecution execution = StartExecution(store);
     Append(store, execution, 0, "identity");
     TranscriptTextFacts facts = Facts(store, execution, execution.Assistant);
-    MessageContentExtent extent = Capture(store, execution, execution.Assistant);
+    using var client = new ScriptedChatClient(_ => throw new InvalidOperationException("Content reads must not start execution."));
+    var session = await new SessionManager(store, _ => client).GetPrimaryAsync(execution.Session);
+    MessageContentExtent extent = await session.Transcript.CaptureContentExtentAsync(execution.Assistant, facts);
     if (revision) database.ForceHistoryRevision(1);
     else database.Execute($"DELETE FROM execution_messages WHERE session_id = '{execution.Session:D}' "
         + $"AND run_id = '{execution.Execution:D}' AND role = 1 AND message_id = '{execution.Assistant.MessageId:D}';");
     Type error = revision ? typeof(HistoryRevisionConflictException) : typeof(KeyNotFoundException);
-    Assert.Throws(error, () => store.Content.ValidateSourceExtent(extent));
-    Assert.Throws(error, () => store.Content.CaptureSourceExtent(execution.Session, execution.Assistant, facts));
+    await Assert.ThrowsAsync(error, () => session.Transcript.ValidateContentExtentAsync(extent));
+    await Assert.ThrowsAsync(error, () => session.Transcript.CaptureContentExtentAsync(execution.Assistant, facts));
   }
 
   static TestExecution StartExecution(UrdStore store, string text = "input") {

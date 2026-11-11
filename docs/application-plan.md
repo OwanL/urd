@@ -19,12 +19,16 @@ urd/
 │  └─ skills/
 ├─ source/
 │  ├─ backend/
-│  │  ├─ core/
+│  │  ├─ harness/                     agent machinery, not all backend features
 │  │  │  ├─ sessions/                 identity, input, lifecycle and reads
 │  │  │  ├─ execution/                model/tool loop, Stop and completion
+│  │  │  ├─ context/                  starting instructions and model context
+│  │  │  ├─ compaction/               model-context budgeting and summaries
 │  │  │  ├─ providers/                accounts, adapters and request policy
+│  │  │  ├─ tools/                    declarations, invocation and implementations
 │  │  │  └─ storage/                  durable records and bounded readers
-│  │  └─ Urd.Core.csproj               ASP.NET-free library
+│  │  ├─ markdown-rendering/          transcript formatting, outside the harness
+│  │  └─ Urd.Core.csproj               one ASP.NET-free backend assembly
 │  ├─ hosting/server/                 HTTP, local access and composition
 │  │  └─ Urd.Server.csproj
 │  ├─ ui/                             shared Preact client, grouped by feature
@@ -40,6 +44,14 @@ This mixes existing source with planned repository areas; it does not require cr
 the planned directories. Shared `assets/` is conditional on a real shared consumer.
 UI-only assets stay with UI. Managed attachments are persistent data, not repository assets.
 Exact packaged/custom-copy subpaths remain open.
+
+The 2026-11-11 owner-approved split restores the original harness grouping after its
+rename to `core/` in `aed178c`. Markdown formatting is a backend presentation concern,
+not harness behavior. Both areas remain in `Urd.Core`; existing namespaces and public
+APIs stay unchanged. An assembly name does not determine responsibility grouping.
+Harness transcript reads own content bounds and history validation; Markdown owns
+source assembly, parsing and derived display resources. No harness dependency on the
+Markdown subsystem is needed. This is not a reusable harness SDK or a project per area.
 
 ## Responsibilities and future areas
 

@@ -96,8 +96,9 @@ classes remain separate by responsibility; no lifecycle or schema redesign accom
 
 ## Markdown rendering
 
-`source/backend/markdown-rendering/` owns the detached Markdown rendering
-pipeline: `MarkdownParser` produces a `MarkdownRenderIndex`, `MarkdownPageReader`
+`source/backend/markdown-rendering/` owns transcript formatting outside the harness;
+both remain in the `Urd.Core` assembly. The harness supplies content reads, not
+Markdown types or source assembly. `MarkdownParser` produces a `MarkdownRenderIndex`, `MarkdownPageReader`
 serves bounded forward/backward pages and manifests, and `MessageMarkdownScheduler`
 coordinates source capture, queued parsing and two BelowNormal lanes (one large, one
 small). `MessageMarkdownLease` keeps a generation readable during handoff; pinned
@@ -253,8 +254,9 @@ discovery, not activity tracking or a complete summary API.
 2. [SessionBase.cs](../source/backend/harness/sessions/SessionBase.cs) — receipt/not-sent reads and live
    snapshots; [SessionStatus.cs](../source/backend/harness/sessions/SessionStatus.cs) projects snapshot/status
    facts. [SessionTranscript.cs](../source/backend/harness/sessions/SessionTranscript.cs) owns history,
-   content, transcript positioning and Markdown source reads. All share the existing session guard;
-   Markdown source assembly runs outside it between guarded extent capture and validation.
+   content and transcript positioning. Content-extent capture and revalidation use the existing
+   session guard; bounded segment reads release the database lock before decoding. The separate
+   Markdown source reader owns assembly outside both guards, then revalidates before publication.
 3. [SnapshotReader.cs](../source/backend/harness/storage/SnapshotReader.cs),
    [TranscriptHistoryReader.cs](../source/backend/harness/storage/TranscriptHistoryReader.cs) and
    [MessageContentReader.cs](../source/backend/harness/storage/MessageContentReader.cs) — separate

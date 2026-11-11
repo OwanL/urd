@@ -5,11 +5,26 @@ using Urd.Core.Storage;
 
 namespace Urd.Core.MarkdownRendering;
 
-// Deliberately synchronous and unscheduled. Never call under a session/database
-// gate. Storage releases its lock after each bounded read, before any decoding.
+// Captures and revalidates guarded content bounds; assembly is unscheduled and
+// outside the session/database gates. The Markdown scheduler owns worker admission.
 internal static class MessageMarkdownSourceReader {
-  internal static MessageMarkdownSource Read(MessageContentReader reader, MessageContentExtent extent,
+  internal static async Task<MessageMarkdownSource> ReadAsync(SessionBase session, MessageMarkdownKey key,
       CancellationToken cancellation = default) {
+    if (session.Id != key.SessionId)
+      throw new ArgumentException("The session does not match the markdown key.", nameof(key));
+    SessionTranscript transcript = session.Transcript;
+    MessageContentExtent extent = await transcript.CaptureContentExtentAsync(key.Message, key.TextFacts, cancellation);
+    MessageMarkdownSource source = Read(cursor => transcript.ReadContentSegment(extent, cursor), extent, cancellation);
+    await transcript.ValidateContentExtentAsync(extent, cancellation);
+    return source;
+  }
+
+  internal static MessageMarkdownSource Read(MessageContentReader reader, MessageContentExtent extent,
+      CancellationToken cancellation = default) =>
+      Read(cursor => reader.ReadSourceSegment(extent, cursor), extent, cancellation);
+
+  private static MessageMarkdownSource Read(Func<MessageContentCursor, MessageContentSegment> readSegment,
+      MessageContentExtent extent, CancellationToken cancellation) {
     var source = new StringBuilder();
     var segments = new List<MarkdownSourceSegment>();
     MessageContentCursor cursor = extent.From;
@@ -18,7 +33,7 @@ internal static class MessageMarkdownSourceReader {
       cancellation.ThrowIfCancellationRequested();
       if (cursor.Utf8Offset == 0)
         segments.Add(new(bytes, cursor.SegmentIndex));
-      MessageContentSegment segment = reader.ReadSourceSegment(extent, cursor);
+      MessageContentSegment segment = readSegment(cursor);
       int consumed = Append(segment.Prefix, source);
       bytes = checked(bytes + consumed);
       int offset = checked(cursor.Utf8Offset + consumed);

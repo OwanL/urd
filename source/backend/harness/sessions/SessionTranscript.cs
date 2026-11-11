@@ -1,4 +1,3 @@
-using Urd.Core.MarkdownRendering;
 using Urd.Core.Storage;
 
 namespace Urd.Core.Sessions;
@@ -21,20 +20,28 @@ public sealed class SessionTranscript {
     return store.Content.Read(sessionId, cursor);
   }
 
-  internal async Task<MessageMarkdownSource> ReadMarkdownSourceAsync(
-      MessageMarkdownKey key, CancellationToken cancellation = default) {
-    if (key.SessionId != sessionId)
-      throw new ArgumentException("The session does not match the markdown key.", nameof(key));
-    MessageContentExtent extent;
-    using (await gate.AcquireAsync(cancellation))
-      extent = store.Content.CaptureSourceExtent(sessionId, key.Message, key.TextFacts);
+  internal async Task<MessageContentExtent> CaptureContentExtentAsync(
+      MessageRef message, TranscriptTextFacts expected, CancellationToken cancellation = default) {
+    using var held = await gate.AcquireAsync(cancellation);
+    return store.Content.CaptureSourceExtent(sessionId, message, expected);
+  }
 
-    MessageMarkdownSource source = MessageMarkdownSourceReader.Read(store.Content, extent, cancellation);
+  // Each bounded storage read releases its database lock before caller-side assembly.
+  internal MessageContentSegment ReadContentSegment(MessageContentExtent extent, MessageContentCursor cursor) {
+    ValidateExtentSession(extent);
+    return store.Content.ReadSourceSegment(extent, cursor);
+  }
 
-    using (await gate.AcquireAsync(cancellation)) {
-      store.Content.ValidateSourceExtent(extent);
-      return source;
-    }
+  internal async Task ValidateContentExtentAsync(
+      MessageContentExtent extent, CancellationToken cancellation = default) {
+    ValidateExtentSession(extent);
+    using var held = await gate.AcquireAsync(cancellation);
+    store.Content.ValidateSourceExtent(extent);
+  }
+
+  private void ValidateExtentSession(MessageContentExtent extent) {
+    if (extent.SessionId != sessionId)
+      throw new ArgumentException("The content extent belongs to another session.", nameof(extent));
   }
 
   public async Task<TranscriptHistoryPage> ReadHistoryAsync(

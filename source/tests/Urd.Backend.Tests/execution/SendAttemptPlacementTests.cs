@@ -216,7 +216,7 @@ public sealed class SendAttemptPlacementTests {
 
   private static async Task<TranscriptHistoryPage> ReadHistoryAsync(PrimarySession session) {
     SessionSnapshot snapshot = await session.ReadSnapshotAsync();
-    return await session.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, snapshot.HistoryRevision));
+    return await session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, snapshot.HistoryRevision));
   }
 
   private static long ReadAttempt(TemporaryDatabase database) =>

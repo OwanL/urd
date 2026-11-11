@@ -1,6 +1,5 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.AI;
-using Urd.Core.MarkdownRendering;
 using Urd.Core.Execution;
 using Urd.Core.Storage;
 using Urd.Core.Providers;
@@ -8,8 +7,8 @@ using Urd.Core.Tools;
 
 namespace Urd.Core.Sessions;
 
-// Owns one session's state. State reads and writes go through this class's lock;
-// fixed-extent source assembly, LLM work and stop callbacks run outside it.
+// Owns session identity, admission and execution lifetime. Collaborators share its gate;
+// transcript source assembly, LLM work and cleanup joins run outside it.
 public abstract class SessionBase {
   private readonly UrdStore store;
   private readonly Func<ProviderConnection, IChatClient> createChatClient;
@@ -18,11 +17,9 @@ public abstract class SessionBase {
   private readonly PendingToolCalls pending;
   private readonly AsyncLock gate = new();
   private readonly SessionNotifications notifications;
+  private readonly SessionStatus status;
   private bool acceptingUserMessages = true;
   private bool needsAttention;
-  private bool hasUnownedExecution;
-  private bool historyRevisionChanged;
-  private SessionExecutionResult? lastSettlement;
   private SessionExecutionDriver? execution;
   // Retain the driver's task after settlement clears the active execution, so shutdown joins its tail.
   private Task? executionTask;
@@ -31,6 +28,9 @@ public abstract class SessionBase {
       ToolCatalog? tools = null, ChatProcesses? processes = null, PendingToolCalls? pending = null) {
     Id = record.Id;
     notifications = new SessionNotifications(Id);
+    status = new SessionStatus(record.HistoryRevision);
+    Transcript = new SessionTranscript(Id, store, gate);
+    Recorder = new SessionExecutionRecorder(this, store, gate);
     HistoryRevision = record.HistoryRevision;
     WorkingDirectory = record.WorkingDirectory;
     this.store = store;
@@ -41,7 +41,9 @@ public abstract class SessionBase {
   }
 
   public Guid Id { get; }
+  public SessionTranscript Transcript { get; }
 
+  internal SessionExecutionRecorder Recorder { get; }
   internal long HistoryRevision { get; }
   internal string? WorkingDirectory { get; }
 
@@ -61,7 +63,7 @@ public abstract class SessionBase {
 
   public async Task<SessionSnapshot> ReadSnapshotAsync(CancellationToken cancellation = default) {
     using var held = await gate.AcquireAsync(cancellation);
-    return ApplyLiveState(store.Snapshots.ReadStored(Id));
+    return status.ApplyLiveState(store.Snapshots.ReadStored(Id), acceptingUserMessages, execution);
   }
 
   public async Task<IDisposable> SubscribeAsync(Action<SessionChange> observer, bool watched,
@@ -69,69 +71,8 @@ public abstract class SessionBase {
     ArgumentNullException.ThrowIfNull(observer);
     using var held = await gate.AcquireAsync(cancellation);
     SessionSnapshot stored = store.Snapshots.ReadStored(Id);
-    hasUnownedExecution = stored.UnsettledExecutionId is { } executionId && !IsCurrentExecution(executionId);
-    historyRevisionChanged = stored.HistoryRevision != HistoryRevision;
-    lastSettlement = stored.LastSettlement;
-    return notifications.Subscribe(observer, watched, GetStatus(ApplyLiveState(stored)));
-  }
-
-  public async Task<MessageContentPage> ReadMessageContentAsync(
-      MessageContentCursor cursor, CancellationToken cancellation = default) {
-    using var held = await gate.AcquireAsync(cancellation);
-    return store.Content.Read(Id, cursor);
-  }
-
-  internal async Task<MessageMarkdownSource> ReadMessageMarkdownSourceAsync(
-      MessageMarkdownKey key, CancellationToken cancellation = default) {
-    if (key.SessionId != Id)
-      throw new ArgumentException("The session does not match the markdown key.", nameof(key));
-    MessageContentExtent extent;
-    using (await gate.AcquireAsync(cancellation))
-      extent = store.Content.CaptureSourceExtent(Id, key.Message, key.TextFacts);
-
-    MessageMarkdownSource source = MessageMarkdownSourceReader.Read(store.Content, extent, cancellation);
-
-    using (await gate.AcquireAsync(cancellation)) {
-      store.Content.ValidateSourceExtent(extent);
-      return source;
-    }
-  }
-
-  public async Task<TranscriptHistoryPage> ReadHistoryAsync(
-      TranscriptHistoryQuery query, CancellationToken cancellation = default) {
-    using var held = await gate.AcquireAsync(cancellation);
-    return store.History.Read(Id, query);
-  }
-
-  public async Task<TranscriptPositionState> ReadTranscriptPositionSummaryAsync(
-      long expectedHistoryRevision, CancellationToken cancellation = default) {
-    using var held = await gate.AcquireAsync(cancellation);
-    return store.Positions.Summary(Id, expectedHistoryRevision);
-  }
-
-  public async Task<TranscriptPositionWindow> LocateTranscriptPositionAsync(
-      long expectedHistoryRevision, double fraction, CancellationToken cancellation = default) {
-    using var held = await gate.AcquireAsync(cancellation);
-    return store.Positions.LocateFraction(Id, expectedHistoryRevision, fraction);
-  }
-
-  public async Task<TranscriptPromptPage> ReadTranscriptPromptPageAsync(
-      long expectedHistoryRevision, long? afterRank = null, int limit = 60,
-      CancellationToken cancellation = default) {
-    using var held = await gate.AcquireAsync(cancellation);
-    return store.Positions.Prompts(Id, expectedHistoryRevision, afterRank, limit);
-  }
-
-  public async Task<TranscriptPositionWindow> ActivateTranscriptPromptAsync(
-      long expectedHistoryRevision, TranscriptEntryRef prompt, CancellationToken cancellation = default) {
-    using var held = await gate.AcquireAsync(cancellation);
-    return store.Positions.ActivatePrompt(Id, expectedHistoryRevision, prompt);
-  }
-
-  public async Task<TranscriptPositionWindow> ReadTranscriptEntryPositionAsync(
-      long expectedHistoryRevision, TranscriptEntryRef entry, CancellationToken cancellation = default) {
-    using var held = await gate.AcquireAsync(cancellation);
-    return store.Positions.LocateEntry(Id, expectedHistoryRevision, entry);
+    status.Observe(stored, execution);
+    return notifications.Subscribe(observer, watched, status.ReadStored(stored, acceptingUserMessages, needsAttention, execution));
   }
 
   private protected async Task<UserMessageReceipt> AdmitUserMessageAsync(UserMessageSubmission submission) {
@@ -236,66 +177,9 @@ public abstract class SessionBase {
   internal LlmRequest? ClaimNextRequest(Guid executionId) => IsCurrentExecution(executionId) && !execution!.IsStopping
       ? store.Executions.ClaimNextRequest(Id, executionId, HistoryRevision) : null;
 
-  internal async Task<bool> StartRequestAsync(Guid executionId, Guid requestId) {
-    using var held = await gate.AcquireAsync();
-    if (!IsCurrentExecution(executionId) || execution!.IsStopping)
-      return false;
-
-    bool started = WriteToStore(() => store.Executions.StartRequest(Id, executionId, HistoryRevision, requestId));
-    if (started)
-      PublishChange();
-    return started;
-  }
-
-  internal async Task<bool> RecordOutputAsync(Guid executionId, LlmResponseChunk chunk) {
-    using var held = await gate.AcquireAsync();
-    if (!IsCurrentExecution(executionId) || execution!.IsStopping
-        || !store.LlmResponses.Append(Id, executionId, HistoryRevision, chunk))
-      return false;
-
-    PublishChange();
-    return true;
-  }
-
-  internal async Task<bool> ObserveToolAsync(Guid executionId, Guid requestId, string callId, string? name) {
-    using var held = await gate.AcquireAsync();
-    if (!IsCurrentExecution(executionId) || execution!.IsStopping
-        || !store.LlmResponses.ObserveTool(Id, executionId, HistoryRevision, requestId, callId, name))
-      return false;
-
-    PublishChange();
-    return true;
-  }
-
-  internal async Task<bool> CompleteRequestAsync(Guid executionId, LlmRequestResult outcome) {
-    using var held = await gate.AcquireAsync();
-    if (!IsCurrentExecution(executionId)
-        || (outcome.Outcome == ExecutionOutcome.Completed && execution!.IsStopping)
-        || !store.LlmResponses.CompleteRequest(Id, executionId, HistoryRevision, outcome))
-      return false;
-
-    PublishChange();
-    return true;
-  }
-
-  internal async Task<bool> TryStartToolAsync(Guid executionId, Guid requestId, string callId, bool background = false) {
-    using var held = await gate.AcquireAsync();
-    if (!IsCurrentExecution(executionId) || execution!.IsStopping
-        || !store.Tools.TryStart(Id, executionId, HistoryRevision, requestId, callId, background))
-      return false;
-
-    PublishChange();
-    return true;
-  }
-
-  internal async Task<bool> CompleteToolAsync(Guid executionId, Guid requestId, LlmToolResult result) {
-    using var held = await gate.AcquireAsync();
-    if (!IsCurrentExecution(executionId) || !store.Tools.Complete(Id, executionId, HistoryRevision, requestId, result))
-      return false;
-
-    PublishChange();
-    return true;
-  }
+  // Caller holds the session gate. Results may finish during Stop, but no new work may start.
+  internal bool CanRecordExecution(Guid executionId, bool allowStopping = false) =>
+      IsCurrentExecution(executionId) && (allowStopping || !execution!.IsStopping);
 
   // Completion and cancellation-failure notifications never start another driver or join themselves.
   internal async Task BackgroundToolCompletedAsync(Guid executionId, Exception? failure = null) {
@@ -319,45 +203,15 @@ public abstract class SessionBase {
 
     execution.Release();
     this.execution = null;
-    hasUnownedExecution = false;
-    lastSettlement = saved;
+    status.Settled(saved);
     PublishChange();
     return saved;
   }
 
   private bool IsCurrentExecution(Guid executionId) => execution?.ExecutionId == executionId;
 
-  private SessionSnapshot ApplyLiveState(SessionSnapshot stored) {
-    bool executionOwnedElsewhere = stored.UnsettledExecutionId is { } executionId && !IsCurrentExecution(executionId);
-    bool fenced = !acceptingUserMessages || stored.HistoryRevision != HistoryRevision || executionOwnedElsewhere;
-    bool stopping = stored.StopRequested
-        || (stored.UnsettledExecutionId is { } activeExecution && IsCurrentExecution(activeExecution) && execution!.IsStopping);
-    return stored with { AdmissionFenced = fenced, StopRequested = stopping };
-  }
-
-  private string GetStatus(SessionSnapshot snapshot) {
-    bool admissionFenced = snapshot.AdmissionFenced || (snapshot.UnsettledExecutionId is { } executionId
-        && !IsCurrentExecution(executionId));
-    return GetStatus(needsAttention, admissionFenced, isRunning: execution is not null,
-        waiting: execution?.IsWaiting == true, lastOutcome: snapshot.LastSettlement?.Outcome);
-  }
-
   // Caller holds the session gate.
-  internal void PublishChange() => notifications.Publish(GetCurrentStatus());
-
-  private string GetCurrentStatus() => GetStatus(needsAttention,
-      admissionFenced: !acceptingUserMessages || hasUnownedExecution || historyRevisionChanged,
-      isRunning: execution is not null, waiting: execution?.IsWaiting == true, lastOutcome: lastSettlement?.Outcome);
-
-  private static string GetStatus(bool needsAttention, bool admissionFenced, bool isRunning, bool waiting, ExecutionOutcome? lastOutcome) {
-    if (needsAttention)
-      return "needs-attention";
-    if (admissionFenced)
-      return "fenced";
-    if (isRunning)
-      return waiting ? "waiting" : "running";
-    return lastOutcome == ExecutionOutcome.Failed ? "failed" : "idle";
-  }
+  internal void PublishChange() => notifications.Publish(status.ReadCurrent(acceptingUserMessages, needsAttention, execution));
 
   // Caller holds the session gate.
   internal void MarkNeedsAttention() {
@@ -370,7 +224,7 @@ public abstract class SessionBase {
   }
 
   // A failed write may still have been committed, so refuse new user messages rather than guess.
-  private T WriteToStore<T>(Func<T> write) {
+  internal T WriteToStore<T>(Func<T> write) {
     try {
       return write();
     } catch (SqliteException) {

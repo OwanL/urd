@@ -128,14 +128,14 @@ public sealed class MessageMarkdownSourceTests {
     Append(store, execution, 1, "later", final: true);
     using var client = new ScriptedChatClient(_ => throw new InvalidOperationException("Markdown reads must not start execution."));
     var session = await new SessionManager(store, _ => client).GetPrimaryAsync(execution.Session);
-    MessageMarkdownSource source = await session.ReadMessageMarkdownSourceAsync(key);
+    MessageMarkdownSource source = await session.Transcript.ReadMarkdownSourceAsync(key);
 
     Assert.Equal("read🙂", source.Source);
     Assert.True(key.Matches(source));
     Assert.False(source.IsClosed);
     Assert.False(source.FinalOutputCommitted);
     Assert.Equal(0, client.Calls);
-    await Assert.ThrowsAsync<ArgumentException>(() => session.ReadMessageMarkdownSourceAsync(key with { SessionId = Guid.NewGuid() }));
+    await Assert.ThrowsAsync<ArgumentException>(() => session.Transcript.ReadMarkdownSourceAsync(key with { SessionId = Guid.NewGuid() }));
   }
 
   [Fact]

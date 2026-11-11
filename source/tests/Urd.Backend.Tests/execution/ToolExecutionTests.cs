@@ -280,8 +280,8 @@ public sealed class ToolExecutionTests {
 
     MessageRef before = new(executionId, entries[1].MessageId, MessageRole.Assistant, 0);
     MessageRef after = new(executionId, entries[3].MessageId, MessageRole.Assistant, 0);
-    MessageContentPage first = await fixture.Session.ReadMessageContentAsync(new(before, 0, 0));
-    MessageContentPage second = await fixture.Session.ReadMessageContentAsync(new(after, 0, 0));
+    MessageContentPage first = await fixture.Session.Transcript.ReadContentAsync(new(before, 0, 0));
+    MessageContentPage second = await fixture.Session.Transcript.ReadContentAsync(new(after, 0, 0));
     Assert.Equal("before", first.Text);
     Assert.Equal(new(before, 1, 0), first.AvailableThrough);
     Assert.True(first.IsClosed);
@@ -401,21 +401,21 @@ public sealed class ToolExecutionTests {
 
     Guid submissionId = Assert.Single(StoredExecutions.Read(fixture.Database)).SubmissionId;
     var userRef = new MessageRef(executionId, submissionId, MessageRole.User, 0);
-    MessageContentPage userPage = await fixture.Session.ReadMessageContentAsync(new(userRef, 0, 0));
+    MessageContentPage userPage = await fixture.Session.Transcript.ReadContentAsync(new(userRef, 0, 0));
     Assert.Equal(16 * 1024, Encoding.UTF8.GetByteCount(userPage.Text));
     Assert.True(userPage.HasMore);
-    MessageContentPage userRemainder = await fixture.Session.ReadMessageContentAsync(userPage.Next);
+    MessageContentPage userRemainder = await fixture.Session.Transcript.ReadContentAsync(userPage.Next);
     Assert.Equal(userText, userPage.Text + userRemainder.Text);
 
     StoredEntry assistant = ReadEntries(fixture.Database).First(entry => entry.Role == 1);
     var assistantRef = new MessageRef(executionId, assistant.MessageId, MessageRole.Assistant, 0);
-    MessageContentPage page = await fixture.Session.ReadMessageContentAsync(new(assistantRef, 0, 0));
+    MessageContentPage page = await fixture.Session.Transcript.ReadContentAsync(new(assistantRef, 0, 0));
     Assert.True(page.HasMore);
     Assert.InRange(Encoding.UTF8.GetByteCount(page.Text), 1, 16 * 1024);
     var savedAssistant = new StringBuilder(page.Text);
     MessageContentPage tail = page;
     while (tail.HasMore) {
-      tail = await fixture.Session.ReadMessageContentAsync(tail.Next);
+      tail = await fixture.Session.Transcript.ReadContentAsync(tail.Next);
       savedAssistant.Append(tail.Text);
     }
     Assert.Equal(assistantText, savedAssistant.ToString());

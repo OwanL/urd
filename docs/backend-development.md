@@ -42,9 +42,9 @@ Historical verification included raw HTTP assertions for the renamed JSON member
 rejection of legacy routes/required field names, alongside retry, reopen, migration, Stop
 and bounded-read checks.
 `SessionSnapshot` is now the single snapshot shape. `SnapshotReader.ReadStored` supplies
-stored facts with a conservative admission fence; `SessionBase.ReadSnapshotAsync` applies
-the same live admission/Stop rules under its existing lock before returning an immutable
-view. The separate stored snapshot and duplicate field mapping are removed. The private
+stored facts with a conservative admission fence; `SessionBase.ReadSnapshotAsync` uses
+`SessionStatus` to apply live admission/Stop rules under the shared session lock before
+returning an immutable view. The separate stored snapshot and duplicate field mapping are removed. The private
 settlement bookkeeping pair is a named tuple, and shared tool JSON validation lives in
 `StorageText`, rather than making LLM response storage depend on tool storage. Other storage
 classes remain separate by responsibility; no lifecycle or schema redesign accompanies this cleanup.
@@ -76,11 +76,14 @@ drains the service and HTTP requests before disposing their shared storage.
   the original decision; neither lookup nor retained acceptance starts work. Refusal fences delayed originals.
   Changed-submission reuse throws `UserMessageConflictException` with its `SubmissionId`, so HTTP can distinguish
   conflicts from shutdown or uncertain failure without parsing exception messages.
-- `SessionBase` owns admission and database writes under its existing guard. Each execution has
-  one `SessionExecutionDriver`, which uses that same guard for continuation, background waiting
-  and settlement coordination. The session retains the driver task for shutdown to join, even
-  after saved settlement clears the active execution. `SessionNotifications` owns observer delivery
-  and change versions; the session still decides when to publish and derives live status.
+- `SessionBase` owns identity, admission and execution lifetime under its guard. `SessionTranscript`,
+  exposed as `session.Transcript`, owns history/content, positioning and Markdown source reads.
+  `SessionExecutionRecorder` owns guarded request/tool progress writes; admission and execution
+  ownership still decide whether writes are allowed. Each execution has one `SessionExecutionDriver`,
+  which uses the same guard for continuation, background waiting and settlement coordination.
+  The session retains the driver task for shutdown to join, even after saved settlement clears
+  the active execution. `SessionStatus` projects live state and caches observed stored status facts;
+  `SessionNotifications` owns observer delivery and change versions. The session decides when to publish.
   `SessionExecution` owns LLM streams, tool invocation and the execution's Stop source, with
   sequential request phases outside the guard; a request-local
   `LlmResponseWriter` owns bounded UTF-8 batches and their flush deadline.
@@ -202,9 +205,11 @@ discovery, not activity tracking or a complete summary API.
    `SessionExecutionResult`/`ExecutionOutcome` in [SessionExecutionResult.cs](../source/backend/core/execution/SessionExecutionResult.cs)
    are public, not duplicated. `ExecutionOutcome` describes an LLM request attempt, a tool invocation
    or a whole session execution; a successful request/tool does not imply settled execution.
-2. [SessionBase.cs](../source/backend/core/sessions/SessionBase.cs) — public snapshot, history,
-   not-sent and content reads take the existing guard; snapshots merge live admission fencing/local
-   Stop intent with one committed view.
+2. [SessionBase.cs](../source/backend/core/sessions/SessionBase.cs) — receipt/not-sent reads and live
+   snapshots; [SessionStatus.cs](../source/backend/core/sessions/SessionStatus.cs) projects snapshot/status
+   facts. [SessionTranscript.cs](../source/backend/core/sessions/SessionTranscript.cs) owns history,
+   content, transcript positioning and Markdown source reads. All share the existing session guard;
+   Markdown source assembly runs outside it between guarded extent capture and validation.
 3. [SnapshotReader.cs](../source/backend/core/storage/SnapshotReader.cs),
    [TranscriptHistoryReader.cs](../source/backend/core/storage/TranscriptHistoryReader.cs) and
    [MessageContentReader.cs](../source/backend/core/storage/MessageContentReader.cs) — separate
@@ -222,7 +227,9 @@ with text cursors or tool status; `/content` fetches message bytes separately. T
 the latest history page and loads visible text on demand; older-page navigation is not exposed
 in the UI yet.
 
-Call `ReadMessageContentAsync` with `new MessageContentCursor(messageRef, 0, 0)`.
+Call `session.Transcript.ReadContentAsync` with `new MessageContentCursor(messageRef, 0, 0)`.
+History and navigation likewise use `session.Transcript`; the former direct session read methods
+are removed, with no compatibility aliases. HTTP routes and response shapes are unchanged.
 Each page returns at most 16 KiB of original UTF-8 and examines at most 16 immutable segments.
 Follow `Next` while `HasMore`; a false value means the current committed tail, not necessarily
 final output. Segment-local byte offsets preserve Unicode and embedded NUL; stale revisions
@@ -249,6 +256,8 @@ share a file per concept. Read them alongside their owners.
    continuation, background waits, cleanup joins and settlement coordination using the session guard;
    [SessionExecution.cs](../source/backend/core/execution/SessionExecution.cs) — sequential request/tool
    phases, response streaming, cancellation and cleanup;
+   [SessionExecutionRecorder.cs](../source/backend/core/execution/SessionExecutionRecorder.cs) — guarded
+   request/tool progress writes and stale/stopped-execution rejection;
    [LlmResponseAccumulator.cs](../source/backend/core/execution/LlmResponseAccumulator.cs) — complete
    fake-tool batch validation and bounded JSON freezing;
    [LlmTools.cs](../source/backend/core/execution/LlmTools.cs) — call/result records; then
@@ -312,7 +321,9 @@ Test also builds Core, Server and tests with nullable checking and the code-qual
 The command avoids persistent build/compiler servers and limits build parallelism.
 If a running development server owns the normal Release files, preserve it and add
 `-p:BaseOutputPath=bin/Verification/` to build/test commands. This stages isolated per-project
-outputs without changing restore paths. Browser integration can target that server assembly
+outputs without changing restore paths. Also add `-p:DefaultItemExcludesInProjectFolder=bin/**`
+to exclude every sibling output directory from SDK content globs; otherwise isolated Web SDK
+builds can recursively copy previous `bin/` outputs. Browser integration can target that server assembly
 with `URD_TEST_SERVER_ASSEMBLY`; never point its temporary test data at a personal profile.
 
 `Microsoft.Data.Sqlite` **10.0.14** follows the stable .NET 10 provider line and

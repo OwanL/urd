@@ -38,7 +38,7 @@ internal sealed class MessageMarkdownScheduler : IAsyncDisposable {
   internal Task<MessageMarkdownLease> RequestAsync(MessageMarkdownKey key, SessionBase session,
       CancellationToken cancellation = default) {
     if (session.Id != key.SessionId) throw new ArgumentException("The session does not match the markdown key.", nameof(session));
-    return RequestAsync(key, token => session.ReadMessageMarkdownSourceAsync(key, token), cancellation);
+    return RequestAsync(key, token => session.Transcript.ReadMarkdownSourceAsync(key, token), cancellation);
   }
 
   internal Task<MessageMarkdownLease> RequestAsync(MessageMarkdownKey key,

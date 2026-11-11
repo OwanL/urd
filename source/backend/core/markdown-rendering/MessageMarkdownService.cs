@@ -12,7 +12,7 @@ public sealed class MessageMarkdownService : IAsyncDisposable {
     ArgumentNullException.ThrowIfNull(session);
     ArgumentNullException.ThrowIfNull(entry);
 
-    TranscriptPositionWindow window = await session.ReadTranscriptEntryPositionAsync(
+    TranscriptPositionWindow window = await session.Transcript.ReadEntryPositionAsync(
         entry.HistoryRevision, entry, cancellation);
     TranscriptPositionedEntry positioned = window.Entries.SingleOrDefault(candidate =>
         candidate.Descriptor.Entry == entry && candidate.Position.Entry == entry)
@@ -21,7 +21,7 @@ public sealed class MessageMarkdownService : IAsyncDisposable {
     MessageMarkdownLease lease = await scheduler.RequestAsync(key, session, cancellation);
 
     try {
-      await session.ReadTranscriptPositionSummaryAsync(entry.HistoryRevision, cancellation);
+      await session.Transcript.ReadPositionSummaryAsync(entry.HistoryRevision, cancellation);
     } catch (Exception failure) {
       lease.Dispose();
       if (failure is HistoryRevisionConflictException or KeyNotFoundException) {

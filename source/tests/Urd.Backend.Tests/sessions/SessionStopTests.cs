@@ -118,7 +118,7 @@ public sealed class SessionStopTests {
       Assert.False(settlement.IsCompleted);
       Assert.Empty(snapshot.PendingInputs); // Stop retires accepted inputs that never reached a send.
       Assert.Null(Assert.Single(StoredExecutions.Read(fixture.Database)).Outcome);
-      TranscriptHistoryPage history = await fixture.Session.ReadHistoryAsync(
+      TranscriptHistoryPage history = await fixture.Session.Transcript.ReadHistoryAsync(
           new(TranscriptHistoryMode.Latest, snapshot.HistoryRevision));
       Assert.DoesNotContain(history.Entries, entry => entry.Entry.EntryId == submission.SubmissionId);
       Assert.Empty(history.Settlements); // The run is not settled yet.
@@ -216,10 +216,10 @@ public sealed class SessionStopTests {
 
       // Each probe is otherwise valid in storage, so rejection exercises the local Stop guard.
       if (finalOutput) {
-        Assert.False(await fixture.Session.CompleteRequestAsync(executionId,
+        Assert.False(await fixture.Session.Recorder.CompleteRequestAsync(executionId,
             new(request.RequestId, ExecutionOutcome.Completed)));
       } else {
-        Assert.False(await fixture.Session.RecordOutputAsync(executionId,
+        Assert.False(await fixture.Session.Recorder.RecordOutputAsync(executionId,
             new(request.RequestId, lastChunk.ResponseId, lastChunk.ChunkIndex + 1, "late output", true)));
       }
       Assert.Equal(outputBeforeStop, StoredLlmResponses.ReadText(fixture.Database));
@@ -242,7 +242,7 @@ public sealed class SessionStopTests {
     SessionSnapshot settled = await fixture.Session.ReadSnapshotAsync();
     Assert.Equal(ExecutionOutcome.Cancelled, settled.LastSettlement!.Outcome);
     Assert.Empty(settled.PendingInputs);
-    TranscriptHistoryPage history = await fixture.Session.ReadHistoryAsync(
+    TranscriptHistoryPage history = await fixture.Session.Transcript.ReadHistoryAsync(
         new(TranscriptHistoryMode.Latest, settled.HistoryRevision));
     Assert.DoesNotContain(history.Entries, entry => entry.Entry.EntryId == submission.SubmissionId);
   }

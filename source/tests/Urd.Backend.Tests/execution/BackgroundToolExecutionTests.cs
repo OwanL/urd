@@ -58,7 +58,7 @@ public sealed class BackgroundToolExecutionTests {
       await saved.Task.WaitAsync(TestTimeout);
       Assert.Equal(3, client.Calls);
       Assert.Equal(frozen, inFlight.Select(message => message.Text));
-      Assert.DoesNotContain((await fixture.Session.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, 0))).Entries,
+      Assert.DoesNotContain((await fixture.Session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, 0))).Entries,
           entry => entry.Entry.Kind == TranscriptEntryKind.ToolCompletion);
       releaseProvider.TrySetResult();
       Assert.Equal(ExecutionOutcome.Completed,
@@ -74,7 +74,7 @@ public sealed class BackgroundToolExecutionTests {
           message => message.Text.Contains("[TOOL-ORIGIN: background tool completion", StringComparison.Ordinal));
       Assert.Equal(ChatRole.User, completion.Role);
       Assert.Contains("background result", completion.Text, StringComparison.Ordinal);
-      Assert.Single((await fixture.Session.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, 0))).Entries,
+      Assert.Single((await fixture.Session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, 0))).Entries,
           entry => entry.Entry.Kind == TranscriptEntryKind.ToolCompletion);
       Assert.All(client.Options, options => {
         var declaration = Assert.IsAssignableFrom<AIFunctionDeclaration>(Assert.Single(options!.Tools!));

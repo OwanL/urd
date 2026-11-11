@@ -172,7 +172,7 @@ internal static class SessionRoutes {
         ? new(query.ExecutionId!.Value, query.EntryId!.Value, kind!.Value, query.ExpectedHistoryRevision) : null;
     var history = new TranscriptHistoryQuery(mode.Value, query.ExpectedHistoryRevision, anchor);
     return WithSessionAsync(http, sessions, sessionId, async session =>
-        Results.Ok(await session.ReadHistoryAsync(history, http.RequestAborted)));
+        Results.Ok(await session.Transcript.ReadHistoryAsync(history, http.RequestAborted)));
   }
 
   private static Task<IResult> ReadPositionSummaryAsync(
@@ -181,7 +181,7 @@ internal static class SessionRoutes {
       return Task.FromResult<IResult>(Results.BadRequest());
 
     return WithSessionAsync(http, sessions, sessionId, async session => {
-      TranscriptPositionState state = await session.ReadTranscriptPositionSummaryAsync(
+      TranscriptPositionState state = await session.Transcript.ReadPositionSummaryAsync(
           query.ExpectedHistoryRevision, http.RequestAborted);
       return Results.Ok(ToPositionSummary(state));
     });
@@ -194,7 +194,7 @@ internal static class SessionRoutes {
       return Task.FromResult<IResult>(Results.BadRequest());
 
     return WithSessionAsync(http, sessions, sessionId, async session => {
-      TranscriptPositionWindow window = await session.LocateTranscriptPositionAsync(
+      TranscriptPositionWindow window = await session.Transcript.LocatePositionAsync(
           query.ExpectedHistoryRevision, fraction, http.RequestAborted);
       return Results.Ok(ToPositionWindow(window));
     });
@@ -207,7 +207,7 @@ internal static class SessionRoutes {
       return Task.FromResult<IResult>(Results.BadRequest());
     var entry = new TranscriptEntryRef(executionId, entryId, kind, query.ExpectedHistoryRevision);
     return WithSessionAsync(http, sessions, sessionId, async session => {
-      TranscriptPositionWindow window = await session.ReadTranscriptEntryPositionAsync(
+      TranscriptPositionWindow window = await session.Transcript.ReadEntryPositionAsync(
           query.ExpectedHistoryRevision, entry, http.RequestAborted);
       return Results.Ok(ToPositionWindow(window));
     });
@@ -223,7 +223,7 @@ internal static class SessionRoutes {
       return Task.FromResult<IResult>(Results.BadRequest());
 
     return WithSessionAsync(http, sessions, sessionId, async session => {
-      TranscriptPromptPage page = await session.ReadTranscriptPromptPageAsync(
+      TranscriptPromptPage page = await session.Transcript.ReadPromptPageAsync(
           query.ExpectedHistoryRevision, query.AfterRank, limit, http.RequestAborted);
       return Results.Ok(new PromptPageDto(ToPositionSummary(page.State),
           page.Prompts.Select(ToPosition).ToArray(), page.NextAfterRank));
@@ -237,7 +237,7 @@ internal static class SessionRoutes {
     var prompt = new TranscriptEntryRef(executionId, entryId, TranscriptEntryKind.User, query.ExpectedHistoryRevision);
 
     return WithSessionAsync(http, sessions, sessionId, async session => {
-      TranscriptPositionWindow window = await session.ActivateTranscriptPromptAsync(
+      TranscriptPositionWindow window = await session.Transcript.ActivatePromptAsync(
           query.ExpectedHistoryRevision, prompt, http.RequestAborted);
       return Results.Ok(ToPositionWindow(window));
     });
@@ -269,7 +269,7 @@ internal static class SessionRoutes {
     var message = new MessageRef(query.ExecutionId, query.MessageId, role.Value, query.HistoryRevision);
     var cursor = new MessageContentCursor(message, query.SegmentIndex, query.Utf8Offset);
     return WithSessionAsync(http, sessions, sessionId, async session =>
-        Results.Ok(await session.ReadMessageContentAsync(cursor, http.RequestAborted)));
+        Results.Ok(await session.Transcript.ReadContentAsync(cursor, http.RequestAborted)));
   }
 
   private static async Task<IResult> WithSessionAsync(HttpContext http, SessionManager sessions,

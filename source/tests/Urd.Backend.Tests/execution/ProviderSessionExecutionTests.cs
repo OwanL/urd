@@ -352,14 +352,14 @@ public sealed class ProviderSessionExecutionTests {
     SessionSnapshot snapshot = await session.ReadSnapshotAsync();
     Assert.False(snapshot.AdmissionFenced);
     Assert.Null(snapshot.UnsettledExecutionId);
-    TranscriptHistoryPage history = await session.ReadHistoryAsync(
+    TranscriptHistoryPage history = await session.Transcript.ReadHistoryAsync(
         new(TranscriptHistoryMode.Latest, snapshot.HistoryRevision));
     List<string> textRuns = [];
     foreach (TranscriptEntryDescriptor entry in history.Entries.Where(entry => entry.Entry.Kind == TranscriptEntryKind.Text)) {
-      MessageContentPage page = await session.ReadMessageContentAsync(entry.Text!.From);
+      MessageContentPage page = await session.Transcript.ReadContentAsync(entry.Text!.From);
       var text = new System.Text.StringBuilder(page.Text);
       while (page.HasMore) {
-        page = await session.ReadMessageContentAsync(page.Next);
+        page = await session.Transcript.ReadContentAsync(page.Next);
         text.Append(page.Text);
       }
       textRuns.Add(text.ToString());

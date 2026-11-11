@@ -62,7 +62,7 @@ internal sealed class SessionExecution : IDisposable {
     // Tools use the execution token, never this already-cleaned-up provider-request source.
     using (var requestStop = CancellationTokenSource.CreateLinkedTokenSource(stop.Token)) {
       outcome = await SendRequestAsync(request, requestStop);
-      saved = await session.CompleteRequestAsync(ExecutionId, outcome);
+      saved = await session.Recorder.CompleteRequestAsync(ExecutionId, outcome);
     }
 
     if (!saved)
@@ -82,7 +82,7 @@ internal sealed class SessionExecution : IDisposable {
           break;
         bool background = call.Arguments.TryGetProperty("background", out JsonElement option)
             && option.ValueKind == JsonValueKind.True;
-        if (!await session.TryStartToolAsync(ExecutionId, requestId, call.CallId, background)) {
+        if (!await session.Recorder.TryStartToolAsync(ExecutionId, requestId, call.CallId, background)) {
           if (IsStopping)
             break;
           throw new InvalidOperationException("The tool call could not be started.");
@@ -160,7 +160,7 @@ internal sealed class SessionExecution : IDisposable {
     try {
       LlmToolResult result = await InvokeToolAsync(requestId, call, cancellation);
       // A rejected or failed save leaves effects uncertain, never an ordinary tool error.
-      if (!await session.CompleteToolAsync(ExecutionId, requestId, result))
+      if (!await session.Recorder.CompleteToolAsync(ExecutionId, requestId, result))
         throw new InvalidOperationException("The tool result could not be saved.");
     } catch (Exception failure) {
       await session.BackgroundToolCompletedAsync(ExecutionId, failure);
@@ -287,7 +287,7 @@ internal sealed class SessionExecution : IDisposable {
   private async Task StartRequestAsync(Guid requestId) {
     bool started;
     try {
-      started = await session.StartRequestAsync(ExecutionId, requestId);
+      started = await session.Recorder.StartRequestAsync(ExecutionId, requestId);
     } catch (Exception exception) {
       throw new RequestStartSaveException(exception);
     }
@@ -299,7 +299,7 @@ internal sealed class SessionExecution : IDisposable {
   private async Task SaveChunkAsync(LlmResponseChunk chunk) {
     bool saved;
     try {
-      saved = await session.RecordOutputAsync(ExecutionId, chunk);
+      saved = await session.Recorder.RecordOutputAsync(ExecutionId, chunk);
     } catch (Exception exception) {
       throw new OutputSaveException(exception);
     }
@@ -311,7 +311,7 @@ internal sealed class SessionExecution : IDisposable {
   private async Task ObserveToolAsync(Guid requestId, string callId, string? name) {
     bool saved;
     try {
-      saved = await session.ObserveToolAsync(ExecutionId, requestId, callId, name);
+      saved = await session.Recorder.ObserveToolAsync(ExecutionId, requestId, callId, name);
     } catch (Exception exception) {
       throw new OutputSaveException(exception);
     }

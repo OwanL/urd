@@ -96,7 +96,7 @@ public sealed class SessionExecutionTests {
       Assert.Equal(acceptedExecution, snapshot.UnsettledExecutionId);
       Assert.Null(snapshot.LastSettlement);
       Assert.Equal("go", snapshot.FirstUserPreview);
-      TranscriptHistoryPage history = await session.ReadHistoryAsync(
+      TranscriptHistoryPage history = await session.Transcript.ReadHistoryAsync(
           new(TranscriptHistoryMode.Latest, snapshot.HistoryRevision));
       Assert.Single(history.Entries, entry => entry.Entry.Kind == TranscriptEntryKind.User);
       Assert.Null(Assert.Single(StoredExecutions.Read(database)).Outcome);

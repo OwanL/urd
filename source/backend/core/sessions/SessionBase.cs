@@ -23,12 +23,9 @@ public abstract class SessionBase {
   private bool hasUnownedExecution;
   private bool historyRevisionChanged;
   private SessionExecutionResult? lastSettlement;
-  private SessionExecution? execution;
-  private TaskCompletionSource<SessionExecutionResult>? settlement;
+  private SessionExecutionDriver? execution;
+  // Retain the driver's task after settlement clears the active execution, so shutdown joins its tail.
   private Task? executionTask;
-  private TaskCompletionSource? executionWake;
-  private Exception? executionFailure;
-  private bool waiting;
 
   private protected SessionBase(SessionRecord record, UrdStore store, Func<ProviderConnection, IChatClient> createChatClient,
       ToolCatalog? tools = null, ChatProcesses? processes = null, PendingToolCalls? pending = null) {
@@ -151,7 +148,7 @@ public abstract class SessionBase {
           lockReleased = new(TaskCreationOptions.RunContinuationsAsynchronously);
           StartExecution(receipt.ExecutionId!.Value, receipt.Submission.LlmSelection!, lockReleased.Task);
         }
-        WakeExecution();
+        execution!.Wake();
         PublishChange();
       }
     }
@@ -177,7 +174,7 @@ public abstract class SessionBase {
     Exception? stopFailure = null;
     using (await gate.AcquireAsync()) {
       pendingExecution = executionTask ?? Task.CompletedTask;
-      pendingSettlement = settlement?.Task ?? Task.CompletedTask;
+      pendingSettlement = execution?.Settlement ?? Task.CompletedTask;
       if (execution is not null) {
         try {
           StopReceipt stop = WriteToStore(
@@ -189,7 +186,6 @@ public abstract class SessionBase {
         }
 
         stopCallbacks = execution.StopAsync();
-        WakeExecution();
       }
     }
 
@@ -210,10 +206,8 @@ public abstract class SessionBase {
     bool ownsExecution = IsCurrentExecution(executionId);
     // Signal even if the Stop write fails. The driver owns joining the retained
     // callback task before settlement; this acknowledgement never means cleanup finished.
-    if (ownsExecution) {
+    if (ownsExecution)
       _ = execution!.StopAsync();
-      WakeExecution();
-    }
 
     StopReceipt receipt = WriteToStore(() => store.Executions.RequestStop(Id, executionId, ownsExecution));
     if (receipt.Status == StopStatus.Requested)
@@ -231,23 +225,16 @@ public abstract class SessionBase {
       }
 
       pendingExecution = executionTask!;
-      pendingSettlement = settlement!.Task;
+      pendingSettlement = execution!.Settlement;
     }
 
     await pendingExecution.WaitAsync(cancellation);
     return await pendingSettlement.WaitAsync(cancellation);
   }
 
-  internal async Task<LlmRequest?> ClaimNextRequestAsync(Guid executionId) {
-    using var held = await gate.AcquireAsync();
-    if (!IsCurrentExecution(executionId) || execution!.IsStopping)
-      return null;
-
-    LlmRequest? request = store.Executions.ClaimNextRequest(Id, executionId, HistoryRevision);
-    if (request is not null)
-      PublishChange();
-    return request;
-  }
+  // Caller holds the session gate; the driver publishes after updating its waiting state.
+  internal LlmRequest? ClaimNextRequest(Guid executionId) => IsCurrentExecution(executionId) && !execution!.IsStopping
+      ? store.Executions.ClaimNextRequest(Id, executionId, HistoryRevision) : null;
 
   internal async Task<bool> StartRequestAsync(Guid executionId, Guid requestId) {
     using var held = await gate.AcquireAsync();
@@ -313,149 +300,29 @@ public abstract class SessionBase {
   // Completion and cancellation-failure notifications never start another driver or join themselves.
   internal async Task BackgroundToolCompletedAsync(Guid executionId, Exception? failure = null) {
     using var held = await gate.AcquireAsync();
-    if (!IsCurrentExecution(executionId))
-      return;
-    if (failure is not null) {
-      executionFailure ??= failure;
-      MarkNeedsAttention();
-      _ = execution!.StopAsync();
-    }
-    WakeExecution();
+    if (IsCurrentExecution(executionId))
+      execution!.BackgroundToolCompleted(failure);
   }
 
-  // Caller holds the lock.
-  private void WakeExecution() {
-    executionWake?.TrySetResult();
-    executionWake = null;
-  }
-
-  // Caller holds the lock.
+  // Caller holds the lock. The driver starts only after admission releases it.
   private void StartExecution(Guid executionId, LlmSelection selection, Task lockReleased) {
-    var newExecution = new SessionExecution(executionId, this, createChatClient, selection, tools.For(selection.Family), pending);
-    executionFailure = null;
-    waiting = false;
-    var newSettlement = new TaskCompletionSource<SessionExecutionResult>(TaskCreationOptions.RunContinuationsAsynchronously);
-    execution = newExecution;
-    settlement = newSettlement;
-    executionTask = RunExecutionAsync(newExecution, newSettlement, lockReleased);
+    var work = new SessionExecution(executionId, this, createChatClient, selection, tools.For(selection.Family), pending);
+    execution = new SessionExecutionDriver(this, gate, work);
+    executionTask = execution.RunAsync(lockReleased);
   }
 
-  private async Task RunExecutionAsync(SessionExecution execution,
-      TaskCompletionSource<SessionExecutionResult> settlement, Task lockReleased) {
-    try {
-      await lockReleased;
-      LlmRequest? request = await ClaimNextRequestAsync(execution.ExecutionId);
-      if (request is null) {
-        if (!execution.IsStopping)
-          throw new InvalidOperationException("The execution has no initial request and was not stopped.");
-
-        await AdvanceExecutionAsync(execution, settlement, ExecutionOutcome.Cancelled);
-        return;
-      }
-
-      while (request is not null) {
-        ExecutionOutcome outcome = await execution.RunRequestAsync(request);
-        request = await AdvanceExecutionAsync(execution, settlement, outcome);
-      }
-    } catch (Exception failure) {
-      // A save/cleanup fault fences immediately, but still owns every task and callback.
-      Task stopCallbacks;
-      using (await gate.AcquireAsync()) {
-        MarkNeedsAttention();
-        stopCallbacks = execution.StopAsync();
-        WakeExecution();
-      }
-      Task drained = Task.WhenAll(stopCallbacks, execution.JoinPendingToolsAsync());
-      try {
-        await drained;
-      } catch (Exception cleanupFailure) {
-        failure = new AggregateException(failure, drained.Exception ?? cleanupFailure);
-      }
-      using var held = await gate.AcquireAsync();
-      settlement.TrySetException(failure);
-      _ = settlement.Task.Exception; // Observed even if nobody is waiting yet.
-    }
-  }
-
-  private async Task<LlmRequest?> AdvanceExecutionAsync(SessionExecution execution,
-      TaskCompletionSource<SessionExecutionResult> settlement, ExecutionOutcome outcome) {
-    while (true) {
-      Task? wake = null;
-      Task stopCallbacks;
-      using (await gate.AcquireAsync()) {
-        ThrowIfExecutionFailed();
-        if (outcome == ExecutionOutcome.Completed && !execution.IsStopping) {
-          LlmRequest? next = ClaimContinuation(execution);
-          if (next is not null)
-            return next;
-          if (execution.HasPendingTools) {
-            // Install the wait under the same gate as all input/completion/Stop signals.
-            executionWake ??= new(TaskCreationOptions.RunContinuationsAsynchronously);
-            wake = executionWake.Task;
-            if (!waiting) {
-              waiting = true;
-              PublishChange();
-            }
-          }
-        }
-        stopCallbacks = outcome != ExecutionOutcome.Completed || execution.IsStopping
-            ? execution.StopAsync() : execution.StopCallbacks;
-      }
-      if (wake is not null) {
-        await wake;
-        continue; // Notifications are hints; always recheck durable request readiness.
-      }
-
-      // Terminal provider failure and Stop cancel first. Even successful completion joins
-      // remaining callback/notification ownership before the final guarded decision.
-      await Task.WhenAll(stopCallbacks, execution.JoinPendingToolsAsync());
-      using (await gate.AcquireAsync()) {
-        ThrowIfExecutionFailed();
-        if (!execution.StopCallbacks.IsCompletedSuccessfully)
-          continue; // A late Stop must join its newly installed callback task too.
-        if (outcome == ExecutionOutcome.Completed && !execution.IsStopping) {
-          LlmRequest? next = ClaimContinuation(execution);
-          if (next is not null)
-            return next;
-        }
-        Settle(execution, settlement, outcome == ExecutionOutcome.Completed && execution.IsStopping
-            ? ExecutionOutcome.Cancelled : outcome);
-        return null;
-      }
-    }
-  }
-
-  // Caller holds the gate. Admission cannot slip between recheck and settlement.
-  private LlmRequest? ClaimContinuation(SessionExecution execution) {
-    LlmRequest? next = store.Executions.ClaimNextRequest(Id, execution.ExecutionId, HistoryRevision);
-    if (next is not null) {
-      waiting = false;
-      PublishChange();
-    }
-    return next;
-  }
-
-  private void ThrowIfExecutionFailed() {
-    if (executionFailure is not null)
-      throw new AggregateException("Tool cleanup or result recording failed.", executionFailure);
-  }
-
-  // Caller holds the lock. Saves the result before releasing resources and
-  // publishing it, so waiters only ever see a saved settlement.
-  private void Settle(SessionExecution execution,
-      TaskCompletionSource<SessionExecutionResult> settlement, ExecutionOutcome outcome) {
+  // Caller holds the session gate. Save before releasing resources and publishing;
+  // only then may the driver complete its settlement task.
+  internal SessionExecutionResult SettleExecution(SessionExecutionDriver execution, ExecutionOutcome outcome) {
     SessionExecutionResult saved = store.Executions.TrySettle(Id, execution.ExecutionId, outcome)
         ?? throw new InvalidOperationException("The current execution could not be settled.");
 
-    execution.Dispose();
+    execution.Release();
     this.execution = null;
-    this.settlement = null;
-    waiting = false;
-    WakeExecution();
     hasUnownedExecution = false;
     lastSettlement = saved;
     PublishChange();
-    settlement.TrySetResult(saved);
+    return saved;
   }
 
   private bool IsCurrentExecution(Guid executionId) => execution?.ExecutionId == executionId;
@@ -472,15 +339,15 @@ public abstract class SessionBase {
     bool admissionFenced = snapshot.AdmissionFenced || (snapshot.UnsettledExecutionId is { } executionId
         && !IsCurrentExecution(executionId));
     return GetStatus(needsAttention, admissionFenced, isRunning: execution is not null,
-        waiting, lastOutcome: snapshot.LastSettlement?.Outcome);
+        waiting: execution?.IsWaiting == true, lastOutcome: snapshot.LastSettlement?.Outcome);
   }
 
   // Caller holds the session gate.
-  private void PublishChange() => notifications.Publish(GetCurrentStatus());
+  internal void PublishChange() => notifications.Publish(GetCurrentStatus());
 
   private string GetCurrentStatus() => GetStatus(needsAttention,
       admissionFenced: !acceptingUserMessages || hasUnownedExecution || historyRevisionChanged,
-      isRunning: execution is not null, waiting, lastOutcome: lastSettlement?.Outcome);
+      isRunning: execution is not null, waiting: execution?.IsWaiting == true, lastOutcome: lastSettlement?.Outcome);
 
   private static string GetStatus(bool needsAttention, bool admissionFenced, bool isRunning, bool waiting, ExecutionOutcome? lastOutcome) {
     if (needsAttention)
@@ -492,7 +359,8 @@ public abstract class SessionBase {
     return lastOutcome == ExecutionOutcome.Failed ? "failed" : "idle";
   }
 
-  private void MarkNeedsAttention() {
+  // Caller holds the session gate.
+  internal void MarkNeedsAttention() {
     if (needsAttention && !acceptingUserMessages)
       return;
 

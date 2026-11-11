@@ -76,9 +76,13 @@ drains the service and HTTP requests before disposing their shared storage.
   the original decision; neither lookup nor retained acceptance starts work. Refusal fences delayed originals.
   Changed-submission reuse throws `UserMessageConflictException` with its `SubmissionId`, so HTTP can distinguish
   conflicts from shutdown or uncertain failure without parsing exception messages.
-- `SessionBase` owns admission, database writes and lifecycle coordination under its existing guard.
-  Each execution has one `SessionExecution` and one driver, with sequential request phases outside the guard.
-  Execution owns LLM streams, tool invocation and the execution's Stop source; a request-local
+- `SessionBase` owns admission and database writes under its existing guard. Each execution has
+  one `SessionExecutionDriver`, which uses that same guard for continuation, background waiting
+  and settlement coordination. The session retains the driver task for shutdown to join, even
+  after saved settlement clears the active execution. `SessionNotifications` owns observer delivery
+  and change versions; the session still decides when to publish and derives live status.
+  `SessionExecution` owns LLM streams, tool invocation and the execution's Stop source, with
+  sequential request phases outside the guard; a request-local
   `LlmResponseWriter` owns bounded UTF-8 batches and their flush deadline.
 - Public `SessionBase.RequestStopAsync(Guid executionId)` returns `StopReceipt(ExecutionId, Status, Outcome)`:
   `Requested` acknowledges committed Stop intent/steering retirement, not completed cancellation;
@@ -241,7 +245,9 @@ share a file per concept. Read them alongside their owners.
    [UserMessageSubmission.cs](../source/backend/core/sessions/UserMessageSubmission.cs) holds the submission, receipt and enums;
    [Stop.cs](../source/backend/core/sessions/Stop.cs) holds the public Stop receipt/status;
    [AsyncLock.cs](../source/backend/core/sessions/AsyncLock.cs) is the shared async lock.
-3. [SessionExecution.cs](../source/backend/core/execution/SessionExecution.cs) — sequential request/tool
+3. [SessionExecutionDriver.cs](../source/backend/core/execution/SessionExecutionDriver.cs) — request
+   continuation, background waits, cleanup joins and settlement coordination using the session guard;
+   [SessionExecution.cs](../source/backend/core/execution/SessionExecution.cs) — sequential request/tool
    phases, response streaming, cancellation and cleanup;
    [LlmResponseAccumulator.cs](../source/backend/core/execution/LlmResponseAccumulator.cs) — complete
    fake-tool batch validation and bounded JSON freezing;

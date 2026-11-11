@@ -13,6 +13,12 @@ current suite size. Git history retains deleted drafts and superseded comparison
 - [Test scope](testing.md) and [code shape](code-shape-guidelines.md): local verification,
   size budget and review conventions.
 
+## Audits
+
+- [Organization audit — 2026-11-11](organization-audit-2026-11-11.md): prioritized structural/rot
+  findings for later review, with [per-file coverage](organization-audit-2026-11-11-files.md).
+  Audit only; active implementation work is distinguished from established findings.
+
 ## Decisions
 
 - [Product direction](product-direction.md): purpose, constraints and their rationale.

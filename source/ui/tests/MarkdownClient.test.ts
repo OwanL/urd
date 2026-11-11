@@ -232,6 +232,111 @@ void test("maps lease and page routes, bodies, and numeric Markdown enums", asyn
   assert.deepEqual(JSON.parse(server.requests.at(-1)!.body), {});
 });
 
+void test("maps every Markdown wire enum number through the client", async (t) => {
+  const elementKinds = [
+    "document",
+    "paragraph",
+    "heading",
+    "quote",
+    "list",
+    "item",
+    "code",
+    "codeLine",
+    "table",
+    "row",
+    "cell",
+    "emphasis",
+    "strong",
+    "inlineCode",
+    "link",
+    "thematicBreak",
+  ] as const;
+  const textKinds = ["text", "literal", "code", "softBreak", "hardBreak", "thematicBreak"] as const;
+  const sourceMappings = ["exact", "containing", "container"] as const;
+  const valueKinds = ["destination", "title", "language", "fenceInfo", "orderedStart"] as const;
+  const alignments = ["none", "left", "center", "right"] as const;
+  const pieces = textKinds.flatMap((_, kind) =>
+    sourceMappings.map((__, mapping) =>
+      piece({ id: kind * sourceMappings.length + mapping, kind, mapping }),
+    ),
+  );
+  const contexts = elementKinds.flatMap((_, kind) =>
+    alignments.map((__, alignment) =>
+      context({ id: kind * alignments.length + alignment, kind, alignment }),
+    ),
+  );
+  const values = valueKinds.map((_, kind) => ({ kind, text: "", part: 0, continued: false }));
+  const enumManifest = {
+    ...manifest,
+    pieceCount: pieces.length,
+    contextCount: contexts.length,
+  };
+  const server = await startHttpServer((request, response) => {
+    if (request.url.endsWith("/release")) {
+      response.writeHead(204);
+      response.end();
+    } else if (request.method === "POST" && !request.url.endsWith("/contexts"))
+      sendJson(response, { manifest: enumManifest, source: sourceFacts });
+    else if (request.url.includes("/pieces?"))
+      sendJson(response, { generation, from: 0, next: pieces.length, hasMore: false, pieces });
+    else if (request.url.includes("/contexts/0?"))
+      sendJson(response, {
+        generation,
+        context: context(),
+        from: 0,
+        next: values.length,
+        hasMore: false,
+        values,
+      });
+    else if (request.url.endsWith("/contexts"))
+      sendJson(response, {
+        generation,
+        from: 0,
+        next: contexts.length,
+        hasMore: false,
+        contexts,
+      });
+    else {
+      response.writeHead(404);
+      response.end();
+    }
+  });
+  t.after(() => server.close());
+
+  const client = new MarkdownClient(server.origin);
+  const signal = new AbortController().signal;
+  const source = await client.request(streamId, sessionId, entry).open(signal);
+  const piecePage = await source.readPieces({ generation, index: 0 }, signal);
+  const contextPage = await source.readContext(0, { generation, index: 0 }, signal);
+  const descriptorPage = await source.readContexts(
+    contexts.map((_, id) => id),
+    { generation, index: 0 },
+    signal,
+  );
+
+  assert.deepEqual(
+    piecePage.pieces.map(({ kind }) => kind),
+    textKinds.flatMap((kind) => sourceMappings.map(() => kind)),
+  );
+  assert.deepEqual(
+    piecePage.pieces.map(({ mapping }) => mapping),
+    textKinds.flatMap(() => sourceMappings),
+  );
+  assert.deepEqual(
+    contextPage.values.map(({ kind }) => kind),
+    valueKinds,
+  );
+  assert.deepEqual(
+    descriptorPage.contexts.map(({ kind }) => kind),
+    elementKinds.flatMap((kind) => alignments.map(() => kind)),
+  );
+  assert.deepEqual(
+    descriptorPage.contexts.map(({ alignment }) => alignment),
+    elementKinds.flatMap(() => alignments),
+  );
+  await source.dispose();
+});
+
 interface InvalidWirePageCase {
   readonly name: string;
   readonly response: unknown;

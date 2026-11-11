@@ -1,16 +1,17 @@
 namespace Urd.Core.MarkdownRendering;
 
+// These numbers are deliberate wire identifiers and must remain stable.
 // Disposable, generation-local structure. Original source belongs to the caller,
 // not this index. IDs/cursors must never be persisted as source anchors.
 public enum MarkdownElementKind {
-  Document, Paragraph, Heading, Quote, List, Item, Code, CodeLine,
-  Table, Row, Cell, Emphasis, Strong, InlineCode, Link, ThematicBreak
+  Document = 0, Paragraph = 1, Heading = 2, Quote = 3, List = 4, Item = 5, Code = 6, CodeLine = 7,
+  Table = 8, Row = 9, Cell = 10, Emphasis = 11, Strong = 12, InlineCode = 13, Link = 14, ThematicBreak = 15
 }
 
-public enum MarkdownTextKind { Text, Literal, Code, SoftBreak, HardBreak, ThematicBreak }
-public enum MarkdownSourceMapping { Exact, Containing, Container }
-public enum MarkdownValueKind { Destination, Title, Language, FenceInfo, OrderedStart }
-public enum MarkdownTableAlignment { None, Left, Center, Right }
+public enum MarkdownTextKind { Text = 0, Literal = 1, Code = 2, SoftBreak = 3, HardBreak = 4, ThematicBreak = 5 }
+public enum MarkdownSourceMapping { Exact = 0, Containing = 1, Container = 2 }
+public enum MarkdownValueKind { Destination = 0, Title = 1, Language = 2, FenceInfo = 3, OrderedStart = 4 }
+public enum MarkdownTableAlignment { None = 0, Left = 1, Center = 2, Right = 3 }
 
 public readonly record struct MarkdownSourceRange(int Start, int End);
 public readonly record struct MarkdownRenderCursor(Guid Generation, int Index);

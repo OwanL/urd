@@ -10,6 +10,26 @@ import type { ProviderModelCatalog } from "../ProviderModels.ts";
 import type { ModelSettings } from "../ModelSettings.ts";
 import type { ProviderSignIn } from "../ProviderSignIn.ts";
 
+export type ProviderSettingsClient = Pick<
+  ProviderClient,
+  | "list"
+  | "getCredentials"
+  | "getModels"
+  | "getModelSettings"
+  | "getSignIn"
+  | "createChatGpt"
+  | "createOpenAI"
+  | "createCustom"
+  | "updateCustom"
+  | "remove"
+  | "setApiKey"
+  | "beginSignIn"
+  | "cancelSignIn"
+  | "disconnect"
+  | "refreshModels"
+  | "saveModelSettings"
+>;
+
 export type ConnectionDraft = CustomProviderSettings;
 
 export interface AddDraft extends ConnectionDraft {
@@ -173,10 +193,10 @@ export class ProviderSettingsController {
   private readAbort: AbortController | null = null;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private readonly listeners = new Set<() => void>();
-  private readonly client: ProviderClient;
+  private readonly client: ProviderSettingsClient;
   private readonly changed: () => void;
 
-  constructor(client: ProviderClient, changed: () => void) {
+  constructor(client: ProviderSettingsClient, changed: () => void) {
     this.client = client;
     this.changed = changed;
   }

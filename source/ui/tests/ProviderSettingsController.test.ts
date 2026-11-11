@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { RequestError } from "../http/RequestError.ts";
-import { ProviderClient } from "../providers/ProviderClient.ts";
 import type { ProviderConnection } from "../providers/ProviderConnection.ts";
 import type { ProviderCredentialStatus } from "../providers/ProviderCredentials.ts";
 import type { ProviderSignIn } from "../providers/ProviderSignIn.ts";
@@ -13,6 +12,7 @@ import {
   providerSetupState,
   ProviderSettingsController,
 } from "../providers/settings/ProviderSettingsController.ts";
+import type { ProviderSettingsClient } from "../providers/settings/ProviderSettingsController.ts";
 
 const connection: ProviderConnection = {
   id: "one",
@@ -55,19 +55,34 @@ async function flush() {
   await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
-function setup(overrides: Partial<ProviderClient> = {}) {
+function unsupported(operation: keyof ProviderSettingsClient) {
+  return async () => {
+    throw new Error(`Unexpected ProviderClient operation: ${operation}`);
+  };
+}
+
+const defaultClient: ProviderSettingsClient = {
+  list: async () => [connection],
+  getCredentials: async () => credential,
+  getModels: async () => emptyCatalog,
+  getModelSettings: async () => [],
+  getSignIn: async () => pending,
+  createChatGpt: unsupported("createChatGpt"),
+  createOpenAI: unsupported("createOpenAI"),
+  createCustom: unsupported("createCustom"),
+  updateCustom: unsupported("updateCustom"),
+  remove: unsupported("remove"),
+  setApiKey: unsupported("setApiKey"),
+  beginSignIn: unsupported("beginSignIn"),
+  cancelSignIn: unsupported("cancelSignIn"),
+  disconnect: unsupported("disconnect"),
+  refreshModels: unsupported("refreshModels"),
+  saveModelSettings: unsupported("saveModelSettings"),
+};
+
+function setup(overrides: Partial<ProviderSettingsClient> = {}) {
   let notifications = 0;
-  const client: ProviderClient = Object.assign(
-    new ProviderClient(new URL("http://localhost:1")),
-    {
-      list: async () => [connection],
-      getCredentials: async () => credential,
-      getModels: async () => emptyCatalog,
-      getModelSettings: async () => [],
-      getSignIn: async () => pending,
-    },
-    overrides,
-  );
+  const client: ProviderSettingsClient = { ...defaultClient, ...overrides };
   const state = new ProviderSettingsController(client, () => {
     notifications++;
   });

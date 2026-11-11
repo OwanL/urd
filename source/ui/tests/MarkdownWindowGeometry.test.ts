@@ -439,10 +439,11 @@ void test("shared scrollport clips geometry and restores without scrolling the r
       }),
     },
   };
+  let rootTop = 50;
   const root = {
     dataset: { markdownGeneration: "g" },
     scrollTop: 0,
-    getBoundingClientRect: () => ({ top: 50, right: 900, bottom: 900, left: 100, width: 800 }),
+    getBoundingClientRect: () => ({ top: rootTop, right: 900, bottom: 900, left: 100, width: 800 }),
     querySelectorAll: (selector: string) => {
       if (selector.includes("data-root-piece-count")) return [];
       if (selector.includes("codeLine")) return [visibleLine, clippedLine];
@@ -458,6 +459,13 @@ void test("shared scrollport clips geometry and restores without scrolling the r
   assert.equal(geometry.measure(root, scrollport), true);
   assert.equal(geometry.gapHeight("code", 1, 0, 2), 40);
 
+  textTop = 95;
+  assert.equal(
+    geometry.capture(root, scrollport)?.offset,
+    -5,
+    "Partially visible text remains a source anchor",
+  );
+  textTop = 120;
   const anchor = geometry.capture(root, scrollport);
   assert.deepEqual(anchor, {
     generation: "g",
@@ -470,4 +478,15 @@ void test("shared scrollport clips geometry and restores without scrolling the r
   assert.equal(geometry.restore(root, anchor, scrollport), true);
   assert.equal(scrollport.scrollTop, 70);
   assert.equal(root.scrollTop, 0);
+
+  rootTop = 110;
+  const insetAnchor = geometry.capture(root, scrollport);
+  assert.equal(
+    insetAnchor?.offset,
+    20,
+    "Source offsets stay relative to the shared port, not the inset body",
+  );
+  textTop = 230;
+  assert.equal(geometry.restore(root, insetAnchor, scrollport), true);
+  assert.equal(scrollport.scrollTop, 110);
 });

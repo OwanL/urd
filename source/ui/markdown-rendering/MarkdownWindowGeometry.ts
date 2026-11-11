@@ -198,7 +198,7 @@ export class MarkdownWindowGeometry {
     )
       return null;
     const withinGap = Math.max(0, Math.min(1, (targetY - rect.top) / rect.height));
-    const offset = targetY - viewport.top;
+    const offset = targetY - scrollport.getBoundingClientRect().top;
     if (kind === "root" || kind === "ordinary")
       return {
         generation: snapshot.generation,
@@ -328,14 +328,14 @@ export class MarkdownWindowGeometry {
     if (!viewport) return null;
     for (const element of root.querySelectorAll<HTMLElement>("[data-piece]")) {
       const rect = this.textRect(element);
-      if (!rect || rect.top < viewport.top || rect.top >= viewport.bottom) continue;
+      if (!rect || rect.bottom <= viewport.top || rect.top >= viewport.bottom) continue;
       if (rect.right <= viewport.left || rect.left >= viewport.right) continue;
       return {
         generation: this.generation,
         piece: element.dataset.piece!,
         start: element.dataset.sourceStart!,
         end: element.dataset.sourceEnd!,
-        offset: rect.top - viewport.top,
+        offset: rect.top - scrollport.getBoundingClientRect().top,
       };
     }
     return null;
@@ -359,14 +359,14 @@ export class MarkdownWindowGeometry {
     if (!element) return false;
     const rect = this.textRect(element);
     if (!rect) return false;
-    const delta = rect.top - viewport.top - anchor.offset;
+    const delta = rect.top - scrollport.getBoundingClientRect().top - anchor.offset;
     scrollport.scrollTop += delta;
     const restored = this.textRect(element);
     const restoredViewport = this.visibleBounds(root, scrollport);
     return (
       restored !== null &&
       restoredViewport !== null &&
-      Math.abs(restored.top - restoredViewport.top - anchor.offset) <= 1
+      Math.abs(restored.top - scrollport.getBoundingClientRect().top - anchor.offset) <= 1
     );
   }
 

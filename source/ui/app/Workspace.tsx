@@ -12,6 +12,7 @@ import { ChatTabs } from "./ChatTabs.tsx";
 import { Conversation } from "./Conversation.tsx";
 import type { ReadingPosition } from "./Transcript.tsx";
 import type { TranscriptDisplay } from "./TranscriptDisplay.ts";
+import type { TranscriptNavigationState } from "../sessions/TranscriptNavigationStorage.ts";
 import { usePersistedWorkspace } from "./usePersistedWorkspace.ts";
 import { useWorkspaceModels } from "./useWorkspaceModels.ts";
 import { useWorkspaceNavigation } from "./useWorkspaceNavigation.ts";
@@ -23,7 +24,12 @@ const providers = new ProviderClient(new URL(window.location.href));
 const storageKey = "urd.workspace.v1";
 const storageRetryLabels = { read: "Retry read", write: "Retry save", cleanup: "Retry cleanup" };
 
-export function Workspace({ transcript }: { transcript?: TranscriptDisplay } = {}) {
+export interface WorkspaceProps {
+  transcript?: TranscriptDisplay;
+  transcriptError?: string | null;
+}
+
+export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) {
   const [persistence] = useState(() => new WorkspacePersistence(() => sessionStorage, storageKey));
   const workspace = usePersistedWorkspace(persistence);
   const models = useWorkspaceModels(providers);
@@ -51,6 +57,7 @@ export function Workspace({ transcript }: { transcript?: TranscriptDisplay } = {
     if (workspace.loaded) return commands.watchPendingReceipts();
   }, [commands, workspace.loaded]);
   const readingPositions = useRef(new Map<string, ReadingPosition>());
+  const transcriptPositions = useRef(new Map<string, TranscriptNavigationState>());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsAnchor = useRef<HTMLButtonElement>(null);
   const newChatButton = useRef<HTMLButtonElement>(null);
@@ -87,7 +94,7 @@ export function Workspace({ transcript }: { transcript?: TranscriptDisplay } = {
       ? [activeId]
       : [];
   const canPersist = workspace.access.canPersist();
-  const error = commandError || navigation.error || events.error;
+  const error = commandError || navigation.error || events.error || transcriptError;
 
   return (
     <main class="workspace">
@@ -188,6 +195,10 @@ export function Workspace({ transcript }: { transcript?: TranscriptDisplay } = {
             position={readingPositions.current.get(id)}
             onPositionChange={(position) => {
               readingPositions.current.set(id, position);
+            }}
+            transcriptPosition={transcriptPositions.current.get(id)}
+            onTranscriptPositionChange={(position) => {
+              transcriptPositions.current.set(id, position);
             }}
           />
         ))

@@ -4,6 +4,8 @@ import type { TranscriptDisplay } from "./TranscriptDisplay.ts";
 import { IconButton } from "../components/IconButton.tsx";
 import { TranscriptContentReader } from "./TranscriptContentReader.ts";
 import { isTextEntry } from "../sessions/Messages.ts";
+import type { TranscriptNavigationState } from "../sessions/TranscriptNavigationStorage.ts";
+import { VirtualTranscript } from "./VirtualTranscript.tsx";
 import type {
   MessageContentCursor,
   TranscriptEntryRef,
@@ -237,7 +239,42 @@ export interface ReadingPosition {
   anchor: { key: string; top: number } | null;
 }
 
-export function Transcript({
+export interface TranscriptProps {
+  client: SessionClient;
+  history: TranscriptHistoryPage | null;
+  historyRevision?: number | null;
+  notice?: string | null;
+  display?: TranscriptDisplay | undefined;
+  streamId?: string | null;
+  sessionId: string;
+  visible: boolean;
+  position: ReadingPosition | undefined;
+  onPositionChange: (position: ReadingPosition) => void;
+  transcriptPosition?: TranscriptNavigationState | undefined;
+  onTranscriptPositionChange?: (position: TranscriptNavigationState) => void;
+}
+
+export function Transcript(props: TranscriptProps) {
+  if (props.display)
+    return (
+      <VirtualTranscript
+        client={props.client}
+        display={props.display}
+        streamId={props.streamId ?? null}
+        sessionId={props.sessionId}
+        historyRevision={props.historyRevision ?? props.history?.historyRevision ?? null}
+        notice={props.notice ?? null}
+        visible={props.visible}
+        navigation={props.transcriptPosition}
+        onNavigationChange={props.onTranscriptPositionChange ?? ignoreNavigationChange}
+      />
+    );
+  return <PlainTranscript {...props} />;
+}
+
+function ignoreNavigationChange(_position: TranscriptNavigationState): void {}
+
+function PlainTranscript({
   display,
   streamId = null,
   client,
@@ -246,16 +283,7 @@ export function Transcript({
   visible,
   position,
   onPositionChange,
-}: {
-  client: SessionClient;
-  history: TranscriptHistoryPage | null;
-  display?: TranscriptDisplay | undefined;
-  streamId?: string | null;
-  sessionId: string;
-  visible: boolean;
-  position: ReadingPosition | undefined;
-  onPositionChange: (position: ReadingPosition) => void;
-}) {
+}: TranscriptProps) {
   const RichBody = display?.MessageBody;
   const scroll = useRef<HTMLDivElement>(null);
   const [documentHidden, setDocumentHidden] = useState(

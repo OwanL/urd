@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { MarkdownMessageView } from "../markdown-rendering/MarkdownMessageView.tsx";
+import type { MarkdownSavedSourcePosition } from "../markdown-rendering/MarkdownMessageView.tsx";
 import type { RichMessageBodyProps } from "./TranscriptDisplay.ts";
 import "../markdown-rendering/markdown-renderer.css";
 
@@ -8,8 +9,12 @@ export function RichMessageBody(props: RichMessageBodyProps) {
   const latest = useRef(props);
   latest.current = props;
   const update = useRef(() => {});
+  const capture = useRef<(signal: AbortSignal) => Promise<MarkdownSavedSourcePosition | null>>(
+    async () => null,
+  );
+  const restoreSource = useRef<(saved: MarkdownSavedSourcePosition) => boolean>(() => false);
   const [error, setError] = useState<string | null>(null);
-  const { display, root, sessionId, entry } = props;
+  const { display, root, sessionId, entry, registerSource, registerRestore } = props;
 
   useEffect(() => {
     const element = host.current;
@@ -17,6 +22,7 @@ export function RichMessageBody(props: RichMessageBodyProps) {
     let stopped = false;
     let visible = false;
     let view: MarkdownMessageView | null = null;
+    let restore = latest.current.saved;
     let releasing = false;
     let reading = false;
     let queued = false;
@@ -38,19 +44,30 @@ export function RichMessageBody(props: RichMessageBodyProps) {
         )
       );
     };
+    async function capturePosition(signal: AbortSignal) {
+      signal.throwIfAborted();
+      const current = view;
+      if (!current || releasing || stopped) return null;
+      const position = await current.captureSource(signal);
+      signal.throwIfAborted();
+      return view === current ? position : null;
+    }
+    capture.current = capturePosition;
+    restoreSource.current = (position) => view?.restoreCapturedSource(position) ?? false;
     function release() {
       if (!view || releasing) return;
+      const current = view;
       releasing = true;
       element!.style.minHeight = `${element!.getBoundingClientRect().height}px`;
-      const work = view.dispose();
+      const work = current.dispose();
       display.release(work);
       void work
         .then(() => {}, report)
         .finally(() => {
-          view = null;
+          if (view === current) view = null;
           releasing = false;
           applied = "";
-          schedule();
+          if (!latest.current.paused) schedule();
         });
     }
     async function refresh() {
@@ -66,6 +83,7 @@ export function RichMessageBody(props: RichMessageBodyProps) {
         changed() {
           element!.style.minHeight = "";
           setError(null);
+          latest.current.onPublished?.();
           schedule();
         },
         error: report,
@@ -82,9 +100,11 @@ export function RichMessageBody(props: RichMessageBodyProps) {
       try {
         if (key !== applied) {
           applied = key;
-          await view.setRequest(
+          const publication = await view.setRequest(
             display.client.request(current.streamId!, sessionId, current.entry),
+            restore,
           );
+          if (publication === "published") restore = undefined;
         } else {
           const port = root!.getBoundingClientRect();
           const gapVisible = [
@@ -95,7 +115,10 @@ export function RichMessageBody(props: RichMessageBodyProps) {
           });
           if (visible && gapVisible) await view.refreshWindow();
         }
+        if (!stopped && visible && !latest.current.paused)
+          await capturePosition(new AbortController().signal);
       } catch (cause) {
+        applied = "";
         report(cause);
       } finally {
         reading = false;
@@ -113,7 +136,10 @@ export function RichMessageBody(props: RichMessageBodyProps) {
         });
     }
     function selectionChanged() {
-      if (!latest.current.paused) schedule();
+      if (!latest.current.paused && view) schedule();
+    }
+    function scrolled() {
+      if (!latest.current.paused && visible) schedule();
     }
     update.current = schedule;
     const observer = new IntersectionObserver(
@@ -124,16 +150,18 @@ export function RichMessageBody(props: RichMessageBodyProps) {
       { root },
     );
     observer.observe(element);
-    root.addEventListener("scroll", schedule, { passive: true });
+    root.addEventListener("scroll", scrolled, { passive: true });
     element.ownerDocument.addEventListener("selectionchange", selectionChanged);
-    element.addEventListener("focusout", schedule);
+    element.addEventListener("focusout", selectionChanged);
     return () => {
       stopped = true;
       update.current = () => {};
+      capture.current = async () => null;
+      restoreSource.current = () => false;
       observer.disconnect();
-      root.removeEventListener("scroll", schedule);
+      root.removeEventListener("scroll", scrolled);
       element.ownerDocument.removeEventListener("selectionchange", selectionChanged);
-      element.removeEventListener("focusout", schedule);
+      element.removeEventListener("focusout", selectionChanged);
       cancelAnimationFrame(frame);
       release();
     };
@@ -147,11 +175,23 @@ export function RichMessageBody(props: RichMessageBodyProps) {
     entry.historyRevision,
   ]);
 
+  useEffect(() => {
+    registerSource?.((signal) => capture.current(signal));
+    return () => registerSource?.(null);
+  }, [registerSource]);
+  useEffect(() => {
+    registerRestore?.((position) => restoreSource.current(position));
+    return () => registerRestore?.(null);
+  }, [registerRestore]);
   useEffect(() => update.current(), [props.paused, props.streamId, props.text]);
   return (
     <div class={`message message-${entry.kind === "user" ? "user" : "assistant"}`}>
       <div ref={host} style={{ minHeight: "1lh" }} />
-      {error && <div class="inline-error">{error}</div>}
+      {error && (
+        <div class="inline-error">
+          {error} <button onClick={() => update.current()}>Retry read</button>
+        </div>
+      )}
     </div>
   );
 }

@@ -36,12 +36,17 @@ conversation views. Normal entry bundles exclude the renderer and normal server 
 still does not map its routes. Three isolated stored fixtures passed retained-DOM,
 native-selection and awaited-disposal checks in this composition.
 
-This is only the latest-history-window composition: global entry navigation, composed
-persisted source restoration, distant intra-message jumps and large catch-up remain
-unfinished. Partial ordinary blocks, actual hidden/freeze lifecycle, contention and
-memory recovery remain unqualified; paused views currently retain their active leases.
-No production limits or activation follow. See the latest real-Workspace checkpoint in
-[parser evidence](TRANSCRIPT-PARSER-EVIDENCE.md).
+Indexed full-history entry navigation, persisted source restoration, recursive ordinary
+block gaps and exact indexed code/table child seeks are now implemented in the explicit
+composition. The first 100k-entry browser run exposed suspended initial reads; after
+correction, distant scrollbar jumps loaded bounded windows without walking history.
+Reload then exposed a 3.25 px source-position drift despite preserving the draft. Capture
+on publication and shared-scrollport offset fixes are under composed verification, not
+signed off. Active-generation resize restoration retains mappings only for mounted pieces;
+it must not reopen a lease or reread a window. Page freeze/resume ownership hooks exist,
+but actual hidden/freeze behavior, large catch-up, contention and memory recovery remain
+unqualified. No production limits, activation or user-preview build follow yet. See the
+latest real-Workspace checkpoint in [parser evidence](TRANSCRIPT-PARSER-EVIDENCE.md).
 
 Stages 3–4 (tool/reasoning detail and managed media) retain their separate ownership
 and requirements. This delivery sequence does not authorize bypassing Stage 2

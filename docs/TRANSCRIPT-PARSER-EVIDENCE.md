@@ -521,3 +521,58 @@ actual hidden/freeze behavior, contention, memory recovery and cache selection r
 unfinished or unqualified. Paused views retain their active lease and DOM. No activation
 or user-preview build follows. Full provenance, limitations, artifacts and cleanup:
 `C:/Users/OwanLazic/AppData/Local/Temp/urd-real-workspace-TvspsL/REPORT.md`.
+
+## Indexed 100k Workspace checkpoint — 2026-11-11
+
+A fresh isolated qualification entry used the real Workspace and page-owned Markdown
+HTTP client with 100,000 indexed entries. Frozen UI02 inputs are recorded in
+`%TEMP%/urd-transcript-finish-991456-eqZAQG/ui-current-02/ui-manifest.json`; the backend
+was the separate `ToolRelevanceAlways-4d11e9d` Release artifact, not the concurrently
+changing checkout. Normal UI entry and server activation remain unchanged.
+
+An initial failed run exposed visibility/readiness leaving entry reads suspended. With
+that corrected, scrollbar seeks to 42%, 81% and 1% landed within 3/37/7 ranks of the
+estimated target, with 37–38 mounted entry rows and bounded indexed locates, not history
+walking. Jump to latest returned to rank 99,999. These are navigation correctness checks,
+not accepted visibility/latency targets: observations included deliberate settle waits.
+The seed's small replies contained literal `\\n`, so this case did not exercise normal
+multiline replies; heavy fixtures and resize were not reached in this run.
+
+Reload preserved the Message draft but shifted the same actual text range **3.25 px**
+(tolerance 1 px); before reload the saved entry anchor had no source cursor. The run
+stopped at this supported failure. Publication-time source capture, partially visible
+text anchors, shared-scrollport offset coordinates and retained-piece source mappings
+are being corrected and verified; the failed run does not establish those fixes. UI
+static checks and 260 unit tests pass, but composed restoration remains an open gate.
+
+The browser runtime closed and the owned fixture stopped with backend exit 0, all three
+owned listeners closed and logical cache/pin/reservation counters zero. This proves
+logical disposal only, not heap/resident recovery. No provider request was made. Existing
+user hosts were untouched. Full browser evidence and screenshot:
+`%TEMP%/urd-browser-acceptance-cab91195/evidence.json`; cleanup proof:
+`%TEMP%/urd-transcript-finish-991456-eqZAQG/fixture-current-02/server/cleanup-proof.json`.
+No cache-budget selection, activation or user-preview build follows.
+
+### Source restoration follow-up
+
+Frozen UI03 corrected the 100k reload case: the same saved source cursor and actual
+text range returned with **0 px** displacement, and the draft remained exact. Heavy
+mixed content then exposed virtual-row churn: six lease opens/five releases in 500 ms,
+with the assistant row repeatedly replaced. The filter had used the browser's old
+scroll offset after the corrected total height shrank. Selecting the next clamped
+viewport (or new tail for followers) before rendering removed that remount loop.
+
+Frozen UI04 retained the same heavy assistant row with **zero opens, releases or GETs**
+over a one-second idle observation. A distant mixed-message source point returned on
+reload within **0.016 px**; live 1280→700 reflow preserved it within **0.36 px** without
+lease reopening. However, the 64-piece probe window covered only about 21 code lines
+in a 718 px viewport, leaving visible omitted ranges and causing a two-request refill
+on each resize. This is not acceptance of the no-reread resize gate. A larger explicit
+candidate window is the next probe, not a selected production default. Static checks,
+260 unit tests and 16 renderer Chromium checks passed; normal startup stays inactive.
+
+Raw UI03/UI04 browser artifacts live under the parent Pie session's Playwright artifact
+folder; frozen inputs and owned cleanup proofs remain under
+`%TEMP%/urd-transcript-finish-991456-eqZAQG/`. UI03's awaited disposal and shutdown
+returned every logical cache counter to zero and backend exit 0; this is not resident
+memory recovery evidence.

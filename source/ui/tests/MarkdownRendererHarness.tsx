@@ -432,6 +432,8 @@ async function setupMessageViewHarness() {
     },
     settleReplacement: () => replacementPublication,
     refreshWindow: () => view.refreshWindow(),
+    captureSource: () => view.captureSource(new AbortController().signal),
+    restoreCapturedSource: view.restoreCapturedSource.bind(view),
     dispose: () => view.dispose(),
   };
 }

@@ -8,6 +8,7 @@ import { NotSentInputs } from "./NotSentInputs.tsx";
 import { Transcript } from "./Transcript.tsx";
 import type { ReadingPosition } from "./Transcript.tsx";
 import type { TranscriptDisplay } from "./TranscriptDisplay.ts";
+import type { TranscriptNavigationState } from "../sessions/TranscriptNavigationStorage.ts";
 import type { WorkspaceCommands, WorkspaceStopState } from "./WorkspaceCommands.ts";
 import type { ChatState } from "./WorkspaceState.ts";
 import { useSessionSnapshot } from "./useSessionSnapshot.ts";
@@ -42,6 +43,8 @@ interface ConversationProps {
   selectModel(id: string, selection: LlmSelection): boolean;
   position: ReadingPosition | undefined;
   onPositionChange(position: ReadingPosition): void;
+  transcriptPosition: TranscriptNavigationState | undefined;
+  onTranscriptPositionChange(position: TranscriptNavigationState): void;
 }
 
 // Qualification may retain paused chats; normal startup mounts only the active chat.
@@ -65,6 +68,8 @@ export function Conversation({
   selectModel,
   position,
   onPositionChange,
+  transcriptPosition,
+  onTranscriptPositionChange,
 }: ConversationProps) {
   const observeSnapshot = useCallback(
     (snapshot: SessionSnapshot, knownWhenRead: string | null) =>
@@ -85,6 +90,7 @@ export function Conversation({
     observeSnapshot,
     notice,
     active,
+    transcript === undefined,
   );
   const state = deriveConversationState(chat, snapshot, stop, ready, canPersist);
   const canResendNotSent = Boolean(
@@ -119,10 +125,14 @@ export function Conversation({
         display={transcript}
         streamId={streamId}
         history={history}
+        historyRevision={snapshot?.historyRevision ?? null}
+        notice={notice}
         sessionId={sessionId}
         visible={visible && notice !== null}
         position={position}
         onPositionChange={onPositionChange}
+        transcriptPosition={transcriptPosition}
+        onTranscriptPositionChange={onTranscriptPositionChange}
       />
       <div class="chat-status" aria-live="polite">
         {error && <span class="inline-error">{error} </span>}

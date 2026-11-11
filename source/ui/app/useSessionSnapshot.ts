@@ -12,6 +12,7 @@ export function useSessionSnapshot(
   onSnapshot: (snapshot: SessionSnapshot, knownWhenRead: string | null) => void,
   notice: string | null,
   enabled = true,
+  includeHistory = true,
 ) {
   const [snapshot, setSnapshot] = useState<SessionSnapshot | null>(null);
   const [history, setHistory] = useState<TranscriptHistoryPage | null>(null);
@@ -29,10 +30,11 @@ export function useSessionSnapshot(
     let disposed = false;
     let reading = false;
     let queued = false;
+    let suspended = false;
     let controller: AbortController | null = null;
 
     async function read() {
-      if (disposed || current.current.notice === null) return;
+      if (disposed || suspended || current.current.notice === null) return;
       if (document.hidden) {
         queued = true;
         return;
@@ -52,16 +54,19 @@ export function useSessionSnapshot(
         if (next.sessionId !== requestedSessionId || !Number.isSafeInteger(next.historyRevision))
           throw new Error("Invalid session snapshot.");
 
-        const nextHistory = await client.getHistory(
-          requestedSessionId,
-          { mode: "latest", expectedHistoryRevision: next.historyRevision },
-          request.signal,
-        );
+        const nextHistory = includeHistory
+          ? await client.getHistory(
+              requestedSessionId,
+              { mode: "latest", expectedHistoryRevision: next.historyRevision },
+              request.signal,
+            )
+          : null;
         if (request.signal.aborted || disposed) return;
         if (
-          nextHistory.sessionId !== requestedSessionId ||
-          nextHistory.historyRevision !== next.historyRevision ||
-          !Array.isArray(nextHistory.entries)
+          nextHistory &&
+          (nextHistory.sessionId !== requestedSessionId ||
+            nextHistory.historyRevision !== next.historyRevision ||
+            !Array.isArray(nextHistory.entries))
         )
           throw new Error("Invalid session history.");
 
@@ -84,6 +89,10 @@ export function useSessionSnapshot(
 
     requestRead.current = () => {
       if (current.current.notice === null) return;
+      if (suspended) {
+        queued = true;
+        return;
+      }
       if (reading) {
         queued = true;
         return;
@@ -91,25 +100,42 @@ export function useSessionSnapshot(
       void read();
     };
 
+    function suspend() {
+      suspended = true;
+      queued = false;
+      controller?.abort();
+    }
+    function resume() {
+      if (document.hidden) return;
+      suspended = false;
+      setVisible(true);
+      requestRead.current();
+    }
     function activate() {
       setVisible(!document.hidden);
-      if (document.hidden) {
-        queued = false;
-        controller?.abort();
-      } else requestRead.current();
+      if (document.hidden) suspend();
+      else requestRead.current();
     }
 
     document.addEventListener("visibilitychange", activate);
     window.addEventListener("focus", activate);
+    window.addEventListener("pagehide", suspend);
+    window.addEventListener("pageshow", resume);
+    document.addEventListener("freeze", suspend as EventListener);
+    document.addEventListener("resume", resume as EventListener);
     return () => {
       disposed = true;
       queued = false;
       controller?.abort();
       document.removeEventListener("visibilitychange", activate);
       window.removeEventListener("focus", activate);
+      window.removeEventListener("pagehide", suspend);
+      window.removeEventListener("pageshow", resume);
+      document.removeEventListener("freeze", suspend as EventListener);
+      document.removeEventListener("resume", resume as EventListener);
       requestRead.current = () => {};
     };
-  }, [client, sessionId, enabled]);
+  }, [client, sessionId, enabled, includeHistory]);
 
   useEffect(() => {
     if (notice !== null) requestRead.current();

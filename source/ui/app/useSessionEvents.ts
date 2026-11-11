@@ -92,7 +92,15 @@ export function useSessionEvents(
         discovery?.abort();
       } else events.start();
     }
+    function suspend() {
+      events.stop();
+      discovery?.abort();
+    }
     document.addEventListener("visibilitychange", activate);
+    document.addEventListener("freeze", suspend);
+    document.addEventListener("resume", activate);
+    window.addEventListener("pagehide", suspend);
+    window.addEventListener("pageshow", activate);
     window.addEventListener("focus", activate);
     activate();
     return () => {
@@ -102,6 +110,10 @@ export function useSessionEvents(
       setStreamId(null);
       transport.current = null;
       document.removeEventListener("visibilitychange", activate);
+      document.removeEventListener("freeze", suspend);
+      document.removeEventListener("resume", activate);
+      window.removeEventListener("pagehide", suspend);
+      window.removeEventListener("pageshow", activate);
       window.removeEventListener("focus", activate);
     };
   }, [client, access, discovered, ready]);

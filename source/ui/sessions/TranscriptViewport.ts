@@ -31,6 +31,7 @@ export interface TranscriptViewportGeometry {
 
 export interface TranscriptViewportSnapshot {
   readonly historyRevision: number;
+  readonly positionVersion: number;
   readonly entryCount: number;
   readonly estimatedTotalHeight: number;
   readonly correctedTotalHeight: number;
@@ -101,6 +102,7 @@ export class TranscriptViewport {
   snapshot(): TranscriptViewportSnapshot {
     return {
       historyRevision: this.geometry.historyRevision,
+      positionVersion: this.geometry.positionVersion,
       entryCount: this.geometry.entryCount,
       estimatedTotalHeight: this.geometry.estimatedTotalHeight,
       correctedTotalHeight: this.correctedTotalHeight(),
@@ -149,6 +151,40 @@ export class TranscriptViewport {
     return this.updateResult(scrollAdjustment);
   }
 
+  // Replace sparse lookup samples from another window of the same indexed state.
+  // Measurements and follow intent remain valid because the source version did not change.
+  refreshGeometryWindow(geometry: TranscriptViewportGeometry): TranscriptViewportUpdate {
+    const next = copyAndValidateGeometry(geometry);
+    if (
+      next.historyRevision !== this.geometry.historyRevision ||
+      next.positionVersion !== this.geometry.positionVersion ||
+      next.entryCount !== this.geometry.entryCount ||
+      next.estimatedTotalHeight !== this.geometry.estimatedTotalHeight
+    )
+      throw new TypeError("A refreshed geometry window must describe the same position state.");
+
+    for (const position of next.weightedPositions) {
+      const existing = this.geometry.weightedPositions.find((item) => item.rank === position.rank);
+      if (
+        existing &&
+        (!sameEntry(existing.entry, position.entry) ||
+          existing.estimatedTop !== position.estimatedTop)
+      )
+        throw new TypeError(
+          "Transcript geometry changed a position without a new position version.",
+        );
+    }
+
+    const previousAnchorTop =
+      this.anchor === null ? null : this.estimatedPrefixHeight(this.anchor.rank);
+    this.geometry = next;
+    const scrollAdjustment =
+      previousAnchorTop === null || this.anchor === null
+        ? 0
+        : this.estimatedPrefixHeight(this.anchor.rank) - previousAnchorTop;
+    return this.updateResult(scrollAdjustment);
+  }
+
   // Capturing a rendered anchor does not infer user intent from a scroll event.
   recordAnchor(anchor: TranscriptViewportAnchor | null): boolean {
     if (anchor !== null && !isValidAnchor(anchor, this.geometry)) return false;
@@ -165,9 +201,10 @@ export class TranscriptViewport {
       return true;
     }
 
-    if (anchor === null || !isValidAnchor(anchor, this.geometry)) return false;
+    // A scrollbar seek may land in an unloaded gap before an indexed anchor arrives.
+    if (anchor !== null && !isValidAnchor(anchor, this.geometry)) return false;
     this.followsLatest = false;
-    this.anchor = copyAnchor(anchor);
+    this.anchor = anchor === null ? null : copyAnchor(anchor);
     return true;
   }
 
@@ -253,6 +290,17 @@ export class TranscriptViewport {
   estimatedPrefixHeight(rank: number): number {
     validateRank(rank, this.geometry.entryCount, true);
     return basePrefixHeight(this.geometry, rank) + this.correctionBeforeRank(rank);
+  }
+
+  positionFractionAtPixel(pixel: number): number {
+    if (!Number.isFinite(pixel)) throw new TypeError("Pixel position must be finite.");
+    const totalHeight = this.correctedTotalHeight();
+    if (totalHeight <= 0 || this.geometry.estimatedTotalHeight <= 0 || pixel <= 0) return 0;
+    if (pixel >= totalHeight) return 1;
+    const clamped = Math.max(0, Math.min(totalHeight, pixel));
+    const location = this.locateAtFraction(clamped / totalHeight);
+    const sourceHeight = clamped - this.correctionBeforeRank(location.rankHint);
+    return Math.max(0, Math.min(1, sourceHeight / this.geometry.estimatedTotalHeight));
   }
 
   locateAtFraction(fraction: number): WeightedPositionLookup {

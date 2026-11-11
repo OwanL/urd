@@ -1,6 +1,7 @@
 import type { ComponentType } from "preact";
 import type { TranscriptEntryRef, TranscriptTextFacts } from "../sessions/Messages.ts";
 import type { MarkdownClient } from "../markdown-rendering/MarkdownClient.ts";
+import type { MarkdownSavedSourcePosition } from "../markdown-rendering/MarkdownMessageView.tsx";
 
 // Supplied only by an explicit composition entry point; normal startup has none.
 // These are qualification inputs, not selected production budgets.
@@ -20,4 +21,10 @@ export interface RichMessageBodyProps {
   text: TranscriptTextFacts;
   root: HTMLElement | null;
   paused: boolean;
+  saved?: MarkdownSavedSourcePosition;
+  registerSource?: (
+    capture: ((signal: AbortSignal) => Promise<MarkdownSavedSourcePosition | null>) | null,
+  ) => void;
+  registerRestore?: (restore: ((saved: MarkdownSavedSourcePosition) => boolean) | null) => void;
+  onPublished?: () => void;
 }

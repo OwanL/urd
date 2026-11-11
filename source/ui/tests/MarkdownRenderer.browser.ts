@@ -715,6 +715,52 @@ async function exerciseMessageView(page: Page, open: (mode: string) => Promise<v
       ["message-view-replacement", "Generation B paragraph 24."],
     );
 
+    const reflow = await page.evaluate(async () => {
+      const harness = window.markdownRendererHarness.messageView!;
+      const saved = await harness.captureSource();
+      if (!saved) throw new Error("Expected a retained source anchor before reflow");
+      const root = document.querySelector<HTMLElement>(".markdown-renderer")!;
+      const anchor = root.querySelector<HTMLElement>(
+        `[data-source-start="${saved.cursor.utf8Offset}"]`,
+      )!;
+      const range = document.createRange();
+      range.selectNodeContents(anchor);
+      const before = range.getClientRects()[0]!.top;
+      const port = document.querySelector<HTMLElement>("#transcript-scrollport")!;
+      port.scrollTop += 40;
+      const later = await harness.captureSource();
+      if (!later || later.cursor.utf8Offset === saved.cursor.utf8Offset)
+        throw new Error("Expected a different retained source mapping");
+      const earlierRestored = harness.restoreCapturedSource(saved);
+      const reads = harness.replacement.pageSource.pieceRequests.length;
+      root.style.fontSize = "30px";
+      const movement = Math.abs(range.getClientRects()[0]!.top - before);
+      const restored = harness.restoreCapturedSource(saved);
+      const error = Math.abs(range.getClientRects()[0]!.top - before);
+      const stale = harness.restoreCapturedSource({
+        ...saved,
+        cursor: { ...saved.cursor, message: { ...saved.cursor.message, messageId: "stale" } },
+      });
+      root.style.removeProperty("font-size");
+      harness.restoreCapturedSource(saved);
+      return {
+        movement,
+        restored,
+        earlierRestored,
+        error,
+        stale,
+        reads: harness.replacement.pageSource.pieceRequests.length - reads,
+        opens: harness.openCount,
+      };
+    });
+    assert.equal(reflow.earlierRestored, true, "A later body capture displaced the saved mapping");
+    assert.ok(reflow.movement > 1, "Fixture did not reflow the retained source anchor");
+    assert.deepEqual(
+      [reflow.restored, reflow.stale, reflow.reads, reflow.opens],
+      [true, false, 0, 2],
+    );
+    assert.ok(reflow.error <= 1, `Cached source restoration moved the anchor by ${reflow.error}px`);
+
     const selected = await page.evaluate(async () => {
       const piece = document.querySelector<HTMLElement>('[data-piece="24"]')!;
       const range = document.createRange();

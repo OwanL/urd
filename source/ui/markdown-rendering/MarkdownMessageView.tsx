@@ -45,11 +45,8 @@ export class MarkdownMessageView {
   private readonly ownedGenerations = new Set<TrackedTextGeneration>();
   private readonly mutationControllers = new Set<AbortController>();
   private readonly sourceReads = new Map<AbortController, Promise<unknown>>();
-  private lastSourceMapping: {
-    readonly source: TrackedTextGeneration;
-    readonly sourceStart: number;
-    readonly cursor: MessageContentCursor;
-  } | null = null;
+  private mappingSource: TrackedTextGeneration | null = null;
+  private readonly sourceMappings = new Map<number, MessageContentCursor>();
   private pins: MarkdownSelectionPins | null = null;
   private rendererRoot: HTMLElement | null = null;
   private handoff: MarkdownGenerationHandoff | null = null;
@@ -153,7 +150,6 @@ export class MarkdownMessageView {
   restoreCapturedSource(saved: MarkdownSavedSourcePosition): boolean {
     const root = this.rendererRoot;
     const source = this.activeGeneration;
-    const cached = this.lastSourceMapping;
     const snapshot = this.handoff?.snapshot;
     if (
       this.paused ||
@@ -161,25 +157,16 @@ export class MarkdownMessageView {
       !root ||
       !source ||
       source.isDisposed ||
-      cached?.source !== source ||
+      this.mappingSource !== source ||
       snapshot?.generation !== source.manifest.generation ||
       !Number.isFinite(saved.offset)
     )
       return false;
-    const left = cached.cursor;
-    const right = saved.cursor;
-    if (
-      left.segmentIndex !== right.segmentIndex ||
-      left.utf8Offset !== right.utf8Offset ||
-      left.message.executionId !== right.message.executionId ||
-      left.message.messageId !== right.message.messageId ||
-      left.message.historyRevision !== right.message.historyRevision ||
-      left.message.role !== right.message.role
-    )
-      return false;
-    const piece = [...snapshot.pieces.values()].find(
-      (item) => item.source.start === cached.sourceStart,
+    const mapping = [...this.sourceMappings].find(([, cursor]) =>
+      sameSourceCursor(cursor, saved.cursor),
     );
+    const piece =
+      mapping && [...snapshot.pieces.values()].find((item) => item.source.start === mapping[0]);
     const width = this.host.getBoundingClientRect().width;
     if (!piece || width <= 0) return false;
     this.geometry.configure(snapshot.generation, width, "message");
@@ -354,7 +341,8 @@ export class MarkdownMessageView {
       } finally {
         this.pins?.dispose();
         this.pins = null;
-        this.lastSourceMapping = null;
+        this.mappingSource = null;
+        this.sourceMappings.clear();
         this.rendererRoot = null;
         render(null, this.host);
       }
@@ -525,13 +513,15 @@ export class MarkdownMessageView {
     if (!anchor) return null;
     const sourceStart = Number(anchor.start);
     if (!Number.isSafeInteger(sourceStart)) throw new Error("Markdown source anchor is invalid.");
-    const cached = this.lastSourceMapping;
-    if (cached?.source === source && cached.sourceStart === sourceStart)
-      return { cursor: cached.cursor, offset: anchor.offset };
+    const cached = this.mappingSource === source ? this.sourceMappings.get(sourceStart) : undefined;
+    if (cached) return { cursor: cached, offset: anchor.offset };
     const cursor = await source.sourceCursor(sourceStart, signal);
     signal.throwIfAborted();
-    if (this.activeGeneration === source && !source.isDisposed)
-      this.lastSourceMapping = { source, sourceStart, cursor };
+    if (this.activeGeneration === source && !source.isDisposed) {
+      if (this.mappingSource !== source) this.sourceMappings.clear();
+      this.mappingSource = source;
+      this.sourceMappings.set(sourceStart, cursor);
+    }
     return { cursor, offset: anchor.offset };
   }
 
@@ -702,7 +692,14 @@ export class MarkdownMessageView {
     anchor: MarkdownWindowAnchor | null,
   ): void {
     const previousGeneration = this.rendererRoot?.dataset.markdownGeneration;
-    if (this.lastSourceMapping?.source !== this.activeGeneration) this.lastSourceMapping = null;
+    if (this.mappingSource !== this.activeGeneration) {
+      this.mappingSource = this.activeGeneration;
+      this.sourceMappings.clear();
+    }
+    // Mappings live only as long as their retained pieces, including native-selection pins.
+    const starts = new Set([...snapshot.pieces.values()].map((piece) => piece.source.start));
+    for (const start of this.sourceMappings.keys())
+      if (!starts.has(start)) this.sourceMappings.delete(start);
     if (previousGeneration !== snapshot.generation) {
       this.pins?.dispose();
       this.pins = null;
@@ -782,6 +779,17 @@ export class MarkdownMessageView {
     );
     return next;
   }
+}
+
+function sameSourceCursor(left: MessageContentCursor, right: MessageContentCursor): boolean {
+  return (
+    left.segmentIndex === right.segmentIndex &&
+    left.utf8Offset === right.utf8Offset &&
+    left.message.executionId === right.message.executionId &&
+    left.message.messageId === right.message.messageId &&
+    left.message.historyRevision === right.message.historyRevision &&
+    left.message.role === right.message.role
+  );
 }
 
 function sameSeekTarget(

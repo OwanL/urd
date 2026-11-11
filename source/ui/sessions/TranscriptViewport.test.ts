@@ -137,6 +137,16 @@ void test("appends move followers to the new tail without moving readers", () =>
   assert.equal(readingUpdate.latestPosition, null);
 });
 
+void test("converts corrected scroll pixels back to the indexed source fraction", () => {
+  const viewport = new TranscriptViewport(geometry(10, 1, 1_000, [0, 9]));
+  viewport.recordMeasurement(measurement(3, 0, 100, 200));
+
+  assert.equal(viewport.positionFractionAtPixel(500), 0.4);
+  assert.equal(viewport.positionFractionAtPixel(700), 0.6);
+  assert.equal(viewport.positionFractionAtPixel(-10), 0);
+  assert.equal(viewport.positionFractionAtPixel(1_100), 1);
+});
+
 void test("same-revision geometry rejects stale append and estimate versions", () => {
   const viewport = new TranscriptViewport(geometry(2, 1, 200, [0, 1], 4));
   const readingAnchor = anchor(0);
@@ -160,6 +170,55 @@ void test("same-revision geometry rejects stale append and estimate versions", (
   const duplicateVersion = viewport.updateGeometry(geometry(3, 1, 500, [0, 1, 2], 7));
   assert.equal(viewport.snapshot().estimatedTotalHeight, 360);
   assert.equal(duplicateVersion.scrollAdjustment, 0);
+});
+
+void test("refreshes bounded position windows without invalidating measurements or follow state", () => {
+  const viewport = new TranscriptViewport(geometry(10, 1, 1_000, [0, 3, 9], 4));
+  const visible = anchor(5);
+  assert.equal(viewport.recordUserScroll(visible, false), true);
+  const generation = viewport.snapshot().generation;
+  viewport.recordMeasurement(measurement(2, generation, 100, 140));
+  const before = viewport.estimatedPrefixHeight(5);
+  const refreshedWindow = geometry(10, 1, 1_000, [0, 5, 9], 4);
+  const refreshed: TranscriptViewportGeometry = {
+    ...refreshedWindow,
+    weightedPositions: refreshedWindow.weightedPositions.map((position) =>
+      position.rank === 5 ? { ...position, estimatedTop: 560 } : position,
+    ),
+  };
+
+  const update = viewport.refreshGeometryWindow(refreshed);
+
+  assert.equal(update.scrollAdjustment, viewport.estimatedPrefixHeight(5) - before);
+  assert.equal(viewport.snapshot().positionVersion, 4);
+  assert.equal(viewport.snapshot().generation, generation);
+  assert.equal(viewport.snapshot().measurementCount, 1);
+  assert.deepEqual(update.anchor, visible);
+  assert.equal(update.followsLatest, false);
+  assert.throws(
+    () => viewport.refreshGeometryWindow(geometry(10, 1, 1_000, [0, 3, 9], 5)),
+    /same position state/,
+  );
+  assert.throws(
+    () =>
+      viewport.refreshGeometryWindow({
+        ...refreshed,
+        weightedPositions: refreshed.weightedPositions.map((position) =>
+          position.rank === 5 ? { ...position, entry: entry(6) } : position,
+        ),
+      }),
+    /without a new position version/,
+  );
+  assert.throws(
+    () =>
+      viewport.refreshGeometryWindow({
+        ...refreshed,
+        weightedPositions: refreshed.weightedPositions.map((position) =>
+          position.rank === 5 ? { ...position, estimatedTop: 561 } : position,
+        ),
+      }),
+    /without a new position version/,
+  );
 });
 
 void test("width changes invalidate measurements while preserving anchor and follow intent", () => {
@@ -245,6 +304,10 @@ void test("only genuine user navigation changes follow intent; Jump to latest re
   const readingAnchor = anchor(2);
 
   assert.equal(viewport.snapshot().followsLatest, true);
+  assert.equal(viewport.recordUserScroll(null, false), true);
+  assert.equal(viewport.snapshot().followsLatest, false);
+  assert.equal(viewport.snapshot().anchor, null);
+  viewport.jumpToLatest();
   assert.equal(viewport.recordAnchor(readingAnchor), true);
   assert.equal(viewport.snapshot().followsLatest, true);
   assert.equal(viewport.recordUserScroll(readingAnchor, false), true);

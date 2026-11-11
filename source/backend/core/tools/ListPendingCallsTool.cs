@@ -4,9 +4,7 @@ namespace Urd.Core.Tools;
 
 internal sealed class ListPendingCallsTool(PendingToolCalls pending) : AgentTool {
   public override string Name => "list_pending_calls";
-  public override ToolRelevance RelevantWhen { get; } = ToolRelevance.When("""
-    The task requires inspecting identities, start times, or cancellation state of pending or background tool work.
-    """);
+  public override ToolRelevance RelevantWhen => ToolRelevance.Always;
   public override string Description => """
     List pending tool calls, including their identities, start times and cancellation-request status.
     """;

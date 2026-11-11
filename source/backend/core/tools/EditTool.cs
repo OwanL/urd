@@ -6,9 +6,7 @@ namespace Urd.Core.Tools;
 // Matches every replacement against one original snapshot without normalizing untouched text.
 internal sealed class EditTool(FileMutationQueue files) : AgentTool {
   public override string Name => "edit";
-  public override ToolRelevance RelevantWhen { get; } = ToolRelevance.When("""
-    The task requires targeted exact-text changes while preserving the rest of a file.
-    """);
+  public override ToolRelevance RelevantWhen => ToolRelevance.Always;
   public override string Description => """
     Edit a single file using exact text replacement.
     Every edits[].oldText must match a unique, non-overlapping region of the original file.

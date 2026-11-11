@@ -6,9 +6,7 @@ namespace Urd.Core.Tools;
 // Creates or replaces a UTF-8 file, ordered with other Urd mutations of that path.
 internal sealed class WriteTool(FileMutationQueue files) : AgentTool {
   public override string Name => "write";
-  public override ToolRelevance RelevantWhen { get; } = ToolRelevance.When("""
-    The task requires creating new files or fully replacing existing file contents.
-    """);
+  public override ToolRelevance RelevantWhen => ToolRelevance.Always;
   public override string Description => """
     Write content to a file. Creates the file if it doesn't exist, overwrites if it does.
     Automatically creates parent directories. Use only for new files or complete rewrites.

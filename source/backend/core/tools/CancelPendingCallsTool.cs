@@ -4,9 +4,7 @@ namespace Urd.Core.Tools;
 
 internal sealed class CancelPendingCallsTool(PendingToolCalls pending) : AgentTool {
   public override string Name => "cancel_pending_calls";
-  public override ToolRelevance RelevantWhen { get; } = ToolRelevance.When("""
-    The task requires cancelling pending or background tool work.
-    """);
+  public override ToolRelevance RelevantWhen => ToolRelevance.Always;
   public override string Description => """
     Request cancellation of all pending tool calls except this call.
     This acknowledges requests, not completed cleanup or rollback; calls may already have had partial effects.

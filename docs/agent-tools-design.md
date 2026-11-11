@@ -110,7 +110,7 @@ and explicit startup recovery. Compaction and rich tool-result inspection remain
     `user` on the wire. Qualify this mapping per supported provider route.
 20. **Tool relevance** (owner review 2026-11-11). Every tool explicitly declares typed
     `RelevantWhen` metadata, separate from its agent-facing `Description`.
-    `ToolRelevance.Always` declares unconditional inclusion (`bash`);
+    `ToolRelevance.Always` declares unconditional inclusion (all six current tools);
     `ToolRelevance.When(guidance)` supplies immutable, nonblank relevance guidance for
     future pruning and dynamic discovery. This adds metadata only: no selector is
     implemented, and all configured tools remain available to the model up front.

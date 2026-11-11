@@ -6,9 +6,7 @@ namespace Urd.Core.Tools;
 // Reads bounded text pages or processed images after preceding Urd mutations finish.
 internal sealed class ReadTool(FileMutationQueue files) : AgentTool {
   public override string Name => "read";
-  public override ToolRelevance RelevantWhen { get; } = ToolRelevance.When("""
-    The task requires inspecting existing file, source, log, or image contents, including exact text before targeted edits.
-    """);
+  public override ToolRelevance RelevantWhen => ToolRelevance.Always;
   public override string Description => """
     Read a file. Supports UTF-8 text and images (jpg, png, gif, webp, bmp).
     Images are processed to at most 2000×2000 and below 4.5MiB of base64; BMP is converted before attachment.

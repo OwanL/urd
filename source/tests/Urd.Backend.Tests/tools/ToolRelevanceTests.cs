@@ -6,27 +6,23 @@ namespace Urd.Backend.Tests.Tools;
 
 public sealed class ToolRelevanceTests {
   [Fact]
-  public async Task BuiltInToolsKeepSelectionGuidanceSeparateFromAgentDescriptions() {
+  public async Task BuiltInToolsAreAlwaysRelevantAndKeepTheirAgentDescriptions() {
     if (!OperatingSystem.IsWindows())
       return;
     var bash = new GitBash();
     await using var processes = new ChatProcesses(bash);
     var files = new FileMutationQueue();
     var pending = new PendingToolCalls();
-    var shell = new BashTool(processes, bash, new Dictionary<string, string>());
-    AgentTool[] conditional = [
+    AgentTool[] tools = [
+      new BashTool(processes, bash, new Dictionary<string, string>()),
       new ReadTool(files), new WriteTool(files), new EditTool(files),
       new ListPendingCallsTool(pending), new CancelPendingCallsTool(pending)
     ];
 
-    Assert.Same(ToolRelevance.Always, shell.RelevantWhen);
-    foreach (AgentTool tool in conditional) {
-      string guidance = Assert.IsType<ToolRelevance.Conditional>(tool.RelevantWhen).Guidance;
-      Assert.False(string.IsNullOrWhiteSpace(guidance));
-      Assert.NotEqual(tool.Description, guidance);
-    }
-    foreach (AgentTool tool in conditional.Append(shell))
+    foreach (AgentTool tool in tools) {
+      Assert.Same(ToolRelevance.Always, tool.RelevantWhen);
       Assert.Equal(tool.Description, AgentToolDeclaration.Create(tool).Description);
+    }
   }
 
   [Fact]

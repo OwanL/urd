@@ -276,7 +276,7 @@ history. Keep the existing rendered regressions passing.
 not-sent projection with minimal client presentation, promotion without anchor
 movement.
 
-Likely owning files: backend `core/sessions/` (`Messages.cs`, `SessionSnapshot.cs`,
+Likely owning files: backend `core/sessions/` (`Messages.cs`, `SessionState.cs`,
 `SessionBase.cs`), `core/storage/` (`DatabaseSchema.cs`, `SnapshotReader.cs`,
 `MessageContentReader.cs`, `UserMessageStorage.cs`, `SessionExecutionStorage.cs`,
 `LlmResponseStorage.cs`, `LlmContextReader.cs`), `core/execution/SessionExecution.cs`,

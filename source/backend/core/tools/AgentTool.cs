@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Extensions.AI;
 
 namespace Urd.Core.Tools;
 
@@ -12,3 +13,13 @@ internal abstract class AgentTool {
     JsonElement arguments, ToolContext context, CancellationToken cancellation);
 }
 #pragma warning restore S1694
+
+// Invocation identity and chat defaults; the working directory is not a sandbox.
+internal sealed record ToolContext(
+  string WorkingDirectory, Guid RequestId, string CallId,
+  bool ModelAcceptsImages, Action<ToolOutput> ReportProgress);
+
+// A tool's text and optional images, with structured detail retained for consumers.
+internal sealed record ToolOutput(
+  string Text, IReadOnlyList<DataContent> Images,
+  JsonElement? Details = null, bool IsError = false);

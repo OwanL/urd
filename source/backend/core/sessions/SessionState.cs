@@ -3,6 +3,9 @@ using Urd.Core.Providers;
 
 namespace Urd.Core.Sessions;
 
+// Status is present for initial registration and status transitions; null marks a watched content change.
+public sealed record SessionChange(Guid Session, long Version, string? Status = null);
+
 // Bounded committed facts combined with live admission and Stop state by SessionBase.
 public sealed record SessionSnapshot(
     Guid SessionId, long HistoryRevision, bool AdmissionFenced,

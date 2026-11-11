@@ -193,7 +193,7 @@ discovery, not activity tracking or a complete summary API.
 
 ## Read contract and incremental review order
 
-1. [SessionSnapshot.cs](../source/backend/core/sessions/SessionSnapshot.cs) and
+1. [SessionState.cs](../source/backend/core/sessions/SessionState.cs) and
    [Messages.cs](../source/backend/core/sessions/Messages.cs) — detached records; shared
    `SessionExecutionResult`/`ExecutionOutcome` in [SessionExecutionResult.cs](../source/backend/core/execution/SessionExecutionResult.cs)
    are public, not duplicated. `ExecutionOutcome` describes an LLM request attempt, a tool invocation
@@ -233,9 +233,9 @@ Paths below are relative to the repository. Classes have their own files; small 
 share a file per concept. Read them alongside their owners.
 
 1. [SessionManager.cs](../source/backend/core/sessions/SessionManager.cs) — canonical handles,
-   borrowed dependencies, ID-only discovery, the session-shutdown boundary and `SessionRecord`
-   identity used to create/load handles; [SessionIdPage.cs](../source/backend/core/sessions/SessionIdPage.cs)
-   is the detached discovery page.
+   borrowed dependencies, ID-only discovery and the session-shutdown boundary;
+   [SessionIdentity.cs](../source/backend/core/sessions/SessionIdentity.cs) holds the stored `SessionRecord`
+   identity used to create/load handles and the detached `SessionIdPage` discovery page.
 2. [SessionBase.cs](../source/backend/core/sessions/SessionBase.cs) and
    [PrimarySession.cs](../source/backend/core/sessions/PrimarySession.cs) — admission/driver ownership;
    [UserMessageSubmission.cs](../source/backend/core/sessions/UserMessageSubmission.cs) holds the submission, receipt and enums;

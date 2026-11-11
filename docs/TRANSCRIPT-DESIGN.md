@@ -30,8 +30,18 @@ The batch reader, exact-entry Core facade and page-owned HTTP/browser adapter ar
 implemented but unactivated. Geometry accepts a shared outer scrollport; reconnects
 can replace a lease without changing its cached generation. Persisted segment/byte
 source anchors can be translated to and from generation-local offsets without loading
-source text. Focused tests cover these primitives; none constitutes qualification of
-the real transcript, common-message latency or production memory limits.
+source text. An explicit qualification entry now injects Markdown into the actual
+Workspace/Conversation/Transcript, with bounded message windows and retained paused
+conversation views. Normal entry bundles exclude the renderer and normal server startup
+still does not map its routes. Three isolated stored fixtures passed retained-DOM,
+native-selection and awaited-disposal checks in this composition.
+
+This is only the latest-history-window composition: global entry navigation, composed
+persisted source restoration, distant intra-message jumps and large catch-up remain
+unfinished. Partial ordinary blocks, actual hidden/freeze lifecycle, contention and
+memory recovery remain unqualified; paused views currently retain their active leases.
+No production limits or activation follow. See the latest real-Workspace checkpoint in
+[parser evidence](TRANSCRIPT-PARSER-EVIDENCE.md).
 
 Stages 3–4 (tool/reasoning detail and managed media) retain their separate ownership
 and requirements. This delivery sequence does not authorize bypassing Stage 2

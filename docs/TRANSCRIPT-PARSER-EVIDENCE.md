@@ -486,3 +486,38 @@ contention, memory and actual hidden/freeze lifecycle gates remain unqualified. 
 production limits or activation follow. All owned processes/ports stopped; the user's
 running server remained untouched. Full report, raw trials, hashes and cleanup proof:
 `C:/Users/OwanLazic/AppData/Local/Temp/urd-real-http-qual-ob68YR/REPORT.md`.
+
+## First real-Workspace composition checkpoint — 2026-11-11
+
+The explicit qualification entry now renders Markdown inside the actual Workspace,
+Conversation and Transcript, using the page SSE owner and production HTTP client. Normal
+entry bundles exclude the injected renderer; ordinary backend startup remains inactive.
+A production browser bundle was served directly by isolated Kestrel against three stored
+synthetic fixtures: mixed Markdown (870 bytes), code (84,498 bytes), and table (52,582 bytes).
+The frontend is a frozen working-tree capture; backend binaries are the isolated
+`Transcript-991456` build after exact-entry HTTP wiring, before later tool-only refactors.
+
+Nine final tab switches retained the same sampled DOM nodes, with 20/66/70 mounted pieces.
+A native selection across inline semantics survived a snapshot refresh. Awaited workspace
+disposal removed all panels with no release failures; shutdown returned all logical cache
+counters to zero. This does not establish heap or resident-memory recovery. Composition
+also exposed and fixed user-bubble code/table contrast and Preact 11's requirement for
+explicit CSS units on gap heights; corrected visuals passed independent image review.
+
+An earlier exploratory 12-switch pass observed 13.5–36.3 ms through two animation frames,
+with one bounded piece refill. It preceded the final fixes and ran under host memory
+pressure: it is **not accepted warm-tab latency evidence**. Only three chats were exercised;
+five retained slots and 64 active pieces were probe inputs, not production defaults.
+
+Verification: UI static checks, 249 unit tests (including session geometry/navigation),
+14 reported Markdown browser tests, 14 normal-app browser tests, one real-server client
+integration test and two focused Release route tests passed. Checkout physical lines were
+24,912 application / 23,903 test-helper lines at review (concurrent backend refactors
+included). Both owned runs stopped; both user hosts remained healthy and untouched.
+
+This still uses the latest metadata window. Global entry navigation, composed persisted
+source restoration, distant intra-message jumps, large catch-up, partial ordinary blocks,
+actual hidden/freeze behavior, contention, memory recovery and cache selection remain
+unfinished or unqualified. Paused views retain their active lease and DOM. No activation
+or user-preview build follows. Full provenance, limitations, artifacts and cleanup:
+`C:/Users/OwanLazic/AppData/Local/Temp/urd-real-workspace-TvspsL/REPORT.md`.

@@ -12,7 +12,8 @@ using ChatMessage = Microsoft.Extensions.AI.ChatMessage;
 namespace Urd.Core.Providers;
 
 // Bounded completed state, never a transcript of streaming updates. Native terminals authorize completion.
-internal sealed class ProviderStreamState(LlmProviderScope scope, IEnumerable<AITool>? tools, bool isChatGpt) {
+internal sealed class ProviderStreamState(LlmProviderScope scope, IEnumerable<AITool>? tools, bool isChatGpt,
+    ProviderCredentials? credentials) {
   private readonly HashSet<string> allowedFunctions = tools?.Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal) ?? [];
   private readonly SortedDictionary<int, string> completedItems = [];
   private readonly HashSet<int> chatCallIndexes = [];
@@ -83,9 +84,10 @@ internal sealed class ProviderStreamState(LlmProviderScope scope, IEnumerable<AI
       case StreamingResponseIncompleteUpdate:
         throw new ProviderOperationException(ProviderFailure.IncompleteResponse);
       case StreamingResponseFailedUpdate failed:
-        throw StreamFailure(failed.Response?.Error?.Code.ToString());
+        throw StreamFailure(failed.Response?.Error?.Code.ToString(), failed.Response?.Error?.Message,
+            failed.Response?.Error?.Param);
       case StreamingResponseErrorUpdate error:
-        throw StreamFailure(error.Code);
+        throw StreamFailure(error.Code, error.Message, error.Param);
       case StreamingResponseOutputItemDoneUpdate done:
         ValidateItem(done.Item);
         string encoded = Encode(done.Item);
@@ -210,9 +212,8 @@ internal sealed class ProviderStreamState(LlmProviderScope scope, IEnumerable<AI
   private void Count(string? value) => contentBytes = Add(contentBytes, Encoding.UTF8.GetByteCount(value ?? ""));
   private static int Add(int total, int count) => count <= LlmProviderContext.MaximumBytes - total ? total + count : throw Invalid();
   private static string Encode(ResponseItem item) => ModelReaderWriter.Write(item).ToString();
-  private static ProviderOperationException StreamFailure(string? code) => new(
-      ProviderOperationException.IsContextWindowExceededCode(code)
-          ? ProviderFailure.ContextWindowExceeded : ProviderFailure.ProviderUnavailable);
+  private ProviderOperationException StreamFailure(string? code, string? message, string? param) =>
+      ProviderOperationException.FromProviderStreamError(code, message, param, credentials);
 
   private static ProviderOperationException Invalid() => new(ProviderFailure.InvalidProviderResponse);
 }

@@ -15,6 +15,28 @@ namespace Urd.Backend.Tests.Providers;
 
 public sealed class ProviderModelClientTests {
   [Theory]
+  [InlineData(ProviderRoute.ChatGpt, LlmApi.OpenAIResponses, "developer")]
+  [InlineData(ProviderRoute.OpenAI, LlmApi.OpenAIResponses, "system")]
+  [InlineData(ProviderRoute.Custom, LlmApi.OpenAIChatCompletions, "system")]
+  public async Task InstructionsUseRouteAppropriateRolesWithoutMutatingSavedHistory(
+      ProviderRoute route, LlmApi api, string expectedRole) {
+    ChatMessage[] history = [new(ChatRole.System, "first instruction"),
+        new(ChatRole.System, "second instruction"), new(ChatRole.User, "hello")];
+    using var handler = new ScriptedOpenAIHandler(api == LlmApi.OpenAIResponses
+        ? Responses([Message]) : ChatStream());
+    using var http = new HttpClient(handler);
+
+    await foreach (var _ in new ProviderModelClient(http).GetStreamingResponseAsync(
+        State(api, route), history, Options(), default)) { /* Drain before reading the wire. */ }
+
+    using var document = JsonDocument.Parse(Assert.Single(handler.Requests).Body);
+    JsonElement input = document.RootElement.GetProperty(api == LlmApi.OpenAIResponses ? "input" : "messages");
+    Assert.Equal([expectedRole, expectedRole, "user"],
+        input.EnumerateArray().Select(item => item.GetProperty("role").GetString()));
+    Assert.Equal([ChatRole.System, ChatRole.System, ChatRole.User], history.Select(message => message.Role));
+  }
+
+  [Theory]
   [InlineData(LlmApi.OpenAIResponses)]
   [InlineData(LlmApi.OpenAIChatCompletions)]
   public async Task ForegroundToolImagesUseNativeProviderSerialization(LlmApi api) {
@@ -164,9 +186,8 @@ public sealed class ProviderModelClientTests {
     });
 
     Assert.Equal(failure, error.Failure);
-    Assert.Equal(failure.ToString(), error.Message);
+    Assert.StartsWith($"{failure} (HTTP 400)", error.Message);
     Assert.Null(error.InnerException);
-    Assert.DoesNotContain("private-token", error.ToString());
   }
 
   [Theory]
@@ -195,9 +216,9 @@ public sealed class ProviderModelClientTests {
     });
 
     Assert.Equal(failure, error.Failure);
-    Assert.Equal(failure.ToString(), error.Message);
+    Assert.StartsWith($"{failure} (HTTP {(int)status})", error.Message);
+    Assert.Contains("private-token", error.Message); // Provider text is retained; credential redaction has separate coverage.
     Assert.Null(error.InnerException);
-    Assert.DoesNotContain("private-token", error.ToString());
     Assert.Single(handler.Requests);
   }
 

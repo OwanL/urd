@@ -126,6 +126,18 @@ their separate two-minute limit. There are no automatic retries, fallback provid
 provider-hosted conversations or tool execution inside the client. `GetResponseAsync`
 consumes the same guarded streaming path, not a second unvalidated implementation.
 
+ChatGPT maps system instructions to `developer` messages at the request boundary; the plan
+Responses endpoint rejects `system` messages. Saved starting context and other routes keep
+their original roles.
+
+Failed requests retain their classification, HTTP status and available provider error message,
+code, parameter and request ID. Known connection credentials are redacted before normalization
+and truncation to 1024 characters. Raw response bodies, headers and inner exceptions are not
+saved as diagnostics. Provider messages can still echo prompt content; treat these local error
+records as private conversation data. Failed settlements expose the retained error through
+snapshot, Stop and history reads, including after reopen; the browser shows it inline.
+Earlier failures cannot recover detail that was already discarded.
+
 Text streams incrementally. Executable calls, final completion and native context are
 withheld until the positive native terminal, complete SDK iteration/disposal, cancellation
 callback drain and final manager grant check all succeed. A changed binding cannot redirect

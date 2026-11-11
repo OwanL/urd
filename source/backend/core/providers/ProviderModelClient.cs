@@ -26,43 +26,56 @@ internal sealed class ProviderModelClient(HttpClient httpClient) {
       wireOptions = ProviderModelOptions.Prepare(state.Connection, options);
       scope = new(state.Connection.Id, state.Generation, state.Connection.Api, options.ModelId!);
       history = LlmProviderContext.Prepare(messages, scope);
+      // ChatGPT's Responses endpoint rejects system messages, including saved starting context.
+      if (state.Connection.Route == ProviderRoute.ChatGpt)
+        history = history.Select(ForChatGpt).ToArray();
       client = CreateClient(state, options.ModelId!);
     } catch (Exception error) when (CanClassify(error, cancellationToken)) {
-      throw ProviderOperationException.FromProviderError(error, contextWindow: true);
+      throw ProviderOperationException.FromProviderError(error, contextWindow: true, credentials: state.Credentials);
     }
 
     using (client) {
-      var guard = new ProviderStreamState(scope, options.Tools, state.Connection.Route == ProviderRoute.ChatGpt);
+      var guard = new ProviderStreamState(scope, options.Tools, state.Connection.Route == ProviderRoute.ChatGpt,
+          state.Credentials);
       IAsyncEnumerator<ChatResponseUpdate> stream;
       try {
         stream = client.GetStreamingResponseAsync(history, wireOptions, cancellationToken).GetAsyncEnumerator(cancellationToken);
       } catch (Exception error) when (CanClassify(error, cancellationToken)) {
         cancellationToken.ThrowIfCancellationRequested();
-        throw ProviderOperationException.FromProviderError(error, contextWindow: true);
+        throw ProviderOperationException.FromProviderError(error, contextWindow: true, credentials: state.Credentials);
       }
       try {
-        while (await MoveNextAsync(stream, cancellationToken).ConfigureAwait(false)) {
+        while (await MoveNextAsync(stream, state.Credentials, cancellationToken).ConfigureAwait(false)) {
           ChatResponseUpdate? update;
           try {
             update = guard.Accept(stream.Current);
           } catch (Exception error) when (CanClassify(error, cancellationToken)) {
-            throw ProviderOperationException.FromProviderError(error, contextWindow: true);
+            throw ProviderOperationException.FromProviderError(error, contextWindow: true, credentials: state.Credentials);
           }
           if (update is not null) yield return update;
         }
       } finally {
-        await DisposeAsync(stream, cancellationToken).ConfigureAwait(false);
+        await DisposeAsync(stream, state.Credentials, cancellationToken).ConfigureAwait(false);
       }
       cancellationToken.ThrowIfCancellationRequested();
       ChatResponseUpdate final;
       try {
         final = guard.Complete();
       } catch (Exception error) when (CanClassify(error, cancellationToken)) {
-        throw ProviderOperationException.FromProviderError(error, contextWindow: true);
+        throw ProviderOperationException.FromProviderError(error, contextWindow: true, credentials: state.Credentials);
       }
       // Calls and the positive finish are published only after native iteration AND cleanup.
       yield return final;
     }
+  }
+
+  private static ChatMessage ForChatGpt(ChatMessage message) {
+    if (message.Role != ChatRole.System)
+      return message;
+
+    ChatMessage instruction = message.Clone();
+    instruction.Role = new ChatRole("developer");
+    return instruction;
   }
 
   private IChatClient CreateClient(ProviderState state, string model) {
@@ -85,21 +98,23 @@ internal sealed class ProviderModelClient(HttpClient httpClient) {
     };
   }
 
-  private static async ValueTask<bool> MoveNextAsync(IAsyncEnumerator<ChatResponseUpdate> stream, CancellationToken ct) {
+  private static async ValueTask<bool> MoveNextAsync(IAsyncEnumerator<ChatResponseUpdate> stream,
+      ProviderCredentials? credentials, CancellationToken ct) {
     try {
       return await stream.MoveNextAsync().ConfigureAwait(false);
     } catch (Exception error) when (CanClassify(error, ct)) {
       ct.ThrowIfCancellationRequested();
-      throw ProviderOperationException.FromProviderError(error, contextWindow: true);
+      throw ProviderOperationException.FromProviderError(error, contextWindow: true, credentials: credentials);
     }
   }
 
-  private static async ValueTask DisposeAsync(IAsyncEnumerator<ChatResponseUpdate> stream, CancellationToken ct) {
+  private static async ValueTask DisposeAsync(IAsyncEnumerator<ChatResponseUpdate> stream,
+      ProviderCredentials? credentials, CancellationToken ct) {
     try {
       await stream.DisposeAsync().ConfigureAwait(false);
     } catch (Exception error) when (CanClassify(error, ct)) {
       ct.ThrowIfCancellationRequested();
-      throw ProviderOperationException.FromProviderError(error, contextWindow: true);
+      throw ProviderOperationException.FromProviderError(error, contextWindow: true, credentials: credentials);
     }
   }
 

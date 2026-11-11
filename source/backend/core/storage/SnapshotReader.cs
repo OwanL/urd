@@ -37,9 +37,14 @@ internal sealed class SnapshotReader {
     """;
 
   internal const string SnapshotSettlementSql = """
-    SELECT run_id, outcome FROM execution_runs
-    WHERE session_id = $session AND outcome IS NOT NULL
-    ORDER BY ordinal DESC LIMIT 1;
+    SELECT r.run_id, r.outcome,
+        CASE WHEN r.outcome = 2 THEN coalesce(
+            (SELECT substr(q.error, 1, 1024) FROM execution_requests q
+                WHERE q.run_id = r.run_id AND q.outcome = 2 ORDER BY q.request_index DESC LIMIT 1),
+            substr(r.error, 1, 1024)) ELSE NULL END
+    FROM execution_runs r
+    WHERE r.session_id = $session AND r.outcome IS NOT NULL
+    ORDER BY r.ordinal DESC LIMIT 1;
     """;
 
   internal const string SnapshotSelectionSql = """
@@ -94,7 +99,11 @@ internal sealed class SnapshotReader {
     using SqliteCommand terminalRead = database.Command(transaction, SnapshotSettlementSql,
         ("$session", sessionId));
     using SqliteDataReader reader = terminalRead.ExecuteReader();
-    return reader.Read() ? new(reader.GetGuid(0), (ExecutionOutcome)reader.GetInt32(1)) : null;
+    if (!reader.Read())
+      return null;
+
+    string? error = reader.IsDBNull(2) ? null : reader.GetString(2);
+    return new(reader.GetGuid(0), (ExecutionOutcome)reader.GetInt32(1), error);
   }
 
   private LlmSelection? ReadLatestSelection(SqliteTransaction transaction, Guid sessionId, Guid? executionId) {

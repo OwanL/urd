@@ -46,7 +46,7 @@ internal sealed class TranscriptHistoryReader(Database database) {
       hasAfter |= query.Mode == TranscriptHistoryMode.Before;
     }
     var settlements = rows.Where(row => row.Settlement is not null)
-        .Select(row => new SessionExecutionResult(row.Descriptor.Entry.ExecutionId, row.Settlement!.Value))
+        .Select(row => new SessionExecutionResult(row.Descriptor.Entry.ExecutionId, row.Settlement!.Value, row.Error))
         .DistinctBy(result => result.ExecutionId).ToArray();
     return new(sessionId, query.ExpectedHistoryRevision, rows.Select(row => row.Descriptor).ToArray(),
         hasBefore, hasAfter, settlements);

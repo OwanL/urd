@@ -39,7 +39,7 @@ internal sealed class OpenAIProviderClient(HttpClient httpClient) {
       }).ToArray();
     } catch (Exception error) when (CanClassify(error, ct)) {
       ct.ThrowIfCancellationRequested();
-      throw ProviderOperationException.FromProviderError(error, discovery: true);
+      throw ProviderOperationException.FromProviderError(error, discovery: true, credentials: credentials);
     }
   }
 
@@ -54,7 +54,7 @@ internal sealed class OpenAIProviderClient(HttpClient httpClient) {
       };
     } catch (Exception error) when (CanClassify(error, ct)) {
       ct.ThrowIfCancellationRequested();
-      throw ProviderOperationException.FromProviderError(error);
+      throw ProviderOperationException.FromProviderError(error, credentials: credentials);
     }
   }
 
@@ -88,9 +88,11 @@ internal sealed class OpenAIProviderClient(HttpClient httpClient) {
           break;
         case StreamingResponseIncompleteUpdate:
           throw new ProviderOperationException(ProviderFailure.IncompleteResponse);
-        case StreamingResponseFailedUpdate:
-        case StreamingResponseErrorUpdate:
-          throw new ProviderOperationException(ProviderFailure.ProviderUnavailable);
+        case StreamingResponseFailedUpdate failed:
+          throw ProviderOperationException.FromProviderStreamError(failed.Response?.Error?.Code.ToString(),
+              failed.Response?.Error?.Message, failed.Response?.Error?.Param, credentials);
+        case StreamingResponseErrorUpdate error:
+          throw ProviderOperationException.FromProviderStreamError(error.Code, error.Message, error.Param, credentials);
       }
     }
     // Iteration disposes the SDK stream before success; partial text and ordinary EOF are not completion.

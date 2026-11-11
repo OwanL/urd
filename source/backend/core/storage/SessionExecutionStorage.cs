@@ -142,14 +142,17 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
             EXISTS (SELECT 1 FROM execution_tools t JOIN execution_requests q ON q.request_id = t.request_id
                 WHERE q.run_id = r.run_id AND q.request_index =
                     (SELECT MAX(request_index) FROM execution_requests WHERE run_id = r.run_id)),
-            r.compaction_selection_json IS NOT NULL
+            r.compaction_selection_json IS NOT NULL,
+            (SELECT substr(q.error, 1, 1024) FROM execution_requests q
+                WHERE q.run_id = r.run_id AND q.outcome = 2 ORDER BY q.request_index DESC LIMIT 1),
+            substr(r.error, 1, 1024)
         FROM execution_runs r WHERE r.session_id = $session AND r.run_id = $run;
         """, ("$session", sessionId), ("$run", executionId));
       if (DecideSettlement(read, driverOutcome) is not { } settlement)
         return null;
 
       if (settlement.AlreadySettled)
-        return new(executionId, settlement.Outcome);
+        return new(executionId, settlement.Outcome, settlement.Error);
 
       using SqliteCommand settle = database.Command(transaction, """
         UPDATE execution_tool_completions SET claimed_request_id = NULL WHERE claimed_request_id IN (
@@ -182,7 +185,7 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
       using SqliteCommand revision = database.Command(transaction,
           "SELECT history_revision FROM execution_runs WHERE run_id = $run;", ("$run", executionId));
       PublishCompletions(transaction, sessionId, (long)revision.ExecuteScalar()!);
-      return new(executionId, settlement.Outcome);
+      return new(executionId, settlement.Outcome, settlement.Error);
     });
   }
 
@@ -278,15 +281,23 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
 
   internal SessionExecutionResult? ReadSettlement(Guid sessionId, Guid executionId) {
     return database.Guarded<SessionExecutionResult?>(() => {
-      using SqliteCommand read = database.Command(null,
-          "SELECT outcome FROM execution_runs WHERE session_id = $session AND run_id = $run;",
-          ("$session", sessionId), ("$run", executionId));
-      object? outcome = read.ExecuteScalar();
-      return outcome is null or DBNull ? null : new(executionId, (ExecutionOutcome)(long)outcome);
+      using SqliteCommand read = database.Command(null, """
+        SELECT r.outcome,
+            (SELECT substr(q.error, 1, 1024) FROM execution_requests q
+                WHERE q.run_id = r.run_id AND q.outcome = 2 ORDER BY q.request_index DESC LIMIT 1),
+            substr(r.error, 1, 1024)
+        FROM execution_runs r WHERE r.session_id = $session AND r.run_id = $run;
+        """, ("$session", sessionId), ("$run", executionId));
+      using SqliteDataReader reader = read.ExecuteReader();
+      if (!reader.Read() || reader.IsDBNull(0))
+        return null;
+
+      ExecutionOutcome outcome = (ExecutionOutcome)reader.GetInt32(0);
+      return new(executionId, outcome, ReadSettlementError(reader, outcome, 1, 2));
     });
   }
 
-  private static (ExecutionOutcome Outcome, bool AlreadySettled)? DecideSettlement(
+  private static (ExecutionOutcome Outcome, bool AlreadySettled, string? Error)? DecideSettlement(
       SqliteCommand read, ExecutionOutcome driverOutcome) {
     using SqliteDataReader reader = read.ExecuteReader();
     if (!reader.Read())
@@ -299,16 +310,17 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
     bool missingResults = reader.GetInt32(4) != 0;
     bool needsToolContinuation = reader.GetInt32(5) != 0;
     if (executionOutcome is { } settled)
-      return (settled, AlreadySettled: true);
+      return (settled, AlreadySettled: true, ReadSettlementError(reader, settled, 7, 8));
 
     if (stopRequested)
-      return (ExecutionOutcome.Cancelled, AlreadySettled: false);
+      return (ExecutionOutcome.Cancelled, AlreadySettled: false, null);
 
     if (driverOutcome != ExecutionOutcome.Completed)
-      return (driverOutcome, AlreadySettled: false);
+      return (driverOutcome, AlreadySettled: false,
+          ReadSettlementError(reader, driverOutcome, 7, 8));
 
     if (reader.GetBoolean(6))
-      return (driverOutcome, AlreadySettled: false);
+      return (driverOutcome, AlreadySettled: false, null);
 
     if (lastOutcome is not { } outcome)
       return null;
@@ -316,6 +328,15 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
     if (outcome == ExecutionOutcome.Completed && (pendingSubmissions || missingResults || needsToolContinuation))
       return null;
 
-    return (outcome, AlreadySettled: false);
+    return (outcome, AlreadySettled: false, ReadSettlementError(reader, outcome, 7, 8));
+  }
+
+  private static string? ReadSettlementError(SqliteDataReader reader, ExecutionOutcome outcome,
+      int requestErrorIndex, int runErrorIndex) {
+    if (outcome != ExecutionOutcome.Failed)
+      return null;
+    if (!reader.IsDBNull(requestErrorIndex))
+      return reader.GetString(requestErrorIndex);
+    return reader.IsDBNull(runErrorIndex) ? null : reader.GetString(runErrorIndex);
   }
 }

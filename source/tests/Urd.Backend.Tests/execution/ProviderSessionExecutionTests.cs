@@ -139,18 +139,68 @@ public sealed class ProviderSessionExecutionTests {
     var handler = new ScriptedOpenAIHandler(ToolResponse(api).Replace("data: [DONE]\n\n", "")) { FailAtEnd = true };
     int effects = 0;
     AIFunction lookup = AIFunctionFactory.Create((string key) => Interlocked.Increment(ref effects), name: "lookup");
-    await using var fixture = new ManagedSession(database, handler);
-    await fixture.OpenAsync(api, [lookup]);
-    await fixture.SendAsync("go", ExecutionOutcome.Failed);
+    Guid sessionId;
+    Guid connectionId;
+    SessionExecutionResult settlement;
+    await using (var fixture = new ManagedSession(database, handler)) {
+      await fixture.OpenAsync(api, [lookup]);
+      sessionId = fixture.Session.Id;
+      connectionId = fixture.Connection.Id;
+      var selection = new LlmSelection(fixture.Connection, "fixture-model", null, ModelFamily.Other, false);
+      UserMessageReceipt receipt = await fixture.Session.SubmitUserMessageAsync(
+          new(Guid.NewGuid(), 0, "go", selection));
+      Assert.Equal(MessageAcceptance.Accepted, receipt.Acceptance);
+      Guid executionId = Assert.IsType<Guid>(receipt.ExecutionId);
+      settlement = await fixture.Session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout);
 
-    Assert.Equal(0, effects);
+      Assert.Equal(ExecutionOutcome.Failed, settlement.Outcome);
+      Assert.Equal("ProviderUnavailable (IOException)", settlement.Error);
+      Assert.DoesNotContain("Synthetic private provider transport details", settlement.Error!, StringComparison.Ordinal);
+      Assert.Equal(0, effects);
+      Assert.Single(handler.Requests);
+      Assert.Equal(1, handler.StreamDisposals);
+      Assert.Empty(StoredTools.Read(database));
+      Assert.Empty(ReadProviderResponses(database));
+      Assert.Equal(settlement.Error, Assert.Single(StoredExecutions.ReadRequests(database)).Error);
+      Assert.All(StoredLlmResponses.Read(database), chunk => Assert.False(chunk.Final));
+      SessionSnapshot snapshot = await fixture.Session.ReadSnapshotAsync();
+      Assert.False(snapshot.AdmissionFenced);
+      Assert.Equal(settlement, snapshot.LastSettlement);
+      TranscriptHistoryPage history = await fixture.Session.Transcript.ReadHistoryAsync(
+          new(TranscriptHistoryMode.Latest, snapshot.HistoryRevision));
+      Assert.Equal(settlement, Assert.Single(history.Settlements));
+    }
+
+    using var reopenedHandler = new ScriptedOpenAIHandler("");
+    await using var reopened = new ManagedSession(database, reopenedHandler);
+    await reopened.OpenAsync(api, new ToolCatalog([]), sessionId, connectionId);
+    Assert.Equal(settlement, (await reopened.Session.ReadSnapshotAsync()).LastSettlement);
+    TranscriptHistoryPage reopenedHistory = await reopened.Session.Transcript.ReadHistoryAsync(
+        new(TranscriptHistoryMode.Latest, 0));
+    Assert.Equal(settlement, Assert.Single(reopenedHistory.Settlements));
+  }
+
+  [Fact]
+  public async Task ProviderRejectionRemainsInspectableAfterSettlement() {
+    using var database = new TemporaryDatabase();
+    var handler = new ScriptedOpenAIHandler("""{"detail":"System messages are not allowed"}""",
+        "application/json", System.Net.HttpStatusCode.BadRequest);
+    await using var fixture = new ManagedSession(database, handler);
+    await fixture.OpenAsync(LlmApi.OpenAIResponses, []);
+    var selection = new LlmSelection(fixture.Connection, "fixture-model", null, ModelFamily.Other, false);
+    UserMessageReceipt receipt = await fixture.Session.SubmitUserMessageAsync(
+        new(Guid.NewGuid(), 0, "hello", selection));
+    SessionExecutionResult settlement = await fixture.Session.WaitForSettlementAsync(receipt.ExecutionId!.Value)
+        .WaitAsync(TestTimeout);
+
+    Assert.Equal(ExecutionOutcome.Failed, settlement.Outcome);
+    Assert.Contains("HTTP 400", settlement.Error);
+    Assert.Contains("System messages are not allowed", settlement.Error);
+    Assert.Equal(settlement, (await fixture.Session.ReadSnapshotAsync()).LastSettlement);
+    TranscriptHistoryPage history = await fixture.Session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, 0));
+    Assert.Equal(settlement, Assert.Single(history.Settlements));
+    Assert.Equal(settlement.Error, Assert.Single(StoredExecutions.ReadRequests(database)).Error);
     Assert.Single(handler.Requests);
-    Assert.Equal(1, handler.StreamDisposals);
-    Assert.Empty(StoredTools.Read(database));
-    Assert.Empty(ReadProviderResponses(database));
-    Assert.Equal(ExecutionOutcome.Failed, Assert.Single(StoredExecutions.ReadRequests(database)).Outcome);
-    Assert.All(StoredLlmResponses.Read(database), chunk => Assert.False(chunk.Final));
-    Assert.False((await fixture.Session.ReadSnapshotAsync()).AdmissionFenced);
   }
 
   private static string ToolResponse(LlmApi api, bool background = false) {

@@ -38,7 +38,11 @@ internal sealed class TranscriptHistoryStorage(
         r.stopping, r.outcome AS execution_outcome,
         m.call_id, CASE WHEN m.role = 3 THEN t.name ELSE m.tool_name END AS tool_name,
         t.started, t.outcome AS tool_outcome, t.started_at, t.ended_at,
-        c.reason AS compaction_reason, c.tokens_before, c.tokens_after
+        c.reason AS compaction_reason, c.tokens_before, c.tokens_after,
+        CASE WHEN r.outcome = 2 THEN coalesce(
+            (SELECT substr(f.error, 1, 1024) FROM execution_requests f
+                WHERE f.run_id = r.run_id AND f.outcome = 2 ORDER BY f.request_index DESC LIMIT 1),
+            substr(r.error, 1, 1024)) ELSE NULL END AS execution_error
     FROM window m
     JOIN execution_runs r ON r.run_id = m.run_id
     LEFT JOIN execution_requests q ON q.request_id = m.request_id
@@ -102,7 +106,8 @@ internal sealed class TranscriptHistoryStorage(
     TranscriptCompactionFacts? compaction = isCompaction ? new(
         (CompactionReason)reader.GetInt32("compaction_reason"), reader.GetInt64("tokens_before"), reader.GetInt64("tokens_after")) : null;
     var descriptor = new TranscriptEntryDescriptor(reference, ReadTime(reader, "created_at"), text, tool, compaction);
-    return new(reader.GetInt64("ordinal"), descriptor, ReadOutcome(reader, "execution_outcome"));
+    return new(reader.GetInt64("ordinal"), descriptor, ReadOutcome(reader, "execution_outcome"),
+        reader.IsDBNull("execution_error") ? null : reader.GetString("execution_error"));
   }
 
   private static TranscriptTextFacts ReadTextFacts(SqliteDataReader reader, TranscriptEntryRef entry) {
@@ -144,4 +149,4 @@ internal sealed class TranscriptHistoryStorage(
 }
 
 internal sealed record TranscriptHistoryRow(
-    long Ordinal, TranscriptEntryDescriptor Descriptor, ExecutionOutcome? Settlement);
+    long Ordinal, TranscriptEntryDescriptor Descriptor, ExecutionOutcome? Settlement, string? Error);

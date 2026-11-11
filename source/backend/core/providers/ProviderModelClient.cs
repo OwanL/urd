@@ -28,7 +28,7 @@ internal sealed class ProviderModelClient(HttpClient httpClient) {
       history = LlmProviderContext.Prepare(messages, scope);
       client = CreateClient(state, options.ModelId!);
     } catch (Exception error) when (CanClassify(error, cancellationToken)) {
-      throw ProviderOperationException.FromProviderError(error);
+      throw ProviderOperationException.FromProviderError(error, contextWindow: true);
     }
 
     using (client) {
@@ -38,7 +38,7 @@ internal sealed class ProviderModelClient(HttpClient httpClient) {
         stream = client.GetStreamingResponseAsync(history, wireOptions, cancellationToken).GetAsyncEnumerator(cancellationToken);
       } catch (Exception error) when (CanClassify(error, cancellationToken)) {
         cancellationToken.ThrowIfCancellationRequested();
-        throw ProviderOperationException.FromProviderError(error);
+        throw ProviderOperationException.FromProviderError(error, contextWindow: true);
       }
       try {
         while (await MoveNextAsync(stream, cancellationToken).ConfigureAwait(false)) {
@@ -46,7 +46,7 @@ internal sealed class ProviderModelClient(HttpClient httpClient) {
           try {
             update = guard.Accept(stream.Current);
           } catch (Exception error) when (CanClassify(error, cancellationToken)) {
-            throw ProviderOperationException.FromProviderError(error);
+            throw ProviderOperationException.FromProviderError(error, contextWindow: true);
           }
           if (update is not null) yield return update;
         }
@@ -58,7 +58,7 @@ internal sealed class ProviderModelClient(HttpClient httpClient) {
       try {
         final = guard.Complete();
       } catch (Exception error) when (CanClassify(error, cancellationToken)) {
-        throw ProviderOperationException.FromProviderError(error);
+        throw ProviderOperationException.FromProviderError(error, contextWindow: true);
       }
       // Calls and the positive finish are published only after native iteration AND cleanup.
       yield return final;
@@ -90,7 +90,7 @@ internal sealed class ProviderModelClient(HttpClient httpClient) {
       return await stream.MoveNextAsync().ConfigureAwait(false);
     } catch (Exception error) when (CanClassify(error, ct)) {
       ct.ThrowIfCancellationRequested();
-      throw ProviderOperationException.FromProviderError(error);
+      throw ProviderOperationException.FromProviderError(error, contextWindow: true);
     }
   }
 
@@ -99,7 +99,7 @@ internal sealed class ProviderModelClient(HttpClient httpClient) {
       await stream.DisposeAsync().ConfigureAwait(false);
     } catch (Exception error) when (CanClassify(error, ct)) {
       ct.ThrowIfCancellationRequested();
-      throw ProviderOperationException.FromProviderError(error);
+      throw ProviderOperationException.FromProviderError(error, contextWindow: true);
     }
   }
 

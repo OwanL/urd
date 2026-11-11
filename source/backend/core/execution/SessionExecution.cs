@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.AI;
 using Urd.Core.Context;
+using Urd.Core.Compaction;
 using Urd.Core.Sessions;
 using Urd.Core.Providers;
 using Urd.Core.Tools;
@@ -23,10 +24,11 @@ internal sealed class SessionExecution : IDisposable {
   private readonly PendingToolCalls pending;
   private Task? stopCallbacks;
   private int backgroundCalls;
+  private readonly CompactionSubmission? compaction;
 
   internal SessionExecution(Guid executionId, SessionBase session, Func<ProviderConnection, IChatClient> createChatClient,
       LlmSelection selection, StartingContextManager startingContextManager,
-      IReadOnlyList<AgentTool>? tools = null, PendingToolCalls? pending = null) {
+      IReadOnlyList<AgentTool>? tools = null, PendingToolCalls? pending = null, CompactionSubmission? compaction = null) {
     ExecutionId = executionId;
     this.session = session;
     this.createChatClient = createChatClient;
@@ -34,10 +36,14 @@ internal sealed class SessionExecution : IDisposable {
     this.startingContextManager = startingContextManager;
     this.tools = tools ?? [];
     this.pending = pending ?? new PendingToolCalls();
+    this.compaction = compaction;
+    IsCompacting = compaction is not null;
   }
 
   internal Guid ExecutionId { get; }
   internal bool IsStopping => stop.IsCancellationRequested;
+  internal bool IsCompactionOnly => compaction is not null;
+  internal bool IsCompacting { get; set; }
   internal bool HasPendingTools => Volatile.Read(ref backgroundCalls) != 0;
   internal Task JoinPendingToolsAsync() => pending.JoinExecutionAsync(ExecutionId);
 
@@ -60,14 +66,19 @@ internal sealed class SessionExecution : IDisposable {
   // Called sequentially outside the session lock. Foreground calls join here;
   // registered background calls remain owned until the session drains them.
   internal async Task<ExecutionOutcome> RunRequestAsync(LlmRequest request) {
-    LlmRequestResult outcome;
-    bool saved;
-    // Keep the source alive through the outcome save, as disposal can wait for callbacks.
-    // Tools use the execution token, never this already-cleaned-up provider-request source.
-    using (var requestStop = CancellationTokenSource.CreateLinkedTokenSource(stop.Token)) {
-      outcome = await SendRequestAsync(request, requestStop);
-      saved = await session.Recorder.CompleteRequestAsync(ExecutionId, outcome);
+    LlmRequestResult outcome = await SendAttemptAsync(request);
+    // Retry only the rejected model exchange, never a tool or any observed partial output.
+    if (outcome.Failure == ProviderFailure.ContextWindowExceeded && !outcome.OutputObserved && !IsStopping
+        && await session.CanRetryOverflowAsync(ExecutionId, request.RequestId)) {
+      try {
+        LlmRequest? reduced = await CompactContextAsync(request.RequestId, CompactionReason.Overflow);
+        if (reduced is not null)
+          outcome = await SendAttemptAsync(reduced, compactBefore: false);
+      } catch (Exception failure) {
+        outcome = ToRequestResult(request.RequestId, failure);
+      }
     }
+    bool saved = await session.Recorder.CompleteRequestAsync(ExecutionId, outcome);
 
     if (!saved)
       return ExecutionOutcome.Cancelled;
@@ -75,6 +86,73 @@ internal sealed class SessionExecution : IDisposable {
       return outcome.Outcome;
 
     return await RunToolsAsync(request.RequestId, outcome.ToolCalls ?? []);
+  }
+
+  private async Task<LlmRequestResult> SendAttemptAsync(LlmRequest request, bool compactBefore = true) {
+    using var requestStop = CancellationTokenSource.CreateLinkedTokenSource(stop.Token);
+    return await SendRequestAsync(request, requestStop, compactBefore);
+  }
+
+  internal async Task<ExecutionOutcome> RunCompactionAsync() {
+    try {
+      if (await CompactContextAsync(null, CompactionReason.Manual, compaction!.Focus) is null)
+        await session.RecordCompactionErrorAsync(ExecutionId, "No older history can be compacted without dropping recent context.");
+      return IsStopping ? ExecutionOutcome.Cancelled : ExecutionOutcome.Completed;
+    } catch (OperationCanceledException) when (IsStopping) {
+      return ExecutionOutcome.Cancelled;
+    } catch (CompactionSaveException) {
+      throw;
+    } catch (Exception failure) {
+      await session.RecordCompactionErrorAsync(ExecutionId, failure is ProviderOperationException provider
+          ? provider.Failure.ToString() : "History compaction failed; the previous context is unchanged.");
+      return ExecutionOutcome.Failed;
+    }
+  }
+
+  // Summary work runs outside the session gate. The commit rechecks Stop, revision and prior boundary.
+  private async Task<LlmRequest?> CompactContextAsync(Guid? requestId, CompactionReason reason, string? focus = null,
+      CompactionContext? prepared = null) {
+    stop.Token.ThrowIfCancellationRequested();
+    if (reason == CompactionReason.Threshold && selection.ContextWindow is null)
+      return null;
+    CompactionContext context = prepared ?? await session.ReadCompactionContextAsync(ExecutionId, requestId);
+    await EnsureStartingContextAsync(context.ReadMessages());
+    CompactionPlan? plan = HistoryCompactor.Prepare(context, selection,
+        startingContext!.Instructions, startingContext.Tools, reason, focus);
+    if (plan is null)
+      return null;
+    await session.SetCompactingAsync(ExecutionId, true);
+    try {
+      chatClient ??= createChatClient(selection.Connection);
+      CompactionResult result;
+      try {
+        result = await HistoryCompactor.SummarizeAsync(chatClient, selection, plan, stop.Token);
+      } catch (OperationCanceledException) when (IsStopping) {
+        throw;
+      } catch (Exception failure) {
+        throw new InvalidOperationException("History compaction failed; the previous context is unchanged.", failure);
+      }
+      stop.Token.ThrowIfCancellationRequested();
+      bool saved;
+      try {
+        saved = await session.SaveCompactionAsync(ExecutionId, plan, result);
+      } catch (Exception failure) {
+        throw new CompactionSaveException(failure);
+      }
+      if (!saved)
+        throw new OperationCanceledException("The compaction boundary was rejected.");
+      CompactionContext reduced = await session.ReadCompactionContextAsync(ExecutionId, requestId);
+      return new(requestId ?? Guid.Empty, reduced.ReadMessages(), reduced);
+    } finally {
+      await session.SetCompactingAsync(ExecutionId, IsCompactionOnly);
+    }
+  }
+
+  private async Task EnsureStartingContextAsync(IReadOnlyList<ChatMessage> messages) {
+    startingContext ??= session.ReadStartingContext() ?? await startingContextManager.CreateAsync(new(
+        session.Kind, selection.Family, session.WorkingDirectory,
+        messages.FirstOrDefault(message => message.Role == ChatRole.User)?.Text ?? "", null), stop.Token);
+    stop.Token.ThrowIfCancellationRequested();
   }
 
   private async Task<ExecutionOutcome> RunToolsAsync(Guid requestId, IReadOnlyList<LlmToolCall> calls) {
@@ -221,26 +299,26 @@ internal sealed class SessionExecution : IDisposable {
     return new(call.CallId, outcome, new ToolOutput(error, [], IsError: true));
   }
 
-  private async Task<LlmRequestResult> SendRequestAsync(LlmRequest request, CancellationTokenSource requestStop) {
+  private async Task<LlmRequestResult> SendRequestAsync(LlmRequest request, CancellationTokenSource requestStop, bool compactBefore) {
     var writer = new LlmResponseWriter(request.RequestId, SaveChunkAsync,
         (callId, name) => ObserveToolAsync(request.RequestId, callId, name));
     var response = new LlmResponseAccumulator(writer);
     IAsyncEnumerator<ChatResponseUpdate>? updates = null;
     Task<bool>? pendingRead = null;
     Exception? failure = null;
+    bool outputObserved = false;
     try {
       CancellationToken stopToken = stop.Token;
       stopToken.ThrowIfCancellationRequested();
-      startingContext ??= session.ReadStartingContext() ?? await startingContextManager.CreateAsync(new(
-          session.Kind, selection.Family, session.WorkingDirectory,
-          request.Messages.FirstOrDefault(message => message.Role == ChatRole.User)?.Text ?? "", null), stopToken);
-      stopToken.ThrowIfCancellationRequested();
+      await EnsureStartingContextAsync(request.Messages);
+      if (compactBefore)
+        request = await CompactContextAsync(request.RequestId, CompactionReason.Threshold, prepared: request.Context) ?? request;
       chatClient ??= createChatClient(selection.Connection);
       var options = new ChatOptions {
         ModelId = selection.ModelId,
         Reasoning = selection.ReadReasoningEffort() is { } effort
             ? new ReasoningOptions { Effort = effort } : null,
-        Tools = [.. startingContext.Tools]
+        Tools = [.. startingContext!.Tools]
       };
       await StartRequestAsync(request.RequestId, startingContext);
       updates = chatClient
@@ -251,6 +329,7 @@ internal sealed class SessionExecution : IDisposable {
       while (await WaitForNextUpdateAsync(writer, pendingRead ??= updates.MoveNextAsync().AsTask())) {
         pendingRead = null;
         stopToken.ThrowIfCancellationRequested();
+        outputObserved |= updates.Current.Contents.Any(content => content is not UsageContent);
         await response.AppendAsync(updates.Current);
       }
 
@@ -262,11 +341,16 @@ internal sealed class SessionExecution : IDisposable {
     }
 
     await CleanUpAsync(requestStop, pendingRead, updates, failure);
+    if (failure is ProviderOperationException && !IsStopping) {
+      try { await writer.FlushAsync(); }
+      catch (Exception saveFailure) { failure = saveFailure; }
+    }
     LlmRequestResult outcome = ToRequestResult(request.RequestId, failure);
     return outcome with {
       ToolCalls = outcome.Outcome == ExecutionOutcome.Completed ? response.ToolCalls : null,
       ProviderResponse = outcome.Outcome == ExecutionOutcome.Completed ? response.ProviderResponse : null,
-      Usage = response.Usage
+      Usage = response.Usage,
+      OutputObserved = outputObserved
     };
   }
 
@@ -284,7 +368,7 @@ internal sealed class SessionExecution : IDisposable {
 
   private LlmRequestResult ToRequestResult(Guid requestId, Exception? failure) {
     // A failed save is a session failure, not a failed LLM request.
-    if (failure is OutputSaveException or RequestStartSaveException)
+    if (failure is OutputSaveException or RequestStartSaveException or CompactionSaveException)
       ExceptionDispatchInfo.Throw(failure);
 
     bool stopped = stop.IsCancellationRequested;
@@ -296,7 +380,7 @@ internal sealed class SessionExecution : IDisposable {
       _ => ExecutionOutcome.Failed
     };
     string? error = outcome == ExecutionOutcome.Failed ? failure!.Message : null;
-    return new(requestId, outcome, error);
+    return new(requestId, outcome, error, Failure: (failure as ProviderOperationException)?.Failure);
   }
 
   private async Task StartRequestAsync(Guid requestId, StartingContext startingContext) {
@@ -366,6 +450,8 @@ internal sealed class SessionExecution : IDisposable {
 #pragma warning disable S3871 // Private driver signals, not public exception contracts.
   // The session no longer accepts output from this execution.
   private sealed class OutputRejectedException : Exception;
+
+  private sealed class CompactionSaveException(Exception inner) : Exception("Saving history compaction failed.", inner);
 
   private sealed class OutputSaveException(Exception inner) : Exception("Saving response output failed.", inner);
 

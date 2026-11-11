@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.AI;
 using Urd.Core.Context;
+using Urd.Core.Compaction;
 using Urd.Core.Execution;
 using Urd.Core.Storage;
 using Urd.Core.Providers;
@@ -55,6 +56,76 @@ public abstract class SessionBase {
   // Restores the delivered starting view; opening a session alone never composes it.
   internal StartingContext? ReadStartingContext() => store.StartingContexts.Read(Id);
 
+  public async Task<CompactionReceipt?> CompactAsync(CompactionSubmission submission) {
+    ArgumentNullException.ThrowIfNull(submission);
+    if (submission.OperationId == Guid.Empty || submission.ExpectedHistoryRevision < 0
+        || submission.LlmSelection is null || submission.Focus?.Length > 8192)
+      throw new ArgumentException("Compaction requires an operation ID, revision, selection and bounded focus.", nameof(submission));
+    submission.LlmSelection.Validate();
+    TaskCompletionSource? released = null;
+    CompactionReceipt? receipt;
+    using (await gate.AcquireAsync()) {
+      var admission = WriteToStore(() => store.Compactions.Admit(Id, submission,
+          acceptingUserMessages && !needsAttention && submission.ExpectedHistoryRevision == HistoryRevision));
+      if (admission is null)
+        return null;
+      receipt = admission.Value.Receipt;
+      if (admission.Value.New) {
+        released = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        StartExecution(submission.OperationId, submission.LlmSelection, released.Task, submission);
+        PublishChange();
+      }
+    }
+    released?.SetResult();
+    return receipt;
+  }
+
+  public async Task<CompactionReceipt?> ReadCompactionReceiptAsync(Guid operationId, CancellationToken cancellation = default) {
+    using var held = await gate.AcquireAsync(cancellation);
+    return store.Compactions.ReadReceipt(Id, operationId);
+  }
+
+  public async Task<CompactionSummary?> ReadCompactionAsync(Guid id, long revision, CancellationToken cancellation = default) {
+    using var held = await gate.AcquireAsync(cancellation);
+    return store.Compactions.Read(Id, revision, id);
+  }
+
+  internal async Task<CompactionContext> ReadCompactionContextAsync(Guid executionId, Guid? requestId) {
+    using var held = await gate.AcquireAsync();
+    if (!CanRecordExecution(executionId))
+      throw new OperationCanceledException("The execution no longer accepts compaction.");
+    return store.Compactions.ReadContext(Id, HistoryRevision, requestId is null ? null : executionId, requestId);
+  }
+
+  internal async Task<bool> SaveCompactionAsync(Guid executionId, CompactionPlan plan, CompactionResult result) {
+    using var held = await gate.AcquireAsync();
+    if (!CanRecordExecution(executionId))
+      return false;
+    bool saved = WriteToStore(() => store.Compactions.Save(Id, executionId, HistoryRevision, plan, result)) is not null;
+    if (saved)
+      PublishChange();
+    return saved;
+  }
+
+  internal async Task SetCompactingAsync(Guid executionId, bool compacting) {
+    using var held = await gate.AcquireAsync();
+    if (IsCurrentExecution(executionId)) {
+      execution!.SetCompacting(compacting);
+      PublishChange();
+    }
+  }
+
+  internal async Task RecordCompactionErrorAsync(Guid executionId, string? error) {
+    using var held = await gate.AcquireAsync();
+    if (CanRecordExecution(executionId, allowStopping: true))
+      WriteToStore(() => { store.Compactions.RecordError(Id, executionId, error); return true; });
+  }
+
+  internal async Task<bool> CanRetryOverflowAsync(Guid executionId, Guid requestId) {
+    using var held = await gate.AcquireAsync();
+    return CanRecordExecution(executionId) && store.Executions.CanRetryOverflow(Id, executionId, requestId);
+  }
+
   // Manager shutdown joins executions before terminating deliberately retained processes.
   internal Task KillProcessesAsync() => OperatingSystem.IsWindows() && processes is not null
       ? processes.KillAllAsync() : Task.CompletedTask;
@@ -71,7 +142,8 @@ public abstract class SessionBase {
 
   public async Task<SessionSnapshot> ReadSnapshotAsync(CancellationToken cancellation = default) {
     using var held = await gate.AcquireAsync(cancellation);
-    return status.ApplyLiveState(store.Snapshots.ReadStored(Id), acceptingUserMessages, execution);
+    return status.ApplyLiveState(store.Snapshots.ReadStored(Id), acceptingUserMessages, execution)
+        with { IsCompacting = execution?.IsCompacting == true };
   }
 
   public async Task<IDisposable> SubscribeAsync(Action<SessionChange> observer, bool watched,
@@ -197,9 +269,9 @@ public abstract class SessionBase {
   }
 
   // Caller holds the lock. The driver starts only after admission releases it.
-  private void StartExecution(Guid executionId, LlmSelection selection, Task lockReleased) {
+  private void StartExecution(Guid executionId, LlmSelection selection, Task lockReleased, CompactionSubmission? compaction = null) {
     var work = new SessionExecution(executionId, this, createChatClient, selection,
-        startingContextManager, tools.For(selection.Family), pending);
+        startingContextManager, tools.For(selection.Family), pending, compaction);
     execution = new SessionExecutionDriver(this, gate, work);
     executionTask = execution.RunAsync(lockReleased);
   }

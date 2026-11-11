@@ -11,6 +11,7 @@ public sealed class UrdStore : IDisposable {
     var toolResults = new ToolResultCodec(new ToolImageStore(databasePath + ".tool-images"));
     Sessions = new(database);
     StartingContexts = new(database);
+    Compactions = new(database, toolResults);
     UserMessages = new(database);
     Executions = new(database, toolResults);
     LlmResponses = new(database);
@@ -28,6 +29,7 @@ public sealed class UrdStore : IDisposable {
   internal ModelSettingsStorage ModelSettings { get; }
   internal SessionStorage Sessions { get; }
   internal StartingContextStorage StartingContexts { get; }
+  internal CompactionStorage Compactions { get; }
   internal UserMessageStorage UserMessages { get; }
   internal SessionExecutionStorage Executions { get; }
   internal LlmResponseStorage LlmResponses { get; }

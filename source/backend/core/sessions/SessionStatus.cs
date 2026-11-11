@@ -41,8 +41,11 @@ internal sealed class SessionStatus(long historyRevision) {
       return "needs-attention";
     if (admissionFenced)
       return "fenced";
-    if (execution is not null)
+    if (execution is not null) {
+      if (execution.IsCompacting)
+        return "compacting";
       return execution.IsWaiting ? "waiting" : "running";
+    }
     return lastOutcome == ExecutionOutcome.Failed ? "failed" : "idle";
   }
 }

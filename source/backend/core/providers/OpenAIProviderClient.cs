@@ -25,16 +25,17 @@ internal sealed class OpenAIProviderClient(HttpClient httpClient) {
         var result = await client.GetModelsAsync(new RequestOptions { CancellationToken = ct }).ConfigureAwait(false);
         using var response = result.GetRawResponse();
         using var document = JsonDocument.Parse(response.Content);
-        return ReadPlanModels(document.RootElement);
+        return ReadPlanModels(document.RootElement, connection);
       }
 
       var models = await client.GetModelsAsync(ct).ConfigureAwait(false);
       using var raw = models.GetRawResponse();
       using var envelope = JsonDocument.Parse(raw.Content);
-      RequireArray(envelope.RootElement, "data");
+      Dictionary<string, int> reportedContextWindows = ReadReportedContextWindows(RequireArray(envelope.RootElement, "data"));
       return models.Value.Select(model => {
         string id = Required(model?.Id);
-        return new ProviderModel(id, id);
+        int? reported = reportedContextWindows.TryGetValue(id, out int contextWindow) ? contextWindow : null;
+        return new ProviderModel(id, id, ModelContextWindows.Resolve(connection, id, reported));
       }).ToArray();
     } catch (Exception error) when (CanClassify(error, ct)) {
       ct.ThrowIfCancellationRequested();
@@ -127,14 +128,27 @@ internal sealed class OpenAIProviderClient(HttpClient httpClient) {
     RetryPolicy = new ClientRetryPolicy(0)
   };
 
-  private static ProviderModel[] ReadPlanModels(JsonElement envelope) => RequireArray(envelope, "models")
-      .EnumerateArray()
+  private static ProviderModel[] ReadPlanModels(JsonElement envelope, ProviderConnection connection) =>
+      RequireArray(envelope, "models").EnumerateArray()
       .Where(model => model.TryGetProperty("visibility", out var visibility) && visibility.GetString() == "list")
       .Select(model => {
         string id = Required(model.GetProperty("slug").GetString());
         string? name = model.TryGetProperty("display_name", out var display) ? display.GetString() : null;
-        return new ProviderModel(id, string.IsNullOrWhiteSpace(name) ? id : name);
+        return new ProviderModel(id, string.IsNullOrWhiteSpace(name) ? id : name,
+            ModelContextWindows.Resolve(connection, id, model));
       }).ToArray();
+
+  private static Dictionary<string, int> ReadReportedContextWindows(JsonElement models) {
+    var contextWindows = new Dictionary<string, int>(StringComparer.Ordinal);
+    foreach (JsonElement model in models.EnumerateArray()) {
+      if (!model.TryGetProperty("id", out JsonElement id) || id.ValueKind != JsonValueKind.String ||
+          string.IsNullOrWhiteSpace(id.GetString()) || ModelContextWindows.ReadReported(model) is not { } contextWindow)
+        continue;
+
+      contextWindows[id.GetString()!] = contextWindow;
+    }
+    return contextWindows;
+  }
 
   private static JsonElement RequireArray(JsonElement envelope, string name) {
     if (!envelope.TryGetProperty(name, out var array) || array.ValueKind != JsonValueKind.Array)

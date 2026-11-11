@@ -1,4 +1,5 @@
 using Urd.Core.Execution;
+using Urd.Core.Compaction;
 
 namespace Urd.Core.Sessions;
 
@@ -6,7 +7,7 @@ namespace Urd.Core.Sessions;
 public sealed record TranscriptEntryRef(
     Guid ExecutionId, Guid EntryId, TranscriptEntryKind Kind, long HistoryRevision);
 
-public enum TranscriptEntryKind { User, Text, Tool, ToolCompletion }
+public enum TranscriptEntryKind { User, Text, Tool, ToolCompletion, Compaction }
 
 public enum TranscriptHistoryMode { Latest, Before, After, Around }
 
@@ -15,7 +16,10 @@ public sealed record TranscriptHistoryQuery(
 
 // Metadata only. Neither message text nor tool arguments/results belong in a history page.
 public sealed record TranscriptEntryDescriptor(
-    TranscriptEntryRef Entry, DateTimeOffset? CreatedAt, TranscriptTextFacts? Text, TranscriptToolFacts? Tool);
+    TranscriptEntryRef Entry, DateTimeOffset? CreatedAt, TranscriptTextFacts? Text, TranscriptToolFacts? Tool,
+    TranscriptCompactionFacts? Compaction = null);
+
+public sealed record TranscriptCompactionFacts(CompactionReason Reason, long TokensBefore, long TokensAfter);
 
 public sealed record TranscriptTextFacts(
     MessageContentCursor From, MessageContentCursor AvailableThrough, bool IsClosed, bool FinalOutputCommitted);

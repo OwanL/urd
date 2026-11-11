@@ -82,8 +82,10 @@ internal sealed class ProviderStreamState(LlmProviderScope scope, IEnumerable<AI
         break;
       case StreamingResponseIncompleteUpdate:
         throw new ProviderOperationException(ProviderFailure.IncompleteResponse);
-      case StreamingResponseFailedUpdate or StreamingResponseErrorUpdate:
-        throw new ProviderOperationException(ProviderFailure.ProviderUnavailable);
+      case StreamingResponseFailedUpdate failed:
+        throw StreamFailure(failed.Response?.Error?.Code.ToString());
+      case StreamingResponseErrorUpdate error:
+        throw StreamFailure(error.Code);
       case StreamingResponseOutputItemDoneUpdate done:
         ValidateItem(done.Item);
         string encoded = Encode(done.Item);
@@ -208,6 +210,10 @@ internal sealed class ProviderStreamState(LlmProviderScope scope, IEnumerable<AI
   private void Count(string? value) => contentBytes = Add(contentBytes, Encoding.UTF8.GetByteCount(value ?? ""));
   private static int Add(int total, int count) => count <= LlmProviderContext.MaximumBytes - total ? total + count : throw Invalid();
   private static string Encode(ResponseItem item) => ModelReaderWriter.Write(item).ToString();
+  private static ProviderOperationException StreamFailure(string? code) => new(
+      ProviderOperationException.IsContextWindowExceededCode(code)
+          ? ProviderFailure.ContextWindowExceeded : ProviderFailure.ProviderUnavailable);
+
   private static ProviderOperationException Invalid() => new(ProviderFailure.InvalidProviderResponse);
 }
 

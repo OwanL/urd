@@ -1,5 +1,6 @@
 using Microsoft.Extensions.AI;
 using Urd.Core.Providers;
+using Urd.Core.Compaction;
 
 namespace Urd.Core.Execution;
 
@@ -7,7 +8,8 @@ namespace Urd.Core.Execution;
 // only after the request claim is committed.
 internal sealed record LlmRequest(
     Guid RequestId,
-    IReadOnlyList<ChatMessage> Messages);
+    IReadOnlyList<ChatMessage> Messages,
+    CompactionContext? Context = null);
 
 // Buffered response text sent through SessionBase for persistence.
 // IsFinal closes the text, not the execution; the final chunk may be empty.
@@ -26,4 +28,6 @@ internal sealed record LlmRequestResult(
     string? Error = null,
     IReadOnlyList<LlmToolCall>? ToolCalls = null,
     LlmProviderResponse? ProviderResponse = null,
-    UsageDetails? Usage = null);
+    UsageDetails? Usage = null,
+    ProviderFailure? Failure = null,
+    bool OutputObserved = false);

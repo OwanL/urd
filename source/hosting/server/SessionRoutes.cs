@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Data.Sqlite;
 using Urd.Core.Execution;
+using Urd.Core.Compaction;
 using Urd.Core.Sessions;
 
 namespace Urd.Server;
@@ -21,6 +22,17 @@ internal static class SessionRoutes {
         ReadReceiptAsync(http, sessions, sessionId, submissionId));
     routes.MapPost("/{sessionId}/executions/{executionId}/stop", (HttpContext http, Guid sessionId, Guid executionId) =>
         StopAsync(http, sessions, sessionId, executionId));
+    routes.MapPost("/{sessionId}/compactions", (HttpContext http, Guid sessionId) => CompactAsync(http, sessions, sessionId));
+    routes.MapGet("/{sessionId}/compactions/operations/{operationId}", (HttpContext http, Guid sessionId, Guid operationId) =>
+        WithSessionAsync(http, sessions, sessionId, async session => {
+          CompactionReceipt? receipt = await session.ReadCompactionReceiptAsync(operationId, http.RequestAborted);
+          return receipt is null ? Results.Content("null", "application/json") : Results.Ok(receipt);
+        }));
+    routes.MapGet("/{sessionId}/compactions/{compactionId}", (HttpContext http, Guid sessionId, Guid compactionId, long expectedHistoryRevision) =>
+        WithSessionAsync(http, sessions, sessionId, async session => {
+          CompactionSummary? summary = await session.ReadCompactionAsync(compactionId, expectedHistoryRevision, http.RequestAborted);
+          return summary is null ? Results.NotFound() : Results.Ok(summary);
+        }));
     routes.MapGet("/{sessionId}/snapshot", (HttpContext http, Guid sessionId) =>
         WithSessionAsync(http, sessions, sessionId, async session =>
             Results.Ok(await session.ReadSnapshotAsync(http.RequestAborted))));
@@ -116,6 +128,16 @@ internal static class SessionRoutes {
     });
   }
 
+  private static async Task<IResult> CompactAsync(HttpContext http, SessionManager sessions, Guid sessionId) {
+    CompactionSubmission? submission = await http.Request.ReadFromJsonAsync<CompactionSubmission>(http.RequestAborted);
+    if (submission is null)
+      return Results.BadRequest();
+    return await WithSessionAsync(http, sessions, sessionId, async session => {
+      CompactionReceipt? receipt = await session.CompactAsync(submission);
+      return receipt is null ? Results.Conflict() : Results.Ok(receipt);
+    });
+  }
+
   private static async Task<IResult> StopAsync(HttpContext http, SessionManager sessions, Guid sessionId, Guid executionId) {
     if (executionId == Guid.Empty)
       return Results.BadRequest();
@@ -160,6 +182,7 @@ internal static class SessionRoutes {
       "text" => TranscriptEntryKind.Text,
       "tool" => TranscriptEntryKind.Tool,
       "toolCompletion" => TranscriptEntryKind.ToolCompletion,
+      "compaction" => TranscriptEntryKind.Compaction,
       _ => null
     };
     if (mode is null || query.ExpectedHistoryRevision < 0)

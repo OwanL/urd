@@ -9,7 +9,7 @@ saved-primary-ID discovery, durable Send decisions, safe-boundary steering, addr
 Stop, bounded snapshot/history/content reads, known-not-sent discovery and graceful
 shutdown. The browser workspace is implemented and served as static assets by the Server.
 
-`UrdStore` owns the shared database, currently schema 15. It records whether a request
+`UrdStore` owns the shared database, currently schema 16. It records whether a request
 started sending and pages inputs known not to have been sent, so users can retrieve
 and explicitly resend them. Snapshots stay slim; transcript metadata and
 content use separate bounded reads, and reported usage is persisted per request. Provider
@@ -19,7 +19,7 @@ credential behavior.
 
 Before the supported public data baseline, schema changes replace the schema rather than
 migrating it. A fresh/version-0 database creates all current tables and indexes in one
-transaction; version 15 reopens normally. Other versions fail with reset instructions:
+transaction; version 16 reopens normally. Other versions fail with reset instructions:
 stop Urd, delete `urd.sqlite`, `urd.sqlite-wal` and `urd.sqlite-shm`, then restart.
 Urd never deletes these files automatically. Requests have only known not-attempted (1)
 or attempted (2) provenance; transcript user entries require request links and receipts
@@ -54,9 +54,22 @@ Current tool availability and declaration compatibility still control execution:
 or changed declarations cannot silently rebind old calls to new tool semantics.
 
 The snapshot is currently per session, including explicit model changes: all implemented
-tool families use the same generic catalog. Reload, compaction and future family-specific
-exposure boundaries remain separate work, not an automatic refresh mechanism. System
+tool families use the same generic catalog. Compaction retains this frozen starting context;
+reload and future family-specific exposure boundaries are not automatic refresh mechanisms. System
 instruction wording is intentionally minimal and can be researched independently.
+
+## History compaction
+
+Model settings and frozen selections carry an optional positive `ContextWindow`; unknown limits
+still allow Send. Exact-ID defaults are restricted to trusted provider identities. Before model
+requests, threshold preparation may summarize older history through the shared request-only
+`IChatClient`; explicit provider overflow permits one retry before any output or tool call.
+Configured limits are unchanged; only headroom/recent-history budgets shrink for small windows.
+
+Successful summaries and metadata-only markers commit together in `session_compactions` and
+`execution_messages`. Context reads apply the saved boundary without rewriting the transcript.
+Manual compaction is idle-only, has its own execution/receipt and uses ordinary addressed Stop;
+failure or cancellation leaves the previous boundary usable. See [compaction design](compaction-design.md).
 
 ## Naming and structure cleanup
 

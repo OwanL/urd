@@ -2,6 +2,7 @@ using System.Data;
 using System.Globalization;
 using Microsoft.Data.Sqlite;
 using Urd.Core.Execution;
+using Urd.Core.Compaction;
 using Urd.Core.Sessions;
 
 namespace Urd.Core.Storage;
@@ -36,11 +37,13 @@ internal sealed class TranscriptHistoryStorage(
         q.next_chunk_index, q.response_final, q.outcome AS request_outcome,
         r.stopping, r.outcome AS execution_outcome,
         m.call_id, CASE WHEN m.role = 3 THEN t.name ELSE m.tool_name END AS tool_name,
-        t.started, t.outcome AS tool_outcome, t.started_at, t.ended_at
+        t.started, t.outcome AS tool_outcome, t.started_at, t.ended_at,
+        c.reason AS compaction_reason, c.tokens_before, c.tokens_after
     FROM window m
     JOIN execution_runs r ON r.run_id = m.run_id
     LEFT JOIN execution_requests q ON q.request_id = m.request_id
     LEFT JOIN execution_tools t ON t.request_id = m.request_id AND t.call_id = m.call_id
+    LEFT JOIN session_compactions c ON c.compaction_id = m.message_id AND m.role = 4
     ORDER BY m.ordinal {{(ascending ? "ASC" : "DESC")}};
     """;
 
@@ -93,9 +96,12 @@ internal sealed class TranscriptHistoryStorage(
     var reference = new TranscriptEntryRef(reader.GetGuid("run_id"), reader.GetGuid("message_id"),
         (TranscriptEntryKind)reader.GetInt32("role"), revision);
     bool isTool = reference.Kind is TranscriptEntryKind.Tool or TranscriptEntryKind.ToolCompletion;
-    TranscriptTextFacts? text = isTool ? null : ReadTextFacts(reader, reference);
+    bool isCompaction = reference.Kind == TranscriptEntryKind.Compaction;
+    TranscriptTextFacts? text = isTool || isCompaction ? null : ReadTextFacts(reader, reference);
     TranscriptToolFacts? tool = isTool ? ReadToolFacts(reader) : null;
-    var descriptor = new TranscriptEntryDescriptor(reference, ReadTime(reader, "created_at"), text, tool);
+    TranscriptCompactionFacts? compaction = isCompaction ? new(
+        (CompactionReason)reader.GetInt32("compaction_reason"), reader.GetInt64("tokens_before"), reader.GetInt64("tokens_after")) : null;
+    var descriptor = new TranscriptEntryDescriptor(reference, ReadTime(reader, "created_at"), text, tool, compaction);
     return new(reader.GetInt64("ordinal"), descriptor, ReadOutcome(reader, "execution_outcome"));
   }
 

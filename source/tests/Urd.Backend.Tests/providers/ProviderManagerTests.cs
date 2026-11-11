@@ -42,6 +42,28 @@ public sealed class ProviderManagerTests {
   }
 
   [Fact]
+  public async Task CatalogPreservesProviderReportedPositiveContextWindow() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    const string body = """
+        {"object":"list","data":[
+          {"id":"reported-model","object":"model","created":1700000000,"owned_by":"fixture","context_window":32768},
+          {"id":"unknown-model","object":"model","created":1700000000,"owned_by":"fixture","context_window":0}
+        ]}
+        """;
+    using var handler = new ScriptedOpenAIHandler(body, "application/json");
+    var manager = Manager(store, handler);
+    try {
+      ProviderConnection connection = await manager.AddCustomAsync(Settings(AuthenticationMethod.None));
+      ProviderModelCatalog catalog = await manager.RefreshModelCatalogAsync(connection.Id).WaitAsync(TestTimeout);
+      Assert.Equal(32768, Assert.Single(catalog.Models, model => model.Id == "reported-model").ContextWindow);
+      Assert.Null(Assert.Single(catalog.Models, model => model.Id == "unknown-model").ContextWindow);
+    } finally {
+      await CloseAsync(manager);
+    }
+  }
+
+  [Fact]
   public async Task CredentialChangeJoinsCatalogCleanupAndLateResponseCannotRepopulateIt() {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);

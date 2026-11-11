@@ -43,8 +43,8 @@ internal sealed class SnapshotReader {
     """;
 
   internal const string SnapshotSelectionSql = """
-    SELECT d.llm_selection_json FROM execution_runs r
-    JOIN input_decisions d ON d.session_id = r.session_id AND d.input_id = r.input_id
+    SELECT COALESCE(d.llm_selection_json, r.compaction_selection_json) FROM execution_runs r
+    LEFT JOIN input_decisions d ON d.session_id = r.session_id AND d.input_id = r.input_id
     WHERE r.session_id = $session AND r.run_id = $run;
     """;
 

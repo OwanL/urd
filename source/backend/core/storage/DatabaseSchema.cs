@@ -4,7 +4,7 @@ namespace Urd.Core.Storage;
 
 // Creates the current pre-release schema; incompatible databases require a manual reset.
 internal static class DatabaseSchema {
-  private const int SchemaVersion = 15;
+  private const int SchemaVersion = 16;
 
   internal static void Initialize(SqliteConnection connection) {
     using SqliteCommand command = connection.CreateCommand();
@@ -73,11 +73,16 @@ internal static class DatabaseSchema {
           session_id TEXT NOT NULL REFERENCES sessions(session_id),
           run_id TEXT NOT NULL UNIQUE,
           history_revision INTEGER NOT NULL CHECK (history_revision >= 0),
-          input_id TEXT NOT NULL,
+          input_id TEXT,
+          compaction_selection_json TEXT,
+          compaction_focus TEXT,
+          error TEXT,
           stopping INTEGER NOT NULL DEFAULT 0 CHECK (stopping IN (0, 1)),
           outcome INTEGER CHECK (outcome IN (0, 1, 2)),
           UNIQUE (session_id, input_id),
-          FOREIGN KEY (session_id, input_id) REFERENCES input_decisions(session_id, input_id)
+          FOREIGN KEY (session_id, input_id) REFERENCES input_decisions(session_id, input_id),
+          CHECK ((input_id IS NOT NULL AND compaction_selection_json IS NULL)
+              OR (input_id IS NULL AND compaction_selection_json IS NOT NULL))
       ) STRICT;
       CREATE TABLE execution_requests (
           request_id TEXT PRIMARY KEY NOT NULL,
@@ -85,6 +90,7 @@ internal static class DatabaseSchema {
           request_index INTEGER NOT NULL DEFAULT 0 CHECK (request_index >= 0),
           attempt INTEGER NOT NULL DEFAULT 1 CHECK (attempt IN (1, 2)),
           usage_json TEXT,
+          compaction_id TEXT REFERENCES session_compactions(compaction_id),
           response_id TEXT,
           next_chunk_index INTEGER NOT NULL DEFAULT 0 CHECK (next_chunk_index >= 0),
           response_final INTEGER NOT NULL DEFAULT 0 CHECK (response_final IN (0, 1)),
@@ -115,10 +121,10 @@ internal static class DatabaseSchema {
           session_id TEXT NOT NULL REFERENCES sessions(session_id),
           history_revision INTEGER NOT NULL CHECK (history_revision >= 0),
           run_id TEXT NOT NULL REFERENCES execution_runs(run_id),
-          role INTEGER NOT NULL CHECK (role IN (0, 1, 2, 3)),
+          role INTEGER NOT NULL CHECK (role IN (0, 1, 2, 3, 4)),
           message_id TEXT NOT NULL,
           input_id TEXT,
-          request_id TEXT NOT NULL REFERENCES execution_requests(request_id),
+          request_id TEXT REFERENCES execution_requests(request_id),
           first_chunk_index INTEGER NOT NULL DEFAULT 0 CHECK (first_chunk_index >= 0),
           end_chunk_index INTEGER,
           created_at TEXT,
@@ -129,12 +135,14 @@ internal static class DatabaseSchema {
           UNIQUE (role, request_id, call_id),
           FOREIGN KEY (session_id, input_id) REFERENCES input_decisions(session_id, input_id),
           CHECK (end_chunk_index IS NULL OR end_chunk_index >= first_chunk_index),
-          CHECK ((role = 0 AND input_id IS NOT NULL AND call_id IS NULL
+          CHECK ((role = 0 AND input_id IS NOT NULL AND request_id IS NOT NULL AND call_id IS NULL
                       AND tool_name IS NULL AND end_chunk_index IS NULL)
               OR (role = 1 AND input_id IS NULL AND request_id IS NOT NULL AND call_id IS NULL
                       AND tool_name IS NULL)
               OR (role IN (2, 3) AND input_id IS NULL AND request_id IS NOT NULL AND end_chunk_index IS NULL
-                      AND call_id IS NOT NULL))
+                      AND call_id IS NOT NULL)
+              OR (role = 4 AND input_id IS NULL AND request_id IS NULL
+                      AND call_id IS NULL AND tool_name IS NULL AND end_chunk_index IS NULL))
       ) STRICT;
       CREATE TABLE transcript_position_totals (
           session_id TEXT NOT NULL REFERENCES sessions(session_id),
@@ -148,7 +156,7 @@ internal static class DatabaseSchema {
           session_id TEXT NOT NULL REFERENCES sessions(session_id),
           history_revision INTEGER NOT NULL CHECK (history_revision >= 0),
           rank INTEGER NOT NULL CHECK (rank >= 0),
-          kind INTEGER NOT NULL CHECK (kind IN (0, 1, 2, 3)),
+          kind INTEGER NOT NULL CHECK (kind IN (0, 1, 2, 3, 4)),
           weight INTEGER NOT NULL CHECK (weight > 0),
           prefix_weight INTEGER NOT NULL CHECK (prefix_weight >= 0),
           UNIQUE (session_id, history_revision, rank)
@@ -221,6 +229,23 @@ internal static class DatabaseSchema {
           request_id TEXT PRIMARY KEY NOT NULL REFERENCES execution_requests(request_id),
           response_json TEXT NOT NULL
       ) STRICT;
+      CREATE TABLE session_compactions (
+          ordinal INTEGER PRIMARY KEY AUTOINCREMENT,
+          compaction_id TEXT NOT NULL UNIQUE,
+          session_id TEXT NOT NULL REFERENCES sessions(session_id),
+          history_revision INTEGER NOT NULL CHECK (history_revision >= 0),
+          run_id TEXT NOT NULL REFERENCES execution_runs(run_id),
+          first_kept_request_id TEXT NOT NULL REFERENCES execution_requests(request_id),
+          first_kept_message_index INTEGER NOT NULL CHECK (first_kept_message_index >= 0),
+          first_kept_run_ordinal INTEGER NOT NULL,
+          first_kept_request_index INTEGER NOT NULL CHECK (first_kept_request_index >= 0),
+          reason INTEGER NOT NULL CHECK (reason IN (0, 1, 2)),
+          tokens_before INTEGER NOT NULL CHECK (tokens_before >= 0),
+          tokens_after INTEGER NOT NULL CHECK (tokens_after >= 0 AND tokens_after < tokens_before),
+          created_at TEXT NOT NULL,
+          summary_json TEXT NOT NULL
+      ) STRICT;
+      CREATE INDEX session_compactions_latest ON session_compactions(session_id, history_revision, ordinal DESC);
       CREATE TABLE provider_connections (
           connection_id TEXT PRIMARY KEY NOT NULL,
           name TEXT NOT NULL,
@@ -241,6 +266,7 @@ internal static class DatabaseSchema {
           model_id TEXT NOT NULL,
           family INTEGER NOT NULL CHECK (family IN (0, 1, 2, 3)),
           supports_images INTEGER NOT NULL CHECK (supports_images IN (0, 1)),
+          context_window INTEGER CHECK (context_window IS NULL OR context_window > 0),
           PRIMARY KEY (connection_id, model_id)
       ) STRICT;
       CREATE TABLE provider_host (
@@ -257,7 +283,7 @@ internal static class DatabaseSchema {
       CREATE INDEX execution_inputs_not_sent_order ON execution_inputs(session_id, ordinal) WHERE not_sent = 1;
       CREATE INDEX execution_messages_history_order ON execution_messages(session_id, history_revision, ordinal DESC);
       CREATE INDEX execution_messages_request_order ON execution_messages(request_id, role, first_chunk_index);
-      PRAGMA user_version = 15;
+      PRAGMA user_version = 16;
       """;
     command.ExecuteNonQuery();
     transaction.Commit();

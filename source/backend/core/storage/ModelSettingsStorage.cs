@@ -10,13 +10,14 @@ internal sealed class ModelSettingsStorage(Database database) {
     return database.Read(transaction => {
       RequireConnection(transaction, connectionId);
       using SqliteCommand command = database.Command(transaction, """
-        SELECT model_id, family, supports_images FROM model_settings
+        SELECT model_id, family, supports_images, context_window FROM model_settings
         WHERE connection_id = $id ORDER BY model_id;
         """, ("$id", connectionId));
       using SqliteDataReader reader = command.ExecuteReader();
       var settings = new List<ModelSettings>();
       while (reader.Read())
-        settings.Add(new(connectionId, reader.GetString(0), (ModelFamily)reader.GetInt32(1), reader.GetBoolean(2)));
+        settings.Add(new(connectionId, reader.GetString(0), (ModelFamily)reader.GetInt32(1), reader.GetBoolean(2),
+            reader.IsDBNull(3) ? null : reader.GetInt32(3)));
       return settings;
     });
   }
@@ -28,15 +29,18 @@ internal sealed class ModelSettingsStorage(Database database) {
       throw new ArgumentException("A model ID must be nonempty and at most 256 characters without control characters.", nameof(settings));
     if (!Enum.IsDefined(settings.Family))
       throw new ArgumentException("Select a supported model family.", nameof(settings));
+    ModelContextWindows.Validate(settings.ContextWindow, nameof(settings));
     return database.Write(transaction => {
       RequireConnection(transaction, settings.ConnectionId);
       using SqliteCommand command = database.Command(transaction, """
-        INSERT INTO model_settings (connection_id, model_id, family, supports_images)
-        VALUES ($id, $model, $family, $images)
+        INSERT INTO model_settings (connection_id, model_id, family, supports_images, context_window)
+        VALUES ($id, $model, $family, $images, $contextWindow)
         ON CONFLICT (connection_id, model_id) DO UPDATE
-        SET family = excluded.family, supports_images = excluded.supports_images;
+        SET family = excluded.family, supports_images = excluded.supports_images,
+            context_window = excluded.context_window;
         """, ("$id", settings.ConnectionId), ("$model", settings.ModelId),
-          ("$family", (int)settings.Family), ("$images", settings.SupportsImages ? 1 : 0));
+          ("$family", (int)settings.Family), ("$images", settings.SupportsImages ? 1 : 0),
+          ("$contextWindow", settings.ContextWindow));
       command.ExecuteNonQuery();
       return settings;
     });

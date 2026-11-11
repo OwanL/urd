@@ -1,7 +1,7 @@
 namespace Urd.Core.Providers;
 
 // A provider-supplied model ID and display name, without inferred capabilities or pricing.
-public sealed record ProviderModel(string Id, string Name);
+public sealed record ProviderModel(string Id, string Name, int? ContextWindow = null);
 
 // The last successfully fetched catalog; a null timestamp means it has never been fetched.
 public sealed record ProviderModelCatalog(

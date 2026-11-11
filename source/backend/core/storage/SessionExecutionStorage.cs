@@ -42,10 +42,22 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
         WHERE run_id = $run AND request_id IS NULL AND outcome IS NULL;
         """, ("$session", sessionId), ("$revision", historyRevision), ("$run", executionId), ("$request", requestId));
       assign.ExecuteNonQuery();
-      return new LlmRequest(requestId,
-          new LlmContextReader(database, toolResults).Read(transaction, sessionId, executionId, historyRevision, requestId));
+      var context = new LlmContextReader(database, toolResults).ReadContext(transaction, sessionId, historyRevision, executionId, requestId);
+      return new LlmRequest(requestId, context.ReadMessages(), context);
     });
   }
+
+  // A rejected provider request may be retried only before any output or call was observed.
+  internal bool CanRetryOverflow(Guid sessionId, Guid runId, Guid requestId) => database.Read(transaction => {
+    using SqliteCommand read = database.Command(transaction, """
+      SELECT EXISTS (SELECT 1 FROM execution_requests q JOIN execution_runs r ON r.run_id = q.run_id
+          WHERE q.request_id = $request AND q.run_id = $run AND r.session_id = $session
+              AND q.outcome IS NULL AND q.next_chunk_index = 0 AND r.stopping = 0 AND r.outcome IS NULL
+              AND NOT EXISTS (SELECT 1 FROM execution_messages m WHERE m.request_id = q.request_id AND m.role IN (1, 2))
+              AND NOT EXISTS (SELECT 1 FROM execution_tools t WHERE t.request_id = q.request_id));
+      """, ("$session", sessionId), ("$run", runId), ("$request", requestId));
+    return (long)read.ExecuteScalar()! == 1;
+  });
 
   // The marker and its user entries share a transaction. A repeat hook never allocates
   // entries again, and the stopped/settled/revision checks also apply to repeats.
@@ -53,7 +65,9 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
       StartingContext? startingContext = null) {
     return database.Write(transaction => {
       using SqliteCommand mark = database.Command(transaction, """
-        UPDATE execution_requests SET attempt = 2
+        UPDATE execution_requests SET attempt = 2,
+            compaction_id = (SELECT compaction_id FROM session_compactions
+                WHERE session_id = $session AND history_revision = $revision ORDER BY ordinal DESC LIMIT 1)
         WHERE request_id = $request AND run_id = $run AND outcome IS NULL AND attempt IN (1, 2)
             AND EXISTS (SELECT 1 FROM execution_runs r JOIN sessions s ON s.session_id = r.session_id
                 WHERE r.run_id = $run AND r.session_id = $session AND r.history_revision = $revision
@@ -127,7 +141,8 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
             EXISTS (SELECT 1 FROM execution_tools t WHERE t.run_id = r.run_id AND (t.outcome IS NULL OR t.result_json IS NULL)),
             EXISTS (SELECT 1 FROM execution_tools t JOIN execution_requests q ON q.request_id = t.request_id
                 WHERE q.run_id = r.run_id AND q.request_index =
-                    (SELECT MAX(request_index) FROM execution_requests WHERE run_id = r.run_id))
+                    (SELECT MAX(request_index) FROM execution_requests WHERE run_id = r.run_id)),
+            r.compaction_selection_json IS NOT NULL
         FROM execution_runs r WHERE r.session_id = $session AND r.run_id = $run;
         """, ("$session", sessionId), ("$run", executionId));
       if (DecideSettlement(read, driverOutcome) is not { } settlement)
@@ -290,6 +305,9 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
       return (ExecutionOutcome.Cancelled, AlreadySettled: false);
 
     if (driverOutcome != ExecutionOutcome.Completed)
+      return (driverOutcome, AlreadySettled: false);
+
+    if (reader.GetBoolean(6))
       return (driverOutcome, AlreadySettled: false);
 
     if (lastOutcome is not { } outcome)

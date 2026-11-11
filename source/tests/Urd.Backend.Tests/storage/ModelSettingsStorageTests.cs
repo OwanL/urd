@@ -1,5 +1,6 @@
 using Urd.Backend.Tests.Support;
 using Urd.Core.Providers;
+using Urd.Core.Sessions;
 using Urd.Core.Storage;
 using Xunit;
 using static Urd.Backend.Tests.Support.TestAsync;
@@ -11,8 +12,8 @@ public sealed class ModelSettingsStorageTests {
   public void SettingsPersistIndependentlyOfCredentialsAndCatalogUntilConnectionRemoval() {
     using var database = new TemporaryDatabase();
     Guid first = Guid.NewGuid(), second = Guid.NewGuid();
-    var original = new ModelSettings(first, "manual-model", ModelFamily.Anthropic, true);
-    var updated = original with { Family = ModelFamily.Google, SupportsImages = false };
+    var original = new ModelSettings(first, "manual-model", ModelFamily.Anthropic, true, 128_000);
+    var updated = original with { Family = ModelFamily.Google, SupportsImages = false, ContextWindow = 196_608 };
     var isolated = original with { ConnectionId = second };
     using (UrdStore store = UrdStore.Open(database.Path)) {
       store.Providers.Add(Connection(first));
@@ -49,16 +50,38 @@ public sealed class ModelSettingsStorageTests {
     ModelSettings[] invalid = [
       valid with { ConnectionId = Guid.Empty }, valid with { ModelId = " " },
       valid with { ModelId = "model\n" }, valid with { ModelId = new string('x', 257) },
-      valid with { Family = (ModelFamily)99 }
+      valid with { Family = (ModelFamily)99 }, valid with { ContextWindow = 0 }, valid with { ContextWindow = -1 }
     ];
     foreach (var settings in invalid)
-      Assert.Throws<ArgumentException>(() => store.ModelSettings.Save(settings));
+      Assert.ThrowsAny<ArgumentException>(() => store.ModelSettings.Save(settings));
     Assert.Throws<ArgumentException>(() => store.ModelSettings.List(Guid.Empty));
     Assert.Throws<KeyNotFoundException>(() => store.ModelSettings.List(Guid.NewGuid()));
     Assert.Throws<KeyNotFoundException>(() => store.ModelSettings.Save(valid with { ConnectionId = Guid.NewGuid() }));
     Assert.Empty(store.ModelSettings.List(id));
     var longest = valid with { ModelId = new string('x', 256) };
     Assert.Equal(longest, store.ModelSettings.Save(longest));
+  }
+
+  [Fact]
+  public void FrozenSelectionContextWindowIsPersistedAndMustBePositive() {
+    using var database = new TemporaryDatabase();
+    Guid sessionId = Guid.Empty, connectionId = Guid.NewGuid(), submissionId = Guid.NewGuid();
+    var connection = Connection(connectionId);
+    var selection = new LlmSelection(connection, "manual-model", null, ModelFamily.OpenAI, false, 128_000);
+    using (UrdStore store = UrdStore.Open(database.Path)) {
+      store.Providers.Add(connection);
+      sessionId = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
+      var submission = new UserMessageSubmission(submissionId, 0, "request", selection);
+      Assert.True(store.UserMessages.Admit(sessionId, 0, submission, true, Guid.NewGuid()).NewlyAccepted);
+      Assert.Equal(selection, store.UserMessages.ReadReceipt(sessionId, submissionId)!.Submission.LlmSelection);
+
+      var invalid = submission with { SubmissionId = Guid.NewGuid(), LlmSelection = selection with { ContextWindow = 0 } };
+      Assert.Throws<ArgumentOutOfRangeException>(() => store.UserMessages.Admit(
+          sessionId, 0, invalid, true, Guid.NewGuid()));
+    }
+
+    using UrdStore reopened = UrdStore.Open(database.Path);
+    Assert.Equal(selection, reopened.UserMessages.ReadReceipt(sessionId, submissionId)?.Submission.LlmSelection);
   }
 
   [Fact]

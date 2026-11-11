@@ -4,7 +4,20 @@ namespace Urd.Core.Providers;
 
 // The complete secret-free choice frozen by an initiating Send, not a live connection lookup.
 public sealed record LlmSelection(
-    ProviderConnection Connection, string ModelId, string? ReasoningEffort, ModelFamily Family, bool SupportsImages) {
+    ProviderConnection Connection, string ModelId, string? ReasoningEffort, ModelFamily Family, bool SupportsImages,
+    int? ContextWindow = null) {
+  internal void Validate() {
+    if (Connection is null || Connection.Id == Guid.Empty || string.IsNullOrWhiteSpace(ModelId))
+      throw new ArgumentException("An LLM selection requires a connection and model.");
+    _ = ReadReasoningEffort();
+    ModelContextWindows.Validate(ContextWindow, nameof(ContextWindow));
+    if (!Enum.IsDefined(Family) || !Enum.IsDefined(Connection.Route) || !Enum.IsDefined(Connection.Api)
+        || !Enum.IsDefined(Connection.Authentication) || Connection.Name is null
+        || Connection.Endpoint is not { IsAbsoluteUri: true } endpoint
+        || (endpoint.Scheme != Uri.UriSchemeHttps && endpoint.Scheme != Uri.UriSchemeHttp))
+      throw new ArgumentException("The selected connection binding is invalid.");
+  }
+
   // These are the standard effort levels in the pinned MEAI SDK, not model capabilities.
   internal Microsoft.Extensions.AI.ReasoningEffort? ReadReasoningEffort() => ReasoningEffort switch {
     null => null,

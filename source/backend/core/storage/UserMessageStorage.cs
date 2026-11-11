@@ -95,7 +95,7 @@ internal sealed class UserMessageStorage(Database database) {
   private MessageRefusalReason? DecideRefusal(SqliteTransaction transaction, Guid sessionId, long actualRevision,
       long historyRevision, UserMessageSubmission submission, bool accepting, Guid? activeExecutionId) {
     using SqliteCommand read = database.Command(transaction,
-        "SELECT stopping FROM execution_runs WHERE session_id = $session AND outcome IS NULL;",
+        "SELECT CASE WHEN compaction_selection_json IS NOT NULL THEN 2 ELSE stopping END FROM execution_runs WHERE session_id = $session AND outcome IS NULL;",
         ("$session", sessionId));
     object? stopFlag = read.ExecuteScalar();
     if (!accepting || stopFlag is 1L)
@@ -104,6 +104,8 @@ internal sealed class UserMessageStorage(Database database) {
     if (actualRevision != historyRevision || submission.ExpectedHistoryRevision != actualRevision)
       return MessageRefusalReason.StaleRevision;
 
+    if (stopFlag is 2L)
+      return MessageRefusalReason.Capacity;
     if (stopFlag is null)
       return null;
 
@@ -170,20 +172,7 @@ internal sealed class UserMessageStorage(Database database) {
     if (submission.LlmSelection is not { Connection: not null } selection)
       throw new ArgumentException("An LLM selection and connection are required.", nameof(submission));
 
-    if (selection.Connection.Id == Guid.Empty)
-      throw new ArgumentException("Connection ID cannot be empty.", nameof(submission));
-
-    if (string.IsNullOrWhiteSpace(selection.ModelId))
-      throw new ArgumentException("Model ID cannot be empty or whitespace.", nameof(submission));
-
-    _ = selection.ReadReasoningEffort();
-    if (!Enum.IsDefined(selection.Family))
-      throw new ArgumentException("The selected model family is invalid.", nameof(submission));
-    if (!Enum.IsDefined(selection.Connection.Route) || !Enum.IsDefined(selection.Connection.Api)
-        || !Enum.IsDefined(selection.Connection.Authentication) || selection.Connection.Name is null
-        || selection.Connection.Endpoint is not { IsAbsoluteUri: true } endpoint
-        || (endpoint.Scheme != Uri.UriSchemeHttps && endpoint.Scheme != Uri.UriSchemeHttp))
-      throw new ArgumentException("The selected connection binding is invalid.", nameof(submission));
+    selection.Validate();
 
     ArgumentOutOfRangeException.ThrowIfNegative(submission.ExpectedHistoryRevision);
     _ = StorageText.StrictUtf8.GetByteCount(submission.Text);

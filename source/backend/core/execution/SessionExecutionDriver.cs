@@ -11,6 +11,8 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock gate
 
   internal Guid ExecutionId => execution.ExecutionId;
   internal bool IsStopping => execution.IsStopping;
+  internal bool IsCompacting => execution.IsCompacting;
+  internal void SetCompacting(bool value) => execution.IsCompacting = value;
   internal bool IsWaiting { get; private set; }
   internal Task<SessionExecutionResult> Settlement => settlement.Task;
 
@@ -47,6 +49,10 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock gate
   internal async Task RunAsync(Task lockReleased) {
     try {
       await lockReleased;
+      if (execution.IsCompactionOnly) {
+        await AdvanceAsync(await execution.RunCompactionAsync());
+        return;
+      }
       LlmRequest? request;
       using (await gate.AcquireAsync())
         request = ClaimContinuation();
@@ -131,7 +137,7 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock gate
 
   // Caller holds the session gate. Admission cannot slip between recheck and settlement.
   private LlmRequest? ClaimContinuation() {
-    LlmRequest? next = session.ClaimNextRequest(ExecutionId);
+    LlmRequest? next = execution.IsCompactionOnly ? null : session.ClaimNextRequest(ExecutionId);
     if (next is not null) {
       IsWaiting = false;
       session.PublishChange();

@@ -115,7 +115,7 @@ public sealed class TranscriptHistoryTests(ITestOutputHelper output) {
     RichFixture fixture = SeedRichHistory(database, session, otherSession);
     TranscriptHistoryPage page = store.History.Read(session, new(TranscriptHistoryMode.Latest, 3));
 
-    Assert.Equal(new[] { "CreatedAt", "Entry", "Text", "Tool" },
+    Assert.Equal(new[] { "Compaction", "CreatedAt", "Entry", "Text", "Tool" },
         typeof(TranscriptEntryDescriptor).GetProperties().Select(property => property.Name).Order(StringComparer.Ordinal));
     Assert.Equal(new[] { "AvailableThrough", "FinalOutputCommitted", "From", "IsClosed" },
         typeof(TranscriptTextFacts).GetProperties().Select(property => property.Name).Order(StringComparer.Ordinal));

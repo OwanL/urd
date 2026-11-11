@@ -145,9 +145,45 @@ public sealed class ProviderModelClientTests {
           ProviderFailure.InvalidProviderResponse, State(LlmApi.OpenAIChatCompletions), Options(tools: true));
 
   [Theory]
+  [InlineData(
+      "{\"error\":{\"code\":\"context_length_exceeded\",\"message\":\"private-token\"}}",
+      ProviderFailure.ContextWindowExceeded)]
+  [InlineData(
+      "{\"error\":{\"code\":\"invalid_request_error\",\"message\":\"context_length_exceeded private-token\"}}",
+      ProviderFailure.ProviderUnavailable)]
+  [InlineData(
+      "{\"error\":{\"message\":\"context_length_exceeded private-token\"}}",
+      ProviderFailure.ProviderUnavailable)]
+  public async Task HttpFailuresClassifyOnlyAnExplicitContextWindowCode(string body, ProviderFailure failure) {
+    using var handler = new ScriptedOpenAIHandler(body, "application/json", HttpStatusCode.BadRequest);
+    using var http = new HttpClient(handler);
+
+    var error = await Assert.ThrowsAsync<ProviderOperationException>(async () => {
+      await foreach (var _ in new ProviderModelClient(http).GetStreamingResponseAsync(
+          State(), History(), Options(), default)) { /* Exhaust the stream to observe its terminal failure. */ }
+    });
+
+    Assert.Equal(failure, error.Failure);
+    Assert.Equal(failure.ToString(), error.Message);
+    Assert.Null(error.InnerException);
+    Assert.DoesNotContain("private-token", error.ToString());
+  }
+
+  [Theory]
+  [InlineData("response.failed")]
+  [InlineData("error")]
+  public async Task ResponsesStreamClassifiesExplicitContextWindowErrors(string terminal) {
+    string wire = terminal == "error"
+        ? ResponseStream(terminal).Replace("server_error", "context_length_exceeded", StringComparison.Ordinal)
+        : Responses(terminal: terminal).Replace("server_error", "context_length_exceeded", StringComparison.Ordinal);
+    await Rejected(wire, ProviderFailure.ContextWindowExceeded);
+  }
+
+  [Theory]
   [InlineData(HttpStatusCode.Unauthorized, ProviderFailure.AuthenticationRequired)]
   [InlineData(HttpStatusCode.Forbidden, ProviderFailure.PlanAccessDenied)]
   [InlineData(HttpStatusCode.InternalServerError, ProviderFailure.ProviderUnavailable)]
+  [InlineData(HttpStatusCode.BadRequest, ProviderFailure.ProviderUnavailable)]
   public async Task ErrorsAreSecretSafeAndNeverRetried(HttpStatusCode status, ProviderFailure failure) {
     using var handler = new ScriptedOpenAIHandler("{\"error\":{\"message\":\"private-token\"}}", "application/json", status);
     using var http = new HttpClient(handler);

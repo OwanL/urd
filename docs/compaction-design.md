@@ -1,7 +1,6 @@
 # History compaction — design decisions
 
-**Status: direction approved by the owner 2026-11-10. Class shapes deferred until agent tools
-are built.**
+**Status: implemented 2026-11-11; verification recorded below.**
 
 Compaction summarizes older conversation so a chat fits the model's context window. It is
 distinct from tool-result pruning and catalog pruning (ARCHITECTURE.md, "Context management").
@@ -22,7 +21,10 @@ distinct from tool-result pruning and catalog pruning (ARCHITECTURE.md, "Context
    model family on saved model settings. Source order: provider-reported where the API supplies
    it, else a built-in table seeded from Pi's model registry (exact known model IDs on known
    services only); user-editable. An unknown limit still allows Send; compaction then happens
-   only on overflow or on request. Pi's fixed budgets apply to every model size.
+   only on overflow or on request. The configured limit stays fixed. Headroom is the smaller
+   of 16,384 tokens and one fifth of the window; recent history is at most 20,000 tokens,
+   reduced to half the threshold for small windows. Summary output is capped at 8,192 tokens
+   or one quarter of a known window, whichever is smaller.
 3. **Existing Urd requirements still hold:**
    - original history stays readable (session-design.md, ARCHITECTURE.md);
    - a transcript marker shows where compaction took effect, with the summary inspectable
@@ -32,8 +34,34 @@ distinct from tool-result pruning and catalog pruning (ARCHITECTURE.md, "Context
    - the summary call uses the shared request-only `IChatClient`.
 4. **Hook:** context preparation before each model request (agent-tools-design.md).
 
-## Open
+## Execution and storage
 
-- Class shapes and storage (marker, summary, cut point keyed to history revision).
-- Provider-native replay for summarized spans: drop for the summarized part.
-- Sequencing: after agent-tools phase 2, since both touch context building and storage.
+`core/compaction/` owns budgeting, safe-cut planning and request-only summarization.
+`session_compactions` stores only successful summaries and their first retained request/message
+position, scoped to the session's history revision. A metadata-only transcript marker commits
+with the summary; expanding it reads the bounded summary separately. Original messages, tools,
+images, usage and execution identities are never rewritten. Context reads use the latest
+summary plus its retained suffix, dropping provider-native payloads from the summarized span.
+
+Threshold preparation runs before each model request. A classified `context_length_exceeded`
+may cause one compact-and-retry, only when the rejected exchange produced no output or calls.
+Previously executed tools are not retried. Generic HTTP failures and message text do not trigger
+this recovery. Reported usage anchors the next threshold check; later history is estimated
+with a four-characters-per-token fallback, not a tokenizer guarantee.
+
+Manual **Compact now** is idle-only and accepts optional focus instructions. It is a separate,
+addressable execution: Stop cancels and joins its summary request, and reopening never replays it.
+Busy Send cannot steer into manual compaction. Failure, cancellation and stale boundaries do
+not replace the previous summary. Schema 16 requires a fresh disposable database or an explicit
+owner-approved reset of older data; no automatic migration or deletion is performed.
+
+## Verification
+
+- Isolated Release build and full backend suite: **374/374 passed**. Focused compaction,
+  model-window, schema and starting-context checks: **39/39 passed**.
+- Coverage includes safe tool boundaries, threshold and overflow preparation, no retry after
+  even briefly buffered output, manual idempotency, cancellation cleanup, failed summaries,
+  readable original history and reopening with the saved summary boundary.
+- Independent backend review approved after the buffered-output retry guard was corrected.
+  These are offline checks, not a new live-provider qualification. No existing database was
+  reset and no running user host was restarted for this verification.

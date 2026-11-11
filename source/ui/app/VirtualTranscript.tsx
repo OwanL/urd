@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { MarkdownSavedSourcePosition } from "../markdown-rendering/MarkdownMessageView.tsx";
 import type {
   TranscriptEntryDescriptor,
@@ -23,6 +23,7 @@ import {
   transcriptNavigationProfileVersion,
 } from "./useTranscriptNavigation.ts";
 import type { TranscriptDisplay } from "./TranscriptDisplay.ts";
+import { TranscriptPositionReader } from "./TranscriptPositionReader.ts";
 import "../chat/transcript.css";
 
 const layoutProfile = { version: 1 as const, pixelsPerWeight: 0.1 };
@@ -267,6 +268,10 @@ export function VirtualTranscript({
   const scroll = useRef<HTMLDivElement>(null);
   const [root, setRoot] = useState<HTMLDivElement | null>(null);
   const [positionWindow, setPositionWindow] = useState<TranscriptPositionWindow | null>(null);
+  const positionReader = useMemo(
+    () => new TranscriptPositionReader(client, sessionId),
+    [client, sessionId],
+  );
   const positionWindowRef = useRef<TranscriptPositionWindow | null>(null);
   const viewport = useRef<TranscriptViewportModel | null>(null);
   const [modelVersion, setModelVersion] = useState(0);
@@ -290,13 +295,11 @@ export function VirtualTranscript({
   const resumingVisibility = visible && !documentInactive && !renderedActive.current;
   renderedActive.current = visible && !documentInactive;
   const [retainedKeys, setRetainedKeys] = useState<ReadonlySet<string>>(new Set());
-  const activeRequest = useRef<AbortController | null>(null);
   const sourceRequest = useRef<AbortController | null>(null);
   const loadWindowRef = useRef<(fraction: number) => Promise<void>>(async () => {});
   const captureVisibleRef = useRef<() => Promise<void>>(async () => {});
   const captureFrame = useRef<number | null>(null);
   const flushNavigationRef = useRef<() => void>(() => {});
-  const requestGeneration = useRef(0);
   const widthGeneration = useRef(0);
   const suspended = useRef(false);
   const initialized = useRef(false);
@@ -319,9 +322,7 @@ export function VirtualTranscript({
   const suspendReads = useCallback(() => {
     if (suspended.current) return;
     suspended.current = true;
-    requestGeneration.current++;
-    activeRequest.current?.abort();
-    activeRequest.current = null;
+    positionReader.cancel();
     if (seekTimer.current !== null) window.clearTimeout(seekTimer.current);
     seekTimer.current = null;
     setLoading(false);
@@ -329,7 +330,7 @@ export function VirtualTranscript({
       .current()
       .catch(() => {})
       .finally(() => flushNavigationRef.current());
-  }, []);
+  }, [positionReader]);
   const resumeReads = useCallback(() => {
     if (!suspended.current) return;
     suspended.current = false;
@@ -575,33 +576,34 @@ export function VirtualTranscript({
       const revision = latest.current.historyRevision;
       if (suspended.current || !latest.current.visible || revision === null) return;
 
-      activeRequest.current?.abort();
-      const controller = new AbortController();
-      activeRequest.current = controller;
-      const generation = ++requestGeneration.current;
       desiredFraction.current = fraction;
       setLoading(true);
+      const read = positionReader.read({ kind: "fraction", historyRevision: revision, fraction });
       try {
-        const next = await client.locatePosition(sessionId, revision, fraction, controller.signal);
+        const next = await read;
         if (
-          controller.signal.aborted ||
+          next === null ||
+          !positionReader.isCurrent(read) ||
           suspended.current ||
-          generation !== requestGeneration.current ||
+          !latest.current.visible ||
           latest.current.historyRevision !== revision
         )
           return;
         setWindow(next, fraction, !initialized.current);
         initialized.current = true;
       } catch (cause) {
-        if (!controller.signal.aborted && generation === requestGeneration.current) {
+        if (
+          positionReader.isCurrent(read) &&
+          !suspended.current &&
+          latest.current.visible &&
+          latest.current.historyRevision === revision
+        ) {
           setError(cause instanceof Error ? cause.message : "Transcript position read failed.");
           setLoading(false);
         }
-      } finally {
-        if (activeRequest.current === controller) activeRequest.current = null;
       }
     },
-    [client, sessionId, setWindow],
+    [positionReader, setWindow],
   );
   loadWindowRef.current = loadWindow;
 
@@ -654,34 +656,41 @@ export function VirtualTranscript({
       stored && stored.historyRevision === historyRevision && !stored.followsLatest && stored.anchor
         ? stored.anchor
         : null;
-    const controller = new AbortController();
-    const work = restore
-      ? client.getEntryPosition(sessionId, restore.entry, controller.signal)
-      : client.locatePosition(sessionId, historyRevision, 1, controller.signal);
-    activeRequest.current?.abort();
-    activeRequest.current = controller;
+    const target = restore
+      ? { kind: "entry" as const, entry: restore.entry }
+      : { kind: "fraction" as const, historyRevision, fraction: 1 };
     setLoading(true);
-    void work
+    const read = positionReader.read(target);
+    void read
       .then((next) => {
-        if (controller.signal.aborted || latest.current.historyRevision !== historyRevision) return;
+        if (
+          next === null ||
+          !positionReader.isCurrent(read) ||
+          suspended.current ||
+          !latest.current.visible ||
+          latest.current.historyRevision !== historyRevision
+        )
+          return;
         setWindow(next, 1, true);
         initialized.current = true;
       })
       .catch((cause: unknown) => {
-        if (!controller.signal.aborted) {
+        if (
+          positionReader.isCurrent(read) &&
+          !suspended.current &&
+          latest.current.visible &&
+          latest.current.historyRevision === historyRevision
+        ) {
           setError(cause instanceof Error ? cause.message : "Transcript position read failed.");
           setLoading(false);
         }
-      })
-      .finally(() => {
-        if (activeRequest.current === controller) activeRequest.current = null;
       });
-    return () => controller.abort();
+    return () => positionReader.cancel();
   }, [
-    client,
     documentInactive,
     historyRevision,
     readEpoch,
+    positionReader,
     root,
     sessionId,
     setWindow,
@@ -1060,11 +1069,11 @@ export function VirtualTranscript({
     () => () => {
       if (seekTimer.current !== null) window.clearTimeout(seekTimer.current);
       if (captureFrame.current !== null) cancelAnimationFrame(captureFrame.current);
-      activeRequest.current?.abort();
+      positionReader.cancel();
       sourceRequest.current?.abort();
       store.flush();
     },
-    [store],
+    [positionReader, store],
   );
 
   const spacerHeight = Math.max(0, estimatedHeight + topPadding + bottomPadding);

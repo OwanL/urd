@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   markdownChildGaps,
+  markdownRootGaps,
   MarkdownWindowGeometry,
   markdownTableColumns,
   requireMarkdownWindowUnits,
@@ -26,6 +27,31 @@ void test("positional gaps partition omitted complete units, not source bytes", 
         .join(" "),
       expected,
     );
+});
+
+void test("root piece spans leave gaps around complete loaded child extents", () => {
+  assert.deepEqual(
+    markdownRootGaps(0, 10, [
+      { firstPiece: 7, pieceCount: 3 },
+      { firstPiece: 2, pieceCount: 3 },
+      { firstPiece: 4, pieceCount: 1 },
+      { firstPiece: 12, pieceCount: 1 },
+    ]),
+    [
+      { from: 0, next: 2 },
+      { from: 5, next: 7 },
+    ],
+  );
+  assert.deepEqual(
+    markdownRootGaps(10, 20, [
+      { firstPiece: 14, pieceCount: 3 },
+      { firstPiece: 8, pieceCount: 4 },
+    ]),
+    [
+      { from: 12, next: 14 },
+      { from: 17, next: 20 },
+    ],
+  );
 });
 
 void test("geometry is disposable and requires complete positional units", async () => {
@@ -77,7 +103,12 @@ void test("measurements replace estimates and fence generation, width and layout
   const root = {
     dataset: { markdownGeneration: "g" },
     getBoundingClientRect: () => ({ top: 0, right: 800, bottom: 100, left: 0, width: 800 }),
-    querySelectorAll: (selector: string) => (selector.includes("codeLine") ? [line] : [shell]),
+    querySelectorAll: (selector: string) =>
+      selector.includes("data-root-piece-count")
+        ? []
+        : selector.includes("codeLine")
+          ? [line]
+          : [shell],
   } as unknown as HTMLElement;
   geometry.configure("g", 800, "a");
   assert.equal(geometry.measure(root), true);
@@ -95,6 +126,54 @@ void test("measurements replace estimates and fence generation, width and layout
     assert.equal(geometry.gapHeight("code", 1, 0, 3), 72);
     assert.equal(geometry.measure(root), accepted);
   }
+});
+
+void test("root gap height measures complete blocks and collapsed sibling margins", () => {
+  const block = (
+    pieceCount: number,
+    renderedPieces: number,
+    height: number,
+    marginTop: number,
+    marginBottom: number,
+  ) => ({
+    dataset: { rootPieceCount: String(pieceCount) },
+    ownerDocument: {
+      defaultView: {
+        getComputedStyle: () => ({
+          marginTop: `${marginTop}px`,
+          marginBottom: `${marginBottom}px`,
+        }),
+      },
+    },
+    getBoundingClientRect: () => ({
+      top: 10,
+      right: 800,
+      bottom: 10 + height,
+      left: 0,
+      height,
+    }),
+    querySelectorAll: () => Array.from({ length: renderedPieces }),
+    previousElementSibling: null as unknown,
+    nextElementSibling: null as unknown,
+  });
+  const blocks = [block(2, 2, 40, 0, 10), block(1, 1, 30, 20, 0), block(4, 1, 900, 100, 100)];
+  blocks.forEach((current, index) => {
+    current.previousElementSibling = blocks[index - 1] ?? null;
+    current.nextElementSibling = blocks[index + 1] ?? null;
+  });
+  const root = {
+    dataset: { markdownGeneration: "g" },
+    getBoundingClientRect: () => ({ top: 0, right: 800, bottom: 500, left: 0, width: 800 }),
+    querySelectorAll: (selector: string) =>
+      selector.includes("data-root-piece-count") ? blocks : selector.includes("codeLine") ? [] : [],
+  } as unknown as HTMLElement;
+  const geometry = new MarkdownWindowGeometry();
+  geometry.configure("g", 800, "default");
+  assert.equal(geometry.rootGapHeight(0, 3), 72);
+  assert.equal(geometry.measure(root), true);
+  assert.ok(Math.abs(geometry.rootGapHeight(0, 3) - 90) < 0.01);
+  geometry.configure("g", 800, "resized profile");
+  assert.equal(geometry.rootGapHeight(0, 3), 72);
 });
 
 void test("shared scrollport clips geometry and restores without scrolling the renderer root", () => {
@@ -127,6 +206,7 @@ void test("shared scrollport clips geometry and restores without scrolling the r
     scrollTop: 0,
     getBoundingClientRect: () => ({ top: 50, right: 900, bottom: 900, left: 100, width: 800 }),
     querySelectorAll: (selector: string) => {
+      if (selector.includes("data-root-piece-count")) return [];
       if (selector.includes("codeLine")) return [visibleLine, clippedLine];
       if (selector.includes('[data-kind="code"]')) return [shell];
       return [piece];

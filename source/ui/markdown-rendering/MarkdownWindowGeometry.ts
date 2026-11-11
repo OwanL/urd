@@ -15,6 +15,37 @@ export interface MarkdownWindowAnchor {
 type ShellKind = "code" | "table";
 type Estimate = { kind: ShellKind; height: number };
 
+const defaultRootPieceHeight = 24;
+
+export interface MarkdownPieceSpan {
+  readonly firstPiece: number;
+  readonly pieceCount: number;
+}
+
+export function markdownRootGaps(
+  firstPiece: number,
+  nextPiece: number,
+  children: readonly MarkdownPieceSpan[],
+): readonly { from: number; next: number }[] {
+  const gaps: { from: number; next: number }[] = [];
+  let cursor = firstPiece;
+  const spans = [...children]
+    .filter(
+      ({ firstPiece: childFirst, pieceCount }) =>
+        pieceCount > 0 && childFirst < nextPiece && childFirst + pieceCount > firstPiece,
+    )
+    .sort((left, right) => left.firstPiece - right.firstPiece);
+  for (const child of spans) {
+    const from = Math.max(firstPiece, child.firstPiece);
+    const next = Math.min(nextPiece, child.firstPiece + child.pieceCount);
+    if (next <= cursor) continue;
+    if (from > cursor) gaps.push({ from: cursor, next: from });
+    cursor = next;
+  }
+  if (cursor < nextPiece) gaps.push({ from: cursor, next: nextPiece });
+  return gaps;
+}
+
 // Positions are ordinals among all direct children, including table headers.
 // Only absence of complete siblings is represented: no fabricated source ranges.
 export function markdownChildGaps(
@@ -95,6 +126,7 @@ export class MarkdownWindowGeometry {
   private generation = "";
   private width = 0;
   private profile = "";
+  private rootPieceHeight = defaultRootPieceHeight;
   private readonly estimates = new Map<number, Estimate>();
 
   configure(generation: string, width: number, profile: string): void {
@@ -104,7 +136,13 @@ export class MarkdownWindowGeometry {
     this.generation = generation;
     this.width = width;
     this.profile = profile;
+    this.rootPieceHeight = defaultRootPieceHeight;
     this.estimates.clear();
+  }
+
+  rootGapHeight(from: number, next: number, generation = this.generation): number {
+    const height = generation === this.generation ? this.rootPieceHeight : defaultRootPieceHeight;
+    return Math.max(0, next - from) * height;
   }
 
   gapHeight(
@@ -124,6 +162,51 @@ export class MarkdownWindowGeometry {
     const viewport = this.visibleBounds(root, scrollport);
     if (!viewport) return false;
     const samples = new Map<number, { kind: ShellKind; total: number; count: number }>();
+    const rootSamples: {
+      element: HTMLElement;
+      height: number;
+      pieceCount: number;
+      marginTop: number;
+      marginBottom: number;
+    }[] = [];
+    for (const element of root.querySelectorAll<HTMLElement>(
+      '[data-kind="document"] > [data-root-piece-count]',
+    )) {
+      const pieceCount = Number(element.dataset.rootPieceCount);
+      const rect = element.getBoundingClientRect();
+      if (
+        !Number.isSafeInteger(pieceCount) ||
+        pieceCount <= 0 ||
+        rect.bottom <= viewport.top ||
+        rect.top >= viewport.bottom ||
+        rect.right <= viewport.left ||
+        rect.left >= viewport.right ||
+        rect.height <= 0 ||
+        element.querySelectorAll("[data-piece]").length !== pieceCount
+      )
+        continue;
+      const style = element.ownerDocument.defaultView?.getComputedStyle(element);
+      const marginTop = Number.parseFloat(style?.marginTop ?? "") || 0;
+      const marginBottom = Number.parseFloat(style?.marginBottom ?? "") || 0;
+      rootSamples.push({ element, height: rect.height, pieceCount, marginTop, marginBottom });
+    }
+    let rootHeight = 0;
+    let rootPieceCount = 0;
+    for (let index = 0; index < rootSamples.length; index++) {
+      const sample = rootSamples[index]!;
+      const previous = rootSamples[index - 1];
+      const next = rootSamples[index + 1];
+      const previousMargin =
+        previous?.element.nextElementSibling === sample.element
+          ? Math.max(previous.marginBottom, sample.marginTop)
+          : sample.marginTop;
+      const nextMargin =
+        next?.element === sample.element.nextElementSibling
+          ? Math.max(sample.marginBottom, next.marginTop)
+          : sample.marginBottom;
+      rootHeight += sample.height + (previousMargin + nextMargin) / 2;
+      rootPieceCount += sample.pieceCount;
+    }
     for (const element of root.querySelectorAll<HTMLElement>(
       '[data-kind="codeLine"], tbody > [data-kind="row"]',
     )) {
@@ -146,6 +229,13 @@ export class MarkdownWindowGeometry {
       samples.set(parent, sample);
     }
     let changed = false;
+    if (rootPieceCount > 0) {
+      const height = rootHeight / rootPieceCount;
+      if (Math.abs(this.rootPieceHeight - height) >= 0.01) {
+        this.rootPieceHeight = height;
+        changed = true;
+      }
+    }
     // Keep one estimate per currently mounted shell, never a row/line history.
     const mounted = new Set(
       [...root.querySelectorAll<HTMLElement>('[data-kind="code"], [data-kind="table"]')].map(

@@ -9,6 +9,7 @@ import type {
 import { safeMarkdownLink } from "./MarkdownLinkPolicy.ts";
 import {
   markdownChildGaps,
+  markdownRootGaps,
   markdownTableColumns,
   requireMarkdownWindowUnits,
   type MarkdownWindowGeometry,
@@ -77,6 +78,36 @@ export function MarkdownRenderer({
       const node = pieceNode(piece);
       if (node) entries.push({ at: piece.id, order: Number.MAX_SAFE_INTEGER, node });
     }
+    const parent = snapshot.contexts.get(id)?.context;
+    if (parent?.kind === "document") {
+      const spans = [
+        ...(children.get(id) ?? []).map(({ context }) => context),
+        ...(pieces.get(id) ?? []).map(({ id: firstPiece }) => ({ firstPiece, pieceCount: 1 })),
+      ];
+      for (const { from, next } of markdownRootGaps(
+        parent.firstPiece,
+        parent.firstPiece + parent.pieceCount,
+        spans,
+      )) {
+        const height =
+          geometry?.rootGapHeight(from, next, snapshot.generation) ?? (next - from) * 24;
+        entries.push({
+          at: from,
+          order: -1,
+          node: (
+            <div
+              key={`r${from}`}
+              data-markdown-gap="root"
+              data-gap-from={from}
+              data-gap-next={next}
+              aria-hidden="true"
+              className="markdown-renderer-gap"
+              style={{ height: `${height}px` }}
+            />
+          ),
+        });
+      }
+    }
     return entries.sort((a, b) => a.at - b.at || a.order - b.order).map((entry) => entry.node);
   }
 
@@ -118,10 +149,10 @@ export function MarkdownRenderer({
       };
       const node =
         kind === "code" ? (
-          <span {...attributes} style={{ height }} />
+          <span {...attributes} style={{ height: `${height}px` }} />
         ) : (
           <tr {...attributes}>
-            <td colSpan={columns} style={{ height }} aria-hidden="true" />
+            <td colSpan={columns} style={{ height: `${height}px` }} aria-hidden="true" />
           </tr>
         );
       result.push({ at: from, order: 0, node });
@@ -132,8 +163,12 @@ export function MarkdownRenderer({
   function markdownContextNode(entry: AssembledMarkdownContext): VNode {
     const { context, values } = entry;
     const key = `c${context.id}`;
+    const parent = snapshot.contexts.get(context.parent);
+    const rootPieceAttributes =
+      parent?.context.kind === "document" ? { "data-root-piece-count": context.pieceCount } : {};
     const attributes = {
       ...rangeAttributes(context.source),
+      ...rootPieceAttributes,
       "data-context": context.id,
       "data-kind": context.kind,
       "data-position": context.position,
@@ -142,7 +177,6 @@ export function MarkdownRenderer({
     // Tables group rows below; do not construct their entire subtree twice.
     const content =
       context.kind === "table" || context.kind === "code" ? null : contents(context.id);
-    const parent = snapshot.contexts.get(context.parent);
     switch (context.kind) {
       case "document":
         return (
@@ -258,6 +292,7 @@ export function MarkdownRenderer({
           <div
             key={key}
             className="markdown-renderer-table"
+            {...rootPieceAttributes}
             tabIndex={0}
             role="region"
             aria-label="Table"

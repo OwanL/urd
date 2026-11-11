@@ -34,7 +34,7 @@
 .markdown-renderer blockquote {
   border-left: 2px solid var(--border-subtle, #454545);
   padding-left: 1em;
-  color: var(--text-secondary, #a0a0a0);
+  color: inherit;
 }
 
 .markdown-renderer :is(ul, ol) {
@@ -86,6 +86,12 @@
   overflow-wrap: normal;
 }
 
+/* Surface fills must carry their foreground into light user-message bubbles. */
+.markdown-renderer :is(pre, th),
+.markdown-renderer :not(pre) > code {
+  color: var(--text-primary, #ddd);
+}
+
 .markdown-renderer pre code {
   display: block;
   white-space: pre;
@@ -112,7 +118,7 @@
 }
 .markdown-renderer a:focus-visible,
 .markdown-renderer :is(pre, .markdown-renderer-table):focus-visible {
-  outline: 2px solid var(--accent, #c6c6c6);
+  outline: 2px solid currentColor;
   outline-offset: 2px;
 }
 

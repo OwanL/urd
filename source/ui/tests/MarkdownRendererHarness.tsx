@@ -1,9 +1,11 @@
 import { render } from "preact";
+import { MarkdownMessageView } from "../markdown-rendering/MarkdownMessageView.tsx";
 import { MarkdownRenderer } from "../markdown-rendering/MarkdownRenderer.tsx";
 import { MarkdownSelectionPins } from "../markdown-rendering/MarkdownSelectionPins.ts";
 import { MarkdownWindowAssembler } from "../markdown-rendering/MarkdownWindowAssembler.ts";
 import { MarkdownWindowGeometry } from "../markdown-rendering/MarkdownWindowGeometry.ts";
 import type { MarkdownWindowAnchor } from "../markdown-rendering/MarkdownWindowGeometry.ts";
+import type { MessageContentCursor } from "../sessions/Messages.ts";
 import type {
   MarkdownPieceInterval,
   MarkdownRenderContext,
@@ -135,6 +137,14 @@ if (mode === "long-code") {
       "code",
     );
   }
+} else if (mode === "root-gaps") {
+  for (let position = 0; position < 512; position++)
+    leaf(
+      position % 8 === 0 ? "heading" : "paragraph",
+      documentId,
+      `Root block ${position} retains its measured height.`,
+      { level: (position % 6) + 1 },
+    );
 } else if (mode === "long-table") {
   const { table, headers } = tableWithHeaders(["Name", "Description", "Count", "Notes"]);
   for (let position = 0; position < 512; position++) {
@@ -160,6 +170,8 @@ if (mode === "long-code") {
   if (mode === "selection") {
     for (let index = 0; index < 700; index++)
       leaf("paragraph", documentId, `Selection paragraph ${index}.`);
+  } else if (mode === "message-view") {
+    for (let index = 0; index < 80; index++) leaf("paragraph", documentId, `paragraph ${index}.`);
   } else if (mode !== "detached") {
     leaf("heading", documentId, "Renderer sample", { level: 2 });
     const paragraph = node("paragraph", documentId);
@@ -237,7 +249,9 @@ const source = new SyntheticMarkdownPageSource(pieces, contexts, {
         ? 104
         : mode === "selection" || mode === "detached" || mode === "links"
           ? 1000
-          : pieces.length - 2,
+          : mode === "root-gaps"
+            ? 24
+            : pieces.length - 2,
 });
 const assembler = new MarkdownWindowAssembler(
   source,
@@ -245,7 +259,7 @@ const assembler = new MarkdownWindowAssembler(
   mode === "detached" ? detachedFrom : 0,
 );
 const root = document.querySelector<HTMLElement>("#markdown-renderer")!;
-const longWindow = mode === "long-code" || mode === "long-table";
+const longWindow = mode === "long-code" || mode === "long-table" || mode === "root-gaps";
 const geometry = longWindow ? new MarkdownWindowGeometry() : null;
 const geometryProfile = mode ?? "default";
 function owner() {
@@ -291,8 +305,9 @@ async function moveWindow(direction: "forward" | "backward") {
   if (direction === "forward") await assembler.append(new AbortController().signal);
   else await assembler.prepend(new AbortController().signal);
   const snapshot = assembler.snapshot;
-  const pieceSize = mode === "long-code" ? 48 : 48 * 4;
-  const minimum = mode === "long-code" ? 0 : 4;
+  const unit = mode === "long-table" ? 4 : 1;
+  const pieceSize = 48 * unit;
+  const minimum = mode === "long-table" ? 4 : 0;
   const active =
     direction === "forward"
       ? { from: Math.max(minimum, snapshot.next - pieceSize), next: snapshot.next }
@@ -302,7 +317,7 @@ async function moveWindow(direction: "forward" | "backward") {
       generation: snapshot.generation,
       active,
       retain: (selectionPins?.read() ?? []).map(({ from, next }) => {
-        const unit = mode === "long-code" ? 1 : 4;
+        const unit = mode === "long-table" ? 4 : 1;
         return { from: Math.floor(from / unit) * unit, next: Math.ceil(next / unit) * unit };
       }),
     },
@@ -310,9 +325,76 @@ async function moveWindow(direction: "forward" | "backward") {
   );
   paintMeasured(anchor);
 }
+function ownedViewGeneration(generation: string, label: string) {
+  const pageSource = new SyntheticMarkdownPageSource(
+    pieces.map((piece) => (piece.id === 24 ? { ...piece, text: `${label} paragraph 24.` } : piece)),
+    contexts,
+    { generation, piecePageSize: 12 },
+  );
+  const message = {
+    executionId: "e",
+    messageId: "m",
+    role: "assistant" as const,
+    historyRevision: 0,
+  };
+  const cursor = (utf8Offset: number) => ({ message, segmentIndex: 0, utf8Offset });
+  const locateSourceCalls: MessageContentCursor[] = [];
+  const owned = Object.assign(pageSource, {
+    source: {
+      from: cursor(0),
+      availableThrough: cursor(pageSource.manifest.sourceUtf8Bytes),
+      isClosed: true,
+      finalOutputCommitted: true,
+    },
+    sourceCursor: async (offset: number) => cursor(offset),
+    locateSource: (position: MessageContentCursor, signal: AbortSignal) => {
+      locateSourceCalls.push(position);
+      return pageSource.locate(position.utf8Offset, signal);
+    },
+  });
+  return { owned, pageSource, locateSourceCalls, cursor };
+}
+
+async function setupMessageViewHarness() {
+  render(null, root);
+  const initial = ownedViewGeneration("message-view-initial", "Generation A");
+  const replacement = ownedViewGeneration("message-view-replacement", "Generation B");
+  const saved = { cursor: initial.cursor(pieces[24]!.source.start), offset: 0 };
+  let openCount = 0;
+  let replacementPublication!: Promise<"published" | "cancelled">;
+  const view = new MarkdownMessageView(root, scrollport(), 8, {
+    changed() {},
+    error() {},
+  });
+  const request = (owned: typeof initial.owned) => ({
+    open: async () => {
+      openCount++;
+      return owned;
+    },
+  });
+  await view.setRequest(request(initial.owned), saved);
+  return {
+    initial,
+    replacement,
+    saved,
+    get openCount() {
+      return openCount;
+    },
+    setPaused: (paused: boolean) => view.setPaused(paused),
+    queueReplacement() {
+      replacementPublication = view.setRequest(request(replacement.owned));
+    },
+    settleReplacement: () => replacementPublication,
+    refreshWindow: () => view.refreshWindow(),
+    dispose: () => view.dispose(),
+  };
+}
+const messageViewHarness = mode === "message-view" ? await setupMessageViewHarness() : undefined;
+
 const harness = {
+  messageView: messageViewHarness,
   get pageSize() {
-    return mode === "long-code" ? 24 : mode === "long-table" ? 104 : 0;
+    return mode === "long-code" ? 24 : mode === "long-table" ? 104 : mode === "root-gaps" ? 24 : 0;
   },
   get pieceCount() {
     return source.manifest.pieceCount;

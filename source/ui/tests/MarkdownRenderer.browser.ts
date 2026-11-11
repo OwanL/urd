@@ -450,6 +450,15 @@ void test("standalone Markdown renderer in Chromium", async (t) => {
     await writeFile(evidencePath, JSON.stringify(longWindowEvidence, null, 2));
     console.log(`Markdown long-window evidence: ${evidencePath}`);
     await t.test(
+      "trimmed paragraph and heading windows retain root piece-span height",
+      async () => {
+        await exerciseRootGaps(page, open);
+      },
+    );
+    await t.test("message view restores, pauses, pins and reclaims owned generations", async () => {
+      await exerciseMessageView(page, open);
+    });
+    await t.test(
       "middle window hydrates detached headers and complete ancestry with isolated IDs",
       async () => {
         await open("detached");
@@ -479,6 +488,142 @@ void test("standalone Markdown renderer in Chromium", async (t) => {
   }
 });
 
+async function exerciseRootGaps(page: Page, open: (mode: string) => Promise<void>) {
+  await page.setViewportSize({ width: 1000, height: 900 });
+  await open("root-gaps");
+  const inspect = () =>
+    page.evaluate(() => {
+      const snapshot = window.markdownRendererHarness.snapshot;
+      const root = document.querySelector<HTMLElement>(".markdown-renderer")!;
+      const gaps = [...root.querySelectorAll<HTMLElement>('[data-markdown-gap="root"]')];
+      return {
+        active: [snapshot.from, snapshot.next],
+        ranges: gaps.map((gap) => [Number(gap.dataset.gapFrom), Number(gap.dataset.gapNext)]),
+        heights: gaps.map((gap) => gap.getBoundingClientRect().height),
+        styles: gaps.map((gap) => gap.style.height),
+        kinds: [...root.querySelectorAll<HTMLElement>("[data-markdown-gap]")].map(
+          (gap) => gap.dataset.markdownGap,
+        ),
+      };
+    });
+
+  let state = await inspect();
+  assert.deepEqual(state.active, [0, 24]);
+  assert.deepEqual(state.ranges, [[24, 512]]);
+  assert.deepEqual(state.kinds, ["root"]);
+  assert.ok(state.heights[0]! > 0, JSON.stringify(state));
+
+  await page.evaluate(() => window.markdownRendererHarness.moveWindow("forward"));
+  state = await inspect();
+  assert.deepEqual(state.active, [0, 48]);
+  assert.deepEqual(state.ranges, [[48, 512]]);
+
+  const anchor = page.locator('[data-piece="40"]');
+  await anchor.scrollIntoViewIfNeeded();
+  const before = (await anchor.boundingBox())!.y;
+  assert.ok(await page.locator("#transcript-scrollport").evaluate((el) => el.scrollTop > 0));
+  await page.evaluate(() => window.markdownRendererHarness.moveWindow("forward"));
+  const after = (await anchor.boundingBox())!.y;
+  assert.ok(Math.abs(after - before) <= 1, `Root gap trim moved anchor by ${after - before}px`);
+  state = await inspect();
+  assert.deepEqual(state.active, [24, 72]);
+  assert.deepEqual(state.ranges, [
+    [0, 24],
+    [72, 512],
+  ]);
+  assert.ok(state.heights.every((height) => height > 0));
+}
+
+async function exerciseMessageView(page: Page, open: (mode: string) => Promise<void>) {
+  await open("message-view");
+  const restored = await page.evaluate(() => {
+    const harness = window.markdownRendererHarness.messageView!;
+    return {
+      text: document.querySelector('[data-piece="24"]')!.textContent,
+      saved: harness.saved.cursor,
+      located: harness.initial.locateSourceCalls,
+    };
+  });
+  assert.deepEqual(
+    [restored.text, restored.located],
+    ["Generation A paragraph 24.", [restored.saved]],
+  );
+
+  const original = await page.locator('[data-piece="24"]').evaluateHandle((piece) => piece);
+  try {
+    await page.evaluate(async () => {
+      const harness = window.markdownRendererHarness.messageView!;
+      await harness.setPaused(true);
+      harness.queueReplacement();
+    });
+    assert.equal(
+      await page.evaluate(() => window.markdownRendererHarness.messageView!.openCount),
+      1,
+    );
+    assert.equal(await page.evaluate((piece) => piece.isConnected, original), true);
+    assert.equal(
+      await page.evaluate(async () => {
+        const harness = window.markdownRendererHarness.messageView!;
+        await harness.setPaused(false);
+        return harness.settleReplacement();
+      }),
+      "published",
+    );
+    await page.waitForFunction(
+      () => window.markdownRendererHarness.messageView!.initial.pageSource.disposals === 1,
+    );
+    assert.deepEqual(
+      await page.evaluate(() => [
+        document.querySelector<HTMLElement>(".markdown-renderer")!.dataset.markdownGeneration,
+        document.querySelector('[data-piece="24"]')!.textContent,
+      ]),
+      ["message-view-replacement", "Generation B paragraph 24."],
+    );
+
+    const selected = await page.evaluate(async () => {
+      const piece = document.querySelector<HTMLElement>('[data-piece="24"]')!;
+      const range = document.createRange();
+      range.selectNodeContents(piece);
+      getSelection()!.removeAllRanges();
+      getSelection()!.addRange(range);
+      const port = document.querySelector<HTMLElement>("#transcript-scrollport")!;
+      port.scrollTop = port.scrollHeight;
+      await window.markdownRendererHarness.messageView!.refreshWindow();
+      return [
+        getSelection()!.toString(),
+        document.querySelector('[data-piece="24"]') === piece,
+        !!document.querySelector('[data-piece="38"]') &&
+          !document.querySelector('[data-piece="28"]'),
+        port.scrollTop,
+      ];
+    });
+    assert.deepEqual(
+      selected.slice(0, 3),
+      ["Generation B paragraph 24.", true, true],
+      "Selection stays native as the active window advances past its pinned node",
+    );
+    await page.evaluate(() => getSelection()!.removeAllRanges());
+    await page.waitForFunction(
+      () => !document.querySelector('.markdown-renderer [data-piece="24"]'),
+    );
+    assert.equal(
+      await page.locator("#transcript-scrollport").evaluate((port) => port.scrollTop),
+      selected[3],
+      "Stationary selection release reclaims the pinned piece",
+    );
+  } finally {
+    await page.evaluate(() => window.markdownRendererHarness.messageView!.dispose());
+    await original.dispose();
+  }
+  assert.deepEqual(
+    await page.evaluate(() => [
+      window.markdownRendererHarness.messageView!.initial.pageSource.disposals,
+      window.markdownRendererHarness.messageView!.replacement.pageSource.disposals,
+    ]),
+    [1, 1],
+  );
+}
+
 type LongWindowMode = "long-code" | "long-table";
 
 async function exerciseLongWindow(
@@ -507,6 +652,7 @@ async function exerciseLongWindow(
           !gap.hasAttribute("data-source-end") &&
           gap.getAttribute("aria-hidden") === "true" &&
           getComputedStyle(gap).userSelect === "none" &&
+          gap.getBoundingClientRect().height > 0 &&
           (code || (cell?.tagName === "TD" && cell.colSpan === 4 && gap.children.length === 1))
         );
       });
@@ -523,6 +669,7 @@ async function exerciseLongWindow(
         rows: rows.length,
         lines: lines.length,
         gaps: gaps.length,
+        rootGaps: gaps.filter((gap) => gap.dataset.markdownGap === "root").length,
         gapsValid,
         widths: headers.map((header) => header.getBoundingClientRect().width),
         headerIds: headers.map((header) => header.id),
@@ -563,6 +710,7 @@ async function exerciseLongWindow(
     assert.ok(state.documentWidth <= state.viewportWidth, "Document overflows horizontally");
     assert.equal(state.positioned, true, "Windowed source lines/rows expose data-position");
     assert.ok(state.gapsValid, "Gaps retain native structure and are hidden/non-selectable");
+    assert.equal(state.rootGaps, 0, "A loaded code/table child owns its internal gap geometry");
     assert.equal(state.pageSize % unit, 0, "Source page ends on a complete unit");
     assert.equal(state.pageCursorsValid, true, "Source reads start on complete units");
     if (mode === "long-code") assert.ok(state.lines <= 49, JSON.stringify(state));

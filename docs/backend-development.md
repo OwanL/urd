@@ -125,7 +125,8 @@ shared storage.
   Changed-submission reuse throws `UserMessageConflictException` with its `SubmissionId`, so HTTP can distinguish
   conflicts from shutdown or uncertain failure without parsing exception messages.
 - `SessionBase` owns identity, admission and execution lifetime under its guard. `SessionTranscript`,
-  exposed as `session.Transcript`, owns history/content, positioning and Markdown source reads.
+  exposed as `session.Transcript`, owns history/content, positioning and bounded raw-source reads.
+  Markdown source assembly belongs to `MessageMarkdownSourceReader`, outside the harness.
   `SessionExecutionRecorder` owns guarded request/tool progress writes; admission and execution
   ownership still decide whether writes are allowed. Each execution has one `SessionExecutionDriver`,
   which uses the same guard for continuation, background waiting and settlement coordination.

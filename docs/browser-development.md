@@ -46,8 +46,8 @@ shapes are discarded, not migrated. The current shape in
 alongside placeholder/derived title provenance, so an actual first message of `New chat`
 is not mistaken for an unnamed tab. Incompatible earlier state is discarded.
 The palette uses neutral black/charcoal surfaces and grey controls; semantic error
-colours remain distinct. Transcript rows render plain text and tool status; richer formatting
-and tool argument/result inspection remain future work.
+colours remain distinct. Transcript text uses the Markdown renderer; tool rows show status,
+while tool argument/result inspection remains future work.
 
 ## Markdown rendering
 

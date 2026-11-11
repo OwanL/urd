@@ -35,6 +35,9 @@ internal static class SessionRoutes {
         [AsParameters] PositionSummaryQuery query) => ReadPositionSummaryAsync(http, sessions, sessionId, query));
     routes.MapGet("/{sessionId}/positions/locate", (HttpContext http, Guid sessionId,
         [AsParameters] PositionLocateQuery query) => LocatePositionAsync(http, sessions, sessionId, query));
+    routes.MapGet("/{sessionId}/positions/entries/{executionId}/{entryId}", (HttpContext http, Guid sessionId,
+        Guid executionId, Guid entryId, [AsParameters] EntryPositionQuery query) =>
+        ReadEntryPositionAsync(http, sessions, sessionId, executionId, entryId, query));
     routes.MapGet("/{sessionId}/positions/prompts", (HttpContext http, Guid sessionId,
         [AsParameters] PromptPageQuery query) => ReadPromptPageAsync(http, sessions, sessionId, query));
     routes.MapGet("/{sessionId}/positions/prompts/{executionId}/{entryId}", (HttpContext http, Guid sessionId,
@@ -197,6 +200,19 @@ internal static class SessionRoutes {
     });
   }
 
+  private static Task<IResult> ReadEntryPositionAsync(HttpContext http, SessionManager sessions, Guid sessionId,
+      Guid executionId, Guid entryId, EntryPositionQuery query) {
+    if (executionId == Guid.Empty || entryId == Guid.Empty || query.ExpectedHistoryRevision < 0
+        || !Enum.TryParse(query.Kind, ignoreCase: true, out TranscriptEntryKind kind) || !Enum.IsDefined(kind))
+      return Task.FromResult<IResult>(Results.BadRequest());
+    var entry = new TranscriptEntryRef(executionId, entryId, kind, query.ExpectedHistoryRevision);
+    return WithSessionAsync(http, sessions, sessionId, async session => {
+      TranscriptPositionWindow window = await session.ReadTranscriptEntryPositionAsync(
+          query.ExpectedHistoryRevision, entry, http.RequestAborted);
+      return Results.Ok(ToPositionWindow(window));
+    });
+  }
+
   private static Task<IResult> ReadPromptPageAsync(
       HttpContext http, SessionManager sessions, Guid sessionId, PromptPageQuery query) {
     int limit = query.Limit ?? 60;
@@ -279,6 +295,7 @@ internal static class SessionRoutes {
 
   private sealed record PositionSummaryQuery(long ExpectedHistoryRevision);
   private sealed record PositionLocateQuery(long ExpectedHistoryRevision, double? Fraction);
+  private sealed record EntryPositionQuery(long ExpectedHistoryRevision, string? Kind);
   private sealed record PromptPageQuery(
       long ExpectedHistoryRevision, long? AfterRank, int? Limit);
   private sealed record PromptActivationQuery(long ExpectedHistoryRevision);

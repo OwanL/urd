@@ -302,6 +302,14 @@ const mappings: MappingCase[] = [
     response: positionWindow,
   },
   {
+    name: "exact entry position retains kind and revision",
+    call: (client) => client.getEntryPosition(sessionId, { ...promptRef, kind: "text" }),
+    method: "GET",
+    path: `/api/sessions/${sessionId}/positions/entries/${executionId}/${submissionId}`,
+    query: { expectedHistoryRevision: "7", kind: "text" },
+    response: positionWindow,
+  },
+  {
     name: "content flattens every cursor member",
     call: (client) => client.getMessageContent(sessionId, cursor),
     method: "GET",

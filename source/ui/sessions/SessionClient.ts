@@ -102,6 +102,21 @@ export class SessionClient {
     return requestJson(url, "GET", undefined, signal);
   }
 
+  getEntryPosition(
+    sessionId: string,
+    entry: TranscriptEntryRef,
+    signal?: AbortSignal,
+  ): Promise<TranscriptPositionWindow> {
+    const url = this.url(
+      `/${encodeURIComponent(sessionId)}/positions/entries/${encodeURIComponent(entry.executionId)}/${encodeURIComponent(entry.entryId)}`,
+    );
+    url.search = new URLSearchParams({
+      expectedHistoryRevision: String(entry.historyRevision),
+      kind: entry.kind,
+    }).toString();
+    return requestJson(url, "GET", undefined, signal);
+  }
+
   getPromptMarkers(
     sessionId: string,
     query: TranscriptPromptPageQuery,

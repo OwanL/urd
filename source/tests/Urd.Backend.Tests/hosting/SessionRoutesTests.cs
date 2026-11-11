@@ -193,6 +193,17 @@ public sealed class SessionRoutesTests {
         + $"?expectedHistoryRevision={snapshot.HistoryRevision}"))
       Assert.Equal(HttpStatusCode.NotFound, wrongKind.StatusCode);
 
+    string entryPath = $"/api/sessions/{sessionId}/positions/entries/{textEntry.ExecutionId}/{textEntry.EntryId}";
+    using (HttpResponseMessage entryLocation = await RequestAsync(server.Client, HttpMethod.Get,
+        entryPath + $"?expectedHistoryRevision={snapshot.HistoryRevision}&kind=text")) {
+      Assert.Equal(HttpStatusCode.OK, entryLocation.StatusCode);
+      using JsonDocument body = JsonDocument.Parse(await entryLocation.Content.ReadAsStringAsync());
+      Assert.Equal(textEntry.EntryId, body.RootElement.GetProperty("target").GetProperty("entryId").GetGuid());
+    }
+    using (HttpResponseMessage stale = await RequestAsync(server.Client, HttpMethod.Get,
+        entryPath + $"?expectedHistoryRevision={snapshot.HistoryRevision + 1}&kind=text"))
+      Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+
     var message = new MessageRef(receipt.ExecutionId.Value, submission.SubmissionId, MessageRole.User, snapshot.HistoryRevision);
     var cursor = new MessageContentCursor(message, 0, 0);
     string contentPath = $"/api/sessions/{sessionId}/content?executionId={cursor.Message.ExecutionId}"

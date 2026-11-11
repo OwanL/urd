@@ -625,8 +625,10 @@ visibility-handler evidence, not native minimize/restore or freeze qualification
 
 Earlier UI05's larger candidate window eliminated Markdown/content reads during tested
 mixed/table resizes, with source displacement within **0.36 px**, and controlled offline
-streaming rendered formatted content without a raw-Markdown flash. Its tested append
-commit-to-visible bounds were **178–217 ms**: the ≤100 ms target was not established.
+streaming rendered formatted content without a raw-Markdown flash. Its **178–217 ms**
+bounds measured append-call start to observed database commit, not rendering latency.
+Commit-to-visible latency was not instrumented; this does not establish a failure of the
+≤100 ms rendering target.
 UI07's same-width retained DOM returns had fixture paint upper bounds around **33–57 ms**;
 these are not final UI12 warm/cold latency acceptance. Native minimize coincided with zero
 page-owned pins, but native restore was not completed. Synthetic handler checks do not

@@ -4,7 +4,7 @@ namespace Urd.Core.Storage;
 
 // Creates the current pre-release schema; incompatible databases require a manual reset.
 internal static class DatabaseSchema {
-  private const int SchemaVersion = 13;
+  private const int SchemaVersion = 14;
 
   internal static void Initialize(SqliteConnection connection) {
     using SqliteCommand command = connection.CreateCommand();
@@ -111,7 +111,7 @@ internal static class DatabaseSchema {
           session_id TEXT NOT NULL REFERENCES sessions(session_id),
           history_revision INTEGER NOT NULL CHECK (history_revision >= 0),
           run_id TEXT NOT NULL REFERENCES execution_runs(run_id),
-          role INTEGER NOT NULL CHECK (role IN (0, 1, 2)),
+          role INTEGER NOT NULL CHECK (role IN (0, 1, 2, 3)),
           message_id TEXT NOT NULL,
           input_id TEXT,
           request_id TEXT NOT NULL REFERENCES execution_requests(request_id),
@@ -122,14 +122,14 @@ internal static class DatabaseSchema {
           tool_name TEXT,
           layout_weight INTEGER NOT NULL DEFAULT 256 CHECK (layout_weight > 0),
           UNIQUE (run_id, role, message_id),
-          UNIQUE (request_id, call_id),
+          UNIQUE (role, request_id, call_id),
           FOREIGN KEY (session_id, input_id) REFERENCES input_decisions(session_id, input_id),
           CHECK (end_chunk_index IS NULL OR end_chunk_index >= first_chunk_index),
           CHECK ((role = 0 AND input_id IS NOT NULL AND call_id IS NULL
                       AND tool_name IS NULL AND end_chunk_index IS NULL)
               OR (role = 1 AND input_id IS NULL AND request_id IS NOT NULL AND call_id IS NULL
                       AND tool_name IS NULL)
-              OR (role = 2 AND input_id IS NULL AND request_id IS NOT NULL AND end_chunk_index IS NULL
+              OR (role IN (2, 3) AND input_id IS NULL AND request_id IS NOT NULL AND end_chunk_index IS NULL
                       AND call_id IS NOT NULL))
       ) STRICT;
       CREATE TABLE transcript_position_totals (
@@ -144,7 +144,7 @@ internal static class DatabaseSchema {
           session_id TEXT NOT NULL REFERENCES sessions(session_id),
           history_revision INTEGER NOT NULL CHECK (history_revision >= 0),
           rank INTEGER NOT NULL CHECK (rank >= 0),
-          kind INTEGER NOT NULL CHECK (kind IN (0, 1, 2)),
+          kind INTEGER NOT NULL CHECK (kind IN (0, 1, 2, 3)),
           weight INTEGER NOT NULL CHECK (weight > 0),
           prefix_weight INTEGER NOT NULL CHECK (prefix_weight >= 0),
           UNIQUE (session_id, history_revision, rank)
@@ -186,6 +186,7 @@ internal static class DatabaseSchema {
           name TEXT NOT NULL,
           arguments_json TEXT NOT NULL,
           started INTEGER NOT NULL DEFAULT 0 CHECK (started IN (0, 1)),
+          background INTEGER NOT NULL DEFAULT 0 CHECK (background IN (0, 1)),
           outcome INTEGER CHECK (outcome IN (0, 1, 2)),
           result_json TEXT,
           error TEXT,
@@ -195,6 +196,23 @@ internal static class DatabaseSchema {
           UNIQUE (request_id, call_index),
           UNIQUE (run_id, call_id)
       ) STRICT;
+      CREATE TABLE execution_tool_completions (
+          ordinal INTEGER PRIMARY KEY AUTOINCREMENT,
+          completion_id TEXT NOT NULL UNIQUE,
+          session_id TEXT NOT NULL REFERENCES sessions(session_id),
+          history_revision INTEGER NOT NULL CHECK (history_revision >= 0),
+          request_id TEXT NOT NULL,
+          call_id TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          claimed_request_id TEXT REFERENCES execution_requests(request_id),
+          published INTEGER NOT NULL DEFAULT 0 CHECK (published IN (0, 1)),
+          UNIQUE (request_id, call_id),
+          FOREIGN KEY (request_id, call_id) REFERENCES execution_tools(request_id, call_id)
+      ) STRICT;
+      CREATE INDEX execution_tool_completions_undelivered
+          ON execution_tool_completions(session_id, history_revision, ordinal) WHERE claimed_request_id IS NULL;
+      CREATE INDEX execution_tool_completions_unpublished
+          ON execution_tool_completions(session_id, history_revision, ordinal) WHERE published = 0;
       CREATE TABLE execution_provider_context (
           request_id TEXT PRIMARY KEY NOT NULL REFERENCES execution_requests(request_id),
           response_json TEXT NOT NULL
@@ -235,7 +253,7 @@ internal static class DatabaseSchema {
       CREATE INDEX execution_inputs_not_sent_order ON execution_inputs(session_id, ordinal) WHERE not_sent = 1;
       CREATE INDEX execution_messages_history_order ON execution_messages(session_id, history_revision, ordinal DESC);
       CREATE INDEX execution_messages_request_order ON execution_messages(request_id, role, first_chunk_index);
-      PRAGMA user_version = 13;
+      PRAGMA user_version = 14;
       """;
     command.ExecuteNonQuery();
     transaction.Commit();

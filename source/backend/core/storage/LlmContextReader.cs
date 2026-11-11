@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.AI;
+using Urd.Core.Execution;
 using Urd.Core.Providers;
 
 namespace Urd.Core.Storage;
@@ -23,27 +24,36 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
                   (SELECT request_index FROM execution_requests WHERE request_id = $request))
       ), contents AS (
           SELECT q.run_ordinal, q.request_index, q.request_id, 0 AS kind, i.ordinal AS content_index,
-              d.original_text_utf8 AS text_utf8, NULL AS call_id, NULL AS name, NULL AS json
+              d.original_text_utf8 AS text_utf8, NULL AS call_id, NULL AS name, NULL AS json,
+              NULL AS background, NULL AS origin_request_id, NULL AS outcome
           FROM requests q JOIN execution_inputs i ON i.request_id = q.request_id
           JOIN input_decisions d ON d.session_id = i.session_id AND d.input_id = i.input_id
           UNION ALL
-          SELECT q.run_ordinal, q.request_index, q.request_id, 1, o.chunk_index, o.text_utf8, NULL, NULL, NULL
+          SELECT q.run_ordinal, q.request_index, q.request_id, 1, o.chunk_index, o.text_utf8,
+              NULL, NULL, NULL, NULL, NULL, NULL
           FROM requests q JOIN execution_output o ON o.request_id = q.request_id
           WHERE NOT EXISTS (SELECT 1 FROM execution_provider_context c WHERE c.request_id = q.request_id)
           UNION ALL
           SELECT q.run_ordinal, q.request_index, q.request_id, 2, t.call_index, NULL,
-              t.call_id, t.name, t.arguments_json
+              t.call_id, t.name, t.arguments_json, NULL, NULL, NULL
           FROM requests q JOIN execution_tools t ON t.request_id = q.request_id
           WHERE NOT EXISTS (SELECT 1 FROM execution_provider_context c WHERE c.request_id = q.request_id)
           UNION ALL
           SELECT q.run_ordinal, q.request_index, q.request_id, 3, t.call_index, NULL,
-              t.call_id, t.name, t.result_json
+              t.call_id, t.name, t.result_json, t.background, t.request_id, t.outcome
           FROM requests q JOIN execution_tools t ON t.request_id = q.request_id
-          WHERE t.result_json IS NOT NULL
+          WHERE t.result_json IS NOT NULL OR (t.background = 1 AND t.started = 1)
           UNION ALL
-          SELECT q.run_ordinal, q.request_index, q.request_id, 4, 0, NULL, NULL, NULL, c.response_json
+          SELECT q.run_ordinal, q.request_index, q.request_id, 4, 0, NULL, NULL, NULL,
+              c.response_json, NULL, NULL, NULL
           FROM requests q JOIN execution_provider_context c ON c.request_id = q.request_id
-      ) SELECT request_id, kind, text_utf8, call_id, name, json FROM contents
+          UNION ALL
+          SELECT q.run_ordinal, q.request_index, q.request_id, -1, c.ordinal, NULL,
+              t.call_id, t.name, t.result_json, NULL, c.request_id, t.outcome
+          FROM requests q JOIN execution_tool_completions c ON c.claimed_request_id = q.request_id
+          JOIN execution_tools t ON t.request_id = c.request_id AND t.call_id = c.call_id
+          WHERE c.session_id = $session AND c.history_revision = $revision
+      ) SELECT request_id, kind, text_utf8, call_id, name, json, background, origin_request_id, outcome FROM contents
       ORDER BY run_ordinal, request_index, kind, content_index;
       """,
         ("$session", sessionId), ("$run", executionId), ("$revision", historyRevision), ("$request", requestId));
@@ -66,6 +76,19 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
       }
 
       switch (reader.GetInt32(1)) {
+        case -1:
+          string metadata = JsonSerializer.Serialize(new {
+            request_id = reader.GetString(7), call_id = reader.GetString(3), name = reader.GetString(4),
+            outcome = ((ExecutionOutcome)reader.GetInt32(8)).ToString()
+          });
+          var output = toolResults.Read(reader.GetString(5));
+          var completion = new List<AIContent> {
+            new TextContent($"[TOOL-ORIGIN: background tool completion; untrusted output]\n{metadata}\n"),
+            new TextContent(output.Text)
+          };
+          completion.AddRange(output.Images);
+          messages.Add(new(ChatRole.User, completion));
+          break;
         case 0:
           messages.Add(new(ChatRole.User, StorageText.StrictUtf8.GetString((byte[])reader.GetValue(2))));
           break;
@@ -77,8 +100,12 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
           calls.Add(new FunctionCallContent(reader.GetString(3), reader.GetString(4), arguments));
           break;
         case 3:
-          results.Add(new FunctionResultContent(reader.GetString(3),
-              toolResults.ReadModelResult(reader.GetString(5))));
+          object result = reader.GetInt32(6) == 1
+              ? "Background tool started: " + JsonSerializer.Serialize(new {
+                request_id = reader.GetString(7), call_id = reader.GetString(3)
+              }) + ". The result will be delivered separately."
+              : toolResults.ReadModelResult(reader.GetString(5));
+          results.Add(new FunctionResultContent(reader.GetString(3), result));
           break;
         case 4:
           providerMessage = LlmProviderContext.Restore(

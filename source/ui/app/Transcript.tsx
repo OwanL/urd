@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "preac
 import type { SessionClient } from "../sessions/SessionClient.ts";
 import { IconButton } from "../components/IconButton.tsx";
 import { TranscriptContentReader } from "./TranscriptContentReader.ts";
+import { isTextEntry } from "../sessions/Messages.ts";
 import type {
   MessageContentCursor,
   TranscriptEntryRef,
@@ -217,12 +218,13 @@ function MessageBody({
   );
 }
 
-function ToolEntry({ tool }: { tool: TranscriptToolFacts }) {
+function ToolEntry({ tool, completion }: { tool: TranscriptToolFacts; completion: boolean }) {
   const status =
     tool.outcome ?? (tool.started ? "Running" : tool.isClosed ? "Not started" : "Waiting");
   return (
     <div class="message message-assistant">
       <div class="message-text">
+        {completion ? "Completed " : ""}
         {tool.name ?? "Tool"} · {status}
       </div>
     </div>
@@ -365,7 +367,7 @@ export function Transcript({
             const key = `${entry.executionId}/${entry.entryId}/${entry.kind}`;
             return (
               <div key={key} data-message={key}>
-                {descriptor.text ? (
+                {isTextEntry(entry) && descriptor.text ? (
                   <MessageBody
                     client={client}
                     contentReader={contentReader}
@@ -376,7 +378,7 @@ export function Transcript({
                     paused={selecting || !visible || documentHidden}
                   />
                 ) : descriptor.tool ? (
-                  <ToolEntry tool={descriptor.tool} />
+                  <ToolEntry tool={descriptor.tool} completion={entry.kind === "toolCompletion"} />
                 ) : null}
               </div>
             );

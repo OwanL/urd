@@ -14,7 +14,7 @@ public sealed class SessionManager {
   private readonly string? workingDirectory;
   private readonly GitBash? bash;
   private readonly FileMutationQueue files = new();
-  private readonly IReadOnlyList<AgentTool> injectedTools = [];
+  private readonly ReadOnlyCollection<AgentTool> injectedTools = new([]);
   private readonly AsyncLock gate = new();
   private readonly Dictionary<Guid, PrimarySession> sessions = new();
   private TaskCompletionSource? sessionShutdown;
@@ -127,8 +127,12 @@ public sealed class SessionManager {
   }
 
   private PrimarySession CreateSession(SessionRecord record) {
-    if (toolSettings is null)
-      return new PrimarySession(record, store, createChatClient, new ToolCatalog(injectedTools));
+    var pending = new PendingToolCalls();
+    AgentTool[] controls = [new ListPendingCallsTool(pending), new CancelPendingCallsTool(pending)];
+    if (toolSettings is null) {
+      var configured = new ToolCatalog(injectedTools.Count == 0 ? [] : [.. injectedTools, .. controls]);
+      return new PrimarySession(record, store, createChatClient, configured, pending: pending);
+    }
     if (!OperatingSystem.IsWindows())
       throw new PlatformNotSupportedException("Agent tools currently require Windows and Git for Windows.");
     if (record.WorkingDirectory is null)
@@ -137,9 +141,9 @@ public sealed class SessionManager {
     var processes = new ChatProcesses(bash!);
     var tools = new ToolCatalog([
       new ReadTool(files), new WriteTool(files), new EditTool(files),
-      new BashTool(processes, bash!, toolSettings.Environment)
+      new BashTool(processes, bash!, toolSettings.Environment), .. controls
     ]);
-    return new PrimarySession(record, store, createChatClient, tools, processes);
+    return new PrimarySession(record, store, createChatClient, tools, processes, pending);
   }
 
   private void ThrowIfShuttingDown() {

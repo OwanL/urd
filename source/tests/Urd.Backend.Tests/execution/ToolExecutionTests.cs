@@ -54,10 +54,12 @@ public sealed class ToolExecutionTests {
     Assert.Equal(2, invoked);
     Assert.Equal(2, client.Calls);
     Assert.All(client.Options, options => {
-      AIFunctionDeclaration declaration = Assert.IsAssignableFrom<AIFunctionDeclaration>(Assert.Single(options!.Tools!));
+      AIFunctionDeclaration declaration = Assert.IsAssignableFrom<AIFunctionDeclaration>(
+          Assert.Single(options!.Tools!, tool => tool.Name == count.Name));
       Assert.False(declaration is AIFunction);
-      Assert.Equal(count.Name, declaration.Name);
-      Assert.Equal(count.JsonSchema.GetRawText(), declaration.JsonSchema.GetRawText());
+      Assert.Equal("boolean", declaration.JsonSchema.GetProperty("properties").GetProperty("background").GetProperty("type").GetString());
+      Assert.Equal(count.JsonSchema.GetProperty("properties").GetProperty("amount").GetRawText(),
+          declaration.JsonSchema.GetProperty("properties").GetProperty("amount").GetRawText());
     });
     FunctionResultContent[] results = client.LastRequest.SelectMany(message => message.Contents)
         .OfType<FunctionResultContent>().ToArray();
@@ -84,11 +86,12 @@ public sealed class ToolExecutionTests {
     var failureReached = Signal();
     var tool = new TestAgentTool("effect", async (_, context, cancellation) => {
       if (context.CallId == "first") {
+        using var stopped = cancellation.Register(() => failureReached.TrySetResult());
         firstEntered.TrySetResult();
-        await firstRelease.Task.WaitAsync(cancellation);
+        // Hold owned work independently of sibling-failure cancellation.
+        await firstRelease.Task;
         return new ToolOutput("first saved", []);
       }
-      failureReached.TrySetResult();
       if (failurePoint == "cleanup")
         throw new ToolCleanupException("Injected cleanup failure.", new IOException("unfinished cleanup"));
       if (failurePoint != "encoding")
@@ -113,12 +116,10 @@ public sealed class ToolExecutionTests {
     UserMessageReceipt receipt = await session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, "go", TestLlmSelection.Default));
     Guid execution = receipt.ExecutionId!.Value;
     Task<SessionExecutionResult> settlement = session.WaitForSettlementAsync(execution);
-    bool drained = false;
     try {
       try {
         await firstEntered.Task.WaitAsync(TestTimeout);
-        if (failurePoint != "start")
-          await failureReached.Task.WaitAsync(TestTimeout);
+        await failureReached.Task.WaitAsync(TestTimeout);
         Assert.False(settlement.IsCompleted);
         Assert.Equal(1, client.Calls);
       } finally {
@@ -126,7 +127,6 @@ public sealed class ToolExecutionTests {
         // A timeout is not accepted as permission to close resources underneath owned work.
         Exception failure = await Assert.ThrowsAnyAsync<Exception>(() => settlement.WaitAsync(TestTimeout));
         Assert.IsNotType<TimeoutException>(failure);
-        drained = true;
       }
       SessionSnapshot snapshot = await session.ReadSnapshotAsync();
       Assert.True(snapshot.AdmissionFenced);
@@ -135,7 +135,7 @@ public sealed class ToolExecutionTests {
       Assert.NotNull(Assert.Single(StoredTools.Read(database), call => call.CallId == "first").ResultJson);
       Assert.Equal(1, client.Calls);
     } finally {
-      if (drained) {
+      if (settlement.IsCompleted) {
         store.Dispose();
         client.Dispose();
         database.Dispose();

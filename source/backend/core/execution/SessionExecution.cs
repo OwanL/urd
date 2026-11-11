@@ -1,4 +1,6 @@
 using System.Runtime.ExceptionServices;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.Extensions.AI;
 using Urd.Core.Sessions;
 using Urd.Core.Providers;
@@ -15,32 +17,44 @@ internal sealed class SessionExecution : IDisposable {
   private IChatClient? chatClient;
   private readonly IReadOnlyList<AgentTool> tools; // Frozen offered capabilities for this execution.
   private readonly CancellationTokenSource stop = new();
+  private readonly PendingToolCalls pending;
   private Task? stopCallbacks;
+  private int backgroundCalls;
 
   internal SessionExecution(Guid executionId, SessionBase session, Func<ProviderConnection, IChatClient> createChatClient,
       LlmSelection selection,
-      IReadOnlyList<AgentTool>? tools = null) {
+      IReadOnlyList<AgentTool>? tools = null, PendingToolCalls? pending = null) {
     ExecutionId = executionId;
     this.session = session;
     this.createChatClient = createChatClient;
     this.selection = selection;
     this.tools = tools ?? [];
+    this.pending = pending ?? new PendingToolCalls();
   }
 
   internal Guid ExecutionId { get; }
   internal bool IsStopping => stop.IsCancellationRequested;
+  internal bool HasPendingTools => Volatile.Read(ref backgroundCalls) != 0;
+  internal Task JoinPendingToolsAsync() => pending.JoinExecutionAsync(ExecutionId);
 
   // Completes once every callback registered on the stop token has finished.
   internal Task StopCallbacks => stopCallbacks ?? Task.CompletedTask;
 
   // Called by the session while it holds its lock. Repeated calls share one task.
-  internal Task StopAsync() => stopCallbacks ??= stop.CancelAsync();
+  internal Task StopAsync() {
+    if (stopCallbacks is not null)
+      return stopCallbacks;
+    stopCallbacks = stop.CancelAsync();
+    pending.RequestCancelExecution(ExecutionId);
+    return stopCallbacks;
+  }
 
   // Called by the session only after every request and StopCallbacks have finished
   // and the execution's result has been saved.
   public void Dispose() => stop.Dispose();
 
-  // Called sequentially by the session, outside its lock. No work survives the return.
+  // Called sequentially outside the session lock. Foreground calls join here;
+  // registered background calls remain owned until the session drains them.
   internal async Task<ExecutionOutcome> RunRequestAsync(LlmRequest request) {
     LlmRequestResult outcome;
     bool saved;
@@ -60,13 +74,15 @@ internal sealed class SessionExecution : IDisposable {
   }
 
   private async Task<ExecutionOutcome> RunToolsAsync(Guid requestId, IReadOnlyList<LlmToolCall> calls) {
-    var pending = new List<Task>(calls.Count);
+    var foreground = new List<Task>(calls.Count);
     var failures = new List<Exception>();
     try {
       foreach (LlmToolCall call in calls) {
         if (IsStopping)
           break;
-        if (!await session.TryStartToolAsync(ExecutionId, requestId, call.CallId)) {
+        bool background = call.Arguments.TryGetProperty("background", out JsonElement option)
+            && option.ValueKind == JsonValueKind.True;
+        if (!await session.TryStartToolAsync(ExecutionId, requestId, call.CallId, background)) {
           if (IsStopping)
             break;
           throw new InvalidOperationException("The tool call could not be started.");
@@ -74,14 +90,18 @@ internal sealed class SessionExecution : IDisposable {
 
         // Invoke immediately, before claiming the next call. File tools admit to their
         // shared path queue synchronously, preserving emitted order without Task.Run.
-        pending.Add(InvokeAndSaveToolAsync(requestId, call));
+        if (background)
+          StartBackgroundTool(requestId, call);
+        else
+          foreground.Add(InvokeAndSaveToolAsync(requestId, call, stop.Token));
       }
     } catch (Exception failure) {
       failures.Add(failure);
+      await session.BackgroundToolCompletedAsync(ExecutionId, failure);
     }
 
     // Even a failed start/save/encoding must join all launched siblings before fencing.
-    Task joined = Task.WhenAll(pending);
+    Task joined = Task.WhenAll(foreground);
     try {
       await joined;
     } catch (Exception failure) {
@@ -93,17 +113,75 @@ internal sealed class SessionExecution : IDisposable {
     return IsStopping ? ExecutionOutcome.Cancelled : ExecutionOutcome.Completed;
   }
 
-  private async Task InvokeAndSaveToolAsync(Guid requestId, LlmToolCall call) {
-    LlmToolResult result = await InvokeToolAsync(requestId, call);
-    // A rejected or failed save leaves effects uncertain, never an ordinary tool error.
-    if (!await session.CompleteToolAsync(ExecutionId, requestId, result))
-      throw new InvalidOperationException("The tool result could not be saved.");
+  private void StartBackgroundTool(Guid requestId, LlmToolCall call) {
+    // The registry is the only cancellation owner; linked-source callbacks would bypass its join.
+    var cancellation = new CancellationTokenSource();
+    var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    Interlocked.Increment(ref backgroundCalls);
+    try {
+      pending.Add(ExecutionId, requestId, call, completion.Task, cancellation,
+          failure => session.BackgroundToolCompletedAsync(ExecutionId, failure));
+    } catch {
+      Interlocked.Decrement(ref backgroundCalls);
+      cancellation.Dispose();
+      throw;
+    }
+    // Stop may have raced the durable start before registration. Cancel the newly owned
+    // source before invocation; later Stops see it in the registry.
+    if (IsStopping)
+      pending.RequestCancelExecution(ExecutionId);
+    // Registration precedes invocation, including tools that finish synchronously.
+    _ = RunBackgroundToolAsync(requestId, call, completion, cancellation.Token);
   }
 
-  private async Task<LlmToolResult> InvokeToolAsync(Guid requestId, LlmToolCall call) {
+  private async Task RunBackgroundToolAsync(Guid requestId, LlmToolCall call, TaskCompletionSource completion,
+      CancellationToken cancellation) {
+    Exception? failure = null;
+    try {
+      await InvokeAndSaveToolAsync(requestId, call, cancellation);
+    } catch (Exception error) {
+      failure = error;
+    }
+    // Update the wait predicate before signalling under the session gate. The registry
+    // still owns this task and all callback cleanup, so settlement must join it outside the gate.
+    Interlocked.Decrement(ref backgroundCalls);
+    try {
+      await session.BackgroundToolCompletedAsync(ExecutionId, failure);
+    } catch (Exception error) {
+      failure = failure is null ? error : new AggregateException(failure, error);
+    }
+    if (failure is null)
+      completion.TrySetResult();
+    else
+      completion.TrySetException(failure);
+  }
+
+  private async Task InvokeAndSaveToolAsync(Guid requestId, LlmToolCall call, CancellationToken cancellation) {
+    try {
+      LlmToolResult result = await InvokeToolAsync(requestId, call, cancellation);
+      // A rejected or failed save leaves effects uncertain, never an ordinary tool error.
+      if (!await session.CompleteToolAsync(ExecutionId, requestId, result))
+        throw new InvalidOperationException("The tool result could not be saved.");
+    } catch (Exception failure) {
+      await session.BackgroundToolCompletedAsync(ExecutionId, failure);
+      throw;
+    }
+  }
+
+  private static JsonElement ToolArguments(JsonElement arguments) {
+    if (!arguments.TryGetProperty("background", out JsonElement option))
+      return arguments;
+    if (option.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+      throw new ArgumentException("The background option must be a boolean.", nameof(arguments));
+    JsonObject values = JsonNode.Parse(arguments.GetRawText())!.AsObject();
+    values.Remove("background");
+    return JsonSerializer.SerializeToElement(values);
+  }
+
+  private async Task<LlmToolResult> InvokeToolAsync(Guid requestId, LlmToolCall call, CancellationToken cancellation) {
     ToolOutput output;
     try {
-      stop.Token.ThrowIfCancellationRequested();
+      cancellation.ThrowIfCancellationRequested();
       AgentTool tool = tools.FirstOrDefault(tool =>
           string.Equals(tool.Name, call.Name, StringComparison.Ordinal))
           ?? throw new InvalidOperationException($"Unknown tool '{call.Name}'.");
@@ -111,8 +189,8 @@ internal sealed class SessionExecution : IDisposable {
           ?? throw new InvalidOperationException("The chat has no saved working folder.");
       // Progress is intentionally inert until transcript progress integration is available.
       var context = new ToolContext(directory, requestId, call.CallId, selection.SupportsImages, static _ => { });
-      output = await tool.RunAsync(call.Arguments, context, stop.Token);
-    } catch (OperationCanceledException) when (IsStopping) {
+      output = await tool.RunAsync(ToolArguments(call.Arguments), context, cancellation);
+    } catch (OperationCanceledException) when (cancellation.IsCancellationRequested) {
       return ToolError(call, ExecutionOutcome.Cancelled,
           "Tool execution was cancelled; effects may have occurred.");
     } catch (Exception exception) when (exception is not ToolCleanupException) {
@@ -122,7 +200,7 @@ internal sealed class SessionExecution : IDisposable {
     // Storage freezes output and publishes images outside the ordinary invocation-error catch.
     // A tool may return an error instead of throwing after cancellation; Stop still takes priority.
     ExecutionOutcome outcome = output.IsError ? ExecutionOutcome.Failed : ExecutionOutcome.Completed;
-    if (IsStopping)
+    if (cancellation.IsCancellationRequested)
       outcome = ExecutionOutcome.Cancelled;
     return new(call.CallId, outcome, output);
   }

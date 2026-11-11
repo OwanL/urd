@@ -9,13 +9,17 @@ export interface MessageRef {
 }
 
 // Entry order is observed order, not request order or a displayed rank.
-export type TranscriptEntryKind = "user" | "text" | "tool";
+export type TranscriptEntryKind = "user" | "text" | "tool" | "toolCompletion";
 
 export interface TranscriptEntryRef {
   readonly executionId: string;
   readonly entryId: string;
   readonly kind: TranscriptEntryKind;
   readonly historyRevision: number;
+}
+
+export function isTextEntry(entry: TranscriptEntryRef): boolean {
+  return entry.kind === "user" || entry.kind === "text";
 }
 
 export type TranscriptHistoryQuery =

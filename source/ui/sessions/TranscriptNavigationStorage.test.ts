@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { isTextEntry } from "./Messages.ts";
 import {
   DebouncedTranscriptNavigationWriter,
   TranscriptNavigationStorage,
@@ -52,6 +53,30 @@ void test("persists only the navigation schema and roundtrips valid state", () =
   assert.ok(persisted);
   assert.deepEqual(JSON.parse(persisted), { version: 1, state: sample });
   assert.deepEqual(new TranscriptNavigationStorage(storage).load("session/a").value.state, sample);
+});
+
+void test("completion anchors roundtrip without a text cursor and stay non-text", () => {
+  const storage = new TranscriptNavigationStorage(new MemoryStorage());
+  const state: TranscriptNavigationState = {
+    ...sample,
+    anchor: {
+      ...sample.anchor!,
+      entry: { ...sample.anchor!.entry, kind: "toolCompletion" },
+      sourceCursor: null,
+    },
+  };
+  assert.equal(storage.save("s", state).error, null);
+  assert.deepEqual(storage.load("s").value.state, state);
+  assert.equal(isTextEntry(state.anchor!.entry), false);
+  assert.equal(isTextEntry(sample.anchor!.entry), true);
+  assert.equal(isTextEntry({ ...sample.anchor!.entry, kind: "tool" }), false);
+  assert.notEqual(
+    storage.save("s", {
+      ...state,
+      anchor: { ...state.anchor!, sourceCursor: sample.anchor!.sourceCursor },
+    }).error,
+    null,
+  );
 });
 
 void test("latest debounced write wins and flush persists immediately", () => {

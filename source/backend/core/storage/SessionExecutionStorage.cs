@@ -20,8 +20,10 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
             AND NOT EXISTS (SELECT 1 FROM execution_requests q
                 WHERE q.run_id = r.run_id AND (q.outcome IS NULL OR q.outcome <> 0))
             AND NOT EXISTS (SELECT 1 FROM execution_tools t WHERE t.run_id = r.run_id
-                AND (t.outcome IS NULL OR t.result_json IS NULL))
-            AND (EXISTS (SELECT 1 FROM execution_inputs i WHERE i.run_id = r.run_id
+                AND (t.background = 0 OR t.started = 0) AND (t.outcome IS NULL OR t.result_json IS NULL))
+            AND (EXISTS (SELECT 1 FROM execution_tool_completions c
+                    WHERE c.session_id = $session AND c.history_revision = $revision AND c.claimed_request_id IS NULL)
+                OR EXISTS (SELECT 1 FROM execution_inputs i WHERE i.run_id = r.run_id
                     AND i.request_id IS NULL AND i.outcome IS NULL)
                 OR EXISTS (SELECT 1 FROM execution_tools t JOIN execution_requests q ON q.request_id = t.request_id
                     WHERE q.run_id = r.run_id AND q.request_index =
@@ -31,10 +33,13 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
       if (claim.ExecuteNonQuery() == 0)
         return null;
 
+      PublishCompletions(transaction, sessionId, historyRevision, requestId);
       using SqliteCommand assign = database.Command(transaction, """
+        UPDATE execution_tool_completions SET claimed_request_id = $request
+        WHERE session_id = $session AND history_revision = $revision AND claimed_request_id IS NULL;
         UPDATE execution_inputs SET request_id = $request
         WHERE run_id = $run AND request_id IS NULL AND outcome IS NULL;
-        """, ("$run", executionId), ("$request", requestId));
+        """, ("$session", sessionId), ("$revision", historyRevision), ("$run", executionId), ("$request", requestId));
       assign.ExecuteNonQuery();
       return new LlmRequest(requestId,
           new LlmContextReader(database, toolResults).Read(transaction, sessionId, executionId, historyRevision, requestId));
@@ -111,7 +116,9 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
       using SqliteCommand read = database.Command(transaction, """
         SELECT r.outcome, r.stopping,
             (SELECT q.outcome FROM execution_requests q WHERE q.run_id = r.run_id ORDER BY q.request_index DESC LIMIT 1),
-            EXISTS (SELECT 1 FROM execution_inputs i WHERE i.run_id = r.run_id AND i.request_id IS NULL AND i.outcome IS NULL),
+            (EXISTS (SELECT 1 FROM execution_inputs i WHERE i.run_id = r.run_id AND i.request_id IS NULL AND i.outcome IS NULL)
+                OR EXISTS (SELECT 1 FROM execution_tool_completions c WHERE c.session_id = r.session_id
+                    AND c.history_revision = r.history_revision AND c.claimed_request_id IS NULL)),
             EXISTS (SELECT 1 FROM execution_tools t WHERE t.run_id = r.run_id AND (t.outcome IS NULL OR t.result_json IS NULL)),
             EXISTS (SELECT 1 FROM execution_tools t JOIN execution_requests q ON q.request_id = t.request_id
                 WHERE q.run_id = r.run_id AND q.request_index =
@@ -125,6 +132,11 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
         return new(executionId, settlement.Outcome);
 
       using SqliteCommand settle = database.Command(transaction, """
+        UPDATE execution_tool_completions SET claimed_request_id = NULL WHERE claimed_request_id IN (
+            SELECT request_id FROM execution_requests WHERE run_id = $run AND attempt = 1);
+        UPDATE execution_messages SET end_chunk_index = (
+            SELECT next_chunk_index FROM execution_requests q WHERE q.request_id = execution_messages.request_id)
+        WHERE run_id = $run AND role = 1 AND end_chunk_index IS NULL;
         UPDATE execution_requests SET outcome = $outcome WHERE run_id = $run AND outcome IS NULL;
         UPDATE execution_inputs SET outcome = $outcome,
             not_sent = CASE WHEN (request_id IS NULL OR EXISTS (
@@ -134,18 +146,114 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
         WHERE run_id = $run AND outcome IS NULL;
         UPDATE execution_tools SET outcome = $toolOutcome,
             error = CASE WHEN started = 0 THEN 'Tool was not executed.' ELSE 'Tool result unavailable; effects may have occurred.' END,
-            result_json = CASE WHEN started = 0 THEN $unstartedResult ELSE $unknownResult END
+            result_json = CASE WHEN started = 0 THEN $unstartedResult ELSE $unknownResult END,
+            ended_at = CASE WHEN started = 1 THEN $ended ELSE NULL END
         WHERE run_id = $run AND result_json IS NULL;
         UPDATE execution_runs SET outcome = $outcome WHERE session_id = $session AND run_id = $run;
         """,
           ("$session", sessionId), ("$run", executionId), ("$outcome", (int)settlement.Outcome),
+          ("$ended", StorageText.UtcTimestamp()),
           ("$unstartedResult", toolResults.Error("Tool was not executed.")),
           ("$unknownResult", toolResults.Error("Tool result unavailable; effects may have occurred.")),
           ("$toolOutcome", (int)(settlement.Outcome == ExecutionOutcome.Cancelled
               ? ExecutionOutcome.Cancelled : ExecutionOutcome.Failed)));
       settle.ExecuteNonQuery();
+      QueueMissingCompletions(transaction, executionId);
+      using SqliteCommand revision = database.Command(transaction,
+          "SELECT history_revision FROM execution_runs WHERE run_id = $run;", ("$run", executionId));
+      PublishCompletions(transaction, sessionId, (long)revision.ExecuteScalar()!);
       return new(executionId, settlement.Outcome);
     });
+  }
+
+  // Host-only startup operation, under its exclusive data-directory lease. Opening a store
+  // alone never changes history or restarts work. Completed facts remain untouched.
+  internal void RecoverInterruptedExecutions() {
+    database.Write(transaction => {
+      var interrupted = new List<(Guid RunId, Guid SessionId, long Revision)>();
+      using (SqliteCommand read = database.Command(transaction,
+          "SELECT run_id, session_id, history_revision FROM execution_runs WHERE outcome IS NULL;"))
+      using (SqliteDataReader reader = read.ExecuteReader()) {
+        while (reader.Read())
+          interrupted.Add((reader.GetGuid(0), reader.GetGuid(1), reader.GetInt64(2)));
+      }
+
+      foreach (var run in interrupted) {
+        using SqliteCommand recover = database.Command(transaction, """
+          UPDATE execution_tool_completions SET claimed_request_id = NULL WHERE claimed_request_id IN (
+              SELECT request_id FROM execution_requests WHERE run_id = $run AND attempt = 1);
+          UPDATE execution_messages SET end_chunk_index = (
+              SELECT next_chunk_index FROM execution_requests q WHERE q.request_id = execution_messages.request_id)
+          WHERE run_id = $run AND role = 1 AND end_chunk_index IS NULL;
+          UPDATE execution_inputs SET outcome = $failed,
+              not_sent = CASE WHEN request_id IS NULL OR EXISTS (SELECT 1 FROM execution_requests q
+                  WHERE q.request_id = execution_inputs.request_id AND q.attempt = 1) THEN 1 ELSE 0 END
+          WHERE run_id = $run AND outcome IS NULL;
+          UPDATE execution_requests SET outcome = $failed, error = 'Interrupted by backend shutdown.'
+          WHERE run_id = $run AND outcome IS NULL;
+          UPDATE execution_tools SET outcome = $failed,
+              error = CASE WHEN started = 0 THEN $unstarted ELSE $unknown END,
+              result_json = CASE WHEN started = 0 THEN $unstartedResult ELSE $unknownResult END,
+              ended_at = CASE WHEN started = 1 THEN $ended ELSE NULL END
+          WHERE run_id = $run AND result_json IS NULL;
+          UPDATE execution_runs SET outcome = $failed WHERE run_id = $run;
+          """, ("$run", run.RunId), ("$failed", (int)ExecutionOutcome.Failed),
+            ("$unstarted", "Interrupted before tool execution; tool was not executed."),
+            ("$unknown", "Tool execution interrupted; effects may have occurred. Do not automatically retry."),
+            ("$unstartedResult", toolResults.Error("Interrupted before tool execution; tool was not executed.")),
+            ("$unknownResult", toolResults.Error("Tool execution interrupted; effects may have occurred. Do not automatically retry.")),
+            ("$ended", StorageText.UtcTimestamp()));
+        recover.ExecuteNonQuery();
+        QueueMissingCompletions(transaction, run.RunId);
+        PublishCompletions(transaction, run.SessionId, run.Revision);
+      }
+      return true;
+    });
+  }
+
+  // Synthetic interruption results need the same one-event guarantee as real completions.
+  private void QueueMissingCompletions(SqliteTransaction transaction, Guid executionId) {
+    var missing = new List<(Guid RequestId, string CallId)>();
+    using (SqliteCommand read = database.Command(transaction, """
+      SELECT t.request_id, t.call_id FROM execution_tools t JOIN execution_requests q ON q.request_id = t.request_id
+      WHERE t.run_id = $run AND t.background = 1 AND t.started = 1 AND t.result_json IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM execution_tool_completions c
+              WHERE c.request_id = t.request_id AND c.call_id = t.call_id)
+      ORDER BY q.request_index, t.call_index;
+      """, ("$run", executionId)))
+    using (SqliteDataReader reader = read.ExecuteReader()) {
+      while (reader.Read())
+        missing.Add((reader.GetGuid(0), reader.GetString(1)));
+    }
+    foreach (var call in missing) {
+      using SqliteCommand insert = database.Command(transaction, """
+        INSERT INTO execution_tool_completions (
+            completion_id, session_id, history_revision, request_id, call_id, created_at)
+        SELECT $completion, r.session_id, r.history_revision, t.request_id, t.call_id, t.ended_at
+        FROM execution_tools t JOIN execution_runs r ON r.run_id = t.run_id
+        WHERE t.request_id = $request AND t.call_id = $call;
+        """, ("$completion", Guid.NewGuid()), ("$request", call.RequestId), ("$call", call.CallId));
+      insert.ExecuteNonQuery();
+    }
+  }
+
+  // Never append behind a streaming text tail: publication and input delivery are separate.
+  private void PublishCompletions(SqliteTransaction transaction, Guid sessionId, long revision, Guid? unstartedRequest = null) {
+    using SqliteCommand publish = database.Command(transaction, """
+      INSERT INTO execution_messages (
+          session_id, history_revision, run_id, role, message_id, request_id, created_at, call_id, tool_name)
+      SELECT c.session_id, c.history_revision, t.run_id, 3, c.completion_id, c.request_id, c.created_at, c.call_id, t.name
+      FROM execution_tool_completions c JOIN execution_tools t ON t.request_id = c.request_id AND t.call_id = c.call_id
+      WHERE c.session_id = $session AND c.history_revision = $revision AND c.published = 0
+          AND NOT EXISTS (SELECT 1 FROM execution_requests q JOIN execution_runs r ON r.run_id = q.run_id
+              WHERE r.session_id = $session AND r.history_revision = $revision AND q.outcome IS NULL
+                  AND ($claim IS NULL OR q.request_id <> $claim OR q.attempt <> 1))
+      ORDER BY c.ordinal;
+      UPDATE execution_tool_completions SET published = 1
+      WHERE session_id = $session AND history_revision = $revision AND published = 0
+          AND EXISTS (SELECT 1 FROM execution_messages m WHERE m.role = 3 AND m.message_id = completion_id);
+      """, ("$session", sessionId), ("$revision", revision), ("$claim", unstartedRequest));
+    publish.ExecuteNonQuery();
   }
 
   internal SessionExecutionResult? ReadSettlement(Guid sessionId, Guid executionId) {

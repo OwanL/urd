@@ -9,7 +9,7 @@ saved-primary-ID discovery, durable Send decisions, safe-boundary steering, addr
 Stop, bounded snapshot/history/content reads, known-not-sent discovery and graceful
 shutdown. The browser workspace is implemented and served as static assets by the Server.
 
-`UrdStore` owns the shared database, currently schema 13. It records whether a request
+`UrdStore` owns the shared database, currently schema 14. It records whether a request
 started sending and pages inputs known not to have been sent, so users can retrieve
 and explicitly resend them. Snapshots stay slim; transcript metadata and
 content use separate bounded reads, and reported usage is persisted per request. Provider
@@ -19,7 +19,7 @@ credential behavior.
 
 Before the supported public data baseline, schema changes replace the schema rather than
 migrating it. A fresh/version-0 database creates all current tables and indexes in one
-transaction; version 13 reopens normally. Other versions fail with reset instructions:
+transaction; version 14 reopens normally. Other versions fail with reset instructions:
 stop Urd, delete `urd.sqlite`, `urd.sqlite-wal` and `urd.sqlite-shm`, then restart.
 Urd never deletes these files automatically. Requests have only known not-attempted (1)
 or attempted (2) provenance; transcript user entries require request links and receipts
@@ -68,7 +68,7 @@ drains the service and HTTP requests before disposing their shared storage.
 
 - `SessionManager(store, createChatClient, AgentToolSettings? toolSettings = null)` passes the
   borrowed store and client factory to canonical session handles. Optional settings enable the
-  generic read/write/edit/bash catalog; no settings means no tools. Each chat retains its saved
+  generic read/write/edit/bash catalog plus list/cancel-pending controls; no settings means no tools. Each chat retains its saved
   working directory and owns its shell processes; file mutations share the manager's ordering
   queue. The factory receives the frozen selected connection binding. Constructors start no work.
 - `PrimarySession.SubmitUserMessageAsync(submission)` returns a durable acceptance/refusal receipt,
@@ -100,19 +100,27 @@ drains the service and HTTP requests before disposing their shared storage.
   Claiming the next request or settling happens under the same guard, so racing admission cannot
   strand accepted input. Capacity, revision and Stopping refusals remain durable decisions.
 - Configured tool batches are authorized only after successful response completion and provider cleanup;
-  up to 16 calls launch in emitted order and run in parallel. All launched calls join before
-  continuation; dependencies require separate replies or a chained shell command. Bounded reads
+  up to 16 calls launch in emitted order and run in parallel. Foreground calls join before
+  continuation; `background: true` calls retain a stable direct placeholder and remain owned
+  through cleanup and result save. Dependencies require separate replies or a chained shell command. Bounded reads
   protect display paths rather than imposing a 16 KiB tool JSON write cap.
   Ordinary argument/execution errors become feedback and do not cancel siblings. Such errors do
   not guarantee no effects. Core-owned result encoding, persistence or cleanup faults fence
   uncertain work instead of becoming ordinary tool errors. Saved results retain text, inspection
   details and content-addressed processed image bytes; the selected model's explicit image flag
   filters only outgoing context. Reported usage remains unknown when the provider omits it.
+- Background completions commit atomically with results, are claimed before steering at a safe
+  request boundary and appear as distinct compact transcript rows. Their model envelopes retain
+  tool origin and untrusted-output labels, including images only for image-capable selections.
+  A tool-free reply with pending calls enters `waiting`; input or completion wakes the same driver.
+  Stop and terminal provider failure cancel/join owned calls; completed-shell survivors remain chat-owned.
 - Stop retires pending deliveries without rewriting Accepted receipts or automatically carrying
   them into another execution. No explicit after-execution queue is implemented.
 - Public snapshot, history, not-sent and content reads expose committed state without starting
-  work; cancelled reads do not cancel execution. Reopened orphan executions and live persistence
-  faults are reported as fenced.
+  work; cancelled reads do not cancel execution. Opening a store alone leaves orphan executions
+  fenced. The host explicitly recovers under its data-directory lease: close interrupted work,
+  preserve saved results, record unknown effects and permit later deliberate input, never replay.
+  Live persistence/cleanup failures remain fenced until that host recovery.
 - `SessionManager.ShutdownSessionsAsync(waitCancellation)` fences creation/lookup/listing and input on every
   held handle, then stops and drains owned executions through cleanup and saved settlement. Concurrent/repeated
   calls join one retained outcome; cancellation abandons only the caller's wait, not shutdown. A failed

@@ -32,7 +32,8 @@ internal sealed class TranscriptHistoryReader(Database database) {
     SELECT m.ordinal, m.run_id, m.role, m.message_id, m.created_at,
         m.request_id, m.first_chunk_index, m.end_chunk_index,
         q.next_chunk_index, q.response_final, q.outcome, r.stopping, r.outcome,
-        m.call_id, m.tool_name, t.started, t.outcome, t.started_at, t.ended_at
+        m.call_id, CASE WHEN m.role = 3 THEN t.name ELSE m.tool_name END,
+        t.started, t.outcome, t.started_at, t.ended_at
     FROM window m
     JOIN execution_runs r ON r.run_id = m.run_id
     LEFT JOIN execution_requests q ON q.request_id = m.request_id
@@ -109,7 +110,7 @@ internal sealed class TranscriptHistoryReader(Database database) {
       bool stopping = reader.GetBoolean(11);
       TranscriptTextFacts? text = null;
       TranscriptToolFacts? tool = null;
-      if (reference.Kind == TranscriptEntryKind.Tool) {
+      if (reference.Kind is TranscriptEntryKind.Tool or TranscriptEntryKind.ToolCompletion) {
         bool authorized = !reader.IsDBNull(15);
         bool started = authorized && reader.GetBoolean(15);
         ExecutionOutcome? outcome = reader.IsDBNull(16) ? null : (ExecutionOutcome)reader.GetInt32(16);

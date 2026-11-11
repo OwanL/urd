@@ -4,6 +4,36 @@ Evidence for the [agent-tool plan](agent-tools-design.md), separating integrated
 qualification from earlier disposable probes. No live model requests, personal databases,
 installations or desktop control. Builds/runs used the exclusive `urd:dotnet` resource.
 
+## Integrated background checkpoint — 2026-11-11
+
+Background dispatch, list/cancel controls, waiting/wake, Stop/failure drain and explicit host
+recovery are implemented. Verification of the shared tree passed:
+
+- Isolated Release build/analyzers: zero warnings/errors; **322 backend tests** passed.
+- UI formatting, typed lint and typecheck; **246 unit tests** (including `sessions/*.test.ts`),
+  real-server/SDK integration, **14 headless browser regressions** and Vite production build.
+- Deterministic lifecycle tests cover waiting, steering, unchanged in-flight context, one
+  completion delivery, held cleanup on Stop/provider failure and prompt cancellation/fencing
+  after a background result-save fault. Focused ownership cases passed two additional repeats.
+- Storage tests cover atomic result/event commit, exact repeats, late background authorization,
+  safe transcript publication, recipient ordering and release of never-attempted claims.
+  Explicit recovery distinguishes unstarted/unknown work, preserves actual results and event
+  identities, closes interrupted requests/inputs/runs and performs no tool/model replay.
+- Offline real-SDK captures for **Responses and Chat Completions** verify stable placeholders,
+  separately labelled tool-origin completions, actual image parts, text-only omission and
+  reopen fidelity. These are serialization checks, not live-provider acceptance.
+- Independent source reviews approved registry, storage/context and final driver integration.
+  Physical-line budget: **23,486 tests/helpers ≤ 23,623 application lines**, including the
+  concurrently committed Markdown work; no compressed formatting or moved helpers.
+
+Outputs remain isolated at `bin/Tools-4d11e9d/Release/net10.0`; all tests used owned temporary
+profiles. Verification children stopped and both resource leases were released. The live
+schema-12 server/data were untouched. **Schema 14 is built, not activated**; it requires
+owner-directed data recreation, not a migration or an automatic reset.
+
+**Still pending:** live-provider acceptance, rich tool-result inspection and compaction.
+These local checks do not establish normal-use readiness or an integrated crash-process probe.
+
 ## Integrated foreground checkpoint — 2026-11-11
 
 Generic read/write/edit/bash, parallel dispatch, explicit model metadata and processed-image
@@ -29,8 +59,9 @@ Verification used `bin/Tools-4d11e9d/Release/net10.0` outputs and owned temporar
 running development server and its schema-12 data were not restarted or reset. Schema 13
 requires deliberate data recreation before activation; browser state is version 3.
 
-**Still pending:** integrated background completion/waiting/recovery, live-provider acceptance,
-rich tool-result inspection and compaction. Foreground qualification is not normal-use readiness.
+At this foreground checkpoint, background completion/waiting/recovery was still pending;
+the later checkpoint above qualifies it locally. Foreground qualification alone was not
+normal-use readiness.
 The following **2026-11-10 probes** establish only their stated fixture boundaries; independent
 review checked their source/captures but did not independently rerun them.
 
@@ -116,7 +147,7 @@ Do not use higher-authority developer instructions merely to avoid a `user` wire
 The initial probe's interpretation of that role as necessarily human-authored was too strict;
 it is not a product constraint. A label is not provider-enforced trust isolation.
 
-### Integration still required
+### Integration requirements recorded at the probe checkpoint
 
 - Persist and claim completion events separately from the stable direct placeholder; test
   delivery races, restart and Stop against the actual session/storage owners.
@@ -152,6 +183,6 @@ was found. These boundaries still apply:
   and recovery, then compaction. Tool-row presentation and compaction remain normal-use gates;
   passing these two probes does not justify self-hosting early.
 
-Actual storage/context tests, the transcript's approved large-payload work and integrated
-Stop/restart/shutdown tests remain delivery obligations, not reasons to redesign the approved
-tools or class shapes.
+The integrated checkpoints above cover the selected tool storage/context, Stop, recovery and
+shutdown boundaries. The transcript's approved large-payload work and compaction remain
+separate delivery obligations, not reasons to redesign the approved tools or class shapes.

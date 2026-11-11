@@ -43,7 +43,7 @@ internal static class LlmProviderContext {
     if (supportsImages)
       return source;
 
-    return source.Select(FilterToolImages).ToArray();
+    return source.Select(FilterImages).ToArray();
   }
 
   internal static LlmProviderResponse CaptureResponses(LlmProviderScope scope, IReadOnlyList<ResponseItem> items) {
@@ -325,7 +325,10 @@ internal static class LlmProviderContext {
     return projected;
   }
 
-  private static ChatMessage FilterToolImages(ChatMessage message) {
+  private static ChatMessage FilterImages(ChatMessage message) {
+    if (message.Role == ChatRole.User && message.Contents.Any(content => content is DataContent))
+      return new ChatMessage(message.Role, message.Contents.Where(content => content is not DataContent)
+          .Append(new TextContent(ImageOmissionLabel)).ToList());
     if (message.Role != ChatRole.Tool)
       return message;
 

@@ -1,4 +1,4 @@
-import type { TranscriptEntryRef } from "./Messages.ts";
+import { isTextEntry, type TranscriptEntryRef } from "./Messages.ts";
 import type { TranscriptSourceCursor } from "./TranscriptViewport.ts";
 
 export interface TranscriptNavigationState {
@@ -218,6 +218,7 @@ function isState(value: unknown): value is TranscriptNavigationState {
     return false;
   if (value.anchor.entry.historyRevision !== value.historyRevision) return false;
   const cursor = value.anchor.sourceCursor;
+  if (cursor !== null && !isTextEntry(value.anchor.entry)) return false;
   return (
     cursor === null ||
     (isRecord(cursor) && validCounter(cursor.segmentIndex) && validCounter(cursor.utf8Offset))
@@ -233,7 +234,10 @@ function isEntry(value: unknown): value is TranscriptEntryRef {
     typeof value.entryId === "string" &&
     value.entryId.length > 0 &&
     value.entryId.length <= 512 &&
-    (value.kind === "user" || value.kind === "text" || value.kind === "tool") &&
+    (value.kind === "user" ||
+      value.kind === "text" ||
+      value.kind === "tool" ||
+      value.kind === "toolCompletion") &&
     validCounter(value.historyRevision)
   );
 }

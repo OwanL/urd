@@ -156,6 +156,7 @@ internal static class SessionRoutes {
       "user" => TranscriptEntryKind.User,
       "text" => TranscriptEntryKind.Text,
       "tool" => TranscriptEntryKind.Tool,
+      "toolCompletion" => TranscriptEntryKind.ToolCompletion,
       _ => null
     };
     if (mode is null || query.ExpectedHistoryRevision < 0)

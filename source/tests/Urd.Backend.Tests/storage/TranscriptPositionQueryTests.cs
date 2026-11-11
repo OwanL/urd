@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Urd.Backend.Tests.Support;
+using Urd.Core.Execution;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
 using Xunit;
@@ -157,15 +158,17 @@ public sealed class TranscriptPositionQueryTests {
     Assert.Equal(1L, conflict.ActualRevision);
   }
 
-  [Fact]
-  public void ExactEntryPositioningSupportsEveryKindAndFencesInvalidIdentity() {
+  [Theory]
+  [InlineData(ExecutionOutcome.Failed)]
+  [InlineData(ExecutionOutcome.Cancelled)]
+  public void ExactEntryPositioningSupportsEveryKindAndFencesInvalidIdentity(ExecutionOutcome outcome) {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     Guid session = Guid.NewGuid(), otherSession = Guid.NewGuid();
     store.Sessions.CreatePrimary(session);
     store.Sessions.CreatePrimary(otherSession);
-    TranscriptEntryRef[] entries = SeedMixedEntries(database, session, 0);
-    TranscriptEntryRef foreignEntry = SeedMixedEntries(database, otherSession, 0)[0];
+    TranscriptEntryRef[] entries = SeedMixedEntries(database, session, 0, outcome);
+    TranscriptEntryRef foreignEntry = SeedMixedEntries(database, otherSession, 0, outcome)[0];
 
     for (int index = 0; index < entries.Length; index++) {
       TranscriptEntryRef entry = entries[index];
@@ -176,6 +179,17 @@ public sealed class TranscriptPositionQueryTests {
           && positioned.Position.Entry == entry);
       Assert.Equal((TranscriptEntryKind)index, window.Target.Entry.Kind);
     }
+    TranscriptEntryDescriptor completion = store.History.Read(session,
+        new(TranscriptHistoryMode.Around, 0, entries[3])).Entries.Single(entry => entry.Entry == entries[3]);
+    Assert.Null(completion.Text);
+    Assert.Equal("shell", completion.Tool!.Name);
+    Assert.Equal(outcome, completion.Tool.Outcome);
+    Assert.True(completion.Tool.Started);
+    Assert.True(completion.Tool.IsClosed);
+    Assert.Equal(entries[0], Assert.Single(store.Positions.Prompts(session, 0).Prompts).Entry);
+    Assert.Throws<ArgumentException>(() => store.Positions.ActivatePrompt(session, 0, entries[3]));
+    Assert.Throws<KeyNotFoundException>(() => store.Positions.LocateEntry(session, 0,
+        entries[3] with { Kind = TranscriptEntryKind.Tool }));
 
     Assert.Throws<KeyNotFoundException>(() => store.Positions.LocateEntry(session, 0, foreignEntry));
     Assert.Throws<KeyNotFoundException>(() => store.Positions.LocateEntry(session, 0,
@@ -272,9 +286,10 @@ public sealed class TranscriptPositionQueryTests {
         entry.RunId, entry.InputId, TranscriptEntryKind.User, revision)).ToArray();
   }
 
-  private static TranscriptEntryRef[] SeedMixedEntries(TemporaryDatabase database, Guid session, long revision) {
+  private static TranscriptEntryRef[] SeedMixedEntries(TemporaryDatabase database, Guid session, long revision,
+      ExecutionOutcome outcome) {
     Guid input = Guid.NewGuid(), run = Guid.NewGuid(), request = Guid.NewGuid();
-    Guid text = Guid.NewGuid(), tool = Guid.NewGuid();
+    Guid text = Guid.NewGuid(), tool = Guid.NewGuid(), completionId = Guid.NewGuid();
     database.Execute($"""
       BEGIN;
       INSERT INTO input_decisions
@@ -284,8 +299,9 @@ public sealed class TranscriptPositionQueryTests {
       VALUES ('{session:D}', '{run:D}', {revision}, '{input:D}');
       INSERT INTO execution_requests (request_id, run_id, next_chunk_index, response_final)
       VALUES ('{request:D}', '{run:D}', 1, 1);
-      INSERT INTO execution_tools (run_id, request_id, call_index, call_id, name, arguments_json)
-      VALUES ('{run:D}', '{request:D}', 0, 'call', 'shell', json_object());
+      INSERT INTO execution_tools (run_id, request_id, call_index, call_id, name, arguments_json,
+          started, outcome, result_json)
+      VALUES ('{run:D}', '{request:D}', 0, 'call', 'shell', 'not-json', 1, {(int)outcome}, 'not-json');
       INSERT INTO execution_output (request_id, chunk_index, text_utf8, is_final)
       VALUES ('{request:D}', 0, X'6f6b', 1);
       INSERT INTO execution_messages
@@ -297,13 +313,17 @@ public sealed class TranscriptPositionQueryTests {
       INSERT INTO execution_messages
           (session_id, history_revision, run_id, role, message_id, request_id, call_id, tool_name)
       VALUES ('{session:D}', {revision}, '{run:D}', 2, '{tool:D}', '{request:D}', 'call', 'shell');
+      INSERT INTO execution_messages
+          (session_id, history_revision, run_id, role, message_id, request_id, call_id, tool_name)
+      VALUES ('{session:D}', {revision}, '{run:D}', 3, '{completionId:D}', '{request:D}', 'call', 'not-origin');
       COMMIT;
       """);
 
     return [
       new(run, input, TranscriptEntryKind.User, revision),
       new(run, text, TranscriptEntryKind.Text, revision),
-      new(run, tool, TranscriptEntryKind.Tool, revision)
+      new(run, tool, TranscriptEntryKind.Tool, revision),
+      new(run, completionId, TranscriptEntryKind.ToolCompletion, revision)
     ];
   }
 

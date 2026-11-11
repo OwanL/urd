@@ -65,6 +65,7 @@ internal static class Program {
     ExceptionDispatchInfo? runFailure = null;
     try {
       store = UrdStore.Open(Path.Combine(options.DataRoot, "urd.sqlite"));
+      store.RecoverInterruptedExecutions();
       if (createClient is not null)
         client = createClient() ?? throw new InvalidOperationException("The client factory returned no client.");
       Uri CallbackUri() => new(Volatile.Read(ref servedOrigin)

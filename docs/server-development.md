@@ -5,8 +5,8 @@ second backend. Session routes cover creation, saved-ID listing, Send/receipt, a
 slim snapshots, paged transcript history, not-sent inputs and bounded content reads. Separate
 event routes provide server-sent updates for the browser workspace. Provider management and
 its settings UI are integrated; production sessions borrow provider-managed clients. Startup
-recovery and an explicit after-execution queue are not implemented. Real application tools,
-tool arguments and results are not exposed to the browser.
+records interrupted work without replay; no explicit after-execution queue is implemented.
+Tool and background-completion rows expose compact status, not argument/result inspection.
 
 ## Run
 
@@ -21,7 +21,7 @@ From `source/`, with `$dotnet` set to that SDK's executable:
 Choose your own absolute data directory. Both arguments are required; either order is
 accepted. Port `0` lets the OS select an available port; an explicit port must be within
 `1..65535`. Unknown, duplicate or malformed options fail before opening data.
-Add `--working-directory 'C:\dev\repos\your-project'` to enable the four agent tools.
+Add `--working-directory 'C:\dev\repos\your-project'` to enable file/shell tools and pending-call controls.
 This is a relative-path default, not a sandbox: tools have the server user's full access,
 without per-call approvals. New chats save this folder; reopening preserves it. Existing
 chats without a folder require a new chat before tools can run. Optional `--git-bash`
@@ -240,14 +240,18 @@ Startup or readiness-callback failures also enter cleanup. A drain failure is re
 the CLI exits unsuccessfully without explicitly disposing resources beneath uncertain work.
 The stop token requests shutdown; it is not a deadline or permission to abandon cleanup.
 
-Normal reopen preserves saved history and does not replay work. Opening a database does
-**not** recover orphan executions or make a previously fenced conversation usable again.
+Normal reopen preserves saved history and does not replay work. Opening a store alone does
+**not** recover orphan executions. Host startup explicitly recovers them under the directory
+lease before creating sessions: close interrupted requests/runs, distinguish unstarted calls
+from uncertain effects and preserve committed results. Only a later user instruction starts
+new work; missing results are never repaired by rerunning tools.
 Stop retires pending steering without rewriting Accepted receipts or automatically carrying
 it into another execution. Separate independent worker chats continue; bounded-descendant ownership
 requirements remain in [architecture](ARCHITECTURE.md) and [session design](session-design.md),
 not a new child runtime. Stop cannot undo effects or forcibly kill arbitrary in-process functions.
-The CLI configures real selected provider clients, but not application tools. Public
-Stop does not add a second execution loop or change provider/tool ownership.
+The CLI configures real selected provider clients and optional application tools. Public
+Stop cancels provider/foreground/background calls and joins cleanup through the single driver;
+processes retained by completed shell calls survive Stop until chat/backend shutdown.
 
 ## Verification and review
 

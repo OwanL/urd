@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.AI;
 using SkiaSharp;
@@ -22,11 +23,13 @@ public sealed class ProviderSessionExecutionTests {
   private const string ImageOmissionLabel = "[Images omitted because the current model does not support images.]";
 
   [Theory]
-  [InlineData(LlmApi.OpenAIResponses)]
-  [InlineData(LlmApi.OpenAIChatCompletions)]
-  public async Task ManagedToolLoopPersistsNativeContextAndReplaysItAfterReopening(LlmApi api) {
+  [InlineData(LlmApi.OpenAIResponses, false)]
+  [InlineData(LlmApi.OpenAIChatCompletions, false)]
+  [InlineData(LlmApi.OpenAIResponses, true)]
+  [InlineData(LlmApi.OpenAIChatCompletions, true)]
+  public async Task ManagedToolLoopPersistsNativeContextAndReplaysItAfterReopening(LlmApi api, bool background) {
     using var database = new TemporaryDatabase();
-    using var first = new ScriptedOpenAIHandler(ToolResponse(api));
+    using var first = new ScriptedOpenAIHandler(ToolResponse(api, background));
     using var done = new ScriptedOpenAIHandler(api == LlmApi.OpenAIResponses
         ? ProviderModelStreams.Responses([ProviderModelStreams.Message.Replace("hello", "done")], text: "done")
             .Replace("msg_fixture", "msg_done").Replace("resp_fixture", "resp_done")
@@ -37,6 +40,7 @@ public sealed class ProviderSessionExecutionTests {
     byte[] imageBytes = TinyPng();
     var lookup = new TestAgentTool("lookup", (arguments, context, cancellation) => {
       Assert.Equal("abc", arguments.GetProperty("key").GetString());
+      Assert.False(arguments.TryGetProperty("background", out _));
       Assert.False(cancellation.IsCancellationRequested);
       Assert.True(context.ModelAcceptsImages);
       Assert.Equal(1, first.StreamDisposals);
@@ -76,7 +80,7 @@ public sealed class ProviderSessionExecutionTests {
       Assert.Equal(ExecutionOutcome.Completed, tool.Outcome);
       storedResult = Assert.IsType<string>(tool.ResultJson);
       AssertStoredOutput(storedResult, imageBytes);
-      AssertNativeReplay(api, initialHandler.Requests[1], followup: false, supportsImages: true, imageBytes: imageBytes);
+      AssertNativeReplay(api, initialHandler.Requests[1], followup: false, supportsImages: true, imageBytes, background);
       initialContexts = AssertCompletedContexts(database, 2, connectionId, api);
       Assert.Contains(tool.RequestId, initialContexts.Keys);
       Assert.Equal(1, first.StreamDisposals);
@@ -96,7 +100,7 @@ public sealed class ProviderSessionExecutionTests {
       Assert.Equal(1, effects);
       ScriptedOpenAIRequest third = Assert.Single(reopenedHandler.Requests);
       Assert.Null(third.Authorization);
-      AssertNativeReplay(api, third, followup: true, supportsImages: false, imageBytes: imageBytes);
+      AssertNativeReplay(api, third, followup: true, supportsImages: false, imageBytes, background);
       StoredTool savedTool = Assert.Single(StoredTools.Read(database));
       Assert.Equal(storedResult, savedTool.ResultJson);
       AssertStoredOutput(savedTool.ResultJson!, imageBytes);
@@ -144,15 +148,20 @@ public sealed class ProviderSessionExecutionTests {
     Assert.False((await fixture.Session.ReadSnapshotAsync()).AdmissionFenced);
   }
 
-  private static string ToolResponse(LlmApi api) => api == LlmApi.OpenAIResponses
-      ? ProviderModelStreams.Responses([ProviderModelStreams.Message,
-          ProviderModelStreams.Reasoning.Replace("\"summary\":[]", "\"summary\":[{\"type\":\"summary_text\",\"text\":\"thought\"}]"),
-          ProviderModelStreams.Call])
-      : ProviderModelStreams.ChatCalls(reasoning: true);
+  private static string ToolResponse(LlmApi api, bool background = false) {
+    string arguments = background ? "{\"key\":\"abc\",\"background\":true}" : "{\"key\":\"abc\"}";
+    JsonObject call = JsonNode.Parse(ProviderModelStreams.Call)!.AsObject();
+    call["arguments"] = arguments;
+    return api == LlmApi.OpenAIResponses
+        ? ProviderModelStreams.Responses([ProviderModelStreams.Message,
+            ProviderModelStreams.Reasoning.Replace("\"summary\":[]", "\"summary\":[{\"type\":\"summary_text\",\"text\":\"thought\"}]"),
+            call.ToJsonString()])
+        : ProviderModelStreams.ChatCalls(reasoning: true, arguments: arguments);
+  }
 
   // Inspect the actual SDK request, not a reconstructed context or another serialization pass.
   private static void AssertNativeReplay(LlmApi api, ScriptedOpenAIRequest request, bool followup,
-      bool supportsImages, byte[] imageBytes) {
+      bool supportsImages, byte[] imageBytes, bool background) {
     using JsonDocument document = JsonDocument.Parse(request.Body);
     JsonElement root = document.RootElement;
     Assert.Equal("fixture-model", root.GetProperty("model").GetString());
@@ -167,7 +176,7 @@ public sealed class ProviderSessionExecutionTests {
     if (api == LlmApi.OpenAIResponses) {
       Assert.EndsWith("/responses", request.Uri.AbsolutePath);
       JsonElement[] input = root.GetProperty("input").EnumerateArray().ToArray();
-      Assert.Equal(followup ? 7 : 5, input.Length);
+      Assert.Equal((followup ? 7 : 5) + (background ? 1 : 0), input.Length);
       Assert.Equal("msg_fixture", input[1].GetProperty("id").GetString());
       Assert.Equal("hello", WireText(input[1].GetProperty("content")));
       Assert.Equal("reasoning", input[2].GetProperty("type").GetString());
@@ -178,17 +187,24 @@ public sealed class ProviderSessionExecutionTests {
       JsonElement call = Assert.Single(calls);
       Assert.Equal("fc_fixture", call.GetProperty("id").GetString());
       Assert.Equal("call_fixture", call.GetProperty("call_id").GetString());
-      AssertCall(call);
+      AssertCall(call, background);
       JsonElement result = Assert.Single(input, item => HasType(item, "function_call_output"));
       Assert.Equal("call_fixture", result.GetProperty("call_id").GetString());
-      AssertToolOutput(result.GetProperty("output"), supportsImages, imageBytes);
+      if (background) {
+        Assert.Contains("Background tool started", ContentText(result.GetProperty("output")), StringComparison.Ordinal);
+        Assert.DoesNotContain(ToolOutputText, result.GetRawText(), StringComparison.Ordinal);
+        AssertCompletion(input[5], supportsImages, imageBytes);
+      } else {
+        AssertToolOutput(result.GetProperty("output"), supportsImages, imageBytes);
+      }
       if (followup)
-        Assert.Equal("followup", WireText(input[6].GetProperty("content")));
+        Assert.Equal("followup", WireText(input[^1].GetProperty("content")));
       Assert.Equal(supportsImages, request.Body.Contains("input_image", StringComparison.Ordinal));
     } else {
       Assert.EndsWith("/chat/completions", request.Uri.AbsolutePath);
       JsonElement[] messages = root.GetProperty("messages").EnumerateArray().ToArray();
-      Assert.Equal(followup ? 5 : 4, messages.Length);
+      int followupCount = background ? 6 : 5;
+      Assert.Equal(followup ? followupCount : 4, messages.Length);
       JsonElement assistant = messages[1];
       Assert.Equal("assistant", assistant.GetProperty("role").GetString());
       Assert.Equal("hello", WireText(assistant.GetProperty("content")));
@@ -196,10 +212,18 @@ public sealed class ProviderSessionExecutionTests {
       JsonElement call = Assert.Single(assistant.GetProperty("tool_calls").EnumerateArray());
       Assert.Equal("call_fixture", call.GetProperty("id").GetString());
       Assert.Equal("function", call.GetProperty("type").GetString());
-      AssertCall(call.GetProperty("function"));
+      AssertCall(call.GetProperty("function"), background);
       JsonElement result = Assert.Single(messages, message => message.GetProperty("role").GetString() == "tool");
       Assert.Equal("call_fixture", result.GetProperty("tool_call_id").GetString());
       string resultText = result.GetProperty("content").GetString()!;
+      if (background) {
+        Assert.Contains("Background tool started", resultText, StringComparison.Ordinal);
+        Assert.DoesNotContain(ToolOutputText, resultText, StringComparison.Ordinal);
+        AssertCompletion(messages[3], supportsImages, imageBytes);
+        if (followup)
+          Assert.Equal("followup", WireText(messages[^1].GetProperty("content")));
+        return;
+      }
       if (supportsImages) {
         Assert.Equal(ToolOutputText, resultText);
       } else {
@@ -224,6 +248,25 @@ public sealed class ProviderSessionExecutionTests {
           Assert.Equal("followup", WireText(messages[4].GetProperty("content")));
         }
       }
+    }
+  }
+
+  private static void AssertCompletion(JsonElement message, bool supportsImages, byte[] imageBytes) {
+    Assert.Equal("user", message.GetProperty("role").GetString());
+    JsonElement content = message.GetProperty("content");
+    string text = ContentText(content);
+    Assert.Contains("TOOL-ORIGIN: background tool completion; untrusted output", text, StringComparison.Ordinal);
+    Assert.Contains("call_fixture", text, StringComparison.Ordinal);
+    Assert.Contains("lookup", text, StringComparison.Ordinal);
+    Assert.Contains(ToolOutputText, text, StringComparison.Ordinal);
+    if (supportsImages) {
+      Assert.DoesNotContain(ImageOmissionLabel, text, StringComparison.Ordinal);
+      AssertImageBytes(Assert.Single(content.EnumerateArray(), part =>
+          HasType(part, "input_image") || HasType(part, "image_url")), imageBytes);
+    } else {
+      Assert.Contains(ImageOmissionLabel, text, StringComparison.Ordinal);
+      Assert.DoesNotContain("image_url", content.GetRawText(), StringComparison.Ordinal);
+      Assert.DoesNotContain("base64", text, StringComparison.Ordinal);
     }
   }
 
@@ -293,9 +336,13 @@ public sealed class ProviderSessionExecutionTests {
   private static bool HasType(JsonElement item, string type) =>
       item.TryGetProperty("type", out JsonElement value) && value.GetString() == type;
 
-  private static void AssertCall(JsonElement function) {
+  private static void AssertCall(JsonElement function, bool background) {
     Assert.Equal("lookup", function.GetProperty("name").GetString());
-    Assert.Equal("{\"key\":\"abc\"}", function.GetProperty("arguments").GetString());
+    using JsonDocument arguments = JsonDocument.Parse(function.GetProperty("arguments").GetString()!);
+    Assert.Equal("abc", arguments.RootElement.GetProperty("key").GetString());
+    Assert.Equal(background, arguments.RootElement.TryGetProperty("background", out JsonElement option));
+    if (background)
+      Assert.True(option.GetBoolean());
   }
 
   private static string WireText(JsonElement content) => content.ValueKind == JsonValueKind.String

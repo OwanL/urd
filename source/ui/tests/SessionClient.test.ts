@@ -207,8 +207,16 @@ const mappings: MappingCase[] = [
     query: { cursor: opaqueCursor },
     response: notSentPage,
   },
-  ...(["latest", "before", "after", "around"] as const).map((mode): MappingCase => ({
-    name: `history ${mode} preserves its exact reference`,
+  ...(
+    [
+      ["latest", "tool"],
+      ["before", "tool"],
+      ["after", "tool"],
+      ["around", "tool"],
+      ["after", "toolCompletion"],
+    ] as const
+  ).map(([mode, kind]): MappingCase => ({
+    name: `history ${mode} preserves its exact ${kind} reference`,
     call: (client) =>
       client.getHistory(
         sessionId,
@@ -220,7 +228,7 @@ const mappings: MappingCase[] = [
               anchor: {
                 executionId,
                 entryId: submissionId,
-                kind: "tool",
+                kind,
                 historyRevision: 7,
               },
             },
@@ -230,12 +238,31 @@ const mappings: MappingCase[] = [
     query: {
       mode,
       expectedHistoryRevision: "7",
-      ...(mode === "latest" ? {} : { executionId, entryId: submissionId, kind: "tool" }),
+      ...(mode === "latest" ? {} : { executionId, entryId: submissionId, kind }),
     },
     response: {
       sessionId,
       historyRevision: 7,
-      entries: [],
+      entries:
+        kind === "toolCompletion"
+          ? [
+              {
+                entry: { executionId, entryId: submissionId, kind, historyRevision: 7 },
+                createdAt: null,
+                text: null,
+                tool: {
+                  requestId: executionId,
+                  callId: "call",
+                  name: "read",
+                  started: true,
+                  outcome: "failed",
+                  isClosed: true,
+                  startedAt: null,
+                  endedAt: null,
+                },
+              },
+            ]
+          : [],
       hasBefore: true,
       hasAfter: false,
       settlements: [],

@@ -34,7 +34,7 @@ public sealed class ToolCompositionTests {
         sessionId = session.Id;
         await SubmitAsync(session);
         Assert.Equal("original", await File.ReadAllTextAsync(Path.Combine(first, "note.txt")));
-        Assert.All(client.Options, options => Assert.Equal(new[] { "bash", "edit", "read", "write" },
+        Assert.All(client.Options, options => Assert.Equal(new[] { "bash", "cancel_pending_calls", "edit", "list_pending_calls", "read", "write" },
             options!.Tools!.Select(tool => tool.Name).Order(StringComparer.Ordinal)));
       } finally {
         await manager.ShutdownSessionsAsync().WaitAsync(TestTimeout);

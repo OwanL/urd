@@ -55,5 +55,9 @@ public sealed class UrdStore : IDisposable {
     }
   }
 
+  // The host must hold exclusive data-directory ownership and have no live sessions.
+  // Recovery records uncertainty; it never sends a request or invokes a tool.
+  public void RecoverInterruptedExecutions() => Executions.RecoverInterruptedExecutions();
+
   public void Dispose() => database.Dispose();
 }

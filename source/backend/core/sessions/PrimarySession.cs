@@ -8,7 +8,8 @@ namespace Urd.Core.Sessions;
 // The user-facing session: accepts typed user messages and sends them to the LLM.
 public sealed class PrimarySession : SessionBase {
   internal PrimarySession(SessionRecord record, UrdStore store, Func<ProviderConnection, IChatClient> createChatClient,
-      ToolCatalog? tools = null, ChatProcesses? processes = null) : base(record, store, createChatClient, tools, processes) {
+      ToolCatalog? tools = null, ChatProcesses? processes = null, PendingToolCalls? pending = null)
+      : base(record, store, createChatClient, tools, processes, pending) {
   }
 
   // Returns a saved acceptance/refusal, without waiting for the LLM answer.

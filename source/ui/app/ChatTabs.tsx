@@ -8,6 +8,7 @@ import "./chat-tabs.css";
 
 const statusLabels: Record<string, string> = {
   running: "Running",
+  waiting: "Waiting for tools",
   idle: "Idle",
   failed: "Failed",
   fenced: "Fenced",
@@ -151,7 +152,7 @@ export function ChatTabs({
               {title}
               {status && status !== "idle" && (
                 <span class="tab-status" aria-label={statusLabels[status] ?? status}>
-                  {status === "running" ? " ·" : " !"}
+                  {status === "running" || status === "waiting" ? " ·" : " !"}
                 </span>
               )}
             </button>

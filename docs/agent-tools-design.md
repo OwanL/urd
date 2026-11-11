@@ -5,9 +5,9 @@ made, and the approved class shapes. Implementation follows these shapes, subjec
 qualification gates below; approval is not evidence that the integration already works.
 Related: [execution](execution-design.md), [sessions](session-design.md), [discovery](discovery-design.md).
 [Qualification evidence](agent-tools-qualification.md) records the bounded process and adapter
-probes and their remaining integration limits. The 2026-11-11 foreground checkpoint now
-qualifies generic tools, parallel dispatch, explicit metadata and persisted image results;
-background lifecycle/recovery remains the next implementation phase.
+probes and their remaining integration limits. The 2026-11-11 checkpoints qualify generic
+parallel tools, explicit model metadata, persisted images, background delivery/waiting, Stop
+and explicit startup recovery. Compaction and rich tool-result inspection remain pending.
 
 ## Agreed
 
@@ -165,7 +165,7 @@ The harness adds and strips the `background` field; only tools offered to this c
 ```csharp
 internal sealed class PendingToolCalls {
   public void Add(Guid executionId, Guid requestId, LlmToolCall call,
-    Task completion, CancellationTokenSource cancellation);
+    Task completion, CancellationTokenSource cancellation, Func<Exception, Task>? onFailure = null);
   public IReadOnlyList<PendingToolCall> List();
   public int RequestCancelAll(Guid callerRequestId, string callerCallId);
   public void RequestCancelExecution(Guid executionId);
@@ -197,7 +197,7 @@ internal sealed class BashTool(ChatProcesses processes, GitBash bash,
 **Waiting, completion delivery and Stop** (existing `SessionBase`).
 
 ```csharp
-internal Task BackgroundToolCompletedAsync(Guid requestId, string callId);
+internal Task BackgroundToolCompletedAsync(Guid executionId, Exception? failure = null);
 private Task<LlmRequest?> AdvanceExecutionAsync(SessionExecution execution,
   TaskCompletionSource<SessionExecutionResult> settlement, ExecutionOutcome outcome);
 internal Task StopExecutionAsync();
@@ -219,12 +219,24 @@ internal bool TryStart(Guid sessionId, Guid executionId, long revision,
   Guid requestId, string callId, bool background);                       // ToolStorage
 internal bool Complete(Guid sessionId, Guid executionId, long revision,
   Guid requestId, LlmToolResult result);                                 // ToolStorage
-public void RecoverInterruptedExecutions();                              // SessionExecutionStorage
+public void RecoverInterruptedExecutions();                              // UrdStore → SessionExecutionStorage
 ```
 - A background call is a saved call with `background = true`; its placeholder is generated from
   that flag, not stored. `Complete` saves a background result and its completion message in one
   transaction; the next-request claim includes waiting completions after direct results.
 - Startup marks calls running at crash time "interrupted, possibly partly applied"; nothing re-runs.
+
+**Background integration details (locally qualified 2026-11-11).** Schema 14 stores
+completion identity separately from its recipient request and transcript publication. Started
+background calls always reconstruct the same direct placeholder; completions are claimed before
+steering and published only after streaming closes. Never-attempted recipient claims are released
+on Stop/recovery; attempted history remains fixed. One guarded driver rechecks durable readiness
+after input, completion or Stop signals and joins all remaining ownership outside the guard.
+The registry alone cancels each background token, including a post-registration Stop recheck;
+linked parent cancellation must not bypass its callback join. Its optional failure callback
+fences admission and cancels the provider promptly, but never joins the registry itself.
+The host explicitly invokes recovery under the data-directory lease, before creating sessions.
+Opening a store alone neither recovers nor resumes work.
 
 **Composition.**
 

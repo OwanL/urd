@@ -164,8 +164,10 @@ internal sealed class LlmResponseStorage(Database database) {
     if (completion.ToolCalls is { Count: > 16 })
       throw new ArgumentException("A response may authorize at most 16 tool calls.", nameof(completion));
 
-    var calls = (completion.ToolCalls ?? []).Select(call =>
-        (call.CallId, call.Name, Arguments: StorageText.JsonText(call.Arguments, requireObject: true))).ToArray();
+    var calls = (completion.ToolCalls ?? []).Select(call => {
+      string arguments = StorageText.JsonText(call.Arguments, requireObject: true);
+      return (call.CallId, call.Name, Arguments: arguments, Excerpt: ToolArgumentsExcerpt.Create(arguments));
+    }).ToArray();
     if (calls.Any(call => string.IsNullOrWhiteSpace(call.CallId) || string.IsNullOrWhiteSpace(call.Name))
         || calls.Select(call => call.CallId).Distinct(StringComparer.Ordinal).Count() != calls.Length
         || (calls.Length != 0 && completion.Outcome != ExecutionOutcome.Completed))
@@ -185,7 +187,8 @@ internal sealed class LlmResponseStorage(Database database) {
   }
 
   private bool CompleteRequest(SqliteTransaction transaction, Guid sessionId, Guid executionId,
-      long historyRevision, LlmRequestResult completion, (string CallId, string Name, string Arguments)[] calls,
+      long historyRevision, LlmRequestResult completion,
+      (string CallId, string Name, string Arguments, string Excerpt)[] calls,
       string? providerResponseJson, string? usageJson) {
     bool alreadyCompleted;
     using (SqliteCommand read = database.Command(transaction, """
@@ -282,18 +285,20 @@ internal sealed class LlmResponseStorage(Database database) {
       }
 
       using SqliteCommand authorize = database.Command(transaction, """
-        INSERT INTO execution_tools (run_id, request_id, call_index, call_id, name, arguments_json)
-        VALUES ($run, $request, $index, $call, $name, $arguments);
+        INSERT INTO execution_tools (
+            run_id, request_id, call_index, call_id, name, arguments_json, arguments_excerpt)
+        VALUES ($run, $request, $index, $call, $name, $arguments, $excerpt);
         """,
           ("$run", executionId), ("$request", completion.RequestId), ("$index", index),
-          ("$call", call.CallId), ("$name", call.Name), ("$arguments", call.Arguments));
+          ("$call", call.CallId), ("$name", call.Name), ("$arguments", call.Arguments),
+          ("$excerpt", call.Excerpt));
       authorize.ExecuteNonQuery();
     }
     return true;
   }
 
   private bool MatchesObservedCalls(SqliteTransaction transaction, Guid requestId,
-      (string CallId, string Name, string Arguments)[] calls) {
+      (string CallId, string Name, string Arguments, string Excerpt)[] calls) {
     List<(string CallId, string? Name)> observed = ReadObservedCallsInOrder(transaction, requestId);
     int callIndex = 0;
     foreach (var reservation in observed) {
@@ -337,15 +342,17 @@ internal sealed class LlmResponseStorage(Database database) {
   }
 
   private bool MatchesCalls(SqliteTransaction transaction, Guid requestId,
-      (string CallId, string Name, string Arguments)[] calls) {
+      (string CallId, string Name, string Arguments, string Excerpt)[] calls) {
     using SqliteCommand read = database.Command(transaction, """
-      SELECT call_id, name, arguments_json FROM execution_tools WHERE request_id = $request ORDER BY call_index;
+      SELECT call_id, name, arguments_json, arguments_excerpt
+      FROM execution_tools WHERE request_id = $request ORDER BY call_index;
       """, ("$request", requestId));
     using SqliteDataReader reader = read.ExecuteReader();
     int index = 0;
     while (reader.Read()) {
       if (index == calls.Length || reader.GetString(0) != calls[index].CallId
-          || reader.GetString(1) != calls[index].Name || reader.GetString(2) != calls[index].Arguments)
+          || reader.GetString(1) != calls[index].Name || reader.GetString(2) != calls[index].Arguments
+          || reader.GetString(3) != calls[index].Excerpt)
         return false;
       index++;
     }

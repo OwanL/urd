@@ -10,12 +10,12 @@ public sealed class DatabaseSchemaTests {
   public void FreshDatabaseCreatesAndReopensCurrentSchema() {
     using var database = new TemporaryDatabase();
     using (UrdStore store = UrdStore.Open(database.Path)) {
-      Assert.Equal(16L, database.Scalar("PRAGMA user_version;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
+      Assert.Equal(17L, database.Scalar("PRAGMA user_version;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
       store.Sessions.CreatePrimary(Guid.NewGuid());
     }
 
     using UrdStore reopened = UrdStore.Open(database.Path);
-    Assert.Equal(16L, database.Scalar("PRAGMA user_version;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
+    Assert.Equal(17L, database.Scalar("PRAGMA user_version;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
     Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM sessions;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
   }
 
@@ -66,6 +66,7 @@ public sealed class DatabaseSchemaTests {
     Assert.Equal(2L, database.Scalar($"SELECT attempt FROM execution_requests WHERE request_id = '{request:D}';")); // raw-sql: current schema creation, rejection or constraint is the subject under test
     Assert.Equal(17000L, database.Scalar($"SELECT length(original_text_utf8) FROM input_decisions WHERE input_id = '{input:D}';")); // raw-sql: current schema creation, rejection or constraint is the subject under test
     Assert.Equal(1L, database.Scalar("SELECT \"notnull\" FROM pragma_table_info('input_decisions') WHERE name = 'llm_selection_json';")); // raw-sql: current schema creation, rejection or constraint is the subject under test
+    Assert.Equal(1L, database.Scalar("SELECT \"notnull\" FROM pragma_table_info('execution_tools') WHERE name = 'arguments_excerpt';")); // raw-sql: current schema creation, rejection or constraint is the subject under test
     Assert.Equal(0L, database.Scalar("SELECT \"notnull\" FROM pragma_table_info('execution_messages') WHERE name = 'request_id';")); // raw-sql: compaction markers have no ordinary request
     Assert.Throws<SqliteException>(() => database.Execute($"UPDATE execution_messages SET request_id = NULL WHERE run_id = '{run:D}' AND role = 0;"));
     Assert.Throws<SqliteException>(() => database.Execute($"""
@@ -78,8 +79,9 @@ public sealed class DatabaseSchemaTests {
     string largeArguments = new('a', 17000);
     string largeResult = new('b', 17000);
     database.Execute($"""
-      INSERT INTO execution_tools (run_id, request_id, call_index, call_id, name, arguments_json, result_json)
-      VALUES ('{run:D}', '{request:D}', 0, 'large-call', 'large-tool', '{largeArguments}', '{largeResult}');
+      INSERT INTO execution_tools (
+          run_id, request_id, call_index, call_id, name, arguments_json, arguments_excerpt, result_json)
+      VALUES ('{run:D}', '{request:D}', 0, 'large-call', 'large-tool', '{largeArguments}', 'excerpt', '{largeResult}');
       """);
     Assert.Equal(17000L, database.Scalar("SELECT length(CAST(arguments_json AS BLOB)) FROM execution_tools WHERE call_id = 'large-call';")); // raw-sql: current schema creation, rejection or constraint is the subject under test
     Assert.Equal(17000L, database.Scalar("SELECT length(CAST(result_json AS BLOB)) FROM execution_tools WHERE call_id = 'large-call';")); // raw-sql: current schema creation, rejection or constraint is the subject under test

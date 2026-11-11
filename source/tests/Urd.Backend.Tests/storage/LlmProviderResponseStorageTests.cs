@@ -69,7 +69,9 @@ public sealed class LlmProviderResponseStorageTests {
     database.Execute("DROP TRIGGER fail_completion;");
     Assert.True(store.LlmResponses.CompleteRequest(session, execution, 0, completion));
     Assert.Equal(completion.ProviderResponse, Assert.Single(ReadProviderResponses(database)));
-    Assert.Equal(2, StoredTools.Read(database).Count);
+    List<StoredTool> authorized = StoredTools.Read(database);
+    Assert.Equal(2, authorized.Count);
+    Assert.All(authorized, tool => Assert.Equal("""{"path":"src/file","count":3}""", tool.ArgumentsExcerpt));
   }
 
   private static (Guid Session, Guid Execution, Guid Request) Begin(UrdStore store) {
@@ -86,7 +88,7 @@ public sealed class LlmProviderResponseStorageTests {
           new(request, Guid.NewGuid(), 0, "display answer", true)));
 
   private static LlmToolCall Call(string id) =>
-      new(id, "fake", JsonSerializer.SerializeToElement(new { }));
+      new(id, "fake", JsonSerializer.SerializeToElement(new { path = "src/file", count = 3 }));
 
   private static LlmProviderResponse Response() {
     const string json = """

@@ -3,10 +3,7 @@ namespace Urd.Core.Tools;
 // Shared I/O paths and queue identities, including existing parents of new files.
 internal static class ToolPaths {
   public static string Resolve(string path, string workingDirectory) {
-    ArgumentException.ThrowIfNullOrWhiteSpace(path);
-    ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
-    string fullPath = Path.GetFullPath(WindowsDrivePath(path),
-      Path.GetFullPath(WindowsDrivePath(workingDirectory)));
+    string fullPath = ResolveLexically(path, workingDirectory);
     string root = Path.GetPathRoot(fullPath)!;
     string resolved = root;
     foreach (string part in fullPath[root.Length..].Split(
@@ -16,6 +13,13 @@ internal static class ToolPaths {
       resolved = entry.Exists ? entry.ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? candidate : candidate;
     }
     return resolved;
+  }
+
+  internal static string ResolveLexically(string path, string workingDirectory) {
+    ArgumentException.ThrowIfNullOrWhiteSpace(path);
+    ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+    return Path.GetFullPath(WindowsDrivePath(path),
+      Path.GetFullPath(WindowsDrivePath(workingDirectory)));
   }
 
   private static string WindowsDrivePath(string path) {

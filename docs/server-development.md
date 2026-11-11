@@ -119,7 +119,7 @@ routes and required field names.
 ### Frozen LLM selection
 
 New Sends require `llmSelection`; [`LlmSelection.ts`](../source/ui/providers/LlmSelection.ts)
-owns its browser shape and [`LlmSelection.cs`](../source/backend/core/providers/LlmSelection.cs)
+owns its browser shape and [`LlmSelection.cs`](../source/backend/harness/providers/LlmSelection.cs)
 owns validation. It includes connection, model ID, reasoning effort, family, image support
 and a nullable context window. `connection` is the full saved secret-free `ProviderConnection`,
 including route, API, endpoint and authentication kind, not credentials. A stale/removed binding is not replaced

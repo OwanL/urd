@@ -48,7 +48,7 @@ baseline seed rows passed the schema-16 SQL, foreign-key and position-trigger ch
 full manual baseline/benchmark was not rerun; no new rendering-performance claim is made.
 
 Removed source paths below are plain text rather than broken live links. The per-file ledger
-retains its original fingerprints and historical assessments.
+retains its original fingerprints and historical assessments. Links to moved source files follow their current locations; displayed paths, line numbers and hashes remain snapshot evidence.
 
 ## Scope and evidence
 
@@ -145,8 +145,8 @@ The browser decodes numeric enum values by array position while Core serializes 
 **Evidence:**
 - [`source/ui/markdown-rendering/MarkdownClient.ts:26–65`](../source/ui/markdown-rendering/MarkdownClient.ts#L26)
 - [`source/ui/markdown-rendering/MarkdownClient.ts:433–468`](../source/ui/markdown-rendering/MarkdownClient.ts#L433)
-- [`source/backend/core/markdown-rendering/MarkdownRenderModel.cs:5–13`](../source/backend/core/markdown-rendering/MarkdownRenderModel.cs#L5)
-- [`source/backend/core/markdown-rendering/MarkdownRenderJson.cs:5–11`](../source/backend/core/markdown-rendering/MarkdownRenderJson.cs#L5)
+- [`source/backend/core/markdown-rendering/MarkdownRenderModel.cs:5–13`](../source/backend/markdown-rendering/MarkdownRenderModel.cs#L5)
+- [`source/backend/core/markdown-rendering/MarkdownRenderJson.cs:5–11`](../source/backend/markdown-rendering/MarkdownRenderJson.cs#L5)
 - [`source/hosting/server/MarkdownRoutes.cs:260`](../source/hosting/server/MarkdownRoutes.cs#L260)
 - [`docs/browser-development.md:60–61`](../docs/browser-development.md#L60)
 
@@ -161,8 +161,8 @@ The manual baseline starts the current server, which initializes schema version 
 
 **Evidence:**
 - [`source/ui/tests/TranscriptBaseline.ts:118`](../source/ui/tests/TranscriptBaseline.ts#L118)
-- [`source/backend/core/storage/DatabaseSchema.cs:7`](../source/backend/core/storage/DatabaseSchema.cs#L7)
-- [`source/backend/core/storage/DatabaseSchema.cs:260`](../source/backend/core/storage/DatabaseSchema.cs#L260)
+- [`source/backend/core/storage/DatabaseSchema.cs:7`](../source/backend/harness/storage/DatabaseSchema.cs#L7)
+- [`source/backend/core/storage/DatabaseSchema.cs:260`](../source/backend/harness/storage/DatabaseSchema.cs#L260)
 
 <a id="t01"></a>
 ### T01 — Session observer tests freeze internal publication counts
@@ -175,7 +175,7 @@ The watched-tool scenario asserts exact versions 8/9, a complete 0..11 sequence,
 
 **Evidence:**
 - [`source/tests/Urd.Backend.Tests/sessions/SessionSubscriptionTests.cs:149–176`](../source/tests/Urd.Backend.Tests/sessions/SessionSubscriptionTests.cs#L149)
-- [`source/backend/core/sessions/SessionNotifications.cs:24–35`](../source/backend/core/sessions/SessionNotifications.cs#L24)
+- [`source/backend/core/sessions/SessionNotifications.cs:24–35`](../source/backend/harness/sessions/SessionNotifications.cs#L24)
 
 <a id="t02"></a>
 ### T02 — Provider settings tests can fall through to the real HTTP client
@@ -225,7 +225,7 @@ ToolCatalog constructs and exposes an exact-name dictionary lookup, but producti
 **Review option:** Remove the unused name-lookup API/index if no current caller needs it, but preserve its incidental duplicate-name validation explicitly. Do not move invocation off the frozen execution tool set.
 
 **Evidence:**
-- [`source/backend/core/tools/runtime/ToolCatalog.cs:6–21`](../source/backend/core/tools/runtime/ToolCatalog.cs#L6)
+- [`source/backend/core/tools/runtime/ToolCatalog.cs:6–21`](../source/backend/harness/tools/runtime/ToolCatalog.cs#L6)
 
 <a id="o09"></a>
 ### O09 — Diagnostic and streaming clients duplicate common provider-failure mapping
@@ -237,8 +237,8 @@ The two client paths separately map authentication (401), plan access (403), and
 **Review option:** If centralizing, extract only the common classification and keep discovery/stream-specific cases local; otherwise retain parity with focused classification tests.
 
 **Evidence:**
-- [`source/backend/core/providers/OpenAIProviderClient.cs:191–196`](../source/backend/core/providers/OpenAIProviderClient.cs#L191)
-- [`source/backend/core/providers/ProviderModelClient.cs:111–118`](../source/backend/core/providers/ProviderModelClient.cs#L111)
+- [`source/backend/core/providers/OpenAIProviderClient.cs:191–196`](../source/backend/harness/providers/OpenAIProviderClient.cs#L191)
+- [`source/backend/core/providers/ProviderModelClient.cs:111–118`](../source/backend/harness/providers/ProviderModelClient.cs#L111)
 
 <a id="o10"></a>
 ### O10 — Workspace harness is a dangling in-tree entry shim
@@ -267,8 +267,8 @@ Read/ReadText select every output row in the database and order request groups b
 **Evidence:**
 - [`source/tests/Urd.Backend.Tests/support/StoredLlmResponses.cs:13–14`](../source/tests/Urd.Backend.Tests/support/StoredLlmResponses.cs#L13)
 - [`source/tests/Urd.Backend.Tests/support/StoredLlmResponses.cs:20–23`](../source/tests/Urd.Backend.Tests/support/StoredLlmResponses.cs#L20)
-- [`source/backend/core/storage/DatabaseSchema.cs:82–93`](../source/backend/core/storage/DatabaseSchema.cs#L82)
-- [`source/backend/core/storage/SessionExecutionStorage.cs:12–17`](../source/backend/core/storage/SessionExecutionStorage.cs#L12)
+- [`source/backend/core/storage/DatabaseSchema.cs:82–93`](../source/backend/harness/storage/DatabaseSchema.cs#L82)
+- [`source/backend/core/storage/SessionExecutionStorage.cs:12–17`](../source/backend/harness/storage/SessionExecutionStorage.cs#L12)
 
 <a id="t04"></a>
 ### T04 — Two tests are outside their named production owner
@@ -294,7 +294,7 @@ The test compares enumerated property names as ordered arrays for the persisted 
 
 **Evidence:**
 - [`source/tests/Urd.Backend.Tests/execution/ProviderSessionExecutionTests.cs:309–320`](../source/tests/Urd.Backend.Tests/execution/ProviderSessionExecutionTests.cs#L309)
-- [`source/backend/core/storage/ToolResultCodec.cs:20–29`](../source/backend/core/storage/ToolResultCodec.cs#L20)
+- [`source/backend/core/storage/ToolResultCodec.cs:20–29`](../source/backend/harness/storage/ToolResultCodec.cs#L20)
 
 <a id="t06"></a>
 ### T06 — SSE unwatch test uses a wall-clock sleep for a negative assertion
@@ -332,7 +332,7 @@ Provider management explicitly names current database schema 10 although Databas
 
 **Evidence:**
 - [`docs/provider-management.md:12–15`](../docs/provider-management.md#L12)
-- [`source/backend/core/storage/DatabaseSchema.cs:5–8`](../source/backend/core/storage/DatabaseSchema.cs#L5)
+- [`source/backend/core/storage/DatabaseSchema.cs:5–8`](../source/backend/harness/storage/DatabaseSchema.cs#L5)
 - [`source/hosting/server/SessionRoutes.cs:34–47`](../source/hosting/server/SessionRoutes.cs#L34)
 - [`source/ui/sessions/SessionClient.ts:84–154`](../source/ui/sessions/SessionClient.ts#L84)
 - [`docs/server-development.md:69–80`](../docs/server-development.md#L69)

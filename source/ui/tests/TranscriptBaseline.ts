@@ -178,7 +178,7 @@ function seed(path: string, ids: string[], selection: string) {
 async function queryPlans(path: string, session: string) {
   // Read the actual production constants rather than silently benchmarking a stale copy.
   const source = await readFile(
-    new URL("../../backend/core/storage/TranscriptHistoryReader.cs", import.meta.url),
+    new URL("../../backend/harness/storage/TranscriptHistoryReader.cs", import.meta.url),
     "utf8",
   );
   const window = source

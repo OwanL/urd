@@ -10,7 +10,7 @@ adds no discovery tools, other subscription providers or native Ollama/Anthropic
 ## Storage and ownership
 
 `UrdStore` replaces the former `SessionStore` name and owns the shared SQLite database.
-[`DatabaseSchema.cs`](../source/backend/core/storage/DatabaseSchema.cs) owns the current schema
+[`DatabaseSchema.cs`](../source/backend/harness/storage/DatabaseSchema.cs) owns the current schema
 and supported version. Provider connections, host identity, model settings, native context,
 frozen selections and transcript/request facts share that schema; there is no second database
 or lease. Incompatible pre-release databases require an explicit reset, not migration.

@@ -28,7 +28,7 @@ Storage uses `response_id`/`response_final` and request-global chunk indexes.
 
 ## Starting context
 
-Editable system guidance lives in [`core/context/`](../source/backend/core/context/README.md),
+Editable system guidance lives in [`harness/context/`](../source/backend/harness/context/README.md),
 one `ContextGuidance` subclass per block. Each declares its `Order`, `AppliesTo(input)`
 and `GetText(input)`; the manager automatically discovers parameterless subclasses in
 Core's assembly, with no central registration list. Runtime-constructed guidance can
@@ -96,7 +96,7 @@ classes remain separate by responsibility; no lifecycle or schema redesign accom
 
 ## Markdown rendering
 
-`source/backend/core/markdown-rendering/` owns the detached Markdown rendering
+`source/backend/markdown-rendering/` owns the detached Markdown rendering
 pipeline: `MarkdownParser` produces a `MarkdownRenderIndex`, `MarkdownPageReader`
 serves bounded forward/backward pages and manifests, and `MessageMarkdownScheduler`
 coordinates source capture, queued parsing and two BelowNormal lanes (one large, one
@@ -245,20 +245,20 @@ discovery, not activity tracking or a complete summary API.
 
 ## Read contract and incremental review order
 
-1. [SessionState.cs](../source/backend/core/sessions/SessionState.cs) and
-   [Messages.cs](../source/backend/core/sessions/Messages.cs) — detached records; shared
-   `SessionExecutionResult`/`ExecutionOutcome` in [SessionExecutionResult.cs](../source/backend/core/execution/SessionExecutionResult.cs)
+1. [SessionState.cs](../source/backend/harness/sessions/SessionState.cs) and
+   [Messages.cs](../source/backend/harness/sessions/Messages.cs) — detached records; shared
+   `SessionExecutionResult`/`ExecutionOutcome` in [SessionExecutionResult.cs](../source/backend/harness/execution/SessionExecutionResult.cs)
    are public, not duplicated. `ExecutionOutcome` describes an LLM request attempt, a tool invocation
    or a whole session execution; a successful request/tool does not imply settled execution.
-2. [SessionBase.cs](../source/backend/core/sessions/SessionBase.cs) — receipt/not-sent reads and live
-   snapshots; [SessionStatus.cs](../source/backend/core/sessions/SessionStatus.cs) projects snapshot/status
-   facts. [SessionTranscript.cs](../source/backend/core/sessions/SessionTranscript.cs) owns history,
+2. [SessionBase.cs](../source/backend/harness/sessions/SessionBase.cs) — receipt/not-sent reads and live
+   snapshots; [SessionStatus.cs](../source/backend/harness/sessions/SessionStatus.cs) projects snapshot/status
+   facts. [SessionTranscript.cs](../source/backend/harness/sessions/SessionTranscript.cs) owns history,
    content, transcript positioning and Markdown source reads. All share the existing session guard;
    Markdown source assembly runs outside it between guarded extent capture and validation.
-3. [SnapshotReader.cs](../source/backend/core/storage/SnapshotReader.cs),
-   [TranscriptHistoryReader.cs](../source/backend/core/storage/TranscriptHistoryReader.cs) and
-   [MessageContentReader.cs](../source/backend/core/storage/MessageContentReader.cs) — separate
-   bounded reads in short transactions. [DatabaseSchema.cs](../source/backend/core/storage/DatabaseSchema.cs)
+3. [SnapshotReader.cs](../source/backend/harness/storage/SnapshotReader.cs),
+   [TranscriptHistoryReader.cs](../source/backend/harness/storage/TranscriptHistoryReader.cs) and
+   [MessageContentReader.cs](../source/backend/harness/storage/MessageContentReader.cs) — separate
+   bounded reads in short transactions. [DatabaseSchema.cs](../source/backend/harness/storage/DatabaseSchema.cs)
    is at schema version 10. Earlier versions added creation order, provider state/native context,
    frozen selection, transcript metadata and request usage; version 10 adds request-attempt and
    not-sent facts while preserving transcript ordering.
@@ -288,39 +288,39 @@ metadata and reads message content on demand.
 Paths below are relative to the repository. Classes have their own files; small data records and enums
 share a file per concept. Read them alongside their owners.
 
-1. [SessionManager.cs](../source/backend/core/sessions/SessionManager.cs) — canonical handles,
+1. [SessionManager.cs](../source/backend/harness/sessions/SessionManager.cs) — canonical handles,
    borrowed dependencies, ID-only discovery and the session-shutdown boundary;
-   [SessionIdentity.cs](../source/backend/core/sessions/SessionIdentity.cs) holds the stored `SessionRecord`
+   [SessionIdentity.cs](../source/backend/harness/sessions/SessionIdentity.cs) holds the stored `SessionRecord`
    identity used to create/load handles and the detached `SessionIdPage` discovery page.
-2. [SessionBase.cs](../source/backend/core/sessions/SessionBase.cs) and
-   [PrimarySession.cs](../source/backend/core/sessions/PrimarySession.cs) — admission/driver ownership;
-   [UserMessageSubmission.cs](../source/backend/core/sessions/UserMessageSubmission.cs) holds the submission, receipt and enums;
-   [Stop.cs](../source/backend/core/sessions/Stop.cs) holds the public Stop receipt/status;
-   [AsyncLock.cs](../source/backend/core/sessions/AsyncLock.cs) is the shared async lock.
-3. [SessionExecutionDriver.cs](../source/backend/core/execution/SessionExecutionDriver.cs) — request
+2. [SessionBase.cs](../source/backend/harness/sessions/SessionBase.cs) and
+   [PrimarySession.cs](../source/backend/harness/sessions/PrimarySession.cs) — admission/driver ownership;
+   [UserMessageSubmission.cs](../source/backend/harness/sessions/UserMessageSubmission.cs) holds the submission, receipt and enums;
+   [Stop.cs](../source/backend/harness/sessions/Stop.cs) holds the public Stop receipt/status;
+   [AsyncLock.cs](../source/backend/harness/sessions/AsyncLock.cs) is the shared async lock.
+3. [SessionExecutionDriver.cs](../source/backend/harness/execution/SessionExecutionDriver.cs) — request
    continuation, background waits, cleanup joins and settlement coordination using the session guard;
-   [SessionExecution.cs](../source/backend/core/execution/SessionExecution.cs) — sequential request/tool
+   [SessionExecution.cs](../source/backend/harness/execution/SessionExecution.cs) — sequential request/tool
    phases, response streaming, cancellation and cleanup;
-   [SessionExecutionRecorder.cs](../source/backend/core/execution/SessionExecutionRecorder.cs) — guarded
+   [SessionExecutionRecorder.cs](../source/backend/harness/execution/SessionExecutionRecorder.cs) — guarded
    request/tool progress writes and stale/stopped-execution rejection;
-   [LlmResponseAccumulator.cs](../source/backend/core/execution/LlmResponseAccumulator.cs) — complete
+   [LlmResponseAccumulator.cs](../source/backend/harness/execution/LlmResponseAccumulator.cs) — complete
    fake-tool batch validation and bounded JSON freezing;
-   [LlmTools.cs](../source/backend/core/execution/LlmTools.cs) — call/result records; then
-   [LlmResponseWriter.cs](../source/backend/core/execution/LlmResponseWriter.cs) — request-local
-   Unicode-safe chunking and flush timing. [LlmRequest.cs](../source/backend/core/execution/LlmRequest.cs) holds
-   `LlmRequest`, `LlmResponseChunk` and `LlmRequestResult`; [SessionExecutionResult.cs](../source/backend/core/execution/SessionExecutionResult.cs)
+   [LlmTools.cs](../source/backend/harness/execution/LlmTools.cs) — call/result records; then
+   [LlmResponseWriter.cs](../source/backend/harness/execution/LlmResponseWriter.cs) — request-local
+   Unicode-safe chunking and flush timing. [LlmRequest.cs](../source/backend/harness/execution/LlmRequest.cs) holds
+   `LlmRequest`, `LlmResponseChunk` and `LlmRequestResult`; [SessionExecutionResult.cs](../source/backend/harness/execution/SessionExecutionResult.cs)
    holds the saved whole-execution `SessionExecutionResult` and `ExecutionOutcome`. Their comments identify
    producer/consumer roles and lifecycle guarantees.
-4. [UrdStore.cs](../source/backend/core/storage/UrdStore.cs) — opens the database and exposes
-   focused parts: [Database.cs](../source/backend/core/storage/Database.cs) (connection, lock,
-   transactions), [DatabaseSchema.cs](../source/backend/core/storage/DatabaseSchema.cs) (current schema creation),
-   [SessionStorage.cs](../source/backend/core/storage/SessionStorage.cs),
-   [UserMessageStorage.cs](../source/backend/core/storage/UserMessageStorage.cs) (receipts),
-   [SessionExecutionStorage.cs](../source/backend/core/storage/SessionExecutionStorage.cs) and
-   [LlmResponseStorage.cs](../source/backend/core/storage/LlmResponseStorage.cs) — atomic execution/request/response and delivery facts;
+4. [UrdStore.cs](../source/backend/harness/storage/UrdStore.cs) — opens the database and exposes
+   focused parts: [Database.cs](../source/backend/harness/storage/Database.cs) (connection, lock,
+   transactions), [DatabaseSchema.cs](../source/backend/harness/storage/DatabaseSchema.cs) (current schema creation),
+   [SessionStorage.cs](../source/backend/harness/storage/SessionStorage.cs),
+   [UserMessageStorage.cs](../source/backend/harness/storage/UserMessageStorage.cs) (receipts),
+   [SessionExecutionStorage.cs](../source/backend/harness/storage/SessionExecutionStorage.cs) and
+   [LlmResponseStorage.cs](../source/backend/harness/storage/LlmResponseStorage.cs) — atomic execution/request/response and delivery facts;
    these are exposed internally as `UserMessages`, `Executions` and `LlmResponses`.
-   [ToolStorage.cs](../source/backend/core/storage/ToolStorage.cs) — dispatch claims and retained results;
-   [LlmContextReader.cs](../source/backend/core/storage/LlmContextReader.cs) — claimed submissions and
+   [ToolStorage.cs](../source/backend/harness/storage/ToolStorage.cs) — dispatch claims and retained results;
+   [LlmContextReader.cs](../source/backend/harness/storage/LlmContextReader.cs) — claimed submissions and
    ordered assistant/tool context, distinct from the public transcript metadata/content projection.
 5. [SessionConcurrencyTests.cs](../source/tests/Urd.Backend.Tests/sessions/SessionConcurrencyTests.cs),
    [SessionShutdownTests.cs](../source/tests/Urd.Backend.Tests/sessions/SessionShutdownTests.cs),

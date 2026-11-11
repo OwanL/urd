@@ -541,7 +541,7 @@ async function main() {
     await installProbe(page);
     const streamId = ids[5]!;
     const workspace = encodeWorkspace({
-      version: 3,
+      version: 4,
       tabs: ids,
       activeId: streamId,
       chats: Object.fromEntries(ids.map((id) => [id, newChat(null)])),
@@ -731,6 +731,7 @@ async function main() {
           modelId: "fixture-a",
           family: "other",
           supportsImages: false,
+          contextWindow: null,
           reasoningEffort: null,
         },
       });
@@ -769,6 +770,7 @@ async function main() {
         modelId: "fixture-a",
         family: "other",
         supportsImages: false,
+        contextWindow: null,
         reasoningEffort: null,
       },
     });

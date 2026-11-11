@@ -260,7 +260,7 @@ export class ProviderSettingsController {
 
   editModel(
     settings: ModelSettings,
-    update: Partial<Pick<ModelSettings, "family" | "supportsImages">>,
+    update: Partial<Pick<ModelSettings, "family" | "supportsImages" | "contextWindow">>,
   ): void {
     if (!this.canMutate || !this.snapshot.modelSettings[settings.connectionId]) return;
     const drafts = this.snapshot.modelDrafts[settings.connectionId] ?? [];

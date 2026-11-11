@@ -23,6 +23,7 @@ const selection: LlmSelection = {
   modelId: "saved-model",
   family: "other",
   supportsImages: false,
+  contextWindow: null,
   reasoningEffort: null,
 };
 const latestSelection: LlmSelection = { ...selection, modelId: "latest-model" };
@@ -167,6 +168,31 @@ void test("uncertain submissions and known executions retain their distinct stat
   assert.equal(settled.executionStatus, "accepted");
   assert.equal(settled.canSend, true);
   assert.equal(settled.canResendNotSent, true);
+});
+
+void test("compaction blocks steering while ordinary active executions remain steerable", () => {
+  const knownChat = { ...chat, knownExecutionId: executionId };
+  const running = deriveConversationState(
+    knownChat,
+    snapshot({ unsettledExecutionId: executionId }),
+    undefined,
+    true,
+    true,
+  );
+  assert.equal(running.executionStatus, "running");
+  assert.equal(running.canSend, true);
+  assert.equal(running.canResendNotSent, true);
+
+  const compacting = deriveConversationState(
+    knownChat,
+    snapshot({ unsettledExecutionId: executionId, isCompacting: true }),
+    undefined,
+    true,
+    true,
+  );
+  assert.equal(compacting.executionStatus, "compacting");
+  assert.equal(compacting.canSend, false);
+  assert.equal(compacting.canResendNotSent, false);
 });
 
 void test("stopping and explicit stop state take priority over settlement facts", () => {

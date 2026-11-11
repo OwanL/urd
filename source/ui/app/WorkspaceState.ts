@@ -28,7 +28,7 @@ export interface PendingSubmission {
 }
 
 export interface WorkspaceState {
-  version: 3;
+  version: 4;
   tabs: string[];
   activeId: string | null;
   chats: Record<string, ChatState>;
@@ -62,7 +62,7 @@ export function executionSettled(
 }
 
 export function emptyWorkspace(): WorkspaceState {
-  return { version: 3, tabs: [], activeId: null, chats: {}, lastSelection: null };
+  return { version: 4, tabs: [], activeId: null, chats: {}, lastSelection: null };
 }
 
 export function newChat(selection: LlmSelection | null): ChatState {
@@ -160,6 +160,10 @@ function isNullableString(value: unknown): value is string | null {
   return value === null || typeof value === "string";
 }
 
+function isNullableContextWindow(value: unknown): value is number | null {
+  return value === null || (typeof value === "number" && Number.isSafeInteger(value) && value > 0);
+}
+
 function isSelection(value: unknown): value is LlmSelection | null {
   if (value === null) return true;
   if (!isRecord(value) || !isRecord(value.connection)) return false;
@@ -181,6 +185,7 @@ function isSelection(value: unknown): value is LlmSelection | null {
       value.family === "google" ||
       value.family === "other") &&
     typeof value.supportsImages === "boolean" &&
+    isNullableContextWindow(value.contextWindow) &&
     isNullableString(value.reasoningEffort)
   );
 }
@@ -222,6 +227,7 @@ function sameSelection(left: LlmSelection | null, right: LlmSelection | null): b
     left.modelId === right.modelId &&
     left.family === right.family &&
     left.supportsImages === right.supportsImages &&
+    left.contextWindow === right.contextWindow &&
     left.reasoningEffort === right.reasoningEffort &&
     left.connection.id === right.connection.id &&
     left.connection.name === right.connection.name &&
@@ -273,7 +279,7 @@ function isChat(value: unknown): value is ChatState {
 function isWorkspace(value: unknown): value is WorkspaceState {
   if (
     !isRecord(value) ||
-    value.version !== 3 ||
+    value.version !== 4 ||
     !Array.isArray(value.tabs) ||
     !value.tabs.every(isId) ||
     !isRecord(value.chats) ||

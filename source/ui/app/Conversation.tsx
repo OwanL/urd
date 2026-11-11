@@ -1,9 +1,11 @@
-import { useCallback } from "preact/hooks";
+import { useCallback, useState } from "preact/hooks";
 import { Composer } from "../chat/Composer.tsx";
 import type { LlmSelection } from "../providers/LlmSelection.ts";
 import type { SessionClient } from "../sessions/SessionClient.ts";
 import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
 import { deriveConversationState } from "./ConversationState.ts";
+import type { ConversationExecutionStatus } from "./ConversationState.ts";
+import { ManualCompactionControl } from "./ManualCompactionControl.tsx";
 import { NotSentInputs } from "./NotSentInputs.tsx";
 import { Transcript } from "./Transcript.tsx";
 import type { ReadingPosition } from "./Transcript.tsx";
@@ -16,10 +18,11 @@ import type { WorkspaceModelState } from "./useWorkspaceModels.ts";
 import "./conversation.css";
 
 const efforts = ["none", "low", "medium", "high", "extraHigh"];
-const executionLabels = {
+const executionLabels: Record<Exclude<ConversationExecutionStatus, null>, string> = {
   stopping: "Stopping…",
   running: "Running…",
   accepted: "Accepted; awaiting session update.",
+  compacting: "Compacting…",
 };
 const settlementLabels = { failed: "Execution failed.", cancelled: "Cancelled." };
 
@@ -96,6 +99,19 @@ export function Conversation({
   const selection = state.selection;
   const modelKey = selection ? `${selection.connection.id}/${selection.modelId}` : null;
   const error = readError || chat.error || stop?.error;
+  const [manualCompactionPending, setManualCompactionPending] = useState(false);
+  const canStartCompaction = Boolean(
+    ready &&
+    canPersist &&
+    snapshot &&
+    selection &&
+    !snapshot.unsettledExecutionId &&
+    !snapshot.admissionFenced &&
+    !snapshot.stopRequested &&
+    !chat.pending &&
+    !chat.knownExecutionId &&
+    !stop?.pending,
+  );
   function choose(next: LlmSelection) {
     if (!state.selectionLocked) selectModel(sessionId, next);
   }
@@ -166,6 +182,15 @@ export function Conversation({
         )}
         {state.textError && <span class="inline-error">{state.textError}</span>}
       </div>
+      <ManualCompactionControl
+        client={client}
+        sessionId={sessionId}
+        snapshot={snapshot}
+        selection={selection}
+        canStart={canStartCompaction && !manualCompactionPending}
+        onPendingChange={setManualCompactionPending}
+        onRefresh={onRefresh}
+      />
       {snapshot && snapshot.pendingInputs.length > 0 && (
         <div class="chat-status">
           <details>
@@ -184,7 +209,7 @@ export function Conversation({
           sessionId={sessionId}
           snapshot={snapshot}
           commands={commands}
-          canResend={state.canResendNotSent}
+          canResend={state.canResendNotSent && !manualCompactionPending}
         />
       </div>
       <Composer
@@ -210,15 +235,21 @@ export function Conversation({
         onReasoningChange={(effort) => {
           if (selection) choose({ ...selection, reasoningEffort: effort });
         }}
-        selectionLocked={state.selectionLocked}
-        canSend={state.canSend}
+        selectionLocked={state.selectionLocked || manualCompactionPending}
+        canSend={state.canSend && !manualCompactionPending}
         working={state.active}
         stopping={state.executionStatus === "stopping"}
         onSend={() => {
-          if (snapshot) void commands.send(sessionId, snapshot, state.active, state.canSend);
+          if (snapshot)
+            void commands.send(
+              sessionId,
+              snapshot,
+              state.active,
+              state.canSend && !manualCompactionPending,
+            );
         }}
         onStop={() => {
-          if (snapshot) void commands.stop(sessionId, snapshot, state.stopId);
+          if (snapshot && state.active) void commands.stop(sessionId, snapshot, state.stopId);
         }}
         onRefreshModels={() => {
           void models.refresh();

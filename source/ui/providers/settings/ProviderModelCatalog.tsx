@@ -59,18 +59,26 @@ export function ProviderModelCatalog({
                     modelId: model.id,
                     family: "other",
                     supportsImages: false,
+                    contextWindow: null,
                   };
                 const changed =
                   draft &&
                   (!saved ||
                     draft.family !== saved.family ||
-                    draft.supportsImages !== saved.supportsImages);
+                    draft.supportsImages !== saved.supportsImages ||
+                    draft.contextWindow !== saved.contextWindow);
                 const unavailable = disabled || !records;
                 return (
                   <li key={model.id}>
                     <span>{model.name}</span>
                     <code>{model.id}</code>
-                    <div class="provider-settings-model-controls">
+                    <form
+                      class="provider-settings-model-controls"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        void state.actions.saveModelSettings(settings);
+                      }}
+                    >
                       <ProviderModelFamily
                         family={settings.family}
                         modelName={model.name}
@@ -91,17 +99,39 @@ export function ProviderModelCatalog({
                         />
                         Images
                       </label>
+                      <label>
+                        Context window
+                        <input
+                          type="number"
+                          aria-label={`${model.name} context window override (blank uses catalog default)`}
+                          min={1}
+                          max={2_147_483_647}
+                          step={1}
+                          placeholder={
+                            model.contextWindow == null ? undefined : String(model.contextWindow)
+                          }
+                          value={settings.contextWindow ?? ""}
+                          disabled={unavailable}
+                          onChange={(event) => {
+                            const input = event.currentTarget;
+                            if (!input.validity.valid) return;
+                            const contextWindow = input.value === "" ? null : input.valueAsNumber;
+                            if (
+                              contextWindow === null ||
+                              (Number.isSafeInteger(contextWindow) && contextWindow > 0)
+                            )
+                              state.actions.editModel(settings, { contextWindow });
+                          }}
+                        />
+                      </label>
                       <button
-                        type="button"
+                        type="submit"
                         aria-label={`Save ${model.name} settings`}
                         disabled={unavailable || !changed}
-                        onClick={() => {
-                          void state.actions.saveModelSettings(settings);
-                        }}
                       >
                         Save
                       </button>
-                    </div>
+                    </form>
                   </li>
                 );
               })}

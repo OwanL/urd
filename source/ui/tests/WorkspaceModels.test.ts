@@ -48,6 +48,7 @@ void test("cached reads do not discover models; explicit refresh does", async ()
   assert.equal(cached.options?.[0]?.providerLabel, "First provider");
   assert.equal(cached.options?.[0]?.selection.family, "other");
   assert.equal(cached.options?.[0]?.selection.supportsImages, false);
+  assert.equal(cached.options?.[0]?.selection.contextWindow, null);
   assert.equal(cachedReads, 1);
   assert.equal(discoveries, 0);
 
@@ -91,12 +92,14 @@ void test("configured metadata is matched by connection and model without infere
       modelId: "gpt-configured",
       family: "anthropic" as const,
       supportsImages: true,
+      contextWindow: 16_384,
     }),
     Object.freeze({
       connectionId: "another-connection",
       modelId: "gpt-unconfigured",
       family: "google" as const,
       supportsImages: true,
+      contextWindow: null,
     }),
   ]);
   let records = settings;
@@ -106,9 +109,9 @@ void test("configured metadata is matched by connection and model without infere
       connectionId: connection.id,
       refreshedAt: null,
       models: Object.freeze([
-        Object.freeze({ id: "gpt-configured", name: "GPT configured" }),
-        Object.freeze({ id: "claude-default", name: "Claude default" }),
-        Object.freeze({ id: "gpt-unconfigured", name: "GPT unmatched" }),
+        Object.freeze({ id: "gpt-configured", name: "GPT configured", contextWindow: 32_768 }),
+        Object.freeze({ id: "claude-default", name: "Claude default", contextWindow: 64_000 }),
+        Object.freeze({ id: "gpt-unconfigured", name: "GPT unmatched", contextWindow: null }),
       ]),
     }),
     getModelSettings: async () => records,
@@ -117,21 +120,27 @@ void test("configured metadata is matched by connection and model without infere
 
   const result = await models.readCached(new AbortController().signal);
   assert.deepEqual(
-    result.options?.map(({ selection }) => [selection.family, selection.supportsImages]),
+    result.options?.map(({ selection }) => [
+      selection.family,
+      selection.supportsImages,
+      selection.contextWindow,
+    ]),
     [
-      ["anthropic", true],
-      ["other", false],
-      ["other", false],
+      ["anthropic", true, 16_384],
+      ["other", false, 64_000],
+      ["other", false, null],
     ],
   );
   assert.equal(result.options?.[0]?.selection.connection, connection);
   assert.equal(Object.isFrozen(connection), true);
   assert.equal(Object.isFrozen(settings[0]), true);
   const chosen = result.options![0]!.selection;
-  records = [{ ...settings[0]!, family: "google", supportsImages: false }];
+  records = [{ ...settings[0]!, family: "google", supportsImages: false, contextWindow: null }];
   const updated = await models.readCached(new AbortController().signal);
   assert.equal(updated.options?.[0]?.selection.family, "google");
   assert.equal(updated.options?.[0]?.selection.supportsImages, false);
   assert.equal(chosen.family, "anthropic");
   assert.equal(chosen.supportsImages, true);
+  assert.equal(chosen.contextWindow, 16_384);
+  assert.equal(updated.options?.[0]?.selection.contextWindow, 32_768);
 });

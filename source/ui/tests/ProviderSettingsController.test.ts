@@ -601,6 +601,7 @@ void test("model metadata drafts survive reads, refresh and disconnect; saves ar
       modelId: "opaque",
       family: "anthropic",
       supportsImages: true,
+      contextWindow: null,
     },
   ];
   let connections = [connection];
@@ -627,17 +628,18 @@ void test("model metadata drafts survive reads, refresh and disconnect; saves ar
   state.setActivity(true, true);
   await flush();
   const initial = records[0]!;
-  state.editModel(initial, { family: "google" });
+  state.editModel(initial, { family: "google", contextWindow: 32_768 });
   await state.read();
   await state.refreshModels(connection);
   state.requestConfirmation("disconnect", connection);
   await state.confirm();
   assert.deepEqual(state.snapshot.modelSettings.one, [initial]);
   assert.equal(state.snapshot.modelDrafts.one?.[0]?.family, "google");
+  assert.equal(state.snapshot.modelDrafts.one?.[0]?.contextWindow, 32_768);
   assert.equal(writes.length, 0);
   const draft = state.snapshot.modelDrafts.one![0]!;
   await state.saveModelSettings(draft);
-  assert.deepEqual(writes, [{ ...initial, family: "google" }]);
+  assert.deepEqual(writes, [{ ...initial, family: "google", contextWindow: 32_768 }]);
   assert.deepEqual(state.snapshot.modelSettings.one, writes);
   assert.deepEqual(state.snapshot.modelDrafts.one, []);
   state.requestConfirmation("remove", connection);
@@ -653,6 +655,7 @@ void test("aborted model settings reads cannot publish over a newer read", async
     modelId: "opaque",
     family: "other",
     supportsImages: false,
+    contextWindow: null,
   };
   let signal: AbortSignal | undefined;
   const { state, client } = setup({
@@ -680,6 +683,7 @@ void test("unknown model settings writes are not retried and require metadata re
     modelId: "opaque",
     family: "other",
     supportsImages: false,
+    contextWindow: null,
   };
   let readsFail = false;
   let writes = 0;

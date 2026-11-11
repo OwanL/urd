@@ -237,7 +237,8 @@ function isEntry(value: unknown): value is TranscriptEntryRef {
     (value.kind === "user" ||
       value.kind === "text" ||
       value.kind === "tool" ||
-      value.kind === "toolCompletion") &&
+      value.kind === "toolCompletion" ||
+      value.kind === "compaction") &&
     validCounter(value.historyRevision)
   );
 }

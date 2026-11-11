@@ -8,4 +8,5 @@ export interface LlmSelection {
   readonly reasoningEffort: string | null;
   readonly family: ModelFamily;
   readonly supportsImages: boolean;
+  readonly contextWindow: number | null;
 }

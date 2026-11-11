@@ -11,6 +11,7 @@ import type {
   TranscriptPromptPage,
   TranscriptPromptPageQuery,
 } from "./Messages.ts";
+import type { CompactionReceipt, CompactionSubmission, CompactionSummary } from "./Compaction.ts";
 import type { SessionIdPage } from "./SessionIdPage.ts";
 import type { SessionSnapshot } from "./SessionSnapshot.ts";
 import type { StopReceipt } from "./Stop.ts";
@@ -197,6 +198,37 @@ export class SessionClient {
   stopExecution(sessionId: string, executionId: string): Promise<StopReceipt> {
     const path = `/${encodeURIComponent(sessionId)}/executions/${encodeURIComponent(executionId)}/stop`;
     return requestJson(this.url(path), "POST", {});
+  }
+
+  startCompaction(sessionId: string, submission: CompactionSubmission): Promise<CompactionReceipt> {
+    return requestJson(
+      this.url(`/${encodeURIComponent(sessionId)}/compactions`),
+      "POST",
+      submission,
+    );
+  }
+
+  getCompactionOperation(
+    sessionId: string,
+    operationId: string,
+    signal?: AbortSignal,
+  ): Promise<CompactionReceipt | null> {
+    const path =
+      `/${encodeURIComponent(sessionId)}/compactions/operations/` + encodeURIComponent(operationId);
+    return requestJson(this.url(path), "GET", undefined, signal);
+  }
+
+  getCompactionSummary(
+    sessionId: string,
+    compactionId: string,
+    expectedHistoryRevision: number,
+    signal?: AbortSignal,
+  ): Promise<CompactionSummary> {
+    const url = this.url(
+      `/${encodeURIComponent(sessionId)}/compactions/${encodeURIComponent(compactionId)}`,
+    );
+    url.searchParams.set("expectedHistoryRevision", String(expectedHistoryRevision));
+    return requestJson(url, "GET", undefined, signal);
   }
 
   private url(path: string): URL {

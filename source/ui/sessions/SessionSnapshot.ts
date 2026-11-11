@@ -12,6 +12,7 @@ export interface SessionSnapshot {
   readonly historyRevision: number;
   readonly admissionFenced: boolean;
   readonly unsettledExecutionId: string | null;
+  readonly isCompacting?: boolean;
   readonly stopRequested: boolean;
   readonly lastSettlement: SessionExecutionResult | null;
   readonly latestLlmSelection: LlmSelection | null;

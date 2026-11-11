@@ -34,6 +34,7 @@ const selection: LlmSelection = {
   modelId: "model-id",
   family: "other",
   supportsImages: false,
+  contextWindow: null,
   reasoningEffort: null,
 };
 

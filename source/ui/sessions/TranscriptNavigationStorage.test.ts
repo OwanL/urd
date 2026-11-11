@@ -55,7 +55,7 @@ void test("persists only the navigation schema and roundtrips valid state", () =
   assert.deepEqual(new TranscriptNavigationStorage(storage).load("session/a").value.state, sample);
 });
 
-void test("completion anchors roundtrip without a text cursor and stay non-text", () => {
+void test("completion and compaction anchors roundtrip without a text cursor", () => {
   const storage = new TranscriptNavigationStorage(new MemoryStorage());
   const state: TranscriptNavigationState = {
     ...sample,
@@ -68,6 +68,16 @@ void test("completion anchors roundtrip without a text cursor and stay non-text"
   assert.equal(storage.save("s", state).error, null);
   assert.deepEqual(storage.load("s").value.state, state);
   assert.equal(isTextEntry(state.anchor!.entry), false);
+  const compactionState: TranscriptNavigationState = {
+    ...state,
+    anchor: {
+      ...state.anchor!,
+      entry: { ...state.anchor!.entry, kind: "compaction" },
+    },
+  };
+  assert.equal(storage.save("s", compactionState).error, null);
+  assert.deepEqual(storage.load("s").value.state, compactionState);
+  assert.equal(isTextEntry(compactionState.anchor!.entry), false);
   assert.equal(isTextEntry(sample.anchor!.entry), true);
   assert.equal(isTextEntry({ ...sample.anchor!.entry, kind: "tool" }), false);
   assert.notEqual(

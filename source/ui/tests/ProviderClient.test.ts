@@ -38,7 +38,7 @@ const cached: ProviderModelCatalog = { connectionId, refreshedAt: null, models: 
 const refreshed: ProviderModelCatalog = {
   connectionId,
   refreshedAt: "2026-11-08T10:30:00+00:00",
-  models: [{ id: "provider/model 雪", name: "Display name 雪" }],
+  models: [{ id: "provider/model 雪", name: "Display name 雪", contextWindow: 32_768 }],
 };
 
 const modelSettings: ModelSettings = {
@@ -46,6 +46,7 @@ const modelSettings: ModelSettings = {
   modelId: "opaque-model 雪",
   family: "anthropic",
   supportsImages: true,
+  contextWindow: null,
 };
 
 const mappings = [

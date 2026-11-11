@@ -12,6 +12,11 @@ import type {
   TranscriptPositionWindow,
   TranscriptPromptPage,
 } from "../sessions/Messages.ts";
+import type {
+  CompactionReceipt,
+  CompactionSubmission,
+  CompactionSummary,
+} from "../sessions/Compaction.ts";
 import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
 import type {
   UserMessageReceipt,
@@ -22,6 +27,8 @@ import { startHttpServer } from "./HttpTestServer.ts";
 const sessionId = "10000000-0000-0000-0000-000000000001";
 const executionId = "20000000-0000-0000-0000-000000000002";
 const submissionId = "30000000-0000-0000-0000-000000000003";
+const operationId = "60000000-0000-0000-0000-000000000006";
+const compactionId = "70000000-0000-0000-0000-000000000007";
 const cursor: MessageContentCursor = {
   message: {
     executionId,
@@ -68,6 +75,7 @@ const selection: LlmSelection = {
   modelId: "provider/model-id",
   family: "other",
   supportsImages: false,
+  contextWindow: null,
   reasoningEffort: null,
 };
 const selectedSubmission: UserMessageSubmission = { ...submission, llmSelection: selection };
@@ -138,6 +146,25 @@ const notSentPage = {
   nextCursor: opaqueCursor,
 };
 const stopReceipt = { executionId, status: "requested", outcome: null };
+const compactionSubmission: CompactionSubmission = {
+  operationId,
+  expectedHistoryRevision: 7,
+  llmSelection: selection,
+  focus: "Preserve decisions and unresolved work.",
+};
+const compactionReceipt: CompactionReceipt = { executionId, outcome: null };
+const compactionSummary: CompactionSummary = {
+  id: compactionId,
+  sessionId,
+  historyRevision: 8,
+  executionId,
+  summary: "The conversation summary.",
+  reason: "manual",
+  tokensBefore: 8_000,
+  tokensAfter: 900,
+  createdAt: "2026-10-12T12:00:00Z",
+  cursor: { executionId, entryId: compactionId },
+};
 const selectedRefusal: UserMessageReceipt = {
   ...selectedReceipt,
   acceptance: "refused",
@@ -214,6 +241,7 @@ const mappings: MappingCase[] = [
       ["after", "tool"],
       ["around", "tool"],
       ["after", "toolCompletion"],
+      ["after", "compaction"],
     ] as const
   ).map(([mode, kind]): MappingCase => ({
     name: `history ${mode} preserves its exact ${kind} reference`,
@@ -376,6 +404,36 @@ const mappings: MappingCase[] = [
     body: {},
     response: stopReceipt,
   },
+  {
+    name: "manual compaction preserves the frozen selection and focus",
+    call: (client) => client.startCompaction(sessionId, compactionSubmission),
+    method: "POST",
+    path: `/api/sessions/${sessionId}/compactions`,
+    body: compactionSubmission,
+    response: compactionReceipt,
+  },
+  {
+    name: "compaction operation receipt lookup",
+    call: (client) => client.getCompactionOperation(sessionId, operationId),
+    method: "GET",
+    path: `/api/sessions/${sessionId}/compactions/operations/${operationId}`,
+    response: compactionReceipt,
+  },
+  {
+    name: "missing compaction operation receipt is null",
+    call: (client) => client.getCompactionOperation(sessionId, operationId),
+    method: "GET",
+    path: `/api/sessions/${sessionId}/compactions/operations/${operationId}`,
+    response: null,
+  },
+  {
+    name: "compaction summary is fenced by history revision",
+    call: (client) => client.getCompactionSummary(sessionId, compactionId, 8),
+    method: "GET",
+    path: `/api/sessions/${sessionId}/compactions/${compactionId}`,
+    query: { expectedHistoryRevision: "8" },
+    response: compactionSummary,
+  },
 ];
 
 for (const mapping of mappings) {
@@ -505,6 +563,10 @@ const commands: { name: string; call: (client: SessionClient) => Promise<unknown
   { name: "create", call: (client) => client.create() },
   { name: "submit", call: (client) => client.submitMessage(sessionId, submission) },
   { name: "Stop", call: (client) => client.stopExecution(sessionId, executionId) },
+  {
+    name: "manual compaction",
+    call: (client) => client.startCompaction(sessionId, compactionSubmission),
+  },
 ];
 for (const command of commands) {
   for (const phase of ["request", "acknowledgement"] as const) {
@@ -570,6 +632,14 @@ const reads: {
   {
     name: "receipt",
     call: (client, signal) => client.getMessageReceipt(sessionId, submissionId, signal),
+  },
+  {
+    name: "compaction receipt",
+    call: (client, signal) => client.getCompactionOperation(sessionId, operationId, signal),
+  },
+  {
+    name: "compaction summary",
+    call: (client, signal) => client.getCompactionSummary(sessionId, compactionId, 8, signal),
   },
 ];
 for (const read of reads) {

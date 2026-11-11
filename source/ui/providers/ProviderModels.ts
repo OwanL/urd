@@ -2,6 +2,7 @@
 export interface ProviderModel {
   readonly id: string;
   readonly name: string;
+  readonly contextWindow?: number | null;
 }
 
 // The last successfully fetched catalog; null means it has never been fetched.

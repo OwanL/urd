@@ -6,4 +6,5 @@ export interface ModelSettings {
   readonly modelId: string;
   readonly family: ModelFamily;
   readonly supportsImages: boolean;
+  readonly contextWindow: number | null;
 }

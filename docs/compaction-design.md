@@ -62,6 +62,8 @@ owner-approved reset of older data; no automatic migration or deletion is perfor
 - Coverage includes safe tool boundaries, threshold and overflow preparation, no retry after
   even briefly buffered output, manual idempotency, cancellation cleanup, failed summaries,
   readable original history and reopening with the saved summary boundary.
+- UI format/lint/type checks, **278 unit tests** and the production bundle passed on the
+  integrated tree. Independent UI review approved the idle-only control and final-receipt feedback.
 - Independent backend review approved after the buffered-output retry guard was corrected.
   These are offline checks, not a new live-provider qualification. No existing database was
   reset and no running user host was restarted for this verification.

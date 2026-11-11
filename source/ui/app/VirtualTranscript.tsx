@@ -23,6 +23,7 @@ import {
   transcriptNavigationProfileVersion,
 } from "./useTranscriptNavigation.ts";
 import type { TranscriptDisplay } from "./TranscriptDisplay.ts";
+import { CompactionMarker } from "./CompactionMarker.tsx";
 import { TranscriptPositionReader } from "./TranscriptPositionReader.ts";
 import "../chat/transcript.css";
 
@@ -167,6 +168,7 @@ function ToolEntry({ tool, completion }: { tool: TranscriptToolFacts; completion
 }
 
 function VirtualEntry({
+  client,
   display,
   streamId,
   sessionId,
@@ -181,6 +183,7 @@ function VirtualEntry({
   onSourceRestore,
   onPublished,
 }: {
+  client: SessionClient;
   display: TranscriptDisplay;
   streamId: string | null;
   sessionId: string;
@@ -244,6 +247,13 @@ function VirtualEntry({
           registerSource={registerSource}
           registerRestore={registerRestore}
           onPublished={published}
+        />
+      ) : descriptor.compaction ? (
+        <CompactionMarker
+          client={client}
+          sessionId={sessionId}
+          entry={descriptor.entry}
+          compaction={descriptor.compaction}
         />
       ) : descriptor.tool ? (
         <ToolEntry tool={descriptor.tool} completion={descriptor.entry.kind === "toolCompletion"} />
@@ -1110,6 +1120,7 @@ export function VirtualTranscript({
             return (
               <VirtualEntry
                 key={key}
+                client={client}
                 display={display}
                 streamId={streamId}
                 sessionId={sessionId}

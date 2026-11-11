@@ -4,7 +4,7 @@ import { submissionTextError } from "./WorkspaceState.ts";
 import type { ChatState } from "./WorkspaceState.ts";
 import type { WorkspaceStopState } from "./WorkspaceCommands.ts";
 
-export type ConversationExecutionStatus = "stopping" | "running" | "accepted" | null;
+export type ConversationExecutionStatus = "stopping" | "running" | "accepted" | "compacting" | null;
 export type ConversationSettlementStatus = "failed" | "cancelled" | null;
 
 export interface ConversationState {
@@ -31,6 +31,7 @@ export function deriveConversationState(
   canPersist: boolean,
 ): ConversationState {
   const active = Boolean(snapshot?.unsettledExecutionId && !snapshot.admissionFenced);
+  const compacting = Boolean(active && snapshot?.isCompacting);
   const stopId = stop?.pending ? stop.executionId : undefined;
   const selectionLocked = Boolean(
     active ||
@@ -47,6 +48,7 @@ export function deriveConversationState(
   const canResendNotSent = Boolean(
     snapshot &&
     canPersist &&
+    !compacting &&
     !chat.pending &&
     !snapshot.admissionFenced &&
     !snapshot.stopRequested &&
@@ -63,7 +65,9 @@ export function deriveConversationState(
   const executionStatus: ConversationExecutionStatus = active
     ? snapshot?.stopRequested || stopId
       ? "stopping"
-      : "running"
+      : compacting
+        ? "compacting"
+        : "running"
     : chat.knownExecutionId
       ? "accepted"
       : null;

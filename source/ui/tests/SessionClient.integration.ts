@@ -72,6 +72,7 @@ void test(
       sessionId: id,
       historyRevision: 0,
       admissionFenced: false,
+      isCompacting: false,
       unsettledExecutionId: null,
       stopRequested: false,
       lastSettlement: null,
@@ -89,6 +90,7 @@ void test(
         modelId: "fixture-a",
         family: "other",
         supportsImages: false,
+        contextWindow: null,
         reasoningEffort: "high",
       },
       text:

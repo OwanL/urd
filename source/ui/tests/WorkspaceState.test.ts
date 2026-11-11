@@ -41,6 +41,7 @@ const selection: LlmSelection = {
   modelId: "provider/model-id",
   family: "openAI",
   supportsImages: false,
+  contextWindow: null,
   reasoningEffort: null,
 };
 void test("causal snapshot reads release accepted work outside the recent window without trusting an earlier read", () => {
@@ -97,7 +98,7 @@ function sending(submission = original) {
 
 function workspace(): WorkspaceState {
   return {
-    version: 3,
+    version: 4,
     tabs: [sessionId],
     activeId: sessionId,
     chats: { [sessionId]: sending() },
@@ -107,7 +108,7 @@ function workspace(): WorkspaceState {
 
 void test("new state is independent, empty and does not invent a selection", () => {
   assert.deepEqual(emptyWorkspace(), {
-    version: 3,
+    version: 4,
     tabs: [],
     activeId: null,
     chats: {},
@@ -226,6 +227,7 @@ void test("foreign sessions, absent pending submissions and full original mismat
     { llmSelection: { ...selection, modelId: "another-model" } },
     { llmSelection: { ...selection, family: "anthropic" } },
     { llmSelection: { ...selection, supportsImages: true } },
+    { llmSelection: { ...selection, contextWindow: 32_768 } },
     { llmSelection: { ...selection, reasoningEffort: "high" } },
     ...Object.entries({
       id: "another-connection",
@@ -251,6 +253,7 @@ void test("original matching is independent of JSON property order", () => {
   const submission = {
     llmSelection: {
       supportsImages: selection.supportsImages,
+      contextWindow: selection.contextWindow,
       family: selection.family,
       reasoningEffort: selection.reasoningEffort,
       modelId: selection.modelId,
@@ -323,8 +326,8 @@ void test("reload retains later edits while reconciling an uncertain submission"
   assert.equal(resolved.pending, null);
 });
 
-void test("version 2 saved workspaces are discarded, not migrated", () => {
-  const saved = { ...workspace(), version: 2 };
+void test("version 3 saved workspaces are discarded, not migrated", () => {
+  const saved = { ...workspace(), version: 3 };
   assert.throws(() => decodeWorkspace(JSON.stringify(saved)), TypeError);
 });
 
@@ -335,7 +338,8 @@ void test("corrupt saved structure throws instead of resetting or discarding dra
   const invalid: unknown[] = [
     { ...workspace(), version: 1 },
     { ...workspace(), version: 2 },
-    { ...workspace(), version: 4 },
+    { ...workspace(), version: 3 },
+    { ...workspace(), version: 5 },
     { ...workspace(), tabs: [sessionId, sessionId] },
     { ...workspace(), tabs: ["missing"] },
     { ...workspace(), tabs: [1] },
@@ -345,6 +349,9 @@ void test("corrupt saved structure throws instead of resetting or discarding dra
     { ...workspace(), lastSelection: { ...selection, connection: { id: "x" } } },
     { ...workspace(), lastSelection: { ...selection, family: "invalid" } },
     { ...workspace(), lastSelection: { ...selection, supportsImages: "yes" } },
+    { ...workspace(), lastSelection: { ...selection, contextWindow: 0 } },
+    { ...workspace(), lastSelection: { ...selection, contextWindow: 1.5 } },
+    { ...workspace(), lastSelection: { ...selection, contextWindow: undefined } },
     { ...workspace(), lastSelection: { ...selection, family: undefined } },
     { ...workspace(), lastSelection: { ...selection, supportsImages: undefined } },
   ];
@@ -357,6 +364,7 @@ void test("corrupt saved structure throws instead of resetting or discarding dra
     { selection: { ...selection, connection: { ...selection.connection, route: "unknown" } } },
     { selection: { ...selection, family: "invalid" } },
     { selection: { ...selection, supportsImages: 1 } },
+    { selection: { ...selection, contextWindow: -1 } },
     { selection: { ...selection, reasoningEffort: 3 } },
     { knownExecutionId: false },
     { title: null },

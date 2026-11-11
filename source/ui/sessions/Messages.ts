@@ -1,3 +1,4 @@
+import type { CompactionReason } from "./Compaction.ts";
 import type { ExecutionOutcome, SessionExecutionResult } from "./SessionExecutionResult.ts";
 
 // Identifies one message within a session's history revision.
@@ -9,7 +10,7 @@ export interface MessageRef {
 }
 
 // Entry order is observed order, not request order or a displayed rank.
-export type TranscriptEntryKind = "user" | "text" | "tool" | "toolCompletion";
+export type TranscriptEntryKind = "user" | "text" | "tool" | "toolCompletion" | "compaction";
 
 export interface TranscriptEntryRef {
   readonly executionId: string;
@@ -35,6 +36,13 @@ export interface TranscriptEntryDescriptor {
   readonly createdAt: string | null;
   readonly text: TranscriptTextFacts | null;
   readonly tool: TranscriptToolFacts | null;
+  readonly compaction?: TranscriptCompactionFacts;
+}
+
+export interface TranscriptCompactionFacts {
+  readonly reason: CompactionReason;
+  readonly tokensBefore: number;
+  readonly tokensAfter: number;
 }
 
 export interface TranscriptTextFacts {

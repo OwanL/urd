@@ -6,10 +6,31 @@ not in the context manager.
 | File | Applies to | Order |
 | --- | --- | --- |
 | `BaseGuidance.cs` | All sessions | 0 |
+| `DefaultWorkingGuidance.cs` | Primary sessions | 10 |
+| `WorkingPreferencesGuidance.cs` | Primary sessions | 20 |
+| `ToolUsageGuidance.cs` | Sessions with a working directory | 50 |
+| `DocumentationGuidance.cs` | All sessions | 60 |
 | `PrimaryGuidance.cs` | Primary sessions | 100 |
 | `SubagentGuidance.cs` | Subagents | 100 |
+| `SubagentPreferencesGuidance.cs` | Subagents | 110 |
 | `WorkingDirectoryGuidance.cs` | Sessions with a working directory | 200 |
 | `AssignmentGuidance.cs` | Sessions with an assignment | 300 |
+
+## Guidance copied from Pie
+
+The working defaults/preferences, child guidance and tool-use/documentation rules
+were selected from Pie's `harness/agent-instructions/` and
+`harness/pi/packages/coding-agent/src/core/`. Source paths are recorded on each class.
+Retained text is word-for-word, including spelling and punctuation. These are local
+editable copies, not a runtime dependency or automatic synchronization with Pie.
+
+Omissions include Pie/Pi identity and documentation paths, skill/resource recovery,
+session coordination, subagent dispatch, unavailable clarification/computer-control
+tools, timers and unsupported image-presentation workflows. The Pie-naming sentence
+in the defaults preamble and the Pie-specific repository-layout sentence were omitted. The implicit push-approval
+example was omitted while retaining its preceding intent sentence; explicit consent
+limits remain. Primary preferences are not included in child sessions. Child guidance
+is composed for `Subagent` inputs; it does not add a delegation runtime.
 
 ## Add a block
 

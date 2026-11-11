@@ -36,6 +36,37 @@ public sealed class StartingContextManagerTests {
   }
 
   [Fact]
+  public async Task ImportedGuidanceKeepsPrimaryPreferencesSeparateFromChildInstructions() {
+    var manager = CreateManager();
+    var input = new StartingContextInput(SessionKind.Primary, ModelFamily.Other, null, "request", null);
+
+    StartingContext primary = await manager.CreateAsync(input, default);
+    StartingContext subagent = await manager.CreateAsync(input with { SessionKind = SessionKind.Subagent }, default);
+    string primaryText = InstructionText(primary);
+    string subagentText = InstructionText(subagent);
+
+    Assert.Contains("# Default working guidance", primaryText, StringComparison.Ordinal);
+    Assert.Contains("# Working preferences", primaryText, StringComparison.Ordinal);
+    Assert.DoesNotContain("# Shared child guidance", primaryText, StringComparison.Ordinal);
+    Assert.Contains("# Shared child guidance", subagentText, StringComparison.Ordinal);
+    Assert.DoesNotContain("# Default working guidance", subagentText, StringComparison.Ordinal);
+    Assert.DoesNotContain("# Working preferences", subagentText, StringComparison.Ordinal);
+  }
+
+  [Fact]
+  public async Task ImportedGuidanceDoesNotClaimUnavailableToolsOrPieFeatures() {
+    var manager = CreateManager();
+    foreach (SessionKind kind in new[] { SessionKind.Primary, SessionKind.Subagent }) {
+      StartingContext context = await manager.CreateAsync(
+          new(kind, ModelFamily.Other, "C:\\workspace\\urd", "request", null), default);
+      string text = InstructionText(context);
+
+      foreach (string unsupported in new[] { "ask_user", "session_resources", "session_changes", "request_capability", "invoke_tool", "Pie", "Pi runtime" })
+        Assert.DoesNotContain(unsupported, text, StringComparison.Ordinal);
+    }
+  }
+
+  [Fact]
   public async Task WorkingDirectoryIsIncludedOnlyWhenAvailable() {
     const string workingDirectory = "C:\\workspace\\urd";
     var manager = CreateManager();
@@ -47,6 +78,8 @@ public sealed class StartingContextManagerTests {
     Assert.DoesNotContain("Working directory:", InstructionText(withoutDirectory), StringComparison.Ordinal);
     Assert.DoesNotContain("Assignment context:", InstructionText(withoutDirectory), StringComparison.Ordinal);
     Assert.Contains(workingDirectory, InstructionText(withDirectory), StringComparison.Ordinal);
+    Assert.DoesNotContain("Tool guidance:", InstructionText(withoutDirectory), StringComparison.Ordinal);
+    Assert.Contains("Tool guidance:", InstructionText(withDirectory), StringComparison.Ordinal);
   }
 
   [Fact]

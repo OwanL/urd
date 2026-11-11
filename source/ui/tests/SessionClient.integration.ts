@@ -121,7 +121,7 @@ void test(
     assert.equal(settled.admissionFenced, false);
     assert.equal(settled.unsettledExecutionId, null);
     assert.equal(settled.stopRequested, false);
-    assert.deepEqual(settled.lastSettlement, { executionId, outcome: "completed" });
+    assert.deepEqual(settled.lastSettlement, { executionId, outcome: "completed", error: null });
     assert.deepEqual(settled.pendingInputs, []);
     assert.deepEqual(settled.latestLlmSelection, submission.llmSelection);
     assert.ok(settled.firstUserPreview);
@@ -145,7 +145,7 @@ void test(
     assert.equal(history.historyRevision, initial.historyRevision);
     assert.equal(history.hasBefore, false);
     assert.equal(history.hasAfter, false);
-    assert.deepEqual(history.settlements, [{ executionId, outcome: "completed" }]);
+    assert.deepEqual(history.settlements, [{ executionId, outcome: "completed", error: null }]);
     const user = history.entries.find((entry) => entry.entry.kind === "user");
     const assistant = history.entries.find((entry) => entry.entry.kind === "text");
     assert.ok(user?.text);

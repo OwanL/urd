@@ -6,6 +6,10 @@
   min-width: 0;
 }
 
+.chat-view[hidden] {
+  display: none;
+}
+
 .chat-status {
   flex: none;
   padding: 0 20px;

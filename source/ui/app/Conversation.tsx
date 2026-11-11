@@ -7,6 +7,7 @@ import { deriveConversationState } from "./ConversationState.ts";
 import { NotSentInputs } from "./NotSentInputs.tsx";
 import { Transcript } from "./Transcript.tsx";
 import type { ReadingPosition } from "./Transcript.tsx";
+import type { TranscriptDisplay } from "./TranscriptDisplay.ts";
 import type { WorkspaceCommands, WorkspaceStopState } from "./WorkspaceCommands.ts";
 import type { ChatState } from "./WorkspaceState.ts";
 import { useSessionSnapshot } from "./useSessionSnapshot.ts";
@@ -24,6 +25,9 @@ const settlementLabels = { failed: "Execution failed.", cancelled: "Cancelled." 
 interface ConversationProps {
   client: SessionClient;
   sessionId: string;
+  active?: boolean;
+  transcript?: TranscriptDisplay | undefined;
+  streamId?: string | null;
   chat: ChatState;
   commands: WorkspaceCommands;
   stop: WorkspaceStopState | undefined;
@@ -40,10 +44,13 @@ interface ConversationProps {
   onPositionChange(position: ReadingPosition): void;
 }
 
-// Mounted for the active chat only; commands and retained reading positions outlive this view.
+// Qualification may retain paused chats; normal startup mounts only the active chat.
 export function Conversation({
   client,
   sessionId,
+  active = true,
+  transcript,
+  streamId = null,
   chat,
   commands,
   stop,
@@ -77,6 +84,7 @@ export function Conversation({
     chat.pending?.status === "sending",
     observeSnapshot,
     notice,
+    active,
   );
   const state = deriveConversationState(chat, snapshot, stop, ready, canPersist);
   const canResendNotSent = Boolean(
@@ -98,9 +106,18 @@ export function Conversation({
   }
 
   return (
-    <section id="chat-view" class="chat-view" role="tabpanel" aria-labelledby={`tab-${sessionId}`}>
+    <section
+      id={active ? "chat-view" : undefined}
+      hidden={!active}
+      data-chat-session={sessionId}
+      class="chat-view"
+      role="tabpanel"
+      aria-labelledby={`tab-${sessionId}`}
+    >
       <Transcript
         client={client}
+        display={transcript}
+        streamId={streamId}
         history={history}
         sessionId={sessionId}
         visible={visible && notice !== null}

@@ -11,6 +11,7 @@ import type { WorkspaceCommandState } from "./WorkspaceCommands.ts";
 import { ChatTabs } from "./ChatTabs.tsx";
 import { Conversation } from "./Conversation.tsx";
 import type { ReadingPosition } from "./Transcript.tsx";
+import type { TranscriptDisplay } from "./TranscriptDisplay.ts";
 import { usePersistedWorkspace } from "./usePersistedWorkspace.ts";
 import { useWorkspaceModels } from "./useWorkspaceModels.ts";
 import { useWorkspaceNavigation } from "./useWorkspaceNavigation.ts";
@@ -22,7 +23,7 @@ const providers = new ProviderClient(new URL(window.location.href));
 const storageKey = "urd.workspace.v1";
 const storageRetryLabels = { read: "Retry read", write: "Retry save", cleanup: "Retry cleanup" };
 
-export function Workspace() {
+export function Workspace({ transcript }: { transcript?: TranscriptDisplay } = {}) {
   const [persistence] = useState(() => new WorkspacePersistence(() => sessionStorage, storageKey));
   const workspace = usePersistedWorkspace(persistence);
   const models = useWorkspaceModels(providers);
@@ -62,7 +63,29 @@ export function Workspace() {
     tabs,
     activeId,
   );
-  const chat = activeId ? chats[activeId] : undefined;
+  const retained = useRef<string[]>([]);
+  if (transcript && activeId) {
+    const selection = document.getSelection();
+    const pinned = new Set(
+      [selection?.anchorNode, selection?.focusNode, document.activeElement].flatMap((node) => {
+        const element = node instanceof Element ? node : node?.parentElement;
+        const id = element?.closest<HTMLElement>("[data-chat-session]")?.dataset.chatSession;
+        return id ? [id] : [];
+      }),
+    );
+    const ordered = [
+      activeId,
+      ...retained.current.filter((id) => id !== activeId && tabs.includes(id)),
+    ];
+    retained.current = ordered.filter(
+      (id, index) => index < transcript.retainedTabs || pinned.has(id),
+    );
+  }
+  const shown = transcript
+    ? retained.current.filter((id) => tabs.includes(id))
+    : activeId
+      ? [activeId]
+      : [];
   const canPersist = workspace.access.canPersist();
   const error = commandError || navigation.error || events.error;
 
@@ -141,28 +164,33 @@ export function Workspace() {
           </button>
         </div>
       )}
-      {activeId && chat ? (
-        <Conversation
-          key={activeId}
-          client={sessions}
-          sessionId={activeId}
-          chat={chat}
-          commands={commands}
-          stop={commandState.stopping[activeId]}
-          checking={commandState.checking[activeId] ?? false}
-          models={models}
-          ready={navigation.ready}
-          canPersist={canPersist}
-          notice={events.notice}
-          refresh={refresh}
-          onRefresh={refreshSnapshot}
-          editDraft={workspace.editDraft}
-          selectModel={workspace.selectModel}
-          position={readingPositions.current.get(activeId)}
-          onPositionChange={(position) => {
-            readingPositions.current.set(activeId, position);
-          }}
-        />
+      {shown.length ? (
+        shown.map((id) => (
+          <Conversation
+            key={id}
+            client={sessions}
+            sessionId={id}
+            chat={chats[id]!}
+            active={id === activeId}
+            transcript={transcript}
+            streamId={events.streamId}
+            commands={commands}
+            stop={commandState.stopping[id]}
+            checking={commandState.checking[id] ?? false}
+            models={models}
+            ready={navigation.ready}
+            canPersist={canPersist}
+            notice={id === activeId ? events.notice : null}
+            refresh={refresh}
+            onRefresh={refreshSnapshot}
+            editDraft={workspace.editDraft}
+            selectModel={workspace.selectModel}
+            position={readingPositions.current.get(id)}
+            onPositionChange={(position) => {
+              readingPositions.current.set(id, position);
+            }}
+          />
+        ))
       ) : (
         <div class="empty-workspace" />
       )}

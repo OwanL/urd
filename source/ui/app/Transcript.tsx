@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { SessionClient } from "../sessions/SessionClient.ts";
+import type { TranscriptDisplay } from "./TranscriptDisplay.ts";
 import { IconButton } from "../components/IconButton.tsx";
 import { TranscriptContentReader } from "./TranscriptContentReader.ts";
 import { isTextEntry } from "../sessions/Messages.ts";
@@ -237,6 +238,8 @@ export interface ReadingPosition {
 }
 
 export function Transcript({
+  display,
+  streamId = null,
   client,
   history,
   sessionId,
@@ -246,11 +249,14 @@ export function Transcript({
 }: {
   client: SessionClient;
   history: TranscriptHistoryPage | null;
+  display?: TranscriptDisplay | undefined;
+  streamId?: string | null;
   sessionId: string;
   visible: boolean;
   position: ReadingPosition | undefined;
   onPositionChange: (position: ReadingPosition) => void;
 }) {
+  const RichBody = display?.MessageBody;
   const scroll = useRef<HTMLDivElement>(null);
   const [documentHidden, setDocumentHidden] = useState(
     () => typeof document !== "undefined" && document.hidden,
@@ -309,6 +315,7 @@ export function Transcript({
     const node = scroll.current;
     if (!node) return;
     const observer = new ResizeObserver(() => {
+      if (!visible || documentHidden) return;
       if (following.current && !selecting) {
         node.scrollTop = node.scrollHeight;
         adjustedScrollTop.current = node.scrollTop;
@@ -319,17 +326,17 @@ export function Transcript({
     if (node.firstElementChild) observer.observe(node.firstElementChild);
     for (const item of node.querySelectorAll<HTMLElement>("[data-message]")) observer.observe(item);
     return () => observer.disconnect();
-  }, [keepAnchorInPlace, selecting, visibleHistory]);
+  }, [keepAnchorInPlace, selecting, visibleHistory, visible, documentHidden]);
   useLayoutEffect(() => {
     const node = scroll.current;
-    if (!node || selecting) return;
+    if (!node || selecting || !visible || documentHidden) return;
     if (following.current) {
       node.scrollTop = node.scrollHeight;
       adjustedScrollTop.current = node.scrollTop;
     } else if (anchor.current) {
       keepAnchorInPlace(node);
     }
-  }, [keepAnchorInPlace, shown, selecting]);
+  }, [keepAnchorInPlace, shown, selecting, visible, documentHidden]);
 
   function rememberPosition() {
     const node = scroll.current;
@@ -368,15 +375,27 @@ export function Transcript({
             return (
               <div key={key} data-message={key}>
                 {isTextEntry(entry) && descriptor.text ? (
-                  <MessageBody
-                    client={client}
-                    contentReader={contentReader}
-                    sessionId={sessionId}
-                    entry={entry}
-                    text={descriptor.text}
-                    root={root}
-                    paused={selecting || !visible || documentHidden}
-                  />
+                  display && RichBody ? (
+                    <RichBody
+                      display={display}
+                      streamId={streamId}
+                      sessionId={sessionId}
+                      entry={entry}
+                      text={descriptor.text}
+                      root={root}
+                      paused={!visible || documentHidden}
+                    />
+                  ) : (
+                    <MessageBody
+                      client={client}
+                      contentReader={contentReader}
+                      sessionId={sessionId}
+                      entry={entry}
+                      text={descriptor.text}
+                      root={root}
+                      paused={selecting || !visible || documentHidden}
+                    />
+                  )
                 ) : descriptor.tool ? (
                   <ToolEntry tool={descriptor.tool} completion={entry.kind === "toolCompletion"} />
                 ) : null}

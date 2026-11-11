@@ -11,6 +11,7 @@ export function useSessionSnapshot(
   sending: boolean,
   onSnapshot: (snapshot: SessionSnapshot, knownWhenRead: string | null) => void,
   notice: string | null,
+  enabled = true,
 ) {
   const [snapshot, setSnapshot] = useState<SessionSnapshot | null>(null);
   const [history, setHistory] = useState<TranscriptHistoryPage | null>(null);
@@ -22,7 +23,7 @@ export function useSessionSnapshot(
 
   useEffect(() => {
     setError(null);
-    if (!sessionId) return;
+    if (!sessionId || !enabled) return;
     const requestedSessionId = sessionId;
 
     let disposed = false;
@@ -108,16 +109,16 @@ export function useSessionSnapshot(
       window.removeEventListener("focus", activate);
       requestRead.current = () => {};
     };
-  }, [client, sessionId]);
+  }, [client, sessionId, enabled]);
 
   useEffect(() => {
     if (notice !== null) requestRead.current();
-  }, [notice, refresh]);
+  }, [notice, refresh, enabled]);
 
   return {
     snapshot: snapshot?.sessionId === sessionId ? snapshot : null,
     history: history?.sessionId === sessionId ? history : null,
     error,
-    visible,
+    visible: enabled && visible,
   };
 }

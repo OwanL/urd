@@ -51,7 +51,8 @@ public sealed class SteeringFlowTests {
 
       toolRelease.TrySetResult();
       await nextEntered.Task.WaitAsync(TestTimeout);
-      IReadOnlyList<ChatMessage> continued = client.Requests[1];
+      ChatMessage[] continued = client.Requests[1]
+          .SkipWhile(message => message.Role == ChatRole.System || message.Role == new ChatRole("developer")).ToArray();
       Assert.Equal(new[] { ChatRole.User, ChatRole.Assistant, ChatRole.Tool, ChatRole.User, ChatRole.User },
           continued.Select(message => message.Role));
       FunctionResultContent[] results = continued[2].Contents.OfType<FunctionResultContent>().ToArray();

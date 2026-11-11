@@ -2,6 +2,7 @@ using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.AI;
+using Urd.Core.Context;
 using Urd.Core.Sessions;
 using Urd.Core.Providers;
 using Urd.Core.Tools;
@@ -14,6 +15,8 @@ internal sealed class SessionExecution : IDisposable {
   private readonly SessionBase session;
   private readonly Func<ProviderConnection, IChatClient> createChatClient; // Returns borrowed clients.
   private readonly LlmSelection selection;
+  private readonly StartingContextManager startingContextManager;
+  private StartingContext? startingContext;
   private IChatClient? chatClient;
   private readonly IReadOnlyList<AgentTool> tools; // Frozen offered capabilities for this execution.
   private readonly CancellationTokenSource stop = new();
@@ -22,12 +25,13 @@ internal sealed class SessionExecution : IDisposable {
   private int backgroundCalls;
 
   internal SessionExecution(Guid executionId, SessionBase session, Func<ProviderConnection, IChatClient> createChatClient,
-      LlmSelection selection,
+      LlmSelection selection, StartingContextManager startingContextManager,
       IReadOnlyList<AgentTool>? tools = null, PendingToolCalls? pending = null) {
     ExecutionId = executionId;
     this.session = session;
     this.createChatClient = createChatClient;
     this.selection = selection;
+    this.startingContextManager = startingContextManager;
     this.tools = tools ?? [];
     this.pending = pending ?? new PendingToolCalls();
   }
@@ -185,6 +189,12 @@ internal sealed class SessionExecution : IDisposable {
       AgentTool tool = tools.FirstOrDefault(tool =>
           string.Equals(tool.Name, call.Name, StringComparison.Ordinal))
           ?? throw new InvalidOperationException($"Unknown tool '{call.Name}'.");
+      AIFunctionDeclaration? offered = startingContext?.Tools.FirstOrDefault(declaration =>
+          string.Equals(declaration.Name, call.Name, StringComparison.Ordinal));
+      AIFunctionDeclaration current = AgentToolDeclaration.Create(tool);
+      if (offered is null || offered.Description != current.Description
+          || offered.JsonSchema.GetRawText() != current.JsonSchema.GetRawText())
+        throw new InvalidOperationException($"Tool '{call.Name}' no longer matches its offered definition.");
       string directory = session.WorkingDirectory
           ?? throw new InvalidOperationException("The chat has no saved working folder.");
       // Progress is intentionally inert until transcript progress integration is available.
@@ -221,16 +231,21 @@ internal sealed class SessionExecution : IDisposable {
     try {
       CancellationToken stopToken = stop.Token;
       stopToken.ThrowIfCancellationRequested();
+      startingContext ??= session.ReadStartingContext() ?? await startingContextManager.CreateAsync(new(
+          session.Kind, selection.Family, session.WorkingDirectory,
+          request.Messages.FirstOrDefault(message => message.Role == ChatRole.User)?.Text ?? "", null), stopToken);
+      stopToken.ThrowIfCancellationRequested();
       chatClient ??= createChatClient(selection.Connection);
       var options = new ChatOptions {
         ModelId = selection.ModelId,
         Reasoning = selection.ReadReasoningEffort() is { } effort
             ? new ReasoningOptions { Effort = effort } : null,
-        Tools = [.. tools.Select(AgentToolDeclaration.Create)]
+        Tools = [.. startingContext.Tools]
       };
-      await StartRequestAsync(request.RequestId);
+      await StartRequestAsync(request.RequestId, startingContext);
       updates = chatClient
-          .GetStreamingResponseAsync(LlmProviderContext.ForModel(request.Messages, selection.SupportsImages), options, requestStop.Token)
+          .GetStreamingResponseAsync(LlmProviderContext.ForModel(
+              [.. startingContext.Instructions, .. request.Messages], selection.SupportsImages), options, requestStop.Token)
           .GetAsyncEnumerator(requestStop.Token);
 
       while (await WaitForNextUpdateAsync(writer, pendingRead ??= updates.MoveNextAsync().AsTask())) {
@@ -284,10 +299,10 @@ internal sealed class SessionExecution : IDisposable {
     return new(requestId, outcome, error);
   }
 
-  private async Task StartRequestAsync(Guid requestId) {
+  private async Task StartRequestAsync(Guid requestId, StartingContext startingContext) {
     bool started;
     try {
-      started = await session.Recorder.StartRequestAsync(ExecutionId, requestId);
+      started = await session.Recorder.StartRequestAsync(ExecutionId, requestId, startingContext);
     } catch (Exception exception) {
       throw new RequestStartSaveException(exception);
     }

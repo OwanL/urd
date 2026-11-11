@@ -1,3 +1,4 @@
+using Urd.Core.Context;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
 
@@ -5,12 +6,13 @@ namespace Urd.Core.Execution;
 
 // Persists request and tool progress under the session gate, rejecting stale or stopped work.
 internal sealed class SessionExecutionRecorder(SessionBase session, UrdStore store, AsyncLock gate) {
-  internal async Task<bool> StartRequestAsync(Guid executionId, Guid requestId) {
+  internal async Task<bool> StartRequestAsync(Guid executionId, Guid requestId, StartingContext startingContext) {
     using var held = await gate.AcquireAsync();
     if (!session.CanRecordExecution(executionId))
       return false;
 
-    bool started = session.WriteToStore(() => store.Executions.StartRequest(session.Id, executionId, session.HistoryRevision, requestId));
+    bool started = session.WriteToStore(() => store.Executions.StartRequest(
+        session.Id, executionId, session.HistoryRevision, requestId, startingContext));
     if (started)
       session.PublishChange();
     return started;

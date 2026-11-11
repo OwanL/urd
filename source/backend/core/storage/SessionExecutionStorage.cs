@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using Urd.Core.Context;
 using Urd.Core.Execution;
 using Urd.Core.Sessions;
 
@@ -48,7 +49,8 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
 
   // The marker and its user entries share a transaction. A repeat hook never allocates
   // entries again, and the stopped/settled/revision checks also apply to repeats.
-  internal bool StartRequest(Guid sessionId, Guid executionId, long historyRevision, Guid requestId) {
+  internal bool StartRequest(Guid sessionId, Guid executionId, long historyRevision, Guid requestId,
+      StartingContext? startingContext = null) {
     return database.Write(transaction => {
       using SqliteCommand mark = database.Command(transaction, """
         UPDATE execution_requests SET attempt = 2
@@ -59,6 +61,9 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
         """, ("$session", sessionId), ("$run", executionId), ("$revision", historyRevision), ("$request", requestId));
       if (mark.ExecuteNonQuery() == 0)
         return false;
+
+      if (startingContext is not null)
+        new StartingContextStorage(database).Save(transaction, sessionId, startingContext);
 
       using SqliteCommand place = database.Command(transaction, """
         INSERT INTO execution_messages (

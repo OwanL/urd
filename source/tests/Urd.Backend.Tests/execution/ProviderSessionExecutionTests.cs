@@ -66,6 +66,7 @@ public sealed class ProviderSessionExecutionTests {
     Guid sessionId, connectionId;
     string storedResult;
     Dictionary<Guid, LlmProviderResponse> initialContexts;
+    string[] startingInstructions;
     await using (var fixture = new ManagedSession(database, initialHandler)) {
       await fixture.OpenAsync(api, new ToolCatalog([lookup]));
       sessionId = fixture.Session.Id;
@@ -76,6 +77,9 @@ public sealed class ProviderSessionExecutionTests {
       Assert.Equal(1, effects);
       Assert.Equal(2, initialHandler.Requests.Count);
       Assert.All(initialHandler.Requests, request => Assert.Null(request.Authorization));
+      startingInstructions = WireInstructions(api, initialHandler.Requests[0]);
+      Assert.NotEmpty(startingInstructions);
+      Assert.Equal(startingInstructions, WireInstructions(api, initialHandler.Requests[1]));
       StoredTool tool = Assert.Single(StoredTools.Read(database));
       Assert.Equal(ExecutionOutcome.Completed, tool.Outcome);
       storedResult = Assert.IsType<string>(tool.ResultJson);
@@ -100,6 +104,7 @@ public sealed class ProviderSessionExecutionTests {
       Assert.Equal(1, effects);
       ScriptedOpenAIRequest third = Assert.Single(reopenedHandler.Requests);
       Assert.Null(third.Authorization);
+      Assert.Equal(startingInstructions, WireInstructions(api, third));
       AssertNativeReplay(api, third, followup: true, supportsImages: false, imageBytes, background);
       StoredTool savedTool = Assert.Single(StoredTools.Read(database));
       Assert.Equal(storedResult, savedTool.ResultJson);
@@ -175,7 +180,7 @@ public sealed class ProviderSessionExecutionTests {
         .GetProperty("name").GetString());
     if (api == LlmApi.OpenAIResponses) {
       Assert.EndsWith("/responses", request.Uri.AbsolutePath);
-      JsonElement[] input = root.GetProperty("input").EnumerateArray().ToArray();
+      JsonElement[] input = root.GetProperty("input").EnumerateArray().SkipWhile(IsInstruction).ToArray();
       Assert.Equal((followup ? 7 : 5) + (background ? 1 : 0), input.Length);
       Assert.Equal("msg_fixture", input[1].GetProperty("id").GetString());
       Assert.Equal("hello", WireText(input[1].GetProperty("content")));
@@ -202,7 +207,7 @@ public sealed class ProviderSessionExecutionTests {
       Assert.Equal(supportsImages, request.Body.Contains("input_image", StringComparison.Ordinal));
     } else {
       Assert.EndsWith("/chat/completions", request.Uri.AbsolutePath);
-      JsonElement[] messages = root.GetProperty("messages").EnumerateArray().ToArray();
+      JsonElement[] messages = root.GetProperty("messages").EnumerateArray().SkipWhile(IsInstruction).ToArray();
       int followupCount = background ? 6 : 5;
       Assert.Equal(followup ? followupCount : 4, messages.Length);
       JsonElement assistant = messages[1];
@@ -249,6 +254,15 @@ public sealed class ProviderSessionExecutionTests {
         }
       }
     }
+  }
+
+  private static bool IsInstruction(JsonElement message) =>
+      message.TryGetProperty("role", out JsonElement role) && role.GetString() is "system" or "developer";
+
+  private static string[] WireInstructions(LlmApi api, ScriptedOpenAIRequest request) {
+    using JsonDocument document = JsonDocument.Parse(request.Body);
+    return document.RootElement.GetProperty(api == LlmApi.OpenAIResponses ? "input" : "messages")
+        .EnumerateArray().TakeWhile(IsInstruction).Select(message => message.GetRawText()).ToArray();
   }
 
   private static void AssertCompletion(JsonElement message, bool supportsImages, byte[] imageBytes) {

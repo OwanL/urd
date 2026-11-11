@@ -69,8 +69,10 @@ Exact packaged/custom-copy subpaths remain open.
 - **Settings** meaning and validation stay with domain owners. Provider login is not
   an agent execution; a global configuration/policy manager is not implied.
 
-Context, guidance loading, tools, MCP, usage reporting, coordination and platform/delivery
-areas remain unfinished where no implementation exists. Their absence is not a scope cut.
+Minimal [starting-context composition and restoration](backend-development.md#starting-context)
+is implemented for primary-session execution; pruning, skills and instruction-file loading
+remain pending. Context, guidance loading, tools, MCP, usage reporting, coordination and
+platform/delivery areas remain unfinished where no implementation exists. Their absence is not a scope cut.
 Do not mistake a detailed harness sketch for a complete application design.
 
 ## Repository areas

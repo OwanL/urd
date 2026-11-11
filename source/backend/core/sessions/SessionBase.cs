@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.AI;
+using Urd.Core.Context;
 using Urd.Core.Execution;
 using Urd.Core.Storage;
 using Urd.Core.Providers;
@@ -13,6 +14,7 @@ public abstract class SessionBase {
   private readonly UrdStore store;
   private readonly Func<ProviderConnection, IChatClient> createChatClient;
   private readonly ToolCatalog tools;
+  private readonly StartingContextManager startingContextManager;
   private readonly ChatProcesses? processes;
   private readonly PendingToolCalls pending;
   private readonly AsyncLock gate = new();
@@ -24,9 +26,10 @@ public abstract class SessionBase {
   // Retain the driver's task after settlement clears the active execution, so shutdown joins its tail.
   private Task? executionTask;
 
-  private protected SessionBase(SessionRecord record, UrdStore store, Func<ProviderConnection, IChatClient> createChatClient,
+  private protected SessionBase(SessionRecord record, SessionKind kind, UrdStore store, Func<ProviderConnection, IChatClient> createChatClient,
       ToolCatalog? tools = null, ChatProcesses? processes = null, PendingToolCalls? pending = null) {
     Id = record.Id;
+    Kind = kind;
     notifications = new SessionNotifications(Id);
     status = new SessionStatus(record.HistoryRevision);
     Transcript = new SessionTranscript(Id, store, gate);
@@ -36,6 +39,7 @@ public abstract class SessionBase {
     this.store = store;
     this.createChatClient = createChatClient;
     this.tools = tools ?? new ToolCatalog([]);
+    startingContextManager = new(this.tools);
     this.processes = processes;
     this.pending = pending ?? new PendingToolCalls();
   }
@@ -43,9 +47,13 @@ public abstract class SessionBase {
   public Guid Id { get; }
   public SessionTranscript Transcript { get; }
 
+  internal SessionKind Kind { get; }
   internal SessionExecutionRecorder Recorder { get; }
   internal long HistoryRevision { get; }
   internal string? WorkingDirectory { get; }
+
+  // Restores the delivered starting view; opening a session alone never composes it.
+  internal StartingContext? ReadStartingContext() => store.StartingContexts.Read(Id);
 
   // Manager shutdown joins executions before terminating deliberately retained processes.
   internal Task KillProcessesAsync() => OperatingSystem.IsWindows() && processes is not null
@@ -190,7 +198,8 @@ public abstract class SessionBase {
 
   // Caller holds the lock. The driver starts only after admission releases it.
   private void StartExecution(Guid executionId, LlmSelection selection, Task lockReleased) {
-    var work = new SessionExecution(executionId, this, createChatClient, selection, tools.For(selection.Family), pending);
+    var work = new SessionExecution(executionId, this, createChatClient, selection,
+        startingContextManager, tools.For(selection.Family), pending);
     execution = new SessionExecutionDriver(this, gate, work);
     executionTask = execution.RunAsync(lockReleased);
   }

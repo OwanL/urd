@@ -165,6 +165,14 @@ up. Set `DOTNET_HOST_PATH` to a specific `dotnet` executable if needed; otherwis
 uses PATH. Explicit fixture termination is not evidence of graceful shutdown.
 Neither command authorizes live provider/account requests.
 
+## Conversation feedback
+
+Execution feedback belongs in the scrollable transcript, directly after the latest entries,
+not in a separate footer above the composer. Followers stay at the tail; readers keep their
+position when feedback changes. Successful compaction adds a quiet **History compacted**
+entry; its summary and token counts load on demand. There is no manual compaction control
+or not-sent input inspector in the workspace. The underlying HTTP operations remain available.
+
 ## Shared UI controls
 
 `components/Popover.tsx` owns anchored placement, viewport clamping and dismissal.

@@ -1,7 +1,9 @@
+import type { ComponentChildren } from "preact";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { SessionClient } from "../sessions/SessionClient.ts";
 import type { TranscriptDisplay } from "./TranscriptDisplay.ts";
 import { IconButton } from "../components/IconButton.tsx";
+import { CompactionMarker } from "./CompactionMarker.tsx";
 import { TranscriptContentReader } from "./TranscriptContentReader.ts";
 import { isTextEntry } from "../sessions/Messages.ts";
 import type { TranscriptNavigationState } from "../sessions/TranscriptNavigationStorage.ts";
@@ -240,6 +242,7 @@ export interface ReadingPosition {
 }
 
 export interface TranscriptProps {
+  children?: ComponentChildren;
   client: SessionClient;
   history: TranscriptHistoryPage | null;
   historyRevision?: number | null;
@@ -267,7 +270,9 @@ export function Transcript(props: TranscriptProps) {
         visible={props.visible}
         navigation={props.transcriptPosition}
         onNavigationChange={props.onTranscriptPositionChange ?? ignoreNavigationChange}
-      />
+      >
+        {props.children}
+      </VirtualTranscript>
     );
   return <PlainTranscript {...props} />;
 }
@@ -275,6 +280,7 @@ export function Transcript(props: TranscriptProps) {
 function ignoreNavigationChange(_position: TranscriptNavigationState): void {}
 
 function PlainTranscript({
+  children,
   display,
   streamId = null,
   client,
@@ -364,7 +370,7 @@ function PlainTranscript({
     } else if (anchor.current) {
       keepAnchorInPlace(node);
     }
-  }, [keepAnchorInPlace, shown, selecting, visible, documentHidden]);
+  }, [keepAnchorInPlace, shown, children, selecting, visible, documentHidden]);
 
   function rememberPosition() {
     const node = scroll.current;
@@ -399,7 +405,7 @@ function PlainTranscript({
           {visibleHistory?.hasBefore && <p class="history-note">Earlier messages are not shown.</p>}
           {visibleHistory?.entries.map((descriptor) => {
             const entry = descriptor.entry;
-            const key = `${entry.executionId}/${entry.entryId}/${entry.kind}`;
+            const key = `${entry.executionId}/${entry.entryId}/${entry.kind}/${entry.historyRevision}`;
             return (
               <div key={key} data-message={key}>
                 {isTextEntry(entry) && descriptor.text ? (
@@ -424,12 +430,20 @@ function PlainTranscript({
                       paused={selecting || !visible || documentHidden}
                     />
                   )
+                ) : descriptor.compaction ? (
+                  <CompactionMarker
+                    client={client}
+                    sessionId={sessionId}
+                    entry={entry}
+                    compaction={descriptor.compaction}
+                  />
                 ) : descriptor.tool ? (
                   <ToolEntry tool={descriptor.tool} completion={entry.kind === "toolCompletion"} />
                 ) : null}
               </div>
             );
           })}
+          {children}
         </div>
       </div>
       {jump && (

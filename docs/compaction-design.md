@@ -49,8 +49,10 @@ Previously executed tools are not retried. Generic HTTP failures and message tex
 this recovery. Reported usage anchors the next threshold check; later history is estimated
 with a four-characters-per-token fallback, not a tokenizer guarantee.
 
-Manual **Compact now** is idle-only and accepts optional focus instructions. It is a separate,
-addressable execution: Stop cancels and joins its summary request, and reopening never replays it.
+The manual compaction HTTP operation is idle-only and accepts optional focus instructions.
+It is a separate, addressable execution: Stop cancels and joins its summary request, and reopening
+never replays it. The workspace does not expose it as a control; successful automatic compaction
+appears as a **History compacted** transcript entry with an inspectable summary.
 Busy Send cannot steer into manual compaction. Failure, cancellation and stale boundaries do
 not replace the previous summary. Schema 16 requires a fresh disposable database or an explicit
 owner-approved reset of older data; no automatic migration or deletion is performed.

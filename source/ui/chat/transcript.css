@@ -40,6 +40,12 @@
   padding-bottom: 24px;
 }
 
+.transcript-tail {
+  position: absolute;
+  left: 0;
+  right: 0;
+}
+
 .transcript-entry > .message {
   margin-bottom: 0;
 }

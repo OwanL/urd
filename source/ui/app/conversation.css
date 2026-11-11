@@ -12,14 +12,14 @@
 
 .chat-status {
   flex: none;
-  padding: 0 20px;
+  padding: 1px 0;
   color: var(--text-secondary);
   font-size: 12px;
   overflow-wrap: anywhere;
 }
 
-.chat-status:not(:empty) {
-  padding-bottom: 7px;
+.chat-status:empty {
+  display: none;
 }
 
 .chat-status button {
@@ -29,10 +29,4 @@
   color: var(--accent);
   text-decoration: underline;
   text-underline-offset: 3px;
-}
-
-@media (max-width: 480px) {
-  .chat-status {
-    padding-inline: 12px;
-  }
 }

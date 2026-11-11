@@ -75,11 +75,14 @@ export function CompactionMarker({ client, sessionId, entry, compaction }: Compa
         aria-controls={expanded ? summaryId : undefined}
         onClick={toggle}
       >
-        Compaction · {compaction.reason} · {compaction.tokensBefore.toLocaleString()} →{" "}
-        {compaction.tokensAfter.toLocaleString()} tokens
+        History compacted
       </button>
       {expanded && (
         <div id={summaryId} class="message-text">
+          <p>
+            {compaction.tokensBefore.toLocaleString()} → {compaction.tokensAfter.toLocaleString()}{" "}
+            tokens · {compaction.reason}
+          </p>
           {loading && <p>Loading summary…</p>}
           {error && (
             <p class="inline-error">

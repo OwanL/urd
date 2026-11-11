@@ -1,12 +1,10 @@
-import { useCallback, useState } from "preact/hooks";
+import { useCallback } from "preact/hooks";
 import { Composer } from "../chat/Composer.tsx";
 import type { LlmSelection } from "../providers/LlmSelection.ts";
 import type { SessionClient } from "../sessions/SessionClient.ts";
 import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
 import { deriveConversationState } from "./ConversationState.ts";
 import type { ConversationExecutionStatus } from "./ConversationState.ts";
-import { ManualCompactionControl } from "./ManualCompactionControl.tsx";
-import { NotSentInputs } from "./NotSentInputs.tsx";
 import { Transcript } from "./Transcript.tsx";
 import type { ReadingPosition } from "./Transcript.tsx";
 import type { TranscriptDisplay } from "./TranscriptDisplay.ts";
@@ -99,19 +97,6 @@ export function Conversation({
   const selection = state.selection;
   const modelKey = selection ? `${selection.connection.id}/${selection.modelId}` : null;
   const error = readError || chat.error || stop?.error;
-  const [manualCompactionPending, setManualCompactionPending] = useState(false);
-  const canStartCompaction = Boolean(
-    ready &&
-    canPersist &&
-    snapshot &&
-    selection &&
-    !snapshot.unsettledExecutionId &&
-    !snapshot.admissionFenced &&
-    !snapshot.stopRequested &&
-    !chat.pending &&
-    !chat.knownExecutionId &&
-    !stop?.pending,
-  );
   function choose(next: LlmSelection) {
     if (!state.selectionLocked) selectModel(sessionId, next);
   }
@@ -138,80 +123,61 @@ export function Conversation({
         onPositionChange={onPositionChange}
         transcriptPosition={transcriptPosition}
         onTranscriptPositionChange={onTranscriptPositionChange}
-      />
-      <div class="chat-status" aria-live="polite">
-        {error && <span class="inline-error">{error} </span>}
-        {readError && <button onClick={onRefresh}>Refresh</button>}
-        {state.admissionFenced && <span>Session admission is fenced. </span>}
-        {state.unsettledWhileFenced && <span>Unsettled execution. </span>}
-        {state.executionStatus && <span>{executionLabels[state.executionStatus]} </span>}
-        {state.showStopRequested && <span>Stop requested. </span>}
-        {state.settlementStatus && (
-          <span class={state.settlementStatus === "failed" ? "inline-error" : undefined}>
-            {settlementLabels[state.settlementStatus]}{" "}
-          </span>
-        )}
-        {state.pendingStatus && (
-          <span>
-            {state.pendingStatus === "sending"
-              ? "Sending…"
-              : checking
-                ? "Checking receipt…"
-                : "Send uncertain."}{" "}
-            {state.pendingStatus === "uncertain" && (
-              <>
-                <button
-                  disabled={checking}
-                  onClick={() => {
-                    void commands.checkReceipt(sessionId);
-                  }}
-                >
-                  Check receipt
-                </button>
-                <button
-                  disabled={!canPersist || checking}
-                  onClick={() => {
-                    void commands.retryOriginalSubmission(sessionId);
-                  }}
-                >
-                  Retry original
-                </button>
-              </>
-            )}
-          </span>
-        )}
-        {state.textError && <span class="inline-error">{state.textError}</span>}
-      </div>
-      <ManualCompactionControl
-        client={client}
-        sessionId={sessionId}
-        snapshot={snapshot}
-        selection={selection}
-        canStart={canStartCompaction && !manualCompactionPending}
-        onPendingChange={setManualCompactionPending}
-        onRefresh={onRefresh}
-      />
-      {snapshot && snapshot.pendingInputs.length > 0 && (
-        <div class="chat-status">
-          <details>
-            <summary>Pending ({snapshot.pendingInputs.length})</summary>
-            <ol>
-              {snapshot.pendingInputs.map((input) => (
-                <li key={input.submissionId}>{input.preview}</li>
-              ))}
-            </ol>
-          </details>
+      >
+        <div class="chat-status" aria-live="polite">
+          {error && <span class="inline-error">{error} </span>}
+          {readError && <button onClick={onRefresh}>Refresh</button>}
+          {state.admissionFenced && <span>Session admission is fenced. </span>}
+          {state.unsettledWhileFenced && <span>Unsettled execution. </span>}
+          {state.executionStatus && <span>{executionLabels[state.executionStatus]} </span>}
+          {state.showStopRequested && <span>Stop requested. </span>}
+          {state.settlementStatus && (
+            <span class={state.settlementStatus === "failed" ? "inline-error" : undefined}>
+              {settlementLabels[state.settlementStatus]}{" "}
+            </span>
+          )}
+          {state.pendingStatus && (
+            <span>
+              {state.pendingStatus === "sending"
+                ? "Sending…"
+                : checking
+                  ? "Checking receipt…"
+                  : "Send uncertain."}{" "}
+              {state.pendingStatus === "uncertain" && (
+                <>
+                  <button
+                    disabled={checking}
+                    onClick={() => {
+                      void commands.checkReceipt(sessionId);
+                    }}
+                  >
+                    Check receipt
+                  </button>
+                  <button
+                    disabled={!canPersist || checking}
+                    onClick={() => {
+                      void commands.retryOriginalSubmission(sessionId);
+                    }}
+                  >
+                    Retry original
+                  </button>
+                </>
+              )}
+            </span>
+          )}
+          {state.textError && <span class="inline-error">{state.textError}</span>}
+          {snapshot && snapshot.pendingInputs.length > 0 && (
+            <details>
+              <summary>Pending ({snapshot.pendingInputs.length})</summary>
+              <ol>
+                {snapshot.pendingInputs.map((input) => (
+                  <li key={input.submissionId}>{input.preview}</li>
+                ))}
+              </ol>
+            </details>
+          )}
         </div>
-      )}
-      <div class="chat-status">
-        <NotSentInputs
-          client={client}
-          sessionId={sessionId}
-          snapshot={snapshot}
-          commands={commands}
-          canResend={state.canResendNotSent && !manualCompactionPending}
-        />
-      </div>
+      </Transcript>
       <Composer
         text={chat.draft}
         onTextChange={(text) => {
@@ -235,18 +201,12 @@ export function Conversation({
         onReasoningChange={(effort) => {
           if (selection) choose({ ...selection, reasoningEffort: effort });
         }}
-        selectionLocked={state.selectionLocked || manualCompactionPending}
-        canSend={state.canSend && !manualCompactionPending}
+        selectionLocked={state.selectionLocked}
+        canSend={state.canSend}
         working={state.active}
         stopping={state.executionStatus === "stopping"}
         onSend={() => {
-          if (snapshot)
-            void commands.send(
-              sessionId,
-              snapshot,
-              state.active,
-              state.canSend && !manualCompactionPending,
-            );
+          if (snapshot) void commands.send(sessionId, snapshot, state.active, state.canSend);
         }}
         onStop={() => {
           if (snapshot && state.active) void commands.stop(sessionId, snapshot, state.stopId);

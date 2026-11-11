@@ -1,3 +1,4 @@
+import type { ComponentChildren } from "preact";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { MarkdownSavedSourcePosition } from "../markdown-rendering/MarkdownMessageView.tsx";
 import type {
@@ -33,6 +34,7 @@ const bottomPadding = 28;
 const seekDebounceMs = 75;
 
 interface VirtualTranscriptProps {
+  children?: ComponentChildren;
   client: SessionClient;
   display: TranscriptDisplay;
   streamId: string | null;
@@ -265,6 +267,7 @@ function VirtualEntry({
 }
 
 export function VirtualTranscript({
+  children,
   client,
   display,
   streamId,
@@ -276,6 +279,8 @@ export function VirtualTranscript({
   onNavigationChange,
 }: VirtualTranscriptProps) {
   const scroll = useRef<HTMLDivElement>(null);
+  const tail = useRef<HTMLDivElement>(null);
+  const [tailHeight, setTailHeight] = useState(0);
   const [root, setRoot] = useState<HTMLDivElement | null>(null);
   const [positionWindow, setPositionWindow] = useState<TranscriptPositionWindow | null>(null);
   const positionReader = useMemo(
@@ -623,6 +628,7 @@ export function VirtualTranscript({
     const observer = new ResizeObserver(() => {
       setScrollVersion((value) => value + 1);
       const width = node.clientWidth;
+      if (width > 0) setTailHeight(tail.current?.offsetHeight ?? 0);
       const model = viewport.current;
       if (width <= 0 || !model || model.snapshot().width === width) return;
       const before = model.snapshot();
@@ -646,6 +652,7 @@ export function VirtualTranscript({
       saveCurrentState();
     });
     observer.observe(node);
+    if (tail.current) observer.observe(tail.current);
     return () => observer.disconnect();
   }, [root, saveCurrentState]);
 
@@ -772,7 +779,15 @@ export function VirtualTranscript({
         }
       }
     }
-  }, [documentInactive, modelVersion, positionWindow, resumingVisibility, root, visible]);
+  }, [
+    documentInactive,
+    modelVersion,
+    positionWindow,
+    resumingVisibility,
+    root,
+    visible,
+    tailHeight,
+  ]);
 
   const onSourceCapture = useCallback(
     (
@@ -855,7 +870,7 @@ export function VirtualTranscript({
     const snapshot = model.snapshot();
     const maximum = Math.max(
       0,
-      snapshot.correctedTotalHeight + topPadding + bottomPadding - node.clientHeight,
+      snapshot.correctedTotalHeight + topPadding + bottomPadding + tailHeight - node.clientHeight,
     );
     // Height correction precedes DOM scroll clamping. Keep the next viewport mounted,
     // rather than evicting a large row against the browser's obsolete scroll offset.
@@ -1086,7 +1101,7 @@ export function VirtualTranscript({
     [positionReader, store],
   );
 
-  const spacerHeight = Math.max(0, estimatedHeight + topPadding + bottomPadding);
+  const spacerHeight = Math.max(0, estimatedHeight + topPadding + bottomPadding + tailHeight);
   void scrollVersion;
   return (
     <div class="transcript-area">
@@ -1137,6 +1152,13 @@ export function VirtualTranscript({
               />
             );
           })}
+          <div
+            ref={tail}
+            class="transcript-tail"
+            style={{ top: `${topPadding + estimatedHeight}px` }}
+          >
+            {children}
+          </div>
           {!positionWindow && !error && <p class="history-note">Loading messages…</p>}
           {error && (
             <p class="inline-error">

@@ -10,7 +10,7 @@
   "scripts": {
     "build": "vite build",
     "build:watch": "vite build --watch",
-    "test:browser:host": "node tests/BrowserFixture.ts",
+    "dev:browser:host": "node tests/BrowserFixture.ts",
     "check": "oxfmt --check . && oxlint --type-aware --deny-warnings . && tsc --noEmit",
     "format": "oxfmt --write .",
     "format:check": "oxfmt --check .",

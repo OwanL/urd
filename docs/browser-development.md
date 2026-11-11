@@ -12,10 +12,10 @@ snapshot/history metadata and loads message text on demand.
 
 The workspace has closable, reorderable local tabs, transcript, model and reasoning
 selectors, Send, Stop and integrated [provider settings](provider-management.md#browser-settings).
-Snooze remains unavailable. The UI displays the latest bounded history page and tool status;
-older-page navigation, Markdown and tool arguments/results are not implemented. The history
-API supports anchored pages. Closing a tab hides the view; it does not stop work, close a
-backend session or delete history. Components and effects stay with their feature; hooks are
+Snooze remains unavailable. The UI displays a bounded, navigable transcript with tool status
+and Markdown rendering; tool arguments/results are not exposed. The history API supports
+anchored pages. Closing a tab hides the view; it does not stop work, close a backend session
+or delete history. Components and effects stay with their feature; hooks are
 extracted for actual responsibilities, not a state framework.
 
 Drag tabs with a pointer, or focus a tab and use Alt+Shift+Left/Right to move it.
@@ -60,8 +60,8 @@ have placeholders and source-anchor geometry, while arbitrary giant paragraphs, 
 cells and metadata are not bounded. Generation handoff awaits read drain and generation
 release before another open or final disposal. `MarkdownClient` adapts the page-owned
 HTTP lease API, normalizes Core numeric enums and awaits explicit release, including
-failed opens. The bridge is test-composed with explicit limits; ordinary startup and
-`Transcript` remain inactive. Catch-up can be deferred by selection, and unmounting
+failed opens. Normal startup composes the bridge-backed renderer and activates Markdown
+in `Transcript` with explicit limits. Catch-up can be deferred by selection, and unmounting
 loses selection. Fast unit tests cover the model, paging and handoff logic. Browser suites
 and their synthetic renderer harness were removed by owner decision on 2026-11-11;
 real layout, selection, focus and clipboard behavior no longer have automated browser
@@ -79,7 +79,7 @@ It does not implement storage recovery, navigation or catalog request lifecycles
 | `useWorkspaceModels` | Owns cached catalog loading, refresh state and invalidation at workspace lifetime, using `WorkspaceModels` for request publication ordering. |
 | `useSessionEvents` | Owns the page-lifetime event stream, saved-ID discovery, open/watched registrations and per-tab status/change notices. |
 | `WorkspaceCommands` | Owns Create, Send/retry, receipt reconciliation and Stop across conversation switches. Create still journals before dispatch and opens the acknowledged session against current state. |
-| `Conversation` | Mounts only for the active chat; composes snapshot observation, transcript, status and composer. Its snapshot hook owns cancellable reads, not command lifetime. |
+| `Conversation` | Normal startup retains three recent chats, including the active chat; focused or selected views stay mounted beyond that limit, and other chats unmount. It composes snapshot observation, transcript, status and composer. Its snapshot hook owns cancellable reads, not command lifetime. |
 | `ConversationState` | Derives selection, Send eligibility and execution status from existing facts; it stores no additional state. |
 | `ChatTabs` | Owns tab interaction, focus restoration and active-tab scrolling. |
 
@@ -118,7 +118,7 @@ npm run build
 | `npm test` | Fast Node unit tests discovered from `tests/**/*.test.ts`; no frontend component framework. |
 | `npm run build` / `npm run build:watch` | Bundle once / watch into `source/ui/dist`; neither runs a server. |
 | `npm run test:integration` | Real Server and SDK-to-loopback-provider test; requires built UI assets and the Release backend build. |
-| `npm run test:browser:host` | Explicit temporary browser fixture host; real Urd plus a credential-free loopback model fixture, never saved accounts. |
+| `npm run dev:browser:host` | Explicit temporary browser fixture host; real Urd plus a credential-free loopback model fixture, never saved accounts. |
 
 Formatting pins width 100, double quotes, trailing commas and two-space indentation.
 Import/package sorting is disabled; generated `package-lock.json` is ignored by the
@@ -154,8 +154,8 @@ The fixture launches the built Server with its own temporary data root and port
 `0`, creates a custom no-auth connection to its owned loopback model endpoint, and
 refreshes only that fixture's catalog. It exercises the real managed provider, SDK,
 execution and SQLite path, not a production fake-client flag. Automated browser tests are
-not retained. For manual inspection, run `npm run test:browser:host` and open its printed
-Urd origin. Despite its historical script name, this starts a development host, not tests.
+not retained. For manual inspection, run `npm run dev:browser:host` and open its printed
+Urd origin. This starts a development host, not tests.
 Playwright remains a dependency only for the separate manual `TranscriptBaseline.ts`
 diagnostic; install its pinned Chromium explicitly before running that tool.
 Ctrl+C or POST to
@@ -228,8 +228,8 @@ The [context-choice alignment](ARCHITECTURE.md#provider-specific-context-choices
 keeps future provider context modes separate from limits, Urd's context budget and
 pricing. This slice adds no context-tier selector, inferred limit or silent history
 truncation. Snapshots contain slim current facts; the history API pages transcript metadata,
-and the browser loads visible message content on demand. Older transcript pages remain
-available through the API but are not yet navigable in the UI.
+and the browser navigates the bounded transcript while loading visible message content on
+demand.
 
 ## Standalone virtualized Markdown qualification
 

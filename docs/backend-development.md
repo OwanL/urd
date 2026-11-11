@@ -105,10 +105,12 @@ small). `MessageMarkdownLease` keeps a generation readable during handoff; pinne
 generations and leases still count against explicit cache budgets. Explicit limits
 remain required. `MessageMarkdownService` resolves exact positioned text entries and
 returns independently owned public leases. `MarkdownRenderJson.Options` is the shared,
-immutable wire-size contract. The page-scoped HTTP bridge is available only through an
-explicit internal composition factory for qualification; ordinary startup does not map
-its routes. SSE disconnect cancels pending opens and releases delivered leases. Shutdown
-drains the service and HTTP requests before disposing their shared storage.
+immutable wire-size contract. Normal Server startup maps the page-scoped HTTP bridge
+alongside the session-event routes. `Program` composes its service and routes; the parser,
+scheduler, leases and bounded rendering types remain owned by
+`source/backend/markdown-rendering/`. SSE disconnect cancels pending opens and releases
+delivered leases. Shutdown drains the service and HTTP requests before disposing their
+shared storage.
 
 ## Checkpoint scope
 
@@ -270,9 +272,8 @@ discovery, not activity tracking or a complete summary API.
 Snapshots are slim committed facts: identity/revision and admission/Stop/settlement state,
 latest selection, a short first-user preview, and up to eight pending-input previews. They do not
 contain a recent transcript window. The `/history` read returns at most 60 entry descriptors
-with text cursors or tool status; `/content` fetches message bytes separately. The browser shows
-the latest history page and loads visible text on demand; older-page navigation is not exposed
-in the UI yet.
+with text cursors or tool status; `/content` fetches message bytes separately. The browser
+navigates the bounded history window and loads visible text on demand.
 
 Call `session.Transcript.ReadContentAsync` with `new MessageContentCursor(messageRef, 0, 0)`.
 History and navigation likewise use `session.Transcript`; the former direct session read methods

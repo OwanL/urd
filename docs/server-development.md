@@ -163,7 +163,7 @@ failures remain 503. Core's schema-5 ordering metadata and atomic create are des
 [backend development](backend-development.md#saved-primary-id-discovery).
 Legacy rows use a fixed descending binary-ID fallback, not recovered creation chronology.
 The listing adds no last-used tracking or automatic recovery. Transcript history has a separate
-bounded API; the browser currently displays its latest page but does not navigate older pages.
+bounded API; the browser navigates the bounded transcript and loads visible content on demand.
 
 POST requires JSON. Encoded bodies are limited to 128 KiB, including chunked requests;
 Core no longer applies the old separate 16 KiB submission-text cap. Missing required submission members,

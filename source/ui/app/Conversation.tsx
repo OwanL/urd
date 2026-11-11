@@ -48,7 +48,7 @@ interface ConversationProps {
   onTranscriptPositionChange(position: TranscriptNavigationState): void;
 }
 
-// Qualification may retain paused chats; normal startup mounts only the active chat.
+// Normal startup retains three recent chats plus focused or selected views.
 export function Conversation({
   client,
   sessionId,

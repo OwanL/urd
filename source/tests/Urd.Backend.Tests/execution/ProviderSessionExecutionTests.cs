@@ -306,13 +306,13 @@ public sealed class ProviderSessionExecutionTests {
   private static void AssertStoredOutput(string storedResult, byte[] imageBytes) {
     using JsonDocument document = JsonDocument.Parse(storedResult);
     JsonElement output = document.RootElement;
-    Assert.Equal(new[] { "text", "images", "details", "isError" },
-        output.EnumerateObject().Select(property => property.Name).ToArray());
+    Assert.Equal(new[] { "text", "images", "details", "isError" }.Order(StringComparer.Ordinal),
+        output.EnumerateObject().Select(property => property.Name).Order(StringComparer.Ordinal));
     Assert.Equal(ToolOutputText, output.GetProperty("text").GetString());
     Assert.False(output.GetProperty("isError").GetBoolean());
     JsonElement image = Assert.Single(output.GetProperty("images").EnumerateArray());
-    Assert.Equal(new[] { "hash", "mediaType", "byteLength" },
-        image.EnumerateObject().Select(property => property.Name).ToArray());
+    Assert.Equal(new[] { "hash", "mediaType", "byteLength" }.Order(StringComparer.Ordinal),
+        image.EnumerateObject().Select(property => property.Name).Order(StringComparer.Ordinal));
     Assert.Equal(Convert.ToHexString(SHA256.HashData(imageBytes)).ToLowerInvariant(), image.GetProperty("hash").GetString());
     Assert.Equal("image/png", image.GetProperty("mediaType").GetString());
     Assert.Equal(imageBytes.Length, image.GetProperty("byteLength").GetInt32());

@@ -1,11 +1,12 @@
 using System.Data.Common;
 using System.Text;
 using Microsoft.Data.Sqlite;
+using Xunit;
 using static Urd.Backend.Tests.Support.TestAsync;
 
 namespace Urd.Backend.Tests.Support;
 
-// Reads persisted response chunks directly from a test database.
+// Reads persisted response chunks directly from a test database. These helpers intentionally cover one request.
 internal static class StoredLlmResponses {
   private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 
@@ -20,13 +21,16 @@ internal static class StoredLlmResponses {
     command.CommandText = """
       SELECT o.request_id, q.response_id, o.chunk_index, o.text_utf8, o.is_final
       FROM execution_output o JOIN execution_requests q ON q.request_id = o.request_id
-      ORDER BY o.request_id, o.chunk_index;
+      ORDER BY o.chunk_index;
       """;
     using SqliteDataReader reader = command.ExecuteReader();
-    return reader.Cast<DbDataRecord>()
+    List<(Guid RequestId, Guid ResponseId, long ChunkIndex, byte[] Bytes, bool Final)> rows = reader.Cast<DbDataRecord>()
         .Select(row => (Guid.Parse(row.GetString(0)), Guid.Parse(row.GetString(1)), row.GetInt64(2),
             (byte[])row.GetValue(3), row.GetInt64(4) != 0))
         .ToList();
+    Assert.True(rows.Select(row => row.RequestId).Distinct().Take(2).Count() <= 1,
+        "Stored response readers support output from one request only.");
+    return rows;
   }
 
   internal static async Task WaitForAnyAsync(TemporaryDatabase database) {

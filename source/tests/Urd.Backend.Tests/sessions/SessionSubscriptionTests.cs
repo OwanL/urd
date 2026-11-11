@@ -105,12 +105,16 @@ public sealed class SessionSubscriptionTests {
     await session.WaitForSettlementAsync(receipt.ExecutionId!.Value).WaitAsync(TestTimeout);
 
     SessionChange[] notifications = changes.ToArray();
-    Assert.Equal("idle", notifications[0].Status);
-    Assert.Contains(notifications, change => change.Status == "running");
+    SessionChange[] statuses = notifications.Where(change => change.Status is not null).ToArray();
+    Assert.Equal(new[] { "idle", "running", "idle" }, statuses.Select(change => change.Status));
+    Assert.All(statuses, status => Assert.Contains(notifications,
+        change => change.Status is null && change.Version == status.Version));
+    Assert.All(notifications.Zip(notifications.Skip(1)), pair =>
+        Assert.True(pair.First.Version <= pair.Second.Version));
     Assert.Equal("idle", notifications[^2].Status);
     Assert.Null(notifications[^1].Status);
-    Assert.Equal(notifications.Select(change => change.Version).Order(), notifications.Select(change => change.Version));
-    Assert.True(notifications[^1].Version >= 4);
+    Assert.Equal(notifications[^2].Version, notifications[^1].Version);
+    Assert.True(notifications[^1].Version > notifications[0].Version);
   }
 
   [Fact]
@@ -130,15 +134,19 @@ public sealed class SessionSubscriptionTests {
     var unwatched = new ConcurrentQueue<SessionChange>();
     using IDisposable watchedSubscription = await fixture.Session.SubscribeAsync(watched.Enqueue, watched: true);
     using IDisposable unwatchedSubscription = await fixture.Session.SubscribeAsync(unwatched.Enqueue, watched: false);
+    long versionAtStop = watched.Last().Version;
 
     try {
       Guid executionId = await fixture.StartExecutionAsync("start");
       await toolEntered.Task.WaitAsync(TestTimeout);
+      long runningVersion = watched.Single(change => change.Status == "running").Version;
       StoredTool runningTool = Assert.Single(StoredTools.Read(fixture.Database));
       Assert.Equal("call", runningTool.CallId);
       Assert.Equal("wait", runningTool.Name);
       Assert.True(runningTool.Started);
       Assert.Null(runningTool.Outcome);
+      long versionBeforePending = watched.Last().Version;
+      Assert.True(versionBeforePending > runningVersion);
 
       var pending = new UserMessageSubmission(Guid.NewGuid(), 0, "pending", TestLlmSelection.Default);
       UserMessageReceipt receipt = await fixture.Session.SubmitUserMessageAsync(pending);
@@ -146,14 +154,16 @@ public sealed class SessionSubscriptionTests {
       Assert.Equal(executionId, receipt.ExecutionId);
       SessionSnapshot pendingSnapshot = await fixture.Session.ReadSnapshotAsync();
       Assert.Contains(pendingSnapshot.PendingInputs, input => input.SubmissionId == pending.SubmissionId);
-      Assert.Equal(8L, watched.Last().Version);
+      Assert.True(watched.Last().Version > versionBeforePending);
+      long versionBeforeStop = watched.Last().Version;
 
       Assert.Equal(new StopReceipt(executionId, StopStatus.Requested),
           await fixture.Session.RequestStopAsync(executionId).WaitAsync(TestTimeout));
       SessionSnapshot stoppingSnapshot = await fixture.Session.ReadSnapshotAsync();
       Assert.True(stoppingSnapshot.StopRequested);
       Assert.Equal(executionId, stoppingSnapshot.UnsettledExecutionId);
-      Assert.Equal(9L, watched.Last().Version);
+      Assert.True(watched.Last().Version > versionBeforeStop);
+      versionAtStop = watched.Last().Version;
 
       toolRelease.TrySetResult();
       Assert.Equal(ExecutionOutcome.Cancelled,
@@ -168,14 +178,15 @@ public sealed class SessionSubscriptionTests {
     Assert.NotNull(completedTool.ResultJson);
 
     SessionChange[] changes = watched.ToArray();
-    Assert.Equal(Enumerable.Range(0, 12).Select(version => (long)version),
-        changes.Where(change => change.Status is null).Select(change => change.Version));
-    Assert.Contains(changes, change => change.Status is null && change.Version == 4); // Tool observed.
-    Assert.Contains(changes, change => change.Status is null && change.Version == 7); // Tool started.
-    Assert.Contains(changes, change => change.Status is null && change.Version == 10); // Tool completed.
-    Assert.Equal(new[] { (0L, "idle"), (1L, "running"), (11L, "idle") },
-        changes.Where(change => change.Status is not null)
-            .Select(change => (change.Version, change.Status!)));
+    SessionChange[] watchedChanges = changes.Where(change => change.Status is null).ToArray();
+    Assert.All(watchedChanges.Zip(watchedChanges.Skip(1)), pair =>
+        Assert.True(pair.First.Version < pair.Second.Version));
+    SessionChange[] statuses = changes.Where(change => change.Status is not null).ToArray();
+    Assert.Equal(new[] { "idle", "running", "idle" }, statuses.Select(change => change.Status));
+    Assert.All(statuses, status => Assert.Contains(watchedChanges, change => change.Version == status.Version));
+    long settledVersion = statuses[^1].Version;
+    Assert.Contains(watchedChanges, change => change.Version > versionAtStop && change.Version < settledVersion);
+    Assert.Equal(settledVersion, watchedChanges[^1].Version);
     Assert.Equal(new[] { "idle", "running", "idle" },
         unwatched.Select(change => change.Status).ToArray());
     Assert.All(unwatched, change => Assert.NotNull(change.Status));

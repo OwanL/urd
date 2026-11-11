@@ -57,16 +57,34 @@ export interface TranscriptToolFacts {
   readonly callId: string;
   readonly name: string | null;
   readonly started: boolean;
+  readonly background: boolean;
+  readonly batchedWithPrevious: boolean;
+  readonly batchedWithNext: boolean;
   readonly outcome: ExecutionOutcome | null;
   readonly isClosed: boolean;
   readonly startedAt: string | null;
   readonly endedAt: string | null;
 }
 
+export interface ToolCallLabel {
+  readonly icon:
+    | "terminal"
+    | "read"
+    | "write"
+    | "edit"
+    | "listPending"
+    | "cancelPending"
+    | "generic";
+  readonly title: string;
+  readonly detail: string | null;
+  readonly path: string | null;
+}
+
 export interface TranscriptHistoryPage {
   readonly sessionId: string;
   readonly historyRevision: number;
   readonly entries: readonly TranscriptEntryDescriptor[];
+  readonly toolLabels: Readonly<Record<string, ToolCallLabel>>;
   readonly hasBefore: boolean;
   readonly hasAfter: boolean;
   readonly settlements: readonly SessionExecutionResult[];
@@ -99,6 +117,7 @@ export interface TranscriptPositionWindow {
   readonly state: TranscriptPositionSummary;
   readonly target: TranscriptPosition | null;
   readonly entries: readonly TranscriptPositionedEntry[];
+  readonly toolLabels: Readonly<Record<string, ToolCallLabel>>;
   readonly hasBefore: boolean;
   readonly hasAfter: boolean;
   readonly settlements: readonly SessionExecutionResult[];

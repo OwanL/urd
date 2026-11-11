@@ -117,6 +117,7 @@ const positionWindow: TranscriptPositionWindow = {
       position,
     },
   ],
+  toolLabels: {},
   hasBefore: true,
   hasAfter: false,
   settlements: [],

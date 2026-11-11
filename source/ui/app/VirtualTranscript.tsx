@@ -6,7 +6,7 @@ import type {
   TranscriptEntryRef,
   TranscriptPositionWindow,
   TranscriptTextFacts,
-  TranscriptToolFacts,
+  ToolCallLabel,
 } from "../sessions/Messages.ts";
 import { isTextEntry } from "../sessions/Messages.ts";
 import type { SessionClient } from "../sessions/SessionClient.ts";
@@ -25,6 +25,8 @@ import {
 } from "./useTranscriptNavigation.ts";
 import type { TranscriptDisplay } from "./TranscriptDisplay.ts";
 import { CompactionMarker } from "./CompactionMarker.tsx";
+import { ToolRow } from "../chat/ToolRow.tsx";
+import { toolCallLabel } from "./ToolRowPresentation.ts";
 import { TranscriptPositionReader } from "./TranscriptPositionReader.ts";
 import "../chat/transcript.css";
 
@@ -49,6 +51,7 @@ interface VirtualTranscriptProps {
 interface PositionedRow {
   readonly descriptor: TranscriptEntryDescriptor;
   readonly rank: number;
+  readonly toolLabel: ToolCallLabel | null;
 }
 
 interface PendingWidthRestore {
@@ -97,6 +100,7 @@ function positionedRows(window: TranscriptPositionWindow): PositionedRow[] {
   return window.entries.map(({ descriptor, position }) => ({
     descriptor,
     rank: position.rank,
+    toolLabel: descriptor.tool ? toolCallLabel(descriptor.tool, window.toolLabels) : null,
   }));
 }
 
@@ -156,25 +160,13 @@ function firstVisibleRow(root: HTMLElement): HTMLElement | undefined {
   return visibleElements(root)[0];
 }
 
-function ToolEntry({ tool, completion }: { tool: TranscriptToolFacts; completion: boolean }) {
-  const status =
-    tool.outcome ?? (tool.started ? "Running" : tool.isClosed ? "Not started" : "Waiting");
-  return (
-    <div class="message message-assistant">
-      <div class="message-text">
-        {completion ? "Completed " : ""}
-        {tool.name ?? "Tool"} · {status}
-      </div>
-    </div>
-  );
-}
-
 function VirtualEntry({
   client,
   display,
   streamId,
   sessionId,
   descriptor,
+  toolLabel,
   rank,
   top,
   root,
@@ -190,6 +182,7 @@ function VirtualEntry({
   streamId: string | null;
   sessionId: string;
   descriptor: TranscriptEntryDescriptor;
+  toolLabel: ToolCallLabel | null;
   rank: number;
   top: number;
   root: HTMLElement | null;
@@ -230,7 +223,7 @@ function VirtualEntry({
   return (
     <div
       ref={row}
-      class="transcript-entry"
+      class={`transcript-entry${descriptor.tool ? " transcript-tool-entry" : ""}`}
       data-transcript-entry=""
       data-entry-key={key}
       data-entry-rank={rank}
@@ -258,7 +251,13 @@ function VirtualEntry({
           compaction={descriptor.compaction}
         />
       ) : descriptor.tool ? (
-        <ToolEntry tool={descriptor.tool} completion={descriptor.entry.kind === "toolCompletion"} />
+        <ToolRow
+          tool={descriptor.tool}
+          label={toolLabel}
+          completion={descriptor.entry.kind === "toolCompletion"}
+          root={root}
+          paused={paused}
+        />
       ) : (
         <div class={`message message-${role}`} />
       )}
@@ -1140,6 +1139,7 @@ export function VirtualTranscript({
                 streamId={streamId}
                 sessionId={sessionId}
                 descriptor={row.descriptor}
+                toolLabel={row.toolLabel}
                 rank={row.rank}
                 top={top}
                 root={root}

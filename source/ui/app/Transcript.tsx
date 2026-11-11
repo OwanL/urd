@@ -4,6 +4,8 @@ import type { SessionClient } from "../sessions/SessionClient.ts";
 import type { TranscriptDisplay } from "./TranscriptDisplay.ts";
 import { IconButton } from "../components/IconButton.tsx";
 import { CompactionMarker } from "./CompactionMarker.tsx";
+import { ToolRow } from "../chat/ToolRow.tsx";
+import { toolCallLabel } from "./ToolRowPresentation.ts";
 import { TranscriptContentReader } from "./TranscriptContentReader.ts";
 import { isTextEntry } from "../sessions/Messages.ts";
 import type { TranscriptNavigationState } from "../sessions/TranscriptNavigationStorage.ts";
@@ -13,7 +15,6 @@ import type {
   TranscriptEntryRef,
   TranscriptHistoryPage,
   TranscriptTextFacts,
-  TranscriptToolFacts,
 } from "../sessions/Messages.ts";
 import "../chat/transcript.css";
 
@@ -223,19 +224,6 @@ function MessageBody({
   );
 }
 
-function ToolEntry({ tool, completion }: { tool: TranscriptToolFacts; completion: boolean }) {
-  const status =
-    tool.outcome ?? (tool.started ? "Running" : tool.isClosed ? "Not started" : "Waiting");
-  return (
-    <div class="message message-assistant">
-      <div class="message-text">
-        {completion ? "Completed " : ""}
-        {tool.name ?? "Tool"} · {status}
-      </div>
-    </div>
-  );
-}
-
 export interface ReadingPosition {
   following: boolean;
   anchor: { key: string; top: number } | null;
@@ -407,7 +395,11 @@ function PlainTranscript({
             const entry = descriptor.entry;
             const key = `${entry.executionId}/${entry.entryId}/${entry.kind}/${entry.historyRevision}`;
             return (
-              <div key={key} data-message={key}>
+              <div
+                key={key}
+                data-message={key}
+                class={descriptor.tool ? "transcript-tool-entry" : undefined}
+              >
                 {isTextEntry(entry) && descriptor.text ? (
                   display && RichBody ? (
                     <RichBody
@@ -438,7 +430,13 @@ function PlainTranscript({
                     compaction={descriptor.compaction}
                   />
                 ) : descriptor.tool ? (
-                  <ToolEntry tool={descriptor.tool} completion={entry.kind === "toolCompletion"} />
+                  <ToolRow
+                    tool={descriptor.tool}
+                    label={toolCallLabel(descriptor.tool, visibleHistory?.toolLabels ?? {})}
+                    completion={entry.kind === "toolCompletion"}
+                    root={root}
+                    paused={!visible || documentHidden}
+                  />
                 ) : null}
               </div>
             );

@@ -1,0 +1,146 @@
+.tool-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 26px;
+  min-width: 0;
+  margin: 0 -6px;
+  padding: 0 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.tool-row.is-batched {
+  padding-left: 20px;
+}
+
+.tool-row.is-batched::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 7px;
+  width: 1px;
+  background: #2c2c2c;
+  content: "";
+}
+
+.tool-row.is-batched[data-batched-with-previous="false"]::before {
+  top: 50%;
+}
+
+.tool-row.is-batched[data-batched-with-next="false"]::before {
+  bottom: 50%;
+}
+
+.tool-row.is-batched::after {
+  position: absolute;
+  top: 50%;
+  left: 7px;
+  width: 7px;
+  height: 1px;
+  background: #2c2c2c;
+  content: "";
+}
+
+.tool-row-icon {
+  display: block;
+  flex: 0 0 15px;
+  width: 15px;
+  height: 15px;
+  color: var(--text-secondary);
+}
+
+.tool-row-icon .icon {
+  display: block;
+  width: 15px;
+  height: 15px;
+}
+
+.tool-row-icon.is-running {
+  animation: tool-row-icon-pulse 2.4s ease-in-out infinite;
+}
+
+.tool-row-icon.is-failed {
+  color: var(--danger);
+}
+
+.tool-row-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 55%;
+  overflow: hidden;
+  color: var(--text-primary);
+  text-overflow: ellipsis;
+}
+
+.tool-row-title.is-muted {
+  color: var(--text-faint, #6e6e6e);
+}
+
+.tool-row-detail {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-faint, #6e6e6e);
+  text-overflow: ellipsis;
+}
+
+.tool-row-mono {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12.5px;
+}
+
+.tool-row-time {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  color: var(--text-faint, #6e6e6e);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tool-row-time.is-live {
+  color: var(--text-secondary);
+}
+
+.tool-row-background {
+  display: block;
+  width: 12px;
+  height: 12px;
+}
+
+.tool-row-background .icon {
+  display: block;
+  width: 12px;
+  height: 12px;
+}
+
+.transcript-tool-entry {
+  margin-bottom: 2px;
+}
+
+.transcript-entry.transcript-tool-entry {
+  padding-bottom: 2px;
+}
+
+@keyframes tool-row-icon-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tool-row-icon.is-running {
+    animation: none;
+    opacity: 1;
+  }
+}

@@ -49,6 +49,7 @@ function windowOf(
     },
     target: null,
     entries,
+    toolLabels: {},
     hasBefore: false,
     hasAfter: false,
     settlements: [],

@@ -576,3 +576,73 @@ folder; frozen inputs and owned cleanup proofs remain under
 `%TEMP%/urd-transcript-finish-991456-eqZAQG/`. UI03's awaited disposal and shutdown
 returned every logical cache counter to zero and backend exit 0; this is not resident
 memory recovery evidence.
+
+## Retained-tab and lifecycle correctness checkpoint — 2026-11-11
+
+Source commit `1a3bf5c` fixes initial-position retry after suspension, retains the bounded
+mounted row window while a panel has zero geometry, and restores the saved source before
+resumed gap scanning. Hidden-width tracing exposed a second race: paused/pending anchor
+capture overwrote a valid source anchor with a null cursor, then a later layout reset the
+restored scroll position. Capture now refuses suspended, zero-height and pending-restore
+states, including after its asynchronous mapping completes. Jump to latest is docked below
+the scrollport instead of covering message content. Independent scoped reviews approved
+these changes; reviewers did not run verification.
+
+Final frozen UI12 used UI06's schema14 inputs plus the three owned source overlays; their
+hashes matched the committed files. Concurrent schema16/workspace-v4/provider changes were
+excluded. Normal startup still does not compose Markdown services. The 256-piece / three
+retained-tab settings remain probe candidates, not selected production limits. Focus or
+selection can additionally pin a panel; UI12's five-tab cycle observed three to four panels.
+
+UI12 real-Workspace checks passed:
+
+- Four hidden-tab 1000↔700 width changes preserved the same mixed-message source piece;
+  maximum displacement was **0.36 px**.
+- Five heavy code/table/mixed tabs preserved source text, follow-latest intent and exact
+  drafts, including returns after eviction; maximum displacement was **0.36 px**.
+- Native Playwright pointer-drag selection survived scrolling with the selected DOM node
+  retained. Clearing selection released that old source node. This is native selection
+  input in headless Chromium, not native page-lifecycle qualification.
+- A deliberately aborted first indexed locate retried once after synthetic freeze/resume.
+  The 100k-entry history rendered again, then 42%, 81% and 1% seeks used **30–31 mounted
+  entry rows**. Source navigation state and draft survived reload exactly.
+- The docked jump button began four pixels below the transcript viewport, with no overlap;
+  an independent image review found the table continuous and readable.
+
+UI12 formatting/lint/type checks, **260 unit tests** and **16 renderer Chromium tests**
+passed. The normal entry initially failed its synthetic hidden/reconnect case, including
+with the old CSS baseline. The snapshot reader's visible handler requested work without
+clearing its suspended flag. Commit `5fc0bd2` routes visibility/focus return through resume.
+Final frozen UI13 adds only this hook change to UI12 and passes formatting/lint/type checks,
+**260 unit tests**, **16 renderer Chromium tests** and **all 14 normal browser regressions**.
+These checks used owned frozen copies; repository browser tests were not restored.
+
+UI13 in fixture14 also retried an aborted first locate exactly once on visibility return,
+rendered 31 rows at a 100k-entry seek, and preserved the heavy source and exact draft across
+two synthetic hide/resize/show cycles (1000→700→1000), within **0.69 px**. Hidden pins and
+post-disposal pins/pending keys/reservations were zero; browser errors were empty. This is
+visibility-handler evidence, not native minimize/restore or freeze qualification.
+
+Earlier UI05's larger candidate window eliminated Markdown/content reads during tested
+mixed/table resizes, with source displacement within **0.36 px**, and controlled offline
+streaming rendered formatted content without a raw-Markdown flash. Its tested append
+commit-to-visible bounds were **178–217 ms**: the ≤100 ms target was not established.
+UI07's same-width retained DOM returns had fixture paint upper bounds around **33–57 ms**;
+these are not final UI12 warm/cold latency acceptance. Native minimize coincided with zero
+page-owned pins, but native restore was not completed. Synthetic handler checks do not
+substitute for native lifecycle evidence. Long-task/input-paint, full contention, cache
+budget selection and resident-memory recovery remain unqualified. No activation follows.
+
+All owned fixtures and browser runtimes closed. UI12 client disposal left zero pins,
+pending keys and reservations; subsequent cache invalidation and fixture shutdown returned
+every logical cache counter to zero with backend exit 0 and all owned listeners closed.
+This is logical cleanup, not heap/resident recovery. User servers were not restarted or
+modified; no live account/model calls were used.
+
+Frozen UI12/UI13 manifests, check logs, `ui12-table-docked.png`, normal baseline diagnostics
+and `fixture-current-{12,14}/server/cleanup-proof.json` are under
+`%TEMP%/urd-transcript-finish-991456-eqZAQG/`. Detailed UI12 assertions are the parent
+session's Playwright artifacts named `ui12-hidden-reflow-cycles.json`,
+`ui12-native-selection.json`, `ui12-five-tab-source-follow-draft.json`,
+`ui12-initial-resume-100k-reload.json`, `ui12-final-client-disposal.json` and
+`ui13-visible-resume-source-draft.json`.

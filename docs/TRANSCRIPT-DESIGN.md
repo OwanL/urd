@@ -1063,7 +1063,13 @@ persistent-projection selection. Its bounded packets, 100k-entry SQLite position
 lookup baseline, gates and current Stage 1 measurements are recorded above. Stage 1's
 current-tree 25× run qualifies only that bounded workload; its tab-return anchor
 assertion remains unroot-caused and its memory sample is not recovery sign-off. Stage 2
-integration, browser behavior, scheduling and cache budgets remain unqualified.
+now has a bounded explicit-service Workspace correctness checkpoint: indexed 100k seeks,
+source/draft reload, retained-tab reflow and native pointer selection passed in frozen
+UI12 (`1a3bf5c` source overlays on schema14). UI13 additionally corrects snapshot-read
+resume (`5fc0bd2`) and passes the frozen normal reconnect regression. This is not overall
+acceptance: native lifecycle, warm/cold and input-paint latency, contention, recovery and
+production cache budgets remain open. See the final checkpoint in
+[parser evidence](TRANSCRIPT-PARSER-EVIDENCE.md). Normal startup remains inactive.
 Do not invent a custom parser or treat sampled sizes as hard limits. Do not keep
 asking minor product questions that can be resolved through existing requirements.
 Ask only unresolved questions,

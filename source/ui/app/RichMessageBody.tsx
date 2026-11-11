@@ -58,6 +58,7 @@ export function RichMessageBody(props: RichMessageBodyProps) {
       if (!view || releasing) return;
       const current = view;
       releasing = true;
+      // The flow-root host includes Markdown margins in the frozen height.
       element!.style.minHeight = `${element!.getBoundingClientRect().height}px`;
       const work = current.dispose();
       display.release(work);
@@ -121,8 +122,14 @@ export function RichMessageBody(props: RichMessageBodyProps) {
         if (!stopped && visible && !latest.current.paused)
           await capturePosition(new AbortController().signal);
       } catch (cause) {
-        applied = "";
-        report(cause);
+        if (cause instanceof DOMException && cause.name === "AbortError") {
+          // Other rows can reflow during a seek. Retry its new target without
+          // reopening the generation at the old, now offscreen source position.
+          queued = true;
+        } else {
+          applied = "";
+          report(cause);
+        }
       } finally {
         reading = false;
         if (queued) {
@@ -189,7 +196,7 @@ export function RichMessageBody(props: RichMessageBodyProps) {
   useEffect(() => update.current(), [props.paused, props.streamId, props.text]);
   return (
     <div class={`message message-${entry.kind === "user" ? "user" : "assistant"}`}>
-      <div ref={host} style={{ minHeight: "1lh" }} />
+      <div ref={host} style={{ display: "flow-root", minHeight: "1lh" }} />
       {error && (
         <div class="inline-error">
           {error} <button onClick={() => update.current()}>Retry read</button>

@@ -18,6 +18,7 @@ export function useSessionEvents(
   const [notices, setNotices] = useState<Record<string, string>>({});
   const [statuses, setStatuses] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
+  const [streamId, setStreamId] = useState<string | null>(null);
   const transport = useRef<SessionEvents | null>(null);
   // Match the server's per-page bound without dropping tabs, drafts or the active view.
   const observed = useMemo(
@@ -62,7 +63,8 @@ export function useSessionEvents(
       }
     }
     const events = new SessionEvents(new URL(window.location.href), {
-      connected() {
+      connected(_boot, nextStreamId) {
+        setStreamId(nextStreamId);
         setError(null);
         discovery?.abort();
         discovery = new AbortController();
@@ -76,6 +78,7 @@ export function useSessionEvents(
       },
       created: add,
       disconnected() {
+        setStreamId(null);
         setNotices({});
         setStatuses({});
       },
@@ -96,6 +99,7 @@ export function useSessionEvents(
       disposed = true;
       discovery?.abort();
       events.stop();
+      setStreamId(null);
       transport.current = null;
       document.removeEventListener("visibilitychange", activate);
       window.removeEventListener("focus", activate);
@@ -116,6 +120,7 @@ export function useSessionEvents(
   }, [observed, active, watched]);
 
   return {
+    streamId,
     notice: watched === active && active ? (notices[active] ?? null) : null,
     statuses: Object.fromEntries(
       open.map((session) => [

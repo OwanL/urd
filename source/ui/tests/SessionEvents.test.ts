@@ -8,6 +8,7 @@ void test("parses chunked SSE events and sends the browser registration", async 
   let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
   const calls: Array<{ url: URL; options: RequestInit | undefined }> = [];
   const connected: string[] = [];
+  const streamIds: string[] = [];
   const changes: Array<[string, string]> = [];
   const statuses: Array<[string, string]> = [];
   const created: string[] = [];
@@ -46,8 +47,9 @@ void test("parses chunked SSE events and sends the browser registration", async 
   );
 
   const events = new SessionEvents(new URL("https://server.example/path"), {
-    connected(boot) {
+    connected(boot, streamId) {
       connected.push(boot);
+      streamIds.push(streamId);
     },
     change(session, notice) {
       changes.push([session, notice]);
@@ -77,6 +79,7 @@ void test("parses chunked SSE events and sends the browser registration", async 
   );
 
   assert.deepEqual(connected, ["boot-a"]);
+  assert.deepEqual(streamIds, ["stream-a"]);
   assert.deepEqual(changes, [["s1", "1:boot-a:3:1"]]);
   assert.deepEqual(statuses, [["s1", "running"]]);
   assert.deepEqual(created, ["session-雪"]);
@@ -453,6 +456,8 @@ void test("a pending old registration cannot block registration after restart", 
 void test("reconnects after EOF and resyncs both unchanged and restarted boot versions", async (t) => {
   let getCount = 0;
   let disconnected = 0;
+  let currentStreamId: string | null = null;
+  const streamIds: string[] = [];
   const boots: string[] = [];
   const notices: string[] = [];
 
@@ -463,7 +468,7 @@ void test("reconnects after EOF and resyncs both unchanged and restarted boot ve
     const boot = getCount < 3 ? "boot-c" : "restarted-boot";
     const version = getCount < 3 ? 9 : 0;
     const frames = [
-      `event: connected\ndata: {"stream":"stream-c","boot":"${boot}"}\n\n`,
+      `event: connected\ndata: {"stream":"stream-c-${getCount}","boot":"${boot}"}\n\n`,
       `event: status\ndata: {"session":"s","boot":"${boot}","version":${version},"status":"running"}\n\n`,
       `event: change\ndata: {"session":"s","boot":"${boot}","version":${version}}\n\n`,
     ];
@@ -477,8 +482,10 @@ void test("reconnects after EOF and resyncs both unchanged and restarted boot ve
   });
 
   const events = new SessionEvents(new URL("https://server.example"), {
-    connected(boot) {
+    connected(boot, streamId) {
       boots.push(boot);
+      streamIds.push(streamId);
+      currentStreamId = streamId;
     },
     change(_session, notice) {
       notices.push(notice);
@@ -487,6 +494,7 @@ void test("reconnects after EOF and resyncs both unchanged and restarted boot ve
     created() {},
     disconnected() {
       disconnected++;
+      currentStreamId = null;
     },
   });
   events.update(["s"], ["s"]);
@@ -494,6 +502,8 @@ void test("reconnects after EOF and resyncs both unchanged and restarted boot ve
   await waitFor(() => notices.length === 3);
 
   assert.deepEqual(boots, ["boot-c", "boot-c", "restarted-boot"]);
+  assert.deepEqual(streamIds, ["stream-c-1", "stream-c-2", "stream-c-3"]);
+  assert.equal(currentStreamId, "stream-c-3");
   assert.equal(notices[0], "1:boot-c:9:1");
   assert.equal(notices[1], "2:boot-c:9:2");
   assert.equal(notices[2], "3:restarted-boot:0:3");
@@ -502,6 +512,7 @@ void test("reconnects after EOF and resyncs both unchanged and restarted boot ve
 
   events.stop();
   assert.equal(disconnected, 3);
+  assert.equal(currentStreamId, null);
 });
 
 void test("heartbeat resets the watchdog and stop cancels its retry", async (t) => {

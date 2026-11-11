@@ -1,5 +1,5 @@
 export interface SessionEventCallbacks {
-  connected(boot: string): void;
+  connected(boot: string, streamId: string): void;
   change(session: string, notice: string): void;
   status(session: string, status: string): void;
   created(session: string): void;
@@ -190,7 +190,7 @@ export class SessionEvents {
       this.connectionNumber++;
       this.registration = null;
       this.updatePending = true;
-      this.call(() => this.callbacks.connected(event.boot as string));
+      this.call(() => this.callbacks.connected(event.boot as string, event.stream as string));
       if (this.isCurrent(generation)) void this.sendUpdates(generation);
       return;
     }

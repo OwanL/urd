@@ -32,6 +32,7 @@ public sealed class ToolCatalogTests {
   private sealed class TestTool(string name) : AgentTool {
     public override string Name => name;
     public override string Description => "Catalog fixture";
+    public override ToolRelevance RelevantWhen => ToolRelevance.Always;
     public override JsonElement ParametersSchema => JsonSerializer.SerializeToElement(new { type = "object" });
     public override Task<ToolOutput> RunAsync(JsonElement arguments, ToolContext context, CancellationToken cancellation) =>
       Task.FromResult(new ToolOutput("unused", []));

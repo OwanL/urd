@@ -71,6 +71,7 @@ and explicit startup recovery. Compaction and rich tool-result inspection remain
     ```csharp
     internal abstract class AgentTool {
       public abstract string Name { get; }
+      public abstract ToolRelevance RelevantWhen { get; }
       public abstract string Description { get; }
       public abstract JsonElement ParametersSchema { get; }
       public abstract Task<ToolOutput> RunAsync(
@@ -107,6 +108,12 @@ and explicit startup recovery. Compaction and rich tool-result inspection remain
     the ordinary `user` input channel. Preserve origin, call identity and untrusted-result
     labelling; do not promote tool output to `developer` instructions merely to avoid the word
     `user` on the wire. Qualify this mapping per supported provider route.
+20. **Tool relevance** (owner review 2026-11-11). Every tool explicitly declares typed
+    `RelevantWhen` metadata, separate from its agent-facing `Description`.
+    `ToolRelevance.Always` declares unconditional inclusion (`bash`);
+    `ToolRelevance.When(guidance)` supplies immutable, nonblank relevance guidance for
+    future pruning and dynamic discovery. This adds metadata only: no selector is
+    implemented, and all configured tools remain available to the model up front.
 
 ## Open
 

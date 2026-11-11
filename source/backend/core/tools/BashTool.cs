@@ -7,6 +7,7 @@ namespace Urd.Core.Tools;
 [SupportedOSPlatform("windows")]
 internal sealed class BashTool(ChatProcesses processes, GitBash bash, IReadOnlyDictionary<string, string> environment) : AgentTool {
   public override string Name => "bash";
+  public override ToolRelevance RelevantWhen => ToolRelevance.Always;
   public override string Description => """
     Execute a Git Bash command in the current working directory. Returns stdout and stderr.
     Output is truncated to the last 2000 lines or 50KB, whichever comes first.

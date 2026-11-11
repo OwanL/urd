@@ -28,6 +28,7 @@ internal sealed class TestAgentTool : AgentTool {
 
   public override string Name { get; }
   public override string Description { get; } = "Test tool";
+  public override ToolRelevance RelevantWhen => ToolRelevance.Always;
   public override JsonElement ParametersSchema { get; } = emptySchema;
 
   public override Task<ToolOutput> RunAsync(JsonElement arguments, ToolContext context, CancellationToken cancellation) =>

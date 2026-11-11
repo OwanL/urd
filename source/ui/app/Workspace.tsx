@@ -17,6 +17,7 @@ import { usePersistedWorkspace } from "./usePersistedWorkspace.ts";
 import { useWorkspaceModels } from "./useWorkspaceModels.ts";
 import { useWorkspaceNavigation } from "./useWorkspaceNavigation.ts";
 import { useSessionEvents } from "./useSessionEvents.ts";
+import { useWorkspaceRetention } from "./useWorkspaceRetention.ts";
 import "./workspace.css";
 
 const sessions = new SessionClient(new URL(window.location.href));
@@ -70,29 +71,7 @@ export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) 
     tabs,
     activeId,
   );
-  const retained = useRef<string[]>([]);
-  if (transcript && activeId) {
-    const selection = document.getSelection();
-    const pinned = new Set(
-      [selection?.anchorNode, selection?.focusNode, document.activeElement].flatMap((node) => {
-        const element = node instanceof Element ? node : node?.parentElement;
-        const id = element?.closest<HTMLElement>("[data-chat-session]")?.dataset.chatSession;
-        return id ? [id] : [];
-      }),
-    );
-    const ordered = [
-      activeId,
-      ...retained.current.filter((id) => id !== activeId && tabs.includes(id)),
-    ];
-    retained.current = ordered.filter(
-      (id, index) => index < transcript.retainedTabs || pinned.has(id),
-    );
-  }
-  const shown = transcript
-    ? retained.current.filter((id) => tabs.includes(id))
-    : activeId
-      ? [activeId]
-      : [];
+  const shown = useWorkspaceRetention(activeId, tabs, transcript?.retainedTabs ?? null);
   const canPersist = workspace.access.canPersist();
   const error = commandError || navigation.error || events.error || transcriptError;
 

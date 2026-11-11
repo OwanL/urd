@@ -183,17 +183,17 @@ public sealed class TranscriptHistoryTests(ITestOutputHelper output) {
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     TranscriptEntryRef anchor = Assert.Single(SeedUsers(database, session, 0, 1));
     var queries = new[] {
-      (Sql: TranscriptHistoryReader.WindowSql(ascending: false), Parameters: new (string, object)[] {
+      (Sql: TranscriptHistoryStorage.WindowSql(ascending: false), Parameters: new (string, object)[] {
         ("$session", session), ("$revision", 0L), ("$boundary", long.MaxValue), ("$limit", 60)
       }),
-      (Sql: TranscriptHistoryReader.WindowSql(ascending: true), Parameters: new (string, object)[] {
+      (Sql: TranscriptHistoryStorage.WindowSql(ascending: true), Parameters: new (string, object)[] {
         ("$session", session), ("$revision", 0L), ("$boundary", 1L), ("$limit", 60)
       }),
-      (Sql: TranscriptHistoryReader.AnchorSql, Parameters: new (string, object)[] {
+      (Sql: TranscriptHistoryStorage.AnchorSql, Parameters: new (string, object)[] {
         ("$run", anchor.ExecutionId), ("$kind", (int)anchor.Kind), ("$entry", anchor.EntryId),
         ("$session", session), ("$revision", 0L)
       }),
-      (Sql: TranscriptHistoryReader.LookaheadSql, Parameters: new (string, object)[] {
+      (Sql: TranscriptHistoryStorage.LookaheadSql, Parameters: new (string, object)[] {
         ("$session", session), ("$revision", 0L), ("$first", 1L), ("$last", 1L)
       })
     };
@@ -204,7 +204,7 @@ public sealed class TranscriptHistoryTests(ITestOutputHelper output) {
       string[] plan = Explain(database, sql, parameters);
       Assert.DoesNotContain(plan, step => step.Contains("SCAN execution_messages", StringComparison.OrdinalIgnoreCase));
       Assert.Contains(plan, step => step.Contains("SEARCH execution_messages", StringComparison.OrdinalIgnoreCase));
-      if (sql != TranscriptHistoryReader.AnchorSql)
+      if (sql != TranscriptHistoryStorage.AnchorSql)
         Assert.Contains(plan, step => step.Contains("execution_messages_history_order", StringComparison.OrdinalIgnoreCase));
     }
   }

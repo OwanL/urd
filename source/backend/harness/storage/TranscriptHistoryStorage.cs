@@ -38,6 +38,14 @@ internal sealed class TranscriptHistoryStorage(
         r.stopping, r.outcome AS execution_outcome,
         m.call_id, CASE WHEN m.role = 3 THEN t.name ELSE m.tool_name END AS tool_name,
         t.started, t.outcome AS tool_outcome, t.started_at, t.ended_at,
+        CASE WHEN t.call_id IS NOT NULL THEN t.background ELSE 0 END AS background,
+        CASE WHEN m.role = 2 AND t.call_id IS NOT NULL AND previous.role = 2
+            AND previous.request_id = m.request_id AND previous_tool.call_id IS NOT NULL THEN 1 ELSE 0 END
+            AS batched_with_previous,
+        CASE WHEN m.role = 2 AND t.call_id IS NOT NULL AND next.role = 2
+            AND next.request_id = m.request_id AND next_tool.call_id IS NOT NULL THEN 1 ELSE 0 END
+            AS batched_with_next,
+        CASE WHEN t.call_id IS NOT NULL THEN t.arguments_excerpt ELSE NULL END AS arguments_excerpt,
         c.reason AS compaction_reason, c.tokens_before, c.tokens_after,
         CASE WHEN r.outcome = 2 THEN coalesce(
             (SELECT substr(f.error, 1, 1024) FROM execution_requests f
@@ -47,6 +55,17 @@ internal sealed class TranscriptHistoryStorage(
     JOIN execution_runs r ON r.run_id = m.run_id
     LEFT JOIN execution_requests q ON q.request_id = m.request_id
     LEFT JOIN execution_tools t ON t.request_id = m.request_id AND t.call_id = m.call_id
+    LEFT JOIN execution_messages previous ON previous.ordinal = (
+        SELECT neighbor.ordinal FROM execution_messages neighbor
+        WHERE neighbor.session_id = $session AND neighbor.history_revision = $revision
+            AND neighbor.ordinal < m.ordinal ORDER BY neighbor.ordinal DESC LIMIT 1)
+    LEFT JOIN execution_tools previous_tool
+        ON previous_tool.request_id = previous.request_id AND previous_tool.call_id = previous.call_id
+    LEFT JOIN execution_messages next ON next.ordinal = (
+        SELECT neighbor.ordinal FROM execution_messages neighbor
+        WHERE neighbor.session_id = $session AND neighbor.history_revision = $revision
+            AND neighbor.ordinal > m.ordinal ORDER BY neighbor.ordinal LIMIT 1)
+    LEFT JOIN execution_tools next_tool ON next_tool.request_id = next.request_id AND next_tool.call_id = next.call_id
     LEFT JOIN session_compactions c ON c.compaction_id = m.message_id AND m.role = 4
     ORDER BY m.ordinal {{(ascending ? "ASC" : "DESC")}};
     """;
@@ -138,7 +157,9 @@ internal sealed class TranscriptHistoryStorage(
         || (!authorized && requestSettled);
     string? name = reader.IsDBNull("tool_name") ? null : reader.GetString("tool_name");
     return new(reader.GetGuid("request_id"), reader.GetString("call_id"), name, started, outcome, closed,
-        ReadTime(reader, "started_at"), ReadTime(reader, "ended_at"));
+        ReadTime(reader, "started_at"), ReadTime(reader, "ended_at"), reader.GetBoolean("background"),
+        reader.GetBoolean("batched_with_previous"), reader.GetBoolean("batched_with_next"),
+        reader.IsDBNull("arguments_excerpt") ? null : reader.GetString("arguments_excerpt"));
   }
 
   private static ExecutionOutcome? ReadOutcome(SqliteDataReader reader, string column) => reader.IsDBNull(column)

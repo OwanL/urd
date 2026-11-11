@@ -119,8 +119,10 @@ public sealed class TranscriptHistoryTests(ITestOutputHelper output) {
         typeof(TranscriptEntryDescriptor).GetProperties().Select(property => property.Name).Order(StringComparer.Ordinal));
     Assert.Equal(new[] { "AvailableThrough", "FinalOutputCommitted", "From", "IsClosed" },
         typeof(TranscriptTextFacts).GetProperties().Select(property => property.Name).Order(StringComparer.Ordinal));
-    Assert.Equal(new[] { "CallId", "EndedAt", "IsClosed", "Name", "Outcome", "RequestId", "Started", "StartedAt" },
-        typeof(TranscriptToolFacts).GetProperties().Select(property => property.Name).Order(StringComparer.Ordinal));
+    Assert.Equal(new[] {
+      "ArgumentsExcerpt", "Background", "BatchedWithNext", "BatchedWithPrevious", "CallId", "EndedAt",
+      "IsClosed", "Name", "Outcome", "RequestId", "Started", "StartedAt"
+    }, typeof(TranscriptToolFacts).GetProperties().Select(property => property.Name).Order(StringComparer.Ordinal));
 
     Assert.Equal(new[] {
       TranscriptEntryKind.User, TranscriptEntryKind.Text, TranscriptEntryKind.Tool, TranscriptEntryKind.Text,
@@ -177,6 +179,48 @@ public sealed class TranscriptHistoryTests(ITestOutputHelper output) {
   }
 
   [Fact]
+  public void BatchFactsLookBeyondWindowEdgesAndRequireAdjacentAuthorizedToolRows() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
+    TranscriptEntryRef[] entries = SeedBatchHistory(database, session);
+
+    TranscriptHistoryPage page = store.History.Read(session,
+        new(TranscriptHistoryMode.Around, 0, entries[32]));
+    Assert.Equal(60, page.Entries.Count);
+    TranscriptToolFacts first = page.Entries[0].Tool!;
+    Assert.Equal("batch-c", first.CallId);
+    Assert.True(first.BatchedWithPrevious);
+    Assert.False(first.BatchedWithNext);
+    Assert.True(first.Background);
+    Assert.Equal("{\"call\":\"batch-c\"}", first.ArgumentsExcerpt);
+    Assert.DoesNotContain("argumentsExcerpt", JsonSerializer.Serialize(first), StringComparison.Ordinal);
+
+    TranscriptToolFacts interrupted = page.Entries.Single(entry => entry.Tool?.CallId == "gap-a").Tool!;
+    Assert.False(interrupted.BatchedWithPrevious);
+    Assert.True(interrupted.BatchedWithNext);
+    TranscriptToolFacts gapEnd = page.Entries.Single(entry => entry.Tool?.CallId == "gap-b").Tool!;
+    Assert.True(gapEnd.BatchedWithPrevious);
+    Assert.False(gapEnd.BatchedWithNext);
+    TranscriptToolFacts reservation = page.Entries.Single(entry => entry.Tool?.CallId == "reservation").Tool!;
+    Assert.False(reservation.BatchedWithPrevious);
+    Assert.False(reservation.BatchedWithNext);
+    Assert.Null(reservation.ArgumentsExcerpt);
+    TranscriptToolFacts afterReservation = page.Entries.Single(entry => entry.Tool?.CallId == "after-reservation").Tool!;
+    Assert.False(afterReservation.BatchedWithPrevious);
+
+    TranscriptToolFacts lastInWindow = page.Entries[^1].Tool!;
+    Assert.Equal("window-edge-a", lastInWindow.CallId);
+    Assert.True(lastInWindow.BatchedWithNext);
+
+    TranscriptPositionWindow position = store.Positions.LocateEntry(session, 0, entries[32]);
+    TranscriptToolFacts positionedFirst = position.Entries[0].Descriptor.Tool!;
+    Assert.True(positionedFirst.BatchedWithPrevious);
+    Assert.Equal("{\"call\":\"batch-c\"}", positionedFirst.ArgumentsExcerpt);
+    Assert.True(position.Entries[^1].Descriptor.Tool!.BatchedWithNext);
+  }
+
+  [Fact]
   public void HistoryQueriesUseIndexedKeysetPlansWithoutOffsetCountsOrEntryScans() {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
@@ -201,6 +245,8 @@ public sealed class TranscriptHistoryTests(ITestOutputHelper output) {
     foreach ((string sql, (string Name, object Value)[] parameters) in queries) {
       Assert.DoesNotContain("OFFSET", sql, StringComparison.OrdinalIgnoreCase);
       Assert.DoesNotContain("COUNT", sql, StringComparison.OrdinalIgnoreCase);
+      Assert.DoesNotContain("arguments_json", sql, StringComparison.OrdinalIgnoreCase);
+      Assert.DoesNotContain("result_json", sql, StringComparison.OrdinalIgnoreCase);
       string[] plan = Explain(database, sql, parameters);
       Assert.DoesNotContain(plan, step => step.Contains("SCAN execution_messages", StringComparison.OrdinalIgnoreCase));
       Assert.Contains(plan, step => step.Contains("SEARCH execution_messages", StringComparison.OrdinalIgnoreCase));
@@ -391,6 +437,47 @@ public sealed class TranscriptHistoryTests(ITestOutputHelper output) {
     ];
     return new(entries, firstExecution, userMessage, firstText, secondText,
         toolOnlyExecution, toolOnlyRequest);
+  }
+
+  private static TranscriptEntryRef[] SeedBatchHistory(TemporaryDatabase database, Guid session) {
+    Guid run = Guid.NewGuid(), request = Guid.NewGuid();
+    (bool IsTool, string? CallId)[] kinds = Enumerable.Range(0, 64).Select(index => index switch {
+      1 => (true, "batch-a"),
+      2 => (true, "batch-b"),
+      3 => (true, "batch-c"),
+      5 => (true, "gap-a"),
+      6 => (true, "gap-b"),
+      7 => (true, "reservation"),
+      8 => (true, "after-reservation"),
+      62 => (true, "window-edge-a"),
+      63 => (true, "window-edge-b"),
+      _ => (false, (string?)null)
+    }).ToArray();
+    Guid[] messageIds = Enumerable.Range(0, kinds.Length).Select(_ => Guid.NewGuid()).ToArray();
+    string messages = string.Join(",\n", kinds.Select((entry, index) => entry.IsTool
+        ? $"('{session:D}', 0, '{run:D}', 2, '{messageIds[index]:D}', '{request:D}', '{entry.CallId}', 'test-tool', 0, NULL)"
+        : $"('{session:D}', 0, '{run:D}', 1, '{messageIds[index]:D}', '{request:D}', NULL, NULL, 0, 0)"));
+    string authorizedTools = string.Join(",\n", kinds.Select((entry, index) => (entry, index))
+        .Where(item => item.entry.IsTool && item.entry.CallId != "reservation")
+        .Select(item => $"('{run:D}', '{request:D}', {item.index}, '{item.entry.CallId}', 'test-tool', '{{}}', "
+            + $"'{{\"call\":\"{item.entry.CallId}\"}}', {(item.entry.CallId == "batch-c" ? 1 : 0)}, "
+            + $"{(item.entry.CallId == "batch-c" ? 1 : 0)})"));
+    database.Execute($"""
+      INSERT INTO execution_runs (session_id, run_id, history_revision, compaction_selection_json, outcome)
+      VALUES ('{session:D}', '{run:D}', 0, 'x', 0);
+      INSERT INTO execution_requests (request_id, run_id, response_final, outcome)
+      VALUES ('{request:D}', '{run:D}', 1, 0);
+      INSERT INTO execution_tools
+          (run_id, request_id, call_index, call_id, name, arguments_json, arguments_excerpt, started, background)
+      VALUES {authorizedTools};
+      INSERT INTO execution_messages
+          (session_id, history_revision, run_id, role, message_id, request_id, call_id, tool_name,
+              first_chunk_index, end_chunk_index)
+      VALUES {messages};
+      """);
+
+    return kinds.Select((entry, index) => new TranscriptEntryRef(run, messageIds[index],
+        entry.IsTool ? TranscriptEntryKind.Tool : TranscriptEntryKind.Text, 0)).ToArray();
   }
 
   private static void SeedLargeMixedHistory(TemporaryDatabase database, Guid session) {

@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Urd.Core.Execution;
 using Urd.Core.Compaction;
 
@@ -27,7 +28,9 @@ public sealed record TranscriptTextFacts(
 // A closed, never-started reservation was not executed. Missing timing/outcome facts stay unknown.
 public sealed record TranscriptToolFacts(
     Guid RequestId, string CallId, string? Name, bool Started, ExecutionOutcome? Outcome,
-    bool IsClosed, DateTimeOffset? StartedAt, DateTimeOffset? EndedAt);
+    bool IsClosed, DateTimeOffset? StartedAt, DateTimeOffset? EndedAt,
+    bool Background, bool BatchedWithPrevious, bool BatchedWithNext,
+    [property: JsonIgnore] string? ArgumentsExcerpt);
 
 public sealed record TranscriptHistoryPage(
     Guid SessionId, long HistoryRevision, IReadOnlyList<TranscriptEntryDescriptor> Entries,

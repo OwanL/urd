@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Urd.Core.Execution;
+using Urd.Core.Sessions;
 using Urd.Core.Tools;
 
 namespace Urd.Core.Storage;
@@ -13,6 +14,49 @@ internal sealed class ToolStorage(Database database, ToolResultCodec results) {
       WHERE r.session_id = $session AND t.request_id = $request AND t.call_id = $call;
       """, ("$session", sessionId), ("$request", requestId), ("$call", callId));
     return read.ExecuteScalar() is string value ? results.Read(value) : null;
+  });
+
+  internal ToolCallTranscript? ReadTranscript(Guid sessionId, long expectedHistoryRevision,
+      Guid requestId, string callId, bool returned) => database.Read(transaction => {
+    using (SqliteCommand check = database.Command(transaction,
+        "SELECT history_revision FROM sessions WHERE session_id = $session;", ("$session", sessionId))) {
+      if (check.ExecuteScalar() is not long revision)
+        throw new KeyNotFoundException("The session does not exist.");
+      if (revision != expectedHistoryRevision)
+        throw new HistoryRevisionConflictException(expectedHistoryRevision, revision);
+    }
+
+    using SqliteCommand read = database.Command(transaction, """
+      SELECT t.arguments_json, t.background, t.started, t.result_json, t.outcome, t.name,
+          EXISTS (SELECT 1 FROM execution_tool_completions c
+              WHERE c.session_id = r.session_id AND c.history_revision = r.history_revision
+                  AND c.request_id = t.request_id AND c.call_id = t.call_id AND c.published = 1)
+      FROM execution_tools t JOIN execution_runs r ON r.run_id = t.run_id
+      JOIN execution_requests q ON q.request_id = t.request_id AND q.run_id = t.run_id
+      WHERE r.session_id = $session AND r.history_revision = $revision
+          AND t.request_id = $request AND t.call_id = $call;
+      """, ("$session", sessionId), ("$revision", expectedHistoryRevision),
+        ("$request", requestId), ("$call", callId));
+    using SqliteDataReader reader = read.ExecuteReader();
+    if (!reader.Read())
+      return null;
+
+    string input = reader.GetString(0);
+    bool background = reader.GetInt32(1) != 0;
+    bool started = reader.GetInt32(2) != 0;
+    string? resultJson = reader.IsDBNull(3) ? null : reader.GetString(3);
+    ExecutionOutcome? outcome = reader.IsDBNull(4) ? null : (ExecutionOutcome)reader.GetInt32(4);
+    string name = reader.GetString(5);
+    bool returnedPublished = reader.GetBoolean(6);
+    string? output = null;
+    if (returned && background && returnedPublished && resultJson is not null && outcome is not null)
+      output = results.ReadModelCompletionText(requestId, callId, name, outcome.Value, resultJson);
+    else if (!returned && background && started)
+      output = ToolResultCodec.BackgroundStarted(requestId, callId);
+    else if (!returned && resultJson is not null)
+      output = results.ReadModelResultText(resultJson);
+
+    return new ToolCallTranscript(input, output, Truncated: false);
   });
 
   internal bool TryStart(Guid sessionId, Guid executionId, long revision, Guid requestId, string callId,

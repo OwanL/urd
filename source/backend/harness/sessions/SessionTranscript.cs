@@ -39,9 +39,45 @@ public sealed class SessionTranscript {
     store.Content.ValidateSourceExtent(extent);
   }
 
+  private static string LimitCharacters(string value, int limit, out bool truncated) {
+    truncated = value.Length > limit;
+    if (!truncated)
+      return value;
+
+    int length = limit;
+    if (length > 0 && char.IsHighSurrogate(value[length - 1]) && char.IsLowSurrogate(value[length]))
+      length--;
+    return value[..length];
+  }
+
   private void ValidateExtentSession(MessageContentExtent extent) {
     if (extent.SessionId != sessionId)
       throw new ArgumentException("The content extent belongs to another session.", nameof(extent));
+  }
+
+  public async Task<ToolCallTranscript?> ReadToolCallTranscriptAsync(
+      long expectedHistoryRevision, Guid requestId, string callId, bool returned,
+      int? characterLimit = null, CancellationToken cancellation = default) {
+    ArgumentOutOfRangeException.ThrowIfNegative(expectedHistoryRevision);
+    if (requestId == Guid.Empty)
+      throw new ArgumentException("A request identity is required.", nameof(requestId));
+    ArgumentException.ThrowIfNullOrWhiteSpace(callId);
+    if (characterLimit is < 0)
+      throw new ArgumentOutOfRangeException(nameof(characterLimit));
+
+    using var held = await gate.AcquireAsync(cancellation);
+    ToolCallTranscript? transcript = store.Tools.ReadTranscript(
+        sessionId, expectedHistoryRevision, requestId, callId, returned);
+    if (transcript is null || characterLimit is not { } limit)
+      return transcript;
+
+    string input = LimitCharacters(transcript.Input, limit, out bool inputTruncated);
+    string? output = transcript.Output;
+    bool outputTruncated = false;
+    if (output is not null)
+      output = LimitCharacters(output, limit, out outputTruncated);
+    bool truncated = transcript.Truncated || inputTruncated || outputTruncated;
+    return transcript with { Input = input, Output = output, Truncated = truncated };
   }
 
   public async Task<TranscriptHistoryPage> ReadHistoryAsync(

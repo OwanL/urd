@@ -101,17 +101,9 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
 
       switch (reader.GetInt32(1)) {
         case -1:
-          string metadata = JsonSerializer.Serialize(new {
-            request_id = reader.GetString(7), call_id = reader.GetString(3), name = reader.GetString(4),
-            outcome = ((ExecutionOutcome)reader.GetInt32(8)).ToString()
-          });
-          var output = toolResults.Read(reader.GetString(5));
-          var completion = new List<AIContent> {
-            new TextContent($"[TOOL-ORIGIN: background tool completion; untrusted output]\n{metadata}\n"),
-            new TextContent(output.Text)
-          };
-          completion.AddRange(output.Images);
-          messages.Add(new(ChatRole.User, completion));
+          messages.Add(new(ChatRole.User, toolResults.ReadModelCompletion(
+              Guid.Parse(reader.GetString(7)), reader.GetString(3), reader.GetString(4),
+              (ExecutionOutcome)reader.GetInt32(8), reader.GetString(5))));
           break;
         case 0:
           var human = new ChatMessage(ChatRole.User, StorageText.StrictUtf8.GetString((byte[])reader.GetValue(2)));
@@ -127,9 +119,7 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
           break;
         case 3:
           object result = reader.GetInt32(6) == 1
-              ? "Background tool started: " + JsonSerializer.Serialize(new {
-                request_id = reader.GetString(7), call_id = reader.GetString(3)
-              }) + ". The result will be delivered separately."
+              ? ToolResultCodec.BackgroundStarted(Guid.Parse(reader.GetString(7)), reader.GetString(3))
               : toolResults.ReadModelResult(reader.GetString(5));
           results.Add(new FunctionResultContent(reader.GetString(3), result));
           break;

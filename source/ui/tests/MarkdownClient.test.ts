@@ -105,6 +105,10 @@ void test("maps lease and page routes, bodies, and numeric Markdown enums", asyn
     if (isRoute(request, "POST", "/release")) {
       response.writeHead(204);
       response.end();
+    } else if (isRoute(request, "POST", "/locate")) {
+      sendJson(response, { generation, index: 0 });
+    } else if (request.url.includes("/source?")) {
+      sendJson(response, sourceFacts.from);
     } else if (request.method === "POST" && !request.url.endsWith("/contexts")) {
       sendJson(response, opened());
     } else if (request.url.includes("/locate?")) {
@@ -173,6 +177,9 @@ void test("maps lease and page routes, bodies, and numeric Markdown enums", asyn
   const preceding = await owned.readPiecesBefore({ generation, index: 1 }, signal);
   const contextPage = await owned.readContext(0, { generation, index: 0 }, signal);
   const descriptors = await owned.readContexts([0], { generation, index: 0 }, signal);
+  const saved = await owned.sourceCursor(1, signal);
+  assert.deepEqual(saved, sourceFacts.from);
+  assert.deepEqual(await owned.locateSource(saved, signal), cursor);
 
   assert.deepEqual(owned.source, sourceFacts);
   assert.equal(pieces.pieces[0]?.kind, "text");
@@ -186,6 +193,8 @@ void test("maps lease and page routes, bodies, and numeric Markdown enums", asyn
   await Promise.all([owned.dispose(), owned.dispose()]);
   assert.equal(server.requests.filter((request) => request.url.endsWith("/release")).length, 1);
   await assert.rejects(owned.readPieces(cursor, signal), /disposed/u);
+  await assert.rejects(owned.sourceCursor(1, signal), /disposed/u);
+  await assert.rejects(owned.locateSource(saved, signal), /disposed/u);
 
   const open = server.requests[0]!;
   const leasePath = new URL(open.url, server.origin).pathname;
@@ -204,6 +213,8 @@ void test("maps lease and page routes, bodies, and numeric Markdown enums", asyn
       `GET ${leasePath}/pieces/before?generation=${generation}&index=1`,
       `GET ${leasePath}/contexts/0?generation=${generation}&index=0`,
       `POST ${leasePath}/contexts`,
+      `GET ${leasePath}/source?sourceUtf8Offset=1`,
+      `POST ${leasePath}/locate`,
       `POST ${leasePath}/release`,
     ],
   );
@@ -212,6 +223,7 @@ void test("maps lease and page routes, bodies, and numeric Markdown enums", asyn
     index: 0,
     ids: [0],
   });
+  assert.deepEqual(JSON.parse(server.requests.at(-2)!.body), saved);
   assert.deepEqual(JSON.parse(server.requests.at(-1)!.body), {});
 });
 

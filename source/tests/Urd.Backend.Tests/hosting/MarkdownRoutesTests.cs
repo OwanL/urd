@@ -88,6 +88,18 @@ public sealed class MarkdownRoutesTests {
       MarkdownRenderCursor location = await located.Content.ReadFromJsonAsync<MarkdownRenderCursor>(MarkdownRenderJson.Options);
       Assert.Equal(new(generation, 0), location);
     }
+    using (HttpResponseMessage sourceResponse = await RequestAsync(server.Client, HttpMethod.Get,
+        path + "/source?sourceUtf8Offset=1")) {
+      MessageContentCursor saved = (await sourceResponse.Content.ReadFromJsonAsync<MessageContentCursor>(inputJson))!;
+      Assert.Equal(entry.EntryId, saved.Message.MessageId);
+      Assert.Equal((0L, 1), (saved.SegmentIndex, saved.Utf8Offset));
+      string savedJson = JsonSerializer.Serialize(saved, inputJson);
+      JsonElement location = await PostJsonAsync(server.Client, path + "/locate", savedJson);
+      Assert.Equal(generation, location.GetProperty("generation").GetGuid());
+      Assert.Equal(0, location.GetProperty("index").GetInt32());
+      await AssertStatusAsync(server.Client, HttpMethod.Post, path + "/locate", HttpStatusCode.BadRequest,
+          JsonSerializer.Serialize(saved with { Message = saved.Message with { HistoryRevision = 1 } }, inputJson));
+    }
     await AssertStatusAsync(server.Client, HttpMethod.Get,
         path + $"/pieces?generation={Guid.NewGuid()}&index=0", HttpStatusCode.BadRequest);
     await AssertStatusAsync(server.Client, HttpMethod.Post, path + "/contexts", HttpStatusCode.BadRequest,

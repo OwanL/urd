@@ -34,6 +34,11 @@ public sealed class MessageMarkdownLease : IDisposable {
 
   public MarkdownRenderCursor Locate(int sourceUtf8Offset) => GetOwner().Locate(this, sourceUtf8Offset);
 
+  public MarkdownRenderCursor Locate(MessageContentCursor savedSourceCursor) =>
+      GetOwner().Locate(this, savedSourceCursor);
+
+  public MessageContentCursor SourceCursor(int globalUtf8Offset) => GetOwner().SourceCursor(this, globalUtf8Offset);
+
   public MarkdownPiecePage ReadPieces(MarkdownRenderCursor cursor) => GetOwner().Read(this, cursor);
 
   public MarkdownPiecePage ReadPiecesBefore(MarkdownRenderCursor exclusiveEndCursor) => GetOwner().ReadBefore(this, exclusiveEndCursor);

@@ -29,6 +29,10 @@ internal static class MarkdownRoutes {
         ReadContextsAsync(http, hub, streamId, leaseId));
     routes.MapGet("/locate", (HttpContext http, Guid streamId, Guid leaseId,
         [AsParameters] LocateQuery query) => LocateAsync(http, hub, streamId, leaseId, query));
+    routes.MapPost("/locate", (HttpContext http, Guid streamId, Guid leaseId) =>
+        LocateSourceAsync(http, hub, streamId, leaseId));
+    routes.MapGet("/source", (HttpContext http, Guid streamId, Guid leaseId,
+        [AsParameters] LocateQuery query) => ReadSourceCursor(http, hub, streamId, leaseId, query));
     routes.MapPost("/release", (HttpContext http, Guid streamId, Guid leaseId) =>
         ReleaseAsync(http, hub, streamId, leaseId));
     return routes;
@@ -172,6 +176,30 @@ internal static class MarkdownRoutes {
     MarkdownRenderCursor cursor = page.MarkdownLeases.Read(leaseId,
         lease => lease.Locate(query.SourceUtf8Offset.Value));
     return Task.FromResult<IResult>(RenderJson(cursor));
+  }
+
+  private static async Task<IResult> LocateSourceAsync(HttpContext http, SessionEventHub hub,
+      Guid streamId, Guid leaseId) {
+    if (streamId == Guid.Empty || leaseId == Guid.Empty)
+      return Results.BadRequest();
+    MessageContentCursor? cursor = await http.Request.ReadFromJsonAsync<MessageContentCursor>(http.RequestAborted);
+    if (cursor is null)
+      return Results.BadRequest();
+    if (!TryGetPage(hub, streamId, out SessionEventPage page))
+      return MissingPageResult(http);
+    return RenderJson(page.MarkdownLeases.Read(leaseId, lease => lease.Locate(cursor)));
+  }
+
+  private static IResult ReadSourceCursor(HttpContext http, SessionEventHub hub,
+      Guid streamId, Guid leaseId, LocateQuery query) {
+    if (streamId == Guid.Empty || leaseId == Guid.Empty || query.SourceUtf8Offset is null
+        || query.SourceUtf8Offset < 0)
+      return Results.BadRequest();
+    if (!TryGetPage(hub, streamId, out SessionEventPage page))
+      return MissingPageResult(http);
+    // Persisted source identity uses the normal session wire contract, including role strings.
+    return Results.Ok(page.MarkdownLeases.Read(leaseId,
+        lease => lease.SourceCursor(query.SourceUtf8Offset.Value)));
   }
 
   private static async Task<IResult> ReleaseAsync(HttpContext http, SessionEventHub hub,

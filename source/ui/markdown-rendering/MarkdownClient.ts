@@ -67,6 +67,8 @@ const guidPattern = /^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/iu;
 // Source facts are exposed for the later transcript integration; the renderer uses the paged API.
 export interface MarkdownOwnedTextGeneration extends MarkdownOwnedGeneration {
   readonly source: TranscriptTextFacts;
+  sourceCursor(sourceUtf8Offset: number, signal: AbortSignal): Promise<MessageContentCursor>;
+  locateSource(cursor: MessageContentCursor, signal: AbortSignal): Promise<MarkdownRenderCursor>;
 }
 
 export interface MarkdownClientRequest extends MarkdownGenerationRequest {
@@ -144,6 +146,29 @@ class MarkdownHttpGeneration implements MarkdownOwnedTextGeneration {
     url.searchParams.set("sourceUtf8Offset", String(sourceUtf8Offset));
     const cursor = await requestJson<unknown>(url, "GET", undefined, signal);
     return copyCursor(cursor, this.manifest, this.manifest.pieceCount, "located cursor");
+  }
+
+  async sourceCursor(sourceUtf8Offset: number, signal: AbortSignal): Promise<MessageContentCursor> {
+    this.assertReadable();
+    if (!isIndex(sourceUtf8Offset) || sourceUtf8Offset > this.manifest.sourceUtf8Bytes)
+      throw new RangeError("Invalid Markdown source offset.");
+    const url = this.path("/source");
+    url.searchParams.set("sourceUtf8Offset", String(sourceUtf8Offset));
+    return copyMessageCursor(await requestJson<unknown>(url, "GET", undefined, signal));
+  }
+
+  async locateSource(
+    cursor: MessageContentCursor,
+    signal: AbortSignal,
+  ): Promise<MarkdownRenderCursor> {
+    this.assertReadable();
+    const location = await requestJson<unknown>(
+      this.path("/locate"),
+      "POST",
+      copyMessageCursor(cursor),
+      signal,
+    );
+    return copyCursor(location, this.manifest, this.manifest.pieceCount, "located source cursor");
   }
 
   async readPieces(cursor: MarkdownRenderCursor, signal: AbortSignal): Promise<MarkdownPiecePage> {

@@ -77,6 +77,40 @@ internal sealed class MessageMarkdownCache(MessageMarkdownCacheLimits limits) {
     return new(entry.Key.Message, segment.SegmentIndex, utf8Offset - segment.Utf8Start);
   }
 
+  internal static int SourceOffset(Entry entry, MessageContentCursor cursor) {
+    ArgumentNullException.ThrowIfNull(cursor);
+    if (cursor.Message != entry.Key.Message)
+      throw new ArgumentException("The source cursor does not belong to the captured message.", nameof(cursor));
+    if (cursor.SegmentIndex < entry.Key.FromSegment || cursor.SegmentIndex > entry.Key.ThroughSegment)
+      throw new ArgumentOutOfRangeException(nameof(cursor), "The source cursor is outside the captured extent.");
+    if (cursor.SegmentIndex == entry.Key.ThroughSegment) {
+      if (cursor.Utf8Offset != 0)
+        throw new ArgumentOutOfRangeException(nameof(cursor), "The captured end cursor must have a zero byte offset.");
+      return entry.Index.SourceUtf8Bytes;
+    }
+    if (cursor.Utf8Offset < 0)
+      throw new ArgumentOutOfRangeException(nameof(cursor), "The source cursor byte offset cannot be negative.");
+
+    int low = 0, high = entry.Segments.Length;
+    while (low < high) {
+      int middle = low + (high - low) / 2;
+      if (entry.Segments[middle].SegmentIndex < cursor.SegmentIndex) low = middle + 1;
+      else high = middle;
+    }
+    if (low == entry.Segments.Length || entry.Segments[low].SegmentIndex != cursor.SegmentIndex)
+      throw new ArgumentOutOfRangeException(nameof(cursor), "The source cursor segment is outside the captured extent.");
+
+    MarkdownSourceSegment segment = entry.Segments[low];
+    int segmentEnd = low + 1 < entry.Segments.Length
+        ? entry.Segments[low + 1].Utf8Start : entry.Index.SourceUtf8Bytes;
+    int segmentLength = segmentEnd - segment.Utf8Start;
+    if (cursor.Utf8Offset > segmentLength)
+      throw new ArgumentOutOfRangeException(nameof(cursor), "The source cursor byte offset exceeds its captured segment.");
+    // A saved end may become an earlier segment boundary when empty segments append.
+    // Accept equivalent in-extent endpoints; SourceCursor emits the canonical one.
+    return checked(segment.Utf8Start + cursor.Utf8Offset);
+  }
+
   internal void Invalidate(Guid sessionId) {
     foreach (var node in entries.Values.Where(node => node.Value.Key.SessionId == sessionId).ToArray()) Remove(node);
   }

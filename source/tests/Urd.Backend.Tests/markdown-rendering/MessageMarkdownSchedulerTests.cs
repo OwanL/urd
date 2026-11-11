@@ -346,6 +346,58 @@ public sealed class MessageMarkdownSchedulerTests {
     Assert.Throws<MarkdownUnavailableException>(() => Text(other, fresh));
   }
 
+  [Fact]
+  public async Task LeaseMapsSavedSourceCursorsToGlobalAndRenderOffsets() {
+    await using var scheduler = CreateScheduler();
+    const string text = "é🙂z";
+    var key = Key(text, through: 5);
+    var source = Source(key, text) with {
+      Segments = [new(0, 0), new(2, 1), new(2, 2), new(6, 3), new(7, 4)]
+    };
+    using var lease = await scheduler.RequestAsync(key, _ => Task.FromResult(source));
+
+    var anchors = new (MessageContentCursor Cursor, int GlobalOffset)[] {
+      (new(key.Message, 0, 1), 1), // A byte coordinate inside the multibyte é scalar.
+      (new(key.Message, 1, 0), 2), // Empty segment.
+      (new(key.Message, 2, 3), 5), // A byte coordinate inside the multibyte emoji scalar.
+      (new(key.Message, 2, 4), 6), // Segment end maps to the next segment's global start.
+      (new(key.Message, 3, 0), 6),
+      (new(key.Message, 3, 1), 7), // Equivalent end of the final nonempty segment.
+      (new(key.Message, 4, 0), 7), // Saved EOF before a trailing empty segment appended.
+      (new(key.Message, 5, 0), 7) // Current captured end.
+    };
+    foreach (var (cursor, globalOffset) in anchors) {
+      Assert.Equal(lease.Locate(globalOffset), lease.Locate(cursor));
+      Assert.Equal(lease.Locate(globalOffset), lease.Locate(lease.SourceCursor(globalOffset)));
+    }
+    Assert.Equal(new(key.Message, 0, 1), lease.SourceCursor(1));
+    Assert.Equal(new(key.Message, 2, 0), lease.SourceCursor(2));
+    Assert.Equal(new(key.Message, 2, 3), lease.SourceCursor(5));
+    Assert.Equal(new(key.Message, 3, 0), lease.SourceCursor(6));
+    Assert.Equal(new(key.Message, 5, 0), lease.SourceCursor(7));
+
+    Assert.Throws<ArgumentException>(() => lease.Locate(new MessageContentCursor(key.Message with { HistoryRevision = 1 }, 0, 0)));
+    Assert.Throws<ArgumentException>(() => lease.Locate(new MessageContentCursor(key.Message with { Role = MessageRole.User }, 0, 0)));
+    Assert.Throws<ArgumentOutOfRangeException>(() => lease.Locate(new MessageContentCursor(key.Message, -1, 0)));
+    Assert.Throws<ArgumentOutOfRangeException>(() => lease.Locate(new MessageContentCursor(key.Message, 6, 0)));
+    Assert.Throws<ArgumentOutOfRangeException>(() => lease.Locate(new MessageContentCursor(key.Message, 0, -1)));
+    Assert.Throws<ArgumentOutOfRangeException>(() => lease.Locate(new MessageContentCursor(key.Message, 0, 3)));
+    Assert.Throws<ArgumentOutOfRangeException>(() => lease.Locate(new MessageContentCursor(key.Message, 4, 1)));
+    Assert.Throws<ArgumentOutOfRangeException>(() => lease.Locate(new MessageContentCursor(key.Message, 5, 1)));
+  }
+
+  [Fact]
+  public async Task DisposedLeaseRejectsBothSourceAnchorConversions() {
+    await using var scheduler = CreateScheduler();
+    const string text = "saved";
+    var key = Key(text);
+    var lease = await Ready(scheduler, key, text);
+    lease.Dispose();
+
+    Assert.Throws<MarkdownUnavailableException>(() => lease.SourceCursor(0));
+    Assert.Throws<MarkdownUnavailableException>(() => lease.Locate(new MessageContentCursor(key.Message, 0, 0)));
+  }
+
   [Theory]
   [InlineData(false)]
   [InlineData(true)]

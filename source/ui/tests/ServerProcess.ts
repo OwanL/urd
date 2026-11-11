@@ -11,28 +11,41 @@ const assembly =
     new URL("../../hosting/server/bin/Release/net10.0/Urd.Server.dll", import.meta.url),
   );
 
-// Owns only this child and its temporary data. Termination is not a graceful shutdown test.
+export class ServerProcessNotStoppedError extends Error {
+  constructor() {
+    super("Owned server did not exit; data retained");
+  }
+}
+
+// Owns only this child and any temporary data it creates. Termination is not a graceful shutdown test.
 export class ServerProcess {
   readonly origin: URL;
+  readonly pid: number;
   private readonly child: ChildProcessWithoutNullStreams;
   private readonly closed: Promise<void>;
   private readonly dataRoot: string;
+  private readonly ownsDataRoot: boolean;
 
   private constructor(
     origin: URL,
     child: ChildProcessWithoutNullStreams,
     closed: Promise<void>,
     dataRoot: string,
+    ownsDataRoot: boolean,
+    pid: number,
   ) {
     this.origin = origin;
+    this.pid = pid;
     this.child = child;
     this.closed = closed;
     this.dataRoot = dataRoot;
+    this.ownsDataRoot = ownsDataRoot;
   }
 
-  static async start(): Promise<ServerProcess> {
+  static async start(options: { dataRoot?: string } = {}): Promise<ServerProcess> {
     await access(assembly);
-    const dataRoot = await mkdtemp(join(tmpdir(), "urd-ui-integration-"));
+    const ownsDataRoot = options.dataRoot === undefined;
+    const dataRoot = options.dataRoot ?? (await mkdtemp(join(tmpdir(), "urd-ui-integration-")));
     let child: ChildProcessWithoutNullStreams;
     try {
       child = spawn(
@@ -44,7 +57,7 @@ export class ServerProcess {
         },
       );
     } catch (error) {
-      await rm(dataRoot, { recursive: true, force: true });
+      if (ownsDataRoot) await rm(dataRoot, { recursive: true, force: true });
       throw error;
     }
 
@@ -60,7 +73,7 @@ export class ServerProcess {
     child.stdin.end();
     try {
       const origin = await new Promise<URL>((resolve, reject) => {
-        const timer = setTimeout(() => finish(new Error("Server readiness timed out")), 15_000);
+        const timer = setTimeout(() => finish(new Error("Server readiness timed out")), 30_000);
         const onError = (error: Error) => finish(error);
         const onClose = (code: number | null, signal: NodeJS.Signals | null) =>
           finish(new Error(`Server exited before readiness (${code ?? signal})`));
@@ -110,10 +123,12 @@ export class ServerProcess {
         child.once("close", onClose);
         lines.on("line", onLine);
       });
-      return new ServerProcess(origin, child, closed, dataRoot);
+      if (child.pid === undefined) throw new Error("Server process did not expose a PID");
+      return new ServerProcess(origin, child, closed, dataRoot, ownsDataRoot, child.pid);
     } catch (error) {
       await ServerProcess.reap(child, closed);
-      await rm(dataRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      if (ownsDataRoot)
+        await rm(dataRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
       throw error;
     } finally {
       lines.close();
@@ -122,7 +137,8 @@ export class ServerProcess {
 
   async stop(): Promise<void> {
     await ServerProcess.reap(this.child, this.closed);
-    await rm(this.dataRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    if (this.ownsDataRoot)
+      await rm(this.dataRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   }
 
   private static async reap(
@@ -137,10 +153,7 @@ export class ServerProcess {
       await Promise.race([
         closed,
         new Promise<never>((_, reject) => {
-          timer = setTimeout(
-            () => reject(new Error("Owned server did not exit; temporary data retained")),
-            5_000,
-          );
+          timer = setTimeout(() => reject(new ServerProcessNotStoppedError()), 10_000);
         }),
       ]);
     } finally {

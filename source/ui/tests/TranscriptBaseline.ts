@@ -1,24 +1,19 @@
 // Run from source/ui: node tests/TranscriptBaseline.ts
 // Build Vite, then the Release server first. Not part of any test suite.
 import assert from "node:assert/strict";
-import { execFile, spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { cpus, freemem, hostname, platform, release, tmpdir, totalmem } from "node:os";
 import { join } from "node:path";
-import { createInterface } from "node:readline";
 import { DatabaseSync } from "node:sqlite";
-import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { isMainThread, parentPort, Worker, workerData } from "node:worker_threads";
 import { chromium, type Page } from "playwright";
 import { encodeWorkspace, newChat } from "../app/WorkspaceState.ts";
 import { SessionClient } from "../sessions/SessionClient.ts";
 import { startLocalModelServer } from "./LocalModelServer.ts";
-
-const assembly = fileURLToPath(
-  new URL("../../hosting/server/bin/Release/net10.0/Urd.Server.dll", import.meta.url),
-);
+import { ServerProcess, ServerProcessNotStoppedError } from "./ServerProcess.ts";
 const runFile = promisify(execFile);
 const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 const epoch = () => performance.timeOrigin + performance.now();
@@ -40,82 +35,38 @@ class ProcessExitUnconfirmed extends Error {}
 
 type Commit = { negativeStart: number; positiveEnd: number; samples: number; maxQueryMs: number };
 
-// Same lifecycle as ServerProcess, but root/PID remain visible for seeding and memory probes.
 async function startServer(root: string) {
-  await access(assembly);
-  const child = spawn(
-    process.env.DOTNET_HOST_PATH ?? "dotnet",
-    [assembly, "--data-root", root, "--port", "0"],
-    {
-      stdio: "pipe",
-      windowsHide: true,
-    },
-  );
-  const closed = new Promise<void>((resolve) => child.once("close", () => resolve()));
-  const lines = createInterface({ input: child.stdout });
-  let errors = "";
-  child.stderr.on("data", (chunk: Buffer) => {
-    errors = (errors + chunk.toString()).slice(-8192);
-  });
-  child.stdin.end();
-  async function stop() {
-    if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      await Promise.race([
-        closed,
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(
-            () => reject(new ProcessExitUnconfirmed("Owned server did not exit; retain temp root")),
-            10_000,
-          );
-        }),
-      ]);
-    } finally {
-      clearTimeout(timer);
-    }
-  }
+  let server: ServerProcess;
   try {
-    const origin = await new Promise<URL>((resolve, reject) => {
-      const timer = setTimeout(
-        () => reject(new Error(`Server readiness timeout: ${errors}`)),
-        30_000,
-      );
-      child.once("error", (error) => {
-        clearTimeout(timer);
-        reject(error);
-      });
-      child.once("close", () => {
-        clearTimeout(timer);
-        reject(new Error(`Server exited: ${errors}`));
-      });
-      lines.on("line", (line) => {
-        try {
-          const ready = JSON.parse(line) as { event: string; origin: string };
-          if (ready.event !== "urd-ready") return;
-          const url = new URL(ready.origin);
-          assert.equal(url.hostname, "127.0.0.1");
-          clearTimeout(timer);
-          resolve(url);
-        } catch {
-          /* Ignore ordinary log lines. */
-        }
-      });
-    });
-    assert.ok(child.pid);
-    return { origin, pid: child.pid, stop };
+    server = await ServerProcess.start({ dataRoot: root });
   } catch (error) {
-    await stop();
+    if (error instanceof ServerProcessNotStoppedError)
+      throw new ProcessExitUnconfirmed(error.message);
     throw error;
-  } finally {
-    lines.close();
   }
+  return {
+    origin: server.origin,
+    pid: server.pid,
+    async stop() {
+      try {
+        await server.stop();
+      } catch (error) {
+        if (error instanceof ServerProcessNotStoppedError)
+          throw new ProcessExitUnconfirmed(error.message);
+        throw error;
+      }
+    },
+  };
 }
 
 function seed(path: string, ids: string[], selection: string) {
   const db = new DatabaseSync(path);
   try {
-    assert.equal(db.prepare("PRAGMA user_version").get()?.user_version, 11);
+    assert.equal(
+      db.prepare("PRAGMA user_version").get()?.user_version,
+      16,
+      "Transcript fixture schema changed; requalify its SQL before updating this guard.",
+    );
     db.exec("PRAGMA foreign_keys=ON; PRAGMA cache_size=-8192; PRAGMA synchronous=NORMAL;");
     const input = db.prepare(`INSERT INTO input_decisions
       (session_id,input_id,expected_history_revision,original_text_utf8,decision,run_id,llm_selection_json) VALUES (?,?,0,?,1,?,?)`);

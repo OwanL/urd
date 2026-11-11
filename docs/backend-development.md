@@ -28,8 +28,18 @@ Storage uses `response_id`/`response_final` and request-global chunk indexes.
 
 ## Starting context
 
-`StartingContextManager` composes a small general-purpose base, session-kind guidance
-and an optional working directory/assignment. It offers all configured tools through
+Editable system guidance lives in [`core/context/`](../source/backend/core/context/README.md),
+one `ContextGuidance` subclass per block. Each declares its `Order`, `AppliesTo(input)`
+and `GetText(input)`; the manager automatically discovers parameterless subclasses in
+Core's assembly, with no central registration list. Runtime-constructed guidance can
+also be supplied explicitly, allowing a future instruction-file loader to use the same
+type without file I/O in the composer. Discovery caches types, not shared mutable instances.
+Ordering is ascending `Order`, then ordinal full type name; ties between instances of
+the same type retain their supplied order. No other assemblies are scanned.
+
+`StartingContextManager`, under `context/runtime/`, composes the applicable blocks,
+omitting null/whitespace text and propagating guidance errors and cancellation.
+It offers all configured tools through
 existing declarations; no AI pruning, skill discovery or instruction-file loading is
 implemented. Primary and bounded-subagent composition are tested, but only the existing
 primary-session execution flow is integrated. A delegated primary uses primary guidance

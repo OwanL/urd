@@ -124,8 +124,9 @@ and explicit startup recovery. Compaction and rich tool-result inspection remain
     - A running call's icon slowly fades in and out (about a 2.4 s cycle; steady under
       reduced motion). A failed call (including non-zero exit) has a danger-coloured icon.
       Stopped, interrupted or never-run calls look like finished calls.
-    - Calls from one response with two or more calls share a subtle left guide with
-      `┌ ├ └` connectors; each row draws its own segment so partially loaded batches join.
+    - Calls from one response with two or more adjacent calls share a subtle left guide
+      with `┌ ├ └` connectors; each row draws its own segment so partially loaded
+      batches join.
     - A background call keeps its start row (background glyph; live time while pending)
       and gets a separate returned row where the model received the result: return
       glyph, muted major, the call's minor, total time.
@@ -134,11 +135,40 @@ and explicit startup recovery. Compaction and rich tool-result inspection remain
       copies the full payload.
     - File names show their resolved absolute path on hover. A shared context menu
       offers **Copy path** and **Reveal in Explorer** only.
-    - Summaries come from a backend presentation module beside `markdown-rendering/`,
-      not the harness or tool classes. It derives bounded per-tool summaries from stored
-      calls on read, resolves paths against the session working folder and keeps
-      history pages small. Full arguments never ship with rows. Expandable details are
-      deferred; keep row parts modular so they can be added later.
+    - Labels come from a backend display module, `source/backend/tool-call-display/`,
+      beside `markdown-rendering/`, not the harness or tool classes. Full arguments
+      never ship with rows. Expandable details are deferred; keep row parts modular so
+      they can be added later.
+    - **Data path** (owner review 2026-11-12, after three review rounds):
+      - When a response's calls are authorised, the harness also stores
+        `execution_tools.arguments_excerpt`: a generic, tool-agnostic JSON excerpt of the
+        arguments, always ≤ 4 KiB including keys, escaping and markers. Top-level scalars
+        are admitted first in source order (strings ≤ 2 KiB whole, longer ones become
+        `{"$truncated": <256-char prefix>, "length": n}`), then top-level containers
+        recursively (nested strings ≤ 256 chars, arrays ≤ 16 items plus a count marker),
+        stopping at the first member that would overflow. Keys over 128 bytes are never
+        admitted; everything not admitted is counted in one final `{"$omitted": n}`.
+        Window reads therefore stay bounded regardless of argument size.
+      - History and position reads capture descriptors and the excerpts of their tool
+        rows in the same storage transaction. The display module derives labels after
+        the locks are released. Excerpts never reach the browser.
+      - A `ToolCallLabel` has `Icon`, `Title`, `Detail` and `Path`. A truncated or
+        omitted field is never treated as complete: a truncated path gives a name-only
+        row without path actions. Paths are resolved lexically against the session
+        working folder (sharing the tools' Windows path normalisation), without disk
+        access; Reveal checks existence only when invoked.
+      - Tool descriptors gain `background`, `batchedWithPrevious` and `batchedWithNext`.
+        The batch facts are derived on read (the adjacent transcript entry is a tool call
+        from the same response), not stored, so text between calls breaks the guide.
+      - Responses that carry descriptors (history pages and position windows) carry
+        `toolLabels` keyed by `requestId/callId`; the browser stores each label with its
+        descriptor.
+      - The hover card reads a `ToolCallTranscript` (model-facing input and output, as
+        the model context presents them, including background placeholders and the
+        returned-result envelope) on demand. The display is a bounded preview; Copy
+        fetches the full text. Images appear as placeholders, never inline bytes.
+      - The returned row marks where the result entered model history. If the session
+        settles before another request, the model has not yet read it; accepted.
 
 ## Open
 

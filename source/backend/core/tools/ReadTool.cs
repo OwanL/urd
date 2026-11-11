@@ -13,9 +13,7 @@ internal sealed class ReadTool(FileMutationQueue files) : AgentTool {
     Text output is limited to 2000 lines or 50KB, whichever comes first.
     Use offset/limit to page through large files; continue with the suggested offset until complete.
     """;
-  public override JsonElement ParametersSchema => schema;
-
-  private static readonly JsonElement schema = ToolSchema.Parse("""
+  public override JsonElement ParametersSchema { get; } = ToolSchema.Parse("""
     {
       "type": "object",
       "properties": {

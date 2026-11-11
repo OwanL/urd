@@ -13,9 +13,7 @@ internal sealed class BashTool(ChatProcesses processes, GitBash bash, IReadOnlyD
     If truncated, full output is saved to a temp file.
     Optionally provide a timeout in seconds; there is no default timeout.
     """;
-  public override JsonElement ParametersSchema => schema;
-
-  private static readonly JsonElement schema = ToolSchema.Parse("""
+  public override JsonElement ParametersSchema { get; } = ToolSchema.Parse("""
     {
       "type": "object",
       "properties": {

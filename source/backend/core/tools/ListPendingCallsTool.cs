@@ -7,9 +7,7 @@ internal sealed class ListPendingCallsTool(PendingToolCalls pending) : AgentTool
   public override string Description => """
     List pending tool calls, including their identities, start times and cancellation-request status.
     """;
-  public override JsonElement ParametersSchema => schema;
-
-  private static readonly JsonElement schema = ToolSchema.Parse("""
+  public override JsonElement ParametersSchema { get; } = ToolSchema.Parse("""
     {
       "type": "object",
       "properties": {},

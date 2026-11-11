@@ -12,9 +12,7 @@ internal sealed class EditTool(FileMutationQueue files) : AgentTool {
     CRLF and LF are equivalent. No fuzzy matching.
     Merge nearby changes into one edit; do not pad with large unchanged regions.
     """;
-  public override JsonElement ParametersSchema => schema;
-
-  private static readonly JsonElement schema = ToolSchema.Parse("""
+  public override JsonElement ParametersSchema { get; } = ToolSchema.Parse("""
     {
       "type": "object",
       "properties": {

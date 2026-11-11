@@ -8,9 +8,7 @@ internal sealed class CancelPendingCallsTool(PendingToolCalls pending) : AgentTo
     Request cancellation of all pending tool calls except this call.
     This acknowledges requests, not completed cleanup or rollback; calls may already have had partial effects.
     """;
-  public override JsonElement ParametersSchema => schema;
-
-  private static readonly JsonElement schema = ToolSchema.Parse("""
+  public override JsonElement ParametersSchema { get; } = ToolSchema.Parse("""
     {
       "type": "object",
       "properties": {},

@@ -5,6 +5,13 @@ namespace Urd.Core.Tools;
 
 // Creates or replaces a UTF-8 file, ordered with other Urd mutations of that path.
 internal sealed class WriteTool(FileMutationQueue files) : AgentTool {
+  public override string Name => "write";
+  public override string Description => """
+    Write content to a file. Creates the file if it doesn't exist, overwrites if it does.
+    Automatically creates parent directories. Use only for new files or complete rewrites.
+    """;
+  public override JsonElement ParametersSchema => schema;
+
   private static readonly JsonElement schema = ToolSchema.Parse("""
     {
       "type": "object",
@@ -16,13 +23,6 @@ internal sealed class WriteTool(FileMutationQueue files) : AgentTool {
     }
     """);
   private static readonly UTF8Encoding utf8 = new(false, true);
-
-  public override string Name => "write";
-  public override string Description => """
-    Write content to a file. Creates the file if it doesn't exist, overwrites if it does.
-    Automatically creates parent directories. Use only for new files or complete rewrites.
-    """;
-  public override JsonElement ParametersSchema => schema;
 
   public override async Task<ToolOutput> RunAsync(JsonElement arguments, ToolContext context, CancellationToken cancellation) {
     try {

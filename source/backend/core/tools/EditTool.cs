@@ -5,6 +5,15 @@ namespace Urd.Core.Tools;
 
 // Matches every replacement against one original snapshot without normalizing untouched text.
 internal sealed class EditTool(FileMutationQueue files) : AgentTool {
+  public override string Name => "edit";
+  public override string Description => """
+    Edit a single file using exact text replacement.
+    Every edits[].oldText must match a unique, non-overlapping region of the original file.
+    CRLF and LF are equivalent. No fuzzy matching.
+    Merge nearby changes into one edit; do not pad with large unchanged regions.
+    """;
+  public override JsonElement ParametersSchema => schema;
+
   private static readonly JsonElement schema = ToolSchema.Parse("""
     {
       "type": "object",
@@ -27,15 +36,6 @@ internal sealed class EditTool(FileMutationQueue files) : AgentTool {
       "required": ["path", "edits"]
     }
     """);
-
-  public override string Name => "edit";
-  public override string Description => """
-    Edit a single file using exact text replacement.
-    Every edits[].oldText must match a unique, non-overlapping region of the original file.
-    CRLF and LF are equivalent. No fuzzy matching.
-    Merge nearby changes into one edit; do not pad with large unchanged regions.
-    """;
-  public override JsonElement ParametersSchema => schema;
 
   public override async Task<ToolOutput> RunAsync(JsonElement arguments, ToolContext context, CancellationToken cancellation) {
     try {

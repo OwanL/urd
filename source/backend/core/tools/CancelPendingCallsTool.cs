@@ -3,6 +3,13 @@ using System.Text.Json;
 namespace Urd.Core.Tools;
 
 internal sealed class CancelPendingCallsTool(PendingToolCalls pending) : AgentTool {
+  public override string Name => "cancel_pending_calls";
+  public override string Description => """
+    Request cancellation of all pending tool calls except this call.
+    This acknowledges requests, not completed cleanup or rollback; calls may already have had partial effects.
+    """;
+  public override JsonElement ParametersSchema => schema;
+
   private static readonly JsonElement schema = ToolSchema.Parse("""
     {
       "type": "object",
@@ -10,13 +17,6 @@ internal sealed class CancelPendingCallsTool(PendingToolCalls pending) : AgentTo
       "additionalProperties": false
     }
     """);
-
-  public override string Name => "cancel_pending_calls";
-  public override string Description => """
-    Request cancellation of all pending tool calls except this call.
-    This acknowledges requests, not completed cleanup or rollback; calls may already have had partial effects.
-    """;
-  public override JsonElement ParametersSchema => schema;
 
   public override Task<ToolOutput> RunAsync(JsonElement arguments, ToolContext context, CancellationToken cancellation) {
     int count = pending.RequestCancelAll(context.RequestId, context.CallId);

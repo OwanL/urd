@@ -1,7 +1,7 @@
 # Transcript engineering — working design
 
 **Status: Stage 1 delivered; Stage 2 implementation and composed qualification in progress.**
-**Updated: 2026-11-10.** The owner has directed continuing through a usable real-GUI
+**Updated: 2026-11-11.** The owner has directed continuing through a usable real-GUI
 transcript, rather than handing over another standalone demo. Markdig derivation,
 weighted positions, standalone rendering and generation handoff are implemented;
 production display remains inactive pending the gates below. Earlier "not selected"
@@ -25,6 +25,13 @@ checkpoint, not the present source tree. Production cache limits remain unselect
    lifecycle and memory on that composition; select explicit limits from the evidence.
    Only then stage a real-GUI build worth owner evaluation. A fixture improvement or
    completed module is not a substitute for this gate.
+
+The batch reader, exact-entry Core facade and page-owned HTTP/browser adapter are now
+implemented but unactivated. Geometry accepts a shared outer scrollport; reconnects
+can replace a lease without changing its cached generation. Persisted segment/byte
+source anchors can be translated to and from generation-local offsets without loading
+source text. Focused tests cover these primitives; none constitutes qualification of
+the real transcript, common-message latency or production memory limits.
 
 Stages 3–4 (tool/reasoning detail and managed media) retain their separate ownership
 and requirements. This delivery sequence does not authorize bypassing Stage 2

@@ -459,3 +459,30 @@ acceptance is still blocked. No production latency, memory budget or activation 
 The owned processes stopped, leases were released and the original evidence was unchanged.
 Report, input hashes, measured results and cleanup proof:
 `C:/Users/OwanLazic/AppData/Local/Temp/urd-batched-context-qual-qZWACy/`.
+
+## Actual page-owned HTTP/client fixture — 2026-11-11
+
+Frozen production Kestrel routes plus the real browser client/assembler/renderer now
+pass native-format, bounded-response, failure-cleanup and SSE orphan-reclamation probes.
+The production browser bundle was served directly by Kestrel, without a development
+proxy. The source capture is labelled `7b28297`; backend binaries were copied from the
+previous isolated build, not rebuilt from that capture. Exact input/loaded-binary hashes
+are recorded. Later source-anchor and background-tool changes are outside this probe.
+
+For an 870-byte message, 25 warmed-runtime **cache misses** produced distinct generations
+and measured median **49.6 ms**, p95 **54.0 ms**, maximum **54.6 ms**. Another 25 cache-hit
+reacquire/assembly trials measured median **27.0 ms**, p95 **58.5 ms**, maximum **58.6 ms**.
+First-ever process/browser formatting was separately **329.1–446.2 ms** across two launches.
+These intervals include HTTP open, complete fixture assembly, DOM commit and two animation
+frames; they exclude SSE setup/release and are not actual retained-tab activation timings.
+Complete 512-line code / 512-row table fixtures took **295.9 / 689.9 ms**, with **41 / 199**
+HTTP calls including open/release. Observed pages stayed within 16 KiB / 256 records.
+
+Missing/stale opens, the candidate 12-lease cap, disconnect reclamation, fresh-page reopen
+and awaited release passed. Shutdown ended with zero entries, retained bytes and pending
+keys; this is logical cleanup, **not heap/resident-memory recovery evidence**. Warm-tab
+latency, first-ever formatting, real transcript composition, long-task/frame behavior,
+contention, memory and actual hidden/freeze lifecycle gates remain unqualified. No
+production limits or activation follow. All owned processes/ports stopped; the user's
+running server remained untouched. Full report, raw trials, hashes and cleanup proof:
+`C:/Users/OwanLazic/AppData/Local/Temp/urd-real-http-qual-ob68YR/REPORT.md`.

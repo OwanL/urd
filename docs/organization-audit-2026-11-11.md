@@ -1,12 +1,54 @@
 # Organization audit — 2026-11-11
 
-**Audit only. No application or test changes.** This is a review backlog, not approval to refactor.
+**Frozen audit with approved follow-up.** The original findings below describe the reviewed snapshot, not today's unresolved backlog. The follow-up records the owner's later decisions and cleanup; it does not claim a new full-source audit of concurrent feature work.
 
 ## Result
 
 The strongest organizational pressure is in browser presentation and test ownership, not a need to redesign the C# hierarchy. Transcript viewport work spans remote data, DOM measurement and anchoring; large browser suites combine unrelated owners; numeric Markdown wire values rely on manual cross-language synchronization. One concrete stale diagnostic was also found: the transcript baseline requires an obsolete database schema.
 
 **19 findings:** 8 worth reviewing first; 11 smaller cleanup candidates. Priority here means maintenance review order, not production incident severity. Structural concerns are not claims of a demonstrated runtime failure.
+
+## Approved follow-up
+
+The owner approved bounded cleanup and chose to remove all browser tests rather than split
+or retain them. For O01, design review rejected the proposed DOM extraction in favor of a
+position-reader boundary. For O02, the owner delegated the choice; a small workspace-owned
+hook preserves both transcript selection and composer focus pinning.
+
+| Finding | Outcome |
+| --- | --- |
+| O01 | `TranscriptPositionReader` owns cancellable position reads. VirtualTranscript keeps geometry, anchoring, visibility and publication policy; currentness is rechecked after promise settlement. |
+| O02 | `useWorkspaceRetention` names the existing MRU/focus/selection policy without moving it into the transcript. |
+| O03 / O04 / O10 | Browser suites, synthetic renderer harnesses, unused workspace shim and their test commands removed. No replacement browser smoke suite. |
+| O05 | Backend Markdown enum numbers are explicit stable wire IDs; a client boundary test decodes every enum family. |
+| R01 / T07 | Baseline guard updated to schema 16 after checking its seed SQL. Shared ServerProcess now supports caller-owned roots and PID access, preserving data when child exit is unconfirmed. |
+| T01 | Observer tests check meaningful status/content changes and monotonic versions, not fixed publication counts. |
+| T02 | Provider settings depend on a derived client-method surface; complete local fakes cannot fall through to HTTP. |
+| O06 | One cancellable session-page enumerator; initial-open and reconnect policies remain in their callers. |
+| O07 | One derived resend-eligibility fact supplies shared execution gates; Send retains its own readiness, selection and draft requirements. |
+| O08 | Unused tool-name lookup/index removed; duplicate-name validation and immutable catalog snapshots remain. |
+| O09 | Common safe provider-failure mapping consolidated; caller-specific classification and cancellation policies remain separate. |
+| T03 | Stored response helpers explicitly reject output from multiple requests instead of concatenating arbitrary request order. |
+| T04 | Link-policy assertions moved to their owner; the synthetic locator's self-test removed. |
+| T05 | JSON envelope checks retain exact fields and values without depending on property order. |
+| T06 | A controlled delivered-change barrier replaces the unwatch test's fixed sleep. |
+| D01 | Current guides link schema/state/selection owners and inventory current session routes. Historical milestones remain historical. |
+
+**Coverage trade-off:** Fast Node tests and the offline HTTP/SDK integration remain. Actual
+DOM layout, selection, focus, clipboard and composed browser behavior no longer have retained
+automated browser coverage. BrowserFixture is a manual development host; TranscriptBaseline
+is a separate manual diagnostic, not a test suite. See [testing](testing.md).
+
+**Verification:** Independent acceptance reviews covered the bounded changes. The integrated
+Release backend compiled cleanly and passed 374/374 tests, including these cleanups and the
+concurrent compaction work (peer-run verification). Local focused UI checks passed 76 tests,
+typed lint and TypeScript checking. An owned stub child verified shared process startup/stop,
+default-root cleanup and caller-root preservation, including startup failure. Representative
+baseline seed rows passed the schema-16 SQL, foreign-key and position-trigger checks. The
+full manual baseline/benchmark was not rerun; no new rendering-performance claim is made.
+
+Removed source paths below are plain text rather than broken live links. The per-file ledger
+retains its original fingerprints and historical assessments.
 
 ## Scope and evidence
 
@@ -69,9 +111,9 @@ One 2,104-line suite combines workspace/provider UI, event-stream lifecycle, a b
 **Review option:** Separate the existing scenarios by behavioral owner, keeping the common browser fixture shared and the benchmark identifiable as measurement code rather than creating a new test framework.
 
 **Evidence:**
-- [`source/ui/tests/BrowserRegression.ts:446–862`](../source/ui/tests/BrowserRegression.ts#L446)
-- [`source/ui/tests/BrowserRegression.ts:863–1197`](../source/ui/tests/BrowserRegression.ts#L863)
-- [`source/ui/tests/BrowserRegression.ts:1198–2104`](../source/ui/tests/BrowserRegression.ts#L1198)
+- `source/ui/tests/BrowserRegression.ts:446–862`
+- `source/ui/tests/BrowserRegression.ts:863–1197`
+- `source/ui/tests/BrowserRegression.ts:1198–2104`
 
 <a id="o04"></a>
 ### O04 — Renderer browser ownership is concentrated in one mode-driven harness
@@ -83,13 +125,13 @@ A single parent browser test owns independent DOM-semantic, selection, geometry/
 **Review option:** Keep the shared Chromium/server lifecycle, but move behavior-specific scenario data and assertions behind renderer, window-geometry, and message-view owners; extract only where it removes cross-owner edits.
 
 **Evidence:**
-- [`source/ui/tests/MarkdownRenderer.browser.ts:17–45`](../source/ui/tests/MarkdownRenderer.browser.ts#L17)
-- [`source/ui/tests/MarkdownRenderer.browser.ts:48–50`](../source/ui/tests/MarkdownRenderer.browser.ts#L48)
-- [`source/ui/tests/MarkdownRenderer.browser.ts:406–480`](../source/ui/tests/MarkdownRenderer.browser.ts#L406)
-- [`source/ui/tests/MarkdownRenderer.browser.ts:503–549`](../source/ui/tests/MarkdownRenderer.browser.ts#L503)
-- [`source/ui/tests/MarkdownRenderer.browser.ts:672–932`](../source/ui/tests/MarkdownRenderer.browser.ts#L672)
-- [`source/ui/tests/MarkdownRendererHarness.tsx:114–287`](../source/ui/tests/MarkdownRendererHarness.tsx#L114)
-- [`source/ui/tests/MarkdownRendererHarness.tsx:443–518`](../source/ui/tests/MarkdownRendererHarness.tsx#L443)
+- `source/ui/tests/MarkdownRenderer.browser.ts:17–45`
+- `source/ui/tests/MarkdownRenderer.browser.ts:48–50`
+- `source/ui/tests/MarkdownRenderer.browser.ts:406–480`
+- `source/ui/tests/MarkdownRenderer.browser.ts:503–549`
+- `source/ui/tests/MarkdownRenderer.browser.ts:672–932`
+- `source/ui/tests/MarkdownRendererHarness.tsx:114–287`
+- `source/ui/tests/MarkdownRendererHarness.tsx:443–518`
 
 <a id="o05"></a>
 ### O05 — Markdown enum ordinals are a manually synchronized wire contract
@@ -208,8 +250,8 @@ The module only imports base.css and re-exports mountMarkdownWorkspace, but no i
 **Review option:** Remove the unused shim if obsolete, or add an explicit test entry that consumes it if full-workspace mounting is still an intended qualification path.
 
 **Evidence:**
-- [`source/ui/tests/MarkdownWorkspaceHarness.tsx:1–3`](../source/ui/tests/MarkdownWorkspaceHarness.tsx#L1)
-- [`source/ui/tests/MarkdownRendererHarness.html:40–47`](../source/ui/tests/MarkdownRendererHarness.html#L40)
+- `source/ui/tests/MarkdownWorkspaceHarness.tsx:1–3`
+- `source/ui/tests/MarkdownRendererHarness.html:40–47`
 - [`source/ui/package.json:22–23`](../source/ui/package.json#L22)
 - [`source/ui/index.html:1–11`](../source/ui/index.html#L1)
 
@@ -296,7 +338,7 @@ Provider management explicitly names current database schema 10 although Databas
 - [`docs/server-development.md:69–80`](../docs/server-development.md#L69)
 - [`docs/browser-development.md:42–45`](../docs/browser-development.md#L42)
 - [`source/ui/app/WorkspaceState.ts:27–31`](../source/ui/app/WorkspaceState.ts#L27)
-- [`source/ui/tests/BrowserRegression.ts:770–776`](../source/ui/tests/BrowserRegression.ts#L770)
+- `source/ui/tests/BrowserRegression.ts:770–776`
 
 ## Boundaries worth keeping
 

@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.AI;
 using Urd.Core.MarkdownRendering;
@@ -18,14 +17,11 @@ public abstract class SessionBase {
   private readonly ChatProcesses? processes;
   private readonly PendingToolCalls pending;
   private readonly AsyncLock gate = new();
-  private readonly ConcurrentDictionary<long, SessionObserver> observers = new();
+  private readonly SessionNotifications notifications;
   private bool acceptingUserMessages = true;
   private bool needsAttention;
   private bool hasUnownedExecution;
   private bool historyRevisionChanged;
-  private long version;
-  private long nextObserverId;
-  private string? currentStatus;
   private SessionExecutionResult? lastSettlement;
   private SessionExecution? execution;
   private TaskCompletionSource<SessionExecutionResult>? settlement;
@@ -37,6 +33,7 @@ public abstract class SessionBase {
   private protected SessionBase(SessionRecord record, UrdStore store, Func<ProviderConnection, IChatClient> createChatClient,
       ToolCatalog? tools = null, ChatProcesses? processes = null, PendingToolCalls? pending = null) {
     Id = record.Id;
+    notifications = new SessionNotifications(Id);
     HistoryRevision = record.HistoryRevision;
     WorkingDirectory = record.WorkingDirectory;
     this.store = store;
@@ -78,15 +75,7 @@ public abstract class SessionBase {
     hasUnownedExecution = stored.UnsettledExecutionId is { } executionId && !IsCurrentExecution(executionId);
     historyRevisionChanged = stored.HistoryRevision != HistoryRevision;
     lastSettlement = stored.LastSettlement;
-    currentStatus = GetStatus(ApplyLiveState(stored));
-
-    long observerId = Interlocked.Increment(ref nextObserverId);
-    var subscription = new SessionObserver(observer, watched, () => observers.TryRemove(observerId, out _));
-    observers.TryAdd(observerId, subscription);
-    subscription.Notify(new SessionChange(Id, version, currentStatus));
-    if (watched)
-      subscription.Notify(new SessionChange(Id, version));
-    return subscription;
+    return notifications.Subscribe(observer, watched, GetStatus(ApplyLiveState(stored)));
   }
 
   public async Task<MessageContentPage> ReadMessageContentAsync(
@@ -486,22 +475,8 @@ public abstract class SessionBase {
         waiting, lastOutcome: snapshot.LastSettlement?.Outcome);
   }
 
-  // Caller holds the session gate. Observers are expected to enqueue into bounded server queues.
-  private void PublishChange() {
-    version = checked(version + 1);
-    if (observers.IsEmpty)
-      return;
-
-    string status = GetCurrentStatus();
-    bool statusChanged = currentStatus is not null && currentStatus != status;
-    currentStatus = status;
-    foreach (SessionObserver observer in observers.Values) {
-      if (statusChanged)
-        observer.Notify(new SessionChange(Id, version, status));
-      if (observer.Watched)
-        observer.Notify(new SessionChange(Id, version));
-    }
-  }
+  // Caller holds the session gate.
+  private void PublishChange() => notifications.Publish(GetCurrentStatus());
 
   private string GetCurrentStatus() => GetStatus(needsAttention,
       admissionFenced: !acceptingUserMessages || hasUnownedExecution || historyRevisionChanged,
@@ -533,27 +508,6 @@ public abstract class SessionBase {
     } catch (SqliteException) {
       MarkNeedsAttention();
       throw;
-    }
-  }
-
-  private sealed class SessionObserver(Action<SessionChange> callback, bool watched, Action unsubscribe) : IDisposable {
-    private int disposed;
-
-    internal bool Watched { get; } = watched;
-
-    internal void Notify(SessionChange change) {
-      if (Volatile.Read(ref disposed) != 0)
-        return;
-      try {
-        callback(change);
-      } catch (Exception) {
-        // Subscriber failure must not turn a saved session change into an execution failure.
-      }
-    }
-
-    public void Dispose() {
-      if (Interlocked.Exchange(ref disposed, 1) == 0)
-        unsubscribe();
     }
   }
 }

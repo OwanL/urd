@@ -13,6 +13,43 @@ namespace Urd.Backend.Tests.Sessions;
 
 public sealed class SessionSubscriptionTests {
   [Fact]
+  public async Task ThrowingObserverDoesNotInterruptOtherObserversOrSettlement() {
+    using var client = new ScriptedChatClient(Complete);
+    await using var fixture = new ExecutionFixture(client);
+    var healthyChanges = new ConcurrentQueue<SessionChange>();
+    using IDisposable throwingSubscription = await fixture.Session.SubscribeAsync(
+        _ => throw new InvalidOperationException("Subscriber failed."), watched: true);
+    using IDisposable healthySubscription = await fixture.Session.SubscribeAsync(healthyChanges.Enqueue, watched: false);
+
+    Guid executionId = await fixture.StartExecutionAsync("hello");
+    SessionExecutionResult result = await fixture.Session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout);
+
+    Assert.Equal(ExecutionOutcome.Completed, result.Outcome);
+    Assert.Contains(healthyChanges, change => change.Status == "running");
+    Assert.Equal("idle", healthyChanges.Last().Status);
+  }
+
+  [Fact]
+  public async Task DisposalIsIdempotentAndUnobservedChangesAdvanceVersion() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    using var client = new ScriptedChatClient(_ => throw new InvalidOperationException("No request expected."));
+    var manager = new SessionManager(store, _ => client);
+    PrimarySession session = await manager.CreatePrimaryAsync();
+    var changes = new ConcurrentQueue<SessionChange>();
+    IDisposable subscription = await session.SubscribeAsync(changes.Enqueue, watched: false);
+    int initialCount = changes.Count;
+
+    subscription.Dispose();
+    subscription.Dispose();
+    await session.FenceUserMessagesAsync();
+    Assert.Equal(initialCount, changes.Count);
+
+    using IDisposable laterSubscription = await session.SubscribeAsync(changes.Enqueue, watched: false);
+    Assert.Equal(new SessionChange(session.Id, 1, "fenced"), changes.Last());
+  }
+
+  [Fact]
   public async Task RegistrationDeliversStatusAndWatchedChangeAtOneVersion() {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);

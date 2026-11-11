@@ -550,6 +550,36 @@ assuming Pie's exact presets, storage or admission machinery must be copied.
 Interactions with pending work and follow-ups need a clear lifecycle rule; do not
 silently bypass the existing idle-only safeguard.
 
+### Compose starting context from shared and session-specific parts
+
+**Owner direction (2026-11-11):** Follow Pi's general prompt-composition direction,
+with a small shared base and separately composed parts that vary with session and
+assignment context. Do not maintain a separate complete prompt for every role.
+A primary session, bounded subagent and delegated primary can need different
+instructions while retaining most of the same prompt. A delegated primary remains
+`PrimarySession`; assignment context does not create a third session kind or alter
+its lifetime and authority.
+
+A starting-context manager is a reasonable working direction: coordinate guidance,
+environment facts, capability catalogs and pruning utilities to assemble the initial
+model context. Keep composition distinct from source discovery, relevance selection,
+resource loading, tool permission and session lifecycle. The manager can select the
+appropriate prompt parts from explicit session/assignment facts; it must not become
+another session engine. `StartingContextManager` is a working name, not an approved
+class API or a requirement for a generic prompt/resource framework.
+
+Leave room for optional instruction documents to participate in selection alongside
+tools and skills. Automatic `AGENTS.md`/`CLAUDE.md` insertion, their precedence and
+whether they may be pruned remain undecided; this direction does not implement or
+approve those policies. Existing protected-capability and prefix-stability constraints
+below still apply. Exact assembly, restoration and refresh boundaries need concrete
+implementation design.
+
+Prompt wording is a separate research task. Inventory other harnesses' fixed
+instructions and dynamic additions without treating their presence as evidence that
+Urd should copy them. Prefer small, general-purpose guidance over bloat and
+workflow-specific overfitting. No complete external prompt has been selected.
+
 ### Keep AI-based tool and skill pruning, with protected core capabilities
 
 **Decision:** Retain Pie's AI-based tool/skill catalog pruning. The owner reports

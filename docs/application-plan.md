@@ -51,6 +51,10 @@ Exact packaged/custom-copy subpaths remain open.
   provider accounts and MCP connections must not become execution-owned objects.
 - **Context** will own the model's working view, selection, compaction and recall.
   Compaction does not delete readable history. Context selection is not tool permission.
+  Starting-context composition combines a shared base with session/assignment-specific
+  prompt parts and uses separate discovery/pruning utilities; see the
+  [owner direction](ARCHITECTURE.md#compose-starting-context-from-shared-and-session-specific-parts).
+  Exact manager APIs, prompt wording and instruction-file selection policies remain open.
 - **Guidance** holds bundled editable prompts, agents and skills. A corresponding
   `guidance-loading/` area discovers and reads them. Authored content and loader code
   are separate; existing user/project instructions are not moved into this collection.

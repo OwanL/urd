@@ -5,7 +5,7 @@ import { RichMessageBody } from "./RichMessageBody.tsx";
 import type { TranscriptDisplay } from "./TranscriptDisplay.ts";
 import { MarkdownClient } from "../markdown-rendering/MarkdownClient.ts";
 
-// Startup supplies measured limits; qualification uses this same application composition.
+// Normal startup and isolated previews share the same bounded application composition.
 export function mountMarkdownWorkspace(
   root: HTMLElement,
   limits: Pick<TranscriptDisplay, "retainedPieces" | "retainedTabs">,

@@ -1,56 +1,36 @@
 # Transcript engineering — working design
 
-**Status: Stage 1 delivered; Stage 2 implementation and composed qualification in progress.**
-**Updated: 2026-11-11.** The owner has directed continuing through a usable real-GUI
-transcript, rather than handing over another standalone demo. Markdig derivation,
-weighted positions, standalone rendering and generation handoff are implemented;
-production display remains inactive pending the gates below. Earlier "not selected"
-and planning-only statements in the discussion record describe their historical
-checkpoint, not the present source tree. Production cache limits remain unselected.
+**Status: Stage 2 is composed into the normal app for local owner UX review.**
+**Updated: 2026-11-11.** The owner accepted output propagation timing as follow-up
+work and approved making the transcript usable with an isolated preview. Normal
+frontend and backend startup now share the exercised lease/disposal composition.
+Native lifecycle and performance qualification remain follow-up work.
 
-## Current delivery sequence
+## Current delivery status
 
-1. Replace serial per-context HTTP reads with bounded descriptor batches, preserving
-   fragmented metadata and atomic generation-fenced assembly. Re-run the composed
-   fixture before claiming a latency improvement.
-2. Connect authoritative entry lookup and public Core generation ownership to HTTP.
-   Lease ownership follows the existing page event stream: disconnect and shutdown
-   reclaim generations, including late opens. Explicit release remains awaitable;
-   a generation identity is not an independent ownership token. Keep this bridge
-   unactivated while its lifetime/failure paths are verified.
-3. Compose the actual browser transcript with the HTTP adapter, entry and intra-message
-   windows, source anchors, selected-span retention and persisted reading intent.
-   Exercise the real app against isolated stored fixtures, not live provider accounts.
-4. Qualify common-message latency, large-message catch-up, contention, navigation,
-   lifecycle and memory on that composition; select explicit limits from the evidence.
-   Only then stage a real-GUI build worth owner evaluation. A fixture improvement or
-   completed module is not a substitute for this gate.
+The normal frontend mounts the Markdown workspace with 256-piece message windows
+and three normally retained tabs; focus/selection can pin additional panels. Program
+composes `MessageMarkdownService` with 64 entries, 384 MiB of accounted retained
+indices/lease overhead, 32 pending keys, 64 leases and a 16 KiB small-message threshold.
+Explicit overrides remain supported. These initial local limits reuse the exercised
+workload; transient parsing is separate, and these are not resident-memory guarantees.
 
-The batch reader, exact-entry Core facade and page-owned HTTP/browser adapter are now
-implemented but unactivated. Geometry accepts a shared outer scrollport; reconnects
-can replace a lease without changing its cached generation. Persisted segment/byte
-source anchors can be translated to and from generation-local offsets without loading
-source text. An explicit qualification entry now injects Markdown into the actual
-Workspace/Conversation/Transcript, with bounded message windows and retained paused
-conversation views. Normal entry bundles exclude the renderer and normal server startup
-still does not map its routes. Three isolated stored fixtures passed retained-DOM,
-native-selection and awaited-disposal checks in this composition.
+The actual Workspace/Conversation composition now uses bounded message windows,
+indexed full-history navigation, source anchors, selected-span retention and persisted
+reading intent. The batch reader, exact-entry Core facade and page-owned HTTP adapter
+retain scoped leases: disconnect/shutdown reclaim generations, including late opens.
+Reconnect and shared-scrollport reflow preserve source-based reading positions.
 
-Indexed full-history entry navigation, persisted source restoration, recursive ordinary
-block gaps and exact indexed code/table child seeks are now implemented in the explicit
-composition. The first 100k-entry browser run exposed suspended initial reads; after
-correction, distant scrollbar jumps loaded bounded windows without walking history.
-Reload then exposed a 3.25 px source-position drift despite preserving the draft. Capture
-on publication and shared-scrollport offset fixes are under composed verification, not
-signed off. Active-generation resize restoration retains mappings only for mounted pieces;
-it must not reopen a lease or reread a window. Page freeze/resume ownership hooks exist,
-but actual hidden/freeze behavior, large catch-up, contention and memory recovery remain
-unqualified. No production limits, activation or user-preview build follow yet. See the
-latest real-Workspace checkpoint in [parser evidence](TRANSCRIPT-PARSER-EVIDENCE.md).
+The combined schema-16 startup passes focused hosting/lifetime checks, the real HTTP
+client integration, UI checks/unit tests/build and bounded normal-app browser smoke
+checks. See [parser evidence](TRANSCRIPT-PARSER-EVIDENCE.md) for their scope. Native
+lifecycle, input/paint/long-task, warm/cold latency, contention and resident-memory
+qualification remain follow-up work, not blockers to local owner UX review. The
+178–217 ms observation measured append start through observed database commit, not
+paint; it does not establish a rendering target failure.
 
-Stages 3–4 (tool/reasoning detail and managed media) retain their separate ownership
-and requirements. This delivery sequence does not authorize bypassing Stage 2
-performance/selection gates or adding migrations.
+Stages 3–4 (tool/reasoning detail and managed media) retain separate ownership and
+requirements. This activation adds no migrations.
 
 ## Purpose and authority
 

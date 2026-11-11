@@ -78,8 +78,10 @@ internal static class Program {
           : null;
       manager = new SessionManager(store, client is { } supplied ? _ => supplied : providers.CreateChatClient, tools);
       eventHub = new SessionEventHub(manager);
-      // Qualification may supply explicit limits; normal startup leaves Markdown inactive.
-      markdown = createMarkdown?.Invoke();
+      // Initial local limits reuse the exercised workload; transient parser memory is separate.
+      markdown = createMarkdown?.Invoke() ?? new MessageMarkdownService(new(
+          Entries: 64, RetainedBytes: 384L * 1024 * 1024,
+          PendingKeys: 32, Leases: 64, SmallMessageUtf8Bytes: 16 * 1024));
       app = CreateApplication(options, manager, providers, eventHub, markdown, () => Volatile.Read(ref servedOrigin));
       var shutdownRequested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
       using var lifetimeStop = app.Lifetime.ApplicationStopping.Register(() => shutdownRequested.TrySetResult());

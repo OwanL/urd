@@ -3,8 +3,7 @@ import type { TranscriptEntryRef, TranscriptTextFacts } from "../sessions/Messag
 import type { MarkdownClient } from "../markdown-rendering/MarkdownClient.ts";
 import type { MarkdownSavedSourcePosition } from "../markdown-rendering/MarkdownMessageView.tsx";
 
-// Supplied only by an explicit composition entry point; normal startup has none.
-// These are qualification inputs, not selected production budgets.
+// Shared bounded resources supplied by the application composition.
 export interface TranscriptDisplay {
   readonly MessageBody: ComponentType<RichMessageBodyProps>;
   readonly client: MarkdownClient;

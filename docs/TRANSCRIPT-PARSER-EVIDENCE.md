@@ -648,3 +648,37 @@ session's Playwright artifacts named `ui12-hidden-reflow-cycles.json`,
 `ui12-native-selection.json`, `ui12-five-tab-source-follow-draft.json`,
 `ui12-initial-resume-100k-reload.json`, `ui12-final-client-disposal.json` and
 `ui13-visible-resume-source-draft.json`.
+
+## Owner-approved normal startup activation — 2026-11-11
+
+The owner approved making the transcript usable without treating the storage-side
+178–217 ms observation as a rendering failure. Normal UI startup now mounts the shared
+Markdown workspace, and normal server startup composes its owned Markdown service;
+explicit qualification overrides remain available. Initial local limits reuse the
+exercised workload (256-piece message windows, three normally retained tabs; 64 cached
+entries, 384 MiB accounted retained bytes, 32 pending keys, 64 leases, 16 KiB small-message
+threshold). These are not process-memory limits or production budget qualification.
+
+Current combined schema-16/audited-reader source passed UI format/typed lint/type checks,
+**278 unit tests**, the normal Vite build and real `SessionClient` HTTP integration.
+A private pinned-SDK Release build had zero warnings/errors; **11 focused Markdown
+route/lease and server lifetime tests** passed, including default-startup activation.
+The compaction owner separately reported its integrated **374/374 backend tests** passed.
+
+The normal executable and normal entry bundle—not injected qualification composition—
+were exercised against owned offline sample data. Bounded headless checks preserved a
+middle code source across tab return/reload, drafts across tabs/reload and source through
+resize. A formatted streamed Send settled successfully and native Chromium pointer
+selection retained code text. Empty-session manual compaction displayed its final no-op
+notice neutrally; long-history compaction displayed its marker and expanded saved summary.
+No page errors were observed; independent screenshot review found no material layout defect.
+These checks do not establish native minimize/restore, input-paint latency or memory recovery.
+
+Browser verification sessions closed. A separate local sample preview remains deliberately
+running for owner review; its data, process IDs, build/check logs and screenshot are under
+`%TEMP%/urd-active-preview-991456-PyVzyv/`. The frozen schema-14 evidence above remains
+separate and unchanged. Neither protected user server was restarted or rebuilt by this
+work. Final port-57625 HTML/asset hashes match the baseline. Port 63460 was unreachable
+(connection refused) and its original PID 23104 was absent at the final check, so its
+current assets could not be revalidated; it was left alone. The sample preview remained
+healthy. No cause for the original server's disappearance was established.

@@ -139,12 +139,27 @@ public sealed class MarkdownRoutesTests {
   }
 
   [Fact]
-  public async Task OrdinaryStartupDoesNotActivateMarkdownRoutes() {
+  public async Task DefaultStartupActivatesMarkdownRoutes() {
     using var database = new TemporaryDatabase();
+    (Guid sessionId, TranscriptEntryRef entry) = Seed(database);
     await using var server = new RunningServer(new(Path.GetDirectoryName(database.Path)!, 0));
     await server.WaitForReadyAsync();
-    await AssertStatusAsync(server.Client, HttpMethod.Post,
-        $"/api/events/{Guid.NewGuid()}/markdown/{Guid.NewGuid()}", HttpStatusCode.NotFound, "{}");
+    using HttpResponseMessage stream = await OpenStreamAsync(server.Client);
+    Guid streamId = await ReadStreamIdAsync(stream);
+    string path = $"/api/events/{streamId}/markdown/{Guid.NewGuid()}";
+    string body = JsonSerializer.Serialize(new { sessionId, entry }, inputJson);
+
+    JsonElement opened = await PostJsonAsync(server.Client, path, body);
+    Guid generation = opened.GetProperty("manifest").GetProperty("generation").GetGuid();
+    using (HttpResponseMessage piecesResponse = await RequestAsync(server.Client, HttpMethod.Get,
+        path + $"/pieces?generation={generation}&index=0")) {
+      Assert.Equal(HttpStatusCode.OK, piecesResponse.StatusCode);
+      AssertPrivateResponse(piecesResponse);
+      MarkdownPiecePage pieces = (await piecesResponse.Content.ReadFromJsonAsync<MarkdownPiecePage>(
+          MarkdownRenderJson.Options))!;
+      Assert.NotEmpty(pieces.Pieces);
+    }
+    await AssertStatusAsync(server.Client, HttpMethod.Post, path + "/release", HttpStatusCode.NoContent, "{}");
   }
 
   [Theory]

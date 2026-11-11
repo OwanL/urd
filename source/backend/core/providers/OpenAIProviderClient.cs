@@ -38,7 +38,7 @@ internal sealed class OpenAIProviderClient(HttpClient httpClient) {
       }).ToArray();
     } catch (Exception error) when (CanClassify(error, ct)) {
       ct.ThrowIfCancellationRequested();
-      throw SafeFailure(error, discovery: true);
+      throw ProviderOperationException.FromProviderError(error, discovery: true);
     }
   }
 
@@ -53,7 +53,7 @@ internal sealed class OpenAIProviderClient(HttpClient httpClient) {
       };
     } catch (Exception error) when (CanClassify(error, ct)) {
       ct.ThrowIfCancellationRequested();
-      throw SafeFailure(error, discovery: false);
+      throw ProviderOperationException.FromProviderError(error);
     }
   }
 
@@ -173,14 +173,6 @@ internal sealed class OpenAIProviderClient(HttpClient httpClient) {
       !(error is OperationCanceledException && ct.IsCancellationRequested) &&
       error is ClientResultException or HttpRequestException or IOException or OperationCanceledException or
           JsonException or FormatException or InvalidOperationException or KeyNotFoundException or ArgumentException;
-
-  private static ProviderOperationException SafeFailure(Exception error, bool discovery) => new(error switch {
-    ClientResultException { Status: 401 } => ProviderFailure.AuthenticationRequired,
-    ClientResultException { Status: 403 } => ProviderFailure.PlanAccessDenied,
-    ClientResultException { Status: 404 or 405 or 501 } when discovery => ProviderFailure.DiscoveryUnsupported,
-    ClientResultException or HttpRequestException or IOException or OperationCanceledException => ProviderFailure.ProviderUnavailable,
-    _ => ProviderFailure.InvalidProviderResponse
-  });
 }
 
 #pragma warning restore OPENAI001

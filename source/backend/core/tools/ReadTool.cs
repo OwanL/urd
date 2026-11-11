@@ -5,23 +5,26 @@ namespace Urd.Core.Tools;
 
 // Reads bounded text pages or processed images after preceding Urd mutations finish.
 internal sealed class ReadTool(FileMutationQueue files) : AgentTool {
-  private static readonly JsonElement schema = JsonSerializer.SerializeToElement(new {
-    type = "object",
-    properties = new {
-      path = new { type = "string", description = "Path to the file to read (relative or absolute)" },
-      offset = new { type = "integer", minimum = 1, description = "Line number to start reading from (1-indexed). Omit to start at line 1." },
-      limit = new { type = "integer", minimum = 1, description = "Maximum number of lines to read" }
-    },
-    required = new[] { "path" }
-  });
+  private static readonly JsonElement schema = ToolSchema.Parse("""
+    {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string", "description": "Path to the file to read (relative or absolute)" },
+        "offset": { "type": "integer", "minimum": 1, "description": "Line number to start reading from (1-indexed). Omit to start at line 1." },
+        "limit": { "type": "integer", "minimum": 1, "description": "Maximum number of lines to read" }
+      },
+      "required": ["path"]
+    }
+    """);
 
   public override string Name => "read";
-  public override string Description =>
-      "Read a file. Supports UTF-8 text and images (jpg, png, gif, webp, bmp). " +
-      "Images are processed to at most 2000×2000 and below 4.5MiB of base64; BMP is converted before attachment. " +
-      "Image source files are limited to 64MiB and decoding is memory-bounded. " +
-      "Text output is limited to 2000 lines or 50KB, whichever comes first. " +
-      "Use offset/limit to page through large files; continue with the suggested offset until complete.";
+  public override string Description => """
+    Read a file. Supports UTF-8 text and images (jpg, png, gif, webp, bmp).
+    Images are processed to at most 2000×2000 and below 4.5MiB of base64; BMP is converted before attachment.
+    Image source files are limited to 64MiB and decoding is memory-bounded.
+    Text output is limited to 2000 lines or 50KB, whichever comes first.
+    Use offset/limit to page through large files; continue with the suggested offset until complete.
+    """;
   public override JsonElement ParametersSchema => schema;
 
   public override async Task<ToolOutput> RunAsync(JsonElement arguments, ToolContext context, CancellationToken cancellation) {

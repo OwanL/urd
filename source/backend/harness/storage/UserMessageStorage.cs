@@ -10,49 +10,52 @@ internal sealed class UserMessageStorage(Database database) {
       Guid sessionId, long historyRevision, UserMessageSubmission submission, bool accepting, Guid proposedExecutionId,
       Guid? activeExecutionId = null) {
     ArgumentNullException.ThrowIfNull(submission);
-    return database.Write(transaction => {
-      UserMessageReceipt? retained = ReadReceipt(sessionId, submission.SubmissionId, transaction);
-      if (retained is not null) {
-        EnsureSameSubmission(retained, submission);
-        return (retained, false);
-      }
+    return database.Write(transaction => Admit(transaction, sessionId, historyRevision, submission,
+        accepting, proposedExecutionId, activeExecutionId));
+  }
 
-      Validate(sessionId, submission);
-      long actualRevision = ReadRevision(transaction, sessionId);
-      MessageRefusalReason? refusal = DecideRefusal(
-          transaction, sessionId, actualRevision, historyRevision, submission, accepting, activeExecutionId);
-      if (refusal is { } reason) {
-        var refused = new UserMessageReceipt(sessionId, submission, MessageAcceptance.Refused, reason, null);
-        InsertReceipt(transaction, refused);
-        return (refused, false);
-      }
+  internal (UserMessageReceipt Receipt, bool NewlyAccepted) Admit(SqliteTransaction transaction,
+      Guid sessionId, long historyRevision, UserMessageSubmission submission, bool accepting, Guid proposedExecutionId,
+      Guid? activeExecutionId = null) {
+    UserMessageReceipt? retained = ReadReceipt(sessionId, submission.SubmissionId, transaction);
+    if (retained is not null) {
+      EnsureSameSubmission(retained, submission);
+      return (retained, false);
+    }
 
-#pragma warning disable S3928 // Captured method argument; validation must follow retained decisions.
-      Guid? currentExecutionId = ReadActiveExecution(transaction, sessionId);
-      Guid executionId = currentExecutionId ?? proposedExecutionId;
-      if (executionId == Guid.Empty)
-        throw new ArgumentException("Execution ID cannot be empty.", nameof(proposedExecutionId));
-#pragma warning restore S3928
+    Validate(sessionId, submission);
+    long actualRevision = ReadRevision(transaction, sessionId);
+    MessageRefusalReason? refusal = DecideRefusal(
+        transaction, sessionId, actualRevision, historyRevision, submission, accepting, activeExecutionId);
+    if (refusal is { } reason) {
+      var refused = new UserMessageReceipt(sessionId, submission, MessageAcceptance.Refused, reason, null);
+      InsertReceipt(transaction, refused);
+      return (refused, false);
+    }
 
-      var accepted = new UserMessageReceipt(sessionId, submission, MessageAcceptance.Accepted, null, executionId);
-      InsertReceipt(transaction, accepted);
-      if (currentExecutionId is null) {
-        using SqliteCommand insertExecution = database.Command(transaction, """
-          INSERT INTO execution_runs (session_id, run_id, history_revision, input_id)
-          VALUES ($session, $run, $revision, $input);
-          """,
-            ("$session", sessionId), ("$run", executionId),
-            ("$revision", actualRevision), ("$input", submission.SubmissionId));
-        insertExecution.ExecuteNonQuery();
-      }
+    Guid? currentExecutionId = ReadActiveExecution(transaction, sessionId);
+    Guid executionId = currentExecutionId ?? proposedExecutionId;
+    if (executionId == Guid.Empty)
+      throw new ArgumentException("Execution ID cannot be empty.", nameof(proposedExecutionId));
 
-      using SqliteCommand insert = database.Command(transaction, """
-        INSERT INTO execution_inputs (session_id, input_id, run_id) VALUES ($session, $input, $run);
+    var accepted = new UserMessageReceipt(sessionId, submission, MessageAcceptance.Accepted, null, executionId);
+    InsertReceipt(transaction, accepted);
+    if (currentExecutionId is null) {
+      using SqliteCommand insertExecution = database.Command(transaction, """
+        INSERT INTO execution_runs (session_id, run_id, history_revision, input_id)
+        VALUES ($session, $run, $revision, $input);
         """,
-          ("$session", sessionId), ("$run", executionId), ("$input", submission.SubmissionId));
-      insert.ExecuteNonQuery();
-      return (accepted, true);
-    });
+          ("$session", sessionId), ("$run", executionId),
+          ("$revision", actualRevision), ("$input", submission.SubmissionId));
+      insertExecution.ExecuteNonQuery();
+    }
+
+    using SqliteCommand insert = database.Command(transaction, """
+      INSERT INTO execution_inputs (session_id, input_id, run_id) VALUES ($session, $input, $run);
+      """,
+        ("$session", sessionId), ("$run", executionId), ("$input", submission.SubmissionId));
+    insert.ExecuteNonQuery();
+    return (accepted, true);
   }
 
   internal UserMessageReceipt? ReadReceipt(Guid sessionId, Guid submissionId)
@@ -60,7 +63,7 @@ internal sealed class UserMessageStorage(Database database) {
 
   private UserMessageReceipt? ReadReceipt(Guid sessionId, Guid submissionId, SqliteTransaction? transaction) {
     using SqliteCommand command = database.Command(transaction, """
-      SELECT expected_history_revision, original_text_utf8, decision, run_id, refusal_reason, llm_selection_json
+      SELECT expected_history_revision, original_text_utf8, decision, run_id, refusal_reason, llm_selection_json, superseded
       FROM input_decisions
       WHERE session_id = $session AND input_id = $input;
       """,
@@ -69,6 +72,9 @@ internal sealed class UserMessageStorage(Database database) {
     using SqliteDataReader reader = command.ExecuteReader();
     if (!reader.Read())
       return null;
+
+    if (reader.GetBoolean(6))
+      throw new UserMessageConflictException(submissionId);
 
     // Locals name the SELECT columns in order.
     long expectedRevision = reader.GetInt64(0);

@@ -79,7 +79,9 @@ and Core shutdown operations both finish; it has no forced cleanup timeout.
 | POST `/api/sessions` | Empty JSON object `{}` → 201 `{sessionId}`; Location names its snapshot |
 | GET `/api/sessions?cursor=...` | Optional opaque string cursor → 200 `SessionIdPage` (`sessionIds`, `nextCursor`) |
 | POST `/api/sessions/{sessionId}/message-submissions` | `UserMessageSubmission` → 200 `UserMessageReceipt`, Accepted **or** Refused |
-| GET `/api/sessions/{sessionId}/message-submissions/{submissionId}` | 200 receipt or literal JSON `null` |
+| GET `/api/sessions/{sessionId}/message-submissions/{submissionId}` | 200 receipt or literal JSON `null`; 409 if an edit removed the input |
+| POST `/api/sessions/{sessionId}/message-edits` | `MessageEditSubmission` → 200 `MessageEditReceipt` after Stop/settlement and committed replacement |
+| GET `/api/sessions/{sessionId}/message-edits/{operationId}` | 200 committed edit receipt or literal JSON `null` |
 | POST `/api/sessions/{sessionId}/executions/{executionId}/stop` | Empty JSON object `{}` → 200 `StopReceipt` for Requested or Settled |
 | POST `/api/sessions/{sessionId}/compactions` | `CompactionSubmission` → 200 `CompactionReceipt`; 409 when admission is unavailable |
 | GET `/api/sessions/{sessionId}/compactions/operations/{operationId}` | 200 receipt or literal JSON `null` |
@@ -130,6 +132,33 @@ provenance and not-sent tracking. Earlier pre-release schemas must be reset, not
 their local admission gates, status mapping, no-store and read-cancellation rules. Historical
 wire checks covered the renamed receipt, Stop, snapshot and cursor fields and rejected legacy
 routes and required field names.
+
+### Earlier-message editing
+
+`MessageEditSubmission` is `{operationId, message, text, llmSelection}`; `message` is the
+exact user `MessageRef`, including its history revision. Core validates it before stopping
+anything, fences competing admission, joins the current execution, and atomically replaces
+the target and later history with a new accepted input. The receipt is
+`{sessionId, operationId, historyRevision, executionId}`. It establishes replacement, not
+successful completion of the new response. The selected model/reasoning settings are frozen
+at Save, not inherited from the edited message.
+
+The same operation and payload return the same receipt without starting another execution;
+a changed payload under that ID conflicts. Receipt lookup may return null while Stop is
+still settling, so null never proves rejection. Disconnect does not cancel admitted editing.
+Before replacement commits, a restart leaves the old conversation (and interrupted work)
+intact. After commit, normal execution recovery applies; it never repeats the edit or tools.
+Shutdown fences and joins editing too, without admitting a replacement after shutdown begins.
+
+Kept messages retain their IDs under a new history revision. Removed text, response/tool
+bodies, native provider context and obsolete summaries are erased from the logical store;
+compact command identities/hashes and usage remain. Removed Send receipts return 409 rather
+than exposing deleted text or allowing an old Send to recreate it. History replacement does
+not undo external tool effects. There is no branch archive or undo.
+
+This introduces schema **21**. Existing schemas, including 20, require explicit database
+recreation under the pre-release policy. Never reset an active profile as part of verification
+or automatically activate this build against one.
 
 ### Frozen LLM selection
 

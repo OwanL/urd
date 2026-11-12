@@ -78,6 +78,53 @@ public sealed class AutomaticCompactionTests {
   }
 
   [Fact]
+  public async Task EditingSteeringInvalidatesAnEarlierMarkerThatSummarizedThatSameRequest() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    var entered = Signal();
+    var release = Signal();
+    var tool = new TestAgentTool("lookup", async (_, _, cancellation) => {
+      entered.TrySetResult();
+      await release.Task.WaitAsync(cancellation);
+      return new ToolOutput("kept result", []);
+    });
+    using var client = new TestChatClient((call, token) => call == 1
+        ? ToolBatch(token, new FunctionCallContent("lookup", "lookup", new Dictionary<string, object?>())) : Complete(token));
+    var session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid(), Path.GetDirectoryName(database.Path)), store, _ => client,
+        new ToolCatalog([tool]));
+    var selection = TestLlmSelection.Default with { ContextWindow = 8_192 };
+    try {
+      var initial = await AcceptAsync(session, "start", selection);
+      await entered.Task.WaitAsync(TestTimeout);
+      var removed = new UserMessageSubmission(Guid.NewGuid(), 0, new string('x', 100_000), selection);
+      await session.SubmitUserMessageAsync(removed);
+      await session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, "last steering input", selection));
+      release.TrySetResult();
+      await session.WaitForSettlementAsync(initial.ExecutionId!.Value).WaitAsync(TestTimeout);
+      var context = store.Compactions.ReadContext(session.Id, 0);
+      Assert.Equal(1, context.Previous!.FirstKeptRequestIndex);
+      Assert.Equal(1, context.Previous.FirstKeptMessageIndex); // The first steering input was summarized.
+      var history = await session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, 0));
+      var target = Assert.Single(history.Entries, entry => entry.Entry.EntryId == removed.SubmissionId).Text!.From.Message;
+      Assert.Contains(history.Entries.TakeWhile(entry => entry.Entry.EntryId != removed.SubmissionId),
+          entry => entry.Entry.Kind == TranscriptEntryKind.Compaction);
+
+      var edited = await session.EditUserMessageAsync(new(Guid.NewGuid(), target, "new steering", TestLlmSelection.Default));
+      await session.WaitForSettlementAsync(edited.ExecutionId).WaitAsync(TestTimeout);
+      Assert.Null(store.Compactions.ReadContext(session.Id, edited.HistoryRevision).Previous);
+      Assert.DoesNotContain(client.Requests[^1], message => message.Text?.Contains(Summary, StringComparison.Ordinal) == true);
+      Assert.Equal(new[] { "start", "new steering" }, client.Requests[^1]
+          .Where(message => message.Role == ChatRole.User).Select(message => message.Text));
+      Assert.DoesNotContain((await session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, edited.HistoryRevision))).Entries,
+          entry => entry.Entry.Kind == TranscriptEntryKind.Compaction);
+    } finally {
+      release.TrySetResult();
+      await session.FenceUserMessagesAsync();
+      await session.StopExecutionAsync().WaitAsync(TestTimeout);
+    }
+  }
+
+  [Fact]
   public async Task ContextWindowOverflowSummarizesAndRetriesWithoutRepeatingUserOrTool() {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);

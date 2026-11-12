@@ -26,6 +26,8 @@ public abstract class SessionBase {
   private SessionExecutionDriver? execution;
   // Retain the driver's task after settlement clears the active execution, so shutdown joins its tail.
   private Task? executionTask;
+  private Task<MessageEditReceipt>? editTask;
+  private MessageEditSubmission? editSubmission;
 
   private protected SessionBase(SessionRecord record, SessionKind kind, UrdStore store, Func<ProviderConnection, IChatClient> createChatClient,
       ToolCatalog? tools = null, ChatProcesses? processes = null, PendingToolCalls? pending = null) {
@@ -51,7 +53,9 @@ public abstract class SessionBase {
 
   internal SessionKind Kind { get; }
   internal SessionExecutionRecorder Recorder { get; }
-  internal long HistoryRevision { get; }
+  internal long HistoryRevision { get; private set; }
+
+  private bool CanAdmit => acceptingUserMessages && editTask is null;
 
   // Restores the delivered starting view; opening a session alone never composes it.
   internal StartingContext? ReadStartingContext() => store.StartingContexts.Read(Id);
@@ -66,7 +70,7 @@ public abstract class SessionBase {
     CompactionReceipt? receipt;
     using (await gate.AcquireAsync()) {
       var admission = WriteToStore(() => store.Compactions.Admit(Id, submission,
-          acceptingUserMessages && !needsAttention && submission.ExpectedHistoryRevision == HistoryRevision));
+          CanAdmit && !needsAttention && submission.ExpectedHistoryRevision == HistoryRevision));
       if (admission is null)
         return null;
       receipt = admission.Value.Receipt;
@@ -142,7 +146,7 @@ public abstract class SessionBase {
 
   public async Task<SessionSnapshot> ReadSnapshotAsync(CancellationToken cancellation = default) {
     using var held = await gate.AcquireAsync(cancellation);
-    return status.ApplyLiveState(store.Snapshots.ReadStored(Id), acceptingUserMessages, execution)
+    return status.ApplyLiveState(store.Snapshots.ReadStored(Id), CanAdmit, execution)
         with { IsCompacting = execution?.IsCompacting == true };
   }
 
@@ -152,7 +156,7 @@ public abstract class SessionBase {
     using var held = await gate.AcquireAsync(cancellation);
     SessionSnapshot stored = store.Snapshots.ReadStored(Id);
     status.Observe(stored, execution);
-    return notifications.Subscribe(observer, watched, status.ReadStored(stored, acceptingUserMessages, needsAttention, execution));
+    return notifications.Subscribe(observer, watched, status.ReadStored(stored, CanAdmit, needsAttention, execution));
   }
 
   private protected async Task<UserMessageReceipt> AdmitUserMessageAsync(UserMessageSubmission submission) {
@@ -161,7 +165,7 @@ public abstract class SessionBase {
     UserMessageReceipt receipt;
     using (await gate.AcquireAsync()) {
       (receipt, bool newlyAccepted) = WriteToStore(
-          () => store.UserMessages.Admit(Id, HistoryRevision, submission, acceptingUserMessages, Guid.NewGuid(), execution?.ExecutionId));
+          () => store.UserMessages.Admit(Id, HistoryRevision, submission, CanAdmit, Guid.NewGuid(), execution?.ExecutionId));
 
       // Steering joins the owned execution; neither it nor a retained receipt starts another driver.
       if (newlyAccepted) {
@@ -178,6 +182,60 @@ public abstract class SessionBase {
     return receipt;
   }
 
+  public async Task<MessageEditReceipt?> ReadMessageEditReceiptAsync(Guid operationId, CancellationToken cancellation = default) {
+    using var held = await gate.AcquireAsync(cancellation);
+    return store.MessageEdits.ReadReceipt(Id, operationId);
+  }
+
+  private protected async Task<MessageEditReceipt> ReplaceUserMessageAsync(MessageEditSubmission submission) {
+    MessageEditStorage.Validate(submission);
+    Task<MessageEditReceipt> work;
+    TaskCompletionSource? released = null;
+    using (await gate.AcquireAsync()) {
+      MessageEditReceipt? receipt = store.MessageEdits.Check(Id, submission);
+      if (receipt is not null)
+        return receipt;
+      if (editTask is not null) {
+        if (editSubmission != submission)
+          throw new UserMessageConflictException(submission.OperationId);
+        work = editTask;
+      } else {
+        if (!acceptingUserMessages || needsAttention)
+          throw new UserMessageConflictException(submission.OperationId);
+        released = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        editSubmission = submission;
+        work = editTask = ReplaceAfterStopAsync(submission, released.Task);
+        PublishChange();
+      }
+    }
+    released?.SetResult();
+    return await work;
+  }
+
+  private async Task<MessageEditReceipt> ReplaceAfterStopAsync(MessageEditSubmission submission, Task admitted) {
+    await admitted;
+    TaskCompletionSource? released = null;
+    try {
+      await StopActiveExecutionAsync();
+      using var held = await gate.AcquireAsync();
+      if (!acceptingUserMessages || needsAttention)
+        throw new UserMessageConflictException(submission.OperationId);
+      MessageEditReceipt receipt = WriteToStore(() => store.MessageEdits.Replace(Id, submission));
+      HistoryRevision = receipt.HistoryRevision;
+      status.Replaced(HistoryRevision);
+      released = new(TaskCreationOptions.RunContinuationsAsynchronously);
+      StartExecution(receipt.ExecutionId, submission.LlmSelection, released.Task);
+      return receipt;
+    } finally {
+      using (await gate.AcquireAsync()) {
+        editTask = null;
+        editSubmission = null;
+        PublishChange();
+      }
+      released?.SetResult();
+    }
+  }
+
   internal async Task FenceUserMessagesAsync() {
     using var held = await gate.AcquireAsync();
     if (acceptingUserMessages) {
@@ -189,6 +247,23 @@ public abstract class SessionBase {
   // Called after all manager-owned sessions have fenced user messages. A failed Stop write
   // must not prevent local cancellation or let shutdown skip waiting for owned work.
   internal async Task StopExecutionAsync() {
+    Task? pendingEdit;
+    using (await gate.AcquireAsync())
+      pendingEdit = editTask;
+    await Task.WhenAll(StopActiveExecutionAsync(), JoinEditAsync(pendingEdit));
+  }
+
+  private static async Task JoinEditAsync(Task? pendingEdit) {
+    if (pendingEdit is null)
+      return;
+    try {
+      await pendingEdit;
+    } catch (UserMessageConflictException) {
+      // Shutdown fenced an admitted edit before replacement; no history was changed.
+    }
+  }
+
+  private async Task StopActiveExecutionAsync() {
     Task pendingExecution;
     Task pendingSettlement;
     Task stopCallbacks = Task.CompletedTask;
@@ -292,7 +367,7 @@ public abstract class SessionBase {
   private bool IsCurrentExecution(Guid executionId) => execution?.ExecutionId == executionId;
 
   // Caller holds the session gate.
-  internal void PublishChange() => notifications.Publish(status.ReadCurrent(acceptingUserMessages, needsAttention, execution));
+  internal void PublishChange() => notifications.Publish(status.ReadCurrent(CanAdmit, needsAttention, execution));
 
   // Caller holds the session gate.
   internal void MarkNeedsAttention() {

@@ -14,6 +14,13 @@ internal sealed class SessionStatus(long historyRevision) {
     lastSettlement = stored.LastSettlement;
   }
 
+  internal void Replaced(long revision) {
+    historyRevision = revision;
+    historyRevisionChanged = false;
+    hasUnownedExecution = false;
+    lastSettlement = null;
+  }
+
   internal void Settled(SessionExecutionResult saved) {
     hasUnownedExecution = false;
     lastSettlement = saved;

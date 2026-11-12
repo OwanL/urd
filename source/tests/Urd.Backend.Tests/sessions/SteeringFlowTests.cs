@@ -77,6 +77,17 @@ public sealed class SteeringFlowTests {
           .Select(message => message.Text).Where(text => !string.IsNullOrEmpty(text)));
       Assert.Equal(3, StoredExecutions.ReadRequests(fixture.Database).Count);
       Assert.All(StoredTools.Read(fixture.Database), tool => Assert.Equal(ExecutionOutcome.Completed, tool.Outcome));
+
+      // Two steering messages shared a request. Editing the second must keep the
+      // first input in that request, but none of that request's old response.
+      var history = await fixture.Session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, 0));
+      MessageRef target = Assert.Single(history.Entries, entry => entry.Entry.EntryId == second.SubmissionId).Text!.From.Message;
+      var edited = await fixture.Session.EditUserMessageAsync(new(Guid.NewGuid(), target, "revised steering", TestLlmSelection.Default));
+      await fixture.Session.WaitForSettlementAsync(edited.ExecutionId).WaitAsync(TestTimeout);
+      Assert.Equal(new[] { "start", first.Text, "revised steering" }, Users(client.LastRequest));
+      Assert.Equal(new[] { 1, 2 }, effects.ToArray());
+      Assert.Single(client.LastRequest, message => message.Role == ChatRole.Tool);
+      Assert.DoesNotContain(client.LastRequest, message => message.Role == ChatRole.Assistant && message.Text == "visible");
     } finally {
       toolRelease.TrySetResult();
       nextRelease.TrySetResult();

@@ -21,6 +21,13 @@ internal static class SessionRoutes {
         SubmitAsync(http, sessions, sessionId));
     routes.MapGet("/{sessionId}/message-submissions/{submissionId}", (HttpContext http, Guid sessionId, Guid submissionId) =>
         ReadReceiptAsync(http, sessions, sessionId, submissionId));
+    routes.MapPost("/{sessionId}/message-edits", (HttpContext http, Guid sessionId) =>
+        EditAsync(http, sessions, sessionId));
+    routes.MapGet("/{sessionId}/message-edits/{operationId}", (HttpContext http, Guid sessionId, Guid operationId) =>
+        WithSessionAsync(http, sessions, sessionId, async session => {
+          MessageEditReceipt? receipt = await session.ReadMessageEditReceiptAsync(operationId, http.RequestAborted);
+          return receipt is null ? Results.Content("null", "application/json") : Results.Ok(receipt);
+        }));
     routes.MapPost("/{sessionId}/executions/{executionId}/stop", (HttpContext http, Guid sessionId, Guid executionId) =>
         StopAsync(http, sessions, sessionId, executionId));
     routes.MapPost("/{sessionId}/compactions", (HttpContext http, Guid sessionId) => CompactAsync(http, sessions, sessionId));
@@ -129,6 +136,16 @@ internal static class SessionRoutes {
       // Core retains the decision; a disconnected request never owns accepted work.
       UserMessageReceipt receipt = await session.SubmitUserMessageAsync(submission);
       return Results.Ok(receipt);
+    });
+  }
+
+  private static async Task<IResult> EditAsync(HttpContext http, SessionManager sessions, Guid sessionId) {
+    MessageEditSubmission? submission = await http.Request.ReadFromJsonAsync<MessageEditSubmission>(http.RequestAborted);
+    if (submission is null)
+      return Results.BadRequest();
+    return await WithSessionAsync(http, sessions, sessionId, async session => {
+      // Core owns Stop, settlement and replacement even if this browser disconnects.
+      return Results.Ok(await session.EditUserMessageAsync(submission));
     });
   }
 

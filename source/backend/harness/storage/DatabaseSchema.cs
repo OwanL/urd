@@ -4,7 +4,7 @@ namespace Urd.Core.Storage;
 
 // Creates the current pre-release schema; incompatible databases require a manual reset.
 internal static class DatabaseSchema {
-  private const int SchemaVersion = 20;
+  private const int SchemaVersion = 21;
 
   internal static void Initialize(SqliteConnection connection) {
     using SqliteCommand command = connection.CreateCommand();
@@ -57,6 +57,7 @@ internal static class DatabaseSchema {
           input_id TEXT NOT NULL,
           expected_history_revision INTEGER NOT NULL CHECK (expected_history_revision >= 0),
           original_text_utf8 BLOB NOT NULL,
+          superseded INTEGER NOT NULL DEFAULT 0 CHECK (superseded IN (0, 1)),
           decision INTEGER NOT NULL CHECK (decision IN (1, 2)),
           run_id TEXT,
           refusal_reason INTEGER CHECK (refusal_reason IN (1, 2, 3, 4)),
@@ -67,6 +68,14 @@ internal static class DatabaseSchema {
                   AND run_id <> '00000000-0000-0000-0000-000000000000' AND refusal_reason IS NULL)
               OR (decision = 2 AND run_id IS NULL AND refusal_reason IS NOT NULL)
           )
+      ) STRICT;
+      CREATE TABLE message_edits (
+          session_id TEXT NOT NULL REFERENCES sessions(session_id),
+          operation_id TEXT NOT NULL,
+          submission_hash TEXT NOT NULL,
+          history_revision INTEGER NOT NULL CHECK (history_revision > 0),
+          run_id TEXT NOT NULL,
+          PRIMARY KEY (session_id, operation_id)
       ) STRICT;
       CREATE TABLE execution_runs (
           ordinal INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -285,7 +294,7 @@ internal static class DatabaseSchema {
       CREATE INDEX execution_inputs_not_sent_order ON execution_inputs(session_id, ordinal) WHERE not_sent = 1;
       CREATE INDEX execution_messages_history_order ON execution_messages(session_id, history_revision, ordinal DESC);
       CREATE INDEX execution_messages_request_order ON execution_messages(request_id, role, first_chunk_index);
-      PRAGMA user_version = 20;
+      PRAGMA user_version = 21;
       """;
     command.ExecuteNonQuery();
     transaction.Commit();

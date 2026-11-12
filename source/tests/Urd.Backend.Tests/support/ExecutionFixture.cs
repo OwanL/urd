@@ -11,7 +11,6 @@ namespace Urd.Backend.Tests.Support;
 internal sealed class ExecutionFixture : IAsyncDisposable {
   private readonly UrdStore store;
   private readonly ScriptedChatClient client;
-  private readonly List<Guid> executions = [];
 
   internal ExecutionFixture(ScriptedChatClient client, IReadOnlyList<AIFunction>? tools = null)
       : this(client, TestAgentTool.Catalog(tools)) { }
@@ -31,19 +30,17 @@ internal sealed class ExecutionFixture : IAsyncDisposable {
   internal PrimarySession Session { get; }
 
   internal async Task<Guid> StartExecutionAsync(string text) {
-    UserMessageReceipt receipt = await Session.SubmitUserMessageAsync(new UserMessageSubmission(Guid.NewGuid(), 0, text, TestLlmSelection.Default));
+    long revision = (await Session.ReadSnapshotAsync()).HistoryRevision;
+    UserMessageReceipt receipt = await Session.SubmitUserMessageAsync(new UserMessageSubmission(Guid.NewGuid(), revision, text, TestLlmSelection.Default));
     Assert.Equal(MessageAcceptance.Accepted, receipt.Acceptance);
     Guid executionId = Assert.IsType<Guid>(receipt.ExecutionId);
-    executions.Add(executionId);
     return executionId;
   }
 
   public async ValueTask DisposeAsync() {
     // Even a failed assertion must not dispose the database or client underneath owned work.
-    foreach (Guid executionId in executions) {
-      await Session.RequestStopAsync(executionId);
-      await Session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout);
-    }
+    await Session.FenceUserMessagesAsync();
+    await Session.StopExecutionAsync().WaitAsync(TestTimeout);
 
     store.Dispose();
     client.Dispose();

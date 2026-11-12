@@ -15,14 +15,16 @@ internal static class StoredLlmResponses {
       string.Concat(Read(database).Select(row => StrictUtf8.GetString(row.Bytes)));
 
   internal static List<(Guid RequestId, Guid ResponseId, long ChunkIndex, byte[] Bytes, bool Final)>
-      Read(TemporaryDatabase database) {
+      Read(TemporaryDatabase database, Guid? requestId = null) {
     using SqliteConnection connection = database.OpenReadOnlyConnection();
     using SqliteCommand command = connection.CreateCommand();
     command.CommandText = """
       SELECT o.request_id, q.response_id, o.chunk_index, o.text_utf8, o.is_final
       FROM execution_output o JOIN execution_requests q ON q.request_id = o.request_id
+      WHERE $request IS NULL OR o.request_id = $request
       ORDER BY o.chunk_index;
       """;
+    command.Parameters.AddWithValue("$request", requestId is { } id ? id.ToString("D") : DBNull.Value);
     using SqliteDataReader reader = command.ExecuteReader();
     List<(Guid RequestId, Guid ResponseId, long ChunkIndex, byte[] Bytes, bool Final)> rows = reader.Cast<DbDataRecord>()
         .Select(row => (Guid.Parse(row.GetString(0)), Guid.Parse(row.GetString(1)), row.GetInt64(2),

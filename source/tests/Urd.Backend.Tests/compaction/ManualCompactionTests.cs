@@ -61,6 +61,20 @@ public sealed class ManualCompactionTests {
       Assert.Contains("after-reopen-turn", modelContext);
       Assert.DoesNotContain("ancient-turn:", modelContext);
       Assert.Equal(saved.Id, Assert.IsType<CompactionSummary>(await session.ReadCompactionAsync(saved.Id, revision)).Id);
+
+      var history = await session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, revision));
+      MessageRef latest = history.Entries.Last(entry => entry.Entry.Kind == TranscriptEntryKind.User).Text!.From.Message;
+      var edited = await session.EditUserMessageAsync(new(Guid.NewGuid(), latest, "revised recent turn", TestLlmSelection.Default));
+      await session.WaitForSettlementAsync(edited.ExecutionId).WaitAsync(TestTimeout);
+      Assert.Equal(saved.Id, reopened.Compactions.ReadContext(sessionId, edited.HistoryRevision).Previous!.Id);
+
+      history = await session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, edited.HistoryRevision));
+      MessageRef ancient = history.Entries.First(entry => entry.Entry.Kind == TranscriptEntryKind.User).Text!.From.Message;
+      var reset = await session.EditUserMessageAsync(new(Guid.NewGuid(), ancient, "fresh beginning", TestLlmSelection.Default));
+      await session.WaitForSettlementAsync(reset.ExecutionId).WaitAsync(TestTimeout);
+      Assert.Null(reopened.Compactions.ReadContext(sessionId, reset.HistoryRevision).Previous);
+      Assert.Null(await session.ReadCompactionAsync(saved.Id, reset.HistoryRevision));
+      Assert.DoesNotContain(client.Requests[^1], message => message.Text?.Contains(Summary, StringComparison.Ordinal) == true);
     }
   }
 

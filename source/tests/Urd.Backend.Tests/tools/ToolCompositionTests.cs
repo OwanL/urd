@@ -2,6 +2,7 @@ using Microsoft.Extensions.AI;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Execution;
 using Urd.Core.Providers;
+using Urd.Core.Preferences;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
 using Urd.Core.Tools;
@@ -29,7 +30,10 @@ public sealed class ToolCompositionTests {
           ? ToolBatch(token, new FunctionCallContent("write", "write", new Dictionary<string, object?> {
             ["path"] = "note.txt", ["content"] = "original"
           })) : Complete(token));
-      var manager = new SessionManager(store, _ => client, new AgentToolSettings(first, null, new Dictionary<string, string>()));
+      var preferences = new PreferenceManager(store);
+      preferences.SetWorkingDirectory(first);
+      var manager = new SessionManager(store, _ => client,
+          new AgentToolSettings(null, new Dictionary<string, string>()), preferences: preferences);
       try {
         PrimarySession session = await manager.CreatePrimaryAsync();
         sessionId = session.Id;
@@ -47,7 +51,10 @@ public sealed class ToolCompositionTests {
         ? ToolBatch(token, new FunctionCallContent("edit", "edit", new Dictionary<string, object?> {
           ["path"] = "note.txt", ["edits"] = new[] { new { oldText = "original", newText = "updated" } }
         })) : Complete(token));
-    var loadedManager = new SessionManager(reopened, _ => nextClient, new AgentToolSettings(second, null, new Dictionary<string, string>()));
+    var reopenedPreferences = new PreferenceManager(reopened);
+    reopenedPreferences.SetWorkingDirectory(second);
+    var loadedManager = new SessionManager(reopened, _ => nextClient,
+        new AgentToolSettings(null, new Dictionary<string, string>()), preferences: reopenedPreferences);
     try {
       PrimarySession loaded = await loadedManager.GetPrimaryAsync(sessionId);
       await SubmitAsync(loaded);

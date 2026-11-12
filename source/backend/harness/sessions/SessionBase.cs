@@ -147,7 +147,7 @@ public abstract class SessionBase {
   public async Task<SessionSnapshot> ReadSnapshotAsync(CancellationToken cancellation = default) {
     using var held = await gate.AcquireAsync(cancellation);
     return status.ApplyLiveState(store.Snapshots.ReadStored(Id), CanAdmit, execution)
-        with { IsCompacting = execution?.IsCompacting == true };
+        with { IsCompacting = execution?.IsCompacting == true, WorkingDirectory = WorkingDirectory };
   }
 
   public async Task<IDisposable> SubscribeAsync(Action<SessionChange> observer, bool watched,

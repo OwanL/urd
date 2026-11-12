@@ -53,8 +53,7 @@ public sealed class ToolHostCrashTests {
       string providerAddress = provider.Services.GetRequiredService<IServer>().Features
           .Get<IServerAddressesFeature>()!.Addresses.Single();
       var providerEndpoint = new Uri(new Uri(providerAddress), "/v1/");
-      string[] serverArguments = ["--data-root", Path.GetDirectoryName(database.Path)!, "--port", "0",
-          "--working-directory", workingDirectory];
+      string[] serverArguments = ["--data-root", Path.GetDirectoryName(database.Path)!, "--port", "0"];
 
       await using var server = new ServerProcess(serverArguments);
       using var client = CreateClient(await server.WaitForReadyAsync());
@@ -63,6 +62,9 @@ public sealed class ToolHostCrashTests {
               AuthenticationMethod.None), json);
       providerResponse.EnsureSuccessStatusCode();
       ProviderConnection connection = (await providerResponse.Content.ReadFromJsonAsync<ProviderConnection>(json))!;
+      using HttpResponseMessage preferenceResponse = await client.PostAsJsonAsync(
+          "/api/preferences/working-directory", new { workingDirectory }, json);
+      preferenceResponse.EnsureSuccessStatusCode();
 
       using HttpResponseMessage sessionResponse = await client.PostAsJsonAsync("/api/sessions", new { }, json);
       sessionResponse.EnsureSuccessStatusCode();

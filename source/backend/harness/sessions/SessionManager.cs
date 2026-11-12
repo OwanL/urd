@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using Microsoft.Extensions.AI;
 using Urd.Core.Storage;
 using Urd.Core.Providers;
+using Urd.Core.Preferences;
 using Urd.Core.Tools;
 
 namespace Urd.Core.Sessions;
@@ -11,7 +12,8 @@ public sealed class SessionManager {
   private readonly UrdStore store;
   private readonly Func<ProviderConnection, IChatClient> createChatClient;
   private readonly AgentToolSettings? toolSettings;
-  private readonly string? workingDirectory;
+  private readonly PreferenceManager preferences;
+  private readonly string? fallbackWorkingDirectory;
   private readonly GitBash? bash;
   private readonly FileMutationQueue files = new();
   private readonly ReadOnlyCollection<AgentTool> injectedTools = new([]);
@@ -24,19 +26,18 @@ public sealed class SessionManager {
   public event Action<Guid>? SessionCreated;
 
   public SessionManager(UrdStore store, Func<ProviderConnection, IChatClient> createChatClient,
-      AgentToolSettings? toolSettings = null) {
+      AgentToolSettings? toolSettings = null, PreferenceManager? preferences = null) {
     ArgumentNullException.ThrowIfNull(store);
     ArgumentNullException.ThrowIfNull(createChatClient);
     this.store = store;
     this.createChatClient = createChatClient;
+    this.preferences = preferences ?? new PreferenceManager(store);
+    fallbackWorkingDirectory = Path.GetPathRoot(Environment.CurrentDirectory);
     if (toolSettings is null)
       return;
     if (!OperatingSystem.IsWindows())
       throw new PlatformNotSupportedException("Agent tools currently require Windows and Git for Windows.");
-
-    workingDirectory = Path.GetFullPath(toolSettings.WorkingDirectory);
     this.toolSettings = toolSettings with {
-      WorkingDirectory = workingDirectory,
       Environment = new ReadOnlyDictionary<string, string>(toolSettings.Environment
           .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase))
     };
@@ -47,13 +48,16 @@ public sealed class SessionManager {
   internal SessionManager(UrdStore store, Func<ProviderConnection, IChatClient> createChatClient,
       IReadOnlyList<AgentTool> tools, string workingDirectory) : this(store, createChatClient) {
     injectedTools = Array.AsReadOnly(tools.ToArray());
-    this.workingDirectory = Path.GetFullPath(workingDirectory);
+    fallbackWorkingDirectory = Path.GetFullPath(workingDirectory);
   }
 
   public async Task<PrimarySession> CreatePrimaryAsync() {
     PrimarySession session;
     using (await gate.AcquireAsync()) {
       ThrowIfShuttingDown();
+      // Changing the preference affects only chats created afterwards.
+      string? workingDirectory = toolSettings is null && injectedTools.Count == 0
+          ? null : preferences.Read().WorkingDirectory ?? fallbackWorkingDirectory;
       SessionRecord record = store.Sessions.CreatePrimary(Guid.NewGuid(), workingDirectory);
       session = Track(CreateSession(record));
     }

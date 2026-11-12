@@ -24,14 +24,15 @@ accepted. Port `0` lets the OS select an available port; an explicit port must b
 `1..65535`. Unknown, duplicate or malformed options fail before opening data.
 On Windows, file/shell tools and pending-call controls are enabled by default and require
 Git for Windows. Other platforms retain tool-free startup; explicitly requesting tools is
-unsupported. Without `--working-directory`, new Windows chats use the launch drive's root
-(for example `C:\`), not the launch folder or data root. Add
-`--working-directory 'C:\dev\repos\your-project'` to override this relative-path default.
-It is not a sandbox: tools have the server user's full access, without per-call approvals.
-New chats save this folder; reopening preserves it. Existing chats without a folder or
-with an empty frozen tool list remain readable and tool-free; create a new chat to use tools.
-Optional `--git-bash`
-selects an absolute Git for Windows Bash executable, independently of `--working-directory`;
+unsupported. New sessions use the saved working-directory preference; when unset, new
+sessions use the process working drive's root (for example `C:\`), not the launch folder or
+data root. Set it in Settings → General, or with `POST /api/preferences/working-directory` using
+`{ "workingDirectory": "C:\\dev\\repos\\your-project" }`; `GET /api/preferences` reads it.
+The path must be an existing absolute directory. Changes apply only to new sessions; existing
+sessions retain their saved directory. The directory is not a sandbox: tools have the server
+user's full access, without per-call approvals. Existing sessions with an empty frozen tool list
+remain readable and tool-free. Optional `--git-bash` selects an
+absolute Git for Windows Bash executable, independently of the working-directory preference;
 otherwise Urd locates Git Bash. Shells receive a startup snapshot of the server environment
 and run non-login `bash -c`.
 

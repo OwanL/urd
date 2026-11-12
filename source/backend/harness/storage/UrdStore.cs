@@ -24,10 +24,12 @@ public sealed class UrdStore : IDisposable {
     NotSentInputs = new(database);
     Providers = new(database);
     ModelSettings = new(database);
+    Preferences = new(database);
   }
 
   internal ProviderStorage Providers { get; }
   internal ModelSettingsStorage ModelSettings { get; }
+  internal PreferencesStorage Preferences { get; }
   internal SessionStorage Sessions { get; }
   internal StartingContextStorage StartingContexts { get; }
   internal CompactionStorage Compactions { get; }

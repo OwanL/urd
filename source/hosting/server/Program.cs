@@ -10,6 +10,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging.Console;
 using Urd.Core.MarkdownRendering;
 using Urd.Core.Providers;
+using Urd.Core.Preferences;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
 using Urd.Core.Tools;
@@ -24,7 +25,7 @@ internal static class Program {
       options = ServerOptions.Parse(args);
     } catch (ArgumentException failure) {
       await Console.Error.WriteLineAsync(failure.Message);
-      await Console.Error.WriteLineAsync("Usage: Urd.Server --data-root <absolute directory> --port <0..65535> [--working-directory <absolute directory>] [--git-bash <absolute executable>]");
+      await Console.Error.WriteLineAsync("Usage: Urd.Server --data-root <absolute directory> --port <0..65535> [--git-bash <absolute executable>]");
       return 2;
     }
 
@@ -71,18 +72,21 @@ internal static class Program {
       Uri CallbackUri() => new(Volatile.Read(ref servedOrigin)
           ?? throw new InvalidOperationException("The server is not ready."), "/auth/callback");
       providers = createProviders?.Invoke(store, CallbackUri) ?? new ProviderManager(store, CallbackUri);
-      AgentToolSettings? tools = options.WorkingDirectory is { } directory
-          ? new AgentToolSettings(directory, options.GitBashPath,
+      var preferences = new PreferenceManager(store);
+      AgentToolSettings? tools = OperatingSystem.IsWindows() || options.GitBashPath is not null
+          ? new AgentToolSettings(options.GitBashPath,
               Environment.GetEnvironmentVariables().Cast<System.Collections.DictionaryEntry>()
                   .ToDictionary(entry => (string)entry.Key, entry => (string)entry.Value!, StringComparer.OrdinalIgnoreCase))
           : null;
-      manager = new SessionManager(store, client is { } supplied ? _ => supplied : providers.CreateChatClient, tools);
+      manager = new SessionManager(store, client is { } supplied ? _ => supplied : providers.CreateChatClient,
+          tools, preferences);
       eventHub = new SessionEventHub(manager);
       // Initial local limits reuse the exercised workload; transient parser memory is separate.
       markdown = createMarkdown?.Invoke() ?? new MessageMarkdownService(new(
           Entries: 64, RetainedBytes: 384L * 1024 * 1024,
           PendingKeys: 32, Leases: 64, SmallMessageUtf8Bytes: 16 * 1024));
-      app = CreateApplication(options, manager, providers, eventHub, markdown, () => Volatile.Read(ref servedOrigin));
+      app = CreateApplication(options, manager, providers, eventHub, markdown, preferences,
+          () => Volatile.Read(ref servedOrigin));
       var shutdownRequested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
       using var lifetimeStop = app.Lifetime.ApplicationStopping.Register(() => shutdownRequested.TrySetResult());
       using var callerStop = stopping.Register(app.Lifetime.StopApplication);
@@ -125,7 +129,8 @@ internal static class Program {
   }
 
   private static WebApplication CreateApplication(ServerOptions options, SessionManager manager,
-      ProviderManager providers, SessionEventHub eventHub, MessageMarkdownService? markdown, Func<Uri?> servedOrigin) {
+      ProviderManager providers, SessionEventHub eventHub, MessageMarkdownService? markdown,
+      PreferenceManager preferences, Func<Uri?> servedOrigin) {
     // No default appsettings/environment/URL providers: Kestrel configuration can otherwise add listeners.
     WebApplicationBuilder builder = WebApplication.CreateEmptyBuilder(new WebApplicationOptions {
       ApplicationName = typeof(Program).Assembly.GetName().Name,
@@ -168,6 +173,7 @@ internal static class Program {
     if (markdown is not null)
       app.MapMarkdown(manager, eventHub, markdown);
     app.MapProviders(providers);
+    app.MapPreferences(preferences);
     return app;
   }
 }

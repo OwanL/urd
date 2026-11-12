@@ -12,7 +12,7 @@ public sealed record SessionSnapshot(
     Guid? UnsettledExecutionId, bool StopRequested, SessionExecutionResult? LastSettlement,
     string? FirstUserPreview, IReadOnlyList<PendingInputPreview> PendingInputs,
     LlmSelection? LatestLlmSelection = null, bool IsCompacting = false, SessionWorkingTime? WorkingTime = null,
-    SessionContextUsage? ContextUsage = null);
+    SessionContextUsage? ContextUsage = null, string? WorkingDirectory = null);
 
 public sealed record SessionContextUsage(long UsedTokens, bool IsEstimate);
 

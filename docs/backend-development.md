@@ -9,7 +9,7 @@ saved-primary-ID discovery, durable Send decisions, safe-boundary steering, addr
 Stop, bounded snapshot/history/content reads, known-not-sent discovery and graceful
 shutdown. The browser workspace is implemented and served as static assets by the Server.
 
-`UrdStore` owns the shared database, currently schema 22. It records whether a request
+`UrdStore` owns the shared database, currently schema 23. It records whether a request
 started sending and pages inputs known not to have been sent, so users can retrieve
 and explicitly resend them. Snapshots stay slim; transcript metadata and
 content use separate bounded reads, and reported usage is persisted per request. Session snapshots
@@ -23,7 +23,7 @@ credential behavior.
 
 Before the supported public data baseline, schema changes replace the schema rather than
 migrating it. A fresh/version-0 database creates all current tables and indexes in one
-transaction; version 22 reopens normally. Other versions fail with reset instructions:
+transaction; version 23 reopens normally. Other versions fail with reset instructions:
 stop Urd, delete `urd.sqlite`, `urd.sqlite-wal` and `urd.sqlite-shm`, then restart.
 Urd never deletes these files automatically. Requests have only known not-attempted (1)
 or attempted (2) provenance; transcript user entries require request links and receipts
@@ -118,11 +118,13 @@ shared storage.
 
 ## Checkpoint scope
 
-- `SessionManager(store, createChatClient, AgentToolSettings? toolSettings = null)` passes the
-  borrowed store and client factory to canonical session handles. Optional settings enable the
-  generic read/write/edit/bash catalog plus list/cancel-pending controls; no settings means no tools. Each chat retains its saved
-  working directory and owns its shell processes; file mutations share the manager's ordering
-  queue. The factory receives the frozen selected connection binding. Constructors start no work.
+- `SessionManager(store, createChatClient, AgentToolSettings? toolSettings = null, PreferenceManager? preferences = null)` passes the
+  borrowed store and client factory to canonical session handles. `PreferenceManager` owns the typed
+  working-directory preference; new sessions save it or the host fallback, while existing sessions
+  retain their saved directory. Optional tool settings enable the generic read/write/edit/bash catalog
+  plus list/cancel-pending controls independently of the selected directory. Each chat owns its shell
+  processes; file mutations share the manager's ordering queue. The factory receives the frozen
+  selected connection binding. Constructors start no work.
 - `PrimarySession.SubmitUserMessageAsync(submission)` returns a durable acceptance/refusal receipt,
   not an LLM answer. Acceptance and execution identity commit together. Exact retries return
   the original decision; neither lookup nor retained acceptance starts work. Refusal fences delayed originals.

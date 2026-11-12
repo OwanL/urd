@@ -6,29 +6,20 @@ namespace Urd.Server;
 internal sealed record ServerOptions {
   public string DataRoot { get; }
   public int Port { get; }
-  public string? WorkingDirectory { get; }
   public string? GitBashPath { get; }
 
-  public ServerOptions(string dataRoot, int port, string? workingDirectory = null, string? gitBashPath = null) {
+  public ServerOptions(string dataRoot, int port, string? gitBashPath = null) {
     if (string.IsNullOrWhiteSpace(dataRoot) || !Path.IsPathFullyQualified(dataRoot))
       throw new ArgumentException("Data root must be a nonempty, fully qualified path.", nameof(dataRoot));
     if (port is < 0 or > 65535)
       throw new ArgumentException("Port must be between 0 and 65535.", nameof(port));
 
-    if (workingDirectory is not null &&
-        (string.IsNullOrWhiteSpace(workingDirectory) || !Path.IsPathFullyQualified(workingDirectory)))
-      throw new ArgumentException("Working directory must be a nonempty, fully qualified path.", nameof(workingDirectory));
     if (gitBashPath is not null &&
         (string.IsNullOrWhiteSpace(gitBashPath) || !Path.IsPathFullyQualified(gitBashPath)))
       throw new ArgumentException("Git Bash requires a fully qualified executable path.", nameof(gitBashPath));
 
     DataRoot = Path.GetFullPath(dataRoot);
     Port = port;
-    // Application tools currently require Windows. Preserve tool-free startup elsewhere.
-    string? directory = workingDirectory;
-    if (directory is null && (OperatingSystem.IsWindows() || gitBashPath is not null))
-      directory = Path.GetPathRoot(Environment.CurrentDirectory);
-    WorkingDirectory = directory is null ? null : Path.GetFullPath(directory);
     GitBashPath = gitBashPath is null ? null : Path.GetFullPath(gitBashPath);
   }
 
@@ -36,7 +27,6 @@ internal sealed record ServerOptions {
     ArgumentNullException.ThrowIfNull(args);
     string? dataRoot = null;
     int? port = null;
-    string? workingDirectory = null;
     string? gitBashPath = null;
 
     for (int index = 0; index < args.Length; index += 2) {
@@ -54,11 +44,6 @@ internal sealed record ServerOptions {
             throw new ArgumentException("--port must be an integer between 0 and 65535.", nameof(args));
           port = parsedPort;
           break;
-        case "--working-directory":
-          if (workingDirectory is not null)
-            throw new ArgumentException("Duplicate --working-directory option.", nameof(args));
-          workingDirectory = ReadValue(args, index);
-          break;
         case "--git-bash":
           if (gitBashPath is not null)
             throw new ArgumentException("Duplicate --git-bash option.", nameof(args));
@@ -73,7 +58,7 @@ internal sealed record ServerOptions {
       throw new ArgumentException("Missing required --data-root option.", nameof(args));
     if (port is null)
       throw new ArgumentException("Missing required --port option.", nameof(args));
-    return new ServerOptions(dataRoot, port.Value, workingDirectory, gitBashPath);
+    return new ServerOptions(dataRoot, port.Value, gitBashPath);
   }
 
   private static string ReadValue(string[] args, int index) {

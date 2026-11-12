@@ -9,7 +9,7 @@ saved-primary-ID discovery, durable Send decisions, safe-boundary steering, addr
 Stop, bounded snapshot/history/content reads, known-not-sent discovery and graceful
 shutdown. The browser workspace is implemented and served as static assets by the Server.
 
-`UrdStore` owns the shared database, currently schema 20. It records whether a request
+`UrdStore` owns the shared database, currently schema 21. It records whether a request
 started sending and pages inputs known not to have been sent, so users can retrieve
 and explicitly resend them. Snapshots stay slim; transcript metadata and
 content use separate bounded reads, and reported usage is persisted per request. Provider
@@ -19,7 +19,7 @@ credential behavior.
 
 Before the supported public data baseline, schema changes replace the schema rather than
 migrating it. A fresh/version-0 database creates all current tables and indexes in one
-transaction; version 20 reopens normally. Other versions fail with reset instructions:
+transaction; version 21 reopens normally. Other versions fail with reset instructions:
 stop Urd, delete `urd.sqlite`, `urd.sqlite-wal` and `urd.sqlite-shm`, then restart.
 Urd never deletes these files automatically. Requests have only known not-attempted (1)
 or attempted (2) provenance; transcript user entries require request links and receipts
@@ -191,8 +191,8 @@ shared storage.
   Unowned orphan Stop does not mutate/recover/replay the execution or fabricate settlement.
   Content reads expose user/assistant text; history pages also expose bounded tool-entry status
   and names, but not tool arguments or results. An admission receipt is not completion.
-- Normal terminal close/reopen is tested without replay. Nonterminal rows survive reopening
-  and block new admission; startup interruption/recovery is **not** implemented.
+- Normal terminal close/reopen is tested without replay. Opening the store alone leaves nonterminal
+  rows fenced; host startup records interrupted work before admitting later deliberate input.
 
 Earlier Stop and steering checkpoints used real SQLite and HTTP with held callbacks/cleanup,
 uncooperative fake tools, immutable receipts, stale/wrong-session Stop isolation, unowned
@@ -331,8 +331,7 @@ share a file per concept. Read them alongside their owners.
    [LlmResponseWriterTests.cs](../source/tests/Urd.Backend.Tests/execution/LlmResponseWriterTests.cs) and
    [SessionExecutionTests.cs](../source/tests/Urd.Backend.Tests/execution/SessionExecutionTests.cs) — whole Core flow,
    concurrent retries, cancelled waiters and lifecycle failures.
-6. [UserMessageReceiptTests.cs](../source/tests/Urd.Backend.Tests/storage/UserMessageReceiptTests.cs),
-   [ExecutionStorageTests.cs](../source/tests/Urd.Backend.Tests/storage/ExecutionStorageTests.cs) and
+6. [ExecutionStorageTests.cs](../source/tests/Urd.Backend.Tests/storage/ExecutionStorageTests.cs) and
    [SessionIdentityTests.cs](../source/tests/Urd.Backend.Tests/sessions/SessionIdentityTests.cs) — storage/registry invariants;
    [TemporaryDatabase.cs](../source/tests/Urd.Backend.Tests/support/TemporaryDatabase.cs) supplies isolated test data.
    `support/` also holds the scripted LLM client, response scripts and execution fixture;

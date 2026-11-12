@@ -240,8 +240,9 @@ up to eight nonterminal input deliveries. At the next safe request boundary, too
 precede separate user messages in admission order; pending steering also continues after a
 successful no-tool response. Already-claimed requests are unchanged. The HTTP layer adds no
 busy policy or steering-specific routes and does not turn a durable refusal into an HTTP error.
-History entries include tool names and execution status, but there is no endpoint for tool
-arguments or results.
+History entries include tool names and execution status. Inspect arguments/results on demand
+at `/api/sessions/{sessionId}/tool-calls/{requestId}/{callId}` with explicit `returned` and
+`full` flags. Previews are bounded to 65,536 characters per field and report truncation.
 
 Stop addresses the observed execution ID, never a replacement: `Requested` acknowledges committed
 intent and pending-steering retirement, not finished cleanup; `Settled` includes the saved

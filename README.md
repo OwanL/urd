@@ -20,10 +20,11 @@ older pre-release databases require an explicit reset, not automatic migration.
 History metadata, not-sent inputs and one shared event stream support transcript updates.
 Closing a tab hides it; it does not stop work or close its backend session.
 
-Windows file/shell tools and browser navigation through older history are available. Tool-body
-inspection, an explicit after-run queue and full startup recovery remain unfinished. Snooze is
-unavailable. Transcript virtualization, images and storage caching are active work; the transcript
-records distinguish approved requirements from delivered behavior. Reopening does not replay work.
+Windows file/shell tools, browser navigation through older history and on-demand tool-body
+inspection are available. Host startup records interrupted executions without replay; broader
+recovery remains unfinished. An explicit after-run queue and Snooze are unavailable. Transcript
+virtualization, images and storage caching are active work; transcript records distinguish approved
+requirements from delivered behavior. Reopening does not replay work.
 
 ## Start here
 

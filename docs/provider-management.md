@@ -3,9 +3,9 @@
 The local server manages saved **ChatGPT subscription**, **OpenAI API-key** and
 **custom OpenAI-compatible** connections. ChatGPT uses Responses; custom endpoints
 choose Responses or Chat Completions, with an API key or no authentication. The shared
-request client powers chat execution; the provider settings UI is integrated into the browser
-workspace. Future pruning, compaction and title operations remain separate consumers. This
-adds no discovery tools, other subscription providers or native Ollama/Anthropic adapters.
+request client powers chat execution and history compaction; the provider settings UI is integrated
+into the browser workspace. Pruning and title generation remain future request-client consumers.
+This adds no discovery tools, other subscription providers or native Ollama/Anthropic adapters.
 
 ## Storage and ownership
 

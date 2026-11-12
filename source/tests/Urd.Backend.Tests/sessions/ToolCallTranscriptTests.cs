@@ -62,6 +62,30 @@ public sealed class ToolCallTranscriptTests {
     Assert.Equal(expectedOutput, transcript.Output);
   }
 
+  [Fact]
+  public async Task DirectImageResultUsesNextRunThatSendsAfterTheOriginalRunStops() {
+    var client = new ScriptedChatClient(token => Complete(token));
+    await using var fixture = new ExecutionFixture(client);
+    Guid request = SeedStoppedDirectResult(fixture.Database, fixture.Session.Id, neverAttemptedContinuation: false);
+
+    ToolCallTranscript transcript = Assert.IsType<ToolCallTranscript>(await fixture.Session.Transcript.ReadToolCallTranscriptAsync(
+        0, request, "direct", returned: false));
+
+    Assert.Equal("direct output\n[Images omitted because the current model does not support images.]", transcript.Output);
+  }
+
+  [Fact]
+  public async Task NeverAttemptedSameRunContinuationDoesNotMaskTheLaterReceiver() {
+    var client = new ScriptedChatClient(token => Complete(token));
+    await using var fixture = new ExecutionFixture(client);
+    Guid request = SeedStoppedDirectResult(fixture.Database, fixture.Session.Id, neverAttemptedContinuation: true);
+
+    ToolCallTranscript transcript = Assert.IsType<ToolCallTranscript>(await fixture.Session.Transcript.ReadToolCallTranscriptAsync(
+        0, request, "direct", returned: false));
+
+    Assert.Equal("direct output\n[Images omitted because the current model does not support images.]", transcript.Output);
+  }
+
   [Theory]
   [InlineData(true, "returned result\n[image: image/jpeg]")]
   [InlineData(false, "returned result\n[Images omitted because the current model does not support images.]")]
@@ -79,8 +103,21 @@ public sealed class ToolCallTranscriptTests {
         + expectedResult, transcript.Output);
   }
 
+  [Fact]
+  public async Task ReturnedImageCompletionIgnoresAnUnsentClaim() {
+    var client = new ScriptedChatClient(token => Complete(token));
+    await using var fixture = new ExecutionFixture(client);
+    TranscriptCalls calls = SeedToolCalls(fixture.Database, fixture.Session.Id,
+        supportsImages: false, returnedImage: true, returnedClaimSent: false);
+
+    ToolCallTranscript transcript = Assert.IsType<ToolCallTranscript>(await fixture.Session.Transcript.ReadToolCallTranscriptAsync(
+        0, calls.ReturnedRequest, "returned", returned: true));
+
+    Assert.EndsWith("returned result\n[image: image/jpeg]", transcript.Output);
+  }
+
   private static TranscriptCalls SeedToolCalls(TemporaryDatabase database, Guid session,
-      bool supportsImages = true, bool returnedImage = false) {
+      bool supportsImages = true, bool returnedImage = false, bool returnedClaimSent = true) {
     Guid run = Guid.NewGuid();
     Guid directRequest = Guid.NewGuid(), runningRequest = Guid.NewGuid();
     Guid returnedRequest = Guid.NewGuid(), unicodeRequest = Guid.NewGuid();
@@ -103,11 +140,11 @@ public sealed class ToolCallTranscriptTests {
       VALUES ('{session:D}', '{input:D}', 0, X'', 1, '{run:D}', '{selection}');
       INSERT INTO execution_runs (session_id, run_id, history_revision, input_id, outcome)
       VALUES ('{session:D}', '{run:D}', 0, '{input:D}', 0);
-      INSERT INTO execution_requests (request_id, run_id, request_index, response_final, outcome)
-      VALUES ('{directRequest:D}', '{run:D}', 0, 1, 0),
-          ('{runningRequest:D}', '{run:D}', 1, 1, 0),
-          ('{returnedRequest:D}', '{run:D}', 2, 1, 0),
-          ('{unicodeRequest:D}', '{run:D}', 3, 1, 0);
+      INSERT INTO execution_requests (request_id, run_id, request_index, attempt, response_final, outcome)
+      VALUES ('{directRequest:D}', '{run:D}', 0, 2, 1, 0),
+          ('{runningRequest:D}', '{run:D}', 1, 2, 1, 0),
+          ('{returnedRequest:D}', '{run:D}', 2, 2, 1, 0),
+          ('{unicodeRequest:D}', '{run:D}', 3, {(returnedClaimSent ? 2 : 1)}, 1, 0);
       INSERT INTO execution_tools
           (run_id, request_id, call_index, call_id, name, arguments_json, started, background, outcome, result_json)
       VALUES ('{run:D}', '{directRequest:D}', 0, 'direct', 'read', '{directArguments}', 1, 0, 0, '{directResult}'),
@@ -126,6 +163,37 @@ public sealed class ToolCallTranscriptTests {
           ('{session:D}', 0, '{run:D}', 2, '{Guid.NewGuid():D}', '{unicodeRequest:D}', 'unicode', 'read');
       """);
     return new(directRequest, runningRequest, returnedRequest, unicodeRequest);
+  }
+
+  private static Guid SeedStoppedDirectResult(TemporaryDatabase database, Guid session, bool neverAttemptedContinuation) {
+    Guid originalRun = Guid.NewGuid(), nextRun = Guid.NewGuid();
+    Guid originalInput = Guid.NewGuid(), nextInput = Guid.NewGuid();
+    Guid directRequest = Guid.NewGuid(), continuationRequest = Guid.NewGuid(), receiverRequest = Guid.NewGuid();
+    string originalSelection = JsonSerializer.Serialize(TestLlmSelection.Default);
+    string nextSelection = JsonSerializer.Serialize(TestLlmSelection.Default with { SupportsImages = false });
+    string directArguments = JsonSerializer.Serialize(new { });
+    const string directResult = "{\"text\":\"direct output\",\"images\":[{\"hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"byteLength\":1}],\"details\":null,\"isError\":false}";
+    database.Execute($"""
+      INSERT INTO input_decisions
+          (session_id, input_id, expected_history_revision, original_text_utf8, decision, run_id, llm_selection_json)
+      VALUES ('{session:D}', '{originalInput:D}', 0, X'', 1, '{originalRun:D}', '{originalSelection}'),
+          ('{session:D}', '{nextInput:D}', 0, X'', 1, '{nextRun:D}', '{nextSelection}');
+      INSERT INTO execution_runs (session_id, run_id, history_revision, input_id, stopping, outcome)
+      VALUES ('{session:D}', '{originalRun:D}', 0, '{originalInput:D}', 1, 1),
+          ('{session:D}', '{nextRun:D}', 0, '{nextInput:D}', 0, NULL);
+      INSERT INTO execution_requests (request_id, run_id, request_index, attempt, response_final, outcome)
+      VALUES ('{directRequest:D}', '{originalRun:D}', 0, 2, 1, 0),
+          ('{receiverRequest:D}', '{nextRun:D}', 0, 2, 0, NULL);
+      INSERT INTO execution_tools
+          (run_id, request_id, call_index, call_id, name, arguments_json, started, outcome, result_json)
+      VALUES ('{originalRun:D}', '{directRequest:D}', 0, 'direct', 'read', '{directArguments}', 1, 0, '{directResult}');
+      """);
+    if (neverAttemptedContinuation)
+      database.Execute($"""
+        INSERT INTO execution_requests (request_id, run_id, request_index, attempt, response_final, outcome)
+        VALUES ('{continuationRequest:D}', '{originalRun:D}', 1, 1, 1, 1);
+        """);
+    return directRequest;
   }
 
   private sealed record TranscriptCalls(Guid DirectRequest, Guid RunningRequest, Guid ReturnedRequest, Guid UnicodeRequest);

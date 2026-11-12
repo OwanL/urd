@@ -31,16 +31,21 @@ internal sealed class ToolStorage(Database database, ToolResultCodec results) {
           EXISTS (SELECT 1 FROM execution_tool_completions c
               WHERE c.session_id = r.session_id AND c.history_revision = r.history_revision
                   AND c.request_id = t.request_id AND c.call_id = t.call_id AND c.published = 1),
-          (SELECT d.llm_selection_json FROM execution_requests receiving
-              JOIN execution_runs receiving_run ON receiving_run.run_id = receiving.run_id
+          (SELECT d.llm_selection_json FROM execution_runs receiving_run
+              JOIN execution_requests receiving ON receiving.run_id = receiving_run.run_id
               JOIN input_decisions d ON d.session_id = receiving_run.session_id AND d.input_id = receiving_run.input_id
-              WHERE receiving.run_id = q.run_id AND receiving.request_index > q.request_index
-              ORDER BY receiving.request_index LIMIT 1),
+              WHERE receiving_run.session_id = r.session_id AND receiving_run.history_revision = r.history_revision
+                  AND receiving.attempt = 2
+                  AND (receiving_run.ordinal > r.ordinal OR
+                      (receiving_run.ordinal = r.ordinal AND receiving.request_index > q.request_index))
+              ORDER BY receiving_run.ordinal, receiving.request_index LIMIT 1),
           (SELECT d.llm_selection_json FROM execution_tool_completions c
               JOIN execution_requests receiving ON receiving.request_id = c.claimed_request_id
               JOIN execution_runs receiving_run ON receiving_run.run_id = receiving.run_id
               JOIN input_decisions d ON d.session_id = receiving_run.session_id AND d.input_id = receiving_run.input_id
-              WHERE c.request_id = t.request_id AND c.call_id = t.call_id AND c.published = 1)
+              WHERE c.session_id = r.session_id AND c.history_revision = r.history_revision
+                  AND c.request_id = t.request_id AND c.call_id = t.call_id AND c.published = 1
+                  AND receiving.attempt = 2)
       FROM execution_tools t JOIN execution_runs r ON r.run_id = t.run_id
       JOIN execution_requests q ON q.request_id = t.request_id AND q.run_id = t.run_id
       WHERE r.session_id = $session AND r.history_revision = $revision
@@ -71,7 +76,7 @@ internal sealed class ToolStorage(Database database, ToolResultCodec results) {
   });
 
   private static bool ReadReceivingModelSupportsImages(SqliteDataReader reader, int selectionColumn) {
-    // If the receiving request does not exist yet, preserve placeholders rather than infer future model support.
+    // If no sent receiving request exists yet, preserve placeholders rather than infer future model support.
     string? selectionJson = reader.IsDBNull(selectionColumn) ? null : reader.GetString(selectionColumn);
     return LlmSelectionJson.Read(selectionJson)?.SupportsImages ?? true;
   }

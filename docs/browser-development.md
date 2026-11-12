@@ -12,8 +12,8 @@ snapshot/history metadata and loads message text on demand.
 
 The workspace has closable, reorderable local tabs, transcript, model and reasoning
 selectors, Send, Stop and integrated [provider settings](provider-management.md#browser-settings).
-Snooze remains unavailable. The UI displays a bounded, navigable transcript with tool status
-and Markdown rendering; tool arguments/results are not exposed. The history API supports
+Snooze remains unavailable. The UI displays a bounded, navigable transcript with compact tool
+rows, on-demand input/output inspection and Markdown rendering. The history API supports
 anchored pages. Closing a tab hides the view; it does not stop work, close a backend session
 or delete history. Components and effects stay with their feature; hooks are
 extracted for actual responsibilities, not a state framework.
@@ -46,8 +46,9 @@ shapes are discarded, not migrated. The current shape in
 alongside placeholder/derived title provenance, so an actual first message of `New chat`
 is not mistaken for an unnamed tab. Incompatible earlier state is discarded.
 The palette uses neutral black/charcoal surfaces and grey controls; semantic error
-colours remain distinct. Transcript text uses the Markdown renderer; tool rows show status,
-while tool argument/result inspection remains future work.
+colours remain distinct. Transcript text uses the Markdown renderer. Tool icons open a shared
+inspection card by hover, click or keyboard; hover alone preserves composer focus. The card
+refreshes when a running call finishes. File rows offer Copy path and Reveal in Explorer.
 
 ## Markdown rendering
 

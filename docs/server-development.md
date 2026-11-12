@@ -6,7 +6,8 @@ slim snapshots, paged transcript history, not-sent inputs and bounded content re
 event routes provide server-sent updates for the browser workspace. Provider management and
 its settings UI are integrated; production sessions borrow provider-managed clients. Startup
 records interrupted work without replay; no explicit after-execution queue is implemented.
-Tool and background-completion rows expose compact status, not argument/result inspection.
+Tool and background-completion rows expose compact labels and status, with model-facing
+argument/result inspection loaded separately on demand.
 
 ## Run
 
@@ -84,7 +85,8 @@ and Core shutdown operations both finish; it has no forced cleanup timeout.
 | GET `/api/sessions/{sessionId}/compactions/operations/{operationId}` | 200 receipt or literal JSON `null` |
 | GET `/api/sessions/{sessionId}/compactions/{compactionId}` | `expectedHistoryRevision` → 200 `CompactionSummary`, or 404 |
 | GET `/api/sessions/{sessionId}/snapshot` | 200 slim `SessionSnapshot` |
-| GET `/api/sessions/{sessionId}/history` | Mode/revision and optional entry anchor → 200 bounded `TranscriptHistoryPage` |
+| GET `/api/sessions/{sessionId}/history` | Mode/revision and optional entry anchor → 200 bounded `TranscriptHistoryPage` with `toolLabels` |
+| GET `/api/sessions/{sessionId}/tool-calls/{requestId}/{callId}` | `expectedHistoryRevision`, `returned`, `full` → 200 `ToolCallTranscript`, or 404 |
 | GET `/api/sessions/{sessionId}/not-sent?cursor=...` | Optional opaque cursor → 200 page of known-not-sent inputs |
 | GET `/api/sessions/{sessionId}/content` | Segment-local cursor → 200 `MessageContentPage` |
 | GET `/api/sessions/{sessionId}/positions` | `expectedHistoryRevision` → 200 `TranscriptPositionSummary` |
@@ -95,6 +97,14 @@ and Core shutdown operations both finish; it has no forced cleanup timeout.
 
 [`SessionRoutes.cs`](../source/hosting/server/SessionRoutes.cs) owns the route inventory;
 [`SessionClient.ts`](../source/ui/sessions/SessionClient.ts) supplies the browser query shapes.
+
+History and descriptor-carrying position windows attach `toolLabels`; full arguments,
+results and storage excerpts are never included. Tool inspection requires explicit `returned`
+and `full` booleans. Previews (`full=false`) cap each field at 65,536 characters and report
+truncation; Copy requests full text. Image references render without reading image bytes.
+
+POST `/api/files/reveal` accepts `{path}` with an existing absolute path and returns 204
+on Windows. It starts Explorer directly without a shell; missing paths return 404.
 
 ### Browser event stream
 

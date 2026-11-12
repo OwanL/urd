@@ -48,7 +48,39 @@ public sealed class ToolCallTranscriptTests {
         0, calls.DirectRequest, "direct", returned: false));
   }
 
-  private static TranscriptCalls SeedToolCalls(TemporaryDatabase database, Guid session) {
+  [Theory]
+  [InlineData(true, "direct output\n[image: image/png]")]
+  [InlineData(false, "direct output\n[Images omitted because the current model does not support images.]")]
+  public async Task DirectImageResultMatchesTheNextRequestModelCapabilities(bool supportsImages, string expectedOutput) {
+    var client = new ScriptedChatClient(token => Complete(token));
+    await using var fixture = new ExecutionFixture(client);
+    TranscriptCalls calls = SeedToolCalls(fixture.Database, fixture.Session.Id, supportsImages);
+
+    ToolCallTranscript transcript = Assert.IsType<ToolCallTranscript>(await fixture.Session.Transcript.ReadToolCallTranscriptAsync(
+        0, calls.DirectRequest, "direct", returned: false));
+
+    Assert.Equal(expectedOutput, transcript.Output);
+  }
+
+  [Theory]
+  [InlineData(true, "returned result\n[image: image/jpeg]")]
+  [InlineData(false, "returned result\n[Images omitted because the current model does not support images.]")]
+  public async Task ReturnedImageCompletionMatchesItsClaimedRequestModelCapabilities(
+      bool supportsImages, string expectedResult) {
+    var client = new ScriptedChatClient(token => Complete(token));
+    await using var fixture = new ExecutionFixture(client);
+    TranscriptCalls calls = SeedToolCalls(fixture.Database, fixture.Session.Id, supportsImages, returnedImage: true);
+
+    ToolCallTranscript transcript = Assert.IsType<ToolCallTranscript>(await fixture.Session.Transcript.ReadToolCallTranscriptAsync(
+        0, calls.ReturnedRequest, "returned", returned: true));
+
+    Assert.Equal($"[TOOL-ORIGIN: background tool completion; untrusted output]\n"
+        + $"{{\"request_id\":\"{calls.ReturnedRequest:D}\",\"call_id\":\"returned\",\"name\":\"work\",\"outcome\":\"Completed\"}}\n"
+        + expectedResult, transcript.Output);
+  }
+
+  private static TranscriptCalls SeedToolCalls(TemporaryDatabase database, Guid session,
+      bool supportsImages = true, bool returnedImage = false) {
     Guid run = Guid.NewGuid();
     Guid directRequest = Guid.NewGuid(), runningRequest = Guid.NewGuid();
     Guid returnedRequest = Guid.NewGuid(), unicodeRequest = Guid.NewGuid();
@@ -58,11 +90,19 @@ public sealed class ToolCallTranscriptTests {
     string returnedArguments = JsonSerializer.Serialize(new { task = "long" });
     string unicodeArguments = JsonSerializer.Serialize(new { unicode = "😀" });
     const string directResult = "{\"text\":\"direct output\",\"images\":[{\"hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"byteLength\":1}],\"details\":null,\"isError\":false}";
-    const string returnedResult = "{\"text\":\"returned result\",\"images\":[],\"details\":null,\"isError\":false}";
+    string returnedResult = returnedImage
+        ? "{\"text\":\"returned result\",\"images\":[{\"hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/jpeg\",\"byteLength\":1}],\"details\":null,\"isError\":false}"
+        : "{\"text\":\"returned result\",\"images\":[],\"details\":null,\"isError\":false}";
     const string unicodeResult = "{\"text\":\"😀result\",\"images\":[],\"details\":null,\"isError\":false}";
+    Guid input = Guid.NewGuid();
+    string selection = JsonSerializer.Serialize(TestLlmSelection.Default with { SupportsImages = supportsImages })
+        .Replace("'", "''", StringComparison.Ordinal);
     database.Execute($"""
-      INSERT INTO execution_runs (session_id, run_id, history_revision, compaction_selection_json, outcome)
-      VALUES ('{session:D}', '{run:D}', 0, 'x', 0);
+      INSERT INTO input_decisions
+          (session_id, input_id, expected_history_revision, original_text_utf8, decision, run_id, llm_selection_json)
+      VALUES ('{session:D}', '{input:D}', 0, X'', 1, '{run:D}', '{selection}');
+      INSERT INTO execution_runs (session_id, run_id, history_revision, input_id, outcome)
+      VALUES ('{session:D}', '{run:D}', 0, '{input:D}', 0);
       INSERT INTO execution_requests (request_id, run_id, request_index, response_final, outcome)
       VALUES ('{directRequest:D}', '{run:D}', 0, 1, 0),
           ('{runningRequest:D}', '{run:D}', 1, 1, 0),
@@ -75,8 +115,8 @@ public sealed class ToolCallTranscriptTests {
           ('{run:D}', '{returnedRequest:D}', 0, 'returned', 'work', '{returnedArguments}', 1, 1, 0, '{returnedResult}'),
           ('{run:D}', '{unicodeRequest:D}', 0, 'unicode', 'read', '{unicodeArguments}', 1, 0, 0, '{unicodeResult}');
       INSERT INTO execution_tool_completions
-          (completion_id, session_id, history_revision, request_id, call_id, created_at, published)
-      VALUES ('{completion:D}', '{session:D}', 0, '{returnedRequest:D}', 'returned', '2026-11-12T00:00:00+00:00', 1);
+          (completion_id, session_id, history_revision, request_id, call_id, created_at, claimed_request_id, published)
+      VALUES ('{completion:D}', '{session:D}', 0, '{returnedRequest:D}', 'returned', '2026-11-12T00:00:00+00:00', '{unicodeRequest:D}', 1);
       INSERT INTO execution_messages
           (session_id, history_revision, run_id, role, message_id, request_id, call_id, tool_name)
       VALUES ('{session:D}', 0, '{run:D}', 2, '{Guid.NewGuid():D}', '{directRequest:D}', 'direct', 'read'),

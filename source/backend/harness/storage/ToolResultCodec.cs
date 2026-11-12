@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
 using Urd.Core.Execution;
+using Urd.Core.Providers;
 using Urd.Core.Tools;
 
 namespace Urd.Core.Storage;
@@ -29,7 +30,8 @@ internal sealed class ToolResultCodec(ToolImageStore images) {
 
   internal object ReadModelResult(string value) => ProjectModelResult(value, loadImages: true).Content;
 
-  internal string ReadModelResultText(string value) => ProjectModelResult(value, loadImages: false).Text;
+  internal string ReadModelResultText(string value, bool supportsImages) =>
+      ProjectModelResult(value, loadImages: false, supportsImages: supportsImages).Text;
 
   internal static string BackgroundStarted(Guid requestId, string callId) =>
       "Background tool started: " + JsonSerializer.Serialize(new { request_id = requestId, call_id = callId })
@@ -45,22 +47,26 @@ internal sealed class ToolResultCodec(ToolImageStore images) {
   }
 
   internal string ReadModelCompletionText(
-      Guid requestId, string callId, string name, ExecutionOutcome outcome, string resultJson) =>
-      CompletionEnvelope(requestId, callId, name, outcome) + ProjectModelResult(resultJson, loadImages: false).Text;
+      Guid requestId, string callId, string name, ExecutionOutcome outcome, string resultJson, bool supportsImages) =>
+      CompletionEnvelope(requestId, callId, name, outcome)
+      + ProjectModelResult(resultJson, loadImages: false, supportsImages: supportsImages).Text;
 
   internal string Error(string message) => Write(new ToolOutput(message, [], IsError: true));
 
-  private ModelToolResult ProjectModelResult(string value, bool loadImages) {
+  private ModelToolResult ProjectModelResult(string value, bool loadImages, bool supportsImages = true) {
     ToolResultEnvelope saved = ReadEnvelope(value);
     var projectedImages = new List<AIContent>(saved.Images.Count);
     string text = saved.Text;
     foreach (ToolImageReference image in saved.Images) {
       if (loadImages)
         projectedImages.Add(images.Read(image));
-      else
+      else if (supportsImages)
         projectedImages.Add(new TextContent(ImagePlaceholder(image)));
-      text = AppendImagePlaceholder(text, image);
+      if (supportsImages)
+        text = AppendImagePlaceholder(text, image);
     }
+    if (saved.Images.Count > 0 && !supportsImages)
+      text = LlmProviderContext.AppendImageOmissionNotice(text);
 
     object content = saved.Images.Count == 0
         ? saved.Text

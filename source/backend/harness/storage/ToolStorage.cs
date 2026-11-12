@@ -30,7 +30,17 @@ internal sealed class ToolStorage(Database database, ToolResultCodec results) {
       SELECT t.arguments_json, t.background, t.started, t.result_json, t.outcome, t.name,
           EXISTS (SELECT 1 FROM execution_tool_completions c
               WHERE c.session_id = r.session_id AND c.history_revision = r.history_revision
-                  AND c.request_id = t.request_id AND c.call_id = t.call_id AND c.published = 1)
+                  AND c.request_id = t.request_id AND c.call_id = t.call_id AND c.published = 1),
+          (SELECT d.llm_selection_json FROM execution_requests receiving
+              JOIN execution_runs receiving_run ON receiving_run.run_id = receiving.run_id
+              JOIN input_decisions d ON d.session_id = receiving_run.session_id AND d.input_id = receiving_run.input_id
+              WHERE receiving.run_id = q.run_id AND receiving.request_index > q.request_index
+              ORDER BY receiving.request_index LIMIT 1),
+          (SELECT d.llm_selection_json FROM execution_tool_completions c
+              JOIN execution_requests receiving ON receiving.request_id = c.claimed_request_id
+              JOIN execution_runs receiving_run ON receiving_run.run_id = receiving.run_id
+              JOIN input_decisions d ON d.session_id = receiving_run.session_id AND d.input_id = receiving_run.input_id
+              WHERE c.request_id = t.request_id AND c.call_id = t.call_id AND c.published = 1)
       FROM execution_tools t JOIN execution_runs r ON r.run_id = t.run_id
       JOIN execution_requests q ON q.request_id = t.request_id AND q.run_id = t.run_id
       WHERE r.session_id = $session AND r.history_revision = $revision
@@ -50,14 +60,21 @@ internal sealed class ToolStorage(Database database, ToolResultCodec results) {
     bool returnedPublished = reader.GetBoolean(6);
     string? output = null;
     if (returned && background && returnedPublished && resultJson is not null && outcome is not null)
-      output = results.ReadModelCompletionText(requestId, callId, name, outcome.Value, resultJson);
+      output = results.ReadModelCompletionText(requestId, callId, name, outcome.Value, resultJson,
+          ReadReceivingModelSupportsImages(reader, 8));
     else if (!returned && background && started)
       output = ToolResultCodec.BackgroundStarted(requestId, callId);
     else if (!returned && resultJson is not null)
-      output = results.ReadModelResultText(resultJson);
+      output = results.ReadModelResultText(resultJson, ReadReceivingModelSupportsImages(reader, 7));
 
     return new ToolCallTranscript(input, output, Truncated: false);
   });
+
+  private static bool ReadReceivingModelSupportsImages(SqliteDataReader reader, int selectionColumn) {
+    // If the receiving request does not exist yet, preserve placeholders rather than infer future model support.
+    string? selectionJson = reader.IsDBNull(selectionColumn) ? null : reader.GetString(selectionColumn);
+    return LlmSelectionJson.Read(selectionJson)?.SupportsImages ?? true;
+  }
 
   internal bool TryStart(Guid sessionId, Guid executionId, long revision, Guid requestId, string callId,
       bool background = false) {

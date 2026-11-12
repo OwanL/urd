@@ -46,6 +46,8 @@ internal static class LlmProviderContext {
     return source.Select(FilterImages).ToArray();
   }
 
+  internal static string AppendImageOmissionNotice(string text) => text + ImageOmissionLabel;
+
   internal static LlmProviderResponse CaptureResponses(LlmProviderScope scope, IReadOnlyList<ResponseItem> items) {
     ValidateScope(scope);
     Require(scope.Api == LlmApi.OpenAIResponses);
@@ -328,7 +330,7 @@ internal static class LlmProviderContext {
   private static ChatMessage FilterImages(ChatMessage message) {
     if (message.Role == ChatRole.User && message.Contents.Any(content => content is DataContent))
       return new ChatMessage(message.Role, message.Contents.Where(content => content is not DataContent)
-          .Append(new TextContent(ImageOmissionLabel)).ToList());
+          .Append(new TextContent(AppendImageOmissionNotice(string.Empty))).ToList());
     if (message.Role != ChatRole.Tool)
       return message;
 
@@ -342,7 +344,8 @@ internal static class LlmProviderContext {
       }
 
       filtered ??= message.Contents.Take(index).ToList();
-      filtered.Add(TextResult(result, resultContents.OfType<TextContent>().Append(new TextContent(ImageOmissionLabel)).ToArray()));
+      filtered.Add(TextResult(result, resultContents.OfType<TextContent>()
+          .Append(new TextContent(AppendImageOmissionNotice(string.Empty))).ToArray()));
     }
 
     return filtered is null ? message : new ChatMessage(message.Role, filtered);

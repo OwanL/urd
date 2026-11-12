@@ -4,7 +4,7 @@ namespace Urd.Core.Storage;
 
 // Creates the current pre-release schema; incompatible databases require a manual reset.
 internal static class DatabaseSchema {
-  private const int SchemaVersion = 21;
+  private const int SchemaVersion = 22;
 
   internal static void Initialize(SqliteConnection connection) {
     using SqliteCommand command = connection.CreateCommand();
@@ -42,6 +42,8 @@ internal static class DatabaseSchema {
           session_id TEXT NOT NULL PRIMARY KEY,
           history_revision INTEGER NOT NULL CHECK (history_revision >= 0),
           working_directory TEXT,
+          completed_working_ms INTEGER NOT NULL DEFAULT 0 CHECK (completed_working_ms >= 0),
+          working_time_incomplete INTEGER NOT NULL DEFAULT 0 CHECK (working_time_incomplete IN (0, 1)),
           position_version INTEGER NOT NULL DEFAULT 0 CHECK (position_version >= 0)
       ) STRICT;
       CREATE TABLE session_starting_context (
@@ -87,6 +89,7 @@ internal static class DatabaseSchema {
           compaction_focus TEXT,
           error TEXT,
           stopping INTEGER NOT NULL DEFAULT 0 CHECK (stopping IN (0, 1)),
+          working_started_at TEXT,
           outcome INTEGER CHECK (outcome IN (0, 1, 2)),
           UNIQUE (session_id, input_id),
           FOREIGN KEY (session_id, input_id) REFERENCES input_decisions(session_id, input_id),
@@ -294,7 +297,7 @@ internal static class DatabaseSchema {
       CREATE INDEX execution_inputs_not_sent_order ON execution_inputs(session_id, ordinal) WHERE not_sent = 1;
       CREATE INDEX execution_messages_history_order ON execution_messages(session_id, history_revision, ordinal DESC);
       CREATE INDEX execution_messages_request_order ON execution_messages(request_id, role, first_chunk_index);
-      PRAGMA user_version = 21;
+      PRAGMA user_version = 22;
       """;
     command.ExecuteNonQuery();
     transaction.Commit();

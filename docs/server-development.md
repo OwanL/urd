@@ -156,7 +156,7 @@ compact command identities/hashes and usage remain. Removed Send receipts return
 than exposing deleted text or allowing an old Send to recreate it. History replacement does
 not undo external tool effects. There is no branch archive or undo.
 
-This introduces schema **21**. Existing schemas, including 20, require explicit database
+The current schema is **22**, including durable session working time. Existing schemas require explicit database
 recreation under the pre-release policy. Never reset an active profile as part of verification
 or automatically activate this build against one.
 

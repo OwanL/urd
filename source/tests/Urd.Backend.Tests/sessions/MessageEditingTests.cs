@@ -119,10 +119,13 @@ public sealed class MessageEditingTests {
           await session.WaitForSettlementAsync(accepted.ExecutionId!.Value).WaitAsync(TestTimeout);
         }
         var page = await session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, 0));
+        database.Execute($"UPDATE sessions SET completed_working_ms = 600000 WHERE session_id = '{session.Id:D}';"); // raw-sql: seed a settled-time total so an edit cannot pass by resetting it
+        long completedBeforeEdit = (await session.ReadSnapshotAsync()).WorkingTime!.CompletedMilliseconds;
         MessageRef target = page.Entries.Where(entry => entry.Entry.Kind == TranscriptEntryKind.User).ElementAt(index).Text!.From.Message;
         edit = new(Guid.NewGuid(), target, "  edited 雪🙂\0  ", TestLlmSelection.Default);
         receipt = await session.EditUserMessageAsync(edit).WaitAsync(TestTimeout);
         await session.WaitForSettlementAsync(receipt.ExecutionId).WaitAsync(TestTimeout);
+        Assert.True((await session.ReadSnapshotAsync()).WorkingTime!.CompletedMilliseconds >= completedBeforeEdit);
         Assert.Equal(1, receipt.HistoryRevision);
         Assert.Equal(inputs.Take(index).Select(input => input.Text).Append(edit.Text), Users(client.LastRequest));
         Assert.Equal(index, client.LastRequest.Count(message => message.Role == ChatRole.Assistant));

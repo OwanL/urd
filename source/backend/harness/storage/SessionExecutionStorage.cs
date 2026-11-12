@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Data.Sqlite;
 using Urd.Core.Context;
 using Urd.Core.Execution;
@@ -145,7 +146,7 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
             r.compaction_selection_json IS NOT NULL,
             (SELECT substr(q.error, 1, 1024) FROM execution_requests q
                 WHERE q.run_id = r.run_id AND q.outcome = 2 ORDER BY q.request_index DESC LIMIT 1),
-            substr(r.error, 1, 1024)
+            substr(r.error, 1, 1024), r.working_started_at
         FROM execution_runs r WHERE r.session_id = $session AND r.run_id = $run;
         """, ("$session", sessionId), ("$run", executionId));
       if (DecideSettlement(read, driverOutcome) is not { } settlement)
@@ -153,6 +154,20 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
 
       if (settlement.AlreadySettled)
         return new(executionId, settlement.Outcome, settlement.Error);
+
+      TimeSpan elapsed = settlement.StartedAt is { } startedAt
+          ? DateTimeOffset.UtcNow - startedAt : TimeSpan.Zero;
+      bool unknownDuration = settlement.StartedAt is null || elapsed < TimeSpan.Zero;
+      long elapsedMilliseconds = elapsed > TimeSpan.Zero ? (long)elapsed.TotalMilliseconds : 0L;
+      using SqliteCommand addWorkingTime = database.Command(transaction, """
+        UPDATE sessions SET completed_working_ms = completed_working_ms + $elapsed,
+            working_time_incomplete = CASE WHEN $unknown = 1 THEN 1 ELSE working_time_incomplete END
+        WHERE session_id = $session AND EXISTS (SELECT 1 FROM execution_runs
+            WHERE session_id = $session AND run_id = $run AND outcome IS NULL);
+        """, ("$session", sessionId), ("$run", executionId), ("$elapsed", elapsedMilliseconds),
+          ("$unknown", unknownDuration ? 1 : 0));
+      if (addWorkingTime.ExecuteNonQuery() != 1)
+        throw new InvalidOperationException("The active execution working-time interval could not be settled.");
 
       using SqliteCommand settle = database.Command(transaction, """
         UPDATE execution_tool_completions SET claimed_request_id = NULL WHERE claimed_request_id IN (
@@ -172,7 +187,8 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
             result_json = CASE WHEN started = 0 THEN $unstartedResult ELSE $unknownResult END,
             ended_at = CASE WHEN started = 1 THEN $ended ELSE NULL END
         WHERE run_id = $run AND result_json IS NULL;
-        UPDATE execution_runs SET outcome = $outcome WHERE session_id = $session AND run_id = $run;
+        UPDATE execution_runs SET outcome = $outcome, working_started_at = NULL
+        WHERE session_id = $session AND run_id = $run;
         """,
           ("$session", sessionId), ("$run", executionId), ("$outcome", (int)settlement.Outcome),
           ("$ended", StorageText.UtcTimestamp()),
@@ -219,8 +235,9 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
               result_json = CASE WHEN started = 0 THEN $unstartedResult ELSE $unknownResult END,
               ended_at = CASE WHEN started = 1 THEN $ended ELSE NULL END
           WHERE run_id = $run AND result_json IS NULL;
-          UPDATE execution_runs SET outcome = $failed WHERE run_id = $run;
-          """, ("$run", run.RunId), ("$failed", (int)ExecutionOutcome.Failed),
+          UPDATE sessions SET working_time_incomplete = 1 WHERE session_id = $session;
+          UPDATE execution_runs SET outcome = $failed, working_started_at = NULL WHERE run_id = $run;
+          """, ("$run", run.RunId), ("$session", run.SessionId), ("$failed", (int)ExecutionOutcome.Failed),
             ("$unstarted", "Interrupted before tool execution; tool was not executed."),
             ("$unknown", "Tool execution interrupted; effects may have occurred. Do not automatically retry."),
             ("$unstartedResult", toolResults.Error("Interrupted before tool execution; tool was not executed.")),
@@ -297,7 +314,7 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
     });
   }
 
-  private static (ExecutionOutcome Outcome, bool AlreadySettled, string? Error)? DecideSettlement(
+  private static (ExecutionOutcome Outcome, bool AlreadySettled, string? Error, DateTimeOffset? StartedAt)? DecideSettlement(
       SqliteCommand read, ExecutionOutcome driverOutcome) {
     using SqliteDataReader reader = read.ExecuteReader();
     if (!reader.Read())
@@ -309,18 +326,20 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
     bool pendingSubmissions = reader.GetInt32(3) != 0;
     bool missingResults = reader.GetInt32(4) != 0;
     bool needsToolContinuation = reader.GetInt32(5) != 0;
+    DateTimeOffset? startedAt = reader.IsDBNull(9) ? null
+        : DateTimeOffset.Parse(reader.GetString(9), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
     if (executionOutcome is { } settled)
-      return (settled, AlreadySettled: true, ReadSettlementError(reader, settled, 7, 8));
+      return (settled, AlreadySettled: true, ReadSettlementError(reader, settled, 7, 8), null);
 
     if (stopRequested)
-      return (ExecutionOutcome.Cancelled, AlreadySettled: false, null);
+      return (ExecutionOutcome.Cancelled, AlreadySettled: false, null, startedAt);
 
     if (driverOutcome != ExecutionOutcome.Completed)
       return (driverOutcome, AlreadySettled: false,
-          ReadSettlementError(reader, driverOutcome, 7, 8));
+          ReadSettlementError(reader, driverOutcome, 7, 8), startedAt);
 
     if (reader.GetBoolean(6))
-      return (driverOutcome, AlreadySettled: false, null);
+      return (driverOutcome, AlreadySettled: false, null, startedAt);
 
     if (lastOutcome is not { } outcome)
       return null;
@@ -328,7 +347,7 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
     if (outcome == ExecutionOutcome.Completed && (pendingSubmissions || missingResults || needsToolContinuation))
       return null;
 
-    return (outcome, AlreadySettled: false, ReadSettlementError(reader, outcome, 7, 8));
+    return (outcome, AlreadySettled: false, ReadSettlementError(reader, outcome, 7, 8), startedAt);
   }
 
   private static string? ReadSettlementError(SqliteDataReader reader, ExecutionOutcome outcome,

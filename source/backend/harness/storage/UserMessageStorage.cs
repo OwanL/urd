@@ -42,11 +42,12 @@ internal sealed class UserMessageStorage(Database database) {
     InsertReceipt(transaction, accepted);
     if (currentExecutionId is null) {
       using SqliteCommand insertExecution = database.Command(transaction, """
-        INSERT INTO execution_runs (session_id, run_id, history_revision, input_id)
-        VALUES ($session, $run, $revision, $input);
+        INSERT INTO execution_runs (session_id, run_id, history_revision, input_id, working_started_at)
+        VALUES ($session, $run, $revision, $input, $started);
         """,
           ("$session", sessionId), ("$run", executionId),
-          ("$revision", actualRevision), ("$input", submission.SubmissionId));
+          ("$revision", actualRevision), ("$input", submission.SubmissionId),
+          ("$started", StorageText.UtcTimestamp()));
       insertExecution.ExecuteNonQuery();
     }
 

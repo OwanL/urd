@@ -89,13 +89,14 @@ internal sealed class CompactionStorage(Database database, ToolResultCodec toolR
         }
       }
       using SqliteCommand insert = database.Command(transaction, """
-        INSERT INTO execution_runs (session_id, run_id, history_revision, compaction_selection_json, compaction_focus)
-        SELECT s.session_id, $run, s.history_revision, $selection, $focus FROM sessions s
+        INSERT INTO execution_runs (session_id, run_id, history_revision, compaction_selection_json, compaction_focus,
+            working_started_at)
+        SELECT s.session_id, $run, s.history_revision, $selection, $focus, $started FROM sessions s
         WHERE s.session_id = $session AND s.history_revision = $revision AND $accepting = 1
             AND NOT EXISTS (SELECT 1 FROM execution_runs r WHERE r.session_id = $session AND r.outcome IS NULL);
         """, ("$session", sessionId), ("$run", submission.OperationId), ("$revision", submission.ExpectedHistoryRevision),
           ("$selection", LlmSelectionJson.Write(submission.LlmSelection)), ("$focus", submission.Focus),
-          ("$accepting", accepting ? 1 : 0));
+          ("$started", StorageText.UtcTimestamp()), ("$accepting", accepting ? 1 : 0));
       return insert.ExecuteNonQuery() == 0 ? null : (new CompactionReceipt(submission.OperationId, null), true);
     });
   }

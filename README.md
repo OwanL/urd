@@ -15,7 +15,7 @@ submission. Provider-specific context is saved separately from visible text.
 The same loopback ASP.NET Core host serves the Preact browser workspace and its HTTP APIs.
 The UI has local tabs, drafts, model/reasoning selection, Send/Stop and provider settings.
 User messages can be edited inline: Save stops current work, replaces the later conversation
-and starts a new response. Editing does not undo tool effects. This requires schema 21;
+and starts a new response. Editing does not undo tool effects. The current store requires schema 22;
 older pre-release databases require an explicit reset, not automatic migration.
 History metadata, not-sent inputs and one shared event stream support transcript updates.
 Closing a tab hides it; it does not stop work or close its backend session.

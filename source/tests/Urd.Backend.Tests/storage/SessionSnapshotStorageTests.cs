@@ -1,7 +1,9 @@
 using System.Data.Common;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.AI;
 using Urd.Backend.Tests.Support;
+using Urd.Core.Compaction;
 using Urd.Core.Execution;
 using Urd.Core.Providers;
 using Urd.Core.Sessions;
@@ -116,6 +118,103 @@ public sealed class SessionSnapshotStorageTests {
       Assert.Null(cancelled.Error);
       Assert.Null(reopened.Snapshots.ReadStored(session).LastSettlement!.Error);
     }
+  }
+
+  [Fact]
+  public void ContextUsageUsesReportedInputAndOutputCounts() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
+    RecordAttempt(store, session, new UsageDetails {
+      InputTokenCount = 14, OutputTokenCount = 4, TotalTokenCount = 999
+    });
+
+    Assert.Equal(new SessionContextUsage(18, IsEstimate: false), store.Snapshots.ReadStored(session).ContextUsage);
+
+    string[] plan = Explain(database, SnapshotReader.ContextUsageSql, session, 0);
+    Assert.Contains(plan, step => step.Contains("execution_runs_history_order", StringComparison.Ordinal));
+    Assert.Contains(plan, step => step.Contains("execution_requests", StringComparison.Ordinal)
+        && step.Contains("INDEX", StringComparison.Ordinal));
+    Assert.DoesNotContain(plan, step => step.Contains("TEMP B-TREE", StringComparison.Ordinal));
+  }
+
+  [Fact]
+  public void MissingLatestAttemptUsageDoesNotFallBackToEarlierUsage() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
+    RecordAttempt(store, session, new UsageDetails { InputTokenCount = 10, OutputTokenCount = 2 });
+    RecordAttempt(store, session, usage: null);
+
+    Assert.Null(store.Snapshots.ReadStored(session).ContextUsage);
+  }
+
+  [Theory]
+  [InlineData(-1, 3)]
+  [InlineData(3, -1)]
+  public void NegativeProviderUsageCountsRemainUnknown(int input, int output) {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
+    RecordAttempt(store, session, new UsageDetails { InputTokenCount = input, OutputTokenCount = output });
+
+    Assert.Null(store.Snapshots.ReadStored(session).ContextUsage);
+  }
+
+  [Fact]
+  public void ContextUsageFromPriorHistoryRevisionIsUnknown() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
+    RecordAttempt(store, session, new UsageDetails { InputTokenCount = 10, OutputTokenCount = 2 });
+    database.ForceHistoryRevision(1);
+
+    Assert.Null(store.Snapshots.ReadStored(session).ContextUsage);
+  }
+
+  [Fact]
+  public void NewCompactionProvidesEstimateUntilAMatchingRequestIsAttempted() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
+    (Guid execution, Guid request) = RecordAttempt(store, session,
+        new UsageDetails { InputTokenCount = 100, OutputTokenCount = 20 });
+    AddCompaction(database, session, execution, request, tokensBefore: 1000, tokensAfter: 400);
+
+    Assert.Equal(new SessionContextUsage(400, IsEstimate: true), store.Snapshots.ReadStored(session).ContextUsage);
+    RecordAttempt(store, session, new UsageDetails { InputTokenCount = 22, OutputTokenCount = 3 });
+    Assert.Equal(new SessionContextUsage(25, IsEstimate: false), store.Snapshots.ReadStored(session).ContextUsage);
+    RecordAttempt(store, session, usage: null);
+    Assert.Null(store.Snapshots.ReadStored(session).ContextUsage);
+  }
+
+  private static (Guid Execution, Guid Request) RecordAttempt(UrdStore store, Guid session, UsageDetails? usage) {
+    Guid execution = Admit(store, session);
+    LlmRequest request = store.Executions.ClaimNextRequest(session, execution, 0)!;
+    Assert.True(store.Executions.StartRequest(session, execution, 0, request.RequestId));
+    Assert.True(store.LlmResponses.CompleteRequest(session, execution, 0,
+        new(request.RequestId, ExecutionOutcome.Failed, "request failed", Usage: usage)));
+    Assert.Equal(ExecutionOutcome.Failed, store.Executions.TrySettle(session, execution, ExecutionOutcome.Failed)!.Outcome);
+    return (execution, request.RequestId);
+  }
+
+  private static void AddCompaction(TemporaryDatabase database, Guid session, Guid execution, Guid request,
+      long tokensBefore, long tokensAfter) {
+    Guid compactionId = Guid.NewGuid();
+    long runOrdinal = (long)database.Scalar($"SELECT ordinal FROM execution_runs WHERE run_id = '{execution:D}';")!;
+    DateTimeOffset created = DateTimeOffset.UtcNow;
+    var summary = new CompactionSummary(compactionId, session, 0, execution, request, 0, runOrdinal, 0,
+        "fixture summary", CompactionReason.Manual, tokensBefore, tokensAfter, created);
+    string json = JsonSerializer.Serialize(summary);
+    database.Execute($"""
+      INSERT INTO session_compactions (compaction_id, session_id, history_revision, run_id,
+          first_kept_request_id, first_kept_message_index, first_kept_run_ordinal, first_kept_request_index,
+          reason, tokens_before, tokens_after, created_at, summary_json)
+      VALUES ('{compactionId:D}', '{session:D}', 0, '{execution:D}', '{request:D}', 0, {runOrdinal}, 0,
+          {(int)CompactionReason.Manual}, {tokensBefore}, {tokensAfter}, '{created:O}', '{json}');
+      INSERT INTO execution_messages (session_id, history_revision, run_id, role, message_id, created_at)
+      VALUES ('{session:D}', 0, '{execution:D}', 4, '{compactionId:D}', '{created:O}');
+      """);
   }
 
   private static Guid Admit(UrdStore store, Guid session) {

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "preact/hooks";
+import type { Ref } from "preact";
 import type { TranscriptToolFacts, ToolCallLabel } from "../sessions/Messages.ts";
 import { Icon } from "../components/Icon.tsx";
+import { useToolRowInteractions } from "./ToolRowInteractions.tsx";
 import type { IconName } from "../components/Icon.tsx";
 import {
   formatElapsedTime,
@@ -55,21 +57,37 @@ function ToolRowIcon({
   label,
   running,
   failed,
+  anchor,
+  expanded,
+  onClick,
+  onPointerEnter,
+  onPointerLeave,
 }: {
   name: IconName;
   label: string;
   running: boolean;
   failed: boolean;
+  anchor: Ref<HTMLButtonElement>;
+  expanded: boolean;
+  onClick: () => void;
+  onPointerEnter: (pointerType: string) => void;
+  onPointerLeave: () => void;
 }) {
   return (
-    <span
+    <button
+      ref={anchor}
+      type="button"
       class={`tool-row-icon${running ? " is-running" : ""}${failed ? " is-failed" : ""}`}
-      role="img"
-      aria-label={failed ? `Failed: ${label}` : label}
+      aria-label={`Inspect tool call: ${failed ? "Failed: " : ""}${label}`}
+      aria-haspopup="dialog"
+      aria-expanded={expanded}
       data-tool-icon={name}
+      onPointerEnter={(event) => onPointerEnter(event.pointerType)}
+      onPointerLeave={onPointerLeave}
+      onClick={onClick}
     >
       <Icon name={name} />
-    </span>
+    </button>
   );
 }
 
@@ -87,6 +105,9 @@ export function ToolRow({
   paused: boolean;
 }) {
   const row = useRef<HTMLDivElement>(null);
+  const icon = useRef<HTMLButtonElement>(null);
+  const titleNode = useRef<HTMLSpanElement>(null);
+  const interactions = useToolRowInteractions();
   const [intersecting, setIntersecting] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const running = isToolCallRunning(tool, completion);
@@ -112,6 +133,13 @@ export function ToolRow({
   ]
     .filter(Boolean)
     .join(" ");
+
+  const sourceUnmounted = interactions.sourceUnmounted;
+  useEffect(() => {
+    const source = icon.current;
+    if (!source) return;
+    return () => sourceUnmounted(source);
+  }, [sourceUnmounted]);
 
   useEffect(() => {
     const node = row.current;
@@ -147,12 +175,65 @@ export function ToolRow({
       data-batched-with-previous={batchedWithPrevious}
       data-batched-with-next={batchedWithNext}
     >
-      <ToolRowIcon name={iconName} label={iconLabel} running={running} failed={failed} />
+      <ToolRowIcon
+        name={iconName}
+        label={iconLabel}
+        running={running}
+        failed={failed}
+        anchor={icon}
+        expanded={icon.current ? interactions.isOpen(icon.current, "inspection") : false}
+        onClick={() => {
+          const source = icon.current;
+          if (source)
+            interactions.openInspection(
+              source,
+              tool.requestId,
+              tool.callId,
+              completion,
+              iconLabel,
+              true,
+            );
+        }}
+        onPointerEnter={(pointerType) => {
+          const source = icon.current;
+          if (source && pointerType !== "touch")
+            interactions.scheduleInspection(
+              source,
+              tool.requestId,
+              tool.callId,
+              completion,
+              iconLabel,
+            );
+        }}
+        onPointerLeave={() => {
+          const source = icon.current;
+          if (source) interactions.leaveSource(source);
+        }}
+      />
       <span
+        ref={titleNode}
         class={`tool-row-title${isMono ? " tool-row-mono" : ""}${completion ? " is-muted" : ""}`}
         title={label?.path ?? undefined}
+        tabIndex={label?.path ? 0 : undefined}
+        aria-haspopup={label?.path ? "menu" : undefined}
+        aria-expanded={
+          label?.path && titleNode.current
+            ? interactions.isOpen(titleNode.current, "menu")
+            : undefined
+        }
         data-tool-title=""
         data-tool-path={label?.path ?? undefined}
+        onContextMenu={(event) => {
+          if (!label?.path) return;
+          event.preventDefault();
+          interactions.openFileMenu(event.currentTarget, label.path);
+        }}
+        onKeyDown={(event) => {
+          if (!label?.path) return;
+          if (event.key !== "ContextMenu" && !(event.key === "F10" && event.shiftKey)) return;
+          event.preventDefault();
+          interactions.openFileMenu(event.currentTarget, label.path);
+        }}
       >
         {title}
       </span>

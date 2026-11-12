@@ -8,7 +8,7 @@ export interface PopoverProps {
   anchor: RefObject<HTMLElement | null>;
   id?: string;
   class?: string;
-  role?: "dialog" | "listbox" | "tooltip";
+  role?: "dialog" | "listbox" | "menu" | "tooltip";
   label?: string;
   placement?: PopoverPlacement;
   initialFocus?: RefObject<HTMLElement | null>;

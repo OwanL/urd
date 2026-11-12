@@ -1,0 +1,125 @@
+.tool-inspection-popover {
+  --popover-max-width: 34rem;
+  width: min(34rem, calc(100vw - 16px));
+  padding: 10px;
+}
+
+.tool-inspection-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.tool-overlay-action,
+.tool-file-menu-item {
+  color: var(--text-primary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+}
+
+.tool-overlay-action {
+  flex: none;
+  padding: 2px 7px;
+  border-color: var(--border-subtle);
+  font-size: 12px;
+}
+
+.tool-overlay-action:hover,
+.tool-file-menu-item:hover {
+  background: var(--surface-hover);
+}
+
+.tool-inspection-section + .tool-inspection-section {
+  margin-top: 8px;
+}
+
+.tool-inspection-section h3 {
+  margin: 0 0 3px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.tool-inspection-section pre {
+  max-height: 128px;
+  margin: 0;
+  padding: 7px 8px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  color: var(--text-primary);
+  background: var(--surface-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  font:
+    12px/1.45 ui-monospace,
+    Consolas,
+    monospace;
+  user-select: text;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.tool-inspection-note,
+.tool-inspection-message,
+.tool-file-menu-error {
+  margin: 7px 0 0;
+  font-size: 11px;
+}
+
+.tool-inspection-note {
+  color: var(--text-faint, #777);
+}
+
+.tool-inspection-message,
+.tool-file-menu-error {
+  color: var(--danger);
+}
+
+.tool-inspection-feedback,
+.tool-overlay-announcement {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+.tool-file-menu {
+  --popover-max-width: 16rem;
+  width: max-content;
+  min-width: 12rem;
+  padding: 4px;
+}
+
+.tool-file-menu-items {
+  display: grid;
+  gap: 2px;
+}
+
+.tool-file-menu-item {
+  width: 100%;
+  padding: 5px 8px;
+  text-align: left;
+  font-size: 12px;
+}
+
+.tool-file-menu-item:focus-visible,
+.tool-overlay-action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tool-inspection-popover,
+  .tool-file-menu {
+    animation: none;
+  }
+}

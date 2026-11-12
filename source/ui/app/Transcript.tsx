@@ -5,6 +5,7 @@ import type { TranscriptDisplay } from "./TranscriptDisplay.ts";
 import { IconButton } from "../components/IconButton.tsx";
 import { CompactionMarker } from "./CompactionMarker.tsx";
 import { ToolRow } from "../chat/ToolRow.tsx";
+import { ToolRowInteractionsProvider } from "../chat/ToolRowInteractions.tsx";
 import { toolCallLabel } from "./ToolRowPresentation.ts";
 import { TranscriptContentReader } from "./TranscriptContentReader.ts";
 import { isTextEntry } from "../sessions/Messages.ts";
@@ -273,6 +274,7 @@ function PlainTranscript({
   streamId = null,
   client,
   history,
+  historyRevision,
   sessionId,
   visible,
   position,
@@ -390,58 +392,67 @@ function PlainTranscript({
         tabIndex={0}
       >
         <div class="messages">
-          {visibleHistory?.hasBefore && <p class="history-note">Earlier messages are not shown.</p>}
-          {visibleHistory?.entries.map((descriptor) => {
-            const entry = descriptor.entry;
-            const key = `${entry.executionId}/${entry.entryId}/${entry.kind}/${entry.historyRevision}`;
-            return (
-              <div
-                key={key}
-                data-message={key}
-                class={descriptor.tool ? "transcript-tool-entry" : undefined}
-              >
-                {isTextEntry(entry) && descriptor.text ? (
-                  display && RichBody ? (
-                    <RichBody
-                      display={display}
-                      streamId={streamId}
+          <ToolRowInteractionsProvider
+            client={client}
+            sessionId={sessionId}
+            historyRevision={historyRevision ?? visibleHistory?.historyRevision ?? null}
+            root={root}
+          >
+            {visibleHistory?.hasBefore && (
+              <p class="history-note">Earlier messages are not shown.</p>
+            )}
+            {visibleHistory?.entries.map((descriptor) => {
+              const entry = descriptor.entry;
+              const key = `${entry.executionId}/${entry.entryId}/${entry.kind}/${entry.historyRevision}`;
+              return (
+                <div
+                  key={key}
+                  data-message={key}
+                  class={descriptor.tool ? "transcript-tool-entry" : undefined}
+                >
+                  {isTextEntry(entry) && descriptor.text ? (
+                    display && RichBody ? (
+                      <RichBody
+                        display={display}
+                        streamId={streamId}
+                        sessionId={sessionId}
+                        entry={entry}
+                        text={descriptor.text}
+                        root={root}
+                        paused={!visible || documentHidden}
+                      />
+                    ) : (
+                      <MessageBody
+                        client={client}
+                        contentReader={contentReader}
+                        sessionId={sessionId}
+                        entry={entry}
+                        text={descriptor.text}
+                        root={root}
+                        paused={selecting || !visible || documentHidden}
+                      />
+                    )
+                  ) : descriptor.compaction ? (
+                    <CompactionMarker
+                      client={client}
                       sessionId={sessionId}
                       entry={entry}
-                      text={descriptor.text}
+                      compaction={descriptor.compaction}
+                    />
+                  ) : descriptor.tool ? (
+                    <ToolRow
+                      tool={descriptor.tool}
+                      label={toolCallLabel(descriptor.tool, visibleHistory?.toolLabels ?? {})}
+                      completion={entry.kind === "toolCompletion"}
                       root={root}
                       paused={!visible || documentHidden}
                     />
-                  ) : (
-                    <MessageBody
-                      client={client}
-                      contentReader={contentReader}
-                      sessionId={sessionId}
-                      entry={entry}
-                      text={descriptor.text}
-                      root={root}
-                      paused={selecting || !visible || documentHidden}
-                    />
-                  )
-                ) : descriptor.compaction ? (
-                  <CompactionMarker
-                    client={client}
-                    sessionId={sessionId}
-                    entry={entry}
-                    compaction={descriptor.compaction}
-                  />
-                ) : descriptor.tool ? (
-                  <ToolRow
-                    tool={descriptor.tool}
-                    label={toolCallLabel(descriptor.tool, visibleHistory?.toolLabels ?? {})}
-                    completion={entry.kind === "toolCompletion"}
-                    root={root}
-                    paused={!visible || documentHidden}
-                  />
-                ) : null}
-              </div>
-            );
-          })}
-          {children}
+                  ) : null}
+                </div>
+              );
+            })}
+            {children}
+          </ToolRowInteractionsProvider>
         </div>
       </div>
       {jump && (

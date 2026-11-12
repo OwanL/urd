@@ -26,6 +26,7 @@ import {
 import type { TranscriptDisplay } from "./TranscriptDisplay.ts";
 import { CompactionMarker } from "./CompactionMarker.tsx";
 import { ToolRow } from "../chat/ToolRow.tsx";
+import { ToolRowInteractionsProvider } from "../chat/ToolRowInteractions.tsx";
 import { toolCallLabel } from "./ToolRowPresentation.ts";
 import { TranscriptPositionReader } from "./TranscriptPositionReader.ts";
 import "../chat/transcript.css";
@@ -1114,44 +1115,51 @@ export function VirtualTranscript({
         tabIndex={0}
       >
         <div class="messages messages-virtual" style={{ height: `${spacerHeight}px` }}>
-          {rows.map((row) => {
-            const key = entryKey(row.descriptor.entry);
-            const wanted = pendingRestoreRef.current ?? pendingRestore;
-            const restore =
-              wanted?.entry && sameEntry(wanted.entry, row.descriptor.entry) ? wanted : null;
-            const saved =
-              restore?.sourceCursor && row.descriptor.text
-                ? {
-                    cursor: {
-                      message: row.descriptor.text.from.message,
-                      segmentIndex: restore.sourceCursor.segmentIndex,
-                      utf8Offset: restore.sourceCursor.utf8Offset,
-                    },
-                    offset: restore.viewportOffset,
-                  }
-                : undefined;
-            const top = topPadding + (viewport.current?.estimatedPrefixHeight(row.rank) ?? 0);
-            return (
-              <VirtualEntry
-                key={key}
-                client={client}
-                display={display}
-                streamId={streamId}
-                sessionId={sessionId}
-                descriptor={row.descriptor}
-                toolLabel={row.toolLabel}
-                rank={row.rank}
-                top={top}
-                root={root}
-                paused={!visible || documentInactive}
-                saved={saved}
-                onMeasure={onMeasure}
-                onSourceCapture={onSourceCapture}
-                onSourceRestore={onSourceRestore}
-                onPublished={onPublished}
-              />
-            );
-          })}
+          <ToolRowInteractionsProvider
+            client={client}
+            sessionId={sessionId}
+            historyRevision={historyRevision}
+            root={root}
+          >
+            {rows.map((row) => {
+              const key = entryKey(row.descriptor.entry);
+              const wanted = pendingRestoreRef.current ?? pendingRestore;
+              const restore =
+                wanted?.entry && sameEntry(wanted.entry, row.descriptor.entry) ? wanted : null;
+              const saved =
+                restore?.sourceCursor && row.descriptor.text
+                  ? {
+                      cursor: {
+                        message: row.descriptor.text.from.message,
+                        segmentIndex: restore.sourceCursor.segmentIndex,
+                        utf8Offset: restore.sourceCursor.utf8Offset,
+                      },
+                      offset: restore.viewportOffset,
+                    }
+                  : undefined;
+              const top = topPadding + (viewport.current?.estimatedPrefixHeight(row.rank) ?? 0);
+              return (
+                <VirtualEntry
+                  key={key}
+                  client={client}
+                  display={display}
+                  streamId={streamId}
+                  sessionId={sessionId}
+                  descriptor={row.descriptor}
+                  toolLabel={row.toolLabel}
+                  rank={row.rank}
+                  top={top}
+                  root={root}
+                  paused={!visible || documentInactive}
+                  saved={saved}
+                  onMeasure={onMeasure}
+                  onSourceCapture={onSourceCapture}
+                  onSourceRestore={onSourceRestore}
+                  onPublished={onPublished}
+                />
+              );
+            })}
+          </ToolRowInteractionsProvider>
           <div
             ref={tail}
             class="transcript-tail"

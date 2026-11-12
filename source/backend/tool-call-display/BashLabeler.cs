@@ -173,7 +173,7 @@ internal static class BashLabeler {
       string value = words[index].Value;
       if (IsEnvironmentAssignment(value)) {
         index++;
-      } else if (value is "-i" or "--ignore-environment" or "-0" or "--null" or "-v" or "--debug") {
+      } else if (value is "--" or "-i" or "--ignore-environment" or "-0" or "--null" or "-v" or "--debug") {
         index++;
       } else if (value is "-u" or "--unset" or "-C" or "--chdir") {
         index += Math.Min(2, words.Count - index);

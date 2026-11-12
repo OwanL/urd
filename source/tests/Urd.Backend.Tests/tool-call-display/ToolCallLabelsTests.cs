@@ -12,6 +12,7 @@ public sealed class ToolCallLabelsTests {
   [InlineData("cd /repo; FOO=bar env BAR=baz npx prettier --check app.cs", "prettier", "--check app.cs")]
   [InlineData("cd /repo", "cd", "/repo")]
   [InlineData("sudo time env TEST=1 proto run moon :test --log; echo done", "moon", ":test --log; echo done")]
+  [InlineData("env -- FOO=bar git status", "git", "status")]
   public void BashLabelSkipsDirectoryChangesAssignmentsAndWrappers(string command, string title, string detail) {
     ToolCallLabel label = ToolCallLabels.Create("bash", JsonSerializer.Serialize(new { command }), "/work");
 

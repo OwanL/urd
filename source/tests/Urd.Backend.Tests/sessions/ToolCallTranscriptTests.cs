@@ -86,6 +86,45 @@ public sealed class ToolCallTranscriptTests {
     Assert.Equal("direct output\n[Images omitted because the current model does not support images.]", transcript.Output);
   }
 
+  [Fact]
+  public async Task DirectImageResultBeforeReceiverCompactionBoundaryKeepsImagePlaceholders() {
+    var client = new ScriptedChatClient(token => Complete(token));
+    await using var fixture = new ExecutionFixture(client);
+    Guid request = SeedStoppedDirectResult(fixture.Database, fixture.Session.Id, neverAttemptedContinuation: false,
+        receiverCompaction: ReceiverCompaction.AtReceiver);
+
+    ToolCallTranscript transcript = Assert.IsType<ToolCallTranscript>(await fixture.Session.Transcript.ReadToolCallTranscriptAsync(
+        0, request, "direct", returned: false));
+
+    Assert.Equal("direct output\n[image: image/png]", transcript.Output);
+  }
+
+  [Fact]
+  public async Task DirectImageResultUsesEarlierReceiverAfterLaterCompaction() {
+    var client = new ScriptedChatClient(token => Complete(token));
+    await using var fixture = new ExecutionFixture(client);
+    Guid request = SeedStoppedDirectResult(fixture.Database, fixture.Session.Id, neverAttemptedContinuation: false,
+        receiverCompaction: ReceiverCompaction.AfterReceiver);
+
+    ToolCallTranscript transcript = Assert.IsType<ToolCallTranscript>(await fixture.Session.Transcript.ReadToolCallTranscriptAsync(
+        0, request, "direct", returned: false));
+
+    Assert.Equal("direct output\n[Images omitted because the current model does not support images.]", transcript.Output);
+  }
+
+  [Fact]
+  public async Task DirectImageResultOnSameRequestAsCompactionBoundaryStillUsesReceiver() {
+    var client = new ScriptedChatClient(token => Complete(token));
+    await using var fixture = new ExecutionFixture(client);
+    Guid request = SeedStoppedDirectResult(fixture.Database, fixture.Session.Id, neverAttemptedContinuation: false,
+        receiverCompaction: ReceiverCompaction.AtSource);
+
+    ToolCallTranscript transcript = Assert.IsType<ToolCallTranscript>(await fixture.Session.Transcript.ReadToolCallTranscriptAsync(
+        0, request, "direct", returned: false));
+
+    Assert.Equal("direct output\n[Images omitted because the current model does not support images.]", transcript.Output);
+  }
+
   [Theory]
   [InlineData(true, "returned result\n[image: image/jpeg]")]
   [InlineData(false, "returned result\n[Images omitted because the current model does not support images.]")]
@@ -103,12 +142,14 @@ public sealed class ToolCallTranscriptTests {
         + expectedResult, transcript.Output);
   }
 
-  [Fact]
-  public async Task ReturnedImageCompletionIgnoresAnUnsentClaim() {
+  [Theory]
+  [InlineData(false, false)]
+  [InlineData(true, true)]
+  public async Task ReturnedImageCompletionIgnoresAClaimThatDidNotReceiveIt(bool sent, bool compacted) {
     var client = new ScriptedChatClient(token => Complete(token));
     await using var fixture = new ExecutionFixture(client);
     TranscriptCalls calls = SeedToolCalls(fixture.Database, fixture.Session.Id,
-        supportsImages: false, returnedImage: true, returnedClaimSent: false);
+        supportsImages: false, returnedImage: true, returnedClaimSent: sent, returnedClaimCompacted: compacted);
 
     ToolCallTranscript transcript = Assert.IsType<ToolCallTranscript>(await fixture.Session.Transcript.ReadToolCallTranscriptAsync(
         0, calls.ReturnedRequest, "returned", returned: true));
@@ -117,7 +158,8 @@ public sealed class ToolCallTranscriptTests {
   }
 
   private static TranscriptCalls SeedToolCalls(TemporaryDatabase database, Guid session,
-      bool supportsImages = true, bool returnedImage = false, bool returnedClaimSent = true) {
+      bool supportsImages = true, bool returnedImage = false, bool returnedClaimSent = true,
+      bool returnedClaimCompacted = false) {
     Guid run = Guid.NewGuid();
     Guid directRequest = Guid.NewGuid(), runningRequest = Guid.NewGuid();
     Guid returnedRequest = Guid.NewGuid(), unicodeRequest = Guid.NewGuid();
@@ -162,13 +204,17 @@ public sealed class ToolCallTranscriptTests {
           ('{session:D}', 0, '{run:D}', 3, '{completion:D}', '{returnedRequest:D}', 'returned', 'work'),
           ('{session:D}', 0, '{run:D}', 2, '{Guid.NewGuid():D}', '{unicodeRequest:D}', 'unicode', 'read');
       """);
+    if (returnedClaimCompacted)
+      SeedCompaction(database, session, run, unicodeRequest, unicodeRequest, boundaryRequestIndex: 3, firstKeptMessageIndex: 1);
     return new(directRequest, runningRequest, returnedRequest, unicodeRequest);
   }
 
-  private static Guid SeedStoppedDirectResult(TemporaryDatabase database, Guid session, bool neverAttemptedContinuation) {
-    Guid originalRun = Guid.NewGuid(), nextRun = Guid.NewGuid();
-    Guid originalInput = Guid.NewGuid(), nextInput = Guid.NewGuid();
+  private static Guid SeedStoppedDirectResult(TemporaryDatabase database, Guid session, bool neverAttemptedContinuation,
+      ReceiverCompaction receiverCompaction = ReceiverCompaction.None) {
+    Guid originalRun = Guid.NewGuid(), nextRun = Guid.NewGuid(), laterRun = Guid.NewGuid();
+    Guid originalInput = Guid.NewGuid(), nextInput = Guid.NewGuid(), laterInput = Guid.NewGuid();
     Guid directRequest = Guid.NewGuid(), continuationRequest = Guid.NewGuid(), receiverRequest = Guid.NewGuid();
+    Guid laterRequest = Guid.NewGuid();
     string originalSelection = JsonSerializer.Serialize(TestLlmSelection.Default);
     string nextSelection = JsonSerializer.Serialize(TestLlmSelection.Default with { SupportsImages = false });
     string directArguments = JsonSerializer.Serialize(new { });
@@ -193,8 +239,44 @@ public sealed class ToolCallTranscriptTests {
         INSERT INTO execution_requests (request_id, run_id, request_index, attempt, response_final, outcome)
         VALUES ('{continuationRequest:D}', '{originalRun:D}', 1, 1, 1, 1);
         """);
+
+    if (receiverCompaction == ReceiverCompaction.AfterReceiver) {
+      database.Execute($"""
+        UPDATE execution_requests SET response_final = 1, outcome = 0 WHERE request_id = '{receiverRequest:D}';
+        UPDATE execution_runs SET outcome = 0 WHERE run_id = '{nextRun:D}';
+        INSERT INTO input_decisions
+            (session_id, input_id, expected_history_revision, original_text_utf8, decision, run_id, llm_selection_json)
+        VALUES ('{session:D}', '{laterInput:D}', 0, X'', 1, '{laterRun:D}', '{nextSelection}');
+        INSERT INTO execution_runs (session_id, run_id, history_revision, input_id)
+        VALUES ('{session:D}', '{laterRun:D}', 0, '{laterInput:D}');
+        INSERT INTO execution_requests (request_id, run_id, request_index, attempt, response_final, outcome)
+        VALUES ('{laterRequest:D}', '{laterRun:D}', 0, 2, 0, NULL);
+        """);
+      SeedCompaction(database, session, laterRun, laterRequest, laterRequest);
+    } else if (receiverCompaction != ReceiverCompaction.None) {
+      Guid boundaryRun = receiverCompaction == ReceiverCompaction.AtSource ? originalRun : nextRun;
+      Guid boundaryRequest = receiverCompaction == ReceiverCompaction.AtSource ? directRequest : receiverRequest;
+      SeedCompaction(database, session, boundaryRun, boundaryRequest, receiverRequest);
+    }
     return directRequest;
   }
+
+  private static void SeedCompaction(TemporaryDatabase database, Guid session, Guid boundaryRun,
+      Guid boundaryRequest, Guid receivingRequest, int boundaryRequestIndex = 0, int firstKeptMessageIndex = 0) {
+    Guid compaction = Guid.NewGuid();
+    const string summaryJson = "{}";
+    database.Execute($"""
+      INSERT INTO session_compactions
+          (compaction_id, session_id, history_revision, run_id, first_kept_request_id, first_kept_message_index,
+              first_kept_run_ordinal, first_kept_request_index, reason, tokens_before, tokens_after, created_at, summary_json)
+      VALUES ('{compaction:D}', '{session:D}', 0, '{boundaryRun:D}', '{boundaryRequest:D}', {firstKeptMessageIndex},
+          (SELECT ordinal FROM execution_runs WHERE run_id = '{boundaryRun:D}'), {boundaryRequestIndex}, 0, 2, 1,
+          '2026-11-12T00:00:00+00:00', '{summaryJson}');
+      UPDATE execution_requests SET compaction_id = '{compaction:D}' WHERE request_id = '{receivingRequest:D}';
+      """);
+  }
+
+  private enum ReceiverCompaction { None, AtReceiver, AtSource, AfterReceiver }
 
   private sealed record TranscriptCalls(Guid DirectRequest, Guid RunningRequest, Guid ReturnedRequest, Guid UnicodeRequest);
 }

@@ -33,19 +33,33 @@ internal sealed class ToolStorage(Database database, ToolResultCodec results) {
                   AND c.request_id = t.request_id AND c.call_id = t.call_id AND c.published = 1),
           (SELECT d.llm_selection_json FROM execution_runs receiving_run
               JOIN execution_requests receiving ON receiving.run_id = receiving_run.run_id
+              LEFT JOIN session_compactions receiving_compaction
+                  ON receiving_compaction.compaction_id = receiving.compaction_id
               JOIN input_decisions d ON d.session_id = receiving_run.session_id AND d.input_id = receiving_run.input_id
               WHERE receiving_run.session_id = r.session_id AND receiving_run.history_revision = r.history_revision
                   AND receiving.attempt = 2
                   AND (receiving_run.ordinal > r.ordinal OR
                       (receiving_run.ordinal = r.ordinal AND receiving.request_index > q.request_index))
+                  AND (receiving_compaction.compaction_id IS NULL
+                      OR r.ordinal > receiving_compaction.first_kept_run_ordinal
+                      OR (r.ordinal = receiving_compaction.first_kept_run_ordinal
+                          AND q.request_index >= receiving_compaction.first_kept_request_index))
               ORDER BY receiving_run.ordinal, receiving.request_index LIMIT 1),
           (SELECT d.llm_selection_json FROM execution_tool_completions c
               JOIN execution_requests receiving ON receiving.request_id = c.claimed_request_id
               JOIN execution_runs receiving_run ON receiving_run.run_id = receiving.run_id
+              LEFT JOIN session_compactions receiving_compaction
+                  ON receiving_compaction.compaction_id = receiving.compaction_id
               JOIN input_decisions d ON d.session_id = receiving_run.session_id AND d.input_id = receiving_run.input_id
               WHERE c.session_id = r.session_id AND c.history_revision = r.history_revision
                   AND c.request_id = t.request_id AND c.call_id = t.call_id AND c.published = 1
-                  AND receiving.attempt = 2)
+                  AND receiving.attempt = 2
+                  AND (receiving_compaction.compaction_id IS NULL
+                      OR receiving_run.ordinal > receiving_compaction.first_kept_run_ordinal
+                      OR (receiving_run.ordinal = receiving_compaction.first_kept_run_ordinal
+                          AND (receiving.request_index > receiving_compaction.first_kept_request_index
+                              OR (receiving.request_index = receiving_compaction.first_kept_request_index
+                                  AND receiving_compaction.first_kept_message_index = 0)))))
       FROM execution_tools t JOIN execution_runs r ON r.run_id = t.run_id
       JOIN execution_requests q ON q.request_id = t.request_id AND q.run_id = t.run_id
       WHERE r.session_id = $session AND r.history_revision = $revision

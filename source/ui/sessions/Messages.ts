@@ -66,6 +66,12 @@ export interface TranscriptToolFacts {
   readonly endedAt: string | null;
 }
 
+export interface ToolCallTranscript {
+  readonly input: string;
+  readonly output: string | null;
+  readonly truncated: boolean;
+}
+
 export interface ToolCallLabel {
   readonly icon:
     | "terminal"

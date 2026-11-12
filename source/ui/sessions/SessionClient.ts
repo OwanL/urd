@@ -1,3 +1,5 @@
+import { RequestError } from "../http/RequestError.ts";
+import { requestEmpty } from "../http/requestJson.ts";
 import { requestJson } from "../http/requestJson.ts";
 import type {
   MessageContentCursor,
@@ -6,6 +8,7 @@ import type {
   TranscriptEntryRef,
   TranscriptHistoryPage,
   TranscriptHistoryQuery,
+  ToolCallTranscript,
   TranscriptPositionSummary,
   TranscriptPositionWindow,
   TranscriptPromptPage,
@@ -75,6 +78,34 @@ export class SessionClient {
       url.searchParams.set("kind", anchor.kind);
     }
     return requestJson(url, "GET", undefined, signal);
+  }
+
+  async readToolCallTranscript(
+    sessionId: string,
+    requestId: string,
+    callId: string,
+    options: { expectedHistoryRevision: number; returned: boolean; full: boolean },
+    signal?: AbortSignal,
+  ): Promise<ToolCallTranscript | null> {
+    const path =
+      `/${encodeURIComponent(sessionId)}/tool-calls/${encodeURIComponent(requestId)}` +
+      `/${encodeURIComponent(callId)}`;
+    const url = this.url(path);
+    url.search = new URLSearchParams({
+      expectedHistoryRevision: String(options.expectedHistoryRevision),
+      returned: String(options.returned),
+      full: String(options.full),
+    }).toString();
+    try {
+      return await requestJson(url, "GET", undefined, signal);
+    } catch (failure) {
+      if (failure instanceof RequestError && failure.status === 404) return null;
+      throw failure;
+    }
+  }
+
+  revealPath(path: string): Promise<void> {
+    return requestEmpty(new URL("/api/files/reveal", this.origin), "POST", { path });
   }
 
   getPositionSummary(

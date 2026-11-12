@@ -47,11 +47,11 @@ public abstract class SessionBase {
 
   public Guid Id { get; }
   public SessionTranscript Transcript { get; }
+  public string? WorkingDirectory { get; }
 
   internal SessionKind Kind { get; }
   internal SessionExecutionRecorder Recorder { get; }
   internal long HistoryRevision { get; }
-  internal string? WorkingDirectory { get; }
 
   // Restores the delivered starting view; opening a session alone never composes it.
   internal StartingContext? ReadStartingContext() => store.StartingContexts.Read(Id);

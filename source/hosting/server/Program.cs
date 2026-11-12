@@ -163,6 +163,7 @@ internal static class Program {
         context.Features.Get<IHttpRequestBodyDetectionFeature>()?.CanHaveBody == true
             ? Results.BadRequest() : Results.NoContent());
     app.MapSessions(manager);
+    app.MapFiles();
     app.MapEvents(manager, eventHub);
     if (markdown is not null)
       app.MapMarkdown(manager, eventHub, markdown);

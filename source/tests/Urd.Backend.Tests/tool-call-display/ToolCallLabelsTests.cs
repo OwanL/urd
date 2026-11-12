@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Urd.Core.Execution;
+using Urd.Core.Sessions;
 using Urd.Core.ToolCallDisplay;
 using Xunit;
 
@@ -124,6 +126,25 @@ public sealed class ToolCallLabelsTests {
     Assert.Equal("read", label.Title);
     Assert.Null(label.Detail);
     Assert.Null(label.Path);
+  }
+
+  [Fact]
+  public void LabelSetDeduplicatesStartAndReturnedRowsByRequestAndCall() {
+    Guid requestId = Guid.NewGuid();
+    Guid executionId = Guid.NewGuid();
+    var tool = new TranscriptToolFacts(requestId, "call", "read", true, ExecutionOutcome.Completed,
+        true, null, null, false, false, false, "{\"path\":\"file.txt\"}");
+    var start = new TranscriptEntryDescriptor(
+        new(executionId, Guid.NewGuid(), TranscriptEntryKind.Tool, 0), null, null, tool);
+    var returned = new TranscriptEntryDescriptor(
+        new(executionId, Guid.NewGuid(), TranscriptEntryKind.ToolCompletion, 0), null, null, tool);
+
+    string workingDirectory = Path.Combine(Path.GetTempPath(), "urd-label-set");
+    IReadOnlyDictionary<string, ToolCallLabel> labels = ToolCallLabelSet.Create([start, returned], workingDirectory);
+
+    ToolCallLabel label = Assert.Single(labels).Value;
+    Assert.Equal("file.txt", label.Title);
+    Assert.Equal(Path.GetFullPath(Path.Combine(workingDirectory, "file.txt")), label.Path);
   }
 
   [Fact]

@@ -4,6 +4,7 @@ using Microsoft.Data.Sqlite;
 using Urd.Core.Execution;
 using Urd.Core.Compaction;
 using Urd.Core.Sessions;
+using Urd.Core.ToolCallDisplay;
 
 namespace Urd.Server;
 
@@ -43,6 +44,9 @@ internal static class SessionRoutes {
         }));
     routes.MapGet("/{sessionId}/history", (HttpContext http, Guid sessionId, [AsParameters] HistoryQuery query) =>
         ReadHistoryAsync(http, sessions, sessionId, query));
+    routes.MapGet("/{sessionId}/tool-calls/{requestId}/{callId}", (HttpContext http, Guid sessionId,
+        Guid requestId, string callId, [AsParameters] ToolCallTranscriptQuery query) =>
+        ReadToolCallTranscriptAsync(http, sessions, sessionId, requestId, callId, query));
     routes.MapGet("/{sessionId}/positions", (HttpContext http, Guid sessionId,
         [AsParameters] PositionSummaryQuery query) => ReadPositionSummaryAsync(http, sessions, sessionId, query));
     routes.MapGet("/{sessionId}/positions/locate", (HttpContext http, Guid sessionId,
@@ -194,8 +198,24 @@ internal static class SessionRoutes {
     TranscriptEntryRef? anchor = hasAnchor
         ? new(query.ExecutionId!.Value, query.EntryId!.Value, kind!.Value, query.ExpectedHistoryRevision) : null;
     var history = new TranscriptHistoryQuery(mode.Value, query.ExpectedHistoryRevision, anchor);
-    return WithSessionAsync(http, sessions, sessionId, async session =>
-        Results.Ok(await session.Transcript.ReadHistoryAsync(history, http.RequestAborted)));
+    return WithSessionAsync(http, sessions, sessionId, async session => {
+      TranscriptHistoryPage page = await session.Transcript.ReadHistoryAsync(history, http.RequestAborted);
+      return Results.Ok(ToHistoryPage(session, page));
+    });
+  }
+
+  private static Task<IResult> ReadToolCallTranscriptAsync(HttpContext http, SessionManager sessions,
+      Guid sessionId, Guid requestId, string callId, ToolCallTranscriptQuery query) {
+    if (requestId == Guid.Empty || string.IsNullOrWhiteSpace(callId)
+        || query.ExpectedHistoryRevision < 0 || query.Returned is null || query.Full is null)
+      return Task.FromResult<IResult>(Results.BadRequest());
+
+    return WithSessionAsync(http, sessions, sessionId, async session => {
+      ToolCallTranscript? transcript = await session.Transcript.ReadToolCallTranscriptAsync(
+          query.ExpectedHistoryRevision, requestId, callId, query.Returned.Value,
+          query.Full.Value ? null : 65536, http.RequestAborted);
+      return transcript is null ? Results.NotFound() : Results.Ok(transcript);
+    });
   }
 
   private static Task<IResult> ReadPositionSummaryAsync(
@@ -219,7 +239,7 @@ internal static class SessionRoutes {
     return WithSessionAsync(http, sessions, sessionId, async session => {
       TranscriptPositionWindow window = await session.Transcript.LocatePositionAsync(
           query.ExpectedHistoryRevision, fraction, http.RequestAborted);
-      return Results.Ok(ToPositionWindow(window));
+      return Results.Ok(ToPositionWindow(session, window));
     });
   }
 
@@ -232,7 +252,7 @@ internal static class SessionRoutes {
     return WithSessionAsync(http, sessions, sessionId, async session => {
       TranscriptPositionWindow window = await session.Transcript.ReadEntryPositionAsync(
           query.ExpectedHistoryRevision, entry, http.RequestAborted);
-      return Results.Ok(ToPositionWindow(window));
+      return Results.Ok(ToPositionWindow(session, window));
     });
   }
 
@@ -262,7 +282,7 @@ internal static class SessionRoutes {
     return WithSessionAsync(http, sessions, sessionId, async session => {
       TranscriptPositionWindow window = await session.Transcript.ActivatePromptAsync(
           query.ExpectedHistoryRevision, prompt, http.RequestAborted);
-      return Results.Ok(ToPositionWindow(window));
+      return Results.Ok(ToPositionWindow(session, window));
     });
   }
 
@@ -273,10 +293,19 @@ internal static class SessionRoutes {
       position.Entry.ExecutionId, position.Entry.EntryId, position.Entry.Kind,
       position.Entry.HistoryRevision, position.Rank, position.Weight, position.PrefixWeight);
 
-  private static PositionWindowDto ToPositionWindow(TranscriptPositionWindow window) => new(
+  private static HistoryPageDto ToHistoryPage(PrimarySession session, TranscriptHistoryPage page) => new(
+      page.SessionId, page.HistoryRevision, page.Entries, CreateToolLabels(session, page.Entries),
+      page.HasBefore, page.HasAfter, page.Settlements);
+
+  private static PositionWindowDto ToPositionWindow(PrimarySession session, TranscriptPositionWindow window) => new(
       ToPositionSummary(window.State), window.Target is null ? null : ToPosition(window.Target),
       window.Entries.Select(entry => new PositionedEntryDto(entry.Descriptor, ToPosition(entry.Position))).ToArray(),
+      CreateToolLabels(session, window.Entries.Select(entry => entry.Descriptor)),
       window.HasBefore, window.HasAfter, window.Settlements);
+
+  private static IReadOnlyDictionary<string, ToolCallLabel> CreateToolLabels(
+      PrimarySession session, IEnumerable<TranscriptEntryDescriptor> descriptors) =>
+      ToolCallLabelSet.Create(descriptors, session.WorkingDirectory);
 
   private static Task<IResult> ReadContentAsync(
       HttpContext http, SessionManager sessions, Guid sessionId, ContentQuery query) {
@@ -315,6 +344,7 @@ internal static class SessionRoutes {
 
   private sealed record HistoryQuery(
       string Mode, long ExpectedHistoryRevision, Guid? ExecutionId, Guid? EntryId, string? Kind);
+  private sealed record ToolCallTranscriptQuery(long ExpectedHistoryRevision, bool? Returned, bool? Full);
 
   private sealed record PositionSummaryQuery(long ExpectedHistoryRevision);
   private sealed record PositionLocateQuery(long ExpectedHistoryRevision, double? Fraction);
@@ -330,10 +360,16 @@ internal static class SessionRoutes {
       Guid ExecutionId, Guid EntryId, TranscriptEntryKind Kind, long HistoryRevision,
       long Rank, long Weight, long PrefixWeight);
 
+  private sealed record HistoryPageDto(
+      Guid SessionId, long HistoryRevision, IReadOnlyList<TranscriptEntryDescriptor> Entries,
+      IReadOnlyDictionary<string, ToolCallLabel> ToolLabels, bool HasBefore, bool HasAfter,
+      IReadOnlyList<SessionExecutionResult> Settlements);
+
   private sealed record PositionedEntryDto(TranscriptEntryDescriptor Descriptor, TranscriptPositionDto Position);
 
   private sealed record PositionWindowDto(
       PositionSummaryDto State, TranscriptPositionDto? Target, IReadOnlyList<PositionedEntryDto> Entries,
+      IReadOnlyDictionary<string, ToolCallLabel> ToolLabels,
       bool HasBefore, bool HasAfter, IReadOnlyList<SessionExecutionResult> Settlements);
 
   private sealed record PromptPageDto(

@@ -333,9 +333,10 @@ export function ToolRowInteractionsProvider({
   }, [activeId, dismiss, root]);
 
   async function copyFullTranscript(target: InspectionTarget) {
+    if (copyController.current) return;
     const controller = new AbortController();
-    copyController.current?.abort();
     copyController.current = controller;
+    clearTimeout(copyTimer.current);
     setCopyState("copying");
     try {
       const transcript = await client.readToolCallTranscript(
@@ -450,7 +451,7 @@ export function ToolRowInteractionsProvider({
                   type="button"
                   class="tool-overlay-action"
                   aria-label="Copy full tool input and output"
-                  disabled={copyState === "copying"}
+                  aria-disabled={copyState === "copying"}
                   onClick={() => void copyFullTranscript(active)}
                 >
                   {copyState === "copying"

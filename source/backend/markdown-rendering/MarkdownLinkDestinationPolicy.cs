@@ -1,6 +1,6 @@
 namespace Urd.Core.MarkdownRendering;
 
-internal static class MarkdownLinkPolicy {
+internal static class MarkdownLinkDestinationPolicy {
   // Operates on Markdig's decoded destination. No URL is fetched here.
   internal static bool IsAllowed(string destination) {
     if (ContainsDisallowedCharacters(destination)) return false;

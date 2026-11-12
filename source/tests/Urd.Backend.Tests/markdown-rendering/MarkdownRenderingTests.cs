@@ -103,9 +103,9 @@ public sealed class MarkdownRenderingTests {
     Assert.Equal("<div>\r\nliteral 😀\r\n</div>\r\n![alt][image]", string.Concat(Pieces(index).Select(p => p.Text)));
     Assert.DoesNotContain(Contexts(index), c => c.Kind == MarkdownElementKind.Link);
     Assert.Contains(Pieces(index), p => p.Text == "literal 😀" && Context(index, p.Context).Kind == MarkdownElementKind.Quote);
-    Assert.False(MarkdownLinkPolicy.IsAllowed("https:\\example.test"));
-    Assert.False(MarkdownLinkPolicy.IsAllowed("java\tscript:evil"));
-    Assert.False(MarkdownLinkPolicy.IsAllowed(" https://example.test"));
+    Assert.False(MarkdownLinkDestinationPolicy.IsAllowed("https:\\example.test"));
+    Assert.False(MarkdownLinkDestinationPolicy.IsAllowed("java\tscript:evil"));
+    Assert.False(MarkdownLinkDestinationPolicy.IsAllowed(" https://example.test"));
   }
 
   [Theory]

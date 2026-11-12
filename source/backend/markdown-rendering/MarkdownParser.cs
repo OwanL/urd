@@ -217,7 +217,7 @@ internal sealed class MarkdownParser {
         break;
       case LinkInline link:
         var linkId = Open(MarkdownElementKind.Link, parent, range);
-        if (link.Url is not null && MarkdownLinkPolicy.IsAllowed(link.Url)) {
+        if (link.Url is not null && MarkdownLinkDestinationPolicy.IsAllowed(link.Url)) {
           Value(MarkdownValueKind.Destination, link.Url, linkId);
           if (link.Title is not null) Value(MarkdownValueKind.Title, link.Title, linkId);
         }
@@ -227,7 +227,7 @@ internal sealed class MarkdownParser {
       case AutolinkInline auto:
         var autoId = Open(MarkdownElementKind.Link, parent, range);
         var destination = (auto.IsEmail ? "mailto:" : "") + auto.Url;
-        if (MarkdownLinkPolicy.IsAllowed(destination)) Value(MarkdownValueKind.Destination, destination, autoId);
+        if (MarkdownLinkDestinationPolicy.IsAllowed(destination)) Value(MarkdownValueKind.Destination, destination, autoId);
         Text(auto.Url, autoId, MarkdownTextKind.Text, range);
         Close(autoId);
         break;

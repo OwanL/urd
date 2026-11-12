@@ -45,6 +45,15 @@ pointer cancellation, lost capture, blur and external order changes cancel the p
 There is no native drag payload to insert into the composer. Normal arrow/Home/End
 navigation and Delete-to-close remain available.
 
+The composer shows compact context used/limit and accumulated agent working time (idle gaps excluded).
+Context is the latest request's reported input + output tokens, or an estimate immediately after
+compaction; pending input and in-flight output are excluded. Missing usage/limits display `?`.
+Working time survives reload and history edits; interrupted runs have unknown duration, displayed
+as a lower bound rather than counting host downtime. Only the visible working chat ticks locally.
+Busy tabs replace Close with a pulsing activity dot and ignore Delete. A background completion
+gets a dot until opened; hovering or focusing a completed tab reveals Close. Disconnected updates
+show a paused indicator, not a false completion. Completion markers last for this page lifetime.
+
 Closing a chat tab only hides it. Its record, draft and uncertain Send journal stay in
 this browser tab's `sessionStorage` until the browser tab ends; records are not
 automatically pruned because there is no chat-delete action and removing a pending

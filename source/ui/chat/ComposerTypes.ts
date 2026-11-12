@@ -1,3 +1,5 @@
+import type { ComponentChildren } from "preact";
+
 export interface ComposerModel {
   key: string;
   modelLabel: string;
@@ -34,4 +36,5 @@ export interface ComposerProps {
   stopping: boolean;
   onSend: () => void;
   onStop: () => void;
+  indicators?: ComponentChildren;
 }

@@ -30,6 +30,7 @@ export function Composer({
   stopping,
   onSend,
   onStop,
+  indicators,
 }: ComposerProps) {
   const input = useRef<HTMLTextAreaElement>(null);
   const composing = useRef(false);
@@ -111,6 +112,7 @@ export function Composer({
             disabled={locked || !modelKey}
           />
         </div>
+        {indicators}
         <div class="composer-actions">
           {(working || stopping) && (
             <IconButton

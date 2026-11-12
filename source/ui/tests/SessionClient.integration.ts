@@ -79,6 +79,8 @@ void test(
       latestLlmSelection: null,
       firstUserPreview: null,
       pendingInputs: [],
+      contextUsage: null,
+      workingTime: { completedMilliseconds: 0, startedAt: null, hasUnknownDuration: false },
     });
 
     // Deliberately retain whitespace, CRLF, non-ASCII and astral scalars, well beyond the preview.
@@ -96,6 +98,7 @@ void test(
       text:
         "\n  Original café 東京 🧭\r\n" + "line: é / 🦉 / 漢字\n".repeat(200) + "  final line\n",
     };
+    model.enqueue({ text: "Hello from Urd.", usage: { inputTokens: 12_300, outputTokens: 456 } });
     const receipt = await request(client.submitMessage(id, submission));
     assert.equal(receipt.sessionId, id);
     assert.deepEqual(receipt.submission, submission);
@@ -124,6 +127,11 @@ void test(
     assert.deepEqual(settled.lastSettlement, { executionId, outcome: "completed", error: null });
     assert.deepEqual(settled.pendingInputs, []);
     assert.deepEqual(settled.latestLlmSelection, submission.llmSelection);
+    assert.deepEqual(settled.contextUsage, { usedTokens: 12_756, isEstimate: false });
+    assert.ok(settled.workingTime);
+    assert.equal(settled.workingTime.startedAt, null);
+    assert.equal(settled.workingTime.hasUnknownDuration, false);
+    assert.ok(settled.workingTime.completedMilliseconds > 0);
     assert.ok(settled.firstUserPreview);
     assert.ok(
       settled.firstUserPreview.length > 0 &&

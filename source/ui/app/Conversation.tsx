@@ -2,6 +2,7 @@ import { useCallback } from "preact/hooks";
 import { MessageEditingContext, InlineMessageEditor } from "./EditableMessage.tsx";
 import type { MessageEditing } from "./MessageEditing.ts";
 import { Composer } from "../chat/Composer.tsx";
+import { SessionIndicators } from "../chat/SessionIndicators.tsx";
 import type { LlmSelection } from "../providers/LlmSelection.ts";
 import type { SessionClient } from "../sessions/SessionClient.ts";
 import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
@@ -231,6 +232,15 @@ export function Conversation({
           />
         )}
       <Composer
+        indicators={
+          <SessionIndicators
+            contextUsage={snapshot?.contextUsage ?? null}
+            contextWindow={selection?.contextWindow ?? null}
+            workingTime={snapshot?.workingTime ?? null}
+            active={active && visible && notice !== null}
+            fenced={snapshot?.admissionFenced ?? true}
+          />
+        }
         text={chat.draft}
         onTextChange={(text) => {
           editDraft(sessionId, text);

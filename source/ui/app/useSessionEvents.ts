@@ -4,6 +4,12 @@ import { SessionEvents } from "../sessions/SessionEvents.ts";
 import type { WorkspaceCommandAccess } from "./WorkspaceCommands.ts";
 import { newChat } from "./WorkspaceState.ts";
 import { enumerateSessionPages } from "./enumerateSessionPages.ts";
+import {
+  emptySessionActivity,
+  recordSessionStatus,
+  resetSessionTransitionStatuses,
+  retainOpenSessionActivity,
+} from "./SessionActivity.ts";
 
 const maxObservedSessions = 128;
 
@@ -17,7 +23,9 @@ export function useSessionEvents(
   active: string | null,
 ) {
   const [notices, setNotices] = useState<Record<string, string>>({});
-  const [statuses, setStatuses] = useState<Record<string, string>>({});
+  const [activity, setActivity] = useState(emptySessionActivity);
+  const [connected, setConnected] = useState(false);
+  const [hasConnected, setHasConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [streamId, setStreamId] = useState<string | null>(null);
   const transport = useRef<SessionEvents | null>(null);
@@ -63,6 +71,8 @@ export function useSessionEvents(
     const events = new SessionEvents(new URL(window.location.href), {
       connected(_boot, nextStreamId) {
         setStreamId(nextStreamId);
+        setConnected(true);
+        setHasConnected(true);
         setError(null);
         discovery?.abort();
         discovery = new AbortController();
@@ -72,13 +82,16 @@ export function useSessionEvents(
         setNotices((previous) => ({ ...previous, [session]: notice }));
       },
       status(session, status) {
-        setStatuses((previous) => ({ ...previous, [session]: status }));
+        setActivity((previous) =>
+          recordSessionStatus(previous, session, status, desired.current.active),
+        );
       },
       created: add,
       disconnected() {
         setStreamId(null);
+        setConnected(false);
+        setActivity(resetSessionTransitionStatuses);
         setNotices({});
-        setStatuses({});
       },
       error: setError,
     });
@@ -121,21 +134,21 @@ export function useSessionEvents(
       setNotices({});
       setWatched(active);
     }
-    setStatuses((previous) =>
-      Object.fromEntries(
-        Object.entries(previous).filter(([session]) => observed.includes(session)),
-      ),
-    );
+    setActivity((previous) => retainOpenSessionActivity(previous, open, observed, active));
     transport.current?.update(observed, active ? [active] : []);
-  }, [observed, active, watched]);
+  }, [observed, active, watched, open]);
 
   return {
     streamId,
     notice: watched === active && active ? (notices[active] ?? null) : null,
+    unread: activity.unread,
+    knownStatuses: Object.fromEntries(open.map((session) => [session, activity.statuses[session]])),
     statuses: Object.fromEntries(
       open.map((session) => [
         session,
-        observed.includes(session) ? statuses[session] : "updates-paused",
+        !observed.includes(session) || (hasConnected && !connected)
+          ? "updates-paused"
+          : activity.statuses[session],
       ]),
     ),
     error:

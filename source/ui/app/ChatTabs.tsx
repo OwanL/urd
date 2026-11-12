@@ -2,6 +2,7 @@ import type { RefObject } from "preact";
 import { useLayoutEffect, useState } from "preact/hooks";
 import { IconButton } from "../components/IconButton.tsx";
 import { Tooltip } from "../components/Tooltip.tsx";
+import { isBusySessionStatus } from "./SessionActivity.ts";
 import { moveTab } from "./TabOrder.ts";
 import { useTabDrag } from "./useTabDrag.ts";
 import "./chat-tabs.css";
@@ -18,8 +19,14 @@ const statusLabels: Record<string, string> = {
 };
 
 export interface ChatTabsProps {
-  tabs: readonly { id: string; title: string; status?: string | undefined }[];
+  tabs: readonly {
+    id: string;
+    title: string;
+    status?: string | undefined;
+    knownStatus?: string | undefined;
+  }[];
   activeId: string | null;
+  unread: ReadonlySet<string>;
   emptyFocusTarget: RefObject<HTMLButtonElement | null>;
   onOpen(id: string): void;
   onClose(id: string): void;
@@ -29,6 +36,7 @@ export interface ChatTabsProps {
 export function ChatTabs({
   tabs,
   activeId,
+  unread,
   emptyFocusTarget,
   onOpen,
   onClose,
@@ -48,6 +56,12 @@ export function ChatTabs({
     });
   }
   function closeTab(id: string) {
+    const tab = tabs.find((item) => item.id === id);
+    if (
+      isBusySessionStatus(tab?.status) ||
+      (tab?.status === "updates-paused" && isBusySessionStatus(tab.knownStatus))
+    )
+      return;
     onClose(id);
     requestAnimationFrame(() => {
       const selected = drag.strip.current?.querySelector<HTMLButtonElement>(
@@ -112,68 +126,158 @@ export function ChatTabs({
         focusTab(id);
       }}
     >
-      {tabs.map(({ id, title, status }) => (
-        <div
-          key={id}
-          data-tab-id={id}
-          class={`chat-tab ${id === activeId ? "is-active" : ""} ${drag.draggedId === id ? "is-dragging" : ""}`}
-        >
-          <Tooltip
-            disabled={drag.draggedId !== null}
-            placement="below"
-            content={
-              <>
-                {title}
-                {status && <span class="tooltip-detail">{statusLabels[status] ?? status}</span>}
-                <span class="tooltip-detail">
-                  Move tab <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>← / →</kbd>
-                </span>
-              </>
-            }
+      {tabs.map(({ id, title, status, knownStatus }) => {
+        const busy = isBusySessionStatus(status);
+        const pausedBusy = status === "updates-paused" && isBusySessionStatus(knownStatus);
+        const completed = unread.has(id) && id !== activeId && status === "idle";
+        const lastKnownLabel = knownStatus ? (statusLabels[knownStatus] ?? knownStatus) : null;
+        const statusLabel = completed
+          ? "Completed"
+          : status === "updates-paused" && lastKnownLabel
+            ? `Updates paused; last observed ${lastKnownLabel}`
+            : status
+              ? (statusLabels[status] ?? status)
+              : null;
+        const indicatorStatus =
+          status === "updates-paused" &&
+          ["failed", "fenced", "needs-attention"].includes(knownStatus ?? "")
+            ? knownStatus
+            : status;
+        const indicator =
+          indicatorStatus === "failed"
+            ? "!"
+            : indicatorStatus === "fenced"
+              ? "⊘"
+              : indicatorStatus === "needs-attention"
+                ? "?"
+                : indicatorStatus === "updates-paused" && !pausedBusy
+                  ? "Ⅱ"
+                  : indicatorStatus && !busy && indicatorStatus !== "idle"
+                    ? "?"
+                    : null;
+        return (
+          <div
+            key={id}
+            data-tab-id={id}
+            class={`chat-tab ${id === activeId ? "is-active" : ""} ${drag.draggedId === id ? "is-dragging" : ""} ${completed ? "has-unread" : ""}`}
           >
-            <button
-              id={`tab-${id}`}
-              role="tab"
-              aria-selected={id === activeId}
-              aria-controls="chat-view"
-              aria-keyshortcuts={
-                "Alt+Shift+ArrowLeft Alt+Shift+ArrowRight" // gitleaks:allow -- public keyboard shortcuts, not a credential
+            <Tooltip
+              disabled={drag.draggedId !== null}
+              placement="below"
+              content={
+                <>
+                  {title}
+                  {statusLabel && <span class="tooltip-detail">{statusLabel}</span>}
+                  <span class="tooltip-detail">
+                    Move tab <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>← / →</kbd>
+                  </span>
+                </>
               }
-              tabIndex={id === activeId ? 0 : -1}
-              onPointerDown={(event) => drag.start(event, id)}
-              onDragStart={(event) => event.preventDefault()}
-              onClick={() => onOpen(id)}
-              onKeyDown={(event) => {
-                if (event.key === "Delete" && !drag.draggedId) {
-                  event.preventDefault();
-                  closeTab(id);
-                }
-              }}
             >
-              {title}
-              {status && status !== "idle" && (
-                <span class="tab-status" aria-label={statusLabels[status] ?? status}>
-                  {status === "running" || status === "waiting" || status === "compacting"
-                    ? " ·"
-                    : " !"}
-                </span>
+              <button
+                id={`tab-${id}`}
+                role="tab"
+                aria-label={`${title}${statusLabel ? `, ${statusLabel}` : ""}`}
+                aria-selected={id === activeId}
+                aria-controls="chat-view"
+                aria-keyshortcuts={
+                  "Alt+Shift+ArrowLeft Alt+Shift+ArrowRight" // gitleaks:allow -- public keyboard shortcuts, not a credential
+                }
+                tabIndex={id === activeId ? 0 : -1}
+                onPointerDown={(event) => drag.start(event, id)}
+                onDragStart={(event) => event.preventDefault()}
+                onClick={() => onOpen(id)}
+                onKeyDown={(event) => {
+                  if (event.key === "Delete" && !drag.draggedId) {
+                    event.preventDefault();
+                    closeTab(id);
+                  }
+                }}
+              >
+                <span class="tab-title">{title}</span>
+                {indicator && (
+                  <span
+                    class={`tab-status status-${indicatorStatus}`}
+                    role="img"
+                    aria-label={statusLabel ?? status}
+                  >
+                    {indicator}
+                  </span>
+                )}
+              </button>
+            </Tooltip>
+            <div class="tab-end-slot">
+              {busy ? (
+                <Tooltip
+                  placement="below"
+                  content={
+                    <>
+                      {title}
+                      {statusLabel && <span class="tooltip-detail">{statusLabel}</span>}
+                    </>
+                  }
+                >
+                  <span class="tab-activity-slot" role="img" aria-label={statusLabel ?? status}>
+                    <span class="tab-activity-dot is-busy" />
+                  </span>
+                </Tooltip>
+              ) : pausedBusy ? (
+                <Tooltip
+                  placement="below"
+                  content={
+                    <>
+                      {title}
+                      <span class="tooltip-detail">{statusLabel}</span>
+                    </>
+                  }
+                >
+                  <span
+                    class="tab-activity-slot tab-paused-slot"
+                    role="img"
+                    aria-label={statusLabel!}
+                  >
+                    Ⅱ
+                  </span>
+                </Tooltip>
+              ) : (
+                <>
+                  {completed && (
+                    <Tooltip
+                      placement="below"
+                      content={
+                        <>
+                          {title}
+                          <span class="tooltip-detail">Completed</span>
+                        </>
+                      }
+                    >
+                      <span
+                        class="tab-activity-slot tab-completion-marker"
+                        role="img"
+                        aria-label="Completed"
+                      >
+                        <span class="tab-activity-dot" />
+                      </span>
+                    </Tooltip>
+                  )}
+                  <IconButton
+                    icon="close"
+                    class="close-tab"
+                    label={`Close ${title}`}
+                    hint={
+                      <>
+                        Close tab <kbd>Delete</kbd>
+                      </>
+                    }
+                    placement="below"
+                    onClick={() => closeTab(id)}
+                  />
+                </>
               )}
-            </button>
-          </Tooltip>
-          <IconButton
-            icon="close"
-            class="close-tab"
-            label={`Close ${title}`}
-            hint={
-              <>
-                Close tab <kbd>Delete</kbd>
-              </>
-            }
-            placement="below"
-            onClick={() => closeTab(id)}
-          />
-        </div>
-      ))}
+            </div>
+          </div>
+        );
+      })}
       <span class="tab-order-announcement" aria-live="polite" aria-atomic="true">
         {announcement}
       </span>

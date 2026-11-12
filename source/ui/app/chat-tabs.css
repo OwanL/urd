@@ -36,6 +36,9 @@
 }
 
 .chat-tab [role="tab"] {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   width: 100%;
   min-width: 0;
   padding: 5px 4px 5px 10px;
@@ -43,24 +46,120 @@
   border-radius: 6px;
   background: transparent;
   color: inherit;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   text-align: left;
   font-size: 12px;
   touch-action: pan-y;
   user-select: none;
 }
 
-.chat-tab .close-tab {
+.tab-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.tab-status {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.tab-status.status-failed,
+.tab-status.status-fenced,
+.tab-status.status-needs-attention {
+  color: var(--text-primary);
+}
+
+.tab-end-slot {
+  position: relative;
+  flex: 0 0 27px;
   width: 27px;
   height: 28px;
   margin-right: 2px;
 }
 
+.tab-end-slot > .tooltip-anchor {
+  position: absolute;
+  inset: 0;
+  justify-content: center;
+}
+
+.chat-tab .close-tab {
+  width: 27px;
+  height: 28px;
+  margin: 0;
+}
+
 .close-tab .icon {
   width: 13px;
   height: 13px;
+}
+
+.tab-activity-slot {
+  display: grid;
+  width: 27px;
+  height: 28px;
+  place-items: center;
+  cursor: default;
+}
+
+.tab-paused-slot {
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.tab-activity-dot {
+  display: block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+}
+
+.tab-activity-dot.is-busy {
+  background: var(--accent);
+  animation: tab-activity-pulse 1.6s ease-in-out infinite;
+}
+
+.chat-tab.has-unread .tab-completion-marker {
+  opacity: 1;
+  transition: opacity 100ms ease-out;
+}
+
+.chat-tab.has-unread .tab-end-slot > .tooltip-anchor:last-child {
+  pointer-events: none;
+}
+
+.chat-tab.has-unread .close-tab {
+  opacity: 0;
+  transition: opacity 100ms ease-out;
+}
+
+.chat-tab.has-unread:hover .tab-completion-marker,
+.chat-tab.has-unread:focus-within .tab-completion-marker {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.chat-tab.has-unread:hover .tab-end-slot > .tooltip-anchor:last-child,
+.chat-tab.has-unread:focus-within .tab-end-slot > .tooltip-anchor:last-child {
+  pointer-events: auto;
+}
+
+.chat-tab.has-unread:hover .close-tab,
+.chat-tab.has-unread:focus-within .close-tab {
+  opacity: 1;
 }
 
 .chat-tabs.is-reordering .chat-tab {
@@ -90,6 +189,13 @@
   white-space: nowrap;
 }
 
+@keyframes tab-activity-pulse {
+  50% {
+    opacity: 0.55;
+    transform: scale(0.78);
+  }
+}
+
 @media (max-width: 480px) {
   .chat-tab {
     min-width: 105px;
@@ -102,14 +208,25 @@
     min-height: 36px;
   }
 
-  .chat-tab .close-tab {
+  .tab-end-slot {
+    flex-basis: 32px;
+    width: 32px;
+    height: 36px;
+  }
+
+  .chat-tab .close-tab,
+  .tab-activity-slot {
     min-width: 32px;
     min-height: 36px;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .chat-tabs.is-reordering .chat-tab {
+  .chat-tabs.is-reordering .chat-tab,
+  .tab-activity-dot.is-busy,
+  .chat-tab.has-unread .tab-completion-marker,
+  .chat-tab.has-unread .close-tab {
+    animation: none;
     transition: none;
   }
 }

@@ -7,6 +7,17 @@ export interface PendingInputPreview {
   readonly preview: string;
 }
 
+export interface SessionWorkingTime {
+  readonly completedMilliseconds: number;
+  readonly startedAt: string | null;
+  readonly hasUnknownDuration: boolean;
+}
+
+export interface SessionContextUsage {
+  readonly usedTokens: number;
+  readonly isEstimate: boolean;
+}
+
 export interface SessionSnapshot {
   readonly sessionId: string;
   readonly historyRevision: number;
@@ -18,4 +29,6 @@ export interface SessionSnapshot {
   readonly latestLlmSelection: LlmSelection | null;
   readonly firstUserPreview: string | null;
   readonly pendingInputs: readonly PendingInputPreview[];
+  readonly workingTime?: SessionWorkingTime | null;
+  readonly contextUsage?: SessionContextUsage | null;
 }

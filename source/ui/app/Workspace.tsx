@@ -90,8 +90,10 @@ export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) 
             id,
             title: chats[id]?.title ?? "Chat",
             status: events.statuses[id],
+            knownStatus: events.knownStatuses[id],
           }))}
           activeId={activeId}
+          unread={events.unread}
           onOpen={navigation.open}
           onClose={navigation.close}
           onReorder={navigation.reorder}

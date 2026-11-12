@@ -48,7 +48,47 @@
 }
 .composer-actions {
   flex: none;
+}
+.session-indicators {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: 4px;
   margin-left: auto;
+}
+.session-indicator {
+  min-height: 30px;
+  padding: 4px 5px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.session-indicator:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.session-indicator.is-warning {
+  color: #d5b77d;
+}
+.session-indicator.is-critical {
+  color: var(--danger);
+}
+@media (max-width: 600px) {
+  .composer-controls {
+    flex-wrap: wrap;
+  }
+  .composer-selections {
+    flex-basis: calc(100% - 80px);
+  }
+  .session-indicators {
+    order: 1;
+    flex-basis: 100%;
+    justify-content: flex-end;
+  }
 }
 .composer-selector {
   display: flex;

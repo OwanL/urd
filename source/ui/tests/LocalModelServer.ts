@@ -9,6 +9,7 @@ export interface FixtureReply {
   text: string;
   delayMs?: number;
   chunkSize?: number;
+  usage?: { inputTokens: number; outputTokens: number };
 }
 
 export interface ModelRequest {
@@ -116,6 +117,22 @@ export async function startLocalModelServer(onShutdown?: () => void) {
         }
       }
       frame({}, "stop");
+      if (reply.usage) {
+        response.write(
+          `data: ${JSON.stringify({
+            id,
+            object: "chat.completion.chunk",
+            created: 1,
+            model: body.model,
+            choices: [],
+            usage: {
+              prompt_tokens: reply.usage.inputTokens,
+              completion_tokens: reply.usage.outputTokens,
+              total_tokens: reply.usage.inputTokens + reply.usage.outputTokens,
+            },
+          })}\n\n`,
+        );
+      }
       finished = true;
       response.end("data: [DONE]\n\n");
     }

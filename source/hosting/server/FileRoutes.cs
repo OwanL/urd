@@ -37,15 +37,17 @@ internal static class FileRoutes {
     if (!OperatingSystem.IsWindows())
       return Results.StatusCode(StatusCodes.Status501NotImplemented);
 
-    var start = new ProcessStartInfo {
-      FileName = Path.GetFullPath(Path.Combine(
-          Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe")),
-      UseShellExecute = false
-    };
-    start.ArgumentList.Add($"/select,\"{path}\"");
-    using Process? explorer = Process.Start(start);
+    using Process? explorer = Process.Start(ExplorerSelection(path));
     return explorer is null ? Results.StatusCode(StatusCodes.Status500InternalServerError) : Results.NoContent();
   }
+
+  internal static ProcessStartInfo ExplorerSelection(string path) => new() {
+    FileName = Path.GetFullPath(Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe")),
+    // Explorer parses its own command line; ArgumentList would backslash-escape these quotes.
+    Arguments = $"/select,\"{path}\"",
+    UseShellExecute = false
+  };
 
   private sealed record RevealPathRequest(string? Path);
 }

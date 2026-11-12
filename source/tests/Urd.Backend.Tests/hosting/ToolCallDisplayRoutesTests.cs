@@ -107,6 +107,20 @@ public sealed class ToolCallDisplayRoutesTests {
       Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
   }
 
+  [Theory]
+  [InlineData("file.txt")]
+  [InlineData("folder, with spaces/reveal, unicode-Ω & %TEST%.txt")]
+  public void ExplorerSelectionPreservesNativeQuotingWithoutAShell(string relativePath) {
+    string path = Path.GetFullPath(Path.Combine(Path.GetTempPath(), relativePath));
+    var start = FileRoutes.ExplorerSelection(path);
+
+    Assert.Equal(Path.GetFullPath(Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe")), start.FileName);
+    Assert.Equal($"/select,\"{path}\"", start.Arguments);
+    Assert.Empty(start.ArgumentList);
+    Assert.False(start.UseShellExecute);
+  }
+
   private static void AssertLabel(JsonElement labels, Guid requestId, string callId) {
     Assert.Single(labels.EnumerateObject());
     JsonElement label = labels.GetProperty($"{requestId:D}/{callId}");

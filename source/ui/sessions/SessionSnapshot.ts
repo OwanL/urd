@@ -21,6 +21,7 @@ export interface SessionContextUsage {
 export interface SessionSnapshot {
   readonly sessionId: string;
   readonly historyRevision: number;
+  readonly workingDirectory: string | null;
   readonly admissionFenced: boolean;
   readonly unsettledExecutionId: string | null;
   readonly isCompacting?: boolean;

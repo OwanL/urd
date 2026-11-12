@@ -39,6 +39,8 @@ interface ConversationProps {
   stop: WorkspaceStopState | undefined;
   checking: boolean;
   models: WorkspaceModelState;
+  defaultWorkingDirectoryUnset: boolean;
+  onSetWorkingDirectory(): void;
   ready: boolean;
   canPersist: boolean;
   refresh: number;
@@ -65,6 +67,8 @@ export function Conversation({
   stop,
   checking,
   models,
+  defaultWorkingDirectoryUnset,
+  onSetWorkingDirectory,
   ready,
   canPersist,
   refresh,
@@ -97,6 +101,12 @@ export function Conversation({
     notice,
     active,
     transcript === undefined,
+  );
+  const showWorkingDirectory = Boolean(
+    snapshot?.workingDirectory &&
+    snapshot.firstUserPreview === null &&
+    snapshot.unsettledExecutionId === null &&
+    !chat.pending,
   );
   const state = deriveConversationState(chat, snapshot, stop, ready, canPersist);
   const selection = state.selection;
@@ -231,6 +241,16 @@ export function Conversation({
             onCancel={() => messageEditing.cancel(sessionId)}
           />
         )}
+      {showWorkingDirectory && (
+        <div class="working-directory-line">
+          <span>Working directory: {snapshot?.workingDirectory}</span>
+          {defaultWorkingDirectoryUnset && (
+            <button type="button" onClick={onSetWorkingDirectory}>
+              Set a default
+            </button>
+          )}
+        </div>
+      )}
       <Composer
         indicators={
           <SessionIndicators

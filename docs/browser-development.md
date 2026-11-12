@@ -12,6 +12,8 @@ snapshot/history metadata and loads message text on demand.
 
 The workspace has closable, reorderable local tabs, transcript, model and reasoning
 selectors, Send, Stop and integrated [provider settings](provider-management.md#browser-settings).
+Settings → General holds the default working directory; empty chats show their own directory
+and link there while no default is set.
 Snooze remains unavailable. The UI displays a bounded, navigable transcript with compact tool
 rows, on-demand input/output inspection and Markdown rendering. The history API supports
 anchored pages. Closing a tab hides the view; it does not stop work, close a backend session

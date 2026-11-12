@@ -42,6 +42,7 @@ function snapshot(overrides: Partial<SessionSnapshot> = {}): SessionSnapshot {
   return {
     sessionId,
     historyRevision: 7,
+    workingDirectory: null,
     admissionFenced: false,
     unsettledExecutionId: null,
     stopRequested: false,

@@ -55,6 +55,7 @@ const receipt: UserMessageReceipt = {
 const snapshot: SessionSnapshot = {
   sessionId,
   historyRevision: 7,
+  workingDirectory: "C:\\workspace",
   admissionFenced: false,
   unsettledExecutionId: executionId,
   stopRequested: false,

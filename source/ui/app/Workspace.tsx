@@ -4,6 +4,9 @@ import { Icon } from "../components/Icon.tsx";
 import { Settings } from "../settings/Settings.tsx";
 import { Tooltip } from "../components/Tooltip.tsx";
 import { ProviderClient } from "../providers/ProviderClient.ts";
+import { PreferencesClient } from "../preferences/PreferencesClient.ts";
+import { useWorkingDirectoryPreferences } from "../preferences/useWorkingDirectoryPreferences.ts";
+import type { SettingsTab } from "../settings/Settings.tsx";
 import { SessionClient } from "../sessions/SessionClient.ts";
 import { MessageEditing } from "./MessageEditing.ts";
 import { WorkspacePersistence } from "./WorkspacePersistence.ts";
@@ -23,6 +26,7 @@ import "./workspace.css";
 
 const sessions = new SessionClient(new URL(window.location.href));
 const providers = new ProviderClient(new URL(window.location.href));
+const preferencesClient = new PreferencesClient(new URL(window.location.href));
 const storageKey = "urd.workspace.v1";
 const storageRetryLabels = { read: "Retry read", write: "Retry save", cleanup: "Retry cleanup" };
 
@@ -67,6 +71,16 @@ export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) 
   const readingPositions = useRef(new Map<string, ReadingPosition>());
   const transcriptPositions = useRef(new Map<string, TranscriptNavigationState>());
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("providers");
+  const workingDirectoryPreferences = useWorkingDirectoryPreferences(preferencesClient);
+  const defaultWorkingDirectoryUnset =
+    workingDirectoryPreferences.loaded &&
+    workingDirectoryPreferences.preferences?.workingDirectory === null;
+  const openSettings = (tab?: SettingsTab) => {
+    if (tab) setSettingsTab(tab);
+    void workingDirectoryPreferences.refresh();
+    setSettingsOpen(true);
+  };
   const settingsAnchor = useRef<HTMLButtonElement>(null);
   const newChatButton = useRef<HTMLButtonElement>(null);
   const { activeId, chats, tabs } = workspace.state;
@@ -141,7 +155,7 @@ export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) 
               aria-label="Settings"
               aria-haspopup="dialog"
               aria-expanded={settingsOpen}
-              onClick={() => setSettingsOpen((value) => !value)}
+              onClick={() => (settingsOpen ? setSettingsOpen(false) : openSettings())}
             >
               <Icon name="settings" />
             </button>
@@ -152,6 +166,9 @@ export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) 
         open={settingsOpen}
         anchor={settingsAnchor}
         client={providers}
+        preferences={workingDirectoryPreferences}
+        tab={settingsTab}
+        onTabChange={setSettingsTab}
         onClose={() => setSettingsOpen(false)}
         onChanged={models.providersChanged}
       />
@@ -201,6 +218,8 @@ export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) 
             ready={connected}
             canPersist={canPersist}
             notice={id === activeId ? events.notice : null}
+            defaultWorkingDirectoryUnset={defaultWorkingDirectoryUnset}
+            onSetWorkingDirectory={() => openSettings("general")}
             refresh={refresh}
             onRefresh={refreshSnapshot}
             editDraft={workspace.editDraft}

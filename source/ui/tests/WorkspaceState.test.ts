@@ -49,6 +49,7 @@ void test("causal snapshot reads release accepted work outside the recent window
   const snapshot: SessionSnapshot = {
     sessionId,
     historyRevision: 7,
+    workingDirectory: null,
     admissionFenced: false,
     unsettledExecutionId: null,
     stopRequested: false,

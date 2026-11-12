@@ -130,6 +130,14 @@ export function Popover({
     };
   }, [anchor, placement, role]);
 
+  // A hover-opened surface takes focus once it is deliberately activated.
+  useLayoutEffect(() => {
+    const element = surface.current;
+    if (!autoFocus || role === "tooltip" || !element?.matches(":popover-open")) return;
+    if (element.contains(document.activeElement)) return;
+    (latest.current.initialFocus?.current ?? element).focus({ preventScroll: true });
+  }, [autoFocus, role]);
+
   return (
     <div
       ref={surface}

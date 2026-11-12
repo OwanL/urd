@@ -10,12 +10,12 @@ public sealed class DatabaseSchemaTests {
   public void FreshDatabaseCreatesAndReopensCurrentSchema() {
     using var database = new TemporaryDatabase();
     using (UrdStore store = UrdStore.Open(database.Path)) {
-      Assert.Equal(18L, database.Scalar("PRAGMA user_version;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
+      Assert.Equal(19L, database.Scalar("PRAGMA user_version;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
       store.Sessions.CreatePrimary(Guid.NewGuid());
     }
 
     using UrdStore reopened = UrdStore.Open(database.Path);
-    Assert.Equal(18L, database.Scalar("PRAGMA user_version;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
+    Assert.Equal(19L, database.Scalar("PRAGMA user_version;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
     Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM sessions;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
   }
 
@@ -68,6 +68,8 @@ public sealed class DatabaseSchemaTests {
     Assert.Equal(1L, database.Scalar("SELECT \"notnull\" FROM pragma_table_info('input_decisions') WHERE name = 'llm_selection_json';")); // raw-sql: current schema creation, rejection or constraint is the subject under test
     Assert.Equal(1L, database.Scalar("SELECT \"notnull\" FROM pragma_table_info('execution_tools') WHERE name = 'arguments_excerpt';")); // raw-sql: current schema creation, rejection or constraint is the subject under test
     Assert.Equal(1L, database.Scalar("SELECT \"notnull\" FROM pragma_table_info('execution_tools') WHERE name = 'interrupted';")); // raw-sql: current schema creation, rejection or constraint is the subject under test
+    Assert.Equal(1L, database.Scalar("SELECT MAX(cid) = (SELECT COUNT(*) - 1 FROM pragma_table_info('execution_tools')) FROM pragma_table_info('execution_tools') WHERE name IN ('arguments_json', 'result_json', 'error');")); // raw-sql: current schema creation, rejection or constraint is the subject under test
+    Assert.Equal(3L, database.Scalar("SELECT COUNT(*) FROM pragma_table_info('execution_tools') WHERE cid >= (SELECT MIN(cid) FROM pragma_table_info('execution_tools') WHERE name IN ('arguments_json', 'result_json', 'error'));")); // raw-sql: current schema creation, rejection or constraint is the subject under test
     Assert.Equal(0L, database.Scalar("SELECT \"notnull\" FROM pragma_table_info('execution_messages') WHERE name = 'request_id';")); // raw-sql: compaction markers have no ordinary request
     Assert.Throws<SqliteException>(() => database.Execute($"UPDATE execution_messages SET request_id = NULL WHERE run_id = '{run:D}' AND role = 0;"));
     Assert.Throws<SqliteException>(() => database.Execute($"""

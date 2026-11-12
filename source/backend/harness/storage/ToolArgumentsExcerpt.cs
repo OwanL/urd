@@ -138,13 +138,18 @@ internal static class ToolArgumentsExcerpt {
     switch (value.ValueKind) {
       case JsonValueKind.Object:
         writer.WriteStartObject();
+        int omittedCount = 0;
         foreach (JsonProperty property in value.EnumerateObject()) {
           string name = property.Name;
-          if (Encoding.UTF8.GetByteCount(name) > MaximumKeyBytes)
+          if (Encoding.UTF8.GetByteCount(name) > MaximumKeyBytes) {
+            omittedCount++;
             continue;
+          }
           writer.WritePropertyName(name);
           WriteNestedValue(writer, property.Value);
         }
+        if (omittedCount > 0)
+          writer.WriteNumber("$omitted", omittedCount);
         writer.WriteEndObject();
         break;
       case JsonValueKind.Array:

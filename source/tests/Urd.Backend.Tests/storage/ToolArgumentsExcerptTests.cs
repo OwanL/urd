@@ -58,6 +58,21 @@ public sealed class ToolArgumentsExcerptTests {
   }
 
   [Fact]
+  public void NestedObjectCountsKeysOver128Utf8BytesAsOmitted() {
+    string key = new('k', 129);
+    string arguments = JsonSerializer.Serialize(new {
+      options = new Dictionary<string, int> { [key] = 1 }
+    });
+    string excerpt = ToolArgumentsExcerpt.Create(arguments);
+    using JsonDocument actual = JsonDocument.Parse(excerpt);
+    JsonElement options = actual.RootElement.GetProperty("options");
+
+    Assert.Equal(1, options.GetProperty("$omitted").GetInt32());
+    Assert.False(options.TryGetProperty(key, out _));
+    AssertBounded(excerpt);
+  }
+
+  [Fact]
   public void EscapedSurrogatePairAtPrefixBoundaryIsCutSafely() {
     string arguments = "{\"value\":\"" + new string('a', 254) + "\\\"\\uD83D\\uDE00" + new string('b', 3000) + "\"}";
     string original = new string('a', 254) + "\"😀" + new string('b', 3000);

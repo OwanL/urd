@@ -113,12 +113,6 @@
   cursor: default;
 }
 
-.tab-paused-slot {
-  color: var(--text-secondary);
-  font-size: 10px;
-  font-weight: 700;
-}
-
 .tab-activity-dot {
   display: block;
   width: 7px;

@@ -150,11 +150,12 @@ export function ChatTabs({
               ? "⊘"
               : indicatorStatus === "needs-attention"
                 ? "?"
-                : indicatorStatus === "updates-paused" && !pausedBusy
-                  ? "Ⅱ"
-                  : indicatorStatus && !busy && indicatorStatus !== "idle"
-                    ? "?"
-                    : null;
+                : indicatorStatus &&
+                    !busy &&
+                    indicatorStatus !== "idle" &&
+                    indicatorStatus !== "updates-paused"
+                  ? "?"
+                  : null;
         return (
           <div
             key={id}
@@ -221,25 +222,7 @@ export function ChatTabs({
                     <span class="tab-activity-dot is-busy" />
                   </span>
                 </Tooltip>
-              ) : pausedBusy ? (
-                <Tooltip
-                  placement="below"
-                  content={
-                    <>
-                      {title}
-                      <span class="tooltip-detail">{statusLabel}</span>
-                    </>
-                  }
-                >
-                  <span
-                    class="tab-activity-slot tab-paused-slot"
-                    role="img"
-                    aria-label={statusLabel!}
-                  >
-                    Ⅱ
-                  </span>
-                </Tooltip>
-              ) : (
+              ) : pausedBusy ? null : (
                 <>
                   {completed && (
                     <Tooltip

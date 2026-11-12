@@ -176,7 +176,7 @@ export function useSessionEvents(
     error:
       error ??
       (open.length > observed.length
-        ? `Live updates cover ${maxObservedSessions} tabs, including the active tab. Other tabs are marked Updates paused. Close tabs to restore updates for all.`
+        ? `Live updates cover ${maxObservedSessions} tabs, including the active tab. Close tabs to restore updates for all.`
         : null),
   };
 }

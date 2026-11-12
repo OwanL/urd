@@ -408,6 +408,7 @@ export function ToolRowInteractionsProvider({
           role={active.kind === "inspection" ? "dialog" : "menu"}
           placement="below"
           {...(active.kind === "menu" ? { initialFocus: firstMenuItem } : {})}
+          autoFocus={active.kind === "menu" || active.pinned}
           onClose={(returnFocus) => {
             if (activeRef.current?.id === active.id) dismiss(returnFocus);
           }}

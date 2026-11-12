@@ -12,6 +12,8 @@ export interface PopoverProps {
   label?: string;
   placement?: PopoverPlacement;
   initialFocus?: RefObject<HTMLElement | null>;
+  // Hover-opened surfaces must not take focus from what the user is doing.
+  autoFocus?: boolean;
   onClose: (returnFocus: boolean) => void;
   children: ComponentChildren;
 }
@@ -35,12 +37,13 @@ export function Popover({
   label,
   placement = "below",
   initialFocus,
+  autoFocus = true,
   onClose,
   children,
 }: PopoverProps) {
   const surface = useRef<HTMLDivElement>(null);
-  const latest = useRef({ onClose, initialFocus });
-  latest.current = { onClose, initialFocus };
+  const latest = useRef({ onClose, initialFocus, autoFocus });
+  latest.current = { onClose, initialFocus, autoFocus };
 
   useLayoutEffect(() => {
     const element = surface.current;
@@ -96,7 +99,7 @@ export function Popover({
       event.preventDefault();
       // Descriptions dismiss before an enclosing menu gets the same Escape.
       if (!interactive) event.stopPropagation();
-      close(interactive);
+      close(interactive && element.contains(document.activeElement));
     };
 
     element.style.visibility = "hidden";
@@ -104,7 +107,8 @@ export function Popover({
     position();
     if (interactive) {
       document.dispatchEvent(new Event("urd:popover-open"));
-      (latest.current.initialFocus?.current ?? element).focus({ preventScroll: true });
+      if (latest.current.autoFocus)
+        (latest.current.initialFocus?.current ?? element).focus({ preventScroll: true });
     }
     const observer = new ResizeObserver(schedule);
     observer.observe(control);

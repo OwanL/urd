@@ -43,7 +43,7 @@ public sealed class ToolCallLabelsTests {
     Assert.Equal("app.cs", read.Title);
     Assert.Equal("lines 40–120", read.Detail);
     Assert.Equal(Path.GetFullPath(Path.Combine(workingDirectory, "src/app.cs")), read.Path);
-    Assert.Equal("3 lines", write.Detail);
+    Assert.Null(write.Detail);
     Assert.Equal(Path.GetFullPath(Path.Combine(workingDirectory, "src/new.cs")), write.Path);
     Assert.Equal("5 edits", edit.Detail);
     Assert.Equal(Path.GetFullPath(Path.Combine(workingDirectory, "src/edit.cs")), edit.Path);

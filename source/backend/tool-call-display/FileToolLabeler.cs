@@ -47,32 +47,4 @@ internal static class FileToolLabeler {
     string unit = count == 1 ? "edit" : "edits";
     return $"{count.ToString(CultureInfo.InvariantCulture)} {unit}";
   }
-
-  internal static string? WriteDetail(JsonElement arguments) {
-    if (!ToolCallExcerpt.TryGetExactString(arguments, "content", out string content))
-      return null;
-    int lines = CountLines(content);
-    return $"{lines.ToString(CultureInfo.InvariantCulture)} lines";
-  }
-
-  private static int CountLines(string text) {
-    if (text.Length == 0)
-      return 0;
-
-    int lines = 0;
-    int index = 0;
-    while (index < text.Length) {
-      if (text[index] == '\r') {
-        lines++;
-        index += index + 1 < text.Length && text[index + 1] == '\n' ? 2 : 1;
-      } else {
-        if (text[index] == '\n')
-          lines++;
-        index++;
-      }
-    }
-    if (text[^1] is not ('\r' or '\n'))
-      lines++;
-    return lines;
-  }
 }

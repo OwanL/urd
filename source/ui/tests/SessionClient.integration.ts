@@ -189,5 +189,40 @@ void test(
         return true;
       },
     );
+
+    const edit = {
+      operationId: randomUUID(),
+      message: user.text.from.message,
+      text: "Edited instruction: 雪🙂",
+      llmSelection: { ...submission.llmSelection!, modelId: "fixture-b", reasoningEffort: "low" },
+    };
+    const saved = await request(client.editMessage(id, edit));
+    assert.equal(saved.historyRevision, 1);
+    assert.deepEqual(
+      await request(client.getMessageEditReceipt(id, edit.operationId, signal)),
+      saved,
+    );
+    assert.deepEqual(await request(client.editMessage(id, edit)), saved);
+    let edited = await request(client.getSnapshot(id, signal));
+    while (edited.lastSettlement?.executionId !== saved.executionId) {
+      await delay(20, undefined, { signal });
+      edited = await request(client.getSnapshot(id, signal));
+    }
+    assert.equal(model.calls.length, 2, "An edit retry must not start another provider request");
+    assert.equal(model.calls[1]!.request.model, "fixture-b");
+    assert.equal(model.calls[1]!.request.reasoning_effort, "low");
+    const context = JSON.stringify(model.calls[1]!.request.messages);
+    assert.ok(context.includes(edit.text));
+    assert.ok(!context.includes("Original café"));
+    assert.ok(!context.includes("Hello from Urd."));
+    await assert.rejects(
+      client.getMessageContent(id, user.text.from, signal),
+      (error) => error instanceof RequestError && error.status === 409,
+    );
+    const revised = await request(
+      client.getHistory(id, { mode: "latest", expectedHistoryRevision: 1 }, signal),
+    );
+    assert.equal(revised.entries.length, 2);
+    assert.equal(revised.entries[0]!.entry.entryId, edit.operationId);
   },
 );

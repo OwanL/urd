@@ -117,6 +117,7 @@ export class WorkspaceCommands {
     if (
       !latest ||
       latest.pending ||
+      latest.messageEdit?.submission ||
       !selection ||
       !latest.draft.trim() ||
       submissionTextError(latest.draft)
@@ -153,7 +154,13 @@ export class WorkspaceCommands {
     source: UserMessageSubmission,
   ): Promise<NotSentResendResult | null> {
     const latest = this.access.read().chats[id];
-    if (snapshot.sessionId !== id || !latest || latest.pending || !this.access.canPersist())
+    if (
+      snapshot.sessionId !== id ||
+      !latest ||
+      latest.pending ||
+      latest.messageEdit?.submission ||
+      !this.access.canPersist()
+    )
       return null;
 
     const submission: UserMessageSubmission = {

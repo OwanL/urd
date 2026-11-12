@@ -1,0 +1,77 @@
+.editable-message {
+  position: relative;
+}
+
+.message-edit-action {
+  position: absolute;
+  right: 4px;
+  bottom: -18px;
+  padding: 2px 5px;
+  border: 0;
+  background: var(--surface-popover);
+  color: var(--text-secondary);
+  font-size: 11px;
+  opacity: 0;
+}
+
+.editable-message:hover > .message-edit-action,
+.editable-message:focus-within > .message-edit-action {
+  opacity: 1;
+}
+
+.message-edit-action:disabled {
+  visibility: hidden;
+}
+
+.transcript-entry > .editable-message > .message {
+  margin-bottom: 0;
+}
+
+.message-editor {
+  width: min(86%, 52rem);
+}
+
+.message-editor textarea {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 4lh;
+  max-height: 40vh;
+  field-sizing: content;
+  resize: vertical;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: 1.5;
+}
+
+.message-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.message-editor-actions button {
+  min-height: 28px;
+  padding: 3px 9px;
+  border: 1px solid currentColor;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+}
+
+.message-editor [role="status"] {
+  font-size: 12px;
+}
+
+.message-editor [role="status"]:empty {
+  display: none;
+}
+
+@media (hover: none) {
+  .message-edit-action {
+    opacity: 1;
+  }
+}

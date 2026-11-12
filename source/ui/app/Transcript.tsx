@@ -3,6 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "preac
 import type { SessionClient } from "../sessions/SessionClient.ts";
 import type { TranscriptDisplay } from "./TranscriptDisplay.ts";
 import { IconButton } from "../components/IconButton.tsx";
+import { EditableMessage } from "./EditableMessage.tsx";
 import { CompactionMarker } from "./CompactionMarker.tsx";
 import { ToolRow } from "../chat/ToolRow.tsx";
 import { ToolRowInteractionsProvider } from "../chat/ToolRowInteractions.tsx";
@@ -411,27 +412,29 @@ function PlainTranscript({
                   class={descriptor.tool ? "transcript-tool-entry" : undefined}
                 >
                   {isTextEntry(entry) && descriptor.text ? (
-                    display && RichBody ? (
-                      <RichBody
-                        display={display}
-                        streamId={streamId}
-                        sessionId={sessionId}
-                        entry={entry}
-                        text={descriptor.text}
-                        root={root}
-                        paused={!visible || documentHidden}
-                      />
-                    ) : (
-                      <MessageBody
-                        client={client}
-                        contentReader={contentReader}
-                        sessionId={sessionId}
-                        entry={entry}
-                        text={descriptor.text}
-                        root={root}
-                        paused={selecting || !visible || documentHidden}
-                      />
-                    )
+                    <EditableMessage entry={entry} text={descriptor.text}>
+                      {display && RichBody ? (
+                        <RichBody
+                          display={display}
+                          streamId={streamId}
+                          sessionId={sessionId}
+                          entry={entry}
+                          text={descriptor.text}
+                          root={root}
+                          paused={!visible || documentHidden}
+                        />
+                      ) : (
+                        <MessageBody
+                          client={client}
+                          contentReader={contentReader}
+                          sessionId={sessionId}
+                          entry={entry}
+                          text={descriptor.text}
+                          root={root}
+                          paused={selecting || !visible || documentHidden}
+                        />
+                      )}
+                    </EditableMessage>
                   ) : descriptor.compaction ? (
                     <CompactionMarker
                       client={client}

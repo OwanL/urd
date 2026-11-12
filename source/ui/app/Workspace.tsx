@@ -5,6 +5,7 @@ import { Settings } from "../settings/Settings.tsx";
 import { Tooltip } from "../components/Tooltip.tsx";
 import { ProviderClient } from "../providers/ProviderClient.ts";
 import { SessionClient } from "../sessions/SessionClient.ts";
+import { MessageEditing } from "./MessageEditing.ts";
 import { WorkspacePersistence } from "./WorkspacePersistence.ts";
 import { emptyWorkspaceCommandState, WorkspaceCommands } from "./WorkspaceCommands.ts";
 import type { WorkspaceCommandState } from "./WorkspaceCommands.ts";
@@ -50,6 +51,12 @@ export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) 
         refreshSnapshot,
       ),
   );
+  const [messageEditing] = useState(
+    () => new MessageEditing(sessions, workspace.access, refreshSnapshot),
+  );
+  useEffect(() => {
+    if (workspace.loaded) return messageEditing.watchPendingReceipts();
+  }, [messageEditing, workspace.loaded]);
   const create = useCallback(() => commands.create(), [commands]);
   const navigation = useWorkspaceNavigation(sessions, workspace, create);
 
@@ -161,6 +168,7 @@ export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) 
             transcript={transcript}
             streamId={events.streamId}
             commands={commands}
+            messageEditing={messageEditing}
             stop={commandState.stopping[id]}
             checking={commandState.checking[id] ?? false}
             models={models}

@@ -1,4 +1,5 @@
 import type { LlmSelection } from "../providers/LlmSelection.ts";
+import type { MessageEditDraft } from "../sessions/MessageEdit.ts";
 import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
 import type {
   MessageRefusalReason,
@@ -11,6 +12,7 @@ export interface ChatState {
   draftVersion: number;
   selection: LlmSelection | null;
   pending: PendingSubmission | null;
+  messageEdit?: MessageEditDraft | undefined;
   knownExecutionId: string | null;
   title: string;
   titleProvenance: TitleProvenance;
@@ -28,7 +30,7 @@ export interface PendingSubmission {
 }
 
 export interface WorkspaceState {
-  version: 4;
+  version: 5;
   tabs: string[];
   activeId: string | null;
   chats: Record<string, ChatState>;
@@ -62,7 +64,7 @@ export function executionSettled(
 }
 
 export function emptyWorkspace(): WorkspaceState {
-  return { version: 4, tabs: [], activeId: null, chats: {}, lastSelection: null };
+  return { version: 5, tabs: [], activeId: null, chats: {}, lastSelection: null };
 }
 
 export function newChat(selection: LlmSelection | null): ChatState {
@@ -131,9 +133,19 @@ export function decodeWorkspace(raw: string): WorkspaceState {
     chats: Object.fromEntries(
       Object.entries(state.chats).map(([id, chat]) => [
         id,
-        chat.pending === null
-          ? chat
-          : { ...chat, pending: { ...chat.pending, status: "uncertain" } },
+        {
+          ...chat,
+          pending: chat.pending === null ? null : { ...chat.pending, status: "uncertain" },
+          messageEdit:
+            chat.messageEdit?.status === "loading"
+              ? undefined
+              : chat.messageEdit
+                ? {
+                    ...chat.messageEdit,
+                    status: chat.messageEdit.submission ? "uncertain" : "editing",
+                  }
+                : undefined,
+        },
       ]),
     ),
   };
@@ -256,11 +268,41 @@ function copySubmission(original: UserMessageSubmission): UserMessageSubmission 
   };
 }
 
+function isMessageEdit(value: unknown): value is MessageEditDraft | undefined {
+  if (value === undefined) return true;
+  if (!isRecord(value) || !isRecord(value.target)) return false;
+  const target = value.target;
+  if (
+    !isId(target.executionId) ||
+    !isId(target.entryId) ||
+    target.kind !== "user" ||
+    !isRevision(target.historyRevision) ||
+    typeof value.text !== "string" ||
+    !isNullableString(value.error) ||
+    !["loading", "editing", "saving", "uncertain"].includes(String(value.status))
+  )
+    return false;
+  const original = value.submission;
+  if (value.status === "loading" || value.status === "editing") return original === undefined;
+  if (!isRecord(original) || !isRecord(original.message)) return false;
+  return (
+    isId(original.operationId) &&
+    original.text === value.text &&
+    original.message.executionId === target.executionId &&
+    original.message.messageId === target.entryId &&
+    original.message.role === "user" &&
+    original.message.historyRevision === target.historyRevision &&
+    original.llmSelection !== null &&
+    isSelection(original.llmSelection)
+  );
+}
+
 function isChat(value: unknown): value is ChatState {
   if (!isRecord(value) || !isRevision(value.draftVersion)) return false;
   const pending = value.pending;
   return (
     typeof value.draft === "string" &&
+    isMessageEdit(value.messageEdit) &&
     isSelection(value.selection) &&
     (value.knownExecutionId === null || isId(value.knownExecutionId)) &&
     typeof value.title === "string" &&
@@ -279,7 +321,7 @@ function isChat(value: unknown): value is ChatState {
 function isWorkspace(value: unknown): value is WorkspaceState {
   if (
     !isRecord(value) ||
-    value.version !== 4 ||
+    value.version !== 5 ||
     !Array.isArray(value.tabs) ||
     !value.tabs.every(isId) ||
     !isRecord(value.chats) ||

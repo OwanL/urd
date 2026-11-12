@@ -15,6 +15,7 @@ import type {
   TranscriptPromptPageQuery,
 } from "./Messages.ts";
 import type { CompactionReceipt, CompactionSubmission, CompactionSummary } from "./Compaction.ts";
+import type { MessageEditReceipt, MessageEditSubmission } from "./MessageEdit.ts";
 import type { SessionIdPage } from "./SessionIdPage.ts";
 import type { SessionSnapshot } from "./SessionSnapshot.ts";
 import type { StopReceipt } from "./Stop.ts";
@@ -224,6 +225,29 @@ export class SessionClient {
   ): Promise<UserMessageReceipt | null> {
     const path = `/${encodeURIComponent(sessionId)}/message-submissions/${encodeURIComponent(submissionId)}`;
     return requestJson(this.url(path), "GET", undefined, signal);
+  }
+
+  editMessage(sessionId: string, submission: MessageEditSubmission): Promise<MessageEditReceipt> {
+    return requestJson(
+      this.url(`/${encodeURIComponent(sessionId)}/message-edits`),
+      "POST",
+      submission,
+    );
+  }
+
+  getMessageEditReceipt(
+    sessionId: string,
+    operationId: string,
+    signal?: AbortSignal,
+  ): Promise<MessageEditReceipt | null> {
+    return requestJson(
+      this.url(
+        `/${encodeURIComponent(sessionId)}/message-edits/${encodeURIComponent(operationId)}`,
+      ),
+      "GET",
+      undefined,
+      signal,
+    );
   }
 
   stopExecution(sessionId: string, executionId: string): Promise<StopReceipt> {

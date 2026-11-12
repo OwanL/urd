@@ -98,7 +98,7 @@ function sending(submission = original) {
 
 function workspace(): WorkspaceState {
   return {
-    version: 4,
+    version: 5,
     tabs: [sessionId],
     activeId: sessionId,
     chats: { [sessionId]: sending() },
@@ -108,7 +108,7 @@ function workspace(): WorkspaceState {
 
 void test("new state is independent, empty and does not invent a selection", () => {
   assert.deepEqual(emptyWorkspace(), {
-    version: 4,
+    version: 5,
     tabs: [],
     activeId: null,
     chats: {},
@@ -339,7 +339,8 @@ void test("corrupt saved structure throws instead of resetting or discarding dra
     { ...workspace(), version: 1 },
     { ...workspace(), version: 2 },
     { ...workspace(), version: 3 },
-    { ...workspace(), version: 5 },
+    { ...workspace(), version: 4 },
+    { ...workspace(), version: 6 },
     { ...workspace(), tabs: [sessionId, sessionId] },
     { ...workspace(), tabs: ["missing"] },
     { ...workspace(), tabs: [1] },
@@ -372,6 +373,15 @@ void test("corrupt saved structure throws instead of resetting or discarding dra
     { titleProvenance: null },
     { titleProvenance: 1 },
     { error: {} },
+    { messageEdit: {} },
+    {
+      messageEdit: {
+        target: { executionId, entryId: "entry", kind: "text", historyRevision: 0 },
+        text: "edit",
+        status: "editing",
+        error: null,
+      },
+    },
     { pending: {} },
     { pending: { original, draftVersion: 1, status: "accepted" } },
     { pending: { original, draftVersion: 2, status: "sending" } },

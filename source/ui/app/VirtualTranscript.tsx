@@ -24,6 +24,7 @@ import {
   transcriptNavigationProfileVersion,
 } from "./useTranscriptNavigation.ts";
 import type { TranscriptDisplay } from "./TranscriptDisplay.ts";
+import { EditableMessage } from "./EditableMessage.tsx";
 import { CompactionMarker } from "./CompactionMarker.tsx";
 import { ToolRow } from "../chat/ToolRow.tsx";
 import { ToolRowInteractionsProvider } from "../chat/ToolRowInteractions.tsx";
@@ -231,19 +232,21 @@ function VirtualEntry({
       style={{ top: `${top}px` }}
     >
       {isTextEntry(descriptor.entry) && descriptor.text ? (
-        <display.MessageBody
-          display={display}
-          streamId={streamId}
-          sessionId={sessionId}
-          entry={descriptor.entry}
-          text={descriptor.text}
-          root={root}
-          paused={paused}
-          {...(saved ? { saved } : {})}
-          registerSource={registerSource}
-          registerRestore={registerRestore}
-          onPublished={published}
-        />
+        <EditableMessage entry={descriptor.entry} text={descriptor.text}>
+          <display.MessageBody
+            display={display}
+            streamId={streamId}
+            sessionId={sessionId}
+            entry={descriptor.entry}
+            text={descriptor.text}
+            root={root}
+            paused={paused}
+            {...(saved ? { saved } : {})}
+            registerSource={registerSource}
+            registerRestore={registerRestore}
+            onPublished={published}
+          />
+        </EditableMessage>
       ) : descriptor.compaction ? (
         <CompactionMarker
           client={client}
@@ -393,7 +396,12 @@ export function VirtualTranscript({
         const minimum = Math.min(startRank, endRank);
         const maximum = Math.max(startRank, endRank);
         for (const [key, row] of rowRecords.current)
-          if (row.rank >= minimum && row.rank <= maximum) next.set(key, row);
+          if (
+            row.descriptor.entry.historyRevision === latest.current.historyRevision &&
+            row.rank >= minimum &&
+            row.rank <= maximum
+          )
+            next.set(key, row);
       }
     }
     const active =
@@ -401,7 +409,8 @@ export function VirtualTranscript({
     if (active && node.contains(active)) {
       const key = active.dataset.entryKey;
       const row = key ? rowRecords.current.get(key) : undefined;
-      if (key && row) next.set(key, row);
+      if (key && row?.descriptor.entry.historyRevision === latest.current.historyRevision)
+        next.set(key, row);
     }
     retainedRows.current = next;
     setRetainedKeys(new Set(next.keys()));

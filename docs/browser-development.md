@@ -18,6 +18,20 @@ anchored pages. Closing a tab hides the view; it does not stop work, close a bac
 or delete history. Components and effects stay with their feature; hooks are
 extracted for actual responsibilities, not a state framework.
 
+Click a user message, or focus its Edit message action, to edit inline. Enter/Save stops
+current work, awaits cleanup, replaces that message and the later conversation, then starts
+a response with the currently selected model/reasoning settings. Shift+Enter inserts a
+newline; Escape/Cancel leaves history untouched. There is no confirmation or undo. Links
+and text selection do not open editing. Opening an editor does not stop work or alter the
+normal composer draft. Pending-input and attachment editing are outside this feature.
+
+`MessageEditing` owns inline drafts and exact Save journals through workspace persistence,
+independently of mounted/virtualized rows. A missing acknowledgement stays uncertain; receipt
+lookup and explicit Retry save preserve the original operation, text and model. Pending
+Save blocks new Send, and cancellation is unavailable once Save is dispatched. Reload checks
+receipts rather than blindly repeating edits. Workspace shape **5** discards incompatible
+older saved browser state under the pre-release policy.
+
 Drag tabs with a pointer, or focus a tab and use Alt+Shift+Left/Right to move it.
 The held tab follows the pointer; neighbours move aside when its facing edge crosses
 their midpoint, without waiting for release. Stable layout geometry prevents jitter;

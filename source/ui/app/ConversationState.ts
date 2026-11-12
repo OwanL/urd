@@ -36,6 +36,7 @@ export function deriveConversationState(
   const selectionLocked = Boolean(
     active ||
     chat.pending ||
+    chat.messageEdit?.submission ||
     stopId ||
     snapshot?.stopRequested ||
     snapshot?.admissionFenced ||
@@ -50,6 +51,7 @@ export function deriveConversationState(
     canPersist &&
     !compacting &&
     !chat.pending &&
+    !chat.messageEdit?.submission &&
     !snapshot.admissionFenced &&
     !snapshot.stopRequested &&
     !stopId &&

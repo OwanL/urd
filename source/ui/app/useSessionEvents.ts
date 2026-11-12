@@ -13,6 +13,8 @@ import {
 
 const maxObservedSessions = 128;
 
+type SessionConnectionState = "connecting" | "connected" | "disconnected" | "paused";
+
 // Page lifetime owns the stream; mounted conversations only consume handshakes.
 export function useSessionEvents(
   client: SessionClient,
@@ -24,7 +26,7 @@ export function useSessionEvents(
 ) {
   const [notices, setNotices] = useState<Record<string, string>>({});
   const [activity, setActivity] = useState(emptySessionActivity);
-  const [connected, setConnected] = useState(false);
+  const [connectionState, setConnectionState] = useState<SessionConnectionState>("connecting");
   const [hasConnected, setHasConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [streamId, setStreamId] = useState<string | null>(null);
@@ -44,6 +46,8 @@ export function useSessionEvents(
   useEffect(() => {
     if (!ready) return;
     let disposed = false;
+    let streamStarted = false;
+    let streamConnected = false;
     let discovery: AbortController | null = null;
     function add(session: string) {
       if (disposed || discovered.has(session)) return;
@@ -70,8 +74,9 @@ export function useSessionEvents(
     }
     const events = new SessionEvents(new URL(window.location.href), {
       connected(_boot, nextStreamId) {
+        streamConnected = true;
         setStreamId(nextStreamId);
-        setConnected(true);
+        setConnectionState("connected");
         setHasConnected(true);
         setError(null);
         discovery?.abort();
@@ -88,24 +93,36 @@ export function useSessionEvents(
       },
       created: add,
       disconnected() {
+        streamConnected = false;
         setStreamId(null);
-        setConnected(false);
+        setConnectionState("disconnected");
         setActivity(resetSessionTransitionStatuses);
         setNotices({});
       },
-      error: setError,
+      error(message) {
+        setError(message);
+        if (!streamConnected) setConnectionState("disconnected");
+      },
     });
     transport.current = events;
     events.update(desired.current.open, desired.current.active ? [desired.current.active] : []);
     function activate() {
       if (document.hidden) {
-        events.stop();
-        discovery?.abort();
-      } else events.start();
+        suspend();
+        return;
+      }
+      if (streamStarted) return;
+      streamStarted = true;
+      setConnectionState("connecting");
+      events.start();
     }
     function suspend() {
-      events.stop();
+      if (streamStarted) {
+        streamStarted = false;
+        events.stop();
+      }
       discovery?.abort();
+      setConnectionState("paused");
     }
     document.addEventListener("visibilitychange", activate);
     document.addEventListener("freeze", suspend);
@@ -117,7 +134,9 @@ export function useSessionEvents(
     return () => {
       disposed = true;
       discovery?.abort();
+      streamStarted = false;
       events.stop();
+      setConnectionState("disconnected");
       setStreamId(null);
       transport.current = null;
       document.removeEventListener("visibilitychange", activate);
@@ -138,7 +157,10 @@ export function useSessionEvents(
     transport.current?.update(observed, active ? [active] : []);
   }, [observed, active, watched, open]);
 
+  const connected = connectionState === "connected";
   return {
+    connected,
+    connectionState,
     streamId,
     notice: watched === active && active ? (notices[active] ?? null) : null,
     unread: activity.unread,

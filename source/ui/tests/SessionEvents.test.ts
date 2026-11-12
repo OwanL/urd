@@ -525,6 +525,62 @@ void test("reconnects after EOF and resyncs both unchanged and restarted boot ve
   assert.equal(currentStreamId, null);
 });
 
+for (const failure of ["network", "HTTP"] as const) {
+  void test(`reports an initial ${failure} failure, recovers and stops without extra errors`, async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    let attempts = 0;
+    let connected = 0;
+    const errors: string[] = [];
+    t.mock.method(globalThis, "fetch", async (input: RequestInfo | URL) => {
+      assert.ok(input instanceof URL);
+      if (input.pathname !== "/api/events") return new Response(null, { status: 204 });
+      attempts++;
+      if (attempts === 1) {
+        if (failure === "network") throw new TypeError("Failed to fetch");
+        return new Response(null, { status: 503 });
+      }
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(
+              encoder.encode('event: connected\ndata: {"stream":"recovered","boot":"boot"}\n\n'),
+            );
+          },
+        }),
+        { headers: { "Content-Type": "text/event-stream" } },
+      );
+    });
+    const events = new SessionEvents(new URL("https://server.example"), {
+      connected() {
+        connected++;
+      },
+      change() {},
+      status() {},
+      created() {},
+      disconnected() {},
+      error(message) {
+        errors.push(message);
+      },
+    });
+    t.after(() => events.stop());
+    events.start();
+    await flush();
+    assert.deepEqual(errors, [
+      failure === "network" ? "Failed to fetch" : "Session event stream failed (HTTP 503).",
+    ]);
+    assert.equal(connected, 0);
+    t.mock.timers.tick(250);
+    await flush();
+    assert.equal(connected, 1);
+    assert.equal(attempts, 2);
+    events.stop();
+    t.mock.timers.tick(10_000);
+    await flush();
+    assert.equal(errors.length, 1);
+    assert.equal(attempts, 2);
+  });
+}
+
 void test("heartbeat resets the watchdog and stop cancels its retry", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   let getCount = 0;

@@ -29,6 +29,26 @@
   flex: 1;
 }
 
+.connection-feedback {
+  display: flex;
+  flex: none;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  padding: 8px 20px;
+  border-block: 1px solid var(--border-subtle);
+  background: var(--surface-input);
+  color: var(--text-secondary);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.connection-feedback[hidden] {
+  display: none;
+}
+.connection-feedback.is-disconnected {
+  color: var(--danger);
+}
+
 .workspace-error {
   padding: 7px 20px;
   color: var(--danger);
@@ -49,7 +69,8 @@
     gap: 0;
   }
 
-  .workspace-error {
+  .workspace-error,
+  .connection-feedback {
     padding-inline: 12px;
   }
 }

@@ -80,7 +80,10 @@ export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) 
   );
   const shown = useWorkspaceRetention(activeId, tabs, transcript?.retainedTabs ?? null);
   const canPersist = workspace.access.canPersist();
-  const error = commandError || navigation.error || events.error || transcriptError;
+  const connected = navigation.ready && events.connected;
+  const disconnected = navigation.error !== null || events.connectionState === "disconnected";
+  const error =
+    commandError || navigation.error || (events.connected ? events.error : null) || transcriptError;
 
   return (
     <main class="workspace">
@@ -104,12 +107,18 @@ export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) 
           icon="plus"
           class="new-chat"
           label="New chat"
-          hint={commandState.creating ? "Creating chat…" : "New chat"}
+          hint={
+            commandState.creating
+              ? "Creating chat…"
+              : connected
+                ? "New chat"
+                : "New chat unavailable while disconnected"
+          }
           placement="below"
-          disabled={commandState.creating || !navigation.ready || !canPersist}
+          disabled={commandState.creating || !connected || !canPersist}
           aria-busy={commandState.creating}
           onClick={() => {
-            void create();
+            if (connected) void create();
           }}
         />
         <div class="top-actions">
@@ -146,6 +155,21 @@ export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) 
         onClose={() => setSettingsOpen(false)}
         onChanged={models.providersChanged}
       />
+      <div
+        class={`connection-feedback ${disconnected ? "is-disconnected" : ""}`}
+        role="status"
+        hidden={connected || events.connectionState === "paused"}
+      >
+        <span>
+          {disconnected ? "Disconnected from" : "Connecting to"} {window.location.origin}.
+          {disconnected && navigation.ready ? " Reconnecting…" : ""}
+        </span>
+        {navigation.error && (
+          <button type="button" onClick={() => window.location.reload()}>
+            Retry connection
+          </button>
+        )}
+      </div>
       {error && (
         <div class="workspace-error" role="alert">
           {error}
@@ -174,7 +198,7 @@ export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) 
             stop={commandState.stopping[id]}
             checking={commandState.checking[id] ?? false}
             models={models}
-            ready={navigation.ready}
+            ready={connected}
             canPersist={canPersist}
             notice={id === activeId ? events.notice : null}
             refresh={refresh}

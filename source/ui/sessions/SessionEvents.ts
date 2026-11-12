@@ -105,6 +105,7 @@ export class SessionEvents {
       const controller = new AbortController();
       this.streamController = controller;
       let failure: unknown;
+      let aborted = false;
 
       try {
         await this.openStream(controller, generation);
@@ -112,11 +113,13 @@ export class SessionEvents {
       } catch (error) {
         failure = error;
       } finally {
+        // Cleanup aborts the controller too; preserve whether the failure preceded it.
+        aborted = controller.signal.aborted;
         this.clearConnection(controller);
       }
 
       if (!this.isCurrent(generation)) return;
-      if (!controller.signal.aborted || failure instanceof StreamTimeoutError)
+      if (!aborted || failure instanceof StreamTimeoutError)
         this.reportError(errorMessage(failure));
 
       await this.waitToRetry(retryDelay, lifecycleSignal);

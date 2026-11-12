@@ -53,6 +53,10 @@ as a lower bound rather than counting host downtime. Only the visible working ch
 Busy tabs replace Close with a pulsing activity dot and ignore Delete. A background completion
 gets a dot until opened; hovering or focusing a completed tab reveals Close. Disconnected updates
 show a paused indicator, not a false completion. Completion markers last for this page lifetime.
+A disconnected page shows its server address and reconnects automatically. New chat and Send
+wait for the live connection; drafts remain editable. Intentional background suspension is not
+reported as a connection failure. Initial discovery failure offers an explicit connection retry;
+uncertain commands are never replayed by reconnecting.
 
 Closing a chat tab only hides it. Its record, draft and uncertain Send journal stay in
 this browser tab's `sessionStorage` until the browser tab ends; records are not

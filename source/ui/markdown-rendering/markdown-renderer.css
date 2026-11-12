@@ -27,6 +27,7 @@
 .markdown-renderer [data-kind="document"] > :first-child {
   margin-top: 0;
 }
+.markdown-renderer [data-kind="document"] > :last-child,
 .markdown-renderer :is(li, th, td, blockquote) > :last-child {
   margin-bottom: 0;
 }

@@ -135,6 +135,11 @@ export function ToolRow({
     .filter(Boolean)
     .join(" ");
 
+  const sourceChanged = interactions.sourceChanged;
+  useEffect(() => {
+    if (icon.current) sourceChanged(icon.current);
+  }, [sourceChanged, tool.outcome, tool.isClosed, tool.endedAt]);
+
   const sourceUnmounted = interactions.sourceUnmounted;
   useEffect(() => {
     const source = icon.current;

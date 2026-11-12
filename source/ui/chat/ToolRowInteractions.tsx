@@ -53,6 +53,7 @@ interface ToolRowInteractionContext {
   readonly openFileMenu: (anchor: HTMLElement, path: string) => void;
   readonly isOpen: (anchor: HTMLElement, kind: ActiveTarget["kind"]) => boolean;
   readonly sourceUnmounted: (anchor: HTMLElement) => void;
+  readonly sourceChanged: (anchor: HTMLElement) => void;
 }
 
 const ToolRowInteractionContext = createContext<ToolRowInteractionContext | null>(null);
@@ -81,6 +82,7 @@ export function ToolRowInteractionsProvider({
   const revisionRef = useRef(historyRevision);
   revisionRef.current = historyRevision;
   const [preview, setPreview] = useState<Preview | null>(null);
+  const [previewVersion, setPreviewVersion] = useState(0);
   const [copyState, setCopyState] = useState<CopyState>("idle");
   const [menuMessage, setMenuMessage] = useState<{ id: number; text: string } | null>(null);
   const [announcement, setAnnouncement] = useState("");
@@ -218,6 +220,13 @@ export function ToolRowInteractionsProvider({
     [dismiss],
   );
 
+  // A call that finishes while inspected reloads its preview in place.
+  const sourceChanged = useCallback((anchor: HTMLElement) => {
+    const current = activeRef.current;
+    if (current?.kind === "inspection" && current.anchor === anchor)
+      setPreviewVersion((version) => version + 1);
+  }, []);
+
   const isOpen = useCallback(
     (anchor: HTMLElement, kind: ActiveTarget["kind"]) =>
       active?.anchor === anchor && active.kind === kind,
@@ -232,8 +241,17 @@ export function ToolRowInteractionsProvider({
       openFileMenu,
       isOpen,
       sourceUnmounted,
+      sourceChanged,
     }),
-    [isOpen, leaveSource, openFileMenu, openInspection, scheduleInspection, sourceUnmounted],
+    [
+      isOpen,
+      leaveSource,
+      openFileMenu,
+      openInspection,
+      scheduleInspection,
+      sourceUnmounted,
+      sourceChanged,
+    ],
   );
 
   const activeHistoryRevision = active?.kind === "inspection" ? active.historyRevision : null;
@@ -245,7 +263,11 @@ export function ToolRowInteractionsProvider({
     const target = activeRef.current;
     if (!target || target.kind !== "inspection") return;
     const controller = new AbortController();
-    setPreview({ id: target.id, state: "loading" });
+    setPreview((current) =>
+      current?.id === target.id && current.state === "ready"
+        ? current
+        : { id: target.id, state: "loading" },
+    );
     void client
       .readToolCallTranscript(
         sessionId,
@@ -271,7 +293,7 @@ export function ToolRowInteractionsProvider({
           setPreview({ id: target.id, state: "error" });
       });
     return () => controller.abort();
-  }, [active?.id, client, sessionId]);
+  }, [active?.id, client, previewVersion, sessionId]);
 
   const activeId = active?.id;
   useEffect(() => {

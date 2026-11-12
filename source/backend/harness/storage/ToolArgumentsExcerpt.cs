@@ -108,7 +108,7 @@ internal static class ToolArgumentsExcerpt {
     try {
       using var writer = new Utf8JsonWriter(buffer);
       writer.WriteStartObject();
-      writer.WritePropertyName(name);
+      writer.WritePropertyName(EscapeName(name));
       if (scalar)
         WriteTopLevelScalar(writer, value);
       else
@@ -145,7 +145,7 @@ internal static class ToolArgumentsExcerpt {
             omittedCount++;
             continue;
           }
-          writer.WritePropertyName(name);
+          writer.WritePropertyName(EscapeName(name));
           WriteNestedValue(writer, property.Value);
         }
         if (omittedCount > 0)
@@ -185,7 +185,7 @@ internal static class ToolArgumentsExcerpt {
 
   private static void WriteArrayOmittedMarker(Utf8JsonWriter writer, int count) {
     writer.WriteStartObject();
-    writer.WriteNumber("$omitted", count);
+    writer.WriteNumber("$omittedItems", count);
     writer.WriteEndObject();
   }
 
@@ -214,6 +214,9 @@ internal static class ToolArgumentsExcerpt {
     }
     return new string(prefix[..written]);
   }
+
+  // Reserve single-$ names for metadata; escaping all source $ prefixes is reversible.
+  private static string EscapeName(string name) => name.StartsWith('$') ? "$" + name : name;
 
   private static bool IsScalar(JsonValueKind kind) => kind is JsonValueKind.String or JsonValueKind.Number
       or JsonValueKind.True or JsonValueKind.False or JsonValueKind.Null;

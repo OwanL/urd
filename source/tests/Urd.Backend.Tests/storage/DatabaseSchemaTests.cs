@@ -10,12 +10,12 @@ public sealed class DatabaseSchemaTests {
   public void FreshDatabaseCreatesAndReopensCurrentSchema() {
     using var database = new TemporaryDatabase();
     using (UrdStore store = UrdStore.Open(database.Path)) {
-      Assert.Equal(19L, database.Scalar("PRAGMA user_version;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
+      Assert.Equal(20L, database.Scalar("PRAGMA user_version;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
       store.Sessions.CreatePrimary(Guid.NewGuid());
     }
 
     using UrdStore reopened = UrdStore.Open(database.Path);
-    Assert.Equal(19L, database.Scalar("PRAGMA user_version;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
+    Assert.Equal(20L, database.Scalar("PRAGMA user_version;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
     Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM sessions;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
   }
 

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Urd.Core.Execution;
 using Urd.Core.Sessions;
+using Urd.Core.Storage;
 using Urd.Core.ToolCallDisplay;
 using Xunit;
 
@@ -39,7 +40,7 @@ public sealed class ToolCallLabelsTests {
     ToolCallLabel write = ToolCallLabels.Create("write",
       JsonSerializer.Serialize(new { path = "src/new.cs", content = "one\ntwo\nthree" }), workingDirectory);
     ToolCallLabel edit = ToolCallLabels.Create("edit",
-      "{\"path\":\"src/edit.cs\",\"edits\":[{},{},{\"$omitted\":3}]}", workingDirectory);
+      "{\"path\":\"src/edit.cs\",\"edits\":[{},{},{\"$omittedItems\":3}]}", workingDirectory);
 
     Assert.Equal("app.cs", read.Title);
     Assert.Equal("lines 40–120", read.Detail);
@@ -96,7 +97,7 @@ public sealed class ToolCallLabelsTests {
   public void PendingCallLabelsUseShortTitlesAndCountKnownIds() {
     ToolCallLabel list = ToolCallLabels.Create("list_pending_calls", null, null);
     ToolCallLabel cancel = ToolCallLabels.Create("cancel_pending_calls",
-      "{\"ids\":[\"a\",\"b\",{\"$omitted\":3}]}", null);
+      "{\"ids\":[\"a\",\"b\",{\"$omittedItems\":3}]}", null);
 
     Assert.Equal(ToolCallIcon.ListPending, list.Icon);
     Assert.Equal("pending calls", list.Title);
@@ -114,6 +115,30 @@ public sealed class ToolCallLabelsTests {
     Assert.Equal("mcp__search", label.Title);
     Assert.Equal("query=hello world, options={mode=fast}, cursor=…, $omitted=…", label.Detail);
     Assert.Null(label.Path);
+  }
+
+  [Theory]
+  [InlineData("""{"options":{"$truncated":"literal","length":12}}""", "options={$truncated=literal, length=12}")]
+  [InlineData("""{"$omitted":3,"$$omitted":4,"$omittedItems":8}""", "$omitted=3, $$omitted=4, $omittedItems=8")]
+  [InlineData("""{"items":[{"$omitted":3},{"$omittedItems":8}]}""", "items=[{$omitted=3}, {$omittedItems=8}]")]
+  public void LiteralMarkerNamesRemainArgumentData(string arguments, string expectedDetail) {
+    string excerpt = ToolArgumentsExcerpt.Create(arguments);
+    ToolCallLabel label = ToolCallLabels.Create("mcp__search", excerpt, null);
+
+    Assert.Equal(expectedDetail, label.Detail);
+  }
+
+  [Fact]
+  public void ArrayCountsDistinguishOmittedObjectMembersFromOmittedItems() {
+    var edits = new List<object> {
+      new Dictionary<string, int> { [new string('a', 129)] = 1, [new string('b', 129)] = 2 },
+      new Dictionary<string, int> { ["$omittedItems"] = 99 }
+    };
+    edits.AddRange(Enumerable.Range(0, 19).Select(_ => new { oldText = "a", newText = "b" }));
+    string excerpt = ToolArgumentsExcerpt.Create(JsonSerializer.Serialize(new { path = "file.txt", edits }));
+    ToolCallLabel label = ToolCallLabels.Create("edit", excerpt, "/work");
+
+    Assert.Equal("21 edits", label.Detail);
   }
 
   [Theory]

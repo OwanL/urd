@@ -145,9 +145,12 @@ and explicit startup recovery. Compaction and rich tool-result inspection remain
         arguments, always ≤ 4 KiB including keys, escaping and markers. Top-level scalars
         are admitted first in source order (strings ≤ 2 KiB whole, longer ones become
         `{"$truncated": <256-char prefix>, "length": n}`), then top-level containers
-        recursively (nested strings ≤ 256 chars, arrays ≤ 16 items plus a count marker),
-        stopping at the first member that would overflow. Keys over 128 bytes are never
-        admitted; everything not admitted is counted in one final `{"$omitted": n}`.
+        recursively (nested strings ≤ 256 chars, arrays ≤ 16 items plus a
+        `{"$omittedItems": n}` marker), stopping at the first member that would overflow.
+        Keys over 128 bytes are never admitted; omitted object members are counted in a final
+        `"$omitted": n` member of that object. Source keys starting with `$` gain one leading
+        `$` in the excerpt, keeping literal argument data distinct from generated markers;
+        labels remove that extra prefix when displaying source keys.
         Window reads therefore stay bounded regardless of argument size.
       - History and position reads capture descriptors and the excerpts of their tool
         rows in the same storage transaction. The display module derives labels after

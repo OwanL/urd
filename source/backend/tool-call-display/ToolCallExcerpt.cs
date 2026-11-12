@@ -23,7 +23,8 @@ internal static class ToolCallExcerpt {
   }
 
   internal static bool TryGetProperty(JsonElement? value, string name, out JsonElement property) {
-    if (value is JsonElement element && element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out property))
+    string key = name.StartsWith('$') ? "$" + name : name;
+    if (value is JsonElement element && element.ValueKind == JsonValueKind.Object && element.TryGetProperty(key, out property))
       return true;
     property = default;
     return false;
@@ -57,7 +58,7 @@ internal static class ToolCallExcerpt {
       return false;
 
     foreach (JsonElement item in array.EnumerateArray()) {
-      if (TryGetOmittedCount(item, out long omitted)) {
+      if (TryGetOmittedItemCount(item, out long omitted)) {
         try {
           count = checked(count + omitted);
         } catch (OverflowException) {
@@ -72,9 +73,9 @@ internal static class ToolCallExcerpt {
     return true;
   }
 
-  internal static bool TryGetOmittedCount(JsonElement value, out long count) {
+  private static bool TryGetOmittedItemCount(JsonElement value, out long count) {
     count = 0;
-    return value.ValueKind == JsonValueKind.Object && value.TryGetProperty("$omitted", out JsonElement omitted) &&
+    return value.ValueKind == JsonValueKind.Object && value.TryGetProperty("$omittedItems", out JsonElement omitted) &&
       omitted.ValueKind == JsonValueKind.Number && omitted.TryGetInt64(out count) && count >= 0;
   }
 
@@ -89,7 +90,8 @@ internal static class ToolCallExcerpt {
   }
 
   private static void AppendCompactProperty(StringBuilder text, JsonProperty property, int depth) {
-    AppendSingleLine(text, property.Name);
+    string name = property.Name;
+    AppendSingleLine(text, name.StartsWith("$$", StringComparison.Ordinal) ? name[1..] : name);
     text.Append('=');
     if (property.Name == "$omitted")
       text.Append('…');
@@ -98,7 +100,7 @@ internal static class ToolCallExcerpt {
   }
 
   private static void AppendCompactValue(StringBuilder text, JsonElement value, int depth) {
-    if (IsTruncated(value) || TryGetOmittedCount(value, out _)) {
+    if (IsTruncated(value) || TryGetOmittedItemCount(value, out _)) {
       text.Append('…');
       return;
     }

@@ -118,7 +118,7 @@ public sealed class ToolArgumentsExcerptTests {
 
     Assert.Equal(17, items.GetArrayLength());
     Assert.Equal(Enumerable.Range(0, 16), items.EnumerateArray().Take(16).Select(item => item.GetInt32()));
-    Assert.Equal(itemCount - 16, items[16].GetProperty("$omitted").GetInt32());
+    Assert.Equal(itemCount - 16, items[16].GetProperty("$omittedItems").GetInt32());
     AssertBounded(excerpt);
   }
 
@@ -158,7 +158,7 @@ public sealed class ToolArgumentsExcerptTests {
     var random = new Random(8675309);
     for (int iteration = 0; iteration < 24; iteration++) {
       var arguments = Enumerable.Range(0, random.Next(20, 80))
-          .ToDictionary(index => $"field{index}", _ => RandomValue(random));
+          .ToDictionary(index => index % 3 == 0 ? $"$field{index}" : $"field{index}", _ => RandomValue(random));
       string json = JsonSerializer.Serialize(arguments);
       string excerpt = ToolArgumentsExcerpt.Create(json);
 

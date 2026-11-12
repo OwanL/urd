@@ -132,7 +132,7 @@ public sealed class ToolCallLabelsTests {
   public void LabelSetDeduplicatesStartAndReturnedRowsByRequestAndCall() {
     Guid requestId = Guid.NewGuid();
     Guid executionId = Guid.NewGuid();
-    var tool = new TranscriptToolFacts(requestId, "call", "read", true, ExecutionOutcome.Completed,
+    var tool = new TranscriptToolFacts(requestId, "call", "read", true, false, ExecutionOutcome.Completed,
         true, null, null, false, false, false, "{\"path\":\"file.txt\"}");
     var start = new TranscriptEntryDescriptor(
         new(executionId, Guid.NewGuid(), TranscriptEntryKind.Tool, 0), null, null, tool);

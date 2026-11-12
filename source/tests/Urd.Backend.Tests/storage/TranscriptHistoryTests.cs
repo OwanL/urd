@@ -121,7 +121,7 @@ public sealed class TranscriptHistoryTests(ITestOutputHelper output) {
         typeof(TranscriptTextFacts).GetProperties().Select(property => property.Name).Order(StringComparer.Ordinal));
     Assert.Equal(new[] {
       "ArgumentsExcerpt", "Background", "BatchedWithNext", "BatchedWithPrevious", "CallId", "EndedAt",
-      "IsClosed", "Name", "Outcome", "RequestId", "Started", "StartedAt"
+      "Interrupted", "IsClosed", "Name", "Outcome", "RequestId", "Started", "StartedAt"
     }, typeof(TranscriptToolFacts).GetProperties().Select(property => property.Name).Order(StringComparer.Ordinal));
 
     Assert.Equal(new[] {
@@ -152,6 +152,7 @@ public sealed class TranscriptHistoryTests(ITestOutputHelper output) {
     Assert.Equal("first-tool", firstTool.Tool.Name);
     Assert.True(firstTool.Tool.Started);
     Assert.Equal(ExecutionOutcome.Completed, firstTool.Tool.Outcome);
+    Assert.False(firstTool.Tool.Interrupted);
     Assert.True(firstTool.Tool.IsClosed);
     Assert.Equal(new DateTimeOffset(2026, 11, 9, 12, 0, 0, TimeSpan.Zero), firstTool.Tool.StartedAt);
     Assert.Equal(new DateTimeOffset(2026, 11, 9, 12, 0, 1, TimeSpan.Zero), firstTool.Tool.EndedAt);
@@ -161,6 +162,7 @@ public sealed class TranscriptHistoryTests(ITestOutputHelper output) {
     Assert.Equal(fixture.ToolOnlyRequest, toolOnly.RequestId);
     Assert.Equal("tool-only", toolOnly.Name);
     Assert.False(toolOnly.Started);
+    Assert.False(toolOnly.Interrupted);
     Assert.Null(toolOnly.Outcome);
     Assert.True(toolOnly.IsClosed);
     Assert.Null(toolOnly.StartedAt);

@@ -98,6 +98,47 @@ public sealed class BackgroundExecutionStorageTests {
   }
 
   [Fact]
+  public void SettlementMarksSyntheticToolResultsAsInterrupted() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    var (session, execution, origin) = Start(store);
+    CompleteReply(store, session, execution, origin, "unstarted", "started");
+    Assert.True(store.Tools.TryStart(session, execution, 0, origin, "started"));
+    store.Executions.RequestStop(session, execution, ownsExecution: true);
+
+    Assert.Equal(ExecutionOutcome.Cancelled,
+        store.Executions.TrySettle(session, execution, ExecutionOutcome.Cancelled)!.Outcome);
+    TranscriptEntryDescriptor[] tools = store.History.Read(session,
+        new(TranscriptHistoryMode.Latest, 0)).Entries
+        .Where(entry => entry.Entry.Kind == TranscriptEntryKind.Tool).ToArray();
+    Assert.All(tools, entry => {
+      Assert.True(entry.Tool!.Interrupted);
+      Assert.Equal(ExecutionOutcome.Cancelled, entry.Tool.Outcome);
+    });
+    Assert.False(Assert.Single(tools, entry => entry.Tool!.CallId == "unstarted").Tool!.Started);
+    Assert.True(Assert.Single(tools, entry => entry.Tool!.CallId == "started").Tool!.Started);
+  }
+
+  [Fact]
+  public void GenuineToolFailureIsNotMarkedInterrupted() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    var (session, execution, origin) = Start(store);
+    CompleteReply(store, session, execution, origin, "failed");
+    Assert.True(store.Tools.TryStart(session, execution, 0, origin, "failed"));
+    var failure = new LlmToolResult("failed", ExecutionOutcome.Failed,
+        new ToolOutput("tool returned an error", [], IsError: true));
+
+    Assert.True(store.Tools.Complete(session, execution, 0, origin, failure));
+    TranscriptToolFacts tool = Assert.Single(store.History.Read(session,
+        new(TranscriptHistoryMode.Latest, 0)).Entries,
+        entry => entry.Tool?.CallId == "failed").Tool!;
+    Assert.True(tool.Started);
+    Assert.Equal(ExecutionOutcome.Failed, tool.Outcome);
+    Assert.False(tool.Interrupted);
+  }
+
+  [Fact]
   public void ExplicitRecoveryClosesInterruptedWorkWithoutReplayingOrDuplicatingResults() {
     using var database = new TemporaryDatabase();
     Guid session, execution, origin, streamingSession, streamingExecution, streamingRequest, pendingInput = Guid.NewGuid();
@@ -121,6 +162,23 @@ public sealed class BackgroundExecutionStorageTests {
     Assert.Null(reopened.Executions.ReadSettlement(session, execution));
     Assert.Empty(Completions(reopened, session));
     reopened.RecoverInterruptedExecutions();
+    TranscriptEntryDescriptor[] recoveredTools = reopened.History.Read(session,
+        new(TranscriptHistoryMode.Latest, 0)).Entries
+        .Where(entry => entry.Entry.Kind == TranscriptEntryKind.Tool).ToArray();
+    TranscriptToolFacts recoveredUnstarted = Assert.Single(recoveredTools,
+        entry => entry.Tool?.CallId == "unstarted").Tool!;
+    Assert.False(recoveredUnstarted.Started);
+    Assert.True(recoveredUnstarted.Interrupted);
+    Assert.Equal(ExecutionOutcome.Failed, recoveredUnstarted.Outcome);
+    foreach (string call in new[] { "foreground", "background" }) {
+      TranscriptToolFacts recoveredStarted = Assert.Single(recoveredTools,
+          entry => entry.Tool?.CallId == call).Tool!;
+      Assert.True(recoveredStarted.Started);
+      Assert.True(recoveredStarted.Interrupted);
+      Assert.Equal(ExecutionOutcome.Failed, recoveredStarted.Outcome);
+    }
+    TranscriptToolFacts savedToolFacts = Assert.Single(recoveredTools, entry => entry.Tool?.CallId == "saved").Tool!;
+    Assert.False(savedToolFacts.Interrupted);
     Assert.All(StoredExecutions.Read(database), run => Assert.Equal(ExecutionOutcome.Failed, run.Outcome));
     Assert.Equal(ExecutionOutcome.Failed, Assert.Single(StoredExecutions.ReadRequests(database), request => request.RequestId == streamingRequest).Outcome);
     Assert.All(StoredDeliveries.Read(database), input => Assert.NotNull(input.Outcome));

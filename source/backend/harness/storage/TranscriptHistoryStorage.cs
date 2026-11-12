@@ -37,7 +37,8 @@ internal sealed class TranscriptHistoryStorage(
         q.next_chunk_index, q.response_final, q.outcome AS request_outcome,
         r.stopping, r.outcome AS execution_outcome,
         m.call_id, CASE WHEN m.role = 3 THEN t.name ELSE m.tool_name END AS tool_name,
-        t.started, t.outcome AS tool_outcome, t.started_at, t.ended_at,
+        t.started, CASE WHEN t.call_id IS NOT NULL THEN t.interrupted ELSE 0 END AS interrupted,
+        t.outcome AS tool_outcome, t.started_at, t.ended_at,
         CASE WHEN t.call_id IS NOT NULL THEN t.background ELSE 0 END AS background,
         CASE WHEN m.role = 2 AND t.call_id IS NOT NULL AND previous.role = 2
             AND previous.request_id = m.request_id AND previous_tool.call_id IS NOT NULL THEN 1 ELSE 0 END
@@ -156,8 +157,9 @@ internal sealed class TranscriptHistoryStorage(
     bool closed = outcome is not null || executionSettled || (!started && executionStopping)
         || (!authorized && requestSettled);
     string? name = reader.IsDBNull("tool_name") ? null : reader.GetString("tool_name");
-    return new(reader.GetGuid("request_id"), reader.GetString("call_id"), name, started, outcome, closed,
-        ReadTime(reader, "started_at"), ReadTime(reader, "ended_at"), reader.GetBoolean("background"),
+    return new(reader.GetGuid("request_id"), reader.GetString("call_id"), name, started,
+        reader.GetBoolean("interrupted"), outcome, closed, ReadTime(reader, "started_at"), ReadTime(reader, "ended_at"),
+        reader.GetBoolean("background"),
         reader.GetBoolean("batched_with_previous"), reader.GetBoolean("batched_with_next"),
         reader.IsDBNull("arguments_excerpt") ? null : reader.GetString("arguments_excerpt"));
   }

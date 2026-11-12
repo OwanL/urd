@@ -284,6 +284,7 @@ const mappings: MappingCase[] = [
                   callId: "call",
                   name: "read",
                   started: true,
+                  interrupted: false,
                   outcome: "failed",
                   isClosed: true,
                   startedAt: null,

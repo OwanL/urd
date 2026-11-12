@@ -57,6 +57,7 @@ export interface TranscriptToolFacts {
   readonly callId: string;
   readonly name: string | null;
   readonly started: boolean;
+  readonly interrupted: boolean;
   readonly background: boolean;
   readonly batchedWithPrevious: boolean;
   readonly batchedWithNext: boolean;

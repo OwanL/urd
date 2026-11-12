@@ -27,7 +27,7 @@ public sealed record TranscriptTextFacts(
 
 // A closed, never-started reservation was not executed. Missing timing/outcome facts stay unknown.
 public sealed record TranscriptToolFacts(
-    Guid RequestId, string CallId, string? Name, bool Started, ExecutionOutcome? Outcome,
+    Guid RequestId, string CallId, string? Name, bool Started, bool Interrupted, ExecutionOutcome? Outcome,
     bool IsClosed, DateTimeOffset? StartedAt, DateTimeOffset? EndedAt,
     bool Background, bool BatchedWithPrevious, bool BatchedWithNext,
     [property: JsonIgnore] string? ArgumentsExcerpt);

@@ -11,6 +11,12 @@ export function toolCallLabel(
   return labels[toolCallLabelKey(tool)] ?? null;
 }
 
+export function isToolCallFailed(
+  tool: Pick<TranscriptToolFacts, "outcome" | "started" | "interrupted">,
+): boolean {
+  return tool.outcome === "failed" && tool.started && !tool.interrupted;
+}
+
 export function isToolCallRunning(tool: TranscriptToolFacts, completion: boolean): boolean {
   return (
     !completion &&

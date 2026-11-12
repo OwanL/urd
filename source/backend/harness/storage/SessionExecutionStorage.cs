@@ -167,7 +167,7 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
                 AND NOT EXISTS (SELECT 1 FROM execution_messages m WHERE m.run_id = execution_inputs.run_id
                     AND m.role = 0 AND m.input_id = execution_inputs.input_id) THEN 1 ELSE 0 END
         WHERE run_id = $run AND outcome IS NULL;
-        UPDATE execution_tools SET outcome = $toolOutcome,
+        UPDATE execution_tools SET outcome = $toolOutcome, interrupted = 1,
             error = CASE WHEN started = 0 THEN 'Tool was not executed.' ELSE 'Tool result unavailable; effects may have occurred.' END,
             result_json = CASE WHEN started = 0 THEN $unstartedResult ELSE $unknownResult END,
             ended_at = CASE WHEN started = 1 THEN $ended ELSE NULL END
@@ -214,7 +214,7 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
           WHERE run_id = $run AND outcome IS NULL;
           UPDATE execution_requests SET outcome = $failed, error = 'Interrupted by backend shutdown.'
           WHERE run_id = $run AND outcome IS NULL;
-          UPDATE execution_tools SET outcome = $failed,
+          UPDATE execution_tools SET outcome = $failed, interrupted = 1,
               error = CASE WHEN started = 0 THEN $unstarted ELSE $unknown END,
               result_json = CASE WHEN started = 0 THEN $unstartedResult ELSE $unknownResult END,
               ended_at = CASE WHEN started = 1 THEN $ended ELSE NULL END

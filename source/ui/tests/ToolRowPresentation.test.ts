@@ -3,6 +3,7 @@ import test from "node:test";
 import type { ToolCallLabel, TranscriptToolFacts } from "../sessions/Messages.ts";
 import {
   formatElapsedTime,
+  isToolCallFailed,
   isToolCallRunning,
   toolCallLabel,
   toolElapsedMilliseconds,
@@ -14,6 +15,7 @@ const tool: TranscriptToolFacts = {
   callId: "call-b",
   name: "read_file",
   started: true,
+  interrupted: false,
   background: false,
   batchedWithPrevious: false,
   batchedWithNext: false,
@@ -34,6 +36,16 @@ void test("formats elapsed time at the five-second threshold in whole units", ()
   assert.equal(formatElapsedTime(5_999), "5s");
   assert.equal(formatElapsedTime(133_999), "2m 13s");
   assert.equal(formatElapsedTime(Number.NaN), null);
+});
+
+void test("marks only started, non-interrupted tool errors as failures", () => {
+  assert.equal(isToolCallFailed({ outcome: "failed", started: true, interrupted: false }), true);
+  assert.equal(isToolCallFailed({ outcome: "failed", started: false, interrupted: false }), false);
+  assert.equal(isToolCallFailed({ outcome: "failed", started: true, interrupted: true }), false);
+  assert.equal(
+    isToolCallFailed({ outcome: "completed", started: true, interrupted: false }),
+    false,
+  );
 });
 
 void test("runs live elapsed time until an end timestamp freezes it", () => {

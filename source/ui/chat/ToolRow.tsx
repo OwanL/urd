@@ -6,6 +6,7 @@ import { useToolRowInteractions } from "./ToolRowInteractions.tsx";
 import type { IconName } from "../components/Icon.tsx";
 import {
   formatElapsedTime,
+  isToolCallFailed,
   isToolCallRunning,
   toolElapsedMilliseconds,
   toolRowTimeLabel,
@@ -111,7 +112,7 @@ export function ToolRow({
   const [intersecting, setIntersecting] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const running = isToolCallRunning(tool, completion);
-  const failed = tool.outcome === "failed";
+  const failed = isToolCallFailed(tool);
   const iconName = completion ? "return" : label ? iconNames[label.icon] : "tool";
   const iconLabel = completion
     ? "Returned tool output"

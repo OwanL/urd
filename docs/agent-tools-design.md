@@ -168,8 +168,10 @@ and explicit startup recovery. Compaction and rich tool-result inspection remain
         descriptor.
       - The hover card reads a `ToolCallTranscript` (model-facing input and output, as
         the model context presents them, including background placeholders and the
-        returned-result envelope) on demand. The display is a bounded preview; Copy
-        fetches the full text. Image handling follows the first attempted request whose context
+        returned-result envelope) on demand. The display is a storage-bounded preview;
+        Copy reuses it only when complete, fetched after the tool finished, and its model-facing
+        projection is final at the current revision. Otherwise Copy fetches the full text.
+        Image handling follows the first attempted request whose context
         retained the result, using its frozen selection and compaction boundary. Before any
         receiver exists, inspection keeps image placeholders. Images never include inline bytes.
       - The returned row marks where the result entered model history. If the session

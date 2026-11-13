@@ -71,6 +71,7 @@ export interface ToolCallTranscript {
   readonly input: string;
   readonly output: string | null;
   readonly truncated: boolean;
+  readonly projectionFinal: boolean;
 }
 
 export interface ToolCallLabel {

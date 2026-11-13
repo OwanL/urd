@@ -113,6 +113,7 @@ export function ToolRow({
   const [now, setNow] = useState(() => Date.now());
   const running = isToolCallRunning(tool, completion);
   const failed = isToolCallFailed(tool);
+  const payloadFinished = tool.isClosed && tool.outcome !== null;
   const iconName = completion ? "return" : label ? iconNames[label.icon] : "tool";
   const iconLabel = completion
     ? "Returned tool output"
@@ -137,8 +138,8 @@ export function ToolRow({
 
   const sourceChanged = interactions.sourceChanged;
   useEffect(() => {
-    if (icon.current) sourceChanged(icon.current);
-  }, [sourceChanged, tool.outcome, tool.isClosed, tool.endedAt]);
+    if (icon.current) sourceChanged(icon.current, payloadFinished);
+  }, [payloadFinished, sourceChanged, tool.outcome, tool.isClosed, tool.endedAt]);
 
   const sourceUnmounted = interactions.sourceUnmounted;
   useEffect(() => {
@@ -197,6 +198,7 @@ export function ToolRow({
               tool.callId,
               completion,
               iconLabel,
+              payloadFinished,
               true,
             );
         }}
@@ -209,6 +211,7 @@ export function ToolRow({
               tool.callId,
               completion,
               iconLabel,
+              payloadFinished,
             );
         }}
         onPointerLeave={() => {

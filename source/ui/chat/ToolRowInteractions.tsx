@@ -3,7 +3,11 @@ import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "p
 import { Popover } from "../components/Popover.tsx";
 import type { SessionClient } from "../sessions/SessionClient.ts";
 import type { ToolCallTranscript } from "../sessions/Messages.ts";
-import { formatToolInput, toolCallClipboardText } from "./ToolCallInspection.ts";
+import {
+  formatToolInput,
+  reusableToolCallPreview,
+  toolCallClipboardText,
+} from "./ToolCallInspection.ts";
 import "./tool-row-interactions.css";
 
 interface InspectionTarget {
@@ -14,6 +18,7 @@ interface InspectionTarget {
   readonly callId: string;
   readonly returned: boolean;
   readonly historyRevision: number;
+  readonly payloadFinished: boolean;
   readonly label: string;
   readonly pinned: boolean;
 }
@@ -26,11 +31,19 @@ interface MenuTarget {
 }
 
 type ActiveTarget = InspectionTarget | MenuTarget;
+interface PreviewIdentity {
+  readonly id: number;
+  readonly requestId: string;
+  readonly callId: string;
+  readonly historyRevision: number;
+  readonly payloadFinished: boolean;
+}
+
 type Preview =
-  | { readonly id: number; readonly state: "loading" }
-  | { readonly id: number; readonly state: "ready"; readonly transcript: ToolCallTranscript }
-  | { readonly id: number; readonly state: "missing" }
-  | { readonly id: number; readonly state: "error" };
+  | (PreviewIdentity & { readonly state: "loading" })
+  | (PreviewIdentity & { readonly state: "ready"; readonly transcript: ToolCallTranscript })
+  | (PreviewIdentity & { readonly state: "missing" })
+  | (PreviewIdentity & { readonly state: "error" });
 type CopyState = "idle" | "copying" | "copied" | "error";
 
 interface ToolRowInteractionContext {
@@ -40,6 +53,7 @@ interface ToolRowInteractionContext {
     callId: string,
     returned: boolean,
     label: string,
+    payloadFinished: boolean,
     pin: boolean,
   ) => void;
   readonly scheduleInspection: (
@@ -48,12 +62,13 @@ interface ToolRowInteractionContext {
     callId: string,
     returned: boolean,
     label: string,
+    payloadFinished: boolean,
   ) => void;
   readonly leaveSource: (anchor: HTMLElement) => void;
   readonly openFileMenu: (anchor: HTMLElement, path: string) => void;
   readonly isOpen: (anchor: HTMLElement, kind: ActiveTarget["kind"]) => boolean;
   readonly sourceUnmounted: (anchor: HTMLElement) => void;
-  readonly sourceChanged: (anchor: HTMLElement) => void;
+  readonly sourceChanged: (anchor: HTMLElement, payloadFinished: boolean) => void;
 }
 
 const ToolRowInteractionContext = createContext<ToolRowInteractionContext | null>(null);
@@ -122,6 +137,7 @@ export function ToolRowInteractionsProvider({
       callId: string,
       returned: boolean,
       label: string,
+      payloadFinished: boolean,
       pin: boolean,
     ) => {
       const current = activeRef.current;
@@ -151,6 +167,7 @@ export function ToolRowInteractionsProvider({
         callId,
         returned,
         historyRevision: revision,
+        payloadFinished,
         label,
         pinned: pin,
       };
@@ -166,13 +183,20 @@ export function ToolRowInteractionsProvider({
   );
 
   const scheduleInspection = useCallback(
-    (anchor: HTMLElement, requestId: string, callId: string, returned: boolean, label: string) => {
+    (
+      anchor: HTMLElement,
+      requestId: string,
+      callId: string,
+      returned: boolean,
+      label: string,
+      payloadFinished: boolean,
+    ) => {
       clearTimeout(hoverTimer.current);
       clearTimeout(closeTimer.current);
       closeTimer.current = undefined;
       hoverTimer.current = window.setTimeout(() => {
         hoverTimer.current = undefined;
-        openInspection(anchor, requestId, callId, returned, label, false);
+        openInspection(anchor, requestId, callId, returned, label, payloadFinished, false);
       }, 300);
     },
     [openInspection],
@@ -221,10 +245,15 @@ export function ToolRowInteractionsProvider({
   );
 
   // A call that finishes while inspected reloads its preview in place.
-  const sourceChanged = useCallback((anchor: HTMLElement) => {
+  const sourceChanged = useCallback((anchor: HTMLElement, payloadFinished: boolean) => {
     const current = activeRef.current;
-    if (current?.kind === "inspection" && current.anchor === anchor)
-      setPreviewVersion((version) => version + 1);
+    if (current?.kind !== "inspection" || current.anchor !== anchor) return;
+    if (current.payloadFinished !== payloadFinished) {
+      const updated = { ...current, payloadFinished };
+      activeRef.current = updated;
+      setActive(updated);
+    }
+    setPreviewVersion((version) => version + 1);
   }, []);
 
   const isOpen = useCallback(
@@ -263,10 +292,17 @@ export function ToolRowInteractionsProvider({
     const target = activeRef.current;
     if (!target || target.kind !== "inspection") return;
     const controller = new AbortController();
+    const identity: PreviewIdentity = {
+      id: target.id,
+      requestId: target.requestId,
+      callId: target.callId,
+      historyRevision: target.historyRevision,
+      payloadFinished: target.payloadFinished,
+    };
     setPreview((current) =>
       current?.id === target.id && current.state === "ready"
         ? current
-        : { id: target.id, state: "loading" },
+        : { ...identity, state: "loading" },
     );
     void client
       .readToolCallTranscript(
@@ -284,13 +320,13 @@ export function ToolRowInteractionsProvider({
         if (controller.signal.aborted || activeRef.current?.id !== target.id) return;
         setPreview(
           transcript
-            ? { id: target.id, state: "ready", transcript }
-            : { id: target.id, state: "missing" },
+            ? { ...identity, state: "ready", transcript }
+            : { ...identity, state: "missing" },
         );
       })
       .catch(() => {
         if (!controller.signal.aborted && activeRef.current?.id === target.id)
-          setPreview({ id: target.id, state: "error" });
+          setPreview({ ...identity, state: "error" });
       });
     return () => controller.abort();
   }, [active?.id, client, previewVersion, sessionId]);
@@ -339,17 +375,28 @@ export function ToolRowInteractionsProvider({
     clearTimeout(copyTimer.current);
     setCopyState("copying");
     try {
-      const transcript = await client.readToolCallTranscript(
-        sessionId,
-        target.requestId,
-        target.callId,
-        {
-          expectedHistoryRevision: target.historyRevision,
-          returned: target.returned,
-          full: true,
-        },
-        controller.signal,
-      );
+      const current = activeRef.current;
+      const readyPreview =
+        current?.kind === "inspection" && current.id === target.id
+          ? reusableToolCallPreview(
+              preview?.state === "ready" ? preview : null,
+              current,
+              revisionRef.current,
+            )
+          : null;
+      const transcript =
+        readyPreview ??
+        (await client.readToolCallTranscript(
+          sessionId,
+          target.requestId,
+          target.callId,
+          {
+            expectedHistoryRevision: target.historyRevision,
+            returned: target.returned,
+            full: true,
+          },
+          controller.signal,
+        ));
       if (controller.signal.aborted || activeRef.current?.id !== target.id) return;
       if (!transcript) throw new Error("Tool call is no longer available.");
       if (!navigator.clipboard?.writeText) throw new Error("Clipboard is unavailable.");

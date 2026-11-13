@@ -14,8 +14,9 @@ The workspace has closable, reorderable local tabs, transcript, model and reason
 selectors, Send, Stop and integrated [provider settings](provider-management.md#browser-settings).
 Settings → General holds the default working directory, selected through a folder browser.
 Before the first accepted message, the empty transcript centers the default and current
-working-directory paths with explicit Edit actions. Each inline editor supports typing,
-Browse, and Save/Cancel; browsing changes only the draft until Save. Changing the current
+working-directory paths with explicit Edit actions. Edit opens a single directory editor
+for typing or browsing, with one Save/Cancel decision; browsing never applies a change.
+An unset default resolves to the filesystem root. Changing the current
 path affects this chat only; the default applies to new chats only. Typing keeps the choice
 visible; the composer always uses “Ask away”. Acceptance locks the chat's directory,
 including when provider setup fails before visible history. Changing a chat's directory

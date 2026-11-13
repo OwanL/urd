@@ -50,6 +50,21 @@ export function SessionWorkingDirectory({
     } catch (cause) {
       const message = saveFailure(cause);
       setFailure(message);
+      if (cause instanceof RequestError && (cause.status === 400 || cause.status === 409)) {
+        setChangeState("reconciling");
+        try {
+          const snapshot = await client.getSnapshot(sessionId);
+          setDirectory(snapshotDirectory(snapshot, sessionId));
+          onSnapshot(snapshot);
+          setChangeState("idle");
+          operationInProgress.current = false;
+          onGateChange(false, null);
+          onRefresh();
+          return false;
+        } catch {
+          // Keep sending fenced if the latest directory/capability cannot be read.
+        }
+      }
       setChangeState("uncertain");
       operationInProgress.current = false;
       onGateChange(true, `${message} Check the current directory before sending.`);
@@ -95,7 +110,7 @@ export function SessionWorkingDirectory({
       onSnapshot(snapshot);
       setChangeState("idle");
       operationInProgress.current = false;
-      onGateChange(false, reconciliationMessage(failure, savedDirectory, confirmedDirectory));
+      onGateChange(false, reconciliationMessage(savedDirectory, confirmedDirectory));
       setFailure(null);
       setSavedDirectory(null);
       onRefresh();
@@ -114,34 +129,47 @@ export function SessionWorkingDirectory({
     <div class="chat-working-directory">
       <WorkingDirectoryRow
         label="Default cwd"
+        title="Default working directory"
         directory={
           preferences.loaded ? defaultDirectory : preferences.error ? "unavailable" : "loading…"
         }
         disabled={disabled || !preferences.loaded}
         busy={preferences.pending}
         onSave={preferences.save}
+        feedback={
+          preferences.error && (
+            <>
+              <p role="alert">{preferences.error}</p>
+              {!preferences.loaded && (
+                <button type="button" onClick={() => void preferences.refresh()}>
+                  Retry
+                </button>
+              )}
+            </>
+          )
+        }
       />
       <WorkingDirectoryRow
         label="Current cwd"
+        title="Current working directory"
         directory={directory}
         disabled={disabled}
         busy={changeState !== "idle"}
         onSave={save}
+        feedback={
+          failure || changeState === "uncertain" || changeState === "reconciling" ? (
+            <>
+              {failure && <p role="alert">{failure}</p>}
+              {changeState === "uncertain" && (
+                <button type="button" onClick={() => void reconcile()}>
+                  Check current directory
+                </button>
+              )}
+              {changeState === "reconciling" && <span>Checking current directory…</span>}
+            </>
+          ) : null
+        }
       />
-      {changeState === "uncertain" && (
-        <button type="button" onClick={() => void reconcile()}>
-          Check current directory
-        </button>
-      )}
-      {changeState === "saving" && <span>Saving current cwd…</span>}
-      {changeState === "reconciling" && <span>Checking current cwd…</span>}
-      {preferences.pending && <span>Saving default cwd…</span>}
-      {preferences.error && <span role="alert">{preferences.error}</span>}
-      {preferences.error && !preferences.loaded && (
-        <button type="button" onClick={() => void preferences.refresh()}>
-          Retry default cwd
-        </button>
-      )}
     </div>
   );
 }
@@ -157,8 +185,7 @@ function snapshotDirectory(snapshot: SessionSnapshot, sessionId: string): string
 
 function saveFailure(cause: unknown): string {
   if (cause instanceof RequestError && (cause.status === 400 || cause.status === 409)) {
-    const detail = responseError(cause.responseBody);
-    return `Working directory change was rejected (HTTP ${cause.status}).${detail ? ` ${detail}` : ""}`;
+    return responseError(cause.responseBody) ?? "Directory change was rejected.";
   }
   const detail = cause instanceof Error ? cause.message : "Request failed.";
   return `Working directory save outcome is unknown. ${detail}`;
@@ -170,15 +197,9 @@ function responseError(body: unknown): string | null {
   return typeof error === "string" && error.trim() ? error : null;
 }
 
-function reconciliationMessage(
-  failure: string | null,
-  savedDirectory: string | null,
-  directory: string | null,
-): string {
+function reconciliationMessage(savedDirectory: string | null, directory: string | null): string {
   const current = directory ?? "not set";
   if (savedDirectory !== null)
     return `Working directory was saved; current directory confirmed: ${current}.`;
-  if (failure?.startsWith("Working directory change was rejected"))
-    return `${failure} Current directory confirmed: ${current}.`;
   return `Working directory save outcome was unknown; current directory confirmed: ${current}.`;
 }

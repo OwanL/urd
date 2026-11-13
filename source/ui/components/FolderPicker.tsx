@@ -1,4 +1,4 @@
-import type { RefObject } from "preact";
+import type { ComponentChildren, RefObject } from "preact";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { RequestError } from "../http/RequestError.ts";
 import { DirectoryClient } from "../files/DirectoryClient.ts";
@@ -9,13 +9,27 @@ import "./folder-picker.css";
 export interface FolderPickerProps {
   anchor: RefObject<HTMLElement | null>;
   initialPath: string | null;
-  onChoose(path: string): void;
+  onChoose(path: string): Promise<boolean>;
   onClose(returnFocus: boolean): void;
+  title?: string;
+  busy?: boolean;
+  feedback?: ComponentChildren;
 }
 
-export function FolderPicker({ anchor, initialPath, onChoose, onClose }: FolderPickerProps) {
+export function FolderPicker({
+  anchor,
+  initialPath,
+  onChoose,
+  onClose,
+  title = "Working directory",
+  busy = false,
+  feedback,
+}: FolderPickerProps) {
   const client = useMemo(() => new DirectoryClient(new URL(window.location.origin)), []);
   const pathInput = useRef<HTMLInputElement>(null);
+  const saveInProgress = useRef(false);
+  const closed = useRef(false);
+  const mounted = useRef(true);
   const [requestedPath, setRequestedPath] = useState(initialPath);
   const [pathText, setPathText] = useState(initialPath ?? "");
   const [filter, setFilter] = useState("");
@@ -23,8 +37,24 @@ export function FolderPicker({ anchor, initialPath, onChoose, onClose }: FolderP
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const readVersion = useRef(0);
   const pathEdited = useRef(false);
+
+  useEffect(() => {
+    pathInput.current?.select();
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      closed.current = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!busy && document.activeElement === document.body)
+      pathInput.current?.focus({ preventScroll: true });
+  }, [busy]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -58,87 +88,126 @@ export function FolderPicker({ anchor, initialPath, onChoose, onClose }: FolderP
     setListing(null);
   };
   const navigate = (path: string | null) => {
+    if (saving || busy) return;
     prepareRead();
     pathEdited.current = false;
+    pathInput.current?.focus({ preventScroll: true });
     setPathText(path ?? "");
     setFilter("");
     if (requestedPath === path) setRetryCount((count) => count + 1);
     else setRequestedPath(path);
   };
   const changeFilter = (value: string) => {
-    if (filter === value) return;
+    if (saving || busy || filter === value) return;
     prepareRead();
     setFilter(value);
   };
   const retry = () => {
+    if (saving || busy) return;
     prepareRead();
     setRetryCount((count) => count + 1);
   };
-  const choose = (path: string) => {
-    onClose(true);
-    onChoose(path);
+  const close = (returnFocus: boolean) => {
+    if (closed.current) return;
+    closed.current = true;
+    onClose(returnFocus);
   };
+  const save = async () => {
+    if (saveInProgress.current || busy || !pathText.trim()) return;
+    saveInProgress.current = true;
+    setSaving(true);
+    setSaveError(null);
+
+    try {
+      const saved = await onChoose(pathText);
+      if (!mounted.current || closed.current) return;
+      saveInProgress.current = false;
+      setSaving(false);
+      if (saved) close(true);
+    } catch {
+      if (!mounted.current || closed.current) return;
+      saveInProgress.current = false;
+      setSaving(false);
+      setSaveError("Could not save this folder. Try again.");
+    }
+  };
+
+  const saveUnavailable = saving || busy || !pathText.trim();
+  const canNavigate = !saving && !busy;
 
   return (
     <Popover
       anchor={anchor}
       class="folder-picker"
-      label="Choose folder"
+      label={title}
       placement="center"
       initialFocus={pathInput}
-      onClose={onClose}
+      onClose={close}
     >
       <header class="folder-picker-heading">
-        <h2>Choose folder</h2>
+        <h2>{title}</h2>
       </header>
       <form
         class="folder-picker-path"
         onSubmit={(event) => {
           event.preventDefault();
-          navigate(pathText || null);
+          if (canNavigate) navigate(pathText || null);
         }}
       >
         <label>
-          Path
+          <span>Path</span>
           <input
             ref={pathInput}
             type="text"
             autoComplete="off"
             spellcheck={false}
             value={pathText}
+            readOnly={!canNavigate}
             onInput={(event) => {
               pathEdited.current = true;
               setPathText(event.currentTarget.value);
             }}
           />
         </label>
-        <button type="submit">Go</button>
+        <button type="submit" aria-label="Open folder" disabled={!canNavigate}>
+          <svg aria-hidden="true" viewBox="0 0 24 24">
+            <path d="M5 12h14m-6-6 6 6-6 6" />
+          </svg>
+        </button>
       </form>
-      <nav class="folder-picker-navigation" aria-label="Folder navigation">
-        <button
-          type="button"
-          onClick={() => navigate(null)}
-          disabled={loading && requestedPath === null}
-        >
-          Locations
-        </button>
-        <button
-          type="button"
-          onClick={() => listing?.parentPath && navigate(listing.parentPath)}
-          disabled={loading || !listing?.parentPath}
-        >
-          Parent folder
-        </button>
-      </nav>
-      <label class="folder-picker-filter">
-        Filter folders
+      <div class="folder-picker-toolbar">
+        <nav class="folder-picker-navigation" aria-label="Folder navigation">
+          <button
+            type="button"
+            aria-label="Parent folder"
+            onClick={() => listing?.parentPath && navigate(listing.parentPath)}
+            disabled={!canNavigate || !listing?.parentPath}
+          >
+            <svg aria-hidden="true" viewBox="0 0 24 24">
+              <path d="M12 19V5m-7 7 7-7 7 7" />
+            </svg>
+            <span>Up</span>
+          </button>
+          <button
+            class="folder-picker-locations"
+            type="button"
+            onClick={() => navigate(null)}
+            disabled={!canNavigate || (loading && requestedPath === null)}
+          >
+            Locations
+          </button>
+        </nav>
         <input
+          class="folder-picker-filter"
           type="search"
           maxLength={256}
+          aria-label="Filter folders"
+          placeholder="Filter folders"
           value={filter}
+          disabled={!canNavigate}
           onInput={(event) => changeFilter(event.currentTarget.value)}
         />
-      </label>
+      </div>
       {listing?.truncated && (
         <p class="folder-picker-guidance">Listing is incomplete. Filter folders to narrow it.</p>
       )}
@@ -147,34 +216,53 @@ export function FolderPicker({ anchor, initialPath, onChoose, onClose }: FolderP
         {!loading && error && (
           <div class="folder-picker-error">
             <p role="alert">{error}</p>
-            <button type="button" onClick={retry}>
+            <button type="button" onClick={retry} disabled={!canNavigate}>
               Retry
             </button>
           </div>
         )}
-        {!loading && listing && listing.directories.length === 0 && <p>No subfolders.</p>}
+        {!loading && listing && listing.directories.length === 0 && (
+          <p>{filter ? "No matching folders." : "No folders."}</p>
+        )}
         {!loading && listing && listing.directories.length > 0 && (
           <ul>
             {listing.directories.map((directory) => (
               <li key={directory.path}>
-                <button type="button" onClick={() => navigate(directory.path)}>
-                  {directory.name}
+                <button
+                  type="button"
+                  onClick={() => navigate(directory.path)}
+                  disabled={!canNavigate}
+                >
+                  <svg class="folder-picker-folder-icon" aria-hidden="true" viewBox="0 0 24 24">
+                    <path d="M3 6h7l2 2h9v10H3z" />
+                  </svg>
+                  <span>{directory.name}</span>
+                  <svg class="folder-picker-row-chevron" aria-hidden="true" viewBox="0 0 24 24">
+                    <path d="m9 18 6-6-6-6" />
+                  </svg>
                 </button>
               </li>
             ))}
           </ul>
         )}
       </div>
+      {(feedback != null || saveError) && (
+        <div class="folder-picker-feedback" aria-live="polite">
+          {feedback}
+          {saveError && <p role="alert">{saveError}</p>}
+        </div>
+      )}
       <footer class="folder-picker-actions">
-        <button
-          type="button"
-          onClick={() => listing?.path && choose(listing.path)}
-          disabled={loading || pathEdited.current || !listing?.path}
-        >
-          Use folder
-        </button>
-        <button type="button" onClick={() => onClose(true)}>
+        <button type="button" onClick={() => close(true)}>
           Cancel
+        </button>
+        <button
+          class="folder-picker-save"
+          type="button"
+          aria-disabled={saveUnavailable}
+          onClick={() => void save()}
+        >
+          {saving ? "Saving…" : "Save"}
         </button>
       </footer>
     </Popover>

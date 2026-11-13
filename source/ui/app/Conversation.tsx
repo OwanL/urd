@@ -172,7 +172,7 @@ export function Conversation({
         >
           <div class="chat-status" aria-live="polite">
             {error && <span class="inline-error">{error} </span>}
-            {workingDirectoryNotice && (
+            {workingDirectoryNotice && !showWorkingDirectory && (
               <span class={workingDirectoryLocked ? "inline-error" : undefined}>
                 {workingDirectoryNotice}
               </span>

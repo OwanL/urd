@@ -20,7 +20,7 @@ export function GeneralSettings({ state, buttonRef }: GeneralSettingsProps) {
     >
       <div class="general-settings-field">
         <span>Working directory</span>
-        <code class="general-settings-path">{workingDirectory ?? "Not set"}</code>
+        <code class="general-settings-path">{workingDirectory ?? "…"}</code>
         <p class="general-settings-description">Used for new chats.</p>
       </div>
       <div class="general-settings-actions">
@@ -30,31 +30,36 @@ export function GeneralSettings({ state, buttonRef }: GeneralSettingsProps) {
           disabled={state.pending}
           onClick={() => setPickerOpen(true)}
         >
-          Choose folder…
+          Edit…
         </button>
         <button
           type="button"
           disabled={state.pending || !state.loaded || workingDirectory === null}
           onClick={() => void state.save(null)}
         >
-          Clear
+          Reset to root
         </button>
       </div>
-      <div class="general-settings-feedback" aria-live="polite" aria-atomic="true">
-        {state.pending && <p>Saving…</p>}
-        {!state.pending && state.loading && <p>Loading…</p>}
-        {state.error && <p role="alert">{state.error}</p>}
-        {state.error && !state.loaded && (
-          <button type="button" onClick={() => void state.refresh()}>
-            Retry
-          </button>
-        )}
-      </div>
+      {!pickerOpen && (
+        <div class="general-settings-feedback" aria-live="polite" aria-atomic="true">
+          {state.pending && <p>Saving…</p>}
+          {!state.pending && state.loading && <p>Loading…</p>}
+          {state.error && <p role="alert">{state.error}</p>}
+          {state.error && !state.loaded && (
+            <button type="button" onClick={() => void state.refresh()}>
+              Retry
+            </button>
+          )}
+        </div>
+      )}
       {pickerOpen && (
         <FolderPicker
           anchor={buttonRef}
+          title="Default working directory"
           initialPath={workingDirectory}
-          onChoose={(path) => void state.save(path)}
+          busy={state.pending}
+          feedback={state.error && <p role="alert">{state.error}</p>}
+          onChoose={state.save}
           onClose={(returnFocus) => {
             setPickerOpen(false);
             if (returnFocus) buttonRef.current?.focus({ preventScroll: true });

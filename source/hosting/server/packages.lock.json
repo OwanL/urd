@@ -2,6 +2,15 @@
   "version": 1,
   "dependencies": {
     "net10.0": {
+      "H.NotifyIcon": {
+        "type": "Direct",
+        "requested": "[2.4.1, )",
+        "resolved": "2.4.1",
+        "contentHash": "nNPgNzo5UHcWYpVLO3AsRlH8fKE9shBA7/WLpZrFZUFbzpKGcLnz15Kmg0pQ851aboAfm3YuHjYFsYQges/pyw==",
+        "dependencies": {
+          "H.GeneratedIcons.System.Drawing": "2.4.1"
+        }
+      },
       "SonarAnalyzer.CSharp": {
         "type": "Direct",
         "requested": "[10.35.0.4138, )",
@@ -19,6 +28,14 @@
         "contentHash": "YyuyW1KaCotSTuEBMt5NTXecuKwX2kU0FmaJ+X39QdQvYGAlOv2Yfp8Vo2vVihw6+3EEcpbDKgfiaoJ3EyI8Fg==",
         "dependencies": {
           "Duende.IdentityModel": "8.1.0"
+        }
+      },
+      "H.GeneratedIcons.System.Drawing": {
+        "type": "Transitive",
+        "resolved": "2.4.1",
+        "contentHash": "gjYhuwHQzISqKhcNYaRdDhzKCoqLZii+6TTHP0MQf4Q9+H6z4f4A5Xu/j8B8XpFPQ1grCMlQYREvNyNJT9Q/Bg==",
+        "dependencies": {
+          "System.Drawing.Common": "10.0.0"
         }
       },
       "Markdig": {
@@ -93,6 +110,11 @@
           "Microsoft.IdentityModel.Logging": "8.23.0"
         }
       },
+      "Microsoft.Win32.SystemEvents": {
+        "type": "Transitive",
+        "resolved": "10.0.0",
+        "contentHash": "bYdnhuD0XxcVTrxc8RyBjXo+AXYWJPnda3clhGz2Kakleyun1PyrzYV8RezT7ZYmR9OBSOgvpFQcvHo/K8Y90w=="
+      },
       "OpenAI": {
         "type": "Transitive",
         "resolved": "2.14.0",
@@ -153,6 +175,14 @@
         "contentHash": "y6zQLInrpX+oGL1gXM04DrUSu1O1esWxt4rD/zrujTnzIFChn/noD1OiVVpTrU8ZvglwqO2Uw038svUR3SiAOg==",
         "dependencies": {
           "System.Memory.Data": "10.0.9"
+        }
+      },
+      "System.Drawing.Common": {
+        "type": "Transitive",
+        "resolved": "10.0.0",
+        "contentHash": "kohT9ZZlkB5R5ifihCBnPJLdIUQGiTj1ZI6z4LKatr+F4MmIJJu7qQpBkqt9280ivtnSvlTx9qZEY+CpJ0zMkA==",
+        "dependencies": {
+          "Microsoft.Win32.SystemEvents": "10.0.0"
         }
       },
       "System.Memory.Data": {

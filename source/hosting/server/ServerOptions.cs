@@ -7,8 +7,9 @@ internal sealed record ServerOptions {
   public string DataRoot { get; }
   public int Port { get; }
   public string? GitBashPath { get; }
+  public bool ShowTray { get; }
 
-  public ServerOptions(string dataRoot, int port, string? gitBashPath = null) {
+  public ServerOptions(string dataRoot, int port, string? gitBashPath = null, bool showTray = false) {
     if (string.IsNullOrWhiteSpace(dataRoot) || !Path.IsPathFullyQualified(dataRoot))
       throw new ArgumentException("Data root must be a nonempty, fully qualified path.", nameof(dataRoot));
     if (port is < 0 or > 65535)
@@ -21,6 +22,7 @@ internal sealed record ServerOptions {
     DataRoot = Path.GetFullPath(dataRoot);
     Port = port;
     GitBashPath = gitBashPath is null ? null : Path.GetFullPath(gitBashPath);
+    ShowTray = showTray;
   }
 
   public static ServerOptions Parse(string[] args) {
@@ -28,10 +30,17 @@ internal sealed record ServerOptions {
     string? dataRoot = null;
     int? port = null;
     string? gitBashPath = null;
+    bool? showTray = null;
 
-    for (int index = 0; index < args.Length; index += 2) {
+    int index = 0;
+    while (index < args.Length) {
       string option = args[index];
       switch (option) {
+        case "--no-tray":
+          if (showTray is not null)
+            throw new ArgumentException("Duplicate --no-tray option.", nameof(args));
+          showTray = false;
+          break;
         case "--data-root":
           if (dataRoot is not null)
             throw new ArgumentException("Duplicate --data-root option.", nameof(args));
@@ -52,13 +61,14 @@ internal sealed record ServerOptions {
         default:
           throw new ArgumentException($"Unknown option '{option}'.", nameof(args));
       }
+      index += option == "--no-tray" ? 1 : 2;
     }
 
     if (dataRoot is null)
       throw new ArgumentException("Missing required --data-root option.", nameof(args));
     if (port is null)
       throw new ArgumentException("Missing required --port option.", nameof(args));
-    return new ServerOptions(dataRoot, port.Value, gitBashPath);
+    return new ServerOptions(dataRoot, port.Value, gitBashPath, showTray ?? OperatingSystem.IsWindows());
   }
 
   private static string ReadValue(string[] args, int index) {

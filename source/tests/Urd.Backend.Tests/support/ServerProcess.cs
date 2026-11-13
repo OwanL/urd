@@ -22,6 +22,7 @@ internal sealed class ServerProcess : IAsyncDisposable {
       WorkingDirectory = AppContext.BaseDirectory
     };
     start.ArgumentList.Add(typeof(Program).Assembly.Location);
+    start.ArgumentList.Add("--no-tray");
     foreach (string argument in arguments)
       start.ArgumentList.Add(argument);
     if (environment is not null)

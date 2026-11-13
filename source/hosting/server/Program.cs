@@ -25,19 +25,27 @@ internal static class Program {
       options = ServerOptions.Parse(args);
     } catch (ArgumentException failure) {
       await Console.Error.WriteLineAsync(failure.Message);
-      await Console.Error.WriteLineAsync("Usage: Urd.Server --data-root <absolute directory> --port <0..65535> [--git-bash <absolute executable>]");
+      await Console.Error.WriteLineAsync("Usage: Urd.Server --data-root <absolute directory> --port <0..65535> [--git-bash <absolute executable>] [--no-tray]");
       return 2;
     }
 
+    using var stopping = new CancellationTokenSource();
+    IDisposable? tray = null;
     try {
-      await RunServerAsync(options, origin => Console.Out.WriteLine(JsonSerializer.Serialize(new {
-        @event = "urd-ready",
-        origin = origin.GetLeftPart(UriPartial.Authority)
-      })), CancellationToken.None);
+      await RunServerAsync(options, origin => {
+        Console.Out.WriteLine(JsonSerializer.Serialize(new {
+          @event = "urd-ready",
+          origin = origin.GetLeftPart(UriPartial.Authority)
+        }));
+        if (options.ShowTray && OperatingSystem.IsWindowsVersionAtLeast(6, 1))
+          tray = ServerTray.Show(options.DataRoot, origin, stopping.Cancel);
+      }, stopping.Token);
       return 0;
     } catch (Exception failure) {
       await Console.Error.WriteLineAsync(failure.ToString());
       return 1;
+    } finally {
+      tray?.Dispose();
     }
   }
 

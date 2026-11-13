@@ -108,8 +108,9 @@ Closing a client leaves the backend running; stopping the backend is explicit. A
 work and scheduled follow-ups can continue without a visible UI, consuming usage and
 changing files. Closing a session is a separate final action, not the current tab-hide action.
 
-Users need a clear way to find and stop a running backend. A per-user background app with
-a tray icon is proposed, not a selected service/toolkit or startup-at-login policy. Do not
+Users need a clear way to find and stop a running backend. On Windows, the server shows a
+basic tray icon (address, Open, Stop); a separate background app and startup-at-login policy
+are not selected. Do not
 turn background operation into a generic process-management platform.
 
 ## Start fresh; preserve Urd's own data

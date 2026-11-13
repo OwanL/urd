@@ -5,7 +5,9 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../backend/Urd.Core.csproj" />
+    <PackageReference Include="H.NotifyIcon" Version="2.4.1" />
     <InternalsVisibleTo Include="Urd.Backend.Tests" />
+    <EmbeddedResource Include="urd.ico" LogicalName="Urd.Server.urd.ico" />
     <Content Include="../../ui/dist/**/*" Link="wwwroot/%(RecursiveDir)%(Filename)%(Extension)"
              CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>

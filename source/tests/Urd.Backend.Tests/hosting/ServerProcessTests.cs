@@ -15,10 +15,12 @@ namespace Urd.Backend.Tests.Hosting;
 
 public sealed class ServerProcessTests {
   [Fact]
-  public void ServerOptionsRetainGitBashAndRejectRemovedWorkingDirectoryFlag() {
+  public void ServerOptionsRetainGitBashAndTrayAndRejectRemovedWorkingDirectoryFlag() {
     string root = Path.GetFullPath(Path.GetTempPath());
     string[] basic = ["--data-root", root, "--port", "0"];
     Assert.Null(ServerOptions.Parse(basic).GitBashPath);
+    Assert.Equal(OperatingSystem.IsWindows(), ServerOptions.Parse(basic).ShowTray);
+    Assert.False(ServerOptions.Parse(["--no-tray", .. basic]).ShowTray);
     Assert.Equal(Path.Combine(root, "bash.exe"), ServerOptions.Parse([.. basic, "--git-bash", Path.Combine(root, "bash.exe")]).GitBashPath);
     Assert.Throws<ArgumentException>(() => ServerOptions.Parse([.. basic, "--working-directory", root]));
   }

@@ -50,7 +50,7 @@ export class ServerProcess {
     try {
       child = spawn(
         process.env.DOTNET_HOST_PATH ?? "dotnet",
-        [assembly, "--data-root", dataRoot, "--port", "0"],
+        [assembly, "--data-root", dataRoot, "--port", "0", "--no-tray"],
         {
           stdio: "pipe",
           windowsHide: true,

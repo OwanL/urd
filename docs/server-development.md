@@ -52,6 +52,13 @@ stderr. Invalid arguments exit with code `2`; startup/run failures exit with cod
 Ctrl+C requests graceful shutdown. The run returns successfully only after its HTTP
 and Core shutdown operations both finish; it has no forced cleanup timeout.
 
+On Windows, a ready server shows a notification-area icon (via
+[H.NotifyIcon](https://github.com/HavenDV/H.NotifyIcon)); `--no-tray` disables it, and the
+test launchers pass it. The tooltip shows the served address. Clicking the icon opens a menu:
+**Open** launches the address in the default browser; **Stop Urd** requests the same graceful
+shutdown as Ctrl+C. The icon is removed after shutdown finishes. Tray failures go to stderr
+and never stop the server. New icons start in Windows' hidden-icons overflow; pin it from there.
+
 ## HTTP and local access
 
 - Public `GET /health` or `HEAD /health` returns **204**, without a body or private state.

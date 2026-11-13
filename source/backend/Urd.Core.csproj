@@ -15,4 +15,9 @@
     <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.23.0" />
     <InternalsVisibleTo Include="Urd.Backend.Tests" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Packaged skills are files the model reads, so they are copied beside the server. -->
+    <None Remove="harness/context/skills/**" />
+    <None Include="harness/context/skills/**" Link="skills/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

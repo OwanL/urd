@@ -14,6 +14,7 @@ not in the context manager.
 | `SubagentGuidance.cs` | Subagents | 100 |
 | `SubagentPreferencesGuidance.cs` | Subagents | 110 |
 | `WorkingDirectoryGuidance.cs` | Sessions with a working directory | 200 |
+| `SkillsGuidance.cs` | Sessions with a working directory and skills | 220 |
 | `AssignmentGuidance.cs` | Sessions with an assignment | 300 |
 
 ## Guidance copied from Pie
@@ -72,3 +73,15 @@ instances through that path. File discovery/loading is not implemented here.
 
 Existing chats retain their saved prompts. Rebuild/restart Urd and start a new chat
 to use guidance changes.
+
+## Skills
+
+`SkillsGuidance` lists skills by name, description and path, using Pi's wording; the
+model reads a skill's file when a task matches. It lists `SKILL.md` files tracked by
+Git under the working directory, then skills packaged in `skills/`. A project skill
+replaces a packaged skill with the same name. Outside a Git repository only packaged
+skills are listed. Skills are found once, when a chat's starting context is composed.
+
+Add a packaged skill as `skills/<name>/SKILL.md` with `name` and `description`
+frontmatter. The build copies `skills/` beside the server so the model can read it.
+`diagnose` is adapted from Pie's skill of the same name with Pie-specific passages removed.

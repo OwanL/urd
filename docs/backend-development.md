@@ -44,8 +44,9 @@ the same type retain their supplied order. No other assemblies are scanned.
 `StartingContextManager`, under `context/runtime/`, composes the applicable blocks,
 omitting null/whitespace text and propagating guidance errors and cancellation.
 It offers all configured tools through
-existing declarations; no AI pruning, skill discovery or instruction-file loading is
-implemented. Primary and bounded-subagent composition are tested, but only the existing
+existing declarations; no AI pruning or instruction-file loading is implemented. Sessions with
+a working directory receive a skill list (see the context README). Primary and
+bounded-subagent composition are tested, but only the existing
 primary-session execution flow is integrated. A delegated primary uses primary guidance
 plus assignment context; this adds no production delegation/session subtype.
 

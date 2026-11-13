@@ -580,7 +580,9 @@ class API or a requirement for a generic prompt/resource framework.
 Leave room for optional instruction documents to participate in selection alongside
 tools and skills. Automatic `AGENTS.md`/`CLAUDE.md` insertion, their precedence and
 whether they may be pruned remain undecided; this direction does not implement or
-approve those policies. Existing protected-capability and prefix-stability constraints
+approve those policies. Skills are listed by name, description and path when a chat
+starts: Git-tracked `SKILL.md` files under the working directory, then Urd's packaged
+skills; bodies are read on demand. Existing protected-capability and prefix-stability constraints
 below still apply. Exact assembly, restoration and refresh boundaries need concrete
 implementation design.
 

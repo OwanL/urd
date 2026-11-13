@@ -18,13 +18,9 @@ export type CompactionReason = "manual" | "threshold" | "overflow";
 
 export interface CompactionSummary {
   readonly id: string;
-  readonly sessionId: string;
-  readonly historyRevision: number;
-  readonly executionId: string;
   readonly summary: string;
   readonly reason: CompactionReason;
   readonly tokensBefore: number;
   readonly tokensAfter: number;
   readonly createdAt: string;
-  readonly [cursorField: string]: unknown;
 }

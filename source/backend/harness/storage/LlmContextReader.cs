@@ -18,7 +18,7 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
 
   internal CompactionContext ReadContext(SqliteTransaction transaction, Guid sessionId,
       long historyRevision, Guid? executionId = null, Guid? requestId = null) {
-    CompactionSummary? boundary = CompactionStorage.ReadLatest(database, transaction, sessionId, historyRevision);
+    CompactionBoundary? boundary = CompactionStorage.ReadLatest(database, transaction, sessionId, historyRevision);
     using SqliteCommand read = database.Command(transaction, """
       WITH requests AS (
           SELECT r.ordinal AS run_ordinal, q.request_index, q.request_id, q.usage_json, q.compaction_id FROM execution_runs r
@@ -66,7 +66,7 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
       ORDER BY c.run_ordinal, c.request_index, c.kind, c.content_index;
       """,
         ("$session", sessionId), ("$run", executionId), ("$revision", historyRevision), ("$request", requestId),
-        ("$cutRun", boundary?.FirstKeptRunOrdinal ?? -1), ("$cutRequest", boundary?.FirstKeptRequestIndex ?? 0));
+        ("$cutRun", boundary?.FirstKept.RunOrdinal ?? -1), ("$cutRequest", boundary?.FirstKept.RequestIndex ?? 0));
     using SqliteDataReader reader = read.ExecuteReader();
     var messages = new List<ChatMessage>();
     var entries = new List<ContextEntry>();
@@ -140,9 +140,9 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
         return;
       AddResponse(messages, text, calls, results, providerMessage);
       Guid id = Guid.Parse(previousRequest);
-      int first = id == boundary?.FirstKeptRequestId ? boundary.FirstKeptMessageIndex : 0;
+      int first = id == boundary?.FirstKept.RequestId ? boundary.FirstKept.MessageIndex : 0;
       for (int index = first; index < messages.Count; index++)
-        entries.Add(new(id, runOrdinal, requestIndex, index, humanMessages.Contains(messages[index]), messages[index]));
+        entries.Add(new(new(id, runOrdinal, requestIndex, index), humanMessages.Contains(messages[index]), messages[index]));
       if (usageJson is null || usageBoundary != boundary?.Id)
         return;
       UsageDetails? usage = JsonSerializer.Deserialize<UsageDetails>(usageJson);

@@ -342,14 +342,13 @@ public sealed class ToolCallTranscriptTests {
   private static void SeedCompaction(TemporaryDatabase database, Guid session, Guid boundaryRun,
       Guid boundaryRequest, Guid receivingRequest, int boundaryRequestIndex = 0, int firstKeptMessageIndex = 0) {
     Guid compaction = Guid.NewGuid();
-    const string summaryJson = "{}";
     database.Execute($"""
       INSERT INTO session_compactions
           (compaction_id, session_id, history_revision, run_id, first_kept_request_id, first_kept_message_index,
-              first_kept_run_ordinal, first_kept_request_index, reason, tokens_before, tokens_after, created_at, summary_json)
+              first_kept_run_ordinal, first_kept_request_index, reason, tokens_before, tokens_after, created_at, summary)
       VALUES ('{compaction:D}', '{session:D}', 0, '{boundaryRun:D}', '{boundaryRequest:D}', {firstKeptMessageIndex},
           (SELECT ordinal FROM execution_runs WHERE run_id = '{boundaryRun:D}'), {boundaryRequestIndex}, 0, 2, 1,
-          '2026-11-12T00:00:00+00:00', '{summaryJson}');
+          '2026-11-12T00:00:00+00:00', 'fixture summary');
       UPDATE execution_requests SET compaction_id = '{compaction:D}' WHERE request_id = '{receivingRequest:D}';
       """);
   }

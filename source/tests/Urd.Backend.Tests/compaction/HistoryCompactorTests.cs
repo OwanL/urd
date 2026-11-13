@@ -65,8 +65,7 @@ public sealed class HistoryCompactorTests {
 
   [Fact]
   public async Task SummaryIsIterativeSafeBoundedAndDoesNotDisposeBorrowedClient() {
-    var previous = new CompactionSummary(Guid.NewGuid(), Guid.NewGuid(), 0, Guid.NewGuid(), Guid.NewGuid(),
-        0, 0, 0, "Files read: src/old.cs", CompactionReason.Manual, 0, 0, DateTimeOffset.UtcNow);
+    var previous = new CompactionBoundary(Guid.NewGuid(), new(Guid.NewGuid(), 0, 0, 0), "Files read: src/old.cs");
     var context = new CompactionContext([
       Entry(1, 0, true, ChatRole.User, new string('x', 5_000),
           new DataContent(new byte[] { 1, 2, 3 }, "image/png")),
@@ -114,7 +113,7 @@ public sealed class HistoryCompactorTests {
       message = new ChatMessage(role, contents);
     else
       message = new ChatMessage(role, [new TextContent(text), .. contents]);
-    return new ContextEntry(Guid.NewGuid(), run, 0, index, startsTurn, message);
+    return new ContextEntry(new(Guid.NewGuid(), run, 0, index), startsTurn, message);
   }
 
   private sealed class SummaryClient(string? summary = null, bool waitForCancellation = false) : IChatClient {

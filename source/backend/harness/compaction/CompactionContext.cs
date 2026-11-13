@@ -2,13 +2,22 @@ using Microsoft.Extensions.AI;
 
 namespace Urd.Core.Compaction;
 
-// Stable positions in logical model history, not transcript insertion order.
-internal sealed record ContextEntry(
-    Guid RequestId, long RunOrdinal, int RequestIndex, int MessageIndex,
-    bool StartsTurn, ChatMessage Message);
+// Stable position in logical model history, not transcript insertion order.
+internal sealed record ContextPosition(Guid RequestId, long RunOrdinal, int RequestIndex, int MessageIndex) {
+  internal bool IsAfter(ContextPosition other) {
+    if (RunOrdinal != other.RunOrdinal) return RunOrdinal > other.RunOrdinal;
+    if (RequestIndex != other.RequestIndex) return RequestIndex > other.RequestIndex;
+    return MessageIndex > other.MessageIndex;
+  }
+}
+
+internal sealed record ContextEntry(ContextPosition Position, bool StartsTurn, ChatMessage Message);
+
+// The latest saved summary replaces model history before FirstKept.
+internal sealed record CompactionBoundary(Guid Id, ContextPosition FirstKept, string Summary);
 
 internal sealed record CompactionContext(
-    IReadOnlyList<ContextEntry> Entries, CompactionSummary? Previous = null, long? ObservedTokens = null) {
+    IReadOnlyList<ContextEntry> Entries, CompactionBoundary? Previous = null, long? ObservedTokens = null) {
   internal IReadOnlyList<ChatMessage> ReadMessages() => Previous is null
       ? Entries.Select(entry => entry.Message).ToArray()
       : [SummaryMessage(Previous.Summary), .. Entries.Select(entry => entry.Message)];
@@ -23,4 +32,4 @@ internal sealed record CompactionPlan(
   internal ContextEntry FirstKept => Context.Entries[FirstKeptIndex];
 }
 
-internal sealed record CompactionResult(string Summary, long TokensAfter, UsageDetails? Usage);
+internal sealed record CompactionResult(string Summary, long TokensAfter);

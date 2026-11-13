@@ -39,7 +39,7 @@ public sealed class ManualCompactionTests {
       CompactionReceipt settled = Assert.IsType<CompactionReceipt>(await session.ReadCompactionReceiptAsync(submission.OperationId));
       Assert.Equal(accepted.ExecutionId, settled.ExecutionId);
       Assert.Equal(ExecutionOutcome.Completed, settled.Outcome);
-      CompactionSummary boundary = Assert.IsType<CompactionSummary>(store.Compactions.ReadContext(session.Id, revision).Previous);
+      CompactionBoundary boundary = Assert.IsType<CompactionBoundary>(store.Compactions.ReadContext(session.Id, revision).Previous);
       saved = Assert.IsType<CompactionSummary>(await session.ReadCompactionAsync(boundary.Id, revision));
       Assert.Equal(Summary, saved.Summary);
       Assert.Equal(0, Assert.Single(client.SummaryToolCounts));
@@ -67,6 +67,7 @@ public sealed class ManualCompactionTests {
       var edited = await session.EditUserMessageAsync(new(Guid.NewGuid(), latest, "revised recent turn", TestLlmSelection.Default));
       await session.WaitForSettlementAsync(edited.ExecutionId).WaitAsync(TestTimeout);
       Assert.Equal(saved.Id, reopened.Compactions.ReadContext(sessionId, edited.HistoryRevision).Previous!.Id);
+      Assert.Equal(saved, await session.ReadCompactionAsync(saved.Id, edited.HistoryRevision));
 
       history = await session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, edited.HistoryRevision));
       MessageRef ancient = history.Entries.First(entry => entry.Entry.Kind == TranscriptEntryKind.User).Text!.From.Message;
@@ -152,7 +153,7 @@ public sealed class ManualCompactionTests {
   }
 
   private static (Guid Request, int Index, string? Text) Position(ContextEntry entry) =>
-      (entry.RequestId, entry.MessageIndex, entry.Message.Text);
+      (entry.Position.RequestId, entry.Position.MessageIndex, entry.Message.Text);
 
   private static PrimarySession CreateSession(UrdStore store, CompactionChatClient client) =>
       new(store.Sessions.CreatePrimary(Guid.NewGuid()), store, _ => client);

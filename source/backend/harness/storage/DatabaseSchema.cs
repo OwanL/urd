@@ -4,7 +4,7 @@ namespace Urd.Core.Storage;
 
 // Creates the current pre-release schema; incompatible databases require a manual reset.
 internal static class DatabaseSchema {
-  private const int SchemaVersion = 23;
+  private const int SchemaVersion = 24;
 
   internal static void Initialize(SqliteConnection connection) {
     using SqliteCommand command = connection.CreateCommand();
@@ -257,7 +257,7 @@ internal static class DatabaseSchema {
           tokens_before INTEGER NOT NULL CHECK (tokens_before >= 0),
           tokens_after INTEGER NOT NULL CHECK (tokens_after >= 0 AND tokens_after < tokens_before),
           created_at TEXT NOT NULL,
-          summary_json TEXT NOT NULL
+          summary TEXT NOT NULL
       ) STRICT;
       CREATE INDEX session_compactions_latest ON session_compactions(session_id, history_revision, ordinal DESC);
       CREATE TABLE provider_connections (
@@ -301,7 +301,7 @@ internal static class DatabaseSchema {
       CREATE INDEX execution_inputs_not_sent_order ON execution_inputs(session_id, ordinal) WHERE not_sent = 1;
       CREATE INDEX execution_messages_history_order ON execution_messages(session_id, history_revision, ordinal DESC);
       CREATE INDEX execution_messages_request_order ON execution_messages(request_id, role, first_chunk_index);
-      PRAGMA user_version = 23;
+      PRAGMA user_version = 24;
       """;
     command.ExecuteNonQuery();
     transaction.Commit();

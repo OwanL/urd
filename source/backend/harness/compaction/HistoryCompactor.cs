@@ -79,7 +79,7 @@ internal static class HistoryCompactor {
       throw new InvalidDataException("The compaction summary would not reduce the estimated context.");
 
     cancellationToken.ThrowIfCancellationRequested();
-    return new(summary, tokensAfter, response.Usage);
+    return new(summary, tokensAfter);
   }
 
   private static long EstimateFullContext(CompactionContext context, IReadOnlyList<ChatMessage> instructions,
@@ -126,14 +126,7 @@ internal static class HistoryCompactor {
     if (startsTurn ? index > latestTurn || !entry.StartsTurn || entry.Message.Role != ChatRole.User
         : (force && index > latestTurn) || entry.StartsTurn || entry.Message.Role != ChatRole.Assistant) return false;
     if (context.Previous is not { } previous) return true;
-    return ComparePosition(entry, previous) > 0;
-  }
-
-  private static int ComparePosition(ContextEntry entry, CompactionSummary previous) {
-    int order = entry.RunOrdinal.CompareTo(previous.FirstKeptRunOrdinal);
-    if (order != 0) return order;
-    order = entry.RequestIndex.CompareTo(previous.FirstKeptRequestIndex);
-    return order != 0 ? order : entry.MessageIndex.CompareTo(previous.FirstKeptMessageIndex);
+    return entry.Position.IsAfter(previous.FirstKept);
   }
 
   private static void ValidatePlan(CompactionPlan plan) {
@@ -144,7 +137,7 @@ internal static class HistoryCompactor {
         !(entries[plan.FirstKeptIndex].StartsTurn && entries[plan.FirstKeptIndex].Message.Role == ChatRole.User) &&
         entries[plan.FirstKeptIndex].Message.Role != ChatRole.Assistant)
       throw new ArgumentException("The compaction plan starts at an unsafe history boundary.", nameof(plan));
-    if (plan.Context.Previous is { } previous && ComparePosition(entries[plan.FirstKeptIndex], previous) <= 0)
+    if (plan.Context.Previous is { } previous && !entries[plan.FirstKeptIndex].Position.IsAfter(previous.FirstKept))
       throw new ArgumentException("The compaction plan does not advance the existing boundary.", nameof(plan));
   }
 
@@ -163,8 +156,8 @@ internal static class HistoryCompactor {
     }
     prompt.AppendLine("[REMOVED HISTORY]");
     foreach (ContextEntry entry in plan.Context.Entries.Take(plan.FirstKeptIndex)) {
-      prompt.Append("[run=").Append(entry.RunOrdinal).Append(" request=").Append(entry.RequestIndex)
-          .Append(" message=").Append(entry.MessageIndex).AppendLine("]");
+      prompt.Append("[run=").Append(entry.Position.RunOrdinal).Append(" request=").Append(entry.Position.RequestIndex)
+          .Append(" message=").Append(entry.Position.MessageIndex).AppendLine("]");
       prompt.Append('[').Append(entry.Message.Role).AppendLine("]");
       if (entry.Message.RawRepresentation is not null) prompt.AppendLine("[native message payload omitted]");
       foreach (AIContent content in entry.Message.Contents) AppendContent(prompt, content);

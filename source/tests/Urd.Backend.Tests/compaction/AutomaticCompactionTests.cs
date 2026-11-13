@@ -67,7 +67,7 @@ public sealed class AutomaticCompactionTests {
 
     long revision = (await session.ReadSnapshotAsync()).HistoryRevision;
     CompactionContext context = store.Compactions.ReadContext(session.Id, revision);
-    Assert.Equal(CompactionReason.Threshold, context.Previous?.Reason);
+    Assert.Equal(CompactionReason.Threshold, (await session.ReadCompactionAsync(context.Previous!.Id, revision))?.Reason);
     Assert.DoesNotContain(context.Entries, entry => entry.Message.Contents.OfType<TextContent>()
         .Any(content => content.Text.Contains(new string('o', 128))));
     Assert.Contains(context.Entries, entry => entry.Message.Role == ChatRole.Tool);
@@ -102,8 +102,8 @@ public sealed class AutomaticCompactionTests {
       release.TrySetResult();
       await session.WaitForSettlementAsync(initial.ExecutionId!.Value).WaitAsync(TestTimeout);
       var context = store.Compactions.ReadContext(session.Id, 0);
-      Assert.Equal(1, context.Previous!.FirstKeptRequestIndex);
-      Assert.Equal(1, context.Previous.FirstKeptMessageIndex); // The first steering input was summarized.
+      Assert.Equal(1, context.Previous!.FirstKept.RequestIndex);
+      Assert.Equal(1, context.Previous.FirstKept.MessageIndex); // The first steering input was summarized.
       var history = await session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, 0));
       var target = Assert.Single(history.Entries, entry => entry.Entry.EntryId == removed.SubmissionId).Text!.From.Message;
       Assert.Contains(history.Entries.TakeWhile(entry => entry.Entry.EntryId != removed.SubmissionId),
@@ -149,8 +149,9 @@ public sealed class AutomaticCompactionTests {
     Assert.Equal(1, client.SummaryCalls);
     Assert.Equal(1, toolRuns);
     Assert.Single(StoredTools.Read(database));
-    Assert.Equal(CompactionReason.Overflow,
-        store.Compactions.ReadContext(session.Id, (await session.ReadSnapshotAsync()).HistoryRevision).Previous?.Reason);
+    long revision = (await session.ReadSnapshotAsync()).HistoryRevision;
+    Guid compactionId = store.Compactions.ReadContext(session.Id, revision).Previous!.Id;
+    Assert.Equal(CompactionReason.Overflow, (await session.ReadCompactionAsync(compactionId, revision))?.Reason);
     Assert.Equal(2, StoredExecutions.ReadRequests(database).Count);
     Assert.Contains(client.Requests[2], message => message.Contents.OfType<TextContent>()
         .Any(content => content.Text.Contains("[HISTORY SUMMARY:")));

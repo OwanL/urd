@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Urd.Core.Compaction;
 using Urd.Core.Execution;
@@ -13,31 +12,44 @@ internal sealed class CompactionStorage(Database database, ToolResultCodec toolR
       database.Read(transaction => new LlmContextReader(database, toolResults)
           .ReadContext(transaction, sessionId, revision, runId, requestId));
 
-  internal static CompactionSummary? ReadLatest(Database database, SqliteTransaction transaction, Guid sessionId, long revision) {
+  internal static CompactionBoundary? ReadLatest(Database database, SqliteTransaction transaction, Guid sessionId, long revision) {
     using SqliteCommand read = database.Command(transaction, """
-      SELECT summary_json FROM session_compactions WHERE session_id = $session AND history_revision = $revision
+      SELECT compaction_id, first_kept_request_id, first_kept_run_ordinal, first_kept_request_index,
+          first_kept_message_index, summary
+      FROM session_compactions WHERE session_id = $session AND history_revision = $revision
       ORDER BY ordinal DESC LIMIT 1;
       """, ("$session", sessionId), ("$revision", revision));
-    return read.ExecuteScalar() is string json ? JsonSerializer.Deserialize<CompactionSummary>(json) : null;
+    using SqliteDataReader reader = read.ExecuteReader();
+    if (!reader.Read())
+      return null;
+    var firstKept = new ContextPosition(reader.GetGuid(1), reader.GetInt64(2), reader.GetInt32(3), reader.GetInt32(4));
+    return new(reader.GetGuid(0), firstKept, reader.GetString(5));
   }
 
   internal CompactionSummary? Read(Guid sessionId, long revision, Guid id) => database.Read(transaction => {
     using SqliteCommand read = database.Command(transaction, """
-      SELECT c.summary_json FROM session_compactions c JOIN sessions s ON s.session_id = c.session_id
+      SELECT c.summary, c.reason, c.tokens_before, c.tokens_after, c.created_at
+      FROM session_compactions c JOIN sessions s ON s.session_id = c.session_id
       WHERE c.session_id = $session AND c.history_revision = $revision
           AND s.history_revision = $revision AND c.compaction_id = $id;
       """, ("$session", sessionId), ("$revision", revision), ("$id", id));
-    return read.ExecuteScalar() is string json ? JsonSerializer.Deserialize<CompactionSummary>(json) : null;
+    using SqliteDataReader reader = read.ExecuteReader();
+    if (!reader.Read())
+      return null;
+    return new CompactionSummary(id, reader.GetString(0), (CompactionReason)reader.GetInt32(1),
+        reader.GetInt64(2), reader.GetInt64(3),
+        DateTimeOffset.Parse(reader.GetString(4), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind));
   });
 
-  internal CompactionSummary? Save(Guid sessionId, Guid runId, long revision, CompactionPlan plan, CompactionResult result) {
+  // False means the boundary moved or the run can no longer record compaction.
+  internal bool Save(Guid sessionId, Guid runId, long revision, CompactionPlan plan, CompactionResult result) {
     if (string.IsNullOrWhiteSpace(result.Summary) || result.Summary.Length > 32_768
         || result.TokensAfter < 0 || result.TokensAfter >= plan.TokensBefore)
       throw new ArgumentException("Compaction must provide a bounded summary that reduces context.", nameof(result));
-    return database.Write<CompactionSummary?>(transaction => {
+    return database.Write(transaction => {
       if (ReadLatest(database, transaction, sessionId, revision)?.Id != plan.Context.Previous?.Id)
-        return null;
-      ContextEntry cut = plan.FirstKept;
+        return false;
+      ContextPosition cut = plan.FirstKept.Position;
       using SqliteCommand allowed = database.Command(transaction, """
         SELECT EXISTS (SELECT 1 FROM execution_runs r JOIN sessions s ON s.session_id = r.session_id
             WHERE r.run_id = $run AND r.session_id = $session AND r.history_revision = $revision
@@ -48,25 +60,22 @@ internal sealed class CompactionStorage(Database database, ToolResultCodec toolR
         """, ("$session", sessionId), ("$run", runId), ("$revision", revision),
           ("$keep", cut.RequestId), ("$ordinal", cut.RunOrdinal), ("$index", cut.RequestIndex));
       if ((long)allowed.ExecuteScalar()! == 0)
-        return null;
-      var saved = new CompactionSummary(Guid.NewGuid(), sessionId, revision, runId, cut.RequestId,
-          cut.MessageIndex, cut.RunOrdinal, cut.RequestIndex, result.Summary, plan.Reason,
-          plan.TokensBefore, result.TokensAfter, DateTimeOffset.UtcNow, result.Usage);
+        return false;
+      Guid id = Guid.NewGuid();
       using SqliteCommand insert = database.Command(transaction, """
         INSERT INTO session_compactions (compaction_id, session_id, history_revision, run_id,
             first_kept_request_id, first_kept_message_index, first_kept_run_ordinal, first_kept_request_index,
-            reason, tokens_before, tokens_after, created_at, summary_json)
+            reason, tokens_before, tokens_after, created_at, summary)
         VALUES ($id, $session, $revision, $run, $keep, $message, $ordinal, $index,
-            $reason, $before, $after, $created, $json);
+            $reason, $before, $after, $created, $summary);
         INSERT INTO execution_messages (session_id, history_revision, run_id, role, message_id, created_at)
         VALUES ($session, $revision, $run, 4, $id, $created);
-        """, ("$id", saved.Id), ("$session", sessionId), ("$revision", revision), ("$run", runId),
+        """, ("$id", id), ("$session", sessionId), ("$revision", revision), ("$run", runId),
           ("$keep", cut.RequestId), ("$message", cut.MessageIndex), ("$ordinal", cut.RunOrdinal),
-          ("$index", cut.RequestIndex), ("$reason", (int)saved.Reason), ("$before", saved.TokensBefore),
-          ("$after", saved.TokensAfter), ("$created", saved.CreatedAt.ToString("O", CultureInfo.InvariantCulture)),
-          ("$json", JsonSerializer.Serialize(saved)));
+          ("$index", cut.RequestIndex), ("$reason", (int)plan.Reason), ("$before", plan.TokensBefore),
+          ("$after", result.TokensAfter), ("$created", StorageText.UtcTimestamp()), ("$summary", result.Summary));
       insert.ExecuteNonQuery();
-      return saved;
+      return true;
     });
   }
 

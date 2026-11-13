@@ -33,11 +33,7 @@ export function CompactionMarker({ client, sessionId, entry, compaction }: Compa
         entry.historyRevision,
         controller.signal,
       );
-      if (
-        result.id !== entry.entryId ||
-        result.sessionId !== sessionId ||
-        result.historyRevision !== entry.historyRevision
-      )
+      if (result.id !== entry.entryId)
         throw new Error("Compaction summary did not match this history entry.");
       setSummary(result.summary);
       setCreatedAt(result.createdAt);

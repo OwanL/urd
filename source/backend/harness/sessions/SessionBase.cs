@@ -105,7 +105,7 @@ public abstract class SessionBase {
     using var held = await gate.AcquireAsync();
     if (!CanRecordExecution(executionId))
       return false;
-    bool saved = WriteToStore(() => store.Compactions.Save(Id, executionId, HistoryRevision, plan, result)) is not null;
+    bool saved = WriteToStore(() => store.Compactions.Save(Id, executionId, HistoryRevision, plan, result));
     if (saved)
       PublishChange();
     return saved;

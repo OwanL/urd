@@ -203,15 +203,12 @@ public sealed class SessionSnapshotStorageTests {
     Guid compactionId = Guid.NewGuid();
     long runOrdinal = (long)database.Scalar($"SELECT ordinal FROM execution_runs WHERE run_id = '{execution:D}';")!;
     DateTimeOffset created = DateTimeOffset.UtcNow;
-    var summary = new CompactionSummary(compactionId, session, 0, execution, request, 0, runOrdinal, 0,
-        "fixture summary", CompactionReason.Manual, tokensBefore, tokensAfter, created);
-    string json = JsonSerializer.Serialize(summary);
     database.Execute($"""
       INSERT INTO session_compactions (compaction_id, session_id, history_revision, run_id,
           first_kept_request_id, first_kept_message_index, first_kept_run_ordinal, first_kept_request_index,
-          reason, tokens_before, tokens_after, created_at, summary_json)
+          reason, tokens_before, tokens_after, created_at, summary)
       VALUES ('{compactionId:D}', '{session:D}', 0, '{execution:D}', '{request:D}', 0, {runOrdinal}, 0,
-          {(int)CompactionReason.Manual}, {tokensBefore}, {tokensAfter}, '{created:O}', '{json}');
+          {(int)CompactionReason.Manual}, {tokensBefore}, {tokensAfter}, '{created:O}', 'fixture summary');
       INSERT INTO execution_messages (session_id, history_revision, run_id, role, message_id, created_at)
       VALUES ('{session:D}', 0, '{execution:D}', 4, '{compactionId:D}', '{created:O}');
       """);

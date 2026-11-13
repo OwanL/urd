@@ -157,15 +157,11 @@ const compactionSubmission: CompactionSubmission = {
 const compactionReceipt: CompactionReceipt = { executionId, outcome: null };
 const compactionSummary: CompactionSummary = {
   id: compactionId,
-  sessionId,
-  historyRevision: 8,
-  executionId,
   summary: "The conversation summary.",
   reason: "manual",
   tokensBefore: 8_000,
   tokensAfter: 900,
   createdAt: "2026-10-12T12:00:00Z",
-  cursor: { executionId, entryId: compactionId },
 };
 const selectedRefusal: UserMessageReceipt = {
   ...selectedReceipt,

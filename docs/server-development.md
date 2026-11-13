@@ -27,7 +27,8 @@ Git for Windows. Other platforms retain tool-free startup; explicitly requesting
 unsupported. New sessions use the saved working-directory preference; when unset, new
 sessions use the process working drive's root (for example `C:\`), not the launch folder or
 data root. Set it in Settings → General, or with `POST /api/preferences/working-directory` using
-`{ "workingDirectory": "C:\\dev\\repos\\your-project" }`; `GET /api/preferences` reads it.
+`{ "workingDirectory": "C:\\dev\\repos\\your-project" }`; `GET /api/preferences` reads the
+effective path, including the root fallback. Posting `null` resets the default to that root.
 The path must be an existing absolute directory. Preference changes apply only to new sessions.
 Before its first accepted message, a chat can override its own directory with
 `POST /api/sessions/{sessionId}/working-directory` and `{ "workingDirectory": "C:\\path" }`.

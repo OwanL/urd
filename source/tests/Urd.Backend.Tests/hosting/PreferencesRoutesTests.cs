@@ -21,8 +21,8 @@ public sealed class PreferencesRoutesTests {
     using (HttpResponseMessage initial = await RequestAsync(server.Client, HttpMethod.Get, "/api/preferences")) {
       Assert.Equal(HttpStatusCode.OK, initial.StatusCode);
       AssertPrivateResponse(initial);
-      Assert.Equal(JsonValueKind.Null,
-          (await initial.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("workingDirectory").ValueKind);
+      Assert.Equal(Path.GetPathRoot(Environment.CurrentDirectory),
+          (await initial.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("workingDirectory").GetString());
     }
 
     using (HttpResponseMessage invalid = await RequestAsync(server.Client, HttpMethod.Post,

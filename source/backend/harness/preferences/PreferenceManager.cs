@@ -11,7 +11,9 @@ public sealed class PreferenceManager {
     this.store = store;
   }
 
-  public UserPreferences Read() => new(store.Preferences.ReadWorkingDirectory());
+  public UserPreferences Read(string? fallbackWorkingDirectory = null) => new(
+      store.Preferences.ReadWorkingDirectory()
+          ?? fallbackWorkingDirectory ?? Path.GetPathRoot(Environment.CurrentDirectory));
 
   public void SetWorkingDirectory(string? path) {
     if (path is null) {

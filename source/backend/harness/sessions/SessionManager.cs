@@ -57,7 +57,7 @@ public sealed class SessionManager {
       ThrowIfShuttingDown();
       // Changing the preference affects only chats created afterwards.
       string? workingDirectory = toolSettings is null && injectedTools.Count == 0
-          ? null : preferences.Read().WorkingDirectory ?? fallbackWorkingDirectory;
+          ? null : preferences.Read(fallbackWorkingDirectory).WorkingDirectory;
       SessionRecord record = store.Sessions.CreatePrimary(Guid.NewGuid(), workingDirectory);
       session = Track(CreateSession(record));
     }

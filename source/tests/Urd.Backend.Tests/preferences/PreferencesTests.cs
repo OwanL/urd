@@ -15,6 +15,8 @@ public sealed class PreferencesTests {
     Directory.CreateDirectory(directory);
     using (UrdStore store = UrdStore.Open(database.Path)) {
       var preferences = new PreferenceManager(store);
+      string? fallback = Path.GetPathRoot(Environment.CurrentDirectory);
+      Assert.Equal(fallback, preferences.Read().WorkingDirectory);
       preferences.SetWorkingDirectory(directory + new string(Path.DirectorySeparatorChar, 3));
       Assert.Equal(Path.GetFullPath(directory), preferences.Read().WorkingDirectory);
     }
@@ -25,7 +27,7 @@ public sealed class PreferencesTests {
     Assert.Throws<ArgumentException>(() => saved.SetWorkingDirectory("relative"));
     Assert.Throws<ArgumentException>(() => saved.SetWorkingDirectory(Path.Combine(directory, "missing")));
     saved.SetWorkingDirectory(null);
-    Assert.Null(saved.Read().WorkingDirectory);
+    Assert.Equal(Path.GetPathRoot(Environment.CurrentDirectory), saved.Read().WorkingDirectory);
   }
 
   [Fact]

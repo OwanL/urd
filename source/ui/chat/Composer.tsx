@@ -1,5 +1,5 @@
 import type { TargetedKeyboardEvent } from "preact";
-import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
+import { useEffect, useId, useLayoutEffect, useRef } from "preact/hooks";
 import { IconButton } from "../components/IconButton.tsx";
 import type { ComposerProps } from "./ComposerTypes.ts";
 import { ModelPicker } from "./ModelPicker.tsx";
@@ -31,7 +31,10 @@ export function Composer({
   onSend,
   onStop,
   indicators,
+  emptyHint,
 }: ComposerProps) {
+  const hintId = useId();
+  const showHint = !text && Boolean(emptyHint);
   const input = useRef<HTMLTextAreaElement>(null);
   const composing = useRef(false);
   const locked = selectionLocked || working || stopping;
@@ -77,22 +80,30 @@ export function Composer({
         if (canSend) onSend();
       }}
     >
-      <textarea
-        class="composer-input"
-        ref={input}
-        aria-label="Message"
-        placeholder="Message"
-        rows={1}
-        value={text}
-        onInput={(event) => onTextChange(event.currentTarget.value)}
-        onKeyDown={send}
-        onCompositionStart={() => {
-          composing.current = true;
-        }}
-        onCompositionEnd={() => {
-          composing.current = false;
-        }}
-      />
+      <div class="composer-message">
+        <textarea
+          class="composer-input"
+          ref={input}
+          aria-label="Message"
+          aria-describedby={showHint ? hintId : undefined}
+          placeholder={showHint ? "" : "Ask away"}
+          rows={1}
+          value={text}
+          onInput={(event) => onTextChange(event.currentTarget.value)}
+          onKeyDown={send}
+          onCompositionStart={() => {
+            composing.current = true;
+          }}
+          onCompositionEnd={() => {
+            composing.current = false;
+          }}
+        />
+        {showHint && (
+          <div id={hintId} class="composer-empty-hint">
+            {emptyHint}
+          </div>
+        )}
+      </div>
       <div class="composer-controls">
         <div class="composer-selections">
           <ModelPicker

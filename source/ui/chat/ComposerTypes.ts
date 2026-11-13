@@ -37,4 +37,5 @@ export interface ComposerProps {
   onSend: () => void;
   onStop: () => void;
   indicators?: ComponentChildren;
+  emptyHint?: ComponentChildren;
 }

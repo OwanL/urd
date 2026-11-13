@@ -241,17 +241,19 @@ export function Conversation({
             onCancel={() => messageEditing.cancel(sessionId)}
           />
         )}
-      {showWorkingDirectory && (
-        <div class="working-directory-line">
-          <span>Working directory: {snapshot?.workingDirectory}</span>
-          {defaultWorkingDirectoryUnset && (
-            <button type="button" onClick={onSetWorkingDirectory}>
-              Set a default
-            </button>
-          )}
-        </div>
-      )}
       <Composer
+        emptyHint={
+          showWorkingDirectory ? (
+            <div class="composer-directory-hint">
+              <span>Working directory: {snapshot?.workingDirectory}</span>
+              {defaultWorkingDirectoryUnset && (
+                <button type="button" onClick={onSetWorkingDirectory}>
+                  Set a default
+                </button>
+              )}
+            </div>
+          ) : null
+        }
         indicators={
           <SessionIndicators
             contextUsage={snapshot?.contextUsage ?? null}

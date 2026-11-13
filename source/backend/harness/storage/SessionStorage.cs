@@ -57,6 +57,22 @@ internal sealed class SessionStorage(Database database) {
     });
   }
 
+  internal bool HasAcceptedInput(Guid sessionId) => database.Guarded(() => {
+    using SqliteCommand command = database.Command(null, """
+      SELECT EXISTS(SELECT 1 FROM input_decisions WHERE session_id = $session AND decision = 1);
+      """, ("$session", sessionId));
+    return (long)command.ExecuteScalar()! != 0;
+  });
+
+  internal void SetWorkingDirectory(Guid sessionId, string workingDirectory) => database.Write(transaction => {
+    using SqliteCommand command = database.Command(transaction, """
+      UPDATE sessions SET working_directory = $directory WHERE session_id = $session;
+      """, ("$directory", workingDirectory), ("$session", sessionId));
+    if (command.ExecuteNonQuery() == 0)
+      throw new KeyNotFoundException($"Session {sessionId} does not exist.");
+    return true;
+  });
+
   private static SessionRecord ReadRecord(SqliteDataReader reader)
       => new(reader.GetGuid(0), reader.GetInt64(1), reader.IsDBNull(2) ? null : reader.GetString(2));
 }

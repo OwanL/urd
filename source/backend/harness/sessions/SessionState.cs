@@ -8,7 +8,7 @@ public sealed record SessionChange(Guid Session, long Version, string? Status = 
 
 // Bounded committed facts combined with live admission and Stop state by SessionBase.
 public sealed record SessionSnapshot(
-    Guid SessionId, long HistoryRevision, bool AdmissionFenced,
+    Guid SessionId, long HistoryRevision, bool AdmissionFenced, bool CanChangeWorkingDirectory,
     Guid? UnsettledExecutionId, bool StopRequested, SessionExecutionResult? LastSettlement,
     string? FirstUserPreview, IReadOnlyList<PendingInputPreview> PendingInputs,
     LlmSelection? LatestLlmSelection = null, bool IsCompacting = false, SessionWorkingTime? WorkingTime = null,

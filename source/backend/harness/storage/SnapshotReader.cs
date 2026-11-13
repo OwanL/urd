@@ -102,7 +102,7 @@ internal sealed class SnapshotReader {
     PendingInputPreview[] pendingInputs = ReadPendingInputs(transaction, sessionId);
 
     // Storage cannot establish live admission eligibility; the session replaces this fence.
-    return new(sessionId, historyRevision, AdmissionFenced: true,
+    return new(sessionId, historyRevision, AdmissionFenced: true, CanChangeWorkingDirectory: false,
         unsettledExecution, stopRequested, lastSettlement, firstUserPreview, pendingInputs, latestSelection,
         WorkingTime: ReadWorkingTime(transaction, sessionId, startedAt),
         ContextUsage: ReadContextUsage(transaction, sessionId, historyRevision));

@@ -19,6 +19,10 @@ public sealed class PreferenceManager {
       return;
     }
 
+    store.Preferences.SetWorkingDirectory(NormalizeWorkingDirectory(path));
+  }
+
+  internal static string NormalizeWorkingDirectory(string path) {
     if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path))
       throw InvalidWorkingDirectory();
 
@@ -35,7 +39,7 @@ public sealed class PreferenceManager {
     if (!Directory.Exists(normalized))
       throw InvalidWorkingDirectory();
 
-    store.Preferences.SetWorkingDirectory(normalized);
+    return normalized;
   }
 
   private static ArgumentException InvalidWorkingDirectory() =>

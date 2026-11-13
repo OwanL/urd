@@ -28,8 +28,13 @@ unsupported. New sessions use the saved working-directory preference; when unset
 sessions use the process working drive's root (for example `C:\`), not the launch folder or
 data root. Set it in Settings → General, or with `POST /api/preferences/working-directory` using
 `{ "workingDirectory": "C:\\dev\\repos\\your-project" }`; `GET /api/preferences` reads it.
-The path must be an existing absolute directory. Changes apply only to new sessions; existing
-sessions retain their saved directory. The directory is not a sandbox: tools have the server
+The path must be an existing absolute directory. Preference changes apply only to new sessions.
+Before its first accepted message, a chat can override its own directory with
+`POST /api/sessions/{sessionId}/working-directory` and `{ "workingDirectory": "C:\\path" }`.
+The response contains the normalized `workingDirectory`; invalid paths return 400, missing
+sessions 404, and locked/busy/fenced sessions 409. `canChangeWorkingDirectory` in the live
+snapshot reports eligibility. Any accepted input locks the directory, even if provider setup
+fails before transcript content appears; stored snapshots alone never grant this capability. The directory is not a sandbox: tools have the server
 user's full access, without per-call approvals. Existing sessions with an empty frozen tool list
 remain readable and tool-free. Optional `--git-bash` selects an
 absolute Git for Windows Bash executable, independently of the working-directory preference;
@@ -113,6 +118,14 @@ History and descriptor-carrying position windows attach `toolLabels`; full argum
 results and storage excerpts are never included. Tool inspection requires explicit `returned`
 and `full` booleans. Previews (`full=false`) cap each field at 65,536 characters and report
 truncation; Copy requests full text. Image references render without reading image bytes.
+
+GET `/api/files/directories` lists immediate subfolders for an optional absolute `path`;
+omitting it lists Windows drives (or the filesystem root elsewhere). An optional `filter`
+matches folder names case-insensitively. The response is `{path, parentPath, directories,
+truncated}`, with `{name, path}` directory entries, deterministic ordering and a 200-entry
+limit. Filtering narrows truncated listings. Invalid queries return 400, missing folders 404,
+inaccessible folders 403, and filesystem read failures 503. These bounded, cancellable reads
+use the normal browser API gates; they neither reveal files nor change preferences.
 
 POST `/api/files/reveal` accepts `{path}` with an existing absolute path and returns 204
 on Windows. It starts Explorer directly without a shell; missing paths return 404.

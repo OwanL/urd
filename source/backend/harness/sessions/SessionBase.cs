@@ -5,6 +5,7 @@ using Urd.Core.Compaction;
 using Urd.Core.Execution;
 using Urd.Core.Storage;
 using Urd.Core.Providers;
+using Urd.Core.Preferences;
 using Urd.Core.Tools;
 
 namespace Urd.Core.Sessions;
@@ -23,6 +24,7 @@ public abstract class SessionBase {
   private readonly SessionStatus status;
   private bool acceptingUserMessages = true;
   private bool needsAttention;
+  private bool? hasAcceptedInput;
   private SessionExecutionDriver? execution;
   // Retain the driver's task after settlement clears the active execution, so shutdown joins its tail.
   private Task? executionTask;
@@ -49,7 +51,7 @@ public abstract class SessionBase {
 
   public Guid Id { get; }
   public SessionTranscript Transcript { get; }
-  public string? WorkingDirectory { get; }
+  public string? WorkingDirectory { get; private set; }
 
   internal SessionKind Kind { get; }
   internal SessionExecutionRecorder Recorder { get; }
@@ -146,8 +148,30 @@ public abstract class SessionBase {
 
   public async Task<SessionSnapshot> ReadSnapshotAsync(CancellationToken cancellation = default) {
     using var held = await gate.AcquireAsync(cancellation);
-    return status.ApplyLiveState(store.Snapshots.ReadStored(Id), CanAdmit, execution)
-        with { IsCompacting = execution?.IsCompacting == true, WorkingDirectory = WorkingDirectory };
+    SessionSnapshot snapshot = status.ApplyLiveState(store.Snapshots.ReadStored(Id), CanAdmit, execution);
+    return snapshot with {
+      IsCompacting = execution?.IsCompacting == true,
+      WorkingDirectory = WorkingDirectory,
+      CanChangeWorkingDirectory = CanChangeWorkingDirectory(snapshot)
+    };
+  }
+
+  public async Task<string?> TryChangeWorkingDirectoryAsync(string path) {
+    string normalized = PreferenceManager.NormalizeWorkingDirectory(path);
+    using (await gate.AcquireAsync()) {
+      SessionSnapshot stored = store.Snapshots.ReadStored(Id);
+      SessionSnapshot snapshot = status.ApplyLiveState(stored, CanAdmit, execution);
+      if (!CanChangeWorkingDirectory(snapshot))
+        return null;
+
+      WriteToStore(() => {
+        store.Sessions.SetWorkingDirectory(Id, normalized);
+        return true;
+      });
+      WorkingDirectory = normalized;
+      PublishChange();
+      return normalized;
+    }
   }
 
   public async Task<IDisposable> SubscribeAsync(Action<SessionChange> observer, bool watched,
@@ -166,6 +190,8 @@ public abstract class SessionBase {
     using (await gate.AcquireAsync()) {
       (receipt, bool newlyAccepted) = WriteToStore(
           () => store.UserMessages.Admit(Id, HistoryRevision, submission, CanAdmit, Guid.NewGuid(), execution?.ExecutionId));
+      if (receipt.Acceptance == MessageAcceptance.Accepted)
+        hasAcceptedInput = true;
 
       // Steering joins the owned execution; neither it nor a retained receipt starts another driver.
       if (newlyAccepted) {
@@ -365,6 +391,14 @@ public abstract class SessionBase {
   }
 
   private bool IsCurrentExecution(Guid executionId) => execution?.ExecutionId == executionId;
+
+  // Caller holds the session gate.
+  private bool CanChangeWorkingDirectory(SessionSnapshot snapshot) =>
+      WorkingDirectory is not null && CanAdmit && !needsAttention && execution is null
+      && snapshot.UnsettledExecutionId is null && !snapshot.AdmissionFenced && !HasAcceptedInput();
+
+  // Caller holds the session gate. Accepted decisions never become eligible again.
+  private bool HasAcceptedInput() => hasAcceptedInput ??= store.Sessions.HasAcceptedInput(Id);
 
   // Caller holds the session gate.
   internal void PublishChange() => notifications.Publish(status.ReadCurrent(CanAdmit, needsAttention, execution));

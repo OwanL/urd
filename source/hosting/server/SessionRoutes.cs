@@ -23,6 +23,8 @@ internal static class SessionRoutes {
         ReadReceiptAsync(http, sessions, sessionId, submissionId));
     routes.MapPost("/{sessionId}/message-edits", (HttpContext http, Guid sessionId) =>
         EditAsync(http, sessions, sessionId));
+    routes.MapPost("/{sessionId}/working-directory", (HttpContext http, Guid sessionId) =>
+        SetWorkingDirectoryAsync(http, sessions, sessionId));
     routes.MapGet("/{sessionId}/message-edits/{operationId}", (HttpContext http, Guid sessionId, Guid operationId) =>
         WithSessionAsync(http, sessions, sessionId, async session => {
           MessageEditReceipt? receipt = await session.ReadMessageEditReceiptAsync(operationId, http.RequestAborted);
@@ -146,6 +148,18 @@ internal static class SessionRoutes {
     return await WithSessionAsync(http, sessions, sessionId, async session => {
       // Core owns Stop, settlement and replacement even if this browser disconnects.
       return Results.Ok(await session.EditUserMessageAsync(submission));
+    });
+  }
+
+  private static async Task<IResult> SetWorkingDirectoryAsync(HttpContext http, SessionManager sessions, Guid sessionId) {
+    WorkingDirectoryRequest? request = await http.Request.ReadFromJsonAsync<WorkingDirectoryRequest>(http.RequestAborted);
+    if (request?.WorkingDirectory is null)
+      return Results.BadRequest();
+
+    return await WithSessionAsync(http, sessions, sessionId, async session => {
+      // Request cancellation no longer owns the admitted durable mutation.
+      string? workingDirectory = await session.TryChangeWorkingDirectoryAsync(request.WorkingDirectory);
+      return workingDirectory is null ? Results.Conflict() : Results.Ok(new { workingDirectory });
     });
   }
 
@@ -358,6 +372,8 @@ internal static class SessionRoutes {
 
   private static bool IsStopping(HttpContext http)
       => http.RequestServices.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping.IsCancellationRequested;
+
+  private sealed record WorkingDirectoryRequest(string? WorkingDirectory);
 
   private sealed record HistoryQuery(
       string Mode, long ExpectedHistoryRevision, Guid? ExecutionId, Guid? EntryId, string? Kind);

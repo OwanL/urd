@@ -50,6 +50,7 @@ void test("causal snapshot reads release accepted work outside the recent window
     sessionId,
     historyRevision: 7,
     workingDirectory: null,
+    canChangeWorkingDirectory: false,
     admissionFenced: false,
     unsettledExecutionId: null,
     stopRequested: false,

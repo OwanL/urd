@@ -22,6 +22,58 @@
   display: none;
 }
 
+.transcript-empty {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.empty-transcript {
+  padding: 24px 0;
+}
+
+.chat-working-directory {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  padding: 2px 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.chat-working-directory-path {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.chat-working-directory > button {
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.chat-working-directory > button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.chat-working-directory > button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.chat-working-directory > span:not(.chat-working-directory-path) {
+  overflow-wrap: anywhere;
+}
+
 .chat-status button {
   padding: 3px 5px;
   border: 0;

@@ -73,6 +73,7 @@ void test(
       sessionId: id,
       historyRevision: 0,
       workingDirectory: parse(process.cwd()).root,
+      canChangeWorkingDirectory: true,
       admissionFenced: false,
       isCompacting: false,
       unsettledExecutionId: null,

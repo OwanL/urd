@@ -56,6 +56,7 @@ const snapshot: SessionSnapshot = {
   sessionId,
   historyRevision: 7,
   workingDirectory: "C:\\workspace",
+  canChangeWorkingDirectory: false,
   admissionFenced: false,
   unsettledExecutionId: executionId,
   stopRequested: false,
@@ -216,6 +217,15 @@ const mappings: MappingCase[] = [
     method: "GET",
     path: `/api/sessions/${sessionId}/snapshot`,
     response: snapshot,
+  },
+  {
+    name: "set per-session working directory",
+    call: (client) => client.setWorkingDirectory(sessionId, "C:\\workspace\\next"),
+    method: "POST",
+    path: `/api/sessions/${sessionId}/working-directory`,
+    body: { workingDirectory: "C:\\workspace\\next" },
+    response: { workingDirectory: "C:\\workspace\\next" },
+    expected: "C:\\workspace\\next",
   },
   {
     name: "not-sent without a cursor",
@@ -562,6 +572,10 @@ const commands: { name: string; call: (client: SessionClient) => Promise<unknown
   { name: "create", call: (client) => client.create() },
   { name: "submit", call: (client) => client.submitMessage(sessionId, submission) },
   { name: "Stop", call: (client) => client.stopExecution(sessionId, executionId) },
+  {
+    name: "working-directory change",
+    call: (client) => client.setWorkingDirectory(sessionId, "C:\\workspace\\next"),
+  },
   {
     name: "manual compaction",
     call: (client) => client.startCompaction(sessionId, compactionSubmission),

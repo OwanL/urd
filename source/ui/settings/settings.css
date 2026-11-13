@@ -94,29 +94,20 @@
   color: var(--text-primary);
   font-size: 13px;
 }
-.general-settings form {
-  display: grid;
-  gap: 12px;
-}
 .general-settings-field {
   display: grid;
   gap: 6px;
 }
-.general-settings-field input {
-  box-sizing: border-box;
-  width: 100%;
+.general-settings-path {
   min-width: 0;
-  min-height: 36px;
-  padding: 7px 10px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 5px;
   color: var(--text-primary);
-  background: var(--surface-input);
   font: inherit;
+  overflow-wrap: anywhere;
 }
-.general-settings-field input:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+.general-settings-description {
+  margin: -2px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
 }
 .general-settings-actions {
   display: flex;
@@ -138,11 +129,11 @@
 .general-settings-feedback button:hover:not(:disabled) {
   background: var(--surface-hover);
 }
-.general-settings :where(button, input):focus-visible {
+.general-settings button:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
-.general-settings :where(button, input):disabled {
+.general-settings button:disabled {
   opacity: 0.5;
   cursor: default;
 }

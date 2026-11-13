@@ -1,4 +1,4 @@
-import { useCallback } from "preact/hooks";
+import { useCallback, useRef, useState } from "preact/hooks";
 import { MessageEditingContext, InlineMessageEditor } from "./EditableMessage.tsx";
 import type { MessageEditing } from "./MessageEditing.ts";
 import { Composer } from "../chat/Composer.tsx";
@@ -9,6 +9,7 @@ import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
 import { deriveConversationState } from "./ConversationState.ts";
 import type { ConversationExecutionStatus } from "./ConversationState.ts";
 import { Transcript } from "./Transcript.tsx";
+import { SessionWorkingDirectory } from "./SessionWorkingDirectory.tsx";
 import type { ReadingPosition } from "./Transcript.tsx";
 import type { TranscriptDisplay } from "./TranscriptDisplay.ts";
 import type { TranscriptNavigationState } from "../sessions/TranscriptNavigationStorage.ts";
@@ -39,8 +40,6 @@ interface ConversationProps {
   stop: WorkspaceStopState | undefined;
   checking: boolean;
   models: WorkspaceModelState;
-  defaultWorkingDirectoryUnset: boolean;
-  onSetWorkingDirectory(): void;
   ready: boolean;
   canPersist: boolean;
   refresh: number;
@@ -67,8 +66,6 @@ export function Conversation({
   stop,
   checking,
   models,
-  defaultWorkingDirectoryUnset,
-  onSetWorkingDirectory,
   ready,
   canPersist,
   refresh,
@@ -91,6 +88,7 @@ export function Conversation({
     history,
     error: readError,
     visible,
+    acceptSnapshot,
   } = useSessionSnapshot(
     client,
     sessionId,
@@ -102,13 +100,21 @@ export function Conversation({
     active,
     transcript === undefined,
   );
-  const showWorkingDirectory = Boolean(
-    snapshot?.workingDirectory &&
-    snapshot.firstUserPreview === null &&
-    snapshot.unsettledExecutionId === null &&
-    !chat.pending,
-  );
+  const [workingDirectoryLocked, setWorkingDirectoryLocked] = useState(false);
+  const [workingDirectoryNotice, setWorkingDirectoryNotice] = useState<string | null>(null);
+  const workingDirectoryGate = useRef(false);
+  const updateWorkingDirectoryGate = useCallback((locked: boolean, message: string | null) => {
+    workingDirectoryGate.current = locked;
+    setWorkingDirectoryLocked(locked);
+    setWorkingDirectoryNotice(message);
+  }, []);
   const state = deriveConversationState(chat, snapshot, stop, ready, canPersist);
+  const showWorkingDirectory = Boolean(
+    snapshot?.canChangeWorkingDirectory === true &&
+    snapshot.unsettledExecutionId === null &&
+    !chat.pending &&
+    !chat.knownExecutionId,
+  );
   const selection = state.selection;
   const modelKey = selection ? `${selection.connection.id}/${selection.modelId}` : null;
   const error = readError || chat.error || stop?.error;
@@ -146,9 +152,27 @@ export function Conversation({
           onPositionChange={onPositionChange}
           transcriptPosition={transcriptPosition}
           onTranscriptPositionChange={onTranscriptPositionChange}
+          emptyState={
+            (showWorkingDirectory || workingDirectoryLocked) && snapshot ? (
+              <SessionWorkingDirectory
+                client={client}
+                sessionId={sessionId}
+                workingDirectory={snapshot.workingDirectory}
+                disabled={!ready}
+                onGateChange={updateWorkingDirectoryGate}
+                onSnapshot={acceptSnapshot}
+                onRefresh={onRefresh}
+              />
+            ) : null
+          }
         >
           <div class="chat-status" aria-live="polite">
             {error && <span class="inline-error">{error} </span>}
+            {workingDirectoryNotice && (
+              <span class={workingDirectoryLocked ? "inline-error" : undefined}>
+                {workingDirectoryNotice}
+              </span>
+            )}
             {readError && <button onClick={onRefresh}>Refresh</button>}
             {state.admissionFenced && <span>Session admission is fenced. </span>}
             {state.unsettledWhileFenced && <span>Unsettled execution. </span>}
@@ -242,18 +266,6 @@ export function Conversation({
           />
         )}
       <Composer
-        emptyHint={
-          showWorkingDirectory ? (
-            <div class="composer-directory-hint">
-              <span>Working directory: {snapshot?.workingDirectory}</span>
-              {defaultWorkingDirectoryUnset && (
-                <button type="button" onClick={onSetWorkingDirectory}>
-                  Set a default
-                </button>
-              )}
-            </div>
-          ) : null
-        }
         indicators={
           <SessionIndicators
             contextUsage={snapshot?.contextUsage ?? null}
@@ -286,11 +298,12 @@ export function Conversation({
           if (selection) choose({ ...selection, reasoningEffort: effort });
         }}
         selectionLocked={state.selectionLocked}
-        canSend={state.canSend}
+        canSend={state.canSend && !workingDirectoryLocked}
         working={state.active}
         stopping={state.executionStatus === "stopping"}
         onSend={() => {
-          if (snapshot) void commands.send(sessionId, snapshot, state.active, state.canSend);
+          if (!workingDirectoryGate.current && snapshot)
+            void commands.send(sessionId, snapshot, state.active, state.canSend);
         }}
         onStop={() => {
           if (snapshot && state.active) void commands.stop(sessionId, snapshot, state.stopId);

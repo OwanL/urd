@@ -73,9 +73,6 @@ export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("providers");
   const workingDirectoryPreferences = useWorkingDirectoryPreferences(preferencesClient);
-  const defaultWorkingDirectoryUnset =
-    workingDirectoryPreferences.loaded &&
-    workingDirectoryPreferences.preferences?.workingDirectory === null;
   const openSettings = (tab?: SettingsTab) => {
     if (tab) setSettingsTab(tab);
     void workingDirectoryPreferences.refresh();
@@ -218,8 +215,6 @@ export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) 
             ready={connected}
             canPersist={canPersist}
             notice={id === activeId ? events.notice : null}
-            defaultWorkingDirectoryUnset={defaultWorkingDirectoryUnset}
-            onSetWorkingDirectory={() => openSettings("general")}
             refresh={refresh}
             onRefresh={refreshSnapshot}
             editDraft={workspace.editDraft}

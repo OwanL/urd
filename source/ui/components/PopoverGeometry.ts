@@ -1,4 +1,4 @@
-export type PopoverPlacement = "above" | "below";
+export type PopoverPlacement = "above" | "below" | "center";
 
 interface AnchorBounds {
   left: number;
@@ -17,6 +17,14 @@ export function placePopover(
   const gap = 6;
   const maxWidth = Math.max(0, viewport.width - margin * 2);
   const viewportHeight = Math.max(0, viewport.height - margin * 2);
+  if (preferred === "center")
+    return {
+      placement: preferred,
+      left: Math.max(0, (viewport.width - Math.min(size.width, maxWidth)) / 2),
+      top: Math.max(0, (viewport.height - Math.min(size.height, viewportHeight)) / 2),
+      maxWidth,
+      maxHeight: viewportHeight,
+    };
   const above = Math.min(viewportHeight, Math.max(0, anchor.top - gap - margin));
   const below = Math.min(
     viewportHeight,

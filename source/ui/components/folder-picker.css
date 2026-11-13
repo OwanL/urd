@@ -1,0 +1,128 @@
+.folder-picker {
+  --popover-max-width: 620px;
+  display: flex;
+  flex-direction: column;
+  width: min(560px, calc(100vw - 16px));
+  height: min(560px, calc(100vh - 16px));
+  padding: 10px;
+  gap: 10px;
+  overflow: auto;
+}
+.folder-picker-heading h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+.folder-picker-path,
+.folder-picker-filter {
+  display: flex;
+  align-items: end;
+  gap: 8px;
+}
+.folder-picker-path label,
+.folder-picker-filter {
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.folder-picker-path label {
+  display: grid;
+  flex: 1;
+  gap: 5px;
+}
+.folder-picker-path input,
+.folder-picker-filter input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  color: var(--text-primary);
+  background: var(--surface-input);
+  font: inherit;
+}
+.folder-picker-path button,
+.folder-picker-navigation button,
+.folder-picker-list button,
+.folder-picker-error button,
+.folder-picker-actions button {
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  color: var(--text-primary);
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+.folder-picker button:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+.folder-picker button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.folder-picker :where(button, input):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.folder-picker-navigation {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+.folder-picker-filter {
+  display: grid;
+  gap: 5px;
+}
+.folder-picker-guidance {
+  flex: 0 0 auto;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.folder-picker-list {
+  flex: 1;
+  min-height: 80px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.folder-picker-list > p,
+.folder-picker-error p {
+  margin: 4px 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.folder-picker-error {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+}
+.folder-picker-error [role="alert"] {
+  color: var(--danger);
+}
+.folder-picker-list ul {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  gap: 3px;
+  list-style: none;
+}
+.folder-picker-list li button {
+  width: 100%;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.folder-picker-actions {
+  display: flex;
+  flex: 0 0 auto;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.folder-picker-actions button:first-child {
+  border-color: var(--accent);
+}

@@ -37,7 +37,7 @@ export function Settings({
   const state = useProviderSettings(client, open, onChanged);
   const [search, setSearch] = useState("");
   const searchInput = useRef<HTMLInputElement>(null);
-  const workingDirectoryInput = useRef<HTMLInputElement>(null);
+  const workingDirectoryButton = useRef<HTMLButtonElement>(null);
   const providersTab = useRef<HTMLButtonElement>(null);
   const generalTab = useRef<HTMLButtonElement>(null);
   const id = useId();
@@ -67,7 +67,7 @@ export function Settings({
       class="settings-popover"
       label="Settings"
       placement="below"
-      initialFocus={tab === "providers" ? searchInput : workingDirectoryInput}
+      initialFocus={tab === "providers" ? searchInput : workingDirectoryButton}
       onClose={close}
     >
       <header class="settings-heading">
@@ -132,7 +132,7 @@ export function Settings({
         aria-labelledby={`${id}-general-tab`}
         hidden={tab !== "general"}
       >
-        <GeneralSettings state={preferences} inputRef={workingDirectoryInput} />
+        <GeneralSettings state={preferences} buttonRef={workingDirectoryButton} />
       </section>
     </Popover>
   );

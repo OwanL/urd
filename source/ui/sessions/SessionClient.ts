@@ -56,6 +56,17 @@ export class SessionClient {
     );
   }
 
+  async setWorkingDirectory(sessionId: string, workingDirectory: string): Promise<string> {
+    const result = await requestJson<{ workingDirectory: string }>(
+      this.url(`/${encodeURIComponent(sessionId)}/working-directory`),
+      "POST",
+      { workingDirectory },
+    );
+    if (typeof result?.workingDirectory !== "string" || !result.workingDirectory)
+      throw new TypeError("Server returned an invalid working directory.");
+    return result.workingDirectory;
+  }
+
   getNotSent(sessionId: string, cursor?: string, signal?: AbortSignal): Promise<NotSentPage> {
     const url = this.url(`/${encodeURIComponent(sessionId)}/not-sent`);
     if (cursor !== undefined) url.searchParams.set("cursor", cursor);

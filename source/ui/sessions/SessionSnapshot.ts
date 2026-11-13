@@ -22,6 +22,7 @@ export interface SessionSnapshot {
   readonly sessionId: string;
   readonly historyRevision: number;
   readonly workingDirectory: string | null;
+  readonly canChangeWorkingDirectory: boolean;
   readonly admissionFenced: boolean;
   readonly unsettledExecutionId: string | null;
   readonly isCompacting?: boolean;

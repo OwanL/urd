@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import type { SessionClient } from "../sessions/SessionClient.ts";
 import type { TranscriptHistoryPage } from "../sessions/Messages.ts";
 import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
@@ -21,6 +21,22 @@ export function useSessionSnapshot(
   const requestRead = useRef<() => void>(() => {});
   const current = useRef({ knownExecutionId, onSnapshot, notice, sending });
   current.current = { knownExecutionId, onSnapshot, notice, sending };
+  const snapshotVersion = useRef(0);
+  const acceptSnapshot = useCallback(
+    (next: SessionSnapshot) => {
+      if (
+        next.sessionId !== sessionId ||
+        !Number.isSafeInteger(next.historyRevision) ||
+        typeof next.canChangeWorkingDirectory !== "boolean"
+      )
+        throw new TypeError("Invalid session snapshot.");
+      snapshotVersion.current++;
+      setSnapshot(next);
+      setError(null);
+      current.current.onSnapshot(next, current.current.knownExecutionId);
+    },
+    [sessionId],
+  );
 
   useEffect(() => {
     setError(null);
@@ -48,6 +64,7 @@ export function useSessionSnapshot(
       const request = new AbortController();
       controller = request;
       const knownWhenRead = current.current.knownExecutionId;
+      const versionWhenRead = snapshotVersion.current;
       try {
         const next = await client.getSnapshot(requestedSessionId, request.signal);
         if (request.signal.aborted || disposed) return;
@@ -62,6 +79,10 @@ export function useSessionSnapshot(
             )
           : null;
         if (request.signal.aborted || disposed) return;
+        if (versionWhenRead !== snapshotVersion.current) {
+          queued = true;
+          return;
+        }
         if (
           nextHistory &&
           (nextHistory.sessionId !== requestedSessionId ||
@@ -75,7 +96,7 @@ export function useSessionSnapshot(
         setError(null);
         current.current.onSnapshot(next, knownWhenRead);
       } catch (cause) {
-        if (!request.signal.aborted && !disposed)
+        if (!request.signal.aborted && !disposed && versionWhenRead === snapshotVersion.current)
           setError(cause instanceof Error ? cause.message : "Session read failed.");
       } finally {
         if (controller === request) controller = null;
@@ -146,5 +167,6 @@ export function useSessionSnapshot(
     history: history?.sessionId === sessionId ? history : null,
     error,
     visible: enabled && visible,
+    acceptSnapshot,
   };
 }

@@ -233,6 +233,7 @@ export interface ReadingPosition {
 
 export interface TranscriptProps {
   children?: ComponentChildren;
+  emptyState?: ComponentChildren;
   client: SessionClient;
   history: TranscriptHistoryPage | null;
   historyRevision?: number | null;
@@ -248,6 +249,22 @@ export interface TranscriptProps {
 }
 
 export function Transcript(props: TranscriptProps) {
+  if (props.emptyState)
+    return (
+      <div class="transcript-area">
+        <div
+          class="transcript transcript-empty"
+          role="region"
+          aria-label="Conversation"
+          tabIndex={0}
+        >
+          <div class="empty-transcript">
+            {props.emptyState}
+            {props.children}
+          </div>
+        </div>
+      </div>
+    );
   if (props.display)
     return (
       <VirtualTranscript

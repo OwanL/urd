@@ -38,6 +38,17 @@ void test("clamps horizontal overflow and oversized content", () => {
   assert.equal(wide.maxWidth, 784);
 });
 
+void test("centers folder dialogs using the full viewport rather than space beside the anchor", () => {
+  const anchor = { left: 20, top: 210, bottom: 230 };
+  assert.deepEqual(
+    placePopover(anchor, { width: 560, height: 560 }, { width: 600, height: 400 }, "center"),
+    { placement: "center", left: 20, top: 8, maxWidth: 584, maxHeight: 384 },
+  );
+  const centered = placePopover(anchor, size, viewport, "center");
+  assert.equal(centered.left, 300);
+  assert.equal(centered.top, 240);
+});
+
 void test("handles offscreen anchors and tiny viewports without negative available sizes", () => {
   const above = placePopover({ left: 900, top: 900, bottom: 930 }, size, viewport);
   assert.equal(above.placement, "above");

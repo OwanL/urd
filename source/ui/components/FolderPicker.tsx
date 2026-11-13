@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { RequestError } from "../http/RequestError.ts";
 import { DirectoryClient } from "../files/DirectoryClient.ts";
 import type { DirectoryListing } from "../files/DirectoryClient.ts";
+import { DirectoryTree } from "./DirectoryTree.tsx";
 import { Popover } from "./Popover.tsx";
 import "./folder-picker.css";
 
@@ -224,26 +225,18 @@ export function FolderPicker({
         {!loading && listing && listing.directories.length === 0 && (
           <p>{filter ? "No matching folders." : "No folders."}</p>
         )}
-        {!loading && listing && listing.directories.length > 0 && (
-          <ul>
-            {listing.directories.map((directory) => (
-              <li key={directory.path}>
-                <button
-                  type="button"
-                  onClick={() => navigate(directory.path)}
-                  disabled={!canNavigate}
-                >
-                  <svg class="folder-picker-folder-icon" aria-hidden="true" viewBox="0 0 24 24">
-                    <path d="M3 6h7l2 2h9v10H3z" />
-                  </svg>
-                  <span>{directory.name}</span>
-                  <svg class="folder-picker-row-chevron" aria-hidden="true" viewBox="0 0 24 24">
-                    <path d="m9 18 6-6-6-6" />
-                  </svg>
-                </button>
-              </li>
-            ))}
-          </ul>
+        {!loading && listing && (
+          <DirectoryTree
+            listing={listing}
+            client={client}
+            disabled={!canNavigate}
+            selectedPath={pathText || null}
+            onSelect={(path) => {
+              pathEdited.current = true;
+              setPathText(path);
+            }}
+            onOpen={navigate}
+          />
         )}
       </div>
       {(feedback != null || saveError) && (

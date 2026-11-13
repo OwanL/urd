@@ -47,7 +47,6 @@
 }
 .folder-picker-path button,
 .folder-picker-navigation button,
-.folder-picker-list button,
 .folder-picker-error button,
 .folder-picker-actions button {
   min-height: 34px;
@@ -143,42 +142,6 @@
 .folder-picker-error [role="alert"],
 .folder-picker-feedback [role="alert"] {
   color: var(--danger);
-}
-.folder-picker-list ul {
-  display: grid;
-  margin: 0;
-  padding: 0;
-  gap: 3px;
-  list-style: none;
-}
-.folder-picker-list li button {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  gap: 9px;
-  text-align: left;
-  overflow-wrap: anywhere;
-}
-.folder-picker-list li button span {
-  min-width: 0;
-  flex: 1;
-}
-.folder-picker-folder-icon,
-.folder-picker-row-chevron {
-  width: 16px;
-  height: 16px;
-  flex: 0 0 16px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.6;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-.folder-picker-folder-icon {
-  color: var(--text-secondary);
-}
-.folder-picker-row-chevron {
-  color: var(--text-secondary);
 }
 .folder-picker-feedback {
   max-height: 80px;

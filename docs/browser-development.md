@@ -21,8 +21,10 @@ path affects this chat only; the default applies to new chats only. Typing keeps
 visible; the composer always uses “Ask away”. Acceptance locks the chat's directory,
 including when provider setup fails before visible history. Changing a chat's directory
 never changes the default.
-The shared folder browser lists subfolders on demand, supports parent/location navigation,
-filtering and an optional pasted path. Unknown directory saves block Send until an explicit
+The shared folder browser uses Zag's Preact tree for selection, expansion, keyboard navigation
+and typeahead. Subfolders load on demand; selecting a row changes only the draft path.
+The browser also supports parent/location navigation, filtering the displayed directory
+and an optional pasted path. Unknown directory saves block Send until an explicit
 snapshot read confirms the current directory; writes are never automatically repeated.
 Snooze remains unavailable. The UI displays a bounded, navigable transcript with compact tool
 rows, on-demand input/output inspection and Markdown rendering. The history API supports

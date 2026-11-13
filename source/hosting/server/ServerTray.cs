@@ -3,6 +3,7 @@ using System.Drawing;
 using System.Runtime.Versioning;
 using H.NotifyIcon.Core;
 using H.NotifyIcon.Interop;
+using Microsoft.Win32;
 
 namespace Urd.Server;
 
@@ -55,8 +56,10 @@ internal sealed class ServerTray : IDisposable {
   }
 
   private void Run() {
-    if (TryCreate())
-      WindowUtilities.RunMessageLoop();
+    if (!TryCreate())
+      return;
+    TryPromote();
+    WindowUtilities.RunMessageLoop();
   }
 
   private bool TryCreate() {
@@ -67,6 +70,35 @@ internal sealed class ServerTray : IDisposable {
       Console.Error.WriteLine($"Tray icon unavailable: {failure.Message}");
       return false;
     }
+  }
+
+  // Windows 11 starts new icons in the hidden overflow. Shortly after the icon is added, the shell records its
+  // setting by icon GUID; show ours unless the user has since hidden it there (IsPromoted = 0).
+  private void TryPromote() {
+    string iconGuid = trayIcon.Id.ToString("B");
+    try {
+      for (int attempt = 0; attempt < 20; attempt++) {
+        using RegistryKey? settings = Registry.CurrentUser.OpenSubKey(@"Control Panel\NotifyIconSettings");
+        if (settings is null || Promote(settings, iconGuid))
+          return;
+        Thread.Sleep(100);
+      }
+    } catch (Exception failure) {
+      Console.Error.WriteLine($"Could not show the tray icon outside the overflow: {failure.Message}");
+    }
+  }
+
+  private static bool Promote(RegistryKey settings, string iconGuid) {
+    string? entryName = settings.GetSubKeyNames().FirstOrDefault(name => {
+      using RegistryKey? candidate = settings.OpenSubKey(name);
+      return string.Equals(candidate?.GetValue("IconGuid") as string, iconGuid, StringComparison.OrdinalIgnoreCase);
+    });
+    if (entryName is null)
+      return false;
+    using RegistryKey? entry = settings.OpenSubKey(entryName, writable: true);
+    if (entry is not null && entry.GetValue("IsPromoted") is null)
+      entry.SetValue("IsPromoted", 1, RegistryValueKind.DWord);
+    return true;
   }
 
   // Menu clicks run inside Show, so this also keeps a failed Open or Stop from escaping the tray thread.

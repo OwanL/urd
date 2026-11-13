@@ -57,7 +57,8 @@ On Windows, a ready server shows a notification-area icon (via
 test launchers pass it. The tooltip shows the served address. Clicking the icon opens a menu:
 **Open** launches the address in the default browser; **Stop Urd** requests the same graceful
 shutdown as Ctrl+C. The icon is removed after shutdown finishes. Tray failures go to stderr
-and never stop the server. New icons start in Windows' hidden-icons overflow; pin it from there.
+and never stop the server. On Windows 11 the icon is shown on the taskbar rather than in the
+hidden-icons overflow, unless it has been hidden in Settings → Personalization → Taskbar.
 
 ## HTTP and local access
 

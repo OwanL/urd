@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { parse } from "node:path";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { SessionClient } from "../sessions/SessionClient.ts";
@@ -71,6 +72,7 @@ void test(
     assert.deepEqual(initial, {
       sessionId: id,
       historyRevision: 0,
+      workingDirectory: parse(process.cwd()).root,
       admissionFenced: false,
       isCompacting: false,
       unsettledExecutionId: null,

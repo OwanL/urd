@@ -212,6 +212,7 @@ export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) 
             stop={commandState.stopping[id]}
             checking={commandState.checking[id] ?? false}
             models={models}
+            preferences={workingDirectoryPreferences}
             ready={connected}
             canPersist={canPersist}
             notice={id === activeId ? events.notice : null}

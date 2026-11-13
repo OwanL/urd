@@ -25,7 +25,7 @@
 .transcript-empty {
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
+  justify-content: center;
 }
 
 .empty-transcript {
@@ -35,7 +35,7 @@
 .chat-working-directory {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
   min-width: 0;
   padding: 2px 0;
@@ -43,12 +43,22 @@
   font-size: 12px;
 }
 
+.chat-working-directory-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 2px 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+
 .chat-working-directory-path {
   min-width: 0;
+  max-width: 100%;
   overflow-wrap: anywhere;
 }
 
-.chat-working-directory > button {
+:is(.chat-working-directory, .chat-working-directory-row) > button {
   flex: none;
   padding: 0;
   border: 0;
@@ -60,12 +70,13 @@
   cursor: pointer;
 }
 
-.chat-working-directory > button:disabled {
+:is(.chat-working-directory, .chat-working-directory-row)
+  > button:is(:disabled, [aria-disabled="true"]) {
   opacity: 0.6;
   cursor: default;
 }
 
-.chat-working-directory > button:focus-visible {
+:is(.chat-working-directory, .chat-working-directory-row) > button:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }

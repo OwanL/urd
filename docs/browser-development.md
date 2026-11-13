@@ -13,10 +13,11 @@ snapshot/history metadata and loads message text on demand.
 The workspace has closable, reorderable local tabs, transcript, model and reasoning
 selectors, Send, Stop and integrated [provider settings](provider-management.md#browser-settings).
 Settings → General holds the default working directory, selected through a folder browser.
-Before the first accepted message, the empty transcript shows “Working in …” and a
-Choose folder action for this chat only. Typing keeps that choice visible; the composer
-always uses “Ask away”. Acceptance locks the chat's directory, including when provider
-setup fails before visible history. Changing a chat's directory never changes the default.
+Before the first accepted message, the empty transcript centers clickable default and
+current working-directory paths; changing the current path affects this chat only. The
+default applies to new chats only. Typing keeps the choice visible; the composer always
+uses “Ask away”. Acceptance locks the chat's directory, including when provider setup
+fails before visible history. Changing a chat's directory never changes the default.
 The shared folder browser lists subfolders on demand, supports parent/location navigation,
 filtering and an optional pasted path. Unknown directory saves block Send until an explicit
 snapshot read confirms the current directory; writes are never automatically repeated.

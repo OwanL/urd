@@ -6,6 +6,7 @@ import { SessionIndicators } from "../chat/SessionIndicators.tsx";
 import type { LlmSelection } from "../providers/LlmSelection.ts";
 import type { SessionClient } from "../sessions/SessionClient.ts";
 import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
+import type { WorkingDirectoryPreferenceState } from "../preferences/useWorkingDirectoryPreferences.ts";
 import { deriveConversationState } from "./ConversationState.ts";
 import type { ConversationExecutionStatus } from "./ConversationState.ts";
 import { Transcript } from "./Transcript.tsx";
@@ -40,6 +41,7 @@ interface ConversationProps {
   stop: WorkspaceStopState | undefined;
   checking: boolean;
   models: WorkspaceModelState;
+  preferences: WorkingDirectoryPreferenceState;
   ready: boolean;
   canPersist: boolean;
   refresh: number;
@@ -66,6 +68,7 @@ export function Conversation({
   stop,
   checking,
   models,
+  preferences,
   ready,
   canPersist,
   refresh,
@@ -158,6 +161,7 @@ export function Conversation({
                 client={client}
                 sessionId={sessionId}
                 workingDirectory={snapshot.workingDirectory}
+                preferences={preferences}
                 disabled={!ready}
                 onGateChange={updateWorkingDirectoryGate}
                 onSnapshot={acceptSnapshot}

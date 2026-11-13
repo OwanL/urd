@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { FolderPicker } from "../components/FolderPicker.tsx";
 import { RequestError } from "../http/RequestError.ts";
+import type { WorkingDirectoryPreferenceState } from "../preferences/useWorkingDirectoryPreferences.ts";
 import type { SessionClient } from "../sessions/SessionClient.ts";
 import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
 
@@ -8,6 +9,7 @@ interface SessionWorkingDirectoryProps {
   client: SessionClient;
   sessionId: string;
   workingDirectory: string | null;
+  preferences: WorkingDirectoryPreferenceState;
   disabled: boolean;
   onGateChange(locked: boolean, notice: string | null): void;
   onSnapshot(snapshot: SessionSnapshot): void;
@@ -20,15 +22,17 @@ export function SessionWorkingDirectory({
   client,
   sessionId,
   workingDirectory,
+  preferences,
   disabled,
   onGateChange,
   onSnapshot,
   onRefresh,
 }: SessionWorkingDirectoryProps) {
-  const anchor = useRef<HTMLButtonElement>(null);
+  const currentAnchor = useRef<HTMLButtonElement>(null);
+  const defaultAnchor = useRef<HTMLButtonElement>(null);
   const operationInProgress = useRef(false);
   const [directory, setDirectory] = useState(workingDirectory);
-  const [pickerOpen, setPickerOpen] = useState(false);
+  const [picker, setPicker] = useState<"default" | "current" | null>(null);
   const [changeState, setChangeState] = useState<ChangeState>("idle");
   const [failure, setFailure] = useState<string | null>(null);
   const [savedDirectory, setSavedDirectory] = useState<string | null>(null);
@@ -106,37 +110,76 @@ export function SessionWorkingDirectory({
     }
   }
 
+  const defaultDirectory = preferences.preferences?.workingDirectory ?? null;
+  const pickerAnchor = picker === "default" ? defaultAnchor : currentAnchor;
+
   return (
     <div class="chat-working-directory">
-      <span class="chat-working-directory-path">
-        {directory ? `Working in ${directory}` : "Working directory not set"}
-      </span>
-      {changeState === "uncertain" ? (
+      <div class="chat-working-directory-row">
+        Default cwd is{" "}
+        <button
+          ref={defaultAnchor}
+          class="chat-working-directory-path"
+          type="button"
+          aria-label={`Change default cwd: ${defaultDirectory ?? "not set"}`}
+          aria-haspopup="dialog"
+          aria-expanded={picker === "default"}
+          disabled={disabled || !preferences.loaded}
+          aria-disabled={preferences.pending}
+          onClick={() => {
+            if (!preferences.pending) setPicker("default");
+          }}
+        >
+          {preferences.loaded
+            ? (defaultDirectory ?? "not set")
+            : preferences.error
+              ? "unavailable"
+              : "loading…"}
+        </button>
+      </div>
+      <div class="chat-working-directory-row">
+        Current cwd is{" "}
+        <button
+          ref={currentAnchor}
+          class="chat-working-directory-path"
+          type="button"
+          aria-label={`Change current cwd: ${directory ?? "not set"}`}
+          aria-haspopup="dialog"
+          aria-expanded={picker === "current"}
+          disabled={disabled}
+          aria-disabled={changeState !== "idle"}
+          onClick={() => {
+            if (changeState === "idle" && !operationInProgress.current) setPicker("current");
+          }}
+        >
+          {directory ?? "not set"}
+        </button>
+      </div>
+      {changeState === "uncertain" && (
         <button type="button" onClick={() => void reconcile()}>
           Check current directory
         </button>
-      ) : (
-        <button
-          ref={anchor}
-          type="button"
-          aria-haspopup="dialog"
-          aria-expanded={pickerOpen}
-          disabled={disabled || changeState !== "idle"}
-          onClick={() => setPickerOpen(true)}
-        >
-          Choose folder…
+      )}
+      {changeState === "saving" && <span>Saving current cwd…</span>}
+      {changeState === "reconciling" && <span>Checking current cwd…</span>}
+      {preferences.pending && <span>Saving default cwd…</span>}
+      {preferences.error && <span role="alert">{preferences.error}</span>}
+      {preferences.error && !preferences.loaded && (
+        <button type="button" onClick={() => void preferences.refresh()}>
+          Retry default cwd
         </button>
       )}
-      {changeState === "saving" && <span>Saving…</span>}
-      {changeState === "reconciling" && <span>Checking…</span>}
-      {pickerOpen && changeState === "idle" && (
+      {picker && (
         <FolderPicker
-          anchor={anchor}
-          initialPath={directory}
-          onChoose={(path) => void save(path)}
+          anchor={pickerAnchor}
+          initialPath={picker === "default" ? defaultDirectory : directory}
+          onChoose={(path) => {
+            if (picker === "default") void preferences.save(path);
+            else void save(path);
+          }}
           onClose={(returnFocus) => {
-            setPickerOpen(false);
-            if (returnFocus) anchor.current?.focus({ preventScroll: true });
+            setPicker(null);
+            if (returnFocus) pickerAnchor.current?.focus({ preventScroll: true });
           }}
         />
       )}

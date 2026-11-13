@@ -243,7 +243,10 @@ successful no-tool response. Already-claimed requests are unchanged. The HTTP la
 busy policy or steering-specific routes and does not turn a durable refusal into an HTTP error.
 History entries include tool names and execution status. Inspect arguments/results on demand
 at `/api/sessions/{sessionId}/tool-calls/{requestId}/{callId}` with explicit `returned` and
-`full` flags. Previews are bounded to 65,536 characters per field and report truncation.
+`full` flags. Previews are bounded to 65,536 characters per field at the storage read,
+without loading inspection-only details, and report truncation. `projectionFinal` means
+the model-facing image projection is fixed for this history revision. Copy can reuse a
+complete preview only when that flag is true and the tool payload has finished.
 
 Stop addresses the observed execution ID, never a replacement: `Requested` acknowledges committed
 intent and pending-steering retirement, not finished cleanup; `Settled` includes the saved

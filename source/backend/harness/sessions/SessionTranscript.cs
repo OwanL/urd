@@ -39,17 +39,6 @@ public sealed class SessionTranscript {
     store.Content.ValidateSourceExtent(extent);
   }
 
-  private static string LimitCharacters(string value, int limit, out bool truncated) {
-    truncated = value.Length > limit;
-    if (!truncated)
-      return value;
-
-    int length = limit;
-    if (length > 0 && char.IsHighSurrogate(value[length - 1]) && char.IsLowSurrogate(value[length]))
-      length--;
-    return value[..length];
-  }
-
   private void ValidateExtentSession(MessageContentExtent extent) {
     if (extent.SessionId != sessionId)
       throw new ArgumentException("The content extent belongs to another session.", nameof(extent));
@@ -66,18 +55,8 @@ public sealed class SessionTranscript {
       throw new ArgumentOutOfRangeException(nameof(characterLimit));
 
     using var held = await gate.AcquireAsync(cancellation);
-    ToolCallTranscript? transcript = store.Tools.ReadTranscript(
-        sessionId, expectedHistoryRevision, requestId, callId, returned);
-    if (transcript is null || characterLimit is not { } limit)
-      return transcript;
-
-    string input = LimitCharacters(transcript.Input, limit, out bool inputTruncated);
-    string? output = transcript.Output;
-    bool outputTruncated = false;
-    if (output is not null)
-      output = LimitCharacters(output, limit, out outputTruncated);
-    bool truncated = transcript.Truncated || inputTruncated || outputTruncated;
-    return transcript with { Input = input, Output = output, Truncated = truncated };
+    return store.Tools.ReadTranscript(
+        sessionId, expectedHistoryRevision, requestId, callId, returned, characterLimit);
   }
 
   public async Task<TranscriptHistoryPage> ReadHistoryAsync(

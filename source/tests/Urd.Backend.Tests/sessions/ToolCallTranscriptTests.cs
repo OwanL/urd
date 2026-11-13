@@ -48,6 +48,84 @@ public sealed class ToolCallTranscriptTests {
         0, calls.DirectRequest, "direct", returned: false));
   }
 
+  [Fact]
+  public async Task PreviewAllocationsStayBoundedForLargeArgumentsResultsAndInspectionOnlyDetails() {
+    var client = new ScriptedChatClient(token => Complete(token));
+    await using var fixture = new ExecutionFixture(client);
+    TranscriptCalls calls = SeedToolCalls(fixture.Database, fixture.Session.Id);
+    string large = new('x', 2 * 1024 * 1024);
+    string arguments = JsonSerializer.Serialize(new { content = large });
+    foreach (string text in new[] { large, "short\n😀\t\\\"" }) {
+      string result = JsonSerializer.Serialize(new { text, images = Array.Empty<object>(), details = large, isError = false });
+      fixture.Database.Execute($"UPDATE execution_tools SET arguments_json = '{arguments}', result_json = '{result}' "
+          + $"WHERE request_id = '{calls.DirectRequest:D}';");
+      await fixture.Session.Transcript.ReadToolCallTranscriptAsync(0, calls.DirectRequest, "direct", false, 64);
+      long before = GC.GetAllocatedBytesForCurrentThread();
+      Task<ToolCallTranscript?> read = fixture.Session.Transcript.ReadToolCallTranscriptAsync(
+          0, calls.DirectRequest, "direct", false, 64);
+      long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+      Assert.True(read.IsCompletedSuccessfully, "The uncontended read must finish on the measured thread.");
+      ToolCallTranscript preview = Assert.IsType<ToolCallTranscript>(await read);
+      Assert.Equal(arguments[..64], preview.Input);
+      Assert.Equal(text[..Math.Min(text.Length, 64)], preview.Output);
+      Assert.True(preview.Truncated);
+      Assert.True(allocated < 512 * 1024, $"A 64-character preview allocated {allocated:N0} bytes.");
+    }
+  }
+
+  [Fact]
+  public async Task PreviewMatchesFullModelProjectionAtCharacterAndUnicodeBoundaries() {
+    foreach (bool supportsImages in new[] { true, false }) {
+      var client = new ScriptedChatClient(token => Complete(token));
+      await using var fixture = new ExecutionFixture(client);
+      TranscriptCalls calls = SeedToolCalls(fixture.Database, fixture.Session.Id, supportsImages, returnedImage: true);
+      fixture.Database.Execute($"UPDATE execution_tools SET result_json = json_set(result_json, '$.text', '') "
+          + $"WHERE request_id = '{calls.ReturnedRequest:D}';");
+      foreach ((Guid request, string call, bool returned) in new[] {
+          (calls.DirectRequest, "direct", false), (calls.ReturnedRequest, "returned", false),
+          (calls.ReturnedRequest, "returned", true), (calls.RunningRequest, "running", false),
+          (calls.UnicodeRequest, "unicode", false) }) {
+        ToolCallTranscript full = Assert.IsType<ToolCallTranscript>(await fixture.Session.Transcript.ReadToolCallTranscriptAsync(
+            0, request, call, returned));
+        int length = Math.Max(full.Input.Length, full.Output?.Length ?? 0);
+        foreach (int limit in new[] { 0, 1, 2, 3, 12, 64, 128, length, length + 1 }) {
+          ToolCallTranscript preview = Assert.IsType<ToolCallTranscript>(await fixture.Session.Transcript.ReadToolCallTranscriptAsync(
+              0, request, call, returned, limit));
+          Assert.Equal(ScalarPrefix(full.Input, limit), preview.Input);
+          Assert.Equal(ScalarPrefix(full.Output, limit), preview.Output);
+          Assert.Equal(full.Input.Length > limit || full.Output?.Length > limit, preview.Truncated);
+        }
+      }
+    }
+  }
+
+  private static string? ScalarPrefix(string? value, int limit) {
+    int length = 0;
+    return value is null ? null : string.Concat(value.EnumerateRunes().TakeWhile(rune => {
+      length += rune.Utf16SequenceLength;
+      return length <= limit;
+    }));
+  }
+
+  [Fact]
+  public async Task FinishedPayloadIsNotFinalUntilItsModelFacingImageProjectionIsKnown() {
+    var client = new ScriptedChatClient(token => Complete(token));
+    await using var fixture = new ExecutionFixture(client);
+    Guid request = SeedStoppedDirectResult(fixture.Database, fixture.Session.Id, neverAttemptedContinuation: false);
+    fixture.Database.Execute($"UPDATE execution_requests SET attempt = 1 WHERE request_id <> '{request:D}';");
+    ToolCallTranscript pending = Assert.IsType<ToolCallTranscript>(await fixture.Session.Transcript.ReadToolCallTranscriptAsync(
+        0, request, "direct", false, 65536));
+    Assert.False(pending.ProjectionFinal);
+    Assert.False(pending.Truncated);
+    Assert.Equal("direct output\n[image: image/png]", pending.Output);
+
+    fixture.Database.Execute($"UPDATE execution_requests SET attempt = 2 WHERE request_id <> '{request:D}';");
+    ToolCallTranscript delivered = Assert.IsType<ToolCallTranscript>(await fixture.Session.Transcript.ReadToolCallTranscriptAsync(
+        0, request, "direct", false, 65536));
+    Assert.True(delivered.ProjectionFinal);
+    Assert.Equal("direct output\n[Images omitted because the current model does not support images.]", delivered.Output);
+  }
+
   [Theory]
   [InlineData(true, "direct output\n[image: image/png]")]
   [InlineData(false, "direct output\n[Images omitted because the current model does not support images.]")]
@@ -167,7 +245,7 @@ public sealed class ToolCallTranscriptTests {
     string directArguments = JsonSerializer.Serialize(new { path = "file.txt" });
     string runningArguments = JsonSerializer.Serialize(new { });
     string returnedArguments = JsonSerializer.Serialize(new { task = "long" });
-    string unicodeArguments = JsonSerializer.Serialize(new { unicode = "😀" });
+    const string unicodeArguments = "{\"unicode\":\"😀\"}";
     const string directResult = "{\"text\":\"direct output\",\"images\":[{\"hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"byteLength\":1}],\"details\":null,\"isError\":false}";
     string returnedResult = returnedImage
         ? "{\"text\":\"returned result\",\"images\":[{\"hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/jpeg\",\"byteLength\":1}],\"details\":null,\"isError\":false}"

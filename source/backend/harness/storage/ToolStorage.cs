@@ -17,7 +17,7 @@ internal sealed class ToolStorage(Database database, ToolResultCodec results) {
   });
 
   internal ToolCallTranscript? ReadTranscript(Guid sessionId, long expectedHistoryRevision,
-      Guid requestId, string callId, bool returned) => database.Read(transaction => {
+      Guid requestId, string callId, bool returned, int? characterLimit = null) => database.Read(transaction => {
     using (SqliteCommand check = database.Command(transaction,
         "SELECT history_revision FROM sessions WHERE session_id = $session;", ("$session", sessionId))) {
       if (check.ExecuteScalar() is not long revision)
@@ -27,7 +27,7 @@ internal sealed class ToolStorage(Database database, ToolResultCodec results) {
     }
 
     using SqliteCommand read = database.Command(transaction, """
-      SELECT t.arguments_json, t.background, t.started, t.result_json, t.outcome, t.name,
+      SELECT t.rowid, t.background, t.started, t.result_json IS NOT NULL, t.outcome, t.name,
           EXISTS (SELECT 1 FROM execution_tool_completions c
               WHERE c.session_id = r.session_id AND c.history_revision = r.history_revision
                   AND c.request_id = t.request_id AND c.call_id = t.call_id AND c.published = 1),
@@ -70,23 +70,37 @@ internal sealed class ToolStorage(Database database, ToolResultCodec results) {
     if (!reader.Read())
       return null;
 
-    string input = reader.GetString(0);
+    long rowId = reader.GetInt64(0);
+    // Do not SELECT the payloads: even a bounded managed read would materialize SQLite's full TEXT values.
+    using var inputBlob = new SqliteBlob(transaction.Connection!, "execution_tools", "arguments_json", rowId, readOnly: true);
+    using var inputReader = new StreamReader(inputBlob);
+    string input = ToolTranscriptPreview.ReadText(inputReader, characterLimit, out bool inputTruncated);
     bool background = reader.GetInt32(1) != 0;
     bool started = reader.GetInt32(2) != 0;
-    string? resultJson = reader.IsDBNull(3) ? null : reader.GetString(3);
+    bool hasResult = reader.GetBoolean(3);
     ExecutionOutcome? outcome = reader.IsDBNull(4) ? null : (ExecutionOutcome)reader.GetInt32(4);
     string name = reader.GetString(5);
     bool returnedPublished = reader.GetBoolean(6);
     string? output = null;
-    if (returned && background && returnedPublished && resultJson is not null && outcome is not null)
-      output = results.ReadModelCompletionText(requestId, callId, name, outcome.Value, resultJson,
-          ReadReceivingModelSupportsImages(reader, 8));
-    else if (!returned && background && started)
-      output = ToolResultCodec.BackgroundStarted(requestId, callId);
-    else if (!returned && resultJson is not null)
-      output = results.ReadModelResultText(resultJson, ReadReceivingModelSupportsImages(reader, 7));
+    bool outputTruncated = false;
+    bool projectionFinal = false;
+    if (!returned && background && started) {
+      projectionFinal = true;
+      using var startedReader = new StringReader(ToolResultCodec.BackgroundStarted(requestId, callId));
+      output = ToolTranscriptPreview.ReadText(startedReader, characterLimit, out outputTruncated);
+    } else if (hasResult && (!returned || (background && returnedPublished && outcome is not null))) {
+      using var resultBlob = new SqliteBlob(transaction.Connection!, "execution_tools", "result_json", rowId, readOnly: true);
+      using var resultReader = new StreamReader(resultBlob);
+      // Until a receiver is saved, image placeholders can still become the model's omission notice.
+      projectionFinal = !reader.IsDBNull(returned ? 8 : 7);
+      output = returned
+          ? results.ReadModelCompletionText(requestId, callId, name, outcome!.Value, resultReader, characterLimit,
+              ReadReceivingModelSupportsImages(reader, 8), out outputTruncated)
+          : results.ReadModelResultText(resultReader, characterLimit,
+              ReadReceivingModelSupportsImages(reader, 7), out outputTruncated);
+    }
 
-    return new ToolCallTranscript(input, output, Truncated: false);
+    return new ToolCallTranscript(input, output, inputTruncated || outputTruncated, projectionFinal);
   });
 
   private static bool ReadReceivingModelSupportsImages(SqliteDataReader reader, int selectionColumn) {

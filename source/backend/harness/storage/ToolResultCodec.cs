@@ -30,8 +30,13 @@ internal sealed class ToolResultCodec(ToolImageStore images) {
 
   internal object ReadModelResult(string value) => ProjectModelResult(value, loadImages: true).Content;
 
-  internal string ReadModelResultText(string value, bool supportsImages) =>
-      ProjectModelResult(value, loadImages: false, supportsImages: supportsImages).Text;
+  internal string ReadModelResultText(
+      TextReader reader, int? characterLimit, bool supportsImages, out bool truncated) {
+    if (characterLimit is { } limit)
+      return ToolTranscriptPreview.ReadResult(reader, limit, supportsImages, string.Empty, out truncated);
+    truncated = false;
+    return ProjectModelResult(reader.ReadToEnd(), loadImages: false, supportsImages: supportsImages).Text;
+  }
 
   internal static string BackgroundStarted(Guid requestId, string callId) =>
       "Background tool started: " + JsonSerializer.Serialize(new { request_id = requestId, call_id = callId })
@@ -46,10 +51,14 @@ internal sealed class ToolResultCodec(ToolImageStore images) {
     return contents;
   }
 
-  internal string ReadModelCompletionText(
-      Guid requestId, string callId, string name, ExecutionOutcome outcome, string resultJson, bool supportsImages) =>
-      CompletionEnvelope(requestId, callId, name, outcome)
-      + ProjectModelResult(resultJson, loadImages: false, supportsImages: supportsImages).Text;
+  internal string ReadModelCompletionText(Guid requestId, string callId, string name, ExecutionOutcome outcome,
+      TextReader reader, int? characterLimit, bool supportsImages, out bool truncated) {
+    string prefix = CompletionEnvelope(requestId, callId, name, outcome);
+    if (characterLimit is { } limit)
+      return ToolTranscriptPreview.ReadResult(reader, limit, supportsImages, prefix, out truncated);
+    truncated = false;
+    return prefix + ProjectModelResult(reader.ReadToEnd(), loadImages: false, supportsImages: supportsImages).Text;
+  }
 
   internal string Error(string message) => Write(new ToolOutput(message, [], IsError: true));
 
@@ -97,6 +106,7 @@ internal sealed class ToolResultCodec(ToolImageStore images) {
 
   private static string ImagePlaceholder(ToolImageReference image) => $"[image: {image.MediaType}]";
 
+  // Text/images stay first and ordered for bounded transcript reads; details are never model-facing.
   // This schema replaces the previous result shape; there is deliberately no legacy reader.
   private sealed record ToolResultEnvelope(
     string Text, IReadOnlyList<ToolImageReference> Images, JsonElement? Details, bool IsError);

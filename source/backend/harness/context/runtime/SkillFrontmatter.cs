@@ -1,7 +1,8 @@
 namespace Urd.Core.Context;
 
 // Reads top-level scalar fields from a Markdown file's YAML frontmatter: plain or quoted
-// values, and folded (>) or literal (|) blocks. Other YAML is ignored.
+// values, and folded (>) or literal (|) blocks. Trailing comments are dropped. Other YAML
+// is ignored.
 internal static class SkillFrontmatter {
   internal static Dictionary<string, string> Read(string file) {
     var fields = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -30,11 +31,17 @@ internal static class SkillFrontmatter {
 
       string name = line[..colon].Trim();
       string value = line[(colon + 1)..].Trim();
+      if (value.StartsWith('"') || value.StartsWith('\'')) {
+        fields[name] = Quoted(value);
+        continue;
+      }
+
+      value = WithoutComment(value);
       if (value is "" or ">" or ">-" or "|" or "|-") {
         key = name;
         literal = value.StartsWith('|');
       } else {
-        fields[name] = Unquote(value);
+        fields[name] = value;
       }
     }
 
@@ -43,6 +50,37 @@ internal static class SkillFrontmatter {
     return fields;
   }
 
-  private static string Unquote(string value) =>
-      value.Length >= 2 && (value[0] is '"' or '\'') && value[^1] == value[0] ? value[1..^1] : value;
+  // A # starts a comment at the beginning of a value or after whitespace.
+  private static string WithoutComment(string value) {
+    for (int index = 0; index < value.Length; index++) {
+      if (value[index] == '#' && (index == 0 || char.IsWhiteSpace(value[index - 1])))
+        return value[..index].TrimEnd();
+    }
+    return value;
+  }
+
+  // Text up to the closing quote; '' escapes a single quote and \ escapes in double quotes.
+  // An unterminated value is kept as written.
+  private static string Quoted(string value) {
+    char quote = value[0];
+    var text = new System.Text.StringBuilder();
+    int index = 1;
+    while (index < value.Length) {
+      char current = value[index];
+      bool hasNext = index + 1 < value.Length;
+      if (quote == '\'' && current == '\'' && hasNext && value[index + 1] == '\'') {
+        text.Append('\'');
+        index += 2;
+      } else if (quote == '"' && current == '\\' && hasNext) {
+        text.Append(value[index + 1]);
+        index += 2;
+      } else if (current == quote) {
+        return text.ToString();
+      } else {
+        text.Append(current);
+        index++;
+      }
+    }
+    return value;
+  }
 }

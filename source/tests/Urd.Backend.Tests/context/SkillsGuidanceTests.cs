@@ -52,6 +52,19 @@ public sealed class SkillsGuidanceTests : IDisposable {
     Assert.Null(SkillsGuidance.Compose([]));
   }
 
+  [Theory]
+  [InlineData("Plain text # note", "Plain text")]
+  [InlineData("\"Quoted # kept\" # note", "Quoted # kept")]
+  [InlineData("'It''s here' # note", "It's here")]
+  [InlineData("Issue#42 stays", "Issue#42 stays")]
+  [InlineData("> # note\n  Folded\n  text.", "Folded text.")]
+  public void DescriptionsDropTrailingComments(string value, string expected) {
+    string file = Path.Combine(Project, "SKILL.md");
+    Write(file, Skill("example", value));
+
+    Assert.Equal(expected, SkillFrontmatter.Read(file)["description"]);
+  }
+
   [Fact]
   public void UrdPackagesItsDiagnoseSkill() =>
       Assert.Contains(SkillsGuidance.Find(Project, SkillsGuidance.PackagedDirectory), skill => skill.Name == "diagnose");

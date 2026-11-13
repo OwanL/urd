@@ -25,7 +25,7 @@
 .transcript-empty {
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: safe center;
 }
 
 .empty-transcript {
@@ -46,10 +46,15 @@
 .chat-working-directory-row {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   justify-content: center;
-  gap: 2px 4px;
+  gap: 4px 8px;
   min-width: 0;
   max-width: 100%;
+}
+
+.chat-working-directory-label {
+  flex: none;
 }
 
 .chat-working-directory-path {
@@ -58,31 +63,72 @@
   overflow-wrap: anywhere;
 }
 
-:is(.chat-working-directory, .chat-working-directory-row) > button {
-  flex: none;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--accent);
-  font: inherit;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-  cursor: pointer;
+.chat-working-directory-editor {
+  display: flex;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
 }
 
-:is(.chat-working-directory, .chat-working-directory-row)
-  > button:is(:disabled, [aria-disabled="true"]) {
-  opacity: 0.6;
-  cursor: default;
+.chat-working-directory-input {
+  flex: 1 1 14rem;
+  min-width: min(100%, 12rem);
+  max-width: 40rem;
+  min-height: 34px;
+  padding: 5px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  background: var(--surface-input);
 }
 
-:is(.chat-working-directory, .chat-working-directory-row) > button:focus-visible {
+.chat-working-directory-input:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
-.chat-working-directory > span:not(.chat-working-directory-path) {
-  overflow-wrap: anywhere;
+.chat-working-directory-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+}
+
+.chat-working-directory-control {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 34px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.chat-working-directory-control:hover:not([aria-disabled="true"]) {
+  background: var(--surface-hover);
+}
+
+.chat-working-directory-control[aria-disabled="true"] {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.chat-working-directory-control:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.chat-working-directory-edit .icon {
+  width: 16px;
+  height: 16px;
 }
 
 .chat-status button {

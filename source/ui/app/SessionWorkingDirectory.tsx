@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "preact/hooks";
-import { FolderPicker } from "../components/FolderPicker.tsx";
+import { WorkingDirectoryRow } from "./WorkingDirectoryRow.tsx";
 import { RequestError } from "../http/RequestError.ts";
 import type { WorkingDirectoryPreferenceState } from "../preferences/useWorkingDirectoryPreferences.ts";
 import type { SessionClient } from "../sessions/SessionClient.ts";
@@ -28,11 +28,8 @@ export function SessionWorkingDirectory({
   onSnapshot,
   onRefresh,
 }: SessionWorkingDirectoryProps) {
-  const currentAnchor = useRef<HTMLButtonElement>(null);
-  const defaultAnchor = useRef<HTMLButtonElement>(null);
   const operationInProgress = useRef(false);
   const [directory, setDirectory] = useState(workingDirectory);
-  const [picker, setPicker] = useState<"default" | "current" | null>(null);
   const [changeState, setChangeState] = useState<ChangeState>("idle");
   const [failure, setFailure] = useState<string | null>(null);
   const [savedDirectory, setSavedDirectory] = useState<string | null>(null);
@@ -40,7 +37,7 @@ export function SessionWorkingDirectory({
   useEffect(() => setDirectory(workingDirectory), [workingDirectory]);
 
   async function save(nextDirectory: string) {
-    if (disabled || operationInProgress.current || changeState !== "idle") return;
+    if (disabled || operationInProgress.current || changeState !== "idle") return false;
     operationInProgress.current = true;
     setChangeState("saving");
     setFailure(null);
@@ -56,7 +53,7 @@ export function SessionWorkingDirectory({
       setChangeState("uncertain");
       operationInProgress.current = false;
       onGateChange(true, `${message} Check the current directory before sending.`);
-      return;
+      return false;
     }
 
     setDirectory(confirmedDirectory);
@@ -73,6 +70,7 @@ export function SessionWorkingDirectory({
       onGateChange(false, null);
       setSavedDirectory(null);
       onRefresh();
+      return true;
     } catch (cause) {
       const detail = cause instanceof Error ? cause.message : "Session read failed.";
       const message = `Working directory was saved as ${confirmedDirectory}, but the current directory could not be confirmed: ${detail}`;
@@ -80,6 +78,7 @@ export function SessionWorkingDirectory({
       setChangeState("uncertain");
       operationInProgress.current = false;
       onGateChange(true, `${message} Check current directory before sending.`);
+      return false;
     }
   }
 
@@ -111,50 +110,24 @@ export function SessionWorkingDirectory({
   }
 
   const defaultDirectory = preferences.preferences?.workingDirectory ?? null;
-  const pickerAnchor = picker === "default" ? defaultAnchor : currentAnchor;
-
   return (
     <div class="chat-working-directory">
-      <div class="chat-working-directory-row">
-        Default cwd is{" "}
-        <button
-          ref={defaultAnchor}
-          class="chat-working-directory-path"
-          type="button"
-          aria-label={`Change default cwd: ${defaultDirectory ?? "not set"}`}
-          aria-haspopup="dialog"
-          aria-expanded={picker === "default"}
-          disabled={disabled || !preferences.loaded}
-          aria-disabled={preferences.pending}
-          onClick={() => {
-            if (!preferences.pending) setPicker("default");
-          }}
-        >
-          {preferences.loaded
-            ? (defaultDirectory ?? "not set")
-            : preferences.error
-              ? "unavailable"
-              : "loading…"}
-        </button>
-      </div>
-      <div class="chat-working-directory-row">
-        Current cwd is{" "}
-        <button
-          ref={currentAnchor}
-          class="chat-working-directory-path"
-          type="button"
-          aria-label={`Change current cwd: ${directory ?? "not set"}`}
-          aria-haspopup="dialog"
-          aria-expanded={picker === "current"}
-          disabled={disabled}
-          aria-disabled={changeState !== "idle"}
-          onClick={() => {
-            if (changeState === "idle" && !operationInProgress.current) setPicker("current");
-          }}
-        >
-          {directory ?? "not set"}
-        </button>
-      </div>
+      <WorkingDirectoryRow
+        label="Default cwd"
+        directory={
+          preferences.loaded ? defaultDirectory : preferences.error ? "unavailable" : "loading…"
+        }
+        disabled={disabled || !preferences.loaded}
+        busy={preferences.pending}
+        onSave={preferences.save}
+      />
+      <WorkingDirectoryRow
+        label="Current cwd"
+        directory={directory}
+        disabled={disabled}
+        busy={changeState !== "idle"}
+        onSave={save}
+      />
       {changeState === "uncertain" && (
         <button type="button" onClick={() => void reconcile()}>
           Check current directory
@@ -168,20 +141,6 @@ export function SessionWorkingDirectory({
         <button type="button" onClick={() => void preferences.refresh()}>
           Retry default cwd
         </button>
-      )}
-      {picker && (
-        <FolderPicker
-          anchor={pickerAnchor}
-          initialPath={picker === "default" ? defaultDirectory : directory}
-          onChoose={(path) => {
-            if (picker === "default") void preferences.save(path);
-            else void save(path);
-          }}
-          onClose={(returnFocus) => {
-            setPicker(null);
-            if (returnFocus) pickerAnchor.current?.focus({ preventScroll: true });
-          }}
-        />
       )}
     </div>
   );

@@ -138,11 +138,17 @@ on Windows. It starts Explorer directly without a shell; missing paths return 40
 
 `GET /api/events` opens a transient server-sent event stream. Its `connected` event provides
 stream and process-boot IDs. Register a page's open and watched session IDs with
-`POST /api/events/{streamId}` using `{open, watched}`; the server emits `status` for open
-sessions, `change` for watched sessions, and `session-created` hints. Heartbeats keep the
-stream active. Status events update tab status; change notices prompt bounded snapshot/history
-reads. Events are not durable history or message payloads. Reconnect performs saved-ID
-discovery again. The existing local API marker and gates apply.
+`POST /api/events/{streamId}` using `{open, watched}`. For each registration the server
+subscribes before returning success and sends an initial `status` for every open session;
+a watched session also gets an initial `change` hint. The browser waits for both the
+registration response and that initial status before releasing a racing change, then reads
+a bounded snapshot/history. This subscribe-before-read handshake avoids a gap between
+initial state and live updates. Changes coalesce per session; if more arrive during a
+snapshot/history read, the client performs a trailing read rather than overlapping reads.
+Later `status` events update tab status, `change` notices prompt bounded reads, and
+`session-created` events are discovery hints. Heartbeats keep the stream active. Events are
+not durable history or message payloads. Reconnect performs saved-ID discovery again. The
+existing local API marker and gates apply.
 
 **Breaking vocabulary change:** there are no legacy route/member aliases.
 A submission body is `{submissionId, expectedHistoryRevision, text, llmSelection}`.
@@ -153,8 +159,10 @@ receipts have a refusal reason and null execution ID. Stop receipts and
 `SessionExecutionResult` use `executionId`; snapshots use `unsettledExecutionId` and
 `MessageRef` (including nested content cursors) uses `executionId`.
 The vocabulary cleanup preserved saved IDs, revisions, SQL identifiers and decisions.
-Schema 11 stores frozen selection, transcript metadata, request usage, known send-attempt
-provenance and not-sent tracking. Earlier pre-release schemas must be reset, not migrated. Session routes retain
+The current schema stores frozen selection, transcript metadata, request usage, known
+send-attempt provenance and not-sent tracking. Incompatible pre-release schemas must be
+reset, not migrated; [backend development](backend-development.md) identifies the version.
+Session routes retain
 their local admission gates, status mapping, no-store and read-cancellation rules. Historical
 wire checks covered the renamed receipt, Stop, snapshot and cursor fields and rejected legacy
 routes and required field names.

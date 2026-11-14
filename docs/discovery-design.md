@@ -45,15 +45,14 @@ no per-provider session engine or general discovery framework is selected.
 
 ## Route evidence and gaps
 
-Pins and detailed source findings remain in
-[model-interface research](model-interface-research.md). These findings qualify
-specific mechanics, not live-provider acceptance or cache savings.
+The route table owns the pinned adapter findings. They qualify specific mechanics,
+not live-provider acceptance or cache savings.
 
 | Route | Native path and established evidence | Fallback / remaining qualification |
 | --- | --- | --- |
-| **OpenAI Responses** | `additional_tools` can represent appended client-executable definitions. OpenAI .NET 2.14.0 lacks public typed support; MEAI 10.11.0 uses raw unknown items. The [composed execution fixture](execution-design.md#composed-follow-up-adapter--guarded-urd-loop--sqlite--continuation) exercises the real adapter/terminal guard/loop/tool with ordered native reconstruction through SQLite test-envelope reload. | Experimental adapter; native IDs, terminal status and raw persistence need explicit handling. Actual session-store integration, process-kill recovery, production streaming and native provider acceptance remain unqualified. Use the initial wrapper on routes without qualified native support. |
-| **Anthropic / Claude** | Provider documents inline `tool_addition`/`tool_definition` beta blocks, subject to model/placement restrictions. SDK 13.4.0 has typed beta models, but its ordinary `AsIChatClient` adapter drops those blocks despite preserving mid-conversation system text. | Native append needs separate adapter qualification; no Claude beta adapter is approved here. Stable wrapper is the selected fallback, not ordinary-list updates. |
-| **OllamaSharp / local models** | The inspected 5.5.0 adapter maps ordinary function declarations; no native append equivalent was established for that route. Actual tool support, thinking replay and call identity require server/model/adapter testing. | Include the stable wrapper initially for recovered tools where function calling works. Wrapper reliability is untested; do not generalize this adapter finding to every local/OpenAI-compatible server. |
+| **OpenAI Responses** | `additional_tools` can represent appended client-executable definitions. OpenAI .NET 2.14.0 has no public typed `additional_tools` item; MEAI 10.11.0 carries unknown response items through raw representations ([pinned sources](https://github.com/dotnet/extensions/blob/25f07afa51034e37b334210642d7dc5f191c142d/src/Libraries/Microsoft.Extensions.AI.OpenAI/OpenAIResponsesChatClient.cs), [OpenAI .NET](https://github.com/openai/openai-dotnet/tree/2e77b08828145f658ec04e49aec87abb1543c553)). The scripted adapter fixture needed an assistant-role carrier (developer-role raw content was dropped), captured `StreamingResponseOutputItemDoneUpdate.Item` before coalescing to retain the native function-item ID, and rejected failed/incomplete/EOF call drafts without positive native completion. Default `ChatMessage` JSON drops `RawRepresentation`, so reload needs explicit indexed native-item reconstruction. The [composed fixture](execution-design.md#composed-follow-up-adapter--guarded-urd-loop--sqlite--continuation) reconstructs ordered items through a SQLite test envelope. | Experimental adapter; raw item capture/reconstruction is owned glue. Actual session-store integration, process-kill recovery, production streaming and provider acceptance remain unqualified. Use the initial wrapper on routes without qualified native support. |
+| **Anthropic / Claude** | Provider documents inline `tool_addition`/`tool_definition` beta blocks, subject to model/placement restrictions. SDK 13.4.0 has typed beta models, but ordinary `AsIChatClient` drops those blocks despite preserving mid-conversation system text ([pinned adapter](https://github.com/anthropics/anthropic-sdk-csharp/blob/6eae95e4689477382c81bb5b35b6386ff5b3686d/src/Anthropic/AnthropicClientExtensions.cs)). Ordinary MEAI declarations also narrow Anthropic schemas to `properties` and `required`; preserve native definitions when full schema fidelity matters. | Native append needs a separate adapter and beta-header qualification; no Claude beta adapter is approved here. Stable wrapper is the selected fallback, not ordinary-list updates. |
+| **OllamaSharp / local models** | Pinned OllamaSharp 5.5.0 maps ordinary function declarations; no native append equivalent was established for that route ([pinned source](https://github.com/awaescher/OllamaSharp/tree/135abcc3e31ac6a1ec535ff4c891e11ed1328df4)). Its adapter synthesizes tool-call IDs on replay, so stable native call identity is not established. | Include the stable wrapper initially for recovered tools where function calling works. Wrapper reliability is untested; do not generalize this adapter finding to every local/OpenAI-compatible server. |
 | **Other routes** | Native appends require exact provider+adapter evidence; none is implied by implementing `IChatClient`. | Initial-wrapper fallback also needs tool/model qualification; unsupported tool calling is not repaired by a wrapper. |
 
 **Route distinction:** OpenAI `tool_search` is a separate hosted/client-executed
@@ -65,9 +64,16 @@ not a valid plan request. The original SDK JSON-only fixture was weaker than the
 later adapter fixture; neither is a real-provider round trip.
 
 Ordinary tools-list updates remain a consciously available alternative, **not the
-selected fallback**. The initial-wrapper rule favours prefix stability, not measured
-savings. Do not insert a wrapper late, silently switch exposure after a rejection,
-or replay tools as a fallback. The [resumed owner review](#resumed-owner-review--2026-11-05)
+selected fallback**. Provider documentation describes reuse of the longest matching
+rendered prefix: changing OpenAI's top-level tools invalidates reuse from that point,
+and Anthropic says changed tool definitions invalidate its entire cache; append-only
+messages and qualified native additions can preserve the preceding prefix. Local
+cache behavior depends on model-template rendering. These are cache-mechanics facts,
+not measured Urd cache hits or savings. The initial-wrapper rule favours prefix
+stability, not proven savings ([OpenAI](https://developers.openai.com/api/docs/guides/prompt-caching),
+[Anthropic](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)).
+Do not insert a wrapper late, silently switch exposure after a rejection, or replay
+tools as a fallback. The [resumed owner review](#resumed-owner-review--2026-11-05)
 below narrows provider-switch behavior without selecting a reset implementation.
 
 ## Resumed owner review — 2026-11-05
@@ -176,9 +182,15 @@ Visible-content incompatibility handling, selection-failure policy and precise
 reload/admission semantics remain open; no further consequential owner choice
 was forced in this round.
 
-The already-sent-result drift in [Context Lifetime Evidence](CONTEXT-LIFETIME-EVIDENCE.md)
-is an engineering acceptance gap, not an owner vote on serialization fields.
-Its replay control is not a selected production recorder or storage design.
+Already-sent results must retain their model-visible representation across
+continuation and reopen; generic JSON equivalence is insufficient. A retired
+synthetic `ChatMessage` JSON fixture found quoted/escaped string drift (including
+JSON-looking text) and typed text/image content reloaded as JSON text. That fixture
+was not the current production path: [`ToolResultCodec`](../source/backend/harness/storage/ToolResultCodec.cs)
+and [`ProviderSessionExecutionTests`](../source/tests/Urd.Backend.Tests/execution/ProviderSessionExecutionTests.cs)
+now cover basic text/PNG replay across reopen, but not embedded quotes, newlines or
+JSON-looking strings. Those edges remain unqualified; see
+[execution evidence](execution-design.md#already-sent-tool-results-across-reopen).
 
 ## Minimum facts to restore
 
@@ -233,9 +245,7 @@ coherent continuation, not exact token retention or a workflow-replay engine.
   2025 handshake—not default 2026 negotiation/fallback or model reliability.
 - [Session design](session-design.md): direct request-only client composition and
   durable/live/client ownership; class and file layout approval limits.
-- [Model-interface research](model-interface-research.md): pinned MEAI 10.11.0,
-  OpenAI .NET 2.14.0, Anthropic 13.4.0 and OllamaSharp 5.5.0 findings. Research pins,
-  not selected package versions.
+- This route table retains the pinned adapter findings and cache-prefix constraints;
+  these pins are research evidence, not selected package versions or measured savings.
 - [Provider qualification](provider-qualification.md): route-specific restrictions
-  and authentication/entitlement limits; [cache research](cache-research.md):
-  documented prefix behaviour, not Urd cache-hit measurements.
+  and authentication/entitlement limits.

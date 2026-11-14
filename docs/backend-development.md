@@ -30,6 +30,28 @@ or attempted (2) provenance; transcript user entries require request links and r
 require their original model selection. Empty sessions still have no selection.
 Storage uses `response_id`/`response_final` and request-global chunk indexes.
 
+## Send-attempt placement and uncertainty
+
+Accepted input stays pending through client/context preparation. Immediately before
+`IChatClient.GetStreamingResponseAsync`, the session awaits `StartRequestAsync`, which
+commits the attempted marker and promotes that request's assigned inputs into transcript
+user entries. This is the local send-attempt boundary, not proof of provider delivery.
+
+If saving the marker fails, the failure escapes ordinary provider-error handling: the
+execution remains unsettled/fenced for attention, continuation stops, and the provider is
+not called. After a committed attempt, failures retain the placed input and any committed
+partial output; the input is not automatically requeued or resubmitted. Exact receipt
+retries return the original decision and do not start a replacement execution. Explicit
+resend of a positively known not-sent input is a separate operation with a new submission
+identity; the safe context-window overflow retry is a separate provider response path, not
+automatic recovery of an uncertain submission.
+
+The current `SendAttemptPlacementTests` cover eager-provider visibility after preparation,
+pre-attempt and post-attempt failures, Stop during preparation, exact receipt idempotency,
+and marker-commit failure fencing with no provider call. These are representative boundary
+cases, not exhaustive race/failure coverage; [testing](testing.md) owns the current retained
+test scope.
+
 ## Starting context
 
 Editable system guidance lives in [`harness/context/`](../source/backend/harness/context/README.md),
@@ -287,9 +309,9 @@ discovery, not activity tracking or a complete summary API.
    [TranscriptHistoryReader.cs](../source/backend/harness/storage/TranscriptHistoryReader.cs) and
    [MessageContentReader.cs](../source/backend/harness/storage/MessageContentReader.cs) — separate
    bounded reads in short transactions. [DatabaseSchema.cs](../source/backend/harness/storage/DatabaseSchema.cs)
-   is at schema version 10. Earlier versions added creation order, provider state/native context,
-   frozen selection, transcript metadata and request usage; version 10 adds request-attempt and
-   not-sent facts while preserving transcript ordering.
+   owns current schema creation and version refusal; before the supported public data baseline,
+   changes replace the schema rather than adding migrations. Do not rely on historical migration
+   checkpoints as current compatibility behavior.
 4. [MessageContentTests.cs](../source/tests/Urd.Backend.Tests/storage/MessageContentTests.cs) and
    [SessionSnapshotStorageTests.cs](../source/tests/Urd.Backend.Tests/storage/SessionSnapshotStorageTests.cs).
 

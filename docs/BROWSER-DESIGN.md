@@ -192,14 +192,11 @@ PC does not imply that two copies should attach to one backend/data instance.
 
 ### Evidence limits and bounded next step
 
-[Overnight access evidence](access-boundary-evidence.md) used injected synthetic
-credentials, one-event streams and Windows/headless Chromium. It established
-cookie port-sharing, native EventSource's header limitation and the no-CORS effect
-counterexample—not onboarding, sustained reconnect, LAN/Tailscale or production
-access qualification. Its explicit-client-credential recommendation was a proposal;
-**this owner round instead chose trusted-local simplicity for the local milestone**.
-Cookies/native SSE and token/header fetch retain real engineering costs if later
-needed, but neither their fixture success nor the old recommendation selects them.
+The earlier synthetic access probe did not qualify onboarding, sustained reconnect
+or LAN/Tailscale access. Its explicit-client-credential recommendation was superseded
+by the trusted-local decision above. Current loopback, Host, Origin and browser-marker
+checks are documented in [local server development](server-development.md#http-and-local-access);
+they are browser-request gates, not local-program authentication.
 
 The existing TEMP `FIRST-SLICE-CLIENT-CONTRACT.md` and
 `FIRST-SLICE-IMPLEMENTATION-PLAN.md` remain candidate integration details. Their old

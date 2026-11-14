@@ -36,7 +36,7 @@ distinct from tool-result pruning and catalog pruning (ARCHITECTURE.md, "Context
 
 ## Execution and storage
 
-`core/compaction/` owns budgeting, safe-cut planning and request-only summarization.
+`source/backend/harness/compaction/` owns budgeting, safe-cut planning and request-only summarization.
 `session_compactions` stores only successful summaries and their first retained request/message
 position, scoped to the session's history revision. A metadata-only transcript marker commits
 with the summary; expanding it reads the bounded summary separately. Original messages, tools,
@@ -54,8 +54,9 @@ It is a separate, addressable execution: Stop cancels and joins its summary requ
 never replays it. The workspace does not expose it as a control; successful automatic compaction
 appears as a **History compacted** transcript entry with an inspectable summary.
 Busy Send cannot steer into manual compaction. Failure, cancellation and stale boundaries do
-not replace the previous summary. Schema 16 requires a fresh disposable database or an explicit
-owner-approved reset of older data; no automatic migration or deletion is performed.
+not replace the previous summary. The pre-release schema policy requires a fresh disposable
+database or an explicit owner-approved reset of incompatible data; no automatic migration
+or deletion is performed. See [backend development](backend-development.md) for the current schema.
 
 ## Verification
 

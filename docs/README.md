@@ -2,7 +2,8 @@
 
 Guides describe implemented behavior. Decisions distinguish agreed requirements from proposals.
 Evidence records describe only their dated test/research scope; old test totals are not the
-current suite size. Git history retains deleted drafts and superseded comparisons.
+current suite size. Completed plans, closed audits and superseded research live in Git history,
+not a separate archive. Their remaining constraints belong to the current documents below.
 
 ## Current guides
 
@@ -14,47 +15,33 @@ current suite size. Git history retains deleted drafts and superseded comparison
 - [Test scope](testing.md) and [code shape](code-shape-guidelines.md): local verification,
   size budget and review conventions.
 
-## Audits
-
-- [Organization audit — 2026-11-11](organization-audit-2026-11-11.md): prioritized structural/rot
-  findings for later review, with [per-file coverage](organization-audit-2026-11-11-files.md).
-  Audit only; active implementation work is distinguished from established findings.
-
 ## Decisions
 
 - [Product direction](product-direction.md): purpose, constraints and their rationale.
-- [Architecture](ARCHITECTURE.md): agreed boundaries, retained features and open choices.
+- [Architecture](ARCHITECTURE.md): agreed boundaries, storage choice and open decisions.
 - [Application structure](application-plan.md): current/planned owners and scoped review.
 - [Sessions](session-design.md), [execution](execution-design.md) and
-  [discovery](discovery-design.md): lifetime, model/tool calls and capability exposure.
+  [discovery](discovery-design.md): lifetime, model/tool calls, adapter limits and capability exposure.
 - [Agent tools](agent-tools-design.md): tool set, parallel/background calls, approved class shapes.
-- [Compaction](compaction-design.md): history compaction direction (copy Pi); shapes deferred until tools are built.
+- [Compaction](compaction-design.md): implemented history compaction and its limits.
 - [Browser](BROWSER-DESIGN.md): shared UI, local access and remaining host/closure choices.
-- [Transcript](TRANSCRIPT-DESIGN.md) and [stage-1 plan](TRANSCRIPT-HISTORY-PLAN.md):
-  approved requirements and staged work. [Implementation evidence](transcript-history-implementation.md)
-  identifies delivered stage-1 behavior. Stage 2 is active; these files retain their names
-  and ownership while that work proceeds.
+- [Transcript](TRANSCRIPT-DESIGN.md): approved requirements, delivered foundation and remaining
+  staged work. Stage 2 is active; historical checkpoints are not overall acceptance.
 - [Source distribution](repo-foundations.md): matching source, custom-copy data and setup boundaries,
   with a dated round-trip trial; packaging and activation remain unfinished.
 
 ## Evidence
 
-These records preserve measurements, source findings or constraints still used by decisions.
+These records preserve qualification or constraints still used by decisions.
 Experimental source is [archived outside the checkout](product-direction.md#experimental-source-archive).
 
-- [Agent-tool qualification](agent-tools-qualification.md): Windows job ownership and offline
-  background-result/image adapter probes; not production integration or live provider acceptance.
+- [Agent-tool qualification](agent-tools-qualification.md): scoped Windows process, adapter and
+  live acceptance checkpoints; not universal tool/provider qualification.
 - [Provider qualification](provider-qualification.md): offline and separately authorized live route/model checks.
-- [Model interface](model-interface-research.md), [provider research](provider-research.md),
-  [context lifetime](CONTEXT-LIFETIME-EVIDENCE.md) and [cache behavior](cache-research.md).
-- [MCP library](mcp-library-research.md) and [SDK qualification](mcp-qualification.md).
-- [Access boundaries](access-boundary-evidence.md), [backend lifecycle](backend-lifecycle.md)
-  and [durable intent/reference lifetimes](DURABLE-BOUNDARIES-EVIDENCE.md).
-- [Storage research](STORAGE-RESEARCH.md), [binding review](storage-binding-review.md),
-  [experiment contract](storage-experiment.md) and [SQLite validation](sqlite-validation.md).
-- [Parser qualification](TRANSCRIPT-PARSER-EVIDENCE.md).
-- [Small-operation proposal](experiment-proposal.md), [Windows results](experiment-results.md)
-  and [Go/.NET discovery](go-dotnet-discovery.md): historical comparisons, not open language choices.
+- [MCP library](mcp-library-research.md) and [SDK qualification](mcp-qualification.md): selected library,
+  protocol boundaries and remaining integration gates.
+- [Parser qualification](TRANSCRIPT-PARSER-EVIDENCE.md) and
+  [position lookup](TRANSCRIPT-POSITION-EVIDENCE.md): transcript feasibility and unclosed gates.
 
 New filenames use lowercase-kebab-case. Transcript-owned files and their directly linked
 legacy targets retain existing spelling until link-only renames can be coordinated.

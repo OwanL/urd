@@ -4,9 +4,8 @@
 
 This is a living decision record, not a complete description of implemented behavior.
 [Product direction](product-direction.md) owns purpose and strategic constraints;
-[development guides](README.md#current-guides) own the current operating instructions.
-Historical experiments below retain their original scope; production integration and
-qualification have since advanced in the guides.
+[development guides](README.md#current-guides) own current operating instructions.
+Bounded evidence retained here states its scope and limits.
 
 The review includes feature value as well as interfaces, data models,
 dependencies, class/module structure, ownership, coupling, failure behaviour
@@ -488,12 +487,11 @@ layer; do not assume an SDK for API-key requests also handles subscription
 sign-in. First-party harness ownership does not require hand-writing all provider
 code, and these requirements do not select a language or SDK.
 
-[Provider research](provider-research.md) compares LLM-client approaches and
-subscription integration seams. Current OpenAI documentation offers a public
-ChatGPT-plan Responses API flow; Pi's existing Codex route is not the only option.
-GitHub's documented Copilot SDK instead embeds its agent runtime, so it must not
-be mistaken for a neutral LLM client. These are source findings, not qualified
-Urd integrations or a reason to select a library prematurely.
+Current OpenAI documentation offers a public ChatGPT-plan Responses API flow;
+Pi's existing Codex route is not the only option. GitHub's documented Copilot SDK
+instead embeds its agent runtime, so it is not a neutral LLM client. These are
+source findings, not qualified Urd integrations or a reason to select a library
+prematurely.
 
 [Provider qualification](provider-qualification.md) records the later focused
 route/authentication findings. ChatGPT-plan Responses is a recommended first
@@ -652,12 +650,11 @@ cache reuse needs provider evidence. The later interface and exposure decisions
 below do not qualify every route. Cached descriptions must not override current
 execution permissions.
 
-**Follow-up alignment (2026-11-03):** The [cache investigation](cache-research.md)
-supports the original concern: changing early tool definitions generally loses
-prefix reuse across the later conversation, not necessarily the earlier unchanged
-prefix or the old cache entry itself. Urd-specific savings remain unmeasured.
-Continue dynamic tool discovery design and use its requirements to inform
-LLM-layer selection.
+**Follow-up alignment (2026-11-03):** Changing early tool definitions generally
+loses prefix reuse across the later conversation, not necessarily the earlier
+unchanged prefix or the old cache entry itself. Urd-specific savings remain
+unmeasured. Continue dynamic tool discovery design and use its requirements to
+inform LLM-layer selection.
 
 **Owner alignment (2026-11-04): qualified native additions, otherwise an initial
 stable wrapper.** Where the provider **and adapter** support qualified native
@@ -752,7 +749,14 @@ copy Pie's ability to restore a closed timer target after restart.
 
 This is an explicit future request, such as checking a build later, not permission
 to blindly replay unfinished commands or duplicate a delivery whose outcome is
-uncertain. Delivery/recovery mechanics remain to be designed. Approval covers
+uncertain. Recovery must distinguish a due request known never to have been
+dispatched from an already-admitted input or ambiguous effect. Admit a due request
+once through normal session admission; if its input is already committed, recover
+that input rather than creating another. If dispatch may have occurred but its
+result is missing, preserve uncertainty and never automatically replay the effect.
+Correlating the due registration with input admission in one transaction where
+possible can close a local duplicate-delivery window, not guarantee exactly-once
+effects. Delivery/recovery mechanics remain to be designed. Approval covers
 delayed follow-ups, not automatic inheritance of Pie's broader combinations of
 timer, user-input, session-finished and command-polling conditions.
 
@@ -770,10 +774,9 @@ source in custom packages. It does not require repackaging every compile or sele
 physical packaging, SDK/cache bundling, tooling or activation mechanics.
 
 Earlier language shortlists are superseded; no language stereotype establishes
-resource superiority. [Focused Go/C# discovery](go-dotnet-discovery.md) established small streaming/tool/
-control paths using real loop libraries and fake LLMs in both languages. These
-remain feasibility observations, not provider, packaging, resource or cross-platform
-qualification. Further qualification should focus on the selected C#/.NET backend.
+resource superiority. Tiny Go/C# feasibility probes did not measure product
+resources, maintenance, provider integration, source builds or portability. Further
+qualification should focus on the selected C#/.NET backend.
 
 <a id="provisional-direction-a-narrow-urd-owned-modeltool-cycle"></a>
 
@@ -817,10 +820,13 @@ justify it. External commands and selected integrations can still run in their
 own processes. Keeping the option open is not a reason to implement both
 execution models or add speculative process-abstraction layers now.
 
-[Backend lifecycle evidence](backend-lifecycle.md) exercises competing launchers,
-verified attachment, stale discovery and owned-process exit on Windows. It does
-not select portable locking, packaged daemon lifetime, authentication, shutdown
-policy or topology; one backend remains a working default.
+A disposable launcher check established basic exclusive-owner and attachment
+mechanics on Windows/NTFS only. macOS/Linux locking is **not qualified**: the
+inspected .NET 10 Unix implementation maps `FileShare.None` to advisory `flock`,
+and unsupported or disabled locking cannot be treated as exclusion. Successful
+open alone is not portable proof of a single owner. Qualify the actual target
+runtime and filesystem before relying on this lease; packaged daemon lifetime,
+authentication and shutdown policy also remain open.
 
 ### Session structure and communication: owner-reviewed working sketch
 
@@ -916,8 +922,7 @@ request state. Provider fidelity, caller-specific retry/fallback policy and
 cancellation still need qualification; auxiliary calls do not acquire the tool
 loop. The provisional cycle direction above is separate from this composition
 boundary. [Execution design](execution-design.md) records evidence and remaining
-gates; the older [C# discovery](go-dotnet-discovery.md) remains historical candidate
-evidence, not a wider package selection.
+gates; provider integrations remain separately qualified.
 
 ### Provider-specific context choices
 
@@ -984,53 +989,41 @@ Edits replace history only and never roll back external effects; recovery does
 not invent, reorder or duplicate records. A missing acknowledgement does not
 prove that a transaction failed or that retrying it is safe.
 
-**Rejected alternatives** (evidence in [STORAGE-RESEARCH.md](STORAGE-RESEARCH.md),
-[storage-experiment.md](storage-experiment.md), the binding review and harness
-run records):
+**Selection rationale.** In a synthetic Windows store-operation probe, bounded
+recent reads were both sub-millisecond: per-session JSONL measured 0.17 ms and
+SQLite 0.07 ms median for 210 identities with short histories. The differentiator
+was the extra file coordination work, not read speed: message-plus-summary append
+measured 1.91 ms for files versus 0.23 ms for SQLite; assignment update 1.59 versus
+0.13 ms; suffix edit 3.42 versus 0.63 ms; and reopen/list/recent-read 42.98 versus
+1.22 ms. The file prototype rewrote shared metadata and reconciled session tails
+on reopen; it was not an optimized lower bound. These measurements explain the
+choice of one transactional store over custom cross-file coordination, not a
+production performance claim or click-to-visible UI comparison.
 
-- *Pure JSONL/files and segmented binary logs:* bounded reads tie with SQLite,
-  but metadata, assignment, edit and reopen operations were 5–35× slower in the
-  store-operations probe, and each needs a custom index plus reconciliation and
-  tail-repair machinery — the JSONL prototype embedded SQLite for coordination
-  anyway, at higher code cost.
-- *SQLite plus external payload files as the primary layout:* two-store
-  atomicity risk for ordinary transcript writes; file spill stays only for the
-  attachment policy above.
-- *Per-session SQLite files:* no cross-file atomicity with the coordination
-  database, and session deletion becomes a filesystem operation over multiple
-  files.
-- *LMDB:* un-versioned (0.x) wrapper, a fresh on-disk format break, and Windows
-  map-size pre-reservation, with no measured advantage.
-- *RocksDB:* qualified and the closest measured rival, but a ~13 MB native
-  asset plus higher dependency/LOC cost without a decisive win at Stage 1.
-- *LiteDB:* attractive size and fully managed, but the stable line is unmoved
-  since mid-2024, v5 offers no transaction object, and its culture-based index
-  collation already caused one correctness incident in the harness.
-- *Tsavorite standalone:* not qualified (no official embeddable package).
-- *ORMs, event-sourcing platforms and interchangeable-backend frameworks:*
-  rejected up front; Urd uses a narrow first-party storage owner.
+A primary transcript layout split between SQLite metadata and ordinary payload
+files would add two-store atomicity risk; managed attachment bytes remain files
+under the separate reference policy above. Per-session databases would also
+separate session changes from shared coordination records. Urd keeps a narrow
+first-party storage owner rather than an ORM, event-sourcing platform or
+interchangeable-backend framework.
 
-**Consequences and revisit conditions.** The experiment programme's remaining
-stages continue as *validation* evidence — the full Stage 1 matrix and Stage 2
-concurrency/interruption/soak runs — not as selection. Revisit the internal
-layout (rows → content blocks) only if measured large-result read behaviour
-justifies a same-engine change. Revisit the engine itself only on demonstrated
-pathology: unbounded WAL/vacuum cost at the largest fixture tiers, or a
-concurrency failure under multiple active writers in Stage 2. Internal schema,
-driver pinning and process placement remain ordinary design work, not new
-decisions. Prior sections of [STORAGE-RESEARCH.md](STORAGE-RESEARCH.md) and
-[storage-experiment.md](storage-experiment.md) that describe storage as
-unselected are historical as of this date.
+**Consequences and revisit conditions.** Large-result reads may justify changing
+rows to content blocks within SQLite; the engine choice is not reopened for that
+alone. WAL growth/checkpointing, vacuum or cleanup costs at representative large
+histories, and sustained concurrent-writer behavior remain unqualified. A reduced
+adapter check passed two independent writer connections appending 100 records
+each, but it did not measure sustained contention, fairness, multiple backend
+processes or live-agent capacity. Revisit the engine only if actual workloads show
+pathological WAL/cleanup cost or a concurrent-writer failure; do not treat the
+reduced check as production qualification. Schema, driver pinning and process
+placement remain ordinary design work.
 
-[First-slice SQLite validation](sqlite-validation.md) subsequently exercised
-bounded concurrent activity and signalled process-kill boundaries. Its
-[preview follow-up](sqlite-validation.md#preview-fix-follow-up--2026-11-04) fixes
-snapshot consistency, empty-message visibility and Unicode boundaries in the
-experimental adapter; separate `PageOlder`/`ReadRange` snapshot races remain.
-Its conditional go supports the engine choice, not promotion of the reduced
-experimental contract or closure of production lifecycle/schema gaps. These checks
-do not qualify power loss, sustained contention, attachment cleanup or end-to-end
-UI latency.
+The reduced adapter's later validation also exercised one writer with two readers
+and injected process exits around transactions. Its corrected preview path passed
+bounded snapshot, empty-message and Unicode checks, while separate `PageOlder` /
+`ReadRange` snapshot races remained in that experimental contract. None of this
+promotes the adapter to the production domain model or qualifies power loss,
+attachment cleanup, sustained contention or end-to-end UI latency.
 
 ## Feature discovery: first pass
 

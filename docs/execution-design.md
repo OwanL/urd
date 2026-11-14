@@ -10,8 +10,10 @@ selected. Only two loop candidates were compared: a small Urd-controlled cycle a
 ## Implemented Core
 
 The approved Urd-owned cycle now uses provider-managed clients and real SQLite, with
-optional configured `AIFunction`s. Production Server does not register application tools;
-its cycle uses Abstractions, not the optional library-owned function loop. Busy steering is delivered as separate user messages
+configured application tools through the shared tool runtime. Server composition enables
+Windows file/shell tools on Windows, or when Git Bash is explicitly configured; see
+[agent tools](agent-tools-design.md) for their scope. The cycle uses Abstractions, not the
+optional library-owned function loop. Busy steering is delivered as separate user messages
 following the next tool-result batch, or after a no-tool response finishes. Claims, call/result
 records and settlement are durable; reopening never automatically invokes historical tools.
 
@@ -76,11 +78,11 @@ wrapper or rerun tools.
 
 ## What was actually exercised
 
-Earlier [Go/.NET discovery](go-dotnet-discovery.md) ran real loop libraries with
-**in-process fake LLMs**. Earlier [LLM-interface research](model-interface-research.md)
-only round-tripped native SDK JSON. Both artifact sets survived and were reused:
-source patterns, exact cached dependencies and raw-item reconstruction. They were
-not mistaken for new HTTP or provider evidence.
+Earlier Go/.NET discovery ran real loop libraries with **in-process fake LLMs**;
+earlier pinned MEAI research only round-tripped native SDK JSON. These supplied
+bounded loop/source patterns, dependency pins and raw-item reconstruction, not HTTP
+or provider evidence. The adapter fixture below supersedes the JSON-only evidence
+only for its tested adapter behavior.
 
 New work used .NET SDK **10.0.403**, runtime **10.0.14**, MEAI **10.11.0**, and
 OpenAI **2.14.0** on Windows. No login, credentials, live LLMs, metered calls,
@@ -193,6 +195,26 @@ HTTP/SSE and five databases. Final build: zero warnings/errors; pre-build free R
 555 MiB. Owned process check was empty before releasing the lease. Independent
 read-only acceptance review of source, wire captures, logs and these claims is
 recorded with the fixture; it is not an independent runtime rerun.
+
+## Already-sent tool results across reopen
+
+Exact model-visible result representation is an acceptance condition across
+continuation and reopen; generic JSON equivalence is not enough. A retired synthetic
+`ChatMessage` JSON fixture found that literal strings gained JSON quoting/escaping
+(including text that merely looked like JSON), while typed text/image `AIContent`
+arrays reloaded as JSON text. One structured-JSON control happened to match. That
+fixture exercised an old generic-message serialization path, not current Urd result
+storage, so its drift is not itself a current production-path failure.
+
+The current [`ToolResultCodec`](../source/backend/harness/storage/ToolResultCodec.cs)
+persists a `ToolOutput` envelope and reprojects text/images. The actual
+[`ProviderSessionExecutionTests`](../source/tests/Urd.Backend.Tests/execution/ProviderSessionExecutionTests.cs)
+exercise plain text and PNG output through Responses and Chat Completions request
+bodies, including session close/reopen and a follow-up without rerunning the tool.
+Their text fixture is the simple `lookup result text`; embedded quotes, newlines and
+JSON-looking strings are not tested. Those edges remain unqualified. This closes
+basic text/image coverage for the current path, not every result shape or adapter
+projection; do not claim the broader representation gap is fully resolved.
 
 ## Control and responsibility seam — proposal, not a new class layout
 

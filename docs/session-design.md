@@ -193,10 +193,11 @@ locking and method signatures remain implementation work.
 
 Read windows, their cursor and history identity must describe one consistent
 snapshot. An append is not the same invalidation as suffix replacement; assignment
-revision is not a transport sequence. Shared SQLite validation reproduced a
-count/window cursor race, freely overwritten task results and append-after-delete
-recreation in the reduced experimental contract. **Do not copy that contract as
-Urd's domain model**; see [sqlite-validation.md](sqlite-validation.md).
+revision is not a transport sequence. A reduced SQLite fixture exposed a
+count/window cursor race, replaceable task results and append-after-delete
+recreation in its experimental contract. These are observations about that fixture,
+not claims about the current production store. **Do not copy its contract as Urd's
+domain model.**
 
 Preserve provider-specific context/call IDs and exposed-definition order where
 needed. `IChatClient` is not a durable serialization format: default serialization
@@ -453,9 +454,9 @@ shared authority remains unchanged until the coordinator reconciles its wording.
 
 **Evidence/limits:** reread the retained input/Stop/continuation behavior in Pie's
 `STATE_CONTRACT.md` (Execution Ordering and Queued Follow-ups), the existing §7
-fixture, Execution Design's recorded-effect/result-write failure and
-[DURABLE-BOUNDARIES-EVIDENCE.md](DURABLE-BOUNDARIES-EVIDENCE.md), plus the TEMP
-first-slice implementation/storage proposals. The results are existing bounded
+fixture, Execution Design's recorded-effect/result-write failure, and the due-work
+and uncertain-effect requirements in [ARCHITECTURE.md](ARCHITECTURE.md), plus the
+TEMP first-slice implementation/storage proposals. The results are existing bounded
 evidence and source-grounded reasoning, not new execution. No probes rerun,
 scheduler/cleanup/session code, schema, account access or build was added.
 Client/coordinator were told both the simplicity delegation and the unanswered

@@ -123,11 +123,10 @@ not completed cleanup. Saved sessions can be listed without starting execution. 
 settings, bounded history/not-sent reads, push notices and request usage capture now exist.
 See the [index](README.md) for current guides and dated verification evidence.
 
-Transcript stage 2 owns virtualization, images and storage-cache work. Follow its
-[design](TRANSCRIPT-DESIGN.md), [stage-1 plan](TRANSCRIPT-HISTORY-PLAN.md) and
-[implementation evidence](transcript-history-implementation.md); do not infer that every
-proposed stage has shipped. Startup recovery, application tools, tool-body inspection,
-an explicit after-run queue, delegation and packaging remain separate work.
+Transcript design records the active Stage 2 criteria and staged tool/media follow-up.
+Follow the [design](TRANSCRIPT-DESIGN.md); do not infer that every proposed stage has
+shipped. Startup recovery, application tools, tool-body inspection, an explicit after-run
+queue, delegation and packaging remain separate work.
 
 Measure tiny output chunks, slow observers, click-to-visible content and memory on the
 integrated path. Qualify fidelity of previously sent tool results through real storage;

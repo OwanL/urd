@@ -288,7 +288,8 @@ These are single-entry/release checks, not multi-message cache stability or proo
 memory recovery.
 
 The source report and retained raw records are in
-[`%TEMP%/urd-display-production-f50fc475-835d-469c-92b6-a552fa6cea93/REPORT.md`](file:///C:/Users/OwanLazic/AppData/Local/Temp/urd-display-production-f50fc475-835d-469c-92b6-a552fa6cea93/REPORT.md)
+`%TEMP%/urd-display-production-f50fc475-835d-469c-92b6-a552fa6cea93/REPORT.md`
+(temporary evidence path, not a durable repository link)
 and that directory's `all-metrics.json`, `process-results.json`, per-case JSON/Markdown
 and production snapshots. This evidence supports bounded production-builder index
 reads and tested cache release only. It is not end-to-end, memory-recovery or

@@ -21,13 +21,15 @@ reading intent. The batch reader, exact-entry Core facade and page-owned HTTP ad
 retain scoped leases: disconnect/shutdown reclaim generations, including late opens.
 Reconnect and shared-scrollport reflow preserve source-based reading positions.
 
-The combined schema-16 startup passes focused hosting/lifetime checks, the real HTTP
-client integration, UI checks/unit tests/build and bounded normal-app browser smoke
-checks. See [parser evidence](TRANSCRIPT-PARSER-EVIDENCE.md) for their scope. Native
-lifecycle, input/paint/long-task, warm/cold latency, contention and resident-memory
-qualification remain follow-up work, not blockers to local owner UX review. The
-178–217 ms observation measured append start through observed database commit, not
-paint; it does not establish a rendering target failure.
+At the frozen schema-16 checkpoint, the composed startup passed hosting/lifetime
+checks, real HTTP client integration, UI checks/unit tests/build and normal-app browser
+checks. These are historical evidence, not schema-26 requalification or retained
+browser coverage. See [parser evidence](TRANSCRIPT-PARSER-EVIDENCE.md) for checkpoint
+scope and [testing](testing.md) for current coverage. Native lifecycle, input/paint/
+long-task, warm/cold latency, contention and resident-memory qualification remain
+follow-up work, not blockers to local owner UX review. The 178–217 ms observation
+measured append start through observed database commit, not paint; it does not establish
+a rendering target failure.
 
 Stages 3–4 (tool/reasoning detail and managed media) retain separate ownership and
 requirements. This activation adds no migrations.
@@ -142,9 +144,10 @@ Distinguish throughout:
   flat dark surfaces, restrained separation, no shadows/bright popup surfaces,
   while retaining visible keyboard focus.
 
-## Current implementation — observed constraints
+## Historical implementation snapshot — observed constraints
 
-Source spot-check at `6519de9` on 2026-11-08; recheck before implementation.
+The following bullets describe the source spot-check at `6519de9` on 2026-11-08,
+not current behavior; they are retained as dated design evidence.
 
 - `source/ui/app/Transcript.tsx` displays escaped text. IntersectionObserver gates
   content reads, with up to four pages per read. Already fetched bodies remain in
@@ -580,17 +583,29 @@ Any retained references still follow the existing shared-reference lifetime cont
 separating responsibilities does not make a dangling recall link acceptable. The
 exact pruner/storage ownership interface belongs to that later feature.
 
-[Context lifetime evidence](CONTEXT-LIFETIME-EVIDENCE.md) distinguishes raw execution
-results from model-facing results; [storage research](STORAGE-RESEARCH.md) leaves
-capture fidelity open. Earlier proposals to make original tool results the default
-inspector content, or settle global pre-pruning retention in this UI discussion,
-are superseded by the owner's clarified boundary.
+Keep raw process/service output, a tool's returned result and the exact
+model-facing representation after producer-side reduction distinct. Transcript
+inspection must represent what was supplied to the model, with explicit retained
+references; UI availability alone does not prove model consumption. This is a design
+boundary, not a claim that both representations are currently stored or that a
+pruning system exists. Earlier proposals to make original tool results the default
+inspector content are superseded by the owner's clarified boundary.
 
 Separate original files, generated previews, decoded previews, full-resolution
 viewer resources and pending clipboard/upload data. Small display size does not
 mean small decode cost. Define dimensions, format validation, preview generation,
-object URL lifetime, cancellation and cache ownership. Respect existing managed
-attachment publication/reference rules; no general artifact policy is selected.
+object URL lifetime, cancellation and cache ownership.
+
+Managed attachment bytes must be independent of mutable original paths. Publish complete
+bytes before acknowledging a ready reference, and commit that reference with its owning
+message/result. A failed reference commit may leave an orphan; rollback must not delete a
+shared or pre-existing file. If a retained reference resolves to missing or unreadable
+bytes, report them unavailable rather than substituting another file, erasing the record,
+silently rereading a mutable source or rerunning the producer. Final cleanup must coordinate
+with new references, active publication and readers/tool uses: a zero-reference query or
+SQLite snapshot does not pin a file, and delays or repeat scans do not close the race.
+The exact exclusion/lease mechanism remains unselected. These are required failure
+boundaries, not claims of an implemented attachment lifecycle.
 
 ## Grill queue — resolve dependencies, one scenario at a time
 
@@ -641,26 +656,20 @@ source, not by asking the owner. Update this document immediately after decision
 9. **Implementation sequencing:** bounded milestones and ownership only after
    the above contracts and high-risk feasibility checks are coherent.
 
-## Proposed implementation sequence — not yet approved
+## Staged implementation sequence
 
-Owner approved making stage 1 concrete as a **plan**, not implementing it. See
-[History/navigation plan](TRANSCRIPT-HISTORY-PLAN.md) for source-grounded contracts,
-read/placement packets, migration policy and acceptance gates. It explicitly keeps
-message-rank navigation distinct from stage 2's estimated rendered geometry.
+Stage 1 established the history, live-update and send-attempt foundation. Its bounded
+metadata reads remain distinct from Stage 2's estimated rendered geometry. The remaining
+slices are bounded delivery scopes, not authorization to implement the entire design.
 
-These are bounded delivery slices, not authorization to implement the entire design.
-Before the first source edits, settle its concrete read contract and ownership,
-coordinate active Workspace/CSS/storage work, and choose only the dependencies that
-slice requires. Markdig remains a candidate; the parser probe does not select a
+Coordinate active Workspace/CSS/storage ownership and choose only dependencies required
+by an approved slice. Markdig remains a candidate; the parser probe does not select a
 production parser, projection format or a browser virtualizer.
 
-1. **History, live-update and placement foundation.** Kind-tagged entry index
-   (user, text run, tool) in observed order, with entry times, tool start/end and
-   per-reply usage; metadata-only latest/anchor/neighbor reads; one multiplexed push
-   stream per browser page replacing snapshot polling; conversation placement at
-   send-attempt start, preserving durable receipts and failed-attempt history. Whole-history
-   position lookup is deferred to Stage 2. Verify revision fencing, mixed kinds,
-   notice coalescing and query cost without reading bodies. Do not weaken existing
+1. **Stage 1 — existing history, live-update and placement foundation.** The kind-tagged
+   entry index, bounded metadata reads, multiplexed notices and send-attempt placement
+   establish the baseline. Whole-history position lookup belongs to Stage 2. Preserve
+   revision fencing, mixed-kind ordering, notice coalescing, bounded reads and existing
    delivery/Stop guarantees.
 2. **Stage 2 core — formatted, virtualized text.** Qualify Markdown text, code and
    tables; virtualize between entries and within large messages/blocks. Preserve the
@@ -790,10 +799,9 @@ Requirements check additions (2026-11-09), owned by the named stage:
 - **Syntax highlighting ownership (Stage 2):** unassigned. Compare backend tokens
   with browser highlighting, including large-code-block cost and lazy offscreen ranges,
   in the probe matrix before choosing a library.
-- **Tool payload size (stage 3):** stored tool arguments/results are currently capped
-  at 16 KiB each, below real model-facing results (decision 26). Inspection needs
-  bounded reads once that execution-layer limit is raised; do not design for small
-  payloads only.
+- **Tool payload size (stage 3):** the former 16 KiB write caps on tool arguments,
+  tool results and user submissions were lifted. Inspection still needs bounded reads
+  and rendering; do not design for small payloads only.
 
 ### Current Stage 1 baseline and open limits
 
@@ -801,15 +809,14 @@ The Stage 2 position probe used 100,000 entries in each of five interleaved sess
 see [position evidence](TRANSCRIPT-POSITION-EVIDENCE.md) for lookup, storage and
 historical-correction costs. It supports no hierarchy for lookup, but does not resolve
 historical-maintenance requirements. The current-tree 25× Stage 1 run is a baseline,
-not sign-off. The five heavy sessions used 100,000 entries each. The implementation report records first-mount switch
+not sign-off. The five heavy sessions used 100,000 entries each. The local run recorded first-mount switch
 median **112.4 ms**, return/remount median **130.3 ms**, commit-to-DOM-plus-next-rAF
 bracket **39.4–44.8 ms**, **22.74 active GET/s**, and at 60 seconds **+17.24 MiB
 browser / +4 MiB backend** over baseline. The commit bracket is not pixel latency;
 the remounts are not Stage 2 warm-cache measurements. An intermittent tab-return
 anchor assertion remains unroot-caused (0/25 focused reproductions); it is not signed
-off. These observations establish neither memory recovery nor overall performance.
-See the [current Stage 1 implementation report](transcript-history-implementation.md)
-for methods, ranges and caveats.
+off. These historical observations establish neither memory recovery nor overall
+performance.
 
 ## Verification approach — broader work proposed; isolated parser probe completed
 
@@ -831,8 +838,8 @@ for methods, ranges and caveats.
 [Browser design](BROWSER-DESIGN.md) records a bounded synthetic plaintext experiment,
 not qualification of rich rendering, long individual messages or real SQLite under
 agent load. Its heap sample is not full browser memory or a soak result.
-[Durable boundaries](DURABLE-BOUNDARIES-EVIDENCE.md) records managed-file publication,
-shared-reference and cleanup failure cases; those are not implemented guarantees.
+The attachment constraints above preserve managed-file publication, shared-reference
+and cleanup failure cases; they are required boundaries, not implemented guarantees.
 
 ## Discussion record and rejected shortcuts
 
@@ -904,9 +911,10 @@ shared-reference and cleanup failure cases; those are not implemented guarantees
   placement and muted inline reasoning. It did not qualify live draft streaming,
   expansion behavior or underlying architecture/performance. No Pie source/styles
   were inspected/copied. Temporary browser/computer sessions were closed.
-- No Stage 2 source implementation, dependency, cache budget, schema, worker design
-  or runtime performance guarantee has been approved here. Push change notices are
-  agreed in principle (decision 16); their implementation is not yet approved.
+- At the time this discussion record was written, no Stage 2 source implementation,
+  dependency, cache budget, schema, worker design or runtime performance guarantee had
+  been approved. The current delivery status and remaining gates are summarized at the
+  top of this document; the Stage 1 push-notice path is now part of the existing system.
 - Grilling decision 15 (requirements check, 2026-11-09): owner reconfirmed tool
   details show **model-facing** input/results only, not process I/O. “Raw tool IO”
   in conversation means this; do not reintroduce a raw execution-log feature.
@@ -1048,8 +1056,10 @@ source/draft reload, retained-tab reflow and native pointer selection passed in 
 UI12 (`1a3bf5c` source overlays on schema14). UI13 additionally corrects snapshot-read
 resume (`5fc0bd2`) and passes the frozen normal reconnect regression. This is not overall
 acceptance: native lifecycle, warm/cold and input-paint latency, contention, recovery and
-production cache budgets remain open. See the final checkpoint in
-[parser evidence](TRANSCRIPT-PARSER-EVIDENCE.md). Normal startup remains inactive.
+production cache budgets remain open. These frozen-checkpoint observations are historical,
+not retained automated browser coverage; see [testing](testing.md) for current coverage.
+The final checkpoint is in [parser evidence](TRANSCRIPT-PARSER-EVIDENCE.md). Normal startup
+mounts the active Markdown workspace; this does not sign off the remaining gates.
 Do not invent a custom parser or treat sampled sizes as hard limits. Do not keep
 asking minor product questions that can be resolved through existing requirements.
 Ask only unresolved questions,
@@ -1061,11 +1071,10 @@ The existing user application was on port 55174/PID 2548 during the initial
 inventory; identifiers can change and are not permission to operate it. Do not
 inspect/copy Pie UI source/styles. Visible control requires appropriate user scope.
 
-Other work: frontend audit cleanup has landed through 5c9392f, including Workspace
-ownership boundaries, stylesheet separation and offline rendered regressions. Its
-reported anchor failure was resolved as test setup/timing, without Transcript behavior
-changes. This session remains planning-only in the transcript design/evidence/plan
-documents. Earlier parent work covered palette/tabs and provider/settings integration.
-Recheck ownership before any source edits.
+Earlier Workspace ownership, stylesheet and rendered-checkpoint notes above are
+historical observations; automated browser coverage is intentionally not retained.
+Earlier work also integrated palette/tabs and provider/settings. Transcript Stage 2 is
+active in the normal app; recheck source ownership before further edits, and use
+[testing](testing.md) for the current automated coverage scope.
 Future transcript logic can stay feature-local; coordinate shared CSS, Workspace,
 package/lockfile and docs changes. Preserve unrelated working-tree edits.

@@ -37,6 +37,16 @@ The pre-release schema policy applies: older databases are refused, not migrated
 Do not run a newer-schema build against an active older-schema profile or delete
 that profile to make verification pass. Use an isolated temporary profile.
 
+## Closed-session retention
+
+The detailed ledger supports accounting while a session is open and remains
+independent of transcript edits. Final closure has a separate retention boundary:
+keep only a compact usage summary (for example, tokens, estimated cost, time and
+errors), not the session's per-request ledger as a closed-session analytics archive
+or its conversation/tool payloads. Exact summary fields and cleanup timing remain
+open. This is the agreed retention requirement, not a claim that the current close
+path already compacts or removes request records.
+
 ## Pricing and uncertainty
 
 Rates are a checked-in capture of the official OpenAI pricing page on 2026-11-14,

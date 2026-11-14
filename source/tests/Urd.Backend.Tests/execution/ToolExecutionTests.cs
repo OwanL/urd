@@ -457,13 +457,14 @@ public sealed class ToolExecutionTests {
     using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     Guid execution = Guid.NewGuid();
+    var identity = new ExecutionIdentity(session, execution, 0);
     store.UserMessages.Admit(session, 0,
         new(Guid.NewGuid(), 0, "request", TestLlmSelection.Default), true, execution);
-    Guid request = store.Executions.ClaimNextRequest(session, execution, 0)!.RequestId;
-    Assert.True(store.Executions.StartRequest(session, execution, 0, request));
+    Guid request = store.Executions.ClaimNextRequest(identity)!.RequestId;
+    Assert.True(store.Executions.StartRequest(identity, request));
     var call = new LlmToolCall("never-started", "fake", JsonSerializer.SerializeToElement(new { }));
-    Assert.True(store.LlmResponses.Append(session, execution, 0, new(request, Guid.NewGuid(), 0, "", true)));
-    Assert.True(store.LlmResponses.CompleteRequest(session, execution, 0,
+    Assert.True(store.LlmResponses.Append(identity, new(request, Guid.NewGuid(), 0, "", true)));
+    Assert.True(store.LlmResponses.CompleteRequest(identity,
         new(request, ExecutionOutcome.Completed, ToolCalls: [call])));
 
     Assert.Equal(ExecutionOutcome.Cancelled,

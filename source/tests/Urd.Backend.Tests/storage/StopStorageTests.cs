@@ -15,9 +15,10 @@ public sealed class StopStorageTests {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, execution = Guid.NewGuid();
+    var identity = new ExecutionIdentity(session, execution, 0);
     store.UserMessages.Admit(session, 0,
         new(Guid.NewGuid(), 0, "claimed", TestLlmSelection.Default), true, execution);
-    store.Executions.ClaimNextRequest(session, execution, 0);
+    store.Executions.ClaimNextRequest(identity);
     var pending = new UserMessageSubmission(Guid.NewGuid(), 0, "pending", TestLlmSelection.Default);
     UserMessageReceipt receipt = store.UserMessages.Admit(
         session, 0, pending, true, Guid.NewGuid(), execution).Receipt;

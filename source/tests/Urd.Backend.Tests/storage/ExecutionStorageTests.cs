@@ -42,16 +42,17 @@ public sealed class ExecutionStorageTests {
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     Guid otherSession = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     Guid execution = Guid.NewGuid();
+    var identity = new ExecutionIdentity(session, execution, 0);
     store.UserMessages.Admit(session, 0,
         new(Guid.NewGuid(), 0, "input", TestLlmSelection.Default), true, execution);
-    Guid request = store.Executions.ClaimNextRequest(session, execution, 0)!.RequestId;
-    Assert.True(store.LlmResponses.ObserveTool(session, execution, 0, request, "call", null));
-    Assert.True(store.LlmResponses.ObserveTool(session, execution, 0, request, "call", null));
-    Assert.False(store.LlmResponses.ObserveTool(otherSession, execution, 0, request, "call", "foreign"));
-    Assert.False(store.LlmResponses.ObserveTool(session, Guid.NewGuid(), 0, request, "call", "foreign"));
-    Assert.False(store.LlmResponses.ObserveTool(session, execution, 1, request, "call", "stale"));
+    Guid request = store.Executions.ClaimNextRequest(identity)!.RequestId;
+    Assert.True(store.LlmResponses.ObserveTool(identity, request, "call", null));
+    Assert.True(store.LlmResponses.ObserveTool(identity, request, "call", null));
+    Assert.False(store.LlmResponses.ObserveTool(identity with { SessionId = otherSession }, request, "call", "foreign"));
+    Assert.False(store.LlmResponses.ObserveTool(identity with { ExecutionId = Guid.NewGuid() }, request, "call", "foreign"));
+    Assert.False(store.LlmResponses.ObserveTool(identity with { HistoryRevision = 1 }, request, "call", "stale"));
     store.Executions.RequestStop(session, execution, ownsExecution: true);
-    Assert.False(store.LlmResponses.ObserveTool(session, execution, 0, request, "call", "late"));
+    Assert.False(store.LlmResponses.ObserveTool(identity, request, "call", "late"));
     TranscriptEntryDescriptor reserved = Assert.Single(store.History.Read(session,
         new(TranscriptHistoryMode.Latest, 0)).Entries, entry => entry.Entry.Kind == TranscriptEntryKind.Tool);
     Assert.Null(reserved.Tool!.Name);
@@ -64,19 +65,20 @@ public sealed class ExecutionStorageTests {
   public void OutputIdentityAndOrderedContextSurviveReopen() {
     using var database = new TemporaryDatabase();
     Guid session = Guid.NewGuid(), execution = Guid.NewGuid(), output = Guid.NewGuid();
+    var identity = new ExecutionIdentity(session, execution, 0);
     Guid requestId;
     using (UrdStore store = UrdStore.Open(database.Path)) {
       store.Sessions.CreatePrimary(session);
       store.UserMessages.Admit(session, 0,
           new(Guid.NewGuid(), 0, "first input", TestLlmSelection.Default), true, execution);
-      LlmRequest request = store.Executions.ClaimNextRequest(session, execution, 0)!;
+      LlmRequest request = store.Executions.ClaimNextRequest(identity)!;
       requestId = request.RequestId;
-      Assert.True(store.Executions.StartRequest(session, execution, 0, requestId));
-      Assert.True(store.LlmResponses.Append(session, execution, 0,
+      Assert.True(store.Executions.StartRequest(identity, requestId));
+      Assert.True(store.LlmResponses.Append(identity,
           new(requestId, output, 0, "part", false)));
-      Assert.True(store.LlmResponses.Append(session, execution, 0,
+      Assert.True(store.LlmResponses.Append(identity,
           new(requestId, output, 1, "🙂 final", true)));
-      Assert.True(store.LlmResponses.CompleteRequest(session, execution, 0,
+      Assert.True(store.LlmResponses.CompleteRequest(identity,
           new(requestId, ExecutionOutcome.Completed)));
       Assert.Equal(ExecutionOutcome.Completed,
           store.Executions.TrySettle(session, execution, ExecutionOutcome.Completed)!.Outcome);
@@ -93,9 +95,10 @@ public sealed class ExecutionStorageTests {
 
     using UrdStore reopened = UrdStore.Open(database.Path);
     Guid nextExecution = Guid.NewGuid();
+    var nextIdentity = new ExecutionIdentity(session, nextExecution, 0);
     reopened.UserMessages.Admit(session, 0,
         new(Guid.NewGuid(), 0, "second input", TestLlmSelection.Default), true, nextExecution);
-    LlmRequest next = reopened.Executions.ClaimNextRequest(session, nextExecution, 0)!;
+    LlmRequest next = reopened.Executions.ClaimNextRequest(nextIdentity)!;
     Assert.Equal(new[] { ChatRole.User, ChatRole.Assistant, ChatRole.User },
         next.Messages.Select(message => message.Role));
     Assert.Equal(new[] { "first input", "part🙂 final", "second input" },

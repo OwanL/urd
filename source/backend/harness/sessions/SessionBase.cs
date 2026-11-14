@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.AI;
 using Urd.Core.Context;
+using Urd.Core.Concurrency;
 using Urd.Core.Compaction;
 using Urd.Core.Execution;
 using Urd.Core.Storage;
@@ -38,7 +39,6 @@ public abstract class SessionBase {
     notifications = new SessionNotifications(Id);
     status = new SessionStatus(record.HistoryRevision);
     Transcript = new SessionTranscript(Id, store, gate);
-    Recorder = new SessionExecutionRecorder(this, store, gate);
     HistoryRevision = record.HistoryRevision;
     WorkingDirectory = record.WorkingDirectory;
     this.store = store;
@@ -54,7 +54,8 @@ public abstract class SessionBase {
   public string? WorkingDirectory { get; private set; }
 
   internal SessionKind Kind { get; }
-  internal SessionExecutionRecorder Recorder { get; }
+  internal SessionExecutionRecorder Recorder => execution?.Recorder
+      ?? throw new InvalidOperationException("The session has no active execution recorder.");
 
   internal long HistoryRevision { get; private set; }
 
@@ -161,7 +162,8 @@ public abstract class SessionBase {
 
     using var held = await gate.AcquireAsync();
     if (!CanAdmit || needsAttention || execution is not { } current
-        || current.ExecutionId != executionId || current.IsStopping)
+        || current.Identity.ExecutionId != executionId || current.Identity.HistoryRevision != HistoryRevision
+        || current.IsStopping)
       return false;
 
     SessionSnapshot stored = store.Snapshots.ReadStored(Id);
@@ -169,8 +171,7 @@ public abstract class SessionBase {
     if (snapshot.AdmissionFenced || snapshot.StopRequested || snapshot.UnsettledExecutionId != executionId)
       return false;
 
-    bool removed = WriteToStore(() => store.Executions.RemovePendingInput(
-        Id, executionId, submissionId, HistoryRevision));
+    bool removed = WriteToStore(() => store.Executions.RemovePendingInput(current.Identity, submissionId));
     if (removed) {
       current.Wake();
       PublishChange();
@@ -417,12 +418,18 @@ public abstract class SessionBase {
   }
 
   // Caller holds the session gate; the driver publishes after updating its waiting state.
-  internal LlmRequest? ClaimNextRequest(Guid executionId) => IsCurrentExecution(executionId) && !execution!.IsStopping
-      ? store.Executions.ClaimNextRequest(Id, executionId, HistoryRevision) : null;
+  internal LlmRequest? ClaimNextRequest(ExecutionIdentity identity) => identity.SessionId == Id
+      && identity.HistoryRevision == HistoryRevision && IsCurrentExecution(identity.ExecutionId) && !execution!.IsStopping
+      ? store.Executions.ClaimNextRequest(identity) : null;
 
   // Caller holds the session gate. Results may finish during Stop, but no new work may start.
   internal bool CanRecordExecution(Guid executionId, bool allowStopping = false) =>
       IsCurrentExecution(executionId) && (allowStopping || !execution!.IsStopping);
+
+  // Captured identities can outlive a history edit; never authorize their writes in a new revision.
+  internal bool CanRecordExecution(ExecutionIdentity identity, bool allowStopping = false) =>
+      identity.SessionId == Id && identity.HistoryRevision == HistoryRevision
+      && CanRecordExecution(identity.ExecutionId, allowStopping);
 
   // Completion and cancellation-failure notifications never start another driver or join themselves.
   internal async Task BackgroundToolCompletedAsync(Guid executionId, Exception? failure = null) {
@@ -433,7 +440,9 @@ public abstract class SessionBase {
 
   // Caller holds the lock. The driver starts only after admission releases it.
   private void StartExecution(Guid executionId, LlmSelection selection, Task lockReleased, ManualCompactionRequest? compaction = null) {
-    var work = new SessionExecution(executionId, this, createChatClient, selection,
+    var identity = new ExecutionIdentity(SessionId: Id, ExecutionId: executionId, HistoryRevision: HistoryRevision);
+    var recorder = new SessionExecutionRecorder(this, store, gate, identity);
+    var work = new SessionExecution(recorder, this, createChatClient, selection,
         startingContextManager, tools.For(selection.Family), pending, compaction);
     execution = new SessionExecutionDriver(this, gate, work);
     executionTask = execution.RunAsync(lockReleased);

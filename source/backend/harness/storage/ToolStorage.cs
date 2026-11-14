@@ -111,8 +111,7 @@ internal sealed class ToolStorage(Database database, ToolResultCodec results) {
     return LlmSelectionJson.Read(selectionJson)?.SupportsImages ?? true;
   }
 
-  internal bool TryStart(Guid sessionId, Guid executionId, long revision, Guid requestId, string callId,
-      bool background = false) {
+  internal bool TryStart(ExecutionIdentity execution, Guid requestId, string callId, bool background = false) {
     return database.Write(transaction => {
       using SqliteCommand start = database.Command(transaction, """
         UPDATE execution_tools SET started = 1, started_at = $started, background = $background
@@ -127,15 +126,16 @@ internal sealed class ToolStorage(Database database, ToolResultCodec results) {
                     AND NOT EXISTS (SELECT 1 FROM execution_requests later
                         WHERE later.run_id = $run AND later.request_index > q.request_index));
         """,
-          ("$session", sessionId), ("$run", executionId), ("$revision", revision),
-          ("$request", requestId), ("$call", callId), ("$started", StorageText.UtcTimestamp()),
+          ("$session", execution.SessionId), ("$run", execution.ExecutionId),
+          ("$revision", execution.HistoryRevision), ("$request", requestId),
+          ("$call", callId), ("$started", StorageText.UtcTimestamp()),
           ("$background", background ? 1 : 0),
           ("$completed", (int)ExecutionOutcome.Completed));
       return start.ExecuteNonQuery() == 1;
     });
   }
 
-  internal bool Complete(Guid sessionId, Guid executionId, long revision, Guid requestId, LlmToolResult result) {
+  internal bool Complete(ExecutionIdentity execution, Guid requestId, LlmToolResult result) {
     if (!Enum.IsDefined(result.Outcome))
       throw new ArgumentOutOfRangeException(nameof(result));
     // Publish immutable image bytes before committing their references. Failed or uncertain
@@ -154,8 +154,8 @@ internal sealed class ToolStorage(Database database, ToolResultCodec results) {
         WHERE t.run_id = $run AND t.request_id = $request AND t.call_id = $call
             AND r.session_id = $session AND r.history_revision = $revision AND s.history_revision = $revision;
         """,
-          ("$session", sessionId), ("$run", executionId), ("$revision", revision),
-          ("$request", requestId), ("$call", result.CallId)))
+          ("$session", execution.SessionId), ("$run", execution.ExecutionId),
+          ("$revision", execution.HistoryRevision), ("$request", requestId), ("$call", result.CallId)))
       using (SqliteDataReader reader = read.ExecuteReader()) {
         if (!reader.Read() || reader.GetInt32(0) == 0)
           return false;
@@ -187,7 +187,8 @@ internal sealed class ToolStorage(Database database, ToolResultCodec results) {
               completion_id, session_id, history_revision, request_id, call_id, created_at)
           VALUES ($completion, $session, $revision, $request, $call, $created);
           """,
-            ("$completion", Guid.NewGuid()), ("$session", sessionId), ("$revision", revision),
+            ("$completion", Guid.NewGuid()), ("$session", execution.SessionId),
+            ("$revision", execution.HistoryRevision),
             ("$request", requestId), ("$call", result.CallId), ("$created", ended));
         completion.ExecuteNonQuery();
       }

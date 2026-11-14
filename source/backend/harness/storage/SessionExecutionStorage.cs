@@ -8,7 +8,7 @@ namespace Urd.Core.Storage;
 
 // Claims execution work and retains stop and settlement facts. The caller joins request cleanup first.
 internal sealed class SessionExecutionStorage(Database database, ToolResultCodec toolResults) {
-  internal LlmRequest? ClaimNextRequest(Guid sessionId, Guid executionId, long historyRevision) {
+  internal LlmRequest? ClaimNextRequest(ExecutionIdentity execution) {
     return database.Write<LlmRequest?>(transaction => {
       Guid requestId = Guid.NewGuid();
       using SqliteCommand claim = database.Command(transaction, """
@@ -33,25 +33,28 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
                 OR (r.kind = $continuation AND NOT EXISTS (
                     SELECT 1 FROM execution_requests first_request WHERE first_request.run_id = r.run_id)));
         """,
-          ("$session", sessionId), ("$run", executionId), ("$revision", historyRevision),
+          ("$session", execution.SessionId), ("$run", execution.ExecutionId),
+          ("$revision", execution.HistoryRevision),
           ("$request", requestId), ("$continuation", (int)ExecutionRunKind.Continuation));
       if (claim.ExecuteNonQuery() == 0)
         return null;
 
-      PublishCompletions(transaction, sessionId, historyRevision, requestId);
+      PublishCompletions(transaction, execution.SessionId, execution.HistoryRevision, requestId);
       using SqliteCommand assign = database.Command(transaction, """
         UPDATE execution_tool_completions SET claimed_request_id = $request
         WHERE session_id = $session AND history_revision = $revision AND claimed_request_id IS NULL;
         UPDATE execution_inputs SET request_id = $request
         WHERE run_id = $run AND request_id IS NULL AND outcome IS NULL;
-        """, ("$session", sessionId), ("$revision", historyRevision), ("$run", executionId), ("$request", requestId));
+        """, ("$session", execution.SessionId), ("$revision", execution.HistoryRevision),
+          ("$run", execution.ExecutionId), ("$request", requestId));
       assign.ExecuteNonQuery();
-      var context = new LlmContextReader(database, toolResults).ReadContext(transaction, sessionId, historyRevision, executionId, requestId);
+      var context = new LlmContextReader(database, toolResults).ReadContext(transaction,
+          execution.SessionId, execution.HistoryRevision, execution.ExecutionId, requestId);
       return new LlmRequest(requestId, context.ReadMessages(), context);
     });
   }
 
-  internal bool RemovePendingInput(Guid sessionId, Guid executionId, Guid submissionId, long historyRevision) => database.Write(transaction => {
+  internal bool RemovePendingInput(ExecutionIdentity execution, Guid submissionId) => database.Write(transaction => {
     using SqliteCommand remove = database.Command(transaction, """
       UPDATE execution_inputs SET outcome = $cancelled, not_sent = 0
       WHERE session_id = $session AND run_id = $run AND input_id = $input
@@ -60,8 +63,8 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
               WHERE r.session_id = $session AND r.run_id = $run AND r.history_revision = $revision
                   AND s.history_revision = $revision AND r.stopping = 0 AND r.outcome IS NULL
                   AND (r.input_id IS NULL OR r.input_id <> $input));
-      """, ("$session", sessionId), ("$run", executionId), ("$input", submissionId),
-        ("$revision", historyRevision),
+      """, ("$session", execution.SessionId), ("$run", execution.ExecutionId), ("$input", submissionId),
+        ("$revision", execution.HistoryRevision),
         ("$cancelled", (int)ExecutionOutcome.Cancelled));
     return remove.ExecuteNonQuery() == 1;
   });
@@ -80,8 +83,7 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
 
   // The marker and its user entries share a transaction. A repeat hook never allocates
   // entries again, and the stopped/settled/revision checks also apply to repeats.
-  internal bool StartRequest(Guid sessionId, Guid executionId, long historyRevision, Guid requestId,
-      StartingContext? startingContext = null) {
+  internal bool StartRequest(ExecutionIdentity execution, Guid requestId, StartingContext? startingContext = null) {
     return database.Write(transaction => {
       using SqliteCommand mark = database.Command(transaction, """
         UPDATE execution_requests SET attempt = 2,
@@ -91,12 +93,13 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
             AND EXISTS (SELECT 1 FROM execution_runs r JOIN sessions s ON s.session_id = r.session_id
                 WHERE r.run_id = $run AND r.session_id = $session AND r.history_revision = $revision
                     AND s.history_revision = $revision AND r.stopping = 0 AND r.outcome IS NULL);
-        """, ("$session", sessionId), ("$run", executionId), ("$revision", historyRevision), ("$request", requestId));
+        """, ("$session", execution.SessionId), ("$run", execution.ExecutionId),
+          ("$revision", execution.HistoryRevision), ("$request", requestId));
       if (mark.ExecuteNonQuery() == 0)
         return false;
 
       if (startingContext is not null)
-        new StartingContextStorage(database).Save(transaction, sessionId, startingContext);
+        new StartingContextStorage(database).Save(transaction, execution.SessionId, startingContext);
 
       using SqliteCommand place = database.Command(transaction, """
         INSERT INTO execution_messages (
@@ -108,7 +111,8 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
             AND NOT EXISTS (SELECT 1 FROM execution_messages m
                 WHERE m.run_id = i.run_id AND m.role = 0 AND m.message_id = i.input_id)
         ORDER BY i.ordinal;
-        """, ("$run", executionId), ("$revision", historyRevision), ("$request", requestId),
+        """, ("$run", execution.ExecutionId), ("$revision", execution.HistoryRevision),
+          ("$request", requestId),
           ("$created", StorageText.UtcTimestamp()));
       place.ExecuteNonQuery();
       return true;

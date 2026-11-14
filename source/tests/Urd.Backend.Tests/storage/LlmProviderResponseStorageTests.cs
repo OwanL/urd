@@ -14,22 +14,23 @@ public sealed class LlmProviderResponseStorageTests {
   public void NativeEnvelopeSurvivesReopenAndReplacesDisplayTextInContext() {
     using var database = new TemporaryDatabase();
     LlmProviderResponse response = Response();
-    Guid session, execution, request;
+    ExecutionIdentity identity;
+    Guid request;
     using (UrdStore store = UrdStore.Open(database.Path)) {
-      (session, execution, request) = Begin(store);
-      FinalText(store, session, execution, request);
-      Assert.True(store.LlmResponses.CompleteRequest(session, execution, 0,
+      (identity, request) = Begin(store);
+      FinalText(store, identity, request);
+      Assert.True(store.LlmResponses.CompleteRequest(identity,
           new(request, ExecutionOutcome.Completed, ProviderResponse: response)));
       Assert.Equal(response, Assert.Single(ReadProviderResponses(database)));
       Assert.Equal(ExecutionOutcome.Completed,
-          store.Executions.TrySettle(session, execution, ExecutionOutcome.Completed)!.Outcome);
+          store.Executions.TrySettle(identity.SessionId, identity.ExecutionId, ExecutionOutcome.Completed)!.Outcome);
     }
 
     using UrdStore reopened = UrdStore.Open(database.Path);
-    Guid nextExecution = Guid.NewGuid();
-    reopened.UserMessages.Admit(session, 0,
-        new(Guid.NewGuid(), 0, "next input", TestLlmSelection.Default), true, nextExecution);
-    LlmRequest next = reopened.Executions.ClaimNextRequest(session, nextExecution, 0)!;
+    var nextIdentity = new ExecutionIdentity(identity.SessionId, Guid.NewGuid(), 0);
+    reopened.UserMessages.Admit(identity.SessionId, 0,
+        new(Guid.NewGuid(), 0, "next input", TestLlmSelection.Default), true, nextIdentity.ExecutionId);
+    LlmRequest next = reopened.Executions.ClaimNextRequest(nextIdentity)!;
     Assert.Equal(new[] { ChatRole.User, ChatRole.Assistant, ChatRole.User },
         next.Messages.Select(message => message.Role));
     Assert.Equal(new[] { "request", "native answer", "next input" },
@@ -48,8 +49,8 @@ public sealed class LlmProviderResponseStorageTests {
   public void CompletionCommitFailureRollsBackNativeContextAndToolAuthorization(string table, string condition) {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
-    var (session, execution, request) = Begin(store);
-    FinalText(store, session, execution, request);
+    var (identity, request) = Begin(store);
+    FinalText(store, identity, request);
     var completion = new LlmRequestResult(request, ExecutionOutcome.Completed,
         ToolCalls: [Call("one"), Call("two")], ProviderResponse: Response());
     database.Execute($"""
@@ -59,32 +60,33 @@ public sealed class LlmProviderResponseStorageTests {
       BEGIN INSERT INTO test_child VALUES (1); END;
       """);
 
-    Assert.Throws<SqliteException>(() => store.LlmResponses.CompleteRequest(session, execution, 0, completion));
+    Assert.Throws<SqliteException>(() => store.LlmResponses.CompleteRequest(identity, completion));
     Assert.Null(Assert.Single(StoredExecutions.ReadRequests(database)).Outcome);
     Assert.Null(Assert.Single(StoredDeliveries.Read(database)).Outcome);
     Assert.Empty(ReadProviderResponses(database));
     Assert.Empty(StoredTools.Read(database));
-    Assert.False(store.Tools.TryStart(session, execution, 0, request, "one"));
+    Assert.False(store.Tools.TryStart(identity, request, "one"));
 
     database.Execute("DROP TRIGGER fail_completion;");
-    Assert.True(store.LlmResponses.CompleteRequest(session, execution, 0, completion));
+    Assert.True(store.LlmResponses.CompleteRequest(identity, completion));
     Assert.Equal(completion.ProviderResponse, Assert.Single(ReadProviderResponses(database)));
     List<StoredTool> authorized = StoredTools.Read(database);
     Assert.Equal(2, authorized.Count);
     Assert.All(authorized, tool => Assert.Equal("""{"path":"src/file","count":3}""", tool.ArgumentsExcerpt));
   }
 
-  private static (Guid Session, Guid Execution, Guid Request) Begin(UrdStore store) {
-    Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, execution = Guid.NewGuid();
+  private static (ExecutionIdentity Identity, Guid Request) Begin(UrdStore store) {
+    Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
+    var identity = new ExecutionIdentity(session, Guid.NewGuid(), 0);
     store.UserMessages.Admit(session, 0,
-        new(Guid.NewGuid(), 0, "request", TestLlmSelection.Default), true, execution);
-    Guid request = store.Executions.ClaimNextRequest(session, execution, 0)!.RequestId;
-    Assert.True(store.Executions.StartRequest(session, execution, 0, request));
-    return (session, execution, request);
+        new(Guid.NewGuid(), 0, "request", TestLlmSelection.Default), true, identity.ExecutionId);
+    Guid request = store.Executions.ClaimNextRequest(identity)!.RequestId;
+    Assert.True(store.Executions.StartRequest(identity, request));
+    return (identity, request);
   }
 
-  private static void FinalText(UrdStore store, Guid session, Guid execution, Guid request) =>
-      Assert.True(store.LlmResponses.Append(session, execution, 0,
+  private static void FinalText(UrdStore store, ExecutionIdentity identity, Guid request) =>
+      Assert.True(store.LlmResponses.Append(identity,
           new(request, Guid.NewGuid(), 0, "display answer", true)));
 
   private static LlmToolCall Call(string id) =>

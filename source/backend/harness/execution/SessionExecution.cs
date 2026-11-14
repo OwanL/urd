@@ -15,6 +15,7 @@ namespace Urd.Core.Execution;
 // The session owns locking and storage; this class owns the LLM call and its cleanup.
 internal sealed class SessionExecution : IDisposable {
   private readonly SessionBase session;
+  private readonly SessionExecutionRecorder recorder;
   private readonly Func<ProviderConnection, IChatClient> createChatClient; // Returns borrowed clients.
   private readonly LlmSelection selection;
   private readonly StartingContextManager startingContextManager;
@@ -27,10 +28,11 @@ internal sealed class SessionExecution : IDisposable {
   private int backgroundCalls;
   private readonly ManualCompactionRequest? compaction;
 
-  internal SessionExecution(Guid executionId, SessionBase session, Func<ProviderConnection, IChatClient> createChatClient,
-      LlmSelection selection, StartingContextManager startingContextManager,
-      IReadOnlyList<AgentTool>? tools = null, PendingToolCalls? pending = null, ManualCompactionRequest? compaction = null) {
-    ExecutionId = executionId;
+  internal SessionExecution(SessionExecutionRecorder recorder, SessionBase session,
+      Func<ProviderConnection, IChatClient> createChatClient, LlmSelection selection,
+      StartingContextManager startingContextManager, IReadOnlyList<AgentTool>? tools = null,
+      PendingToolCalls? pending = null, ManualCompactionRequest? compaction = null) {
+    this.recorder = recorder;
     this.session = session;
     this.createChatClient = createChatClient;
     this.selection = selection;
@@ -41,7 +43,9 @@ internal sealed class SessionExecution : IDisposable {
     IsCompacting = compaction is not null;
   }
 
-  internal Guid ExecutionId { get; }
+  internal ExecutionIdentity Identity => recorder.Identity;
+  internal SessionExecutionRecorder Recorder => recorder;
+  internal Guid ExecutionId => Identity.ExecutionId;
   internal bool IsStopping => stop.IsCancellationRequested;
   internal bool IsCompactionOnly => compaction is not null;
   internal bool IsCompacting { get; set; }
@@ -79,7 +83,7 @@ internal sealed class SessionExecution : IDisposable {
         outcome = ToRequestResult(request.RequestId, failure);
       }
     }
-    bool saved = await session.Recorder.CompleteRequestAsync(ExecutionId, outcome);
+    bool saved = await recorder.CompleteRequestAsync(outcome);
 
     if (!saved)
       return ExecutionOutcome.Cancelled;
@@ -166,7 +170,7 @@ internal sealed class SessionExecution : IDisposable {
           break;
         bool background = call.Arguments.TryGetProperty("background", out JsonElement option)
             && option.ValueKind == JsonValueKind.True;
-        if (!await session.Recorder.TryStartToolAsync(ExecutionId, requestId, call.CallId, background)) {
+        if (!await recorder.TryStartToolAsync(requestId, call.CallId, background)) {
           if (IsStopping)
             break;
           throw new InvalidOperationException("The tool call could not be started.");
@@ -244,7 +248,7 @@ internal sealed class SessionExecution : IDisposable {
     try {
       LlmToolResult result = await InvokeToolAsync(requestId, call, cancellation);
       // A rejected or failed save leaves effects uncertain, never an ordinary tool error.
-      if (!await session.Recorder.CompleteToolAsync(ExecutionId, requestId, result))
+      if (!await recorder.CompleteToolAsync(requestId, result))
         throw new InvalidOperationException("The tool result could not be saved.");
     } catch (Exception failure) {
       await session.BackgroundToolCompletedAsync(ExecutionId, failure);
@@ -390,7 +394,7 @@ internal sealed class SessionExecution : IDisposable {
   private async Task StartRequestAsync(Guid requestId, StartingContext startingContext) {
     bool started;
     try {
-      started = await session.Recorder.StartRequestAsync(ExecutionId, requestId, startingContext);
+      started = await recorder.StartRequestAsync(requestId, startingContext);
     } catch (Exception exception) {
       throw new RequestStartSaveException(exception);
     }
@@ -402,7 +406,7 @@ internal sealed class SessionExecution : IDisposable {
   private async Task SaveChunkAsync(LlmResponseChunk chunk) {
     bool saved;
     try {
-      saved = await session.Recorder.RecordOutputAsync(ExecutionId, chunk);
+      saved = await recorder.RecordOutputAsync(chunk);
     } catch (Exception exception) {
       throw new OutputSaveException(exception);
     }
@@ -414,7 +418,7 @@ internal sealed class SessionExecution : IDisposable {
   private async Task ObserveToolAsync(Guid requestId, string callId, string? name) {
     bool saved;
     try {
-      saved = await session.Recorder.ObserveToolAsync(ExecutionId, requestId, callId, name);
+      saved = await recorder.ObserveToolAsync(requestId, callId, name);
     } catch (Exception exception) {
       throw new OutputSaveException(exception);
     }

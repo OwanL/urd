@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using Microsoft.Extensions.AI;
 using Urd.Core.Storage;
+using Urd.Core.Concurrency;
 using Urd.Core.Providers;
 using Urd.Core.Preferences;
 using Urd.Core.Tools;

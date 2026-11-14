@@ -240,9 +240,10 @@ public sealed class SessionRoutesTests {
     UserMessageReceipt receipt;
     using (UrdStore store = UrdStore.Open(database.Path)) {
       sessionId = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
+      var identity = new ExecutionIdentity(sessionId, run, 0);
       receipt = store.UserMessages.Admit(sessionId, 0, submission, true, run).Receipt;
-      Guid request = store.Executions.ClaimNextRequest(sessionId, run, 0)!.RequestId;
-      Assert.True(store.LlmResponses.CompleteRequest(sessionId, run, 0, new(request, ExecutionOutcome.Failed)));
+      Guid request = store.Executions.ClaimNextRequest(identity)!.RequestId;
+      Assert.True(store.LlmResponses.CompleteRequest(identity, new(request, ExecutionOutcome.Failed)));
       Assert.NotNull(store.Executions.TrySettle(sessionId, run, ExecutionOutcome.Failed));
     }
 

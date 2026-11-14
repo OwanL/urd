@@ -7,7 +7,7 @@ namespace Urd.Core.Storage;
 
 // Appends ordered output segments and records explicit request completion.
 internal sealed class LlmResponseStorage(Database database) {
-  internal bool Append(Guid sessionId, Guid executionId, long historyRevision, LlmResponseChunk chunk) {
+  internal bool Append(ExecutionIdentity execution, LlmResponseChunk chunk) {
     ArgumentOutOfRangeException.ThrowIfNegative(chunk.ChunkIndex);
     if (chunk.RequestId == Guid.Empty || chunk.ResponseId == Guid.Empty
         || StorageText.StrictUtf8.GetByteCount(chunk.Text) > StorageText.MaximumBytes) {
@@ -31,9 +31,9 @@ internal sealed class LlmResponseStorage(Database database) {
                 WHERE r.run_id = $run AND r.session_id = $session AND r.history_revision = $revision
                     AND s.history_revision = $revision AND r.stopping = 0 AND r.outcome IS NULL);
         """,
-          ("$session", sessionId),
-          ("$run", executionId),
-          ("$revision", historyRevision),
+          ("$session", execution.SessionId),
+          ("$run", execution.ExecutionId),
+          ("$revision", execution.HistoryRevision),
           ("$request", chunk.RequestId),
           ("$output", chunk.ResponseId),
           ("$index", chunk.ChunkIndex),
@@ -62,7 +62,8 @@ internal sealed class LlmResponseStorage(Database database) {
           WHERE NOT EXISTS (SELECT 1 FROM execution_messages
               WHERE request_id = $request AND role = 1 AND message_id = $output);
           """,
-            ("$session", sessionId), ("$revision", historyRevision), ("$run", executionId),
+            ("$session", execution.SessionId), ("$revision", execution.HistoryRevision),
+            ("$run", execution.ExecutionId),
             ("$output", chunk.ResponseId), ("$request", chunk.RequestId), ("$index", chunk.ChunkIndex),
             ("$created", StorageText.UtcTimestamp()), ("$bytes", StorageText.StrictUtf8.GetByteCount(chunk.Text)));
         if (index.ExecuteNonQuery() == 0) {
@@ -77,7 +78,7 @@ internal sealed class LlmResponseStorage(Database database) {
         // Empty committed segments still advance source cursors in this history revision.
         using SqliteCommand touch = database.Command(transaction,
             "UPDATE sessions SET position_version = position_version + 1 WHERE session_id = $session;",
-            ("$session", sessionId));
+            ("$session", execution.SessionId));
         touch.ExecuteNonQuery();
       }
 
@@ -96,8 +97,7 @@ internal sealed class LlmResponseStorage(Database database) {
 
   // A provider-observed boundary closes the current text run and reserves a display entry,
   // but it does not authorize execution or persist any arguments.
-  internal bool ObserveTool(Guid sessionId, Guid executionId, long historyRevision,
-      Guid requestId, string callId, string? name) {
+  internal bool ObserveTool(ExecutionIdentity execution, Guid requestId, string callId, string? name) {
     ArgumentException.ThrowIfNullOrWhiteSpace(callId);
     if (name is not null && string.IsNullOrWhiteSpace(name))
       throw new ArgumentException("A tool name must be nonempty when supplied.", nameof(name));
@@ -111,8 +111,8 @@ internal sealed class LlmResponseStorage(Database database) {
                 AND r.stopping = 0 AND r.outcome IS NULL
                 AND NOT EXISTS (SELECT 1 FROM execution_requests later
                     WHERE later.run_id = $run AND later.request_index > q.request_index));
-        """, ("$session", sessionId), ("$run", executionId), ("$revision", historyRevision),
-          ("$request", requestId));
+        """, ("$session", execution.SessionId), ("$run", execution.ExecutionId),
+          ("$revision", execution.HistoryRevision), ("$request", requestId));
       if ((long)allowed.ExecuteScalar()! == 0)
         return false;
 
@@ -149,15 +149,16 @@ internal sealed class LlmResponseStorage(Database database) {
             session_id, history_revision, run_id, role, message_id, request_id, created_at, call_id, tool_name)
         VALUES ($session, $revision, $run, 2, $entry, $request, $created, $call, $name);
         """,
-          ("$session", sessionId), ("$revision", historyRevision), ("$run", executionId),
-          ("$entry", Guid.NewGuid()), ("$request", requestId), ("$created", StorageText.UtcTimestamp()),
+          ("$session", execution.SessionId), ("$revision", execution.HistoryRevision),
+          ("$run", execution.ExecutionId), ("$entry", Guid.NewGuid()), ("$request", requestId),
+          ("$created", StorageText.UtcTimestamp()),
           ("$call", callId), ("$name", name));
       reserve.ExecuteNonQuery();
       return true;
     });
   }
 
-  internal bool CompleteRequest(Guid sessionId, Guid executionId, long historyRevision, LlmRequestResult completion) {
+  internal bool CompleteRequest(ExecutionIdentity execution, LlmRequestResult completion) {
     if (!Enum.IsDefined(completion.Outcome))
       throw new ArgumentOutOfRangeException(nameof(completion));
 
@@ -182,12 +183,12 @@ internal sealed class LlmResponseStorage(Database database) {
     }
     string? usageJson = completion.Usage is null ? null : JsonSerializer.Serialize(completion.Usage);
 
-    return database.Write(transaction => CompleteRequest(transaction, sessionId, executionId,
-        historyRevision, completion, calls, providerResponseJson, usageJson));
+    return database.Write(transaction => CompleteRequest(transaction, execution,
+        completion, calls, providerResponseJson, usageJson));
   }
 
-  private bool CompleteRequest(SqliteTransaction transaction, Guid sessionId, Guid executionId,
-      long historyRevision, LlmRequestResult completion,
+  private bool CompleteRequest(SqliteTransaction transaction, ExecutionIdentity execution,
+      LlmRequestResult completion,
       (string CallId, string Name, string Arguments, string Excerpt)[] calls,
       string? providerResponseJson, string? usageJson) {
     bool alreadyCompleted;
@@ -201,9 +202,9 @@ internal sealed class LlmResponseStorage(Database database) {
       WHERE r.session_id = $session AND r.run_id = $run AND q.request_id = $request
           AND r.history_revision = $revision AND s.history_revision = $revision;
       """,
-        ("$session", sessionId),
-        ("$run", executionId),
-        ("$revision", historyRevision),
+        ("$session", execution.SessionId),
+        ("$run", execution.ExecutionId),
+        ("$revision", execution.HistoryRevision),
         ("$request", completion.RequestId)))
     using (SqliteDataReader reader = read.ExecuteReader()) {
       if (!reader.Read())
@@ -239,7 +240,7 @@ internal sealed class LlmResponseStorage(Database database) {
     foreach (var call in calls) {
       using SqliteCommand exists = database.Command(transaction,
           "SELECT EXISTS(SELECT 1 FROM execution_tools WHERE run_id = $run AND call_id = $call);",
-          ("$run", executionId), ("$call", call.CallId));
+          ("$run", execution.ExecutionId), ("$call", call.CallId));
       if ((long)exists.ExecuteScalar()! != 0)
         return false;
     }
@@ -280,8 +281,7 @@ internal sealed class LlmResponseStorage(Database database) {
           """, ("$name", call.Name), ("$request", completion.RequestId), ("$call", call.CallId));
         attach.ExecuteNonQuery();
       } else {
-        ReserveCompletedCall(transaction, sessionId, executionId, historyRevision, completion.RequestId,
-            call.CallId, call.Name);
+        ReserveCompletedCall(transaction, execution, completion.RequestId, call.CallId, call.Name);
       }
 
       using SqliteCommand authorize = database.Command(transaction, """
@@ -289,7 +289,7 @@ internal sealed class LlmResponseStorage(Database database) {
             run_id, request_id, call_index, call_id, name, arguments_json, arguments_excerpt)
         VALUES ($run, $request, $index, $call, $name, $arguments, $excerpt);
         """,
-          ("$run", executionId), ("$request", completion.RequestId), ("$index", index),
+          ("$run", execution.ExecutionId), ("$request", completion.RequestId), ("$index", index),
           ("$call", call.CallId), ("$name", call.Name), ("$arguments", call.Arguments),
           ("$excerpt", call.Excerpt));
       authorize.ExecuteNonQuery();
@@ -312,14 +312,15 @@ internal sealed class LlmResponseStorage(Database database) {
     return true;
   }
 
-  private void ReserveCompletedCall(SqliteTransaction transaction, Guid sessionId, Guid executionId,
-      long historyRevision, Guid requestId, string callId, string name) {
+  private void ReserveCompletedCall(SqliteTransaction transaction, ExecutionIdentity execution,
+      Guid requestId, string callId, string name) {
     using SqliteCommand reserve = database.Command(transaction, """
       INSERT INTO execution_messages (
           session_id, history_revision, run_id, role, message_id, request_id, created_at, call_id, tool_name)
       VALUES ($session, $revision, $run, 2, $entry, $request, $created, $call, $name);
       """,
-        ("$session", sessionId), ("$revision", historyRevision), ("$run", executionId),
+        ("$session", execution.SessionId), ("$revision", execution.HistoryRevision),
+        ("$run", execution.ExecutionId),
         ("$entry", Guid.NewGuid()), ("$request", requestId), ("$created", StorageText.UtcTimestamp()),
         ("$call", callId), ("$name", name));
     reserve.ExecuteNonQuery();

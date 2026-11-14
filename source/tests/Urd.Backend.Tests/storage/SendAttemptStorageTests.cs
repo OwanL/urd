@@ -14,34 +14,35 @@ public sealed class SendAttemptStorageTests {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, run = Guid.NewGuid();
+    var identity = new ExecutionIdentity(session, run, 0);
     UserMessageSubmission first = Input("first"), second = Input("second"), third = Input("third");
     Admit(store, session, run, first);
-    Guid request = store.Executions.ClaimNextRequest(session, run, 0)!.RequestId;
+    Guid request = store.Executions.ClaimNextRequest(identity)!.RequestId;
     Assert.Empty(History(store, session));
     Assert.Equal(first.SubmissionId, Assert.Single(store.Snapshots.ReadStored(session).PendingInputs).SubmissionId);
     Assert.Null(store.Snapshots.ReadStored(session).FirstUserPreview);
-    Assert.True(store.Executions.StartRequest(session, run, 0, request));
-    Assert.True(store.Executions.StartRequest(session, run, 0, request));
+    Assert.True(store.Executions.StartRequest(identity, request));
+    Assert.True(store.Executions.StartRequest(identity, request));
     Assert.Single(History(store, session));
     Assert.Equal("first", store.Snapshots.ReadStored(session).FirstUserPreview);
     Assert.Empty(store.Snapshots.ReadStored(session).PendingInputs);
     Admit(store, session, run, second);
     Admit(store, session, run, third);
     Assert.Single(History(store, session));
-    Assert.True(store.LlmResponses.Append(session, run, 0, new(request, Guid.NewGuid(), 0, "", true)));
-    Assert.True(store.LlmResponses.CompleteRequest(session, run, 0, new(request, ExecutionOutcome.Completed)));
-    Guid next = store.Executions.ClaimNextRequest(session, run, 0)!.RequestId;
+    Assert.True(store.LlmResponses.Append(identity, new(request, Guid.NewGuid(), 0, "", true)));
+    Assert.True(store.LlmResponses.CompleteRequest(identity, new(request, ExecutionOutcome.Completed)));
+    Guid next = store.Executions.ClaimNextRequest(identity)!.RequestId;
     Assert.Equal(new[] { second.SubmissionId, third.SubmissionId },
         store.Snapshots.ReadStored(session).PendingInputs.Select(input => input.SubmissionId));
-    Assert.False(store.Executions.StartRequest(Guid.NewGuid(), run, 0, next));
-    Assert.False(store.Executions.StartRequest(session, run, 1, next));
-    Assert.True(store.Executions.StartRequest(session, run, 0, next));
+    Assert.False(store.Executions.StartRequest(identity with { SessionId = Guid.NewGuid() }, next));
+    Assert.False(store.Executions.StartRequest(identity with { HistoryRevision = 1 }, next));
+    Assert.True(store.Executions.StartRequest(identity, next));
     Assert.Equal(new[] { first.SubmissionId, second.SubmissionId, third.SubmissionId },
         History(store, session).Where(entry => entry.Entry.Kind == TranscriptEntryKind.User).Select(entry => entry.Entry.EntryId));
     Assert.Equal(next.ToString("D").ToUpperInvariant(),
         ((string)database.Scalar($"SELECT request_id FROM execution_messages WHERE message_id = '{second.SubmissionId:D}';")!).ToUpperInvariant()); // raw-sql: verify transaction-time history placement
     store.Executions.RequestStop(session, run, true);
-    Assert.False(store.Executions.StartRequest(session, run, 0, next));
+    Assert.False(store.Executions.StartRequest(identity, next));
     Assert.Equal(3, History(store, session).Count(entry => entry.Entry.Kind == TranscriptEntryKind.User));
   }
 
@@ -50,20 +51,21 @@ public sealed class SendAttemptStorageTests {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, run = Guid.NewGuid();
+    var identity = new ExecutionIdentity(session, run, 0);
     Admit(store, session, run, Input("one"));
     Admit(store, session, run, Input("two"));
-    Guid request = store.Executions.ClaimNextRequest(session, run, 0)!.RequestId;
+    Guid request = store.Executions.ClaimNextRequest(identity)!.RequestId;
     database.Execute("""
       CREATE TRIGGER fail_placement BEFORE INSERT ON execution_messages
       WHEN (SELECT count(*) FROM execution_messages) = 1
       BEGIN SELECT RAISE(ABORT, 'second placement rejected'); END;
       """);
-    Assert.Throws<SqliteException>(() => store.Executions.StartRequest(session, run, 0, request));
+    Assert.Throws<SqliteException>(() => store.Executions.StartRequest(identity, request));
     Assert.Equal(1L, database.Scalar("SELECT attempt FROM execution_requests;")); // raw-sql: verify attempt marker rolls back with placements
     Assert.Empty(History(store, session));
     Assert.Equal(2, store.Snapshots.ReadStored(session).PendingInputs.Count);
     database.Execute("DROP TRIGGER fail_placement;");
-    Assert.True(store.Executions.StartRequest(session, run, 0, request));
+    Assert.True(store.Executions.StartRequest(identity, request));
     Assert.Equal(2, History(store, session).Count);
   }
 
@@ -75,8 +77,9 @@ public sealed class SendAttemptStorageTests {
     Finish("never sent", startRequest: false, partial: null);
     Finish("attempted failed", startRequest: true, partial: "committed partial");
     Guid run = Guid.NewGuid();
+    var identity = new ExecutionIdentity(session, run, 0);
     Admit(store, session, run, Input("current claim"));
-    LlmRequest next = store.Executions.ClaimNextRequest(session, run, 0)!;
+    LlmRequest next = store.Executions.ClaimNextRequest(identity)!;
     Assert.Equal(new[] { "attempted failed", "committed partial", "current claim" },
         next.Messages.Select(message => message.Text));
     Assert.Equal(new[] { ChatRole.User, ChatRole.Assistant, ChatRole.User },
@@ -84,13 +87,14 @@ public sealed class SendAttemptStorageTests {
 
     void Finish(string text, bool startRequest, string? partial) {
       Guid execution = Guid.NewGuid();
+      var executionIdentity = new ExecutionIdentity(session, execution, 0);
       Admit(store, session, execution, Input(text));
-      Guid request = store.Executions.ClaimNextRequest(session, execution, 0)!.RequestId;
+      Guid request = store.Executions.ClaimNextRequest(executionIdentity)!.RequestId;
       if (startRequest)
-        Assert.True(store.Executions.StartRequest(session, execution, 0, request));
+        Assert.True(store.Executions.StartRequest(executionIdentity, request));
       if (partial is not null)
-        Assert.True(store.LlmResponses.Append(session, execution, 0, new(request, Guid.NewGuid(), 0, partial, false)));
-      Assert.True(store.LlmResponses.CompleteRequest(session, execution, 0, new(request, ExecutionOutcome.Failed, "failure")));
+        Assert.True(store.LlmResponses.Append(executionIdentity, new(request, Guid.NewGuid(), 0, partial, false)));
+      Assert.True(store.LlmResponses.CompleteRequest(executionIdentity, new(request, ExecutionOutcome.Failed, "failure")));
       Assert.NotNull(store.Executions.TrySettle(session, execution, ExecutionOutcome.Failed));
     }
   }
@@ -106,23 +110,25 @@ public sealed class SendAttemptStorageTests {
       other = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
       for (int index = 0; index < 65; index++) {
         Guid run = Guid.NewGuid();
+        var identity = new ExecutionIdentity(session, run, 0);
         UserMessageSubmission input = Input(text);
         expected.Add(input.SubmissionId);
         Admit(store, session, run, input);
         if (index % 2 == 0) {
-          Guid request = store.Executions.ClaimNextRequest(session, run, 0)!.RequestId;
-          Assert.True(store.LlmResponses.CompleteRequest(session, run, 0, new(request, ExecutionOutcome.Failed)));
+          Guid request = store.Executions.ClaimNextRequest(identity)!.RequestId;
+          Assert.True(store.LlmResponses.CompleteRequest(identity, new(request, ExecutionOutcome.Failed)));
         } else {
           store.Executions.RequestStop(session, run, true);
         }
         Assert.NotNull(store.Executions.TrySettle(session, run, ExecutionOutcome.Cancelled));
       }
       Guid sent = Guid.NewGuid();
+      var sentIdentity = new ExecutionIdentity(session, sent, 0);
       Admit(store, session, sent, Input("later sent run"));
-      Guid sentRequest = store.Executions.ClaimNextRequest(session, sent, 0)!.RequestId;
-      Assert.True(store.Executions.StartRequest(session, sent, 0, sentRequest));
-      Assert.True(store.LlmResponses.Append(session, sent, 0, new(sentRequest, Guid.NewGuid(), 0, "", true)));
-      Assert.True(store.LlmResponses.CompleteRequest(session, sent, 0, new(sentRequest, ExecutionOutcome.Completed)));
+      Guid sentRequest = store.Executions.ClaimNextRequest(sentIdentity)!.RequestId;
+      Assert.True(store.Executions.StartRequest(sentIdentity, sentRequest));
+      Assert.True(store.LlmResponses.Append(sentIdentity, new(sentRequest, Guid.NewGuid(), 0, "", true)));
+      Assert.True(store.LlmResponses.CompleteRequest(sentIdentity, new(sentRequest, ExecutionOutcome.Completed)));
       Assert.NotNull(store.Executions.TrySettle(session, sent, ExecutionOutcome.Completed));
     }
 

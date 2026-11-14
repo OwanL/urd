@@ -24,9 +24,10 @@ public sealed class SessionStopRoutesTests {
     Guid executionId = Guid.NewGuid();
     using (UrdStore store = UrdStore.Open(database.Path)) {
       store.Sessions.CreatePrimary(sessionId);
+      var identity = new ExecutionIdentity(sessionId, executionId, 0);
       store.UserMessages.Admit(sessionId, 0,
           new(Guid.NewGuid(), 0, "orphan", TestLlmSelection.Default), true, executionId);
-      Assert.NotNull(store.Executions.ClaimNextRequest(sessionId, executionId, 0));
+      Assert.NotNull(store.Executions.ClaimNextRequest(identity));
       store.UserMessages.Admit(sessionId, 0,
           new(Guid.NewGuid(), 0, "pending", TestLlmSelection.Default), true, Guid.NewGuid(), executionId);
     }

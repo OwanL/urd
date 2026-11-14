@@ -1,4 +1,5 @@
 using Urd.Backend.Tests.Support;
+using Urd.Core.Execution;
 using Urd.Core.MarkdownRendering;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
@@ -98,10 +99,11 @@ public sealed class MessageMarkdownSchedulerSourceTests {
   static MessageMarkdownKey Admit(UrdStore store, string text) {
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     Guid execution = Guid.NewGuid(), submission = Guid.NewGuid();
+    var identity = new ExecutionIdentity(session, execution, 0);
     Assert.True(store.UserMessages.Admit(session, 0,
         new(submission, 0, text, TestLlmSelection.Default), true, execution).NewlyAccepted);
-    var request = store.Executions.ClaimNextRequest(session, execution, 0)!;
-    Assert.True(store.Executions.StartRequest(session, execution, 0, request.RequestId));
+    var request = store.Executions.ClaimNextRequest(identity)!;
+    Assert.True(store.Executions.StartRequest(identity, request.RequestId));
     var positioned = store.Positions.Locate(session, 0, 0).Entries.Single();
     return MessageMarkdownKey.FromPositionedEntry(session, positioned);
   }

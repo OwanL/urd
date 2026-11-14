@@ -61,6 +61,7 @@ public sealed class SessionSnapshotStorageTests {
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     string text = string.Concat(Enumerable.Repeat("pending 🙂", 4000));
     Guid input = Guid.NewGuid(), run = Guid.NewGuid();
+    var identity = new ExecutionIdentity(session, run, 0);
     store.UserMessages.Admit(session, 0,
         new(input, 0, text, TestLlmSelection.Default), true, run);
     Assert.Equal(0L, database.Scalar($"SELECT COUNT(*) FROM execution_messages WHERE session_id = '{session:D}' AND message_id = '{input:D}';")); // raw-sql: admission does not place a user entry before the request starts
@@ -70,10 +71,10 @@ public sealed class SessionSnapshotStorageTests {
     PendingInputPreview pending = Assert.Single(snapshot.PendingInputs);
     Assert.Equal(input, pending.SubmissionId);
     Assert.Equal(text[..256], pending.Preview);
-    Guid request = store.Executions.ClaimNextRequest(session, run, 0)!.RequestId;
+    Guid request = store.Executions.ClaimNextRequest(identity)!.RequestId;
     Assert.Equal(pending, Assert.Single(store.Snapshots.ReadStored(session).PendingInputs));
     Assert.Equal(text, store.UserMessages.ReadReceipt(session, input)!.Submission.Text);
-    Assert.True(store.Executions.StartRequest(session, run, 0, request));
+    Assert.True(store.Executions.StartRequest(identity, request));
     Assert.Empty(store.Snapshots.ReadStored(session).PendingInputs);
   }
 
@@ -87,8 +88,9 @@ public sealed class SessionSnapshotStorageTests {
     using (UrdStore store = UrdStore.Open(database.Path)) {
       session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
       Guid failedRequestExecution = Admit(store, session);
-      Guid request = store.Executions.ClaimNextRequest(session, failedRequestExecution, 0)!.RequestId;
-      Assert.True(store.LlmResponses.CompleteRequest(session, failedRequestExecution, 0,
+      var failedRequestIdentity = new ExecutionIdentity(session, failedRequestExecution, 0);
+      Guid request = store.Executions.ClaimNextRequest(failedRequestIdentity)!.RequestId;
+      Assert.True(store.LlmResponses.CompleteRequest(failedRequestIdentity,
           new(request, ExecutionOutcome.Failed, longError)));
       store.Compactions.RecordError(session, failedRequestExecution, "run-level fallback");
       failedRequestSettlement = store.Executions.TrySettle(session, failedRequestExecution, ExecutionOutcome.Failed)!;
@@ -190,9 +192,10 @@ public sealed class SessionSnapshotStorageTests {
 
   private static (Guid Execution, Guid Request) RecordAttempt(UrdStore store, Guid session, UsageDetails? usage) {
     Guid execution = Admit(store, session);
-    LlmRequest request = store.Executions.ClaimNextRequest(session, execution, 0)!;
-    Assert.True(store.Executions.StartRequest(session, execution, 0, request.RequestId));
-    Assert.True(store.LlmResponses.CompleteRequest(session, execution, 0,
+    var identity = new ExecutionIdentity(session, execution, 0);
+    LlmRequest request = store.Executions.ClaimNextRequest(identity)!;
+    Assert.True(store.Executions.StartRequest(identity, request.RequestId));
+    Assert.True(store.LlmResponses.CompleteRequest(identity,
         new(request.RequestId, ExecutionOutcome.Failed, "request failed", Usage: usage)));
     Assert.Equal(ExecutionOutcome.Failed, store.Executions.TrySettle(session, execution, ExecutionOutcome.Failed)!.Outcome);
     return (execution, request.RequestId);

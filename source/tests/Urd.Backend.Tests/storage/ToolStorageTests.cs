@@ -14,24 +14,26 @@ public sealed class ToolStorageTests {
   public void CallsStartIndependentlyWhileFailedClaimsAndResultsRemainFenced() {
     using var database = new TemporaryDatabase();
     Guid session, execution, request;
+    ExecutionIdentity identity;
     int effects = 0;
     using (UrdStore store = UrdStore.Open(database.Path)) {
       (session, execution, request) = Begin(store);
+      identity = new ExecutionIdentity(session, execution, 0);
       var call = new LlmToolCall("effect", "fake", JsonSerializer.SerializeToElement(new { }));
       var later = call with { CallId = "later" };
       var unstarted = call with { CallId = "unstarted" };
-      Assert.False(store.Tools.TryStart(session, execution, 0, request, later.CallId));
-      Assert.True(store.LlmResponses.Append(session, execution, 0,
+      Assert.False(store.Tools.TryStart(identity, request, later.CallId));
+      Assert.True(store.LlmResponses.Append(identity,
           new(request, Guid.NewGuid(), 0, "", true)));
-      Assert.True(store.LlmResponses.CompleteRequest(session, execution, 0,
+      Assert.True(store.LlmResponses.CompleteRequest(identity,
           new(request, ExecutionOutcome.Completed, ToolCalls: [call, later, unstarted])));
       var laterResult = new LlmToolResult(later.CallId, ExecutionOutcome.Completed,
           new ToolOutput("later", [], JsonSerializer.SerializeToElement(new { saved = "later" })));
-      Assert.False(store.Tools.Complete(session, execution, 0, request, laterResult));
-      Assert.False(store.Tools.TryStart(Guid.NewGuid(), execution, 0, request, later.CallId));
-      Assert.False(store.Tools.TryStart(session, Guid.NewGuid(), 0, request, later.CallId));
-      Assert.False(store.Tools.TryStart(session, execution, 1, request, later.CallId));
-      Assert.False(store.Tools.TryStart(session, execution, 0, Guid.NewGuid(), later.CallId));
+      Assert.False(store.Tools.Complete(identity, request, laterResult));
+      Assert.False(store.Tools.TryStart(identity with { SessionId = Guid.NewGuid() }, request, later.CallId));
+      Assert.False(store.Tools.TryStart(identity with { ExecutionId = Guid.NewGuid() }, request, later.CallId));
+      Assert.False(store.Tools.TryStart(identity with { HistoryRevision = 1 }, request, later.CallId));
+      Assert.False(store.Tools.TryStart(identity, Guid.NewGuid(), later.CallId));
       database.Execute("""
         CREATE TABLE test_parent (id INTEGER PRIMARY KEY);
         CREATE TABLE test_child (parent_id INTEGER REFERENCES test_parent(id) DEFERRABLE INITIALLY DEFERRED);
@@ -40,13 +42,13 @@ public sealed class ToolStorageTests {
         """);
 
       Assert.Throws<SqliteException>(() => {
-        if (store.Tools.TryStart(session, execution, 0, request, call.CallId))
+        if (store.Tools.TryStart(identity, request, call.CallId))
           effects++;
       });
       Assert.Equal(0, effects);
       Assert.All(StoredTools.Read(database), tool => Assert.False(tool.Started));
       database.Execute("DROP TRIGGER fail_claim;");
-      if (store.Tools.TryStart(session, execution, 0, request, call.CallId))
+      if (store.Tools.TryStart(identity, request, call.CallId))
         effects++;
       Assert.Equal(1, effects);
 
@@ -57,44 +59,44 @@ public sealed class ToolStorageTests {
       var result = new LlmToolResult("effect", ExecutionOutcome.Completed,
           new ToolOutput("saved result", [new DataContent(new byte[] { 1, 2, 3 }, "image/png")],
               JsonSerializer.SerializeToElement(new { saved = true })));
-      Assert.Throws<SqliteException>(() => store.Tools.Complete(session, execution, 0, request, result));
+      Assert.Throws<SqliteException>(() => store.Tools.Complete(identity, request, result));
       // Bytes published before an uncertain commit are retained, not deleted as rollback.
       Assert.Single(Directory.GetFiles(database.Path + ".tool-images"));
       StoredTool retained = Assert.Single(StoredTools.Read(database), tool => tool.CallId == call.CallId);
       Assert.True(retained.Started);
       Assert.Null(retained.ResultJson);
       Assert.Null(retained.Outcome);
-      Assert.False(store.Tools.TryStart(session, execution, 0, request, call.CallId));
-      Assert.True(store.Tools.TryStart(session, execution, 0, request, later.CallId));
-      Assert.False(store.Tools.TryStart(session, execution, 0, request, later.CallId));
+      Assert.False(store.Tools.TryStart(identity, request, call.CallId));
+      Assert.True(store.Tools.TryStart(identity, request, later.CallId));
+      Assert.False(store.Tools.TryStart(identity, request, later.CallId));
       database.Execute("DROP TRIGGER fail_result;");
-      Assert.True(store.Tools.Complete(session, execution, 0, request, laterResult));
-      Assert.True(store.Tools.Complete(session, execution, 0, request, laterResult));
-      Assert.False(store.Tools.Complete(session, execution, 0, request,
+      Assert.True(store.Tools.Complete(identity, request, laterResult));
+      Assert.True(store.Tools.Complete(identity, request, laterResult));
+      Assert.False(store.Tools.Complete(identity, request,
           laterResult with { Output = laterResult.Output with { Text = "changed" } }));
       Assert.Null(Assert.Single(StoredTools.Read(database), tool => tool.CallId == call.CallId).ResultJson);
       ToolOutput savedLater = Assert.IsType<ToolOutput>(store.Tools.ReadOutput(session, request, later.CallId));
       Assert.Equal(laterResult.Output.Text, savedLater.Text);
       Assert.True(JsonElement.DeepEquals(laterResult.Output.Details!.Value, savedLater.Details!.Value));
-      Assert.Null(store.Executions.ClaimNextRequest(session, execution, 0));
+      Assert.Null(store.Executions.ClaimNextRequest(identity));
       Assert.Null(store.Executions.TrySettle(session, execution, ExecutionOutcome.Completed));
     }
 
     using UrdStore reopened = UrdStore.Open(database.Path);
-    Assert.False(reopened.Tools.TryStart(session, execution, 0, request, "effect"));
+    Assert.False(reopened.Tools.TryStart(identity, request, "effect"));
     Assert.Equal(1, effects);
-    Assert.Null(reopened.Executions.ClaimNextRequest(session, execution, 0));
+    Assert.Null(reopened.Executions.ClaimNextRequest(identity));
     Assert.Null(reopened.Executions.ReadSettlement(session, execution));
     reopened.Executions.RequestStop(session, execution, ownsExecution: true);
-    Assert.False(reopened.Tools.TryStart(session, execution, 0, request, "unstarted"));
+    Assert.False(reopened.Tools.TryStart(identity, request, "unstarted"));
     var recovered = new LlmToolResult("effect", ExecutionOutcome.Completed,
         new ToolOutput("saved result", [new DataContent(new byte[] { 1, 2, 3 }, "image/png")],
             JsonSerializer.SerializeToElement(new { saved = true })));
-    Assert.True(reopened.Tools.Complete(session, execution, 0, request, recovered));
+    Assert.True(reopened.Tools.Complete(identity, request, recovered));
     Assert.Equal(ExecutionOutcome.Cancelled,
         reopened.Executions.TrySettle(session, execution, ExecutionOutcome.Cancelled)!.Outcome);
-    Assert.False(reopened.Tools.TryStart(session, execution, 0, request, "unstarted"));
-    Assert.True(reopened.Tools.Complete(session, execution, 0, request, recovered));
+    Assert.False(reopened.Tools.TryStart(identity, request, "unstarted"));
+    Assert.True(reopened.Tools.Complete(identity, request, recovered));
     Assert.Single(Directory.GetFiles(database.Path + ".tool-images"));
     ToolOutput original = Assert.IsType<ToolOutput>(reopened.Tools.ReadOutput(session, request, "effect"));
     Assert.Equal("saved result", original.Text);
@@ -130,8 +132,9 @@ public sealed class ToolStorageTests {
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, execution = Guid.NewGuid();
     store.UserMessages.Admit(session, 0,
         new(Guid.NewGuid(), 0, "request", TestLlmSelection.Default), true, execution);
-    Guid request = store.Executions.ClaimNextRequest(session, execution, 0)!.RequestId;
-    Assert.True(store.Executions.StartRequest(session, execution, 0, request));
+    var identity = new ExecutionIdentity(session, execution, 0);
+    Guid request = store.Executions.ClaimNextRequest(identity)!.RequestId;
+    Assert.True(store.Executions.StartRequest(identity, request));
     return (session, execution, request);
   }
 }

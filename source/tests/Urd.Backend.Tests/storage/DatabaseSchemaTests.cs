@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Urd.Backend.Tests.Support;
+using Urd.Core.Execution;
 using Urd.Core.Storage;
 using Xunit;
 
@@ -54,15 +55,16 @@ public sealed class DatabaseSchemaTests {
     using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     Guid run = Guid.NewGuid();
+    var identity = new ExecutionIdentity(session, run, 0);
     Guid input = Guid.NewGuid();
     string text = new('x', 17000);
     Assert.True(store.UserMessages.Admit(session, 0,
         new(input, 0, text, TestLlmSelection.Default), true, run, run).NewlyAccepted);
-    Guid request = store.Executions.ClaimNextRequest(session, run, 0)!.RequestId;
+    Guid request = store.Executions.ClaimNextRequest(identity)!.RequestId;
     Assert.Equal(1L, database.Scalar($"SELECT attempt FROM execution_requests WHERE request_id = '{request:D}';")); // raw-sql: current schema creation, rejection or constraint is the subject under test
     Assert.Throws<SqliteException>(() => database.Execute($"UPDATE execution_requests SET attempt = 0 WHERE request_id = '{request:D}';"));
     Assert.Throws<SqliteException>(() => database.Execute($"UPDATE execution_requests SET attempt = 3 WHERE request_id = '{request:D}';"));
-    Assert.True(store.Executions.StartRequest(session, run, 0, request));
+    Assert.True(store.Executions.StartRequest(identity, request));
     Assert.Equal(2L, database.Scalar($"SELECT attempt FROM execution_requests WHERE request_id = '{request:D}';")); // raw-sql: current schema creation, rejection or constraint is the subject under test
     Assert.Equal(17000L, database.Scalar($"SELECT length(original_text_utf8) FROM input_decisions WHERE input_id = '{input:D}';")); // raw-sql: current schema creation, rejection or constraint is the subject under test
     Assert.Equal(1L, database.Scalar("SELECT \"notnull\" FROM pragma_table_info('input_decisions') WHERE name = 'llm_selection_json';")); // raw-sql: current schema creation, rejection or constraint is the subject under test

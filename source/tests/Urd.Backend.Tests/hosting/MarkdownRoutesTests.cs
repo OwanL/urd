@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Urd.Backend.Tests.Support;
+using Urd.Core.Execution;
 using Urd.Core.MarkdownRendering;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
@@ -191,10 +192,11 @@ public sealed class MarkdownRoutesTests {
     using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     Guid run = Guid.NewGuid();
+    var identity = new ExecutionIdentity(session, run, 0);
     string text = string.Join("\n\n", Enumerable.Range(0, 130).Select(i => $"[item{i}](https://example.invalid/{i})"));
     store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, text, TestLlmSelection.Default), true, run);
-    var request = store.Executions.ClaimNextRequest(session, run, 0)!;
-    Assert.True(store.Executions.StartRequest(session, run, 0, request.RequestId));
+    var request = store.Executions.ClaimNextRequest(identity)!;
+    Assert.True(store.Executions.StartRequest(identity, request.RequestId));
     return (session, store.Positions.Locate(session, 0, 0).Entries.Single().Descriptor.Entry);
   }
 

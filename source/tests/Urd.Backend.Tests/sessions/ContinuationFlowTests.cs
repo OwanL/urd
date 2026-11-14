@@ -147,19 +147,19 @@ public sealed class ContinuationFlowTests {
     using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     Guid execution = Guid.NewGuid();
+    var identity = new ExecutionIdentity(session, execution, 0);
     Assert.True(store.UserMessages.Admit(session, 0,
         new(Guid.NewGuid(), 0, "request", TestLlmSelection.Default), true, execution).NewlyAccepted);
-    LlmRequest first = store.Executions.ClaimNextRequest(session, execution, 0)!;
-    Assert.True(store.Executions.StartRequest(session, execution, 0, first.RequestId));
-    Assert.True(store.LlmResponses.Append(session, execution, 0,
-        new(first.RequestId, Guid.NewGuid(), 0, "", true)));
-    Assert.True(store.LlmResponses.CompleteRequest(session, execution, 0,
+    LlmRequest first = store.Executions.ClaimNextRequest(identity)!;
+    Assert.True(store.Executions.StartRequest(identity, first.RequestId));
+    Assert.True(store.LlmResponses.Append(identity, new(first.RequestId, Guid.NewGuid(), 0, "", true)));
+    Assert.True(store.LlmResponses.CompleteRequest(identity,
         new(first.RequestId, ExecutionOutcome.Completed, ToolCalls: [new("failed-call", "fake",
             JsonSerializer.SerializeToElement(new { value = "test" }))])));
-    Assert.True(store.Tools.TryStart(session, execution, 0, first.RequestId, "failed-call"));
-    Assert.True(store.Tools.Complete(session, execution, 0, first.RequestId,
+    Assert.True(store.Tools.TryStart(identity, first.RequestId, "failed-call"));
+    Assert.True(store.Tools.Complete(identity, first.RequestId,
         new("failed-call", ExecutionOutcome.Failed, new ToolOutput("tool failed", [], IsError: true))));
-    Assert.NotNull(store.Executions.ClaimNextRequest(session, execution, 0));
+    Assert.NotNull(store.Executions.ClaimNextRequest(identity));
     store.Executions.RequestStop(session, execution, ownsExecution: true);
     Assert.Equal(ExecutionOutcome.Cancelled,
         store.Executions.TrySettle(session, execution, ExecutionOutcome.Cancelled)!.Outcome);
@@ -168,7 +168,8 @@ public sealed class ContinuationFlowTests {
     Assert.NotNull(store.Continuations.Admit(session, 0,
         new(continuation, 0, execution, TestLlmSelection.Default), accepting: true));
     Assert.Equal(1L, database.Scalar($"SELECT continuation_omitted_request_id IS NULL FROM execution_runs WHERE run_id = '{continuation:D}';")); // raw-sql: a tool-result tail must not record an assistant omission.
-    LlmRequest continued = store.Executions.ClaimNextRequest(session, continuation, 0)!;
+    var continuationIdentity = new ExecutionIdentity(session, continuation, 0);
+    LlmRequest continued = store.Executions.ClaimNextRequest(continuationIdentity)!;
     ChatMessage assistant = Assert.Single(continued.Messages, message => message.Role == ChatRole.Assistant);
     Assert.Contains(assistant.Contents, content => content is FunctionCallContent call && call.CallId == "failed-call");
     ChatMessage result = Assert.Single(continued.Messages, message => message.Role == ChatRole.Tool);
@@ -185,18 +186,19 @@ public sealed class ContinuationFlowTests {
     using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     Guid execution = Guid.NewGuid(), response = Guid.NewGuid();
+    var identity = new ExecutionIdentity(session, execution, 0);
     Assert.True(store.UserMessages.Admit(session, 0,
         new(Guid.NewGuid(), 0, "request", TestLlmSelection.Default), true, execution).NewlyAccepted);
-    LlmRequest first = store.Executions.ClaimNextRequest(session, execution, 0)!;
-    Assert.True(store.Executions.StartRequest(session, execution, 0, first.RequestId));
-    Assert.True(store.LlmResponses.Append(session, execution, 0,
+    LlmRequest first = store.Executions.ClaimNextRequest(identity)!;
+    Assert.True(store.Executions.StartRequest(identity, first.RequestId));
+    Assert.True(store.LlmResponses.Append(identity,
         new(first.RequestId, response, 0, "assistant text", false)));
-    Assert.True(store.LlmResponses.ObserveTool(session, execution, 0, first.RequestId, "observed", "fake"));
+    Assert.True(store.LlmResponses.ObserveTool(identity, first.RequestId, "observed", "fake"));
     bool authorized = responseOutcome == ExecutionOutcome.Completed;
     if (authorized)
-      Assert.True(store.LlmResponses.Append(session, execution, 0,
+      Assert.True(store.LlmResponses.Append(identity,
           new(first.RequestId, Guid.NewGuid(), 1, "", true)));
-    Assert.True(store.LlmResponses.CompleteRequest(session, execution, 0,
+    Assert.True(store.LlmResponses.CompleteRequest(identity,
         new(first.RequestId, responseOutcome, ToolCalls: authorized
             ? [new("observed", "fake", JsonSerializer.SerializeToElement(new { }))] : null)));
     if (authorized)
@@ -208,7 +210,8 @@ public sealed class ContinuationFlowTests {
     Guid continuation = Guid.NewGuid();
     Assert.NotNull(store.Continuations.Admit(session, 0,
         new(continuation, 0, execution, TestLlmSelection.Default), accepting: true));
-    LlmRequest continued = store.Executions.ClaimNextRequest(session, continuation, 0)!;
+    var continuationIdentity = new ExecutionIdentity(session, continuation, 0);
+    LlmRequest continued = store.Executions.ClaimNextRequest(continuationIdentity)!;
     Assert.Equal("request", Assert.Single(continued.Messages, message => message.Role == ChatRole.User).Text);
     if (authorized) {
       ChatMessage assistant = Assert.Single(continued.Messages, message => message.Role == ChatRole.Assistant);

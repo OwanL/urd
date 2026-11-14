@@ -3,6 +3,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.AI;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Context;
+using Urd.Core.Execution;
 using Urd.Core.Storage;
 using Xunit;
 
@@ -88,9 +89,10 @@ public sealed class StartingContextStorageTests {
     using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     Guid execution = Guid.NewGuid();
+    var identity = new ExecutionIdentity(session, execution, 0);
     store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "request", TestLlmSelection.Default),
         true, execution, null);
-    Guid request = store.Executions.ClaimNextRequest(session, execution, 0)!.RequestId;
+    Guid request = store.Executions.ClaimNextRequest(identity)!.RequestId;
     StartingContext context = Context("system", "developer");
     if (failPlacement) {
       database.Execute("""
@@ -98,10 +100,10 @@ public sealed class StartingContextStorageTests {
           SELECT RAISE(ABORT, 'placement failed');
         END;
         """);
-      Assert.Throws<SqliteException>(() => store.Executions.StartRequest(session, execution, 0, request, context));
+      Assert.Throws<SqliteException>(() => store.Executions.StartRequest(identity, request, context));
     } else {
       store.Executions.RequestStop(session, execution, ownsExecution: true);
-      Assert.False(store.Executions.StartRequest(session, execution, 0, request, context));
+      Assert.False(store.Executions.StartRequest(identity, request, context));
     }
     Assert.Null(store.StartingContexts.Read(session));
   }

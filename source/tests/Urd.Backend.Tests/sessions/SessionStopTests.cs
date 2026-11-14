@@ -174,6 +174,7 @@ public sealed class SessionStopTests {
         : UncooperativeResponse(token));
     await using var fixture = new ExecutionFixture(client);
     Guid executionId = await fixture.StartExecutionAsync("start");
+    var recorder = fixture.Session.Recorder;
     Task<SessionExecutionResult> settlement = fixture.Session.WaitForSettlementAsync(executionId);
     var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "pending steering", TestLlmSelection.Default);
     UserMessageReceipt? accepted = null;
@@ -216,10 +217,10 @@ public sealed class SessionStopTests {
 
       // Each probe is otherwise valid in storage, so rejection exercises the local Stop guard.
       if (finalOutput) {
-        Assert.False(await fixture.Session.Recorder.CompleteRequestAsync(executionId,
+        Assert.False(await recorder.CompleteRequestAsync(
             new(request.RequestId, ExecutionOutcome.Completed)));
       } else {
-        Assert.False(await fixture.Session.Recorder.RecordOutputAsync(executionId,
+        Assert.False(await recorder.RecordOutputAsync(
             new(request.RequestId, lastChunk.ResponseId, lastChunk.ChunkIndex + 1, "late output", true)));
       }
       Assert.Equal(outputBeforeStop, StoredLlmResponses.ReadText(fixture.Database));
@@ -245,6 +246,48 @@ public sealed class SessionStopTests {
     TranscriptHistoryPage history = await fixture.Session.Transcript.ReadHistoryAsync(
         new(TranscriptHistoryMode.Latest, settled.HistoryRevision));
     Assert.DoesNotContain(history.Entries, entry => entry.Entry.EntryId == submission.SubmissionId);
+  }
+
+  [Fact]
+  public async Task RetainedRecorderCannotWriteIntoAReplacementExecution() {
+    var originalEntered = Signal();
+    var originalRelease = Signal();
+    var replacementEntered = Signal();
+    var replacementRelease = Signal();
+    int calls = 0;
+    var client = new ScriptedChatClient(token => Interlocked.Increment(ref calls) == 1
+        ? Paused(originalEntered, originalRelease, token)
+        : Paused(replacementEntered, replacementRelease, token));
+    await using var fixture = new ExecutionFixture(client);
+
+    Guid original = await fixture.StartExecutionAsync("original");
+    await originalEntered.Task.WaitAsync(TestTimeout);
+    var originalRecorder = fixture.Session.Recorder;
+    Assert.Equal(original, originalRecorder.Identity.ExecutionId);
+    Assert.Equal(0L, originalRecorder.Identity.HistoryRevision);
+
+    Assert.Equal(new StopReceipt(original, StopStatus.Requested),
+        await fixture.Session.RequestStopAsync(original).WaitAsync(TestTimeout));
+    Assert.Equal(ExecutionOutcome.Cancelled,
+        (await fixture.Session.WaitForSettlementAsync(original).WaitAsync(TestTimeout)).Outcome);
+
+    Guid replacement = await fixture.StartExecutionAsync("replacement");
+    await replacementEntered.Task.WaitAsync(TestTimeout);
+    var replacementRecorder = fixture.Session.Recorder;
+    Assert.Equal(replacement, replacementRecorder.Identity.ExecutionId);
+    Assert.Equal(originalRecorder.Identity.HistoryRevision, replacementRecorder.Identity.HistoryRevision);
+    Assert.NotEqual(originalRecorder.Identity.ExecutionId, replacementRecorder.Identity.ExecutionId);
+    StoredRequest request = Assert.Single(StoredExecutions.ReadRequests(fixture.Database), row => row.ExecutionId == replacement);
+    // Both writes would be valid for the replacement recorder, even before buffered text flushes.
+    Assert.False(await originalRecorder.ObserveToolAsync(request.RequestId, "stale-call", "lookup"));
+    Assert.False(await originalRecorder.CompleteRequestAsync(
+        new(request.RequestId, ExecutionOutcome.Failed, "stale failure")));
+    Assert.Null(Assert.Single(StoredExecutions.ReadRequests(fixture.Database), row => row.ExecutionId == replacement).Outcome);
+    var history = await fixture.Session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, 0));
+    Assert.DoesNotContain(history.Entries, entry => entry.Tool?.CallId == "stale-call");
+
+    originalRelease.TrySetResult();
+    replacementRelease.TrySetResult();
   }
 
   [Fact]

@@ -172,8 +172,11 @@ shared storage.
 - `SessionBase` owns identity, admission and execution lifetime under its guard. `SessionTranscript`,
   exposed as `session.Transcript`, owns history/content, positioning and bounded raw-source reads.
   Markdown source assembly belongs to `MessageMarkdownSourceReader`, outside the harness.
-  `SessionExecutionRecorder` owns guarded request/tool progress writes; admission and execution
-  ownership still decide whether writes are allowed. Each execution has one `SessionExecutionDriver`,
+  Each execution captures one immutable `ExecutionIdentity` (session, execution, history revision)
+  at admission and owns its own `SessionExecutionRecorder`. Guarded request/tool progress writes
+  carry that identity through storage, rather than rereading the session's current revision or
+  accepting an execution ID on every call. Admission, Stop and storage checks still decide whether
+  writes are allowed; a retained recorder cannot write into a replacement execution. Each execution has one `SessionExecutionDriver`,
   which uses the same guard for continuation, background waiting and settlement coordination.
   The session retains the driver task for shutdown to join, even after saved settlement clears
   the active execution. `SessionStatus` projects live state and caches observed stored status facts;
@@ -345,7 +348,8 @@ share a file per concept. Read them alongside their owners.
    [PrimarySession.cs](../source/backend/harness/sessions/PrimarySession.cs) — admission/driver ownership;
    [UserMessageSubmission.cs](../source/backend/harness/sessions/UserMessageSubmission.cs) holds the submission, receipt and enums;
    [Stop.cs](../source/backend/harness/sessions/Stop.cs) holds the public Stop receipt/status;
-   [AsyncLock.cs](../source/backend/harness/sessions/AsyncLock.cs) is the shared async lock.
+   [AsyncLock.cs](../source/backend/concurrency/AsyncLock.cs) wraps `SemaphoreSlim` for shared async
+   mutual exclusion. Its single-owner lease releases on disposal; it is not a synchronous `Lock`.
 3. [SessionExecutionDriver.cs](../source/backend/harness/execution/SessionExecutionDriver.cs) — request
    continuation, background waits, cleanup joins and settlement coordination using the session guard;
    [SessionExecution.cs](../source/backend/harness/execution/SessionExecution.cs) — sequential request/tool

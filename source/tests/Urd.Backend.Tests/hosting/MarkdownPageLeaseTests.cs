@@ -1,4 +1,5 @@
 using Urd.Backend.Tests.Support;
+using Urd.Core.Execution;
 using Urd.Core.MarkdownRendering;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
@@ -103,11 +104,12 @@ public sealed class MarkdownPageLeaseTests {
     const string text = "independent lease";
     Guid sessionId = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     Guid executionId = Guid.NewGuid();
+    var identity = new ExecutionIdentity(sessionId, executionId, 0);
     Guid submissionId = Guid.NewGuid();
     Assert.True(store.UserMessages.Admit(sessionId, 0,
         new(submissionId, 0, text, TestLlmSelection.Default), true, executionId).NewlyAccepted);
-    var request = store.Executions.ClaimNextRequest(sessionId, executionId, 0)!;
-    Assert.True(store.Executions.StartRequest(sessionId, executionId, 0, request.RequestId));
+    var request = store.Executions.ClaimNextRequest(identity)!;
+    Assert.True(store.Executions.StartRequest(identity, request.RequestId));
 
     TranscriptEntryRef entry = store.Positions.Locate(sessionId, 0, 0).Entries.Single().Descriptor.Entry;
     var sessions = new SessionManager(store, _ => client);

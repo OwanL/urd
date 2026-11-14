@@ -16,27 +16,28 @@ public sealed class BackgroundExecutionStorageTests {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     var (session, execution, origin) = Start(store);
+    var identity = new ExecutionIdentity(session, execution, 0);
     const string callId = "background\"\n]";
-    CompleteReply(store, session, execution, origin, callId);
-    Assert.True(store.Tools.TryStart(session, execution, 0, origin, callId, background: true));
-    LlmRequest streaming = store.Executions.ClaimNextRequest(session, execution, 0)!;
-    Assert.True(store.Executions.StartRequest(session, execution, 0, streaming.RequestId));
+    CompleteReply(store, identity, origin, callId);
+    Assert.True(store.Tools.TryStart(identity, origin, callId, background: true));
+    LlmRequest streaming = store.Executions.ClaimNextRequest(identity)!;
+    Assert.True(store.Executions.StartRequest(identity, streaming.RequestId));
     Guid output = Guid.NewGuid();
-    Assert.True(store.LlmResponses.Append(session, execution, 0, new(streaming.RequestId, output, 0, "part", false)));
-    Assert.True(store.Tools.Complete(session, execution, 0, origin, Result(callId, "actual output")));
+    Assert.True(store.LlmResponses.Append(identity, new(streaming.RequestId, output, 0, "part", false)));
+    Assert.True(store.Tools.Complete(identity, origin, Result(callId, "actual output")));
     Assert.Empty(Completions(store, session));
     Assert.DoesNotContain(Read(database, session, execution, streaming.RequestId), IsCompletion);
-    Assert.True(store.LlmResponses.Append(session, execution, 0, new(streaming.RequestId, output, 1, " done", true)));
-    Assert.True(store.LlmResponses.CompleteRequest(session, execution, 0, new(streaming.RequestId, ExecutionOutcome.Completed)));
+    Assert.True(store.LlmResponses.Append(identity, new(streaming.RequestId, output, 1, " done", true)));
+    Assert.True(store.LlmResponses.CompleteRequest(identity, new(streaming.RequestId, ExecutionOutcome.Completed)));
     TranscriptPositionState before = store.Positions.Summary(session, 0);
-    Assert.Null(store.Executions.ClaimNextRequest(session, Guid.NewGuid(), 0));
-    Assert.Null(store.Executions.ClaimNextRequest(session, execution, 1));
+    Assert.Null(store.Executions.ClaimNextRequest(identity with { SessionId = Guid.NewGuid() }));
+    Assert.Null(store.Executions.ClaimNextRequest(identity with { HistoryRevision = 1 }));
     Assert.Equal(before, store.Positions.Summary(session, 0));
     Assert.Empty(Completions(store, session));
     store.UserMessages.Admit(session, 0,
         new(Guid.NewGuid(), 0, "steering", TestLlmSelection.Default), true, execution, execution);
 
-    LlmRequest next = store.Executions.ClaimNextRequest(session, execution, 0)!;
+    LlmRequest next = store.Executions.ClaimNextRequest(identity)!;
     TranscriptEntryDescriptor completion = Assert.Single(Completions(store, session));
     Assert.Equal(execution, completion.Entry.ExecutionId);
     Assert.Equal(origin, completion.Tool!.RequestId);
@@ -55,8 +56,8 @@ public sealed class BackgroundExecutionStorageTests {
     Assert.Equal(callId, metadata.RootElement.GetProperty("call_id").GetString());
     Assert.Equal("steering", next.Messages[^1].Text);
     Assert.DoesNotContain(Read(database, session, execution, streaming.RequestId), IsCompletion);
-    Assert.True(store.Executions.StartRequest(session, execution, 0, next.RequestId));
-    Assert.True(store.Executions.StartRequest(session, execution, 0, next.RequestId));
+    Assert.True(store.Executions.StartRequest(identity, next.RequestId));
+    Assert.True(store.Executions.StartRequest(identity, next.RequestId));
     TranscriptHistoryPage history = store.History.Read(session, new(TranscriptHistoryMode.Latest, 0));
     Assert.Equal(completion.Entry, history.Entries[^2].Entry);
     Assert.Equal(TranscriptEntryKind.User, history.Entries[^1].Entry.Kind);
@@ -72,13 +73,14 @@ public sealed class BackgroundExecutionStorageTests {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     var (session, execution, origin) = Start(store);
-    CompleteReply(store, session, execution, origin, "background");
-    Assert.True(store.Tools.TryStart(session, execution, 0, origin, "background", background: true));
-    Assert.True(store.Tools.Complete(session, execution, 0, origin, Result("background", "saved")));
-    LlmRequest recipient = store.Executions.ClaimNextRequest(session, execution, 0)!;
-    TranscriptEntryRef identity = Assert.Single(Completions(store, session)).Entry;
+    var identity = new ExecutionIdentity(session, execution, 0);
+    CompleteReply(store, identity, origin, "background");
+    Assert.True(store.Tools.TryStart(identity, origin, "background", background: true));
+    Assert.True(store.Tools.Complete(identity, origin, Result("background", "saved")));
+    LlmRequest recipient = store.Executions.ClaimNextRequest(identity)!;
+    TranscriptEntryRef completionIdentity = Assert.Single(Completions(store, session)).Entry;
     if (attempted)
-      Assert.True(store.Executions.StartRequest(session, execution, 0, recipient.RequestId));
+      Assert.True(store.Executions.StartRequest(identity, recipient.RequestId));
     if (recovery) {
       store.RecoverInterruptedExecutions();
     } else {
@@ -88,11 +90,12 @@ public sealed class BackgroundExecutionStorageTests {
     object? owner = database.Scalar("SELECT claimed_request_id FROM execution_tool_completions;"); // raw-sql: No reader exposes recipient ownership; settlement must atomically release only never-attempted claims.
     Assert.Equal(attempted ? recipient.RequestId.ToString("D") : null, owner as string);
     Guid nextExecution = Guid.NewGuid();
+    var nextIdentity = new ExecutionIdentity(session, nextExecution, 0);
     store.UserMessages.Admit(session, 0,
         new(Guid.NewGuid(), 0, "deliberate continuation", TestLlmSelection.Default), true, nextExecution);
-    LlmRequest next = store.Executions.ClaimNextRequest(session, nextExecution, 0)!;
+    LlmRequest next = store.Executions.ClaimNextRequest(nextIdentity)!;
     Assert.Equal((attempted ? recipient.RequestId : next.RequestId).ToString("D"), database.Scalar("SELECT claimed_request_id FROM execution_tool_completions;")); // raw-sql: A new execution must reclaim the original event only when its earlier recipient was never attempted.
-    Assert.Equal(identity, Assert.Single(Completions(store, session)).Entry);
+    Assert.Equal(completionIdentity, Assert.Single(Completions(store, session)).Entry);
     Assert.Single(next.Messages, IsCompletion);
     Assert.Equal("deliberate continuation", next.Messages[^1].Text);
   }
@@ -102,8 +105,9 @@ public sealed class BackgroundExecutionStorageTests {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     var (session, execution, origin) = Start(store);
-    CompleteReply(store, session, execution, origin, "unstarted", "started");
-    Assert.True(store.Tools.TryStart(session, execution, 0, origin, "started"));
+    var identity = new ExecutionIdentity(session, execution, 0);
+    CompleteReply(store, identity, origin, "unstarted", "started");
+    Assert.True(store.Tools.TryStart(identity, origin, "started"));
     store.Executions.RequestStop(session, execution, ownsExecution: true);
 
     Assert.Equal(ExecutionOutcome.Cancelled,
@@ -124,12 +128,13 @@ public sealed class BackgroundExecutionStorageTests {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     var (session, execution, origin) = Start(store);
-    CompleteReply(store, session, execution, origin, "failed");
-    Assert.True(store.Tools.TryStart(session, execution, 0, origin, "failed"));
+    var identity = new ExecutionIdentity(session, execution, 0);
+    CompleteReply(store, identity, origin, "failed");
+    Assert.True(store.Tools.TryStart(identity, origin, "failed"));
     var failure = new LlmToolResult("failed", ExecutionOutcome.Failed,
         new ToolOutput("tool returned an error", [], IsError: true));
 
-    Assert.True(store.Tools.Complete(session, execution, 0, origin, failure));
+    Assert.True(store.Tools.Complete(identity, origin, failure));
     TranscriptToolFacts tool = Assert.Single(store.History.Read(session,
         new(TranscriptHistoryMode.Latest, 0)).Entries,
         entry => entry.Tool?.CallId == "failed").Tool!;
@@ -142,17 +147,20 @@ public sealed class BackgroundExecutionStorageTests {
   public void ExplicitRecoveryClosesInterruptedWorkWithoutReplayingOrDuplicatingResults() {
     using var database = new TemporaryDatabase();
     Guid session, execution, origin, streamingSession, streamingExecution, streamingRequest, pendingInput = Guid.NewGuid();
+    ExecutionIdentity identity, streamingIdentity;
     string savedJson;
     using (UrdStore store = UrdStore.Open(database.Path)) {
       (session, execution, origin) = Start(store);
-      CompleteReply(store, session, execution, origin, "unstarted", "foreground", "background", "saved");
-      Assert.True(store.Tools.TryStart(session, execution, 0, origin, "foreground"));
-      Assert.True(store.Tools.TryStart(session, execution, 0, origin, "background", background: true));
-      Assert.True(store.Tools.TryStart(session, execution, 0, origin, "saved", background: true));
-      Assert.True(store.Tools.Complete(session, execution, 0, origin, Result("saved", "actual saved result")));
+      identity = new ExecutionIdentity(session, execution, 0);
+      CompleteReply(store, identity, origin, "unstarted", "foreground", "background", "saved");
+      Assert.True(store.Tools.TryStart(identity, origin, "foreground"));
+      Assert.True(store.Tools.TryStart(identity, origin, "background", background: true));
+      Assert.True(store.Tools.TryStart(identity, origin, "saved", background: true));
+      Assert.True(store.Tools.Complete(identity, origin, Result("saved", "actual saved result")));
       savedJson = Assert.Single(StoredTools.Read(database), tool => tool.CallId == "saved").ResultJson!;
       (streamingSession, streamingExecution, streamingRequest) = Start(store);
-      Assert.True(store.LlmResponses.Append(streamingSession, streamingExecution, 0,
+      streamingIdentity = new ExecutionIdentity(streamingSession, streamingExecution, 0);
+      Assert.True(store.LlmResponses.Append(streamingIdentity,
           new(streamingRequest, Guid.NewGuid(), 0, "interrupted text", false)));
       store.UserMessages.Admit(streamingSession, 0,
           new(pendingInput, 0, "not yet sent", TestLlmSelection.Default), true, streamingExecution, streamingExecution);
@@ -197,7 +205,7 @@ public sealed class BackgroundExecutionStorageTests {
       ToolOutput unknown = reopened.Tools.ReadOutput(session, origin, call)!;
       Assert.True(unknown.IsError);
       Assert.Contains("effects may have occurred", unknown.Text);
-      Assert.False(reopened.Tools.TryStart(session, execution, 0, origin, call, background: call == "background"));
+      Assert.False(reopened.Tools.TryStart(identity, origin, call, background: call == "background"));
     }
     Assert.Equal(savedJson, Assert.Single(StoredTools.Read(database), tool => tool.CallId == "saved").ResultJson);
     Assert.Equal("actual saved result", reopened.Tools.ReadOutput(session, origin, "saved")!.Text);
@@ -208,9 +216,10 @@ public sealed class BackgroundExecutionStorageTests {
     Assert.Equal(identities, Completions(reopened, session).Select(entry => entry.Entry));
     Assert.Equal(positions, reopened.Positions.Summary(session, 0));
     Guid nextExecution = Guid.NewGuid();
+    var nextIdentity = new ExecutionIdentity(session, nextExecution, 0);
     reopened.UserMessages.Admit(session, 0,
         new(Guid.NewGuid(), 0, "continue deliberately", TestLlmSelection.Default), true, nextExecution);
-    LlmRequest next = reopened.Executions.ClaimNextRequest(session, nextExecution, 0)!;
+    LlmRequest next = reopened.Executions.ClaimNextRequest(nextIdentity)!;
     Assert.Equal(2, next.Messages.Count(IsCompletion));
     ChatMessage saved = Assert.Single(next.Messages.Where(IsCompletion),
         message => message.Text.EndsWith("actual saved result", StringComparison.Ordinal));
@@ -241,14 +250,15 @@ public sealed class BackgroundExecutionStorageTests {
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, execution = Guid.NewGuid();
     store.UserMessages.Admit(session, 0,
         new(Guid.NewGuid(), 0, "request", TestLlmSelection.Default), true, execution);
-    Guid request = store.Executions.ClaimNextRequest(session, execution, 0)!.RequestId;
-    Assert.True(store.Executions.StartRequest(session, execution, 0, request));
+    var identity = new ExecutionIdentity(session, execution, 0);
+    Guid request = store.Executions.ClaimNextRequest(identity)!.RequestId;
+    Assert.True(store.Executions.StartRequest(identity, request));
     return (session, execution, request);
   }
 
-  private static void CompleteReply(UrdStore store, Guid session, Guid execution, Guid request, params string[] tools) {
-    Assert.True(store.LlmResponses.Append(session, execution, 0, new(request, Guid.NewGuid(), 0, "", true)));
-    Assert.True(store.LlmResponses.CompleteRequest(session, execution, 0,
+  private static void CompleteReply(UrdStore store, ExecutionIdentity identity, Guid request, params string[] tools) {
+    Assert.True(store.LlmResponses.Append(identity, new(request, Guid.NewGuid(), 0, "", true)));
+    Assert.True(store.LlmResponses.CompleteRequest(identity,
         new(request, ExecutionOutcome.Completed, ToolCalls: tools.Select(call =>
             new LlmToolCall(call, "fake", JsonSerializer.SerializeToElement(new { background = true }))).ToArray())));
   }

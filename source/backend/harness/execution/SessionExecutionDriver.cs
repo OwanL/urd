@@ -1,4 +1,5 @@
 using Urd.Core.Sessions;
+using Urd.Core.Concurrency;
 
 namespace Urd.Core.Execution;
 
@@ -9,7 +10,9 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock gate
   private TaskCompletionSource? executionWake;
   private Exception? executionFailure;
 
-  internal Guid ExecutionId => execution.ExecutionId;
+  internal ExecutionIdentity Identity => execution.Identity;
+  internal SessionExecutionRecorder Recorder => execution.Recorder;
+  internal Guid ExecutionId => Identity.ExecutionId;
   internal bool IsStopping => execution.IsStopping;
   internal bool IsCompacting => execution.IsCompacting;
   internal void SetCompacting(bool value) => execution.IsCompacting = value;
@@ -137,7 +140,7 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock gate
 
   // Caller holds the session gate. Admission cannot slip between recheck and settlement.
   private LlmRequest? ClaimContinuation() {
-    LlmRequest? next = execution.IsCompactionOnly ? null : session.ClaimNextRequest(ExecutionId);
+    LlmRequest? next = execution.IsCompactionOnly ? null : session.ClaimNextRequest(Identity);
     if (next is not null) {
       IsWaiting = false;
       session.PublishChange();

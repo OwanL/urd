@@ -65,6 +65,7 @@ public sealed class MessageMarkdownSourceTests {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     TestExecution execution = StartExecution(store);
+    ExecutionIdentity identity = execution.Identity;
     Append(store, execution, 0, "");
     Append(store, execution, 1, "before🙂");
     Append(store, execution, 2, "é\0");
@@ -75,7 +76,7 @@ public sealed class MessageMarkdownSourceTests {
     if (final)
       Append(store, execution, 4, "last", final: true);
     else
-      Assert.True(store.LlmResponses.ObserveTool(execution.Session, execution.Execution, 0, execution.Request, "call", "tool"));
+      Assert.True(store.LlmResponses.ObserveTool(identity, execution.Request, "call", "tool"));
     MessageMarkdownSource source = MessageMarkdownSourceReader.Read(store.Content, extent);
     store.Content.ValidateSourceExtent(extent);
 
@@ -96,14 +97,15 @@ public sealed class MessageMarkdownSourceTests {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     TestExecution execution = StartExecution(store);
+    ExecutionIdentity identity = execution.Identity;
     Append(store, execution, 0, "");
     Append(store, execution, 1, "partial🙂");
     if (failed) {
-      Assert.True(store.LlmResponses.CompleteRequest(execution.Session, execution.Execution, 0,
+      Assert.True(store.LlmResponses.CompleteRequest(identity,
           new(execution.Request, ExecutionOutcome.Failed, "provider failed")));
       Assert.NotNull(store.Executions.TrySettle(execution.Session, execution.Execution, ExecutionOutcome.Failed));
     } else {
-      Assert.True(store.LlmResponses.ObserveTool(execution.Session, execution.Execution, 0, execution.Request, "call", "tool"));
+      Assert.True(store.LlmResponses.ObserveTool(identity, execution.Request, "call", "tool"));
     }
     MessageContentExtent extent = Capture(store, execution, execution.Assistant);
     if (!failed) Append(store, execution, 2, "after", output: Guid.NewGuid());
@@ -184,12 +186,13 @@ public sealed class MessageMarkdownSourceTests {
 
   static TestExecution StartExecution(UrdStore store, string text = "input") {
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, execution = Guid.NewGuid();
+    var identity = new ExecutionIdentity(session, execution, 0);
     var submission = new UserMessageSubmission(Guid.NewGuid(), 0, text, TestLlmSelection.Default);
     Assert.True(store.UserMessages.Admit(session, 0, submission, true, execution).NewlyAccepted);
-    LlmRequest request = store.Executions.ClaimNextRequest(session, execution, 0)!;
-    Assert.True(store.Executions.StartRequest(session, execution, 0, request.RequestId));
+    LlmRequest request = store.Executions.ClaimNextRequest(identity)!;
+    Assert.True(store.Executions.StartRequest(identity, request.RequestId));
     return new(session, execution, request.RequestId,
-        new(execution, submission.SubmissionId, MessageRole.User, 0), new(execution, Guid.NewGuid(), MessageRole.Assistant, 0));
+        new(execution, submission.SubmissionId, MessageRole.User, 0), new(execution, Guid.NewGuid(), MessageRole.Assistant, 0), identity);
   }
 
   static TranscriptTextFacts Facts(UrdStore store, TestExecution execution, MessageRef message) =>
@@ -203,8 +206,9 @@ public sealed class MessageMarkdownSourceTests {
       MessageMarkdownSourceReader.Read(store.Content, Capture(store, execution, message));
 
   static void Append(UrdStore store, TestExecution execution, int index, string text, bool final = false, Guid? output = null) =>
-      Assert.True(store.LlmResponses.Append(execution.Session, execution.Execution, 0,
+      Assert.True(store.LlmResponses.Append(execution.Identity,
           new(execution.Request, output ?? execution.Assistant.MessageId, index, text, final)));
 
-  sealed record TestExecution(Guid Session, Guid Execution, Guid Request, MessageRef User, MessageRef Assistant);
+  sealed record TestExecution(Guid Session, Guid Execution, Guid Request, MessageRef User, MessageRef Assistant,
+      ExecutionIdentity Identity);
 }

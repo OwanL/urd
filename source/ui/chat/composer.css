@@ -53,9 +53,13 @@
 .composer-accounting {
   display: inline-flex;
   flex: none;
-  align-items: baseline;
+  align-items: flex-end;
   gap: 4px;
   width: max-content;
+}
+.composer-controls > .composer-accounting .usage-overview .usage-control {
+  align-items: flex-end;
+  padding-bottom: 5px;
 }
 .composer-accounting .session-indicators {
   margin-left: 0;

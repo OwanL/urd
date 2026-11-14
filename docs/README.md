@@ -10,6 +10,7 @@ current suite size. Git history retains deleted drafts and superseded comparison
 - [Local server](server-development.md): launch, data ownership, HTTP and event APIs.
 - [Browser development](browser-development.md): UI toolchain, behavior and verification.
 - [Provider management](provider-management.md): connections, credentials and browser settings.
+- [Usage accounting](usage-accounting.md): API-equivalent cost, durable records and live-estimate limits.
 - [Test scope](testing.md) and [code shape](code-shape-guidelines.md): local verification,
   size budget and review conventions.
 

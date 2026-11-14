@@ -277,6 +277,10 @@ export function Conversation({
             workingTime={snapshot?.workingTime ?? null}
             active={active && visible && notice !== null}
             fenced={snapshot?.admissionFenced ?? true}
+            sessionId={sessionId}
+            usageActive={active && visible}
+            usageBusy={state.active || chat.pending?.status === "sending"}
+            usageRefresh={`${refresh}:${state.active || chat.pending?.status === "sending" ? "" : (notice ?? "")}`}
           />
         }
         text={chat.draft}

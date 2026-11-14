@@ -1,5 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 import { Tooltip } from "../components/Tooltip.tsx";
+import { UsageControl } from "../usage/UsageControl.tsx";
 import type { SessionContextUsage, SessionWorkingTime } from "../sessions/SessionSnapshot.ts";
 import {
   formatContextTokens,
@@ -13,6 +14,10 @@ interface SessionIndicatorsProps {
   workingTime: SessionWorkingTime | null;
   active: boolean;
   fenced: boolean;
+  sessionId: string;
+  usageActive: boolean;
+  usageBusy: boolean;
+  usageRefresh: number | string;
 }
 
 export function SessionIndicators({
@@ -21,6 +26,10 @@ export function SessionIndicators({
   workingTime,
   active,
   fenced,
+  sessionId,
+  usageActive,
+  usageBusy,
+  usageRefresh,
 }: SessionIndicatorsProps) {
   const [now, setNow] = useState(Date.now);
   const startedAt = workingTime?.startedAt;
@@ -42,6 +51,14 @@ export function SessionIndicators({
 
   return (
     <div class="session-indicators">
+      <UsageControl
+        label="Session"
+        sessionId={sessionId}
+        active={usageActive}
+        busy={usageBusy}
+        refreshKey={usageRefresh}
+        class="session-usage-control"
+      />
       <Tooltip
         content={
           <>

@@ -68,7 +68,7 @@ public sealed class SendAttemptStorageTests {
   }
 
   [Fact]
-  public void ContextExcludesUnsentAndRetainsAttemptedFailures() {
+  public void ContextExcludesUnsentInputsAndRetainsFailedAssistantOutput() {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;

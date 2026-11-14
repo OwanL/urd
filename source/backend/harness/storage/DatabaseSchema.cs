@@ -4,7 +4,7 @@ namespace Urd.Core.Storage;
 
 // Creates the current pre-release schema; incompatible databases require a manual reset.
 internal static class DatabaseSchema {
-  private const int SchemaVersion = 25;
+  private const int SchemaVersion = 26;
 
   internal static void Initialize(SqliteConnection connection) {
     using SqliteCommand command = connection.CreateCommand();
@@ -101,7 +101,12 @@ internal static class DatabaseSchema {
           run_id TEXT NOT NULL UNIQUE,
           history_revision INTEGER NOT NULL CHECK (history_revision >= 0),
           input_id TEXT,
-          compaction_selection_json TEXT,
+          kind INTEGER NOT NULL DEFAULT 0 CHECK (kind IN (0, 1, 2)),
+          llm_selection_json TEXT,
+          continuation_expected_history_revision INTEGER CHECK (
+              continuation_expected_history_revision IS NULL OR continuation_expected_history_revision >= 0),
+          continuation_expected_last_execution_id TEXT,
+          continuation_omitted_request_id TEXT,
           compaction_focus TEXT,
           error TEXT,
           stopping INTEGER NOT NULL DEFAULT 0 CHECK (stopping IN (0, 1)),
@@ -109,8 +114,17 @@ internal static class DatabaseSchema {
           outcome INTEGER CHECK (outcome IN (0, 1, 2)),
           UNIQUE (session_id, input_id),
           FOREIGN KEY (session_id, input_id) REFERENCES input_decisions(session_id, input_id),
-          CHECK ((input_id IS NOT NULL AND compaction_selection_json IS NULL)
-              OR (input_id IS NULL AND compaction_selection_json IS NOT NULL))
+          CHECK (
+              (kind = 0 AND input_id IS NOT NULL AND continuation_expected_history_revision IS NULL
+                  AND continuation_expected_last_execution_id IS NULL AND continuation_omitted_request_id IS NULL
+                  AND compaction_focus IS NULL)
+              OR (kind = 1 AND input_id IS NULL AND llm_selection_json IS NOT NULL
+                  AND continuation_expected_history_revision IS NULL AND continuation_expected_last_execution_id IS NULL
+                  AND continuation_omitted_request_id IS NULL)
+              OR (kind = 2 AND input_id IS NULL AND llm_selection_json IS NOT NULL AND compaction_focus IS NULL
+                  AND continuation_expected_history_revision IS NOT NULL
+                  AND continuation_expected_last_execution_id IS NOT NULL
+                  AND continuation_expected_last_execution_id <> '00000000-0000-0000-0000-000000000000'))
       ) STRICT;
       CREATE TABLE execution_requests (
           request_id TEXT PRIMARY KEY NOT NULL,
@@ -308,6 +322,8 @@ internal static class DatabaseSchema {
           working_directory TEXT
       ) STRICT;
       CREATE INDEX execution_runs_history_order ON execution_runs(session_id, history_revision, ordinal DESC);
+      CREATE INDEX continuation_omitted_requests ON execution_runs(session_id, history_revision, continuation_omitted_request_id)
+          WHERE continuation_omitted_request_id IS NOT NULL;
       CREATE INDEX execution_runs_terminal_order ON execution_runs(session_id, ordinal DESC) WHERE outcome IS NOT NULL;
       CREATE UNIQUE INDEX one_active_execution ON execution_runs(session_id) WHERE outcome IS NULL;
       CREATE UNIQUE INDEX one_unfinished_request ON execution_requests(run_id) WHERE outcome IS NULL;
@@ -317,7 +333,7 @@ internal static class DatabaseSchema {
       CREATE INDEX execution_inputs_not_sent_order ON execution_inputs(session_id, ordinal) WHERE not_sent = 1;
       CREATE INDEX execution_messages_history_order ON execution_messages(session_id, history_revision, ordinal DESC);
       CREATE INDEX execution_messages_request_order ON execution_messages(request_id, role, first_chunk_index);
-      PRAGMA user_version = 25;
+      PRAGMA user_version = 26;
       """;
     command.ExecuteNonQuery();
     transaction.Commit();

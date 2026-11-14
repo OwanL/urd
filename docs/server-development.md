@@ -2,7 +2,7 @@
 
 The local ASP.NET Core server composes Urd's Core, SQLite and provider manager; it is not a
 second backend. Session routes cover creation, saved-ID listing, Send/receipt, addressed Stop,
-slim snapshots, paged transcript history, not-sent inputs and bounded content reads. Separate
+slim snapshots, paged transcript history, steering removal, manual Continue, not-sent inputs and bounded content reads. Separate
 event routes provide server-sent updates for the browser workspace. Provider management and
 its settings UI are integrated; production sessions borrow provider-managed clients. Startup
 records interrupted work without replay; no explicit after-execution queue is implemented.
@@ -98,6 +98,9 @@ hidden-icons overflow, unless it has been hidden in Settings → Personalization
 | POST `/api/sessions/{sessionId}/message-edits` | `MessageEditSubmission` → 200 `MessageEditReceipt` after Stop/settlement and committed replacement |
 | GET `/api/sessions/{sessionId}/message-edits/{operationId}` | 200 committed edit receipt or literal JSON `null` |
 | POST `/api/sessions/{sessionId}/executions/{executionId}/stop` | Empty JSON object `{}` → 200 `StopReceipt` for Requested or Settled |
+| POST `/api/sessions/{sessionId}/continuations` | `ContinuationSubmission` → 200 `{sessionId, operationId, executionId}`; 409 when stale or unavailable |
+| GET `/api/sessions/{sessionId}/continuations/{operationId}` | 200 retained receipt or literal JSON `null` |
+| POST `/api/sessions/{sessionId}/executions/{executionId}/pending-inputs/{submissionId}/remove` | Empty JSON object `{}` → 200 boolean; false if already claimed, retired or unavailable |
 | POST `/api/sessions/{sessionId}/compactions` | `CompactionSubmission` → 200 `CompactionReceipt`; 409 when admission is unavailable |
 | GET `/api/sessions/{sessionId}/compactions/operations/{operationId}` | 200 receipt or literal JSON `null` |
 | GET `/api/sessions/{sessionId}/compactions/{compactionId}` | `expectedHistoryRevision` → 200 `CompactionSummary`, or 404 |
@@ -156,6 +159,20 @@ their local admission gates, status mapping, no-store and read-cancellation rule
 wire checks covered the renamed receipt, Stop, snapshot and cursor fields and rejected legacy
 routes and required field names.
 
+### Steering removal and Continue
+
+Pending previews include `canRemove`; removal addresses the exact execution and submission.
+It never stops the run, changes the accepted receipt or creates a not-sent warning. A false
+reply means removal did not win; reread the snapshot instead of assuming it was removed.
+
+`ContinuationSubmission` is `{operationId, expectedHistoryRevision, expectedLastExecutionId,
+llmSelection}`. Admission atomically checks the settled tail and idle eligibility reported by
+`canContinue`. The accepted execution ID equals the operation ID. Exact original retries return
+the retained receipt, including after history edits or restart, without starting again; changed
+reuse conflicts. A null lookup alone does not establish rejection. Continue adds no user row or
+hidden user prompt. Failed/cancelled/dangling assistant-tail omission affects model context only,
+not transcript history or prior tool effects. There is no automatic after-run dispatch.
+
 ### Earlier-message editing
 
 `MessageEditSubmission` is `{operationId, message, text, llmSelection}`; `message` is the
@@ -179,7 +196,7 @@ compact command identities/hashes and usage remain. Removed Send receipts return
 than exposing deleted text or allowing an old Send to recreate it. History replacement does
 not undo external tool effects. There is no branch archive or undo.
 
-The current schema is **22**, including durable session working time. Existing schemas require explicit database
+The current schema is **26**, including durable continuation identity and context-only omission decisions. Existing schemas require explicit database
 recreation under the pre-release policy. Never reset an active profile as part of verification
 or automatically activate this build against one.
 

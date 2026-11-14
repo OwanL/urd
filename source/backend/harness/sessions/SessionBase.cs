@@ -142,18 +142,57 @@ public abstract class SessionBase {
     return store.UserMessages.ReadReceipt(Id, submissionId);
   }
 
+  public async Task<ContinuationReceipt?> ReadContinuationReceiptAsync(Guid operationId,
+      CancellationToken cancellation = default) {
+    if (operationId == Guid.Empty)
+      throw new ArgumentException("An operation ID is required.", nameof(operationId));
+    using var held = await gate.AcquireAsync(cancellation);
+    return store.Continuations.ReadReceipt(Id, operationId);
+  }
+
   public async Task<NotSentPage> ReadNotSentInputsAsync(string? cursor = null, CancellationToken cancellation = default) {
     using var held = await gate.AcquireAsync(cancellation);
     return store.NotSentInputs.Read(Id, cursor);
   }
 
+  public async Task<bool> RemovePendingInputAsync(Guid executionId, Guid submissionId) {
+    if (executionId == Guid.Empty || submissionId == Guid.Empty)
+      throw new ArgumentException("Execution and submission identities are required.");
+
+    using var held = await gate.AcquireAsync();
+    if (!CanAdmit || needsAttention || execution is not { } current
+        || current.ExecutionId != executionId || current.IsStopping)
+      return false;
+
+    SessionSnapshot stored = store.Snapshots.ReadStored(Id);
+    SessionSnapshot snapshot = status.ApplyLiveState(stored, CanAdmit, current);
+    if (snapshot.AdmissionFenced || snapshot.StopRequested || snapshot.UnsettledExecutionId != executionId)
+      return false;
+
+    bool removed = WriteToStore(() => store.Executions.RemovePendingInput(
+        Id, executionId, submissionId, HistoryRevision));
+    if (removed) {
+      current.Wake();
+      PublishChange();
+    }
+    return removed;
+  }
+
   public async Task<SessionSnapshot> ReadSnapshotAsync(CancellationToken cancellation = default) {
     using var held = await gate.AcquireAsync(cancellation);
     SessionSnapshot snapshot = status.ApplyLiveState(store.Snapshots.ReadStored(Id), CanAdmit, execution);
+    bool locallyIdle = CanAdmit && !needsAttention && execution is null
+        && snapshot.UnsettledExecutionId is null && !snapshot.AdmissionFenced && !snapshot.StopRequested;
+    bool canRemovePending = CanAdmit && !needsAttention && !snapshot.AdmissionFenced && !snapshot.StopRequested
+        && execution is { IsStopping: false } && snapshot.UnsettledExecutionId == execution.ExecutionId;
     return snapshot with {
       IsCompacting = execution?.IsCompacting == true,
       WorkingDirectory = WorkingDirectory,
-      CanChangeWorkingDirectory = CanChangeWorkingDirectory(snapshot)
+      CanChangeWorkingDirectory = CanChangeWorkingDirectory(snapshot),
+      CanContinue = snapshot.CanContinue && locallyIdle,
+      PendingInputs = snapshot.PendingInputs.Select(input => input with {
+        CanRemove = input.CanRemove && canRemovePending
+      }).ToArray()
     };
   }
 
@@ -182,6 +221,28 @@ public abstract class SessionBase {
     SessionSnapshot stored = store.Snapshots.ReadStored(Id);
     status.Observe(stored, execution);
     return notifications.Subscribe(observer, watched, status.ReadStored(stored, CanAdmit, needsAttention, execution));
+  }
+
+  private protected async Task<ContinuationReceipt?> AdmitContinuationAsync(ContinuationSubmission submission) {
+    ArgumentNullException.ThrowIfNull(submission);
+    TaskCompletionSource? lockReleased = null;
+    ContinuationReceipt? receipt;
+    using (await gate.AcquireAsync()) {
+      var admission = WriteToStore(() => store.Continuations.Admit(Id, HistoryRevision, submission,
+          CanAdmit && !needsAttention && execution is null));
+      if (admission is null)
+        return null;
+
+      receipt = admission.Value.Receipt;
+      if (admission.Value.New) {
+        lockReleased = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        StartExecution(receipt.ExecutionId, submission.LlmSelection!, lockReleased.Task);
+        PublishChange();
+      }
+    }
+
+    lockReleased?.SetResult();
+    return receipt;
   }
 
   private protected async Task<UserMessageReceipt> AdmitUserMessageAsync(UserMessageSubmission submission) {

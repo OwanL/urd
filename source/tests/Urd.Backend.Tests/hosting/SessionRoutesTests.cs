@@ -283,6 +283,58 @@ public sealed class SessionRoutesTests {
     Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
   }
 
+  [Fact]
+  public async Task ContinueAndPendingRemovalUseTheApprovedWireContract() {
+    using var database = new TemporaryDatabase();
+    await using var server = new RunningServer(Options(database));
+    await server.WaitForReadyAsync();
+    using HttpResponseMessage created = await RequestAsync(server.Client, HttpMethod.Post,
+        "/api/sessions", JsonBody("{}"));
+    using JsonDocument createdBody = JsonDocument.Parse(await created.Content.ReadAsStringAsync());
+    Guid sessionId = createdBody.RootElement.GetProperty("sessionId").GetGuid();
+
+    var message = new UserMessageSubmission(Guid.NewGuid(), 0, "initial", TestLlmSelection.Default);
+    using HttpResponseMessage sent = await RequestAsync(server.Client, HttpMethod.Post,
+        $"/api/sessions/{sessionId}/message-submissions", JsonContent.Create(message, options: json));
+    UserMessageReceipt accepted = (await sent.Content.ReadFromJsonAsync<UserMessageReceipt>(json))!;
+    SessionSnapshot completed = await HttpTest.SettledAsync(accepted.ExecutionId!.Value,
+        () => ReadSnapshotAsync(server.Client, sessionId));
+    Assert.True(completed.CanContinue);
+
+    var continuation = new ContinuationSubmission(Guid.NewGuid(), completed.HistoryRevision,
+        completed.LastSettlement!.ExecutionId, TestLlmSelection.Default);
+    using HttpResponseMessage continued = await RequestAsync(server.Client, HttpMethod.Post,
+        $"/api/sessions/{sessionId}/continuations", JsonContent.Create(continuation, options: json));
+    Assert.Equal(HttpStatusCode.OK, continued.StatusCode);
+    ContinuationReceipt receipt = (await continued.Content.ReadFromJsonAsync<ContinuationReceipt>(json))!;
+    Assert.Equal(continuation.OperationId, receipt.ExecutionId);
+    using (HttpResponseMessage retained = await RequestAsync(server.Client, HttpMethod.Get,
+        $"/api/sessions/{sessionId}/continuations/{continuation.OperationId}")) {
+      Assert.Equal(HttpStatusCode.OK, retained.StatusCode);
+      Assert.Equal(receipt, await retained.Content.ReadFromJsonAsync<ContinuationReceipt>(json));
+    }
+    using (HttpResponseMessage absent = await RequestAsync(server.Client, HttpMethod.Get,
+        $"/api/sessions/{sessionId}/continuations/{Guid.NewGuid()}")) {
+      Assert.Equal(HttpStatusCode.OK, absent.StatusCode);
+      Assert.Equal("null", await absent.Content.ReadAsStringAsync());
+    }
+
+    ContinuationSubmission stale = continuation with {
+      OperationId = Guid.NewGuid(), ExpectedHistoryRevision = completed.HistoryRevision + 1
+    };
+    using (HttpResponseMessage conflict = await RequestAsync(server.Client, HttpMethod.Post,
+        $"/api/sessions/{sessionId}/continuations", JsonContent.Create(stale, options: json)))
+      Assert.Equal(HttpStatusCode.Conflict, conflict.StatusCode);
+
+    await HttpTest.SettledAsync(receipt.ExecutionId, () => ReadSnapshotAsync(server.Client, sessionId));
+    using (HttpResponseMessage missingInput = await RequestAsync(server.Client, HttpMethod.Post,
+        $"/api/sessions/{sessionId}/executions/{receipt.ExecutionId}/pending-inputs/{Guid.NewGuid()}/remove",
+        JsonBody("{}"))) {
+      Assert.Equal(HttpStatusCode.OK, missingInput.StatusCode);
+      Assert.False(await missingInput.Content.ReadFromJsonAsync<bool>());
+    }
+  }
+
   private static ServerOptions Options(TemporaryDatabase database) => new(Path.GetDirectoryName(database.Path)!, 0);
 
   private static async Task<SessionSnapshot> ReadSnapshotAsync(HttpClient client, Guid sessionId) {

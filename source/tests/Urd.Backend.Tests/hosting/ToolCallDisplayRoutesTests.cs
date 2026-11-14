@@ -151,8 +151,8 @@ public sealed class ToolCallDisplayRoutesTests {
       store.Sessions.CreatePrimary(sessionId, workingDirectory);
 
     database.Execute($"""
-      INSERT INTO execution_runs (session_id, run_id, history_revision, compaction_selection_json, outcome)
-      VALUES ('{sessionId:D}', '{runId:D}', 0, 'test', 0);
+      INSERT INTO execution_runs (session_id, run_id, history_revision, kind, llm_selection_json, outcome)
+      VALUES ('{sessionId:D}', '{runId:D}', 0, 1, 'test', 0);
       INSERT INTO execution_requests (request_id, run_id, request_index, response_final, outcome)
       VALUES ('{requestId:D}', '{runId:D}', 0, 1, 0);
       INSERT INTO input_decisions

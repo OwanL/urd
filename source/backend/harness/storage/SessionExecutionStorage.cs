@@ -29,9 +29,12 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
                     AND i.request_id IS NULL AND i.outcome IS NULL)
                 OR EXISTS (SELECT 1 FROM execution_tools t JOIN execution_requests q ON q.request_id = t.request_id
                     WHERE q.run_id = r.run_id AND q.request_index =
-                        (SELECT MAX(request_index) FROM execution_requests WHERE run_id = r.run_id)));
+                        (SELECT MAX(request_index) FROM execution_requests WHERE run_id = r.run_id))
+                OR (r.kind = $continuation AND NOT EXISTS (
+                    SELECT 1 FROM execution_requests first_request WHERE first_request.run_id = r.run_id)));
         """,
-          ("$session", sessionId), ("$run", executionId), ("$revision", historyRevision), ("$request", requestId));
+          ("$session", sessionId), ("$run", executionId), ("$revision", historyRevision),
+          ("$request", requestId), ("$continuation", (int)ExecutionRunKind.Continuation));
       if (claim.ExecuteNonQuery() == 0)
         return null;
 
@@ -47,6 +50,21 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
       return new LlmRequest(requestId, context.ReadMessages(), context);
     });
   }
+
+  internal bool RemovePendingInput(Guid sessionId, Guid executionId, Guid submissionId, long historyRevision) => database.Write(transaction => {
+    using SqliteCommand remove = database.Command(transaction, """
+      UPDATE execution_inputs SET outcome = $cancelled, not_sent = 0
+      WHERE session_id = $session AND run_id = $run AND input_id = $input
+          AND request_id IS NULL AND outcome IS NULL
+          AND EXISTS (SELECT 1 FROM execution_runs r JOIN sessions s ON s.session_id = r.session_id
+              WHERE r.session_id = $session AND r.run_id = $run AND r.history_revision = $revision
+                  AND s.history_revision = $revision AND r.stopping = 0 AND r.outcome IS NULL
+                  AND (r.input_id IS NULL OR r.input_id <> $input));
+      """, ("$session", sessionId), ("$run", executionId), ("$input", submissionId),
+        ("$revision", historyRevision),
+        ("$cancelled", (int)ExecutionOutcome.Cancelled));
+    return remove.ExecuteNonQuery() == 1;
+  });
 
   // A rejected provider request may be retried only before any output or call was observed.
   internal bool CanRetryOverflow(Guid sessionId, Guid runId, Guid requestId) => database.Read(transaction => {
@@ -143,12 +161,13 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
             EXISTS (SELECT 1 FROM execution_tools t JOIN execution_requests q ON q.request_id = t.request_id
                 WHERE q.run_id = r.run_id AND q.request_index =
                     (SELECT MAX(request_index) FROM execution_requests WHERE run_id = r.run_id)),
-            r.compaction_selection_json IS NOT NULL,
+            r.kind = $compaction,
             (SELECT substr(q.error, 1, 1024) FROM execution_requests q
                 WHERE q.run_id = r.run_id AND q.outcome = 2 ORDER BY q.request_index DESC LIMIT 1),
             substr(r.error, 1, 1024), r.working_started_at
         FROM execution_runs r WHERE r.session_id = $session AND r.run_id = $run;
-        """, ("$session", sessionId), ("$run", executionId));
+        """, ("$session", sessionId), ("$run", executionId),
+          ("$compaction", (int)ExecutionRunKind.Compaction));
       if (DecideSettlement(read, driverOutcome) is not { } settlement)
         return null;
 

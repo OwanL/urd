@@ -21,6 +21,13 @@ internal static class SessionRoutes {
         SubmitAsync(http, sessions, sessionId));
     routes.MapGet("/{sessionId}/message-submissions/{submissionId}", (HttpContext http, Guid sessionId, Guid submissionId) =>
         ReadReceiptAsync(http, sessions, sessionId, submissionId));
+    routes.MapPost("/{sessionId}/continuations", (HttpContext http, Guid sessionId) =>
+        ContinueAsync(http, sessions, sessionId));
+    routes.MapGet("/{sessionId}/continuations/{operationId}", (HttpContext http, Guid sessionId, Guid operationId) =>
+        ReadContinuationReceiptAsync(http, sessions, sessionId, operationId));
+    routes.MapPost("/{sessionId}/executions/{executionId}/pending-inputs/{submissionId}/remove",
+        (HttpContext http, Guid sessionId, Guid executionId, Guid submissionId) =>
+            RemovePendingInputAsync(http, sessions, sessionId, executionId, submissionId));
     routes.MapPost("/{sessionId}/message-edits", (HttpContext http, Guid sessionId) =>
         EditAsync(http, sessions, sessionId));
     routes.MapPost("/{sessionId}/working-directory", (HttpContext http, Guid sessionId) =>
@@ -139,6 +146,38 @@ internal static class SessionRoutes {
       UserMessageReceipt receipt = await session.SubmitUserMessageAsync(submission);
       return Results.Ok(receipt);
     });
+  }
+
+  private static async Task<IResult> ContinueAsync(HttpContext http, SessionManager sessions, Guid sessionId) {
+    ContinuationSubmission? submission = await http.Request.ReadFromJsonAsync<ContinuationSubmission>(http.RequestAborted);
+    if (submission is null)
+      return Results.BadRequest();
+
+    return await WithSessionAsync(http, sessions, sessionId, async session => {
+      ContinuationReceipt? receipt = await session.ContinueAsync(submission);
+      return receipt is null ? Results.Conflict() : Results.Ok(receipt);
+    });
+  }
+
+  private static Task<IResult> ReadContinuationReceiptAsync(
+      HttpContext http, SessionManager sessions, Guid sessionId, Guid operationId) {
+    if (operationId == Guid.Empty)
+      return Task.FromResult<IResult>(Results.BadRequest());
+
+    return WithSessionAsync(http, sessions, sessionId, async session => {
+      ContinuationReceipt? receipt = await session.ReadContinuationReceiptAsync(operationId, http.RequestAborted);
+      return receipt is null ? Results.Content("null", "application/json") : Results.Ok(receipt);
+    });
+  }
+
+  private static async Task<IResult> RemovePendingInputAsync(HttpContext http, SessionManager sessions,
+      Guid sessionId, Guid executionId, Guid submissionId) {
+    if (executionId == Guid.Empty || submissionId == Guid.Empty)
+      return Results.BadRequest();
+    await HttpJson.RequireEmptyAsync(http.Request, http.RequestAborted);
+
+    return await WithSessionAsync(http, sessions, sessionId, async session =>
+        Results.Ok(await session.RemovePendingInputAsync(executionId, submissionId)));
   }
 
   private static async Task<IResult> EditAsync(HttpContext http, SessionManager sessions, Guid sessionId) {

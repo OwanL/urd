@@ -6,11 +6,12 @@ using Microsoft.Extensions.AI;
 using Urd.Core.Compaction;
 using Urd.Core.Execution;
 using Urd.Core.Providers;
+using Urd.Core.Sessions;
 
 namespace Urd.Core.Storage;
 
 // Execution owns context eligibility: never-attempted history is excluded, while the
-// current claim is included to prepare its send. Attempted failures stay eligible.
+// current claim is included to prepare its send. Only accepted continuations can omit a tail.
 internal sealed class LlmContextReader(Database database, ToolResultCodec toolResults) {
   internal ReadOnlyCollection<ChatMessage> Read(SqliteTransaction transaction, Guid sessionId,
       Guid executionId, long historyRevision, Guid requestId) =>
@@ -21,8 +22,16 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
     CompactionBoundary? boundary = CompactionStorage.ReadLatest(database, transaction, sessionId, historyRevision);
     using SqliteCommand read = database.Command(transaction, """
       WITH requests AS (
-          SELECT r.ordinal AS run_ordinal, q.request_index, q.request_id, q.usage_json, q.compaction_id FROM execution_runs r
-          JOIN execution_requests q ON q.run_id = r.run_id
+          SELECT r.ordinal AS run_ordinal, q.request_index, q.request_id, q.usage_json, q.compaction_id,
+              CASE WHEN EXISTS (SELECT 1 FROM execution_runs continuation
+                  WHERE continuation.session_id = r.session_id
+                      AND continuation.history_revision = r.history_revision
+                      AND continuation.kind = $continuation
+                      AND ($run IS NULL OR continuation.ordinal <=
+                          (SELECT ordinal FROM execution_runs WHERE run_id = $run))
+                      AND continuation.continuation_omitted_request_id = q.request_id)
+                  THEN 1 ELSE 0 END AS omit_assistant
+          FROM execution_runs r JOIN execution_requests q ON q.run_id = r.run_id
           WHERE r.session_id = $session AND r.history_revision = $revision
               AND ($run IS NULL OR r.ordinal <= (SELECT ordinal FROM execution_runs WHERE run_id = $run))
               AND (q.attempt = 2 OR q.request_id = $request)
@@ -39,12 +48,14 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
           SELECT q.run_ordinal, q.request_index, q.request_id, 1, o.chunk_index, o.text_utf8,
               NULL, NULL, NULL, NULL, NULL, NULL
           FROM requests q JOIN execution_output o ON o.request_id = q.request_id
-          WHERE NOT EXISTS (SELECT 1 FROM execution_provider_context c WHERE c.request_id = q.request_id)
+          WHERE q.omit_assistant = 0
+              AND NOT EXISTS (SELECT 1 FROM execution_provider_context c WHERE c.request_id = q.request_id)
           UNION ALL
           SELECT q.run_ordinal, q.request_index, q.request_id, 2, t.call_index, NULL,
               t.call_id, t.name, t.arguments_json, NULL, NULL, NULL
           FROM requests q JOIN execution_tools t ON t.request_id = q.request_id
-          WHERE NOT EXISTS (SELECT 1 FROM execution_provider_context c WHERE c.request_id = q.request_id)
+          WHERE q.omit_assistant = 0
+              AND NOT EXISTS (SELECT 1 FROM execution_provider_context c WHERE c.request_id = q.request_id)
           UNION ALL
           SELECT q.run_ordinal, q.request_index, q.request_id, 3, t.call_index, NULL,
               t.call_id, t.name, t.result_json, t.background, t.request_id, t.outcome
@@ -61,11 +72,12 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
           JOIN execution_tools t ON t.request_id = c.request_id AND t.call_id = c.call_id
           WHERE c.session_id = $session AND c.history_revision = $revision
       ) SELECT c.request_id, c.kind, c.text_utf8, c.call_id, c.name, c.json, c.background,
-          c.origin_request_id, c.outcome, c.run_ordinal, c.request_index, q.usage_json, q.compaction_id
+          c.origin_request_id, c.outcome, c.run_ordinal, c.request_index, q.usage_json, q.compaction_id, q.omit_assistant
       FROM contents c JOIN requests q ON q.request_id = c.request_id
       ORDER BY c.run_ordinal, c.request_index, c.kind, c.content_index;
       """,
         ("$session", sessionId), ("$run", executionId), ("$revision", historyRevision), ("$request", requestId),
+        ("$continuation", (int)ExecutionRunKind.Continuation),
         ("$cutRun", boundary?.FirstKept.RunOrdinal ?? -1), ("$cutRequest", boundary?.FirstKept.RequestIndex ?? 0));
     using SqliteDataReader reader = read.ExecuteReader();
     var messages = new List<ChatMessage>();
@@ -78,6 +90,7 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
     int observedThrough = 0;
     string? usageJson = null;
     Guid? usageBoundary = null;
+    bool omitAssistant = false;
     StringBuilder? text = null;
     ChatMessage? providerMessage = null;
     var calls = new List<AIContent>();
@@ -97,6 +110,7 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
         requestIndex = reader.GetInt32(10);
         usageJson = reader.IsDBNull(11) ? null : reader.GetString(11);
         usageBoundary = reader.IsDBNull(12) ? null : reader.GetGuid(12);
+        omitAssistant = reader.GetBoolean(13);
       }
 
       switch (reader.GetInt32(1)) {
@@ -138,7 +152,7 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
     void FinishGroup() {
       if (previousRequest is null)
         return;
-      AddResponse(messages, text, calls, results, providerMessage);
+      AddResponse(messages, text, calls, results, providerMessage, omitAssistant);
       Guid id = Guid.Parse(previousRequest);
       int first = id == boundary?.FirstKept.RequestId ? boundary.FirstKept.MessageIndex : 0;
       for (int index = first; index < messages.Count; index++)
@@ -146,9 +160,10 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
       if (usageJson is null || usageBoundary != boundary?.Id)
         return;
       UsageDetails? usage = JsonSerializer.Deserialize<UsageDetails>(usageJson);
-      if (usage?.InputTokenCount is not >= 0 || usage.OutputTokenCount is not >= 0)
+      if (usage?.InputTokenCount is not >= 0 || (!omitAssistant && usage.OutputTokenCount is not >= 0))
         return;
-      observedTokens = ContextBudget.Add(usage.InputTokenCount.Value, usage.OutputTokenCount.Value);
+      observedTokens = ContextBudget.Add(usage.InputTokenCount.Value,
+          omitAssistant ? 0 : usage.OutputTokenCount!.Value);
       observedTokens = ContextBudget.Add(observedTokens.Value,
           ContextBudget.Estimate(messages.Where(message => message.Role == ChatRole.Tool)));
       observedThrough = entries.Count;
@@ -156,15 +171,17 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
   }
 
   private static void AddResponse(List<ChatMessage> messages, StringBuilder? text,
-      List<AIContent> calls, List<AIContent> results, ChatMessage? providerMessage) {
-    if (providerMessage is not null) {
-      messages.Add(providerMessage);
-    } else if (text is not null || calls.Count > 0) {
-      var contents = new List<AIContent>();
-      if (text is not null)
-        contents.Add(new TextContent(text.ToString()));
-      contents.AddRange(calls);
-      messages.Add(new(ChatRole.Assistant, contents));
+      List<AIContent> calls, List<AIContent> results, ChatMessage? providerMessage, bool omitAssistant) {
+    if (!omitAssistant) {
+      if (providerMessage is not null) {
+        messages.Add(providerMessage);
+      } else if (text is not null || calls.Count > 0) {
+        var contents = new List<AIContent>();
+        if (text is not null)
+          contents.Add(new TextContent(text.ToString()));
+        contents.AddRange(calls);
+        messages.Add(new(ChatRole.Assistant, contents));
+      }
     }
 
     if (results.Count > 0)

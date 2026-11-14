@@ -465,8 +465,8 @@ public sealed class TranscriptHistoryTests(ITestOutputHelper output) {
             + $"'{{\"call\":\"{item.entry.CallId}\"}}', {(item.entry.CallId == "batch-c" ? 1 : 0)}, "
             + $"{(item.entry.CallId == "batch-c" ? 1 : 0)})"));
     database.Execute($"""
-      INSERT INTO execution_runs (session_id, run_id, history_revision, compaction_selection_json, outcome)
-      VALUES ('{session:D}', '{run:D}', 0, 'x', 0);
+      INSERT INTO execution_runs (session_id, run_id, history_revision, kind, llm_selection_json, outcome)
+      VALUES ('{session:D}', '{run:D}', 0, 1, 'x', 0);
       INSERT INTO execution_requests (request_id, run_id, response_final, outcome)
       VALUES ('{request:D}', '{run:D}', 1, 0);
       INSERT INTO execution_tools

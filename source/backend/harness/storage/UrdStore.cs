@@ -14,6 +14,7 @@ public sealed class UrdStore : IDisposable {
     StartingContexts = new(database);
     Compactions = new(database, toolResults);
     UserMessages = new(database);
+    Continuations = new(database, toolResults);
     MessageEdits = new(database, UserMessages);
     Executions = new(database, toolResults);
     LlmResponses = new(database);
@@ -37,6 +38,7 @@ public sealed class UrdStore : IDisposable {
   internal StartingContextStorage StartingContexts { get; }
   internal CompactionStorage Compactions { get; }
   internal UserMessageStorage UserMessages { get; }
+  internal ContinuationStorage Continuations { get; }
   internal MessageEditStorage MessageEdits { get; }
   internal SessionExecutionStorage Executions { get; }
   internal LlmResponseStorage LlmResponses { get; }

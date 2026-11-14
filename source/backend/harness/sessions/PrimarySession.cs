@@ -16,5 +16,7 @@ public sealed class PrimarySession : SessionBase {
   // Returns a saved acceptance/refusal, without waiting for the LLM answer.
   public Task<UserMessageReceipt> SubmitUserMessageAsync(UserMessageSubmission submission) => AdmitUserMessageAsync(submission);
 
+  public Task<ContinuationReceipt?> ContinueAsync(ContinuationSubmission submission) => AdmitContinuationAsync(submission);
+
   public Task<MessageEditReceipt> EditUserMessageAsync(MessageEditSubmission submission) => ReplaceUserMessageAsync(submission);
 }

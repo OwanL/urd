@@ -42,11 +42,14 @@ internal sealed class UserMessageStorage(Database database) {
     InsertReceipt(transaction, accepted);
     if (currentExecutionId is null) {
       using SqliteCommand insertExecution = database.Command(transaction, """
-        INSERT INTO execution_runs (session_id, run_id, history_revision, input_id, working_started_at)
-        VALUES ($session, $run, $revision, $input, $started);
+        INSERT INTO execution_runs (session_id, run_id, history_revision, input_id, kind,
+            llm_selection_json, working_started_at)
+        VALUES ($session, $run, $revision, $input, $kind, $selection, $started);
         """,
           ("$session", sessionId), ("$run", executionId),
           ("$revision", actualRevision), ("$input", submission.SubmissionId),
+          ("$kind", (int)ExecutionRunKind.UserInput),
+          ("$selection", LlmSelectionJson.Write(submission.LlmSelection)),
           ("$started", StorageText.UtcTimestamp()));
       insertExecution.ExecuteNonQuery();
     }
@@ -102,8 +105,8 @@ internal sealed class UserMessageStorage(Database database) {
   private MessageRefusalReason? DecideRefusal(SqliteTransaction transaction, Guid sessionId, long actualRevision,
       long historyRevision, UserMessageSubmission submission, bool accepting, Guid? activeExecutionId) {
     using SqliteCommand read = database.Command(transaction,
-        "SELECT CASE WHEN compaction_selection_json IS NOT NULL THEN 2 ELSE stopping END FROM execution_runs WHERE session_id = $session AND outcome IS NULL;",
-        ("$session", sessionId));
+        "SELECT CASE WHEN kind = $compaction THEN 2 ELSE stopping END FROM execution_runs WHERE session_id = $session AND outcome IS NULL;",
+        ("$session", sessionId), ("$compaction", (int)ExecutionRunKind.Compaction));
     object? stopFlag = read.ExecuteScalar();
     if (!accepting || stopFlag is 1L)
       return MessageRefusalReason.Stopping;
@@ -127,9 +130,8 @@ internal sealed class UserMessageStorage(Database database) {
       return MessageRefusalReason.Capacity;
 
     using SqliteCommand selectionRead = database.Command(transaction, """
-      SELECT d.llm_selection_json FROM execution_runs r
-      JOIN input_decisions d ON d.session_id = r.session_id AND d.input_id = r.input_id
-      WHERE r.session_id = $session AND r.run_id = $run;
+      SELECT llm_selection_json FROM execution_runs
+      WHERE session_id = $session AND run_id = $run;
       """, ("$session", sessionId), ("$run", currentExecutionId));
     LlmSelection? initiatingSelection = LlmSelectionJson.Read(selectionRead.ExecuteScalar() as string);
     return LlmSelectionJson.SameOperation(initiatingSelection, submission.LlmSelection)

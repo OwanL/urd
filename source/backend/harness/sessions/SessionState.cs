@@ -12,7 +12,7 @@ public sealed record SessionSnapshot(
     Guid? UnsettledExecutionId, bool StopRequested, SessionExecutionResult? LastSettlement,
     string? FirstUserPreview, IReadOnlyList<PendingInputPreview> PendingInputs,
     LlmSelection? LatestLlmSelection = null, bool IsCompacting = false, SessionWorkingTime? WorkingTime = null,
-    SessionContextUsage? ContextUsage = null, string? WorkingDirectory = null);
+    SessionContextUsage? ContextUsage = null, string? WorkingDirectory = null, bool CanContinue = false);
 
 public sealed record SessionContextUsage(long UsedTokens, bool IsEstimate);
 
@@ -20,4 +20,4 @@ public sealed record SessionWorkingTime(
     long CompletedMilliseconds, DateTimeOffset? StartedAt, bool HasUnknownDuration = false);
 
 // A bounded preview of an accepted input whose containing request has not started sending.
-public sealed record PendingInputPreview(Guid SubmissionId, string Preview);
+public sealed record PendingInputPreview(Guid SubmissionId, string Preview, bool CanRemove = false);

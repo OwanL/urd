@@ -9,7 +9,7 @@ saved-primary-ID discovery, durable Send decisions, safe-boundary steering, addr
 Stop, bounded snapshot/history/content reads, known-not-sent discovery and graceful
 shutdown. The browser workspace is implemented and served as static assets by the Server.
 
-`UrdStore` owns the shared database, currently schema 25. It records whether a request
+`UrdStore` owns the shared database, currently schema 26. It records whether a request
 started sending and pages inputs known not to have been sent, so users can retrieve
 and explicitly resend them. Snapshots stay slim; transcript metadata and
 content use separate bounded reads, and reported usage is persisted per request. Session snapshots
@@ -23,7 +23,7 @@ credential behavior.
 
 Before the supported public data baseline, schema changes replace the schema rather than
 migrating it. A fresh/version-0 database creates all current tables and indexes in one
-transaction; version 25 reopens normally. Other versions fail with reset instructions:
+transaction; version 26 reopens normally. Other versions fail with reset instructions:
 stop Urd, delete `urd.sqlite`, `urd.sqlite-wal` and `urd.sqlite-shm`, then restart.
 Urd never deletes these files automatically. Requests have only known not-attempted (1)
 or attempted (2) provenance; transcript user entries require request links and receipts
@@ -62,6 +62,22 @@ The snapshot is currently per session, including explicit model changes: all imp
 tool families use the same generic catalog. Compaction retains this frozen starting context;
 reload and future family-specific exposure boundaries are not automatic refresh mechanisms. System
 instruction wording is intentionally minimal and can be researched independently.
+
+## Steering removal and manual Continue
+
+Pending steering previews expose `CanRemove` until their request is claimed.
+`RemovePendingInputAsync(executionId, submissionId)` removes only that unclaimed delivery,
+without stopping the execution, changing its Accepted receipt or creating a not-sent warning.
+A delivery race returns false. Stop still cancels active work and retires pending steering.
+
+`PrimarySession.ContinueAsync` admits one idle, input-less execution against the exact
+history revision and last execution. Its frozen model and operation identity are durable;
+exact retries and receipt reads never restart it. Empty, active, stopping or fenced sessions
+are ineligible. There is no automatic continuation or after-run scheduler.
+Continue omits a failed, cancelled or dangling final assistant message from model context
+only; earlier failures, completed replies and paired tool results remain. The saved omission
+survives later requests and reopening without changing the visible transcript or invoking
+historical tool calls. Ordinary sends and compaction do not create omission decisions.
 
 ## History compaction
 

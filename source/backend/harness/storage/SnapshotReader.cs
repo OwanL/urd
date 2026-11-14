@@ -25,9 +25,11 @@ internal sealed class SnapshotReader {
     """;
 
   internal const string PendingInputsSql = """
-    SELECT i.input_id, coalesce(substr(d.original_text_utf8, 1, $bytes), X'')
+    SELECT i.input_id, coalesce(substr(d.original_text_utf8, 1, $bytes), X''),
+        i.request_id IS NULL AND r.stopping = 0 AND (r.input_id IS NULL OR r.input_id <> i.input_id)
     FROM execution_inputs i
     JOIN input_decisions d ON d.session_id = i.session_id AND d.input_id = i.input_id
+    JOIN execution_runs r ON r.run_id = i.run_id
     WHERE i.run_id = (
         SELECT run_id FROM execution_runs WHERE session_id = $session AND outcome IS NULL
     ) AND i.outcome IS NULL AND (i.request_id IS NULL OR EXISTS (
@@ -73,9 +75,27 @@ internal sealed class SnapshotReader {
     """;
 
   internal const string SnapshotSelectionSql = """
-    SELECT COALESCE(d.llm_selection_json, r.compaction_selection_json) FROM execution_runs r
+    SELECT COALESCE(r.llm_selection_json, d.llm_selection_json) FROM execution_runs r
     LEFT JOIN input_decisions d ON d.session_id = r.session_id AND d.input_id = r.input_id
     WHERE r.session_id = $session AND r.run_id = $run;
+    """;
+
+  internal const string CanContinueSql = """
+    SELECT EXISTS (SELECT 1 FROM execution_runs tail
+        WHERE tail.session_id = $session AND tail.history_revision = $revision AND tail.outcome IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM execution_runs later
+                WHERE later.session_id = tail.session_id AND later.history_revision = tail.history_revision
+                    AND later.ordinal > tail.ordinal)
+            AND EXISTS (SELECT 1 FROM execution_runs attempted JOIN execution_requests q ON q.run_id = attempted.run_id
+                WHERE attempted.session_id = tail.session_id AND attempted.history_revision = tail.history_revision
+                    AND attempted.ordinal <= tail.ordinal AND q.attempt = 2)
+            AND (EXISTS (SELECT 1 FROM execution_messages m JOIN execution_requests q ON q.request_id = m.request_id
+                    JOIN execution_runs source ON source.run_id = q.run_id
+                WHERE m.session_id = tail.session_id AND m.history_revision = tail.history_revision AND m.role = 0
+                    AND source.history_revision = tail.history_revision AND source.ordinal <= tail.ordinal
+                    AND q.attempt = 2)
+                OR EXISTS (SELECT 1 FROM session_compactions c
+                    WHERE c.session_id = tail.session_id AND c.history_revision = tail.history_revision)));
     """;
 
   internal SnapshotReader(Database database, MessageContentReader content) {
@@ -105,7 +125,8 @@ internal sealed class SnapshotReader {
     return new(sessionId, historyRevision, AdmissionFenced: true, CanChangeWorkingDirectory: false,
         unsettledExecution, stopRequested, lastSettlement, firstUserPreview, pendingInputs, latestSelection,
         WorkingTime: ReadWorkingTime(transaction, sessionId, startedAt),
-        ContextUsage: ReadContextUsage(transaction, sessionId, historyRevision));
+        ContextUsage: ReadContextUsage(transaction, sessionId, historyRevision),
+        CanContinue: ReadCanContinue(transaction, sessionId, historyRevision));
   }
 
   private long ReadHistoryRevision(SqliteTransaction transaction, Guid sessionId) {
@@ -127,6 +148,12 @@ internal sealed class SnapshotReader {
     DateTimeOffset? startedAt = reader.IsDBNull(2) ? null
         : DateTimeOffset.Parse(reader.GetString(2), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
     return (reader.GetGuid(0), reader.GetBoolean(1), startedAt);
+  }
+
+  private bool ReadCanContinue(SqliteTransaction transaction, Guid sessionId, long historyRevision) {
+    using SqliteCommand read = database.Command(transaction, CanContinueSql,
+        ("$session", sessionId), ("$revision", historyRevision));
+    return (long)read.ExecuteScalar()! == 1;
   }
 
   private SessionContextUsage? ReadContextUsage(SqliteTransaction transaction, Guid sessionId, long historyRevision) {
@@ -208,7 +235,7 @@ internal sealed class SnapshotReader {
     using SqliteDataReader reader = pendingRead.ExecuteReader();
     var inputs = new List<PendingInputPreview>(PendingInputLimit);
     while (reader.Read())
-      inputs.Add(new(reader.GetGuid(0), ReadPreview((byte[])reader.GetValue(1))));
+      inputs.Add(new(reader.GetGuid(0), ReadPreview((byte[])reader.GetValue(1)), reader.GetBoolean(2)));
 
     return inputs.ToArray();
   }

@@ -83,27 +83,29 @@ internal sealed class CompactionStorage(Database database, ToolResultCodec toolR
   internal (CompactionReceipt Receipt, bool New)? Admit(Guid sessionId, CompactionSubmission submission, bool accepting) {
     return database.Write<(CompactionReceipt, bool)?>(transaction => {
       using (SqliteCommand retained = database.Command(transaction, """
-        SELECT session_id, history_revision, compaction_selection_json, compaction_focus, outcome, error
+        SELECT session_id, history_revision, kind, llm_selection_json, compaction_focus, outcome, error
         FROM execution_runs WHERE run_id = $run;
         """, ("$run", submission.OperationId)))
       using (SqliteDataReader reader = retained.ExecuteReader()) {
         if (reader.Read()) {
           if (reader.GetGuid(0) != sessionId || reader.GetInt64(1) != submission.ExpectedHistoryRevision
-              || reader.IsDBNull(2) || !LlmSelectionJson.SameOperation(LlmSelectionJson.Read(reader.GetString(2)), submission.LlmSelection)
-              || (reader.IsDBNull(3) ? null : reader.GetString(3)) != submission.Focus)
+              || reader.GetInt32(2) != (int)ExecutionRunKind.Compaction || reader.IsDBNull(3)
+              || !LlmSelectionJson.SameOperation(LlmSelectionJson.Read(reader.GetString(3)), submission.LlmSelection)
+              || (reader.IsDBNull(4) ? null : reader.GetString(4)) != submission.Focus)
             throw new UserMessageConflictException(submission.OperationId);
           return (new CompactionReceipt(submission.OperationId,
-              reader.IsDBNull(4) ? null : (ExecutionOutcome)reader.GetInt32(4),
-              reader.IsDBNull(5) ? null : reader.GetString(5)), false);
+              reader.IsDBNull(5) ? null : (ExecutionOutcome)reader.GetInt32(5),
+              reader.IsDBNull(6) ? null : reader.GetString(6)), false);
         }
       }
       using SqliteCommand insert = database.Command(transaction, """
-        INSERT INTO execution_runs (session_id, run_id, history_revision, compaction_selection_json, compaction_focus,
-            working_started_at)
-        SELECT s.session_id, $run, s.history_revision, $selection, $focus, $started FROM sessions s
+        INSERT INTO execution_runs (session_id, run_id, history_revision, kind, llm_selection_json,
+            compaction_focus, working_started_at)
+        SELECT s.session_id, $run, s.history_revision, $kind, $selection, $focus, $started FROM sessions s
         WHERE s.session_id = $session AND s.history_revision = $revision AND $accepting = 1
             AND NOT EXISTS (SELECT 1 FROM execution_runs r WHERE r.session_id = $session AND r.outcome IS NULL);
         """, ("$session", sessionId), ("$run", submission.OperationId), ("$revision", submission.ExpectedHistoryRevision),
+          ("$kind", (int)ExecutionRunKind.Compaction),
           ("$selection", LlmSelectionJson.Write(submission.LlmSelection)), ("$focus", submission.Focus),
           ("$started", StorageText.UtcTimestamp()), ("$accepting", accepting ? 1 : 0));
       return insert.ExecuteNonQuery() == 0 ? null : (new CompactionReceipt(submission.OperationId, null), true);
@@ -113,8 +115,9 @@ internal sealed class CompactionStorage(Database database, ToolResultCodec toolR
   internal CompactionReceipt? ReadReceipt(Guid sessionId, Guid operationId) => database.Read(transaction => {
     using SqliteCommand read = database.Command(transaction, """
       SELECT outcome, error FROM execution_runs
-      WHERE run_id = $run AND session_id = $session AND compaction_selection_json IS NOT NULL;
-      """, ("$run", operationId), ("$session", sessionId));
+      WHERE run_id = $run AND session_id = $session AND kind = $kind;
+      """, ("$run", operationId), ("$session", sessionId),
+        ("$kind", (int)ExecutionRunKind.Compaction));
     using SqliteDataReader reader = read.ExecuteReader();
     if (!reader.Read())
       return null;

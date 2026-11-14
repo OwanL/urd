@@ -9,12 +9,12 @@ internal static class ProviderModelStreams {
   internal const string Call = """{"type":"function_call","id":"fc_fixture","status":"completed","call_id":"call_fixture","name":"lookup","arguments":"{\"key\":\"abc\"}"}""";
 
   internal static string Responses(string[]? items = null, string? terminal = "response.completed", string text = "hello",
-      bool itemDone = true, string? terminalItems = null) {
+      bool itemDone = true, string? terminalItems = null, object? usage = null) {
     items ??= [Message];
     JsonElement[] output = items.Select(item => JsonSerializer.Deserialize<JsonElement>(item)).ToArray();
     object Envelope(string status, object nativeOutput) => new {
       id = "resp_fixture", @object = "response", created_at = 1700000000, model = "fixture-model", status,
-      store = false, output = nativeOutput,
+      store = false, output = nativeOutput, usage,
       error = status == "failed" ? new { code = "server_error", message = "synthetic-private" } : null,
       incomplete_details = status == "incomplete" ? new { reason = "max_output_tokens" } : null
     };

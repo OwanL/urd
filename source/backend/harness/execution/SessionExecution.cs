@@ -7,6 +7,7 @@ using Urd.Core.Compaction;
 using Urd.Core.Sessions;
 using Urd.Core.Providers;
 using Urd.Core.Tools;
+using Urd.Core.Usage;
 
 namespace Urd.Core.Execution;
 
@@ -126,8 +127,8 @@ internal sealed class SessionExecution : IDisposable {
       chatClient ??= createChatClient(selection.Connection);
       CompactionResult result;
       try {
-        result = await HistoryCompactor.SummarizeAsync(
-            session.AccountUsage(chatClient, ExecutionId, selection, "compaction"), selection, plan, stop.Token);
+        result = await HistoryCompactor.SummarizeAsync(chatClient, selection, plan, stop.Token,
+            new UsageContext(session.Id, ExecutionId, "compaction"));
       } catch (OperationCanceledException) when (IsStopping) {
         throw;
       } catch (Exception failure) {
@@ -319,12 +320,14 @@ internal sealed class SessionExecution : IDisposable {
         ModelId = selection.ModelId,
         Reasoning = selection.ReadReasoningEffort() is { } effort
             ? new ReasoningOptions { Effort = effort } : null,
-        Tools = [.. startingContext!.Tools]
+        Tools = [.. startingContext!.Tools],
+        AdditionalProperties = new() {
+          [UsageContext.PropertyName] = new UsageContext(session.Id, ExecutionId, "conversation")
+        }
       };
       await StartRequestAsync(request.RequestId, startingContext);
-      updates = session.AccountUsage(chatClient, ExecutionId, selection, "conversation")
-          .GetStreamingResponseAsync(LlmProviderContext.ForModel(
-              [.. startingContext.Instructions, .. request.Messages], selection.SupportsImages), options, requestStop.Token)
+      updates = chatClient.GetStreamingResponseAsync(LlmProviderContext.ForModel(
+          [.. startingContext.Instructions, .. request.Messages], selection.SupportsImages), options, requestStop.Token)
           .GetAsyncEnumerator(requestStop.Token);
 
       while (await WaitForNextUpdateAsync(writer, pendingRead ??= updates.MoveNextAsync().AsTask())) {

@@ -49,7 +49,7 @@ internal sealed class OpenAIProviderClient(HttpClient httpClient, UsageStorage? 
       ProviderCredentials? credentials, string modelId, CancellationToken ct) {
     ct.ThrowIfCancellationRequested();
     UsageObservation? observation = usageStorage is null ? null : new(usageStorage,
-        new(connection, modelId, null, ModelFamily.Other, false), null, null, "provider test",
+        connection, modelId, new(null, null, "provider test"),
         [new Microsoft.Extensions.AI.ChatMessage(Microsoft.Extensions.AI.ChatRole.User, TestPrompt)],
         new Microsoft.Extensions.AI.ChatOptions { ModelId = modelId });
     try {

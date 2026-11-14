@@ -27,7 +27,8 @@ public sealed class UsageCaptureTests {
     Guid sessionId;
     Guid[] retainedUsageIds;
     using (UrdStore store = UrdStore.Open(database.Path)) {
-      var manager = new SessionManager(store, _ => client);
+      var manager = new SessionManager(store,
+          connection => new UsageChatClient(client, store.Usage, connection));
       try {
         PrimarySession session = await manager.CreatePrimaryAsync();
         sessionId = session.Id;
@@ -59,7 +60,8 @@ public sealed class UsageCaptureTests {
     }
 
     using UrdStore reopened = UrdStore.Open(database.Path);
-    var restored = new SessionManager(reopened, _ => client);
+    var restored = new SessionManager(reopened,
+        connection => new UsageChatClient(client, reopened.Usage, connection));
     try {
       PrimarySession session = await restored.GetPrimaryAsync(sessionId);
       Assert.Equal(4, reopened.ReadUsage(sessionId).Totals.Requests);
@@ -90,7 +92,8 @@ public sealed class UsageCaptureTests {
       await Task.Delay(Timeout.InfiniteTimeSpan, token);
     }
     using var client = new ScriptedChatClient(Held);
-    var manager = new SessionManager(store, _ => client);
+    var manager = new SessionManager(store,
+        connection => new UsageChatClient(client, store.Usage, connection));
     try {
       PrimarySession session = await manager.CreatePrimaryAsync();
       UserMessageReceipt accepted = await session.SubmitUserMessageAsync(
@@ -138,10 +141,11 @@ public sealed class UsageCaptureTests {
         LlmApi.OpenAIResponses, new Uri("https://api.openai.com/v1/"), AuthenticationMethod.None);
     LlmSelection selection = TestLlmSelection.Create(connection, "gpt-4o-mini");
     Guid session = Guid.NewGuid();
-    var wrapper = new UsageChatClient(inner, store.Usage, selection, session, Guid.NewGuid(), "conversation");
+    using var wrapper = new UsageChatClient(inner, store.Usage, connection);
+    var context = new UsageContext(session, Guid.NewGuid(), "conversation");
     Task? first = null;
     try {
-      first = ConsumeAsync(wrapper);
+      first = ConsumeAsync(wrapper, selection.ModelId, context);
       await liveWritten.Task.WaitAsync(TestTimeout);
       UsageRequest live = Assert.Single(store.ReadUsage(session).Recent);
       Assert.True(live.IsEstimate);
@@ -164,7 +168,7 @@ public sealed class UsageCaptureTests {
       Assert.Equal(final.CostUsd!.Value, store.ReadUsage(session).Totals.CostUsd);
       Assert.Equal(1, store.ReadUsage(session).Totals.Requests);
 
-      await ConsumeAsync(wrapper);
+      await ConsumeAsync(wrapper, selection.ModelId, context);
       UsageRequest incomplete = Assert.Single(store.ReadUsage(session).Recent, request => request.Id != final.Id);
       Assert.True(incomplete.IsEstimate);
       Assert.Equal("Provider did not report complete final usage.", incomplete.Problem);
@@ -196,11 +200,12 @@ public sealed class UsageCaptureTests {
         LlmApi.OpenAIResponses, new Uri("https://api.openai.com/v1/"), AuthenticationMethod.None);
     var selection = TestLlmSelection.Create(connection, "gpt-4o-mini");
     Guid session = Guid.NewGuid();
-    using var wrapper = new UsageChatClient(inner, store.Usage, selection, session, null, "conversation");
+    using var wrapper = new UsageChatClient(inner, store.Usage, connection);
+    var context = new UsageContext(session, null, "conversation");
     if (completed)
-      await ConsumeAsync(wrapper);
+      await ConsumeAsync(wrapper, selection.ModelId, context);
     else
-      await Assert.ThrowsAsync<InvalidOperationException>(() => ConsumeAsync(wrapper));
+      await Assert.ThrowsAsync<InvalidOperationException>(() => ConsumeAsync(wrapper, selection.ModelId, context));
     UsageRequest request = Assert.Single(store.ReadUsage(session).Recent);
     Assert.NotNull(request.FinishedAt);
     Assert.Equal(completed, request.CostUsd is > 0);
@@ -237,9 +242,11 @@ public sealed class UsageCaptureTests {
     throw new ProviderOperationException(ProviderFailure.ContextWindowExceeded);
   }
 
-  private static async Task ConsumeAsync(UsageChatClient client) {
+  private static async Task ConsumeAsync(UsageChatClient client, string model, UsageContext context) {
+    var options = new ChatOptions { ModelId = model };
+    options.AdditionalProperties = new() { [UsageContext.PropertyName] = context };
     await foreach (ChatResponseUpdate _ in client.GetStreamingResponseAsync(
-        [new ChatMessage(ChatRole.User, "capture usage")])) {
+        [new ChatMessage(ChatRole.User, "capture usage")], options)) {
       // Drain the exchange without retaining provider output.
     }
   }

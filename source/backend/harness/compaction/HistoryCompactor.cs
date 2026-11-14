@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Urd.Core.Providers;
+using Urd.Core.Usage;
 
 namespace Urd.Core.Compaction;
 
@@ -41,7 +42,7 @@ internal static class HistoryCompactor {
   }
 
   internal static async Task<CompactionResult> SummarizeAsync(IChatClient client, LlmSelection selection,
-      CompactionPlan plan, CancellationToken cancellationToken) {
+      CompactionPlan plan, CancellationToken cancellationToken, UsageContext? usageContext = null) {
     ArgumentNullException.ThrowIfNull(client);
     ArgumentNullException.ThrowIfNull(selection);
     ArgumentNullException.ThrowIfNull(plan);
@@ -53,6 +54,8 @@ internal static class HistoryCompactor {
       MaxOutputTokens = ContextBudget.OutputBudget(selection.ContextWindow),
       Tools = []
     };
+    if (usageContext is not null)
+      options.AdditionalProperties = new() { [UsageContext.PropertyName] = usageContext };
     ChatResponse response = await client.GetResponseAsync(
         [new ChatMessage(ChatRole.User, BuildPrompt(plan))], options, cancellationToken).ConfigureAwait(false);
     cancellationToken.ThrowIfCancellationRequested();

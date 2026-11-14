@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using Microsoft.Extensions.AI;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
+using Urd.Core.Usage;
 
 namespace Urd.Core.Providers;
 
@@ -10,6 +11,7 @@ namespace Urd.Core.Providers;
 public sealed class ProviderManager : IDisposable {
   private static readonly Uri OpenAIEndpoint = new("https://api.openai.com/v1/");
   private readonly ProviderStorage storage;
+  private readonly UsageStorage usage;
   private readonly ModelSettingsStorage modelSettings;
   private readonly AsyncLock gate = new();
   private readonly HttpMessageHandler handler;
@@ -34,6 +36,7 @@ public sealed class ProviderManager : IDisposable {
     ArgumentNullException.ThrowIfNull(callbackUri);
     ArgumentNullException.ThrowIfNull(handler);
     storage = store.Providers;
+    usage = store.Usage;
     modelSettings = store.ModelSettings;
     this.handler = handler;
     client = new(handler, disposeHandler: false) { Timeout = Timeout.InfiniteTimeSpan };
@@ -49,7 +52,7 @@ public sealed class ProviderManager : IDisposable {
     if (expectedBinding.Id == Guid.Empty)
       throw new ArgumentException("A saved provider connection is required.", nameof(expectedBinding));
     ObjectDisposedException.ThrowIf(disposed, this);
-    return new ProviderChatClient(this, expectedBinding);
+    return new UsageChatClient(new ProviderChatClient(this, expectedBinding), usage, expectedBinding, disposeInner: true);
   }
 
   public async Task<IReadOnlyList<ProviderConnection>> ListAsync(CancellationToken cancellationToken = default) {

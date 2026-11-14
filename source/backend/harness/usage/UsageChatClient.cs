@@ -5,35 +5,26 @@ using Urd.Core.Storage;
 namespace Urd.Core.Usage;
 
 // A borrowed view: usage belongs to each invocation, not to this client or its disposal.
-internal sealed class UsageChatClient(IChatClient inner, UsageStorage storage, LlmSelection selection,
-    Guid? sessionId, Guid? executionId, string purpose) : IChatClient {
-  public async Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
-      CancellationToken cancellationToken = default) {
-    cancellationToken.ThrowIfCancellationRequested();
-    ChatMessage[] history = messages.ToArray();
-    options ??= new() { ModelId = selection.ModelId };
-    var observation = new UsageObservation(storage, selection, sessionId, executionId, purpose, history, options);
-    try {
-      if (inner is ProviderChatClient provider)
-        return await provider.GetObservedResponseAsync(history, options, observation.Append, cancellationToken);
-      ChatResponse response = await inner.GetResponseAsync(history, options, cancellationToken);
-      foreach (ChatMessage message in response.Messages)
-        observation.Append(new() { ModelId = response.ModelId, Contents = message.Contents });
-      if (response.Usage is { } usage)
-        observation.Append(new() { ModelId = response.ModelId, Contents = [new UsageContent(usage)] });
-      return response;
-    } finally {
-      observation.Finish();
-    }
-  }
+internal sealed class UsageChatClient(IChatClient inner, UsageStorage storage, ProviderConnection connection,
+    bool disposeInner = false) : IChatClient {
+  public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+      CancellationToken cancellationToken = default) =>
+      GetStreamingResponseAsync(messages, options, cancellationToken).ToChatResponseAsync(cancellationToken);
 
   public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
       ChatOptions? options = null, CancellationToken cancellationToken = default) => new UsageStream(token => {
     cancellationToken.ThrowIfCancellationRequested();
     token.ThrowIfCancellationRequested();
     ChatMessage[] history = messages.ToArray();
-    ChatOptions requestOptions = options ?? new() { ModelId = selection.ModelId };
-    var observation = new UsageObservation(storage, selection, sessionId, executionId, purpose, history, requestOptions);
+    ChatOptions requestOptions = options?.Clone() ?? new();
+    if (options?.AdditionalProperties is { } additionalProperties) {
+      requestOptions.AdditionalProperties = [];
+      foreach ((string key, object? value) in additionalProperties)
+        requestOptions.AdditionalProperties[key] = value;
+    }
+    UsageContext context = ReadContext(requestOptions);
+    string model = requestOptions.ModelId ?? throw new ArgumentException("A model ID is required.");
+    var observation = new UsageObservation(storage, connection, model, context, history, requestOptions);
     try {
       return (inner.GetStreamingResponseAsync(history, requestOptions, cancellationToken).GetAsyncEnumerator(token), observation);
     } catch {
@@ -47,5 +38,17 @@ internal sealed class UsageChatClient(IChatClient inner, UsageStorage storage, L
     return serviceKey is null && serviceType.IsInstanceOfType(this) ? this : inner.GetService(serviceType, serviceKey);
   }
 
-  public void Dispose() { } // The session/provider manager owns the underlying client.
+  public void Dispose() {
+    if (disposeInner)
+      inner.Dispose();
+  }
+
+  private static UsageContext ReadContext(ChatOptions options) {
+    if (options.AdditionalProperties is { } properties && properties.TryGetValue(UsageContext.PropertyName, out object? value)) {
+      properties.Remove(UsageContext.PropertyName);
+      return value as UsageContext
+          ?? throw new ArgumentException($"'{UsageContext.PropertyName}' must contain a UsageContext.", nameof(options));
+    }
+    return new(null, null, UsageContext.DefaultPurpose);
+  }
 }

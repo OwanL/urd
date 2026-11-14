@@ -16,17 +16,19 @@ internal sealed class UsageObservation {
   private UsageDetails? reported;
   private bool finished, responseObserved;
 
-  internal UsageObservation(UsageStorage storage, LlmSelection selection, Guid? sessionId,
-      Guid? executionId, string purpose, IReadOnlyList<ChatMessage> messages, ChatOptions options) {
+  internal UsageObservation(UsageStorage storage, ProviderConnection connection, string model,
+      UsageContext context, IReadOnlyList<ChatMessage> messages, ChatOptions options) {
     this.storage = storage;
-    connection = selection.Connection;
-    string model = options.ModelId ?? selection.ModelId;
+    this.connection = connection;
+    ArgumentException.ThrowIfNullOrWhiteSpace(model);
+    ArgumentNullException.ThrowIfNull(context);
+    ArgumentException.ThrowIfNullOrWhiteSpace(context.Purpose);
     counter = new(model);
     estimatedInput = counter.CountInput(messages, options);
     DateTimeOffset now = DateTimeOffset.UtcNow;
-    request = new(Guid.NewGuid(), sessionId, connection.Name, model, purpose, now, null,
+    request = new(Guid.NewGuid(), context.SessionId, connection.Name, model, context.Purpose, now, null,
         null, true, "Live usage is provisional.", null, UsagePricing.Find(connection, model, now),
-        connection.Id, executionId);
+        connection.Id, context.ExecutionId);
     request = Snapshot(final: false);
     storage.Begin(request);
   }

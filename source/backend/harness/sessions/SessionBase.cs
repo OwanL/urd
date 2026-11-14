@@ -7,6 +7,7 @@ using Urd.Core.Storage;
 using Urd.Core.Providers;
 using Urd.Core.Preferences;
 using Urd.Core.Tools;
+using Urd.Core.Usage;
 
 namespace Urd.Core.Sessions;
 
@@ -55,6 +56,9 @@ public abstract class SessionBase {
 
   internal SessionKind Kind { get; }
   internal SessionExecutionRecorder Recorder { get; }
+
+  internal IChatClient AccountUsage(IChatClient client, Guid executionId, LlmSelection selection, string purpose) =>
+      new UsageChatClient(client, store.Usage, selection, Id, executionId, purpose);
   internal long HistoryRevision { get; private set; }
 
   private bool CanAdmit => acceptingUserMessages && editTask is null;

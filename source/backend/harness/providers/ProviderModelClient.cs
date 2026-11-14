@@ -46,9 +46,21 @@ internal sealed class ProviderModelClient(HttpClient httpClient) {
       }
       try {
         while (await MoveNextAsync(stream, state.Credentials, cancellationToken).ConfigureAwait(false)) {
+          ChatResponseUpdate nativeUpdate = stream.Current;
+          UsageDetails? usage = ProviderTokenUsage.Read(nativeUpdate.RawRepresentation);
+          if (usage is not null) {
+            nativeUpdate.Contents = nativeUpdate.Contents.Where(content => content is not UsageContent).ToList();
+            yield return new ChatResponseUpdate(nativeUpdate.Role, [new UsageContent(usage)]) {
+              ResponseId = nativeUpdate.ResponseId,
+              MessageId = nativeUpdate.MessageId,
+              ModelId = nativeUpdate.ModelId,
+              CreatedAt = nativeUpdate.CreatedAt
+            };
+          }
+
           ChatResponseUpdate? update;
           try {
-            update = guard.Accept(stream.Current);
+            update = guard.Accept(nativeUpdate);
           } catch (Exception error) when (CanClassify(error, cancellationToken)) {
             throw ProviderOperationException.FromProviderError(error, contextWindow: true, credentials: state.Credentials);
           }

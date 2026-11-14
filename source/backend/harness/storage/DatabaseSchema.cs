@@ -4,7 +4,7 @@ namespace Urd.Core.Storage;
 
 // Creates the current pre-release schema; incompatible databases require a manual reset.
 internal static class DatabaseSchema {
-  private const int SchemaVersion = 24;
+  private const int SchemaVersion = 25;
 
   internal static void Initialize(SqliteConnection connection) {
     using SqliteCommand command = connection.CreateCommand();
@@ -38,6 +38,22 @@ internal static class DatabaseSchema {
           + "To reset: stop Urd, delete urd.sqlite and its urd.sqlite-wal/urd.sqlite-shm files, then restart Urd.");
 
     command.CommandText = """
+      -- Accounting survives history replacement and session retention independently.
+      CREATE TABLE usage_requests (
+          id TEXT NOT NULL PRIMARY KEY,
+          session_id TEXT,
+          started_at TEXT NOT NULL,
+          finished_at TEXT,
+          provider TEXT NOT NULL,
+          model TEXT NOT NULL,
+          purpose TEXT NOT NULL,
+          cost_nano_usd INTEGER CHECK (cost_nano_usd >= 0),
+          is_estimate INTEGER NOT NULL CHECK (is_estimate IN (0, 1)),
+          problem TEXT,
+          record_json TEXT NOT NULL
+      ) STRICT;
+      CREATE INDEX usage_requests_session_time ON usage_requests(session_id, started_at);
+      CREATE INDEX usage_requests_time ON usage_requests(started_at);
       CREATE TABLE sessions (
           session_id TEXT NOT NULL PRIMARY KEY,
           history_revision INTEGER NOT NULL CHECK (history_revision >= 0),
@@ -301,7 +317,7 @@ internal static class DatabaseSchema {
       CREATE INDEX execution_inputs_not_sent_order ON execution_inputs(session_id, ordinal) WHERE not_sent = 1;
       CREATE INDEX execution_messages_history_order ON execution_messages(session_id, history_revision, ordinal DESC);
       CREATE INDEX execution_messages_request_order ON execution_messages(request_id, role, first_chunk_index);
-      PRAGMA user_version = 24;
+      PRAGMA user_version = 25;
       """;
     command.ExecuteNonQuery();
     transaction.Commit();

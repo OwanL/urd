@@ -3,7 +3,7 @@ using Microsoft.Extensions.AI;
 
 namespace Urd.Backend.Tests.Support;
 
-// Streaming-only fake LLM client that replays a scripted response and counts calls.
+// Fake LLM client that replays scripted streaming responses and counts both request forms.
 internal sealed class ScriptedChatClient(Func<CancellationToken, IAsyncEnumerable<ChatResponseUpdate>> script)
     : IChatClient {
   private readonly ConcurrentQueue<IReadOnlyList<ChatMessage>> requests = new();
@@ -29,7 +29,8 @@ internal sealed class ScriptedChatClient(Func<CancellationToken, IAsyncEnumerabl
   }
 
   public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
-      CancellationToken cancellationToken = default) => throw new NotSupportedException("Streaming fake only.");
+      CancellationToken cancellationToken = default) =>
+      GetStreamingResponseAsync(messages, options, cancellationToken).ToChatResponseAsync(cancellationToken);
 
   public object? GetService(Type serviceType, object? serviceKey = null) => null;
   public void Dispose() => Interlocked.Increment(ref disposeCalls);

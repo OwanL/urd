@@ -10,6 +10,18 @@ internal sealed class ProviderChatClient(ProviderManager manager, ProviderConnec
       CancellationToken cancellationToken = default) =>
       GetStreamingResponseAsync(messages, options, cancellationToken).ToChatResponseAsync(cancellationToken);
 
+  // Nonstreaming callers still need observations before a terminal failure rejects the response.
+  internal Task<ChatResponse> GetObservedResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions options,
+      Action<ChatResponseUpdate> observe, CancellationToken cancellationToken) {
+    async IAsyncEnumerable<ChatResponseUpdate> Observed() {
+      await foreach (ChatResponseUpdate update in GetStreamingResponseAsync(messages, options, cancellationToken)) {
+        observe(update);
+        yield return update;
+      }
+    }
+    return Observed().ToChatResponseAsync(cancellationToken);
+  }
+
   public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
       ChatOptions? options = null, CancellationToken cancellationToken = default) {
     ObjectDisposedException.ThrowIf(disposed, this);

@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using Urd.Core.Usage;
 
 namespace Urd.Core.Storage;
 
@@ -25,8 +26,10 @@ public sealed class UrdStore : IDisposable {
     Providers = new(database);
     ModelSettings = new(database);
     Preferences = new(database);
+    Usage = new(database);
   }
 
+  internal UsageStorage Usage { get; }
   internal ProviderStorage Providers { get; }
   internal ModelSettingsStorage ModelSettings { get; }
   internal PreferencesStorage Preferences { get; }
@@ -65,7 +68,13 @@ public sealed class UrdStore : IDisposable {
 
   // The host must hold exclusive data-directory ownership and have no live sessions.
   // Recovery records uncertainty; it never sends a request or invokes a tool.
-  public void RecoverInterruptedExecutions() => Executions.RecoverInterruptedExecutions();
+  public void RecoverInterruptedExecutions() {
+    Usage.RecoverInterrupted();
+    Executions.RecoverInterruptedExecutions();
+  }
+
+  public UsageSummary ReadUsage(Guid? sessionId = null, DateTimeOffset? from = null,
+      DateTimeOffset? to = null, bool detail = true) => Usage.Read(sessionId, from, to, detail);
 
   public void Dispose() => database.Dispose();
 }

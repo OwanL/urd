@@ -207,6 +207,19 @@
           "Microsoft.IdentityModel.Logging": "8.23.0"
         }
       },
+      "Microsoft.ML.Tokenizers": {
+        "type": "Transitive",
+        "resolved": "3.0.0",
+        "contentHash": "0fee9Ydsd6zmq2ofM5cKeV/CzvEjzPbgwuqWyU3+imlDgbGA6DjnxTK13Gb0IyS9PPYdGphq+mILBcQvF+Z95A=="
+      },
+      "Microsoft.ML.Tokenizers.Data.O200kBase": {
+        "type": "Transitive",
+        "resolved": "3.0.0",
+        "contentHash": "x2+bw8YPxh81GvJnxsr+ctmENqL56o07foOWtspn8JUyhayVRf/D38YLXJcMTBVaUFSWrgydbY7I6o5Op7cmzw==",
+        "dependencies": {
+          "Microsoft.ML.Tokenizers": "3.0.0"
+        }
+      },
       "Microsoft.TestPlatform.ObjectModel": {
         "type": "Transitive",
         "resolved": "18.11.0",
@@ -353,6 +366,8 @@
           "Microsoft.Extensions.AI.Abstractions": "[10.11.0, )",
           "Microsoft.Extensions.AI.OpenAI": "[10.11.0, )",
           "Microsoft.IdentityModel.JsonWebTokens": "[8.23.0, )",
+          "Microsoft.ML.Tokenizers": "[3.0.0, )",
+          "Microsoft.ML.Tokenizers.Data.O200kBase": "[3.0.0, )",
           "OpenAI": "[2.14.0, )",
           "SkiaSharp": "[4.155.0, )"
         }

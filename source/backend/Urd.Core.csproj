@@ -6,6 +6,8 @@
   <ItemGroup>
     <PackageReference Include="Markdig" Version="[1.6.0]" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.14" />
+    <PackageReference Include="Microsoft.ML.Tokenizers" Version="3.0.0" />
+    <PackageReference Include="Microsoft.ML.Tokenizers.Data.O200kBase" Version="3.0.0" />
     <PackageReference Include="SkiaSharp" Version="4.155.0" />
     <PackageReference Include="Microsoft.Extensions.AI.Abstractions" Version="10.11.0" />
     <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.11.0" />

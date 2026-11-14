@@ -6,13 +6,15 @@ using OpenAI;
 using OpenAI.Chat;
 using OpenAI.Models;
 using OpenAI.Responses;
+using Urd.Core.Storage;
+using Urd.Core.Usage;
 
 #pragma warning disable OPENAI001 // The pinned SDK's native Responses and authentication-policy APIs.
 
 namespace Urd.Core.Providers;
 
 // One-request diagnostics through the official SDK. The caller owns the HTTP client and deadline.
-internal sealed class OpenAIProviderClient(HttpClient httpClient) {
+internal sealed class OpenAIProviderClient(HttpClient httpClient, UsageStorage? usageStorage = null) {
   private const string TestPrompt = "Reply with one short greeting.";
   private const int PreviewLimit = 4096;
 
@@ -45,21 +47,28 @@ internal sealed class OpenAIProviderClient(HttpClient httpClient) {
 
   internal async Task<ProviderModelTestResult> TestModelAsync(ProviderConnection connection,
       ProviderCredentials? credentials, string modelId, CancellationToken ct) {
+    ct.ThrowIfCancellationRequested();
+    UsageObservation? observation = usageStorage is null ? null : new(usageStorage,
+        new(connection, modelId, null, ModelFamily.Other, false), null, null, "provider test",
+        [new Microsoft.Extensions.AI.ChatMessage(Microsoft.Extensions.AI.ChatRole.User, TestPrompt)],
+        new Microsoft.Extensions.AI.ChatOptions { ModelId = modelId });
     try {
       ct.ThrowIfCancellationRequested();
       return connection.Api switch {
-        LlmApi.OpenAIResponses => await TestResponsesAsync(connection, credentials, modelId, ct).ConfigureAwait(false),
-        LlmApi.OpenAIChatCompletions => await TestChatAsync(connection, credentials, modelId, ct).ConfigureAwait(false),
+        LlmApi.OpenAIResponses => await TestResponsesAsync(connection, credentials, modelId, observation, ct).ConfigureAwait(false),
+        LlmApi.OpenAIChatCompletions => await TestChatAsync(connection, credentials, modelId, observation, ct).ConfigureAwait(false),
         _ => throw new ProviderOperationException(ProviderFailure.InvalidProviderResponse)
       };
     } catch (Exception error) when (CanClassify(error, ct)) {
       ct.ThrowIfCancellationRequested();
       throw ProviderOperationException.FromProviderError(error, credentials: credentials);
+    } finally {
+      observation?.Finish();
     }
   }
 
   private async Task<ProviderModelTestResult> TestResponsesAsync(ProviderConnection connection,
-      ProviderCredentials? credentials, string modelId, CancellationToken ct) {
+      ProviderCredentials? credentials, string modelId, UsageObservation? observation, CancellationToken ct) {
     var client = new ResponsesClient(ProviderSdkAuthentication.Create(connection, credentials), new ResponsesClientOptions {
       Endpoint = connection.Endpoint,
       Transport = new HttpClientPipelineTransport(httpClient),
@@ -76,6 +85,8 @@ internal sealed class OpenAIProviderClient(HttpClient httpClient) {
     int completed = 0;
     ProviderUsage? usage = null;
     await foreach (var update in client.CreateResponseStreamingAsync(options, ct).ConfigureAwait(false)) {
+      ObserveUsage(observation, update, (update as StreamingResponseOutputTextDeltaUpdate)?.Delta,
+          (update as StreamingResponseCompletedUpdate)?.Response?.Model);
       switch (update) {
         case StreamingResponseOutputTextDeltaUpdate delta:
           AppendPreview(text, delta.Delta, ref truncated);
@@ -102,7 +113,7 @@ internal sealed class OpenAIProviderClient(HttpClient httpClient) {
   }
 
   private async Task<ProviderModelTestResult> TestChatAsync(ProviderConnection connection,
-      ProviderCredentials? credentials, string modelId, CancellationToken ct) {
+      ProviderCredentials? credentials, string modelId, UsageObservation? observation, CancellationToken ct) {
     var client = new ChatClient(modelId, ProviderSdkAuthentication.Create(connection, credentials), Options(connection));
     var options = new ChatCompletionOptions { StoredOutputEnabled = false };
     var text = new StringBuilder();
@@ -111,6 +122,7 @@ internal sealed class OpenAIProviderClient(HttpClient httpClient) {
     ProviderUsage? usage = null;
     await foreach (var update in client.CompleteChatStreamingAsync(
         [new UserChatMessage(TestPrompt)], options, ct).ConfigureAwait(false)) {
+      ObserveUsage(observation, update, string.Concat(update.ContentUpdate.Select(part => part.Text)), update.Model);
       foreach (var part in update.ContentUpdate) AppendPreview(text, part.Text, ref truncated);
       if (update.FinishReason is { } finish) {
         if (finish != ChatFinishReason.Stop)
@@ -122,6 +134,22 @@ internal sealed class OpenAIProviderClient(HttpClient httpClient) {
     ct.ThrowIfCancellationRequested();
     if (completed != 1) throw new ProviderOperationException(ProviderFailure.IncompleteResponse);
     return new(connection.Id, modelId, text.ToString(), truncated, usage);
+  }
+
+  private static void ObserveUsage(UsageObservation? observation, object update, string? text, string? model) {
+    if (observation is null) return;
+    model ??= update switch {
+      StreamingResponseIncompleteUpdate incomplete => incomplete.Response?.Model,
+      StreamingResponseFailedUpdate failed => failed.Response?.Model,
+      _ => null
+    };
+    var observed = new Microsoft.Extensions.AI.ChatResponseUpdate { ModelId = model };
+    if (update is StreamingResponseCompletedUpdate or StreamingChatCompletionUpdate { FinishReason: not null })
+      observed.FinishReason = Microsoft.Extensions.AI.ChatFinishReason.Stop;
+    if (!string.IsNullOrEmpty(text)) observed.Contents.Add(new Microsoft.Extensions.AI.TextContent(text));
+    if (ProviderTokenUsage.Read(update) is { } usage)
+      observed.Contents.Add(new Microsoft.Extensions.AI.UsageContent(usage));
+    observation.Append(observed);
   }
 
   private OpenAIClientOptions Options(ProviderConnection connection) => new() {

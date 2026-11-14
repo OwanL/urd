@@ -38,7 +38,7 @@ public sealed class ProviderManager : IDisposable {
     this.handler = handler;
     client = new(handler, disposeHandler: false) { Timeout = Timeout.InfiniteTimeSpan };
     authentication = new(handler, issuer);
-    models = new(client);
+    models = new(client, store.Usage);
     modelRequests = new(client);
     signIns = new(storage, authentication, gate, callbackUri, CancelRequests);
   }

@@ -126,7 +126,8 @@ internal sealed class SessionExecution : IDisposable {
       chatClient ??= createChatClient(selection.Connection);
       CompactionResult result;
       try {
-        result = await HistoryCompactor.SummarizeAsync(chatClient, selection, plan, stop.Token);
+        result = await HistoryCompactor.SummarizeAsync(
+            session.AccountUsage(chatClient, ExecutionId, selection, "compaction"), selection, plan, stop.Token);
       } catch (OperationCanceledException) when (IsStopping) {
         throw;
       } catch (Exception failure) {
@@ -321,7 +322,7 @@ internal sealed class SessionExecution : IDisposable {
         Tools = [.. startingContext!.Tools]
       };
       await StartRequestAsync(request.RequestId, startingContext);
-      updates = chatClient
+      updates = session.AccountUsage(chatClient, ExecutionId, selection, "conversation")
           .GetStreamingResponseAsync(LlmProviderContext.ForModel(
               [.. startingContext.Instructions, .. request.Messages], selection.SupportsImages), options, requestStop.Token)
           .GetAsyncEnumerator(requestStop.Token);

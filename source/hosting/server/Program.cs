@@ -93,7 +93,7 @@ internal static class Program {
       markdown = createMarkdown?.Invoke() ?? new MessageMarkdownService(new(
           Entries: 64, RetainedBytes: 384L * 1024 * 1024,
           PendingKeys: 32, Leases: 64, SmallMessageUtf8Bytes: 16 * 1024));
-      app = CreateApplication(options, manager, providers, eventHub, markdown, preferences,
+      app = CreateApplication(options, manager, providers, eventHub, markdown, preferences, store,
           () => Volatile.Read(ref servedOrigin));
       var shutdownRequested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
       using var lifetimeStop = app.Lifetime.ApplicationStopping.Register(() => shutdownRequested.TrySetResult());
@@ -138,7 +138,7 @@ internal static class Program {
 
   private static WebApplication CreateApplication(ServerOptions options, SessionManager manager,
       ProviderManager providers, SessionEventHub eventHub, MessageMarkdownService? markdown,
-      PreferenceManager preferences, Func<Uri?> servedOrigin) {
+      PreferenceManager preferences, UrdStore store, Func<Uri?> servedOrigin) {
     // No default appsettings/environment/URL providers: Kestrel configuration can otherwise add listeners.
     WebApplicationBuilder builder = WebApplication.CreateEmptyBuilder(new WebApplicationOptions {
       ApplicationName = typeof(Program).Assembly.GetName().Name,
@@ -182,6 +182,7 @@ internal static class Program {
       app.MapMarkdown(manager, eventHub, markdown);
     app.MapProviders(providers);
     app.MapPreferences(preferences);
+    app.MapUsage(store);
     return app;
   }
 }

@@ -76,8 +76,8 @@ export function CompactionMarker({ client, sessionId, entry, compaction }: Compa
       {expanded && (
         <div id={summaryId} class="message-text">
           <p>
-            {compaction.tokensBefore.toLocaleString()} → {compaction.tokensAfter.toLocaleString()}{" "}
-            tokens · {compaction.reason}
+            {compaction.estimatedContextTokensBefore.toLocaleString()} →{" "}
+            {compaction.estimatedContextTokensAfter.toLocaleString()} tokens · {compaction.reason}
           </p>
           {loading && <p>Loading summary…</p>}
           {error && (

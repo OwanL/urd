@@ -1,7 +1,7 @@
 import type { LlmSelection } from "../providers/LlmSelection.ts";
 import type { ExecutionOutcome } from "./SessionExecutionResult.ts";
 
-export interface CompactionSubmission {
+export interface ManualCompactionRequest {
   readonly operationId: string;
   readonly expectedHistoryRevision: number;
   readonly llmSelection: LlmSelection;
@@ -20,7 +20,7 @@ export interface CompactionSummary {
   readonly id: string;
   readonly summary: string;
   readonly reason: CompactionReason;
-  readonly tokensBefore: number;
-  readonly tokensAfter: number;
+  readonly estimatedContextTokensBefore: number;
+  readonly estimatedContextTokensAfter: number;
   readonly createdAt: string;
 }

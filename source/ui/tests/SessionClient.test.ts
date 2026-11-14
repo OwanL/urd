@@ -14,7 +14,7 @@ import type {
 } from "../sessions/Messages.ts";
 import type {
   CompactionReceipt,
-  CompactionSubmission,
+  ManualCompactionRequest,
   CompactionSummary,
 } from "../sessions/Compaction.ts";
 import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
@@ -162,7 +162,7 @@ const notSentPage = {
   nextCursor: opaqueCursor,
 };
 const stopReceipt = { executionId, status: "requested", outcome: null };
-const compactionSubmission: CompactionSubmission = {
+const compactionSubmission: ManualCompactionRequest = {
   operationId,
   expectedHistoryRevision: 7,
   llmSelection: selection,
@@ -173,8 +173,8 @@ const compactionSummary: CompactionSummary = {
   id: compactionId,
   summary: "The conversation summary.",
   reason: "manual",
-  tokensBefore: 8_000,
-  tokensAfter: 900,
+  estimatedContextTokensBefore: 8_000,
+  estimatedContextTokensAfter: 900,
   createdAt: "2026-10-12T12:00:00Z",
 };
 const selectedRefusal: UserMessageReceipt = {

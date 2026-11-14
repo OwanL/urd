@@ -9,7 +9,7 @@ namespace Urd.Core.Execution;
 internal sealed record LlmRequest(
     Guid RequestId,
     IReadOnlyList<ChatMessage> Messages,
-    CompactionContext? Context = null);
+    ModelHistory? Context = null);
 
 // Buffered response text sent through SessionBase for persistence.
 // IsFinal closes the text, not the execution; the final chunk may be empty.

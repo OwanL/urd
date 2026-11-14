@@ -51,7 +51,7 @@ public sealed class SessionWorkingTimeStorageTests {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
-    var submission = new CompactionSubmission(Guid.NewGuid(), 0, TestLlmSelection.Default);
+    var submission = new ManualCompactionRequest(Guid.NewGuid(), 0, TestLlmSelection.Default);
 
     var admission = store.Compactions.Admit(session, submission, accepting: true)!.Value;
     Assert.True(admission.New);

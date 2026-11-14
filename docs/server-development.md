@@ -101,7 +101,7 @@ hidden-icons overflow, unless it has been hidden in Settings → Personalization
 | POST `/api/sessions/{sessionId}/continuations` | `ContinuationSubmission` → 200 `{sessionId, operationId, executionId}`; 409 when stale or unavailable |
 | GET `/api/sessions/{sessionId}/continuations/{operationId}` | 200 retained receipt or literal JSON `null` |
 | POST `/api/sessions/{sessionId}/executions/{executionId}/pending-inputs/{submissionId}/remove` | Empty JSON object `{}` → 200 boolean; false if already claimed, retired or unavailable |
-| POST `/api/sessions/{sessionId}/compactions` | `CompactionSubmission` → 200 `CompactionReceipt`; 409 when admission is unavailable |
+| POST `/api/sessions/{sessionId}/compactions` | `ManualCompactionRequest` → 200 `CompactionReceipt`; 409 when admission is unavailable |
 | GET `/api/sessions/{sessionId}/compactions/operations/{operationId}` | 200 receipt or literal JSON `null` |
 | GET `/api/sessions/{sessionId}/compactions/{compactionId}` | `expectedHistoryRevision` → 200 `CompactionSummary`, or 404 |
 | GET `/api/sessions/{sessionId}/snapshot` | 200 slim `SessionSnapshot` |

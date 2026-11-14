@@ -20,7 +20,7 @@ public sealed record TranscriptEntryDescriptor(
     TranscriptEntryRef Entry, DateTimeOffset? CreatedAt, TranscriptTextFacts? Text, TranscriptToolFacts? Tool,
     TranscriptCompactionFacts? Compaction = null);
 
-public sealed record TranscriptCompactionFacts(CompactionReason Reason, long TokensBefore, long TokensAfter);
+public sealed record TranscriptCompactionFacts(CompactionReason Reason, long EstimatedContextTokensBefore, long EstimatedContextTokensAfter);
 
 public sealed record TranscriptTextFacts(
     MessageContentCursor From, MessageContentCursor AvailableThrough, bool IsClosed, bool FinalOutputCommitted);

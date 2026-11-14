@@ -8,77 +8,112 @@ namespace Urd.Backend.Tests.Compaction;
 
 public sealed class HistoryCompactorTests {
   [Fact]
-  public void BudgetsScaleForSmallWindowsAndEstimateVisibleContent() {
-    Assert.Equal(83_616, ContextBudget.Threshold(100_000));
-    Assert.Equal(400, ContextBudget.Recent(1_000));
-    Assert.Equal(20_000, ContextBudget.Recent(null));
-    Assert.Equal(250, ContextBudget.OutputBudget(1_000));
-    Assert.Equal(8_192, ContextBudget.OutputBudget(null));
-    Assert.True(ContextBudget.Estimate([new ChatMessage(ChatRole.User, new string('x', 400))]) >= 108);
-  }
-
-  [Fact]
   public void ThresholdUsesObservedTokensAndUnknownWindowsSkipAutomaticCompaction() {
-    var context = new CompactionContext([
+    var context = new ModelHistory([
       Entry(1, 0, true, ChatRole.User, "old"),
       Entry(1, 1, false, ChatRole.Assistant, "answer"),
       Entry(2, 0, true, ChatRole.User, "current")
-    ], ObservedTokens: 900);
+    ], UsageBasedContextTokens: 900);
     LlmSelection selection = TestLlmSelection.Default with { ContextWindow = 1_000 };
 
-    CompactionPlan? plan = HistoryCompactor.Prepare(context, selection, [], [], CompactionReason.Threshold);
+    HistoryCompactionPlan? plan = HistoryCompactor.Prepare(context, selection, [], [], CompactionReason.Threshold);
 
-    Assert.Equal(2, plan?.FirstKeptIndex);
+    Assert.Equal(2, plan?.FirstRetainedMessageIndex);
     Assert.Null(HistoryCompactor.Prepare(context, selection with { ContextWindow = null }, [], [], CompactionReason.Threshold));
   }
 
   [Fact]
+  public void BoundarySelectionPrefersWholeTurnsAndOldestAffordableCut() {
+    var history = new ModelHistory([
+      Entry(1, 0, true, ChatRole.User, "old"),
+      Entry(1, 1, false, ChatRole.Assistant, "earlier assistant"),
+      Entry(2, 0, true, ChatRole.User, "middle turn"),
+      Entry(3, 0, true, ChatRole.User, "latest turn")
+    ]);
+
+    HistoryCompactionPlan? plan = HistoryCompactor.Prepare(history, TestLlmSelection.Default, [], [], CompactionReason.Manual);
+
+    Assert.Equal(2, plan?.FirstRetainedMessageIndex);
+  }
+
+  [Fact]
+  public void PreviousBoundaryMustAdvance() {
+    var previousLocation = new HistoryMessageLocation(Guid.NewGuid(), 1, 0, 0);
+    var history = new ModelHistory([
+      Entry(0, 0, true, ChatRole.User, "summarized"),
+      Entry(1, 0, true, ChatRole.User, "at previous boundary"),
+      Entry(2, 0, true, ChatRole.User, "new turn")
+    ], new SavedHistoryCompaction(Guid.NewGuid(), previousLocation, "summary"));
+
+    HistoryCompactionPlan? plan = HistoryCompactor.Prepare(history, TestLlmSelection.Default, [], [], CompactionReason.Manual);
+
+    Assert.Equal(2, plan?.FirstRetainedMessageIndex);
+    Assert.True(plan!.FirstRetainedMessage.Location.IsAfter(previousLocation));
+  }
+
+  [Fact]
+  public void LocationsCompareExecutionRequestAndMessageOrderRegardlessOfIds() {
+    var location = new HistoryMessageLocation(Guid.NewGuid(), 4, 2, 3);
+
+    Assert.True(new HistoryMessageLocation(Guid.NewGuid(), 5, 0, 0).IsAfter(location));
+    Assert.True(new HistoryMessageLocation(Guid.NewGuid(), 4, 3, 0).IsAfter(location));
+    Assert.True(new HistoryMessageLocation(Guid.NewGuid(), 4, 2, 4).IsAfter(location));
+    Assert.False(new HistoryMessageLocation(Guid.NewGuid(), 3, 9, 9).IsAfter(location));
+    Assert.False(new HistoryMessageLocation(Guid.NewGuid(), 4, 1, 9).IsAfter(location));
+    var sameOrderDifferentId = new HistoryMessageLocation(Guid.NewGuid(), 4, 2, 3);
+    Assert.False(sameOrderDifferentId.IsAfter(location));
+    Assert.False(location.IsAfter(sameOrderDifferentId));
+  }
+
+  [Fact]
   public void OverflowForcesProgressWhileKeepingNewestTurn() {
-    var context = new CompactionContext([
+    var context = new ModelHistory([
+      Entry(0, 0, true, ChatRole.User, "older"),
       Entry(1, 0, true, ChatRole.User, new string('o', 2_500)),
       Entry(2, 0, true, ChatRole.User, new string('n', 2_500))
     ]);
     LlmSelection selection = TestLlmSelection.Default with { ContextWindow = 1_000 };
 
     Assert.Null(HistoryCompactor.Prepare(context, selection, [], [], CompactionReason.Manual));
-    CompactionPlan? plan = HistoryCompactor.Prepare(context, selection, [], [], CompactionReason.Overflow);
+    HistoryCompactionPlan? plan = HistoryCompactor.Prepare(context, selection, [], [], CompactionReason.Overflow);
 
-    Assert.Equal(1, plan?.FirstKeptIndex);
-    Assert.Equal(new string('n', 2_500), plan?.FirstKept.Message.Contents.OfType<TextContent>().Single().Text);
+    Assert.Equal(2, plan?.FirstRetainedMessageIndex);
+    Assert.Equal(new string('n', 2_500), plan?.FirstRetainedMessage.Message.Contents.OfType<TextContent>().Single().Text);
   }
 
   [Fact]
   public void OversizedTurnCanCutBeforeAssistantButNeverBeforeToolResult() {
-    var context = new CompactionContext([
+    var context = new ModelHistory([
       Entry(1, 0, true, ChatRole.User, new string('u', 100_000)),
       Entry(1, 1, false, ChatRole.Assistant, "call", new FunctionCallContent("call", "search", new Dictionary<string, object?>())),
       Entry(1, 2, false, ChatRole.Tool, "", new FunctionResultContent("call", new string('r', 100_000))),
       Entry(1, 3, false, ChatRole.Assistant, "answer")
     ]);
 
-    CompactionPlan? plan = HistoryCompactor.Prepare(context, TestLlmSelection.Default, [], [], CompactionReason.Manual);
+    HistoryCompactionPlan? plan = HistoryCompactor.Prepare(context, TestLlmSelection.Default, [], [], CompactionReason.Manual);
 
-    Assert.Equal(3, plan?.FirstKeptIndex);
-    Assert.Equal(ChatRole.Assistant, plan?.FirstKept.Message.Role);
-    Assert.DoesNotContain(plan!.Context.Entries.Skip(plan.FirstKeptIndex).Take(1), entry => entry.Message.Role == ChatRole.Tool);
+    Assert.Equal(3, plan?.FirstRetainedMessageIndex);
+    Assert.Equal(ChatRole.Assistant, plan?.FirstRetainedMessage.Message.Role);
+    Assert.DoesNotContain(plan!.History.Messages.Skip(plan.FirstRetainedMessageIndex).Take(1),
+        entry => entry.Message.Role == ChatRole.Tool);
   }
 
   [Fact]
   public async Task SummaryIsIterativeSafeBoundedAndDoesNotDisposeBorrowedClient() {
-    var previous = new CompactionBoundary(Guid.NewGuid(), new(Guid.NewGuid(), 0, 0, 0), "Files read: src/old.cs");
-    var context = new CompactionContext([
+    var previous = new SavedHistoryCompaction(Guid.NewGuid(), new(Guid.NewGuid(), 0, 0, 0), "Files read: src/old.cs");
+    var context = new ModelHistory([
       Entry(1, 0, true, ChatRole.User, new string('x', 5_000),
           new DataContent(new byte[] { 1, 2, 3 }, "image/png")),
       Entry(1, 1, false, ChatRole.Assistant, "", new FunctionCallContent("call", "search", new Dictionary<string, object?> { ["query"] = "x" })),
       Entry(1, 2, false, ChatRole.Tool, "", new FunctionResultContent("call", new string('r', 3_000))),
       Entry(2, 0, true, ChatRole.User, "current")
     ], previous);
-    CompactionPlan plan = HistoryCompactor.Prepare(context, TestLlmSelection.Default, [], [], CompactionReason.Manual)!;
+    HistoryCompactionPlan plan = HistoryCompactor.Prepare(context, TestLlmSelection.Default, [], [], CompactionReason.Manual)!;
     var client = new SummaryClient("Goal: keep context.\nFiles read: src/old.cs");
 
-    CompactionResult result = await HistoryCompactor.SummarizeAsync(client, TestLlmSelection.Default, plan, default);
+    GeneratedCompactionSummary result = await HistoryCompactor.SummarizeAsync(client, TestLlmSelection.Default, plan, default);
 
-    Assert.True(result.TokensAfter < plan.TokensBefore);
+    Assert.True(result.EstimatedContextTokensAfter < plan.EstimatedContextTokensBefore);
     Assert.Equal(1, client.Requests);
     Assert.Empty(client.Options!.Tools!);
     Assert.Equal(8_192, client.Options.MaxOutputTokens);
@@ -89,22 +124,38 @@ public sealed class HistoryCompactorTests {
   }
 
   [Fact]
-  public async Task CancellationProducesNoCompactionResult() {
-    var context = new CompactionContext([
+  public async Task SummaryRejectsNonreducingOrIncompleteResponses() {
+    var history = new ModelHistory([
       Entry(1, 0, true, ChatRole.User, new string('x', 2_000)),
       Entry(2, 0, true, ChatRole.User, "current")
     ]);
-    CompactionPlan plan = HistoryCompactor.Prepare(context, TestLlmSelection.Default, [], [], CompactionReason.Manual)!;
+    HistoryCompactionPlan plan = HistoryCompactor.Prepare(history, TestLlmSelection.Default, [], [], CompactionReason.Manual)!;
+
+    await Assert.ThrowsAsync<InvalidDataException>(() => HistoryCompactor.SummarizeAsync(
+        new SummaryClient(new string('s', 4_000)), TestLlmSelection.Default, plan, default));
+    await Assert.ThrowsAsync<InvalidDataException>(() => HistoryCompactor.SummarizeAsync(
+        new SummaryClient("summary", finishReason: ChatFinishReason.Length), TestLlmSelection.Default, plan, default));
+    await Assert.ThrowsAsync<InvalidDataException>(() => HistoryCompactor.SummarizeAsync(
+        new SummaryClient("summary", includeToolCall: true), TestLlmSelection.Default, plan, default));
+  }
+
+  [Fact]
+  public async Task CancellationProducesNoCompactionResult() {
+    var context = new ModelHistory([
+      Entry(1, 0, true, ChatRole.User, new string('x', 2_000)),
+      Entry(2, 0, true, ChatRole.User, "current")
+    ]);
+    HistoryCompactionPlan plan = HistoryCompactor.Prepare(context, TestLlmSelection.Default, [], [], CompactionReason.Manual)!;
     var client = new SummaryClient(waitForCancellation: true);
     using var cancellation = new CancellationTokenSource();
-    Task<CompactionResult> pending = HistoryCompactor.SummarizeAsync(client, TestLlmSelection.Default, plan, cancellation.Token);
+    Task<GeneratedCompactionSummary> pending = HistoryCompactor.SummarizeAsync(client, TestLlmSelection.Default, plan, cancellation.Token);
     await cancellation.CancelAsync();
 
     await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending);
     Assert.Equal(1, client.Requests);
   }
 
-  private static ContextEntry Entry(long run, int index, bool startsTurn, ChatRole role, string text,
+  private static HistoryMessage Entry(long run, int index, bool startsTurn, ChatRole role, string text,
       params AIContent[] contents) {
     ChatMessage message;
     if (contents.Length == 0)
@@ -113,10 +164,11 @@ public sealed class HistoryCompactorTests {
       message = new ChatMessage(role, contents);
     else
       message = new ChatMessage(role, [new TextContent(text), .. contents]);
-    return new ContextEntry(new(Guid.NewGuid(), run, 0, index), startsTurn, message);
+    return new HistoryMessage(new(Guid.NewGuid(), run, 0, index), startsTurn, message);
   }
 
-  private sealed class SummaryClient(string? summary = null, bool waitForCancellation = false) : IChatClient {
+  private sealed class SummaryClient(string? summary = null, bool waitForCancellation = false,
+      ChatFinishReason? finishReason = null, bool includeToolCall = false) : IChatClient {
     internal int Requests { get; private set; }
     internal int DisposeCalls { get; private set; }
     internal string Prompt { get; private set; } = "";
@@ -131,8 +183,12 @@ public sealed class HistoryCompactorTests {
       Prompt = string.Join("\n", messages.SelectMany(message => message.Contents.OfType<TextContent>()
           .Select(content => content.Text)));
       Options = options;
-      return waitForCancellation ? WaitForCancellation(cancellationToken) : Task.FromResult(new ChatResponse(
-          new ChatMessage(ChatRole.Assistant, summary!)) { FinishReason = ChatFinishReason.Stop });
+      if (waitForCancellation) return WaitForCancellation(cancellationToken);
+      ChatMessage response = includeToolCall
+          ? new ChatMessage(ChatRole.Assistant, [new TextContent(summary!),
+              new FunctionCallContent("summary-call", "lookup", new Dictionary<string, object?>())])
+          : new ChatMessage(ChatRole.Assistant, summary!);
+      return Task.FromResult(new ChatResponse(response) { FinishReason = finishReason ?? ChatFinishReason.Stop });
     }
 
     public object? GetService(Type serviceType, object? serviceKey = null) => null;

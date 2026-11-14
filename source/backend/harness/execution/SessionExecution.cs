@@ -25,11 +25,11 @@ internal sealed class SessionExecution : IDisposable {
   private readonly PendingToolCalls pending;
   private Task? stopCallbacks;
   private int backgroundCalls;
-  private readonly CompactionSubmission? compaction;
+  private readonly ManualCompactionRequest? compaction;
 
   internal SessionExecution(Guid executionId, SessionBase session, Func<ProviderConnection, IChatClient> createChatClient,
       LlmSelection selection, StartingContextManager startingContextManager,
-      IReadOnlyList<AgentTool>? tools = null, PendingToolCalls? pending = null, CompactionSubmission? compaction = null) {
+      IReadOnlyList<AgentTool>? tools = null, PendingToolCalls? pending = null, ManualCompactionRequest? compaction = null) {
     ExecutionId = executionId;
     this.session = session;
     this.createChatClient = createChatClient;
@@ -112,20 +112,20 @@ internal sealed class SessionExecution : IDisposable {
 
   // Summary work runs outside the session gate. The commit rechecks Stop, revision and prior boundary.
   private async Task<LlmRequest?> CompactContextAsync(Guid? requestId, CompactionReason reason, string? focus = null,
-      CompactionContext? prepared = null) {
+      ModelHistory? prepared = null) {
     stop.Token.ThrowIfCancellationRequested();
     if (reason == CompactionReason.Threshold && selection.ContextWindow is null)
       return null;
-    CompactionContext context = prepared ?? await session.ReadCompactionContextAsync(ExecutionId, requestId);
+    ModelHistory context = prepared ?? await session.ReadModelHistoryAsync(ExecutionId, requestId);
     await EnsureStartingContextAsync(context.ReadMessages());
-    CompactionPlan? plan = HistoryCompactor.Prepare(context, selection,
+    HistoryCompactionPlan? plan = HistoryCompactor.Prepare(context, selection,
         startingContext!.Instructions, startingContext.Tools, reason, focus);
     if (plan is null)
       return null;
     await session.SetCompactingAsync(ExecutionId, true);
     try {
       chatClient ??= createChatClient(selection.Connection);
-      CompactionResult result;
+      GeneratedCompactionSummary result;
       try {
         result = await HistoryCompactor.SummarizeAsync(chatClient, selection, plan, stop.Token,
             new UsageContext(session.Id, ExecutionId, "compaction"));
@@ -143,7 +143,7 @@ internal sealed class SessionExecution : IDisposable {
       }
       if (!saved)
         throw new OperationCanceledException("The compaction boundary was rejected.");
-      CompactionContext reduced = await session.ReadCompactionContextAsync(ExecutionId, requestId);
+      ModelHistory reduced = await session.ReadModelHistoryAsync(ExecutionId, requestId);
       return new(requestId ?? Guid.Empty, reduced.ReadMessages(), reduced);
     } finally {
       await session.SetCompactingAsync(ExecutionId, IsCompactionOnly);

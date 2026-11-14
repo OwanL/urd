@@ -37,6 +37,18 @@ distinct from tool-result pruning and catalog pruning (ARCHITECTURE.md, "Context
 ## Execution and storage
 
 `source/backend/harness/compaction/` owns budgeting, safe-cut planning and request-only summarization.
+`ModelHistory` contains model-visible messages and the previous saved summary, not transcript rows.
+`HistoryMessageLocation` orders those messages by execution ordinal, request index within the execution,
+and message index within the request; the request ID locates stored content but does not sort it.
+`HistoryCompactionPlan` identifies the prefix to summarize and the first message to retain.
+`CompactionBoundarySelector` prefers whole turns, then assistant continuations, with an over-budget
+fallback only for provider overflow. `ContextTokenBudget` names the estimation allowances and limits.
+Edit summarization instructions in `CompactionPrompt`; its renderer keeps native payloads/reasoning
+out of the prompt and bounds tool-result text. `ManualCompactionRequest` starts an idle-only execution;
+a `CompactionReceipt` acknowledges that execution, not necessarily a saved summary.
+Summary and transcript metadata expose `estimatedContextTokensBefore/After`: estimated total context
+usage including instructions and tools, not the model's window capacity. Stored SQL columns are unchanged.
+
 `session_compactions` stores only successful summaries and their first retained request/message
 position, scoped to the session's history revision. A metadata-only transcript marker commits
 with the summary; expanding it reads the bounded summary separately. Original messages, tools,

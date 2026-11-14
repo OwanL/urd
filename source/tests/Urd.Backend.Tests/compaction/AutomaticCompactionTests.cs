@@ -66,12 +66,12 @@ public sealed class AutomaticCompactionTests {
         message.Contents.OfType<FunctionResultContent>().Any(result => Equals(result.Result, "safe tool result")));
 
     long revision = (await session.ReadSnapshotAsync()).HistoryRevision;
-    CompactionContext context = store.Compactions.ReadContext(session.Id, revision);
-    Assert.Equal(CompactionReason.Threshold, (await session.ReadCompactionAsync(context.Previous!.Id, revision))?.Reason);
-    Assert.DoesNotContain(context.Entries, entry => entry.Message.Contents.OfType<TextContent>()
+    ModelHistory context = store.Compactions.ReadContext(session.Id, revision);
+    Assert.Equal(CompactionReason.Threshold, (await session.ReadCompactionAsync(context.PreviousCompaction!.Id, revision))?.Reason);
+    Assert.DoesNotContain(context.Messages, entry => entry.Message.Contents.OfType<TextContent>()
         .Any(content => content.Text.Contains(new string('o', 128))));
-    Assert.Contains(context.Entries, entry => entry.Message.Role == ChatRole.Tool);
-    Assert.Contains(context.Entries, entry => entry.StartsTurn && entry.Message.Contents.OfType<TextContent>()
+    Assert.Contains(context.Messages, entry => entry.Message.Role == ChatRole.Tool);
+    Assert.Contains(context.Messages, entry => entry.StartsUserTurn && entry.Message.Contents.OfType<TextContent>()
         .Any(content => content.Text == "tool turn"));
     Assert.Single((await session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, revision))).Entries,
         entry => entry.Entry.Kind == TranscriptEntryKind.Compaction);
@@ -102,8 +102,8 @@ public sealed class AutomaticCompactionTests {
       release.TrySetResult();
       await session.WaitForSettlementAsync(initial.ExecutionId!.Value).WaitAsync(TestTimeout);
       var context = store.Compactions.ReadContext(session.Id, 0);
-      Assert.Equal(1, context.Previous!.FirstKept.RequestIndex);
-      Assert.Equal(1, context.Previous.FirstKept.MessageIndex); // The first steering input was summarized.
+      Assert.Equal(1, context.PreviousCompaction!.FirstRetainedMessageLocation.RequestIndexInExecution);
+      Assert.Equal(1, context.PreviousCompaction.FirstRetainedMessageLocation.MessageIndexInRequest); // The first steering input was summarized.
       var history = await session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, 0));
       var target = Assert.Single(history.Entries, entry => entry.Entry.EntryId == removed.SubmissionId).Text!.From.Message;
       Assert.Contains(history.Entries.TakeWhile(entry => entry.Entry.EntryId != removed.SubmissionId),
@@ -111,7 +111,7 @@ public sealed class AutomaticCompactionTests {
 
       var edited = await session.EditUserMessageAsync(new(Guid.NewGuid(), target, "new steering", TestLlmSelection.Default));
       await session.WaitForSettlementAsync(edited.ExecutionId).WaitAsync(TestTimeout);
-      Assert.Null(store.Compactions.ReadContext(session.Id, edited.HistoryRevision).Previous);
+      Assert.Null(store.Compactions.ReadContext(session.Id, edited.HistoryRevision).PreviousCompaction);
       Assert.DoesNotContain(client.Requests[^1], message => message.Text?.Contains(Summary, StringComparison.Ordinal) == true);
       Assert.Equal(new[] { "start", "new steering" }, client.Requests[^1]
           .Where(message => message.Role == ChatRole.User).Select(message => message.Text));
@@ -150,7 +150,7 @@ public sealed class AutomaticCompactionTests {
     Assert.Equal(1, toolRuns);
     Assert.Single(StoredTools.Read(database));
     long revision = (await session.ReadSnapshotAsync()).HistoryRevision;
-    Guid compactionId = store.Compactions.ReadContext(session.Id, revision).Previous!.Id;
+    Guid compactionId = store.Compactions.ReadContext(session.Id, revision).PreviousCompaction!.Id;
     Assert.Equal(CompactionReason.Overflow, (await session.ReadCompactionAsync(compactionId, revision))?.Reason);
     Assert.Equal(2, StoredExecutions.ReadRequests(database).Count);
     Assert.Contains(client.Requests[2], message => message.Contents.OfType<TextContent>()

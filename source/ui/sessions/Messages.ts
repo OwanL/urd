@@ -41,8 +41,8 @@ export interface TranscriptEntryDescriptor {
 
 export interface TranscriptCompactionFacts {
   readonly reason: CompactionReason;
-  readonly tokensBefore: number;
-  readonly tokensAfter: number;
+  readonly estimatedContextTokensBefore: number;
+  readonly estimatedContextTokensAfter: number;
 }
 
 export interface TranscriptTextFacts {

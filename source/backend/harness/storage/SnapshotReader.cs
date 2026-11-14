@@ -181,7 +181,7 @@ internal sealed class SnapshotReader {
     if (usage?.InputTokenCount is not >= 0 || usage.OutputTokenCount is not >= 0)
       return null;
 
-    return new(ContextBudget.Add(usage.InputTokenCount.Value, usage.OutputTokenCount.Value), IsEstimate: false);
+    return new(ContextTokenBudget.AddSaturating(usage.InputTokenCount.Value, usage.OutputTokenCount.Value), IsEstimate: false);
   }
 
   private SessionWorkingTime ReadWorkingTime(SqliteTransaction transaction, Guid sessionId, DateTimeOffset? startedAt) {

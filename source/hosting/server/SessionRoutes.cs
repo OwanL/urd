@@ -203,7 +203,7 @@ internal static class SessionRoutes {
   }
 
   private static async Task<IResult> CompactAsync(HttpContext http, SessionManager sessions, Guid sessionId) {
-    CompactionSubmission? submission = await http.Request.ReadFromJsonAsync<CompactionSubmission>(http.RequestAborted);
+    ManualCompactionRequest? submission = await http.Request.ReadFromJsonAsync<ManualCompactionRequest>(http.RequestAborted);
     if (submission is null)
       return Results.BadRequest();
     return await WithSessionAsync(http, sessions, sessionId, async session => {

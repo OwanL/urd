@@ -17,9 +17,9 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
       Guid executionId, long historyRevision, Guid requestId) =>
       ReadContext(transaction, sessionId, historyRevision, executionId, requestId).ReadMessages().ToList().AsReadOnly();
 
-  internal CompactionContext ReadContext(SqliteTransaction transaction, Guid sessionId,
+  internal ModelHistory ReadContext(SqliteTransaction transaction, Guid sessionId,
       long historyRevision, Guid? executionId = null, Guid? requestId = null) {
-    CompactionBoundary? boundary = CompactionStorage.ReadLatest(database, transaction, sessionId, historyRevision);
+    SavedHistoryCompaction? boundary = CompactionStorage.ReadLatest(database, transaction, sessionId, historyRevision);
     using SqliteCommand read = database.Command(transaction, """
       WITH requests AS (
           SELECT r.ordinal AS run_ordinal, q.request_index, q.request_id, q.usage_json, q.compaction_id,
@@ -78,10 +78,11 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
       """,
         ("$session", sessionId), ("$run", executionId), ("$revision", historyRevision), ("$request", requestId),
         ("$continuation", (int)ExecutionRunKind.Continuation),
-        ("$cutRun", boundary?.FirstKept.RunOrdinal ?? -1), ("$cutRequest", boundary?.FirstKept.RequestIndex ?? 0));
+        ("$cutRun", boundary?.FirstRetainedMessageLocation.ExecutionOrdinal ?? -1),
+        ("$cutRequest", boundary?.FirstRetainedMessageLocation.RequestIndexInExecution ?? 0));
     using SqliteDataReader reader = read.ExecuteReader();
     var messages = new List<ChatMessage>();
-    var entries = new List<ContextEntry>();
+    var entries = new List<HistoryMessage>();
     var humanMessages = new HashSet<ChatMessage>();
     string? previousRequest = null;
     long runOrdinal = 0;
@@ -146,7 +147,8 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
 
     FinishGroup();
     if (observedTokens is { } known)
-      observedTokens = ContextBudget.Add(known, ContextBudget.Estimate(entries.Skip(observedThrough).Select(entry => entry.Message)));
+      observedTokens = ContextTokenBudget.AddSaturating(known,
+          ContextTokenBudget.EstimateMessages(entries.Skip(observedThrough).Select(entry => entry.Message)));
     return new(entries.AsReadOnly(), boundary, observedTokens);
 
     void FinishGroup() {
@@ -154,7 +156,8 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
         return;
       AddResponse(messages, text, calls, results, providerMessage, omitAssistant);
       Guid id = Guid.Parse(previousRequest);
-      int first = id == boundary?.FirstKept.RequestId ? boundary.FirstKept.MessageIndex : 0;
+      int first = id == boundary?.FirstRetainedMessageLocation.RequestId
+          ? boundary.FirstRetainedMessageLocation.MessageIndexInRequest : 0;
       for (int index = first; index < messages.Count; index++)
         entries.Add(new(new(id, runOrdinal, requestIndex, index), humanMessages.Contains(messages[index]), messages[index]));
       if (usageJson is null || usageBoundary != boundary?.Id)
@@ -162,10 +165,10 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
       UsageDetails? usage = JsonSerializer.Deserialize<UsageDetails>(usageJson);
       if (usage?.InputTokenCount is not >= 0 || (!omitAssistant && usage.OutputTokenCount is not >= 0))
         return;
-      observedTokens = ContextBudget.Add(usage.InputTokenCount.Value,
+      observedTokens = ContextTokenBudget.AddSaturating(usage.InputTokenCount.Value,
           omitAssistant ? 0 : usage.OutputTokenCount!.Value);
-      observedTokens = ContextBudget.Add(observedTokens.Value,
-          ContextBudget.Estimate(messages.Where(message => message.Role == ChatRole.Tool)));
+      observedTokens = ContextTokenBudget.AddSaturating(observedTokens.Value,
+          ContextTokenBudget.EstimateMessages(messages.Where(message => message.Role == ChatRole.Tool)));
       observedThrough = entries.Count;
     }
   }

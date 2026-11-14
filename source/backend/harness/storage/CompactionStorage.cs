@@ -8,11 +8,11 @@ namespace Urd.Core.Storage;
 
 // Successful summaries and their transcript markers commit together; failures leave no boundary.
 internal sealed class CompactionStorage(Database database, ToolResultCodec toolResults) {
-  internal CompactionContext ReadContext(Guid sessionId, long revision, Guid? runId = null, Guid? requestId = null) =>
+  internal ModelHistory ReadContext(Guid sessionId, long revision, Guid? runId = null, Guid? requestId = null) =>
       database.Read(transaction => new LlmContextReader(database, toolResults)
           .ReadContext(transaction, sessionId, revision, runId, requestId));
 
-  internal static CompactionBoundary? ReadLatest(Database database, SqliteTransaction transaction, Guid sessionId, long revision) {
+  internal static SavedHistoryCompaction? ReadLatest(Database database, SqliteTransaction transaction, Guid sessionId, long revision) {
     using SqliteCommand read = database.Command(transaction, """
       SELECT compaction_id, first_kept_request_id, first_kept_run_ordinal, first_kept_request_index,
           first_kept_message_index, summary
@@ -22,8 +22,8 @@ internal sealed class CompactionStorage(Database database, ToolResultCodec toolR
     using SqliteDataReader reader = read.ExecuteReader();
     if (!reader.Read())
       return null;
-    var firstKept = new ContextPosition(reader.GetGuid(1), reader.GetInt64(2), reader.GetInt32(3), reader.GetInt32(4));
-    return new(reader.GetGuid(0), firstKept, reader.GetString(5));
+    var firstRetainedMessage = new HistoryMessageLocation(reader.GetGuid(1), reader.GetInt64(2), reader.GetInt32(3), reader.GetInt32(4));
+    return new(reader.GetGuid(0), firstRetainedMessage, reader.GetString(5));
   }
 
   internal CompactionSummary? Read(Guid sessionId, long revision, Guid id) => database.Read(transaction => {
@@ -42,14 +42,14 @@ internal sealed class CompactionStorage(Database database, ToolResultCodec toolR
   });
 
   // False means the boundary moved or the run can no longer record compaction.
-  internal bool Save(Guid sessionId, Guid runId, long revision, CompactionPlan plan, CompactionResult result) {
-    if (string.IsNullOrWhiteSpace(result.Summary) || result.Summary.Length > 32_768
-        || result.TokensAfter < 0 || result.TokensAfter >= plan.TokensBefore)
+  internal bool Save(Guid sessionId, Guid runId, long revision, HistoryCompactionPlan plan, GeneratedCompactionSummary result) {
+    if (string.IsNullOrWhiteSpace(result.Summary) || result.Summary.Length > HistoryCompactor.MaxSummaryCharacters
+        || result.EstimatedContextTokensAfter < 0 || result.EstimatedContextTokensAfter >= plan.EstimatedContextTokensBefore)
       throw new ArgumentException("Compaction must provide a bounded summary that reduces context.", nameof(result));
     return database.Write(transaction => {
-      if (ReadLatest(database, transaction, sessionId, revision)?.Id != plan.Context.Previous?.Id)
+      if (ReadLatest(database, transaction, sessionId, revision)?.Id != plan.History.PreviousCompaction?.Id)
         return false;
-      ContextPosition cut = plan.FirstKept.Position;
+      HistoryMessageLocation cut = plan.FirstRetainedMessage.Location;
       using SqliteCommand allowed = database.Command(transaction, """
         SELECT EXISTS (SELECT 1 FROM execution_runs r JOIN sessions s ON s.session_id = r.session_id
             WHERE r.run_id = $run AND r.session_id = $session AND r.history_revision = $revision
@@ -58,7 +58,7 @@ internal sealed class CompactionStorage(Database database, ToolResultCodec toolR
                 WHERE q.request_id = $keep AND r.session_id = $session AND r.history_revision = $revision
                     AND r.ordinal = $ordinal AND q.request_index = $index);
         """, ("$session", sessionId), ("$run", runId), ("$revision", revision),
-          ("$keep", cut.RequestId), ("$ordinal", cut.RunOrdinal), ("$index", cut.RequestIndex));
+          ("$keep", cut.RequestId), ("$ordinal", cut.ExecutionOrdinal), ("$index", cut.RequestIndexInExecution));
       if ((long)allowed.ExecuteScalar()! == 0)
         return false;
       Guid id = Guid.NewGuid();
@@ -71,16 +71,16 @@ internal sealed class CompactionStorage(Database database, ToolResultCodec toolR
         INSERT INTO execution_messages (session_id, history_revision, run_id, role, message_id, created_at)
         VALUES ($session, $revision, $run, 4, $id, $created);
         """, ("$id", id), ("$session", sessionId), ("$revision", revision), ("$run", runId),
-          ("$keep", cut.RequestId), ("$message", cut.MessageIndex), ("$ordinal", cut.RunOrdinal),
-          ("$index", cut.RequestIndex), ("$reason", (int)plan.Reason), ("$before", plan.TokensBefore),
-          ("$after", result.TokensAfter), ("$created", StorageText.UtcTimestamp()), ("$summary", result.Summary));
+          ("$keep", cut.RequestId), ("$message", cut.MessageIndexInRequest), ("$ordinal", cut.ExecutionOrdinal),
+          ("$index", cut.RequestIndexInExecution), ("$reason", (int)plan.Reason), ("$before", plan.EstimatedContextTokensBefore),
+          ("$after", result.EstimatedContextTokensAfter), ("$created", StorageText.UtcTimestamp()), ("$summary", result.Summary));
       insert.ExecuteNonQuery();
       return true;
     });
   }
 
   // Null means busy/fenced. A retained operation is never started a second time.
-  internal (CompactionReceipt Receipt, bool New)? Admit(Guid sessionId, CompactionSubmission submission, bool accepting) {
+  internal (CompactionReceipt Receipt, bool New)? Admit(Guid sessionId, ManualCompactionRequest submission, bool accepting) {
     return database.Write<(CompactionReceipt, bool)?>(transaction => {
       using (SqliteCommand retained = database.Command(transaction, """
         SELECT session_id, history_revision, kind, llm_selection_json, compaction_focus, outcome, error

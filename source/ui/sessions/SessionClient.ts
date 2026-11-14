@@ -14,7 +14,11 @@ import type {
   TranscriptPromptPage,
   TranscriptPromptPageQuery,
 } from "./Messages.ts";
-import type { CompactionReceipt, CompactionSubmission, CompactionSummary } from "./Compaction.ts";
+import type {
+  CompactionReceipt,
+  ManualCompactionRequest,
+  CompactionSummary,
+} from "./Compaction.ts";
 import type { ContinuationReceipt, ContinuationSubmission } from "./Continuation.ts";
 import type { MessageEditReceipt, MessageEditSubmission } from "./MessageEdit.ts";
 import type { SessionIdPage } from "./SessionIdPage.ts";
@@ -307,7 +311,10 @@ export class SessionClient {
     return requestJson(this.url(path), "POST", {});
   }
 
-  startCompaction(sessionId: string, submission: CompactionSubmission): Promise<CompactionReceipt> {
+  startCompaction(
+    sessionId: string,
+    submission: ManualCompactionRequest,
+  ): Promise<CompactionReceipt> {
     return requestJson(
       this.url(`/${encodeURIComponent(sessionId)}/compactions`),
       "POST",

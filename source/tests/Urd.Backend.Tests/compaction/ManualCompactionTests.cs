@@ -29,7 +29,7 @@ public sealed class ManualCompactionTests {
       await SubmitTurnAsync(session, "ancient-turn: " + new string('x', 100_000));
       await SubmitTurnAsync(session, "latest-turn: keep this decision");
       revision = (await session.ReadSnapshotAsync()).HistoryRevision;
-      var submission = new CompactionSubmission(Guid.NewGuid(), revision, Selection);
+      var submission = new ManualCompactionRequest(Guid.NewGuid(), revision, Selection);
 
       CompactionReceipt accepted = Assert.IsType<CompactionReceipt>(await session.CompactAsync(submission));
       CompactionReceipt retry = Assert.IsType<CompactionReceipt>(await session.CompactAsync(submission));
@@ -39,7 +39,7 @@ public sealed class ManualCompactionTests {
       CompactionReceipt settled = Assert.IsType<CompactionReceipt>(await session.ReadCompactionReceiptAsync(submission.OperationId));
       Assert.Equal(accepted.ExecutionId, settled.ExecutionId);
       Assert.Equal(ExecutionOutcome.Completed, settled.Outcome);
-      CompactionBoundary boundary = Assert.IsType<CompactionBoundary>(store.Compactions.ReadContext(session.Id, revision).Previous);
+      SavedHistoryCompaction boundary = Assert.IsType<SavedHistoryCompaction>(store.Compactions.ReadContext(session.Id, revision).PreviousCompaction);
       saved = Assert.IsType<CompactionSummary>(await session.ReadCompactionAsync(boundary.Id, revision));
       Assert.Equal(Summary, saved.Summary);
       Assert.Equal(0, Assert.Single(client.SummaryToolCounts));
@@ -66,14 +66,14 @@ public sealed class ManualCompactionTests {
       MessageRef latest = history.Entries.Last(entry => entry.Entry.Kind == TranscriptEntryKind.User).Text!.From.Message;
       var edited = await session.EditUserMessageAsync(new(Guid.NewGuid(), latest, "revised recent turn", TestLlmSelection.Default));
       await session.WaitForSettlementAsync(edited.ExecutionId).WaitAsync(TestTimeout);
-      Assert.Equal(saved.Id, reopened.Compactions.ReadContext(sessionId, edited.HistoryRevision).Previous!.Id);
+      Assert.Equal(saved.Id, reopened.Compactions.ReadContext(sessionId, edited.HistoryRevision).PreviousCompaction!.Id);
       Assert.Equal(saved, await session.ReadCompactionAsync(saved.Id, edited.HistoryRevision));
 
       history = await session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, edited.HistoryRevision));
       MessageRef ancient = history.Entries.First(entry => entry.Entry.Kind == TranscriptEntryKind.User).Text!.From.Message;
       var reset = await session.EditUserMessageAsync(new(Guid.NewGuid(), ancient, "fresh beginning", TestLlmSelection.Default));
       await session.WaitForSettlementAsync(reset.ExecutionId).WaitAsync(TestTimeout);
-      Assert.Null(reopened.Compactions.ReadContext(sessionId, reset.HistoryRevision).Previous);
+      Assert.Null(reopened.Compactions.ReadContext(sessionId, reset.HistoryRevision).PreviousCompaction);
       Assert.Null(await session.ReadCompactionAsync(saved.Id, reset.HistoryRevision));
       Assert.DoesNotContain(client.Requests[^1], message => message.Text?.Contains(Summary, StringComparison.Ordinal) == true);
     }
@@ -108,7 +108,7 @@ public sealed class ManualCompactionTests {
       await session.RequestStopAsync(accepted.ExecutionId).WaitAsync(TestTimeout);
       await cleanupEntered.Task.WaitAsync(TestTimeout);
       Assert.False(settlement.IsCompleted);
-      Assert.Null(store.Compactions.ReadContext(session.Id, revision).Previous);
+      Assert.Null(store.Compactions.ReadContext(session.Id, revision).PreviousCompaction);
       Assert.DoesNotContain((await session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, revision))).Entries,
           entry => entry.Entry.Kind == TranscriptEntryKind.Compaction);
     } finally {
@@ -117,7 +117,7 @@ public sealed class ManualCompactionTests {
     }
 
     Assert.Equal(ExecutionOutcome.Cancelled, (await settlement).Outcome);
-    Assert.Null(store.Compactions.ReadContext(session.Id, revision).Previous);
+    Assert.Null(store.Compactions.ReadContext(session.Id, revision).PreviousCompaction);
   }
 
   [Fact]
@@ -137,23 +137,23 @@ public sealed class ManualCompactionTests {
         (await session.WaitForSettlementAsync(first.ExecutionId).WaitAsync(TestTimeout)).Outcome);
     await SubmitTurnAsync(session, "new-large-turn: " + new string('y', 100_000));
     await SubmitTurnAsync(session, "second-latest-turn");
-    CompactionContext before = store.Compactions.ReadContext(session.Id, revision);
+    ModelHistory before = store.Compactions.ReadContext(session.Id, revision);
     CompactionReceipt failed = Assert.IsType<CompactionReceipt>(await session.CompactAsync(
         new(Guid.NewGuid(), revision, Selection)));
     Assert.Equal(ExecutionOutcome.Failed,
         (await session.WaitForSettlementAsync(failed.ExecutionId).WaitAsync(TestTimeout)).Outcome);
 
-    CompactionContext after = store.Compactions.ReadContext(session.Id, revision);
-    Assert.Equal(before.Previous!.Id, after.Previous!.Id);
-    Assert.Equal(before.Entries.Select(Position), after.Entries.Select(Position));
+    ModelHistory after = store.Compactions.ReadContext(session.Id, revision);
+    Assert.Equal(before.PreviousCompaction!.Id, after.PreviousCompaction!.Id);
+    Assert.Equal(before.Messages.Select(Position), after.Messages.Select(Position));
     Assert.Single((await session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, revision))).Entries,
         entry => entry.Entry.Kind == TranscriptEntryKind.Compaction);
     Assert.Equal(0, client.SummaryToolCounts[0]);
     Assert.Equal(0, client.SummaryToolCounts[1]);
   }
 
-  private static (Guid Request, int Index, string? Text) Position(ContextEntry entry) =>
-      (entry.Position.RequestId, entry.Position.MessageIndex, entry.Message.Text);
+  private static (Guid Request, int Index, string? Text) Position(HistoryMessage entry) =>
+      (entry.Location.RequestId, entry.Location.MessageIndexInRequest, entry.Message.Text);
 
   private static PrimarySession CreateSession(UrdStore store, CompactionChatClient client) =>
       new(store.Sessions.CreatePrimary(Guid.NewGuid()), store, _ => client);

@@ -63,7 +63,7 @@ public abstract class SessionBase {
   // Restores the delivered starting view; opening a session alone never composes it.
   internal StartingContext? ReadStartingContext() => store.StartingContexts.Read(Id);
 
-  public async Task<CompactionReceipt?> CompactAsync(CompactionSubmission submission) {
+  public async Task<CompactionReceipt?> CompactAsync(ManualCompactionRequest submission) {
     ArgumentNullException.ThrowIfNull(submission);
     if (submission.OperationId == Guid.Empty || submission.ExpectedHistoryRevision < 0
         || submission.LlmSelection is null || submission.Focus?.Length > 8192)
@@ -97,14 +97,14 @@ public abstract class SessionBase {
     return store.Compactions.Read(Id, revision, id);
   }
 
-  internal async Task<CompactionContext> ReadCompactionContextAsync(Guid executionId, Guid? requestId) {
+  internal async Task<ModelHistory> ReadModelHistoryAsync(Guid executionId, Guid? requestId) {
     using var held = await gate.AcquireAsync();
     if (!CanRecordExecution(executionId))
       throw new OperationCanceledException("The execution no longer accepts compaction.");
     return store.Compactions.ReadContext(Id, HistoryRevision, requestId is null ? null : executionId, requestId);
   }
 
-  internal async Task<bool> SaveCompactionAsync(Guid executionId, CompactionPlan plan, CompactionResult result) {
+  internal async Task<bool> SaveCompactionAsync(Guid executionId, HistoryCompactionPlan plan, GeneratedCompactionSummary result) {
     using var held = await gate.AcquireAsync();
     if (!CanRecordExecution(executionId))
       return false;
@@ -432,7 +432,7 @@ public abstract class SessionBase {
   }
 
   // Caller holds the lock. The driver starts only after admission releases it.
-  private void StartExecution(Guid executionId, LlmSelection selection, Task lockReleased, CompactionSubmission? compaction = null) {
+  private void StartExecution(Guid executionId, LlmSelection selection, Task lockReleased, ManualCompactionRequest? compaction = null) {
     var work = new SessionExecution(executionId, this, createChatClient, selection,
         startingContextManager, tools.For(selection.Family), pending, compaction);
     execution = new SessionExecutionDriver(this, gate, work);

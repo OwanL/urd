@@ -99,24 +99,24 @@ internal sealed class ContinuationStorage(Database database, ToolResultCodec too
   }
 
   private Guid? ReadFinalFailedAssistant(SqliteTransaction transaction, Guid sessionId, long historyRevision) {
-    CompactionContext context = new LlmContextReader(database, toolResults)
+    ModelHistory context = new LlmContextReader(database, toolResults)
         .ReadContext(transaction, sessionId, historyRevision);
-    if (context.Entries.Count == 0)
+    if (context.Messages.Count == 0)
       return null;
-    ContextEntry tail = context.Entries[^1];
+    HistoryMessage tail = context.Messages[^1];
     if (tail.Message.Role != ChatRole.Assistant)
       return null;
 
     using SqliteCommand request = database.Command(transaction, """
       SELECT q.outcome FROM execution_requests q JOIN execution_runs r ON r.run_id = q.run_id
       WHERE q.request_id = $request AND r.session_id = $session AND r.history_revision = $revision;
-      """, ("$request", tail.Position.RequestId), ("$session", sessionId), ("$revision", historyRevision));
+      """, ("$request", tail.Location.RequestId), ("$session", sessionId), ("$revision", historyRevision));
     using SqliteDataReader reader = request.ExecuteReader();
     if (!reader.Read())
       return null;
     return reader.IsDBNull(0) || reader.GetInt32(0) != (int)ExecutionOutcome.Completed
         || tail.Message.Contents.Any(content => content is FunctionCallContent)
-        ? tail.Position.RequestId : null;
+        ? tail.Location.RequestId : null;
   }
 
   private static void Validate(Guid sessionId, ContinuationSubmission submission) {

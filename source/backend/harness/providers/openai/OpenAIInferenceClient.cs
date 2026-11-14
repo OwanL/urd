@@ -13,7 +13,7 @@ using ChatMessage = Microsoft.Extensions.AI.ChatMessage;
 namespace Urd.Core.Providers;
 
 // One streaming exchange. The manager owns credentials, cancellation and the borrowed transport.
-internal sealed class ProviderModelClient(HttpClient httpClient) {
+internal sealed class OpenAIInferenceClient(HttpClient httpClient) {
   internal async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(ProviderState state,
       IEnumerable<ChatMessage> messages, ChatOptions options,
       [EnumeratorCancellation] CancellationToken cancellationToken) {

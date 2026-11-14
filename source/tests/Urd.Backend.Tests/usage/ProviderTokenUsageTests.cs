@@ -56,6 +56,27 @@ public sealed class ProviderTokenUsageTests {
   }
 
   [Fact]
+  public void DiagnosticProjectionPreservesUnknownAndExplicitZeroCounts() {
+    ProviderUsage response = Assert.IsType<ProviderUsage>(ProviderTokenUsage.ToProviderUsage(
+        ProviderTokenUsage.Response(Read<ResponseTokenUsage>("""
+        {"input_tokens":0,"output_tokens":4,"total_tokens":4,"input_tokens_details":{"cached_tokens":0}}
+        """))));
+    ProviderUsage chat = Assert.IsType<ProviderUsage>(ProviderTokenUsage.ToProviderUsage(
+        ProviderTokenUsage.Chat(Read<ChatTokenUsage>("""
+        {"prompt_tokens":5,"completion_tokens":0}
+        """))));
+
+    Assert.Equal<long?>(0, response.InputTokens);
+    Assert.Equal<long?>(4, response.OutputTokens);
+    Assert.Equal<long?>(4, response.TotalTokens);
+    Assert.Equal<long?>(0, response.CachedInputTokens);
+    Assert.Equal<long?>(5, chat.InputTokens);
+    Assert.Equal<long?>(0, chat.OutputTokens);
+    Assert.Null(chat.TotalTokens);
+    Assert.Null(chat.CachedInputTokens);
+  }
+
+  [Fact]
   public void MissingCountsStayUnknownAndAbsentCacheWritesAreZero() {
     UsageDetails usage = Assert.IsType<UsageDetails>(ProviderTokenUsage.Response(Read<ResponseTokenUsage>("""
         {"input_tokens_details":{"audio_tokens":0},"output_tokens_details":{"reasoning_tokens":7}}
@@ -99,7 +120,7 @@ public sealed class ProviderTokenUsageTests {
     List<ChatResponseUpdate> observed = [];
 
     await Assert.ThrowsAsync<ProviderOperationException>(async () => {
-      await foreach (ChatResponseUpdate update in new ProviderModelClient(http).GetStreamingResponseAsync(
+      await foreach (ChatResponseUpdate update in new OpenAIInferenceClient(http).GetStreamingResponseAsync(
           state, [new ChatMessage(ChatRole.User, "hello")], options, default))
         observed.Add(update);
     });

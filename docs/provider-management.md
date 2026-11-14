@@ -7,6 +7,21 @@ request client powers chat execution and history compaction; the provider settin
 into the browser workspace. Pruning and title generation remain future request-client consumers.
 This adds no discovery tools, other subscription providers or native Ollama/Anthropic adapters.
 
+## Source responsibilities
+
+Under `source/backend/harness/providers/`:
+- The root holds connection/model contracts and `ProviderManager`, which owns admission,
+  credential fencing and shutdown. Model selections remain frozen execution inputs.
+- `authentication/` holds sign-in attempt ownership and ChatGPT OAuth validation/exchanges.
+- `openai/` holds SDK-specific adapters and native response preservation. `OpenAIModelProbe`
+  discovers catalogs and sends diagnostic test prompts; `OpenAIInferenceClient` sends ordinary
+  model requests. Both use `ProviderTokenUsage` for optional native token counts; absent counts
+  remain unknown rather than becoming zero.
+
+These are source organisation boundaries, not a new provider framework. Public namespaces,
+wire records and database shapes are unchanged. Shared async locking lives in
+`source/backend/concurrency/`, not in the session or provider domain.
+
 ## Storage and ownership
 
 `UrdStore` replaces the former `SessionStore` name and owns the shared SQLite database.

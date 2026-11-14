@@ -17,8 +17,8 @@ public sealed class ProviderManager : IDisposable {
   private readonly HttpMessageHandler handler;
   private readonly HttpClient client;
   private readonly ChatGptAuthentication authentication;
-  private readonly OpenAIProviderClient models;
-  private readonly ProviderModelClient modelRequests;
+  private readonly OpenAIModelProbe modelProbe;
+  private readonly OpenAIInferenceClient inference;
   private readonly ProviderSignIns signIns;
   private readonly List<ProviderRequest> requests = [];
   private readonly Dictionary<Guid, Task<ProviderState>> refreshes = [];
@@ -41,8 +41,8 @@ public sealed class ProviderManager : IDisposable {
     this.handler = handler;
     client = new(handler, disposeHandler: false) { Timeout = Timeout.InfiniteTimeSpan };
     authentication = new(handler, issuer);
-    models = new(client, store.Usage);
-    modelRequests = new(client);
+    modelProbe = new(client, store.Usage);
+    inference = new(client);
     signIns = new(storage, authentication, gate, callbackUri, CancelRequests);
   }
 
@@ -200,7 +200,7 @@ public sealed class ProviderManager : IDisposable {
 
   public Task<ProviderModelCatalog> RefreshModelCatalogAsync(Guid connectionId) => RunRequestAsync(connectionId,
       async (state, token) => {
-        IReadOnlyList<ProviderModel> fetched = await models.GetModelsAsync(state.Connection, state.Credentials, token);
+        IReadOnlyList<ProviderModel> fetched = await modelProbe.GetModelsAsync(state.Connection, state.Credentials, token);
         var catalog = new ProviderModelCatalog(connectionId, DateTimeOffset.UtcNow, fetched);
         using var held = await gate.AcquireAsync(token);
         token.ThrowIfCancellationRequested();
@@ -215,7 +215,7 @@ public sealed class ProviderManager : IDisposable {
     if (string.IsNullOrWhiteSpace(modelId) || modelId.Length > 256 || modelId.Any(char.IsControl))
       throw new ArgumentException("A model ID must be nonempty and at most 256 characters.", nameof(modelId));
     return RunRequestAsync(connectionId,
-        (state, token) => models.TestModelAsync(state.Connection, state.Credentials, modelId, token), cancellationToken);
+        (state, token) => modelProbe.TestModelAsync(state.Connection, state.Credentials, modelId, token), cancellationToken);
   }
 
   public async Task ShutdownAsync() {
@@ -277,7 +277,7 @@ public sealed class ProviderManager : IDisposable {
     try {
       ProviderState state = await GetCredentialsAsync(expectedBinding.Id, generation, request.Cancellation.Token);
       request.Cancellation.Token.ThrowIfCancellationRequested();
-      await foreach (var update in modelRequests.GetStreamingResponseAsync(state, messages, options, request.Cancellation.Token)) {
+      await foreach (var update in inference.GetStreamingResponseAsync(state, messages, options, request.Cancellation.Token)) {
         if (completion is not null)
           throw new ProviderOperationException(ProviderFailure.InvalidProviderResponse);
         if (update.FinishReason is not null)

@@ -65,7 +65,7 @@ public sealed class ProviderErrorDetailsTests {
     using var http = new HttpClient(handler);
 
     var error = await Assert.ThrowsAsync<ProviderOperationException>(async () => {
-      await foreach (var _ in new ProviderModelClient(http).GetStreamingResponseAsync(
+      await foreach (var _ in new OpenAIInferenceClient(http).GetStreamingResponseAsync(
           State(), [new ChatMessage(ChatRole.User, "hello")], new ChatOptions { ModelId = "fixture-model" }, default)) {
         Assert.Null(_.FinishReason);
       }
@@ -82,7 +82,7 @@ public sealed class ProviderErrorDetailsTests {
     using var handler = new ScriptedOpenAIHandler(body, contentType, status);
     using var http = new HttpClient(handler);
     return await Assert.ThrowsAsync<ProviderOperationException>(async () => {
-      await foreach (var _ in new ProviderModelClient(http).GetStreamingResponseAsync(
+      await foreach (var _ in new OpenAIInferenceClient(http).GetStreamingResponseAsync(
           State(), [new ChatMessage(ChatRole.User, "hello")], new ChatOptions { ModelId = "fixture-model" }, default)) {
         Assert.Fail("HTTP rejection must not yield updates.");
       }

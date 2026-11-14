@@ -13,7 +13,7 @@ using static Urd.Backend.Tests.Support.TestAsync;
 
 namespace Urd.Backend.Tests.Providers;
 
-public sealed class ProviderModelClientTests {
+public sealed class OpenAIInferenceClientTests {
   [Theory]
   [InlineData(ProviderRoute.ChatGpt, LlmApi.OpenAIResponses, "developer")]
   [InlineData(ProviderRoute.OpenAI, LlmApi.OpenAIResponses, "system")]
@@ -26,7 +26,7 @@ public sealed class ProviderModelClientTests {
         ? Responses([Message]) : ChatStream());
     using var http = new HttpClient(handler);
 
-    await foreach (var _ in new ProviderModelClient(http).GetStreamingResponseAsync(
+    await foreach (var _ in new OpenAIInferenceClient(http).GetStreamingResponseAsync(
         State(api, route), history, Options(), default)) { /* Drain before reading the wire. */ }
 
     using var document = JsonDocument.Parse(Assert.Single(handler.Requests).Body);
@@ -66,7 +66,7 @@ public sealed class ProviderModelClientTests {
         ? Responses([Message]) : ChatStream());
     using var http = new HttpClient(handler);
 
-    await foreach (ChatResponseUpdate _ in new ProviderModelClient(http).GetStreamingResponseAsync(
+    await foreach (ChatResponseUpdate _ in new OpenAIInferenceClient(http).GetStreamingResponseAsync(
         State(api), history, Options(), default)) {
       // Drain the scripted response before inspecting its recorded request.
     }
@@ -129,7 +129,7 @@ public sealed class ProviderModelClientTests {
     List<ChatResponseUpdate> observed = [];
 
     var error = await Assert.ThrowsAsync<ProviderOperationException>(async () => {
-      await foreach (var update in new ProviderModelClient(http).GetStreamingResponseAsync(
+      await foreach (var update in new OpenAIInferenceClient(http).GetStreamingResponseAsync(
           State(api), History(), Options(tools: true), default))
         observed.Add(update);
     });
@@ -181,7 +181,7 @@ public sealed class ProviderModelClientTests {
     using var http = new HttpClient(handler);
 
     var error = await Assert.ThrowsAsync<ProviderOperationException>(async () => {
-      await foreach (var _ in new ProviderModelClient(http).GetStreamingResponseAsync(
+      await foreach (var _ in new OpenAIInferenceClient(http).GetStreamingResponseAsync(
           State(), History(), Options(), default)) { /* Exhaust the stream to observe its terminal failure. */ }
     });
 
@@ -210,7 +210,7 @@ public sealed class ProviderModelClientTests {
     using var http = new HttpClient(handler);
 
     var error = await Assert.ThrowsAsync<ProviderOperationException>(async () => {
-      await foreach (var update in new ProviderModelClient(http).GetStreamingResponseAsync(
+      await foreach (var update in new OpenAIInferenceClient(http).GetStreamingResponseAsync(
           State(), History(), Options(), default))
         Assert.Fail($"HTTP failure yielded content: {update}");
     });
@@ -241,7 +241,7 @@ public sealed class ProviderModelClientTests {
     List<ChatResponseUpdate> observed = [];
 
     var error = await Assert.ThrowsAsync<ProviderOperationException>(async () => {
-      await foreach (var update in new ProviderModelClient(http).GetStreamingResponseAsync(
+      await foreach (var update in new OpenAIInferenceClient(http).GetStreamingResponseAsync(
           state ?? State(), History(), options ?? Options(), default))
         observed.Add(update);
     });

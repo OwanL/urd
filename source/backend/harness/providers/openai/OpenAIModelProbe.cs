@@ -14,7 +14,7 @@ using Urd.Core.Usage;
 namespace Urd.Core.Providers;
 
 // One-request diagnostics through the official SDK. The caller owns the HTTP client and deadline.
-internal sealed class OpenAIProviderClient(HttpClient httpClient, UsageStorage? usageStorage = null) {
+internal sealed class OpenAIModelProbe(HttpClient httpClient, UsageStorage? usageStorage = null) {
   private const string TestPrompt = "Reply with one short greeting.";
   private const int PreviewLimit = 4096;
 
@@ -95,7 +95,7 @@ internal sealed class OpenAIProviderClient(HttpClient httpClient, UsageStorage? 
           if (++completed != 1 || terminal.Response?.Status != ResponseStatus.Completed ||
               terminal.Response.Error is not null || terminal.Response.IncompleteStatusDetails is not null)
             throw new ProviderOperationException(ProviderFailure.InvalidProviderResponse);
-          usage = ResponseUsage(terminal.Response.Usage);
+          usage = ProviderTokenUsage.ToProviderUsage(ProviderTokenUsage.Response(terminal.Response.Usage));
           break;
         case StreamingResponseIncompleteUpdate:
           throw new ProviderOperationException(ProviderFailure.IncompleteResponse);
@@ -129,7 +129,8 @@ internal sealed class OpenAIProviderClient(HttpClient httpClient, UsageStorage? 
           throw new ProviderOperationException(ProviderFailure.IncompleteResponse);
         if (++completed != 1) throw new ProviderOperationException(ProviderFailure.InvalidProviderResponse);
       }
-      if (update.Usage is not null) usage = ChatUsage(update.Usage);
+      if (update.Usage is not null)
+        usage = ProviderTokenUsage.ToProviderUsage(ProviderTokenUsage.Chat(update.Usage));
     }
     ct.ThrowIfCancellationRequested();
     if (completed != 1) throw new ProviderOperationException(ProviderFailure.IncompleteResponse);
@@ -195,23 +196,6 @@ internal sealed class OpenAIProviderClient(HttpClient httpClient, UsageStorage? 
     text.Append(delta, 0, take);
     truncated |= take != delta.Length;
   }
-
-#pragma warning disable SCME0001 // Read preserved wire presence: SDK integer properties default missing counts to zero.
-  private static ProviderUsage? ResponseUsage(ResponseTokenUsage? usage) {
-    if (usage is null) return null;
-    long? cachedTokens = usage.InputTokenDetails is null ? null : Tokens(usage.InputTokenDetails.Patch, "$.cached_tokens"u8);
-    return new(Tokens(usage.Patch, "$.input_tokens"u8), Tokens(usage.Patch, "$.output_tokens"u8),
-        Tokens(usage.Patch, "$.total_tokens"u8), cachedTokens);
-  }
-
-  private static ProviderUsage ChatUsage(ChatTokenUsage usage) => new(
-      Tokens(usage.Patch, "$.prompt_tokens"u8), Tokens(usage.Patch, "$.completion_tokens"u8),
-      Tokens(usage.Patch, "$.total_tokens"u8),
-      usage.InputTokenDetails is null ? null : Tokens(usage.InputTokenDetails.Patch, "$.cached_tokens"u8));
-
-  private static long? Tokens(JsonPatch patch, ReadOnlySpan<byte> path) =>
-      patch.TryGetValue(path, out long value) && value >= 0 ? value : null;
-#pragma warning restore SCME0001
 
   private static bool CanClassify(Exception error, CancellationToken ct) => error is not ProviderOperationException &&
       !(error is OperationCanceledException && ct.IsCancellationRequested) &&

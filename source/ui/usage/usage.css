@@ -1,8 +1,8 @@
 .usage-overview {
   display: grid;
-  grid-template-columns: max-content auto;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
   align-items: center;
-  gap: 6px 16px;
   color: var(--text-secondary);
   white-space: nowrap;
 }
@@ -11,8 +11,16 @@
   display: contents;
 }
 
+.usage-overview-label {
+  grid-column: 1;
+}
+
 .usage-overview .usage-control {
-  font-size: 13px;
+  justify-self: start;
+  min-height: 34px;
+  padding-inline: 0;
+  color: var(--text-primary);
+  font-size: inherit;
 }
 
 .usage-tabs {

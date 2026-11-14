@@ -12,6 +12,9 @@ snapshot/history metadata and loads message text on demand.
 
 The workspace has closable, reorderable local tabs, transcript, model and reasoning
 selectors, Send, Stop and integrated [provider settings](provider-management.md#browser-settings).
+The model picker loads cached catalogs immediately, discovers missing catalogs on startup and
+rediscovers after provider changes, without polling or a routine refresh action. With no providers,
+its setup action opens Settings → Providers; search, loading, empty and failure states stay distinct.
 Settings → General holds the default working directory, selected through a folder browser.
 Before the first accepted message, the empty transcript centers the default and current
 working-directory paths with explicit Edit actions. Edit opens a single directory editor
@@ -130,7 +133,7 @@ It does not implement storage recovery, navigation or catalog request lifecycles
 | --- | --- |
 | `usePersistedWorkspace` | Owns the current workspace and synchronous updates, draft/root persistence, storage failures and explicit recovery. Its stable command access reads the latest state; successful-load identity changes only on read recovery, not ordinary edits. |
 | `useWorkspaceNavigation` | Discovers the initial workspace after a successful read, applies deep links, opens/closes/reorders tabs and synchronizes the URL. It calls the existing Create command; it never stops backend work. |
-| `useWorkspaceModels` | Owns cached catalog loading, refresh state and invalidation at workspace lifetime, using `WorkspaceModels` for request publication ordering. |
+| `useWorkspaceModels` | Owns cached catalog loading, missing-catalog discovery on startup, rediscovery after provider changes and explicit error retry at workspace lifetime, using `WorkspaceModels` for request publication ordering. |
 | `useSessionEvents` | Owns the page-lifetime event stream, saved-ID discovery, open/watched registrations and per-tab status/change notices. |
 | `WorkspaceCommands` | Owns Create, Send/Continue journals and retries, receipt reconciliation, pending-input removal and Stop across conversation switches. Create still journals before dispatch and opens the acknowledged session against current state. |
 | `Conversation` | Normal startup retains three recent chats, including the active chat; focused or selected views stay mounted beyond that limit, and other chats unmount. It composes snapshot observation, transcript, status and composer. Its snapshot hook owns cancellable reads, not command lifetime. |
@@ -254,7 +257,9 @@ account requests were made for these checks; screenshots stay in an owned temp f
   Construction does no I/O; callers own selection, polling and reconciliation.
 - Both clients share `http/requestJson.ts`: the browser marker, no caching, omitted
   cookies, rejected redirects and status-preserving `RequestError`. Provider reads
-  use saved connections/catalogs; only explicit refresh initiates discovery.
+  use saved connections/catalogs. Startup discovers missing catalogs and provider changes
+  rediscover them; Retry repeats failed discovery. No timer or picker-opening refresh runs.
+  Provider settings can also explicitly discover a selected provider's catalog.
 - Create/Stop/refresh send JSON `{}`; submission fields and opaque list cursors are
   preserved. Selection includes the full secret-free expected connection binding,
   model ID and optional reasoning effort, not lookup by mutable connection ID.

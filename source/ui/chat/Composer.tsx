@@ -20,9 +20,12 @@ export function Composer({
   modelKey,
   modelLabel,
   onModelChange,
-  onRefreshModels,
+  hasProviders,
+  loadingModels,
   refreshingModels,
   modelsError,
+  onRetryModels,
+  onSetUpProvider,
   reasoningEffort,
   reasoningOptions,
   onReasoningChange,
@@ -114,9 +117,12 @@ export function Composer({
             modelKey={modelKey}
             modelLabel={modelLabel}
             onModelChange={onModelChange}
-            onRefreshModels={onRefreshModels}
+            hasProviders={hasProviders}
+            loadingModels={loadingModels}
             refreshingModels={refreshingModels}
             modelsError={modelsError}
+            onRetryModels={onRetryModels}
+            onSetUpProvider={onSetUpProvider}
             disabled={locked}
           />
           <ReasoningPicker

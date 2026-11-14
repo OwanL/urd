@@ -10,9 +10,12 @@ export function ModelPicker({
   modelKey,
   modelLabel,
   onModelChange,
-  onRefreshModels,
-  refreshingModels = false,
+  hasProviders,
+  loadingModels,
+  refreshingModels,
   modelsError,
+  onRetryModels,
+  onSetUpProvider,
   disabled,
 }: ModelPickerProps) {
   const id = useId();
@@ -179,33 +182,47 @@ export function ModelPicker({
               </div>
             ))}
           </div>
-          {!options.length && (
-            <div class="composer-model-empty" role="status">
-              No models found
-            </div>
-          )}
-          {(onRefreshModels || modelsError) && (
-            <div class="composer-model-footer">
-              {modelsError && (
-                <div class="composer-model-error" role="status">
-                  {modelsError}
-                </div>
-              )}
-              {onRefreshModels && (
+          {!options.length && (!modelsError || query.trim()) && (
+            <div class="composer-model-empty">
+              <span role="status">
+                {query.trim()
+                  ? "No models match your search"
+                  : hasProviders === false
+                    ? "No providers set up"
+                    : loadingModels || refreshingModels
+                      ? "Loading models…"
+                      : "No models available"}
+              </span>
+              {!query.trim() && hasProviders === false && (
                 <button
-                  class="composer-model-refresh"
+                  class="composer-model-setup"
                   type="button"
-                  aria-label="Refresh models"
-                  aria-disabled={refreshingModels}
-                  aria-busy={refreshingModels}
                   onClick={() => {
-                    if (!refreshingModels) onRefreshModels();
+                    close(false);
+                    onSetUpProvider();
                   }}
                 >
-                  <Icon name="refresh" />
-                  {refreshingModels ? "Refreshing…" : "Refresh models"}
+                  Set up a provider
                 </button>
               )}
+            </div>
+          )}
+          {modelsError && (
+            <div class="composer-model-footer">
+              <div class="composer-model-error" role="status">
+                {modelsError}
+              </div>
+              <button
+                class="composer-model-retry"
+                type="button"
+                aria-label="Retry loading models"
+                disabled={refreshingModels}
+                aria-busy={refreshingModels}
+                onClick={onRetryModels}
+              >
+                <Icon name="refresh" />
+                {refreshingModels ? "Retrying…" : "Retry"}
+              </button>
             </div>
           )}
         </Popover>

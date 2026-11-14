@@ -11,9 +11,12 @@ export interface ModelPickerProps {
   modelKey: string | null;
   modelLabel: string;
   onModelChange: (key: string) => void;
-  onRefreshModels?: (() => void) | undefined;
-  refreshingModels?: boolean | undefined;
-  modelsError?: string | null | undefined;
+  hasProviders: boolean | null;
+  loadingModels: boolean;
+  refreshingModels: boolean;
+  modelsError: string | null;
+  onRetryModels: () => void;
+  onSetUpProvider: () => void;
   disabled: boolean;
 }
 
@@ -24,9 +27,12 @@ export interface ComposerProps {
   modelKey: string | null;
   modelLabel: string;
   onModelChange: (key: string) => void;
-  onRefreshModels?: () => void;
-  refreshingModels?: boolean;
-  modelsError?: string | null;
+  hasProviders: boolean | null;
+  loadingModels: boolean;
+  refreshingModels: boolean;
+  modelsError: string | null;
+  onRetryModels: () => void;
+  onSetUpProvider: () => void;
   reasoningEffort: string | null;
   reasoningOptions: readonly string[];
   onReasoningChange: (effort: string | null) => void;

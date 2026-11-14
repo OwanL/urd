@@ -148,6 +148,7 @@ interface ConversationProps {
   refresh: number;
   notice: string | null;
   onRefresh(): void;
+  onSetUpProvider(): void;
   editDraft(id: string, text: string): boolean;
   selectModel(id: string, selection: LlmSelection): boolean;
   position: ReadingPosition | undefined;
@@ -176,6 +177,7 @@ export function Conversation({
   refresh,
   notice,
   onRefresh,
+  onSetUpProvider,
   editDraft,
   selectModel,
   position,
@@ -532,11 +534,14 @@ export function Conversation({
         onStop={() => {
           if (snapshot && state.active) void commands.stop(sessionId, snapshot, state.stopId);
         }}
-        onRefreshModels={() => {
-          void models.refresh();
-        }}
+        hasProviders={models.hasProviders}
+        loadingModels={models.loading}
         refreshingModels={models.refreshing}
         modelsError={models.error}
+        onRetryModels={() => {
+          void models.retry();
+        }}
+        onSetUpProvider={onSetUpProvider}
       />
     </section>
   );

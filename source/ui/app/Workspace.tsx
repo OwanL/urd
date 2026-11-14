@@ -221,6 +221,7 @@ export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) 
             notice={id === activeId ? events.notice : null}
             refresh={refresh}
             onRefresh={refreshSnapshot}
+            onSetUpProvider={() => openSettings("providers")}
             editDraft={workspace.editDraft}
             selectModel={workspace.selectModel}
             position={readingPositions.current.get(id)}

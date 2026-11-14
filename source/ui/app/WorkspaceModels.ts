@@ -14,10 +14,14 @@ export interface ModelOption {
 export interface ModelCatalogRead {
   revision: number;
   options: ModelOption[] | null;
+  hasProviders: boolean | null;
+  providers: readonly ProviderConnection[] | null;
+  providersToRefresh: readonly ProviderConnection[];
+  successfulProviderIds: readonly string[];
   error: unknown | null;
 }
 
-// Cached catalog reads and explicit discovery share option mapping and publication order.
+// Cached catalog reads and discovery share option mapping and revision protection.
 export class WorkspaceModels {
   private revision = 0;
   private readonly client: Pick<
@@ -39,34 +43,136 @@ export class WorkspaceModels {
     return this.revision === revision;
   }
 
-  readCached(signal: AbortSignal): Promise<ModelCatalogRead> {
-    return this.read(false, signal);
-  }
-
-  refresh(): Promise<ModelCatalogRead> {
-    return this.read(true);
-  }
-
-  private async read(discover: boolean, signal?: AbortSignal): Promise<ModelCatalogRead> {
+  async readCached(signal: AbortSignal): Promise<ModelCatalogRead> {
     const revision = ++this.revision;
+    let providers: readonly ProviderConnection[] | null = null;
     try {
-      const connections = await this.client.list(signal);
-      const options: ModelOption[] = [];
-      for (const connection of connections) {
-        if (!this.isCurrent(revision)) return { revision, options: null, error: null };
-        const catalog = discover
-          ? await this.client.refreshModels(connection.id)
-          : await this.client.getModels(connection.id, signal);
-        if (!this.isCurrent(revision)) return { revision, options: null, error: null };
-        const settings = await this.client.getModelSettings(connection.id, signal);
-        if (!this.isCurrent(revision)) return { revision, options: null, error: null };
-        options.push(...mapModels(connection, catalog, settings));
-      }
-      return { revision, options, error: null };
+      providers = await this.client.list(signal);
+      if (!this.isCurrent(revision)) return canceledRead(revision);
+      let firstError: unknown | null = null;
+      const results = await Promise.all(
+        providers.map(async (provider) => {
+          try {
+            const [catalog, settings] = await Promise.all([
+              this.client.getModels(provider.id, signal),
+              this.client.getModelSettings(provider.id, signal),
+            ]);
+            return { provider, catalog, options: mapModels(provider, catalog, settings) };
+          } catch (error) {
+            firstError ??= error;
+            return { provider, catalog: null, options: [] };
+          }
+        }),
+      );
+      if (!this.isCurrent(revision)) return canceledRead(revision);
+      return {
+        revision,
+        options: results.flatMap(({ options }) => options),
+        hasProviders: providers.length > 0,
+        providers,
+        providersToRefresh: results
+          .filter(({ catalog }) => catalog === null || catalog.refreshedAt === null)
+          .map(({ provider }) => provider),
+        successfulProviderIds: results
+          .filter(({ catalog }) => catalog !== null)
+          .map(({ provider }) => provider.id),
+        error: firstError,
+      };
     } catch (error) {
-      return { revision, options: null, error };
+      if (!this.isCurrent(revision)) return canceledRead(revision);
+      return {
+        revision,
+        options: null,
+        hasProviders: providers === null ? null : providers.length > 0,
+        providers,
+        providersToRefresh: [],
+        successfulProviderIds: [],
+        error,
+      };
     }
   }
+
+  discover(
+    providers: readonly ProviderConnection[],
+    revision: number,
+    signal?: AbortSignal,
+  ): Promise<ModelCatalogRead> {
+    return this.discoverProviders(providers, revision, signal);
+  }
+
+  async refresh(): Promise<ModelCatalogRead> {
+    const revision = ++this.revision;
+    let providers: readonly ProviderConnection[] | null = null;
+    try {
+      providers = await this.client.list();
+      if (!this.isCurrent(revision)) return canceledRead(revision);
+      const result = await this.discoverProviders(providers, revision);
+      if (!this.isCurrent(revision)) return canceledRead(revision);
+      return {
+        ...result,
+        hasProviders: providers.length > 0,
+        providers,
+      };
+    } catch (error) {
+      if (!this.isCurrent(revision)) return canceledRead(revision);
+      return {
+        revision,
+        options: null,
+        hasProviders: providers === null ? null : providers.length > 0,
+        providers,
+        providersToRefresh: [],
+        successfulProviderIds: [],
+        error,
+      };
+    }
+  }
+
+  private async discoverProviders(
+    providers: readonly ProviderConnection[],
+    revision: number,
+    signal?: AbortSignal,
+  ): Promise<ModelCatalogRead> {
+    if (!this.isCurrent(revision)) return canceledRead(revision);
+    let firstError: unknown | null = null;
+    const results = await Promise.all(
+      providers.map(async (provider) => {
+        try {
+          const [catalog, settings] = await Promise.all([
+            this.client.refreshModels(provider.id),
+            this.client.getModelSettings(provider.id, signal),
+          ]);
+          return { provider, options: mapModels(provider, catalog, settings), succeeded: true };
+        } catch (error) {
+          firstError ??= error;
+          return { provider, options: [], succeeded: false };
+        }
+      }),
+    );
+    if (!this.isCurrent(revision)) return canceledRead(revision);
+    return {
+      revision,
+      options: results.flatMap(({ options }) => options),
+      hasProviders: null,
+      providers: null,
+      providersToRefresh: [],
+      successfulProviderIds: results
+        .filter(({ succeeded }) => succeeded)
+        .map(({ provider }) => provider.id),
+      error: firstError,
+    };
+  }
+}
+
+function canceledRead(revision: number): ModelCatalogRead {
+  return {
+    revision,
+    options: null,
+    hasProviders: null,
+    providers: null,
+    providersToRefresh: [],
+    successfulProviderIds: [],
+    error: null,
+  };
 }
 
 function mapModels(

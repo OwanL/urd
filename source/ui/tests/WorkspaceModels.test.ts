@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { WorkspaceModels } from "../app/WorkspaceModels.ts";
+import { replaceProviderOptions } from "../app/useWorkspaceModels.ts";
 import type { ProviderConnection } from "../providers/ProviderConnection.ts";
 import type { ProviderModelCatalog } from "../providers/ProviderModels.ts";
 import type { ModelSettings } from "../providers/ModelSettings.ts";
@@ -14,9 +15,19 @@ const firstConnection: ProviderConnection = {
   authentication: "none",
 };
 const currentConnection: ProviderConnection = { ...firstConnection, name: "Current provider" };
+const secondConnection: ProviderConnection = {
+  ...firstConnection,
+  id: "10000000-0000-0000-0000-000000000002",
+  name: "Second provider",
+};
 
-function catalog(connectionId: string, id: string, name: string): ProviderModelCatalog {
-  return { connectionId, refreshedAt: null, models: [{ id, name }] };
+function catalog(
+  connectionId: string,
+  id: string,
+  name: string,
+  refreshedAt: string | null = null,
+): ProviderModelCatalog {
+  return { connectionId, refreshedAt, models: [{ id, name }] };
 }
 
 function deferred<T>() {
@@ -27,36 +38,154 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-void test("cached reads do not discover models; explicit refresh does", async () => {
-  let cachedReads = 0;
-  let discoveries = 0;
+void test("cached reads publish options and discover only providers without a refreshed catalog", async () => {
+  const discoveryIds: string[] = [];
   const models = new WorkspaceModels({
-    list: async () => [firstConnection],
-    getModels: async () => {
-      cachedReads++;
-      return catalog(firstConnection.id, "cached", "Cached model");
-    },
+    list: async () => [firstConnection, secondConnection],
+    getModels: async (connectionId) =>
+      catalog(
+        connectionId,
+        "cached",
+        "Cached model",
+        connectionId === firstConnection.id ? "2026-01-01T00:00:00Z" : null,
+      ),
     getModelSettings: async () => [],
-    refreshModels: async () => {
-      discoveries++;
-      return catalog(firstConnection.id, "discovered", "Discovered model");
+    refreshModels: async (connectionId) => {
+      discoveryIds.push(connectionId);
+      return catalog(connectionId, "discovered", "Discovered model");
     },
   });
 
   const cached = await models.readCached(new AbortController().signal);
-  assert.equal(cached.options?.[0]?.key, `${firstConnection.id}/cached`);
+  assert.equal(cached.hasProviders, true);
+  assert.deepEqual(
+    cached.options?.map(({ key }) => key),
+    [`${firstConnection.id}/cached`, `${secondConnection.id}/cached`],
+  );
   assert.equal(cached.options?.[0]?.providerLabel, "First provider");
   assert.equal(cached.options?.[0]?.selection.family, "other");
   assert.equal(cached.options?.[0]?.selection.supportsImages, false);
   assert.equal(cached.options?.[0]?.selection.contextWindow, null);
   assert.equal(cached.options?.[0]?.selection.reasoningEffort, "high");
-  assert.equal(cachedReads, 1);
-  assert.equal(discoveries, 0);
+  assert.deepEqual(
+    cached.providersToRefresh.map(({ id }) => id),
+    [secondConnection.id],
+  );
+  assert.deepEqual(discoveryIds, []);
+
+  const missingOnly = await models.discover(
+    cached.providersToRefresh,
+    cached.revision,
+    new AbortController().signal,
+  );
+  assert.deepEqual(discoveryIds, [secondConnection.id]);
+  assert.deepEqual(
+    missingOnly.options?.map(({ key }) => key),
+    [`${secondConnection.id}/discovered`],
+  );
+  const merged = replaceProviderOptions(
+    cached.options!,
+    missingOnly.options!,
+    cached.providers!,
+    missingOnly.successfulProviderIds,
+  );
+  assert.deepEqual(
+    merged.map(({ key }) => key),
+    [`${firstConnection.id}/cached`, `${secondConnection.id}/discovered`],
+  );
 
   const refreshed = await models.refresh();
-  assert.equal(refreshed.options?.[0]?.key, `${firstConnection.id}/discovered`);
-  assert.equal(refreshed.options?.[0]?.selection.reasoningEffort, "high");
-  assert.equal(discoveries, 1);
+  assert.deepEqual(discoveryIds, [secondConnection.id, firstConnection.id, secondConnection.id]);
+  assert.equal(refreshed.options?.length, 2);
+});
+
+void test("cached read failures preserve successful providers and mark failed providers for discovery", async () => {
+  const models = new WorkspaceModels({
+    list: async () => [firstConnection, secondConnection],
+    getModels: async (connectionId) => {
+      if (connectionId === secondConnection.id) throw new Error("cached read failed");
+      return catalog(connectionId, "cached", "Cached model", "refreshed");
+    },
+    getModelSettings: async () => [],
+    refreshModels: async (connectionId) => catalog(connectionId, "found", "Found model"),
+  });
+
+  const cached = await models.readCached(new AbortController().signal);
+  assert.equal(cached.error instanceof Error, true);
+  assert.deepEqual(
+    cached.options?.map(({ key }) => key),
+    [`${firstConnection.id}/cached`],
+  );
+  assert.deepEqual(
+    cached.providersToRefresh.map(({ id }) => id),
+    [secondConnection.id],
+  );
+  assert.deepEqual(cached.successfulProviderIds, [firstConnection.id]);
+});
+
+void test("discovery failures do not discard options from successful providers", async () => {
+  const models = new WorkspaceModels({
+    list: async () => [firstConnection, secondConnection],
+    getModels: async () => catalog(firstConnection.id, "cached", "Cached model"),
+    getModelSettings: async () => [],
+    refreshModels: async (connectionId) => {
+      if (connectionId === secondConnection.id) throw new Error("discovery failed");
+      return catalog(connectionId, "found", "Found model");
+    },
+  });
+
+  const result = await models.refresh();
+  assert.equal(result.error instanceof Error, true);
+  assert.equal((result.error as Error).message, "discovery failed");
+  assert.deepEqual(
+    result.options?.map(({ key }) => key),
+    [`${firstConnection.id}/found`],
+  );
+  assert.deepEqual(result.successfulProviderIds, [firstConnection.id]);
+});
+
+void test("empty provider lists are known and do not attempt discovery", async () => {
+  let discoveries = 0;
+  const models = new WorkspaceModels({
+    list: async () => [],
+    getModels: async () => {
+      throw new Error("unexpected cache read");
+    },
+    getModelSettings: async () => [],
+    refreshModels: async () => {
+      discoveries++;
+      return catalog(firstConnection.id, "unexpected", "Unexpected");
+    },
+  });
+
+  const cached = await models.readCached(new AbortController().signal);
+  assert.equal(cached.hasProviders, false);
+  assert.deepEqual(cached.options, []);
+  assert.deepEqual(cached.providersToRefresh, []);
+  const refreshed = await models.refresh();
+  assert.equal(refreshed.hasProviders, false);
+  assert.deepEqual(refreshed.options, []);
+  assert.equal(discoveries, 0);
+});
+
+void test("provider changes can rediscover every provider", async () => {
+  const discoveryIds: string[] = [];
+  const models = new WorkspaceModels({
+    list: async () => [firstConnection, secondConnection],
+    getModels: async (connectionId) => catalog(connectionId, "cached", "Cached", "refreshed"),
+    getModelSettings: async () => [],
+    refreshModels: async (connectionId) => {
+      discoveryIds.push(connectionId);
+      return catalog(connectionId, "discovered", "Discovered");
+    },
+  });
+
+  models.invalidate();
+  const cached = await models.readCached(new AbortController().signal);
+  assert.deepEqual(cached.providersToRefresh, []);
+  const discovered = await models.discover(cached.providers!, cached.revision);
+  assert.deepEqual(discoveryIds, [firstConnection.id, secondConnection.id]);
+  assert.equal(discovered.options?.length, 2);
 });
 
 void test("provider changes prevent an older manual refresh from publishing over the new cache", async () => {

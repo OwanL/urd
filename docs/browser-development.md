@@ -29,7 +29,8 @@ working-directory paths with explicit Edit actions. Edit opens a single director
 with breadcrumbs and an editable address, with an explicit Select folder/Cancel decision;
 browsing never applies a change.
 An unset default resolves to the filesystem root. Changing the current
-path affects this chat only; the default applies to new chats only. Typing keeps the choice
+path affects this chat only. Saving the default from the empty transcript also updates
+that chat's current directory; saving it in Settings applies to new chats only. Typing keeps the choice
 visible; the composer always uses “Ask Urd”. Acceptance locks the chat's directory,
 including when provider setup fails before visible history. Changing a chat's directory
 never changes the default.

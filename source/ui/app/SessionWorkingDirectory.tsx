@@ -33,16 +33,26 @@ export function SessionWorkingDirectory({
   const [changeState, setChangeState] = useState<ChangeState>("idle");
   const [failure, setFailure] = useState<string | null>(null);
   const [savedDirectory, setSavedDirectory] = useState<string | null>(null);
+  const [changingDefault, setChangingDefault] = useState(false);
 
   useEffect(() => setDirectory(workingDirectory), [workingDirectory]);
 
-  async function save(nextDirectory: string) {
-    if (disabled || operationInProgress.current || changeState !== "idle") return false;
+  async function save(nextDirectory: string, updateDefault = false) {
+    if (disabled || preferences.pending || operationInProgress.current || changeState !== "idle")
+      return false;
     operationInProgress.current = true;
+    setChangingDefault(updateDefault);
     setChangeState("saving");
     setFailure(null);
     setSavedDirectory(null);
     onGateChange(true, "Saving working directory…");
+
+    if (updateDefault && !(await preferences.save(nextDirectory))) {
+      setChangeState("idle");
+      operationInProgress.current = false;
+      onGateChange(false, null);
+      return false;
+    }
 
     let confirmedDirectory: string;
     try {
@@ -125,6 +135,18 @@ export function SessionWorkingDirectory({
   }
 
   const defaultDirectory = preferences.preferences?.workingDirectory ?? null;
+  const changeFeedback =
+    failure || changeState === "uncertain" || changeState === "reconciling" ? (
+      <>
+        {failure && <p role="alert">{failure}</p>}
+        {changeState === "uncertain" && (
+          <button type="button" onClick={() => void reconcile()}>
+            Check current directory
+          </button>
+        )}
+        {changeState === "reconciling" && <span>Checking current directory…</span>}
+      </>
+    ) : null;
   return (
     <div class="chat-working-directory">
       <WorkingDirectoryRow
@@ -133,19 +155,24 @@ export function SessionWorkingDirectory({
         directory={
           preferences.loaded ? defaultDirectory : preferences.error ? "unavailable" : "loading…"
         }
-        disabled={disabled || !preferences.loaded}
-        busy={preferences.pending}
-        onSave={preferences.save}
+        disabled={disabled || !preferences.loaded || changeState !== "idle"}
+        busy={preferences.pending || changeState !== "idle"}
+        onSave={(path) => save(path, true)}
         onDraftChange={preferences.clearError}
         feedback={
-          preferences.error && (
+          (preferences.error || (changingDefault && changeFeedback)) && (
             <>
-              <p role="alert">{preferences.error}</p>
-              {!preferences.loaded && (
-                <button type="button" onClick={() => void preferences.refresh()}>
-                  Retry
-                </button>
+              {preferences.error && (
+                <>
+                  <p role="alert">{preferences.error}</p>
+                  {!preferences.loaded && (
+                    <button type="button" onClick={() => void preferences.refresh()}>
+                      Retry
+                    </button>
+                  )}
+                </>
               )}
+              {changingDefault && changeFeedback}
             </>
           )
         }
@@ -154,25 +181,13 @@ export function SessionWorkingDirectory({
         label="Current working directory"
         title="Current working directory"
         directory={directory}
-        disabled={disabled}
+        disabled={disabled || preferences.pending}
         busy={changeState !== "idle"}
-        onSave={save}
+        onSave={(path) => save(path)}
         onDraftChange={() => {
           if (changeState === "idle") setFailure(null);
         }}
-        feedback={
-          failure || changeState === "uncertain" || changeState === "reconciling" ? (
-            <>
-              {failure && <p role="alert">{failure}</p>}
-              {changeState === "uncertain" && (
-                <button type="button" onClick={() => void reconcile()}>
-                  Check current directory
-                </button>
-              )}
-              {changeState === "reconciling" && <span>Checking current directory…</span>}
-            </>
-          ) : null
-        }
+        feedback={!changingDefault && changeFeedback}
       />
     </div>
   );

@@ -212,7 +212,7 @@
 }
 
 .chat-working-directory-edit:hover:not([aria-disabled="true"]) {
-  background: var(--surface-hover);
+  background: var(--surface-input);
 }
 
 .chat-working-directory-edit[aria-disabled="true"] {

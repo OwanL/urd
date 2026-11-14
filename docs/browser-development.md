@@ -12,6 +12,11 @@ snapshot/history metadata and loads message text on demand.
 
 The workspace has closable, reorderable local tabs, transcript, model and reasoning
 selectors, Send, Stop and integrated [provider settings](provider-management.md#browser-settings).
+Tabs take the header's remaining width beside New chat and Workspace options. Each tab fits within
+its scroll strip; activation, title changes and strip resizing reveal the active tab without fighting
+a drag. Workspace options holds global cost totals, Settings and the unavailable Snooze action;
+usage details mount only while the options are open. The conversation is centered and width-bounded
+on wide screens.
 The model picker loads cached catalogs immediately, discovers missing catalogs on startup and
 rediscovers after provider changes, without polling or a routine refresh action. With no providers,
 the model and reasoning selectors are replaced by an Add provider action that opens Settings →
@@ -33,11 +38,13 @@ or the current location when no child is selected. Pending reads and uncommitted
 block selection; failed reads retain the last location and can be retried.
 Unknown directory saves block Send until an explicit snapshot read confirms the current
 directory; writes are never automatically repeated.
-Busy Send remains opportunistic steering. Queued inputs appear as dimmed user-message bubbles
-at the transcript tail, with an icon to remove each unclaimed input. A small chevron expands long
-previews on request; claimed inputs cannot be removed. Removal never stops active work. With an empty
-composer, an eligible idle conversation offers Continue instead of Send, without adding a user
-message. Continue journals its exact operation before dispatch; reload checks receipts, and an
+Busy Send remains opportunistic steering. Queued inputs form a quiet, compact stack at the transcript
+tail under one count label. Hovering a row or focusing its controls reveals removal and preview actions;
+touch devices show these actions permanently. Uncertain removals keep their explicit status and Check
+action visible. A small chevron expands long previews on request; claimed inputs cannot be removed.
+Removal never stops active work. With an empty composer, an eligible idle conversation offers Continue
+instead of Send, without adding a user message. Continue journals its exact operation before dispatch;
+reload checks receipts, and an
 uncertain result offers explicit check/retry without clearing a newer draft. Stop cancels the
 active run and its pending steering; there is no after-run queue. The composer keeps its model
 and reasoning pickers, Stop and Send/Continue visible on one row at every width. Stop is disabled

@@ -1,6 +1,7 @@
 .chat-tabs {
   display: flex;
   align-items: stretch;
+  flex: 1 1 0;
   gap: 5px;
   min-width: 0;
   overflow-x: auto;
@@ -12,9 +13,9 @@
   position: relative;
   display: flex;
   align-items: center;
-  flex: 0 0 auto;
-  min-width: 116px;
-  max-width: 230px;
+  flex: 0 0 min(230px, 100%);
+  min-width: 0;
+  max-width: 100%;
   border: 1px solid transparent;
   border-radius: 7px;
   background: #151515;
@@ -33,6 +34,7 @@
 
 .chat-tab > .tooltip-anchor:first-child {
   flex: 1;
+  min-width: 0;
 }
 
 .chat-tab [role="tab"] {
@@ -187,13 +189,6 @@
   50% {
     opacity: 0.55;
     transform: scale(0.78);
-  }
-}
-
-@media (max-width: 480px) {
-  .chat-tab {
-    min-width: 105px;
-    max-width: 168px;
   }
 }
 

@@ -4,6 +4,9 @@
   flex: 1;
   min-height: 0;
   min-width: 0;
+  width: 100%;
+  max-width: 56rem;
+  align-self: center;
 }
 
 .chat-view[hidden] {
@@ -22,31 +25,46 @@
   display: none;
 }
 
-.chat-pending-input {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  background: #969696;
-  color: #171717;
+.chat-running-announcement {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
-.chat-pending-input-header {
+.chat-pending-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(90%, 42rem);
+  margin: 12px 0 12px auto;
+}
+
+.chat-pending-inputs-label {
+  padding-right: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-align: right;
+}
+
+.chat-pending-input {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 2px 8px;
   min-width: 0;
-}
-
-.chat-pending-input-label {
-  color: #222;
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1.3;
+  padding: 7px 8px 7px 12px;
+  border-radius: 9px 9px 3px 9px;
+  background: var(--surface-input);
+  color: var(--text-secondary);
+  font-size: 13px;
 }
 
 .chat-pending-input-actions {
   display: flex;
+  grid-column: 2;
   align-items: center;
   justify-content: flex-end;
   min-width: 0;
@@ -54,7 +72,7 @@
 
 .chat-pending-input-status {
   grid-column: 1 / -1;
-  color: #262626;
+  color: var(--text-secondary);
   font-size: 12px;
   line-height: 1.35;
   overflow-wrap: anywhere;
@@ -78,26 +96,19 @@
 .chat-pending-input .icon-button,
 .chat-pending-input-check {
   flex: none;
-  color: #171717;
+  color: var(--text-secondary);
 }
 
-.chat-pending-input .chat-pending-input-remove {
-  width: 30px;
-  height: 30px;
+.chat-pending-input .icon-button {
+  width: 28px;
+  height: 28px;
   border-color: transparent;
 }
 
-.chat-pending-input .chat-pending-input-remove:hover:not(:disabled),
-.chat-pending-input .chat-pending-input-expand:hover:not(:disabled),
+.chat-pending-input .icon-button:hover:not(:disabled),
 .chat-pending-input-check:hover {
-  background: rgb(0 0 0 / 10%);
-  color: #111;
-}
-
-.chat-pending-input .chat-pending-input-remove:disabled {
-  opacity: 1;
-  color: #333;
-  cursor: default;
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 
 .chat-pending-input-check {
@@ -106,15 +117,8 @@
   border: 0;
   border-radius: 4px;
   background: transparent;
-  color: #171717;
   text-decoration: underline;
   text-underline-offset: 2px;
-}
-
-.chat-pending-input .chat-pending-input-expand {
-  width: 30px;
-  height: 30px;
-  border-color: transparent;
 }
 
 .chat-pending-input-expand .icon {
@@ -132,12 +136,26 @@
 }
 
 .chat-pending-input button:focus-visible {
-  outline: 2px solid #171717;
+  outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
 
+@media (hover: hover) and (pointer: fine) {
+  .chat-pending-input-actions {
+    opacity: 0;
+  }
+
+  .chat-pending-input:hover .chat-pending-input-actions,
+  .chat-pending-input:focus-within .chat-pending-input-actions,
+  .chat-pending-input.has-removal-state .chat-pending-input-actions {
+    opacity: 1;
+  }
+}
+
 @media (pointer: coarse) {
+  .chat-pending-input .icon-button,
   .chat-pending-input-check {
+    min-width: 36px;
     min-height: 38px;
   }
 }

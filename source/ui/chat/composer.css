@@ -162,6 +162,9 @@
 .composer .composer-stop {
   color: var(--danger);
 }
+.composer .composer-stop:disabled {
+  color: var(--text-secondary);
+}
 .composer-stop .icon {
   width: 14px;
   height: 14px;

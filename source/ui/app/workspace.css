@@ -8,21 +8,84 @@
 .top-strip {
   display: flex;
   align-items: center;
-  flex: 0 0 auto;
-  gap: 6px;
+  flex: 0 0 48px;
+  height: 48px;
   min-height: 48px;
-  padding: 7px 10px;
+  gap: 6px;
+  padding: 6px 10px;
 }
 
 .top-strip > .tooltip-anchor {
   flex: none;
 }
 
-.top-actions {
+.workspace-options-popover {
+  --popover-max-width: 280px;
   display: flex;
-  margin-left: auto;
-  flex: none;
+  flex-direction: column;
+  width: min(280px, calc(100vw - 16px));
   gap: 3px;
+  padding: 7px;
+}
+
+.workspace-options-costs {
+  display: flex;
+  flex-direction: column;
+}
+
+.workspace-options-cost {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 36px;
+  padding-inline: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.workspace-options-cost .usage-control {
+  justify-content: flex-end;
+}
+
+.workspace-options-divider {
+  height: 1px;
+  margin-block: 3px;
+  background: var(--border-subtle);
+}
+
+.workspace-options-action {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  font-size: 12px;
+}
+
+.workspace-options-action:hover:not([aria-disabled="true"]) {
+  background: var(--surface-hover);
+}
+
+.workspace-options-action .icon {
+  width: 15px;
+  height: 15px;
+}
+
+.workspace-options-action.is-unavailable {
+  color: var(--text-secondary);
+  cursor: default;
+}
+
+.workspace-options-unavailable {
+  margin-left: auto;
+  font-size: 11px;
 }
 
 .empty-workspace {
@@ -63,10 +126,6 @@
   .top-strip {
     padding: 6px;
     gap: 3px;
-  }
-
-  .top-actions {
-    gap: 0;
   }
 
   .workspace-error,

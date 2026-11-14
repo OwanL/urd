@@ -72,12 +72,25 @@ export function ChatTabs({
   }
   const activeTitle = tabs.find((tab) => tab.id === activeId)?.title;
   useLayoutEffect(() => {
-    if (activeId === null) return;
-    drag.strip.current
-      ?.querySelector(`#tab-${CSS.escape(activeId)}`)
-      ?.closest(".chat-tab")
-      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
-  }, [activeId, activeTitle, drag.strip]);
+    const strip = drag.strip.current;
+    if (!strip || activeId === null) return;
+    const revealActive = () => {
+      if (drag.draggedId !== null) return;
+      strip
+        .querySelector(`#tab-${CSS.escape(activeId)}`)
+        ?.closest(".chat-tab")
+        ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    };
+    revealActive();
+    let width = strip.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (strip.clientWidth === width) return;
+      width = strip.clientWidth;
+      revealActive();
+    });
+    observer.observe(strip);
+    return () => observer.disconnect();
+  }, [activeId, activeTitle, drag.strip, drag.draggedId]);
 
   function reorder(id: string, beforeId: string | null) {
     const next = moveTab(tabs, id, beforeId);

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { IconButton } from "../components/IconButton.tsx";
 import { Icon } from "../components/Icon.tsx";
+import { Popover } from "../components/Popover.tsx";
 import { Settings } from "../settings/Settings.tsx";
 import { Tooltip } from "../components/Tooltip.tsx";
 import { ProviderClient } from "../providers/ProviderClient.ts";
@@ -22,7 +23,7 @@ import { useWorkspaceModels } from "./useWorkspaceModels.ts";
 import { useWorkspaceNavigation } from "./useWorkspaceNavigation.ts";
 import { useSessionEvents } from "./useSessionEvents.ts";
 import { useWorkspaceRetention } from "./useWorkspaceRetention.ts";
-import { UsageOverview } from "../usage/UsageOverview.tsx";
+import { UsageControl } from "../usage/UsageControl.tsx";
 import "./workspace.css";
 
 const sessions = new SessionClient(new URL(window.location.href));
@@ -80,6 +81,7 @@ export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) 
     setSettingsOpen(true);
   };
   const settingsAnchor = useRef<HTMLButtonElement>(null);
+  const [optionsOpen, setOptionsOpen] = useState(false);
   const newChatButton = useRef<HTMLButtonElement>(null);
   const { activeId, chats, tabs } = workspace.state;
   const events = useSessionEvents(
@@ -133,34 +135,68 @@ export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) 
             if (connected) void create();
           }}
         />
-        <UsageOverview />
-        <div class="top-actions">
-          <IconButton
-            icon="moon"
-            label="Snooze"
-            hint={
-              <>
-                Snooze<span class="tooltip-detail">Not available yet</span>
-              </>
-            }
-            placement="below"
-            aria-disabled="true"
-          />
-          <Tooltip content="Settings" placement="below" disabled={settingsOpen}>
-            <button
-              ref={settingsAnchor}
-              type="button"
-              class="icon-button"
-              aria-label="Settings"
-              aria-haspopup="dialog"
-              aria-expanded={settingsOpen}
-              onClick={() => (settingsOpen ? setSettingsOpen(false) : openSettings())}
-            >
-              <Icon name="settings" />
-            </button>
-          </Tooltip>
-        </div>
+        <Tooltip
+          content="Workspace options"
+          placement="below"
+          disabled={optionsOpen || settingsOpen}
+        >
+          <button
+            ref={settingsAnchor}
+            type="button"
+            class="icon-button workspace-options-trigger"
+            aria-label="Workspace options"
+            aria-haspopup="dialog"
+            aria-expanded={optionsOpen || settingsOpen}
+            onClick={() => {
+              if (settingsOpen) setSettingsOpen(false);
+              else setOptionsOpen((open) => !open);
+            }}
+          >
+            <Icon name="more" />
+          </button>
+        </Tooltip>
       </header>
+      {optionsOpen && (
+        <Popover
+          anchor={settingsAnchor}
+          class="workspace-options-popover"
+          label="Workspace options"
+          placement="below"
+          onClose={() => setOptionsOpen(false)}
+        >
+          <div class="workspace-options-costs">
+            <div class="workspace-options-cost">
+              <span>Today</span>
+              <UsageControl label="Today" range="today" />
+            </div>
+            <div class="workspace-options-cost">
+              <span>Last 7 days</span>
+              <UsageControl label="Last 7 days" range="sevenDays" />
+            </div>
+          </div>
+          <div class="workspace-options-divider" />
+          <button
+            type="button"
+            class="workspace-options-action"
+            onClick={() => {
+              setOptionsOpen(false);
+              openSettings();
+            }}
+          >
+            <Icon name="settings" />
+            <span>Settings</span>
+          </button>
+          <button
+            type="button"
+            class="workspace-options-action is-unavailable"
+            aria-disabled="true"
+          >
+            <Icon name="moon" />
+            <span>Snooze</span>
+            <span class="workspace-options-unavailable">Not available yet</span>
+          </button>
+        </Popover>
+      )}
       <Settings
         open={settingsOpen}
         anchor={settingsAnchor}

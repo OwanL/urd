@@ -76,54 +76,50 @@ function PendingInputBubble({
           : null;
 
   return (
-    <div class="message message-user chat-pending-input">
-      <div class="chat-pending-input-header">
-        <span class="chat-pending-input-label">{preview === null ? "Queue update" : "Queued"}</span>
-        <div class="chat-pending-input-actions">
-          {canExpand && (
-            <IconButton
-              icon="chevron"
-              label={`${expanded ? "Collapse" : "Expand"} queued input preview`}
-              hint={`${expanded ? "Collapse" : "Expand"} preview`}
-              class={`chat-pending-input-expand${expanded ? " is-expanded" : ""}`}
-              aria-expanded={expanded}
-              onClick={() => setExpanded((value) => !value)}
-            />
-          )}
-          {removalStatus === "uncertain" && onCheck && (
-            <button
-              type="button"
-              class="chat-pending-input-check"
-              aria-label={checkLabel}
-              onClick={onCheck}
-            >
-              Check
-            </button>
-          )}
-          {!removalStatus && removeLabel && onRemove && (
-            <IconButton
-              icon="close"
-              label={removeLabel}
-              hint="Remove queued message"
-              class="chat-pending-input-remove"
-              disabled={disabled}
-              onClick={onRemove}
-            />
-          )}
-        </div>
-        {(status || (!removalStatus && !removeLabel)) && (
-          <span class="chat-pending-input-status" role="status">
-            {status ?? "Sending…"}
-          </span>
+    <div class={`chat-pending-input${removalStatus ? " has-removal-state" : ""}`}>
+      <div
+        ref={previewElement}
+        role={preview === null ? "status" : undefined}
+        class={`chat-pending-input-preview message-text${expanded ? " is-expanded" : ""}`}
+      >
+        {preview ?? status}
+      </div>
+      <div class="chat-pending-input-actions">
+        {canExpand && (
+          <IconButton
+            icon="chevron"
+            label={`${expanded ? "Collapse" : "Expand"} queued input preview`}
+            hint={`${expanded ? "Collapse" : "Expand"} preview`}
+            class={`chat-pending-input-expand${expanded ? " is-expanded" : ""}`}
+            aria-expanded={expanded}
+            onClick={() => setExpanded((value) => !value)}
+          />
+        )}
+        {removalStatus === "uncertain" && onCheck && (
+          <button
+            type="button"
+            class="chat-pending-input-check"
+            aria-label={checkLabel}
+            onClick={onCheck}
+          >
+            Check
+          </button>
+        )}
+        {!removalStatus && removeLabel && onRemove && (
+          <IconButton
+            icon="close"
+            label={removeLabel}
+            hint="Remove queued message"
+            class="chat-pending-input-remove"
+            disabled={disabled}
+            onClick={onRemove}
+          />
         )}
       </div>
-      {preview !== null && (
-        <div
-          ref={previewElement}
-          class={`chat-pending-input-preview message-text${expanded ? " is-expanded" : ""}`}
-        >
-          {preview}
-        </div>
+      {preview !== null && (status || (!removalStatus && !removeLabel)) && (
+        <span class="chat-pending-input-status" role="status">
+          {status ?? "Sending…"}
+        </span>
       )}
     </div>
   );
@@ -221,6 +217,11 @@ export function Conversation({
   );
   const pendingInputs = snapshot?.pendingInputs ?? [];
   const pendingExecutionId = snapshot?.unsettledExecutionId ?? null;
+  const unlistedInputRemovals = unresolvedInputRemovals.filter(
+    (removal) =>
+      pendingExecutionId !== removal.executionId ||
+      !pendingInputs.some((input) => input.submissionId === removal.submissionId),
+  );
   const state = deriveConversationState(
     chat,
     snapshot,
@@ -297,72 +298,74 @@ export function Conversation({
             ) : null
           }
         >
-          {pendingInputs.map((input) => {
-            const executionId = pendingExecutionId;
-            const removable = input.canRemove === true && executionId !== null;
-            const removal = executionId
-              ? commands.pendingInputRemoval(sessionId, executionId, input.submissionId)
-              : undefined;
-            return (
-              <PendingInputBubble
-                key={input.submissionId}
-                preview={input.preview}
-                removalStatus={removal?.status}
-                removeLabel={removable ? `Remove queued input: ${input.preview}` : undefined}
-                checkLabel={`Check removal status for pending input: ${input.preview}`}
-                disabled={!ready}
-                onRemove={
-                  removable
-                    ? () => {
-                        void commands.removePendingInput(
-                          sessionId,
-                          executionId!,
-                          input.submissionId,
-                          removable,
-                        );
-                      }
-                    : undefined
-                }
-                onCheck={
-                  removal?.status === "uncertain" && executionId
-                    ? () => {
-                        void commands.checkPendingInputRemoval(
-                          sessionId,
-                          executionId,
-                          input.submissionId,
-                        );
-                      }
-                    : undefined
-                }
-              />
-            );
-          })}
-          {unresolvedInputRemovals.map((removal) => {
-            const inputStillVisible = Boolean(
-              snapshot?.unsettledExecutionId === removal.executionId &&
-              pendingInputs.some((input) => input.submissionId === removal.submissionId),
-            );
-            if (inputStillVisible) return null;
-            return (
-              <PendingInputBubble
-                key={removal.submissionId}
-                preview={null}
-                removalStatus={removal.status}
-                checkLabel={`Check removal status for input ${removal.submissionId}`}
-                onCheck={
-                  removal.status === "uncertain"
-                    ? () => {
-                        void commands.checkPendingInputRemoval(
-                          sessionId,
-                          removal.executionId,
-                          removal.submissionId,
-                        );
-                      }
-                    : undefined
-                }
-              />
-            );
-          })}
+          {(pendingInputs.length > 0 || unlistedInputRemovals.length > 0) && (
+            <section class="chat-pending-inputs" aria-label="Queued inputs">
+              <div class="chat-pending-inputs-label">
+                {pendingInputs.length ? `Queued · ${pendingInputs.length}` : "Queue update"}
+              </div>
+              {pendingInputs.map((input) => {
+                const executionId = pendingExecutionId;
+                const removable = input.canRemove === true && executionId !== null;
+                const removal = executionId
+                  ? commands.pendingInputRemoval(sessionId, executionId, input.submissionId)
+                  : undefined;
+                return (
+                  <PendingInputBubble
+                    key={input.submissionId}
+                    preview={input.preview}
+                    removalStatus={removal?.status}
+                    removeLabel={removable ? `Remove queued input: ${input.preview}` : undefined}
+                    checkLabel={`Check removal status for pending input: ${input.preview}`}
+                    disabled={!ready}
+                    onRemove={
+                      removable
+                        ? () => {
+                            void commands.removePendingInput(
+                              sessionId,
+                              executionId!,
+                              input.submissionId,
+                              removable,
+                            );
+                          }
+                        : undefined
+                    }
+                    onCheck={
+                      removal?.status === "uncertain" && executionId
+                        ? () => {
+                            void commands.checkPendingInputRemoval(
+                              sessionId,
+                              executionId,
+                              input.submissionId,
+                            );
+                          }
+                        : undefined
+                    }
+                  />
+                );
+              })}
+              {unlistedInputRemovals.map((removal) => {
+                return (
+                  <PendingInputBubble
+                    key={removal.submissionId}
+                    preview={null}
+                    removalStatus={removal.status}
+                    checkLabel={`Check removal status for input ${removal.submissionId}`}
+                    onCheck={
+                      removal.status === "uncertain"
+                        ? () => {
+                            void commands.checkPendingInputRemoval(
+                              sessionId,
+                              removal.executionId,
+                              removal.submissionId,
+                            );
+                          }
+                        : undefined
+                    }
+                  />
+                );
+              })}
+            </section>
+          )}
           <div class="chat-status" aria-live="polite">
             {error && <span class="inline-error">{error} </span>}
             {workingDirectoryNotice && !showWorkingDirectory && (
@@ -373,7 +376,15 @@ export function Conversation({
             {readError && <button onClick={onRefresh}>Refresh</button>}
             {state.admissionFenced && <span>Session admission is fenced. </span>}
             {state.unsettledWhileFenced && <span>Unsettled execution. </span>}
-            {state.executionStatus && <span>{executionLabels[state.executionStatus]} </span>}
+            {state.executionStatus && (
+              <span
+                class={
+                  state.executionStatus === "running" ? "chat-running-announcement" : undefined
+                }
+              >
+                {executionLabels[state.executionStatus]}{" "}
+              </span>
+            )}
             {state.showStopRequested && <span>Stop requested. </span>}
             {state.settlementStatus && (
               <span class={state.settlementStatus === "failed" ? "inline-error" : undefined}>

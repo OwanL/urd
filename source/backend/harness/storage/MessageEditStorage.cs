@@ -70,7 +70,8 @@ internal sealed class MessageEditStorage(Database database, UserMessageStorage m
       """, ("$session", sessionId), ("$operation", submission.OperationId), ("$hash", hash),
         ("$revision", revision), ("$run", executionId));
     save.ExecuteNonQuery();
-    return new MessageEditReceipt(sessionId, submission.OperationId, revision, executionId);
+    return new MessageEditReceipt(SessionId: sessionId, OperationId: submission.OperationId,
+        HistoryRevision: revision, ExecutionId: executionId);
   });
 
   private MessageEditReceipt? ReadReceipt(SqliteTransaction transaction, Guid sessionId, Guid operationId, string? hash) {
@@ -83,7 +84,8 @@ internal sealed class MessageEditStorage(Database database, UserMessageStorage m
       return null;
     if (hash is not null && hash != reader.GetString(0))
       throw new UserMessageConflictException(operationId);
-    return new(sessionId, operationId, reader.GetInt64(1), reader.GetGuid(2));
+    return new(SessionId: sessionId, OperationId: operationId,
+        HistoryRevision: reader.GetInt64(1), ExecutionId: reader.GetGuid(2));
   }
 
   private (long EntryOrdinal, long RunOrdinal, int RequestIndex, long InputOrdinal, long MessageIndex) ReadTarget(

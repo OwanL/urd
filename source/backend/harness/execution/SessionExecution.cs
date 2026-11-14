@@ -122,8 +122,7 @@ internal sealed class SessionExecution : IDisposable {
       return null;
     ModelHistory context = prepared ?? await session.ReadModelHistoryAsync(ExecutionId, requestId);
     await EnsureStartingContextAsync(context.ReadMessages());
-    HistoryCompactionPlan? plan = HistoryCompactor.Prepare(context, selection,
-        startingContext!.Instructions, startingContext.Tools, reason, focus);
+    HistoryCompactionPlan? plan = HistoryCompactor.Prepare(context, selection, startingContext!, reason, focus);
     if (plan is null)
       return null;
     await session.SetCompactingAsync(ExecutionId, true);

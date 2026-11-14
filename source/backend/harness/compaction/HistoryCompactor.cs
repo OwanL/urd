@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using Urd.Core.Context;
 using Urd.Core.Providers;
 using Urd.Core.Usage;
 
@@ -8,16 +9,16 @@ internal static class HistoryCompactor {
   internal const int MaxSummaryCharacters = 32_768;
 
   internal static HistoryCompactionPlan? Prepare(ModelHistory history, LlmSelection selection,
-      IReadOnlyList<ChatMessage> instructions, IReadOnlyList<AIFunctionDeclaration> tools,
-      CompactionReason reason, string? focus = null) {
+      StartingContext startingContext, CompactionReason reason, string? focus = null) {
     ArgumentNullException.ThrowIfNull(history);
     ArgumentNullException.ThrowIfNull(selection);
-    ArgumentNullException.ThrowIfNull(instructions);
-    ArgumentNullException.ThrowIfNull(tools);
+    ArgumentNullException.ThrowIfNull(startingContext);
+    ArgumentNullException.ThrowIfNull(startingContext.Instructions);
+    ArgumentNullException.ThrowIfNull(startingContext.Tools);
     if (!Enum.IsDefined(reason)) throw new ArgumentOutOfRangeException(nameof(reason));
     if (history.Messages.Count < 2) return null;
 
-    long estimatedContextTokens = EstimateFullContext(history, instructions, tools);
+    long estimatedContextTokens = EstimateFullContext(history, startingContext);
     if (reason == CompactionReason.Threshold && !ExceedsCompactionThreshold(history, selection, estimatedContextTokens))
       return null;
 
@@ -86,10 +87,9 @@ internal static class HistoryCompactor {
         ContextTokenBudget.AddSaturating(summaryTokens, retainedHistoryTokens));
   }
 
-  private static long EstimateFullContext(ModelHistory history, IReadOnlyList<ChatMessage> instructions,
-      IReadOnlyList<AIFunctionDeclaration> tools) {
-    long total = ContextTokenBudget.EstimateMessages(instructions.Concat(history.EnumerateMessages()));
-    foreach (AIFunctionDeclaration tool in tools) {
+  private static long EstimateFullContext(ModelHistory history, StartingContext startingContext) {
+    long total = ContextTokenBudget.EstimateMessages(startingContext.Instructions.Concat(history.EnumerateMessages()));
+    foreach (AIFunctionDeclaration tool in startingContext.Tools) {
       total = ContextTokenBudget.AddSaturating(total, ContextTokenBudget.EstimateText(tool.Name));
       total = ContextTokenBudget.AddSaturating(total, ContextTokenBudget.EstimateText(tool.Description));
       total = ContextTokenBudget.AddSaturating(total, ContextTokenBudget.EstimateText(tool.JsonSchema.GetRawText()));

@@ -1,5 +1,6 @@
 import type { TargetedKeyboardEvent } from "preact";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { Icon } from "../components/Icon.tsx";
 import { IconButton } from "../components/IconButton.tsx";
 import { Popover } from "../components/Popover.tsx";
 import { composerSubmissionState } from "./ComposerSubmission.ts";
@@ -112,19 +113,29 @@ export function Composer({
       />
       <div class="composer-controls">
         <div class="composer-selections">
-          <ModelPicker
-            models={models}
-            modelKey={modelKey}
-            modelLabel={modelLabel}
-            onModelChange={onModelChange}
-            hasProviders={hasProviders}
-            loadingModels={loadingModels}
-            refreshingModels={refreshingModels}
-            modelsError={modelsError}
-            onRetryModels={onRetryModels}
-            onSetUpProvider={onSetUpProvider}
-            disabled={locked}
-          />
+          {hasProviders === false ? (
+            <button
+              class="composer-selector composer-model-add-provider"
+              type="button"
+              disabled={locked}
+              onClick={onSetUpProvider}
+            >
+              <Icon name="plus" />
+              <span>Add provider</span>
+            </button>
+          ) : (
+            <ModelPicker
+              models={models}
+              modelKey={modelKey}
+              modelLabel={modelLabel}
+              onModelChange={onModelChange}
+              loadingModels={loadingModels}
+              refreshingModels={refreshingModels}
+              modelsError={modelsError}
+              onRetryModels={onRetryModels}
+              disabled={locked}
+            />
+          )}
           <ReasoningPicker
             effort={reasoningEffort}
             options={reasoningOptions}

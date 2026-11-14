@@ -11,12 +11,10 @@ export interface ModelPickerProps {
   modelKey: string | null;
   modelLabel: string;
   onModelChange: (key: string) => void;
-  hasProviders: boolean | null;
   loadingModels: boolean;
   refreshingModels: boolean;
   modelsError: string | null;
   onRetryModels: () => void;
-  onSetUpProvider: () => void;
   disabled: boolean;
 }
 

@@ -167,6 +167,9 @@
   height: 14px;
   fill: currentColor;
 }
+.composer-model-add-provider {
+  flex: none;
+}
 .composer-model {
   flex: 0 1 auto;
   min-width: 0;
@@ -317,25 +320,9 @@
   font-size: 12px;
 }
 .composer-model-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 10px;
   padding: 16px 8px;
   color: var(--text-secondary);
   font-size: 12px;
-}
-.composer-model-setup {
-  min-height: 32px;
-  padding: 5px 10px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 5px;
-  background: var(--surface-hover);
-  color: var(--text-primary);
-  font-size: 12px;
-}
-.composer-model-setup:hover {
-  border-color: var(--text-secondary);
 }
 .composer-reasoning-popover {
   width: 168px;

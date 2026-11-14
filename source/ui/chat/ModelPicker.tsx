@@ -10,12 +10,10 @@ export function ModelPicker({
   modelKey,
   modelLabel,
   onModelChange,
-  hasProviders,
   loadingModels,
   refreshingModels,
   modelsError,
   onRetryModels,
-  onSetUpProvider,
   disabled,
 }: ModelPickerProps) {
   const id = useId();
@@ -187,24 +185,10 @@ export function ModelPicker({
               <span role="status">
                 {query.trim()
                   ? "No models match your search"
-                  : hasProviders === false
-                    ? "No providers set up"
-                    : loadingModels || refreshingModels
-                      ? "Loading models…"
-                      : "No models available"}
+                  : loadingModels || refreshingModels
+                    ? "Loading models…"
+                    : "No models available"}
               </span>
-              {!query.trim() && hasProviders === false && (
-                <button
-                  class="composer-model-setup"
-                  type="button"
-                  onClick={() => {
-                    close(false);
-                    onSetUpProvider();
-                  }}
-                >
-                  Set up a provider
-                </button>
-              )}
             </div>
           )}
           {modelsError && (

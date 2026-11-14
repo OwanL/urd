@@ -3,6 +3,9 @@
   grid-column: 1 / -1;
   grid-template-columns: subgrid;
   align-items: center;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-subtle);
   color: var(--text-secondary);
   white-space: nowrap;
 }

@@ -15,8 +15,9 @@ selectors, Send, Stop and integrated [provider settings](provider-management.md#
 Tabs take the header's remaining width beside New chat and Workspace options. Each tab fits within
 its scroll strip; activation, title changes and strip resizing reveal the active tab without fighting
 a drag. Tabs have a preferred width of 180px and truncate long titles. Workspace options holds Settings
-and the unavailable Snooze action. The fresh-chat screen shows labeled 24h and 7d API cost totals above
-the working-directory controls; these are rolling 24-hour and 168-hour windows, not calendar days.
+and the unavailable Snooze action. The fresh-chat screen shows working-directory controls first, then a
+subtle separator and labeled 24h and 7d API cost totals. These are rolling 24-hour and 168-hour windows,
+not calendar days.
 The composer keeps only session cost, context and working time. Its session-cost popover has Session,
 24h and 7d tabs; switching scopes reads that scope on demand without changing the session-cost chip.
 When the row cannot fit the session indicators, they move into More without displacing model,

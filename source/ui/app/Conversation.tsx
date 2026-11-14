@@ -287,7 +287,6 @@ export function Conversation({
           emptyState={
             (showWorkingDirectory || workingDirectoryLocked) && snapshot ? (
               <div class="empty-chat-overview">
-                <UsageOverview active={active && visible} refreshKey={refresh} />
                 <SessionWorkingDirectory
                   client={client}
                   sessionId={sessionId}
@@ -298,6 +297,7 @@ export function Conversation({
                   onSnapshot={acceptSnapshot}
                   onRefresh={onRefresh}
                 />
+                <UsageOverview active={active && visible} refreshKey={refresh} />
               </div>
             ) : null
           }

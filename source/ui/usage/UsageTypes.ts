@@ -11,11 +11,13 @@ export interface UsageBreakdown {
   model: string;
   purpose: string;
   totals: UsageTotals;
+  isOther?: boolean;
 }
 
 export interface UsagePoint {
   at: string;
   totals: UsageTotals;
+  breakdown: UsageBreakdown[];
 }
 
 export interface UsageTokens {

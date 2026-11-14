@@ -20,8 +20,8 @@ SDK transport retries are disabled.
 Background tool operations do not themselves consume model tokens; model follow-ups
 use the ordinary execution path. This does not add a subagent feature.
 
-Schema **25** stores `usage_requests` separately from conversation history, without
-history foreign keys. Editing or replacing history does not erase accounting.
+The `usage_requests` ledger (introduced in schema 25) is separate from conversation
+history, without history foreign keys. Editing or replacing history does not erase accounting.
 Each record retains provider/connection, model, session/execution, purpose, times,
 token quantities, rate source/capture date and quoted rates. Reasoning is retained
 as a subset of output, never charged again. Amounts use integer nanodollars.
@@ -34,8 +34,8 @@ since the last checkpoint. Provider-reported usage lost in a disconnected stream
 cannot be recovered automatically.
 
 The pre-release schema policy applies: older databases are refused, not migrated.
-Do not run a schema-25 build against an active schema-24 profile or delete that
-profile to make verification pass. Use an isolated temporary profile.
+Do not run a newer-schema build against an active older-schema profile or delete
+that profile to make verification pass. Use an isolated temporary profile.
 
 ## Pricing and uncertainty
 
@@ -67,20 +67,27 @@ would require separately authorized requests and a representative reference corp
 
 ## Browser and HTTP
 
-The composer shows session cost. The workspace also shows Today and Last 7 days,
-using browser-local midnight. Hover, click or keyboard access opens a compact total
-and cumulative history. Chart.js is loaded only while a history view is mounted;
-charts and listeners are destroyed on close. Breakdowns, request quantities and rate
-provenance are collapsed behind deliberate disclosure, with a table alternative for
-keyboard and screen-reader access to chart values. `~` marks estimates; unknown costs
-are explicit. Failed refreshes retain stale values. Hidden documents and inactive
-session views do not poll.
+The composer shows session cost; its popover shows provider composition and cost
+sources. Provider legends reveal model totals on hover, focus or click. The workspace's
+two cost totals reveal Today and Last 7 days (browser-local midnight), with cumulative
+provider-stacked history and per-point model costs. Focus the chart and use arrow keys,
+Home or End to inspect samples; the model breakdown is readable HTML. Escape dismisses
+the nearest detail first. Request records and rate provenance remain available through
+the API, not a ledger accordion in the cost tooltip.
+
+Inspection snapshots stay fixed until reopened while the cost chips continue refreshing.
+Chart.js loads on demand; charts and listeners are destroyed on close. `~` marks estimates;
+unknown costs stay explicit and only known amounts are plotted. Failed chip refreshes
+retain stale values. Hidden documents and inactive session views do not poll.
 
 `GET /api/usage?sessionId=<guid>` reads a session. Global reads require finite ISO
 `from`/`to` timestamps spanning at most 31 days. Both range bounds are inclusive;
 requests are attributed by start time. Add `detail=false` for totals only. Detailed
-responses bound breakdown/history to 64 entries and recent requests to 20; totals
-still cover the complete selected range. The route uses ordinary browser admission
+responses bound breakdown/history to 64 entries and recent requests to 20. Overflow
+provider/model/purpose groups become an explicit `isOther` aggregate, conserving all
+amounts and counts. Each history interval includes the same bounded breakdown identities;
+its timestamp is the last observed request in that occupied bucket. The chart trims
+empty time before and after activity. Totals cover the complete selected range. The route uses ordinary browser admission
 and private/no-store response rules.
 
 ## Verification

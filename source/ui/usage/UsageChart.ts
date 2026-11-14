@@ -1,5 +1,26 @@
-import { Chart, LineController, LineElement, PointElement, LinearScale, Tooltip } from "chart.js";
+import {
+  Chart,
+  BarController,
+  BarElement,
+  CategoryScale,
+  Filler,
+  LineController,
+  LineElement,
+  PointElement,
+  LinearScale,
+  Tooltip,
+} from "chart.js";
 
-Chart.register(LineController, LineElement, PointElement, LinearScale, Tooltip);
+Chart.register(
+  BarController,
+  BarElement,
+  CategoryScale,
+  Filler,
+  LineController,
+  LineElement,
+  PointElement,
+  LinearScale,
+  Tooltip,
+);
 
 export { Chart };

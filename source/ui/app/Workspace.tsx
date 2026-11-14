@@ -23,7 +23,6 @@ import { useWorkspaceModels } from "./useWorkspaceModels.ts";
 import { useWorkspaceNavigation } from "./useWorkspaceNavigation.ts";
 import { useSessionEvents } from "./useSessionEvents.ts";
 import { useWorkspaceRetention } from "./useWorkspaceRetention.ts";
-import { UsageOverview } from "../usage/UsageOverview.tsx";
 import "./workspace.css";
 
 const sessions = new SessionClient(new URL(window.location.href));
@@ -262,9 +261,6 @@ export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) 
       ) : (
         <div class="empty-workspace" />
       )}
-      <footer class="workspace-footer">
-        <UsageOverview />
-      </footer>
     </main>
   );
 }

@@ -3,6 +3,7 @@ import { MessageEditingContext, InlineMessageEditor } from "./EditableMessage.ts
 import type { MessageEditing } from "./MessageEditing.ts";
 import { Composer } from "../chat/Composer.tsx";
 import { SessionIndicators } from "../chat/SessionIndicators.tsx";
+import { UsageOverview } from "../usage/UsageOverview.tsx";
 import { IconButton } from "../components/IconButton.tsx";
 import type { LlmSelection } from "../providers/LlmSelection.ts";
 import type { SessionClient } from "../sessions/SessionClient.ts";
@@ -494,17 +495,24 @@ export function Conversation({
         )}
       <Composer
         indicators={
-          <SessionIndicators
-            contextUsage={snapshot?.contextUsage ?? null}
-            contextWindow={selection?.contextWindow ?? null}
-            workingTime={snapshot?.workingTime ?? null}
-            active={active && visible && notice !== null}
-            fenced={snapshot?.admissionFenced ?? true}
-            sessionId={sessionId}
-            usageActive={active && visible}
-            usageBusy={state.active || chat.pending?.status === "sending"}
-            usageRefresh={`${refresh}:${state.active || chat.pending?.status === "sending" ? "" : (notice ?? "")}`}
-          />
+          <>
+            <UsageOverview
+              active={active && visible}
+              busy={state.active || chat.pending?.status === "sending"}
+              refreshKey={`${refresh}:${state.active || chat.pending?.status === "sending" ? "" : (notice ?? "")}`}
+            />
+            <SessionIndicators
+              contextUsage={snapshot?.contextUsage ?? null}
+              contextWindow={selection?.contextWindow ?? null}
+              workingTime={snapshot?.workingTime ?? null}
+              active={active && visible && notice !== null}
+              fenced={snapshot?.admissionFenced ?? true}
+              sessionId={sessionId}
+              usageActive={active && visible}
+              usageBusy={state.active || chat.pending?.status === "sending"}
+              usageRefresh={`${refresh}:${state.active || chat.pending?.status === "sending" ? "" : (notice ?? "")}`}
+            />
+          </>
         }
         text={chat.draft}
         onTextChange={(text) => {

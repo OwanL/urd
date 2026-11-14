@@ -28,14 +28,6 @@
   padding: 7px;
 }
 
-.workspace-footer {
-  display: flex;
-  justify-content: flex-end;
-  flex: none;
-  min-width: 0;
-  padding: 0 12px 4px;
-}
-
 .workspace-options-action {
   display: flex;
   align-items: center;

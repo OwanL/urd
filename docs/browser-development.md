@@ -14,9 +14,11 @@ The workspace has closable, reorderable local tabs, transcript, model and reason
 selectors, Send, Stop and integrated [provider settings](provider-management.md#browser-settings).
 Tabs take the header's remaining width beside New chat and Workspace options. Each tab fits within
 its scroll strip; activation, title changes and strip resizing reveal the active tab without fighting
-a drag. Workspace options holds Settings and the unavailable Snooze action. Global cost totals stay
-visible in a quiet footer below the composer; detailed usage opens on demand from those totals.
-The conversation is centered and width-bounded on wide screens.
+a drag. Workspace options holds Settings and the unavailable Snooze action. Small global cost totals
+sit beside session indicators inside the composer's control row, with detailed usage on demand.
+When the row cannot fit them, accounting moves into More without displacing model, reasoning, Stop or
+Send/Continue. There is no separate accounting footer. The conversation is centered and width-bounded
+on wide screens.
 The model picker loads cached catalogs immediately, discovers missing catalogs on startup and
 rediscovers after provider changes, without polling or a routine refresh action. With no providers,
 the model and reasoning selectors are replaced by an Add provider action that opens Settings →

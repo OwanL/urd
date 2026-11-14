@@ -91,7 +91,7 @@ export function Composer({
         class="composer-input"
         ref={input}
         aria-label="Message"
-        placeholder="Ask away"
+        placeholder="Ask Urd"
         rows={1}
         value={text}
         onInput={(event) => onTextChange(event.currentTarget.value)}

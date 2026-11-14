@@ -30,27 +30,29 @@ export function WorkingDirectoryRow({
   return (
     <div class="chat-working-directory-row">
       <span class="chat-working-directory-label">{label}</span>
-      <code class="chat-working-directory-path" title={directory ?? undefined}>
-        {directory ?? "…"}
-      </code>
-      <button
-        ref={anchor}
-        class="chat-working-directory-edit"
-        type="button"
-        aria-label={`Edit ${label.toLowerCase()}`}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        aria-disabled={disabled || busy}
-        onClick={() => {
-          if (!disabled && !busy) {
-            onDraftChange();
-            setOpen(true);
-          }
-        }}
-      >
-        <Icon name="edit" />
-        Edit
-      </button>
+      <div class="chat-working-directory-value">
+        <code class="chat-working-directory-path" title={directory ?? undefined}>
+          {directory ?? "…"}
+        </code>
+        <button
+          ref={anchor}
+          class="chat-working-directory-edit"
+          type="button"
+          aria-label={`Edit ${label.toLowerCase()}`}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          aria-disabled={disabled || busy}
+          onClick={() => {
+            if (!disabled && !busy) {
+              onDraftChange();
+              setOpen(true);
+            }
+          }}
+        >
+          <Icon name="edit" />
+          Edit
+        </button>
+      </div>
       {open ? (
         <FolderPicker
           anchor={anchor}

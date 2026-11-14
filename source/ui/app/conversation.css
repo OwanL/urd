@@ -172,12 +172,12 @@
 
 .empty-chat-overview {
   display: grid;
-  grid-template-columns: max-content minmax(0, 1fr) auto;
+  grid-template-columns: max-content minmax(0, 1fr);
   width: fit-content;
   max-width: min(100%, 40rem);
   min-width: 0;
   margin: 0 auto;
-  column-gap: 16px;
+  column-gap: 12px;
 }
 
 .chat-working-directory {
@@ -194,6 +194,13 @@
   display: contents;
 }
 
+.chat-working-directory-value {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
 .chat-working-directory-path {
   min-width: 0;
   color: var(--text-primary);
@@ -207,9 +214,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
-  min-height: 34px;
-  padding: 4px 8px;
+  flex: none;
+  gap: 4px;
+  min-height: 28px;
+  padding: 2px 4px;
   border: 1px solid transparent;
   border-radius: 5px;
   background: transparent;

@@ -298,9 +298,9 @@ export function Conversation({
         onModelChange={(key) => {
           const option = models.options.find((model) => model.key === key);
           if (option)
-            choose({ ...option.selection, reasoningEffort: selection?.reasoningEffort ?? null });
+            choose({ ...option.selection, reasoningEffort: selection?.reasoningEffort ?? "high" });
         }}
-        reasoningEffort={selection?.reasoningEffort ?? null}
+        reasoningEffort={selection?.reasoningEffort ?? "high"}
         reasoningOptions={efforts}
         onReasoningChange={(effort) => {
           if (selection) choose({ ...selection, reasoningEffort: effort });

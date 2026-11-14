@@ -20,7 +20,7 @@ public sealed record LlmSelection(
 
   // These are the standard effort levels in the pinned MEAI SDK, not model capabilities.
   internal Microsoft.Extensions.AI.ReasoningEffort? ReadReasoningEffort() => ReasoningEffort switch {
-    null => null,
+    null => Microsoft.Extensions.AI.ReasoningEffort.High,
     "none" => Microsoft.Extensions.AI.ReasoningEffort.None,
     "low" => Microsoft.Extensions.AI.ReasoningEffort.Low,
     "medium" => Microsoft.Extensions.AI.ReasoningEffort.Medium,

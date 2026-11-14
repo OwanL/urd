@@ -91,7 +91,7 @@ function mapModels(
         family: modelSettings?.family ?? "other",
         supportsImages: modelSettings?.supportsImages ?? false,
         contextWindow: modelSettings?.contextWindow ?? model.contextWindow ?? null,
-        reasoningEffort: null,
+        reasoningEffort: "high",
       },
     };
   });

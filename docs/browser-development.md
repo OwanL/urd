@@ -265,8 +265,9 @@ account requests were made for these checks; screenshots stay in an owned temp f
   Local unsent choices are not a separate mutable server-settings endpoint.
 - `latestLlmSelection` is the initiating choice of the newest execution, active or
   settled. Null represents an empty session, not a fake model default for new
-  Sends. Null reasoning means provider default; explicit efforts are `none`, `low`,
-  `medium`, `high`, `extraHigh`. Those are request values, not a claim that every
+  Sends. Reasoning defaults to `high`, including when the submitted effort is null.
+  The selector offers `none`, `low`, `medium`, `high`, `extraHigh`, with no provider-default
+  option. Those are request values, not a claim that every
   model supports them. Current catalogs provide IDs/names, not reasoning capability.
 
 The [context-choice alignment](ARCHITECTURE.md#provider-specific-context-choices)

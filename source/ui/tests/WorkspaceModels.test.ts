@@ -49,11 +49,13 @@ void test("cached reads do not discover models; explicit refresh does", async ()
   assert.equal(cached.options?.[0]?.selection.family, "other");
   assert.equal(cached.options?.[0]?.selection.supportsImages, false);
   assert.equal(cached.options?.[0]?.selection.contextWindow, null);
+  assert.equal(cached.options?.[0]?.selection.reasoningEffort, "high");
   assert.equal(cachedReads, 1);
   assert.equal(discoveries, 0);
 
   const refreshed = await models.refresh();
   assert.equal(refreshed.options?.[0]?.key, `${firstConnection.id}/discovered`);
+  assert.equal(refreshed.options?.[0]?.selection.reasoningEffort, "high");
   assert.equal(discoveries, 1);
 });
 

@@ -11,10 +11,8 @@ interface ReasoningPickerProps {
   disabled: boolean;
 }
 
-function effortLabel(effort: string | null): string {
+function effortLabel(effort: string): string {
   switch (effort) {
-    case null:
-      return "Default";
     case "none":
       return "None";
     case "low":
@@ -30,7 +28,13 @@ function effortLabel(effort: string | null): string {
   }
 }
 
-export function ReasoningPicker({ effort, options, onChange, disabled }: ReasoningPickerProps) {
+export function ReasoningPicker({
+  effort: selectedEffort,
+  options,
+  onChange,
+  disabled,
+}: ReasoningPickerProps) {
+  const effort = selectedEffort ?? "high";
   const id = useId();
   const trigger = useRef<HTMLButtonElement>(null);
   const activeOption = useRef<HTMLButtonElement>(null);
@@ -38,9 +42,8 @@ export function ReasoningPicker({ effort, options, onChange, disabled }: Reasoni
   const [activeIndex, setActiveIndex] = useState(0);
   const expanded = open && !disabled;
   const efforts = [...new Set(options)];
-  const unknownEffort = effort !== null && !efforts.includes(effort);
+  const unknownEffort = !efforts.includes(effort);
   const choices = [
-    { value: null, disabled: false },
     ...(unknownEffort ? [{ value: effort, disabled: true }] : []),
     ...efforts.map((value) => ({ value, disabled: false })),
   ];
@@ -62,7 +65,7 @@ export function ReasoningPicker({ effort, options, onChange, disabled }: Reasoni
     setOpen(true);
   }
 
-  function choose(value: string | null) {
+  function choose(value: string) {
     if (disabled) return;
     setOpen(false);
     trigger.current?.focus({ preventScroll: true });
@@ -128,7 +131,7 @@ export function ReasoningPicker({ effort, options, onChange, disabled }: Reasoni
         >
           {choices.map((choice, index) => (
             <button
-              key={choice.value === null ? "default" : `effort:${choice.value}`}
+              key={`effort:${choice.value}`}
               ref={index === activeIndex ? activeOption : null}
               class={`composer-reasoning-option${index === activeIndex ? " is-active" : ""}`}
               type="button"

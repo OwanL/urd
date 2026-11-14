@@ -49,8 +49,15 @@ public sealed class LlmSelectionTests {
     await manager.ShutdownSessionsAsync().WaitAsync(TestTimeout);
   }
 
-  [Fact]
-  public async Task LazyBorrowedFactoryCanReenterAndAllToolRequestsKeepTheInitiatingOptions() {
+  [Theory]
+  [InlineData(null, ReasoningEffort.High)]
+  [InlineData("low", ReasoningEffort.Low)]
+  [InlineData("high", ReasoningEffort.High)]
+  [InlineData("none", ReasoningEffort.None)]
+  [InlineData("medium", ReasoningEffort.Medium)]
+  [InlineData("extraHigh", ReasoningEffort.ExtraHigh)]
+  public async Task LazyBorrowedFactoryCanReenterAndAllToolRequestsKeepTheInitiatingOptions(
+      string? reasoningEffort, ReasoningEffort expectedEffort) {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     int round = 0, factories = 0;
@@ -58,7 +65,7 @@ public sealed class LlmSelectionTests {
         ? ToolBatch(token, new FunctionCallContent("call", "step", new Dictionary<string, object?> { ["number"] = 1 }))
         : Complete(token));
     PrimarySession? session = null;
-    LlmSelection selection = TestLlmSelection.Default with { ModelId = "chosen-model", ReasoningEffort = "high" };
+    LlmSelection selection = TestLlmSelection.Default with { ModelId = "chosen-model", ReasoningEffort = reasoningEffort };
     var manager = new SessionManager(store, binding => {
       Interlocked.Increment(ref factories);
       Assert.Equal(selection.Connection, binding);
@@ -75,7 +82,7 @@ public sealed class LlmSelectionTests {
       Assert.Equal(2, client.Calls);
       Assert.All(client.Options, options => {
         Assert.Equal(selection.ModelId, options!.ModelId);
-        Assert.Equal(ReasoningEffort.High, options.Reasoning!.Effort);
+        Assert.Equal(expectedEffort, options.Reasoning!.Effort);
       });
     } finally {
       await manager.ShutdownSessionsAsync().WaitAsync(TestTimeout);

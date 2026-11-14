@@ -3,7 +3,7 @@ import type { UsageRange, UsageSummary } from "./UsageTypes.ts";
 import { UsageClient } from "./UsageClient.ts";
 import { UsageComposition } from "./UsageComposition.tsx";
 import { UsageHistory } from "./UsageHistory.tsx";
-import { UsageProviders } from "./UsageProviders.tsx";
+import { UsageProviderBreakdown, UsageProviders } from "./UsageProviders.tsx";
 import { useUsageSummary } from "./useUsageSummary.ts";
 import {
   cumulativeUsageHistory,
@@ -93,7 +93,11 @@ function SummaryContent({
           onSelect={setSelected}
         />
       )}
-      <UsageProviders providers={providers} onInspect={() => setSelected(null)} />
+      {session ? (
+        <UsageProviderBreakdown providers={providers} />
+      ) : (
+        <UsageProviders providers={providers} onInspect={() => setSelected(null)} />
+      )}
       {session && sources.length > 1 && (
         <section class="usage-sources">
           <h3>Cost sources</h3>

@@ -53,10 +53,24 @@ export function UsagePointDetails({
         <span>{formatUsageTime(point.at)}</span>
         <strong>{formatUsageCost(point.totals)}</strong>
       </header>
-      {usageProviders(point.breakdown)
+      <UsageProviderBreakdown providers={usageProviders(point.breakdown)} colors={colors} />
+    </div>
+  );
+}
+
+export function UsageProviderBreakdown({
+  providers,
+  colors = usageColors(providers.map((provider) => provider.key)),
+}: {
+  providers: UsageProvider[];
+  colors?: Record<string, string>;
+}) {
+  return (
+    <div class="usage-provider-breakdown">
+      {providers
         .filter((provider) => provider.totals.requests > 0)
         .map((provider) => (
-          <section class="usage-point-provider" key={provider.key}>
+          <section class="usage-provider-section" key={provider.key}>
             <div class="usage-row">
               <span class="usage-provider-name">
                 <span class="usage-swatch" style={{ background: colors[provider.key] }} />

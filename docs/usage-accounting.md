@@ -67,8 +67,10 @@ would require separately authorized requests and a representative reference corp
 
 ## Browser and HTTP
 
-The composer shows session cost; its popover shows provider composition and cost
-sources. Provider legends reveal model totals on hover, focus or click. The workspace's
+The composer shows session cost; its popover shows provider composition with model
+costs directly underneath, followed by cost sources. History provider legends reveal
+model totals on hover, focus or click. Session and history-point details share the
+same provider/model breakdown. The workspace's
 two cost totals reveal Today and Last 7 days (browser-local midnight), with cumulative
 provider-stacked history and per-point model costs. Focus the chart and use arrow keys,
 Home or End to inspect samples; the model breakdown is readable HTML. Escape dismisses

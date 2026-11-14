@@ -213,6 +213,7 @@ export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) 
             messageEditing={messageEditing}
             stop={commandState.stopping[id]}
             checking={commandState.checking[id] ?? false}
+            checkingContinuation={commandState.checkingContinuations[id] ?? false}
             models={models}
             preferences={workingDirectoryPreferences}
             ready={connected}

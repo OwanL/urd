@@ -14,6 +14,8 @@ export interface ConversationState {
   selection: LlmSelection | null;
   textError: string | null;
   canSend: boolean;
+  canContinue: boolean;
+  continuationAvailable: boolean;
   canResendNotSent: boolean;
   admissionFenced: boolean;
   unsettledWhileFenced: boolean;
@@ -29,6 +31,7 @@ export function deriveConversationState(
   stop: WorkspaceStopState | undefined,
   ready: boolean,
   canPersist: boolean,
+  pendingCommand = false,
 ): ConversationState {
   const active = Boolean(snapshot?.unsettledExecutionId && !snapshot.admissionFenced);
   const compacting = Boolean(active && snapshot?.isCompacting);
@@ -36,7 +39,9 @@ export function deriveConversationState(
   const selectionLocked = Boolean(
     active ||
     chat.pending ||
-    chat.messageEdit?.submission ||
+    chat.pendingContinuation ||
+    chat.messageEdit ||
+    pendingCommand ||
     stopId ||
     snapshot?.stopRequested ||
     snapshot?.admissionFenced ||
@@ -51,7 +56,9 @@ export function deriveConversationState(
     canPersist &&
     !compacting &&
     !chat.pending &&
-    !chat.messageEdit?.submission &&
+    !chat.pendingContinuation &&
+    !chat.messageEdit &&
+    !pendingCommand &&
     !snapshot.admissionFenced &&
     !snapshot.stopRequested &&
     !stopId &&
@@ -61,6 +68,25 @@ export function deriveConversationState(
   );
   const canSend = Boolean(
     ready && snapshot && selection && chat.draft.trim() && !textError && canResendNotSent,
+  );
+  const continuationAvailable = Boolean(
+    snapshot?.canContinue === true && snapshot.lastSettlement?.executionId,
+  );
+  const canContinue = Boolean(
+    ready &&
+    canPersist &&
+    continuationAvailable &&
+    snapshot !== null &&
+    snapshot.unsettledExecutionId === null &&
+    !snapshot.admissionFenced &&
+    !snapshot.stopRequested &&
+    selection &&
+    !chat.pending &&
+    !chat.pendingContinuation &&
+    !chat.messageEdit &&
+    !chat.knownExecutionId &&
+    !stop &&
+    !pendingCommand,
   );
   const admissionFenced = Boolean(snapshot?.admissionFenced);
   const unsettledWhileFenced = Boolean(snapshot?.unsettledExecutionId && admissionFenced);
@@ -94,5 +120,7 @@ export function deriveConversationState(
     showStopRequested,
     settlementStatus,
     pendingStatus: chat.pending?.status ?? null,
+    canContinue,
+    continuationAvailable,
   };
 }

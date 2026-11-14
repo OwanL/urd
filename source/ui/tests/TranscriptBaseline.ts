@@ -541,7 +541,7 @@ async function main() {
     await installProbe(page);
     const streamId = ids[5]!;
     const workspace = encodeWorkspace({
-      version: 5,
+      version: 6,
       tabs: ids,
       activeId: streamId,
       chats: Object.fromEntries(ids.map((id) => [id, newChat(null)])),

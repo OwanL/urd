@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { deriveConversationState } from "../app/ConversationState.ts";
+import { composerSubmissionState } from "../chat/ComposerSubmission.ts";
 import type { WorkspaceStopState } from "../app/WorkspaceCommands.ts";
 import { newChat } from "../app/WorkspaceState.ts";
 import type { ChatState } from "../app/WorkspaceState.ts";
 import type { LlmSelection } from "../providers/LlmSelection.ts";
 import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
 import type { UserMessageSubmission } from "../sessions/UserMessageSubmission.ts";
+import type { ContinuationSubmission } from "../sessions/Continuation.ts";
 
 const sessionId = "10000000-0000-0000-0000-000000000001";
 const executionId = "20000000-0000-0000-0000-000000000002";
@@ -36,6 +38,7 @@ function snapshot(overrides: Partial<SessionSnapshot> = {}): SessionSnapshot {
     workingDirectory: null,
     canChangeWorkingDirectory: true,
     admissionFenced: false,
+    canContinue: false,
     unsettledExecutionId: null,
     stopRequested: false,
     lastSettlement: null,
@@ -58,6 +61,25 @@ function pendingChat(status: "sending" | "uncertain"): ChatState {
     pending: { original, draftVersion: chat.draftVersion, status },
   };
 }
+
+void test("an empty composer submits Continue only when explicitly eligible", () => {
+  assert.deepEqual(composerSubmissionState("", false, true, true), {
+    action: "continue",
+    label: "Continue",
+  });
+  assert.deepEqual(composerSubmissionState("  ", false, false, false), {
+    action: null,
+    label: "Send",
+  });
+  assert.deepEqual(composerSubmissionState("draft", true, true, true), {
+    action: "send",
+    label: "Send",
+  });
+  assert.deepEqual(composerSubmissionState("draft", false, true, true), {
+    action: null,
+    label: "Send",
+  });
+});
 
 void test("send and resend share execution gates but retain distinct input requirements", () => {
   const available = deriveConversationState(chat, snapshot(), undefined, true, true);
@@ -105,6 +127,56 @@ void test("send and resend share execution gates but retain distinct input requi
   const noSnapshot = deriveConversationState(chat, null, undefined, true, true);
   assert.equal(noSnapshot.canSend, false);
   assert.equal(noSnapshot.canResendNotSent, false);
+});
+
+void test("Continue eligibility requires the core capability, idle session and no local command", () => {
+  const settled = snapshot({
+    canContinue: true,
+    lastSettlement: { executionId, outcome: "completed" },
+  });
+  const empty = { ...chat, draft: "" };
+  const eligible = deriveConversationState(empty, settled, undefined, true, true);
+  assert.equal(eligible.canSend, false);
+  assert.equal(eligible.continuationAvailable, true);
+  assert.equal(eligible.canContinue, true);
+
+  assert.equal(
+    deriveConversationState(empty, snapshot(), undefined, true, true).canContinue,
+    false,
+  );
+  assert.equal(
+    deriveConversationState(
+      empty,
+      { ...settled, unsettledExecutionId: executionId },
+      undefined,
+      true,
+      true,
+    ).canContinue,
+    false,
+  );
+  assert.equal(deriveConversationState(empty, settled, undefined, false, true).canContinue, false);
+  assert.equal(deriveConversationState(empty, settled, undefined, true, false).canContinue, false);
+  assert.equal(
+    deriveConversationState(empty, settled, undefined, true, true, true).canContinue,
+    false,
+  );
+
+  const original: ContinuationSubmission = {
+    operationId: "60000000-0000-0000-0000-000000000006",
+    expectedHistoryRevision: 7,
+    expectedLastExecutionId: executionId,
+    llmSelection: selection,
+  };
+  const uncertain = deriveConversationState(
+    { ...chat, pendingContinuation: { original, status: "uncertain" } },
+    settled,
+    undefined,
+    true,
+    true,
+  );
+  assert.equal(uncertain.selectionLocked, true);
+  assert.equal(uncertain.canSend, false);
+  assert.equal(uncertain.canContinue, false);
 });
 
 void test("active execution steers selection; fencing locks without steering it", () => {

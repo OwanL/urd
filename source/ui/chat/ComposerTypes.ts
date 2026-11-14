@@ -32,9 +32,12 @@ export interface ComposerProps {
   onReasoningChange: (effort: string | null) => void;
   selectionLocked: boolean;
   canSend: boolean;
+  canContinue: boolean;
+  continuationAvailable: boolean;
   working: boolean;
   stopping: boolean;
   onSend: () => void;
+  onContinue: () => void;
   onStop: () => void;
   indicators?: ComponentChildren;
 }

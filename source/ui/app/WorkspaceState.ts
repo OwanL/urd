@@ -1,6 +1,7 @@
 import type { LlmSelection } from "../providers/LlmSelection.ts";
 import type { MessageEditDraft } from "../sessions/MessageEdit.ts";
 import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
+import type { ContinuationReceipt, ContinuationSubmission } from "../sessions/Continuation.ts";
 import type {
   MessageRefusalReason,
   UserMessageReceipt,
@@ -12,6 +13,7 @@ export interface ChatState {
   draftVersion: number;
   selection: LlmSelection | null;
   pending: PendingSubmission | null;
+  pendingContinuation: PendingContinuation | null;
   messageEdit?: MessageEditDraft | undefined;
   knownExecutionId: string | null;
   title: string;
@@ -29,8 +31,13 @@ export interface PendingSubmission {
   preserveDraft?: boolean;
 }
 
+export interface PendingContinuation {
+  original: ContinuationSubmission;
+  status: "sending" | "uncertain";
+}
+
 export interface WorkspaceState {
-  version: 5;
+  version: 6;
   tabs: string[];
   activeId: string | null;
   chats: Record<string, ChatState>;
@@ -64,7 +71,7 @@ export function executionSettled(
 }
 
 export function emptyWorkspace(): WorkspaceState {
-  return { version: 5, tabs: [], activeId: null, chats: {}, lastSelection: null };
+  return { version: 6, tabs: [], activeId: null, chats: {}, lastSelection: null };
 }
 
 export function newChat(selection: LlmSelection | null): ChatState {
@@ -73,6 +80,7 @@ export function newChat(selection: LlmSelection | null): ChatState {
     draftVersion: 0,
     selection,
     pending: null,
+    pendingContinuation: null,
     knownExecutionId: null,
     title: "New chat",
     titleProvenance: "placeholder",
@@ -99,6 +107,33 @@ export function beginSubmission(
       status: "sending",
       ...(preserveDraft ? { preserveDraft: true } : {}),
     },
+    error: null,
+  };
+}
+
+export function beginContinuation(chat: ChatState, original: ContinuationSubmission): ChatState {
+  if (!isContinuationSubmission(original)) throw new TypeError("Invalid original continuation.");
+  return {
+    ...chat,
+    pendingContinuation: { original: copyContinuationSubmission(original), status: "sending" },
+    error: null,
+  };
+}
+
+export function applyContinuationReceipt(
+  chat: ChatState,
+  sessionId: string,
+  receipt: unknown,
+): ChatState {
+  if (!isContinuationReceipt(receipt)) throw new TypeError("Invalid continuation receipt.");
+  if (receipt.sessionId !== sessionId) throw new TypeError("Receipt belongs to another session.");
+  const pending = chat.pendingContinuation;
+  if (pending === null || pending.original.operationId !== receipt.operationId)
+    throw new TypeError("Receipt does not match the original continuation.");
+  return {
+    ...chat,
+    pendingContinuation: null,
+    knownExecutionId: receipt.executionId,
     error: null,
   };
 }
@@ -136,6 +171,10 @@ export function decodeWorkspace(raw: string): WorkspaceState {
         {
           ...chat,
           pending: chat.pending === null ? null : { ...chat.pending, status: "uncertain" },
+          pendingContinuation:
+            chat.pendingContinuation === null
+              ? null
+              : { ...chat.pendingContinuation, status: "uncertain" },
           messageEdit:
             chat.messageEdit?.status === "loading"
               ? undefined
@@ -200,6 +239,37 @@ function isSelection(value: unknown): value is LlmSelection | null {
     isNullableContextWindow(value.contextWindow) &&
     isNullableString(value.reasoningEffort)
   );
+}
+
+function isContinuationSubmission(value: unknown): value is ContinuationSubmission {
+  return (
+    isRecord(value) &&
+    isId(value.operationId) &&
+    isRevision(value.expectedHistoryRevision) &&
+    isId(value.expectedLastExecutionId) &&
+    isSelection(value.llmSelection) &&
+    value.llmSelection !== null
+  );
+}
+
+function isContinuationReceipt(value: unknown): value is ContinuationReceipt {
+  return (
+    isRecord(value) &&
+    isId(value.sessionId) &&
+    isId(value.operationId) &&
+    isId(value.executionId) &&
+    value.executionId === value.operationId
+  );
+}
+
+function copyContinuationSubmission(original: ContinuationSubmission): ContinuationSubmission {
+  return {
+    ...original,
+    llmSelection: {
+      ...original.llmSelection,
+      connection: { ...original.llmSelection.connection },
+    },
+  };
 }
 
 function isSubmission(value: unknown): value is UserMessageSubmission {
@@ -305,6 +375,13 @@ function isChat(value: unknown): value is ChatState {
     isMessageEdit(value.messageEdit) &&
     isSelection(value.selection) &&
     (value.knownExecutionId === null || isId(value.knownExecutionId)) &&
+    (value.pendingContinuation === null ||
+      (isRecord(value.pendingContinuation) &&
+        isContinuationSubmission(value.pendingContinuation.original) &&
+        (value.pendingContinuation.status === "sending" ||
+          value.pendingContinuation.status === "uncertain"))) &&
+    (value.pendingContinuation === null ||
+      (pending === null && value.messageEdit === undefined && value.knownExecutionId === null)) &&
     typeof value.title === "string" &&
     (value.titleProvenance === "placeholder" || value.titleProvenance === "derived") &&
     isNullableString(value.error) &&
@@ -321,7 +398,7 @@ function isChat(value: unknown): value is ChatState {
 function isWorkspace(value: unknown): value is WorkspaceState {
   if (
     !isRecord(value) ||
-    value.version !== 5 ||
+    value.version !== 6 ||
     !Array.isArray(value.tabs) ||
     !value.tabs.every(isId) ||
     !isRecord(value.chats) ||

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { WorkspaceCommands } from "../app/WorkspaceCommands.ts";
+import { RequestError } from "../http/RequestError.ts";
 import type { WorkspaceCommandAccess, WorkspaceCommandState } from "../app/WorkspaceCommands.ts";
 import {
   decodeWorkspace,
@@ -12,6 +13,7 @@ import {
 import type { WorkspaceState } from "../app/WorkspaceState.ts";
 import type { LlmSelection } from "../providers/LlmSelection.ts";
 import type { SessionClient } from "../sessions/SessionClient.ts";
+import type { ContinuationReceipt, ContinuationSubmission } from "../sessions/Continuation.ts";
 import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
 import type { StopReceipt } from "../sessions/Stop.ts";
 import type {
@@ -45,6 +47,7 @@ function snapshot(overrides: Partial<SessionSnapshot> = {}): SessionSnapshot {
     workingDirectory: null,
     canChangeWorkingDirectory: true,
     admissionFenced: false,
+    canContinue: false,
     unsettledExecutionId: null,
     stopRequested: false,
     lastSettlement: null,
@@ -102,7 +105,17 @@ function fixture(): {
 
 function commands(
   access: WorkspaceCommandAccess,
-  client: Pick<SessionClient, "create" | "submitMessage" | "getMessageReceipt" | "stopExecution">,
+  client: Pick<
+    SessionClient,
+    | "create"
+    | "submitMessage"
+    | "getMessageReceipt"
+    | "continueSession"
+    | "getContinuationReceipt"
+    | "removePendingInput"
+    | "getSnapshot"
+    | "stopExecution"
+  >,
   onState: (state: WorkspaceCommandState) => void = () => {},
 ): WorkspaceCommands {
   return new WorkspaceCommands(
@@ -112,6 +125,14 @@ function commands(
     () => {},
     () => {},
   );
+}
+
+function continuableSnapshot(overrides: Partial<SessionSnapshot> = {}): SessionSnapshot {
+  return snapshot({
+    canContinue: true,
+    lastSettlement: { executionId: firstExecutionId, outcome: "completed" },
+    ...overrides,
+  });
 }
 
 function receipt(submission: UserMessageSubmission): UserMessageReceipt {
@@ -124,6 +145,14 @@ function receipt(submission: UserMessageSubmission): UserMessageReceipt {
   };
 }
 
+function continuationReceipt(submission: ContinuationSubmission): ContinuationReceipt {
+  return {
+    sessionId,
+    operationId: submission.operationId,
+    executionId: submission.operationId,
+  };
+}
+
 function emptyClient(
   submitMessage: SessionClient["submitMessage"] = async () => {
     throw new Error("Unexpected Send");
@@ -133,11 +162,25 @@ function emptyClient(
     status: "requested",
     outcome: null,
   }),
-): Pick<SessionClient, "create" | "submitMessage" | "getMessageReceipt" | "stopExecution"> {
+): Pick<
+  SessionClient,
+  | "create"
+  | "submitMessage"
+  | "getMessageReceipt"
+  | "continueSession"
+  | "getContinuationReceipt"
+  | "removePendingInput"
+  | "getSnapshot"
+  | "stopExecution"
+> {
   return {
     create: async () => sessionId,
     submitMessage,
     getMessageReceipt: async () => null,
+    continueSession: async (_id, submission) => continuationReceipt(submission),
+    getContinuationReceipt: async () => null,
+    removePendingInput: async () => true,
+    getSnapshot: async () => snapshot(),
     stopExecution,
   };
 }
@@ -187,6 +230,25 @@ void test("a failed synchronous Send journal stays unsaved and dispatches nothin
   assert.equal(workspace.reload().chats[sessionId]?.pending, null);
 });
 
+void test("a failed synchronous Continue journal dispatches nothing", async () => {
+  const workspace = fixture();
+  workspace.setWritable(false);
+  let posts = 0;
+  const coordinator = commands(workspace.access, {
+    ...emptyClient(),
+    continueSession: async () => {
+      posts++;
+      throw new Error("must not dispatch");
+    },
+  });
+
+  await coordinator.continueSession(sessionId, continuableSnapshot(), true);
+
+  assert.equal(posts, 0);
+  assert.equal(workspace.read().chats[sessionId]?.pendingContinuation?.status, "uncertain");
+  assert.equal(workspace.reload().chats[sessionId]?.pendingContinuation, null);
+});
+
 void test("retry resends a saved uncertain original while retaining a newer draft", async () => {
   const workspace = fixture();
   let loseFirstAcknowledgement = true;
@@ -228,6 +290,198 @@ void test("retry resends a saved uncertain original while retaining a newer draf
   assert.equal(journaledBeforeDispatch, true);
   assert.equal(workspace.read().chats[sessionId]?.pending, null);
   assert.equal(workspace.read().chats[sessionId]?.draft, "newer draft");
+});
+
+void test("Continue journals before dispatch, checks after reload, and retries the exact frozen operation", async () => {
+  const workspace = fixture();
+  const submissions: ContinuationSubmission[] = [];
+  let journaledBeforeDispatch = false;
+  const initial = commands(workspace.access, {
+    ...emptyClient(),
+    continueSession: async (_id, submission) => {
+      submissions.push(submission);
+      journaledBeforeDispatch =
+        workspace.durable().chats[sessionId]?.pendingContinuation?.status === "sending";
+      throw new Error("acknowledgement lost");
+    },
+  });
+
+  await initial.continueSession(sessionId, continuableSnapshot({ historyRevision: 14 }), true);
+  assert.equal(journaledBeforeDispatch, true);
+  const firstSubmission = submissions[0]!;
+  assert.deepEqual(firstSubmission, {
+    operationId: firstSubmission.operationId,
+    expectedHistoryRevision: 14,
+    expectedLastExecutionId: firstExecutionId,
+    llmSelection: selection,
+  });
+  assert.equal(workspace.read().chats[sessionId]?.pendingContinuation?.status, "uncertain");
+  assert.equal(workspace.read().chats[sessionId]?.draft, "submitted text");
+  assert.equal(workspace.read().chats[sessionId]?.title, "New chat");
+
+  workspace.reload();
+  const restored = workspace.read().chats[sessionId]?.pendingContinuation;
+  assert.equal(restored?.status, "uncertain");
+  assert.deepEqual(restored?.original, firstSubmission);
+  let posts = 0;
+  const recovery = commands(workspace.access, {
+    ...emptyClient(),
+    continueSession: async () => {
+      posts++;
+      throw new Error("receipt check must not POST");
+    },
+    getContinuationReceipt: async () => null,
+  });
+  await withVisibleDocument(() => recovery.checkContinuationReceipt(sessionId));
+  assert.equal(posts, 0);
+  assert.equal(workspace.read().chats[sessionId]?.pendingContinuation?.status, "uncertain");
+
+  workspace.access.updateChat(sessionId, (previous) => editDraft(previous, "draft typed later"));
+  const retries: ContinuationSubmission[] = [];
+  let retryJournaled = false;
+  const retry = commands(workspace.access, {
+    ...emptyClient(),
+    continueSession: async (_id, submission) => {
+      retries.push(submission);
+      retryJournaled =
+        workspace.durable().chats[sessionId]?.pendingContinuation?.status === "sending";
+      return continuationReceipt(submission);
+    },
+  });
+  await retry.retryOriginalContinuation(sessionId);
+
+  assert.deepEqual(retries, [firstSubmission]);
+  assert.equal(retryJournaled, true);
+  assert.equal(workspace.read().chats[sessionId]?.pendingContinuation, null);
+  assert.equal(workspace.read().chats[sessionId]?.knownExecutionId, firstSubmission.operationId);
+  assert.equal(workspace.read().chats[sessionId]?.draft, "draft typed later");
+  assert.equal(workspace.read().chats[sessionId]?.title, "New chat");
+});
+
+void test("a definite Continue conflict checks for an earlier accepted receipt before clearing its journal", async () => {
+  const workspace = fixture();
+  const first = commands(workspace.access, {
+    ...emptyClient(),
+    continueSession: async () => {
+      throw new Error("acknowledgement lost");
+    },
+  });
+  await first.continueSession(sessionId, continuableSnapshot(), true);
+  const original = workspace.read().chats[sessionId]!.pendingContinuation!.original;
+  const conflict = commands(workspace.access, {
+    ...emptyClient(),
+    continueSession: async () => {
+      throw new RequestError(409, { error: "stale continuation" });
+    },
+    getContinuationReceipt: async () => continuationReceipt(original),
+  });
+
+  await conflict.retryOriginalContinuation(sessionId);
+
+  assert.equal(workspace.read().chats[sessionId]?.pendingContinuation, null);
+  assert.equal(workspace.read().chats[sessionId]?.knownExecutionId, original.operationId);
+});
+
+void test("pending-input removal reports progress and reads the snapshot after a race", async () => {
+  const workspace = fixture();
+  const removal = deferred<boolean>();
+  let snapshotReads = 0;
+  const client = {
+    ...emptyClient(),
+    removePendingInput: async () => removal.promise,
+    getSnapshot: async () => {
+      snapshotReads++;
+      return snapshot({ unsettledExecutionId: firstExecutionId, pendingInputs: [] });
+    },
+  };
+  const coordinator = commands(workspace.access, client);
+  const request = coordinator.removePendingInput(
+    sessionId,
+    firstExecutionId,
+    "queued-submission",
+    true,
+  );
+
+  assert.equal(
+    coordinator.pendingInputRemoval(sessionId, firstExecutionId, "queued-submission")?.status,
+    "removing",
+  );
+  removal.resolve(false);
+  await request;
+
+  assert.equal(snapshotReads, 1);
+  assert.equal(coordinator.hasPendingInputRemoval(sessionId), false);
+});
+
+void test("a removal read begun before Continue acceptance cannot settle the new execution", async () => {
+  const workspace = fixture();
+  const continuation = deferred<ContinuationReceipt>();
+  const read = deferred<SessionSnapshot>();
+  const reading = deferred<void>();
+  let original: ContinuationSubmission | undefined;
+  const coordinator = commands(workspace.access, {
+    ...emptyClient(),
+    continueSession: async (_id, submission) => {
+      original = submission;
+      return continuation.promise;
+    },
+    getSnapshot: async () => {
+      reading.resolve();
+      return read.promise;
+    },
+  });
+  const continuing = coordinator.continueSession(sessionId, continuableSnapshot(), true);
+  const removing = coordinator.removePendingInput(sessionId, firstExecutionId, "queued", true);
+  await reading.promise;
+  continuation.resolve(continuationReceipt(original!));
+  await continuing;
+  read.resolve(snapshot());
+  await removing;
+  assert.equal(workspace.read().chats[sessionId]?.knownExecutionId, original!.operationId);
+});
+
+void test("uncertain pending-input removal checks its snapshot without repeating the write", async () => {
+  const workspace = fixture();
+  let removals = 0;
+  let snapshotReads = 0;
+  const coordinator = commands(workspace.access, {
+    ...emptyClient(),
+    removePendingInput: async () => {
+      removals++;
+      throw new Error("acknowledgement lost");
+    },
+    getSnapshot: async () => {
+      snapshotReads++;
+      if (snapshotReads === 1) throw new Error("snapshot unavailable");
+      return snapshot({ unsettledExecutionId: firstExecutionId, pendingInputs: [] });
+    },
+  });
+  await coordinator.removePendingInput(sessionId, firstExecutionId, "queued-submission", true);
+  assert.equal(
+    coordinator.pendingInputRemoval(sessionId, firstExecutionId, "queued-submission")?.status,
+    "uncertain",
+  );
+  await coordinator.checkPendingInputRemoval(sessionId, firstExecutionId, "queued-submission");
+
+  assert.equal(removals, 1);
+  assert.equal(snapshotReads, 2);
+  assert.equal(coordinator.hasPendingInputRemoval(sessionId), false);
+});
+
+void test("a definite Continue conflict without a receipt clears uncertainty", async () => {
+  const workspace = fixture();
+  const coordinator = commands(workspace.access, {
+    ...emptyClient(),
+    continueSession: async () => {
+      throw new RequestError(409, { error: "stale continuation" });
+    },
+    getContinuationReceipt: async () => null,
+  });
+
+  await coordinator.continueSession(sessionId, continuableSnapshot(), true);
+
+  assert.equal(workspace.read().chats[sessionId]?.pendingContinuation, null);
+  assert.match(workspace.read().chats[sessionId]?.error ?? "", /stale continuation/);
 });
 
 void test("an accepted not-sent resend gets a new ID and can be explicitly repeated", async () => {

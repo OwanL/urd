@@ -74,6 +74,7 @@ void test(
       historyRevision: 0,
       workingDirectory: parse(process.cwd()).root,
       canChangeWorkingDirectory: true,
+      canContinue: false,
       admissionFenced: false,
       isCompacting: false,
       unsettledExecutionId: null,
@@ -235,5 +236,32 @@ void test(
     );
     assert.equal(revised.entries.length, 2);
     assert.equal(revised.entries[0]!.entry.entryId, edit.operationId);
+
+    assert.equal(edited.canContinue, true);
+    const continuation = {
+      operationId: randomUUID(),
+      expectedHistoryRevision: edited.historyRevision,
+      expectedLastExecutionId: saved.executionId,
+      llmSelection: edit.llmSelection,
+    };
+    const continued = await request(client.continueSession(id, continuation));
+    assert.deepEqual(await request(client.continueSession(id, continuation)), continued);
+    assert.deepEqual(
+      await request(client.getContinuationReceipt(id, continuation.operationId, signal)),
+      continued,
+    );
+    let latest = await request(client.getSnapshot(id, signal));
+    while (latest.lastSettlement?.executionId !== continued.executionId) {
+      await delay(20, undefined, { signal });
+      latest = await request(client.getSnapshot(id, signal));
+    }
+    assert.equal(model.calls.length, 3, "Continue retries must not duplicate provider requests");
+    const continuedMessages = model.calls[2]!.request.messages as { role: string }[];
+    assert.equal(continuedMessages.filter((message) => message.role === "user").length, 1);
+    assert.equal(continuedMessages.at(-1)?.role, "assistant");
+    const continuedHistory = await request(
+      client.getHistory(id, { mode: "latest", expectedHistoryRevision: 1 }, signal),
+    );
+    assert.equal(continuedHistory.entries.filter((entry) => entry.entry.kind === "user").length, 1);
   },
 );

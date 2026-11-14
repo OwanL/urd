@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  applyContinuationReceipt,
   applyReceipt,
+  beginContinuation,
   beginSubmission,
   decodeWorkspace,
   editDraft,
@@ -14,6 +16,7 @@ import {
 import type { WorkspaceState } from "../app/WorkspaceState.ts";
 import type { LlmSelection } from "../providers/LlmSelection.ts";
 import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
+import type { ContinuationReceipt, ContinuationSubmission } from "../sessions/Continuation.ts";
 import type {
   UserMessageReceipt,
   UserMessageSubmission,
@@ -52,6 +55,7 @@ void test("causal snapshot reads release accepted work outside the recent window
     workingDirectory: null,
     canChangeWorkingDirectory: false,
     admissionFenced: false,
+    canContinue: false,
     unsettledExecutionId: null,
     stopRequested: false,
     lastSettlement: { executionId: newer, outcome: "completed" },
@@ -93,6 +97,17 @@ const receipt: UserMessageReceipt = {
   refusalReason: null,
   executionId,
 };
+const continuation: ContinuationSubmission = {
+  operationId: "60000000-0000-0000-0000-000000000006",
+  expectedHistoryRevision: 7,
+  expectedLastExecutionId: executionId,
+  llmSelection: selection,
+};
+const continuationReceipt: ContinuationReceipt = {
+  sessionId,
+  operationId: continuation.operationId,
+  executionId: continuation.operationId,
+};
 
 function sending(submission = original) {
   return beginSubmission(editDraft(newChat(submission.llmSelection), submission.text), submission);
@@ -100,7 +115,7 @@ function sending(submission = original) {
 
 function workspace(): WorkspaceState {
   return {
-    version: 5,
+    version: 6,
     tabs: [sessionId],
     activeId: sessionId,
     chats: { [sessionId]: sending() },
@@ -110,7 +125,7 @@ function workspace(): WorkspaceState {
 
 void test("new state is independent, empty and does not invent a selection", () => {
   assert.deepEqual(emptyWorkspace(), {
-    version: 5,
+    version: 6,
     tabs: [],
     activeId: null,
     chats: {},
@@ -122,6 +137,7 @@ void test("new state is independent, empty and does not invent a selection", () 
   assert.equal(chat.draft, "");
   assert.equal(chat.draftVersion, 0);
   assert.equal(chat.pending, null);
+  assert.equal(chat.pendingContinuation, null);
   assert.equal(chat.knownExecutionId, null);
   assert.equal(chat.error, null);
   assert.equal(typeof chat.title, "string");
@@ -151,6 +167,54 @@ void test("beginSubmission saves the full original and version and clears an old
   assert.equal(chat.error, "Previous refusal");
   assert.notEqual(pending.pending?.original, original);
   assert.notEqual(pending.pending?.original.llmSelection?.connection, selection.connection);
+});
+
+void test("Continue journals reload as uncertain and accepted receipts preserve the draft and title", () => {
+  const draft = "Draft typed before Continue";
+  const pending = beginContinuation(editDraft(newChat(selection), draft), continuation);
+  const saved: WorkspaceState = {
+    ...emptyWorkspace(),
+    tabs: [sessionId],
+    activeId: sessionId,
+    chats: { [sessionId]: pending },
+    lastSelection: selection,
+  };
+  const restored = decodeWorkspace(encodeWorkspace(saved)).chats[sessionId]!;
+  assert.equal(restored.pendingContinuation?.status, "uncertain");
+  assert.deepEqual(restored.pendingContinuation?.original, continuation);
+
+  const accepted = applyContinuationReceipt(
+    restored,
+    sessionId,
+    JSON.parse(JSON.stringify(continuationReceipt)),
+  );
+  assert.equal(accepted.pendingContinuation, null);
+  assert.equal(accepted.knownExecutionId, continuation.operationId);
+  assert.equal(accepted.draft, draft);
+  assert.equal(accepted.title, "New chat");
+  assert.equal(accepted.titleProvenance, "placeholder");
+  assert.throws(() =>
+    decodeWorkspace(
+      JSON.stringify({
+        ...saved,
+        chats: { [sessionId]: { ...pending, knownExecutionId: executionId } },
+      }),
+    ),
+  );
+  assert.throws(() => applyContinuationReceipt(restored, "other", continuationReceipt));
+  assert.throws(() =>
+    applyContinuationReceipt(restored, sessionId, {
+      ...continuationReceipt,
+      operationId: "70000000-0000-0000-0000-000000000007",
+      executionId: "70000000-0000-0000-0000-000000000007",
+    }),
+  );
+  assert.throws(() =>
+    applyContinuationReceipt(restored, sessionId, {
+      ...continuationReceipt,
+      executionId: "70000000-0000-0000-0000-000000000007",
+    }),
+  );
 });
 
 void test("an exact accepted receipt clears only the submitted draft and records execution identity", () => {
@@ -328,8 +392,8 @@ void test("reload retains later edits while reconciling an uncertain submission"
   assert.equal(resolved.pending, null);
 });
 
-void test("version 3 saved workspaces are discarded, not migrated", () => {
-  const saved = { ...workspace(), version: 3 };
+void test("version 5 saved workspaces are discarded, not migrated", () => {
+  const saved = { ...workspace(), version: 5 };
   assert.throws(() => decodeWorkspace(JSON.stringify(saved)), TypeError);
 });
 
@@ -342,7 +406,8 @@ void test("corrupt saved structure throws instead of resetting or discarding dra
     { ...workspace(), version: 2 },
     { ...workspace(), version: 3 },
     { ...workspace(), version: 4 },
-    { ...workspace(), version: 6 },
+    { ...workspace(), version: 5 },
+    { ...workspace(), version: 7 },
     { ...workspace(), tabs: [sessionId, sessionId] },
     { ...workspace(), tabs: ["missing"] },
     { ...workspace(), tabs: [1] },

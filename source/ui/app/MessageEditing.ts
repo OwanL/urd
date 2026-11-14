@@ -33,6 +33,7 @@ export class MessageEditing {
     if (
       !chat ||
       chat.pending ||
+      chat.pendingContinuation ||
       chat.messageEdit ||
       target.kind !== "user" ||
       !this.access.canPersist()
@@ -122,6 +123,7 @@ export class MessageEditing {
       submissionTextError(edit.text) ||
       !selection ||
       chat.pending ||
+      chat.pendingContinuation ||
       !this.access.canPersist()
     )
       return;

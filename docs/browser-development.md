@@ -29,6 +29,12 @@ or the current location when no child is selected. Pending reads and uncommitted
 block selection; failed reads retain the last location and can be retried.
 Unknown directory saves block Send until an explicit snapshot read confirms the current
 directory; writes are never automatically repeated.
+Busy Send remains opportunistic steering. Expand Pending to remove individual unclaimed
+messages; claimed messages cannot be removed. Removal never stops active work. With an empty
+composer, an eligible idle conversation offers Continue instead of Send, without adding a user
+message. Continue journals its exact operation before dispatch; reload checks receipts, and an
+uncertain result offers explicit check/retry without clearing a newer draft. Stop cancels the
+active run and its pending steering; there is no after-run queue.
 Snooze remains unavailable. The UI displays a bounded, navigable transcript with compact tool
 rows, on-demand input/output inspection and Markdown rendering. The history API supports
 anchored pages. Closing a tab hides the view; it does not stop work, close a backend session
@@ -46,7 +52,7 @@ normal composer draft. Pending-input and attachment editing are outside this fea
 independently of mounted/virtualized rows. A missing acknowledgement stays uncertain; receipt
 lookup and explicit Retry save preserve the original operation, text and model. Pending
 Save blocks new Send, and cancellation is unavailable once Save is dispatched. Reload checks
-receipts rather than blindly repeating edits. Workspace shape **5** discards incompatible
+receipts rather than blindly repeating edits. Workspace shape **6** discards incompatible
 older saved browser state under the pre-release policy.
 
 Drag tabs with a pointer, or focus a tab and use Alt+Shift+Left/Right to move it.
@@ -123,7 +129,7 @@ It does not implement storage recovery, navigation or catalog request lifecycles
 | `useWorkspaceNavigation` | Discovers the initial workspace after a successful read, applies deep links, opens/closes/reorders tabs and synchronizes the URL. It calls the existing Create command; it never stops backend work. |
 | `useWorkspaceModels` | Owns cached catalog loading, refresh state and invalidation at workspace lifetime, using `WorkspaceModels` for request publication ordering. |
 | `useSessionEvents` | Owns the page-lifetime event stream, saved-ID discovery, open/watched registrations and per-tab status/change notices. |
-| `WorkspaceCommands` | Owns Create, Send/retry, receipt reconciliation and Stop across conversation switches. Create still journals before dispatch and opens the acknowledged session against current state. |
+| `WorkspaceCommands` | Owns Create, Send/Continue journals and retries, receipt reconciliation, pending-input removal and Stop across conversation switches. Create still journals before dispatch and opens the acknowledged session against current state. |
 | `Conversation` | Normal startup retains three recent chats, including the active chat; focused or selected views stay mounted beyond that limit, and other chats unmount. It composes snapshot observation, transcript, status and composer. Its snapshot hook owns cancellable reads, not command lifetime. |
 | `ConversationState` | Derives selection, Send eligibility and execution status from existing facts; it stores no additional state. |
 | `ChatTabs` | Owns tab interaction, focus restoration and active-tab scrolling. |

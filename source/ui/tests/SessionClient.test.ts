@@ -18,6 +18,7 @@ import type {
   CompactionSummary,
 } from "../sessions/Compaction.ts";
 import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
+import type { ContinuationReceipt, ContinuationSubmission } from "../sessions/Continuation.ts";
 import type {
   UserMessageReceipt,
   UserMessageSubmission,
@@ -58,6 +59,7 @@ const snapshot: SessionSnapshot = {
   workingDirectory: "C:\\workspace",
   canChangeWorkingDirectory: false,
   admissionFenced: false,
+  canContinue: false,
   unsettledExecutionId: executionId,
   stopRequested: false,
   lastSettlement: null,
@@ -82,6 +84,17 @@ const selection: LlmSelection = {
 };
 const selectedSubmission: UserMessageSubmission = { ...submission, llmSelection: selection };
 const selectedReceipt: UserMessageReceipt = { ...receipt, submission: selectedSubmission };
+const continuationSubmission: ContinuationSubmission = {
+  operationId,
+  expectedHistoryRevision: 7,
+  expectedLastExecutionId: executionId,
+  llmSelection: selection,
+};
+const continuationReceipt: ContinuationReceipt = {
+  sessionId,
+  operationId,
+  executionId: operationId,
+};
 const content: MessageContentPage = {
   from: cursor,
   text: "streamed text 雪",
@@ -217,6 +230,37 @@ const mappings: MappingCase[] = [
     method: "GET",
     path: `/api/sessions/${sessionId}/snapshot`,
     response: snapshot,
+  },
+  {
+    name: "manual Continue preserves its exact revision, prior execution and selection",
+    call: (client) => client.continueSession(sessionId, continuationSubmission),
+    method: "POST",
+    path: `/api/sessions/${sessionId}/continuations`,
+    body: continuationSubmission,
+    response: continuationReceipt,
+  },
+  {
+    name: "manual Continue receipt lookup uses the stable operation ID",
+    call: (client) => client.getContinuationReceipt(sessionId, operationId),
+    method: "GET",
+    path: `/api/sessions/${sessionId}/continuations/${operationId}`,
+    response: continuationReceipt,
+  },
+  {
+    name: "missing manual Continue receipt is null",
+    call: (client) => client.getContinuationReceipt(sessionId, operationId),
+    method: "GET",
+    path: `/api/sessions/${sessionId}/continuations/${operationId}`,
+    response: null,
+  },
+  {
+    name: "pending-input removal targets its execution and submission",
+    call: (client) => client.removePendingInput(sessionId, executionId, submissionId),
+    method: "POST",
+    path: `/api/sessions/${sessionId}/executions/${executionId}/pending-inputs/${submissionId}/remove`,
+    body: {},
+    response: true,
+    expected: true,
   },
   {
     name: "set per-session working directory",
@@ -571,6 +615,14 @@ void test(
 const commands: { name: string; call: (client: SessionClient) => Promise<unknown> }[] = [
   { name: "create", call: (client) => client.create() },
   { name: "submit", call: (client) => client.submitMessage(sessionId, submission) },
+  {
+    name: "Continue",
+    call: (client) => client.continueSession(sessionId, continuationSubmission),
+  },
+  {
+    name: "pending-input removal",
+    call: (client) => client.removePendingInput(sessionId, executionId, submissionId),
+  },
   { name: "Stop", call: (client) => client.stopExecution(sessionId, executionId) },
   {
     name: "working-directory change",

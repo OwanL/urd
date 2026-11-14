@@ -1,5 +1,9 @@
+import { RequestError } from "../http/RequestError.ts";
+import type { ContinuationReceipt, ContinuationSubmission } from "../sessions/Continuation.ts";
 import {
+  applyContinuationReceipt,
   applyReceipt,
+  beginContinuation,
   beginSubmission,
   executionSettled,
   newChat,
@@ -19,10 +23,19 @@ export interface WorkspaceStopState {
   readonly error: string | null;
 }
 
+export interface PendingInputRemovalState {
+  readonly sessionId: string;
+  readonly executionId: string;
+  readonly submissionId: string;
+  readonly status: "removing" | "checking" | "uncertain";
+}
+
 export interface WorkspaceCommandState {
   readonly creating: boolean;
   readonly stopping: Readonly<Record<string, WorkspaceStopState>>;
   readonly checking: Readonly<Record<string, boolean>>;
+  readonly checkingContinuations: Readonly<Record<string, boolean>>;
+  readonly pendingInputRemovals: Readonly<Record<string, PendingInputRemovalState>>;
 }
 
 export interface NotSentResendResult {
@@ -41,12 +54,29 @@ export const emptyWorkspaceCommandState: WorkspaceCommandState = {
   creating: false,
   stopping: {},
   checking: {},
+  checkingContinuations: {},
+  pendingInputRemovals: {},
 };
 
 type WorkspaceCommandClient = Pick<
   SessionClient,
-  "create" | "submitMessage" | "getMessageReceipt" | "stopExecution"
+  | "create"
+  | "submitMessage"
+  | "getMessageReceipt"
+  | "getSnapshot"
+  | "continueSession"
+  | "getContinuationReceipt"
+  | "removePendingInput"
+  | "stopExecution"
 >;
+
+export function pendingInputRemovalKey(
+  sessionId: string,
+  executionId: string,
+  submissionId: string,
+): string {
+  return JSON.stringify([sessionId, executionId, submissionId]);
+}
 
 // Coordinates durable workspace commands without retrying uncertain dispatches.
 export class WorkspaceCommands {
@@ -59,6 +89,9 @@ export class WorkspaceCommands {
   private createPending = false;
   private readonly checks = new Set<string>();
   private readonly receiptReads = new Map<string, AbortController>();
+  private readonly continuationChecks = new Set<string>();
+  private readonly continuationReceiptReads = new Map<string, AbortController>();
+  private readonly pendingInputRemovals = new Set<string>();
   private readonly stoppingRequests = new Set<string>();
 
   constructor(
@@ -77,6 +110,22 @@ export class WorkspaceCommands {
 
   get status(): WorkspaceCommandState {
     return this.state;
+  }
+
+  pendingInputRemoval(
+    sessionId: string,
+    executionId: string,
+    submissionId: string,
+  ): PendingInputRemovalState | undefined {
+    return this.state.pendingInputRemovals[
+      pendingInputRemovalKey(sessionId, executionId, submissionId)
+    ];
+  }
+
+  hasPendingInputRemoval(sessionId: string): boolean {
+    return Object.values(this.state.pendingInputRemovals).some(
+      (removal) => removal.sessionId === sessionId,
+    );
   }
 
   async create(): Promise<void> {
@@ -117,7 +166,8 @@ export class WorkspaceCommands {
     if (
       !latest ||
       latest.pending ||
-      latest.messageEdit?.submission ||
+      latest.pendingContinuation ||
+      latest.messageEdit ||
       !selection ||
       !latest.draft.trim() ||
       submissionTextError(latest.draft)
@@ -148,6 +198,55 @@ export class WorkspaceCommands {
     await this.retryOriginalSubmission(id);
   }
 
+  async continueSession(
+    id: string,
+    snapshot: SessionSnapshot,
+    canContinue: boolean,
+  ): Promise<void> {
+    const latest = this.access.read().chats[id];
+    const selection = latest?.selection ?? snapshot.latestLlmSelection;
+    const expectedLastExecutionId = snapshot.lastSettlement?.executionId;
+    if (
+      !canContinue ||
+      !this.access.canPersist() ||
+      snapshot.sessionId !== id ||
+      snapshot.canContinue !== true ||
+      snapshot.unsettledExecutionId !== null ||
+      snapshot.admissionFenced ||
+      snapshot.stopRequested ||
+      !expectedLastExecutionId ||
+      !latest ||
+      !selection ||
+      latest.pending ||
+      latest.pendingContinuation ||
+      latest.messageEdit ||
+      latest.knownExecutionId ||
+      this.state.stopping[id] ||
+      this.hasPendingInputRemoval(id)
+    )
+      return;
+
+    const original: ContinuationSubmission = {
+      operationId: crypto.randomUUID(),
+      expectedHistoryRevision: snapshot.historyRevision,
+      expectedLastExecutionId,
+      llmSelection: structuredClone(selection),
+    };
+    if (!this.access.updateChat(id, (previous) => beginContinuation(previous, original))) {
+      this.access.updateChat(id, (previous) =>
+        previous.pendingContinuation
+          ? {
+              ...previous,
+              pendingContinuation: { ...previous.pendingContinuation, status: "uncertain" },
+              error: "Continue was not dispatched because its journal could not be saved.",
+            }
+          : previous,
+      );
+      return;
+    }
+    await this.retryOriginalContinuation(id);
+  }
+
   async resendNotSent(
     id: string,
     snapshot: SessionSnapshot,
@@ -158,7 +257,8 @@ export class WorkspaceCommands {
       snapshot.sessionId !== id ||
       !latest ||
       latest.pending ||
-      latest.messageEdit?.submission ||
+      latest.pendingContinuation ||
+      latest.messageEdit ||
       !this.access.canPersist()
     )
       return null;
@@ -193,8 +293,197 @@ export class WorkspaceCommands {
     return this.reconcile(id, false);
   }
 
+  checkContinuationReceipt(id: string): Promise<ContinuationReceipt | null> {
+    return this.reconcileContinuation(id, false);
+  }
+
+  retryOriginalContinuation(id: string): Promise<ContinuationReceipt | null> {
+    return this.reconcileContinuation(id, true);
+  }
+
+  async removePendingInput(
+    id: string,
+    executionId: string,
+    submissionId: string,
+    canRemove: boolean,
+  ): Promise<void> {
+    if (!canRemove || !id || !executionId || !submissionId) return;
+    const key = pendingInputRemovalKey(id, executionId, submissionId);
+    if (this.pendingInputRemovals.has(key) || this.state.pendingInputRemovals[key]) return;
+    this.pendingInputRemovals.add(key);
+    this.setPendingInputRemoval(key, {
+      sessionId: id,
+      executionId,
+      submissionId,
+      status: "removing",
+    });
+    try {
+      await this.client.removePendingInput(id, executionId, submissionId);
+    } catch {
+      // Reconcile the latest snapshot before offering another removal attempt.
+    }
+    this.setPendingInputRemoval(key, {
+      sessionId: id,
+      executionId,
+      submissionId,
+      status: "uncertain",
+    });
+    try {
+      await this.readPendingInputSnapshot(id, key);
+    } catch {
+      // Keep the action disabled until a later snapshot read resolves its state.
+    } finally {
+      this.pendingInputRemovals.delete(key);
+      this.refreshSnapshot();
+    }
+  }
+
+  async checkPendingInputRemoval(
+    id: string,
+    executionId: string,
+    submissionId: string,
+  ): Promise<void> {
+    const key = pendingInputRemovalKey(id, executionId, submissionId);
+    const current = this.state.pendingInputRemovals[key];
+    if (current?.status !== "uncertain" || this.pendingInputRemovals.has(key)) return;
+    this.pendingInputRemovals.add(key);
+    this.setPendingInputRemoval(key, { ...current, status: "checking" });
+    try {
+      await this.readPendingInputSnapshot(id, key);
+    } catch {
+      this.setPendingInputRemoval(key, { ...current, status: "uncertain" });
+    } finally {
+      this.pendingInputRemovals.delete(key);
+      this.refreshSnapshot();
+    }
+  }
+
+  private async readPendingInputSnapshot(id: string, key: string): Promise<void> {
+    const knownWhenRead = this.access.read().chats[id]?.knownExecutionId ?? null;
+    const snapshot = await this.client.getSnapshot(id);
+    if (
+      snapshot.sessionId !== id ||
+      !Number.isSafeInteger(snapshot.historyRevision) ||
+      typeof snapshot.canChangeWorkingDirectory !== "boolean"
+    )
+      throw new TypeError("Invalid session snapshot after pending-input removal.");
+    this.observeSnapshot(snapshot, knownWhenRead);
+    // The view's snapshot owner refreshes after this read; publishing it here
+    // could overwrite a newer view or a receipt accepted while the GET was in flight.
+    this.setPendingInputRemoval(key, null);
+  }
+
   retryOriginalSubmission(id: string): Promise<UserMessageReceipt | null> {
     return this.reconcile(id, true);
+  }
+
+  private async reconcileContinuation(
+    id: string,
+    retry: boolean,
+  ): Promise<ContinuationReceipt | null> {
+    const original = this.access.read().chats[id]?.pendingContinuation?.original;
+    if (
+      !original ||
+      this.continuationChecks.has(id) ||
+      (retry && !this.access.canPersist()) ||
+      (!retry && document.hidden)
+    )
+      return null;
+
+    const controller = retry ? null : new AbortController();
+    if (controller) this.continuationReceiptReads.set(id, controller);
+    this.continuationChecks.add(id);
+    this.setCheckingContinuation(id, true);
+    try {
+      if (
+        retry &&
+        !this.access.updateChat(id, (previous) =>
+          previous.pendingContinuation?.original.operationId === original.operationId
+            ? {
+                ...previous,
+                pendingContinuation: { ...previous.pendingContinuation, status: "sending" },
+                error: null,
+              }
+            : previous,
+        )
+      )
+        throw new Error("The original Continue could not be journaled; it was not dispatched.");
+      const receipt = retry
+        ? await this.client.continueSession(id, original)
+        : await this.client.getContinuationReceipt(id, original.operationId, controller?.signal);
+      if (receipt === null) throw new Error("No receipt found. Continue remains uncertain.");
+      this.resolveContinuation(id, original, receipt);
+      return receipt;
+    } catch (cause) {
+      if (controller?.signal.aborted) return null;
+      if (retry && cause instanceof RequestError && cause.status === 409)
+        return await this.resolveContinuationConflict(id, original, cause);
+      this.markContinuationUncertain(id, original, description(cause));
+      return null;
+    } finally {
+      this.continuationChecks.delete(id);
+      this.continuationReceiptReads.delete(id);
+      this.setCheckingContinuation(id, false);
+      this.refreshSnapshot();
+    }
+  }
+
+  private async resolveContinuationConflict(
+    id: string,
+    original: ContinuationSubmission,
+    conflict: RequestError,
+  ): Promise<ContinuationReceipt | null> {
+    try {
+      const receipt = await this.client.getContinuationReceipt(id, original.operationId);
+      if (receipt) {
+        this.resolveContinuation(id, original, receipt);
+        return receipt;
+      }
+      this.access.updateChat(id, (previous) =>
+        previous.pendingContinuation?.original.operationId === original.operationId
+          ? {
+              ...previous,
+              pendingContinuation: null,
+              error: `Continue was rejected: ${requestErrorDescription(conflict)}`,
+            }
+          : previous,
+      );
+    } catch (cause) {
+      this.markContinuationUncertain(
+        id,
+        original,
+        `Continue outcome is uncertain: ${description(cause)}`,
+      );
+    }
+    return null;
+  }
+
+  private resolveContinuation(
+    id: string,
+    original: ContinuationSubmission,
+    receipt: ContinuationReceipt,
+  ): void {
+    this.access.updateChat(id, (previous) =>
+      previous.pendingContinuation?.original.operationId === original.operationId
+        ? applyContinuationReceipt(previous, id, receipt)
+        : previous,
+    );
+  }
+
+  private markContinuationUncertain(
+    id: string,
+    original: ContinuationSubmission,
+    error: string,
+  ): void {
+    this.access.updateChat(id, (previous) =>
+      previous.pendingContinuation?.original.operationId === original.operationId
+        ? {
+            ...previous,
+            pendingContinuation: { ...previous.pendingContinuation, status: "uncertain" },
+            error,
+          }
+        : previous,
+    );
   }
 
   private async reconcile(id: string, retry: boolean): Promise<UserMessageReceipt | null> {
@@ -305,22 +594,42 @@ export class WorkspaceCommands {
 
   watchPendingReceipts(): () => void {
     const reads = this.receiptReads;
+    const continuationReads = this.continuationReceiptReads;
     const checkPending = () => {
       if (document.hidden) {
         for (const controller of reads.values()) controller.abort();
+        for (const controller of continuationReads.values()) controller.abort();
         return;
       }
-      for (const [id, chat] of Object.entries(this.access.read().chats))
+      for (const [id, chat] of Object.entries(this.access.read().chats)) {
         if (chat.pending?.status === "uncertain") void this.checkReceipt(id);
+        if (chat.pendingContinuation?.status === "uncertain")
+          void this.checkContinuationReceipt(id);
+      }
     };
     checkPending();
     window.addEventListener("focus", checkPending);
     document.addEventListener("visibilitychange", checkPending);
     return () => {
       for (const controller of reads.values()) controller.abort();
+      for (const controller of continuationReads.values()) controller.abort();
       window.removeEventListener("focus", checkPending);
       document.removeEventListener("visibilitychange", checkPending);
     };
+  }
+
+  private setCheckingContinuation(id: string, checking: boolean): void {
+    const next = { ...this.state.checkingContinuations };
+    if (checking) next[id] = true;
+    else delete next[id];
+    this.publish({ checkingContinuations: next });
+  }
+
+  private setPendingInputRemoval(key: string, state: PendingInputRemovalState | null): void {
+    const next = { ...this.state.pendingInputRemovals };
+    if (state) next[key] = state;
+    else delete next[key];
+    this.publish({ pendingInputRemovals: next });
   }
 
   private setChecking(id: string, checking: boolean): void {
@@ -341,6 +650,15 @@ export class WorkspaceCommands {
     this.state = { ...this.state, ...update };
     this.changed(this.state);
   }
+}
+
+function requestErrorDescription(error: RequestError): string {
+  const body = error.responseBody;
+  if (typeof body === "object" && body !== null && "error" in body) {
+    const message = body.error;
+    if (typeof message === "string" && message.trim()) return message;
+  }
+  return error.message;
 }
 
 function description(cause: unknown): string {

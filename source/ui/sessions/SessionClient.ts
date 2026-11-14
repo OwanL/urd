@@ -15,6 +15,7 @@ import type {
   TranscriptPromptPageQuery,
 } from "./Messages.ts";
 import type { CompactionReceipt, CompactionSubmission, CompactionSummary } from "./Compaction.ts";
+import type { ContinuationReceipt, ContinuationSubmission } from "./Continuation.ts";
 import type { MessageEditReceipt, MessageEditSubmission } from "./MessageEdit.ts";
 import type { SessionIdPage } from "./SessionIdPage.ts";
 import type { SessionSnapshot } from "./SessionSnapshot.ts";
@@ -218,6 +219,46 @@ export class SessionClient {
       utf8Offset: String(utf8Offset),
     }).toString();
     return requestJson(url, "GET", undefined, signal);
+  }
+
+  continueSession(
+    sessionId: string,
+    submission: ContinuationSubmission,
+  ): Promise<ContinuationReceipt> {
+    return requestJson(
+      this.url(`/${encodeURIComponent(sessionId)}/continuations`),
+      "POST",
+      submission,
+    );
+  }
+
+  getContinuationReceipt(
+    sessionId: string,
+    operationId: string,
+    signal?: AbortSignal,
+  ): Promise<ContinuationReceipt | null> {
+    return requestJson(
+      this.url(
+        `/${encodeURIComponent(sessionId)}/continuations/${encodeURIComponent(operationId)}`,
+      ),
+      "GET",
+      undefined,
+      signal,
+    );
+  }
+
+  async removePendingInput(
+    sessionId: string,
+    executionId: string,
+    submissionId: string,
+  ): Promise<boolean> {
+    const path =
+      `/${encodeURIComponent(sessionId)}/executions/${encodeURIComponent(executionId)}` +
+      `/pending-inputs/${encodeURIComponent(submissionId)}/remove`;
+    const result = await requestJson<unknown>(this.url(path), "POST", {});
+    if (typeof result !== "boolean")
+      throw new TypeError("Server returned an invalid removal result.");
+    return result;
   }
 
   submitMessage(sessionId: string, submission: UserMessageSubmission): Promise<UserMessageReceipt> {

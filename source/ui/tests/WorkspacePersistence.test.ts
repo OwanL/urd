@@ -214,7 +214,7 @@ void test("workspace writes validate and propagate storage failures", () => {
   const storage = new MemoryStorage();
   const saved = persistence(storage);
   const invalid = emptyWorkspace();
-  invalid.version = 2 as 5;
+  invalid.version = 2 as 6;
   assert.throws(() => saved.save(invalid), /Invalid workspace/);
 
   storage.setItem = () => {

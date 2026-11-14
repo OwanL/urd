@@ -5,6 +5,8 @@ import type { SessionExecutionResult } from "./SessionExecutionResult.ts";
 export interface PendingInputPreview {
   readonly submissionId: string;
   readonly preview: string;
+  // Missing capability fields in older fixtures are treated as non-removable.
+  readonly canRemove?: boolean;
 }
 
 export interface SessionWorkingTime {
@@ -24,6 +26,7 @@ export interface SessionSnapshot {
   readonly workingDirectory: string | null;
   readonly canChangeWorkingDirectory: boolean;
   readonly admissionFenced: boolean;
+  readonly canContinue: boolean;
   readonly unsettledExecutionId: string | null;
   readonly isCompacting?: boolean;
   readonly stopRequested: boolean;

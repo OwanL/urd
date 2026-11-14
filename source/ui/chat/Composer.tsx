@@ -1,6 +1,7 @@
 import type { TargetedKeyboardEvent } from "preact";
 import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
 import { IconButton } from "../components/IconButton.tsx";
+import { composerSubmissionState } from "./ComposerSubmission.ts";
 import type { ComposerProps } from "./ComposerTypes.ts";
 import { ModelPicker } from "./ModelPicker.tsx";
 import "./composer.css";
@@ -26,15 +27,24 @@ export function Composer({
   onReasoningChange,
   selectionLocked,
   canSend,
+  canContinue,
+  continuationAvailable,
   working,
   stopping,
   onSend,
+  onContinue,
   onStop,
   indicators,
 }: ComposerProps) {
   const input = useRef<HTMLTextAreaElement>(null);
   const composing = useRef(false);
   const locked = selectionLocked || working || stopping;
+  const submission = composerSubmissionState(text, canSend, canContinue, continuationAvailable);
+  const canSubmit = submission.action !== null;
+  function submit() {
+    if (submission.action === "send") onSend();
+    else if (submission.action === "continue") onContinue();
+  }
 
   useLayoutEffect(() => {
     const textarea = input.current;
@@ -65,7 +75,7 @@ export function Composer({
     )
       return;
     event.preventDefault();
-    if (canSend) onSend();
+    if (canSubmit) submit();
   }
 
   return (
@@ -74,7 +84,7 @@ export function Composer({
       aria-label="Message composer"
       onSubmit={(event) => {
         event.preventDefault();
-        if (canSend) onSend();
+        if (canSubmit) submit();
       }}
     >
       <textarea
@@ -127,15 +137,15 @@ export function Composer({
           )}
           <IconButton
             icon="send"
-            label="Send"
+            label={submission.label}
             hint={
               <>
-                Send <kbd>Enter</kbd>
+                {submission.label} <kbd>Enter</kbd>
               </>
             }
             class="composer-send"
             type="submit"
-            disabled={!canSend}
+            disabled={!canSubmit}
           />
         </div>
       </div>

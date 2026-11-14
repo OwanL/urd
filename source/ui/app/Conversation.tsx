@@ -40,6 +40,7 @@ interface ConversationProps {
   messageEditing: MessageEditing;
   stop: WorkspaceStopState | undefined;
   checking: boolean;
+  checkingContinuation: boolean;
   models: WorkspaceModelState;
   preferences: WorkingDirectoryPreferenceState;
   ready: boolean;
@@ -67,6 +68,7 @@ export function Conversation({
   messageEditing,
   stop,
   checking,
+  checkingContinuation,
   models,
   preferences,
   ready,
@@ -111,12 +113,25 @@ export function Conversation({
     setWorkingDirectoryLocked(locked);
     setWorkingDirectoryNotice(message);
   }, []);
-  const state = deriveConversationState(chat, snapshot, stop, ready, canPersist);
+  const pendingInputRemoval = commands.hasPendingInputRemoval(sessionId);
+  const unresolvedInputRemovals = Object.values(commands.status.pendingInputRemovals).filter(
+    (removal) => removal.sessionId === sessionId,
+  );
+  const state = deriveConversationState(
+    chat,
+    snapshot,
+    stop,
+    ready,
+    canPersist,
+    pendingInputRemoval,
+  );
   const showWorkingDirectory = Boolean(
     snapshot?.canChangeWorkingDirectory === true &&
     snapshot.unsettledExecutionId === null &&
     !chat.pending &&
-    !chat.knownExecutionId,
+    !chat.pendingContinuation &&
+    !chat.knownExecutionId &&
+    !pendingInputRemoval,
   );
   const selection = state.selection;
   const modelKey = selection ? `${selection.connection.id}/${selection.modelId}` : null;
@@ -126,7 +141,15 @@ export function Conversation({
     sessionId,
     draft: chat.messageEdit,
     selection,
-    canEdit: Boolean(ready && canPersist && snapshot && !snapshot.admissionFenced && !chat.pending),
+    canEdit: Boolean(
+      ready &&
+      canPersist &&
+      snapshot &&
+      !snapshot.admissionFenced &&
+      !chat.pending &&
+      !chat.pendingContinuation &&
+      !pendingInputRemoval,
+    ),
   };
   function choose(next: LlmSelection) {
     if (!state.selectionLocked) selectModel(sessionId, next);
@@ -218,6 +241,35 @@ export function Conversation({
                 )}
               </span>
             )}
+            {chat.pendingContinuation && (
+              <span>
+                {chat.pendingContinuation.status === "sending"
+                  ? "Continuing… "
+                  : checkingContinuation
+                    ? "Checking Continue receipt… "
+                    : "Continue uncertain. "}
+                {chat.pendingContinuation.status === "uncertain" && (
+                  <>
+                    <button
+                      disabled={checkingContinuation}
+                      onClick={() => {
+                        void commands.checkContinuationReceipt(sessionId);
+                      }}
+                    >
+                      Check receipt
+                    </button>
+                    <button
+                      disabled={!canPersist || checkingContinuation}
+                      onClick={() => {
+                        void commands.retryOriginalContinuation(sessionId);
+                      }}
+                    >
+                      Retry original
+                    </button>
+                  </>
+                )}
+              </span>
+            )}
             {chat.messageEdit?.submission && (
               <span>
                 {chat.messageEdit.status === "saving" ? "Saving edit… " : "Save uncertain. "}
@@ -246,13 +298,96 @@ export function Conversation({
               </span>
             )}
             {state.textError && <span class="inline-error">{state.textError}</span>}
+            {unresolvedInputRemovals.map((removal) => {
+              const inputStillVisible = Boolean(
+                snapshot?.unsettledExecutionId === removal.executionId &&
+                snapshot.pendingInputs.some((input) => input.submissionId === removal.submissionId),
+              );
+              if (inputStillVisible) return null;
+              return (
+                <span class="chat-pending-input-reconcile" key={removal.submissionId}>
+                  <span role="status">
+                    {removal.status === "removing"
+                      ? "Removing pending input…"
+                      : removal.status === "checking"
+                        ? "Checking pending-input removal…"
+                        : "Pending-input removal status unknown."}
+                  </span>
+                  {removal.status === "uncertain" && (
+                    <button
+                      type="button"
+                      aria-label={`Check removal status for input ${removal.submissionId}`}
+                      onClick={() => {
+                        void commands.checkPendingInputRemoval(
+                          sessionId,
+                          removal.executionId,
+                          removal.submissionId,
+                        );
+                      }}
+                    >
+                      Check
+                    </button>
+                  )}
+                </span>
+              );
+            })}
             {snapshot && snapshot.pendingInputs.length > 0 && (
-              <details>
+              <details class="chat-pending-inputs">
                 <summary>Pending ({snapshot.pendingInputs.length})</summary>
-                <ol>
-                  {snapshot.pendingInputs.map((input) => (
-                    <li key={input.submissionId}>{input.preview}</li>
-                  ))}
+                <ol class="chat-pending-input-list">
+                  {snapshot.pendingInputs.map((input) => {
+                    const executionId = snapshot.unsettledExecutionId;
+                    const removable = input.canRemove === true && executionId !== null;
+                    const removal = executionId
+                      ? commands.pendingInputRemoval(sessionId, executionId, input.submissionId)
+                      : undefined;
+                    return (
+                      <li class="chat-pending-input" key={input.submissionId}>
+                        <span class="chat-pending-input-preview">{input.preview}</span>
+                        {removal?.status === "removing" ? (
+                          <span role="status">Removing…</span>
+                        ) : removal?.status === "checking" ? (
+                          <span role="status">Checking removal…</span>
+                        ) : removal?.status === "uncertain" ? (
+                          <span class="chat-pending-input-check">
+                            <span role="status">Removal status unknown.</span>
+                            <button
+                              type="button"
+                              aria-label={`Check removal status for pending input: ${input.preview}`}
+                              onClick={() => {
+                                void commands.checkPendingInputRemoval(
+                                  sessionId,
+                                  executionId!,
+                                  input.submissionId,
+                                );
+                              }}
+                            >
+                              Check
+                            </button>
+                          </span>
+                        ) : removable ? (
+                          <button
+                            type="button"
+                            class="chat-pending-input-remove"
+                            aria-label={`Remove pending input: ${input.preview}`}
+                            disabled={!ready}
+                            onClick={() => {
+                              void commands.removePendingInput(
+                                sessionId,
+                                executionId,
+                                input.submissionId,
+                                removable,
+                              );
+                            }}
+                          >
+                            Remove
+                          </button>
+                        ) : (
+                          <span class="chat-pending-input-state">Sending…</span>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ol>
               </details>
             )}
@@ -307,11 +442,17 @@ export function Conversation({
         }}
         selectionLocked={state.selectionLocked}
         canSend={state.canSend && !workingDirectoryLocked}
+        canContinue={state.canContinue && !workingDirectoryLocked}
+        continuationAvailable={state.continuationAvailable}
         working={state.active}
         stopping={state.executionStatus === "stopping"}
         onSend={() => {
           if (!workingDirectoryGate.current && snapshot)
             void commands.send(sessionId, snapshot, state.active, state.canSend);
+        }}
+        onContinue={() => {
+          if (!workingDirectoryGate.current && snapshot)
+            void commands.continueSession(sessionId, snapshot, state.canContinue);
         }}
         onStop={() => {
           if (snapshot && state.active) void commands.stop(sessionId, snapshot, state.stopId);

@@ -128,7 +128,7 @@ export function SessionWorkingDirectory({
   return (
     <div class="chat-working-directory">
       <WorkingDirectoryRow
-        label="Default cwd"
+        label="Default working directory"
         title="Default working directory"
         directory={
           preferences.loaded ? defaultDirectory : preferences.error ? "unavailable" : "loading…"
@@ -151,7 +151,7 @@ export function SessionWorkingDirectory({
         }
       />
       <WorkingDirectoryRow
-        label="Current cwd"
+        label="Current working directory"
         title="Current working directory"
         directory={directory}
         disabled={disabled}

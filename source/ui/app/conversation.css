@@ -175,7 +175,8 @@
   grid-template-columns: max-content minmax(0, 1fr) auto;
   align-items: center;
   align-self: center;
-  width: min(100%, 32rem);
+  width: fit-content;
+  max-width: min(100%, 40rem);
   gap: 8px 16px;
   min-width: 0;
   margin: 0 auto;

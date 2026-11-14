@@ -136,6 +136,7 @@ export function SessionWorkingDirectory({
         disabled={disabled || !preferences.loaded}
         busy={preferences.pending}
         onSave={preferences.save}
+        onDraftChange={preferences.clearError}
         feedback={
           preferences.error && (
             <>
@@ -156,6 +157,9 @@ export function SessionWorkingDirectory({
         disabled={disabled}
         busy={changeState !== "idle"}
         onSave={save}
+        onDraftChange={() => {
+          if (changeState === "idle") setFailure(null);
+        }}
         feedback={
           failure || changeState === "uncertain" || changeState === "reconciling" ? (
             <>

@@ -11,6 +11,7 @@ interface WorkingDirectoryRowProps {
   busy: boolean;
   feedback?: ComponentChildren;
   onSave(path: string): Promise<boolean>;
+  onDraftChange(): void;
 }
 
 export function WorkingDirectoryRow({
@@ -21,6 +22,7 @@ export function WorkingDirectoryRow({
   busy,
   feedback,
   onSave,
+  onDraftChange,
 }: WorkingDirectoryRowProps) {
   const anchor = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
@@ -40,7 +42,10 @@ export function WorkingDirectoryRow({
         aria-expanded={open}
         aria-disabled={disabled || busy}
         onClick={() => {
-          if (!disabled && !busy) setOpen(true);
+          if (!disabled && !busy) {
+            onDraftChange();
+            setOpen(true);
+          }
         }}
       >
         <Icon name="edit" />
@@ -54,6 +59,7 @@ export function WorkingDirectoryRow({
           busy={busy}
           feedback={feedback}
           onChoose={onSave}
+          onDraftChange={onDraftChange}
           onClose={(returnFocus) => {
             setOpen(false);
             if (returnFocus) anchor.current?.focus({ preventScroll: true });

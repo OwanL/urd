@@ -15,17 +15,20 @@ selectors, Send, Stop and integrated [provider settings](provider-management.md#
 Settings → General holds the default working directory, selected through a folder browser.
 Before the first accepted message, the empty transcript centers the default and current
 working-directory paths with explicit Edit actions. Edit opens a single directory editor
-for typing or browsing, with one Save/Cancel decision; browsing never applies a change.
+with breadcrumbs and an editable address, with an explicit Select folder/Cancel decision;
+browsing never applies a change.
 An unset default resolves to the filesystem root. Changing the current
 path affects this chat only; the default applies to new chats only. Typing keeps the choice
 visible; the composer always uses “Ask away”. Acceptance locks the chat's directory,
 including when provider setup fails before visible history. Changing a chat's directory
 never changes the default.
-The shared folder browser uses Zag's Preact tree for selection, expansion, keyboard navigation
-and typeahead. Subfolders load on demand; selecting a row changes only the draft path.
-The browser also supports parent/location navigation, filtering the displayed directory
-and an optional pasted path. Unknown directory saves block Send until an explicit
-snapshot read confirms the current directory; writes are never automatically repeated.
+The shared folder browser uses Zag's Preact listbox for selection, keyboard navigation
+and typeahead. Click selects a folder; double-click, Enter or Open browses it. Breadcrumbs,
+Up and filtering all follow the displayed location. Select folder applies the selected child
+or the current location when no child is selected. Pending reads and uncommitted typed addresses
+block selection; failed reads retain the last location and can be retried.
+Unknown directory saves block Send until an explicit snapshot read confirms the current
+directory; writes are never automatically repeated.
 Snooze remains unavailable. The UI displays a bounded, navigable transcript with compact tool
 rows, on-demand input/output inspection and Markdown rendering. The history API supports
 anchored pages. Closing a tab hides the view; it does not stop work, close a backend session

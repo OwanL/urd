@@ -9,6 +9,7 @@ export interface WorkingDirectoryPreferenceState {
   pending: boolean;
   error: string | null;
   refresh(): Promise<void>;
+  clearError(): void;
   save(workingDirectory: string | null): Promise<boolean>;
 }
 
@@ -67,7 +68,18 @@ export function useWorkingDirectoryPreferences(
     [client],
   );
 
-  return { preferences, loaded: preferences !== null, loading, pending, error, refresh, save };
+  return {
+    preferences,
+    loaded: preferences !== null,
+    loading,
+    pending,
+    error,
+    refresh,
+    save,
+    clearError: () => {
+      if (!saving.current && preferences !== null) setError(null);
+    },
+  };
 }
 
 function failureMessage(cause: unknown, fallback: string): string {

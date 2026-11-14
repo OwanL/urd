@@ -28,7 +28,10 @@ export function GeneralSettings({ state, buttonRef }: GeneralSettingsProps) {
           ref={buttonRef}
           type="button"
           disabled={state.pending}
-          onClick={() => setPickerOpen(true)}
+          onClick={() => {
+            state.clearError();
+            setPickerOpen(true);
+          }}
         >
           Edit…
         </button>
@@ -60,6 +63,7 @@ export function GeneralSettings({ state, buttonRef }: GeneralSettingsProps) {
           busy={state.pending}
           feedback={state.error && <p role="alert">{state.error}</p>}
           onChoose={state.save}
+          onDraftChange={state.clearError}
           onClose={(returnFocus) => {
             setPickerOpen(false);
             if (returnFocus) buttonRef.current?.focus({ preventScroll: true });

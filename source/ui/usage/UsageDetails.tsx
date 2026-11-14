@@ -1,6 +1,8 @@
+import { useState } from "preact/hooks";
 import { useUsageSummary } from "./useUsageSummary.ts";
-import type { UsageBreakdown, UsageRange, UsageRequest, UsageSummary } from "./UsageTypes.ts";
+import type { UsageRange, UsageRequest, UsageSummary } from "./UsageTypes.ts";
 import { UsageClient } from "./UsageClient.ts";
+import { UsageHistory } from "./UsageHistory.tsx";
 import {
   cumulativeUsageHistory,
   formatCostUsd,
@@ -34,224 +36,162 @@ export function UsageDetails({
     ...(sessionId ? { sessionId } : { range: range ?? "today" }),
     detail: true,
   });
-
   return (
     <section class="usage-details" aria-label="Usage details">
-      <header class="usage-details-header">
-        <div>
-          <h2>{sessionId ? "Session" : label}</h2>
-          <p>API-equivalent USD · not invoices</p>
-        </div>
-        {state.summary && <strong>{formatUsageCost(state.summary.totals)}</strong>}
+      <header class="usage-row usage-heading">
+        <h2>{sessionId ? "Session cost" : label}</h2>
+        <strong>{state.summary ? formatUsageCost(state.summary.totals) : "…"}</strong>
       </header>
-      {state.loading && <p class="usage-message">Loading usage…</p>}
       {state.stale && (
-        <p class="usage-message is-stale" role="status">
-          {state.summary ? "Refresh failed. Showing stale totals." : "Could not load usage."}
+        <p class="usage-warning" role="status">
+          {state.summary ? "Stale totals · refresh failed" : "Usage unavailable"}
         </p>
       )}
+      {state.loading && <p class="usage-muted">Loading usage…</p>}
       {state.summary && <SummaryContent summary={state.summary} />}
     </section>
   );
 }
 
 function SummaryContent({ summary }: { summary: UsageSummary }) {
+  const [expanded, setExpanded] = useState(false);
   const totals = summary.totals;
   const history = cumulativeUsageHistory(summary.history);
   return (
     <>
-      <dl class="usage-total-facts">
-        <div>
-          <dt>Requests</dt>
-          <dd>{formatUsageCount(totals.requests)}</dd>
-        </div>
-        {totals.estimatedRequests > 0 && (
-          <div>
-            <dt>Provisional estimates</dt>
-            <dd>{formatUsageCount(totals.estimatedRequests)}</dd>
-          </div>
-        )}
-        {totals.unknownRequests > 0 && (
-          <div>
-            <dt>Incomplete</dt>
-            <dd>{formatUsageCount(totals.unknownRequests)}</dd>
-          </div>
-        )}
-        {totals.activeRequests > 0 && (
-          <div>
-            <dt>Active</dt>
-            <dd>{formatUsageCount(totals.activeRequests)}</dd>
-          </div>
-        )}
-      </dl>
-      {totals.estimatedRequests > 0 && (
-        <p class="usage-estimate-note">Provisional; provider usage is not final.</p>
-      )}
-      <UsageHistory history={history} />
-      <section class="usage-detail-section">
-        <h3>By provider, model and purpose</h3>
-        {summary.breakdown.length ? (
-          <ul class="usage-breakdown">
-            {summary.breakdown.map((item, index) => (
-              <BreakdownRow
-                key={`${item.provider}/${item.model}/${item.purpose}/${index}`}
-                item={item}
-              />
-            ))}
-          </ul>
-        ) : (
-          <p class="usage-message">No breakdown available.</p>
-        )}
-      </section>
-      <section class="usage-detail-section">
-        <h3>Recent requests</h3>
-        {summary.recent.length ? (
-          <ol class="usage-recent">
-            {summary.recent.map((request) => (
-              <RecentRequest key={request.id} request={request} />
-            ))}
-          </ol>
-        ) : (
-          <p class="usage-message">No recent requests.</p>
-        )}
-      </section>
-      {totals.unknownRequests > 0 && (
-        <p class="usage-footnote">Incomplete costs are excluded or estimated in the subtotal.</p>
+      <p class="usage-row usage-muted">
+        <span>{formatUsageCount(totals.requests)} requests · API-equivalent USD</span>
+        {totals.activeRequests > 0 ? (
+          <span>{formatUsageCount(totals.activeRequests)} active</span>
+        ) : totals.estimatedRequests > 0 ? (
+          <span>Provisional</span>
+        ) : null}
+      </p>
+      {history.length > 0 && <UsageHistory history={history} />}
+      {totals.requests > 0 && (
+        <details
+          class="usage-inspection"
+          onToggle={(event) => setExpanded(event.currentTarget.open)}
+        >
+          <summary>Breakdown and requests</summary>
+          {expanded && (
+            <>
+              {summary.breakdown.length > 0 && (
+                <ul class="usage-list" aria-label="Provider, model and purpose breakdown">
+                  {summary.breakdown.map((item, index) => (
+                    <li
+                      class="usage-row"
+                      key={`${item.provider}/${item.model}/${item.purpose}/${index}`}
+                    >
+                      <span class="usage-name">
+                        <strong>{item.model}</strong>
+                        <span>
+                          {item.provider} · {item.purpose}
+                        </span>
+                      </span>
+                      <span class="usage-amount">{formatUsageCost(item.totals)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {summary.recent.length > 0 && (
+                <section class="usage-section">
+                  <h3>Recent requests</h3>
+                  {summary.recent.map((request) => (
+                    <RecentRequest key={request.id} request={request} />
+                  ))}
+                </section>
+              )}
+              {history.length > 0 && (
+                <details class="usage-section">
+                  <summary>History values</summary>
+                  <table class="usage-table">
+                    <caption>Cumulative cost</caption>
+                    <thead>
+                      <tr>
+                        <th scope="col">Time</th>
+                        <th scope="col">Cost</th>
+                        <th scope="col">Requests</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {history.map((point) => (
+                        <tr key={point.at}>
+                          <td>{formatUsageTime(point.at)}</td>
+                          <td>{formatUsageCost(point.totals)}</td>
+                          <td>{formatUsageCount(point.totals.requests)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </details>
+              )}
+            </>
+          )}
+        </details>
       )}
     </>
   );
 }
 
-function UsageHistory({ history }: { history: ReturnType<typeof cumulativeUsageHistory> }) {
-  if (history.length === 0) return null;
-  const width = 320;
-  const height = 54;
-  const max = Math.max(...history.map((point) => point.totals.costUsd), 0);
-  const coordinates = history.map((point, index) => ({
-    x: history.length === 1 ? width / 2 : (index / (history.length - 1)) * width,
-    y: height - (max > 0 ? (point.totals.costUsd / max) * height : 0),
-  }));
-  const points = coordinates.map(({ x, y }) => `${x.toFixed(1)},${y.toFixed(1)}`);
-  return (
-    <section class="usage-detail-section usage-history" aria-label="Cumulative cost history">
-      <h3>Cumulative cost</h3>
-      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={historyLabel(history)}>
-        <polyline points={points.join(" ")} />
-        {coordinates.map(({ x, y }, index) => (
-          <circle key={history[index]!.at} cx={x} cy={y} r="2.5" />
-        ))}
-      </svg>
-      <details>
-        <summary>View cumulative values</summary>
-        <table>
-          <caption>Cumulative API-equivalent cost</caption>
-          <thead>
-            <tr>
-              <th scope="col">Time</th>
-              <th scope="col">Cost</th>
-              <th scope="col">Requests</th>
-            </tr>
-          </thead>
-          <tbody>
-            {history.map((point) => (
-              <tr key={point.at}>
-                <td>{formatUsageTime(point.at)}</td>
-                <td>{formatUsageCost(point.totals)}</td>
-                <td>{formatUsageCount(point.totals.requests)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </details>
-    </section>
-  );
-}
-
-function historyLabel(history: ReturnType<typeof cumulativeUsageHistory>): string {
-  const first = history[0];
-  const last = history.at(-1);
-  return first && last
-    ? `Cumulative API-equivalent cost from ${formatUsageCost(first.totals)} to ${formatUsageCost(last.totals)} across ${history.length} intervals.`
-    : "No usage history.";
-}
-
-function BreakdownRow({ item }: { item: UsageBreakdown }) {
-  return (
-    <li>
-      <div class="usage-breakdown-name">
-        <strong>{item.model}</strong>
-        <span>
-          {item.provider} · {item.purpose}
-        </span>
-      </div>
-      <div class="usage-breakdown-total">
-        <strong>{formatUsageCost(item.totals)}</strong>
-        <span>{formatUsageCount(item.totals.requests)} requests</span>
-      </div>
-    </li>
-  );
-}
-
 function RecentRequest({ request }: { request: UsageRequest }) {
   const cost = request.costUsd === null ? "Unknown" : formatCostUsd(request.costUsd);
-  const shownCost = request.isEstimate && request.costUsd !== null ? `~${cost}` : cost;
   return (
-    <li>
-      <div class="usage-recent-heading">
-        <div>
+    <details class="usage-request">
+      <summary>
+        <span class="usage-name">
           <strong>{request.model}</strong>
           <span>
-            {request.provider} · {request.purpose}
+            {request.purpose} · {formatUsageTime(request.startedAt)}
           </span>
-        </div>
-        <strong>{shownCost}</strong>
-      </div>
-      <time dateTime={request.startedAt}>{formatUsageTime(request.startedAt)}</time>
-      {request.isEstimate && <span class="usage-estimate-tag">Provisional</span>}
-      {request.problem && <p class="usage-request-problem">{request.problem}</p>}
-      {(request.tokens || request.rates) && (
-        <details class="usage-request-metadata">
-          <summary>Tokens and rates</summary>
-          <dl>
-            {request.tokens && (
+        </span>
+        <span class="usage-amount">
+          {request.isEstimate && request.costUsd !== null ? `~${cost}` : cost}
+        </span>
+      </summary>
+      {request.problem && <p class="usage-warning">{request.problem}</p>}
+      <dl class="usage-metadata">
+        <dt>Provider</dt>
+        <dd>{request.provider}</dd>
+        {request.tokens && (
+          <>
+            <dt>Input / output</dt>
+            <dd>
+              {count(request.tokens.inputTokens)} / {count(request.tokens.outputTokens)}
+            </dd>
+            <dt>Cached input</dt>
+            <dd>{count(request.tokens.cachedInputTokens)}</dd>
+            {request.tokens.reasoningTokens != null && (
               <>
-                <dt>Input / output</dt>
+                <dt>Reasoning (in output)</dt>
+                <dd>{count(request.tokens.reasoningTokens)}</dd>
+              </>
+            )}
+            {(request.tokens.cacheWrite30mTokens !== 0 ||
+              request.tokens.cacheWrite12hTokens !== 0) && (
+              <>
+                <dt>Cache writes · 30m / 12h</dt>
                 <dd>
-                  {formatNullableCount(request.tokens.inputTokens)} /{" "}
-                  {formatNullableCount(request.tokens.outputTokens)}
-                </dd>
-                {request.tokens.reasoningTokens != null && (
-                  <>
-                    <dt>Reasoning (included in output)</dt>
-                    <dd>{formatNullableCount(request.tokens.reasoningTokens)}</dd>
-                  </>
-                )}
-                <dt>Cached input</dt>
-                <dd>{formatNullableCount(request.tokens.cachedInputTokens)}</dd>
-                <dt>Cache writes (30m / 12h)</dt>
-                <dd>
-                  {formatNullableCount(request.tokens.cacheWrite30mTokens)} /{" "}
-                  {formatNullableCount(request.tokens.cacheWrite12hTokens)}
+                  {count(request.tokens.cacheWrite30mTokens)} /{" "}
+                  {count(request.tokens.cacheWrite12hTokens)}
                 </dd>
               </>
             )}
-            {request.rates && (
-              <>
-                <dt>Rate source</dt>
-                <dd>
-                  {request.rates.source} · {request.rates.model}
-                </dd>
-                <dt>Rates captured</dt>
-                <dd>{formatUsageTime(request.rates.capturedAt)}</dd>
-              </>
-            )}
-          </dl>
-        </details>
-      )}
-    </li>
+          </>
+        )}
+        {request.rates && (
+          <>
+            <dt>Pricing source</dt>
+            <dd>{request.rates.source}</dd>
+            <dt>Rates captured</dt>
+            <dd>{formatUsageTime(request.rates.capturedAt)}</dd>
+          </>
+        )}
+      </dl>
+    </details>
   );
 }
 
-function formatNullableCount(value: number | null): string {
+function count(value: number | null): string {
   return value === null ? "Unknown" : formatUsageCount(value);
 }

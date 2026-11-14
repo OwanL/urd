@@ -26,7 +26,9 @@ export function useUsageSummary({
   range?: UsageRange;
   detail?: boolean;
 }): UsageSummaryState {
-  const [state, setState] = useState<UsageSummaryState>({
+  const scope = sessionId ? `session:${sessionId}` : `range:${range ?? "today"}`;
+  const [state, setState] = useState<UsageSummaryState & { scope: string }>({
+    scope,
     summary: null,
     loading: false,
     stale: false,
@@ -59,7 +61,11 @@ export function useUsageSummary({
       reading = true;
       const request = new AbortController();
       controller = request;
-      setState((current) => ({ ...current, loading: current.summary === null }));
+      setState((current) =>
+        current.scope === scope
+          ? { ...current, loading: current.summary === null }
+          : { scope, summary: null, loading: true, stale: false },
+      );
       try {
         const query = sessionId
           ? { sessionId, ...(detail ? {} : { detail: false as const }) }
@@ -69,10 +75,15 @@ export function useUsageSummary({
             };
         const summary = await client.getSummary(query, request.signal);
         if (request.signal.aborted || disposed) return;
-        setState({ summary, loading: false, stale: false });
+        setState({ scope, summary, loading: false, stale: false });
       } catch {
         if (!request.signal.aborted && !disposed)
-          setState((current) => ({ ...current, loading: false, stale: true }));
+          setState((current) => ({
+            scope,
+            summary: current.scope === scope ? current.summary : null,
+            loading: false,
+            stale: true,
+          }));
       } finally {
         if (controller === request) controller = null;
         reading = false;
@@ -98,8 +109,11 @@ export function useUsageSummary({
     range,
     refreshKey,
     sessionId,
+    scope,
     visible,
   ]);
 
-  return state;
+  return state.scope === scope
+    ? state
+    : { summary: null, loading: enabled && visible, stale: false };
 }

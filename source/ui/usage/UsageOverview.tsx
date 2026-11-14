@@ -10,25 +10,19 @@ export function UsageOverview({
   refreshKey?: number | string;
 }) {
   return (
-    <div class="usage-overview" aria-label="Usage totals">
+    <div class="usage-overview" aria-label="API cost totals">
       <div class="usage-overview-total">
         <span class="usage-overview-label" aria-hidden="true">
-          Today
+          24h API cost
         </span>
-        <UsageControl
-          label="Today"
-          range="today"
-          active={active}
-          busy={busy}
-          refreshKey={refreshKey}
-        />
+        <UsageControl label="24h" range="day" active={active} busy={busy} refreshKey={refreshKey} />
       </div>
       <div class="usage-overview-total">
         <span class="usage-overview-label" aria-hidden="true">
-          Last 7 days
+          7d API cost
         </span>
         <UsageControl
-          label="Last 7 days"
+          label="7d"
           range="sevenDays"
           active={active}
           busy={busy}

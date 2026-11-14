@@ -14,11 +14,14 @@ The workspace has closable, reorderable local tabs, transcript, model and reason
 selectors, Send, Stop and integrated [provider settings](provider-management.md#browser-settings).
 Tabs take the header's remaining width beside New chat and Workspace options. Each tab fits within
 its scroll strip; activation, title changes and strip resizing reveal the active tab without fighting
-a drag. Workspace options holds Settings and the unavailable Snooze action. Small global cost totals
-sit beside session indicators inside the composer's control row, with detailed usage on demand.
-When the row cannot fit them, accounting moves into More without displacing model, reasoning, Stop or
-Send/Continue. There is no separate accounting footer. The conversation is centered and width-bounded
-on wide screens.
+a drag. Tabs have a preferred width of 180px and truncate long titles. Workspace options holds Settings
+and the unavailable Snooze action. The fresh-chat screen shows labeled 24h and 7d API cost totals above
+the working-directory controls; these are rolling 24-hour and 168-hour windows, not calendar days.
+The composer keeps only session cost, context and working time. Its session-cost popover has Session,
+24h and 7d tabs; switching scopes reads that scope on demand without changing the session-cost chip.
+When the row cannot fit the session indicators, they move into More without displacing model,
+reasoning, Stop or Send/Continue. There is no separate accounting footer. The conversation is centered
+and width-bounded on wide screens.
 The model picker loads cached catalogs immediately, discovers missing catalogs on startup and
 rediscovers after provider changes, without polling or a routine refresh action. With no providers,
 the model and reasoning selectors are replaced by an Add provider action that opens Settings →

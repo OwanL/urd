@@ -286,16 +286,19 @@ export function Conversation({
           onTranscriptPositionChange={onTranscriptPositionChange}
           emptyState={
             (showWorkingDirectory || workingDirectoryLocked) && snapshot ? (
-              <SessionWorkingDirectory
-                client={client}
-                sessionId={sessionId}
-                workingDirectory={snapshot.workingDirectory}
-                preferences={preferences}
-                disabled={!ready}
-                onGateChange={updateWorkingDirectoryGate}
-                onSnapshot={acceptSnapshot}
-                onRefresh={onRefresh}
-              />
+              <div class="empty-chat-overview">
+                <UsageOverview active={active && visible} refreshKey={refresh} />
+                <SessionWorkingDirectory
+                  client={client}
+                  sessionId={sessionId}
+                  workingDirectory={snapshot.workingDirectory}
+                  preferences={preferences}
+                  disabled={!ready}
+                  onGateChange={updateWorkingDirectoryGate}
+                  onSnapshot={acceptSnapshot}
+                  onRefresh={onRefresh}
+                />
+              </div>
             ) : null
           }
         >
@@ -495,24 +498,17 @@ export function Conversation({
         )}
       <Composer
         indicators={
-          <>
-            <UsageOverview
-              active={active && visible}
-              busy={state.active || chat.pending?.status === "sending"}
-              refreshKey={`${refresh}:${state.active || chat.pending?.status === "sending" ? "" : (notice ?? "")}`}
-            />
-            <SessionIndicators
-              contextUsage={snapshot?.contextUsage ?? null}
-              contextWindow={selection?.contextWindow ?? null}
-              workingTime={snapshot?.workingTime ?? null}
-              active={active && visible && notice !== null}
-              fenced={snapshot?.admissionFenced ?? true}
-              sessionId={sessionId}
-              usageActive={active && visible}
-              usageBusy={state.active || chat.pending?.status === "sending"}
-              usageRefresh={`${refresh}:${state.active || chat.pending?.status === "sending" ? "" : (notice ?? "")}`}
-            />
-          </>
+          <SessionIndicators
+            contextUsage={snapshot?.contextUsage ?? null}
+            contextWindow={selection?.contextWindow ?? null}
+            workingTime={snapshot?.workingTime ?? null}
+            active={active && visible && notice !== null}
+            fenced={snapshot?.admissionFenced ?? true}
+            sessionId={sessionId}
+            usageActive={active && visible}
+            usageBusy={state.active || chat.pending?.status === "sending"}
+            usageRefresh={`${refresh}:${state.active || chat.pending?.status === "sending" ? "" : (notice ?? "")}`}
+          />
         }
         text={chat.draft}
         onTextChange={(text) => {

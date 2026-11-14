@@ -170,6 +170,14 @@
   padding: 24px 0;
 }
 
+.empty-chat-overview {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  min-width: 0;
+}
+
 .chat-working-directory {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr) auto;

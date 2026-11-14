@@ -1,27 +1,45 @@
 .usage-overview {
-  display: flex;
+  display: grid;
+  grid-template-columns: max-content auto;
   align-items: center;
-  flex: none;
-  flex-wrap: nowrap;
-  gap: 4px;
-  font-family: monospace;
+  gap: 6px 16px;
+  color: var(--text-secondary);
   white-space: nowrap;
 }
 
 .usage-overview-total {
-  display: flex;
-  align-items: center;
-}
-
-.usage-overview-label {
-  display: none;
+  display: contents;
 }
 
 .usage-overview .usage-control {
-  min-height: 28px;
-  padding-inline: 3px;
-  font-family: inherit;
-  font-size: 8px;
+  font-size: 13px;
+}
+
+.usage-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.usage-tabs button {
+  flex: 1;
+  min-height: 32px;
+  padding: 4px 8px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+}
+
+.usage-tabs button:hover {
+  background: var(--surface-hover);
+}
+
+.usage-tabs button[aria-selected="true"] {
+  border-bottom-color: var(--accent);
+  color: var(--text-primary);
 }
 
 .usage-control {

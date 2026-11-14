@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "preact/hooks";
+import { useId, useMemo, useRef, useState } from "preact/hooks";
 import type { UsageRange, UsageSummary } from "./UsageTypes.ts";
 import { UsageClient } from "./UsageClient.ts";
 import { UsageComposition } from "./UsageComposition.tsx";
@@ -14,32 +14,90 @@ import {
   usageSources,
 } from "./UsageValues.ts";
 
-export function UsageDetails({
-  client,
-  sessionId,
-  range,
-}: {
+const costScopes = [
+  { value: "session", label: "Session" },
+  { value: "day", label: "24h" },
+  { value: "sevenDays", label: "7d" },
+] as const;
+
+interface UsageDetailsProps {
   client: UsageClient;
   sessionId?: string;
   range?: UsageRange;
-}) {
-  // The chip remains live; this inspection snapshot stays still until it is reopened.
+}
+
+export function UsageDetails({ client, sessionId, range }: UsageDetailsProps) {
+  const id = useId();
+  const [scope, setScope] = useState<"session" | UsageRange>(
+    sessionId ? "session" : (range ?? "day"),
+  );
+  return (
+    <section class="usage-details" aria-label="Usage details">
+      {sessionId && (
+        <div class="usage-tabs" role="tablist" aria-label="Cost scope">
+          {costScopes.map((tab, index) => (
+            <button
+              key={tab.value}
+              id={`${id}-${tab.value}`}
+              type="button"
+              role="tab"
+              aria-selected={scope === tab.value}
+              aria-controls={`${id}-panel`}
+              tabIndex={scope === tab.value ? 0 : -1}
+              onClick={() => setScope(tab.value)}
+              onKeyDown={(event) => {
+                let next: number;
+                if (event.key === "ArrowRight") next = (index + 1) % costScopes.length;
+                else if (event.key === "ArrowLeft")
+                  next = (index + costScopes.length - 1) % costScopes.length;
+                else if (event.key === "Home") next = 0;
+                else if (event.key === "End") next = costScopes.length - 1;
+                else return;
+                event.preventDefault();
+                const target = costScopes[next]!;
+                setScope(target.value);
+                document.getElementById(`${id}-${target.value}`)?.focus();
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      )}
+      <div
+        id={`${id}-panel`}
+        role={sessionId ? "tabpanel" : undefined}
+        aria-labelledby={sessionId ? `${id}-${scope}` : undefined}
+        tabIndex={sessionId ? 0 : undefined}
+      >
+        <UsageSnapshot
+          key={scope}
+          client={client}
+          {...(scope === "session" ? { sessionId: sessionId! } : { range: scope })}
+        />
+      </div>
+    </section>
+  );
+}
+
+function UsageSnapshot({ client, sessionId, range }: UsageDetailsProps) {
+  // Each scope is read on demand and stays still until switched or reopened.
   const snapshot = useRef<UsageSummary | null>(null);
   const state = useUsageSummary({
     client,
     enabled: snapshot.current === null,
     pollMilliseconds: null,
     refreshKey: 0,
-    ...(sessionId ? { sessionId } : { range: range ?? "today" }),
+    ...(sessionId ? { sessionId } : { range: range ?? "day" }),
     detail: true,
   });
   snapshot.current ??= state.summary;
   const summary = snapshot.current;
   return (
-    <section class="usage-details" aria-label="Usage details">
+    <>
       <header class="usage-row usage-heading">
         <h2>
-          {sessionId ? "Session cost" : range === "sevenDays" ? "Cost (7 days)" : "Cost today"}
+          {sessionId ? "Session cost" : range === "sevenDays" ? "7d API cost" : "24h API cost"}
         </h2>
         <strong>{summary ? formatUsageCost(summary.totals) : "…"}</strong>
       </header>
@@ -56,7 +114,7 @@ export function UsageDetails({
           dateLabels={range === "sevenDays"}
         />
       )}
-    </section>
+    </>
   );
 }
 

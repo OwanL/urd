@@ -30,7 +30,7 @@ export function UsageControl({
     enabled: active,
     pollMilliseconds: busy ? 1_000 : 15_000,
     refreshKey,
-    ...(sessionId ? { sessionId } : { range: range ?? "today" }),
+    ...(sessionId ? { sessionId } : { range: range ?? "day" }),
     detail: false,
   });
   const value = state.summary
@@ -48,9 +48,9 @@ export function UsageControl({
       enabled={active}
       content={
         <UsageDetails
-          key={sessionId ?? range ?? "today"}
+          key={sessionId ?? range ?? "day"}
           client={client}
-          {...(sessionId ? { sessionId } : { range: range ?? "today" })}
+          {...(sessionId ? { sessionId } : { range: range ?? "day" })}
         />
       }
     >

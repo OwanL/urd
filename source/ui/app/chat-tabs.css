@@ -13,7 +13,7 @@
   position: relative;
   display: flex;
   align-items: center;
-  flex: 0 0 min(230px, 100%);
+  flex: 0 0 min(180px, 100%);
   min-width: 0;
   max-width: 100%;
   border: 1px solid transparent;

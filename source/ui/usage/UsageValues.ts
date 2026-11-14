@@ -34,10 +34,12 @@ const purposeLabels = new Map([
   ["model-test", "Provider tests"],
 ]);
 
-export function localUsageRange(now: Date, range: UsageRange): UsageRangeBounds {
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  if (range === "sevenDays") start.setDate(start.getDate() - 6);
-  return { from: start.toISOString(), to: now.toISOString() };
+export function usageRange(now: Date, range: UsageRange): UsageRangeBounds {
+  const hours = range === "sevenDays" ? 168 : 24;
+  return {
+    from: new Date(now.getTime() - hours * 60 * 60 * 1000).toISOString(),
+    to: now.toISOString(),
+  };
 }
 
 export function cumulativeUsageHistory(history: readonly UsagePoint[]): UsagePoint[] {

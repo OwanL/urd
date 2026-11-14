@@ -1,7 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
 import { UsageClient } from "./UsageClient.ts";
 import type { UsageRange, UsageSummary } from "./UsageTypes.ts";
-import { localUsageRange } from "./UsageValues.ts";
+import { usageRange } from "./UsageValues.ts";
 
 export interface UsageSummaryState {
   summary: UsageSummary | null;
@@ -26,7 +26,7 @@ export function useUsageSummary({
   range?: UsageRange;
   detail?: boolean;
 }): UsageSummaryState {
-  const scope = sessionId ? `session:${sessionId}` : `range:${range ?? "today"}`;
+  const scope = sessionId ? `session:${sessionId}` : `range:${range ?? "day"}`;
   const [state, setState] = useState<UsageSummaryState & { scope: string }>({
     scope,
     summary: null,
@@ -70,7 +70,7 @@ export function useUsageSummary({
         const query = sessionId
           ? { sessionId, ...(detail ? {} : { detail: false as const }) }
           : {
-              ...localUsageRange(new Date(), range ?? "today"),
+              ...usageRange(new Date(), range ?? "day"),
               ...(detail ? {} : { detail: false as const }),
             };
         const summary = await client.getSummary(query, request.signal);

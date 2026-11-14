@@ -5,7 +5,7 @@ import {
   cumulativeUsageHistory,
   formatCostUsd,
   formatUsageCost,
-  localUsageRange,
+  usageRange,
   usageColors,
   usageProviders,
   usageSources,
@@ -258,20 +258,28 @@ void test("usage colors are deterministic, order-independent and distinct for sm
   assert.equal(Object.hasOwn(usageColors(["__proto__"]), "__proto__"), true);
 });
 
-void test("local usage ranges start at local midnight for today or the preceding six days", () => {
-  const now = new Date(2026, 10, 14, 15, 22, 8, 0);
-  const today = localUsageRange(now, "today");
-  const todayStart = new Date(today.from);
-  assert.equal(todayStart.getFullYear(), now.getFullYear());
-  assert.equal(todayStart.getMonth(), now.getMonth());
-  assert.equal(todayStart.getDate(), now.getDate());
-  assert.equal(todayStart.getHours(), 0);
-  assert.equal(new Date(today.to).getTime(), now.getTime());
-
-  const week = localUsageRange(now, "sevenDays");
-  const weekStart = new Date(week.from);
-  assert.equal(weekStart.getFullYear(), 2026);
-  assert.equal(weekStart.getMonth(), 10);
-  assert.equal(weekStart.getDate(), 8);
-  assert.equal(weekStart.getHours(), 0);
+void test("usage ranges cover rolling 24 and 168 hours across calendar and DST boundaries", () => {
+  const cases = [
+    {
+      now: "2026-01-01T00:15:00.123Z",
+      day: "2025-12-31T00:15:00.123Z",
+      week: "2025-12-25T00:15:00.123Z",
+    },
+    {
+      now: "2026-03-08T03:30:00-04:00",
+      day: "2026-03-07T07:30:00.000Z",
+      week: "2026-03-01T07:30:00.000Z",
+    },
+    {
+      now: "2026-11-01T01:30:00-05:00",
+      day: "2026-10-31T06:30:00.000Z",
+      week: "2026-10-25T06:30:00.000Z",
+    },
+  ];
+  for (const { now, day, week } of cases) {
+    const instant = new Date(now);
+    assert.deepEqual(usageRange(instant, "day"), { from: day, to: instant.toISOString() });
+    assert.deepEqual(usageRange(instant, "sevenDays"), { from: week, to: instant.toISOString() });
+    assert.equal(instant.toISOString(), new Date(now).toISOString());
+  }
 });

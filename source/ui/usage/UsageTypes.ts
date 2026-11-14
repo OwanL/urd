@@ -68,7 +68,7 @@ export interface UsageSummary {
   recent: UsageRequest[];
 }
 
-export type UsageRange = "today" | "sevenDays";
+export type UsageRange = "day" | "sevenDays";
 
 export interface SessionUsageQuery {
   sessionId: string;

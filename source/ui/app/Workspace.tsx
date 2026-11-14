@@ -23,7 +23,7 @@ import { useWorkspaceModels } from "./useWorkspaceModels.ts";
 import { useWorkspaceNavigation } from "./useWorkspaceNavigation.ts";
 import { useSessionEvents } from "./useSessionEvents.ts";
 import { useWorkspaceRetention } from "./useWorkspaceRetention.ts";
-import { UsageControl } from "../usage/UsageControl.tsx";
+import { UsageOverview } from "../usage/UsageOverview.tsx";
 import "./workspace.css";
 
 const sessions = new SessionClient(new URL(window.location.href));
@@ -164,17 +164,6 @@ export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) 
           placement="below"
           onClose={() => setOptionsOpen(false)}
         >
-          <div class="workspace-options-costs">
-            <div class="workspace-options-cost">
-              <span>Today</span>
-              <UsageControl label="Today" range="today" />
-            </div>
-            <div class="workspace-options-cost">
-              <span>Last 7 days</span>
-              <UsageControl label="Last 7 days" range="sevenDays" />
-            </div>
-          </div>
-          <div class="workspace-options-divider" />
           <button
             type="button"
             class="workspace-options-action"
@@ -273,6 +262,9 @@ export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) 
       ) : (
         <div class="empty-workspace" />
       )}
+      <footer class="workspace-footer">
+        <UsageOverview />
+      </footer>
     </main>
   );
 }

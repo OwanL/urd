@@ -1,8 +1,20 @@
 .usage-overview {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   flex: none;
-  gap: 2px;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+}
+
+.usage-overview-total {
+  display: inline-flex;
+  align-items: center;
+}
+
+.usage-overview-label {
+  color: var(--text-secondary);
+  font-size: 11px;
 }
 
 .usage-control {

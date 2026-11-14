@@ -9,8 +9,18 @@ export function UsageOverview({
 }) {
   return (
     <div class="usage-overview" aria-label="Usage totals">
-      <UsageControl label="Today" range="today" busy={busy} refreshKey={refreshKey} />
-      <UsageControl label="Last 7 days" range="sevenDays" busy={busy} refreshKey={refreshKey} />
+      <div class="usage-overview-total">
+        <span class="usage-overview-label" aria-hidden="true">
+          Today
+        </span>
+        <UsageControl label="Today" range="today" busy={busy} refreshKey={refreshKey} />
+      </div>
+      <div class="usage-overview-total">
+        <span class="usage-overview-label" aria-hidden="true">
+          7d
+        </span>
+        <UsageControl label="Last 7 days" range="sevenDays" busy={busy} refreshKey={refreshKey} />
+      </div>
     </div>
   );
 }

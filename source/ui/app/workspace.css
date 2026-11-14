@@ -28,30 +28,12 @@
   padding: 7px;
 }
 
-.workspace-options-costs {
+.workspace-footer {
   display: flex;
-  flex-direction: column;
-}
-
-.workspace-options-cost {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 36px;
-  padding-inline: 8px;
-  color: var(--text-secondary);
-  font-size: 12px;
-}
-
-.workspace-options-cost .usage-control {
   justify-content: flex-end;
-}
-
-.workspace-options-divider {
-  height: 1px;
-  margin-block: 3px;
-  background: var(--border-subtle);
+  flex: none;
+  min-width: 0;
+  padding: 0 12px 4px;
 }
 
 .workspace-options-action {

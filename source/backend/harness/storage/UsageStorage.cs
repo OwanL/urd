@@ -108,7 +108,7 @@ internal sealed class UsageStorage(Database database) {
         return new UsageSummary(totals, [], [], []);
 
       IReadOnlyList<UsageBreakdown> breakdown = ReadBreakdown(transaction, where, parameters);
-      IReadOnlyList<UsagePoint> history = ReadHistory(transaction, where, parameters, from, to);
+      IReadOnlyList<UsagePoint> history = ReadHistory(transaction, where, parameters, breakdown);
       IReadOnlyList<UsageRequest> recent = ReadRecent(transaction, where, parameters);
       return new UsageSummary(totals, breakdown, history, recent);
     });
@@ -220,25 +220,44 @@ internal sealed class UsageStorage(Database database) {
   private List<UsageBreakdown> ReadBreakdown(SqliteTransaction transaction, string where,
       (string Name, object? Value)[] parameters) {
     using SqliteCommand read = database.Command(transaction, $"""
-      SELECT provider, model, purpose, COALESCE(SUM(cost_nano_usd), 0), COUNT(*), COALESCE(SUM(is_estimate), 0),
-          COALESCE(SUM(CASE WHEN cost_nano_usd IS NULL OR problem IS NOT NULL THEN 1 ELSE 0 END), 0),
-          COALESCE(SUM(CASE WHEN finished_at IS NULL THEN 1 ELSE 0 END), 0)
-      FROM usage_requests {where}
-      GROUP BY provider, model, purpose
-      ORDER BY COALESCE(SUM(cost_nano_usd), 0) DESC, COUNT(*) DESC,
-          provider COLLATE BINARY, model COLLATE BINARY, purpose COLLATE BINARY
-      LIMIT {MaximumBreakdown};
-      """, parameters);
+      WITH usage_groups AS (
+        SELECT provider, model, purpose, COALESCE(SUM(cost_nano_usd), 0) AS cost_nano_usd,
+            COUNT(*) AS requests, COALESCE(SUM(is_estimate), 0) AS estimated_requests,
+            COALESCE(SUM(CASE WHEN cost_nano_usd IS NULL OR problem IS NOT NULL THEN 1 ELSE 0 END), 0)
+                AS unknown_requests,
+            COALESCE(SUM(CASE WHEN finished_at IS NULL THEN 1 ELSE 0 END), 0) AS active_requests
+        FROM usage_requests {where}
+        GROUP BY provider, model, purpose
+      ), ranked AS (
+        SELECT *, ROW_NUMBER() OVER (ORDER BY cost_nano_usd DESC, requests DESC,
+            provider COLLATE BINARY, model COLLATE BINARY, purpose COLLATE BINARY) AS group_rank,
+            COUNT(*) OVER () AS group_count
+        FROM usage_groups
+      ), result AS (
+        SELECT provider, model, purpose, cost_nano_usd, requests, estimated_requests, unknown_requests,
+            active_requests, 0 AS is_other, group_rank AS sort_order
+        FROM ranked WHERE group_count <= $maximumBreakdown OR group_rank <= $retainedBreakdown
+        UNION ALL
+        SELECT '', '', '', SUM(cost_nano_usd), SUM(requests), SUM(estimated_requests), SUM(unknown_requests),
+            SUM(active_requests), 1, MAX(group_rank) + 1
+        FROM ranked WHERE group_count > $maximumBreakdown AND group_rank > $retainedBreakdown
+        HAVING COUNT(*) > 0
+      )
+      SELECT provider, model, purpose, cost_nano_usd, requests, estimated_requests, unknown_requests,
+          active_requests, is_other
+      FROM result ORDER BY sort_order;
+      """, [.. parameters, ("$maximumBreakdown", MaximumBreakdown),
+          ("$retainedBreakdown", MaximumBreakdown - 1)]);
     using SqliteDataReader reader = read.ExecuteReader();
     List<UsageBreakdown> values = [];
     while (reader.Read())
       values.Add(new UsageBreakdown(reader.GetString(0), reader.GetString(1), reader.GetString(2),
-          ReadTotalsAt(reader, 3)));
+          ReadTotalsAt(reader, 3), reader.GetInt64(8) != 0));
     return values;
   }
 
   private List<UsagePoint> ReadHistory(SqliteTransaction transaction, string where,
-      (string Name, object? Value)[] parameters, DateTimeOffset? from, DateTimeOffset? to) {
+      (string Name, object? Value)[] parameters, IReadOnlyList<UsageBreakdown> breakdown) {
     string? observedStart;
     string? observedEnd;
     long count;
@@ -254,40 +273,101 @@ internal sealed class UsageStorage(Database database) {
     if (count == 0)
       return [];
 
-    DateTimeOffset start = from ?? DateTimeOffset.Parse(observedStart!, CultureInfo.InvariantCulture,
+    DateTimeOffset start = DateTimeOffset.Parse(observedStart!, CultureInfo.InvariantCulture,
         DateTimeStyles.RoundtripKind);
-    DateTimeOffset end = to ?? DateTimeOffset.Parse(observedEnd!, CultureInfo.InvariantCulture,
+    DateTimeOffset end = DateTimeOffset.Parse(observedEnd!, CultureInfo.InvariantCulture,
         DateTimeStyles.RoundtripKind);
-    long durationTicks = end.UtcTicks - start.UtcTicks;
-    int bucketCount = durationTicks <= 0 ? 1 : (int)Math.Min(MaximumHistory, count);
+    int bucketCount = (int)Math.Min(MaximumHistory, count);
     string bucket = $"""
       CASE WHEN $bucketCount = 1 OR julianday($end) <= julianday($start) THEN 0
           ELSE MIN($bucketCount - 1, CAST((julianday(started_at) - julianday($start)) * $bucketCount
               / (julianday($end) - julianday($start)) AS INTEGER)) END
       """;
     (string Name, object? Value)[] historyParameters = [.. parameters,
-      ("$start", Timestamp(start)), ("$end", Timestamp(end)), ("$bucketCount", bucketCount)];
-    UsageTotals[] buckets = new UsageTotals[bucketCount];
-    Array.Fill(buckets, new UsageTotals(0m, 0, 0, 0, 0));
+      ("$start", Timestamp(start)), ("$end", Timestamp(end)), ("$bucketCount", bucketCount),
+      ("$maximumBreakdown", MaximumBreakdown), ("$retainedBreakdown", MaximumBreakdown - 1)];
+    Dictionary<(string Provider, string Model, string Purpose, bool IsOther), int> groupIndexes = breakdown
+        .Select((group, index) => (group, index))
+        .ToDictionary(item => (item.group.Provider, item.group.Model, item.group.Purpose, item.group.IsOther),
+            item => item.index);
+    UsageTotals emptyTotals = new(0m, 0, 0, 0, 0);
+    Dictionary<int, (DateTimeOffset At, UsageTotals[] Totals)> buckets = [];
     using (SqliteCommand read = database.Command(transaction, $"""
-      SELECT {bucket}, COALESCE(SUM(cost_nano_usd), 0), COUNT(*), COALESCE(SUM(is_estimate), 0),
-          COALESCE(SUM(CASE WHEN cost_nano_usd IS NULL OR problem IS NOT NULL THEN 1 ELSE 0 END), 0),
-          COALESCE(SUM(CASE WHEN finished_at IS NULL THEN 1 ELSE 0 END), 0)
-      FROM usage_requests {where}
-      GROUP BY {bucket} ORDER BY 1;
+      WITH filtered AS (
+        SELECT provider, model, purpose, started_at, cost_nano_usd, is_estimate, problem, finished_at,
+            {bucket} AS bucket
+        FROM usage_requests {where}
+      ), bucket_times AS (
+        SELECT bucket, MAX(started_at) AS latest_started_at FROM filtered GROUP BY bucket
+      ), usage_groups AS (
+        SELECT provider, model, purpose, COALESCE(SUM(cost_nano_usd), 0) AS cost_nano_usd,
+            COUNT(*) AS requests, COALESCE(SUM(is_estimate), 0) AS estimated_requests,
+            COALESCE(SUM(CASE WHEN cost_nano_usd IS NULL OR problem IS NOT NULL THEN 1 ELSE 0 END), 0)
+                AS unknown_requests,
+            COALESCE(SUM(CASE WHEN finished_at IS NULL THEN 1 ELSE 0 END), 0) AS active_requests
+        FROM filtered GROUP BY provider, model, purpose
+      ), ranked AS (
+        SELECT *, ROW_NUMBER() OVER (ORDER BY cost_nano_usd DESC, requests DESC,
+            provider COLLATE BINARY, model COLLATE BINARY, purpose COLLATE BINARY) AS group_rank,
+            COUNT(*) OVER () AS group_count
+        FROM usage_groups
+      ), mapped AS (
+        SELECT provider AS source_provider, model AS source_model, purpose AS source_purpose,
+            CASE WHEN group_count > $maximumBreakdown AND group_rank > $retainedBreakdown THEN '' ELSE provider END
+                AS provider,
+            CASE WHEN group_count > $maximumBreakdown AND group_rank > $retainedBreakdown THEN '' ELSE model END AS model,
+            CASE WHEN group_count > $maximumBreakdown AND group_rank > $retainedBreakdown THEN '' ELSE purpose END
+                AS purpose,
+            CASE WHEN group_count > $maximumBreakdown AND group_rank > $retainedBreakdown THEN 1 ELSE 0 END AS is_other
+        FROM ranked
+      )
+      SELECT filtered.bucket, bucket_times.latest_started_at, mapped.provider, mapped.model, mapped.purpose,
+          mapped.is_other, COALESCE(SUM(filtered.cost_nano_usd), 0), COUNT(*),
+          COALESCE(SUM(filtered.is_estimate), 0),
+          COALESCE(SUM(CASE WHEN filtered.cost_nano_usd IS NULL OR filtered.problem IS NOT NULL
+              THEN 1 ELSE 0 END), 0),
+          COALESCE(SUM(CASE WHEN filtered.finished_at IS NULL THEN 1 ELSE 0 END), 0)
+      FROM filtered JOIN bucket_times USING (bucket) JOIN mapped
+          ON mapped.source_provider = filtered.provider AND mapped.source_model = filtered.model
+              AND mapped.source_purpose = filtered.purpose
+      GROUP BY filtered.bucket, bucket_times.latest_started_at, mapped.provider, mapped.model, mapped.purpose,
+          mapped.is_other
+      ORDER BY filtered.bucket, mapped.is_other, mapped.provider COLLATE BINARY,
+          mapped.model COLLATE BINARY, mapped.purpose COLLATE BINARY;
       """, historyParameters))
     using (SqliteDataReader reader = read.ExecuteReader()) {
-      while (reader.Read())
-        buckets[reader.GetInt32(0)] = ReadTotalsAt(reader, 1);
+      while (reader.Read()) {
+        int bucketIndex = reader.GetInt32(0);
+        DateTimeOffset at = DateTimeOffset.Parse(reader.GetString(1), CultureInfo.InvariantCulture,
+            DateTimeStyles.RoundtripKind);
+        if (!buckets.TryGetValue(bucketIndex, out var point)) {
+          UsageTotals[] totals = new UsageTotals[breakdown.Count];
+          Array.Fill(totals, emptyTotals);
+          point = (at, totals);
+          buckets.Add(bucketIndex, point);
+        }
+        var group = (reader.GetString(2), reader.GetString(3), reader.GetString(4), reader.GetInt64(5) != 0);
+        if (!groupIndexes.TryGetValue(group, out int groupIndex))
+          throw new InvalidDataException("Usage history contains an unselected provider/model/purpose group.");
+        point.Totals[groupIndex] = ReadTotalsAt(reader, 6);
+      }
     }
 
-    List<UsagePoint> history = new(bucketCount);
-    for (int index = 0; index < bucketCount; index++) {
-      long offsetTicks = (long)((decimal)durationTicks * index / bucketCount);
-      var at = new DateTimeOffset(start.UtcTicks + offsetTicks, TimeSpan.Zero);
-      history.Add(new UsagePoint(at, buckets[index]));
+    List<UsagePoint> history = new(buckets.Count);
+    foreach (var bucketValue in buckets.OrderBy(item => item.Key).Select(item => item.Value)) {
+      (DateTimeOffset at, UsageTotals[] totals) = bucketValue;
+      UsageBreakdown[] pointBreakdown = breakdown.Select((group, index) =>
+          group with { Totals = totals[index] }).ToArray();
+      history.Add(new UsagePoint(at, SumTotals(pointBreakdown), pointBreakdown));
     }
     return history;
+  }
+
+  private static UsageTotals SumTotals(IEnumerable<UsageBreakdown> groups) {
+    UsageTotals[] totals = groups.Select(group => group.Totals).ToArray();
+    return new UsageTotals(totals.Sum(value => value.CostUsd), totals.Sum(value => value.Requests),
+        totals.Sum(value => value.EstimatedRequests), totals.Sum(value => value.UnknownRequests),
+        totals.Sum(value => value.ActiveRequests));
   }
 
   private List<UsageRequest> ReadRecent(SqliteTransaction transaction, string where,

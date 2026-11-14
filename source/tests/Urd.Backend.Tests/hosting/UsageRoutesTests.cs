@@ -38,8 +38,20 @@ public sealed class UsageRoutesTests {
       AssertPrivateResponse(response);
       using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
       Assert.Equal(70, body.RootElement.GetProperty("totals").GetProperty("requests").GetInt64());
-      Assert.Equal(64, body.RootElement.GetProperty("breakdown").GetArrayLength());
-      Assert.Equal(64, body.RootElement.GetProperty("history").GetArrayLength());
+      JsonElement breakdown = body.RootElement.GetProperty("breakdown");
+      Assert.Equal(64, breakdown.GetArrayLength());
+      JsonElement other = Assert.Single(breakdown.EnumerateArray(), group =>
+          group.GetProperty("isOther").GetBoolean());
+      Assert.Equal(7, other.GetProperty("totals").GetProperty("requests").GetInt64());
+      JsonElement history = body.RootElement.GetProperty("history");
+      Assert.Equal(64, history.GetArrayLength());
+      Assert.All(history.EnumerateArray(), point => {
+        JsonElement pointBreakdown = point.GetProperty("breakdown");
+        Assert.Equal(64, pointBreakdown.GetArrayLength());
+        Assert.Equal(point.GetProperty("totals").GetProperty("requests").GetInt64(),
+            pointBreakdown.EnumerateArray().Sum(group => group.GetProperty("totals")
+                .GetProperty("requests").GetInt64()));
+      });
       Assert.Equal(20, body.RootElement.GetProperty("recent").GetArrayLength());
     }
 

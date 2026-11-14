@@ -14,8 +14,8 @@ The workspace has closable, reorderable local tabs, transcript, model and reason
 selectors, Send, Stop and integrated [provider settings](provider-management.md#browser-settings).
 The model picker loads cached catalogs immediately, discovers missing catalogs on startup and
 rediscovers after provider changes, without polling or a routine refresh action. With no providers,
-the selector is replaced by an Add provider action that opens Settings → Providers; search, loading,
-empty and failure states stay distinct.
+the model and reasoning selectors are replaced by an Add provider action that opens Settings →
+Providers; search, loading, empty and failure states stay distinct.
 Settings → General holds the default working directory, selected through a folder browser.
 Before the first accepted message, the empty transcript centers the default and current
 working-directory paths with explicit Edit actions. Edit opens a single directory editor

@@ -136,12 +136,14 @@ export function Composer({
               disabled={locked}
             />
           )}
-          <ReasoningPicker
-            effort={reasoningEffort}
-            options={reasoningOptions}
-            onChange={onReasoningChange}
-            disabled={locked || !modelKey}
-          />
+          {hasProviders !== false && (
+            <ReasoningPicker
+              effort={reasoningEffort}
+              options={reasoningOptions}
+              onChange={onReasoningChange}
+              disabled={locked || !modelKey}
+            />
+          )}
         </div>
         <div class="composer-actions">
           <div class="composer-overflow">

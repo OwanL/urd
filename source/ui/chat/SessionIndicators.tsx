@@ -51,57 +51,72 @@ export function SessionIndicators({
 
   return (
     <div class="session-indicators">
-      <UsageControl
-        label="Session"
-        sessionId={sessionId}
-        active={usageActive}
-        busy={usageBusy}
-        refreshKey={usageRefresh}
-        class="session-usage-control"
-      />
-      <Tooltip
-        content={
-          <>
-            Context window
-            <span class="tooltip-detail">
-              {contextUsage
-                ? `${contextUsage.isEstimate ? "Estimated" : "Last reported"}: ${contextUsage.usedTokens.toLocaleString()} tokens`
-                : "Usage unknown"}
-              {contextWindow ? ` / ${contextWindow.toLocaleString()}` : " / limit unknown"}
-            </span>
-            <span class="tooltip-detail">Pending input and in-flight output not included.</span>
-          </>
-        }
-      >
-        <button
-          type="button"
-          class={`session-indicator ${ratio >= 0.85 ? "is-critical" : ratio >= 0.7 ? "is-warning" : ""}`}
-          aria-label={`Context window: ${contextLabel}${contextUsage?.isEstimate ? ", estimated" : ""}`}
-        >
-          {contextLabel}
-        </button>
-      </Tooltip>
-      {duration !== null && (
+      <div class="session-indicator-item">
+        <span class="session-indicator-name" aria-hidden="true">
+          Cost
+        </span>
+        <UsageControl
+          label="Session"
+          sessionId={sessionId}
+          active={usageActive}
+          busy={usageBusy}
+          refreshKey={usageRefresh}
+          class="session-usage-control"
+        />
+      </div>
+      <div class="session-indicator-item">
+        <span class="session-indicator-name" aria-hidden="true">
+          Context
+        </span>
         <Tooltip
           content={
             <>
-              Agent working time
-              <span class="tooltip-detail">Idle time excluded.</span>
-              {incomplete && (
-                <span class="tooltip-detail">Interrupted work has unknown duration.</span>
-              )}
+              Context window
+              <span class="tooltip-detail">
+                {contextUsage
+                  ? `${contextUsage.isEstimate ? "Estimated" : "Last reported"}: ${contextUsage.usedTokens.toLocaleString()} tokens`
+                  : "Usage unknown"}
+                {contextWindow ? ` / ${contextWindow.toLocaleString()}` : " / limit unknown"}
+              </span>
+              <span class="tooltip-detail">Pending input and in-flight output not included.</span>
             </>
           }
         >
           <button
             type="button"
-            class="session-indicator"
-            aria-label={`Agent working time: ${duration}${incomplete ? ", incomplete" : ""}`}
+            class={`session-indicator ${ratio >= 0.85 ? "is-critical" : ratio >= 0.7 ? "is-warning" : ""}`}
+            aria-label={`Context window: ${contextLabel}${contextUsage?.isEstimate ? ", estimated" : ""}`}
           >
-            {incomplete ? "≥" : ""}
-            {duration}
+            {contextLabel}
           </button>
         </Tooltip>
+      </div>
+      {duration !== null && (
+        <div class="session-indicator-item">
+          <span class="session-indicator-name" aria-hidden="true">
+            Time
+          </span>
+          <Tooltip
+            content={
+              <>
+                Agent working time
+                <span class="tooltip-detail">Idle time excluded.</span>
+                {incomplete && (
+                  <span class="tooltip-detail">Interrupted work has unknown duration.</span>
+                )}
+              </>
+            }
+          >
+            <button
+              type="button"
+              class="session-indicator"
+              aria-label={`Agent working time: ${duration}${incomplete ? ", incomplete" : ""}`}
+            >
+              {incomplete ? "≥" : ""}
+              {duration}
+            </button>
+          </Tooltip>
+        </div>
       )}
     </div>
   );

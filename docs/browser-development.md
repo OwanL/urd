@@ -29,12 +29,15 @@ or the current location when no child is selected. Pending reads and uncommitted
 block selection; failed reads retain the last location and can be retried.
 Unknown directory saves block Send until an explicit snapshot read confirms the current
 directory; writes are never automatically repeated.
-Busy Send remains opportunistic steering. Expand Pending to remove individual unclaimed
-messages; claimed messages cannot be removed. Removal never stops active work. With an empty
+Busy Send remains opportunistic steering. Queued inputs appear as dimmed user-message bubbles
+at the transcript tail, with an icon to remove each unclaimed input. A small chevron expands long
+previews on request; claimed inputs cannot be removed. Removal never stops active work. With an empty
 composer, an eligible idle conversation offers Continue instead of Send, without adding a user
 message. Continue journals its exact operation before dispatch; reload checks receipts, and an
 uncertain result offers explicit check/retry without clearing a newer draft. Stop cancels the
-active run and its pending steering; there is no after-run queue.
+active run and its pending steering; there is no after-run queue. The composer keeps its model
+and reasoning pickers, Stop and Send/Continue visible on one row at every width. Stop is disabled
+when idle. More options holds session details; these never crowd or wrap the toolbar.
 Snooze remains unavailable. The UI displays a bounded, navigable transcript with compact tool
 rows, on-demand input/output inspection and Markdown rendering. The history API supports
 anchored pages. Closing a tab hides the view; it does not stop work, close a backend session

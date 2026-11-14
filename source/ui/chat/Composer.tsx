@@ -1,6 +1,7 @@
 import type { TargetedKeyboardEvent } from "preact";
-import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { IconButton } from "../components/IconButton.tsx";
+import { Popover } from "../components/Popover.tsx";
 import { composerSubmissionState } from "./ComposerSubmission.ts";
 import type { ComposerProps } from "./ComposerTypes.ts";
 import { ModelPicker } from "./ModelPicker.tsx";
@@ -37,6 +38,9 @@ export function Composer({
   indicators,
 }: ComposerProps) {
   const input = useRef<HTMLTextAreaElement>(null);
+  const overflowTrigger = useRef<HTMLButtonElement>(null);
+  const overflowId = useId();
+  const [overflowOpen, setOverflowOpen] = useState(false);
   const composing = useRef(false);
   const locked = selectionLocked || working || stopping;
   const submission = composerSubmissionState(text, canSend, canContinue, continuationAvailable);
@@ -122,19 +126,40 @@ export function Composer({
             disabled={locked || !modelKey}
           />
         </div>
-        {indicators}
         <div class="composer-actions">
-          {(working || stopping) && (
+          <div class="composer-overflow">
             <IconButton
-              icon="stop"
-              label="Stop"
-              hint={stopping ? "Stopping…" : "Stop"}
-              class="composer-stop"
-              disabled={stopping}
-              aria-busy={stopping}
-              onClick={onStop}
+              icon="more"
+              label="More options"
+              hint="Session details"
+              buttonRef={overflowTrigger}
+              aria-expanded={overflowOpen}
+              aria-controls={overflowOpen ? overflowId : undefined}
+              aria-haspopup="dialog"
+              onClick={() => setOverflowOpen((open) => !open)}
             />
-          )}
+            {overflowOpen && (
+              <Popover
+                id={overflowId}
+                anchor={overflowTrigger}
+                label="Session details"
+                class="composer-overflow-popover"
+                placement="above"
+                onClose={() => setOverflowOpen(false)}
+              >
+                {indicators}
+              </Popover>
+            )}
+          </div>
+          <IconButton
+            icon="stop"
+            label="Stop"
+            hint={stopping ? "Stopping…" : "Stop"}
+            class="composer-stop"
+            disabled={!working || stopping}
+            aria-busy={stopping}
+            onClick={onStop}
+          />
           <IconButton
             icon="send"
             label={submission.label}

@@ -1,5 +1,6 @@
 export type IconName =
   | "send"
+  | "more"
   | "stop"
   | "plus"
   | "close"
@@ -22,6 +23,7 @@ export type IconName =
 
 const paths: Record<IconName, string> = {
   send: "m22 2-7 20-4-9-9-4 20-7ZM22 2 11 13",
+  more: "M5 12h.01M12 12h.01M19 12h.01",
   stop: "M6 6h12v12H6Z",
   plus: "M12 5v14M5 12h14",
   close: "m6 6 12 12M6 18 18 6",

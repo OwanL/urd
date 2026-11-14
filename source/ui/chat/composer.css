@@ -1,5 +1,6 @@
 .composer {
   flex: none;
+  min-width: 0;
   position: relative;
   margin: 0 12px 12px;
   padding: 4px 7px 7px;
@@ -56,6 +57,12 @@
   gap: 4px;
   margin-left: auto;
 }
+.session-indicator-item {
+  display: contents;
+}
+.session-indicator-name {
+  display: none;
+}
 .session-indicator {
   min-height: 30px;
   padding: 4px 5px;
@@ -77,18 +84,36 @@
 .session-indicator.is-critical {
   color: var(--danger);
 }
-@media (max-width: 600px) {
-  .composer-controls {
-    flex-wrap: wrap;
-  }
-  .composer-selections {
-    flex-basis: calc(100% - 80px);
-  }
-  .session-indicators {
-    order: 1;
-    flex-basis: 100%;
-    justify-content: flex-end;
-  }
+.composer-overflow {
+  flex: none;
+}
+.composer-overflow-popover {
+  width: 240px;
+  padding: 8px;
+}
+.composer-overflow-popover .session-indicator-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 36px;
+  padding-left: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.composer-overflow-popover .session-indicators {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  margin: 0;
+}
+.composer-overflow-popover .session-indicator-name {
+  display: inline;
+}
+.composer-overflow-popover .session-indicator,
+.composer-overflow-popover .usage-control {
+  font-size: 12px;
 }
 .composer-selector {
   display: flex;
@@ -105,6 +130,7 @@
   text-align: left;
 }
 .composer-selector > .icon {
+  flex: none;
   width: 12px;
   height: 12px;
   opacity: 0.8;
@@ -159,7 +185,7 @@
   white-space: nowrap;
 }
 .composer-reasoning {
-  flex: 0 1 auto;
+  flex: none;
   min-width: 0;
 }
 .composer-reasoning-trigger > span {

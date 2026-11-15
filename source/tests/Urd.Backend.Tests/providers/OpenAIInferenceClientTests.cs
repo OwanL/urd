@@ -136,7 +136,7 @@ public sealed class OpenAIInferenceClientTests {
 
     Assert.Equal(ProviderFailure.ProviderUnavailable, error.Failure);
     Assert.Null(error.InnerException);
-    Assert.Equal(1, handler.Disposals);
+    Assert.Equal(1, handler.StreamDisposals);
     Assert.DoesNotContain(observed.SelectMany(update => update.Contents), content => content is FunctionCallContent);
     Assert.All(observed, update => Assert.Null(update.FinishReason));
   }

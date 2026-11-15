@@ -98,7 +98,7 @@ public sealed class MessageMarkdownSchedulerTests {
   [Theory]
   [InlineData(false)]
   [InlineData(true)]
-  public async Task ClassFifoRetainsReplacementAgeAcrossClassChange(bool changeClass) {
+  public async Task ReplacementKeepsFifoAgeWithOrWithoutSizeClassChange(bool changeClass) {
     await using var worker = new BlockedBuild();
     var blockers = new[] { Ready(worker.Scheduler, Key(Large), Large), Ready(worker.Scheduler, Key(Small), Small) };
     await Task.WhenAll(worker.Entered.Select(entered => entered.Task)).WaitAsync(Timeout);

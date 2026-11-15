@@ -13,7 +13,7 @@ internal sealed class ExecutionFixture : IAsyncDisposable {
   private readonly ScriptedChatClient client;
 
   internal ExecutionFixture(ScriptedChatClient client, IReadOnlyList<AIFunction>? tools = null)
-      : this(client, TestAgentTool.Catalog(tools)) { }
+      : this(client, TestAgentTool.CreateToolCatalog(tools)) { }
 
   internal ExecutionFixture(ScriptedChatClient client, IReadOnlyList<AgentTool> tools)
       : this(client, new ToolCatalog(tools)) { }

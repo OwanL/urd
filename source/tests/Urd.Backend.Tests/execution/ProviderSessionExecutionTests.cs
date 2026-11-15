@@ -483,7 +483,7 @@ public sealed class ProviderSessionExecutionTests {
 
     internal Task OpenAsync(LlmApi api, IReadOnlyList<AIFunction> tools,
         Guid? sessionId = null, Guid? connectionId = null) =>
-        OpenAsync(api, TestAgentTool.Catalog(tools), sessionId, connectionId);
+        OpenAsync(api, TestAgentTool.CreateToolCatalog(tools), sessionId, connectionId);
 
     internal async Task OpenAsync(LlmApi api, ToolCatalog tools,
         Guid? sessionId = null, Guid? connectionId = null) {

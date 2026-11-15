@@ -80,14 +80,14 @@ public sealed class ToolCallLabelsTests {
 
   [Fact]
   public void TruncatedPathsFallBackToToolNameAndWriteCountsRequireExactContent() {
-    ToolCallLabel path = ToolCallLabels.Create("edit",
+    ToolCallLabel truncatedEditLabel = ToolCallLabels.Create("edit",
       "{\"path\":{\"$truncated\":\"src/partial.cs\",\"length\":3000},\"edits\":[{}]}", "/work");
     ToolCallLabel write = ToolCallLabels.Create("write",
       "{\"path\":\"file.txt\",\"content\":{\"$truncated\":\"first line\",\"length\":3000}}", "/work");
 
-    Assert.Equal("edit", path.Title);
-    Assert.Null(path.Path);
-    Assert.Equal("1 edit", path.Detail);
+    Assert.Equal("edit", truncatedEditLabel.Title);
+    Assert.Null(truncatedEditLabel.Path);
+    Assert.Equal("1 edit", truncatedEditLabel.Detail);
     Assert.Equal("file.txt", write.Title);
     Assert.Null(write.Detail);
     Assert.NotNull(write.Path);

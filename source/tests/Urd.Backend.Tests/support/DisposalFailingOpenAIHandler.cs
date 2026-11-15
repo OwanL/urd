@@ -5,7 +5,7 @@ namespace Urd.Backend.Tests.Support;
 
 // A positive native terminal is not success if ownership cleanup itself fails.
 internal sealed class DisposalFailingOpenAIHandler(string response) : HttpMessageHandler {
-  internal int Disposals { get; private set; }
+  internal int StreamDisposals { get; private set; }
 
   protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
       Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) {
@@ -22,7 +22,7 @@ internal sealed class DisposalFailingOpenAIHandler(string response) : HttpMessag
       base.Dispose(disposing);
       if (disposed) return;
       disposed = true;
-      owner.Disposals++;
+      owner.StreamDisposals++;
       throw new IOException("Synthetic private cleanup details");
     }
   }

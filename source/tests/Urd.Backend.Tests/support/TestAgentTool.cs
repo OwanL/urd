@@ -33,6 +33,6 @@ internal sealed class TestAgentTool : AgentTool {
   public override Task<ToolOutput> RunAsync(JsonElement arguments, ToolContext context, CancellationToken cancellation) =>
       run(arguments, context, cancellation);
 
-  internal static ToolCatalog Catalog(IReadOnlyList<AIFunction>? functions) =>
+  internal static ToolCatalog CreateToolCatalog(IReadOnlyList<AIFunction>? functions) =>
       new(functions?.Select(function => (AgentTool)new TestAgentTool(function)).ToArray() ?? []);
 }

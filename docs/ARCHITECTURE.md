@@ -601,9 +601,11 @@ classification results, not task-success rates or proof of the subsequent design
 for skills, additional instruction documents and tools, with basic exploration tools
 and shared implementation. User preferences supply per-category model choices and
 protected-item settings; protected entries bypass selection before inputs are built.
-The [pruning plan](pruning-plan.md) is the canonical record of this direction, picker
-scope, working proposals and remaining decisions. This is design work only, not
-implementation approval or a settled class/API layout.
+Pruning runs only on the first prompt in a fresh session and on the first message or
+continuation after successful compaction, not on compaction completion alone or other
+events. The [pruning plan](pruning-plan.md) owns these triggers, picker scope, working
+proposals and remaining decisions. This is design work only, not implementation
+approval or a settled class/API layout.
 
 Prompt wording is a separate research task. Inventory other harnesses' fixed
 instructions and dynamic additions without treating their presence as evidence that

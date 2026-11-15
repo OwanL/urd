@@ -126,20 +126,24 @@ Thus “skills do not break cache” is true of append-only loading, not all ski
 changes. File loading, capability selection and model-context rebuilding are
 separate concerns; none grants execution permission.
 
-### Concrete next-request behavior — reference-based proposal
+### Concrete next-request behavior
 
-These recommendations preserve inspected Pie behavior where applicable. They are
-**not additional owner decisions**, approved APIs or prerequisites for the unrelated
-first fake-model slice. No new context engine, pruner or serializer is authorized.
+The [pruning triggers selected on 2026-11-15](pruning-plan.md#pruning-triggers) now
+own selection timing: first fresh-session prompt and first message/continuation after
+successful compaction only. This supersedes the earlier optional post-compaction
+refresh and standalone selection-refresh proposals. Other reference-based behavior
+below remains proposed, not additional owner decisions or approved APIs. No new
+context engine, pruner or serializer is authorized.
 
-| Scenario | Proposed behavior and limit |
+| Scenario | Behavior and limit (pruning triggers decided; other details proposed) |
 | --- | --- |
+| First prompt in a fresh session | Run category pruning before the first main-agent request. Merely opening an empty chat does not trigger pruning. |
 | Ordinary next reply or reopening the same chat | Reuse already-sent guidance, ordered definitions and result representations; append new content. Reopening alone does not reread files into old content or rerun selection. Current permissions still apply. |
 | User explicitly changes an idle chat's model/provider | Keep its selected capabilities where still eligible; adapt the working context to the chosen route without rescoring merely because the model changed. Apply the private-reasoning owner answer above. A changed route can start a new initial catalog with the required wrapper; this is an explicit boundary, not late insertion into the old prefix. Visible-content incompatibility must not be silently treated as successful transfer. |
 | Instructions/resources are deliberately reloaded | Use the changed guidance at that explicit boundary without treating reload as a request to rerun AI selection. Ordinary history stays readable. Initial load plus ordinary explicit reload is the simple candidate; exact reload scope/timing remains deferred by the owner. |
-| Successful manual or automatic compaction | Use the summary and retained recent messages. With pruning and post-compaction refresh enabled, reselect before the next model request, not merely because the chat is idle. With refresh off, keep the previous selection, not pre-compaction history. Unchanged earlier instruction/tool content need not be rewritten just because history was compacted. |
+| Successful manual or automatic compaction | Use the summary and retained recent messages. Run category pruning on the first subsequent message or continuation, before the next main-agent request. Compaction completion or an idle chat does not itself start pruning. |
 | Failed/cancelled compaction | Keep usable existing context; do not establish a successful-compaction boundary or claim a refreshed selection. |
-| Explicit selection refresh or capability recovery | Refresh deliberately reconsiders the catalog; recovery appends an eligible tool disclosure or loaded skill body without rescoring the catalog. Protected entries remain excluded before pruning and protected when applying results; necessary recovered definitions cannot depend on summary prose remembering them. |
+| Capability recovery | Append an eligible tool disclosure or loaded skill body without rescoring the catalog. There is no standalone manual selection-refresh trigger. Protected entries remain excluded before pruning and protected when applying results; necessary recovered definitions cannot depend on summary prose remembering them. |
 | A tool is disabled, removed or incompatibly changed | Current authority wins even when an old definition is still visible. Deny stale/unauthorized execution; do not rewrite history or silently rebind the remembered definition. A context boundary cannot repair or replay an uncertain effect. |
 
 Pie's settings default post-compaction refresh on, but pruning itself off; these

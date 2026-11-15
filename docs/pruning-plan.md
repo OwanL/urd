@@ -27,6 +27,31 @@ model choice for each category. The implementation must be modular, extendable a
 share common execution rather than duplicate pruning loops for the three categories.
 Separate conversations do not imply separate engines or new full-session subtypes.
 
+## Pruning triggers
+
+**Owner decision (2026-11-15):** category pruning runs at exactly two boundaries:
+
+1. On the first prompt in a fresh session, before its first main-agent request.
+2. On the first message or continuation after successful compaction, before the
+   next main-agent request.
+
+Compaction completion alone does not start pruning. If the session stays idle, wait
+for that next message or continuation. Failed or cancelled compaction does not create
+this boundary.
+
+No other event independently triggers pruning: ordinary messages, reopening or restart,
+model/provider changes, settings/protection changes, file edits or resource reloads.
+There is no standalone manual re-pruning trigger. A message after reopening can still
+be the first one after compaction; reopening itself is not the trigger.
+
+Capability recovery remains distinct: it can append an eligible capability without
+rerunning category selection. This decision does not add new recovery behavior.
+
+Rationale: preserve model-visible prefixes between these boundaries and avoid cache
+loss and its associated provider costs. Actual cache effects depend on the emitted
+context and provider; selection computation alone does not necessarily invalidate
+an unchanged main-agent prefix.
+
 ## Protection happens before selection
 
 Settings also has protected-item lists for each category. Protect **`bash`, `read`,
@@ -137,8 +162,8 @@ not replace those mechanisms.
 - The exact boundary between the base operating prompt and additional instruction
   candidates, and any automatically protected instruction layers. This plan does not
   silently protect every applicable `AGENTS.md` or settle all instruction precedence.
-- Exact instruction discovery, stored source identities, refresh/loading boundaries,
-  exploration limits and execution restrictions.
+- Exact instruction discovery, stored source identities and source-loading behavior
+  (distinct from the settled pruning triggers), exploration limits and execution restrictions.
 - Concrete classes, APIs, preference/storage shape and implementation sequencing.
 
 The [classification evidence](pruning-classification-results.md) informs this choice;

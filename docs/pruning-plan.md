@@ -22,6 +22,11 @@ including `read` and `bash`, to explore when necessary. Exploration is optional,
 not a required preliminary stage. Keep useful capabilities rather than aggressively
 pruning uncertain candidates: losing something useful is the more costly error.
 
+**Instruction input decision (2026-11-15):** supply the instruction pruner with the
+full contents of every unprotected candidate document upfront, not just paths or
+summaries requiring follow-up reads. Protected documents remain excluded. This does
+not select full skill-body loading or change the other categories' input contracts.
+
 Users choose pruning models through Settings, stored in user preferences, with a
 model choice for each category. The implementation must be modular, extendable and
 share common execution rather than duplicate pruning loops for the three categories.

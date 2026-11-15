@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Microsoft.Extensions.AI;
-using Urd.Core.Execution;
 using Urd.Core.Tools;
 
 namespace Urd.Backend.Tests.Support;
@@ -19,7 +18,7 @@ internal sealed class TestAgentTool : AgentTool {
     var values = new AIFunctionArguments(arguments.EnumerateObject()
         .ToDictionary(property => property.Name, property => (object?)property.Value, StringComparer.Ordinal));
     object? result = await function.InvokeAsync(values, cancellation);
-    JsonElement details = LlmResponseAccumulator.FreezeJson(result);
+    JsonElement details = JsonSerializer.SerializeToElement(result);
     return new ToolOutput(details.ToString(), [], details);
   }) {
     Description = function.Description;

@@ -279,7 +279,7 @@ public sealed class SessionStopTests {
     Assert.NotEqual(originalRecorder.Identity.ExecutionId, replacementRecorder.Identity.ExecutionId);
     StoredRequest request = Assert.Single(StoredExecutions.ReadRequests(fixture.Database), row => row.ExecutionId == replacement);
     // Both writes would be valid for the replacement recorder, even before buffered text flushes.
-    Assert.False(await originalRecorder.ObserveToolAsync(request.RequestId, "stale-call", "lookup"));
+    Assert.False(await originalRecorder.RecordToolCallAsync(request.RequestId, "stale-call", "lookup"));
     Assert.False(await originalRecorder.CompleteRequestAsync(
         new(request.RequestId, ExecutionOutcome.Failed, "stale failure")));
     Assert.Null(Assert.Single(StoredExecutions.ReadRequests(fixture.Database), row => row.ExecutionId == replacement).Outcome);

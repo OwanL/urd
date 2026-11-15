@@ -16,7 +16,7 @@ internal sealed class LlmResponseAccumulator(LlmResponseWriter writer) {
   internal UsageDetails? Usage { get; private set; }
   internal LlmProviderResponse? ProviderResponse { get; private set; }
 
-  internal async Task AppendAsync(ChatResponseUpdate update) {
+  internal async Task AddUpdateAsync(ChatResponseUpdate update) {
     if (ProviderResponse is not null)
       throw new InvalidDataException("The response contained updates after its provider context.");
     LlmProviderResponse? providerResponse = LlmProviderContext.GetResponse(update);
@@ -80,23 +80,15 @@ internal sealed class LlmResponseAccumulator(LlmResponseWriter writer) {
     if (calls.Count == ToolCallLimit || !callIds.Add(call.CallId))
       throw new InvalidDataException("The response contained too many tool calls or duplicate call IDs.");
 
-    await writer.ObserveToolAsync(call.CallId, string.IsNullOrWhiteSpace(call.Name) ? null : call.Name);
+    await writer.RecordToolCallAsync(call.CallId, string.IsNullOrWhiteSpace(call.Name) ? null : call.Name);
     if (call.InformationalOnly || call.Exception is not null || string.IsNullOrWhiteSpace(call.Name))
       throw new InvalidDataException("The response contained an incomplete or informational tool call.");
 
-    JsonElement arguments = FreezeJson(call.Arguments ?? new Dictionary<string, object?>());
+    // Freeze borrowed arguments before they are persisted or dispatched.
+    JsonElement arguments = JsonSerializer.SerializeToElement(call.Arguments ?? new Dictionary<string, object?>());
     if (arguments.ValueKind != JsonValueKind.Object)
       throw new InvalidDataException("Tool arguments must be a JSON object.");
 
     calls.Add(new(call.CallId, call.Name, arguments));
-  }
-
-  // Freeze borrowed values before they are persisted or dispatched.
-  // Result serialization uses this too, outside the invocation-error catch.
-  internal static JsonElement FreezeJson(object? value) {
-    using var bytes = new MemoryStream();
-    JsonSerializer.Serialize(bytes, value, value?.GetType() ?? typeof(object));
-    using JsonDocument document = JsonDocument.Parse(bytes.GetBuffer().AsMemory(0, (int)bytes.Length));
-    return document.RootElement.Clone();
   }
 }

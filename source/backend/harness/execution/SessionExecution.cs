@@ -24,22 +24,22 @@ internal sealed class SessionExecution : IDisposable {
   private IChatClient? chatClient;
   private readonly IReadOnlyList<AgentTool> tools; // Frozen offered capabilities for this execution.
   private readonly CancellationTokenSource stop = new();
-  private readonly PendingToolCalls pending;
+  private readonly PendingToolCalls pendingToolCalls;
   private Task? stopCallbacks;
-  private int backgroundCalls;
+  private int runningBackgroundTools;
   private readonly ManualCompactionRequest? compaction;
 
   internal SessionExecution(SessionExecutionRecorder recorder, SessionBase session,
       Func<ProviderConnection, IChatClient> createChatClient, LlmSelection selection,
       StartingContextManager startingContextManager, IReadOnlyList<AgentTool>? tools = null,
-      PendingToolCalls? pending = null, ManualCompactionRequest? compaction = null) {
+      PendingToolCalls? pendingToolCalls = null, ManualCompactionRequest? compaction = null) {
     this.recorder = recorder;
     this.session = session;
     this.createChatClient = createChatClient;
     this.selection = selection;
     this.startingContextManager = startingContextManager;
     this.tools = tools ?? [];
-    this.pending = pending ?? new PendingToolCalls();
+    this.pendingToolCalls = pendingToolCalls ?? new PendingToolCalls();
     this.compaction = compaction;
     IsCompacting = compaction is not null;
   }
@@ -48,10 +48,10 @@ internal sealed class SessionExecution : IDisposable {
   internal SessionExecutionRecorder Recorder => recorder;
   internal Guid ExecutionId => Identity.ExecutionId;
   internal bool IsStopping => stop.IsCancellationRequested;
-  internal bool IsCompactionOnly => compaction is not null;
+  internal bool IsManualCompaction => compaction is not null;
   internal bool IsCompacting { get; set; }
-  internal bool HasPendingTools => Volatile.Read(ref backgroundCalls) != 0;
-  internal Task JoinPendingToolsAsync() => pending.JoinExecutionAsync(ExecutionId);
+  internal bool HasPendingTools => Volatile.Read(ref runningBackgroundTools) != 0;
+  internal Task JoinPendingToolsAsync() => pendingToolCalls.JoinExecutionAsync(ExecutionId);
 
   // Completes once every callback registered on the stop token has finished.
   internal Task StopCallbacks => stopCallbacks ?? Task.CompletedTask;
@@ -61,7 +61,7 @@ internal sealed class SessionExecution : IDisposable {
     if (stopCallbacks is not null)
       return stopCallbacks;
     stopCallbacks = stop.CancelAsync();
-    pending.RequestCancelExecution(ExecutionId);
+    pendingToolCalls.RequestCancelExecution(ExecutionId);
     return stopCallbacks;
   }
 
@@ -115,32 +115,15 @@ internal sealed class SessionExecution : IDisposable {
     }
   }
 
-  // Summary work runs outside the session gate. The commit rechecks Stop, revision and prior boundary.
+  // Summary work runs outside the session lock. The commit rechecks Stop, revision and prior boundary.
   private async Task<LlmRequest?> CompactContextAsync(Guid? requestId, CompactionReason reason, string? focus = null,
       ModelHistory? prepared = null) {
-    stop.Token.ThrowIfCancellationRequested();
-    UserPreferences preferences = session.ReadPreferences();
-    if (reason == CompactionReason.Threshold && selection.ContextWindow is null
-        && preferences.CompactionTriggerTokenCount is null)
-      return null;
-    ModelHistory context = prepared ?? await session.ReadModelHistoryAsync(ExecutionId, requestId);
-    await EnsureStartingContextAsync(context.ReadMessages());
-    HistoryCompactionPlan? plan = HistoryCompactor.Prepare(context, selection, startingContext!, reason, focus,
-        preferences.CompactionTriggerTokenCount);
+    HistoryCompactionPlan? plan = await PrepareCompactionAsync(requestId, reason, focus, prepared);
     if (plan is null)
       return null;
     await session.SetCompactingAsync(ExecutionId, true);
     try {
-      chatClient ??= createChatClient(selection.Connection);
-      GeneratedCompactionSummary result;
-      try {
-        result = await HistoryCompactor.SummarizeAsync(chatClient, selection, plan, stop.Token,
-            new UsageContext(session.Id, ExecutionId, "compaction"));
-      } catch (OperationCanceledException) when (IsStopping) {
-        throw;
-      } catch (Exception failure) {
-        throw new InvalidOperationException("History compaction failed; the previous context is unchanged.", failure);
-      }
+      GeneratedCompactionSummary result = await SummarizeCompactionAsync(plan);
       stop.Token.ThrowIfCancellationRequested();
       bool saved;
       try {
@@ -153,7 +136,32 @@ internal sealed class SessionExecution : IDisposable {
       ModelHistory reduced = await session.ReadModelHistoryAsync(ExecutionId, requestId);
       return new(requestId ?? Guid.Empty, reduced.ReadMessages(), reduced);
     } finally {
-      await session.SetCompactingAsync(ExecutionId, IsCompactionOnly);
+      await session.SetCompactingAsync(ExecutionId, IsManualCompaction);
+    }
+  }
+
+  private async Task<HistoryCompactionPlan?> PrepareCompactionAsync(Guid? requestId, CompactionReason reason,
+      string? focus, ModelHistory? prepared) {
+    stop.Token.ThrowIfCancellationRequested();
+    UserPreferences preferences = session.ReadPreferences();
+    if (reason == CompactionReason.Threshold && selection.ContextWindow is null
+        && preferences.CompactionTriggerTokenCount is null)
+      return null;
+    ModelHistory context = prepared ?? await session.ReadModelHistoryAsync(ExecutionId, requestId);
+    await EnsureStartingContextAsync(context.ReadMessages());
+    return HistoryCompactor.Prepare(context, selection, startingContext!, reason, focus,
+        preferences.CompactionTriggerTokenCount);
+  }
+
+  private async Task<GeneratedCompactionSummary> SummarizeCompactionAsync(HistoryCompactionPlan plan) {
+    chatClient ??= createChatClient(selection.Connection);
+    try {
+      return await HistoryCompactor.SummarizeAsync(chatClient, selection, plan, stop.Token,
+          new UsageContext(session.Id, ExecutionId, "compaction"));
+    } catch (OperationCanceledException) when (IsStopping) {
+      throw;
+    } catch (Exception failure) {
+      throw new InvalidOperationException("History compaction failed; the previous context is unchanged.", failure);
     }
   }
 
@@ -171,9 +179,9 @@ internal sealed class SessionExecution : IDisposable {
       foreach (LlmToolCall call in calls) {
         if (IsStopping)
           break;
-        bool background = call.Arguments.TryGetProperty("background", out JsonElement option)
+        bool runInBackground = call.Arguments.TryGetProperty("background", out JsonElement option)
             && option.ValueKind == JsonValueKind.True;
-        if (!await recorder.TryStartToolAsync(requestId, call.CallId, background)) {
+        if (!await recorder.TryStartToolAsync(requestId, call.CallId, runInBackground)) {
           if (IsStopping)
             break;
           throw new InvalidOperationException("The tool call could not be started.");
@@ -181,7 +189,7 @@ internal sealed class SessionExecution : IDisposable {
 
         // Invoke immediately, before claiming the next call. File tools admit to their
         // shared path queue synchronously, preserving emitted order without Task.Run.
-        if (background)
+        if (runInBackground)
           StartBackgroundTool(requestId, call);
         else
           foreground.Add(InvokeAndSaveToolAsync(requestId, call, stop.Token));
@@ -208,19 +216,19 @@ internal sealed class SessionExecution : IDisposable {
     // The registry is the only cancellation owner; linked-source callbacks would bypass its join.
     var cancellation = new CancellationTokenSource();
     var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-    Interlocked.Increment(ref backgroundCalls);
+    Interlocked.Increment(ref runningBackgroundTools);
     try {
-      pending.Add(ExecutionId, requestId, call, completion.Task, cancellation,
+      pendingToolCalls.Add(ExecutionId, requestId, call, completion.Task, cancellation,
           failure => session.ReportToolOutcomeAsync(ExecutionId, failure));
     } catch {
-      Interlocked.Decrement(ref backgroundCalls);
+      Interlocked.Decrement(ref runningBackgroundTools);
       cancellation.Dispose();
       throw;
     }
     // Stop may have raced the durable start before registration. Cancel the newly owned
     // source before invocation; later Stops see it in the registry.
     if (IsStopping)
-      pending.RequestCancelExecution(ExecutionId);
+      pendingToolCalls.RequestCancelExecution(ExecutionId);
     // Registration precedes invocation, including tools that finish synchronously.
     _ = RunBackgroundToolAsync(requestId, call, completion, cancellation.Token);
   }
@@ -235,7 +243,7 @@ internal sealed class SessionExecution : IDisposable {
     }
     // Update the wait predicate before signalling under the session gate. The registry
     // still owns this task and all callback cleanup, so settlement must join it outside the gate.
-    Interlocked.Decrement(ref backgroundCalls);
+    Interlocked.Decrement(ref runningBackgroundTools);
     try {
       await session.ReportToolOutcomeAsync(ExecutionId, failure);
     } catch (Exception error) {
@@ -259,7 +267,7 @@ internal sealed class SessionExecution : IDisposable {
     }
   }
 
-  private static JsonElement ToolArguments(JsonElement arguments) {
+  private static JsonElement StripBackgroundOption(JsonElement arguments) {
     if (!arguments.TryGetProperty("background", out JsonElement option))
       return arguments;
     if (option.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
@@ -286,7 +294,7 @@ internal sealed class SessionExecution : IDisposable {
           ?? throw new InvalidOperationException("The chat has no saved working folder.");
       // Progress is intentionally inert until transcript progress integration is available.
       var context = new ToolContext(directory, requestId, call.CallId, selection.SupportsImages, static _ => { });
-      output = await tool.RunAsync(ToolArguments(call.Arguments), context, cancellation);
+      output = await tool.RunAsync(StripBackgroundOption(call.Arguments), context, cancellation);
     } catch (OperationCanceledException) when (cancellation.IsCancellationRequested) {
       return ToolError(call, ExecutionOutcome.Cancelled,
           "Tool execution was cancelled; effects may have occurred.");
@@ -310,8 +318,24 @@ internal sealed class SessionExecution : IDisposable {
 
   private async Task<LlmRequestResult> SendRequestAsync(LlmRequest request, CancellationTokenSource requestStop, bool compactBefore) {
     var writer = new LlmResponseWriter(request.RequestId, SaveChunkAsync,
-        (callId, name) => ObserveToolAsync(request.RequestId, callId, name));
+        (callId, name) => RecordToolCallAsync(request.RequestId, callId, name));
     var response = new LlmResponseAccumulator(writer);
+    (Exception? failure, bool outputObserved) = await StreamResponseAsync(request, requestStop, compactBefore, writer, response);
+    if (failure is ProviderOperationException && !IsStopping) {
+      try { await writer.FlushAsync(); }
+      catch (Exception saveFailure) { failure = saveFailure; }
+    }
+    LlmRequestResult outcome = ToRequestResult(request.RequestId, failure);
+    return outcome with {
+      ToolCalls = outcome.Outcome == ExecutionOutcome.Completed ? response.ToolCalls : null,
+      ProviderResponse = outcome.Outcome == ExecutionOutcome.Completed ? response.ProviderResponse : null,
+      Usage = response.Usage,
+      OutputObserved = outputObserved
+    };
+  }
+
+  private async Task<(Exception? Failure, bool OutputObserved)> StreamResponseAsync(LlmRequest request,
+      CancellationTokenSource requestStop, bool compactBefore, LlmResponseWriter writer, LlmResponseAccumulator response) {
     IAsyncEnumerator<ChatResponseUpdate>? updates = null;
     Task<bool>? pendingRead = null;
     Exception? failure = null;
@@ -341,7 +365,7 @@ internal sealed class SessionExecution : IDisposable {
         pendingRead = null;
         stopToken.ThrowIfCancellationRequested();
         outputObserved |= updates.Current.Contents.Any(content => content is not UsageContent);
-        await response.AppendAsync(updates.Current);
+        await response.AddUpdateAsync(updates.Current);
       }
 
       pendingRead = null;
@@ -352,17 +376,7 @@ internal sealed class SessionExecution : IDisposable {
     }
 
     await CleanUpAsync(requestStop, pendingRead, updates, failure);
-    if (failure is ProviderOperationException && !IsStopping) {
-      try { await writer.FlushAsync(); }
-      catch (Exception saveFailure) { failure = saveFailure; }
-    }
-    LlmRequestResult outcome = ToRequestResult(request.RequestId, failure);
-    return outcome with {
-      ToolCalls = outcome.Outcome == ExecutionOutcome.Completed ? response.ToolCalls : null,
-      ProviderResponse = outcome.Outcome == ExecutionOutcome.Completed ? response.ProviderResponse : null,
-      Usage = response.Usage,
-      OutputObserved = outputObserved
-    };
+    return (failure, outputObserved);
   }
 
   private async Task<bool> WaitForNextUpdateAsync(LlmResponseWriter writer, Task<bool> pendingRead) {
@@ -394,38 +408,22 @@ internal sealed class SessionExecution : IDisposable {
     return new(requestId, outcome, error, Failure: (failure as ProviderOperationException)?.Failure);
   }
 
-  private async Task StartRequestAsync(Guid requestId, StartingContext startingContext) {
-    bool started;
-    try {
-      started = await recorder.StartRequestAsync(requestId, startingContext);
-    } catch (Exception exception) {
-      throw new RequestStartSaveException(exception);
-    }
+  private Task StartRequestAsync(Guid requestId, StartingContext startingContext) =>
+    SaveAsync(recorder.StartRequestAsync(requestId, startingContext), static failure => new RequestStartSaveException(failure));
 
-    if (!started)
-      throw new OutputRejectedException();
-  }
+  private Task SaveChunkAsync(LlmResponseChunk chunk) =>
+    SaveAsync(recorder.RecordOutputAsync(chunk), static failure => new OutputSaveException(failure));
 
-  private async Task SaveChunkAsync(LlmResponseChunk chunk) {
+  private Task RecordToolCallAsync(Guid requestId, string callId, string? name) =>
+    SaveAsync(recorder.RecordToolCallAsync(requestId, callId, name), static failure => new OutputSaveException(failure));
+
+  private static async Task SaveAsync(Task<bool> save, Func<Exception, Exception> wrapFailure) {
     bool saved;
     try {
-      saved = await recorder.RecordOutputAsync(chunk);
-    } catch (Exception exception) {
-      throw new OutputSaveException(exception);
+      saved = await save;
+    } catch (Exception failure) {
+      throw wrapFailure(failure);
     }
-
-    if (!saved)
-      throw new OutputRejectedException();
-  }
-
-  private async Task ObserveToolAsync(Guid requestId, string callId, string? name) {
-    bool saved;
-    try {
-      saved = await recorder.ObserveToolAsync(requestId, callId, name);
-    } catch (Exception exception) {
-      throw new OutputSaveException(exception);
-    }
-
     if (!saved)
       throw new OutputRejectedException();
   }

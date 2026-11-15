@@ -8,7 +8,7 @@ namespace Urd.Core.Execution;
 internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock sessionLock, SessionExecution execution) {
   private readonly TaskCompletionSource<SessionExecutionResult> settlement = new(TaskCreationOptions.RunContinuationsAsynchronously);
   private TaskCompletionSource? executionWake;
-  private Exception? executionFailure;
+  private Exception? backgroundToolFailure;
 
   internal ExecutionIdentity Identity => execution.Identity;
   internal SessionExecutionRecorder Recorder => execution.Recorder;
@@ -16,7 +16,7 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock sess
   internal bool IsStopping => execution.IsStopping;
   internal bool IsCompacting => execution.IsCompacting;
   internal void SetCompacting(bool value) => execution.IsCompacting = value;
-  internal bool IsWaiting { get; private set; }
+  internal bool IsWaitingForBackgroundTools { get; private set; }
   internal Task<SessionExecutionResult> Settlement => settlement.Task;
 
   // Caller holds the session lock. The driver joins callbacks before settlement.
@@ -29,7 +29,7 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock sess
   // Caller holds the session lock. Notifications never join their own tool task.
   internal void ReportToolOutcome(Exception? failure) {
     if (failure is not null) {
-      executionFailure ??= failure;
+      backgroundToolFailure ??= failure;
       session.MarkNeedsAttention();
       _ = execution.StopAsync();
     }
@@ -45,14 +45,14 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock sess
   // Called under the session lock only after cleanup and successful settlement persistence.
   internal void Release() {
     execution.Dispose();
-    IsWaiting = false;
+    IsWaitingForBackgroundTools = false;
     Wake();
   }
 
   internal async Task RunAsync(Task lockReleased) {
     try {
       await lockReleased;
-      if (execution.IsCompactionOnly) {
+      if (execution.IsManualCompaction) {
         await AdvanceAsync(await execution.RunCompactionAsync());
         return;
       }
@@ -92,7 +92,8 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock sess
   }
 
   private async Task<LlmRequest?> AdvanceAsync(ExecutionOutcome outcome) {
-    while (true) {
+    bool settled = false;
+    while (!settled) {
       Task? wake = null;
       Task stopCallbacks;
       using (await sessionLock.AcquireAsync()) {
@@ -105,8 +106,8 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock sess
             // Install the wait under the same lock as all input/completion/Stop signals.
             executionWake ??= new(TaskCreationOptions.RunContinuationsAsynchronously);
             wake = executionWake.Task;
-            if (!IsWaiting) {
-              IsWaiting = true;
+            if (!IsWaitingForBackgroundTools) {
+              IsWaitingForBackgroundTools = true;
               session.PublishChange();
             }
           }
@@ -114,43 +115,46 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock sess
         stopCallbacks = outcome != ExecutionOutcome.Completed || IsStopping
             ? execution.StopAsync() : execution.StopCallbacks;
       }
-      if (wake is not null) {
-        await wake;
-        continue; // Notifications are hints; always recheck durable request readiness.
-      }
-
-      // Terminal provider failure and Stop cancel first. Even successful completion joins
-      // remaining callback/notification ownership before the final guarded decision.
-      await Task.WhenAll(stopCallbacks, execution.JoinPendingToolsAsync());
-      using (await sessionLock.AcquireAsync()) {
-        ThrowIfExecutionFailed();
-        if (!execution.StopCallbacks.IsCompletedSuccessfully)
-          continue; // A late Stop must join its newly installed callback task too.
-        if (outcome == ExecutionOutcome.Completed && !IsStopping) {
-          LlmRequest? next = ClaimContinuation();
-          if (next is not null)
-            return next;
+      await WaitOrJoinAsync(wake, stopCallbacks);
+      // Notifications are hints; always recheck durable request readiness.
+      if (wake is null) {
+        using (await sessionLock.AcquireAsync()) {
+          ThrowIfExecutionFailed();
+          // A late Stop must join its newly installed callback task too.
+          settled = execution.StopCallbacks.IsCompletedSuccessfully;
+          if (settled) {
+            if (outcome == ExecutionOutcome.Completed && !IsStopping) {
+              LlmRequest? next = ClaimContinuation();
+              if (next is not null)
+                return next;
+            }
+            SessionExecutionResult saved = session.FinishExecution(this, outcome == ExecutionOutcome.Completed && IsStopping
+                ? ExecutionOutcome.Cancelled : outcome);
+            settlement.TrySetResult(saved);
+          }
         }
-        SessionExecutionResult saved = session.FinishExecution(this, outcome == ExecutionOutcome.Completed && IsStopping
-            ? ExecutionOutcome.Cancelled : outcome);
-        settlement.TrySetResult(saved);
-        return null;
       }
     }
+    return null;
   }
+
+  // Terminal provider failure and Stop cancel first. Even successful completion joins
+  // remaining callback/notification ownership before the final guarded decision.
+  private Task WaitOrJoinAsync(Task? wake, Task stopCallbacks) =>
+      wake ?? Task.WhenAll(stopCallbacks, execution.JoinPendingToolsAsync());
 
   // Caller holds the session lock. Admission cannot slip between recheck and settlement.
   private LlmRequest? ClaimContinuation() {
-    LlmRequest? next = execution.IsCompactionOnly ? null : session.CreateNextRequest(Identity);
+    LlmRequest? next = execution.IsManualCompaction ? null : session.CreateNextRequest(Identity);
     if (next is not null) {
-      IsWaiting = false;
+      IsWaitingForBackgroundTools = false;
       session.PublishChange();
     }
     return next;
   }
 
   private void ThrowIfExecutionFailed() {
-    if (executionFailure is not null)
-      throw new AggregateException("Tool cleanup or result recording failed.", executionFailure);
+    if (backgroundToolFailure is not null)
+      throw new AggregateException("Tool cleanup or result recording failed.", backgroundToolFailure);
   }
 }

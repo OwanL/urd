@@ -10,16 +10,8 @@ internal sealed class SessionExecutionRecorder(SessionBase session, UrdStore sto
     ExecutionIdentity identity) {
   internal ExecutionIdentity Identity { get; } = identity;
 
-  internal async Task<bool> StartRequestAsync(Guid requestId, StartingContext startingContext) {
-    using var _ = await sessionLock.AcquireAsync();
-    if (!session.CanRecordExecution(Identity))
-      return false;
-
-    bool started = session.WriteToStore(() => store.Executions.StartRequest(Identity, requestId, startingContext));
-    if (started)
-      session.PublishChange();
-    return started;
-  }
+  internal Task<bool> StartRequestAsync(Guid requestId, StartingContext startingContext) =>
+    RecordChangeAsync(() => session.WriteToStore(() => store.Executions.StartRequest(Identity, requestId, startingContext)));
 
   internal async Task<bool> RecordOutputAsync(LlmResponseChunk chunk) {
     using var _ = await sessionLock.AcquireAsync();
@@ -31,41 +23,22 @@ internal sealed class SessionExecutionRecorder(SessionBase session, UrdStore sto
     return true;
   }
 
-  internal async Task<bool> ObserveToolAsync(Guid requestId, string callId, string? name) {
+  internal Task<bool> RecordToolCallAsync(Guid requestId, string callId, string? name) =>
+    RecordChangeAsync(() => store.LlmResponses.RecordToolCall(Identity, requestId, callId, name));
+
+  internal Task<bool> CompleteRequestAsync(LlmRequestResult outcome) =>
+    RecordChangeAsync(() => store.LlmResponses.CompleteRequest(Identity, outcome),
+      allowStopping: outcome.Outcome != ExecutionOutcome.Completed);
+
+  internal Task<bool> TryStartToolAsync(Guid requestId, string callId, bool runInBackground = false) =>
+    RecordChangeAsync(() => store.Tools.TryStart(Identity, requestId, callId, runInBackground));
+
+  internal Task<bool> CompleteToolAsync(Guid requestId, LlmToolResult result) =>
+    RecordChangeAsync(() => store.Tools.Complete(Identity, requestId, result), allowStopping: true);
+
+  private async Task<bool> RecordChangeAsync(Func<bool> record, bool allowStopping = false) {
     using var _ = await sessionLock.AcquireAsync();
-    if (!session.CanRecordExecution(Identity)
-        || !store.LlmResponses.RecordToolCall(Identity, requestId, callId, name))
-      return false;
-
-    session.PublishChange();
-    return true;
-  }
-
-  internal async Task<bool> CompleteRequestAsync(LlmRequestResult outcome) {
-    using var _ = await sessionLock.AcquireAsync();
-    bool allowStopping = outcome.Outcome != ExecutionOutcome.Completed;
-    if (!session.CanRecordExecution(Identity, allowStopping)
-        || !store.LlmResponses.CompleteRequest(Identity, outcome))
-      return false;
-
-    session.PublishChange();
-    return true;
-  }
-
-  internal async Task<bool> TryStartToolAsync(Guid requestId, string callId, bool background = false) {
-    using var _ = await sessionLock.AcquireAsync();
-    if (!session.CanRecordExecution(Identity)
-        || !store.Tools.TryStart(Identity, requestId, callId, background))
-      return false;
-
-    session.PublishChange();
-    return true;
-  }
-
-  internal async Task<bool> CompleteToolAsync(Guid requestId, LlmToolResult result) {
-    using var _ = await sessionLock.AcquireAsync();
-    if (!session.CanRecordExecution(Identity, allowStopping: true)
-        || !store.Tools.Complete(Identity, requestId, result))
+    if (!session.CanRecordExecution(Identity, allowStopping) || !record())
       return false;
 
     session.PublishChange();

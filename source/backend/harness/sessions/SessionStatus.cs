@@ -51,7 +51,7 @@ internal sealed class SessionStatus(long historyRevision) {
     if (execution is not null) {
       if (execution.IsCompacting)
         return "compacting";
-      return execution.IsWaiting ? "waiting" : "running";
+      return execution.IsWaitingForBackgroundTools ? "waiting" : "running";
     }
     return lastOutcome == ExecutionOutcome.Failed ? "failed" : "idle";
   }

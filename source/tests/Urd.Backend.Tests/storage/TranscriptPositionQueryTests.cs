@@ -244,7 +244,7 @@ public sealed class TranscriptPositionQueryTests {
       Assert.DoesNotContain("text_utf8", sql, StringComparison.OrdinalIgnoreCase);
       Assert.DoesNotContain("arguments_json", sql, StringComparison.OrdinalIgnoreCase);
 
-      string[] plan = Explain(database, sql, parameters);
+      string[] plan = database.ExplainQueryPlan(sql, parameters);
       Assert.DoesNotContain(plan, step => step.Contains("SCAN", StringComparison.OrdinalIgnoreCase));
       Assert.Contains(plan, step => step.Contains("SEARCH p", StringComparison.OrdinalIgnoreCase));
       Assert.Contains(plan, step => step.Contains("SEARCH m", StringComparison.OrdinalIgnoreCase));
@@ -325,19 +325,6 @@ public sealed class TranscriptPositionQueryTests {
       new(run, tool, TranscriptEntryKind.Tool, revision),
       new(run, completionId, TranscriptEntryKind.ToolCompletion, revision)
     ];
-  }
-
-  private static string[] Explain(TemporaryDatabase database, string sql, (string Name, object Value)[] parameters) {
-    using SqliteConnection connection = database.OpenReadOnlyConnection();
-    using SqliteCommand command = connection.CreateCommand();
-    command.CommandText = "EXPLAIN QUERY PLAN " + sql;
-    foreach ((string name, object value) in parameters)
-      command.Parameters.AddWithValue(name, value is Guid id ? id.ToString("D") : value);
-    using SqliteDataReader reader = command.ExecuteReader();
-    var steps = new List<string>();
-    while (reader.Read())
-      steps.Add(reader.GetString(3));
-    return [.. steps];
   }
 
   private sealed record SeededEntry(Guid RunId, Guid InputId, Guid RequestId, int Weight);

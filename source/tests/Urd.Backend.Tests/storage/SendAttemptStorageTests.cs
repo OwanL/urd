@@ -146,15 +146,8 @@ public sealed class SendAttemptStorageTests {
     foreach (string invalid in new[] { "", "0", "-1", "1.0", "9223372036854775808" })
       Assert.Throws<ArgumentException>(() => reopened.NotSentInputs.Read(session, invalid));
 
-    using SqliteConnection connection = database.OpenReadOnlyConnection();
-    using SqliteCommand explain = connection.CreateCommand();
-    explain.CommandText = "EXPLAIN QUERY PLAN " + NotSentInputReader.PageSql;
-    explain.Parameters.AddWithValue("$session", session);
-    explain.Parameters.AddWithValue("$cursor", long.MaxValue);
-    using SqliteDataReader reader = explain.ExecuteReader();
-    var plan = new List<string>();
-    while (reader.Read())
-      plan.Add(reader.GetString(3));
+    string[] plan = database.ExplainQueryPlan(NotSentInputReader.PageSql,
+        ("$session", session), ("$cursor", long.MaxValue));
     Assert.Contains(plan, line => line.Contains("execution_inputs_not_sent_order", StringComparison.Ordinal));
     Assert.DoesNotContain(plan, line => line.Contains("SCAN i", StringComparison.Ordinal) || line.Contains("TEMP B-TREE", StringComparison.Ordinal));
   }

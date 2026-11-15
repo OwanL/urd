@@ -20,13 +20,13 @@ public sealed class TranscriptPositionWriterTests {
     Admit(store, session, run, first);
     Admit(store, session, run, second);
     Guid request = store.Executions.CreateNextRequest(identity)!.RequestId;
-    Assert.Equal(0, State(store, session).EntryCount);
-    Assert.Equal(0, State(store, session).PositionVersion);
+    Assert.Equal(0, ReadPositionState(store, session).EntryCount);
+    Assert.Equal(0, ReadPositionState(store, session).PositionVersion);
     Assert.True(store.Executions.StartRequest(identity, request));
     TranscriptPositionWindow users = store.Positions.Locate(session, 0, 0);
     Assert.Equal(new long[] { 262, 256 }, users.Entries.Select(entry => entry.Position.Weight));
     Assert.True(store.Executions.StartRequest(identity, request));
-    Assert.Equal(users.State, State(store, session));
+    Assert.Equal(users.State, ReadPositionState(store, session));
     Assert.Equal(new[] { first.SubmissionId, second.SubmissionId },
         store.Positions.Prompts(session, 0).Prompts.Select(prompt => prompt.Entry.EntryId));
 
@@ -37,7 +37,7 @@ public sealed class TranscriptPositionWriterTests {
     TranscriptPosition text = initial.Target!;
     Assert.Equal(260, text.Weight);
     Assert.False(store.LlmResponses.Append(identity, firstChunk));
-    Assert.Equal(initial.State, State(store, session));
+    Assert.Equal(initial.State, ReadPositionState(store, session));
     Assert.True(store.LlmResponses.Append(identity, new(request, output, 1, "\0x", false)));
     TranscriptPositionWindow grown = store.Positions.Locate(session, 0, long.MaxValue);
     Assert.Equal(text.Entry, grown.Target!.Entry);
@@ -53,7 +53,7 @@ public sealed class TranscriptPositionWriterTests {
     Assert.Equal(256, tool.Target.Weight);
     Assert.True(store.LlmResponses.RecordToolCall(identity, request, "call", "named"));
     Assert.True(store.LlmResponses.RecordToolCall(identity, request, "call", "named"));
-    Assert.Equal(tool.State, State(store, session)); // Name does not change the compact-row weight.
+    Assert.Equal(tool.State, ReadPositionState(store, session)); // Name does not change the compact-row weight.
     Guid nextText = Guid.NewGuid();
     Assert.True(store.LlmResponses.Append(identity, new(request, nextText, 2, "tail", false)));
     TranscriptPositionWindow beforeFinal = store.Positions.Locate(session, 0, long.MaxValue);
@@ -64,10 +64,10 @@ public sealed class TranscriptPositionWriterTests {
     Assert.Equal(4, final.Entries[^1].Descriptor.Text!.AvailableThrough.SegmentIndex);
     var completion = new LlmRequestResult(request, ExecutionOutcome.Completed, ToolCalls: [Call("call"), Call("unobserved")]);
     Assert.True(store.LlmResponses.CompleteRequest(identity, completion));
-    TranscriptPositionState completed = State(store, session);
+    TranscriptPositionState completed = ReadPositionState(store, session);
     Assert.Equal(final.State.EntryCount + 1, completed.EntryCount);
     Assert.True(store.LlmResponses.CompleteRequest(identity, completion));
-    Assert.Equal(completed, State(store, session));
+    Assert.Equal(completed, ReadPositionState(store, session));
     AssertPrefixes(store.Positions.Locate(session, 0, long.MaxValue));
   }
 
@@ -98,7 +98,7 @@ public sealed class TranscriptPositionWriterTests {
       }
     }
     using UrdStore reopened = UrdStore.Open(database.Path);
-    Assert.Equal(saved, State(reopened, session));
+    Assert.Equal(saved, ReadPositionState(reopened, session));
   }
 
   [Fact]
@@ -115,14 +115,14 @@ public sealed class TranscriptPositionWriterTests {
       BEGIN SELECT RAISE(ABORT, 'position rejected'); END;
       """);
     Assert.Throws<SqliteException>(() => store.Executions.StartRequest(identity, request));
-    Assert.Equal(0, State(store, session).EntryCount);
-    Assert.Equal(0, State(store, session).PositionVersion);
+    Assert.Equal(0, ReadPositionState(store, session).EntryCount);
+    Assert.Equal(0, ReadPositionState(store, session).PositionVersion);
     Assert.Equal(1L, database.Scalar("SELECT attempt FROM execution_requests;")); // raw-sql: Verify durable request state after a simulated failure.
     Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM execution_messages;")); // raw-sql: Verify no history row survived rollback.
     database.Execute("DROP TRIGGER reject_position;");
     Assert.True(store.Executions.StartRequest(identity, request));
     Assert.True(store.LlmResponses.Append(identity, new(request, output, 0, "a", false)));
-    TranscriptPositionState before = State(store, session);
+    TranscriptPositionState before = ReadPositionState(store, session);
     database.Execute("""
       CREATE TABLE test_parent (id INTEGER PRIMARY KEY);
       CREATE TABLE test_child (parent_id INTEGER REFERENCES test_parent(id) DEFERRABLE INITIALLY DEFERRED);
@@ -130,12 +130,12 @@ public sealed class TranscriptPositionWriterTests {
       BEGIN INSERT INTO test_child VALUES (1); END;
       """);
     Assert.Throws<SqliteException>(() => store.LlmResponses.Append(identity, new(request, output, 1, "b", false)));
-    Assert.Equal(before, State(store, session));
+    Assert.Equal(before, ReadPositionState(store, session));
     Assert.Single(StoredLlmResponses.Read(database));
     Assert.Equal(1L, database.Scalar("SELECT next_chunk_index FROM execution_requests;")); // raw-sql: Verify the commit failure rolled back the chunk cursor.
     database.Execute("DROP TRIGGER fail_position_commit;");
     Assert.True(store.LlmResponses.Append(identity, new(request, output, 1, "b", false)));
-    Assert.Equal(before.TotalWeight + 1, State(store, session).TotalWeight);
+    Assert.Equal(before.TotalWeight + 1, ReadPositionState(store, session).TotalWeight);
   }
 
   [Fact]
@@ -154,7 +154,7 @@ public sealed class TranscriptPositionWriterTests {
       UPDATE execution_messages SET layout_weight = layout_weight + 1
       WHERE session_id = '{session:D}' AND role = 0;
       """));
-    Assert.Equal(before.State, State(store, session));
+    Assert.Equal(before.State, ReadPositionState(store, session));
     Assert.Equal(before.Entries[0].Position.Weight,
         store.Positions.Locate(session, 0, 0).Entries[0].Position.Weight);
     database.ForceHistoryRevision(1);
@@ -199,7 +199,7 @@ public sealed class TranscriptPositionWriterTests {
       reads++;
     }
     await appends;
-    Assert.Equal(129, State(reader, session).PositionVersion);
+    Assert.Equal(129, ReadPositionState(reader, session).PositionVersion);
   }
 
   private static void AssertPrefixes(TranscriptPositionWindow window) {
@@ -214,7 +214,7 @@ public sealed class TranscriptPositionWriterTests {
     Assert.Equal(window.Entries.Count, window.State.EntryCount);
   }
 
-  private static TranscriptPositionState State(UrdStore store, Guid session) => store.Positions.Locate(session, 0, 0).State;
+  private static TranscriptPositionState ReadPositionState(UrdStore store, Guid session) => store.Positions.Locate(session, 0, 0).State;
   private static UserMessageSubmission Input(string text) => new(Guid.NewGuid(), 0, text, TestLlmSelection.Default);
   private static void Admit(UrdStore store, Guid session, Guid run, UserMessageSubmission input) =>
       Assert.True(store.UserMessages.Submit(session, 0, input, true, run, run).NewlyAccepted);

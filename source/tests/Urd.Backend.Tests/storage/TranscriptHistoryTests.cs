@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Text.Json;
-using Microsoft.Data.Sqlite;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Execution;
 using Urd.Core.Sessions;
@@ -249,7 +248,7 @@ public sealed class TranscriptHistoryTests(ITestOutputHelper output) {
       Assert.DoesNotContain("COUNT", sql, StringComparison.OrdinalIgnoreCase);
       Assert.DoesNotContain("arguments_json", sql, StringComparison.OrdinalIgnoreCase);
       Assert.DoesNotContain("result_json", sql, StringComparison.OrdinalIgnoreCase);
-      string[] plan = Explain(database, sql, parameters);
+      string[] plan = database.ExplainQueryPlan(sql, parameters);
       Assert.DoesNotContain(plan, step => step.Contains("SCAN execution_messages", StringComparison.OrdinalIgnoreCase));
       Assert.Contains(plan, step => step.Contains("SEARCH execution_messages", StringComparison.OrdinalIgnoreCase));
       if (sql != TranscriptHistoryStorage.AnchorSql)
@@ -543,19 +542,6 @@ public sealed class TranscriptHistoryTests(ITestOutputHelper output) {
       ) ORDER BY run_order, entry_order;
       COMMIT;
       """);
-  }
-
-  private static string[] Explain(TemporaryDatabase database, string sql, (string Name, object Value)[] parameters) {
-    using SqliteConnection connection = database.OpenReadOnlyConnection();
-    using SqliteCommand command = connection.CreateCommand();
-    command.CommandText = "EXPLAIN QUERY PLAN " + sql;
-    foreach ((string name, object value) in parameters)
-      command.Parameters.AddWithValue(name, value is Guid id ? id.ToString("D") : value);
-    using SqliteDataReader reader = command.ExecuteReader();
-    var steps = new List<string>();
-    while (reader.Read())
-      steps.Add(reader.GetString(3));
-    return [.. steps];
   }
 
   private static string Prefix() => Guid.NewGuid().ToString("D")[..24];

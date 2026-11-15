@@ -1,6 +1,4 @@
-using System.Data.Common;
 using System.Text.Json;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.AI;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Compaction;
@@ -40,16 +38,19 @@ public sealed class SessionSnapshotStorageTests {
     Assert.Empty(snapshot.PendingInputs);
     Assert.NotNull(snapshot.LastSettlement);
 
-    string[] plan = Explain(database, SnapshotReader.FirstUserSql, session, 1);
+    string[] plan = database.ExplainQueryPlan(SnapshotReader.FirstUserSql, ("$session", session), ("$revision", 1L));
     Assert.Contains(plan, step => step.Contains("execution_messages_history_order", StringComparison.Ordinal));
     Assert.DoesNotContain(plan, step => step.Contains("SCAN execution_messages", StringComparison.Ordinal));
-    string[] pending = ExplainPending(database, session);
+    string[] pending = database.ExplainQueryPlan(SnapshotReader.PendingInputsSql,
+        ("$session", session), ("$limit", 8), ("$bytes", 256 * 3 + 3));
     Assert.Contains(pending, step => step.Contains("nonterminal_execution_inputs", StringComparison.Ordinal));
     Assert.DoesNotContain(pending, step => step.Contains("SCAN execution_inputs", StringComparison.Ordinal));
-    string[] settlement = Explain(database, SnapshotReader.SnapshotSettlementSql, session, 1);
+    string[] settlement = database.ExplainQueryPlan(SnapshotReader.SnapshotSettlementSql,
+        ("$session", session), ("$revision", 1L));
     Assert.Contains(settlement, step => step.Contains("USING INDEX execution_runs_terminal_order", StringComparison.Ordinal));
     Assert.DoesNotContain(settlement, step => step.Contains("TEMP B-TREE", StringComparison.Ordinal));
-    string[] active = Explain(database, SnapshotReader.SnapshotUnsettledSql, session, 1);
+    string[] active = database.ExplainQueryPlan(SnapshotReader.SnapshotUnsettledSql,
+        ("$session", session), ("$revision", 1L));
     Assert.Contains(active, step => step.Contains("USING INDEX one_active_execution", StringComparison.Ordinal));
     Assert.DoesNotContain(active, step => step.Contains("SCAN", StringComparison.Ordinal));
   }
@@ -133,7 +134,7 @@ public sealed class SessionSnapshotStorageTests {
 
     Assert.Equal(new SessionContextUsage(18, IsEstimate: false), store.Snapshots.ReadPersisted(session).ContextUsage);
 
-    string[] plan = Explain(database, SnapshotReader.ContextUsageSql, session, 0);
+    string[] plan = database.ExplainQueryPlan(SnapshotReader.ContextUsageSql, ("$session", session), ("$revision", 0L));
     Assert.Contains(plan, step => step.Contains("execution_runs_history_order", StringComparison.Ordinal));
     Assert.Contains(plan, step => step.Contains("execution_requests", StringComparison.Ordinal)
         && step.Contains("INDEX", StringComparison.Ordinal));
@@ -223,33 +224,6 @@ public sealed class SessionSnapshotStorageTests {
         new(Guid.NewGuid(), 0, "failure", TestLlmSelection.Default), accepting: true,
         proposedExecutionId: execution);
     return execution;
-  }
-
-  private static string[] ExplainPending(TemporaryDatabase database, Guid session) {
-    using var connection = new SqliteConnection(new SqliteConnectionStringBuilder {
-      DataSource = database.Path, Pooling = false
-    }.ToString());
-    connection.Open();
-    using SqliteCommand command = connection.CreateCommand();
-    command.CommandText = "EXPLAIN QUERY PLAN " + SnapshotReader.PendingInputsSql;
-    command.Parameters.AddWithValue("$session", session.ToString("D"));
-    command.Parameters.AddWithValue("$limit", 8);
-    command.Parameters.AddWithValue("$bytes", 256 * 3 + 3);
-    using SqliteDataReader reader = command.ExecuteReader();
-    return reader.Cast<DbDataRecord>().Select(row => row.GetString(3)).ToArray();
-  }
-
-  private static string[] Explain(TemporaryDatabase database, string sql, Guid session, long revision) {
-    using var connection = new SqliteConnection(new SqliteConnectionStringBuilder {
-      DataSource = database.Path, Pooling = false
-    }.ToString());
-    connection.Open();
-    using SqliteCommand command = connection.CreateCommand();
-    command.CommandText = "EXPLAIN QUERY PLAN " + sql;
-    command.Parameters.AddWithValue("$session", session.ToString("D"));
-    command.Parameters.AddWithValue("$revision", revision);
-    using SqliteDataReader reader = command.ExecuteReader();
-    return reader.Cast<DbDataRecord>().Select(row => row.GetString(3)).ToArray();
   }
 
   // Bulk fixture writes avoid the execution context builder, which deliberately reads full history.

@@ -28,6 +28,30 @@ internal sealed class TemporaryDatabase : IDisposable {
     return command.ExecuteScalar();
   }
 
+  internal List<T> ReadRows<T>(string sql, Func<SqliteDataReader, T> map) {
+    using SqliteConnection connection = OpenReadOnlyConnection();
+    using SqliteCommand command = connection.CreateCommand();
+    command.CommandText = sql;
+    using SqliteDataReader reader = command.ExecuteReader();
+    var rows = new List<T>();
+    while (reader.Read())
+      rows.Add(map(reader));
+    return rows;
+  }
+
+  internal string[] ExplainQueryPlan(string sql, params (string Name, object Value)[] parameters) {
+    using SqliteConnection connection = OpenReadOnlyConnection();
+    using SqliteCommand command = connection.CreateCommand();
+    command.CommandText = "EXPLAIN QUERY PLAN " + sql;
+    foreach ((string name, object value) in parameters)
+      command.Parameters.AddWithValue(name, value is Guid id ? id.ToString("D") : value);
+    using SqliteDataReader reader = command.ExecuteReader();
+    var steps = new List<string>();
+    while (reader.Read())
+      steps.Add(reader.GetString(3));
+    return [.. steps];
+  }
+
   // Opens a read-only connection for the shared Stored* evidence readers.
   internal SqliteConnection OpenReadOnlyConnection() => OpenConnection(SqliteOpenMode.ReadOnly);
 

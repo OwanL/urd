@@ -49,7 +49,7 @@ internal static class HistoryCompactor {
     cancellationToken.ThrowIfCancellationRequested();
 
     string summary = ReadCompletedSummary(response);
-    long estimatedContextTokensAfter = EstimateCompactedContext(plan, summary);
+    long estimatedContextTokensAfter = EstimateCompactedContext(plan, plan.AppendBackgroundToolCalls(summary));
     if (estimatedContextTokensAfter >= plan.EstimatedContextTokensBefore)
       throw new InvalidDataException("The compaction summary would not reduce the estimated context.");
 

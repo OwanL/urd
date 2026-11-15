@@ -142,8 +142,11 @@ internal sealed class SessionExecution : IDisposable {
       return null;
     ModelHistory history = currentHistory ?? await session.ReadModelHistoryAsync(ExecutionId, requestId);
     EnsureStartingContext();
-    return HistoryCompactor.CreatePlan(history, selection, startingContext!, reason, focus,
+    HistoryCompactionPlan? plan = HistoryCompactor.CreatePlan(history, selection, startingContext!, reason, focus,
         preferences.CompactionTriggerTokenCount);
+    return plan is null ? null : plan with {
+      BackgroundToolCalls = await session.ReadCompactionBackgroundCallsAsync(ExecutionId, plan.FirstRetainedMessage.Location)
+    };
   }
 
   private async Task<GeneratedCompactionSummary> GenerateHistorySummaryAsync(HistoryCompactionPlan plan) {

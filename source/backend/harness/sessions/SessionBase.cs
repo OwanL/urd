@@ -105,6 +105,14 @@ public abstract class SessionBase {
     return store.Compactions.ReadContext(Id, HistoryRevision, requestId is null ? null : executionId, requestId);
   }
 
+  internal async Task<IReadOnlyList<BackgroundToolCallInput>> ReadCompactionBackgroundCallsAsync(
+      Guid executionId, HistoryMessageLocation firstRetained) {
+    using var _ = await sessionLock.AcquireAsync();
+    if (!CanRecordExecution(executionId))
+      throw new OperationCanceledException("The execution no longer accepts compaction.");
+    return store.Compactions.ReadBackgroundToolCalls(Id, HistoryRevision, firstRetained);
+  }
+
   internal async Task<bool> SaveCompactionAsync(Guid executionId, HistoryCompactionPlan plan, GeneratedCompactionSummary result) {
     using var _ = await sessionLock.AcquireAsync();
     if (!CanRecordExecution(executionId))

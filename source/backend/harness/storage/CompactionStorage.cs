@@ -11,6 +11,30 @@ internal sealed class CompactionStorage(Database database, ToolResultCodec toolR
       database.Read(transaction => new LlmContextReader(database, toolResults)
           .ReadContext(transaction, sessionId, revision, runId, requestId));
 
+  // Keep inputs until their completion is summarized, including results not yet claimed.
+  // Completions precede every safe cut within their receiving request; only later requests retain them.
+  // An unfinished recipient still needs its input, including an overflow retry. Freeze this snapshot
+  // before summarizing so a racing completion cannot remove its input.
+  internal IReadOnlyList<BackgroundToolCallInput> ReadBackgroundToolCalls(Guid sessionId, long revision,
+      HistoryMessageLocation firstRetained) => database.Read(transaction => database.Query(transaction, """
+        SELECT t.request_id, t.call_id, t.name, t.arguments_json
+        FROM execution_tools t
+        JOIN execution_requests q ON q.request_id = t.request_id
+        JOIN execution_runs r ON r.run_id = t.run_id
+        LEFT JOIN execution_tool_completions c ON c.request_id = t.request_id AND c.call_id = t.call_id
+        LEFT JOIN execution_requests recipient ON recipient.request_id = c.claimed_request_id
+        LEFT JOIN execution_runs recipient_run ON recipient_run.run_id = recipient.run_id
+        WHERE r.session_id = $session AND r.history_revision = $revision
+            AND t.background = 1 AND t.started = 1
+            AND (c.claimed_request_id IS NULL OR recipient.outcome IS NULL OR recipient.attempt = 1
+                OR recipient_run.ordinal > $cutRun
+                OR (recipient_run.ordinal = $cutRun AND recipient.request_index > $cutRequest))
+        ORDER BY r.ordinal, q.request_index, t.call_index;
+        """, row => new BackgroundToolCallInput(row.Guid("request_id"), row.String("call_id"),
+          row.String("name"), row.String("arguments_json")),
+          ("$session", sessionId), ("$revision", revision),
+          ("$cutRun", firstRetained.ExecutionOrdinal), ("$cutRequest", firstRetained.RequestIndexInExecution)));
+
   internal static SavedHistoryCompaction? ReadLatest(Database database, SqliteTransaction transaction, Guid sessionId, long revision) =>
       database.QuerySingleOrDefault(transaction, """
         SELECT compaction_id, first_kept_request_id, first_kept_run_ordinal, first_kept_request_index,
@@ -62,7 +86,8 @@ internal sealed class CompactionStorage(Database database, ToolResultCodec toolR
         """, ("$id", id), ("$session", sessionId), ("$revision", revision), ("$run", runId),
           ("$keep", cut.RequestId), ("$message", cut.MessageIndexInRequest), ("$ordinal", cut.ExecutionOrdinal),
           ("$index", cut.RequestIndexInExecution), ("$reason", (int)plan.Reason), ("$before", plan.EstimatedContextTokensBefore),
-          ("$after", result.EstimatedContextTokensAfter), ("$created", StorageText.UtcTimestamp()), ("$summary", result.Summary));
+          ("$after", result.EstimatedContextTokensAfter), ("$created", StorageText.UtcTimestamp()),
+          ("$summary", plan.AppendBackgroundToolCalls(result.Summary)));
       return true;
     });
   }

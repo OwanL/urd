@@ -176,11 +176,16 @@ public sealed class HistoryCompactorTests {
       Entry(2, 0, true, ChatRole.User, "current")
     ], previous);
     HistoryCompactionPlan plan = HistoryCompactor.CreatePlan(context, TestLlmSelection.Default, emptyStartingContext, CompactionReason.Manual)!;
+    plan = plan with { BackgroundToolCalls = [new(Guid.NewGuid(), "call", "search", "{\"query\":\"x\"}")] };
     using var client = CreateClient("Goal: keep context.\nFiles read: src/old.cs");
 
     GeneratedCompactionSummary result = await HistoryCompactor.GenerateSummaryAsync(client, TestLlmSelection.Default, plan, default);
 
     Assert.True(result.EstimatedContextTokensAfter < plan.EstimatedContextTokensBefore);
+    Assert.Equal(ContextTokenBudget.EstimateMessages(
+        new[] { ModelHistory.SummaryMessage(plan.AppendBackgroundToolCalls(result.Summary)) }
+            .Concat(context.Messages.Skip(plan.FirstRetainedMessageIndex).Select(entry => entry.Message))),
+        result.EstimatedContextTokensAfter);
     IReadOnlyList<ChatMessage> request = Assert.Single(client.Requests);
     ChatOptions options = Assert.IsType<ChatOptions>(Assert.Single(client.Options));
     string prompt = string.Join("\n", request.SelectMany(message => message.Contents.OfType<TextContent>()

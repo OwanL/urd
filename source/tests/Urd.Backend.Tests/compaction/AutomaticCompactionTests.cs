@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Compaction;
@@ -83,6 +84,137 @@ public sealed class AutomaticCompactionTests {
         .Any(content => content.Text == "tool turn"));
     Assert.Single((await session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, revision))).Entries,
         entry => entry.Entry.Kind == TranscriptEntryKind.Compaction);
+  }
+
+  [Fact]
+  public async Task CompactionRetainsStoredBackgroundInputAcrossSnapshotsAndDeliversRacingCompletionOnce() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    var preferences = new PreferenceManager(store);
+    preferences.SetCompactionTriggerTokenCount(int.MaxValue);
+    string payload = string.Concat(Enumerable.Repeat("雪🧭é", 8_500));
+    var toolEntered = Signal();
+    var toolRelease = Signal();
+    var summaryEntered = Signal();
+    var summaryRelease = Signal();
+    var waiting = Signal();
+    var completionSaved = Signal();
+    var tool = new TestAgentTool("work", async (toolInput, context, cancellation) => {
+      Assert.Equal("retained-call", context.CallId);
+      Assert.Equal(payload, toolInput.GetProperty("nested").GetProperty("payload").GetString());
+      toolEntered.TrySetResult();
+      await toolRelease.Task.WaitAsync(cancellation);
+      return new ToolOutput("background result", []);
+    });
+    var toolArguments = new Dictionary<string, object?> {
+      ["background"] = true,
+      ["nested"] = new Dictionary<string, object?> { ["payload"] = payload }
+    };
+    int streamCalls = 0;
+    int summaryCalls = 0;
+    using var client = new ScriptedChatClient(token => Interlocked.Increment(ref streamCalls) switch {
+      2 => ToolBatch(token, new FunctionCallContent("retained-call", "work", toolArguments)),
+      _ => Complete(token)
+    }, async cancellation => {
+      int call = Interlocked.Increment(ref summaryCalls);
+      if (call == 1) {
+        preferences.SetCompactionTriggerTokenCount(int.MaxValue);
+        return SummaryResponse();
+      }
+      if (call == 2) {
+        summaryEntered.TrySetResult();
+        await summaryRelease.Task.WaitAsync(cancellation);
+        preferences.SetCompactionTriggerTokenCount(int.MaxValue);
+      }
+      return SummaryResponse();
+    });
+    var session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid(), Path.GetDirectoryName(database.Path)), store, _ => client,
+        new ToolCatalog([tool]));
+    await SubmitAsync(session, new string('o', 100_000), TestLlmSelection.Default);
+    using IDisposable subscription = await session.SubscribeAsync(change => {
+      if (change.Status == "waiting") waiting.TrySetResult();
+      if (StoredTools.Read(database).Any(call => call.ResultJson is not null)) completionSaved.TrySetResult();
+    }, watched: true);
+    UserMessageReceipt launch = await AcceptAsync(session, "launch background work", TestLlmSelection.Default);
+    Guid executionId = Assert.IsType<Guid>(launch.ExecutionId);
+    try {
+      await toolEntered.Task.WaitAsync(TestTimeout);
+      await waiting.Task.WaitAsync(TestTimeout);
+      StoredTool stored = Assert.Single(StoredTools.Read(database));
+      Assert.True(stored.Started);
+      Assert.Null(stored.ResultJson);
+      Assert.True(stored.ArgumentsJson.Length > 32_768);
+      using (JsonDocument input = JsonDocument.Parse(stored.ArgumentsJson))
+        Assert.Equal(payload, input.RootElement.GetProperty("nested").GetProperty("payload").GetString());
+      Assert.Equal(0, summaryCalls);
+
+      waiting = Signal();
+      preferences.SetCompactionTriggerTokenCount(1_000);
+      UserMessageReceipt firstSteering = await AcceptAsync(session, "compact while work is running", TestLlmSelection.Default);
+      Assert.Equal(executionId, firstSteering.ExecutionId);
+      await waiting.Task.WaitAsync(TestTimeout);
+      long firstRevision = (await session.ReadSnapshotAsync()).HistoryRevision;
+      SavedHistoryCompaction firstBoundary = Assert.IsType<SavedHistoryCompaction>(
+          store.Compactions.ReadContext(session.Id, firstRevision).PreviousCompaction);
+      string firstSummary = Assert.IsType<CompactionSummary>(
+          await session.ReadCompactionAsync(firstBoundary.Id, firstRevision)).Summary;
+      Assert.StartsWith(Summary, firstSummary);
+      AssertBackgroundCallIncluded(firstSummary, stored);
+      ModelHistory firstContext = store.Compactions.ReadContext(session.Id, firstRevision);
+      Assert.DoesNotContain(firstContext.Messages.SelectMany(entry => entry.Message.Contents)
+          .OfType<FunctionCallContent>(), call => call.CallId == stored.CallId);
+
+      waiting = Signal();
+      await AcceptAsync(session, new string('f', 100_000), TestLlmSelection.Default);
+      await waiting.Task.WaitAsync(TestTimeout);
+      Assert.Equal(1, summaryCalls);
+
+      preferences.SetCompactionTriggerTokenCount(1_000);
+      UserMessageReceipt secondSteering = await AcceptAsync(session, "compact after the background result", TestLlmSelection.Default);
+      Assert.Equal(executionId, secondSteering.ExecutionId);
+      await summaryEntered.Task.WaitAsync(TestTimeout);
+      Assert.Equal(2, summaryCalls);
+      toolRelease.TrySetResult();
+      await completionSaved.Task.WaitAsync(TestTimeout);
+      Assert.NotNull(Assert.Single(StoredTools.Read(database)).ResultJson);
+      summaryRelease.TrySetResult();
+      Assert.Equal(ExecutionOutcome.Completed,
+          (await session.WaitForExecutionFinishAsync(executionId).WaitAsync(TestTimeout)).Outcome);
+
+      long secondRevision = (await session.ReadSnapshotAsync()).HistoryRevision;
+      SavedHistoryCompaction secondBoundary = Assert.IsType<SavedHistoryCompaction>(
+          store.Compactions.ReadContext(session.Id, secondRevision).PreviousCompaction);
+      Assert.NotEqual(firstBoundary.Id, secondBoundary.Id);
+      string secondSummary = Assert.IsType<CompactionSummary>(
+          await session.ReadCompactionAsync(secondBoundary.Id, secondRevision)).Summary;
+      AssertBackgroundCallIncluded(secondSummary, stored);
+      Assert.Equal(2, summaryCalls);
+
+      int[] summaryRequestIndices = client.Options.Select((options, index) => (options, index))
+          .Where(item => item.options?.Tools is { Count: 0 }).Select(item => item.index).ToArray();
+      Assert.Equal(2, summaryRequestIndices.Length);
+      string firstModelRequest = client.Requests.Select((request, index) => (request, index))
+          .Where(item => item.index > summaryRequestIndices[0] && item.index < summaryRequestIndices[1]
+              && client.Options[item.index]?.Tools is { Count: > 0 })
+          .Select(item => RequestText(item.request)).First();
+      string[] afterSecondCompaction = client.Requests.Skip(summaryRequestIndices[1] + 1).Select(RequestText).ToArray();
+      AssertBackgroundCallIncluded(firstModelRequest, stored);
+      Assert.Equal(2, afterSecondCompaction.Length);
+      Assert.All(afterSecondCompaction, request => AssertBackgroundCallIncluded(request, stored));
+      Assert.DoesNotContain("[TOOL-ORIGIN: background tool completion", afterSecondCompaction[0], StringComparison.Ordinal);
+      Assert.Contains("[TOOL-ORIGIN: background tool completion", afterSecondCompaction[1], StringComparison.Ordinal);
+      Assert.Contains("background result", afterSecondCompaction[1], StringComparison.Ordinal);
+      Assert.Single((await session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, secondRevision))).Entries,
+          entry => entry.Entry.Kind == TranscriptEntryKind.ToolCompletion);
+    } finally {
+      toolRelease.TrySetResult();
+      summaryRelease.TrySetResult();
+      try {
+        await session.StopAcceptingUserMessagesAsync().WaitAsync(TestTimeout);
+      } finally {
+        await session.StopExecutionAsync().WaitAsync(TestTimeout);
+      }
+    }
   }
 
   [Fact]
@@ -268,6 +400,25 @@ public sealed class AutomaticCompactionTests {
       Assert.Contains("partial output", (await session.Transcript.ReadContentAsync(partial.Text!.From)).Text);
     }
   }
+
+  private static void AssertBackgroundCallIncluded(string text, StoredTool call) {
+    string normalized = text.Replace("\r\n", "\n", StringComparison.Ordinal);
+    const string header = "[BACKGROUND TOOL CALLS: inputs retained for result association; not new calls.]";
+    Assert.Equal(1, normalized.Split(header, StringSplitOptions.None).Length - 1);
+    int appendixStart = normalized.IndexOf(header, StringComparison.Ordinal) + header.Length;
+    string appendix = normalized[appendixStart..];
+    string metadataLine = appendix.Split('\n').First(line => line.StartsWith('{'));
+    using JsonDocument metadata = JsonDocument.Parse(metadataLine);
+    Assert.Equal(call.RequestId.ToString(), metadata.RootElement.GetProperty("request_id").GetString());
+    Assert.Equal(call.CallId, metadata.RootElement.GetProperty("call_id").GetString());
+    Assert.Equal(call.Name, metadata.RootElement.GetProperty("name").GetString());
+    string arguments = call.ArgumentsJson.Replace("\r\n", "\n", StringComparison.Ordinal);
+    Assert.Equal(1, normalized.Split(arguments, StringSplitOptions.None).Length - 1);
+  }
+
+  private static string RequestText(IEnumerable<ChatMessage> request) =>
+      string.Join("\n", request.SelectMany(message => message.Contents.OfType<TextContent>())
+          .Select(content => content.Text));
 
   private static async Task SubmitAsync(PrimarySession session, string text, LlmSelection selection) {
     UserMessageReceipt receipt = await AcceptAsync(session, text, selection);

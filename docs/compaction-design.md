@@ -33,6 +33,14 @@ distinct from tool-result pruning and catalog pruning (ARCHITECTURE.md, "Context
    - compaction never replays tools;
    - the summary call uses the shared request-only `IChatClient`.
 4. **Hook:** context preparation before each model request (agent-tools-design.md).
+5. **Background-call inputs survive compaction.** Append a harness-generated list containing
+   the tool name, request ID, call ID and full stored arguments. Snapshot it before summary
+   generation; a tool finishing during compaction must not lose its input. Include running
+   calls, completed calls awaiting delivery, and calls whose completion stays in retained
+   history. Rebuild the list from storage on each compaction, including calls whose original
+   message was removed by an earlier compaction. Inputs are not summarized or truncated;
+   they bypass the generated-summary output limit but count toward estimated context size.
+   This does not change completion delivery or replay any tool.
 
 ## Execution and storage
 
@@ -64,6 +72,9 @@ position, scoped to the session's history revision. A metadata-only transcript m
 with the summary; expanding it reads the bounded summary separately. Original messages, tools,
 images, usage and execution identities are never rewritten. Context reads use the latest
 summary plus its retained suffix, dropping provider-native payloads from the summarized span.
+The background-call appendix is saved with the summary in the existing text field; no schema
+change or database reset is needed. The summarizer is instructed not to copy the previous
+appendix, since the harness supplies a fresh list after the generated text.
 
 Threshold preparation runs before each model request. A classified `context_length_exceeded`
 may cause one compact-and-retry, only when the rejected exchange produced no output or calls.
@@ -81,6 +92,16 @@ database or an explicit owner-approved reset of incompatible data; no automatic 
 or deletion is performed. See [backend development](backend-development.md) for the current schema.
 
 ## Verification
+
+### Background-call appendix — 2026-11-15
+
+Isolated Release build and **541 backend tests** passed, including **52 focused compaction
+and background-storage cases**. Coverage includes full inputs larger than the summary limit,
+repeated compaction after the original call leaves context, completion during summarization,
+pending recipients, removal after completion is summarized, and appendix token accounting.
+Independent review passed. No running host was replaced or database reset.
+
+### Original compaction checkpoint
 
 - Isolated Release build and full backend suite: **374/374 passed**. Focused compaction,
   model-window, schema and starting-context checks: **39/39 passed**.

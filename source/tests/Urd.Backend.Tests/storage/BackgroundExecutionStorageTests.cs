@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Urd.Backend.Tests.Support;
+using Urd.Core.Compaction;
 using Urd.Core.Execution;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
@@ -98,6 +99,53 @@ public sealed class BackgroundExecutionStorageTests {
     Assert.Equal(completionIdentity, Assert.Single(Completions(store, session)).Entry);
     Assert.Single(next.Messages, IsCompletion);
     Assert.Equal("deliberate continuation", next.Messages[^1].Text);
+  }
+
+  [Fact]
+  public void CompactionRetainsBackgroundInputsUntilTheirCompletionsLeaveRetainedHistory() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    var (session, execution, origin) = Start(store);
+    var identity = new ExecutionIdentity(session, execution, 0);
+    CompleteReply(store, identity, origin, "running", "delivered", "awaiting", "foreground");
+    foreach (string call in new[] { "running", "delivered", "awaiting", "foreground" }) {
+      Assert.True(store.Tools.TryStart(identity, origin, call, background: call != "foreground"));
+      if (call is "delivered" or "foreground")
+        Assert.True(store.Tools.Complete(identity, origin, Result(call, "done")));
+    }
+    store.UserMessages.Submit(session, 0,
+        new(Guid.NewGuid(), 0, "receiving", TestLlmSelection.Default), true, execution, execution);
+    LlmRequest delivered = store.Executions.CreateNextRequest(identity)!;
+    Assert.True(store.Executions.StartRequest(identity, delivered.RequestId));
+    CompleteReply(store, identity, delivered.RequestId);
+    Assert.True(store.Tools.Complete(identity, origin, Result("awaiting", "waiting for delivery")));
+
+    var (otherSession, otherExecution, otherOrigin) = Start(store);
+    var other = new ExecutionIdentity(otherSession, otherExecution, 0);
+    CompleteReply(store, other, otherOrigin, "unrelated");
+    Assert.True(store.Tools.TryStart(other, otherOrigin, "unrelated", background: true));
+
+    HistoryMessageLocation beforeCompletion = delivered.Context!.Messages.First(entry => entry.Message.Role == ChatRole.Assistant).Location;
+    Assert.Equal(new[] { "running", "delivered", "awaiting" },
+        store.Compactions.ReadBackgroundToolCalls(session, 0, beforeCompletion).Select(call => call.CallId));
+    HistoryMessageLocation deliveredCut = delivered.Context.Messages[^1].Location;
+    Assert.Equal(new[] { "running", "awaiting" },
+        store.Compactions.ReadBackgroundToolCalls(session, 0, deliveredCut).Select(call => call.CallId));
+    store.UserMessages.Submit(session, 0,
+        new(Guid.NewGuid(), 0, "next", TestLlmSelection.Default), true, execution, execution);
+    LlmRequest unsent = store.Executions.CreateNextRequest(identity)!;
+    HistoryMessageLocation unsentCut = unsent.Context!.Messages[^1].Location;
+    IReadOnlyList<BackgroundToolCallInput> inputs = store.Compactions.ReadBackgroundToolCalls(session, 0, unsentCut);
+    Assert.Equal(new[] { "running", "awaiting" }, inputs.Select(call => call.CallId));
+    Assert.All(inputs, call => Assert.Equal(origin, call.RequestId));
+    Assert.True(store.Executions.StartRequest(identity, unsent.RequestId));
+    CompleteReply(store, identity, unsent.RequestId);
+    Assert.Equal("running", Assert.Single(store.Compactions.ReadBackgroundToolCalls(session, 0, unsentCut)).CallId);
+    store.UserMessages.Submit(session, 0,
+        new(Guid.NewGuid(), 0, "later", TestLlmSelection.Default), true, execution, execution);
+    LlmRequest later = store.Executions.CreateNextRequest(identity)!;
+    Assert.Equal("running", Assert.Single(store.Compactions.ReadBackgroundToolCalls(
+        session, 0, later.Context!.Messages[^1].Location)).CallId);
   }
 
   [Fact]

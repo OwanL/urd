@@ -160,19 +160,32 @@ Paths are relative to `source/backend/harness/` unless stated otherwise.
 | Proposed owner/file | Change and responsibility |
 | --- | --- |
 | `context/runtime/StartingContextManager.cs` | Extend the existing composer with asynchronous preparation: collect candidates, separate protections, run category selection in parallel and compose the final context. It does not own session admission or durable writes. |
-| `context/runtime/GitFiles.cs` | Extract the Git listing mechanics currently private to `SkillCatalog`; reuse a listing for matching skills and instruction files. Not a new filesystem discovery framework. |
-| `context/runtime/InstructionCatalog.cs` and `InstructionDocument.cs` | Discover/load recognised instruction documents with their source and scope. Keep existing `SkillCatalog` and `ToolCatalog`; do not merge their distinct semantics into one generic catalog. |
-| `context/pruning/CatalogPruner.cs` | One category-independent selection operation: build its brief, run the bounded conversation, validate kept IDs and return a selection or ordinary failure. Three invocations, not three implementations. |
-| `context/pruning/PruningPrompt.cs` and `Pruning.cs` | Category-specific prompt construction plus small input/result records. No skill/tool/instruction pruner subclasses or strategy/plugin hierarchy. |
+| `context/runtime/ResourceDiscovery.cs` and `Resources.cs` | One shared discoverer returns typed skill and file-backed guidance sets, retaining source, scope and ordering metadata. Bring the existing skill-discovery/loading rules into this owner, including packaged skills, and share the Git scan with instruction discovery. Tools still come from `ToolCatalog`, not filesystem discovery. |
+| `context/pruning/Pruner.cs` | Typed `PruneAsync(guidance)`, `PruneAsync(tools)` and `PruneAsync(skills)` overloads adapt their category into one shared selection implementation. Return the retained original resources and outcome; ordinary failure returns the full supplied set with fallback status. |
+| `context/pruning/Pruning.cs` | Small input/result records, including typed selection results. Keep category briefs/formatting with the pruner initially; split a prompt file only if it warrants one. No per-category pruner classes, resource-handler registry or plugin hierarchy. |
 | `execution/ConversationRunner.cs` | Extract the shared streamed-response validation and tool-turn mechanics from the current execution path. Main execution and pruning use the same implementation; primary admission, steering, compaction and settlement stay outside it. Continue using `IChatClient`, existing adapters and tool dispatch rather than adding a model-client facade. |
 | `providers/ModelSelector.cs` | Shared model-choice resolution: configured bucket or explicit provider/model reference becomes the existing `LlmSelection`. Bucket resolution is not implemented today; this is a dependency, not something pruning can already call. Reuse the same owner for delegated work rather than create pruning-only buckets. |
 | Existing execution/recording/storage owners | `SessionExecution` owns the preparation lifetime and joins its branches. Extend guarded recording with distinct pruning conversation/request scopes; extend `StartingContextStorage` for selected contexts at allowed compaction boundaries. Do not make the composer a second persistence owner. |
 | Existing preferences/server/UI owners | Extend `UserPreferences`, `PreferenceManager`, `PreferencesStorage` and existing routes; reuse settings and `ModelPicker`. Add a small pruning-row renderer under `source/ui/app/`, driven by recorded category status rather than owning work. Detailed UI remains deferred. |
 
-`SkillsGuidance` must format the selected skill list instead of rediscovering the full
-catalog during composition. Settings and preparation use the same catalog sources.
-If shared execution or bucket resolution lands through another feature first, reuse it;
-these are responsibility boundaries, not competing implementations.
+**Revised after owner feedback:** shared discovery is a resource-level responsibility,
+not merely a Git helper below separate discoverers. `ResourceDiscovery` owns finding
+and loading skills/guidance; `Pruner` owns selection; `StartingContextManager` connects
+them and handles protection/composition. Resource kinds retain distinct parsing rules
+and typed values without requiring separate top-level discoverer classes.
+
+Construct one pruner for a preparation with its immutable task context, model choices
+and owned-execution dependencies. Each overload chooses the corresponding category
+brief/model and calls the same core; histories, request identities and progress are
+local to each invocation, so the three calls can run concurrently. The public result
+contains original retained items plus outcome/diagnostics; model-facing IDs stay an
+internal selection detail. Do not silently equate a failed keep-all fallback with a
+successful decision to keep every item.
+
+`SkillsGuidance` must format the selected skill list instead of rediscovering everything.
+Settings and preparation use `ResourceDiscovery`; the shared registered tool catalog
+remains the tool source. If shared execution or bucket resolution lands through another
+feature first, reuse it; these are responsibility boundaries, not competing implementations.
 
 ### Proposed data flow
 
@@ -182,7 +195,7 @@ these are responsibility boundaries, not competing implementations.
 2. At an allowed preparation boundary, capture the task context, discovery results,
    preferences and resolved models once. Separate protected entries before building
    selector inputs. Each selector has its own conversation and category brief.
-3. Call the same `CatalogPruner` for the three categories in parallel. Each may use the
+3. Call the same `Pruner` for the three typed sets in parallel. Each may use the
    shared tool-capable execution path for exploration, but never recursively prune itself.
 4. Validate returned IDs against that category's candidate set. Keep original resources
    in stable source/precedence order; the model does not rewrite documents or schemas.
@@ -196,8 +209,9 @@ compaction, supply the summary, retained recent context and any next admitted in
 not the discarded history. Do not copy the main system-guidance bundle into these
 inputs and thereby reintroduce protected documents. Candidate payloads are skill
 name/description/path, existing tool declarations, and full unprotected instruction
-text with source/scope. Treat candidate contents as selection material. Output is kept
-candidate IDs, not rewritten resources; invalid output is an ordinary selection failure.
+text with source/scope. Treat candidate contents as selection material. The model returns
+kept candidate IDs, not rewritten resources; the pruner validates/maps them back to the
+original typed resources. Invalid output is an ordinary selection failure.
 
 **Proposed instruction boundary:** compiled `ContextGuidance` blocks form fixed base
 guidance; discovered additional instruction documents are pruning candidates. The skill

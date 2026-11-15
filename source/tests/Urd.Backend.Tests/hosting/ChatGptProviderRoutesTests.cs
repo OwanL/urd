@@ -5,7 +5,6 @@ using System.Text.Json.Serialization;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Providers;
 using Urd.Core.Storage;
-using Urd.Server;
 using Xunit;
 using static Urd.Backend.Tests.Support.HttpTest;
 using static Urd.Backend.Tests.Support.OpenAIStreams;
@@ -26,7 +25,7 @@ public sealed class ChatGptProviderRoutesTests {
     var catalog = new ScriptedOpenAIHandler("Unexpected catalog request");
     var responses = new ScriptedOpenAIHandler("Unexpected diagnostic request");
     var transport = new ChatGptProviderTransport(identity, catalog, responses);
-    await using var server = new RunningServer(new ServerOptions(Path.GetDirectoryName(database.Path)!, 0),
+    await using var server = new RunningServer(RunningServer.OptionsFor(database),
         createProviders: (store, callbackUri) => new ProviderManager(store, () => {
           identity.CallbackUri = callbackUri();
           return identity.CallbackUri;

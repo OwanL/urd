@@ -1,7 +1,6 @@
 using System.Net;
 using System.Text.Json;
 using Urd.Backend.Tests.Support;
-using Urd.Server;
 using Xunit;
 using static Urd.Backend.Tests.Support.HttpTest;
 
@@ -16,7 +15,7 @@ public sealed class FileRoutesTests {
     string alpha = Path.Combine(parent, "Alpha");
     Directory.CreateDirectory(Path.Combine(alpha, "nested"));
     Directory.CreateDirectory(Path.Combine(parent, "beta"));
-    await using var server = new RunningServer(new(Path.GetDirectoryName(database.Path)!, 0));
+    await using var server = new RunningServer(RunningServer.OptionsFor(database));
     await server.WaitForReadyAsync();
 
     using (HttpResponseMessage roots = await RequestAsync(server.Client, HttpMethod.Get,

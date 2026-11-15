@@ -15,7 +15,7 @@ public sealed class ToolCallDisplayRoutesTests {
     using var database = new TemporaryDatabase();
     SeedToolCall(database, out Guid sessionId, out Guid runId, out Guid requestId,
         out string callId, out Guid startEntryId, out Guid promptEntryId, out _, out _);
-    await using var server = new RunningServer(Options(database));
+    await using var server = new RunningServer(RunningServer.OptionsFor(database));
     await server.WaitForReadyAsync();
 
     using (HttpResponseMessage history = await RequestAsync(server.Client, HttpMethod.Get,
@@ -60,7 +60,7 @@ public sealed class ToolCallDisplayRoutesTests {
     using var database = new TemporaryDatabase();
     SeedToolCall(database, out Guid sessionId, out _, out Guid requestId, out string callId,
         out _, out _, out _, out int outputLength);
-    await using var server = new RunningServer(Options(database));
+    await using var server = new RunningServer(RunningServer.OptionsFor(database));
     await server.WaitForReadyAsync();
     string endpoint = $"/api/sessions/{sessionId}/tool-calls/{requestId}/{Uri.EscapeDataString(callId)}";
 
@@ -94,7 +94,7 @@ public sealed class ToolCallDisplayRoutesTests {
   [Fact]
   public async Task RevealRejectsRelativeAndMissingPathsWithoutLaunchingExplorer() {
     using var database = new TemporaryDatabase();
-    await using var server = new RunningServer(Options(database));
+    await using var server = new RunningServer(RunningServer.OptionsFor(database));
     await server.WaitForReadyAsync();
 
     using (HttpResponseMessage relative = await RequestAsync(server.Client, HttpMethod.Post,
@@ -177,6 +177,4 @@ public sealed class ToolCallDisplayRoutesTests {
   }
 
   private static string Sql(string value) => "'" + value.Replace("'", "''", StringComparison.Ordinal) + "'";
-
-  private static ServerOptions Options(TemporaryDatabase database) => new(Path.GetDirectoryName(database.Path)!, 0);
 }

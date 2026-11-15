@@ -4,7 +4,6 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Sessions;
-using Urd.Server;
 using Xunit;
 using static Urd.Backend.Tests.Support.HttpTest;
 
@@ -19,7 +18,7 @@ public sealed class TranscriptHistoryRoutesTests {
   [Fact]
   public async Task ReadsAllHistoryModesAsPrivateMetadataOnlyResponses() {
     using var database = new TemporaryDatabase();
-    await using var server = new RunningServer(Options(database));
+    await using var server = new RunningServer(RunningServer.OptionsFor(database));
     await server.WaitForReadyAsync();
     Guid sessionId = await CreateSessionAsync(server.Client);
     UserMessageReceipt receipt = await SendAsync(server.Client, sessionId, 0, "private prompt text");
@@ -73,7 +72,7 @@ public sealed class TranscriptHistoryRoutesTests {
   [Fact]
   public async Task RevisionConflictPrecedesMissingAnchorAndWrongSessionAnchorIsNotReplacedByLatest() {
     using var database = new TemporaryDatabase();
-    await using var server = new RunningServer(Options(database));
+    await using var server = new RunningServer(RunningServer.OptionsFor(database));
     await server.WaitForReadyAsync();
     Guid firstSession = await CreateSessionAsync(server.Client);
     UserMessageReceipt receipt = await SendAsync(server.Client, firstSession, 0, "first");
@@ -103,7 +102,7 @@ public sealed class TranscriptHistoryRoutesTests {
   [InlineData("around", "&expectedHistoryRevision=0&executionId=00000000-0000-0000-0000-000000000001&entryId=00000000-0000-0000-0000-000000000001&kind=invalid")]
   public async Task RejectsInvalidModesMissingRevisionAndPartialOrInvalidAnchors(string mode, string query) {
     using var database = new TemporaryDatabase();
-    await using var server = new RunningServer(Options(database));
+    await using var server = new RunningServer(RunningServer.OptionsFor(database));
     await server.WaitForReadyAsync();
     Guid sessionId = await CreateSessionAsync(server.Client);
 
@@ -116,7 +115,7 @@ public sealed class TranscriptHistoryRoutesTests {
   [Fact]
   public async Task NormalSendAdmitsUserEntryFirstInHistory() {
     using var database = new TemporaryDatabase();
-    await using var server = new RunningServer(Options(database));
+    await using var server = new RunningServer(RunningServer.OptionsFor(database));
     await server.WaitForReadyAsync();
     Guid sessionId = await CreateSessionAsync(server.Client);
     UserMessageReceipt receipt = await SendAsync(server.Client, sessionId, 0, "admission order");
@@ -128,8 +127,6 @@ public sealed class TranscriptHistoryRoutesTests {
     Assert.Equal(TranscriptEntryKind.User, page.Entries[0].Entry.Kind);
     Assert.Equal(receipt.ExecutionId, page.Entries[0].Entry.ExecutionId);
   }
-
-  private static ServerOptions Options(TemporaryDatabase database) => new(Path.GetDirectoryName(database.Path)!, 0);
 
   private static async Task<Guid> CreateSessionAsync(HttpClient client) {
     using HttpResponseMessage response = await RequestAsync(client, HttpMethod.Post, "/api/sessions", JsonBody("{}"));

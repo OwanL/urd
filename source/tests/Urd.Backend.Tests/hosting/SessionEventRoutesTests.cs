@@ -20,7 +20,7 @@ public sealed class SessionEventRoutesTests {
   [Fact]
   public async Task StreamAnnouncesCreationAndRegistrationWithoutReconnect() {
     using var database = new TemporaryDatabase();
-    await using var server = new RunningServer(Options(database));
+    await using var server = new RunningServer(RunningServer.OptionsFor(database));
     await server.WaitForReadyAsync();
 
     using HttpResponseMessage stream = await OpenStreamAsync(server.Client);
@@ -65,7 +65,7 @@ public sealed class SessionEventRoutesTests {
   public async Task UnwatchedOpenSessionReportsStatusButNotContentChanges() {
     using var database = new TemporaryDatabase();
     var client = new ScriptedChatClient(WaitForever);
-    await using var server = new RunningServer(Options(database), createClient: () => client);
+    await using var server = new RunningServer(RunningServer.OptionsFor(database), createClient: () => client);
     await server.WaitForReadyAsync();
 
     using HttpResponseMessage stream = await OpenStreamAsync(server.Client);
@@ -91,7 +91,7 @@ public sealed class SessionEventRoutesTests {
   [Fact]
   public async Task EventRoutesKeepTheBrowserGateAndBoundRegistrationSets() {
     using var database = new TemporaryDatabase();
-    await using var server = new RunningServer(Options(database));
+    await using var server = new RunningServer(RunningServer.OptionsFor(database));
     await server.WaitForReadyAsync();
 
     using (HttpResponseMessage denied = await RequestAsync(server.Client, HttpMethod.Get, "/api/events", marker: false)) {
@@ -116,18 +116,10 @@ public sealed class SessionEventRoutesTests {
     AssertPrivateResponse(rejected);
   }
 
-  private static ServerOptions Options(TemporaryDatabase database) => new(Path.GetDirectoryName(database.Path)!, 0);
+  private static Task<HttpResponseMessage> OpenStreamAsync(HttpClient client) =>
+      RequestAsync(client, HttpMethod.Get, "/api/events", completionOption: HttpCompletionOption.ResponseHeadersRead);
 
-  private static Task<HttpResponseMessage> OpenStreamAsync(HttpClient client) {
-    var request = new HttpRequestMessage(HttpMethod.Get, "/api/events");
-    request.Headers.Add("X-Urd-Client", "browser");
-    return client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
-  }
-
-  private static Task<HttpResponseMessage> WaitForDisconnectedAsync(HttpClient client, Guid streamId, Guid sessionId) =>
-      WaitForDisconnectedCoreAsync(client, streamId, sessionId);
-
-  private static async Task<HttpResponseMessage> WaitForDisconnectedCoreAsync(HttpClient client, Guid streamId, Guid sessionId) {
+  private static async Task<HttpResponseMessage> WaitForDisconnectedAsync(HttpClient client, Guid streamId, Guid sessionId) {
     using var deadline = new CancellationTokenSource(TestAsync.TestTimeout);
     while (true) {
       HttpResponseMessage response = await UpdateAsync(client, streamId, [sessionId], []);

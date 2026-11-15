@@ -7,7 +7,6 @@ using Urd.Core.Execution;
 using Urd.Core.Providers;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
-using Urd.Server;
 using Xunit;
 using static Urd.Backend.Tests.Support.HttpTest;
 
@@ -23,7 +22,7 @@ public sealed class SessionRoutesTests {
   [Fact]
   public async Task CreateSendReceiptSnapshotAndContentKeepTheirWireShape() {
     using var database = new TemporaryDatabase();
-    await using var server = new RunningServer(Options(database));
+    await using var server = new RunningServer(RunningServer.OptionsFor(database));
     await server.WaitForReadyAsync();
 
     using HttpResponseMessage created = await RequestAsync(server.Client, HttpMethod.Post, "/api/sessions", JsonBody("{}"));
@@ -247,7 +246,7 @@ public sealed class SessionRoutesTests {
       Assert.NotNull(store.Executions.TryFinish(sessionId, run, ExecutionOutcome.Failed));
     }
 
-    await using var server = new RunningServer(Options(database));
+    await using var server = new RunningServer(RunningServer.OptionsFor(database));
     await server.WaitForReadyAsync();
     var later = new UserMessageSubmission(Guid.NewGuid(), 0, "later run", TestLlmSelection.Default);
     using (HttpResponseMessage accepted = await RequestAsync(server.Client, HttpMethod.Post,
@@ -285,9 +284,9 @@ public sealed class SessionRoutesTests {
   }
 
   [Fact]
-  public async Task ContinueAndPendingRemovalUseTheApprovedWireContract() {
+  public async Task ContinuationReceiptIsRetainedAndMissingPendingInputRemovalReturnsFalse() {
     using var database = new TemporaryDatabase();
-    await using var server = new RunningServer(Options(database));
+    await using var server = new RunningServer(RunningServer.OptionsFor(database));
     await server.WaitForReadyAsync();
     using HttpResponseMessage created = await RequestAsync(server.Client, HttpMethod.Post,
         "/api/sessions", JsonBody("{}"));
@@ -335,8 +334,6 @@ public sealed class SessionRoutesTests {
       Assert.False(await missingInput.Content.ReadFromJsonAsync<bool>());
     }
   }
-
-  private static ServerOptions Options(TemporaryDatabase database) => new(Path.GetDirectoryName(database.Path)!, 0);
 
   private static async Task<SessionSnapshot> ReadSnapshotAsync(HttpClient client, Guid sessionId) {
     using HttpResponseMessage response = await RequestAsync(client, HttpMethod.Get, $"/api/sessions/{sessionId}/snapshot");

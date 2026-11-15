@@ -8,7 +8,8 @@ internal static class HttpTest {
   internal static StringContent JsonBody(string body) => new(body, Encoding.UTF8, "application/json");
 
   internal static async Task<HttpResponseMessage> RequestAsync(HttpClient client, HttpMethod method, string path,
-      HttpContent? content = null, bool marker = true, string? suppliedOrigin = null, bool chunked = false) {
+      HttpContent? content = null, bool marker = true, string? suppliedOrigin = null, bool chunked = false,
+      HttpCompletionOption completionOption = HttpCompletionOption.ResponseContentRead) {
     using var request = new HttpRequestMessage(method, path) { Content = content };
     if (marker)
       request.Headers.Add("X-Urd-Client", "browser");
@@ -16,7 +17,7 @@ internal static class HttpTest {
       request.Headers.Add("Origin", suppliedOrigin);
     if (chunked)
       request.Headers.TransferEncodingChunked = true;
-    return await client.SendAsync(request);
+    return await client.SendAsync(request, completionOption);
   }
 
   internal static void AssertPrivateResponse(HttpResponseMessage response) {

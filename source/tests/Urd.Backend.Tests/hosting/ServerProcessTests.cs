@@ -40,7 +40,7 @@ public sealed class ServerProcessTests {
           new FunctionCallContent("read-call", "read", new Dictionary<string, object?> { ["path"] = file }))
           : Complete(token);
     });
-    await using var server = new RunningServer(new ServerOptions(Path.GetDirectoryName(database.Path)!, 0),
+    await using var server = new RunningServer(RunningServer.OptionsFor(database),
         createClient: () => chatClient);
     await server.WaitForReadyAsync();
     server.Client.DefaultRequestHeaders.Add("X-Urd-Client", "browser");
@@ -70,7 +70,7 @@ public sealed class ServerProcessTests {
   [Fact]
   public async Task AnotherProcessCannotOpenTheRunningServersDataDirectory() {
     using var database = new TemporaryDatabase("urd exclusive process data");
-    await using var owner = new RunningServer(new ServerOptions(Path.GetDirectoryName(database.Path)!, 0));
+    await using var owner = new RunningServer(RunningServer.OptionsFor(database));
     await owner.WaitForReadyAsync();
     await using var competing = new ServerProcess(Arguments(database));
 

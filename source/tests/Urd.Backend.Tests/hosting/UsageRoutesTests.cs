@@ -2,7 +2,6 @@ using System.Net;
 using System.Text.Json;
 using Urd.Core.Storage;
 using Urd.Core.Usage;
-using Urd.Server;
 using Urd.Backend.Tests.Support;
 using Xunit;
 using static Urd.Backend.Tests.Support.HttpTest;
@@ -29,7 +28,7 @@ public sealed class UsageRoutesTests {
       });
     }
 
-    await using var server = new RunningServer(new ServerOptions(Path.GetDirectoryName(database.Path)!, 0));
+    await using var server = new RunningServer(RunningServer.OptionsFor(database));
     await server.WaitForReadyAsync();
 
     using (HttpResponseMessage response = await RequestAsync(server.Client, HttpMethod.Get,

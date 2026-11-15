@@ -3,7 +3,6 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Sessions;
-using Urd.Server;
 using Xunit;
 using static Urd.Backend.Tests.Support.HttpTest;
 
@@ -15,7 +14,7 @@ public sealed class PreferencesRoutesTests {
     using var database = new TemporaryDatabase();
     string workingDirectory = Path.Combine(Path.GetDirectoryName(database.Path)!, "preferred-directory");
     Directory.CreateDirectory(workingDirectory);
-    await using var server = new RunningServer(new ServerOptions(Path.GetDirectoryName(database.Path)!, 0));
+    await using var server = new RunningServer(RunningServer.OptionsFor(database));
     await server.WaitForReadyAsync();
 
     using (HttpResponseMessage initial = await RequestAsync(server.Client, HttpMethod.Get, "/api/preferences")) {
@@ -59,7 +58,7 @@ public sealed class PreferencesRoutesTests {
     string dataDirectory = Path.GetDirectoryName(database.Path)!;
     string workingDirectory = Path.Combine(dataDirectory, "compaction-preference-directory");
     Directory.CreateDirectory(workingDirectory);
-    await using var server = new RunningServer(new ServerOptions(dataDirectory, 0));
+    await using var server = new RunningServer(RunningServer.OptionsFor(database));
     await server.WaitForReadyAsync();
 
     using (HttpResponseMessage workingDirectoryResponse = await RequestAsync(server.Client, HttpMethod.Post,

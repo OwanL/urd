@@ -5,7 +5,6 @@ using Urd.Backend.Tests.Support;
 using Urd.Core.Execution;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
-using Urd.Server;
 using Xunit;
 using static Urd.Backend.Tests.Support.HttpTest;
 
@@ -32,7 +31,7 @@ public sealed class SessionStopRoutesTests {
           new(Guid.NewGuid(), 0, "pending", TestLlmSelection.Default), true, Guid.NewGuid(), executionId);
     }
     var llm = new ScriptedChatClient(_ => throw new InvalidOperationException("Orphan work must not replay."));
-    await using var server = new RunningServer(new ServerOptions(Path.GetDirectoryName(database.Path)!, 0),
+    await using var server = new RunningServer(RunningServer.OptionsFor(database),
         createClient: () => llm);
     await server.WaitForReadyAsync();
     List<StoredExecution> executions = StoredExecutions.Read(database);

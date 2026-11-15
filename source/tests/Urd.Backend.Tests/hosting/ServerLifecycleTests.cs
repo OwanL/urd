@@ -1,7 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
 using Urd.Backend.Tests.Support;
-using Urd.Server;
 using Xunit;
 using static Urd.Backend.Tests.Support.TestAsync;
 
@@ -14,7 +13,7 @@ public sealed class ServerLifecycleTests {
     var database = new TemporaryDatabase("urd callback failure data");
     var expected = new InvalidOperationException("ready callback failed");
     Uri? published = null;
-    var server = new RunningServer(Options(database), origin => {
+    var server = new RunningServer(RunningServer.OptionsFor(database), origin => {
       published = origin;
       throw expected;
     });
@@ -26,7 +25,7 @@ public sealed class ServerLifecycleTests {
       await AssertListenerClosedAsync(published);
       AssertLeaseFree(database);
 
-      restarted = new RunningServer(Options(database));
+      restarted = new RunningServer(RunningServer.OptionsFor(database));
       await restarted.WaitForReadyAsync();
       using HttpResponseMessage health = await restarted.Client.GetAsync("/health");
       Assert.Equal(HttpStatusCode.NoContent, health.StatusCode);
@@ -35,9 +34,6 @@ public sealed class ServerLifecycleTests {
       database.Dispose();
     }
   }
-
-  private static ServerOptions Options(TemporaryDatabase database) =>
-      new(Path.GetDirectoryName(database.Path)!, 0);
 
   private static async Task AssertListenerClosedAsync(Uri origin) {
     using var client = new HttpClient(new SocketsHttpHandler { UseProxy = false }) { Timeout = TestTimeout };

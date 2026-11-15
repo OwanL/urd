@@ -9,7 +9,6 @@ using Microsoft.Extensions.AI;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Execution;
 using Urd.Core.Sessions;
-using Urd.Server;
 using Xunit;
 using static Urd.Backend.Tests.Support.ScriptedResponses;
 using static Urd.Backend.Tests.Support.TestAsync;
@@ -32,7 +31,7 @@ public sealed class SessionHttpLifetimeTests {
       return Paused(entered, finish, token);
     });
     var database = new TemporaryDatabase();
-    var server = new RunningServer(new ServerOptions(Path.GetDirectoryName(database.Path)!, 0),
+    var server = new RunningServer(RunningServer.OptionsFor(database),
         createClient: () => client);
     try {
       Uri origin = await server.WaitForReadyAsync();
@@ -88,7 +87,7 @@ public sealed class SessionHttpLifetimeTests {
     var client = new ScriptedChatClient(token => Response(token));
     var database = new TemporaryDatabase();
     string dataRoot = Path.GetDirectoryName(database.Path)!;
-    var server = new RunningServer(new ServerOptions(dataRoot, 0), createClient: () => client);
+    var server = new RunningServer(RunningServer.OptionsFor(database), createClient: () => client);
     try {
       await server.WaitForReadyAsync();
       server.Client.DefaultRequestHeaders.Add("X-Urd-Client", "browser");

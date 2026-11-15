@@ -5,7 +5,6 @@ using System.Text.Json.Serialization;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
-using Urd.Server;
 using Xunit;
 using static Urd.Backend.Tests.Support.HttpTest;
 
@@ -27,7 +26,7 @@ public sealed class SessionWorkingDirectoryRoutesTests {
     using (UrdStore store = UrdStore.Open(database.Path))
       sessionId = store.Sessions.CreatePrimary(Guid.NewGuid(), initialDirectory).Id;
 
-    await using var server = new RunningServer(new ServerOptions(dataRoot, 0));
+    await using var server = new RunningServer(RunningServer.OptionsFor(database));
     await server.WaitForReadyAsync();
     string route = $"/api/sessions/{sessionId}/working-directory";
     using (HttpResponseMessage initial = await RequestAsync(server.Client, HttpMethod.Get,

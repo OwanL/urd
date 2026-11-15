@@ -26,7 +26,7 @@ public sealed class MarkdownRoutesTests {
   public async Task PageOwnedRoutesPreserveBoundsWireTypesAndReleaseOnDisconnect() {
     using var database = new TemporaryDatabase();
     (Guid sessionId, TranscriptEntryRef entry) = Seed(database);
-    await using var server = new RunningServer(new(Path.GetDirectoryName(database.Path)!, 0),
+    await using var server = new RunningServer(RunningServer.OptionsFor(database),
         createMarkdown: () => new(new(2, 4 * 1024 * 1024, 8, 1, 4096)));
     await server.WaitForReadyAsync();
     using HttpResponseMessage stream = await OpenStreamAsync(server.Client);
@@ -143,7 +143,7 @@ public sealed class MarkdownRoutesTests {
   public async Task DefaultStartupActivatesMarkdownRoutes() {
     using var database = new TemporaryDatabase();
     (Guid sessionId, TranscriptEntryRef entry) = Seed(database);
-    await using var server = new RunningServer(new(Path.GetDirectoryName(database.Path)!, 0));
+    await using var server = new RunningServer(RunningServer.OptionsFor(database));
     await server.WaitForReadyAsync();
     using HttpResponseMessage stream = await OpenStreamAsync(server.Client);
     Guid streamId = await ReadStreamIdAsync(stream);
@@ -213,11 +213,8 @@ public sealed class MarkdownRoutesTests {
     Assert.Equal(expected, response.StatusCode);
   }
 
-  private static async Task<HttpResponseMessage> OpenStreamAsync(HttpClient client) {
-    using var request = new HttpRequestMessage(HttpMethod.Get, "/api/events");
-    request.Headers.Add("X-Urd-Client", "browser");
-    return await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
-  }
+  private static Task<HttpResponseMessage> OpenStreamAsync(HttpClient client) =>
+      RequestAsync(client, HttpMethod.Get, "/api/events", completionOption: HttpCompletionOption.ResponseHeadersRead);
 
   private static async Task<Guid> ReadStreamIdAsync(HttpResponseMessage response) {
     Assert.Equal(HttpStatusCode.OK, response.StatusCode);

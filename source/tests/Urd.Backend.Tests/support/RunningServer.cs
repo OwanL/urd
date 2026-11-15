@@ -25,6 +25,8 @@ internal sealed class RunningServer : IAsyncDisposable {
     }, createClient ?? (static () => new FakeChatClient()), stopping.Token, createProviders, createMarkdown);
   }
 
+  internal static ServerOptions OptionsFor(TemporaryDatabase database) => new(Path.GetDirectoryName(database.Path)!, 0);
+
   internal HttpClient Client { get; }
   internal bool IsReady => ready.Task.IsCompletedSuccessfully;
 

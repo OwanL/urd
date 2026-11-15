@@ -4,7 +4,6 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Providers;
-using Urd.Server;
 using Xunit;
 using static Urd.Backend.Tests.Support.HttpTest;
 
@@ -24,7 +23,7 @@ public sealed class ProviderRoutesTests {
     var handler = new ScriptedOpenAIHandler("""
         {"object":"list","data":[{"id":"fixture-model","object":"model","created":1700000000,"owned_by":"fixture"}]}
         """, "application/json");
-    await using var server = new RunningServer(new ServerOptions(Path.GetDirectoryName(database.Path)!, 0),
+    await using var server = new RunningServer(RunningServer.OptionsFor(database),
         createProviders: (store, callbackUri) => new ProviderManager(store, callbackUri, handler));
     await server.WaitForReadyAsync();
 

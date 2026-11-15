@@ -3,8 +3,9 @@ using Microsoft.Extensions.AI;
 
 namespace Urd.Backend.Tests.Support;
 
-// Fake LLM client that replays scripted streaming responses and counts both request forms.
-internal sealed class ScriptedChatClient(Func<CancellationToken, IAsyncEnumerable<ChatResponseUpdate>> script)
+// Fake LLM client that replays scripted responses and counts both request forms.
+internal sealed class ScriptedChatClient(Func<CancellationToken, IAsyncEnumerable<ChatResponseUpdate>> script,
+    Func<CancellationToken, Task<ChatResponse>>? response = null)
     : IChatClient {
   private readonly ConcurrentQueue<IReadOnlyList<ChatMessage>> requests = new();
   private readonly ConcurrentQueue<ChatOptions?> requestOptions = new();
@@ -18,6 +19,19 @@ internal sealed class ScriptedChatClient(Func<CancellationToken, IAsyncEnumerabl
 
   public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
       ChatOptions? options = null, CancellationToken cancellationToken = default) {
+    Capture(messages, options);
+    return script(cancellationToken);
+  }
+
+  public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+      CancellationToken cancellationToken = default) {
+    if (response is null)
+      return GetStreamingResponseAsync(messages, options, cancellationToken).ToChatResponseAsync(cancellationToken);
+    Capture(messages, options);
+    return response(cancellationToken);
+  }
+
+  private void Capture(IEnumerable<ChatMessage> messages, ChatOptions? options) {
     ObjectDisposedException.ThrowIf(DisposeCalls != 0, this);
     LastRequestSource = messages;
     ChatMessage[] captured = messages.ToArray();
@@ -25,12 +39,7 @@ internal sealed class ScriptedChatClient(Func<CancellationToken, IAsyncEnumerabl
     requests.Enqueue(captured);
     requestOptions.Enqueue(options?.Clone());
     Interlocked.Increment(ref calls);
-    return script(cancellationToken);
   }
-
-  public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
-      CancellationToken cancellationToken = default) =>
-      GetStreamingResponseAsync(messages, options, cancellationToken).ToChatResponseAsync(cancellationToken);
 
   public object? GetService(Type serviceType, object? serviceKey = null) => null;
   public void Dispose() => Interlocked.Increment(ref disposeCalls);

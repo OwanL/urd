@@ -176,17 +176,20 @@ public sealed class HistoryCompactorTests {
       Entry(2, 0, true, ChatRole.User, "current")
     ], previous);
     HistoryCompactionPlan plan = HistoryCompactor.CreatePlan(context, TestLlmSelection.Default, emptyStartingContext, CompactionReason.Manual)!;
-    var client = new SummaryClient("Goal: keep context.\nFiles read: src/old.cs");
+    using var client = CreateClient("Goal: keep context.\nFiles read: src/old.cs");
 
     GeneratedCompactionSummary result = await HistoryCompactor.GenerateSummaryAsync(client, TestLlmSelection.Default, plan, default);
 
     Assert.True(result.EstimatedContextTokensAfter < plan.EstimatedContextTokensBefore);
-    Assert.Equal(1, client.Requests);
-    Assert.Empty(client.Options!.Tools!);
-    Assert.Equal(8_192, client.Options.MaxOutputTokens);
-    Assert.Contains("Files read: src/old.cs", client.Prompt);
-    Assert.Contains("[image or binary content omitted]", client.Prompt);
-    Assert.Contains("…[truncated]", client.Prompt);
+    IReadOnlyList<ChatMessage> request = Assert.Single(client.Requests);
+    ChatOptions options = Assert.IsType<ChatOptions>(Assert.Single(client.Options));
+    string prompt = string.Join("\n", request.SelectMany(message => message.Contents.OfType<TextContent>()
+        .Select(content => content.Text)));
+    Assert.Empty(options.Tools!);
+    Assert.Equal(8_192, options.MaxOutputTokens);
+    Assert.Contains("Files read: src/old.cs", prompt);
+    Assert.Contains("[image or binary content omitted]", prompt);
+    Assert.Contains("…[truncated]", prompt);
     Assert.Equal(0, client.DisposeCalls);
   }
 
@@ -199,11 +202,11 @@ public sealed class HistoryCompactorTests {
     HistoryCompactionPlan plan = HistoryCompactor.CreatePlan(history, TestLlmSelection.Default, emptyStartingContext, CompactionReason.Manual)!;
 
     await Assert.ThrowsAsync<InvalidDataException>(() => HistoryCompactor.GenerateSummaryAsync(
-        new SummaryClient(new string('s', 4_000)), TestLlmSelection.Default, plan, default));
+        CreateClient(new string('s', 4_000)), TestLlmSelection.Default, plan, default));
     await Assert.ThrowsAsync<InvalidDataException>(() => HistoryCompactor.GenerateSummaryAsync(
-        new SummaryClient("summary", finishReason: ChatFinishReason.Length), TestLlmSelection.Default, plan, default));
+        CreateClient("summary", finishReason: ChatFinishReason.Length), TestLlmSelection.Default, plan, default));
     await Assert.ThrowsAsync<InvalidDataException>(() => HistoryCompactor.GenerateSummaryAsync(
-        new SummaryClient("summary", includeToolCall: true), TestLlmSelection.Default, plan, default));
+        CreateClient("summary", includeToolCall: true), TestLlmSelection.Default, plan, default));
   }
 
   [Fact]
@@ -213,13 +216,13 @@ public sealed class HistoryCompactorTests {
       Entry(2, 0, true, ChatRole.User, "current")
     ]);
     HistoryCompactionPlan plan = HistoryCompactor.CreatePlan(context, TestLlmSelection.Default, emptyStartingContext, CompactionReason.Manual)!;
-    var client = new SummaryClient(waitForCancellation: true);
+    using var client = new ScriptedChatClient(_ => throw new NotSupportedException(), WaitForCancellation);
     using var cancellation = new CancellationTokenSource();
     Task<GeneratedCompactionSummary> pending = HistoryCompactor.GenerateSummaryAsync(client, TestLlmSelection.Default, plan, cancellation.Token);
     await cancellation.CancelAsync();
 
     await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending);
-    Assert.Equal(1, client.Requests);
+    Assert.Single(client.Requests);
   }
 
   private static HistoryMessage Entry(long run, int index, bool startsTurn, ChatRole role, string text,
@@ -234,38 +237,19 @@ public sealed class HistoryCompactorTests {
     return new HistoryMessage(new(Guid.NewGuid(), run, 0, index), startsTurn, message);
   }
 
-  private sealed class SummaryClient(string? summary = null, bool waitForCancellation = false,
-      ChatFinishReason? finishReason = null, bool includeToolCall = false) : IChatClient {
-    internal int Requests { get; private set; }
-    internal int DisposeCalls { get; private set; }
-    internal string Prompt { get; private set; } = "";
-    internal ChatOptions? Options { get; private set; }
+  private static ScriptedChatClient CreateClient(string summary, ChatFinishReason? finishReason = null,
+      bool includeToolCall = false) => new(_ => throw new NotSupportedException(), _ => {
+    ChatMessage response = includeToolCall
+        ? new ChatMessage(ChatRole.Assistant, [new TextContent(summary),
+            new FunctionCallContent("summary-call", "lookup", new Dictionary<string, object?>())])
+        : new ChatMessage(ChatRole.Assistant, summary);
+    return Task.FromResult(new ChatResponse(response) { FinishReason = finishReason ?? ChatFinishReason.Stop });
+  });
 
-    public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
-        ChatOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-
-    public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
-        CancellationToken cancellationToken = default) {
-      Requests++;
-      Prompt = string.Join("\n", messages.SelectMany(message => message.Contents.OfType<TextContent>()
-          .Select(content => content.Text)));
-      Options = options;
-      if (waitForCancellation) return WaitForCancellation(cancellationToken);
-      ChatMessage response = includeToolCall
-          ? new ChatMessage(ChatRole.Assistant, [new TextContent(summary!),
-              new FunctionCallContent("summary-call", "lookup", new Dictionary<string, object?>())])
-          : new ChatMessage(ChatRole.Assistant, summary!);
-      return Task.FromResult(new ChatResponse(response) { FinishReason = finishReason ?? ChatFinishReason.Stop });
-    }
-
-    public object? GetService(Type serviceType, object? serviceKey = null) => null;
-    public void Dispose() => DisposeCalls++;
-
-    private static async Task<ChatResponse> WaitForCancellation(CancellationToken cancellationToken) {
-      var completion = new TaskCompletionSource<ChatResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
-      using CancellationTokenRegistration registration = cancellationToken.Register(
-          () => completion.TrySetCanceled(cancellationToken));
-      return await completion.Task.ConfigureAwait(false);
-    }
+  private static async Task<ChatResponse> WaitForCancellation(CancellationToken cancellationToken) {
+    var completion = new TaskCompletionSource<ChatResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+    using CancellationTokenRegistration registration = cancellationToken.Register(
+        () => completion.TrySetCanceled(cancellationToken));
+    return await completion.Task.ConfigureAwait(false);
   }
 }

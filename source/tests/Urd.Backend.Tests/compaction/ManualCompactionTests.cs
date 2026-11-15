@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using Microsoft.Extensions.AI;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Compaction;
@@ -19,7 +18,7 @@ public sealed class ManualCompactionTests {
   [Fact]
   public async Task IdleCompactionIsIdempotentAndKeepsReadableHistoryAndLatestModelContextAfterReopen() {
     using var database = new TemporaryDatabase();
-    using var client = new CompactionChatClient((_, _) => Task.FromResult(SummaryResponse()));
+    using var client = new ScriptedChatClient(Complete, _ => Task.FromResult(SummaryResponse()));
     Guid sessionId;
     long revision;
     CompactionSummary saved;
@@ -42,7 +41,8 @@ public sealed class ManualCompactionTests {
       SavedHistoryCompaction boundary = Assert.IsType<SavedHistoryCompaction>(store.Compactions.ReadContext(session.Id, revision).PreviousCompaction);
       saved = Assert.IsType<CompactionSummary>(await session.ReadCompactionAsync(boundary.Id, revision));
       Assert.Equal(Summary, saved.Summary);
-      Assert.Equal(0, Assert.Single(client.SummaryToolCounts));
+      Assert.Equal(3, client.Calls);
+      Assert.Empty(client.Options[2]!.Tools!);
 
       TranscriptHistoryPage history = await session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, revision));
       Assert.Single(history.Entries, entry => entry.Entry.Kind == TranscriptEntryKind.Compaction);
@@ -85,7 +85,7 @@ public sealed class ManualCompactionTests {
     var entered = Signal();
     var cleanupEntered = Signal();
     var cleanupRelease = Signal();
-    using var client = new CompactionChatClient(async (_, cancellation) => {
+    using var client = new ScriptedChatClient(Complete, async cancellation => {
       entered.TrySetResult();
       try {
         await Task.Delay(Timeout.InfiniteTimeSpan, cancellation);
@@ -123,7 +123,8 @@ public sealed class ManualCompactionTests {
   [Fact]
   public async Task SummaryFailurePreservesPreviousContextAndDoesNotAddMarker() {
     using var database = new TemporaryDatabase();
-    using var client = new CompactionChatClient((call, _) => call == 2
+    int summaryCalls = 0;
+    using var client = new ScriptedChatClient(Complete, _ => Interlocked.Increment(ref summaryCalls) == 2
         ? Task.FromException<ChatResponse>(new InvalidOperationException("scripted summary failure"))
         : Task.FromResult(SummaryResponse()));
     using UrdStore store = UrdStore.Open(database.Path);
@@ -148,14 +149,15 @@ public sealed class ManualCompactionTests {
     Assert.Equal(before.Messages.Select(Position), after.Messages.Select(Position));
     Assert.Single((await session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, revision))).Entries,
         entry => entry.Entry.Kind == TranscriptEntryKind.Compaction);
-    Assert.Equal(0, client.SummaryToolCounts[0]);
-    Assert.Equal(0, client.SummaryToolCounts[1]);
+    Assert.Equal(2, summaryCalls);
+    Assert.Empty(client.Options[2]!.Tools!);
+    Assert.Empty(client.Options[5]!.Tools!);
   }
 
   private static (Guid Request, int Index, string? Text) Position(HistoryMessage entry) =>
       (entry.Location.RequestId, entry.Location.MessageIndexInRequest, entry.Message.Text);
 
-  private static PrimarySession CreateSession(UrdStore store, CompactionChatClient client) =>
+  private static PrimarySession CreateSession(UrdStore store, ScriptedChatClient client) =>
       new(store.Sessions.CreatePrimary(Guid.NewGuid()), store, _ => client);
 
   private static async Task SubmitTurnAsync(PrimarySession session, string text) {
@@ -169,28 +171,4 @@ public sealed class ManualCompactionTests {
   private static ChatResponse SummaryResponse() => new(new ChatMessage(ChatRole.Assistant, Summary)) {
     FinishReason = ChatFinishReason.Stop
   };
-
-  private sealed class CompactionChatClient(Func<int, CancellationToken, Task<ChatResponse>> summarize) : IChatClient {
-    private readonly ConcurrentQueue<IReadOnlyList<ChatMessage>> requests = new();
-    private readonly ConcurrentQueue<int> summaryToolCounts = new();
-    private int summaryCalls;
-    internal IReadOnlyList<IReadOnlyList<ChatMessage>> Requests => requests.ToArray();
-    internal int[] SummaryToolCounts => summaryToolCounts.ToArray();
-
-    public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
-        ChatOptions? options = null, CancellationToken cancellationToken = default) {
-      requests.Enqueue(messages.ToArray());
-      return Complete(cancellationToken);
-    }
-
-    public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
-        CancellationToken cancellationToken = default) {
-      Interlocked.Increment(ref summaryCalls);
-      summaryToolCounts.Enqueue(options?.Tools?.Count ?? -1);
-      return summarize(summaryCalls, cancellationToken);
-    }
-
-    public object? GetService(Type serviceType, object? serviceKey = null) => null;
-    public void Dispose() { }
-  }
 }

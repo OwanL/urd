@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using Microsoft.Extensions.AI;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Compaction;
@@ -26,17 +25,25 @@ public sealed class AutomaticCompactionTests {
       Interlocked.Increment(ref toolRuns);
       return Task.FromResult(new ToolOutput("safe tool result", []));
     });
-    using var client = new TestChatClient((call, token) => call switch {
+    int summaryCalls = 0;
+    var summaryEntered = Signal();
+    var summaryRelease = Signal();
+    using var client = CreateClient((call, token) => call switch {
       1 => Complete(token),
       2 => ToolBatch(token, new FunctionCallContent("lookup-call", "lookup", new Dictionary<string, object?>())),
       3 or 4 => Complete(token),
       _ => throw new InvalidOperationException("Unexpected model request.")
-    }, holdSummary: true);
+    }, async cancellation => {
+      Interlocked.Increment(ref summaryCalls);
+      summaryEntered.TrySetResult();
+      await summaryRelease.Task.WaitAsync(cancellation);
+      return SummaryResponse();
+    });
     var session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid(), Path.GetDirectoryName(database.Path)), store, _ => client,
         new ToolCatalog([tool]));
     await SubmitAsync(session, new string('o', 100_000), TestLlmSelection.Default);
     await SubmitAsync(session, "tool turn", TestLlmSelection.Default);
-    Assert.Equal(0, client.SummaryCalls); // Unknown windows disable automatic compaction.
+    Assert.Equal(0, summaryCalls); // Unknown windows disable automatic compaction.
 
     var compacting = Signal();
     using IDisposable subscription = await session.SubscribeAsync(change => {
@@ -45,19 +52,19 @@ public sealed class AutomaticCompactionTests {
     UserMessageReceipt receipt = await AcceptAsync(session, "current turn", TestLlmSelection.Default with { ContextWindow = 8_192 });
     Task<SessionExecutionResult> settlement = session.WaitForExecutionFinishAsync(Assert.IsType<Guid>(receipt.ExecutionId));
     try {
-      await client.SummaryEntered.WaitAsync(TestTimeout);
+      await summaryEntered.Task.WaitAsync(TestTimeout);
       await compacting.Task.WaitAsync(TestTimeout);
-      client.ReleaseSummary();
+      summaryRelease.TrySetResult();
       Assert.Equal(ExecutionOutcome.Completed, (await settlement.WaitAsync(TestTimeout)).Outcome);
     } finally {
-      client.ReleaseSummary();
+      summaryRelease.TrySetResult();
       await settlement.WaitAsync(TestTimeout);
     }
 
-    Assert.Equal(1, client.SummaryCalls);
+    Assert.Equal(1, summaryCalls);
     Assert.Equal(1, toolRuns);
-    Assert.Equal(4, client.Requests.Length);
-    IReadOnlyList<ChatMessage> request = client.Requests[3];
+    Assert.Equal(5, client.Requests.Count);
+    IReadOnlyList<ChatMessage> request = client.Requests[4];
     Assert.Contains(request, message => message.Contents.OfType<TextContent>().Any(content => content.Text.Contains("[HISTORY SUMMARY:")));
     Assert.DoesNotContain(request, message => message.Contents.OfType<TextContent>()
         .Any(content => content.Text.Contains(new string('o', 128))));
@@ -93,26 +100,30 @@ public sealed class AutomaticCompactionTests {
       await release.Task.WaitAsync(cancellation);
       return new ToolOutput("safe tool result", []);
     });
-    using var client = new TestChatClient((call, token) => call switch {
+    int summaryCalls = 0;
+    using var client = CreateClient((call, token) => call switch {
       1 => ToolBatch(token, new FunctionCallContent("lookup-call", "lookup", new Dictionary<string, object?>())),
       2 or 3 => Complete(token),
       _ => throw new InvalidOperationException("Unexpected model request.")
+    }, _ => {
+      Interlocked.Increment(ref summaryCalls);
+      return Task.FromResult(SummaryResponse());
     });
     var manager = new SessionManager(store, _ => client, [tool], Path.GetDirectoryName(database.Path)!);
     try {
       PrimarySession session = await manager.CreatePrimaryAsync();
       UserMessageReceipt receipt = await AcceptAsync(session, new string('o', 100_000), TestLlmSelection.Default);
       await entered.Task.WaitAsync(TestTimeout);
-      Assert.Equal(0, client.SummaryCalls);
+      Assert.Equal(0, summaryCalls);
       preferences.SetCompactionTriggerTokenCount(1_000);
       release.TrySetResult();
       Assert.Equal(ExecutionOutcome.Completed,
           (await session.WaitForExecutionFinishAsync(Assert.IsType<Guid>(receipt.ExecutionId)).WaitAsync(TestTimeout)).Outcome);
 
-      Assert.Equal(1, client.SummaryCalls);
+      Assert.Equal(1, summaryCalls);
       Assert.Equal(1, toolRuns);
-      Assert.Equal(2, client.Requests.Length);
-      IReadOnlyList<ChatMessage> request = client.Requests[1];
+      Assert.Equal(3, client.Requests.Count);
+      IReadOnlyList<ChatMessage> request = client.Requests[2];
       Assert.Contains(request, message => message.Contents.OfType<TextContent>()
           .Any(content => content.Text.Contains("[HISTORY SUMMARY:")));
       Assert.DoesNotContain(request, message => message.Contents.OfType<TextContent>()
@@ -125,10 +136,10 @@ public sealed class AutomaticCompactionTests {
 
       preferences.SetCompactionTriggerTokenCount(null);
       await SubmitAsync(session, new string('n', 100_000), TestLlmSelection.Default);
-      Assert.Equal(3, client.Requests.Length);
-      Assert.Equal(1, client.SummaryCalls);
+      Assert.Equal(4, client.Requests.Count);
+      Assert.Equal(1, summaryCalls);
       Assert.Equal(1, toolRuns);
-      Assert.Contains(client.Requests[2], message => message.Role == ChatRole.User &&
+      Assert.Contains(client.Requests[3], message => message.Role == ChatRole.User &&
           message.Contents.OfType<TextContent>().Any(content => content.Text.Contains(new string('n', 128))));
     } finally {
       release.TrySetResult();
@@ -147,8 +158,9 @@ public sealed class AutomaticCompactionTests {
       await release.Task.WaitAsync(cancellation);
       return new ToolOutput("kept result", []);
     });
-    using var client = new TestChatClient((call, token) => call == 1
-        ? ToolBatch(token, new FunctionCallContent("lookup", "lookup", new Dictionary<string, object?>())) : Complete(token));
+    using var client = CreateClient((call, token) => call == 1
+        ? ToolBatch(token, new FunctionCallContent("lookup", "lookup", new Dictionary<string, object?>())) : Complete(token),
+        _ => Task.FromResult(SummaryResponse()));
     var session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid(), Path.GetDirectoryName(database.Path)), store, _ => client,
         new ToolCatalog([tool]));
     var selection = TestLlmSelection.Default with { ContextWindow = 8_192 };
@@ -192,11 +204,15 @@ public sealed class AutomaticCompactionTests {
       Interlocked.Increment(ref toolRuns);
       return Task.FromResult(new ToolOutput("overflow result", []));
     });
-    using var client = new TestChatClient((call, token) => call switch {
+    int summaryCalls = 0;
+    using var client = CreateClient((call, token) => call switch {
       1 => ToolBatch(token, new FunctionCallContent("overflow-call", "lookup", new Dictionary<string, object?>())),
       2 => Fail(ProviderFailure.ContextWindowExceeded, false, token),
       3 => Complete(token),
       _ => throw new InvalidOperationException("Unexpected model request.")
+    }, _ => {
+      Interlocked.Increment(ref summaryCalls);
+      return Task.FromResult(SummaryResponse());
     });
     var session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid(), Path.GetDirectoryName(database.Path)), store, _ => client,
         new ToolCatalog([tool]));
@@ -204,17 +220,17 @@ public sealed class AutomaticCompactionTests {
 
     Assert.Equal(ExecutionOutcome.Completed,
         (await session.WaitForExecutionFinishAsync(Assert.IsType<Guid>(receipt.ExecutionId)).WaitAsync(TestTimeout)).Outcome);
-    Assert.Equal(3, client.Requests.Length);
-    Assert.Equal(1, client.SummaryCalls);
+    Assert.Equal(4, client.Requests.Count);
+    Assert.Equal(1, summaryCalls);
     Assert.Equal(1, toolRuns);
     Assert.Single(StoredTools.Read(database));
     long revision = (await session.ReadSnapshotAsync()).HistoryRevision;
     Guid compactionId = store.Compactions.ReadContext(session.Id, revision).PreviousCompaction!.Id;
     Assert.Equal(CompactionReason.Overflow, (await session.ReadCompactionAsync(compactionId, revision))?.Reason);
     Assert.Equal(2, StoredExecutions.ReadRequests(database).Count);
-    Assert.Contains(client.Requests[2], message => message.Contents.OfType<TextContent>()
+    Assert.Contains(client.Requests[3], message => message.Contents.OfType<TextContent>()
         .Any(content => content.Text.Contains("[HISTORY SUMMARY:")));
-    Assert.Contains(client.Requests[2], message => message.Role == ChatRole.Tool &&
+    Assert.Contains(client.Requests[3], message => message.Role == ChatRole.Tool &&
         message.Contents.OfType<FunctionResultContent>().Any(result => Equals(result.Result, "overflow result")));
     Assert.Single((await session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest,
         (await session.ReadSnapshotAsync()).HistoryRevision))).Entries, entry => entry.Entry.Kind == TranscriptEntryKind.User);
@@ -226,11 +242,15 @@ public sealed class AutomaticCompactionTests {
   public async Task NonOverflowAndPartialOutputOverflowAreNeverRetried(bool partialOutput) {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
-    using var client = new TestChatClient((call, token) => call switch {
+    int summaryCalls = 0;
+    using var client = CreateClient((call, token) => call switch {
       1 => Complete(token),
       2 => Fail(partialOutput ? ProviderFailure.ContextWindowExceeded : ProviderFailure.ProviderUnavailable,
           partialOutput, token),
       _ => throw new InvalidOperationException("A failed request must not be retried.")
+    }, _ => {
+      Interlocked.Increment(ref summaryCalls);
+      return Task.FromResult(SummaryResponse());
     });
     var session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid()), store, _ => client);
     await SubmitAsync(session, new string('o', 100_000), TestLlmSelection.Default);
@@ -238,8 +258,8 @@ public sealed class AutomaticCompactionTests {
 
     Assert.Equal(ExecutionOutcome.Failed,
         (await session.WaitForExecutionFinishAsync(Assert.IsType<Guid>(receipt.ExecutionId)).WaitAsync(TestTimeout)).Outcome);
-    Assert.Equal(2, client.Requests.Length);
-    Assert.Equal(0, client.SummaryCalls);
+    Assert.Equal(2, client.Requests.Count);
+    Assert.Equal(0, summaryCalls);
     Assert.Equal(2, StoredExecutions.ReadRequests(database).Count);
     if (partialOutput) {
       TranscriptHistoryPage history = await session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, 0));
@@ -269,35 +289,14 @@ public sealed class AutomaticCompactionTests {
     throw new ProviderOperationException(failure);
   }
 
-  private sealed class TestChatClient(
+  private static ScriptedChatClient CreateClient(
       Func<int, CancellationToken, IAsyncEnumerable<ChatResponseUpdate>> stream,
-      bool holdSummary = false) : IChatClient {
-    private readonly ConcurrentQueue<IReadOnlyList<ChatMessage>> requests = new();
-    private readonly TaskCompletionSource? summaryEntered = holdSummary ? Signal() : null;
-    private readonly TaskCompletionSource? summaryRelease = holdSummary ? Signal() : null;
-    private int streamCalls, summaryCalls;
-    internal IReadOnlyList<ChatMessage>[] Requests => requests.ToArray();
-    internal int SummaryCalls => Volatile.Read(ref summaryCalls);
-    internal Task SummaryEntered => summaryEntered?.Task ?? Task.CompletedTask;
-    internal void ReleaseSummary() => summaryRelease?.TrySetResult();
-
-    public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
-        ChatOptions? options = null, CancellationToken cancellationToken = default) {
-      requests.Enqueue(messages.ToArray());
-      return stream(Interlocked.Increment(ref streamCalls), cancellationToken);
-    }
-
-    public async Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
-        CancellationToken cancellationToken = default) {
-      Interlocked.Increment(ref summaryCalls);
-      if (summaryEntered is not null) {
-        summaryEntered.TrySetResult();
-        await summaryRelease!.Task.WaitAsync(cancellationToken);
-      }
-      return new(new ChatMessage(ChatRole.Assistant, Summary)) { FinishReason = ChatFinishReason.Stop };
-    }
-
-    public object? GetService(Type serviceType, object? serviceKey = null) => null;
-    public void Dispose() { }
+      Func<CancellationToken, Task<ChatResponse>> summarize) {
+    int streamCalls = 0;
+    return new(token => stream(Interlocked.Increment(ref streamCalls), token), summarize);
   }
+
+  private static ChatResponse SummaryResponse() => new(new ChatMessage(ChatRole.Assistant, Summary)) {
+    FinishReason = ChatFinishReason.Stop
+  };
 }

@@ -11,13 +11,32 @@ public sealed class DatabaseSchemaTests {
   public void FreshDatabaseCreatesAndReopensCurrentSchema() {
     using var database = new TemporaryDatabase();
     using (UrdStore store = UrdStore.Open(database.Path)) {
-      Assert.Equal(26L, database.Scalar("PRAGMA user_version;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
+      Assert.Equal(27L, database.Scalar("PRAGMA user_version;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
       store.Sessions.CreatePrimary(Guid.NewGuid());
     }
 
     using UrdStore reopened = UrdStore.Open(database.Path);
-    Assert.Equal(26L, database.Scalar("PRAGMA user_version;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
+    Assert.Equal(27L, database.Scalar("PRAGMA user_version;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
     Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM sessions;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
+  }
+
+  [Fact]
+  public void CompactionTriggerPreferenceIsNullablePositiveInt32() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+
+    Assert.Equal("INTEGER", database.Scalar("SELECT type FROM pragma_table_info('preferences') WHERE name = 'compaction_trigger_token_count';")); // raw-sql: schema constraint is the subject under test
+    Assert.Equal(0L, database.Scalar("SELECT \"notnull\" FROM pragma_table_info('preferences') WHERE name = 'compaction_trigger_token_count';")); // raw-sql: schema constraint is the subject under test
+    database.Execute("INSERT INTO preferences (singleton, compaction_trigger_token_count) VALUES (1, 2147483647);"); // raw-sql: schema constraint is the subject under test
+    Assert.Throws<SqliteException>(() => database.Execute(
+        "UPDATE preferences SET compaction_trigger_token_count = 0 WHERE singleton = 1;")); // raw-sql: schema constraint is the subject under test
+    Assert.Throws<SqliteException>(() => database.Execute(
+        "UPDATE preferences SET compaction_trigger_token_count = -1 WHERE singleton = 1;")); // raw-sql: schema constraint is the subject under test
+    Assert.Throws<SqliteException>(() => database.Execute(
+        "UPDATE preferences SET compaction_trigger_token_count = 2147483648 WHERE singleton = 1;")); // raw-sql: schema constraint is the subject under test
+    Assert.Equal(1L, database.Scalar("SELECT compaction_trigger_token_count = 2147483647 FROM preferences WHERE singleton = 1;")); // raw-sql: schema constraint is the subject under test
+    database.Execute("UPDATE preferences SET compaction_trigger_token_count = NULL WHERE singleton = 1;"); // raw-sql: schema constraint is the subject under test
+    Assert.Equal(1L, database.Scalar("SELECT compaction_trigger_token_count IS NULL FROM preferences WHERE singleton = 1;")); // raw-sql: schema constraint is the subject under test
   }
 
   [Fact]

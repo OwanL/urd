@@ -13,7 +13,7 @@ internal static class ContextTokenBudget {
   private const int CharactersPerEstimatedToken = 4;
   private const int MaximumHeadroomTokens = 16_384;
   private const int HeadroomWindowDivisor = 5;
-  private const int RetainedHistoryThresholdDivisor = 2;
+  private const int RetainedHistoryTriggerDivisor = 2;
   private const int SummaryOutputWindowDivisor = 4;
   private const int MaximumRetainedHistoryTokens = 20_000;
   private const int MaximumSummaryOutputTokens = 8_192;
@@ -36,16 +36,19 @@ internal static class ContextTokenBudget {
     return total;
   }
 
-  internal static int CompactionThreshold(int contextWindowTokens) {
-    ArgumentOutOfRangeException.ThrowIfNegativeOrZero(contextWindowTokens);
+  internal static int? CompactionTrigger(int? contextWindowTokens, int? preferredTokenCount = null) {
+    if (preferredTokenCount is <= 0)
+      throw new ArgumentOutOfRangeException(nameof(preferredTokenCount));
+    if (contextWindowTokens is not > 0) return preferredTokenCount;
+
     int headroomTokens = Math.Min(MaximumHeadroomTokens,
-        Math.Max(MinimumBudgetTokens, contextWindowTokens / HeadroomWindowDivisor));
-    return contextWindowTokens - headroomTokens;
+        Math.Max(MinimumBudgetTokens, contextWindowTokens.Value / HeadroomWindowDivisor));
+    int maximumTrigger = contextWindowTokens.Value - headroomTokens;
+    return Math.Min(preferredTokenCount ?? maximumTrigger, maximumTrigger);
   }
 
-  internal static int RetainedHistoryLimit(int? contextWindowTokens) => contextWindowTokens is > 0
-      ? Math.Min(MaximumRetainedHistoryTokens,
-          Math.Max(MinimumBudgetTokens, CompactionThreshold(contextWindowTokens.Value) / RetainedHistoryThresholdDivisor))
+  internal static int RetainedHistoryLimit(int? compactionTriggerTokenCount) => compactionTriggerTokenCount is { } trigger
+      ? Math.Min(MaximumRetainedHistoryTokens, trigger / RetainedHistoryTriggerDivisor)
       : MaximumRetainedHistoryTokens;
 
   internal static int SummaryOutputLimit(int? contextWindowTokens) => contextWindowTokens is > 0

@@ -6,6 +6,7 @@ using Urd.Core.Context;
 using Urd.Core.Compaction;
 using Urd.Core.Sessions;
 using Urd.Core.Providers;
+using Urd.Core.Preferences;
 using Urd.Core.Tools;
 using Urd.Core.Usage;
 
@@ -118,11 +119,14 @@ internal sealed class SessionExecution : IDisposable {
   private async Task<LlmRequest?> CompactContextAsync(Guid? requestId, CompactionReason reason, string? focus = null,
       ModelHistory? prepared = null) {
     stop.Token.ThrowIfCancellationRequested();
-    if (reason == CompactionReason.Threshold && selection.ContextWindow is null)
+    UserPreferences preferences = session.ReadPreferences();
+    if (reason == CompactionReason.Threshold && selection.ContextWindow is null
+        && preferences.CompactionTriggerTokenCount is null)
       return null;
     ModelHistory context = prepared ?? await session.ReadModelHistoryAsync(ExecutionId, requestId);
     await EnsureStartingContextAsync(context.ReadMessages());
-    HistoryCompactionPlan? plan = HistoryCompactor.Prepare(context, selection, startingContext!, reason, focus);
+    HistoryCompactionPlan? plan = HistoryCompactor.Prepare(context, selection, startingContext!, reason, focus,
+        preferences.CompactionTriggerTokenCount);
     if (plan is null)
       return null;
     await session.SetCompactingAsync(ExecutionId, true);

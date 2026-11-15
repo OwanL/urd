@@ -53,21 +53,24 @@ public sealed class ContextTokenBudgetTests {
 
   [Fact]
   public void BudgetsRespectWindowBoundariesAndFallbacks() {
-    Assert.Equal(0, ContextTokenBudget.CompactionThreshold(1));
-    Assert.Equal(4, ContextTokenBudget.CompactionThreshold(5));
-    Assert.Equal(65_540, ContextTokenBudget.CompactionThreshold(81_924));
-    Assert.Equal(65_541, ContextTokenBudget.CompactionThreshold(81_925));
-    Assert.Equal(83_616, ContextTokenBudget.CompactionThreshold(100_000));
-    Assert.Equal(int.MaxValue - 16_384, ContextTokenBudget.CompactionThreshold(int.MaxValue));
-    Assert.Throws<ArgumentOutOfRangeException>(() => ContextTokenBudget.CompactionThreshold(0));
-    Assert.Throws<ArgumentOutOfRangeException>(() => ContextTokenBudget.CompactionThreshold(-1));
+    Assert.Equal(0, ContextTokenBudget.CompactionTrigger(1));
+    Assert.Equal(4, ContextTokenBudget.CompactionTrigger(5));
+    Assert.Equal(65_540, ContextTokenBudget.CompactionTrigger(81_924));
+    Assert.Equal(65_541, ContextTokenBudget.CompactionTrigger(81_925));
+    Assert.Equal(83_616, ContextTokenBudget.CompactionTrigger(100_000));
+    Assert.Equal(int.MaxValue - 16_384, ContextTokenBudget.CompactionTrigger(int.MaxValue));
+    Assert.Null(ContextTokenBudget.CompactionTrigger(null));
+    Assert.Equal(10_000, ContextTokenBudget.CompactionTrigger(null, 10_000));
+    Assert.Equal(10_000, ContextTokenBudget.CompactionTrigger(100_000, 10_000));
+    Assert.Equal(83_616, ContextTokenBudget.CompactionTrigger(100_000, int.MaxValue));
+    Assert.Throws<ArgumentOutOfRangeException>(() => ContextTokenBudget.CompactionTrigger(100_000, 0));
+    Assert.Throws<ArgumentOutOfRangeException>(() => ContextTokenBudget.CompactionTrigger(null, -1));
 
-    Assert.Equal(1, ContextTokenBudget.RetainedHistoryLimit(1));
-    Assert.Equal(400, ContextTokenBudget.RetainedHistoryLimit(1_000));
+    Assert.Equal(0, ContextTokenBudget.RetainedHistoryLimit(0));
+    Assert.Equal(0, ContextTokenBudget.RetainedHistoryLimit(1));
+    Assert.Equal(500, ContextTokenBudget.RetainedHistoryLimit(1_001));
     Assert.Equal(20_000, ContextTokenBudget.RetainedHistoryLimit(100_000));
     Assert.Equal(20_000, ContextTokenBudget.RetainedHistoryLimit(null));
-    Assert.Equal(20_000, ContextTokenBudget.RetainedHistoryLimit(0));
-    Assert.Equal(20_000, ContextTokenBudget.RetainedHistoryLimit(-1));
 
     Assert.Equal(1, ContextTokenBudget.SummaryOutputLimit(1));
     Assert.Equal(250, ContextTokenBudget.SummaryOutputLimit(1_000));

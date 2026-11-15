@@ -11,17 +11,27 @@ public sealed class PreferenceManager {
     this.store = store;
   }
 
-  public UserPreferences Read(string? fallbackWorkingDirectory = null) => new(
-      store.Preferences.ReadWorkingDirectory()
-          ?? fallbackWorkingDirectory ?? Path.GetPathRoot(Environment.CurrentDirectory));
+  public UserPreferences Read(string? fallbackWorkingDirectory = null) {
+    UserPreferences persisted = store.Preferences.Read();
+    if (persisted.WorkingDirectory is not null) return persisted;
+    return persisted with {
+      WorkingDirectory = persisted.WorkingDirectory
+          ?? fallbackWorkingDirectory ?? Path.GetPathRoot(Environment.CurrentDirectory)
+    };
+  }
 
   public void SetWorkingDirectory(string? path) {
-    if (path is null) {
-      store.Preferences.SetWorkingDirectory(null);
-      return;
-    }
+    string? normalized = path is null ? null : NormalizeWorkingDirectory(path);
+    store.Preferences.Update(preferences => preferences with { WorkingDirectory = normalized });
+  }
 
-    store.Preferences.SetWorkingDirectory(NormalizeWorkingDirectory(path));
+  public void SetCompactionTriggerTokenCount(int? compactionTriggerTokenCount) {
+    if (compactionTriggerTokenCount is <= 0)
+      throw new ArgumentOutOfRangeException(nameof(compactionTriggerTokenCount),
+          "Compaction trigger token count must be a positive integer or null.");
+
+    store.Preferences.Update(preferences =>
+        preferences with { CompactionTriggerTokenCount = compactionTriggerTokenCount });
   }
 
   internal static string NormalizeWorkingDirectory(string path) {

@@ -44,6 +44,15 @@ and message index within the request; the request ID locates stored content but 
 Planning takes the existing `StartingContext` so instructions and tool declarations stay together.
 `RetainedHistorySelector` prefers whole turns, then assistant continuations, with an over-budget
 fallback only for provider overflow. `ContextTokenBudget` names the estimation allowances and limits.
+`CompactionTriggerTokenCount` is an optional application preference, read once at each compaction check.
+Automatic uses the model window minus fixed headroom (20% of the window, capped at 16,384 tokens).
+A configured positive count triggers above that count, capped at the same window-minus-headroom limit;
+it also enables automatic compaction when the model window is unknown. Without either a count or a
+known window, only manual/overflow compaction is available. The retention budget is the smaller of
+20,000 tokens and half the effective trigger; without any trigger it remains 20,000. The summary is
+separate from this retention budget, with its existing output limit unchanged. Overflow recovery may
+still exceed the budget to keep a safe recent turn. Saved preferences apply to the next check in
+existing sessions; an already prepared compaction plan does not change midway.
 Edit summarization instructions in `CompactionPrompt`; its renderer keeps native payloads/reasoning
 out of the prompt and bounds tool-result text. `ManualCompactionRequest` starts an idle-only execution;
 a `CompactionReceipt` acknowledges that execution, not necessarily a saved summary.

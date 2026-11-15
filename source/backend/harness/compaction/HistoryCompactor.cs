@@ -9,7 +9,8 @@ internal static class HistoryCompactor {
   internal const int MaxSummaryCharacters = 32_768;
 
   internal static HistoryCompactionPlan? Prepare(ModelHistory history, LlmSelection selection,
-      StartingContext startingContext, CompactionReason reason, string? focus = null) {
+      StartingContext startingContext, CompactionReason reason, string? focus = null,
+      int? compactionTriggerTokenCount = null) {
     ArgumentNullException.ThrowIfNull(history);
     ArgumentNullException.ThrowIfNull(selection);
     ArgumentNullException.ThrowIfNull(startingContext);
@@ -19,10 +20,11 @@ internal static class HistoryCompactor {
     if (history.Messages.Count < 2) return null;
 
     long estimatedContextTokens = EstimateFullContext(history, startingContext);
-    if (reason == CompactionReason.Threshold && !ExceedsCompactionThreshold(history, selection, estimatedContextTokens))
+    int? trigger = ContextTokenBudget.CompactionTrigger(selection.ContextWindow, compactionTriggerTokenCount);
+    if (reason == CompactionReason.Threshold && !ExceedsCompactionTrigger(history, trigger, estimatedContextTokens))
       return null;
 
-    int retainedHistoryTokenLimit = ContextTokenBudget.RetainedHistoryLimit(selection.ContextWindow);
+    int retainedHistoryTokenLimit = ContextTokenBudget.RetainedHistoryLimit(trigger);
     int? firstRetainedMessageIndex = RetainedHistorySelector.SelectStartIndex(history, retainedHistoryTokenLimit, reason);
     return firstRetainedMessageIndex is { } index ? new(history, index, estimatedContextTokens, reason, focus) : null;
   }
@@ -55,10 +57,10 @@ internal static class HistoryCompactor {
     return new(summary, estimatedContextTokensAfter);
   }
 
-  private static bool ExceedsCompactionThreshold(ModelHistory history, LlmSelection selection, long estimatedContextTokens) {
-    if (selection.ContextWindow is not > 0) return false;
+  private static bool ExceedsCompactionTrigger(ModelHistory history, int? trigger, long estimatedContextTokens) {
+    if (trigger is null) return false;
     long contextTokens = history.UsageBasedContextTokens is > 0 ? history.UsageBasedContextTokens.Value : estimatedContextTokens;
-    return contextTokens > ContextTokenBudget.CompactionThreshold(selection.ContextWindow.Value);
+    return contextTokens > trigger.Value;
   }
 
   private static string ReadCompletedSummary(ChatResponse response) {

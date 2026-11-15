@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Data.Sqlite;
 using Urd.Core.Preferences;
@@ -12,6 +13,8 @@ internal static class PreferencesRoutes {
     routes.AddEndpointFilter(HandleRequestAsync);
     routes.MapGet("", (Delegate)(() => Results.Ok(preferences.Read())));
     routes.MapPost("/working-directory", (Delegate)((HttpContext http) => SetWorkingDirectoryAsync(http, preferences)));
+    routes.MapPost("/compaction-trigger",
+        (Delegate)((HttpContext http) => SetCompactionTriggerTokenCountAsync(http, preferences)));
   }
 
   private static async Task<IResult> SetWorkingDirectoryAsync(HttpContext http, PreferenceManager preferences) {
@@ -20,6 +23,15 @@ internal static class PreferencesRoutes {
       return Results.BadRequest();
 
     preferences.SetWorkingDirectory(body.WorkingDirectory);
+    return Results.Ok(preferences.Read());
+  }
+
+  private static async Task<IResult> SetCompactionTriggerTokenCountAsync(
+      HttpContext http, PreferenceManager preferences) {
+    CompactionTriggerRequest? body = await http.Request.ReadFromJsonAsync<CompactionTriggerRequest>(http.RequestAborted);
+    if (body is null) return Results.BadRequest();
+
+    preferences.SetCompactionTriggerTokenCount(body.CompactionTriggerTokenCount);
     return Results.Ok(preferences.Read());
   }
 
@@ -55,4 +67,6 @@ internal static class PreferencesRoutes {
   }
 
   private sealed record WorkingDirectoryRequest(string? WorkingDirectory);
+  private sealed record CompactionTriggerRequest(
+      [property: JsonRequired, JsonNumberHandling(JsonNumberHandling.Strict)] int? CompactionTriggerTokenCount);
 }

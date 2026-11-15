@@ -48,6 +48,47 @@ public sealed class HistoryCompactorTests {
     Assert.Null(HistoryCompactor.Prepare(context, selection with { ContextWindow = null }, emptyStartingContext, CompactionReason.Threshold));
   }
 
+  [Theory]
+  [InlineData(null, null, 900, null)]
+  [InlineData(null, 200, 200, null)]
+  [InlineData(null, 200, 201, 1)]
+  [InlineData(1_000, 200, 201, 1)]
+  [InlineData(1_000, 100, 101, 2)]
+  [InlineData(1_000, 5_000, 801, 1)]
+  public void ConfiguredTriggerRespectsHeadroomAndLimitsRetainedHistory(int? contextWindow, int? trigger,
+      long observedTokens, int? expectedStart) {
+    var history = new ModelHistory([
+      Entry(1, 0, true, ChatRole.User, new string('o', 2_000)),
+      Entry(2, 0, true, ChatRole.User, new string('m', 120)),
+      Entry(3, 0, true, ChatRole.User, new string('n', 120))
+    ], UsageBasedContextTokens: observedTokens);
+    LlmSelection selection = TestLlmSelection.Default with { ContextWindow = contextWindow };
+
+    HistoryCompactionPlan? plan = HistoryCompactor.Prepare(history, selection, emptyStartingContext,
+        CompactionReason.Threshold, compactionTriggerTokenCount: trigger);
+
+    Assert.Equal(expectedStart, plan?.FirstRetainedMessageIndex);
+    if (plan is null) return;
+    long retainedTokens = ContextTokenBudget.EstimateMessages(history.Messages.Skip(plan.FirstRetainedMessageIndex)
+        .Select(message => message.Message));
+    int effectiveTrigger = ContextTokenBudget.CompactionTrigger(contextWindow, trigger)!.Value;
+    Assert.True(retainedTokens <= effectiveTrigger / 2);
+  }
+
+  [Fact]
+  public void ManualCompactionUsesConfiguredRetentionWithoutWaitingForTrigger() {
+    var history = new ModelHistory([
+      Entry(1, 0, true, ChatRole.User, "old"),
+      Entry(2, 0, true, ChatRole.User, new string('m', 120)),
+      Entry(3, 0, true, ChatRole.User, new string('n', 120))
+    ], UsageBasedContextTokens: 50);
+
+    Assert.Null(HistoryCompactor.Prepare(history, TestLlmSelection.Default, emptyStartingContext,
+        CompactionReason.Threshold, compactionTriggerTokenCount: 100));
+    Assert.Equal(2, HistoryCompactor.Prepare(history, TestLlmSelection.Default, emptyStartingContext,
+        CompactionReason.Manual, compactionTriggerTokenCount: 100)?.FirstRetainedMessageIndex);
+  }
+
   [Fact]
   public void BoundarySelectionPrefersWholeTurnsAndOldestAffordableCut() {
     var history = new ModelHistory([

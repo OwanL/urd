@@ -15,6 +15,7 @@ namespace Urd.Core.Sessions;
 // transcript source assembly, LLM work and cleanup joins run outside it.
 public abstract class SessionBase {
   private readonly UrdStore store;
+  private readonly PreferenceManager preferences;
   private readonly Func<ProviderConnection, IChatClient> createChatClient;
   private readonly ToolCatalog tools;
   private readonly StartingContextManager startingContextManager;
@@ -33,7 +34,8 @@ public abstract class SessionBase {
   private MessageEditSubmission? editSubmission;
 
   private protected SessionBase(SessionRecord record, SessionKind kind, UrdStore store, Func<ProviderConnection, IChatClient> createChatClient,
-      ToolCatalog? tools = null, ChatProcesses? processes = null, PendingToolCalls? pending = null) {
+      ToolCatalog? tools = null, ChatProcesses? processes = null, PendingToolCalls? pending = null,
+      PreferenceManager? preferences = null) {
     Id = record.Id;
     Kind = kind;
     notifications = new SessionNotifications(Id);
@@ -42,6 +44,7 @@ public abstract class SessionBase {
     HistoryRevision = record.HistoryRevision;
     WorkingDirectory = record.WorkingDirectory;
     this.store = store;
+    this.preferences = preferences ?? new PreferenceManager(store);
     this.createChatClient = createChatClient;
     this.tools = tools ?? new ToolCatalog([]);
     startingContextManager = new(this.tools);
@@ -63,6 +66,7 @@ public abstract class SessionBase {
 
   // Restores the delivered starting view; opening a session alone never composes it.
   internal StartingContext? ReadStartingContext() => store.StartingContexts.Read(Id);
+  internal UserPreferences ReadPreferences() => preferences.Read();
 
   public async Task<CompactionReceipt?> CompactAsync(ManualCompactionRequest submission) {
     ArgumentNullException.ThrowIfNull(submission);

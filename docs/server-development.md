@@ -29,7 +29,17 @@ sessions use the process working drive's root (for example `C:\`), not the launc
 data root. Set it in Settings → General, or with `POST /api/preferences/working-directory` using
 `{ "workingDirectory": "C:\\dev\\repos\\your-project" }`; `GET /api/preferences` reads the
 effective path, including the root fallback. Posting `null` resets the default to that root.
-The path must be an existing absolute directory. Preference changes apply only to new sessions.
+The path must be an existing absolute directory. Working-directory preference changes apply only to new sessions.
+
+`GET /api/preferences` also includes nullable `compactionTriggerTokenCount`.
+`POST /api/preferences/compaction-trigger` accepts `{ "compactionTriggerTokenCount": 40000 }`
+or an explicit null for Automatic, and returns the full preferences snapshot. Missing values,
+non-integers and counts outside 1–2,147,483,647 return 400 without saving. This preference applies
+at the next compaction check in existing sessions. The effective count is capped by fixed model
+headroom; retained history is capped at half that count and 20,000 tokens, excluding the summary.
+An explicit count works for unknown model windows too; Automatic without a known window does
+not trigger compaction. See [compaction design](compaction-design.md).
+
 Before its first accepted message, a chat can override its own directory with
 `POST /api/sessions/{sessionId}/working-directory` and `{ "workingDirectory": "C:\\path" }`.
 The response contains the normalized `workingDirectory`; invalid paths return 400, missing
@@ -204,7 +214,7 @@ compact command identities/hashes and usage remain. Removed Send receipts return
 than exposing deleted text or allowing an old Send to recreate it. History replacement does
 not undo external tool effects. There is no branch archive or undo.
 
-The current schema is **26**, including durable continuation identity and context-only omission decisions. Existing schemas require explicit database
+The current schema is **27**, including the compaction-trigger preference. Existing schemas require explicit database
 recreation under the pre-release policy. Never reset an active profile as part of verification
 or automatically activate this build against one.
 

@@ -3,6 +3,7 @@ using Microsoft.Extensions.AI;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Compaction;
 using Urd.Core.Execution;
+using Urd.Core.Preferences;
 using Urd.Core.Providers;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
@@ -75,6 +76,64 @@ public sealed class AutomaticCompactionTests {
         .Any(content => content.Text == "tool turn"));
     Assert.Single((await session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, revision))).Entries,
         entry => entry.Entry.Kind == TranscriptEntryKind.Compaction);
+  }
+
+  [Fact]
+  public async Task ChangingTriggerDuringExecutionAffectsNextCompactionCheck() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    var preferences = new PreferenceManager(store);
+    preferences.SetCompactionTriggerTokenCount(int.MaxValue);
+    var entered = Signal();
+    var release = Signal();
+    int toolRuns = 0;
+    var tool = new TestAgentTool("lookup", async (_, _, cancellation) => {
+      Interlocked.Increment(ref toolRuns);
+      entered.TrySetResult();
+      await release.Task.WaitAsync(cancellation);
+      return new ToolOutput("safe tool result", []);
+    });
+    using var client = new TestChatClient((call, token) => call switch {
+      1 => ToolBatch(token, new FunctionCallContent("lookup-call", "lookup", new Dictionary<string, object?>())),
+      2 or 3 => Complete(token),
+      _ => throw new InvalidOperationException("Unexpected model request.")
+    });
+    var manager = new SessionManager(store, _ => client, [tool], Path.GetDirectoryName(database.Path)!);
+    try {
+      PrimarySession session = await manager.CreatePrimaryAsync();
+      UserMessageReceipt receipt = await AcceptAsync(session, new string('o', 100_000), TestLlmSelection.Default);
+      await entered.Task.WaitAsync(TestTimeout);
+      Assert.Equal(0, client.SummaryCalls);
+      preferences.SetCompactionTriggerTokenCount(1_000);
+      release.TrySetResult();
+      Assert.Equal(ExecutionOutcome.Completed,
+          (await session.WaitForSettlementAsync(Assert.IsType<Guid>(receipt.ExecutionId)).WaitAsync(TestTimeout)).Outcome);
+
+      Assert.Equal(1, client.SummaryCalls);
+      Assert.Equal(1, toolRuns);
+      Assert.Equal(2, client.Requests.Length);
+      IReadOnlyList<ChatMessage> request = client.Requests[1];
+      Assert.Contains(request, message => message.Contents.OfType<TextContent>()
+          .Any(content => content.Text.Contains("[HISTORY SUMMARY:")));
+      Assert.DoesNotContain(request, message => message.Contents.OfType<TextContent>()
+          .Any(content => content.Text.Contains(new string('o', 128))));
+      Assert.Contains(request, message => message.Role == ChatRole.Assistant &&
+          message.Contents.OfType<FunctionCallContent>().Any(call => call.Name == "lookup" && call.CallId == "lookup-call"));
+      Assert.Contains(request, message => message.Role == ChatRole.Tool &&
+          message.Contents.OfType<FunctionResultContent>().Any(result => result.CallId == "lookup-call" &&
+              Equals(result.Result, "safe tool result")));
+
+      preferences.SetCompactionTriggerTokenCount(null);
+      await SubmitAsync(session, new string('n', 100_000), TestLlmSelection.Default);
+      Assert.Equal(3, client.Requests.Length);
+      Assert.Equal(1, client.SummaryCalls);
+      Assert.Equal(1, toolRuns);
+      Assert.Contains(client.Requests[2], message => message.Role == ChatRole.User &&
+          message.Contents.OfType<TextContent>().Any(content => content.Text.Contains(new string('n', 128))));
+    } finally {
+      release.TrySetResult();
+      await manager.ShutdownSessionsAsync().WaitAsync(TestTimeout);
+    }
   }
 
   [Fact]

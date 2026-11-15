@@ -9,7 +9,7 @@ saved-primary-ID discovery, durable Send decisions, safe-boundary steering, addr
 Stop, bounded snapshot/history/content reads, known-not-sent discovery and graceful
 shutdown. The browser workspace is implemented and served as static assets by the Server.
 
-`UrdStore` owns the shared database, currently schema 26. It records whether a request
+`UrdStore` owns the shared database, currently schema 27. It records whether a request
 started sending and pages inputs known not to have been sent, so users can retrieve
 and explicitly resend them. Snapshots stay slim; transcript metadata and
 content use separate bounded reads, and reported usage is persisted per request. Session snapshots
@@ -23,7 +23,7 @@ credential behavior.
 
 Before the supported public data baseline, schema changes replace the schema rather than
 migrating it. A fresh/version-0 database creates all current tables and indexes in one
-transaction; version 26 reopens normally. Other versions fail with reset instructions:
+transaction; version 27 reopens normally. Other versions fail with reset instructions:
 stop Urd, delete `urd.sqlite`, `urd.sqlite-wal` and `urd.sqlite-shm`, then restart.
 Urd never deletes these files automatically. Requests have only known not-attempted (1)
 or attempted (2) provenance; transcript user entries require request links and receipts
@@ -107,7 +107,18 @@ Model settings and frozen selections carry an optional positive `ContextWindow`;
 still allow Send. Exact-ID defaults are restricted to trusted provider identities. Before model
 requests, threshold preparation may summarize older history through the shared request-only
 `IChatClient`; explicit provider overflow permits one retry before any output or tool call.
-Configured limits are unchanged; only headroom/recent-history budgets shrink for small windows.
+`PreferenceManager.Read()` supplies a typed immutable snapshot. The shared store lazily caches the
+preferences row, serializes updates, and publishes a new snapshot only after persistence succeeds;
+reads do not repeatedly query SQLite. Add typed fields to `UserPreferences`, persist them through
+`PreferencesStorage.Update`, and validate changes in `PreferenceManager`; consumers receive values
+rather than callbacks per setting. Working-directory fallback still applies when a new session is created.
+
+Each compaction check reads one current snapshot, so changing `CompactionTriggerTokenCount` applies
+at the next check, including within an existing execution. Null selects the default window-minus-headroom
+trigger; a positive token count overrides it, capped by that same fixed headroom limit when the window
+is known. An explicit count also works for unknown windows. Retained history is capped at half the
+effective trigger and 20,000 tokens; summaries have a separate unchanged limit. Overflow recovery can
+still exceed the retention budget to make safe progress.
 
 Successful summaries and metadata-only markers commit together in `session_compactions` and
 `execution_messages`. Context reads apply the saved boundary without rewriting the transcript.

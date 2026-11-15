@@ -1,7 +1,7 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Http.Features;
-using Microsoft.Data.Sqlite;
 using Urd.Core.Sessions;
+using static Urd.Server.HttpRouteHelpers;
 
 namespace Urd.Server;
 
@@ -12,6 +12,7 @@ internal static class EventRoutes {
   internal static RouteGroupBuilder MapEvents(this IEndpointRouteBuilder app,
       SessionManager sessions, SessionEventHub hub) {
     RouteGroupBuilder routes = app.MapGroup("/api/events");
+    routes.AddEndpointFilter<JsonRequestFilter>();
     routes.AddEndpointFilter(HandleRequestAsync);
     routes.MapGet("", (Delegate)((HttpContext http) => StreamAsync(http, hub)));
     routes.MapPost("/{streamId:guid}", (HttpContext http, Guid streamId) => UpdateAsync(http, sessions, hub, streamId));
@@ -21,12 +22,6 @@ internal static class EventRoutes {
   private static async ValueTask<object?> HandleRequestAsync(
       EndpointFilterInvocationContext invocation, EndpointFilterDelegate next) {
     HttpContext http = invocation.HttpContext;
-    if (HttpMethods.IsGet(http.Request.Method)
-        && http.Features.Get<IHttpRequestBodyDetectionFeature>()?.CanHaveBody == true)
-      return Results.BadRequest();
-    if (HttpMethods.IsPost(http.Request.Method) && !HttpJson.TryPrepare(http.Request))
-      return Results.StatusCode(StatusCodes.Status415UnsupportedMediaType);
-
     try {
       return await next(invocation);
     } catch (KeyNotFoundException) {
@@ -37,12 +32,9 @@ internal static class EventRoutes {
       return Results.StatusCode(failure.StatusCode);
     } catch (ArgumentException) {
       return Results.BadRequest();
-    } catch (SqliteException failure) {
+    } catch (Exception failure) when (IsStorageFailure(failure)) {
       return HttpStorageFailure.Unavailable(http, failure);
-    } catch (InvalidDataException failure) {
-      return HttpStorageFailure.Unavailable(http, failure);
-    } catch (InvalidOperationException) when (
-        http.RequestServices.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping.IsCancellationRequested) {
+    } catch (InvalidOperationException) when (IsApplicationStopping(http)) {
       return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
     }
   }

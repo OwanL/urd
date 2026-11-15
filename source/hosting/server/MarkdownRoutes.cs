@@ -1,8 +1,7 @@
 using System.Text.Json;
-using Microsoft.AspNetCore.Http.Features;
-using Microsoft.Data.Sqlite;
 using Urd.Core.MarkdownRendering;
 using Urd.Core.Sessions;
+using static Urd.Server.HttpRouteHelpers;
 
 namespace Urd.Server;
 
@@ -16,6 +15,7 @@ internal static class MarkdownRoutes {
     ArgumentNullException.ThrowIfNull(markdown);
 
     RouteGroupBuilder routes = app.MapGroup("/api/events/{streamId:guid}/markdown/{leaseId:guid}");
+    routes.AddEndpointFilter<JsonRequestFilter>();
     routes.AddEndpointFilter(HandleRequestAsync);
     routes.MapPost("", (HttpContext http, Guid streamId, Guid leaseId) =>
         OpenAsync(http, sessions, hub, markdown, streamId, leaseId));
@@ -44,16 +44,10 @@ internal static class MarkdownRoutes {
   internal static async ValueTask<object?> HandleRequestAsync(
       EndpointFilterInvocationContext invocation, EndpointFilterDelegate next) {
     HttpContext http = invocation.HttpContext;
-    if (HttpMethods.IsGet(http.Request.Method)
-        && http.Features.Get<IHttpRequestBodyDetectionFeature>()?.CanHaveBody == true)
-      return Results.BadRequest();
-    if (HttpMethods.IsPost(http.Request.Method) && !HttpJson.TryPrepare(http.Request))
-      return Results.StatusCode(StatusCodes.Status415UnsupportedMediaType);
-
     try {
       return await next(invocation);
     } catch (OperationCanceledException) when (!http.RequestAborted.IsCancellationRequested) {
-      return Results.StatusCode(IsStopping(http)
+      return Results.StatusCode(IsApplicationStopping(http)
           ? StatusCodes.Status503ServiceUnavailable : StatusCodes.Status410Gone);
     } catch (MarkdownPageLeases.DuplicateTokenException) {
       return Results.Conflict();
@@ -61,7 +55,7 @@ internal static class MarkdownRoutes {
       return Results.Conflict();
     } catch (MarkdownSupersededException) {
       return Results.Conflict();
-    } catch (MarkdownUnavailableException) when (IsStopping(http)) {
+    } catch (MarkdownUnavailableException) when (IsApplicationStopping(http)) {
       return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
     } catch (MarkdownUnavailableException) {
       return Results.StatusCode(StatusCodes.Status410Gone);
@@ -79,11 +73,9 @@ internal static class MarkdownRoutes {
       return Results.StatusCode(failure.StatusCode);
     } catch (ArgumentException) {
       return Results.BadRequest();
-    } catch (SqliteException failure) {
+    } catch (Exception failure) when (IsStorageFailure(failure)) {
       return HttpStorageFailure.Unavailable(http, failure);
-    } catch (InvalidDataException failure) {
-      return HttpStorageFailure.Unavailable(http, failure);
-    } catch (InvalidOperationException) when (IsStopping(http)) {
+    } catch (InvalidOperationException) when (IsApplicationStopping(http)) {
       return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
     }
   }
@@ -105,7 +97,7 @@ internal static class MarkdownRoutes {
     PrimarySession session;
     try {
       session = await sessions.GetPrimaryAsync(request.SessionId);
-    } catch (InvalidOperationException) when (IsStopping(http)) {
+    } catch (InvalidOperationException) when (IsApplicationStopping(http)) {
       return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
     }
 
@@ -259,11 +251,8 @@ internal static class MarkdownRoutes {
 
   private static IResult RenderJson<T>(T value) => Results.Json(value, options: MarkdownRenderJson.Options);
 
-  private static IResult MissingPageResult(HttpContext http) => IsStopping(http)
+  private static IResult MissingPageResult(HttpContext http) => IsApplicationStopping(http)
       ? Results.StatusCode(StatusCodes.Status503ServiceUnavailable) : Results.NotFound();
-
-  private static bool IsStopping(HttpContext http)
-      => http.RequestServices.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping.IsCancellationRequested;
 
   private sealed class OwnedOpenResult(SessionEventPage page, Guid leaseId, IResult response) : IResult {
     public async Task ExecuteAsync(HttpContext httpContext) {

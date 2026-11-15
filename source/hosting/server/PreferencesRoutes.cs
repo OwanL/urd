@@ -1,8 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Microsoft.AspNetCore.Http.Features;
-using Microsoft.Data.Sqlite;
 using Urd.Core.Preferences;
+using static Urd.Server.HttpRouteHelpers;
 
 namespace Urd.Server;
 
@@ -10,6 +9,7 @@ namespace Urd.Server;
 internal static class PreferencesRoutes {
   internal static void MapPreferences(this IEndpointRouteBuilder app, PreferenceManager preferences) {
     RouteGroupBuilder routes = app.MapGroup("/api/preferences");
+    routes.AddEndpointFilter<JsonRequestFilter>();
     routes.AddEndpointFilter(HandleRequestAsync);
     routes.MapGet("", (Delegate)(() => Results.Ok(preferences.Read())));
     routes.MapPost("/working-directory", (Delegate)((HttpContext http) => SetWorkingDirectoryAsync(http, preferences)));
@@ -38,13 +38,6 @@ internal static class PreferencesRoutes {
   private static async ValueTask<object?> HandleRequestAsync(
       EndpointFilterInvocationContext invocation, EndpointFilterDelegate next) {
     HttpContext http = invocation.HttpContext;
-    if (HttpMethods.IsGet(http.Request.Method)
-        && http.Features.Get<IHttpRequestBodyDetectionFeature>()?.CanHaveBody == true)
-      return Results.BadRequest();
-
-    if (HttpMethods.IsPost(http.Request.Method) && !HttpJson.TryPrepare(http.Request))
-      return Results.StatusCode(StatusCodes.Status415UnsupportedMediaType);
-
     try {
       return await next(invocation);
     } catch (JsonException) {
@@ -53,12 +46,9 @@ internal static class PreferencesRoutes {
       return Results.StatusCode(failure.StatusCode);
     } catch (ArgumentException failure) {
       return Results.Json(new { error = failure.Message }, statusCode: StatusCodes.Status400BadRequest);
-    } catch (SqliteException failure) {
+    } catch (Exception failure) when (IsStorageFailure(failure)) {
       return HttpStorageFailure.Unavailable(http, failure);
-    } catch (InvalidDataException failure) {
-      return HttpStorageFailure.Unavailable(http, failure);
-    } catch (InvalidOperationException) when (http.RequestServices.GetRequiredService<IHostApplicationLifetime>()
-        .ApplicationStopping.IsCancellationRequested) {
+    } catch (InvalidOperationException) when (IsApplicationStopping(http)) {
       return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
     } catch (OperationCanceledException) {
       return Results.StatusCode(http.RequestAborted.IsCancellationRequested

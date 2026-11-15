@@ -1,8 +1,8 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Http.Extensions;
 using Microsoft.AspNetCore.Http.Features;
-using Microsoft.Data.Sqlite;
 using Urd.Core.Providers;
+using static Urd.Server.HttpRouteHelpers;
 
 namespace Urd.Server;
 
@@ -10,6 +10,7 @@ namespace Urd.Server;
 internal static class ProviderRoutes {
   internal static void MapProviders(this IEndpointRouteBuilder app, ProviderManager providers) {
     RouteGroupBuilder routes = app.MapGroup("/api/providers");
+    routes.AddEndpointFilter<JsonRequestFilter>();
     routes.AddEndpointFilter(HandleRequestAsync);
     routes.MapGet("", (Delegate)(async (HttpContext http) => Results.Ok(await providers.ListAsync(http.RequestAborted))));
     routes.MapPost("/openai", (Delegate)((HttpContext http) => AddAsync(http, providers.AddOpenAIAsync)));
@@ -88,10 +89,6 @@ internal static class ProviderRoutes {
   private static async ValueTask<object?> HandleRequestAsync(
       EndpointFilterInvocationContext invocation, EndpointFilterDelegate next) {
     HttpContext http = invocation.HttpContext;
-    if (HttpMethods.IsGet(http.Request.Method) && CanHaveBody(http))
-      return Results.BadRequest();
-    if (HttpMethods.IsPost(http.Request.Method) && !HttpJson.TryPrepare(http.Request))
-      return Results.StatusCode(StatusCodes.Status415UnsupportedMediaType);
     try {
       return await next(invocation);
     } catch (ProviderOperationException failure) {
@@ -111,12 +108,9 @@ internal static class ProviderRoutes {
       return Results.StatusCode(failure.StatusCode);
     } catch (ArgumentException) {
       return Results.BadRequest();
-    } catch (SqliteException failure) {
+    } catch (Exception failure) when (IsStorageFailure(failure)) {
       return HttpStorageFailure.Unavailable(http, failure);
-    } catch (InvalidDataException failure) {
-      return HttpStorageFailure.Unavailable(http, failure);
-    } catch (InvalidOperationException) when (http.RequestServices.GetRequiredService<IHostApplicationLifetime>()
-        .ApplicationStopping.IsCancellationRequested) {
+    } catch (InvalidOperationException) when (IsApplicationStopping(http)) {
       return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
     } catch (OperationCanceledException) {
       return Results.StatusCode(http.RequestAborted.IsCancellationRequested
@@ -137,8 +131,7 @@ internal static class ProviderRoutes {
           : "Sign-in did not complete. Check its status through Urd.");
     } catch (ProviderOperationException) {
       return Results.BadRequest();
-    } catch (InvalidOperationException) when (http.RequestServices.GetRequiredService<IHostApplicationLifetime>()
-        .ApplicationStopping.IsCancellationRequested) {
+    } catch (InvalidOperationException) when (IsApplicationStopping(http)) {
       return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
     }
   }

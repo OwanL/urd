@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Security;
 using System.Text.Json;
-using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.Primitives;
 
 namespace Urd.Server;
@@ -9,6 +8,7 @@ namespace Urd.Server;
 internal static class FileRoutes {
   internal static RouteGroupBuilder MapFiles(this IEndpointRouteBuilder app) {
     RouteGroupBuilder routes = app.MapGroup("/api/files");
+    routes.AddEndpointFilter<JsonRequestFilter>();
     routes.AddEndpointFilter(HandleRequestAsync);
     routes.MapGet("/directories", (Delegate)ListDirectories);
     routes.MapPost("/reveal", (Delegate)RevealAsync);
@@ -17,13 +17,6 @@ internal static class FileRoutes {
 
   private static async ValueTask<object?> HandleRequestAsync(
       EndpointFilterInvocationContext invocation, EndpointFilterDelegate next) {
-    HttpContext http = invocation.HttpContext;
-    if (HttpMethods.IsGet(http.Request.Method)
-        && http.Features.Get<IHttpRequestBodyDetectionFeature>()?.CanHaveBody == true)
-      return Results.BadRequest();
-    if (HttpMethods.IsPost(http.Request.Method) && !HttpJson.TryPrepare(http.Request))
-      return Results.StatusCode(StatusCodes.Status415UnsupportedMediaType);
-
     try {
       return await next(invocation);
     } catch (JsonException) {

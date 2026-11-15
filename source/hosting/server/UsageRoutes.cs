@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.Http.Features;
-using Microsoft.Data.Sqlite;
 using Urd.Core.Storage;
+using static Urd.Server.HttpRouteHelpers;
 
 namespace Urd.Server;
 
@@ -15,9 +15,7 @@ internal static class UsageRoutes {
         return Results.Ok(store.ReadUsage(sessionId, from, to, detail ?? true));
       } catch (ArgumentException) {
         return Results.BadRequest();
-      } catch (SqliteException failure) {
-        return HttpStorageFailure.Unavailable(http, failure);
-      } catch (InvalidDataException failure) {
+      } catch (Exception failure) when (IsStorageFailure(failure)) {
         return HttpStorageFailure.Unavailable(http, failure);
       }
     });

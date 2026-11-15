@@ -35,9 +35,12 @@ not a separate archive. Their remaining constraints belong to the current docume
 These records preserve qualification or constraints still used by decisions.
 Experimental source is [archived outside the checkout](product-direction.md#experimental-source-archive).
 
-- [Pruning replay results](pruning-replay-results.md): dated real-model selection,
-  timing and recovery evidence; no pruning bundle qualified, and no startup winner
-  or production loading policy is established.
+- [Pruning classification](pruning-classification-results.md) and
+  [full classification CSV](pruning-classification-summary.csv): asymmetric error costs,
+  accuracy and latency across all replay blocks; conservative parallel selection is
+  the low-latency candidate, not a proven low-risk winner over keep-all.
+- [Initial pruning replay](pruning-replay-results.md): earlier whole-guidance selection
+  and bounded recovery evidence; no startup winner or production loading policy.
 - [Agent-tool qualification](agent-tools-qualification.md): scoped Windows process, adapter and
   live acceptance checkpoints; not universal tool/provider qualification.
 - [Provider qualification](provider-qualification.md): offline and separately authorized live route/model checks.

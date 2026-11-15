@@ -591,6 +591,11 @@ implementation design.
 instruction-retention gate. Smaller context and faster preparation did not establish
 a startup winner. This does not reverse the AI tool/skill-pruning direction below;
 instruction policy, follow-up experiments and production class APIs remain undecided.
+The [follow-up classification study](pruning-classification-results.md) isolates
+fixed guidance and weights useful-capability losses more heavily. Conservative
+parallel selection is a low-latency candidate, but no tested pruner establishes
+superiority over keep-all under the primary asymmetric-loss criterion. Production
+policy remains undecided; these are classification results, not task-success rates.
 
 Prompt wording is a separate research task. Inventory other harnesses' fixed
 instructions and dynamic additions without treating their presence as evidence that

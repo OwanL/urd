@@ -4,6 +4,10 @@
 
 ## Outcome
 
+**Follow-up:** [classification, asymmetric error costs and latency](pruning-classification-results.md)
+now cover these runs plus fixed-guidance and per-item-scoring experiments. This
+page retains the original protocol's findings; it is not the latest comparison.
+
 **None of the tested pruning bundles qualifies for recommendation.** They removed
 69–73% of the prepared context, but each omitted required whole-file guidance in
 7–11 of its 36 comparison runs. These are rubric failures, not demonstrated failures

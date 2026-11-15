@@ -5,19 +5,19 @@ namespace Urd.Core.Compaction;
 
 // Cheap heuristic estimates, not provider-tokenizer counts. Opaque content uses fixed allowances.
 internal static class ContextTokenBudget {
-  private const int MessageOverheadTokens = 8;
-  private const int RawRepresentationOverheadTokens = 8;
-  private const int FallbackEstimateTokens = 8;
-  private const int ProtectedReasoningEstimateTokens = 1_024;
-  private const int DataContentEstimateTokens = 1_024;
-  private const int CharactersPerEstimatedToken = 4;
-  private const int MaximumHeadroomTokens = 16_384;
-  private const int HeadroomWindowDivisor = 5;
-  private const int RetainedHistoryTriggerDivisor = 2;
-  private const int SummaryOutputWindowDivisor = 4;
-  private const int MaximumRetainedHistoryTokens = 20_000;
-  private const int MaximumSummaryOutputTokens = 8_192;
-  private const int MinimumBudgetTokens = 1;
+  private const int MessageOverheadTokens = 8; // Allowance for message framing, separate from role and content.
+  private const int RawRepresentationOverheadTokens = 8; // Extra allowance when a message or content has provider-native data.
+  private const int FallbackEstimateTokens = 8; // Used for unknown content types or values that cannot be serialized.
+  private const int ProtectedReasoningEstimateTokens = 1_024; // Stand-in for reasoning whose protected contents cannot be counted.
+  private const int DataContentEstimateTokens = 1_024; // Fixed allowance per binary content item, such as an image.
+  private const int CharactersPerEstimatedToken = 4; // Rough text-to-token ratio; estimates round up.
+  private const int MaximumHeadroomTokens = 16_384; // Caps the space left unused at the compaction trigger.
+  private const int HeadroomWindowDivisor = 5; // Reserve one fifth of the context window, subject to the headroom cap.
+  private const int RetainedHistoryTriggerDivisor = 2; // Keep recent history within half the compaction trigger's token count.
+  private const int SummaryOutputWindowDivisor = 4; // Limit summary output to one quarter of the context window, subject to its cap.
+  private const int MaximumRetainedHistoryTokens = 20_000; // Cap on recent history kept alongside the summary; also the fallback limit.
+  private const int MaximumSummaryOutputTokens = 8_192; // Summary output cap; also used when the context window is unknown.
+  private const int MinimumBudgetTokens = 1; // Prevent headroom and summary output budgets from rounding down to zero.
 
   internal static long EstimateMessages(IEnumerable<ChatMessage> messages) {
     ArgumentNullException.ThrowIfNull(messages);

@@ -44,16 +44,16 @@ public sealed class SessionConcurrencyTests {
       Assert.Equal(MessageAcceptance.Accepted, receipts[0].Acceptance);
       Guid executionId = Assert.IsType<Guid>(receipts[0].ExecutionId);
       Assert.Equal(receipts[0], receipts[1]);
-      Assert.Equal(receipts[0], await session.GetUserMessageReceiptAsync(submission.SubmissionId));
+      Assert.Equal(receipts[0], await session.ReadUserMessageReceiptAsync(submission.SubmissionId));
       Assert.Single(StoredSubmissions.Read(database));
       Assert.Single(StoredExecutions.Read(database));
       Assert.Single(StoredExecutions.ReadRequests(database));
       Assert.Equal(1, client.Calls);
-      Assert.False(session.WaitForSettlementAsync(executionId).IsCompleted);
+      Assert.False(session.WaitForExecutionFinishAsync(executionId).IsCompleted);
 
       llmRelease.TrySetResult();
       SessionExecutionResult[] settlements = await Task.WhenAll(receipts.Select(receipt =>
-          session.WaitForSettlementAsync(receipt.ExecutionId!.Value))).WaitAsync(TestTimeout);
+          session.WaitForExecutionFinishAsync(receipt.ExecutionId!.Value))).WaitAsync(TestTimeout);
       Assert.Equal(settlements[0], settlements[1]);
       Assert.Equal(ExecutionOutcome.Completed, settlements[0].Outcome);
       Assert.Equal(1, client.Calls);
@@ -66,7 +66,7 @@ public sealed class SessionConcurrencyTests {
       foreach (Guid executionId in receipts.Where(receipt => receipt.ExecutionId.HasValue)
                    .Select(receipt => receipt.ExecutionId!.Value).Distinct()) {
         await session.RequestStopAsync(executionId);
-        await session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout);
+        await session.WaitForExecutionFinishAsync(executionId).WaitAsync(TestTimeout);
       }
       store.Dispose();
       client.Dispose();

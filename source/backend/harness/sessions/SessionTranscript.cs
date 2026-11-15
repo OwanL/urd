@@ -3,29 +3,25 @@ using Urd.Core.Concurrency;
 
 namespace Urd.Core.Sessions;
 
-// Bounded transcript reads share the session gate without starting or stopping execution.
+// Bounded transcript reads share the session lock without starting or stopping execution.
 public sealed class SessionTranscript {
   private readonly Guid sessionId;
   private readonly UrdStore store;
-  private readonly AsyncLock gate;
+  private readonly AsyncLock sessionLock;
 
-  internal SessionTranscript(Guid sessionId, UrdStore store, AsyncLock gate) {
+  internal SessionTranscript(Guid sessionId, UrdStore store, AsyncLock sessionLock) {
     this.sessionId = sessionId;
     this.store = store;
-    this.gate = gate;
+    this.sessionLock = sessionLock;
   }
 
-  public async Task<MessageContentPage> ReadContentAsync(
-      MessageContentCursor cursor, CancellationToken cancellation = default) {
-    using var held = await gate.AcquireAsync(cancellation);
-    return store.Content.Read(sessionId, cursor);
-  }
+  public Task<MessageContentPage> ReadContentAsync(
+      MessageContentCursor cursor, CancellationToken cancellation = default) =>
+      ReadUnderLockAsync(() => store.Content.Read(sessionId, cursor), cancellation);
 
-  internal async Task<MessageContentExtent> CaptureContentExtentAsync(
-      MessageRef message, TranscriptTextFacts expected, CancellationToken cancellation = default) {
-    using var held = await gate.AcquireAsync(cancellation);
-    return store.Content.CaptureSourceExtent(sessionId, message, expected);
-  }
+  internal Task<MessageContentExtent> CaptureContentExtentAsync(
+      MessageRef message, TranscriptTextFacts expected, CancellationToken cancellation = default) =>
+      ReadUnderLockAsync(() => store.Content.CaptureSourceExtent(sessionId, message, expected), cancellation);
 
   // Each bounded storage read releases its database lock before caller-side assembly.
   internal MessageContentSegment ReadContentSegment(MessageContentExtent extent, MessageContentCursor cursor) {
@@ -36,7 +32,7 @@ public sealed class SessionTranscript {
   internal async Task ValidateContentExtentAsync(
       MessageContentExtent extent, CancellationToken cancellation = default) {
     ValidateExtentSession(extent);
-    using var held = await gate.AcquireAsync(cancellation);
+    using var _ = await sessionLock.AcquireAsync(cancellation);
     store.Content.ValidateSourceExtent(extent);
   }
 
@@ -55,45 +51,37 @@ public sealed class SessionTranscript {
     if (characterLimit is < 0)
       throw new ArgumentOutOfRangeException(nameof(characterLimit));
 
-    using var held = await gate.AcquireAsync(cancellation);
-    return store.Tools.ReadTranscript(
-        sessionId, expectedHistoryRevision, requestId, callId, returned, characterLimit);
+    return await ReadUnderLockAsync(() => store.Tools.ReadTranscript(
+        sessionId, expectedHistoryRevision, requestId, callId, returned, characterLimit), cancellation);
   }
 
-  public async Task<TranscriptHistoryPage> ReadHistoryAsync(
-      TranscriptHistoryQuery query, CancellationToken cancellation = default) {
-    using var held = await gate.AcquireAsync(cancellation);
-    return store.History.Read(sessionId, query);
-  }
+  public Task<TranscriptHistoryPage> ReadHistoryAsync(
+      TranscriptHistoryQuery query, CancellationToken cancellation = default) =>
+      ReadUnderLockAsync(() => store.History.Read(sessionId, query), cancellation);
 
-  public async Task<TranscriptPositionState> ReadPositionSummaryAsync(
-      long expectedHistoryRevision, CancellationToken cancellation = default) {
-    using var held = await gate.AcquireAsync(cancellation);
-    return store.Positions.Summary(sessionId, expectedHistoryRevision);
-  }
+  public Task<TranscriptPositionState> ReadPositionSummaryAsync(
+      long expectedHistoryRevision, CancellationToken cancellation = default) =>
+      ReadUnderLockAsync(() => store.Positions.Summary(sessionId, expectedHistoryRevision), cancellation);
 
-  public async Task<TranscriptPositionWindow> LocatePositionAsync(
-      long expectedHistoryRevision, double fraction, CancellationToken cancellation = default) {
-    using var held = await gate.AcquireAsync(cancellation);
-    return store.Positions.LocateFraction(sessionId, expectedHistoryRevision, fraction);
-  }
+  public Task<TranscriptPositionWindow> LocatePositionAsync(
+      long expectedHistoryRevision, double fraction, CancellationToken cancellation = default) =>
+      ReadUnderLockAsync(() => store.Positions.LocateFraction(sessionId, expectedHistoryRevision, fraction), cancellation);
 
-  public async Task<TranscriptPromptPage> ReadPromptPageAsync(
+  public Task<TranscriptPromptPage> ReadPromptPageAsync(
       long expectedHistoryRevision, long? afterRank = null, int limit = 60,
-      CancellationToken cancellation = default) {
-    using var held = await gate.AcquireAsync(cancellation);
-    return store.Positions.Prompts(sessionId, expectedHistoryRevision, afterRank, limit);
-  }
+      CancellationToken cancellation = default) =>
+      ReadUnderLockAsync(() => store.Positions.Prompts(sessionId, expectedHistoryRevision, afterRank, limit), cancellation);
 
-  public async Task<TranscriptPositionWindow> ActivatePromptAsync(
-      long expectedHistoryRevision, TranscriptEntryRef prompt, CancellationToken cancellation = default) {
-    using var held = await gate.AcquireAsync(cancellation);
-    return store.Positions.ActivatePrompt(sessionId, expectedHistoryRevision, prompt);
-  }
+  public Task<TranscriptPositionWindow> ActivatePromptAsync(
+      long expectedHistoryRevision, TranscriptEntryRef prompt, CancellationToken cancellation = default) =>
+      ReadUnderLockAsync(() => store.Positions.ActivatePrompt(sessionId, expectedHistoryRevision, prompt), cancellation);
 
-  public async Task<TranscriptPositionWindow> ReadEntryPositionAsync(
-      long expectedHistoryRevision, TranscriptEntryRef entry, CancellationToken cancellation = default) {
-    using var held = await gate.AcquireAsync(cancellation);
-    return store.Positions.LocateEntry(sessionId, expectedHistoryRevision, entry);
+  public Task<TranscriptPositionWindow> ReadEntryPositionAsync(
+      long expectedHistoryRevision, TranscriptEntryRef entry, CancellationToken cancellation = default) =>
+      ReadUnderLockAsync(() => store.Positions.LocateEntry(sessionId, expectedHistoryRevision, entry), cancellation);
+
+  private async Task<T> ReadUnderLockAsync<T>(Func<T> read, CancellationToken cancellation) {
+    using var _ = await sessionLock.AcquireAsync(cancellation);
+    return read();
   }
 }

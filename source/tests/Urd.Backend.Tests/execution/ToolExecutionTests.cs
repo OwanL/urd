@@ -38,7 +38,7 @@ public sealed class ToolExecutionTests {
         : Complete(token));
     await using var fixture = new ExecutionFixture(client, tools: [count]);
     Guid executionId = await fixture.StartExecutionAsync("go");
-    Task<SessionExecutionResult> settlement = fixture.Session.WaitForSettlementAsync(executionId);
+    Task<SessionExecutionResult> settlement = fixture.Session.WaitForExecutionFinishAsync(executionId);
     try {
       // The second invocation must start while the first is held; no provider continuation may escape.
       await secondEntered.Task.WaitAsync(TestTimeout);
@@ -115,7 +115,7 @@ public sealed class ToolExecutionTests {
         store, _ => client, new ToolCatalog([tool]));
     UserMessageReceipt receipt = await session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, "go", TestLlmSelection.Default));
     Guid execution = receipt.ExecutionId!.Value;
-    Task<SessionExecutionResult> settlement = session.WaitForSettlementAsync(execution);
+    Task<SessionExecutionResult> settlement = session.WaitForExecutionFinishAsync(execution);
     try {
       try {
         await firstEntered.Task.WaitAsync(TestTimeout);
@@ -161,7 +161,7 @@ public sealed class ToolExecutionTests {
     await entered.Task.WaitAsync(TestTimeout);
     await fixture.Session.RequestStopAsync(execution);
     Assert.Equal(ExecutionOutcome.Cancelled,
-        (await fixture.Session.WaitForSettlementAsync(execution).WaitAsync(TestTimeout)).Outcome);
+        (await fixture.Session.WaitForExecutionFinishAsync(execution).WaitAsync(TestTimeout)).Outcome);
     Assert.Equal(ExecutionOutcome.Cancelled, Assert.Single(StoredTools.Read(fixture.Database)).Outcome);
     Assert.Equal(1, client.Calls);
   }
@@ -207,7 +207,7 @@ public sealed class ToolExecutionTests {
     await using var fixture = new ExecutionFixture(client, tools: [tool]);
     directory = Path.GetDirectoryName(fixture.Database.Path)!;
     Guid execution = await fixture.StartExecutionAsync("go");
-    Task<SessionExecutionResult> settlement = fixture.Session.WaitForSettlementAsync(execution);
+    Task<SessionExecutionResult> settlement = fixture.Session.WaitForExecutionFinishAsync(execution);
     try {
       await entered.Task.WaitAsync(TestTimeout);
       await readAdmitted.Task.WaitAsync(TestTimeout);
@@ -235,7 +235,7 @@ public sealed class ToolExecutionTests {
         : Complete(token));
     await using var fixture = new ExecutionFixture(client, tools: [effect]);
     Guid executionId = await fixture.StartExecutionAsync("go");
-    Task<SessionExecutionResult> settlement = fixture.Session.WaitForSettlementAsync(executionId);
+    Task<SessionExecutionResult> settlement = fixture.Session.WaitForExecutionFinishAsync(executionId);
 
     try {
       await cleanupEntered.Task.WaitAsync(TestTimeout);
@@ -273,7 +273,7 @@ public sealed class ToolExecutionTests {
     Guid executionId = await fixture.StartExecutionAsync("go");
 
     Assert.Equal(ExecutionOutcome.Completed,
-        (await fixture.Session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout)).Outcome);
+        (await fixture.Session.WaitForExecutionFinishAsync(executionId).WaitAsync(TestTimeout)).Outcome);
     StoredEntry[] entries = ReadEntries(fixture.Database);
     Assert.Equal(new[] { 0, 1, 2, 1, 1 }, entries.Select(entry => entry.Role));
     Assert.Equal(new[] { "before", "effect-call", "after" }, entries.Skip(1).Take(3).Select(entry => entry.Label));
@@ -329,7 +329,7 @@ public sealed class ToolExecutionTests {
     Guid executionId = await fixture.StartExecutionAsync("go");
 
     Assert.Equal(ExecutionOutcome.Completed,
-        (await fixture.Session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout)).Outcome);
+        (await fixture.Session.WaitForExecutionFinishAsync(executionId).WaitAsync(TestTimeout)).Outcome);
     Assert.Equal(new[] { 0, 1, 2, 1 }, ReadEntries(fixture.Database).Select(entry => entry.Role));
     Assert.Equal(new[] { "visible", "effect-call" }, ReadEntries(fixture.Database).Skip(1).Take(2).Select(entry => entry.Label));
 
@@ -353,7 +353,7 @@ public sealed class ToolExecutionTests {
     Guid executionId = await fixture.StartExecutionAsync("go");
 
     Assert.Equal(ExecutionOutcome.Failed,
-        (await fixture.Session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout)).Outcome);
+        (await fixture.Session.WaitForExecutionFinishAsync(executionId).WaitAsync(TestTimeout)).Outcome);
     Assert.Equal(0, effects);
     Assert.Empty(StoredTools.Read(fixture.Database));
     StoredEntry reserved = Assert.Single(ReadEntries(fixture.Database), entry => entry.Role == 2);
@@ -385,7 +385,7 @@ public sealed class ToolExecutionTests {
     Guid executionId = await fixture.StartExecutionAsync(userText);
 
     Assert.Equal(ExecutionOutcome.Completed,
-        (await fixture.Session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout)).Outcome);
+        (await fixture.Session.WaitForExecutionFinishAsync(executionId).WaitAsync(TestTimeout)).Outcome);
     Assert.Equal(userText, Assert.Single(client.Requests[0], message => message.Role == ChatRole.User).Text);
     ChatMessage[] continuation = client.Requests[1].ToArray();
     Assert.Equal(assistantText, Assert.Single(continuation.Where(message => message.Role == ChatRole.Assistant)
@@ -488,7 +488,7 @@ public sealed class ToolExecutionTests {
     Guid executionId = await fixture.StartExecutionAsync("go");
 
     Assert.Equal(ExecutionOutcome.Failed,
-        (await fixture.Session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout)).Outcome);
+        (await fixture.Session.WaitForExecutionFinishAsync(executionId).WaitAsync(TestTimeout)).Outcome);
     Assert.Equal(0, effects);
     Assert.Equal(1, client.Calls);
     Assert.Empty(StoredTools.Read(fixture.Database));

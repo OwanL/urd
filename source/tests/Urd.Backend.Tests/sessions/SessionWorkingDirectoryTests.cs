@@ -72,7 +72,7 @@ public sealed class SessionWorkingDirectoryTests {
       UserMessageReceipt receipt = await session.SubmitUserMessageAsync(
           new(Guid.NewGuid(), 0, "use this folder", TestLlmSelection.Default));
       Assert.Equal(ExecutionOutcome.Completed,
-          (await session.WaitForSettlementAsync(receipt.ExecutionId!.Value).WaitAsync(TestTimeout)).Outcome);
+          (await session.WaitForExecutionFinishAsync(receipt.ExecutionId!.Value).WaitAsync(TestTimeout)).Outcome);
       Assert.Equal(alternate, toolDirectory);
       Assert.Contains(client.Requests[0], message => message.Role == ChatRole.System && message.Text.Contains(alternate, StringComparison.Ordinal));
       Assert.Equal(Path.TrimEndingDirectorySeparator(original), preferences.Read().WorkingDirectory);
@@ -97,7 +97,7 @@ public sealed class SessionWorkingDirectoryTests {
       Assert.Equal(MessageAcceptance.Accepted, receipt.Acceptance);
       Assert.False((await session.ReadSnapshotAsync()).CanChangeWorkingDirectory);
 
-      SessionExecutionResult settled = await session.WaitForSettlementAsync(receipt.ExecutionId!.Value)
+      SessionExecutionResult settled = await session.WaitForExecutionFinishAsync(receipt.ExecutionId!.Value)
           .WaitAsync(TestTimeout);
       Assert.Equal(ExecutionOutcome.Failed, settled.Outcome);
       SessionSnapshot snapshot = await session.ReadSnapshotAsync();
@@ -106,7 +106,7 @@ public sealed class SessionWorkingDirectoryTests {
       Assert.Null(await session.TryChangeWorkingDirectoryAsync(alternate));
       Assert.Equal(original, snapshot.WorkingDirectory);
     } finally {
-      await session.FenceUserMessagesAsync();
+      await session.StopAcceptingUserMessagesAsync();
       await session.StopExecutionAsync().WaitAsync(TestTimeout);
       store.Dispose();
     }

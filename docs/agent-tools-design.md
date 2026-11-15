@@ -265,7 +265,7 @@ internal sealed class BashTool(ChatProcesses processes, GitBash bash,
 **Waiting, completion delivery and Stop** (existing `SessionBase`).
 
 ```csharp
-internal Task BackgroundToolCompletedAsync(Guid executionId, Exception? failure = null);
+internal Task ReportToolOutcomeAsync(Guid executionId, Exception? failure = null);
 private Task<LlmRequest?> AdvanceExecutionAsync(SessionExecution execution,
   TaskCompletionSource<SessionExecutionResult> settlement, ExecutionOutcome outcome);
 internal Task StopExecutionAsync();

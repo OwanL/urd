@@ -37,13 +37,13 @@ public sealed class UsageCaptureTests {
         Assert.Equal(MessageAcceptance.Accepted, first.Acceptance);
         Guid firstExecution = Assert.IsType<Guid>(first.ExecutionId);
         Assert.Equal(ExecutionOutcome.Completed,
-            (await session.WaitForSettlementAsync(firstExecution).WaitAsync(TestTimeout)).Outcome);
+            (await session.WaitForExecutionFinishAsync(firstExecution).WaitAsync(TestTimeout)).Outcome);
 
         UserMessageReceipt overflowed = await session.SubmitUserMessageAsync(
             new(Guid.NewGuid(), 0, "retry after overflow", TestLlmSelection.Default));
         Assert.Equal(MessageAcceptance.Accepted, overflowed.Acceptance);
         Assert.Equal(ExecutionOutcome.Completed,
-            (await session.WaitForSettlementAsync(Assert.IsType<Guid>(overflowed.ExecutionId)).WaitAsync(TestTimeout)).Outcome);
+            (await session.WaitForExecutionFinishAsync(Assert.IsType<Guid>(overflowed.ExecutionId)).WaitAsync(TestTimeout)).Outcome);
         Assert.Equal(4, client.Calls); // Main request, rejected overflow, summary, retried main request.
 
         UsageSummary captured = store.ReadUsage(session.Id);
@@ -70,7 +70,7 @@ public sealed class UsageCaptureTests {
       MessageEditReceipt edit = await session.EditUserMessageAsync(
           new(Guid.NewGuid(), target, "edited after reopen", TestLlmSelection.Default));
       Assert.Equal(ExecutionOutcome.Completed,
-          (await session.WaitForSettlementAsync(edit.ExecutionId).WaitAsync(TestTimeout)).Outcome);
+          (await session.WaitForExecutionFinishAsync(edit.ExecutionId).WaitAsync(TestTimeout)).Outcome);
 
       UsageSummary afterEdit = reopened.ReadUsage(sessionId);
       Assert.Equal(5, afterEdit.Totals.Requests);
@@ -102,7 +102,7 @@ public sealed class UsageCaptureTests {
       await observed.Task.WaitAsync(TestTimeout);
       await session.RequestStopAsync(execution).WaitAsync(TestTimeout);
       Assert.Equal(ExecutionOutcome.Cancelled,
-          (await session.WaitForSettlementAsync(execution).WaitAsync(TestTimeout)).Outcome);
+          (await session.WaitForExecutionFinishAsync(execution).WaitAsync(TestTimeout)).Outcome);
 
       UsageRequest captured = Assert.Single(store.ReadUsage(session.Id).Recent);
       Assert.NotNull(captured.FinishedAt);

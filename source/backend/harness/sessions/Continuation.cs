@@ -8,9 +8,3 @@ public sealed record ContinuationSubmission(
 
 // Durable acknowledgement for one input-less continuation execution.
 public sealed record ContinuationReceipt(Guid SessionId, Guid OperationId, Guid ExecutionId);
-
-internal enum ExecutionRunKind {
-  UserInput = 0,
-  Compaction = 1,
-  Continuation = 2
-}

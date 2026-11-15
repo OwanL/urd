@@ -93,7 +93,7 @@ public sealed class SessionShutdownTests {
       Assert.All(snapshots, snapshot => Assert.True(snapshot.AdmissionFenced));
       for (int index = 0; index < callbackResults.Length; index++)
         Assert.Equal(callbackResults[index].Refusal,
-            await sessions[1 - index].GetUserMessageReceiptAsync(callbackResults[index].Refusal.Submission.SubmissionId)
+            await sessions[1 - index].ReadUserMessageReceiptAsync(callbackResults[index].Refusal.Submission.SubmissionId)
                 .WaitAsync(TestTimeout));
       Assert.False(firstWait.IsCompleted);
 
@@ -107,7 +107,7 @@ public sealed class SessionShutdownTests {
       callbackRelease.TrySetResult();
       await secondWait.WaitAsync(TestTimeout);
       SessionExecutionResult[] settlements = await Task.WhenAll(ownedExecutions.Select(execution =>
-          execution.Session.WaitForSettlementAsync(execution.ExecutionId).WaitAsync(TestTimeout))).WaitAsync(TestTimeout);
+          execution.Session.WaitForExecutionFinishAsync(execution.ExecutionId).WaitAsync(TestTimeout))).WaitAsync(TestTimeout);
       Assert.All(settlements, settlement => Assert.Equal(ExecutionOutcome.Cancelled, settlement.Outcome));
       Assert.Equal(2, client.Calls);
       Assert.Equal(0, client.DisposeCalls);
@@ -170,7 +170,7 @@ public sealed class SessionShutdownTests {
           Assert.Single(StoredExecutions.Read(database), execution => execution.ExecutionId == ownedExecutions[1].ExecutionId).Stopping);
 
       cleanupRelease[1].TrySetResult();
-      await sessions[1].WaitForSettlementAsync(ownedExecutions[1].ExecutionId).WaitAsync(TestTimeout);
+      await sessions[1].WaitForExecutionFinishAsync(ownedExecutions[1].ExecutionId).WaitAsync(TestTimeout);
       Assert.False(shutdown.IsCompleted);
 
       database.Execute("DROP TRIGGER reject_stops;");
@@ -186,7 +186,7 @@ public sealed class SessionShutdownTests {
           Assert.Contains(failures, error => error.Message.Contains("Injected second Stop failure", StringComparison.Ordinal));
       }
       SessionExecutionResult[] settlements = await Task.WhenAll(ownedExecutions.Select(execution =>
-          execution.Session.WaitForSettlementAsync(execution.ExecutionId).WaitAsync(TestTimeout))).WaitAsync(TestTimeout);
+          execution.Session.WaitForExecutionFinishAsync(execution.ExecutionId).WaitAsync(TestTimeout))).WaitAsync(TestTimeout);
       Assert.All(settlements, settlement => Assert.Equal(ExecutionOutcome.Cancelled, settlement.Outcome));
       Assert.All(StoredExecutions.Read(database), execution => Assert.Equal(ExecutionOutcome.Cancelled, execution.Outcome));
       Assert.Equal(0, client.DisposeCalls);
@@ -238,7 +238,7 @@ public sealed class SessionShutdownTests {
 
     await Task.WhenAll(executions.Select(async execution => {
       try {
-        await execution.Session.WaitForSettlementAsync(execution.ExecutionId).WaitAsync(TestTimeout);
+        await execution.Session.WaitForExecutionFinishAsync(execution.ExecutionId).WaitAsync(TestTimeout);
       } catch (Exception failure) when (IsInjectedStoreFailure(failure)) {
         // The session joins its execution before returning the injected settlement failure.
       }

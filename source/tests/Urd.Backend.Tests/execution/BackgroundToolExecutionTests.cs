@@ -62,7 +62,7 @@ public sealed class BackgroundToolExecutionTests {
           entry => entry.Entry.Kind == TranscriptEntryKind.ToolCompletion);
       releaseProvider.TrySetResult();
       Assert.Equal(ExecutionOutcome.Completed,
-          (await fixture.Session.WaitForSettlementAsync(execution).WaitAsync(TestTimeout)).Outcome);
+          (await fixture.Session.WaitForExecutionFinishAsync(execution).WaitAsync(TestTimeout)).Outcome);
       Assert.Equal(4, client.Calls);
       Assert.Equal(frozen, inFlight.Select(message => message.Text));
       string placeholder = Assert.IsType<string>(Assert.Single(client.Requests[1].SelectMany(message => message.Contents)
@@ -114,7 +114,7 @@ public sealed class BackgroundToolExecutionTests {
     });
     await using var fixture = new ExecutionFixture(client, tools: [tool]);
     Guid execution = await fixture.StartExecutionAsync("start");
-    Task<SessionExecutionResult> settlement = fixture.Session.WaitForSettlementAsync(execution);
+    Task<SessionExecutionResult> settlement = fixture.Session.WaitForExecutionFinishAsync(execution);
     try {
       await providerEntered.Task.WaitAsync(TestTimeout);
       if (!providerFails)
@@ -142,7 +142,7 @@ public sealed class BackgroundToolExecutionTests {
     Guid following = await fixture.StartExecutionAsync("deliberate follow-up");
     Assert.NotEqual(execution, following);
     Assert.Equal(ExecutionOutcome.Completed,
-        (await fixture.Session.WaitForSettlementAsync(following).WaitAsync(TestTimeout)).Outcome);
+        (await fixture.Session.WaitForExecutionFinishAsync(following).WaitAsync(TestTimeout)).Outcome);
     Assert.Equal(3, client.Calls);
     Assert.DoesNotContain(client.LastRequest, message => message.Text == "too early");
 
@@ -192,7 +192,7 @@ public sealed class BackgroundToolExecutionTests {
         store, _ => client, new ToolCatalog([tool]));
     UserMessageReceipt receipt = await session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, "go", TestLlmSelection.Default));
     Guid execution = receipt.ExecutionId!.Value;
-    Task<SessionExecutionResult> settlement = session.WaitForSettlementAsync(execution);
+    Task<SessionExecutionResult> settlement = session.WaitForExecutionFinishAsync(execution);
     try {
       try {
         await providerEntered.Task.WaitAsync(TestTimeout);

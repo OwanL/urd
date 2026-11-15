@@ -21,7 +21,7 @@ public sealed class LlmResponseWriterTests {
     Guid executionId = await fixture.StartExecutionAsync("go");
 
     Assert.Equal(ExecutionOutcome.Completed,
-        (await fixture.Session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout)).Outcome);
+        (await fixture.Session.WaitForExecutionFinishAsync(executionId).WaitAsync(TestTimeout)).Outcome);
     var output = StoredLlmResponses.Read(fixture.Database);
     Assert.NotEmpty(output);
     Assert.Equal(text, string.Concat(output.Select(chunk => StrictUtf8.GetString(chunk.Bytes))));
@@ -48,14 +48,14 @@ public sealed class LlmResponseWriterTests {
       await StoredLlmResponses.WaitForAnyAsync(fixture.Database);
       Assert.Equal("visible", StoredLlmResponses.ReadText(fixture.Database));
       Assert.All(StoredLlmResponses.Read(fixture.Database), row => Assert.False(row.Final));
-      Assert.False(fixture.Session.WaitForSettlementAsync(executionId).IsCompleted);
+      Assert.False(fixture.Session.WaitForExecutionFinishAsync(executionId).IsCompleted);
       Assert.Equal(1, client.Calls);
     } finally {
       release.TrySetResult();
     }
 
     Assert.Equal(ExecutionOutcome.Completed,
-        (await fixture.Session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout)).Outcome);
+        (await fixture.Session.WaitForExecutionFinishAsync(executionId).WaitAsync(TestTimeout)).Outcome);
     Assert.Equal("visible", StoredLlmResponses.ReadText(fixture.Database));
     Assert.Single(StoredLlmResponses.Read(fixture.Database), row => row.Final);
   }

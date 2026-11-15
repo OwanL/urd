@@ -122,11 +122,11 @@ internal sealed class SessionEventPage : IDisposable {
         return;
 
       if (change.Status is { } status) {
-        queue.Enqueue(new SessionSseEvent("status", change.Session,
-            new { session = change.Session, boot, version = change.Version, status }));
+        queue.Enqueue(new SessionSseEvent("status", change.SessionId,
+            new { session = change.SessionId, boot, version = change.Version, status }));
       } else if (registration.Watched) {
-        queue.Enqueue(new SessionSseEvent("change", change.Session,
-            new { session = change.Session, boot, version = change.Version }));
+        queue.Enqueue(new SessionSseEvent("change", change.SessionId,
+            new { session = change.SessionId, boot, version = change.Version }));
       }
     }
   }

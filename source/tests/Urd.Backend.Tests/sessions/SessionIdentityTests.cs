@@ -15,7 +15,7 @@ public sealed class SessionIdentityTests {
     var manager = new SessionManager(store, _ => client);
     var createdNotices = new List<Guid>();
     manager.SessionCreated += createdNotices.Add;
-    Assert.NotEqual(Guid.Empty, manager.Boot);
+    Assert.NotEqual(Guid.Empty, manager.BootId);
     Guid missing = Guid.NewGuid();
 
     await Assert.ThrowsAsync<KeyNotFoundException>(() => manager.GetPrimaryAsync(missing));

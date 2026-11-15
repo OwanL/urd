@@ -43,7 +43,7 @@ public sealed class AutomaticCompactionTests {
       if (change.Status == "compacting") compacting.TrySetResult();
     }, watched: true);
     UserMessageReceipt receipt = await AcceptAsync(session, "current turn", TestLlmSelection.Default with { ContextWindow = 8_192 });
-    Task<SessionExecutionResult> settlement = session.WaitForSettlementAsync(Assert.IsType<Guid>(receipt.ExecutionId));
+    Task<SessionExecutionResult> settlement = session.WaitForExecutionFinishAsync(Assert.IsType<Guid>(receipt.ExecutionId));
     try {
       await client.SummaryEntered.WaitAsync(TestTimeout);
       await compacting.Task.WaitAsync(TestTimeout);
@@ -107,7 +107,7 @@ public sealed class AutomaticCompactionTests {
       preferences.SetCompactionTriggerTokenCount(1_000);
       release.TrySetResult();
       Assert.Equal(ExecutionOutcome.Completed,
-          (await session.WaitForSettlementAsync(Assert.IsType<Guid>(receipt.ExecutionId)).WaitAsync(TestTimeout)).Outcome);
+          (await session.WaitForExecutionFinishAsync(Assert.IsType<Guid>(receipt.ExecutionId)).WaitAsync(TestTimeout)).Outcome);
 
       Assert.Equal(1, client.SummaryCalls);
       Assert.Equal(1, toolRuns);
@@ -159,7 +159,7 @@ public sealed class AutomaticCompactionTests {
       await session.SubmitUserMessageAsync(removed);
       await session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, "last steering input", selection));
       release.TrySetResult();
-      await session.WaitForSettlementAsync(initial.ExecutionId!.Value).WaitAsync(TestTimeout);
+      await session.WaitForExecutionFinishAsync(initial.ExecutionId!.Value).WaitAsync(TestTimeout);
       var context = store.Compactions.ReadContext(session.Id, 0);
       Assert.Equal(1, context.PreviousCompaction!.FirstRetainedMessageLocation.RequestIndexInExecution);
       Assert.Equal(1, context.PreviousCompaction.FirstRetainedMessageLocation.MessageIndexInRequest); // The first steering input was summarized.
@@ -169,7 +169,7 @@ public sealed class AutomaticCompactionTests {
           entry => entry.Entry.Kind == TranscriptEntryKind.Compaction);
 
       var edited = await session.EditUserMessageAsync(new(Guid.NewGuid(), target, "new steering", TestLlmSelection.Default));
-      await session.WaitForSettlementAsync(edited.ExecutionId).WaitAsync(TestTimeout);
+      await session.WaitForExecutionFinishAsync(edited.ExecutionId).WaitAsync(TestTimeout);
       Assert.Null(store.Compactions.ReadContext(session.Id, edited.HistoryRevision).PreviousCompaction);
       Assert.DoesNotContain(client.Requests[^1], message => message.Text?.Contains(Summary, StringComparison.Ordinal) == true);
       Assert.Equal(new[] { "start", "new steering" }, client.Requests[^1]
@@ -178,7 +178,7 @@ public sealed class AutomaticCompactionTests {
           entry => entry.Entry.Kind == TranscriptEntryKind.Compaction);
     } finally {
       release.TrySetResult();
-      await session.FenceUserMessagesAsync();
+      await session.StopAcceptingUserMessagesAsync();
       await session.StopExecutionAsync().WaitAsync(TestTimeout);
     }
   }
@@ -203,7 +203,7 @@ public sealed class AutomaticCompactionTests {
     UserMessageReceipt receipt = await AcceptAsync(session, new string('u', 100_000), TestLlmSelection.Default);
 
     Assert.Equal(ExecutionOutcome.Completed,
-        (await session.WaitForSettlementAsync(Assert.IsType<Guid>(receipt.ExecutionId)).WaitAsync(TestTimeout)).Outcome);
+        (await session.WaitForExecutionFinishAsync(Assert.IsType<Guid>(receipt.ExecutionId)).WaitAsync(TestTimeout)).Outcome);
     Assert.Equal(3, client.Requests.Length);
     Assert.Equal(1, client.SummaryCalls);
     Assert.Equal(1, toolRuns);
@@ -237,7 +237,7 @@ public sealed class AutomaticCompactionTests {
     UserMessageReceipt receipt = await AcceptAsync(session, "current", TestLlmSelection.Default);
 
     Assert.Equal(ExecutionOutcome.Failed,
-        (await session.WaitForSettlementAsync(Assert.IsType<Guid>(receipt.ExecutionId)).WaitAsync(TestTimeout)).Outcome);
+        (await session.WaitForExecutionFinishAsync(Assert.IsType<Guid>(receipt.ExecutionId)).WaitAsync(TestTimeout)).Outcome);
     Assert.Equal(2, client.Requests.Length);
     Assert.Equal(0, client.SummaryCalls);
     Assert.Equal(2, StoredExecutions.ReadRequests(database).Count);
@@ -252,7 +252,7 @@ public sealed class AutomaticCompactionTests {
   private static async Task SubmitAsync(PrimarySession session, string text, LlmSelection selection) {
     UserMessageReceipt receipt = await AcceptAsync(session, text, selection);
     Assert.Equal(ExecutionOutcome.Completed,
-        (await session.WaitForSettlementAsync(Assert.IsType<Guid>(receipt.ExecutionId)).WaitAsync(TestTimeout)).Outcome);
+        (await session.WaitForExecutionFinishAsync(Assert.IsType<Guid>(receipt.ExecutionId)).WaitAsync(TestTimeout)).Outcome);
   }
 
   private static async Task<UserMessageReceipt> AcceptAsync(PrimarySession session, string text, LlmSelection selection) {

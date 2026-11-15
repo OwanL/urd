@@ -128,7 +128,7 @@ public sealed class StartingContextSessionTests {
         new UserMessageSubmission(Guid.NewGuid(), 0, text, TestLlmSelection.Default));
     Assert.Equal(MessageAcceptance.Accepted, receipt.Acceptance);
     Assert.Equal(ExecutionOutcome.Completed,
-        (await session.WaitForSettlementAsync(Assert.IsType<Guid>(receipt.ExecutionId)).WaitAsync(TestTimeout)).Outcome);
+        (await session.WaitForExecutionFinishAsync(Assert.IsType<Guid>(receipt.ExecutionId)).WaitAsync(TestTimeout)).Outcome);
   }
 
   private static void AssertInstructionPrefix(IReadOnlyList<ChatMessage> instructions, IReadOnlyList<ChatMessage> request) {

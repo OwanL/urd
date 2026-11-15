@@ -73,6 +73,6 @@ public sealed class ToolCompositionTests {
     var selection = TestLlmSelection.Default with { Family = ModelFamily.Google };
     UserMessageReceipt receipt = await session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, "work", selection));
     Assert.Equal(ExecutionOutcome.Completed,
-        (await session.WaitForSettlementAsync(receipt.ExecutionId!.Value).WaitAsync(TestTimeout)).Outcome);
+        (await session.WaitForExecutionFinishAsync(receipt.ExecutionId!.Value).WaitAsync(TestTimeout)).Outcome);
   }
 }

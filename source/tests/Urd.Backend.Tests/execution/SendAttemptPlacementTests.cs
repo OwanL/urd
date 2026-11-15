@@ -52,7 +52,7 @@ public sealed class SendAttemptPlacementTests {
       factoryRelease.TrySetResult();
       Assert.Equal((2L, 1L), await providerObserved.Task.WaitAsync(TestTimeout));
       Assert.Equal(ExecutionOutcome.Completed,
-          (await session.WaitForSettlementAsync(executionId.Value).WaitAsync(TestTimeout)).Outcome);
+          (await session.WaitForExecutionFinishAsync(executionId.Value).WaitAsync(TestTimeout)).Outcome);
       Assert.Contains((await ReadHistoryAsync(session)).Entries,
           entry => entry.Entry.Kind == TranscriptEntryKind.User);
       Assert.Equal(1, client.Calls);
@@ -60,7 +60,7 @@ public sealed class SendAttemptPlacementTests {
     } finally {
       factoryRelease.TrySetResult();
       if (executionId is { } id)
-        await session.WaitForSettlementAsync(id).WaitAsync(TestTimeout);
+        await session.WaitForExecutionFinishAsync(id).WaitAsync(TestTimeout);
     }
   }
 
@@ -75,8 +75,8 @@ public sealed class SendAttemptPlacementTests {
     Guid executionId = Assert.IsType<Guid>(receipt.ExecutionId);
 
     Assert.Equal(ExecutionOutcome.Failed,
-        (await session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout)).Outcome);
-    Assert.Equal(receipt, await session.GetUserMessageReceiptAsync(submission.SubmissionId));
+        (await session.WaitForExecutionFinishAsync(executionId).WaitAsync(TestTimeout)).Outcome);
+    Assert.Equal(receipt, await session.ReadUserMessageReceiptAsync(submission.SubmissionId));
     Assert.Empty((await ReadHistoryAsync(session)).Entries);
     Assert.Empty(StoredLlmResponses.Read(database));
     Assert.Equal(0L, ReadProviderContextCount(database));
@@ -101,7 +101,7 @@ public sealed class SendAttemptPlacementTests {
     Guid executionId = Assert.IsType<Guid>(receipt.ExecutionId);
 
     Assert.Equal(ExecutionOutcome.Failed,
-        (await session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout)).Outcome);
+        (await session.WaitForExecutionFinishAsync(executionId).WaitAsync(TestTimeout)).Outcome);
     TranscriptHistoryPage history = await ReadHistoryAsync(session);
     Assert.Contains(history.Entries, entry => entry.Entry.Kind == TranscriptEntryKind.User);
     Assert.Contains(history.Entries, entry => entry.Entry.Kind == TranscriptEntryKind.Text);
@@ -142,7 +142,7 @@ public sealed class SendAttemptPlacementTests {
           await session.RequestStopAsync(executionId.Value).WaitAsync(TestTimeout));
       factoryRelease.TrySetResult();
       Assert.Equal(ExecutionOutcome.Cancelled,
-          (await session.WaitForSettlementAsync(executionId.Value).WaitAsync(TestTimeout)).Outcome);
+          (await session.WaitForExecutionFinishAsync(executionId.Value).WaitAsync(TestTimeout)).Outcome);
 
       Assert.Equal(0, client.Calls);
       Assert.Equal(1L, ReadAttempt(database));
@@ -153,7 +153,7 @@ public sealed class SendAttemptPlacementTests {
     } finally {
       factoryRelease.TrySetResult();
       if (executionId is { } id)
-        await session.WaitForSettlementAsync(id).WaitAsync(TestTimeout);
+        await session.WaitForExecutionFinishAsync(id).WaitAsync(TestTimeout);
     }
   }
 
@@ -181,7 +181,7 @@ public sealed class SendAttemptPlacementTests {
     Guid executionId = Assert.IsType<Guid>(receipt.ExecutionId);
 
     Exception failure = await Assert.ThrowsAnyAsync<Exception>(
-        () => session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout));
+        () => session.WaitForExecutionFinishAsync(executionId).WaitAsync(TestTimeout));
     Assert.Equal(19, Assert.IsType<SqliteException>(failure.GetBaseException()).SqliteErrorCode);
     Assert.Equal(receipt, await session.SubmitUserMessageAsync(submission));
 

@@ -11,7 +11,7 @@ using Urd.Core.Tools;
 
 namespace Urd.Core.Sessions;
 
-// Owns session identity, admission and execution lifetime. Collaborators share its gate;
+// Owns session identity, admission and execution lifetime. Collaborators share its session lock;
 // transcript source assembly, LLM work and cleanup joins run outside it.
 public abstract class SessionBase {
   private readonly UrdStore store;
@@ -21,7 +21,7 @@ public abstract class SessionBase {
   private readonly StartingContextManager startingContextManager;
   private readonly ChatProcesses? processes;
   private readonly PendingToolCalls pending;
-  private readonly AsyncLock gate = new();
+  private readonly AsyncLock sessionLock = new();
   private readonly SessionNotifications notifications;
   private readonly SessionStatus status;
   private bool acceptingUserMessages = true;
@@ -40,7 +40,7 @@ public abstract class SessionBase {
     Kind = kind;
     notifications = new SessionNotifications(Id);
     status = new SessionStatus(record.HistoryRevision);
-    Transcript = new SessionTranscript(Id, store, gate);
+    Transcript = new SessionTranscript(Id, store, sessionLock);
     HistoryRevision = record.HistoryRevision;
     WorkingDirectory = record.WorkingDirectory;
     this.store = store;
@@ -62,7 +62,8 @@ public abstract class SessionBase {
 
   internal long HistoryRevision { get; private set; }
 
-  private bool CanAdmit => acceptingUserMessages && editTask is null;
+  private bool IsAcceptingWork => acceptingUserMessages && editTask is null;
+  private bool CanStartWork => IsAcceptingWork && !needsAttention;
 
   // Restores the delivered starting view; opening a session alone never composes it.
   internal StartingContext? ReadStartingContext() => store.StartingContexts.Read(Id);
@@ -74,43 +75,38 @@ public abstract class SessionBase {
         || submission.LlmSelection is null || submission.Focus?.Length > 8192)
       throw new ArgumentException("Compaction requires an operation ID, revision, selection and bounded focus.", nameof(submission));
     submission.LlmSelection.Validate();
-    TaskCompletionSource? released = null;
+    TaskCompletionSource? executionStart = null;
     CompactionReceipt? receipt;
-    using (await gate.AcquireAsync()) {
+    using (await sessionLock.AcquireAsync()) {
       var admission = WriteToStore(() => store.Compactions.Start(Id, submission,
-          CanAdmit && !needsAttention && submission.ExpectedHistoryRevision == HistoryRevision));
+          CanStartWork && submission.ExpectedHistoryRevision == HistoryRevision));
       if (admission is null)
         return null;
       receipt = admission.Value.Receipt;
       if (admission.Value.New) {
-        released = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        StartExecution(submission.OperationId, submission.LlmSelection, released.Task, submission);
+        executionStart = StartExecutionAfterUnlock(submission.OperationId, submission.LlmSelection, submission);
         PublishChange();
       }
     }
-    released?.SetResult();
+    executionStart?.SetResult();
     return receipt;
   }
 
-  public async Task<CompactionReceipt?> ReadCompactionReceiptAsync(Guid operationId, CancellationToken cancellation = default) {
-    using var held = await gate.AcquireAsync(cancellation);
-    return store.Compactions.ReadReceipt(Id, operationId);
-  }
+  public Task<CompactionReceipt?> ReadCompactionReceiptAsync(Guid operationId, CancellationToken cancellation = default) =>
+      ReadUnderLockAsync(() => store.Compactions.ReadReceipt(Id, operationId), cancellation);
 
-  public async Task<CompactionSummary?> ReadCompactionAsync(Guid id, long revision, CancellationToken cancellation = default) {
-    using var held = await gate.AcquireAsync(cancellation);
-    return store.Compactions.Read(Id, revision, id);
-  }
+  public Task<CompactionSummary?> ReadCompactionAsync(Guid id, long revision, CancellationToken cancellation = default) =>
+      ReadUnderLockAsync(() => store.Compactions.Read(Id, revision, id), cancellation);
 
   internal async Task<ModelHistory> ReadModelHistoryAsync(Guid executionId, Guid? requestId) {
-    using var held = await gate.AcquireAsync();
+    using var _ = await sessionLock.AcquireAsync();
     if (!CanRecordExecution(executionId))
       throw new OperationCanceledException("The execution no longer accepts compaction.");
     return store.Compactions.ReadContext(Id, HistoryRevision, requestId is null ? null : executionId, requestId);
   }
 
   internal async Task<bool> SaveCompactionAsync(Guid executionId, HistoryCompactionPlan plan, GeneratedCompactionSummary result) {
-    using var held = await gate.AcquireAsync();
+    using var _ = await sessionLock.AcquireAsync();
     if (!CanRecordExecution(executionId))
       return false;
     bool saved = WriteToStore(() => store.Compactions.Save(Id, executionId, HistoryRevision, plan, result));
@@ -120,7 +116,7 @@ public abstract class SessionBase {
   }
 
   internal async Task SetCompactingAsync(Guid executionId, bool compacting) {
-    using var held = await gate.AcquireAsync();
+    using var _ = await sessionLock.AcquireAsync();
     if (IsCurrentExecution(executionId)) {
       execution!.SetCompacting(compacting);
       PublishChange();
@@ -128,50 +124,42 @@ public abstract class SessionBase {
   }
 
   internal async Task RecordCompactionErrorAsync(Guid executionId, string? error) {
-    using var held = await gate.AcquireAsync();
+    using var _ = await sessionLock.AcquireAsync();
     if (CanRecordExecution(executionId, allowStopping: true))
-      WriteToStore(() => { store.Compactions.RecordError(Id, executionId, error); return true; });
+      WriteToStore(() => store.Compactions.RecordError(Id, executionId, error));
   }
 
-  internal async Task<bool> CanRetryOverflowAsync(Guid executionId, Guid requestId) {
-    using var held = await gate.AcquireAsync();
-    return CanRecordExecution(executionId) && store.Executions.CanRetryOverflow(Id, executionId, requestId);
-  }
+  internal Task<bool> CanRetryOverflowAsync(Guid executionId, Guid requestId) =>
+      ReadUnderLockAsync(() => CanRecordExecution(executionId) && store.Executions.CanRetryOverflow(Id, executionId, requestId));
 
   // Manager shutdown joins executions before terminating deliberately retained processes.
   internal Task KillProcessesAsync() => OperatingSystem.IsWindows() && processes is not null
       ? processes.KillAllAsync() : Task.CompletedTask;
 
-  public async Task<UserMessageReceipt?> GetUserMessageReceiptAsync(Guid submissionId, CancellationToken cancellation = default) {
-    using var held = await gate.AcquireAsync(cancellation);
-    return store.UserMessages.ReadReceipt(Id, submissionId);
-  }
+  public Task<UserMessageReceipt?> ReadUserMessageReceiptAsync(Guid submissionId, CancellationToken cancellation = default) =>
+      ReadUnderLockAsync(() => store.UserMessages.ReadReceipt(Id, submissionId), cancellation);
 
   public async Task<ContinuationReceipt?> ReadContinuationReceiptAsync(Guid operationId,
       CancellationToken cancellation = default) {
     if (operationId == Guid.Empty)
       throw new ArgumentException("An operation ID is required.", nameof(operationId));
-    using var held = await gate.AcquireAsync(cancellation);
-    return store.Continuations.ReadReceipt(Id, operationId);
+    return await ReadUnderLockAsync(() => store.Continuations.ReadReceipt(Id, operationId), cancellation);
   }
 
-  public async Task<NotSentPage> ReadNotSentInputsAsync(string? cursor = null, CancellationToken cancellation = default) {
-    using var held = await gate.AcquireAsync(cancellation);
-    return store.NotSentInputs.Read(Id, cursor);
-  }
+  public Task<NotSentPage> ReadNotSentInputsAsync(string? cursor = null, CancellationToken cancellation = default) =>
+      ReadUnderLockAsync(() => store.NotSentInputs.Read(Id, cursor), cancellation);
 
   public async Task<bool> RemovePendingInputAsync(Guid executionId, Guid submissionId) {
     if (executionId == Guid.Empty || submissionId == Guid.Empty)
       throw new ArgumentException("Execution and submission identities are required.");
 
-    using var held = await gate.AcquireAsync();
-    if (!CanAdmit || needsAttention || execution is not { } current
+    using var _ = await sessionLock.AcquireAsync();
+    if (!CanStartWork || execution is not { } current
         || current.Identity.ExecutionId != executionId || current.Identity.HistoryRevision != HistoryRevision
         || current.IsStopping)
       return false;
 
-    SessionSnapshot stored = store.Snapshots.ReadPersisted(Id);
-    SessionSnapshot snapshot = status.ApplyLiveState(stored, CanAdmit, current);
+    SessionSnapshot snapshot = ReadCurrentSnapshot();
     if (snapshot.AdmissionFenced || snapshot.StopRequested || snapshot.UnsettledExecutionId != executionId)
       return false;
 
@@ -184,11 +172,11 @@ public abstract class SessionBase {
   }
 
   public async Task<SessionSnapshot> ReadSnapshotAsync(CancellationToken cancellation = default) {
-    using var held = await gate.AcquireAsync(cancellation);
-    SessionSnapshot snapshot = status.ApplyLiveState(store.Snapshots.ReadPersisted(Id), CanAdmit, execution);
-    bool locallyIdle = CanAdmit && !needsAttention && execution is null
+    using var _ = await sessionLock.AcquireAsync(cancellation);
+    SessionSnapshot snapshot = ReadCurrentSnapshot();
+    bool locallyIdle = CanStartWork && execution is null
         && snapshot.UnsettledExecutionId is null && !snapshot.AdmissionFenced && !snapshot.StopRequested;
-    bool canRemovePending = CanAdmit && !needsAttention && !snapshot.AdmissionFenced && !snapshot.StopRequested
+    bool canRemovePending = CanStartWork && !snapshot.AdmissionFenced && !snapshot.StopRequested
         && execution is { IsStopping: false } && snapshot.UnsettledExecutionId == execution.ExecutionId;
     return snapshot with {
       IsCompacting = execution?.IsCompacting == true,
@@ -203,16 +191,12 @@ public abstract class SessionBase {
 
   public async Task<string?> TryChangeWorkingDirectoryAsync(string path) {
     string normalized = PreferenceManager.NormalizeWorkingDirectory(path);
-    using (await gate.AcquireAsync()) {
-      SessionSnapshot stored = store.Snapshots.ReadPersisted(Id);
-      SessionSnapshot snapshot = status.ApplyLiveState(stored, CanAdmit, execution);
+    using (await sessionLock.AcquireAsync()) {
+      SessionSnapshot snapshot = ReadCurrentSnapshot();
       if (!CanChangeWorkingDirectory(snapshot))
         return null;
 
-      WriteToStore(() => {
-        store.Sessions.SetWorkingDirectory(Id, normalized);
-        return true;
-      });
+      WriteToStore(() => store.Sessions.SetWorkingDirectory(Id, normalized));
       WorkingDirectory = normalized;
       PublishChange();
       return normalized;
@@ -222,69 +206,64 @@ public abstract class SessionBase {
   public async Task<IDisposable> SubscribeAsync(Action<SessionChange> observer, bool watched,
       CancellationToken cancellation = default) {
     ArgumentNullException.ThrowIfNull(observer);
-    using var held = await gate.AcquireAsync(cancellation);
+    using var _ = await sessionLock.AcquireAsync(cancellation);
     SessionSnapshot stored = store.Snapshots.ReadPersisted(Id);
-    status.Observe(stored, execution);
-    return notifications.Subscribe(observer, watched, status.ReadStored(stored, CanAdmit, needsAttention, execution));
+    status.Update(stored, execution);
+    return notifications.Subscribe(observer, watched, status.CurrentStatus(stored, IsAcceptingWork, needsAttention, execution));
   }
 
   private protected async Task<ContinuationReceipt?> AdmitContinuationAsync(ContinuationSubmission submission) {
     ArgumentNullException.ThrowIfNull(submission);
-    TaskCompletionSource? lockReleased = null;
+    TaskCompletionSource? executionStart = null;
     ContinuationReceipt? receipt;
-    using (await gate.AcquireAsync()) {
+    using (await sessionLock.AcquireAsync()) {
       var admission = WriteToStore(() => store.Continuations.Start(Id, HistoryRevision, submission,
-          CanAdmit && !needsAttention && execution is null));
+          CanStartWork && execution is null));
       if (admission is null)
         return null;
 
       receipt = admission.Value.Receipt;
       if (admission.Value.New) {
-        lockReleased = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        StartExecution(receipt.ExecutionId, submission.LlmSelection!, lockReleased.Task);
+        executionStart = StartExecutionAfterUnlock(receipt.ExecutionId, submission.LlmSelection!);
         PublishChange();
       }
     }
 
-    lockReleased?.SetResult();
+    executionStart?.SetResult();
     return receipt;
   }
 
   private protected async Task<UserMessageReceipt> AdmitUserMessageAsync(UserMessageSubmission submission) {
     // A new execution starts only after the lock is released.
-    TaskCompletionSource? lockReleased = null;
+    TaskCompletionSource? executionStart = null;
     UserMessageReceipt receipt;
-    using (await gate.AcquireAsync()) {
+    using (await sessionLock.AcquireAsync()) {
       (receipt, bool newlyAccepted) = WriteToStore(
-          () => store.UserMessages.Submit(Id, HistoryRevision, submission, CanAdmit, Guid.NewGuid(), execution?.ExecutionId));
+          () => store.UserMessages.Submit(Id, HistoryRevision, submission, IsAcceptingWork, Guid.NewGuid(), execution?.ExecutionId));
       if (receipt.Acceptance == MessageAcceptance.Accepted)
         hasAcceptedInput = true;
 
       // Steering joins the owned execution; neither it nor a retained receipt starts another driver.
       if (newlyAccepted) {
-        if (execution is null) {
-          lockReleased = new(TaskCreationOptions.RunContinuationsAsynchronously);
-          StartExecution(receipt.ExecutionId!.Value, receipt.Submission.LlmSelection!, lockReleased.Task);
-        }
+        if (execution is null)
+          executionStart = StartExecutionAfterUnlock(receipt.ExecutionId!.Value, receipt.Submission.LlmSelection!);
         execution!.Wake();
         PublishChange();
       }
     }
 
-    lockReleased?.SetResult();
+    executionStart?.SetResult();
     return receipt;
   }
 
-  public async Task<MessageEditReceipt?> ReadMessageEditReceiptAsync(Guid operationId, CancellationToken cancellation = default) {
-    using var held = await gate.AcquireAsync(cancellation);
-    return store.MessageEdits.ReadReceipt(Id, operationId);
-  }
+  public Task<MessageEditReceipt?> ReadMessageEditReceiptAsync(Guid operationId, CancellationToken cancellation = default) =>
+      ReadUnderLockAsync(() => store.MessageEdits.ReadReceipt(Id, operationId), cancellation);
 
   private protected async Task<MessageEditReceipt> ReplaceUserMessageAsync(MessageEditSubmission submission) {
     MessageEditStorage.Validate(submission);
     Task<MessageEditReceipt> work;
     TaskCompletionSource? released = null;
-    using (await gate.AcquireAsync()) {
+    using (await sessionLock.AcquireAsync()) {
       MessageEditReceipt? receipt = store.MessageEdits.ReadReceiptOrValidate(Id, submission);
       if (receipt is not null)
         return receipt;
@@ -307,30 +286,29 @@ public abstract class SessionBase {
 
   private async Task<MessageEditReceipt> ReplaceAfterStopAsync(MessageEditSubmission submission, Task admitted) {
     await admitted;
-    TaskCompletionSource? released = null;
+    TaskCompletionSource? executionStart = null;
     try {
       await StopActiveExecutionAsync();
-      using var held = await gate.AcquireAsync();
+      using var _ = await sessionLock.AcquireAsync();
       if (!acceptingUserMessages || needsAttention)
         throw new UserMessageConflictException(submission.OperationId);
       MessageEditReceipt receipt = WriteToStore(() => store.MessageEdits.Replace(Id, submission));
       HistoryRevision = receipt.HistoryRevision;
       status.Replaced(HistoryRevision);
-      released = new(TaskCreationOptions.RunContinuationsAsynchronously);
-      StartExecution(receipt.ExecutionId, submission.LlmSelection, released.Task);
+      executionStart = StartExecutionAfterUnlock(receipt.ExecutionId, submission.LlmSelection);
       return receipt;
     } finally {
-      using (await gate.AcquireAsync()) {
+      using (await sessionLock.AcquireAsync()) {
         editTask = null;
         editSubmission = null;
         PublishChange();
       }
-      released?.SetResult();
+      executionStart?.SetResult();
     }
   }
 
-  internal async Task FenceUserMessagesAsync() {
-    using var held = await gate.AcquireAsync();
+  internal async Task StopAcceptingUserMessagesAsync() {
+    using var _ = await sessionLock.AcquireAsync();
     if (acceptingUserMessages) {
       acceptingUserMessages = false;
       PublishChange();
@@ -341,7 +319,7 @@ public abstract class SessionBase {
   // must not prevent local cancellation or let shutdown skip waiting for owned work.
   internal async Task StopExecutionAsync() {
     Task? pendingEdit;
-    using (await gate.AcquireAsync())
+    using (await sessionLock.AcquireAsync())
       pendingEdit = editTask;
     await Task.WhenAll(StopActiveExecutionAsync(), JoinEditAsync(pendingEdit));
   }
@@ -361,7 +339,7 @@ public abstract class SessionBase {
     Task pendingSettlement;
     Task stopCallbacks = Task.CompletedTask;
     Exception? stopFailure = null;
-    using (await gate.AcquireAsync()) {
+    using (await sessionLock.AcquireAsync()) {
       pendingExecution = executionTask ?? Task.CompletedTask;
       pendingSettlement = execution?.Settlement ?? Task.CompletedTask;
       if (execution is not null) {
@@ -391,23 +369,24 @@ public abstract class SessionBase {
     if (executionId == Guid.Empty)
       throw new ArgumentException("An execution ID is required.", nameof(executionId));
 
-    using var held = await gate.AcquireAsync();
-    bool ownsExecution = IsCurrentExecution(executionId);
-    // Signal even if the Stop write fails. The driver owns joining the retained
-    // callback task before settlement; this acknowledgement never means cleanup finished.
-    if (ownsExecution)
-      _ = execution!.StopAsync();
+    using (await sessionLock.AcquireAsync()) {
+      bool ownsExecution = IsCurrentExecution(executionId);
+      // Signal even if the Stop write fails. The driver owns joining the retained
+      // callback task before settlement; this acknowledgement never means cleanup finished.
+      if (ownsExecution)
+        _ = execution!.StopAsync();
 
-    StopReceipt receipt = WriteToStore(() => store.Executions.RequestStop(Id, executionId, ownsExecution));
-    if (receipt.Status == StopStatus.Requested)
-      PublishChange();
-    return receipt;
+      StopReceipt receipt = WriteToStore(() => store.Executions.RequestStop(Id, executionId, ownsExecution));
+      if (receipt.Status == StopStatus.Requested)
+        PublishChange();
+      return receipt;
+    }
   }
 
-  internal async Task<SessionExecutionResult> WaitForSettlementAsync(Guid executionId, CancellationToken cancellation = default) {
+  internal async Task<SessionExecutionResult> WaitForExecutionFinishAsync(Guid executionId, CancellationToken cancellation = default) {
     Task pendingExecution;
     Task<SessionExecutionResult> pendingSettlement;
-    using (await gate.AcquireAsync(cancellation)) {
+    using (await sessionLock.AcquireAsync(cancellation)) {
       if (!IsCurrentExecution(executionId)) {
         return store.Executions.ReadSettlement(Id, executionId)
             ?? throw new InvalidOperationException($"Execution '{executionId}' has no known settlement in this session.");
@@ -421,12 +400,12 @@ public abstract class SessionBase {
     return await pendingSettlement.WaitAsync(cancellation);
   }
 
-  // Caller holds the session gate; the driver publishes after updating its waiting state.
+  // Caller holds the session lock; the driver publishes after updating its waiting state.
   internal LlmRequest? CreateNextRequest(ExecutionIdentity identity) => identity.SessionId == Id
       && identity.HistoryRevision == HistoryRevision && IsCurrentExecution(identity.ExecutionId) && !execution!.IsStopping
       ? store.Executions.CreateNextRequest(identity) : null;
 
-  // Caller holds the session gate. Results may finish during Stop, but no new work may start.
+  // Caller holds the session lock. Results may finish during Stop, but no new work may start.
   internal bool CanRecordExecution(Guid executionId, bool allowStopping = false) =>
       IsCurrentExecution(executionId) && (allowStopping || !execution!.IsStopping);
 
@@ -436,25 +415,27 @@ public abstract class SessionBase {
       && CanRecordExecution(identity.ExecutionId, allowStopping);
 
   // Completion and cancellation-failure notifications never start another driver or join themselves.
-  internal async Task BackgroundToolCompletedAsync(Guid executionId, Exception? failure = null) {
-    using var held = await gate.AcquireAsync();
+  internal async Task ReportToolOutcomeAsync(Guid executionId, Exception? failure = null) {
+    using var _ = await sessionLock.AcquireAsync();
     if (IsCurrentExecution(executionId))
-      execution!.BackgroundToolCompleted(failure);
+      execution!.ReportToolOutcome(failure);
   }
 
   // Caller holds the lock. The driver starts only after admission releases it.
-  private void StartExecution(Guid executionId, LlmSelection selection, Task lockReleased, ManualCompactionRequest? compaction = null) {
+  private TaskCompletionSource StartExecutionAfterUnlock(Guid executionId, LlmSelection selection, ManualCompactionRequest? compaction = null) {
+    var executionStart = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
     var identity = new ExecutionIdentity(SessionId: Id, ExecutionId: executionId, HistoryRevision: HistoryRevision);
-    var recorder = new SessionExecutionRecorder(this, store, gate, identity);
+    var recorder = new SessionExecutionRecorder(this, store, sessionLock, identity);
     var work = new SessionExecution(recorder, this, createChatClient, selection,
         startingContextManager, tools.For(selection.Family), pending, compaction);
-    execution = new SessionExecutionDriver(this, gate, work);
-    executionTask = execution.RunAsync(lockReleased);
+    execution = new SessionExecutionDriver(this, sessionLock, work);
+    executionTask = execution.RunAsync(executionStart.Task);
+    return executionStart;
   }
 
-  // Caller holds the session gate. Save before releasing resources and publishing;
+  // Caller holds the session lock. Save before releasing resources and publishing;
   // only then may the driver complete its settlement task.
-  internal SessionExecutionResult SettleExecution(SessionExecutionDriver execution, ExecutionOutcome outcome) {
+  internal SessionExecutionResult FinishExecution(SessionExecutionDriver execution, ExecutionOutcome outcome) {
     SessionExecutionResult saved = store.Executions.TryFinish(Id, execution.ExecutionId, outcome)
         ?? throw new InvalidOperationException("The current execution could not be settled.");
 
@@ -467,18 +448,27 @@ public abstract class SessionBase {
 
   private bool IsCurrentExecution(Guid executionId) => execution?.ExecutionId == executionId;
 
-  // Caller holds the session gate.
+  private async Task<T> ReadUnderLockAsync<T>(Func<T> read, CancellationToken cancellation = default) {
+    using var _ = await sessionLock.AcquireAsync(cancellation);
+    return read();
+  }
+
+  // Caller holds the session lock.
+  private SessionSnapshot ReadCurrentSnapshot() =>
+      status.WithLiveState(store.Snapshots.ReadPersisted(Id), IsAcceptingWork, execution);
+
+  // Caller holds the session lock.
   private bool CanChangeWorkingDirectory(SessionSnapshot snapshot) =>
-      WorkingDirectory is not null && CanAdmit && !needsAttention && execution is null
+      WorkingDirectory is not null && CanStartWork && execution is null
       && snapshot.UnsettledExecutionId is null && !snapshot.AdmissionFenced && !HasAcceptedInput();
 
-  // Caller holds the session gate. Accepted decisions never become eligible again.
+  // Caller holds the session lock. Accepted decisions never become eligible again.
   private bool HasAcceptedInput() => hasAcceptedInput ??= store.Sessions.HasAcceptedInput(Id);
 
-  // Caller holds the session gate.
-  internal void PublishChange() => notifications.Publish(status.ReadCurrent(CanAdmit, needsAttention, execution));
+  // Caller holds the session lock.
+  internal void PublishChange() => notifications.Publish(status.ReadCurrent(IsAcceptingWork, needsAttention, execution));
 
-  // Caller holds the session gate.
+  // Caller holds the session lock.
   internal void MarkNeedsAttention() {
     if (needsAttention && !acceptingUserMessages)
       return;
@@ -489,6 +479,15 @@ public abstract class SessionBase {
   }
 
   // A failed write may still have been committed, so refuse new user messages rather than guess.
+  internal void WriteToStore(Action write) {
+    try {
+      write();
+    } catch (SqliteException) {
+      MarkNeedsAttention();
+      throw;
+    }
+  }
+
   internal T WriteToStore<T>(Func<T> write) {
     try {
       return write();

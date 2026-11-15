@@ -68,7 +68,7 @@ public sealed class SteeringFlowTests {
       Assert.Equal(claimedUsers, Users(inFlight));
       nextRelease.TrySetResult();
       Assert.Equal(ExecutionOutcome.Completed,
-          (await fixture.Session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout)).Outcome);
+          (await fixture.Session.WaitForExecutionFinishAsync(executionId).WaitAsync(TestTimeout)).Outcome);
       Assert.Equal(3, client.Calls);
       Assert.Equal(claimedUsers, Users(inFlight));
       Assert.Equal(new[] { 1, 2 }, effects.ToArray());
@@ -83,7 +83,7 @@ public sealed class SteeringFlowTests {
       var history = await fixture.Session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, 0));
       MessageRef target = Assert.Single(history.Entries, entry => entry.Entry.EntryId == second.SubmissionId).Text!.From.Message;
       var edited = await fixture.Session.EditUserMessageAsync(new(Guid.NewGuid(), target, "revised steering", TestLlmSelection.Default));
-      await fixture.Session.WaitForSettlementAsync(edited.ExecutionId).WaitAsync(TestTimeout);
+      await fixture.Session.WaitForExecutionFinishAsync(edited.ExecutionId).WaitAsync(TestTimeout);
       Assert.Equal(new[] { "start", first.Text, "revised steering" }, Users(client.LastRequest));
       Assert.Equal(new[] { 1, 2 }, effects.ToArray());
       Assert.Single(client.LastRequest, message => message.Role == ChatRole.Tool);

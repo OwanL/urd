@@ -35,7 +35,7 @@ public sealed class ManualCompactionTests {
       CompactionReceipt retry = Assert.IsType<CompactionReceipt>(await session.CompactAsync(submission));
       Assert.Equal(accepted.ExecutionId, retry.ExecutionId);
       Assert.Equal(ExecutionOutcome.Completed,
-          (await session.WaitForSettlementAsync(accepted.ExecutionId).WaitAsync(TestTimeout)).Outcome);
+          (await session.WaitForExecutionFinishAsync(accepted.ExecutionId).WaitAsync(TestTimeout)).Outcome);
       CompactionReceipt settled = Assert.IsType<CompactionReceipt>(await session.ReadCompactionReceiptAsync(submission.OperationId));
       Assert.Equal(accepted.ExecutionId, settled.ExecutionId);
       Assert.Equal(ExecutionOutcome.Completed, settled.Outcome);
@@ -65,14 +65,14 @@ public sealed class ManualCompactionTests {
       var history = await session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, revision));
       MessageRef latest = history.Entries.Last(entry => entry.Entry.Kind == TranscriptEntryKind.User).Text!.From.Message;
       var edited = await session.EditUserMessageAsync(new(Guid.NewGuid(), latest, "revised recent turn", TestLlmSelection.Default));
-      await session.WaitForSettlementAsync(edited.ExecutionId).WaitAsync(TestTimeout);
+      await session.WaitForExecutionFinishAsync(edited.ExecutionId).WaitAsync(TestTimeout);
       Assert.Equal(saved.Id, reopened.Compactions.ReadContext(sessionId, edited.HistoryRevision).PreviousCompaction!.Id);
       Assert.Equal(saved, await session.ReadCompactionAsync(saved.Id, edited.HistoryRevision));
 
       history = await session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, edited.HistoryRevision));
       MessageRef ancient = history.Entries.First(entry => entry.Entry.Kind == TranscriptEntryKind.User).Text!.From.Message;
       var reset = await session.EditUserMessageAsync(new(Guid.NewGuid(), ancient, "fresh beginning", TestLlmSelection.Default));
-      await session.WaitForSettlementAsync(reset.ExecutionId).WaitAsync(TestTimeout);
+      await session.WaitForExecutionFinishAsync(reset.ExecutionId).WaitAsync(TestTimeout);
       Assert.Null(reopened.Compactions.ReadContext(sessionId, reset.HistoryRevision).PreviousCompaction);
       Assert.Null(await session.ReadCompactionAsync(saved.Id, reset.HistoryRevision));
       Assert.DoesNotContain(client.Requests[^1], message => message.Text?.Contains(Summary, StringComparison.Ordinal) == true);
@@ -102,7 +102,7 @@ public sealed class ManualCompactionTests {
     long revision = (await session.ReadSnapshotAsync()).HistoryRevision;
     CompactionReceipt accepted = Assert.IsType<CompactionReceipt>(await session.CompactAsync(
         new(Guid.NewGuid(), revision, Selection)));
-    Task<SessionExecutionResult> settlement = session.WaitForSettlementAsync(accepted.ExecutionId);
+    Task<SessionExecutionResult> settlement = session.WaitForExecutionFinishAsync(accepted.ExecutionId);
     try {
       await entered.Task.WaitAsync(TestTimeout);
       await session.RequestStopAsync(accepted.ExecutionId).WaitAsync(TestTimeout);
@@ -134,14 +134,14 @@ public sealed class ManualCompactionTests {
     CompactionReceipt first = Assert.IsType<CompactionReceipt>(await session.CompactAsync(
         new(Guid.NewGuid(), revision, Selection)));
     Assert.Equal(ExecutionOutcome.Completed,
-        (await session.WaitForSettlementAsync(first.ExecutionId).WaitAsync(TestTimeout)).Outcome);
+        (await session.WaitForExecutionFinishAsync(first.ExecutionId).WaitAsync(TestTimeout)).Outcome);
     await SubmitTurnAsync(session, "new-large-turn: " + new string('y', 100_000));
     await SubmitTurnAsync(session, "second-latest-turn");
     ModelHistory before = store.Compactions.ReadContext(session.Id, revision);
     CompactionReceipt failed = Assert.IsType<CompactionReceipt>(await session.CompactAsync(
         new(Guid.NewGuid(), revision, Selection)));
     Assert.Equal(ExecutionOutcome.Failed,
-        (await session.WaitForSettlementAsync(failed.ExecutionId).WaitAsync(TestTimeout)).Outcome);
+        (await session.WaitForExecutionFinishAsync(failed.ExecutionId).WaitAsync(TestTimeout)).Outcome);
 
     ModelHistory after = store.Compactions.ReadContext(session.Id, revision);
     Assert.Equal(before.PreviousCompaction!.Id, after.PreviousCompaction!.Id);
@@ -163,7 +163,7 @@ public sealed class ManualCompactionTests {
         new(Guid.NewGuid(), 0, text, TestLlmSelection.Default));
     Assert.Equal(MessageAcceptance.Accepted, receipt.Acceptance);
     Assert.Equal(ExecutionOutcome.Completed,
-        (await session.WaitForSettlementAsync(Assert.IsType<Guid>(receipt.ExecutionId)).WaitAsync(TestTimeout)).Outcome);
+        (await session.WaitForExecutionFinishAsync(Assert.IsType<Guid>(receipt.ExecutionId)).WaitAsync(TestTimeout)).Outcome);
   }
 
   private static ChatResponse SummaryResponse() => new(new ChatMessage(ChatRole.Assistant, Summary)) {

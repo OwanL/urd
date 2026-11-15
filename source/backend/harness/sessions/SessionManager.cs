@@ -18,11 +18,11 @@ public sealed class SessionManager {
   private readonly GitBash? bash;
   private readonly FileMutationQueue files = new();
   private readonly ReadOnlyCollection<AgentTool> injectedTools = new([]);
-  private readonly AsyncLock gate = new();
+  private readonly AsyncLock sessionsLock = new();
   private readonly Dictionary<Guid, PrimarySession> sessions = new();
   private TaskCompletionSource? sessionShutdown;
 
-  public Guid Boot { get; } = Guid.NewGuid();
+  public Guid BootId { get; } = Guid.NewGuid();
 
   public event Action<Guid>? SessionCreated;
 
@@ -54,7 +54,7 @@ public sealed class SessionManager {
 
   public async Task<PrimarySession> CreatePrimaryAsync() {
     PrimarySession session;
-    using (await gate.AcquireAsync()) {
+    using (await sessionsLock.AcquireAsync()) {
       ThrowIfShuttingDown();
       // Changing the preference affects only chats created afterwards.
       string? workingDirectory = toolSettings is null && injectedTools.Count == 0
@@ -68,7 +68,7 @@ public sealed class SessionManager {
   }
 
   public async Task<PrimarySession> GetPrimaryAsync(Guid sessionId) {
-    using var held = await gate.AcquireAsync();
+    using var _ = await sessionsLock.AcquireAsync();
     ThrowIfShuttingDown();
     if (sessions.TryGetValue(sessionId, out PrimarySession? cached))
       return cached;
@@ -81,7 +81,7 @@ public sealed class SessionManager {
   // Discovers saved identities without opening handles or starting execution.
   public async Task<SessionIdPage> ListPrimaryIdsAsync(
       string? cursor = null, CancellationToken cancellationToken = default) {
-    using var held = await gate.AcquireAsync(cancellationToken);
+    using var _ = await sessionsLock.AcquireAsync(cancellationToken);
     ThrowIfShuttingDown();
     cancellationToken.ThrowIfCancellationRequested();
     return store.Sessions.ListPrimaryIds(cursor);
@@ -92,7 +92,7 @@ public sealed class SessionManager {
   public async Task ShutdownSessionsAsync(CancellationToken waitCancellation = default) {
     TaskCompletionSource shutdown;
     PrimarySession[]? sessionsToStop = null;
-    using (await gate.AcquireAsync(CancellationToken.None)) {
+    using (await sessionsLock.AcquireAsync(CancellationToken.None)) {
       if (sessionShutdown is null) {
         sessionsToStop = sessions.Values.ToArray();
         sessionShutdown = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -111,7 +111,7 @@ public sealed class SessionManager {
   private static async Task StopSessionsAsync(PrimarySession[] sessions, TaskCompletionSource shutdown) {
     var failures = new List<Exception>();
     // Fence every handle before a Stop callback can submit a user message to another session.
-    await JoinAsync(Task.WhenAll(sessions.Select(session => session.FenceUserMessagesAsync())));
+    await JoinAsync(Task.WhenAll(sessions.Select(session => session.StopAcceptingUserMessagesAsync())));
     await JoinAsync(Task.WhenAll(sessions.Select(session => session.StopExecutionAsync())));
     // Ordinary Stop preserves earlier survivors; backend shutdown kills them only after work drains.
     await JoinAsync(Task.WhenAll(sessions.Select(session => session.KillProcessesAsync())));

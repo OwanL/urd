@@ -5,13 +5,13 @@ using Urd.Core.Storage;
 
 namespace Urd.Core.Execution;
 
-// Persists request and tool progress under the session gate, rejecting stale or stopped work.
-internal sealed class SessionExecutionRecorder(SessionBase session, UrdStore store, AsyncLock gate,
+// Persists request and tool progress under the session lock, rejecting stale or stopped work.
+internal sealed class SessionExecutionRecorder(SessionBase session, UrdStore store, AsyncLock sessionLock,
     ExecutionIdentity identity) {
   internal ExecutionIdentity Identity { get; } = identity;
 
   internal async Task<bool> StartRequestAsync(Guid requestId, StartingContext startingContext) {
-    using var held = await gate.AcquireAsync();
+    using var _ = await sessionLock.AcquireAsync();
     if (!session.CanRecordExecution(Identity))
       return false;
 
@@ -22,7 +22,7 @@ internal sealed class SessionExecutionRecorder(SessionBase session, UrdStore sto
   }
 
   internal async Task<bool> RecordOutputAsync(LlmResponseChunk chunk) {
-    using var held = await gate.AcquireAsync();
+    using var _ = await sessionLock.AcquireAsync();
     if (!session.CanRecordExecution(Identity)
         || !store.LlmResponses.Append(Identity, chunk))
       return false;
@@ -32,7 +32,7 @@ internal sealed class SessionExecutionRecorder(SessionBase session, UrdStore sto
   }
 
   internal async Task<bool> ObserveToolAsync(Guid requestId, string callId, string? name) {
-    using var held = await gate.AcquireAsync();
+    using var _ = await sessionLock.AcquireAsync();
     if (!session.CanRecordExecution(Identity)
         || !store.LlmResponses.RecordToolCall(Identity, requestId, callId, name))
       return false;
@@ -42,7 +42,7 @@ internal sealed class SessionExecutionRecorder(SessionBase session, UrdStore sto
   }
 
   internal async Task<bool> CompleteRequestAsync(LlmRequestResult outcome) {
-    using var held = await gate.AcquireAsync();
+    using var _ = await sessionLock.AcquireAsync();
     bool allowStopping = outcome.Outcome != ExecutionOutcome.Completed;
     if (!session.CanRecordExecution(Identity, allowStopping)
         || !store.LlmResponses.CompleteRequest(Identity, outcome))
@@ -53,7 +53,7 @@ internal sealed class SessionExecutionRecorder(SessionBase session, UrdStore sto
   }
 
   internal async Task<bool> TryStartToolAsync(Guid requestId, string callId, bool background = false) {
-    using var held = await gate.AcquireAsync();
+    using var _ = await sessionLock.AcquireAsync();
     if (!session.CanRecordExecution(Identity)
         || !store.Tools.TryStart(Identity, requestId, callId, background))
       return false;
@@ -63,7 +63,7 @@ internal sealed class SessionExecutionRecorder(SessionBase session, UrdStore sto
   }
 
   internal async Task<bool> CompleteToolAsync(Guid requestId, LlmToolResult result) {
-    using var held = await gate.AcquireAsync();
+    using var _ = await sessionLock.AcquireAsync();
     if (!session.CanRecordExecution(Identity, allowStopping: true)
         || !store.Tools.Complete(Identity, requestId, result))
       return false;

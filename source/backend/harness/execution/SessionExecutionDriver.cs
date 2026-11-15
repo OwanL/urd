@@ -4,8 +4,8 @@ using Urd.Core.Concurrency;
 namespace Urd.Core.Execution;
 
 // Drives one execution through requests, background waits and saved settlement.
-// Live state uses the owning session's gate; provider work and cleanup joins run outside it.
-internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock gate, SessionExecution execution) {
+// Live state uses the owning session's lock; provider work and cleanup joins run outside it.
+internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock sessionLock, SessionExecution execution) {
   private readonly TaskCompletionSource<SessionExecutionResult> settlement = new(TaskCreationOptions.RunContinuationsAsynchronously);
   private TaskCompletionSource? executionWake;
   private Exception? executionFailure;
@@ -19,15 +19,15 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock gate
   internal bool IsWaiting { get; private set; }
   internal Task<SessionExecutionResult> Settlement => settlement.Task;
 
-  // Caller holds the session gate. The driver joins callbacks before settlement.
+  // Caller holds the session lock. The driver joins callbacks before settlement.
   internal Task StopAsync() {
     Task callbacks = execution.StopAsync();
     Wake();
     return callbacks;
   }
 
-  // Caller holds the session gate. Notifications never join their own tool task.
-  internal void BackgroundToolCompleted(Exception? failure) {
+  // Caller holds the session lock. Notifications never join their own tool task.
+  internal void ReportToolOutcome(Exception? failure) {
     if (failure is not null) {
       executionFailure ??= failure;
       session.MarkNeedsAttention();
@@ -36,13 +36,13 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock gate
     Wake();
   }
 
-  // Caller holds the session gate.
+  // Caller holds the session lock.
   internal void Wake() {
     executionWake?.TrySetResult();
     executionWake = null;
   }
 
-  // Called under the session gate only after cleanup and successful settlement persistence.
+  // Called under the session lock only after cleanup and successful settlement persistence.
   internal void Release() {
     execution.Dispose();
     IsWaiting = false;
@@ -57,7 +57,7 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock gate
         return;
       }
       LlmRequest? request;
-      using (await gate.AcquireAsync())
+      using (await sessionLock.AcquireAsync())
         request = ClaimContinuation();
       if (request is null) {
         if (!IsStopping)
@@ -74,7 +74,7 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock gate
     } catch (Exception failure) {
       // A save/cleanup fault fences immediately, but still owns every task and callback.
       Task stopCallbacks;
-      using (await gate.AcquireAsync()) {
+      using (await sessionLock.AcquireAsync()) {
         session.MarkNeedsAttention();
         stopCallbacks = StopAsync();
       }
@@ -84,9 +84,10 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock gate
       } catch (Exception cleanupFailure) {
         failure = new AggregateException(failure, drained.Exception ?? cleanupFailure);
       }
-      using var held = await gate.AcquireAsync();
-      settlement.TrySetException(failure);
-      _ = settlement.Task.Exception; // Observed even if nobody is waiting yet.
+      using (await sessionLock.AcquireAsync()) {
+        settlement.TrySetException(failure);
+        _ = settlement.Task.Exception; // Observed even if nobody is waiting yet.
+      }
     }
   }
 
@@ -94,14 +95,14 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock gate
     while (true) {
       Task? wake = null;
       Task stopCallbacks;
-      using (await gate.AcquireAsync()) {
+      using (await sessionLock.AcquireAsync()) {
         ThrowIfExecutionFailed();
         if (outcome == ExecutionOutcome.Completed && !IsStopping) {
           LlmRequest? next = ClaimContinuation();
           if (next is not null)
             return next;
           if (execution.HasPendingTools) {
-            // Install the wait under the same gate as all input/completion/Stop signals.
+            // Install the wait under the same lock as all input/completion/Stop signals.
             executionWake ??= new(TaskCreationOptions.RunContinuationsAsynchronously);
             wake = executionWake.Task;
             if (!IsWaiting) {
@@ -121,7 +122,7 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock gate
       // Terminal provider failure and Stop cancel first. Even successful completion joins
       // remaining callback/notification ownership before the final guarded decision.
       await Task.WhenAll(stopCallbacks, execution.JoinPendingToolsAsync());
-      using (await gate.AcquireAsync()) {
+      using (await sessionLock.AcquireAsync()) {
         ThrowIfExecutionFailed();
         if (!execution.StopCallbacks.IsCompletedSuccessfully)
           continue; // A late Stop must join its newly installed callback task too.
@@ -130,7 +131,7 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock gate
           if (next is not null)
             return next;
         }
-        SessionExecutionResult saved = session.SettleExecution(this, outcome == ExecutionOutcome.Completed && IsStopping
+        SessionExecutionResult saved = session.FinishExecution(this, outcome == ExecutionOutcome.Completed && IsStopping
             ? ExecutionOutcome.Cancelled : outcome);
         settlement.TrySetResult(saved);
         return null;
@@ -138,7 +139,7 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock gate
     }
   }
 
-  // Caller holds the session gate. Admission cannot slip between recheck and settlement.
+  // Caller holds the session lock. Admission cannot slip between recheck and settlement.
   private LlmRequest? ClaimContinuation() {
     LlmRequest? next = execution.IsCompactionOnly ? null : session.CreateNextRequest(Identity);
     if (next is not null) {

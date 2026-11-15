@@ -131,7 +131,7 @@ Core and HTTP now use **user message submission / acceptance / session execution
 `UserMessageSubmission(SubmissionId, ExpectedHistoryRevision, Text, LlmSelection?)` and
 `UserMessageReceipt(SessionId, Submission, Acceptance, RefusalReason, ExecutionId)`;
 `MessageAcceptance` and `MessageRefusalReason` retain the existing enum values/meanings.
-`GetUserMessageReceiptAsync(submissionId)` reads the retained receipt or null.
+`ReadUserMessageReceiptAsync(submissionId)` reads the retained receipt or null.
 Execution identities are `ExecutionId`, including `StopReceipt`, `SessionExecutionResult`
 and `MessageRef`; snapshots use `UnsettledExecutionId`.
 This is a breaking vocabulary change, with **no legacy aliases**. At that checkpoint,

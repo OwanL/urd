@@ -151,7 +151,7 @@ public sealed class ProviderSessionExecutionTests {
           new(Guid.NewGuid(), 0, "go", selection));
       Assert.Equal(MessageAcceptance.Accepted, receipt.Acceptance);
       Guid executionId = Assert.IsType<Guid>(receipt.ExecutionId);
-      settlement = await fixture.Session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout);
+      settlement = await fixture.Session.WaitForExecutionFinishAsync(executionId).WaitAsync(TestTimeout);
 
       Assert.Equal(ExecutionOutcome.Failed, settlement.Outcome);
       Assert.Equal("ProviderUnavailable (IOException)", settlement.Error);
@@ -190,7 +190,7 @@ public sealed class ProviderSessionExecutionTests {
     var selection = new LlmSelection(fixture.Connection, "fixture-model", null, ModelFamily.Other, false);
     UserMessageReceipt receipt = await fixture.Session.SubmitUserMessageAsync(
         new(Guid.NewGuid(), 0, "hello", selection));
-    SessionExecutionResult settlement = await fixture.Session.WaitForSettlementAsync(receipt.ExecutionId!.Value)
+    SessionExecutionResult settlement = await fixture.Session.WaitForExecutionFinishAsync(receipt.ExecutionId!.Value)
         .WaitAsync(TestTimeout);
 
     Assert.Equal(ExecutionOutcome.Failed, settlement.Outcome);
@@ -506,12 +506,12 @@ public sealed class ProviderSessionExecutionTests {
       UserMessageReceipt receipt = await Session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, text, selection));
       Assert.Equal(MessageAcceptance.Accepted, receipt.Acceptance);
       Guid executionId = Assert.IsType<Guid>(receipt.ExecutionId);
-      Assert.Equal(outcome, (await Session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout)).Outcome);
+      Assert.Equal(outcome, (await Session.WaitForExecutionFinishAsync(executionId).WaitAsync(TestTimeout)).Outcome);
     }
 
     public async ValueTask DisposeAsync() {
       if (session is not null) {
-        await session.FenceUserMessagesAsync();
+        await session.StopAcceptingUserMessagesAsync();
         await session.StopExecutionAsync().WaitAsync(TestTimeout);
       }
       await manager.ShutdownAsync().WaitAsync(TestTimeout);

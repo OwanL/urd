@@ -53,8 +53,8 @@ public sealed class MessageEditingTests {
       release.TrySetResult();
       MessageEditReceipt receipt = await save.WaitAsync(TestTimeout);
       Assert.Equal(receipt, await retry.WaitAsync(TestTimeout));
-      await fixture.Session.WaitForSettlementAsync(receipt.ExecutionId).WaitAsync(TestTimeout);
-      Assert.Equal(ExecutionOutcome.Cancelled, (await fixture.Session.WaitForSettlementAsync(oldRun)).Outcome);
+      await fixture.Session.WaitForExecutionFinishAsync(receipt.ExecutionId).WaitAsync(TestTimeout);
+      Assert.Equal(ExecutionOutcome.Cancelled, (await fixture.Session.WaitForExecutionFinishAsync(oldRun)).Outcome);
       Assert.Equal(selected, (await fixture.Session.ReadSnapshotAsync()).LatestLlmSelection);
       Assert.Equal(new[] { "replacement" }, Users(client.LastRequest));
       Assert.Equal(1, effects);
@@ -80,7 +80,7 @@ public sealed class MessageEditingTests {
       var history = await fixture.Session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, 0));
       var edit = new MessageEditSubmission(Guid.NewGuid(), history.Entries[0].Text!.From.Message, "replacement", TestLlmSelection.Default);
       Task<MessageEditReceipt> save = fixture.Session.EditUserMessageAsync(edit);
-      await fixture.Session.FenceUserMessagesAsync();
+      await fixture.Session.StopAcceptingUserMessagesAsync();
       Task shutdown = fixture.Session.StopExecutionAsync();
       Assert.False(save.IsCompleted);
       Assert.False(shutdown.IsCompleted);
@@ -116,7 +116,7 @@ public sealed class MessageEditingTests {
           var input = new UserMessageSubmission(Guid.NewGuid(), 0, $"user-{number}", TestLlmSelection.Default);
           inputs.Add(input);
           var accepted = await session.SubmitUserMessageAsync(input);
-          await session.WaitForSettlementAsync(accepted.ExecutionId!.Value).WaitAsync(TestTimeout);
+          await session.WaitForExecutionFinishAsync(accepted.ExecutionId!.Value).WaitAsync(TestTimeout);
         }
         var page = await session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, 0));
         database.Execute($"UPDATE sessions SET completed_working_ms = 600000 WHERE session_id = '{session.Id:D}';"); // raw-sql: seed a settled-time total so an edit cannot pass by resetting it
@@ -124,7 +124,7 @@ public sealed class MessageEditingTests {
         MessageRef target = page.Entries.Where(entry => entry.Entry.Kind == TranscriptEntryKind.User).ElementAt(index).Text!.From.Message;
         edit = new(Guid.NewGuid(), target, "  edited 雪🙂\0  ", TestLlmSelection.Default);
         receipt = await session.EditUserMessageAsync(edit).WaitAsync(TestTimeout);
-        await session.WaitForSettlementAsync(receipt.ExecutionId).WaitAsync(TestTimeout);
+        await session.WaitForExecutionFinishAsync(receipt.ExecutionId).WaitAsync(TestTimeout);
         Assert.True((await session.ReadSnapshotAsync()).WorkingTime!.CompletedMilliseconds >= completedBeforeEdit);
         Assert.Equal(1, receipt.HistoryRevision);
         Assert.Equal(inputs.Take(index).Select(input => input.Text).Append(edit.Text), Users(client.LastRequest));
@@ -135,7 +135,7 @@ public sealed class MessageEditingTests {
         Guid removedRequest = Assert.Single(StoredExecutions.ReadRequests(database), row => row.ExecutionId == target.ExecutionId).RequestId;
         Assert.Empty(StoredLlmResponses.Read(database, removedRequest));
         foreach (var removed in inputs.Skip(index))
-          await Assert.ThrowsAsync<UserMessageConflictException>(() => session.GetUserMessageReceiptAsync(removed.SubmissionId));
+          await Assert.ThrowsAsync<UserMessageConflictException>(() => session.ReadUserMessageReceiptAsync(removed.SubmissionId));
         Assert.False((await session.ReadSnapshotAsync()).AdmissionFenced);
       } finally {
         await manager.ShutdownSessionsAsync().WaitAsync(TestTimeout);
@@ -152,7 +152,7 @@ public sealed class MessageEditingTests {
       Assert.Equal(before, client.Calls);
       var next = await session.SubmitUserMessageAsync(new(Guid.NewGuid(), 1, "continue", TestLlmSelection.Default));
       Assert.Equal(MessageAcceptance.Accepted, next.Acceptance);
-      await session.WaitForSettlementAsync(next.ExecutionId!.Value).WaitAsync(TestTimeout);
+      await session.WaitForExecutionFinishAsync(next.ExecutionId!.Value).WaitAsync(TestTimeout);
       Assert.Equal(edit.Text, Users(client.LastRequest)[^2]);
     } finally {
       await restored.ShutdownSessionsAsync().WaitAsync(TestTimeout);
@@ -164,7 +164,7 @@ public sealed class MessageEditingTests {
     using var client = new ScriptedChatClient(Complete);
     await using var fixture = new ExecutionFixture(client);
     Guid run = await fixture.StartExecutionAsync("keep me");
-    await fixture.Session.WaitForSettlementAsync(run).WaitAsync(TestTimeout);
+    await fixture.Session.WaitForExecutionFinishAsync(run).WaitAsync(TestTimeout);
     var before = await fixture.Session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, 0));
     MessageRef target = before.Entries[0].Text!.From.Message;
     fixture.Database.Execute("""

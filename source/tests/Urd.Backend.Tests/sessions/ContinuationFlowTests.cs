@@ -30,7 +30,7 @@ public sealed class ContinuationFlowTests {
 
     Guid firstExecution = await fixture.StartExecutionAsync("first question");
     Assert.Equal(ExecutionOutcome.Completed,
-        (await fixture.Session.WaitForSettlementAsync(firstExecution).WaitAsync(TestTimeout)).Outcome);
+        (await fixture.Session.WaitForExecutionFinishAsync(firstExecution).WaitAsync(TestTimeout)).Outcome);
     SessionSnapshot firstSnapshot = await fixture.Session.ReadSnapshotAsync();
     Assert.True(firstSnapshot.CanContinue);
 
@@ -43,12 +43,12 @@ public sealed class ContinuationFlowTests {
     var failedInput = new UserMessageSubmission(Guid.NewGuid(), 0, "question that fails", TestLlmSelection.Default);
     UserMessageReceipt failedReceipt = await fixture.Session.SubmitUserMessageAsync(failedInput);
     Assert.Equal(ExecutionOutcome.Failed,
-        (await fixture.Session.WaitForSettlementAsync(failedReceipt.ExecutionId!.Value).WaitAsync(TestTimeout)).Outcome);
+        (await fixture.Session.WaitForExecutionFinishAsync(failedReceipt.ExecutionId!.Value).WaitAsync(TestTimeout)).Outcome);
 
     var laterFailedInput = new UserMessageSubmission(Guid.NewGuid(), 0, "another question that fails", TestLlmSelection.Default);
     UserMessageReceipt laterFailedReceipt = await fixture.Session.SubmitUserMessageAsync(laterFailedInput);
     Assert.Equal(ExecutionOutcome.Failed,
-        (await fixture.Session.WaitForSettlementAsync(laterFailedReceipt.ExecutionId!.Value).WaitAsync(TestTimeout)).Outcome);
+        (await fixture.Session.WaitForExecutionFinishAsync(laterFailedReceipt.ExecutionId!.Value).WaitAsync(TestTimeout)).Outcome);
     Assert.Contains(client.Requests[2], message =>
         message.Role == ChatRole.Assistant && message.Text.Contains("partial failure tail", StringComparison.Ordinal));
     using (UrdStore beforeContinue = UrdStore.Open(fixture.Database.Path)) {
@@ -98,7 +98,7 @@ public sealed class ContinuationFlowTests {
     Assert.Equal(MessageRefusalReason.SelectionLocked, locked.RefusalReason);
     continuationRelease.TrySetResult();
     Assert.Equal(ExecutionOutcome.Completed,
-        (await fixture.Session.WaitForSettlementAsync(receipt.ExecutionId).WaitAsync(TestTimeout)).Outcome);
+        (await fixture.Session.WaitForExecutionFinishAsync(receipt.ExecutionId).WaitAsync(TestTimeout)).Outcome);
     Assert.Equal(new[] { "first question", "question that fails", laterFailedInput.Text, steering.Text },
         client.Requests[4].Where(message => message.Role == ChatRole.User).Select(message => message.Text));
     Assert.Contains(client.Requests[4], message =>
@@ -135,7 +135,7 @@ public sealed class ContinuationFlowTests {
         .Text!.From.Message;
     MessageEditReceipt edit = await fixture.Session.EditUserMessageAsync(
         new(Guid.NewGuid(), firstPrompt, "edited first question", TestLlmSelection.Default));
-    await fixture.Session.WaitForSettlementAsync(edit.ExecutionId).WaitAsync(TestTimeout);
+    await fixture.Session.WaitForExecutionFinishAsync(edit.ExecutionId).WaitAsync(TestTimeout);
     Assert.Equal(receipt, reopened.Continuations.ReadReceipt(fixture.Session.Id, submission.OperationId));
     Assert.Equal(receipt, await fixture.Session.ContinueAsync(submission));
     Assert.Equal(6, client.Calls);
@@ -263,7 +263,7 @@ public sealed class ContinuationFlowTests {
         input => input.SubmissionId == claimed.SubmissionId && input.CanRemove);
     secondRelease.TrySetResult();
     Assert.Equal(ExecutionOutcome.Completed,
-        (await fixture.Session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout)).Outcome);
+        (await fixture.Session.WaitForExecutionFinishAsync(executionId).WaitAsync(TestTimeout)).Outcome);
     Assert.Empty((await fixture.Session.ReadNotSentInputsAsync()).Inputs);
     Assert.Equal(new[] { "initial", claimed.Text },
         client.Requests[1].Where(message => message.Role == ChatRole.User).Select(message => message.Text));

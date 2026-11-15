@@ -188,7 +188,7 @@ internal sealed class SessionExecution : IDisposable {
       }
     } catch (Exception failure) {
       failures.Add(failure);
-      await session.BackgroundToolCompletedAsync(ExecutionId, failure);
+      await session.ReportToolOutcomeAsync(ExecutionId, failure);
     }
 
     // Even a failed start/save/encoding must join all launched siblings before fencing.
@@ -211,7 +211,7 @@ internal sealed class SessionExecution : IDisposable {
     Interlocked.Increment(ref backgroundCalls);
     try {
       pending.Add(ExecutionId, requestId, call, completion.Task, cancellation,
-          failure => session.BackgroundToolCompletedAsync(ExecutionId, failure));
+          failure => session.ReportToolOutcomeAsync(ExecutionId, failure));
     } catch {
       Interlocked.Decrement(ref backgroundCalls);
       cancellation.Dispose();
@@ -237,7 +237,7 @@ internal sealed class SessionExecution : IDisposable {
     // still owns this task and all callback cleanup, so settlement must join it outside the gate.
     Interlocked.Decrement(ref backgroundCalls);
     try {
-      await session.BackgroundToolCompletedAsync(ExecutionId, failure);
+      await session.ReportToolOutcomeAsync(ExecutionId, failure);
     } catch (Exception error) {
       failure = failure is null ? error : new AggregateException(failure, error);
     }
@@ -254,7 +254,7 @@ internal sealed class SessionExecution : IDisposable {
       if (!await recorder.CompleteToolAsync(requestId, result))
         throw new InvalidOperationException("The tool result could not be saved.");
     } catch (Exception failure) {
-      await session.BackgroundToolCompletedAsync(ExecutionId, failure);
+      await session.ReportToolOutcomeAsync(ExecutionId, failure);
       throw;
     }
   }

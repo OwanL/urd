@@ -1,10 +1,11 @@
+using System.Text.Json.Serialization;
 using Urd.Core.Execution;
 using Urd.Core.Providers;
 
 namespace Urd.Core.Sessions;
 
 // Status is present for initial registration and status transitions; null marks a watched content change.
-public sealed record SessionChange(Guid Session, long Version, string? Status = null);
+public sealed record SessionChange([property: JsonPropertyName("session")] Guid SessionId, long Version, string? Status = null);
 
 // Bounded committed facts combined with live admission and Stop state by SessionBase.
 public sealed record SessionSnapshot(

@@ -39,7 +39,7 @@ internal sealed class ExecutionFixture : IAsyncDisposable {
 
   public async ValueTask DisposeAsync() {
     // Even a failed assertion must not dispose the database or client underneath owned work.
-    await Session.FenceUserMessagesAsync();
+    await Session.StopAcceptingUserMessagesAsync();
     await Session.StopExecutionAsync().WaitAsync(TestTimeout);
 
     store.Dispose();

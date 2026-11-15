@@ -44,7 +44,7 @@ public sealed class SessionStopTests {
     var client = new ScriptedChatClient(Response);
     await using var fixture = new ExecutionFixture(client);
     Guid executionId = await fixture.StartExecutionAsync("start");
-    Task<SessionExecutionResult> settlement = fixture.Session.WaitForSettlementAsync(executionId);
+    Task<SessionExecutionResult> settlement = fixture.Session.WaitForExecutionFinishAsync(executionId);
     try {
       await entered.Task.WaitAsync(TestTimeout);
       Assert.Equal(new StopReceipt(executionId, StopStatus.Requested),
@@ -98,7 +98,7 @@ public sealed class SessionStopTests {
         new("second", "step", new Dictionary<string, object?> { ["number"] = 2 })));
     await using var fixture = new ExecutionFixture(client, [step]);
     Guid executionId = await fixture.StartExecutionAsync("start");
-    Task<SessionExecutionResult> settlement = fixture.Session.WaitForSettlementAsync(executionId);
+    Task<SessionExecutionResult> settlement = fixture.Session.WaitForExecutionFinishAsync(executionId);
     var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "pending steering", TestLlmSelection.Default);
     UserMessageReceipt? accepted = null;
     try {
@@ -148,7 +148,7 @@ public sealed class SessionStopTests {
       Assert.Equal(ExecutionOutcome.Cancelled, tool.Outcome);
       Assert.NotNull(tool.ResultJson);
     });
-    Assert.Equal(accepted, await fixture.Session.GetUserMessageReceiptAsync(submission.SubmissionId));
+    Assert.Equal(accepted, await fixture.Session.ReadUserMessageReceiptAsync(submission.SubmissionId));
   }
 
   [Theory]
@@ -175,7 +175,7 @@ public sealed class SessionStopTests {
     await using var fixture = new ExecutionFixture(client);
     Guid executionId = await fixture.StartExecutionAsync("start");
     var recorder = fixture.Session.Recorder;
-    Task<SessionExecutionResult> settlement = fixture.Session.WaitForSettlementAsync(executionId);
+    Task<SessionExecutionResult> settlement = fixture.Session.WaitForExecutionFinishAsync(executionId);
     var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "pending steering", TestLlmSelection.Default);
     UserMessageReceipt? accepted = null;
     try {
@@ -239,7 +239,7 @@ public sealed class SessionStopTests {
     Assert.Equal(finalOutput ? "done" : new string('x', 16 * 1024), StoredLlmResponses.ReadText(fixture.Database));
     Assert.Equal(finalOutput, StoredLlmResponses.Read(fixture.Database)[^1].Final);
     Assert.Equal(1, client.Calls);
-    Assert.Equal(accepted, await fixture.Session.GetUserMessageReceiptAsync(submission.SubmissionId));
+    Assert.Equal(accepted, await fixture.Session.ReadUserMessageReceiptAsync(submission.SubmissionId));
     SessionSnapshot settled = await fixture.Session.ReadSnapshotAsync();
     Assert.Equal(ExecutionOutcome.Cancelled, settled.LastSettlement!.Outcome);
     Assert.Empty(settled.PendingInputs);
@@ -269,7 +269,7 @@ public sealed class SessionStopTests {
     Assert.Equal(new StopReceipt(original, StopStatus.Requested),
         await fixture.Session.RequestStopAsync(original).WaitAsync(TestTimeout));
     Assert.Equal(ExecutionOutcome.Cancelled,
-        (await fixture.Session.WaitForSettlementAsync(original).WaitAsync(TestTimeout)).Outcome);
+        (await fixture.Session.WaitForExecutionFinishAsync(original).WaitAsync(TestTimeout)).Outcome);
 
     Guid replacement = await fixture.StartExecutionAsync("replacement");
     await replacementEntered.Task.WaitAsync(TestTimeout);
@@ -320,13 +320,13 @@ public sealed class SessionStopTests {
     PrimarySession independent = await manager.CreatePrimaryAsync();
     try {
       Guid original = await StartAsync(target, "original");
-      await target.WaitForSettlementAsync(original).WaitAsync(TestTimeout);
+      await target.WaitForExecutionFinishAsync(original).WaitAsync(TestTimeout);
       Guid independentExecution = await StartAsync(independent, "independent");
       await independentEntered.Task.WaitAsync(TestTimeout);
       Guid replacement = await StartAsync(target, "replacement");
       await replacementEntered.Task.WaitAsync(TestTimeout);
-      Task<SessionExecutionResult> independentSettlement = independent.WaitForSettlementAsync(independentExecution);
-      Task<SessionExecutionResult> replacementSettlement = target.WaitForSettlementAsync(replacement);
+      Task<SessionExecutionResult> independentSettlement = independent.WaitForExecutionFinishAsync(independentExecution);
+      Task<SessionExecutionResult> replacementSettlement = target.WaitForExecutionFinishAsync(replacement);
 
       Assert.Equal(new StopReceipt(original, StopStatus.Settled, ExecutionOutcome.Completed),
           await target.RequestStopAsync(original).WaitAsync(TestTimeout));

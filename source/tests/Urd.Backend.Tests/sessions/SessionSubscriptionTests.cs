@@ -22,7 +22,7 @@ public sealed class SessionSubscriptionTests {
     using IDisposable healthySubscription = await fixture.Session.SubscribeAsync(healthyChanges.Enqueue, watched: false);
 
     Guid executionId = await fixture.StartExecutionAsync("hello");
-    SessionExecutionResult result = await fixture.Session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout);
+    SessionExecutionResult result = await fixture.Session.WaitForExecutionFinishAsync(executionId).WaitAsync(TestTimeout);
 
     Assert.Equal(ExecutionOutcome.Completed, result.Outcome);
     Assert.Contains(healthyChanges, change => change.Status == "running");
@@ -42,7 +42,7 @@ public sealed class SessionSubscriptionTests {
 
     subscription.Dispose();
     subscription.Dispose();
-    await session.FenceUserMessagesAsync();
+    await session.StopAcceptingUserMessagesAsync();
     Assert.Equal(initialCount, changes.Count);
 
     using IDisposable laterSubscription = await session.SubscribeAsync(changes.Enqueue, watched: false);
@@ -62,11 +62,11 @@ public sealed class SessionSubscriptionTests {
 
     SessionChange[] initial = changes.ToArray();
     Assert.Equal(2, initial.Length);
-    Assert.All(initial, change => Assert.Equal(session.Id, change.Session));
+    Assert.All(initial, change => Assert.Equal(session.Id, change.SessionId));
     Assert.Equal(new SessionChange(session.Id, 0, "idle"), initial[0]);
     Assert.Equal(new SessionChange(session.Id, 0), initial[1]);
 
-    await session.FenceUserMessagesAsync();
+    await session.StopAcceptingUserMessagesAsync();
     SessionChange[] fenced = changes.ToArray();
     Assert.Equal(new SessionChange(session.Id, 1, "fenced"), fenced[^2]);
     Assert.Equal(new SessionChange(session.Id, 1), fenced[^1]);
@@ -82,7 +82,7 @@ public sealed class SessionSubscriptionTests {
     var changes = new ConcurrentQueue<SessionChange>();
 
     using IDisposable subscription = await session.SubscribeAsync(changes.Enqueue, watched: false);
-    await session.FenceUserMessagesAsync();
+    await session.StopAcceptingUserMessagesAsync();
 
     Assert.Equal(new[] {
       new SessionChange(session.Id, 0, "idle"),
@@ -102,7 +102,7 @@ public sealed class SessionSubscriptionTests {
 
     UserMessageReceipt receipt = await session.SubmitUserMessageAsync(
         new(Guid.NewGuid(), 0, "hello", TestLlmSelection.Default));
-    await session.WaitForSettlementAsync(receipt.ExecutionId!.Value).WaitAsync(TestTimeout);
+    await session.WaitForExecutionFinishAsync(receipt.ExecutionId!.Value).WaitAsync(TestTimeout);
 
     SessionChange[] notifications = changes.ToArray();
     SessionChange[] statuses = notifications.Where(change => change.Status is not null).ToArray();
@@ -167,7 +167,7 @@ public sealed class SessionSubscriptionTests {
 
       toolRelease.TrySetResult();
       Assert.Equal(ExecutionOutcome.Cancelled,
-          (await fixture.Session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout)).Outcome);
+          (await fixture.Session.WaitForExecutionFinishAsync(executionId).WaitAsync(TestTimeout)).Outcome);
     } finally {
       toolRelease.TrySetResult();
     }
@@ -220,7 +220,7 @@ public sealed class SessionSubscriptionTests {
     using IDisposable settlementRegistration = await registrationTask.WaitAsync(TestTimeout);
     await releaseTask.WaitAsync(TestTimeout);
     Assert.Equal(ExecutionOutcome.Completed,
-        (await fixture.Session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout)).Outcome);
+        (await fixture.Session.WaitForExecutionFinishAsync(executionId).WaitAsync(TestTimeout)).Outcome);
 
     string?[] settlementStatuses = settlementChanges.Select(change => change.Status).ToArray();
     Assert.True(settlementStatuses.SequenceEqual(new string?[] { "idle" })
@@ -240,13 +240,13 @@ public sealed class SessionSubscriptionTests {
     Task fenceTask = Task.Run(async () => {
       fencing.TrySetResult();
       await fenceRace.Task;
-      await fixture.Session.FenceUserMessagesAsync();
+      await fixture.Session.StopAcceptingUserMessagesAsync();
     });
     await Task.WhenAll(fenceSubscribing.Task, fencing.Task).WaitAsync(TestTimeout);
     fenceRace.TrySetResult();
     using IDisposable fenceRegistration = await fenceRegistrationTask.WaitAsync(TestTimeout);
     await fenceTask.WaitAsync(TestTimeout);
-    await fixture.Session.FenceUserMessagesAsync();
+    await fixture.Session.StopAcceptingUserMessagesAsync();
 
     string?[] fenceStatuses = fenceChanges.Select(change => change.Status).ToArray();
     Assert.True(fenceStatuses.SequenceEqual(new string?[] { "fenced" })
@@ -273,7 +273,7 @@ public sealed class SessionSubscriptionTests {
         new(Guid.NewGuid(), 0, "hello", TestLlmSelection.Default));
     Guid executionId = Assert.IsType<Guid>(receipt.ExecutionId);
     Exception failure = await Assert.ThrowsAnyAsync<Exception>(
-        () => session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout));
+        () => session.WaitForExecutionFinishAsync(executionId).WaitAsync(TestTimeout));
 
     Assert.Equal(19, Assert.IsType<SqliteException>(failure.GetBaseException()).SqliteErrorCode);
     SessionSnapshot snapshot = await session.ReadSnapshotAsync();
@@ -303,7 +303,7 @@ public sealed class SessionSubscriptionTests {
         new(Guid.NewGuid(), 0, "hello", TestLlmSelection.Default));
 
     await Assert.ThrowsAnyAsync<Exception>(
-        () => session.WaitForSettlementAsync(receipt.ExecutionId!.Value).WaitAsync(TestTimeout));
+        () => session.WaitForExecutionFinishAsync(receipt.ExecutionId!.Value).WaitAsync(TestTimeout));
 
     Assert.Equal("needs-attention", changes.Last().Status);
     Assert.True((await session.ReadSnapshotAsync()).AdmissionFenced);

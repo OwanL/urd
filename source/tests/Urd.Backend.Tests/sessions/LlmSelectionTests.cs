@@ -77,7 +77,7 @@ public sealed class LlmSelectionTests {
       Assert.Equal(0, factories);
       UserMessageReceipt accepted = await session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, "start", selection));
       Assert.Equal(ExecutionOutcome.Completed,
-          (await session.WaitForSettlementAsync(accepted.ExecutionId!.Value).WaitAsync(TestTimeout)).Outcome);
+          (await session.WaitForExecutionFinishAsync(accepted.ExecutionId!.Value).WaitAsync(TestTimeout)).Outcome);
       Assert.Equal(1, factories);
       Assert.Equal(2, client.Calls);
       Assert.All(client.Options, options => {
@@ -112,14 +112,14 @@ public sealed class LlmSelectionTests {
       sessionId = session.Id;
       accepted = await session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, "go", selection));
       Assert.Equal(ExecutionOutcome.Completed,
-          (await session.WaitForSettlementAsync(accepted.ExecutionId!.Value).WaitAsync(TestTimeout)).Outcome);
+          (await session.WaitForExecutionFinishAsync(accepted.ExecutionId!.Value).WaitAsync(TestTimeout)).Outcome);
       Assert.Equal(accepted, await session.SubmitUserMessageAsync(accepted.Submission));
       await providers.UpdateCustomAsync(connection.Id, new("renamed", connection.Api,
           new Uri("https://changed.invalid/v1/"), connection.Authentication));
       failed = await session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, "old binding", selection));
       Assert.Equal(MessageAcceptance.Accepted, failed.Acceptance);
       Assert.Equal(ExecutionOutcome.Failed,
-          (await session.WaitForSettlementAsync(failed.ExecutionId!.Value).WaitAsync(TestTimeout)).Outcome);
+          (await session.WaitForExecutionFinishAsync(failed.ExecutionId!.Value).WaitAsync(TestTimeout)).Outcome);
       Assert.Equal(connection.Endpoint.Host, Assert.Single(transport.Requests).Uri.Host);
       await providers.RemoveAsync(connection.Id);
       Assert.Equal(accepted, await session.SubmitUserMessageAsync(accepted.Submission));

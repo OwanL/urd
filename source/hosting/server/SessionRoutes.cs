@@ -236,7 +236,7 @@ internal static class SessionRoutes {
       return Task.FromResult<IResult>(Results.BadRequest());
 
     return WithSessionAsync(http, sessions, sessionId, async session => {
-      UserMessageReceipt? receipt = await session.GetUserMessageReceiptAsync(submissionId, http.RequestAborted);
+      UserMessageReceipt? receipt = await session.ReadUserMessageReceiptAsync(submissionId, http.RequestAborted);
       // Absence is not a refusal decision, and must be JSON null rather than an empty response.
       return receipt is null ? Results.Content("null", "application/json") : Results.Ok(receipt);
     });

@@ -8,7 +8,7 @@ internal sealed class SessionStatus(long historyRevision) {
   private bool historyRevisionChanged;
   private SessionExecutionResult? lastSettlement;
 
-  internal void Observe(SessionSnapshot stored, SessionExecutionDriver? execution) {
+  internal void Update(SessionSnapshot stored, SessionExecutionDriver? execution) {
     hasUnownedExecution = stored.UnsettledExecutionId is { } executionId && execution?.ExecutionId != executionId;
     historyRevisionChanged = stored.HistoryRevision != historyRevision;
     lastSettlement = stored.LastSettlement;
@@ -26,7 +26,7 @@ internal sealed class SessionStatus(long historyRevision) {
     lastSettlement = saved;
   }
 
-  internal SessionSnapshot ApplyLiveState(SessionSnapshot stored, bool acceptingUserMessages, SessionExecutionDriver? execution) {
+  internal SessionSnapshot WithLiveState(SessionSnapshot stored, bool acceptingUserMessages, SessionExecutionDriver? execution) {
     bool ownsExecution = stored.UnsettledExecutionId is { } executionId && execution?.ExecutionId == executionId;
     bool fenced = !acceptingUserMessages || stored.HistoryRevision != historyRevision
         || (stored.UnsettledExecutionId is not null && !ownsExecution);
@@ -34,8 +34,8 @@ internal sealed class SessionStatus(long historyRevision) {
     return stored with { AdmissionFenced = fenced, StopRequested = stopping };
   }
 
-  internal string ReadStored(SessionSnapshot stored, bool acceptingUserMessages, bool needsAttention, SessionExecutionDriver? execution) {
-    SessionSnapshot snapshot = ApplyLiveState(stored, acceptingUserMessages, execution);
+  internal string CurrentStatus(SessionSnapshot stored, bool acceptingUserMessages, bool needsAttention, SessionExecutionDriver? execution) {
+    SessionSnapshot snapshot = WithLiveState(stored, acceptingUserMessages, execution);
     return Read(needsAttention, snapshot.AdmissionFenced, execution, snapshot.LastSettlement?.Outcome);
   }
 

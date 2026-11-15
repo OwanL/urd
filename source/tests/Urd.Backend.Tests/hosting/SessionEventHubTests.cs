@@ -26,7 +26,7 @@ public sealed class SessionEventHubTests {
       await page.UpdateAsync(sessions, [session.Id], [session.Id], CancellationToken.None);
       UserMessageReceipt receipt = await session.SubmitUserMessageAsync(
           new(Guid.NewGuid(), 0, "settle before reading", TestLlmSelection.Default));
-      await session.WaitForSettlementAsync(Assert.IsType<Guid>(receipt.ExecutionId)).WaitAsync(TestTimeout);
+      await session.WaitForExecutionFinishAsync(Assert.IsType<Guid>(receipt.ExecutionId)).WaitAsync(TestTimeout);
 
       SessionSseEvent status = Assert.IsType<SessionSseEvent>(
           (await page.ReadNextAsync(CancellationToken.None).WaitAsync(TestTimeout)).Event);
@@ -59,7 +59,7 @@ public sealed class SessionEventHubTests {
 
       UserMessageReceipt receipt = await watched.SubmitUserMessageAsync(
           new(Guid.NewGuid(), 0, "settle before update", TestLlmSelection.Default));
-      await watched.WaitForSettlementAsync(Assert.IsType<Guid>(receipt.ExecutionId)).WaitAsync(TestTimeout);
+      await watched.WaitForExecutionFinishAsync(Assert.IsType<Guid>(receipt.ExecutionId)).WaitAsync(TestTimeout);
       SessionSseEvent[] settled = await ReadEventsAsync(page, 2);
       Assert.Equal(new[] { "status", "change" }, settled.Select(message => message.Name));
       Assert.Equal("idle", ReadString(settled[0].Data, "status"));
@@ -120,7 +120,7 @@ public sealed class SessionEventHubTests {
 
         release.TrySetResult();
         SessionExecutionResult[] settlements = await Task.WhenAll(opened.Select((session, index) =>
-            session.WaitForSettlementAsync(Assert.IsType<Guid>(receipts[index].ExecutionId)).WaitAsync(TestTimeout)));
+            session.WaitForExecutionFinishAsync(Assert.IsType<Guid>(receipts[index].ExecutionId)).WaitAsync(TestTimeout)));
         Assert.All(settlements, result => Assert.Equal(ExecutionOutcome.Completed, result.Outcome));
 
         SessionSseEvent[] pending = await ReadEventsAsync(page, sessionCount + watched.Length);

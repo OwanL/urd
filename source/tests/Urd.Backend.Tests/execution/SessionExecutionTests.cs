@@ -23,7 +23,7 @@ public sealed class SessionExecutionTests {
     Guid executionId = await fixture.StartExecutionAsync("go");
 
     Assert.Equal(ExecutionOutcome.Failed,
-        (await fixture.Session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout)).Outcome);
+        (await fixture.Session.WaitForExecutionFinishAsync(executionId).WaitAsync(TestTimeout)).Outcome);
     Assert.Equal(ExecutionOutcome.Failed, Assert.Single(StoredExecutions.ReadRequests(fixture.Database)).Outcome);
     Assert.All(StoredLlmResponses.Read(fixture.Database), row => Assert.False(row.Final));
     Assert.Equal(0L, fixture.Database.Scalar("SELECT count(*) FROM execution_requests WHERE usage_json IS NOT NULL;")); // raw-sql: missing provider usage must remain unknown on request rows
@@ -52,7 +52,7 @@ public sealed class SessionExecutionTests {
     Guid executionId = await fixture.StartExecutionAsync("go");
 
     Assert.Equal(ExecutionOutcome.Completed,
-        (await fixture.Session.WaitForSettlementAsync(executionId).WaitAsync(TestTimeout)).Outcome);
+        (await fixture.Session.WaitForExecutionFinishAsync(executionId).WaitAsync(TestTimeout)).Outcome);
     Assert.Equal("answer", StoredLlmResponses.ReadText(fixture.Database));
     Assert.Single(StoredLlmResponses.Read(fixture.Database), chunk => chunk.Final);
     using (SqliteConnection connection = fixture.Database.OpenReadOnlyConnection())
@@ -88,7 +88,7 @@ public sealed class SessionExecutionTests {
       Guid acceptedExecution = Assert.IsType<Guid>(executionId);
 
       Exception failure = await Assert.ThrowsAnyAsync<Exception>(
-          () => session.WaitForSettlementAsync(acceptedExecution).WaitAsync(TestTimeout));
+          () => session.WaitForExecutionFinishAsync(acceptedExecution).WaitAsync(TestTimeout));
       Assert.Equal(19, Assert.IsType<SqliteException>(failure.GetBaseException()).SqliteErrorCode);
       Assert.True(await cleaned.Task.WaitAsync(TestTimeout));
       SessionSnapshot snapshot = await session.ReadSnapshotAsync();
@@ -116,7 +116,7 @@ public sealed class SessionExecutionTests {
         await session.RequestStopAsync(acceptedExecution).WaitAsync(TestTimeout);
         await cleaned.Task.WaitAsync(TestTimeout);
         try {
-          await session.WaitForSettlementAsync(acceptedExecution).WaitAsync(TestTimeout);
+          await session.WaitForExecutionFinishAsync(acceptedExecution).WaitAsync(TestTimeout);
         } catch (Exception failure) when (failure.GetBaseException() is SqliteException) {
           // Expected driver failure. Timeouts/other uncertain exits must not permit disposal.
         }

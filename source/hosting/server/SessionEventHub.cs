@@ -22,7 +22,7 @@ internal sealed class SessionEventHub : IDisposable {
         return false;
       }
 
-      page = new SessionEventPage(sessions.Boot, Remove);
+      page = new SessionEventPage(sessions.BootId, Remove);
       pages.Add(page.Id, page);
       return true;
     }

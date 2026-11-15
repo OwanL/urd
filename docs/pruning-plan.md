@@ -120,6 +120,13 @@ Discussed UI/data proposals, not a final UI or storage contract:
 - Apply protections to resources discovered and applicable in the actual session's
   context; the default-directory picker is not a reason to change that session's scope.
 
+## Pruning display — initial direction
+
+Start with three rows, one for each pruning conversation: skills, instructions and
+tools. The owner wants to revisit the detailed UI against a working implementation,
+rather than settle speculative layout and interactions now. A single expandable
+preparation row is not the selected starting point.
+
 ## Working composition sketch
 
 This is the proposed shape from the discussion, not a settled runtime/API contract.

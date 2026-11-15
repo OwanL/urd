@@ -16,11 +16,11 @@ public sealed class StopStorageTests {
     using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, execution = Guid.NewGuid();
     var identity = new ExecutionIdentity(session, execution, 0);
-    store.UserMessages.Admit(session, 0,
+    store.UserMessages.Submit(session, 0,
         new(Guid.NewGuid(), 0, "claimed", TestLlmSelection.Default), true, execution);
-    store.Executions.ClaimNextRequest(identity);
+    store.Executions.CreateNextRequest(identity);
     var pending = new UserMessageSubmission(Guid.NewGuid(), 0, "pending", TestLlmSelection.Default);
-    UserMessageReceipt receipt = store.UserMessages.Admit(
+    UserMessageReceipt receipt = store.UserMessages.Submit(
         session, 0, pending, true, Guid.NewGuid(), execution).Receipt;
     StoredExecution savedExecution = Assert.Single(StoredExecutions.Read(database));
     StoredDelivery[] deliveries = StoredDeliveries.Read(database).ToArray();

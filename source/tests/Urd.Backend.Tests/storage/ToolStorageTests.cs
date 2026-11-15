@@ -78,14 +78,14 @@ public sealed class ToolStorageTests {
       ToolOutput savedLater = Assert.IsType<ToolOutput>(store.Tools.ReadOutput(session, request, later.CallId));
       Assert.Equal(laterResult.Output.Text, savedLater.Text);
       Assert.True(JsonElement.DeepEquals(laterResult.Output.Details!.Value, savedLater.Details!.Value));
-      Assert.Null(store.Executions.ClaimNextRequest(identity));
-      Assert.Null(store.Executions.TrySettle(session, execution, ExecutionOutcome.Completed));
+      Assert.Null(store.Executions.CreateNextRequest(identity));
+      Assert.Null(store.Executions.TryFinish(session, execution, ExecutionOutcome.Completed));
     }
 
     using UrdStore reopened = UrdStore.Open(database.Path);
     Assert.False(reopened.Tools.TryStart(identity, request, "effect"));
     Assert.Equal(1, effects);
-    Assert.Null(reopened.Executions.ClaimNextRequest(identity));
+    Assert.Null(reopened.Executions.CreateNextRequest(identity));
     Assert.Null(reopened.Executions.ReadSettlement(session, execution));
     reopened.Executions.RequestStop(session, execution, ownsExecution: true);
     Assert.False(reopened.Tools.TryStart(identity, request, "unstarted"));
@@ -94,7 +94,7 @@ public sealed class ToolStorageTests {
             JsonSerializer.SerializeToElement(new { saved = true })));
     Assert.True(reopened.Tools.Complete(identity, request, recovered));
     Assert.Equal(ExecutionOutcome.Cancelled,
-        reopened.Executions.TrySettle(session, execution, ExecutionOutcome.Cancelled)!.Outcome);
+        reopened.Executions.TryFinish(session, execution, ExecutionOutcome.Cancelled)!.Outcome);
     Assert.False(reopened.Tools.TryStart(identity, request, "unstarted"));
     Assert.True(reopened.Tools.Complete(identity, request, recovered));
     Assert.Single(Directory.GetFiles(database.Path + ".tool-images"));
@@ -130,10 +130,10 @@ public sealed class ToolStorageTests {
 
   private static (Guid Session, Guid Execution, Guid Request) Begin(UrdStore store) {
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, execution = Guid.NewGuid();
-    store.UserMessages.Admit(session, 0,
+    store.UserMessages.Submit(session, 0,
         new(Guid.NewGuid(), 0, "request", TestLlmSelection.Default), true, execution);
     var identity = new ExecutionIdentity(session, execution, 0);
-    Guid request = store.Executions.ClaimNextRequest(identity)!.RequestId;
+    Guid request = store.Executions.CreateNextRequest(identity)!.RequestId;
     Assert.True(store.Executions.StartRequest(identity, request));
     return (session, execution, request);
   }

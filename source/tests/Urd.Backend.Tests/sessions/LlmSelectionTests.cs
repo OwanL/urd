@@ -23,7 +23,7 @@ public sealed class LlmSelectionTests {
     // Admit through storage so the active execution stays held without a provider task.
     Guid execution = Guid.NewGuid();
     var original = new UserMessageSubmission(Guid.NewGuid(), 0, "original", TestLlmSelection.Default);
-    UserMessageReceipt accepted = store.UserMessages.Admit(session.Id, 0, original, true, execution).Receipt;
+    UserMessageReceipt accepted = store.UserMessages.Submit(session.Id, 0, original, true, execution).Receipt;
     LlmSelection selection = original.LlmSelection!;
     ProviderConnection connection = selection.Connection;
     LlmSelection[] changed = [
@@ -35,7 +35,7 @@ public sealed class LlmSelectionTests {
     foreach (LlmSelection choice in changed) {
       await Assert.ThrowsAsync<UserMessageConflictException>(() => session.SubmitUserMessageAsync(original with { LlmSelection = choice }));
       var steering = original with { SubmissionId = Guid.NewGuid(), LlmSelection = choice };
-      var decision = store.UserMessages.Admit(session.Id, 0, steering, true, Guid.NewGuid(), execution);
+      var decision = store.UserMessages.Submit(session.Id, 0, steering, true, Guid.NewGuid(), execution);
       Assert.Equal(MessageAcceptance.Refused, decision.Receipt.Acceptance);
       Assert.Equal(MessageRefusalReason.SelectionLocked, decision.Receipt.RefusalReason);
       Assert.Equal(decision.Receipt, await session.SubmitUserMessageAsync(steering));

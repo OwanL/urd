@@ -132,10 +132,10 @@ public sealed class BackgroundToolStorageTests {
 
   private static (Guid Session, Guid Execution, Guid Request) Begin(UrdStore store, params string[] calls) {
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, execution = Guid.NewGuid();
-    store.UserMessages.Admit(session, 0,
+    store.UserMessages.Submit(session, 0,
         new(Guid.NewGuid(), 0, "request", TestLlmSelection.Default), true, execution);
     var identity = new ExecutionIdentity(session, execution, 0);
-    Guid request = store.Executions.ClaimNextRequest(identity)!.RequestId;
+    Guid request = store.Executions.CreateNextRequest(identity)!.RequestId;
     Assert.True(store.Executions.StartRequest(identity, request));
     Assert.True(store.LlmResponses.Append(identity, new(request, Guid.NewGuid(), 0, "", true)));
     Assert.True(store.LlmResponses.CompleteRequest(identity,

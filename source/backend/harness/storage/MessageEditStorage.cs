@@ -37,7 +37,7 @@ internal sealed class MessageEditStorage(Database database, UserMessageStorage m
       database.Read(transaction => ReadReceipt(transaction, sessionId, operationId, null));
 
   // Check retained operations before target identity: a committed retry necessarily carries an old revision.
-  internal MessageEditReceipt? Check(Guid sessionId, MessageEditSubmission submission) => database.Read(transaction => {
+  internal MessageEditReceipt? ReadReceiptOrValidate(Guid sessionId, MessageEditSubmission submission) => database.Read(transaction => {
     MessageEditReceipt? receipt = ReadReceipt(transaction, sessionId, submission.OperationId, Hash(submission));
     if (receipt is null)
       ReadTarget(transaction, sessionId, submission.Message);
@@ -58,7 +58,7 @@ internal sealed class MessageEditStorage(Database database, UserMessageStorage m
     long revision = checked(submission.Message.HistoryRevision + 1);
     RebuildPositions(transaction, sessionId, revision);
     var input = new UserMessageSubmission(submission.OperationId, revision, submission.Text, submission.LlmSelection);
-    var admitted = messages.Admit(transaction, sessionId, revision, input, accepting: true, Guid.NewGuid());
+    var admitted = messages.Submit(transaction, sessionId, revision, input, accepting: true, Guid.NewGuid());
     if (!admitted.NewlyAccepted || admitted.Receipt.Acceptance != MessageAcceptance.Accepted)
       throw new UserMessageConflictException(submission.OperationId);
     Guid executionId = admitted.Receipt.ExecutionId!.Value;

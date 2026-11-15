@@ -25,10 +25,10 @@ public sealed class SessionStopRoutesTests {
     using (UrdStore store = UrdStore.Open(database.Path)) {
       store.Sessions.CreatePrimary(sessionId);
       var identity = new ExecutionIdentity(sessionId, executionId, 0);
-      store.UserMessages.Admit(sessionId, 0,
+      store.UserMessages.Submit(sessionId, 0,
           new(Guid.NewGuid(), 0, "orphan", TestLlmSelection.Default), true, executionId);
-      Assert.NotNull(store.Executions.ClaimNextRequest(identity));
-      store.UserMessages.Admit(sessionId, 0,
+      Assert.NotNull(store.Executions.CreateNextRequest(identity));
+      store.UserMessages.Submit(sessionId, 0,
           new(Guid.NewGuid(), 0, "pending", TestLlmSelection.Default), true, Guid.NewGuid(), executionId);
     }
     var llm = new ScriptedChatClient(_ => throw new InvalidOperationException("Orphan work must not replay."));

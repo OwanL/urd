@@ -194,8 +194,8 @@ public sealed class MarkdownRoutesTests {
     Guid run = Guid.NewGuid();
     var identity = new ExecutionIdentity(session, run, 0);
     string text = string.Join("\n\n", Enumerable.Range(0, 130).Select(i => $"[item{i}](https://example.invalid/{i})"));
-    store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, text, TestLlmSelection.Default), true, run);
-    var request = store.Executions.ClaimNextRequest(identity)!;
+    store.UserMessages.Submit(session, 0, new(Guid.NewGuid(), 0, text, TestLlmSelection.Default), true, run);
+    var request = store.Executions.CreateNextRequest(identity)!;
     Assert.True(store.Executions.StartRequest(identity, request.RequestId));
     return (session, store.Positions.Locate(session, 0, 0).Entries.Single().Descriptor.Entry);
   }

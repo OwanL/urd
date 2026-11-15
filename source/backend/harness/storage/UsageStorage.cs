@@ -19,7 +19,7 @@ internal sealed class UsageStorage(Database database) {
     string json = Serialize(request);
     long? cost = ToNanoDollars(request.CostUsd);
     database.Write(transaction => {
-      int inserted = database.Execute(transaction, """
+      int insertedUsageRequestCount = database.Execute(transaction, """
         INSERT INTO usage_requests (
             id, session_id, started_at, finished_at, provider, model, purpose, cost_nano_usd,
             is_estimate, problem, record_json)
@@ -32,7 +32,7 @@ internal sealed class UsageStorage(Database database) {
           ("$provider", request.Provider), ("$model", request.Model), ("$purpose", request.Purpose),
           ("$cost", cost), ("$estimate", request.IsEstimate ? 1 : 0), ("$problem", request.Problem),
           ("$record", json));
-      if (inserted == 0 && ReadRequest(transaction, request.Id) != request)
+      if (insertedUsageRequestCount == 0 && ReadRequest(transaction, request.Id) != request)
         throw new InvalidOperationException($"Usage request {request.Id} already exists with different data.");
       return true;
     });
@@ -55,7 +55,7 @@ internal sealed class UsageStorage(Database database) {
       }
 
       EnsureSameBinding(existing, request);
-      int updated = database.Execute(transaction, """
+      int updatedUsageRequestCount = database.Execute(transaction, """
         UPDATE usage_requests SET session_id = $session, started_at = $started, finished_at = $finished,
             provider = $provider, model = $model, purpose = $purpose, cost_nano_usd = $cost,
             is_estimate = $estimate, problem = $problem, record_json = $record
@@ -66,7 +66,7 @@ internal sealed class UsageStorage(Database database) {
           ("$provider", request.Provider), ("$model", request.Model), ("$purpose", request.Purpose),
           ("$cost", cost), ("$estimate", request.IsEstimate ? 1 : 0), ("$problem", request.Problem),
           ("$record", json));
-      if (updated != 1)
+      if (updatedUsageRequestCount != 1)
         throw new InvalidOperationException($"Usage request {request.Id} changed while it was being updated.");
       return true;
     });

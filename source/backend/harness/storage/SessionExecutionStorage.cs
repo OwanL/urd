@@ -5,12 +5,12 @@ using Urd.Core.Sessions;
 
 namespace Urd.Core.Storage;
 
-// Claims execution work and retains stop and settlement facts. The caller joins request cleanup first.
+// Creates execution requests and retains stop and settlement facts. The caller joins request cleanup first.
 internal sealed class SessionExecutionStorage(Database database, ToolResultCodec toolResults) {
-  internal LlmRequest? ClaimNextRequest(ExecutionIdentity execution) {
+  internal LlmRequest? CreateNextRequest(ExecutionIdentity execution) {
     return database.Write<LlmRequest?>(transaction => {
       Guid requestId = Guid.NewGuid();
-      int claimed = database.Execute(transaction, $"""
+      int insertedRequestCount = database.Execute(transaction, $"""
         INSERT INTO execution_requests (request_id, run_id, request_index, attempt)
         SELECT $request, r.run_id,
             COALESCE((SELECT MAX(request_index) + 1 FROM execution_requests WHERE run_id = r.run_id), 0), 1
@@ -32,7 +32,7 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
                     SELECT 1 FROM execution_requests first_request WHERE first_request.run_id = r.run_id)));
         """,
           ExecutionSql.Parameters(execution, ("$request", requestId), ("$continuation", (int)ExecutionRunKind.Continuation)));
-      if (claimed == 0)
+      if (insertedRequestCount == 0)
         return null;
 
       PublishCompletions(transaction, execution.SessionId, execution.HistoryRevision, requestId);
@@ -74,7 +74,7 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
   // entries again, and the stopped/settled/revision checks also apply to repeats.
   internal bool StartRequest(ExecutionIdentity execution, Guid requestId, StartingContext? startingContext = null) {
     return database.Write(transaction => {
-      int marked = database.Execute(transaction, $"""
+      int startedRequestCount = database.Execute(transaction, $"""
         UPDATE execution_requests SET attempt = 2,
             compaction_id = (SELECT compaction_id FROM session_compactions
                 WHERE session_id = $session AND history_revision = $revision ORDER BY ordinal DESC LIMIT 1)
@@ -82,7 +82,7 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
             AND EXISTS (SELECT 1 FROM execution_runs r JOIN sessions s ON s.session_id = r.session_id
                 WHERE r.run_id = $run AND r.session_id = $session AND {ExecutionSql.CurrentRunCondition});
         """, ExecutionSql.Parameters(execution, ("$request", requestId)));
-      if (marked == 0)
+      if (startedRequestCount == 0)
         return false;
 
       if (startingContext is not null)
@@ -135,7 +135,7 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
   }
 
   // The caller has joined all owned work, including cancellation callbacks, before settlement.
-  internal SessionExecutionResult? TrySettle(Guid sessionId, Guid executionId, ExecutionOutcome driverOutcome) {
+  internal SessionExecutionResult? TryFinish(Guid sessionId, Guid executionId, ExecutionOutcome driverOutcome) {
     if (!Enum.IsDefined(driverOutcome))
       throw new ArgumentOutOfRangeException(nameof(driverOutcome));
 
@@ -163,7 +163,7 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
           row.Bool("needs_tool_continuation"), row.Bool("is_compaction"), row.NullableString("error"),
           row.NullableTimestamp("working_started_at")),
         ("$session", sessionId), ("$run", executionId), ("$compaction", (int)ExecutionRunKind.Compaction));
-      if (DecideSettlement(state, driverOutcome) is not { } settlement)
+      if (ChooseFinalOutcome(state, driverOutcome) is not { } settlement)
         return null;
 
       if (settlement.AlreadySettled)
@@ -173,14 +173,14 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
           ? DateTimeOffset.UtcNow - startedAt : TimeSpan.Zero;
       bool unknownDuration = settlement.StartedAt is null || elapsed < TimeSpan.Zero;
       long elapsedMilliseconds = elapsed > TimeSpan.Zero ? (long)elapsed.TotalMilliseconds : 0L;
-      int updated = database.Execute(transaction, """
+      int updatedSessionCount = database.Execute(transaction, """
         UPDATE sessions SET completed_working_ms = completed_working_ms + $elapsed,
             working_time_incomplete = CASE WHEN $unknown = 1 THEN 1 ELSE working_time_incomplete END
         WHERE session_id = $session AND EXISTS (SELECT 1 FROM execution_runs
             WHERE session_id = $session AND run_id = $run AND outcome IS NULL);
         """, ("$session", sessionId), ("$run", executionId), ("$elapsed", elapsedMilliseconds),
           ("$unknown", unknownDuration ? 1 : 0));
-      if (updated != 1)
+      if (updatedSessionCount != 1)
         throw new InvalidOperationException("The active execution working-time interval could not be settled.");
 
       database.Execute(transaction, $"""
@@ -312,7 +312,7 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
             (ExecutionOutcome)outcome == ExecutionOutcome.Failed ? row.NullableString("error") : null);
       }, ("$session", sessionId), ("$run", executionId)));
 
-  private static (ExecutionOutcome Outcome, bool AlreadySettled, string? Error, DateTimeOffset? StartedAt)? DecideSettlement(
+  private static (ExecutionOutcome Outcome, bool AlreadySettled, string? Error, DateTimeOffset? StartedAt)? ChooseFinalOutcome(
       RunFinishState? state, ExecutionOutcome driverOutcome) {
     if (state is null)
       return null;

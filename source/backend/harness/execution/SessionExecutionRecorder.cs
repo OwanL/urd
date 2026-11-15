@@ -34,7 +34,7 @@ internal sealed class SessionExecutionRecorder(SessionBase session, UrdStore sto
   internal async Task<bool> ObserveToolAsync(Guid requestId, string callId, string? name) {
     using var held = await gate.AcquireAsync();
     if (!session.CanRecordExecution(Identity)
-        || !store.LlmResponses.ObserveTool(Identity, requestId, callId, name))
+        || !store.LlmResponses.RecordToolCall(Identity, requestId, callId, name))
       return false;
 
     session.PublishChange();

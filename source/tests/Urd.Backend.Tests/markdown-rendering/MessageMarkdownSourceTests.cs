@@ -76,7 +76,7 @@ public sealed class MessageMarkdownSourceTests {
     if (final)
       Append(store, execution, 4, "last", final: true);
     else
-      Assert.True(store.LlmResponses.ObserveTool(identity, execution.Request, "call", "tool"));
+      Assert.True(store.LlmResponses.RecordToolCall(identity, execution.Request, "call", "tool"));
     MessageMarkdownSource source = MessageMarkdownSourceReader.Read(store.Content, extent);
     store.Content.ValidateSourceExtent(extent);
 
@@ -103,9 +103,9 @@ public sealed class MessageMarkdownSourceTests {
     if (failed) {
       Assert.True(store.LlmResponses.CompleteRequest(identity,
           new(execution.Request, ExecutionOutcome.Failed, "provider failed")));
-      Assert.NotNull(store.Executions.TrySettle(execution.Session, execution.Execution, ExecutionOutcome.Failed));
+      Assert.NotNull(store.Executions.TryFinish(execution.Session, execution.Execution, ExecutionOutcome.Failed));
     } else {
-      Assert.True(store.LlmResponses.ObserveTool(identity, execution.Request, "call", "tool"));
+      Assert.True(store.LlmResponses.RecordToolCall(identity, execution.Request, "call", "tool"));
     }
     MessageContentExtent extent = Capture(store, execution, execution.Assistant);
     if (!failed) Append(store, execution, 2, "after", output: Guid.NewGuid());
@@ -188,8 +188,8 @@ public sealed class MessageMarkdownSourceTests {
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, execution = Guid.NewGuid();
     var identity = new ExecutionIdentity(session, execution, 0);
     var submission = new UserMessageSubmission(Guid.NewGuid(), 0, text, TestLlmSelection.Default);
-    Assert.True(store.UserMessages.Admit(session, 0, submission, true, execution).NewlyAccepted);
-    LlmRequest request = store.Executions.ClaimNextRequest(identity)!;
+    Assert.True(store.UserMessages.Submit(session, 0, submission, true, execution).NewlyAccepted);
+    LlmRequest request = store.Executions.CreateNextRequest(identity)!;
     Assert.True(store.Executions.StartRequest(identity, request.RequestId));
     return new(session, execution, request.RequestId,
         new(execution, submission.SubmissionId, MessageRole.User, 0), new(execution, Guid.NewGuid(), MessageRole.Assistant, 0), identity);

@@ -20,7 +20,7 @@ public sealed class BackgroundExecutionStorageTests {
     const string callId = "background\"\n]";
     CompleteReply(store, identity, origin, callId);
     Assert.True(store.Tools.TryStart(identity, origin, callId, background: true));
-    LlmRequest streaming = store.Executions.ClaimNextRequest(identity)!;
+    LlmRequest streaming = store.Executions.CreateNextRequest(identity)!;
     Assert.True(store.Executions.StartRequest(identity, streaming.RequestId));
     Guid output = Guid.NewGuid();
     Assert.True(store.LlmResponses.Append(identity, new(streaming.RequestId, output, 0, "part", false)));
@@ -30,14 +30,14 @@ public sealed class BackgroundExecutionStorageTests {
     Assert.True(store.LlmResponses.Append(identity, new(streaming.RequestId, output, 1, " done", true)));
     Assert.True(store.LlmResponses.CompleteRequest(identity, new(streaming.RequestId, ExecutionOutcome.Completed)));
     TranscriptPositionState before = store.Positions.Summary(session, 0);
-    Assert.Null(store.Executions.ClaimNextRequest(identity with { SessionId = Guid.NewGuid() }));
-    Assert.Null(store.Executions.ClaimNextRequest(identity with { HistoryRevision = 1 }));
+    Assert.Null(store.Executions.CreateNextRequest(identity with { SessionId = Guid.NewGuid() }));
+    Assert.Null(store.Executions.CreateNextRequest(identity with { HistoryRevision = 1 }));
     Assert.Equal(before, store.Positions.Summary(session, 0));
     Assert.Empty(Completions(store, session));
-    store.UserMessages.Admit(session, 0,
+    store.UserMessages.Submit(session, 0,
         new(Guid.NewGuid(), 0, "steering", TestLlmSelection.Default), true, execution, execution);
 
-    LlmRequest next = store.Executions.ClaimNextRequest(identity)!;
+    LlmRequest next = store.Executions.CreateNextRequest(identity)!;
     TranscriptEntryDescriptor completion = Assert.Single(Completions(store, session));
     Assert.Equal(execution, completion.Entry.ExecutionId);
     Assert.Equal(origin, completion.Tool!.RequestId);
@@ -77,7 +77,7 @@ public sealed class BackgroundExecutionStorageTests {
     CompleteReply(store, identity, origin, "background");
     Assert.True(store.Tools.TryStart(identity, origin, "background", background: true));
     Assert.True(store.Tools.Complete(identity, origin, Result("background", "saved")));
-    LlmRequest recipient = store.Executions.ClaimNextRequest(identity)!;
+    LlmRequest recipient = store.Executions.CreateNextRequest(identity)!;
     TranscriptEntryRef completionIdentity = Assert.Single(Completions(store, session)).Entry;
     if (attempted)
       Assert.True(store.Executions.StartRequest(identity, recipient.RequestId));
@@ -85,15 +85,15 @@ public sealed class BackgroundExecutionStorageTests {
       store.RecoverInterruptedExecutions();
     } else {
       store.Executions.RequestStop(session, execution, ownsExecution: true);
-      Assert.Equal(ExecutionOutcome.Cancelled, store.Executions.TrySettle(session, execution, ExecutionOutcome.Cancelled)!.Outcome);
+      Assert.Equal(ExecutionOutcome.Cancelled, store.Executions.TryFinish(session, execution, ExecutionOutcome.Cancelled)!.Outcome);
     }
     object? owner = database.Scalar("SELECT claimed_request_id FROM execution_tool_completions;"); // raw-sql: No reader exposes recipient ownership; settlement must atomically release only never-attempted claims.
     Assert.Equal(attempted ? recipient.RequestId.ToString("D") : null, owner as string);
     Guid nextExecution = Guid.NewGuid();
     var nextIdentity = new ExecutionIdentity(session, nextExecution, 0);
-    store.UserMessages.Admit(session, 0,
+    store.UserMessages.Submit(session, 0,
         new(Guid.NewGuid(), 0, "deliberate continuation", TestLlmSelection.Default), true, nextExecution);
-    LlmRequest next = store.Executions.ClaimNextRequest(nextIdentity)!;
+    LlmRequest next = store.Executions.CreateNextRequest(nextIdentity)!;
     Assert.Equal((attempted ? recipient.RequestId : next.RequestId).ToString("D"), database.Scalar("SELECT claimed_request_id FROM execution_tool_completions;")); // raw-sql: A new execution must reclaim the original event only when its earlier recipient was never attempted.
     Assert.Equal(completionIdentity, Assert.Single(Completions(store, session)).Entry);
     Assert.Single(next.Messages, IsCompletion);
@@ -111,7 +111,7 @@ public sealed class BackgroundExecutionStorageTests {
     store.Executions.RequestStop(session, execution, ownsExecution: true);
 
     Assert.Equal(ExecutionOutcome.Cancelled,
-        store.Executions.TrySettle(session, execution, ExecutionOutcome.Cancelled)!.Outcome);
+        store.Executions.TryFinish(session, execution, ExecutionOutcome.Cancelled)!.Outcome);
     TranscriptEntryDescriptor[] tools = store.History.Read(session,
         new(TranscriptHistoryMode.Latest, 0)).Entries
         .Where(entry => entry.Entry.Kind == TranscriptEntryKind.Tool).ToArray();
@@ -162,7 +162,7 @@ public sealed class BackgroundExecutionStorageTests {
       streamingIdentity = new ExecutionIdentity(streamingSession, streamingExecution, 0);
       Assert.True(store.LlmResponses.Append(streamingIdentity,
           new(streamingRequest, Guid.NewGuid(), 0, "interrupted text", false)));
-      store.UserMessages.Admit(streamingSession, 0,
+      store.UserMessages.Submit(streamingSession, 0,
           new(pendingInput, 0, "not yet sent", TestLlmSelection.Default), true, streamingExecution, streamingExecution);
     }
 
@@ -191,8 +191,8 @@ public sealed class BackgroundExecutionStorageTests {
     Assert.Equal(ExecutionOutcome.Failed, Assert.Single(StoredExecutions.ReadRequests(database), request => request.RequestId == streamingRequest).Outcome);
     Assert.All(StoredDeliveries.Read(database), input => Assert.NotNull(input.Outcome));
     Assert.Equal(pendingInput, Assert.Single(reopened.NotSentInputs.Read(streamingSession, null).Inputs).SubmissionId);
-    Assert.Null(reopened.Snapshots.ReadStored(session).UnsettledExecutionId);
-    Assert.Empty(reopened.Snapshots.ReadStored(streamingSession).PendingInputs);
+    Assert.Null(reopened.Snapshots.ReadPersisted(session).UnsettledExecutionId);
+    Assert.Empty(reopened.Snapshots.ReadPersisted(streamingSession).PendingInputs);
     TranscriptTextFacts text = Assert.Single(reopened.History.Read(streamingSession,
         new(TranscriptHistoryMode.Latest, 0)).Entries, entry => entry.Entry.Kind == TranscriptEntryKind.Text).Text!;
     Assert.True(text.IsClosed);
@@ -217,9 +217,9 @@ public sealed class BackgroundExecutionStorageTests {
     Assert.Equal(positions, reopened.Positions.Summary(session, 0));
     Guid nextExecution = Guid.NewGuid();
     var nextIdentity = new ExecutionIdentity(session, nextExecution, 0);
-    reopened.UserMessages.Admit(session, 0,
+    reopened.UserMessages.Submit(session, 0,
         new(Guid.NewGuid(), 0, "continue deliberately", TestLlmSelection.Default), true, nextExecution);
-    LlmRequest next = reopened.Executions.ClaimNextRequest(nextIdentity)!;
+    LlmRequest next = reopened.Executions.CreateNextRequest(nextIdentity)!;
     Assert.Equal(2, next.Messages.Count(IsCompletion));
     ChatMessage saved = Assert.Single(next.Messages.Where(IsCompletion),
         message => message.Text.EndsWith("actual saved result", StringComparison.Ordinal));
@@ -248,10 +248,10 @@ public sealed class BackgroundExecutionStorageTests {
 
   private static (Guid Session, Guid Execution, Guid Request) Start(UrdStore store) {
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, execution = Guid.NewGuid();
-    store.UserMessages.Admit(session, 0,
+    store.UserMessages.Submit(session, 0,
         new(Guid.NewGuid(), 0, "request", TestLlmSelection.Default), true, execution);
     var identity = new ExecutionIdentity(session, execution, 0);
-    Guid request = store.Executions.ClaimNextRequest(identity)!.RequestId;
+    Guid request = store.Executions.CreateNextRequest(identity)!.RequestId;
     Assert.True(store.Executions.StartRequest(identity, request));
     return (session, execution, request);
   }

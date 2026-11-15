@@ -241,10 +241,10 @@ public sealed class SessionRoutesTests {
     using (UrdStore store = UrdStore.Open(database.Path)) {
       sessionId = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
       var identity = new ExecutionIdentity(sessionId, run, 0);
-      receipt = store.UserMessages.Admit(sessionId, 0, submission, true, run).Receipt;
-      Guid request = store.Executions.ClaimNextRequest(identity)!.RequestId;
+      receipt = store.UserMessages.Submit(sessionId, 0, submission, true, run).Receipt;
+      Guid request = store.Executions.CreateNextRequest(identity)!.RequestId;
       Assert.True(store.LlmResponses.CompleteRequest(identity, new(request, ExecutionOutcome.Failed)));
-      Assert.NotNull(store.Executions.TrySettle(sessionId, run, ExecutionOutcome.Failed));
+      Assert.NotNull(store.Executions.TryFinish(sessionId, run, ExecutionOutcome.Failed));
     }
 
     await using var server = new RunningServer(Options(database));

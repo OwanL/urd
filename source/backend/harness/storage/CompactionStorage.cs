@@ -68,7 +68,7 @@ internal sealed class CompactionStorage(Database database, ToolResultCodec toolR
   }
 
   // Null means busy/fenced. A retained operation is never started a second time.
-  internal (CompactionReceipt Receipt, bool New)? Admit(Guid sessionId, ManualCompactionRequest submission, bool accepting) {
+  internal (CompactionReceipt Receipt, bool New)? Start(Guid sessionId, ManualCompactionRequest submission, bool accepting) {
     return database.Write<(CompactionReceipt, bool)?>(transaction => {
       CompactionReceipt? retained = database.QuerySingleOrDefault(transaction, """
         SELECT session_id, history_revision, kind, llm_selection_json, compaction_focus, outcome, error
@@ -84,7 +84,7 @@ internal sealed class CompactionStorage(Database database, ToolResultCodec toolR
         }, ("$run", submission.OperationId));
       if (retained is not null)
         return (retained, false);
-      int inserted = database.Execute(transaction, """
+      int insertedCompactionRunCount = database.Execute(transaction, """
         INSERT INTO execution_runs (session_id, run_id, history_revision, kind, llm_selection_json,
             compaction_focus, working_started_at)
         SELECT s.session_id, $run, s.history_revision, $kind, $selection, $focus, $started FROM sessions s
@@ -94,7 +94,7 @@ internal sealed class CompactionStorage(Database database, ToolResultCodec toolR
           ("$kind", (int)ExecutionRunKind.Compaction),
           ("$selection", LlmSelectionJson.Write(submission.LlmSelection)), ("$focus", submission.Focus),
           ("$started", StorageText.UtcTimestamp()), ("$accepting", accepting ? 1 : 0));
-      return inserted == 0 ? null : (new CompactionReceipt(submission.OperationId, null), true);
+      return insertedCompactionRunCount == 0 ? null : (new CompactionReceipt(submission.OperationId, null), true);
     });
   }
 

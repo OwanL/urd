@@ -23,14 +23,14 @@ public sealed class LlmProviderResponseStorageTests {
           new(request, ExecutionOutcome.Completed, ProviderResponse: response)));
       Assert.Equal(response, Assert.Single(ReadProviderResponses(database)));
       Assert.Equal(ExecutionOutcome.Completed,
-          store.Executions.TrySettle(identity.SessionId, identity.ExecutionId, ExecutionOutcome.Completed)!.Outcome);
+          store.Executions.TryFinish(identity.SessionId, identity.ExecutionId, ExecutionOutcome.Completed)!.Outcome);
     }
 
     using UrdStore reopened = UrdStore.Open(database.Path);
     var nextIdentity = new ExecutionIdentity(identity.SessionId, Guid.NewGuid(), 0);
-    reopened.UserMessages.Admit(identity.SessionId, 0,
+    reopened.UserMessages.Submit(identity.SessionId, 0,
         new(Guid.NewGuid(), 0, "next input", TestLlmSelection.Default), true, nextIdentity.ExecutionId);
-    LlmRequest next = reopened.Executions.ClaimNextRequest(nextIdentity)!;
+    LlmRequest next = reopened.Executions.CreateNextRequest(nextIdentity)!;
     Assert.Equal(new[] { ChatRole.User, ChatRole.Assistant, ChatRole.User },
         next.Messages.Select(message => message.Role));
     Assert.Equal(new[] { "request", "native answer", "next input" },
@@ -78,9 +78,9 @@ public sealed class LlmProviderResponseStorageTests {
   private static (ExecutionIdentity Identity, Guid Request) Begin(UrdStore store) {
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     var identity = new ExecutionIdentity(session, Guid.NewGuid(), 0);
-    store.UserMessages.Admit(session, 0,
+    store.UserMessages.Submit(session, 0,
         new(Guid.NewGuid(), 0, "request", TestLlmSelection.Default), true, identity.ExecutionId);
-    Guid request = store.Executions.ClaimNextRequest(identity)!.RequestId;
+    Guid request = store.Executions.CreateNextRequest(identity)!.RequestId;
     Assert.True(store.Executions.StartRequest(identity, request));
     return (identity, request);
   }

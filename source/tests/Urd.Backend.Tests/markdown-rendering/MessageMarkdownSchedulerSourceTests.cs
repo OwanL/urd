@@ -100,9 +100,9 @@ public sealed class MessageMarkdownSchedulerSourceTests {
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     Guid execution = Guid.NewGuid(), submission = Guid.NewGuid();
     var identity = new ExecutionIdentity(session, execution, 0);
-    Assert.True(store.UserMessages.Admit(session, 0,
+    Assert.True(store.UserMessages.Submit(session, 0,
         new(submission, 0, text, TestLlmSelection.Default), true, execution).NewlyAccepted);
-    var request = store.Executions.ClaimNextRequest(identity)!;
+    var request = store.Executions.CreateNextRequest(identity)!;
     Assert.True(store.Executions.StartRequest(identity, request.RequestId));
     var positioned = store.Positions.Locate(session, 0, 0).Entries.Single();
     return MessageMarkdownKey.FromPositionedEntry(session, positioned);

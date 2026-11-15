@@ -101,7 +101,7 @@ internal sealed class SnapshotReader {
   }
 
   // Reads stored facts only. SessionBase supplies live admission and Stop state before exposure.
-  internal SessionSnapshot ReadStored(Guid sessionId) {
+  internal SessionSnapshot ReadPersisted(Guid sessionId) {
     if (sessionId == Guid.Empty)
       throw new ArgumentException("Session ID cannot be empty.", nameof(sessionId));
 

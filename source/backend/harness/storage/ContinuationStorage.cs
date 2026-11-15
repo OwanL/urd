@@ -6,9 +6,9 @@ using Urd.Core.Sessions;
 
 namespace Urd.Core.Storage;
 
-// Admits an input-less execution against the exact settled history tail it continues.
+// Starts an input-less execution against the exact settled history tail it continues.
 internal sealed class ContinuationStorage(Database database, ToolResultCodec toolResults) {
-  internal (ContinuationReceipt Receipt, bool New)? Admit(Guid sessionId, long historyRevision,
+  internal (ContinuationReceipt Receipt, bool New)? Start(Guid sessionId, long historyRevision,
       ContinuationSubmission submission, bool accepting) => database.Write<(ContinuationReceipt Receipt, bool New)?>(transaction => {
     ContinuationReceipt? retained = ReadReceipt(transaction, sessionId, submission.OperationId, submission);
     if (retained is not null)

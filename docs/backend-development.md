@@ -140,7 +140,7 @@ unchanged. [Server](server-development.md#session-http-contract) records the wir
 Historical verification included raw HTTP assertions for the renamed JSON members and
 rejection of legacy routes/required field names, alongside retry, reopen, migration, Stop
 and bounded-read checks.
-`SessionSnapshot` is now the single snapshot shape. `SnapshotReader.ReadStored` supplies
+`SessionSnapshot` is now the single snapshot shape. `SnapshotReader.ReadPersisted` supplies
 stored facts with a conservative admission fence; `SessionBase.ReadSnapshotAsync` uses
 `SessionStatus` to apply live admission/Stop rules under the shared session lock before
 returning an immutable view. The separate stored snapshot and duplicate field mapping are removed. The private

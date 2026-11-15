@@ -77,9 +77,9 @@ public sealed class DatabaseSchemaTests {
     var identity = new ExecutionIdentity(session, run, 0);
     Guid input = Guid.NewGuid();
     string text = new('x', 17000);
-    Assert.True(store.UserMessages.Admit(session, 0,
+    Assert.True(store.UserMessages.Submit(session, 0,
         new(input, 0, text, TestLlmSelection.Default), true, run, run).NewlyAccepted);
-    Guid request = store.Executions.ClaimNextRequest(identity)!.RequestId;
+    Guid request = store.Executions.CreateNextRequest(identity)!.RequestId;
     Assert.Equal(1L, database.Scalar($"SELECT attempt FROM execution_requests WHERE request_id = '{request:D}';")); // raw-sql: current schema creation, rejection or constraint is the subject under test
     Assert.Throws<SqliteException>(() => database.Execute($"UPDATE execution_requests SET attempt = 0 WHERE request_id = '{request:D}';"));
     Assert.Throws<SqliteException>(() => database.Execute($"UPDATE execution_requests SET attempt = 3 WHERE request_id = '{request:D}';"));

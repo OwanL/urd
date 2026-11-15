@@ -77,7 +77,7 @@ public abstract class SessionBase {
     TaskCompletionSource? released = null;
     CompactionReceipt? receipt;
     using (await gate.AcquireAsync()) {
-      var admission = WriteToStore(() => store.Compactions.Admit(Id, submission,
+      var admission = WriteToStore(() => store.Compactions.Start(Id, submission,
           CanAdmit && !needsAttention && submission.ExpectedHistoryRevision == HistoryRevision));
       if (admission is null)
         return null;
@@ -170,7 +170,7 @@ public abstract class SessionBase {
         || current.IsStopping)
       return false;
 
-    SessionSnapshot stored = store.Snapshots.ReadStored(Id);
+    SessionSnapshot stored = store.Snapshots.ReadPersisted(Id);
     SessionSnapshot snapshot = status.ApplyLiveState(stored, CanAdmit, current);
     if (snapshot.AdmissionFenced || snapshot.StopRequested || snapshot.UnsettledExecutionId != executionId)
       return false;
@@ -185,7 +185,7 @@ public abstract class SessionBase {
 
   public async Task<SessionSnapshot> ReadSnapshotAsync(CancellationToken cancellation = default) {
     using var held = await gate.AcquireAsync(cancellation);
-    SessionSnapshot snapshot = status.ApplyLiveState(store.Snapshots.ReadStored(Id), CanAdmit, execution);
+    SessionSnapshot snapshot = status.ApplyLiveState(store.Snapshots.ReadPersisted(Id), CanAdmit, execution);
     bool locallyIdle = CanAdmit && !needsAttention && execution is null
         && snapshot.UnsettledExecutionId is null && !snapshot.AdmissionFenced && !snapshot.StopRequested;
     bool canRemovePending = CanAdmit && !needsAttention && !snapshot.AdmissionFenced && !snapshot.StopRequested
@@ -204,7 +204,7 @@ public abstract class SessionBase {
   public async Task<string?> TryChangeWorkingDirectoryAsync(string path) {
     string normalized = PreferenceManager.NormalizeWorkingDirectory(path);
     using (await gate.AcquireAsync()) {
-      SessionSnapshot stored = store.Snapshots.ReadStored(Id);
+      SessionSnapshot stored = store.Snapshots.ReadPersisted(Id);
       SessionSnapshot snapshot = status.ApplyLiveState(stored, CanAdmit, execution);
       if (!CanChangeWorkingDirectory(snapshot))
         return null;
@@ -223,7 +223,7 @@ public abstract class SessionBase {
       CancellationToken cancellation = default) {
     ArgumentNullException.ThrowIfNull(observer);
     using var held = await gate.AcquireAsync(cancellation);
-    SessionSnapshot stored = store.Snapshots.ReadStored(Id);
+    SessionSnapshot stored = store.Snapshots.ReadPersisted(Id);
     status.Observe(stored, execution);
     return notifications.Subscribe(observer, watched, status.ReadStored(stored, CanAdmit, needsAttention, execution));
   }
@@ -233,7 +233,7 @@ public abstract class SessionBase {
     TaskCompletionSource? lockReleased = null;
     ContinuationReceipt? receipt;
     using (await gate.AcquireAsync()) {
-      var admission = WriteToStore(() => store.Continuations.Admit(Id, HistoryRevision, submission,
+      var admission = WriteToStore(() => store.Continuations.Start(Id, HistoryRevision, submission,
           CanAdmit && !needsAttention && execution is null));
       if (admission is null)
         return null;
@@ -256,7 +256,7 @@ public abstract class SessionBase {
     UserMessageReceipt receipt;
     using (await gate.AcquireAsync()) {
       (receipt, bool newlyAccepted) = WriteToStore(
-          () => store.UserMessages.Admit(Id, HistoryRevision, submission, CanAdmit, Guid.NewGuid(), execution?.ExecutionId));
+          () => store.UserMessages.Submit(Id, HistoryRevision, submission, CanAdmit, Guid.NewGuid(), execution?.ExecutionId));
       if (receipt.Acceptance == MessageAcceptance.Accepted)
         hasAcceptedInput = true;
 
@@ -285,7 +285,7 @@ public abstract class SessionBase {
     Task<MessageEditReceipt> work;
     TaskCompletionSource? released = null;
     using (await gate.AcquireAsync()) {
-      MessageEditReceipt? receipt = store.MessageEdits.Check(Id, submission);
+      MessageEditReceipt? receipt = store.MessageEdits.ReadReceiptOrValidate(Id, submission);
       if (receipt is not null)
         return receipt;
       if (editTask is not null) {
@@ -422,9 +422,9 @@ public abstract class SessionBase {
   }
 
   // Caller holds the session gate; the driver publishes after updating its waiting state.
-  internal LlmRequest? ClaimNextRequest(ExecutionIdentity identity) => identity.SessionId == Id
+  internal LlmRequest? CreateNextRequest(ExecutionIdentity identity) => identity.SessionId == Id
       && identity.HistoryRevision == HistoryRevision && IsCurrentExecution(identity.ExecutionId) && !execution!.IsStopping
-      ? store.Executions.ClaimNextRequest(identity) : null;
+      ? store.Executions.CreateNextRequest(identity) : null;
 
   // Caller holds the session gate. Results may finish during Stop, but no new work may start.
   internal bool CanRecordExecution(Guid executionId, bool allowStopping = false) =>
@@ -455,7 +455,7 @@ public abstract class SessionBase {
   // Caller holds the session gate. Save before releasing resources and publishing;
   // only then may the driver complete its settlement task.
   internal SessionExecutionResult SettleExecution(SessionExecutionDriver execution, ExecutionOutcome outcome) {
-    SessionExecutionResult saved = store.Executions.TrySettle(Id, execution.ExecutionId, outcome)
+    SessionExecutionResult saved = store.Executions.TryFinish(Id, execution.ExecutionId, outcome)
         ?? throw new InvalidOperationException("The current execution could not be settled.");
 
     execution.Release();

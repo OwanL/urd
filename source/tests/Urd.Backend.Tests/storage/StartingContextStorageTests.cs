@@ -90,9 +90,9 @@ public sealed class StartingContextStorageTests {
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     Guid execution = Guid.NewGuid();
     var identity = new ExecutionIdentity(session, execution, 0);
-    store.UserMessages.Admit(session, 0, new(Guid.NewGuid(), 0, "request", TestLlmSelection.Default),
+    store.UserMessages.Submit(session, 0, new(Guid.NewGuid(), 0, "request", TestLlmSelection.Default),
         true, execution, null);
-    Guid request = store.Executions.ClaimNextRequest(identity)!.RequestId;
+    Guid request = store.Executions.CreateNextRequest(identity)!.RequestId;
     StartingContext context = Context("system", "developer");
     if (failPlacement) {
       database.Execute("""

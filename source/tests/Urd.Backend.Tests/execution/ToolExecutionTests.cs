@@ -458,9 +458,9 @@ public sealed class ToolExecutionTests {
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     Guid execution = Guid.NewGuid();
     var identity = new ExecutionIdentity(session, execution, 0);
-    store.UserMessages.Admit(session, 0,
+    store.UserMessages.Submit(session, 0,
         new(Guid.NewGuid(), 0, "request", TestLlmSelection.Default), true, execution);
-    Guid request = store.Executions.ClaimNextRequest(identity)!.RequestId;
+    Guid request = store.Executions.CreateNextRequest(identity)!.RequestId;
     Assert.True(store.Executions.StartRequest(identity, request));
     var call = new LlmToolCall("never-started", "fake", JsonSerializer.SerializeToElement(new { }));
     Assert.True(store.LlmResponses.Append(identity, new(request, Guid.NewGuid(), 0, "", true)));
@@ -468,7 +468,7 @@ public sealed class ToolExecutionTests {
         new(request, ExecutionOutcome.Completed, ToolCalls: [call])));
 
     Assert.Equal(ExecutionOutcome.Cancelled,
-        store.Executions.TrySettle(session, execution, ExecutionOutcome.Cancelled)!.Outcome);
+        store.Executions.TryFinish(session, execution, ExecutionOutcome.Cancelled)!.Outcome);
     Assert.False(Assert.Single(StoredTools.Read(database)).Started);
     using SqliteConnection connection = database.OpenReadOnlyConnection();
     using SqliteCommand command = connection.CreateCommand();

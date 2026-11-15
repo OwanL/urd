@@ -167,7 +167,7 @@ not current behavior; they are retained as dated design evidence.
   not completion. Closed message, final text marker and execution settlement differ.
 - User text is saved in `input_decisions.original_text_utf8`; assistant text in
   immutable `execution_output.text_utf8` segments. Current `UserMessageStorage.cs`
-  inserts a user history-index row at admission, before `ClaimNextRequest` assigns
+  inserts a user history-index row at admission, before `CreateNextRequest` assigns
   it to a model request. This conflicts with the newly requested display promotion
   boundary; change the projection/order contract without weakening durable receipts.
   Submission text is limited to
@@ -220,7 +220,7 @@ Input promotion is agreed at the product level: once Urd starts sending a reques
 containing the input, promote it without waiting for a response. If that attempt
 fails, keep the message with the failure rather than returning it to the queue.
 No automatic resubmission follows. “The model read it” cannot be guaranteed from
-local dispatch alone. Current `ClaimNextRequest` durably assigns pending inputs and
+local dispatch alone. Current `CreateNextRequest` durably assigns pending inputs and
 reconstructs context before provider enumeration; the owner has not selected that
 internal transaction as the sending boundary. Define explicit lifecycle/read facts,
 not a UI guess based on receipt timing or first assistant text. Pending-input

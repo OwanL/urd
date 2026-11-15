@@ -140,7 +140,7 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock gate
 
   // Caller holds the session gate. Admission cannot slip between recheck and settlement.
   private LlmRequest? ClaimContinuation() {
-    LlmRequest? next = execution.IsCompactionOnly ? null : session.ClaimNextRequest(Identity);
+    LlmRequest? next = execution.IsCompactionOnly ? null : session.CreateNextRequest(Identity);
     if (next is not null) {
       IsWaiting = false;
       session.PublishChange();

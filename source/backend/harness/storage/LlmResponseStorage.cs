@@ -16,7 +16,7 @@ internal sealed class LlmResponseStorage(Database database) {
     }
 
     return database.Write(transaction => {
-      int advanced = database.Execute(transaction, $"""
+      int updatedRequestCount = database.Execute(transaction, $"""
         UPDATE execution_requests SET next_chunk_index = next_chunk_index + 1,
             response_id = CASE WHEN response_id IS NULL AND $hasText = 1 THEN $output ELSE response_id END,
             response_final = $final
@@ -33,7 +33,7 @@ internal sealed class LlmResponseStorage(Database database) {
         """, ExecutionSql.Parameters(execution,
           ("$request", chunk.RequestId), ("$output", chunk.ResponseId), ("$index", chunk.ChunkIndex),
           ("$hasText", chunk.Text.Length > 0 ? 1 : 0), ("$final", chunk.IsFinal ? 1 : 0)));
-      if (advanced == 0)
+      if (updatedRequestCount == 0)
         return false;
 
       database.Execute(transaction, """
@@ -45,7 +45,7 @@ internal sealed class LlmResponseStorage(Database database) {
 
       bool hasText = chunk.Text.Length > 0;
       if (hasText) {
-        int inserted = database.Execute(transaction, $"""
+        int insertedTextMessageCount = database.Execute(transaction, $"""
           INSERT INTO execution_messages (
               session_id, history_revision, run_id, role, message_id, request_id,
               first_chunk_index, created_at, layout_weight)
@@ -55,7 +55,7 @@ internal sealed class LlmResponseStorage(Database database) {
           """, ExecutionSql.Parameters(execution,
             ("$output", chunk.ResponseId), ("$request", chunk.RequestId), ("$index", chunk.ChunkIndex),
             ("$created", StorageText.UtcTimestamp()), ("$bytes", StorageText.StrictUtf8.GetByteCount(chunk.Text))));
-        if (inserted == 0) {
+        if (insertedTextMessageCount == 0) {
           database.Execute(transaction, $"""
             UPDATE execution_messages SET layout_weight = layout_weight + $bytes
             WHERE request_id = $request AND role = {(int)TranscriptEntryKind.Text} AND message_id = $output;
@@ -82,7 +82,7 @@ internal sealed class LlmResponseStorage(Database database) {
 
   // A provider-observed boundary closes the current text run and reserves a display entry,
   // but it does not authorize execution or persist any arguments.
-  internal bool ObserveTool(ExecutionIdentity execution, Guid requestId, string callId, string? name) {
+  internal bool RecordToolCall(ExecutionIdentity execution, Guid requestId, string callId, string? name) {
     ArgumentException.ThrowIfNullOrWhiteSpace(callId);
     if (name is not null && string.IsNullOrWhiteSpace(name))
       throw new ArgumentException("A tool name must be nonempty when supplied.", nameof(name));

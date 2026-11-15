@@ -23,13 +23,13 @@ public sealed class ExecutionStorageTests {
       BEGIN INSERT INTO test_child VALUES (1); END;
       """);
 
-    Assert.Throws<SqliteException>(() => store.UserMessages.Admit(session, 0, submission, true, execution));
+    Assert.Throws<SqliteException>(() => store.UserMessages.Submit(session, 0, submission, true, execution));
     Assert.Null(store.UserMessages.ReadReceipt(session, submission.SubmissionId));
     Assert.Empty(StoredSubmissions.Read(database));
     Assert.Empty(StoredExecutions.Read(database));
 
     database.Execute("DROP TRIGGER fail_run;");
-    var admitted = store.UserMessages.Admit(session, 0, submission, true, execution);
+    var admitted = store.UserMessages.Submit(session, 0, submission, true, execution);
     Assert.True(admitted.NewlyAccepted);
     Assert.Equal(execution, admitted.Receipt.ExecutionId);
     Assert.Equal(execution, Assert.Single(StoredExecutions.Read(database)).ExecutionId);
@@ -43,16 +43,16 @@ public sealed class ExecutionStorageTests {
     Guid otherSession = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     Guid execution = Guid.NewGuid();
     var identity = new ExecutionIdentity(session, execution, 0);
-    store.UserMessages.Admit(session, 0,
+    store.UserMessages.Submit(session, 0,
         new(Guid.NewGuid(), 0, "input", TestLlmSelection.Default), true, execution);
-    Guid request = store.Executions.ClaimNextRequest(identity)!.RequestId;
-    Assert.True(store.LlmResponses.ObserveTool(identity, request, "call", null));
-    Assert.True(store.LlmResponses.ObserveTool(identity, request, "call", null));
-    Assert.False(store.LlmResponses.ObserveTool(identity with { SessionId = otherSession }, request, "call", "foreign"));
-    Assert.False(store.LlmResponses.ObserveTool(identity with { ExecutionId = Guid.NewGuid() }, request, "call", "foreign"));
-    Assert.False(store.LlmResponses.ObserveTool(identity with { HistoryRevision = 1 }, request, "call", "stale"));
+    Guid request = store.Executions.CreateNextRequest(identity)!.RequestId;
+    Assert.True(store.LlmResponses.RecordToolCall(identity, request, "call", null));
+    Assert.True(store.LlmResponses.RecordToolCall(identity, request, "call", null));
+    Assert.False(store.LlmResponses.RecordToolCall(identity with { SessionId = otherSession }, request, "call", "foreign"));
+    Assert.False(store.LlmResponses.RecordToolCall(identity with { ExecutionId = Guid.NewGuid() }, request, "call", "foreign"));
+    Assert.False(store.LlmResponses.RecordToolCall(identity with { HistoryRevision = 1 }, request, "call", "stale"));
     store.Executions.RequestStop(session, execution, ownsExecution: true);
-    Assert.False(store.LlmResponses.ObserveTool(identity, request, "call", "late"));
+    Assert.False(store.LlmResponses.RecordToolCall(identity, request, "call", "late"));
     TranscriptEntryDescriptor reserved = Assert.Single(store.History.Read(session,
         new(TranscriptHistoryMode.Latest, 0)).Entries, entry => entry.Entry.Kind == TranscriptEntryKind.Tool);
     Assert.Null(reserved.Tool!.Name);
@@ -69,9 +69,9 @@ public sealed class ExecutionStorageTests {
     Guid requestId;
     using (UrdStore store = UrdStore.Open(database.Path)) {
       store.Sessions.CreatePrimary(session);
-      store.UserMessages.Admit(session, 0,
+      store.UserMessages.Submit(session, 0,
           new(Guid.NewGuid(), 0, "first input", TestLlmSelection.Default), true, execution);
-      LlmRequest request = store.Executions.ClaimNextRequest(identity)!;
+      LlmRequest request = store.Executions.CreateNextRequest(identity)!;
       requestId = request.RequestId;
       Assert.True(store.Executions.StartRequest(identity, requestId));
       Assert.True(store.LlmResponses.Append(identity,
@@ -81,7 +81,7 @@ public sealed class ExecutionStorageTests {
       Assert.True(store.LlmResponses.CompleteRequest(identity,
           new(requestId, ExecutionOutcome.Completed)));
       Assert.Equal(ExecutionOutcome.Completed,
-          store.Executions.TrySettle(session, execution, ExecutionOutcome.Completed)!.Outcome);
+          store.Executions.TryFinish(session, execution, ExecutionOutcome.Completed)!.Outcome);
     }
 
     var chunks = StoredLlmResponses.Read(database);
@@ -96,9 +96,9 @@ public sealed class ExecutionStorageTests {
     using UrdStore reopened = UrdStore.Open(database.Path);
     Guid nextExecution = Guid.NewGuid();
     var nextIdentity = new ExecutionIdentity(session, nextExecution, 0);
-    reopened.UserMessages.Admit(session, 0,
+    reopened.UserMessages.Submit(session, 0,
         new(Guid.NewGuid(), 0, "second input", TestLlmSelection.Default), true, nextExecution);
-    LlmRequest next = reopened.Executions.ClaimNextRequest(nextIdentity)!;
+    LlmRequest next = reopened.Executions.CreateNextRequest(nextIdentity)!;
     Assert.Equal(new[] { ChatRole.User, ChatRole.Assistant, ChatRole.User },
         next.Messages.Select(message => message.Role));
     Assert.Equal(new[] { "first input", "part🙂 final", "second input" },

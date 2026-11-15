@@ -4,17 +4,17 @@ using Urd.Core.Sessions;
 
 namespace Urd.Core.Storage;
 
-// Retains idempotent message acceptances/refusals and admits each accepted submission with its execution.
+// Retains idempotent message acceptances/refusals and submits each accepted message with its execution.
 internal sealed class UserMessageStorage(Database database) {
-  internal (UserMessageReceipt Receipt, bool NewlyAccepted) Admit(
+  internal (UserMessageReceipt Receipt, bool NewlyAccepted) Submit(
       Guid sessionId, long historyRevision, UserMessageSubmission submission, bool accepting, Guid proposedExecutionId,
       Guid? activeExecutionId = null) {
     ArgumentNullException.ThrowIfNull(submission);
-    return database.Write(transaction => Admit(transaction, sessionId, historyRevision, submission,
+    return database.Write(transaction => Submit(transaction, sessionId, historyRevision, submission,
         accepting, proposedExecutionId, activeExecutionId));
   }
 
-  internal (UserMessageReceipt Receipt, bool NewlyAccepted) Admit(SqliteTransaction transaction,
+  internal (UserMessageReceipt Receipt, bool NewlyAccepted) Submit(SqliteTransaction transaction,
       Guid sessionId, long historyRevision, UserMessageSubmission submission, bool accepting, Guid proposedExecutionId,
       Guid? activeExecutionId = null) {
     UserMessageReceipt? retained = ReadReceipt(sessionId, submission.SubmissionId, transaction);

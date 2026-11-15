@@ -27,7 +27,7 @@ public sealed class SessionWorkingDirectoryTests {
     SessionSnapshot before = await session.ReadSnapshotAsync();
     Assert.Equal(original, before.WorkingDirectory);
     Assert.True(before.CanChangeWorkingDirectory);
-    Assert.False(store.Snapshots.ReadStored(sessionId).CanChangeWorkingDirectory);
+    Assert.False(store.Snapshots.ReadPersisted(sessionId).CanChangeWorkingDirectory);
     SessionSnapshot unchangedDefault = await defaultSession.ReadSnapshotAsync();
     Assert.Null(unchangedDefault.WorkingDirectory);
     Assert.False(unchangedDefault.CanChangeWorkingDirectory);
@@ -45,7 +45,7 @@ public sealed class SessionWorkingDirectoryTests {
     SessionSnapshot afterReopen = await reopenedSession.ReadSnapshotAsync();
     Assert.Equal(alternate, afterReopen.WorkingDirectory);
     Assert.True(afterReopen.CanChangeWorkingDirectory);
-    Assert.False(reopened.Snapshots.ReadStored(sessionId).CanChangeWorkingDirectory);
+    Assert.False(reopened.Snapshots.ReadPersisted(sessionId).CanChangeWorkingDirectory);
     Assert.Null(reopened.Sessions.Read(defaultSession.Id)!.WorkingDirectory);
   }
 

@@ -72,11 +72,11 @@ public sealed class ModelSettingsStorageTests {
       store.Providers.Add(connection);
       sessionId = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
       var submission = new UserMessageSubmission(submissionId, 0, "request", selection);
-      Assert.True(store.UserMessages.Admit(sessionId, 0, submission, true, Guid.NewGuid()).NewlyAccepted);
+      Assert.True(store.UserMessages.Submit(sessionId, 0, submission, true, Guid.NewGuid()).NewlyAccepted);
       Assert.Equal(selection, store.UserMessages.ReadReceipt(sessionId, submissionId)!.Submission.LlmSelection);
 
       var invalid = submission with { SubmissionId = Guid.NewGuid(), LlmSelection = selection with { ContextWindow = 0 } };
-      Assert.Throws<ArgumentOutOfRangeException>(() => store.UserMessages.Admit(
+      Assert.Throws<ArgumentOutOfRangeException>(() => store.UserMessages.Submit(
           sessionId, 0, invalid, true, Guid.NewGuid()));
     }
 

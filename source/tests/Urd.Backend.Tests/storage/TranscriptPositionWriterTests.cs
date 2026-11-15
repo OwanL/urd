@@ -19,7 +19,7 @@ public sealed class TranscriptPositionWriterTests {
     UserMessageSubmission first = Input("🙂\0a"), second = Input("");
     Admit(store, session, run, first);
     Admit(store, session, run, second);
-    Guid request = store.Executions.ClaimNextRequest(identity)!.RequestId;
+    Guid request = store.Executions.CreateNextRequest(identity)!.RequestId;
     Assert.Equal(0, State(store, session).EntryCount);
     Assert.Equal(0, State(store, session).PositionVersion);
     Assert.True(store.Executions.StartRequest(identity, request));
@@ -47,12 +47,12 @@ public sealed class TranscriptPositionWriterTests {
     Assert.True(grown.State.PositionVersion > initial.State.PositionVersion);
     Assert.Equal(0, grown.State.HistoryRevision);
 
-    Assert.True(store.LlmResponses.ObserveTool(identity, request, "call", null));
+    Assert.True(store.LlmResponses.RecordToolCall(identity, request, "call", null));
     TranscriptPositionWindow tool = store.Positions.Locate(session, 0, long.MaxValue);
     Assert.Equal(TranscriptEntryKind.Tool, tool.Target!.Entry.Kind);
     Assert.Equal(256, tool.Target.Weight);
-    Assert.True(store.LlmResponses.ObserveTool(identity, request, "call", "named"));
-    Assert.True(store.LlmResponses.ObserveTool(identity, request, "call", "named"));
+    Assert.True(store.LlmResponses.RecordToolCall(identity, request, "call", "named"));
+    Assert.True(store.LlmResponses.RecordToolCall(identity, request, "call", "named"));
     Assert.Equal(tool.State, State(store, session)); // Name does not change the compact-row weight.
     Guid nextText = Guid.NewGuid();
     Assert.True(store.LlmResponses.Append(identity, new(request, nextText, 2, "tail", false)));
@@ -90,7 +90,7 @@ public sealed class TranscriptPositionWriterTests {
         Guid id = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, run = Guid.NewGuid(), output = Guid.NewGuid();
         var identity = new ExecutionIdentity(id, run, 0);
         Admit(store, id, run, Input("input"));
-        Guid request = store.Executions.ClaimNextRequest(identity)!.RequestId;
+        Guid request = store.Executions.CreateNextRequest(identity)!.RequestId;
         Assert.True(store.Executions.StartRequest(identity, request));
         for (int index = 0; index < chunks.Length; index++)
           Assert.True(store.LlmResponses.Append(identity, new(request, output, index, chunks[index], index == chunks.Length - 1)));
@@ -109,7 +109,7 @@ public sealed class TranscriptPositionWriterTests {
     var identity = new ExecutionIdentity(session, run, 0);
     Admit(store, session, run, Input("one"));
     Admit(store, session, run, Input("two"));
-    Guid request = store.Executions.ClaimNextRequest(identity)!.RequestId;
+    Guid request = store.Executions.CreateNextRequest(identity)!.RequestId;
     database.Execute("""
       CREATE TRIGGER reject_position BEFORE INSERT ON transcript_positions WHEN NEW.rank = 1
       BEGIN SELECT RAISE(ABORT, 'position rejected'); END;
@@ -145,7 +145,7 @@ public sealed class TranscriptPositionWriterTests {
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id, run = Guid.NewGuid();
     var identity = new ExecutionIdentity(session, run, 0);
     Admit(store, session, run, Input("user"));
-    Guid request = store.Executions.ClaimNextRequest(identity)!.RequestId;
+    Guid request = store.Executions.CreateNextRequest(identity)!.RequestId;
     Assert.True(store.Executions.StartRequest(identity, request));
     Guid output = Guid.NewGuid();
     Assert.True(store.LlmResponses.Append(identity, new(request, output, 0, "a", false)));
@@ -162,7 +162,7 @@ public sealed class TranscriptPositionWriterTests {
     Assert.True(revised.PositionVersion > before.State.PositionVersion);
     Assert.Equal(0, revised.EntryCount);
     Assert.False(store.LlmResponses.Append(identity, new(request, output, 1, "b", false)));
-    Assert.False(store.LlmResponses.ObserveTool(identity, request, "stale", null));
+    Assert.False(store.LlmResponses.RecordToolCall(identity, request, "stale", null));
     Assert.False(store.Executions.StartRequest(identity, request));
     Assert.Equal(revised, store.Positions.Locate(session, 1, 0).State);
   }
@@ -175,7 +175,7 @@ public sealed class TranscriptPositionWriterTests {
     var identity = new ExecutionIdentity(session, run, 0);
     UserMessageSubmission input = Input("u");
     Admit(writer, session, run, input);
-    Guid request = writer.Executions.ClaimNextRequest(identity)!.RequestId;
+    Guid request = writer.Executions.CreateNextRequest(identity)!.RequestId;
     Assert.True(writer.Executions.StartRequest(identity, request));
     var prompt = new TranscriptEntryRef(run, input.SubmissionId, TranscriptEntryKind.User, 0);
     using UrdStore reader = UrdStore.Open(database.Path);
@@ -217,6 +217,6 @@ public sealed class TranscriptPositionWriterTests {
   private static TranscriptPositionState State(UrdStore store, Guid session) => store.Positions.Locate(session, 0, 0).State;
   private static UserMessageSubmission Input(string text) => new(Guid.NewGuid(), 0, text, TestLlmSelection.Default);
   private static void Admit(UrdStore store, Guid session, Guid run, UserMessageSubmission input) =>
-      Assert.True(store.UserMessages.Admit(session, 0, input, true, run, run).NewlyAccepted);
+      Assert.True(store.UserMessages.Submit(session, 0, input, true, run, run).NewlyAccepted);
   private static LlmToolCall Call(string id) => new(id, "named", JsonSerializer.SerializeToElement(new { }));
 }

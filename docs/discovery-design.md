@@ -149,10 +149,11 @@ context engine, pruner or serializer is authorized.
 Pie's settings default post-compaction refresh on, but pruning itself off; these
 checked-in defaults are not usage evidence or a new Urd configuration decision.
 Its expected selection-failure fallback exposes all currently available candidates,
-with a diagnostic, rather than retaining the prior pruned set. That fallback is
-source evidence, **not approved here as Urd's failure policy**; it can change model
-exposure without changing execution permission. Failure behavior remains explicit
-future qualification, not a reason to add another owner questionnaire now.
+with a diagnostic, rather than retaining the prior pruned set. Urd's later owner-selected
+[failure policy](pruning-plan.md#selection-failure) is per category: keep that category's
+available entries, apply successful sibling selections and surface the failure without
+blocking the main agent. User cancellation does not activate this fallback. Exposure
+still does not change execution permission; the policy is not implementation qualification.
 
 ### Responsibilities, evidence limits and smallest next step
 
@@ -182,9 +183,9 @@ next request; verify the permitted change does not also rescore, lose readable
 originals, broaden authority or replay tools. Include the already-sent-result
 invariant below through its real durable representation. Do not repeat the
 standalone fixture or add a live-model/cache programme to this review.
-Visible-content incompatibility handling, selection-failure policy and precise
-reload/admission semantics remain open; no further consequential owner choice
-was forced in this round.
+Visible-content incompatibility handling and precise reload/admission semantics
+remain open. The later selection-failure policy above does not qualify its
+implementation.
 
 Already-sent results must retain their model-visible representation across
 continuation and reopen; generic JSON equivalence is insufficient. A retired

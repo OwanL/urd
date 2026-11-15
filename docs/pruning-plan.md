@@ -143,6 +143,19 @@ plumbing when a category is added. It does not require category-specific session
 subclasses or a new generic framework. Pruning conversations would not recursively
 prune their own starting context.
 
+## Selection failure
+
+**Owner decision (2026-11-15):** if a category's pruner fails or times out, keep all
+available entries in that category for the preparation and continue with successful
+selections from the other categories. Surface the failure rather than reporting
+successful pruning, but do not block the main agent merely because selection failed.
+For example, failed tool pruning retains all available tools while successful skill
+and instruction selections still apply.
+
+User cancellation stops the preparation; it does not activate keep-all-and-continue.
+Existing current-permission and owned-work cleanup requirements still apply. This
+settles the fallback, not retry policy, timeout values or the precise failure UI.
+
 ## Discussed working defaults
 
 These remain implementation proposals, not separately settled contracts:
@@ -150,8 +163,6 @@ These remain implementation proposals, not separately settled contracts:
 - Use a small exploration budget; no numeric limit has been selected.
 - Return kept candidate IDs rather than rewritten instruction documents; validate and
   combine them with protected entries in stable source/precedence order.
-- Retain a category if its selector fails or times out, rather than silently dropping
-  its entries. This fallback is not a response to user cancellation.
 - Capture model choices when preparation begins; settings changes affect subsequent
   preparations rather than changing an in-flight run.
 

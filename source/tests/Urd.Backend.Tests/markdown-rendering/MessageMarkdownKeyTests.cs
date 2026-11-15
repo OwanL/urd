@@ -16,13 +16,13 @@ public sealed class MessageMarkdownKeyTests {
   }
 
   [Fact]
-  public void MatchesRequiresBothReportedAndActualUtf8ByteCounts() {
+  public void MatchesSourceRequiresBothReportedAndActualUtf8ByteCounts() {
     MessageMarkdownKey key = CreateKey(sourceUtf8Bytes: 2);
     MessageMarkdownSource source = CreateSource(key, "é");
 
-    Assert.True(key.Matches(source));
-    Assert.False(key.Matches(source with { Utf8Bytes = 1 }));
-    Assert.False((key with { SourceUtf8Bytes = 1 }).Matches(source));
+    Assert.True(key.MatchesSource(source));
+    Assert.False(key.MatchesSource(source with { Utf8Bytes = 1 }));
+    Assert.False((key with { SourceUtf8Bytes = 1 }).MatchesSource(source));
   }
 
   [Fact]

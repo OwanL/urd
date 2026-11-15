@@ -35,10 +35,10 @@ public sealed class MessageMarkdownSourceTests {
     Assert.Equal(execution.Assistant, assistant.Message);
     Assert.Equal(parts.Select((_, index) => new MarkdownSourceSegment(
         Encoding.UTF8.GetByteCount(string.Concat(parts.Take(index))), index)), assistant.Segments);
-    Assert.Equal(new(execution.Assistant, 0, 0), assistant.ContentCursor(0));
-    Assert.Equal(new(execution.Assistant, 2, 0), assistant.ContentCursor(1));
-    Assert.Equal(new(execution.Assistant, 4, 0), assistant.ContentCursor(5));
-    Assert.Equal(assistant.AvailableThrough, assistant.ContentCursor(assistant.Utf8Bytes));
+    Assert.Equal(new(execution.Assistant, 0, 0), assistant.CursorAtUtf8Offset(0));
+    Assert.Equal(new(execution.Assistant, 2, 0), assistant.CursorAtUtf8Offset(1));
+    Assert.Equal(new(execution.Assistant, 4, 0), assistant.CursorAtUtf8Offset(5));
+    Assert.Equal(assistant.AvailableThrough, assistant.CursorAtUtf8Offset(assistant.Utf8Bytes));
     Assert.Equal((new MessageContentCursor(execution.Assistant, 2, 0),
         new MessageContentCursor(execution.Assistant, 4, 0)), assistant.ContentRange(new(1, 5)));
   }
@@ -54,8 +54,8 @@ public sealed class MessageMarkdownSourceTests {
     Assert.True(source.Utf8Bytes > 16 * 1024);
     Assert.Equal(text, source.Source);
     Assert.Equal(Encoding.UTF8.GetByteCount(text), source.Utf8Bytes);
-    Assert.Equal(new(execution.User, 0, 16383), source.ContentCursor(16383));
-    Assert.Equal(new(execution.User, 0, 16387), source.ContentCursor(16387));
+    Assert.Equal(new(execution.User, 0, 16383), source.CursorAtUtf8Offset(16383));
+    Assert.Equal(new(execution.User, 0, 16387), source.CursorAtUtf8Offset(16387));
   }
 
   [Theory]
@@ -133,7 +133,7 @@ public sealed class MessageMarkdownSourceTests {
     MessageMarkdownSource source = await MessageMarkdownSourceReader.ReadAsync(session, key);
 
     Assert.Equal("read🙂", source.Source);
-    Assert.True(key.Matches(source));
+    Assert.True(key.MatchesSource(source));
     Assert.False(source.IsClosed);
     Assert.False(source.FinalOutputCommitted);
     Assert.Equal(0, client.Calls);

@@ -14,10 +14,7 @@ internal static class MarkdownPageReader {
     // Max-width Next and false (longer than true) conservatively cover the envelope.
     var bytes = Size(new MarkdownPiecePage(index.Generation, cursor.Index, int.MaxValue, false, []));
     while (next < index.PieceCount && pieces.Count < limits.Records) {
-      var size = index.PieceUtf8Bytes(next) + (pieces.Count == 0 ? 0 : 1);
-      if (bytes + size > limits.Utf8Bytes) break;
-      pieces.Add(index.Piece(next));
-      bytes += size;
+      if (!TryAddWithinByteLimit(pieces, index.Piece(next), index.PieceUtf8Bytes(next), ref bytes, limits.Utf8Bytes)) break;
       next++;
     }
     EnsureAdvance(cursor.Index, next, index.PieceCount);
@@ -35,10 +32,7 @@ internal static class MarkdownPageReader {
     // From is not known until the reverse walk completes; reserve its widest JSON form.
     var bytes = Size(new MarkdownPiecePage(index.Generation, int.MaxValue, exclusiveEndCursor.Index, hasMore, []));
     while (from > 0 && pieces.Count < limits.Records) {
-      var size = index.PieceUtf8Bytes(from - 1) + (pieces.Count == 0 ? 0 : 1);
-      if (bytes + size > limits.Utf8Bytes) break;
-      pieces.Add(index.Piece(from - 1));
-      bytes += size;
+      if (!TryAddWithinByteLimit(pieces, index.Piece(from - 1), index.PieceUtf8Bytes(from - 1), ref bytes, limits.Utf8Bytes)) break;
       from--;
     }
     if (from == exclusiveEndCursor.Index && exclusiveEndCursor.Index > 0)
@@ -68,10 +62,7 @@ internal static class MarkdownPageReader {
     var bytes = Size(new MarkdownContextDescriptorPage(index.Generation, cursor.Index, int.MaxValue, false, []));
     while (next < contextIds.Count && contexts.Count < limits.Records) {
       var context = index.Context(contextIds[next]);
-      var size = Size(context) + (contexts.Count == 0 ? 0 : 1);
-      if (bytes + size > limits.Utf8Bytes) break;
-      contexts.Add(context);
-      bytes += size;
+      if (!TryAddWithinByteLimit(contexts, context, Size(context), ref bytes, limits.Utf8Bytes)) break;
       next++;
     }
     EnsureAdvance(cursor.Index, next, contextIds.Count);
@@ -92,14 +83,19 @@ internal static class MarkdownPageReader {
     var bytes = Size(new MarkdownContextPage(index.Generation, context, cursor.Index, int.MaxValue, false, []));
     while (next < context.ValueCount && values.Count + 1 < limits.Records) {
       var value = index.Value(context.FirstValue + next);
-      var size = Size(value) + (values.Count == 0 ? 0 : 1);
-      if (bytes + size > limits.Utf8Bytes) break;
-      values.Add(value);
-      bytes += size;
+      if (!TryAddWithinByteLimit(values, value, Size(value), ref bytes, limits.Utf8Bytes)) break;
       next++;
     }
     EnsureAdvance(cursor.Index, next, context.ValueCount);
     return new(index.Generation, context, cursor.Index, next, next < context.ValueCount, values.AsReadOnly());
+  }
+
+  static bool TryAddWithinByteLimit<T>(List<T> records, T record, int size, ref int bytes, int byteLimit) {
+    size += records.Count == 0 ? 0 : 1;
+    if (bytes + size > byteLimit) return false;
+    records.Add(record);
+    bytes += size;
+    return true;
   }
 
   internal static int MeasurePiece(MarkdownTextPiece piece) => Size(piece);

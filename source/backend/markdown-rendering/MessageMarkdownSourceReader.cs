@@ -14,16 +14,16 @@ internal static class MessageMarkdownSourceReader {
       throw new ArgumentException("The session does not match the markdown key.", nameof(key));
     SessionTranscript transcript = session.Transcript;
     MessageContentExtent extent = await transcript.CaptureContentExtentAsync(key.Message, key.TextFacts, cancellation);
-    MessageMarkdownSource source = Read(cursor => transcript.ReadContentSegment(extent, cursor), extent, cancellation);
+    MessageMarkdownSource source = AssembleSource(cursor => transcript.ReadContentSegment(extent, cursor), extent, cancellation);
     await transcript.ValidateContentExtentAsync(extent, cancellation);
     return source;
   }
 
   internal static MessageMarkdownSource Read(MessageContentReader reader, MessageContentExtent extent,
       CancellationToken cancellation = default) =>
-      Read(cursor => reader.ReadSourceSegment(extent, cursor), extent, cancellation);
+      AssembleSource(cursor => reader.ReadSourceSegment(extent, cursor), extent, cancellation);
 
-  private static MessageMarkdownSource Read(Func<MessageContentCursor, MessageContentSegment> readSegment,
+  static MessageMarkdownSource AssembleSource(Func<MessageContentCursor, MessageContentSegment> readSegment,
       MessageContentExtent extent, CancellationToken cancellation) {
     var source = new StringBuilder();
     var segments = new List<MarkdownSourceSegment>();

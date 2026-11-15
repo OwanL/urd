@@ -12,28 +12,30 @@ internal sealed record MessageMarkdownSource(
 
   // Markdown ranges are scalar-aligned global UTF-8 offsets. At a segment boundary
   // prefer the following segment; at EOF always return the captured end cursor.
-  internal MessageContentCursor ContentCursor(int utf8Offset) {
+  internal MessageContentCursor CursorAtUtf8Offset(int utf8Offset) {
     if (utf8Offset < 0 || utf8Offset > Utf8Bytes)
       throw new ArgumentOutOfRangeException(nameof(utf8Offset));
     if (utf8Offset == Utf8Bytes)
       return AvailableThrough;
 
-    int low = 0, high = Segments.Count;
-    while (low < high) {
-      int middle = low + (high - low) / 2;
-      if (Segments[middle].Utf8Start <= utf8Offset)
-        low = middle + 1;
-      else
-        high = middle;
-    }
-    MarkdownSourceSegment segment = Segments[low - 1];
+    var segment = FindSegmentAtOrBefore(Segments, utf8Offset);
     return new(Message, segment.SegmentIndex, utf8Offset - segment.Utf8Start);
   }
 
   internal (MessageContentCursor From, MessageContentCursor Through) ContentRange(MarkdownSourceRange range) {
     if (range.End < range.Start)
       throw new ArgumentException("The source range must be ordered.", nameof(range));
-    return (ContentCursor(range.Start), ContentCursor(range.End));
+    return (CursorAtUtf8Offset(range.Start), CursorAtUtf8Offset(range.End));
+  }
+
+  internal static MarkdownSourceSegment FindSegmentAtOrBefore(IReadOnlyList<MarkdownSourceSegment> segments, int utf8Offset) {
+    int low = 0, high = segments.Count;
+    while (low < high) {
+      int middle = low + (high - low) / 2;
+      if (segments[middle].Utf8Start <= utf8Offset) low = middle + 1;
+      else high = middle;
+    }
+    return segments[low - 1];
   }
 }
 

@@ -49,41 +49,49 @@ internal sealed class MessageMarkdownScheduler : IAsyncDisposable {
     key.Validate();
     lock (gate) {
       ThrowIfDisposed();
-      cache.ValidateSize(key);
-      foreach (var retained in active.Concat(pending).OfType<Work>()) key.ValidateSize(retained.Key);
+      ValidateSourceSize(key);
       if (cache.Find(key) is { } entry) {
         cache.Reserve(entry);
         return Task.FromResult(Lease(entry));
       }
       var running = active.FirstOrDefault(work => work is { Invalidated: false, Accepting: true } && work.Key == key);
-      if (running is not null) return Observe(running, cancellation);
-      var existing = pending.First;
-      while (existing is not null && !Compatible(existing.Value.Key, key)) existing = existing.Next;
-      if (existing?.Value.Key == key) return Observe(existing.Value, cancellation);
-      if (existing is not null) {
-        if (AtLeastAsRecent(existing.Value.Key, key))
-          return Task.FromException<MessageMarkdownLease>(new MarkdownSupersededException());
-        // Keep queue position so repeated updates cannot starve other keys.
-        var previous = existing.Value;
-        var replacement = new Work(key, capture);
-        existing.Value = replacement;
-        Fail(previous, new MarkdownSupersededException());
-        try {
-          var observation = Observe(replacement, cancellation);
-          Monitor.PulseAll(gate);
-          return observation;
-        } catch {
-          pending.Remove(existing);
-          throw;
-        }
-      }
-      if (pending.Count >= limits.PendingKeys) throw new MarkdownQueueFullException();
-      var work = new Work(key, capture);
-      var result = Observe(work, cancellation);
-      if (work.Interests.Count > 0) pending.AddLast(work);
-      Monitor.PulseAll(gate);
-      return result;
+      return running is not null ? Observe(running, cancellation) : Queue(key, capture, cancellation);
     }
+  }
+
+  void ValidateSourceSize(MessageMarkdownKey key) {
+    cache.ValidateSourceSize(key);
+    foreach (var retained in active.Concat(pending).OfType<Work>()) key.ValidateSourceSize(retained.Key);
+  }
+
+  Task<MessageMarkdownLease> Queue(MessageMarkdownKey key,
+      Func<CancellationToken, Task<MessageMarkdownSource>> capture, CancellationToken cancellation) {
+    var existing = pending.First;
+    while (existing is not null && !Compatible(existing.Value.Key, key)) existing = existing.Next;
+    if (existing?.Value.Key == key) return Observe(existing.Value, cancellation);
+    if (existing is not null) {
+      if (AtLeastAsRecent(existing.Value.Key, key))
+        return Task.FromException<MessageMarkdownLease>(new MarkdownSupersededException());
+      // Keep queue position so repeated updates cannot starve other keys.
+      var previous = existing.Value;
+      var replacement = new Work(key, capture);
+      existing.Value = replacement;
+      Fail(previous, new MarkdownSupersededException());
+      try {
+        var observation = Observe(replacement, cancellation);
+        Monitor.PulseAll(gate);
+        return observation;
+      } catch {
+        pending.Remove(existing);
+        throw;
+      }
+    }
+    if (pending.Count >= limits.PendingKeys) throw new MarkdownQueueFullException();
+    var work = new Work(key, capture);
+    var result = Observe(work, cancellation);
+    if (work.Interests.Count > 0) pending.AddLast(work);
+    Monitor.PulseAll(gate);
+    return result;
   }
 
   // Valid leases remain readable through invalidation and shutdown. Shutdown drains
@@ -258,25 +266,32 @@ internal sealed class MessageMarkdownScheduler : IAsyncDisposable {
 
   void Process(Work work) {
     try {
-      var source = work.Capture!(shutdown.Token).GetAwaiter().GetResult();
-      if (!work.Key.Matches(source)) throw new MarkdownUnavailableException();
+      var source = CaptureSource(work);
       var index = parse!(source); // Synchronous parsing is deliberately non-cancellable.
       if (index.SourceUtf8Bytes != source.Utf8Bytes) throw new MarkdownUnavailableException();
-      lock (gate) {
-        if (disposed || work.Invalidated) return;
-        work.Accepting = false;
-        foreach (var interest in work.Interests.ToArray())
-          if (interest.Cancellation.IsCancellationRequested) Cancel(interest);
-        if (work.Interests.Count == 0) return;
-        var entry = cache.Add(work.Key, source, index);
-        foreach (var interest in work.Interests.ToArray()) {
-          var lease = Lease(entry); // Pin before completing any observer's task.
-          Detach(interest);
-          interest.Completion.TrySetResult(lease);
-        }
-      }
+      lock (gate) Publish(work, source, index);
     } catch (Exception error) {
       lock (gate) Fail(work, error);
+    }
+  }
+
+  MessageMarkdownSource CaptureSource(Work work) {
+    var source = work.Capture!(shutdown.Token).GetAwaiter().GetResult();
+    if (!work.Key.MatchesSource(source)) throw new MarkdownUnavailableException();
+    return source;
+  }
+
+  void Publish(Work work, MessageMarkdownSource source, MarkdownRenderIndex index) {
+    if (disposed || work.Invalidated) return;
+    work.Accepting = false;
+    foreach (var interest in work.Interests.ToArray())
+      if (interest.Cancellation.IsCancellationRequested) Cancel(interest);
+    if (work.Interests.Count == 0) return;
+    var entry = cache.Add(work.Key, source, index);
+    foreach (var interest in work.Interests.ToArray()) {
+      var lease = Lease(entry); // Pin before completing any observer's task.
+      Detach(interest);
+      interest.Completion.TrySetResult(lease);
     }
   }
 

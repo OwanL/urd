@@ -26,8 +26,8 @@ internal sealed class MessageMarkdownCache(MessageMarkdownCacheLimits limits) {
     RetainedBytes -= LeaseBytes;
   }
 
-  internal void ValidateSize(MessageMarkdownKey key) {
-    foreach (var entry in retained) key.ValidateSize(entry.Key);
+  internal void ValidateSourceSize(MessageMarkdownKey key) {
+    foreach (var entry in retained) key.ValidateSourceSize(entry.Key);
   }
 
   internal Entry? Find(MessageMarkdownKey key) {
@@ -67,13 +67,7 @@ internal sealed class MessageMarkdownCache(MessageMarkdownCacheLimits limits) {
       throw new ArgumentOutOfRangeException(nameof(utf8Offset));
     if (utf8Offset == index.SourceUtf8Bytes)
       return new(entry.Key.Message, entry.Key.ThroughSegment, 0);
-    int low = 0, high = entry.Segments.Length;
-    while (low < high) {
-      int middle = low + (high - low) / 2;
-      if (entry.Segments[middle].Utf8Start <= utf8Offset) low = middle + 1;
-      else high = middle;
-    }
-    var segment = entry.Segments[low - 1];
+    var segment = MessageMarkdownSource.FindSegmentAtOrBefore(entry.Segments, utf8Offset);
     return new(entry.Key.Message, segment.SegmentIndex, utf8Offset - segment.Utf8Start);
   }
 
@@ -121,9 +115,10 @@ internal sealed class MessageMarkdownCache(MessageMarkdownCacheLimits limits) {
 
   void MakeRoom(int count, long bytes, Entry? protectedEntry = null) {
     if (Count <= limits.Entries - count && RetainedBytes <= limits.RetainedBytes - bytes) return;
+    bool CanEvict(Entry entry) => entry.Pins == 0 && entry != protectedEntry;
     int removableCount = 0;
     long removableBytes = 0;
-    foreach (var entry in recent.Where(entry => entry.Pins == 0 && entry != protectedEntry)) {
+    foreach (var entry in recent.Where(CanEvict)) {
       removableCount++;
       removableBytes += entry.Bytes;
     }
@@ -133,7 +128,7 @@ internal sealed class MessageMarkdownCache(MessageMarkdownCacheLimits limits) {
     var node = recent.Last;
     while (Count > limits.Entries - count || RetainedBytes > limits.RetainedBytes - bytes) {
       var previous = node!.Previous;
-      if (node.Value.Pins == 0 && node.Value != protectedEntry) Remove(node);
+      if (CanEvict(node.Value)) Remove(node);
       node = previous;
     }
   }

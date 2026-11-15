@@ -14,6 +14,14 @@ internal sealed record MessageMarkdownKey(
 
   // Only server-produced positioned entries carry authoritative source-byte weights.
   internal static MessageMarkdownKey FromPositionedEntry(Guid sessionId, TranscriptPositionedEntry entry) {
+    var facts = ValidateIdentityAndExtent(sessionId, entry);
+    var key = new MessageMarkdownKey(sessionId, facts.From.Message, facts.From.SegmentIndex,
+        facts.AvailableThrough.SegmentIndex, facts.IsClosed, facts.FinalOutputCommitted, ValidateWeight(entry));
+    key.Validate();
+    return key;
+  }
+
+  static TranscriptTextFacts ValidateIdentityAndExtent(Guid sessionId, TranscriptPositionedEntry entry) {
     ArgumentNullException.ThrowIfNull(entry);
     if (sessionId == Guid.Empty)
       throw InvalidEntry(nameof(entry), "A session identity is required.");
@@ -56,7 +64,11 @@ internal sealed record MessageMarkdownKey(
     long sourceSegmentCount = CheckedSubtract(through.SegmentIndex, from.SegmentIndex, nameof(entry));
     if (from.SegmentIndex < 0 || sourceSegmentCount <= 0 || from.Utf8Offset != 0 || through.Utf8Offset != 0)
       throw InvalidEntry(nameof(entry), "Text facts must describe an ordered range of complete segments.");
+    return facts;
+  }
 
+  static int ValidateWeight(TranscriptPositionedEntry entry) {
+    var position = entry.Position;
     if (position.Rank < 0 || position.PrefixWeight < 0 || position.Weight < 256)
       throw InvalidEntry(nameof(entry), "The transcript position has invalid rank or weight values.");
     _ = CheckedAdd(position.Rank, 1, nameof(entry));
@@ -65,10 +77,7 @@ internal sealed record MessageMarkdownKey(
     if (sourceUtf8Bytes > int.MaxValue)
       throw InvalidEntry(nameof(entry), "The source exceeds the supported UTF-8 byte count.");
 
-    var key = new MessageMarkdownKey(sessionId, message, from.SegmentIndex, through.SegmentIndex,
-        facts.IsClosed, facts.FinalOutputCommitted, (int)sourceUtf8Bytes);
-    key.Validate();
-    return key;
+    return (int)sourceUtf8Bytes;
   }
 
   internal void Validate() {
@@ -86,7 +95,7 @@ internal sealed record MessageMarkdownKey(
 
   // Segment extents have one byte count, irrespective of closure facts. Appends
   // can add empty segments but cannot remove bytes from this immutable start.
-  internal void ValidateSize(MessageMarkdownKey other) {
+  internal void ValidateSourceSize(MessageMarkdownKey other) {
     if (SessionId != other.SessionId || Message != other.Message || FromSegment != other.FromSegment || Pipeline != other.Pipeline) return;
     if ((ThroughSegment == other.ThroughSegment && SourceUtf8Bytes != other.SourceUtf8Bytes)
         || (ThroughSegment > other.ThroughSegment && SourceUtf8Bytes < other.SourceUtf8Bytes)
@@ -94,7 +103,7 @@ internal sealed record MessageMarkdownKey(
       throw new ArgumentException("The Markdown extent contradicts a retained source byte count.");
   }
 
-  internal bool Matches(MessageMarkdownSource source) {
+  internal bool MatchesSource(MessageMarkdownSource source) {
     int actualSourceUtf8Bytes = Encoding.UTF8.GetByteCount(source.Source);
     return SessionId == source.SessionId && Message == source.Message && IsClosed == source.IsClosed
         && source.From.Message == Message && source.AvailableThrough.Message == Message

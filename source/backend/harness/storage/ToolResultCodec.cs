@@ -75,7 +75,7 @@ internal sealed class ToolResultCodec(ToolImageStore images) {
         text = AppendImagePlaceholder(text, image);
     }
     if (saved.Images.Count > 0 && !supportsImages)
-      text = LlmProviderContext.AppendImageOmissionNotice(text);
+      text = LlmMessageProjection.AppendImageOmissionNotice(text);
 
     object content = saved.Images.Count == 0
         ? saved.Text

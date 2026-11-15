@@ -357,7 +357,7 @@ internal sealed class SessionExecution : IDisposable {
         }
       };
       await StartRequestAsync(request.RequestId, startingContext);
-      updates = chatClient.GetStreamingResponseAsync(LlmProviderContext.ForModel(
+      updates = chatClient.GetStreamingResponseAsync(LlmMessageProjection.AdaptForModel(
           [.. startingContext.Instructions, .. request.Messages], selection.SupportsImages), options, requestStop.Token)
           .GetAsyncEnumerator(requestStop.Token);
 

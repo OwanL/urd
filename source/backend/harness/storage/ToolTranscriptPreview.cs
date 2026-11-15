@@ -70,7 +70,7 @@ internal sealed class ToolTranscriptPreview(int characterLimit) {
     if (Next(reader) == ']')
       return;
     if (!supportsImages) {
-      Append(LlmProviderContext.AppendImageOmissionNotice(string.Empty));
+      Append(LlmMessageProjection.AppendImageOmissionNotice(string.Empty));
       return;
     }
     while (!Truncated) {

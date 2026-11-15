@@ -25,7 +25,7 @@ internal sealed class OpenAIInferenceClient(HttpClient httpClient) {
       cancellationToken.ThrowIfCancellationRequested();
       wireOptions = ProviderModelOptions.Prepare(state.Connection, options);
       scope = new(state.Connection.Id, state.Generation, state.Connection.Api, options.ModelId!);
-      history = LlmProviderContext.Prepare(messages, scope);
+      history = LlmMessageProjection.Prepare(messages, scope);
       // ChatGPT's Responses endpoint rejects system messages, including saved starting context.
       if (state.Connection.Route == ProviderRoute.ChatGpt)
         history = history.Select(ForChatGpt).ToArray();

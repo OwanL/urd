@@ -33,7 +33,7 @@ public sealed class LlmProviderContextTests {
       _ => Responses with { ModelId = "another-requested-model" }
     };
 
-    ChatMessage portable = Assert.Single(LlmProviderContext.Prepare([LlmProviderContext.Restore(Reload(captured))], target));
+    ChatMessage portable = Assert.Single(LlmMessageProjection.Prepare([LlmProviderContext.Restore(Reload(captured))], target));
 
     Assert.Equal("Visible", portable.Text);
     Assert.Null(portable.RawRepresentation);
@@ -54,11 +54,11 @@ public sealed class LlmProviderContextTests {
     LlmProviderResponse captured = LlmProviderContext.CaptureChat(Chat, message, field);
     ChatMessage restored = LlmProviderContext.Restore(Reload(captured));
 
-    ChatMessage sameScope = Assert.Single(LlmProviderContext.Prepare([restored], Chat));
+    ChatMessage sameScope = Assert.Single(LlmMessageProjection.Prepare([restored], Chat));
     using var wire = JsonDocument.Parse(ModelReaderWriter.Write(Assert.IsType<AssistantChatMessage>(sameScope.RawRepresentation)));
     Assert.Equal("private thought", wire.RootElement.GetProperty(field).GetString());
 
-    ChatMessage changed = Assert.Single(LlmProviderContext.Prepare([restored], Chat with { ModelId = "another-model" }));
+    ChatMessage changed = Assert.Single(LlmMessageProjection.Prepare([restored], Chat with { ModelId = "another-model" }));
     Assert.Equal("answer", changed.Text);
     Assert.Empty(changed.Contents.OfType<TextReasoningContent>());
     Assert.Null(changed.RawRepresentation);
@@ -71,7 +71,7 @@ public sealed class LlmProviderContextTests {
     ]);
     ChatMessage restored = LlmProviderContext.Restore(Reload(captured));
 
-    Assert.Throws<NotSupportedException>(() => LlmProviderContext.Prepare([restored], Chat));
+    Assert.Throws<NotSupportedException>(() => LlmMessageProjection.Prepare([restored], Chat));
   }
 
   [Fact]
@@ -90,15 +90,15 @@ public sealed class LlmProviderContextTests {
     byte[] assistantImageBytes = [1, 2, 3];
     var assistantImage = new ChatMessage(ChatRole.Assistant, [new DataContent(assistantImageBytes, "image/png")]);
 
-    Assert.Throws<NotSupportedException>(() => LlmProviderContext.Prepare([unsupported], Chat));
-    Assert.Throws<NotSupportedException>(() => LlmProviderContext.Prepare([single], Chat));
-    Assert.Throws<NotSupportedException>(() => LlmProviderContext.Prepare([uriImage], Chat));
-    Assert.Throws<NotSupportedException>(() => LlmProviderContext.Prepare([assistantImage], Chat));
-    Assert.Throws<NotSupportedException>(() => LlmProviderContext.ForModel([unsupported], supportsImages: false));
+    Assert.Throws<NotSupportedException>(() => LlmMessageProjection.Prepare([unsupported], Chat));
+    Assert.Throws<NotSupportedException>(() => LlmMessageProjection.Prepare([single], Chat));
+    Assert.Throws<NotSupportedException>(() => LlmMessageProjection.Prepare([uriImage], Chat));
+    Assert.Throws<NotSupportedException>(() => LlmMessageProjection.Prepare([assistantImage], Chat));
+    Assert.Throws<NotSupportedException>(() => LlmMessageProjection.AdaptForModel([unsupported], supportsImages: false));
   }
 
   [Fact]
-  public void ForModelPreservesNestedImagesWhenSupportedAndLabelsOmittedImagesOtherwise() {
+  public void AdaptForModelPreservesNestedImagesWhenSupportedAndLabelsOmittedImagesOtherwise() {
     byte[] bytes = [1, 2, 3, 4];
     var call = new FunctionCallContent("call-image", "read", new Dictionary<string, object?>());
     AIContent[] nested = [new TextContent("image text"), new DataContent(bytes, "image/png")];
@@ -107,13 +107,13 @@ public sealed class LlmProviderContextTests {
     var tool = new ChatMessage(ChatRole.Tool, [result]);
     ChatMessage[] history = [assistant, tool];
 
-    IReadOnlyList<ChatMessage> imageModel = LlmProviderContext.ForModel(history, supportsImages: true);
+    IReadOnlyList<ChatMessage> imageModel = LlmMessageProjection.AdaptForModel(history, supportsImages: true);
     Assert.Same(assistant, imageModel[0]);
     Assert.Same(tool, imageModel[1]);
     Assert.Same(result, Assert.Single(imageModel[1].Contents.OfType<FunctionResultContent>()));
     Assert.Same(nested, Assert.IsType<AIContent[]>(result.Result));
 
-    IReadOnlyList<ChatMessage> textModel = LlmProviderContext.ForModel(history, supportsImages: false);
+    IReadOnlyList<ChatMessage> textModel = LlmMessageProjection.AdaptForModel(history, supportsImages: false);
     Assert.NotSame(tool, textModel[1]);
     FunctionResultContent filtered = Assert.Single(textModel[1].Contents.OfType<FunctionResultContent>());
     Assert.Equal("call-image", filtered.CallId);

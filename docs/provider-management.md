@@ -116,7 +116,7 @@ Refresh is shared per connection. Definite transient failures preserve the known
 for a later explicit operation; rejected refresh credentials require sign-in. A lost token
 exchange acknowledgement is not retried: the manager marks sign-in required, retaining
 known credentials for disconnect. If that recovery write itself fails, the running
-manager remains fenced; durable recovery cannot be promised when SQLite cannot write.
+manager still requires sign-in; durable recovery cannot be promised when SQLite cannot write.
 No rotated token is used before successful persistence.
 
 Disconnect first saves a durable admission fence, cancels/joins provider work, waits for
@@ -175,6 +175,7 @@ these values; changing settings never rewrites a running execution or an existin
 
 `LlmProviderContext` captures a versioned native response scoped to connection ID, binding
 generation, API and exact **requested** model ID, not the provider's resolved alias.
+`LlmMessageProjection` prepares replay and adapts image/tool-result content for model requests.
 Same-scope replay retains ordered native items, function IDs and private reasoning. An
 explicit changed scope retains portable visible text/calls while omitting private reasoning;
 nonportable visible content fails explicitly. Native payloads have a 4 MiB UTF-8 limit and

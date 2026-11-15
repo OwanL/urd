@@ -360,7 +360,7 @@ product scope or approval of new class shapes.
 
 ### Result fidelity, including images
 
-- `LlmContextReader` currently restores JSON-only function results; `LlmProviderContext` rejects
+- `LlmContextReader` currently restores JSON-only function results; `LlmMessageProjection` rejects
   multimodal tool-result content. Adding `ToolOutput.Images` alone does not provide image input.
   Qualify text plus image through actual storage, context reconstruction and the supported
   provider adapter, for both direct results and background completion envelopes.

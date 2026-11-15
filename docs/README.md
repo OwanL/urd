@@ -30,6 +30,12 @@ not a separate archive. Their remaining constraints belong to the current docume
 - [Source distribution](repo-foundations.md): matching source, custom-copy data and setup boundaries,
   with a dated round-trip trial; packaging and activation remain unfinished.
 
+## Active plans
+
+- [Pruning replay tests](pruning-replay-test-plan.md): real-model comparison of tool,
+  skill and instruction selection, shared exploration, latency and recovery; not
+  benchmark results or an approved production class design.
+
 ## Evidence
 
 These records preserve qualification or constraints still used by decisions.

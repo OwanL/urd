@@ -575,10 +575,13 @@ appropriate prompt parts from explicit session/assignment facts; it must not bec
 another session engine. `StartingContextManager` is a working name, not an approved
 class API or a requirement for a generic prompt/resource framework.
 
-Leave room for optional instruction documents to participate in selection alongside
-tools and skills. Automatic `AGENTS.md`/`CLAUDE.md` insertion, their precedence and
-whether they may be pruned remain undecided; this direction does not implement or
-approve those policies. Skills are listed by name, description and path when a chat
+**Owner direction (2026-11-15):** include instruction-document loading and pruning,
+including `AGENTS.md` and append-system resources, in the context-preparation design
+alongside tools and skills. Compare designs using real Pie task/file/catalog replays
+before fixing class structure; see the [pruning replay test plan](pruning-replay-test-plan.md).
+Exact source discovery, precedence, protected-document policy and production loading
+mechanics remain undecided; research scope is not approval of those policies or an
+implemented loader. Skills are listed by name, description and path when a chat
 starts: Git-tracked `SKILL.md` files under the working directory, then Urd's packaged
 skills; bodies are read on demand. Existing protected-capability and prefix-stability constraints
 below still apply. Exact assembly, restoration and refresh boundaries need concrete

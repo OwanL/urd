@@ -157,16 +157,94 @@ wait for the instruction selector's output. Each has its own category-specific b
 make the responsibilities concrete; signatures, record fields and schema are not frozen.
 Paths are relative to `source/backend/harness/` unless stated otherwise.
 
-| Proposed owner/file | Change and responsibility |
-| --- | --- |
-| `context/runtime/StartingContextManager.cs` | Extend the existing composer with asynchronous preparation: collect candidates, separate protections, run category selection in parallel and compose the final context. It does not own session admission or durable writes. |
-| `context/runtime/ResourceDiscovery.cs` and `Resources.cs` | One shared discoverer returns typed skill and file-backed guidance sets, retaining source, scope and ordering metadata. Bring the existing skill-discovery/loading rules into this owner, including packaged skills, and share the Git scan with instruction discovery. Tools still come from `ToolCatalog`, not filesystem discovery. |
-| `context/pruning/Pruner.cs` | Typed `PruneAsync(guidance)`, `PruneAsync(tools)` and `PruneAsync(skills)` overloads adapt their category into one shared selection implementation. Return the retained original resources and outcome; ordinary failure returns the full supplied set with fallback status. |
-| `context/pruning/Pruning.cs` | Small input/result records, including typed selection results. Keep category briefs/formatting with the pruner initially; split a prompt file only if it warrants one. No per-category pruner classes, resource-handler registry or plugin hierarchy. |
-| `execution/ConversationRunner.cs` | Extract the shared streamed-response validation and tool-turn mechanics from the current execution path. Main execution and pruning use the same implementation; primary admission, steering, compaction and settlement stay outside it. Continue using `IChatClient`, existing adapters and tool dispatch rather than adding a model-client facade. |
-| `providers/ModelSelector.cs` | Shared model-choice resolution: configured bucket or explicit provider/model reference becomes the existing `LlmSelection`. Bucket resolution is not implemented today; this is a dependency, not something pruning can already call. Reuse the same owner for delegated work rather than create pruning-only buckets. |
-| Existing execution/recording/storage owners | `SessionExecution` owns the preparation lifetime and joins its branches. Extend guarded recording with distinct pruning conversation/request scopes; extend `StartingContextStorage` for selected contexts at allowed compaction boundaries. Do not make the composer a second persistence owner. |
-| Existing preferences/server/UI owners | Extend `UserPreferences`, `PreferenceManager`, `PreferencesStorage` and existing routes; reuse settings and `ModelPicker`. Add a small pruning-row renderer under `source/ui/app/`, driven by recorded category status rather than owning work. Detailed UI remains deferred. |
+The owner accepted the shared discoverer/single typed pruner direction. This is the
+proposed concrete structure for that direction, not permission to create these files.
+
+### Files and types
+
+```text
+context/
+  SkillsGuidance.cs                 change: format supplied skills; no discovery
+  runtime/
+    StartingContextManager.cs       change: discover → protect → prune → compose
+    StartingContext.cs              change: carry selected resources into composition
+    ContextGuidance.cs              keep existing guidance abstraction
+    ResourceDiscovery.cs            new: shared skill/instruction discovery and loading
+    Resources.cs                    new: typed discovered collections
+    FileGuidance.cs                 new: loaded file-backed ContextGuidance
+    Skill.cs                        keep existing skill value
+    SkillFrontmatter.cs             keep existing parser
+  pruning/
+    Pruner.cs                       new: three typed overloads, one selection core
+    PruningContext.cs               new: immutable task context and resolved models
+    PruningResult.cs                new: retained items and outcome/diagnostic
+```
+
+`ResourceDiscovery` absorbs the discovery/loading currently in `SkillCatalog`; remove
+that old owner once its callers move, rather than retain two discovery pipelines.
+Keep kind-specific parsing private to discovery and reuse `SkillFrontmatter`. Preserve
+existing packaged-skill and project-override rules. Tools remain registered resources
+from `ToolCatalog`, not files found by the discoverer.
+
+`Resources` contains `IReadOnlyList<Skill>` and `IReadOnlyList<FileGuidance>`.
+`FileGuidance : ContextGuidance` carries already-loaded text, source path and scope,
+and implements the existing ordering/applicability/rendering contract. It requires
+file data in its constructor, so the parameterless built-in guidance scan cannot
+create it accidentally. Neither its constructor nor `GetText` performs file I/O.
+This reuses the existing runtime-guidance extension point instead of introducing a
+second prompt hierarchy or an additional instruction-document/wrapper pair.
+
+### Proposed method surface
+
+```csharp
+// ResourceDiscovery
+Task<Resources> FindAsync(string workingDirectory, CancellationToken cancellation);
+
+// Pruner: one instance for one preparation
+Pruner(PruningContext context, ConversationRunner execution);
+
+Task<PruningResult<FileGuidance>> PruneAsync(
+    IReadOnlyList<FileGuidance> guidance, CancellationToken cancellation);
+Task<PruningResult<AIFunctionDeclaration>> PruneAsync(
+    IReadOnlyList<AIFunctionDeclaration> tools, CancellationToken cancellation);
+Task<PruningResult<Skill>> PruneAsync(
+    IReadOnlyList<Skill> skills, CancellationToken cancellation);
+```
+
+These are proposed shapes, not compiled declarations or frozen APIs. Use the existing
+model-facing tool declarations, not a new tool wrapper type. `PruningResult<T>` carries
+retained original items plus the outcome and diagnostic needed to distinguish successful
+selection from keep-all fallback. Cancellation and fatal recording/cleanup failures
+propagate through the owning execution instead of becoming successful result objects.
+
+The overloads choose their category brief and resolved model, then delegate to one
+private selection core. Keep prompt formatting with `Pruner` initially. No
+`SkillPruner`/`ToolPruner`/`InstructionPruner` classes, resource-handler registry or
+plugin hierarchy are needed.
+
+### Existing owners and shared prerequisites
+
+- `StartingContextManager` owns discovery/protection/pruning/composition, using private
+  helpers rather than additional coordinator classes. Capture models and task context
+  for a preparation; construct its pruner and launch the three calls before awaiting
+  their results. Merge those results with protected resources in source/precedence order.
+  The manager does not own session admission, Stop or durable writes.
+- `execution/ConversationRunner.cs` is a proposed extraction of shared streamed-response
+  validation and tool-turn mechanics, not a new provider client. It is supplied with the
+  parent execution's guarded recording/tool authority; each pruning invocation has its
+  own conversation/request scope. Main execution reuses the same mechanics. Primary
+  steering, compaction and settlement remain outside this class; its exact execution
+  API still needs the extraction design, rather than speculative interfaces here.
+- `providers/ModelSelector.cs` is a shared prerequisite: bucket or specific provider/model
+  choice resolves to the existing `LlmSelection`. Bucket resolution does not exist yet.
+  Reuse the same owner for delegated work, not pruning-only buckets. Resolve model choices
+  once into `PruningContext`; do not silently inherit the main chat's model.
+- `SessionExecution` owns and joins preparation. Extend guarded recording with distinct
+  pruning conversation/request scopes and `StartingContextStorage` with selected contexts
+  at allowed compaction boundaries. Do not make the composer a second persistence owner.
+- Extend `UserPreferences`, `PreferenceManager`, `PreferencesStorage` and their existing
+  routes; reuse settings and `ModelPicker`. A small `PruningRows.tsx` under `source/ui/app/`
+  renders recorded category status. Detailed UI remains deferred.
 
 **Revised after owner feedback:** shared discovery is a resource-level responsibility,
 not merely a Git helper below separate discoverers. `ResourceDiscovery` owns finding
@@ -213,8 +291,8 @@ text with source/scope. Treat candidate contents as selection material. The mode
 kept candidate IDs, not rewritten resources; the pruner validates/maps them back to the
 original typed resources. Invalid output is an ordinary selection failure.
 
-**Proposed instruction boundary:** compiled `ContextGuidance` blocks form fixed base
-guidance; discovered additional instruction documents are pruning candidates. The skill
+**Proposed instruction boundary:** built-in, parameterless `ContextGuidance` blocks form
+fixed base guidance; discovered `FileGuidance` instances are pruning candidates. The skill
 list block remains a formatter, but receives the selected skills. This is a proposed
 boundary for review, not a newly selected protection rule.
 

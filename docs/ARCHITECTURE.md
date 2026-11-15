@@ -579,7 +579,9 @@ class API or a requirement for a generic prompt/resource framework.
 including `AGENTS.md` and append-system resources, in the context-preparation design
 alongside tools and skills. Compare designs using real Pie task/file/catalog replays
 before fixing class structure; see the [dated pruning replay evidence](pruning-replay-results.md).
-Exact source discovery, precedence and production loading mechanics remain undecided;
+Project instruction-file discovery now follows the same recursive Git-backed approach
+as skills; the [pruning plan](pruning-plan.md#project-resource-discovery) owns that direction.
+Remaining discovery details, precedence and production loading mechanics remain undecided;
 research scope is not approval of an implemented loader. The subsequent protection
 and category-selection direction is recorded below. Skills are listed by name,
 description and path when a chat starts: Git-tracked `SKILL.md` files under the working

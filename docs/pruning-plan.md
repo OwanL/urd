@@ -79,6 +79,16 @@ Protection does not change resource semantics. A protected skill stays listed; i
 body is still read on demand. A protected document retains its normal scope and
 precedence, rather than being injected into unrelated projects.
 
+## Project resource discovery
+
+**Owner decision:** discover project instruction files the same way as skills:
+recursively enumerate matching files through Git, including nested instruction files.
+Use the existing Git-tracked-file discovery approach beneath the working directory,
+with the instruction-file matching criteria, rather than a separate filesystem crawl.
+As with project skills, this scan does not include untracked files or discover project
+candidates outside a Git repository. This is a discovery direction, not an implemented
+instruction loader or a decision about additional non-project instruction sources.
+
 ## Settings and picker direction
 
 | Category | Model | Protected items |
@@ -178,8 +188,9 @@ not replace those mechanisms.
 - The exact boundary between the base operating prompt and additional instruction
   candidates, and any automatically protected instruction layers. This plan does not
   silently protect every applicable `AGENTS.md` or settle all instruction precedence.
-- Exact instruction discovery, stored source identities and source-loading behavior
-  (distinct from the settled pruning triggers), exploration limits and execution restrictions.
+- Remaining instruction matching criteria/non-project sources, stored source identities
+  and source-loading behavior (distinct from the settled discovery approach and pruning
+  triggers), exploration limits and execution restrictions.
 - Concrete classes, APIs, preference/storage shape and implementation sequencing.
 
 **Owner steering (2026-11-15):** duplicate-name/project-override skill protection is

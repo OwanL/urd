@@ -23,7 +23,7 @@ internal static class HistoryCompactor {
       return null;
 
     int retainedHistoryTokenLimit = ContextTokenBudget.RetainedHistoryLimit(selection.ContextWindow);
-    int? firstRetainedMessageIndex = CompactionBoundarySelector.FindFirstRetainedMessage(history, retainedHistoryTokenLimit, reason);
+    int? firstRetainedMessageIndex = CompactionBoundarySelector.FindFirstRetainedMessageIndex(history, retainedHistoryTokenLimit, reason);
     return firstRetainedMessageIndex is { } index ? new(history, index, estimatedContextTokens, reason, focus) : null;
   }
 

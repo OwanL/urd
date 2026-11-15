@@ -1,51 +1,62 @@
-using Microsoft.Extensions.AI;
-
 namespace Urd.Core.Compaction;
 
+// Selects the first model-history message to keep verbatim when older history is compacted.
+// Messages before that index are summarized. A boundary must advance past the previous
+// compaction and must not separate a tool call from its result.
 internal static class CompactionBoundarySelector {
-  internal static int? FindFirstRetainedMessage(ModelHistory history, int retainedHistoryTokenLimit,
+  // Returns null when there is no safe boundary. Whole turns are preferred; if none fits
+  // the budget, an assistant continuation can split an oversized turn. Only provider overflow
+  // may use a boundary that exceeds retainedHistoryTokenLimit.
+  internal static int? FindFirstRetainedMessageIndex(ModelHistory history, int retainedHistoryTokenLimit,
       CompactionReason reason) {
-    int latestUserTurnIndex = FindLatestUserTurnIndex(history.Messages);
+    int newestUserTurnIndex = FindNewestUserTurnIndex(history.Messages);
+
+    // The scan visits newest to oldest. Overflow candidates keep their first value;
+    // affordable candidates are replaced until the oldest affordable boundary is found.
     int? oldestTurnWithinBudget = null;
     int? oldestAssistantWithinBudget = null;
-    int? newestTurn = null;
-    int? newestAssistantBeforeLatestTurn = null;
-    long retainedTokens = 0;
+    int? newestTurnForOverflow = null;
+    int? newestAssistantForOverflow = null;
+    long suffixTokens = 0;
 
-    // Walk backwards to count each suffix once, without allocating a suffix-token array.
-    // Index zero cannot remove any history, so it is never a valid cut.
+    // Count each suffix once, without storing token counts for every message. Cutting at
+    // index zero would remove no history, so it is never a valid boundary.
     for (int index = history.Messages.Count - 1; index > 0; index--) {
       HistoryMessage message = history.Messages[index];
-      retainedTokens = ContextTokenBudget.AddSaturating(retainedTokens,
+      suffixTokens = ContextTokenBudget.AddSaturating(suffixTokens,
           ContextTokenBudget.EstimateMessage(message.Message));
       if (!IsAfterPreviousCompaction(history, message)) continue;
 
-      bool withinBudget = retainedTokens <= retainedHistoryTokenLimit;
+      bool suffixWithinBudget = suffixTokens <= retainedHistoryTokenLimit;
       if (message.IsUserTurnStart) {
-        newestTurn ??= index;
-        if (withinBudget) oldestTurnWithinBudget = index;
+        newestTurnForOverflow ??= index;
+        if (suffixWithinBudget) oldestTurnWithinBudget = index;
         continue;
       }
 
       if (!message.IsAssistantContinuation) continue;
-      if (index <= latestUserTurnIndex) newestAssistantBeforeLatestTurn ??= index;
-      if (withinBudget) oldestAssistantWithinBudget = index;
+
+      // An affordable assistant may split the newest turn. Overflow may not cut away the
+      // newest user request, so its assistant fallback must be at or before that turn.
+      if (index <= newestUserTurnIndex) newestAssistantForOverflow ??= index;
+      if (suffixWithinBudget) oldestAssistantWithinBudget = index;
     }
 
-    // Prefer whole turns, then split an oversized turn before an assistant message.
+    // Whole turns take priority over assistant splits, even when the split is newer.
     if (oldestTurnWithinBudget is { } turnIndex) return turnIndex;
     if (oldestAssistantWithinBudget is { } assistantIndex) return assistantIndex;
 
-    // Only an explicit provider overflow may ignore the retained-history token limit.
     if (reason != CompactionReason.Overflow) return null;
-    return newestTurn ?? newestAssistantBeforeLatestTurn;
+    return newestTurnForOverflow ?? newestAssistantForOverflow;
   }
 
   private static bool IsAfterPreviousCompaction(ModelHistory history, HistoryMessage message) =>
       history.PreviousCompaction is not { } previous ||
       message.Location.IsAfter(previous.FirstRetainedMessageLocation);
 
-  private static int FindLatestUserTurnIndex(IReadOnlyList<HistoryMessage> messages) {
+  // With no user turn, the final index allows assistant-only history to use its newest
+  // assistant continuation as an overflow boundary.
+  private static int FindNewestUserTurnIndex(IReadOnlyList<HistoryMessage> messages) {
     for (int index = messages.Count - 1; index >= 0; index--)
       if (messages[index].IsUserTurnStart) return index;
     return messages.Count - 1;

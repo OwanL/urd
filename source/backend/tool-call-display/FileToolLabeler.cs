@@ -5,7 +5,7 @@ using Urd.Core.Tools;
 namespace Urd.Core.ToolCallDisplay;
 
 internal static class FileToolLabeler {
-  internal static (string Title, string? Path) GetFile(JsonElement arguments, string toolName, string? workingDirectory) {
+  internal static (string Title, string? Path) GetFileLabel(JsonElement arguments, string toolName, string? workingDirectory) {
     if (!ToolCallExcerpt.TryGetExactString(arguments, "path", out string path) || string.IsNullOrWhiteSpace(path))
       return (toolName, null);
 

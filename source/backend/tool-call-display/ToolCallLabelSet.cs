@@ -3,7 +3,7 @@ using Urd.Core.Sessions;
 namespace Urd.Core.ToolCallDisplay;
 
 public static class ToolCallLabelSet {
-  public static IReadOnlyDictionary<string, ToolCallLabel> Create(
+  public static IReadOnlyDictionary<string, ToolCallLabel> CreateLookup(
       IEnumerable<TranscriptEntryDescriptor> descriptors, string? workingDirectory) {
     ArgumentNullException.ThrowIfNull(descriptors);
     var labels = new Dictionary<string, ToolCallLabel>(StringComparer.Ordinal);

@@ -166,7 +166,7 @@ public sealed class ToolCallLabelsTests {
         new(executionId, Guid.NewGuid(), TranscriptEntryKind.ToolCompletion, 0), null, null, tool);
 
     string workingDirectory = Path.Combine(Path.GetTempPath(), "urd-label-set");
-    IReadOnlyDictionary<string, ToolCallLabel> labels = ToolCallLabelSet.Create([start, returned], workingDirectory);
+    IReadOnlyDictionary<string, ToolCallLabel> labels = ToolCallLabelSet.CreateLookup([start, returned], workingDirectory);
 
     ToolCallLabel label = Assert.Single(labels).Value;
     Assert.Equal("file.txt", label.Title);

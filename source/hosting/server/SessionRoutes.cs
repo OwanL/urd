@@ -375,7 +375,7 @@ internal static class SessionRoutes {
 
   private static IReadOnlyDictionary<string, ToolCallLabel> CreateToolLabels(
       PrimarySession session, IEnumerable<TranscriptEntryDescriptor> descriptors) =>
-      ToolCallLabelSet.Create(descriptors, session.WorkingDirectory);
+      ToolCallLabelSet.CreateLookup(descriptors, session.WorkingDirectory);
 
   private static Task<IResult> ReadContentAsync(
       HttpContext http, SessionManager sessions, Guid sessionId, ContentQuery query) {

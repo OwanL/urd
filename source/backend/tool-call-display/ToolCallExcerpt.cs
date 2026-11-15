@@ -79,7 +79,7 @@ internal static class ToolCallExcerpt {
       omitted.ValueKind == JsonValueKind.Number && omitted.TryGetInt64(out count) && count >= 0;
   }
 
-  internal static string? RenderCompactArguments(JsonElement arguments) {
+  internal static string? FormatCompactArguments(JsonElement arguments) {
     var text = new StringBuilder();
     foreach (JsonProperty property in arguments.EnumerateObject()) {
       if (text.Length > 0)
@@ -91,7 +91,7 @@ internal static class ToolCallExcerpt {
 
   private static void AppendCompactProperty(StringBuilder text, JsonProperty property, int depth) {
     string name = property.Name;
-    AppendSingleLine(text, name.StartsWith("$$", StringComparison.Ordinal) ? name[1..] : name);
+    ToolCallLabelText.AppendSingleLine(text, name.StartsWith("$$", StringComparison.Ordinal) ? name[1..] : name);
     text.Append('=');
     if (property.Name == "$omitted")
       text.Append('…');
@@ -107,7 +107,7 @@ internal static class ToolCallExcerpt {
 
     switch (value.ValueKind) {
       case JsonValueKind.String:
-        AppendSingleLine(text, value.GetString()!);
+        ToolCallLabelText.AppendSingleLine(text, value.GetString()!);
         break;
       case JsonValueKind.Array:
         if (depth >= 4) {
@@ -152,23 +152,5 @@ internal static class ToolCallExcerpt {
         text.Append("null");
         break;
     }
-  }
-
-  private static void AppendSingleLine(StringBuilder text, string value) {
-    int start = text.Length;
-    bool previousWasSpace = true;
-    foreach (char character in value) {
-      bool isSpace = char.IsWhiteSpace(character) || char.IsControl(character);
-      if (isSpace) {
-        if (!previousWasSpace)
-          text.Append(' ');
-        previousWasSpace = true;
-        continue;
-      }
-      text.Append(character);
-      previousWasSpace = false;
-    }
-    if (text.Length > start && text[^1] == ' ')
-      text.Length--;
   }
 }

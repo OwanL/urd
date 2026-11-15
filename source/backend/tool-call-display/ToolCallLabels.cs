@@ -6,19 +6,30 @@ public static class ToolCallLabels {
   public static ToolCallLabel Create(string? toolName, string? argumentsExcerpt, string? workingDirectory) {
     string fallbackTitle = string.IsNullOrWhiteSpace(toolName) ? "tool" : toolName;
     if (toolName == "list_pending_calls")
-      return ListPendingLabeler.Create();
+      return CreateLabel(ToolCallIcon.ListPending, "pending calls", null, null);
     if (!ToolCallExcerpt.TryParse(argumentsExcerpt, out JsonDocument? document))
       return Fallback(toolName, fallbackTitle);
 
     using (document) {
       JsonElement arguments = document!.RootElement;
+      if (toolName is "read" or "write" or "edit") {
+        (string title, string? path) = FileToolLabeler.GetFileLabel(arguments, toolName, workingDirectory);
+        ToolCallIcon icon = toolName switch {
+          "read" => ToolCallIcon.Read,
+          "write" => ToolCallIcon.Write,
+          _ => ToolCallIcon.Edit
+        };
+        string? detail = toolName switch {
+          "read" => FileToolLabeler.ReadDetail(arguments),
+          "edit" => FileToolLabeler.EditDetail(arguments),
+          _ => null
+        };
+        return CreateLabel(icon, title, detail, path);
+      }
       return toolName switch {
         "bash" => BashLabeler.Create(arguments),
-        "read" => ReadLabeler.Create(arguments, workingDirectory),
-        "write" => WriteLabeler.Create(arguments, workingDirectory),
-        "edit" => EditLabeler.Create(arguments, workingDirectory),
         "cancel_pending_calls" => CancelPendingLabeler.Create(arguments),
-        _ => GenericToolLabeler.Create(fallbackTitle, arguments)
+        _ => CreateLabel(ToolCallIcon.Generic, fallbackTitle, ToolCallExcerpt.FormatCompactArguments(arguments), null)
       };
     }
   }

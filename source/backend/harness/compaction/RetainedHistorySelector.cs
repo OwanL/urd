@@ -1,54 +1,51 @@
 namespace Urd.Core.Compaction;
 
 internal static class RetainedHistorySelector {
-  internal static int? SelectFirstMessageIndex(ModelHistory history, int retainedHistoryTokenLimit,
-      CompactionReason reason) {
-    FirstMessageIndexCandidates candidates = FindFirstMessageIndexCandidates(history, retainedHistoryTokenLimit);
-    return SelectPreferredFirstMessageIndex(candidates, reason);
+  internal static int? SelectStartIndex(ModelHistory history, int retainedHistoryTokenLimit, CompactionReason reason) {
+    int? startWithinBudget = FindOldestStartWithinBudget(history, retainedHistoryTokenLimit);
+    if (startWithinBudget is not null || reason != CompactionReason.Overflow) return startWithinBudget;
+    return FindNewestStartForOverflow(history);
   }
 
-  private static FirstMessageIndexCandidates FindFirstMessageIndexCandidates(ModelHistory history,
-      int retainedHistoryTokenLimit) {
-    int? newestUserTurnIndex = FindNewestUserTurnIndex(history.Messages);
-    int? oldestAffordableTurnStart = null;
-    int? oldestAffordableAssistantContinuation = null;
-    int? newestOverflowTurnStart = null;
-    int? newestOverflowAssistantContinuation = null;
-    long candidateHistoryTokens = 0;
+  private static int? FindOldestStartWithinBudget(ModelHistory history, int retainedHistoryTokenLimit) {
+    int? oldestTurnStart = null;
+    int? oldestAssistantContinuation = null;
+    long retainedTokens = 0;
 
     for (int index = history.Messages.Count - 1; index > 0; index--) {
       HistoryMessage message = history.Messages[index];
-      candidateHistoryTokens = ContextTokenBudget.AddSaturating(candidateHistoryTokens,
+      retainedTokens = ContextTokenBudget.AddSaturating(retainedTokens,
           ContextTokenBudget.EstimateMessage(message.Message));
-      if (!AdvancesPastPreviousCompaction(history, message)) continue;
+      if (retainedTokens > retainedHistoryTokenLimit) break;
+      if (!CanStartRetainedHistory(history, message)) continue;
 
-      bool candidateWithinBudget = candidateHistoryTokens <= retainedHistoryTokenLimit;
-      if (message.IsUserTurnStart) {
-        newestOverflowTurnStart ??= index;
-        if (candidateWithinBudget) oldestAffordableTurnStart = index;
-        continue;
-      }
-
-      if (!message.IsAssistantContinuation) continue;
-
-      bool retainsNewestUserRequest = newestUserTurnIndex is null || index <= newestUserTurnIndex;
-      if (retainsNewestUserRequest) newestOverflowAssistantContinuation ??= index;
-      if (candidateWithinBudget) oldestAffordableAssistantContinuation = index;
+      if (message.IsUserTurnStart) oldestTurnStart = index;
+      else oldestAssistantContinuation = index;
     }
 
-    return new FirstMessageIndexCandidates(oldestAffordableTurnStart, oldestAffordableAssistantContinuation,
-        newestOverflowTurnStart, newestOverflowAssistantContinuation);
+    return oldestTurnStart ?? oldestAssistantContinuation;
   }
 
-  private static int? SelectPreferredFirstMessageIndex(FirstMessageIndexCandidates candidates,
-      CompactionReason reason) {
-    if (candidates.OldestAffordableTurnStart is { } turnStart) return turnStart;
-    if (candidates.OldestAffordableAssistantContinuation is { } assistantContinuation) return assistantContinuation;
-    if (reason != CompactionReason.Overflow) return null;
-    return candidates.NewestOverflowTurnStart ?? candidates.NewestOverflowAssistantContinuation;
+  private static int? FindNewestStartForOverflow(ModelHistory history) {
+    int? newestUserTurnIndex = FindNewestUserTurnIndex(history.Messages);
+    int? newestAssistantContinuation = null;
+
+    for (int index = history.Messages.Count - 1; index > 0; index--) {
+      HistoryMessage message = history.Messages[index];
+      if (!CanStartRetainedHistory(history, message)) continue;
+      if (message.IsUserTurnStart) return index;
+
+      bool retainsNewestUserRequest = newestUserTurnIndex is null || index <= newestUserTurnIndex;
+      if (retainsNewestUserRequest) newestAssistantContinuation ??= index;
+    }
+
+    return newestAssistantContinuation;
   }
 
-  private static bool AdvancesPastPreviousCompaction(ModelHistory history, HistoryMessage message) =>
+  private static bool CanStartRetainedHistory(ModelHistory history, HistoryMessage message) =>
+      (message.IsUserTurnStart || message.IsAssistantContinuation) && IsAfterPreviousCompaction(history, message);
+
+  private static bool IsAfterPreviousCompaction(ModelHistory history, HistoryMessage message) =>
       history.PreviousCompaction is not { } previous ||
       message.Location.IsAfter(previous.FirstRetainedMessageLocation);
 
@@ -57,8 +54,4 @@ internal static class RetainedHistorySelector {
       if (messages[index].IsUserTurnStart) return index;
     return null;
   }
-
-  private readonly record struct FirstMessageIndexCandidates(
-      int? OldestAffordableTurnStart, int? OldestAffordableAssistantContinuation,
-      int? NewestOverflowTurnStart, int? NewestOverflowAssistantContinuation);
 }

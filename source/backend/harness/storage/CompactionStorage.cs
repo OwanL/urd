@@ -41,10 +41,9 @@ internal sealed class CompactionStorage(Database database, ToolResultCodec toolR
       if (ReadLatest(database, transaction, sessionId, revision)?.Id != plan.History.PreviousCompaction?.Id)
         return false;
       HistoryMessageLocation cut = plan.FirstRetainedMessage.Location;
-      if (!database.Scalar<bool>(transaction, """
+      if (!database.Scalar<bool>(transaction, $"""
         SELECT EXISTS (SELECT 1 FROM execution_runs r JOIN sessions s ON s.session_id = r.session_id
-            WHERE r.run_id = $run AND r.session_id = $session AND r.history_revision = $revision
-                AND s.history_revision = $revision AND r.stopping = 0 AND r.outcome IS NULL)
+            WHERE r.run_id = $run AND r.session_id = $session AND {ExecutionSql.CurrentRunCondition})
             AND EXISTS (SELECT 1 FROM execution_requests q JOIN execution_runs r ON r.run_id = q.run_id
                 WHERE q.request_id = $keep AND r.session_id = $session AND r.history_revision = $revision
                     AND r.ordinal = $ordinal AND q.request_index = $index);
@@ -52,14 +51,14 @@ internal sealed class CompactionStorage(Database database, ToolResultCodec toolR
           ("$keep", cut.RequestId), ("$ordinal", cut.ExecutionOrdinal), ("$index", cut.RequestIndexInExecution)))
         return false;
       Guid id = Guid.NewGuid();
-      database.Execute(transaction, """
+      database.Execute(transaction, $"""
         INSERT INTO session_compactions (compaction_id, session_id, history_revision, run_id,
             first_kept_request_id, first_kept_message_index, first_kept_run_ordinal, first_kept_request_index,
             reason, tokens_before, tokens_after, created_at, summary)
         VALUES ($id, $session, $revision, $run, $keep, $message, $ordinal, $index,
             $reason, $before, $after, $created, $summary);
         INSERT INTO execution_messages (session_id, history_revision, run_id, role, message_id, created_at)
-        VALUES ($session, $revision, $run, 4, $id, $created);
+        VALUES ($session, $revision, $run, {(int)TranscriptEntryKind.Compaction}, $id, $created);
         """, ("$id", id), ("$session", sessionId), ("$revision", revision), ("$run", runId),
           ("$keep", cut.RequestId), ("$message", cut.MessageIndexInRequest), ("$ordinal", cut.ExecutionOrdinal),
           ("$index", cut.RequestIndexInExecution), ("$reason", (int)plan.Reason), ("$before", plan.EstimatedContextTokensBefore),

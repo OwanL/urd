@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Urd.Core.Execution;
 using Urd.Core.Providers;
+using Urd.Core.Sessions;
 
 namespace Urd.Core.Storage;
 
@@ -15,80 +16,64 @@ internal sealed class LlmResponseStorage(Database database) {
     }
 
     return database.Write(transaction => {
-      using SqliteCommand advance = database.Command(transaction, """
+      int advanced = database.Execute(transaction, $"""
         UPDATE execution_requests SET next_chunk_index = next_chunk_index + 1,
             response_id = CASE WHEN response_id IS NULL AND $hasText = 1 THEN $output ELSE response_id END,
             response_final = $final
         WHERE request_id = $request AND run_id = $run AND outcome IS NULL
             AND next_chunk_index = $index AND response_final = 0
             AND NOT EXISTS (SELECT 1 FROM execution_messages m
-                WHERE m.request_id = $request AND m.role = 1 AND m.end_chunk_index IS NULL
+                WHERE m.request_id = $request AND m.role = {(int)TranscriptEntryKind.Text} AND m.end_chunk_index IS NULL
                     AND m.message_id <> $output)
             AND NOT EXISTS (SELECT 1 FROM execution_messages m
-                WHERE m.request_id = $request AND m.role = 1 AND m.message_id = $output
+                WHERE m.request_id = $request AND m.role = {(int)TranscriptEntryKind.Text} AND m.message_id = $output
                     AND m.end_chunk_index IS NOT NULL)
             AND EXISTS (SELECT 1 FROM execution_runs r JOIN sessions s ON s.session_id = r.session_id
-                WHERE r.run_id = $run AND r.session_id = $session AND r.history_revision = $revision
-                    AND s.history_revision = $revision AND r.stopping = 0 AND r.outcome IS NULL);
-        """,
-          ("$session", execution.SessionId),
-          ("$run", execution.ExecutionId),
-          ("$revision", execution.HistoryRevision),
-          ("$request", chunk.RequestId),
-          ("$output", chunk.ResponseId),
-          ("$index", chunk.ChunkIndex),
-          ("$hasText", chunk.Text.Length > 0 ? 1 : 0),
-          ("$final", chunk.IsFinal ? 1 : 0));
-      if (advance.ExecuteNonQuery() == 0)
+                WHERE r.run_id = $run AND r.session_id = $session AND {ExecutionSql.CurrentRunCondition});
+        """, ExecutionSql.Parameters(execution,
+          ("$request", chunk.RequestId), ("$output", chunk.ResponseId), ("$index", chunk.ChunkIndex),
+          ("$hasText", chunk.Text.Length > 0 ? 1 : 0), ("$final", chunk.IsFinal ? 1 : 0)));
+      if (advanced == 0)
         return false;
 
-      using SqliteCommand append = database.Command(transaction, """
+      database.Execute(transaction, """
         INSERT INTO execution_output (request_id, chunk_index, text_utf8, is_final)
         VALUES ($request, $index, $text, $final);
         """,
-          ("$request", chunk.RequestId),
-          ("$index", chunk.ChunkIndex),
-          ("$text", StorageText.StrictUtf8.GetBytes(chunk.Text)),
-          ("$final", chunk.IsFinal ? 1 : 0));
-      append.ExecuteNonQuery();
+          ("$request", chunk.RequestId), ("$index", chunk.ChunkIndex),
+          ("$text", StorageText.StrictUtf8.GetBytes(chunk.Text)), ("$final", chunk.IsFinal ? 1 : 0));
 
       bool hasText = chunk.Text.Length > 0;
       if (hasText) {
-        using SqliteCommand index = database.Command(transaction, """
+        int inserted = database.Execute(transaction, $"""
           INSERT INTO execution_messages (
               session_id, history_revision, run_id, role, message_id, request_id,
               first_chunk_index, created_at, layout_weight)
-          SELECT $session, $revision, $run, 1, $output, $request, $index, $created, 256 + $bytes
+          SELECT $session, $revision, $run, {(int)TranscriptEntryKind.Text}, $output, $request, $index, $created, 256 + $bytes
           WHERE NOT EXISTS (SELECT 1 FROM execution_messages
-              WHERE request_id = $request AND role = 1 AND message_id = $output);
-          """,
-            ("$session", execution.SessionId), ("$revision", execution.HistoryRevision),
-            ("$run", execution.ExecutionId),
+              WHERE request_id = $request AND role = {(int)TranscriptEntryKind.Text} AND message_id = $output);
+          """, ExecutionSql.Parameters(execution,
             ("$output", chunk.ResponseId), ("$request", chunk.RequestId), ("$index", chunk.ChunkIndex),
-            ("$created", StorageText.UtcTimestamp()), ("$bytes", StorageText.StrictUtf8.GetByteCount(chunk.Text)));
-        if (index.ExecuteNonQuery() == 0) {
-          using SqliteCommand grow = database.Command(transaction, """
+            ("$created", StorageText.UtcTimestamp()), ("$bytes", StorageText.StrictUtf8.GetByteCount(chunk.Text))));
+        if (inserted == 0) {
+          database.Execute(transaction, $"""
             UPDATE execution_messages SET layout_weight = layout_weight + $bytes
-            WHERE request_id = $request AND role = 1 AND message_id = $output;
+            WHERE request_id = $request AND role = {(int)TranscriptEntryKind.Text} AND message_id = $output;
             """, ("$request", chunk.RequestId), ("$output", chunk.ResponseId),
               ("$bytes", StorageText.StrictUtf8.GetByteCount(chunk.Text)));
-          grow.ExecuteNonQuery();
         }
       } else {
         // Empty committed segments still advance source cursors in this history revision.
-        using SqliteCommand touch = database.Command(transaction,
+        database.Execute(transaction,
             "UPDATE sessions SET position_version = position_version + 1 WHERE session_id = $session;",
             ("$session", execution.SessionId));
-        touch.ExecuteNonQuery();
       }
 
       if (chunk.IsFinal) {
-        using SqliteCommand close = database.Command(transaction, """
+        database.Execute(transaction, $"""
           UPDATE execution_messages SET end_chunk_index = $end
-          WHERE request_id = $request AND role = 1 AND message_id = $output AND end_chunk_index IS NULL;
-          """,
-            ("$end", chunk.ChunkIndex + 1), ("$request", chunk.RequestId), ("$output", chunk.ResponseId));
-        close.ExecuteNonQuery();
+          WHERE request_id = $request AND role = {(int)TranscriptEntryKind.Text} AND message_id = $output AND end_chunk_index IS NULL;
+          """, ("$end", chunk.ChunkIndex + 1), ("$request", chunk.RequestId), ("$output", chunk.ResponseId));
       }
 
       return true;
@@ -103,57 +88,47 @@ internal sealed class LlmResponseStorage(Database database) {
       throw new ArgumentException("A tool name must be nonempty when supplied.", nameof(name));
 
     return database.Write(transaction => {
-      using SqliteCommand allowed = database.Command(transaction, """
+      bool allowed = database.Scalar<bool>(transaction, $"""
         SELECT EXISTS (SELECT 1 FROM execution_requests q
             JOIN execution_runs r ON r.run_id = q.run_id JOIN sessions s ON s.session_id = r.session_id
             WHERE q.request_id = $request AND q.run_id = $run AND q.outcome IS NULL AND q.response_final = 0
-                AND r.session_id = $session AND r.history_revision = $revision AND s.history_revision = $revision
-                AND r.stopping = 0 AND r.outcome IS NULL
+                AND r.session_id = $session AND {ExecutionSql.CurrentRunCondition}
                 AND NOT EXISTS (SELECT 1 FROM execution_requests later
                     WHERE later.run_id = $run AND later.request_index > q.request_index));
-        """, ("$session", execution.SessionId), ("$run", execution.ExecutionId),
-          ("$revision", execution.HistoryRevision), ("$request", requestId));
-      if ((long)allowed.ExecuteScalar()! == 0)
+        """, ExecutionSql.Parameters(execution, ("$request", requestId)));
+      if (!allowed)
         return false;
 
-      using (SqliteCommand existing = database.Command(transaction, """
+      var existing = database.Query(transaction, $"""
         SELECT tool_name FROM execution_messages
-        WHERE request_id = $request AND role = 2 AND call_id = $call;
-        """, ("$request", requestId), ("$call", callId)))
-      using (SqliteDataReader reader = existing.ExecuteReader()) {
-        if (reader.Read()) {
-          string? savedName = reader.IsDBNull(0) ? null : reader.GetString(0);
-          if (savedName is not null && name is not null && savedName != name)
-            return false;
-          if (savedName is null && name is not null) {
-            reader.Close();
-            using SqliteCommand updateName = database.Command(transaction, """
-              UPDATE execution_messages SET tool_name = $name
-              WHERE request_id = $request AND role = 2 AND call_id = $call AND tool_name IS NULL;
-              """, ("$name", name), ("$request", requestId), ("$call", callId));
-            updateName.ExecuteNonQuery();
-          }
-          return true;
+        WHERE request_id = $request AND role = {(int)TranscriptEntryKind.Tool} AND call_id = $call;
+        """, row => row.NullableString("tool_name"), ("$request", requestId), ("$call", callId));
+      if (existing.Count != 0) {
+        string? savedName = existing[0];
+        if (savedName is not null && name is not null && savedName != name)
+          return false;
+        if (savedName is null && name is not null) {
+          database.Execute(transaction, $"""
+            UPDATE execution_messages SET tool_name = $name
+            WHERE request_id = $request AND role = {(int)TranscriptEntryKind.Tool} AND call_id = $call AND tool_name IS NULL;
+            """, ("$name", name), ("$request", requestId), ("$call", callId));
         }
+        return true;
       }
 
-      using SqliteCommand closeRun = database.Command(transaction, """
+      database.Execute(transaction, $"""
         UPDATE execution_messages SET end_chunk_index = (
             SELECT next_chunk_index FROM execution_requests WHERE request_id = $request)
-        WHERE request_id = $request AND role = 1 AND end_chunk_index IS NULL;
+        WHERE request_id = $request AND role = {(int)TranscriptEntryKind.Text} AND end_chunk_index IS NULL;
         """, ("$request", requestId));
-      closeRun.ExecuteNonQuery();
 
-      using SqliteCommand reserve = database.Command(transaction, """
+      database.Execute(transaction, $"""
         INSERT INTO execution_messages (
             session_id, history_revision, run_id, role, message_id, request_id, created_at, call_id, tool_name)
-        VALUES ($session, $revision, $run, 2, $entry, $request, $created, $call, $name);
-        """,
-          ("$session", execution.SessionId), ("$revision", execution.HistoryRevision),
-          ("$run", execution.ExecutionId), ("$entry", Guid.NewGuid()), ("$request", requestId),
-          ("$created", StorageText.UtcTimestamp()),
-          ("$call", callId), ("$name", name));
-      reserve.ExecuteNonQuery();
+        VALUES ($session, $revision, $run, {(int)TranscriptEntryKind.Tool}, $entry, $request, $created, $call, $name);
+        """, ExecutionSql.Parameters(execution,
+          ("$entry", Guid.NewGuid()), ("$request", requestId), ("$created", StorageText.UtcTimestamp()),
+          ("$call", callId), ("$name", name)));
       return true;
     });
   }
@@ -191,61 +166,43 @@ internal sealed class LlmResponseStorage(Database database) {
       LlmRequestResult completion,
       (string CallId, string Name, string Arguments, string Excerpt)[] calls,
       string? providerResponseJson, string? usageJson) {
-    bool alreadyCompleted;
-    using (SqliteCommand read = database.Command(transaction, """
-      SELECT q.outcome, q.error, q.response_final, r.stopping, r.outcome,
+    RequestCompletionState? state = database.QuerySingleOrDefault(transaction, """
+      SELECT q.outcome AS request_outcome, q.error, q.response_final, r.stopping,
+          r.outcome IS NOT NULL AS execution_settled,
           EXISTS (SELECT 1 FROM execution_requests later
-              WHERE later.run_id = $run AND later.request_index > q.request_index), c.response_json, q.usage_json
+              WHERE later.run_id = $run AND later.request_index > q.request_index) AS has_later_request,
+          c.response_json, q.usage_json
       FROM execution_requests q JOIN execution_runs r ON r.run_id = q.run_id
       JOIN sessions s ON s.session_id = r.session_id
       LEFT JOIN execution_provider_context c ON c.request_id = q.request_id
       WHERE r.session_id = $session AND r.run_id = $run AND q.request_id = $request
           AND r.history_revision = $revision AND s.history_revision = $revision;
-      """,
-        ("$session", execution.SessionId),
-        ("$run", execution.ExecutionId),
-        ("$revision", execution.HistoryRevision),
-        ("$request", completion.RequestId)))
-    using (SqliteDataReader reader = read.ExecuteReader()) {
-      if (!reader.Read())
-        return false;
-
-      ExecutionOutcome? savedOutcome = reader.IsDBNull(0) ? null : (ExecutionOutcome)reader.GetInt32(0);
-      string? savedError = reader.IsDBNull(1) ? null : reader.GetString(1);
-      bool hasFinalOutput = reader.GetInt32(2) != 0;
-      bool stopRequested = reader.GetInt32(3) != 0;
-      bool executionSettled = !reader.IsDBNull(4);
-      alreadyCompleted = savedOutcome is not null;
-      if (alreadyCompleted) {
-        string? savedProviderResponseJson = reader.IsDBNull(6) ? null : reader.GetString(6);
-        string? savedUsageJson = reader.IsDBNull(7) ? null : reader.GetString(7);
-        if (savedOutcome != completion.Outcome || savedError != completion.Error
-            || savedProviderResponseJson != providerResponseJson || savedUsageJson != usageJson)
-          return false;
-      } else {
-        if (executionSettled || reader.GetInt32(5) != 0)
-          return false;
-        if (completion.Outcome == ExecutionOutcome.Completed && (stopRequested || !hasFinalOutput))
-          return false;
-      }
+      """, row => new RequestCompletionState((ExecutionOutcome?)row.NullableInt("request_outcome"),
+          row.NullableString("error"), row.Bool("response_final"), row.Bool("stopping"),
+          row.Bool("execution_settled"), row.Bool("has_later_request"),
+          row.NullableString("response_json"), row.NullableString("usage_json")),
+        ExecutionSql.Parameters(execution, ("$request", completion.RequestId)));
+    if (state is null)
+      return false;
+    if (state.Outcome is not null) {
+      return state.Outcome == completion.Outcome && state.Error == completion.Error
+          && state.ProviderResponseJson == providerResponseJson && state.UsageJson == usageJson
+          && MatchesCalls(transaction, completion.RequestId, calls);
     }
-
-    if (alreadyCompleted)
-      return MatchesCalls(transaction, completion.RequestId, calls);
-
+    if (state.ExecutionSettled || state.HasLaterRequest)
+      return false;
+    if (completion.Outcome == ExecutionOutcome.Completed && (state.StopRequested || !state.HasFinalOutput))
+      return false;
     if (completion.Outcome == ExecutionOutcome.Completed
         && !MatchesObservedCalls(transaction, completion.RequestId, calls))
       return false;
 
-    foreach (var call in calls) {
-      using SqliteCommand exists = database.Command(transaction,
-          "SELECT EXISTS(SELECT 1 FROM execution_tools WHERE run_id = $run AND call_id = $call);",
-          ("$run", execution.ExecutionId), ("$call", call.CallId));
-      if ((long)exists.ExecuteScalar()! != 0)
-        return false;
-    }
+    if (calls.Any(call => database.Scalar<bool>(transaction,
+        "SELECT EXISTS(SELECT 1 FROM execution_tools WHERE run_id = $run AND call_id = $call);",
+        ("$run", execution.ExecutionId), ("$call", call.CallId))))
+      return false;
 
-    using SqliteCommand update = database.Command(transaction, """
+    database.Execute(transaction, """
       UPDATE execution_requests SET outcome = $outcome, error = $error, usage_json = $usage
       WHERE request_id = $request;
       UPDATE execution_inputs SET outcome = $outcome,
@@ -253,38 +210,33 @@ internal sealed class LlmResponseStorage(Database database) {
               WHERE q.request_id = $request AND q.attempt = 1) THEN 1 ELSE 0 END
       WHERE request_id = $request;
       """,
-        ("$outcome", (int)completion.Outcome),
-        ("$error", completion.Error),
-        ("$usage", usageJson),
-        ("$request", completion.RequestId));
-    update.ExecuteNonQuery();
-    using (SqliteCommand closeRun = database.Command(transaction, """
+        ("$outcome", (int)completion.Outcome), ("$error", completion.Error),
+        ("$usage", usageJson), ("$request", completion.RequestId));
+    database.Execute(transaction, $"""
       UPDATE execution_messages SET end_chunk_index = (
           SELECT next_chunk_index FROM execution_requests WHERE request_id = $request)
-      WHERE request_id = $request AND role = 1 AND end_chunk_index IS NULL;
-      """, ("$request", completion.RequestId)))
-      closeRun.ExecuteNonQuery();
+      WHERE request_id = $request AND role = {(int)TranscriptEntryKind.Text} AND end_chunk_index IS NULL;
+      """, ("$request", completion.RequestId));
     if (providerResponseJson is not null) {
-      using SqliteCommand retain = database.Command(transaction, """
+      database.Execute(transaction, """
         INSERT INTO execution_provider_context (request_id, response_json) VALUES ($request, $response);
         """, ("$request", completion.RequestId), ("$response", providerResponseJson));
-      retain.ExecuteNonQuery();
     }
 
-    var observed = ReadObservedCalls(transaction, completion.RequestId);
+    var observed = ReadObservedCallsInOrder(transaction, completion.RequestId)
+        .ToDictionary(call => call.CallId, call => call.Name, StringComparer.Ordinal);
     for (int index = 0; index < calls.Length; index++) {
       var call = calls[index];
       if (observed.ContainsKey(call.CallId)) {
-        using SqliteCommand attach = database.Command(transaction, """
+        database.Execute(transaction, $"""
           UPDATE execution_messages SET tool_name = $name
-          WHERE request_id = $request AND role = 2 AND call_id = $call;
+          WHERE request_id = $request AND role = {(int)TranscriptEntryKind.Tool} AND call_id = $call;
           """, ("$name", call.Name), ("$request", completion.RequestId), ("$call", call.CallId));
-        attach.ExecuteNonQuery();
       } else {
         ReserveCompletedCall(transaction, execution, completion.RequestId, call.CallId, call.Name);
       }
 
-      using SqliteCommand authorize = database.Command(transaction, """
+      database.Execute(transaction, """
         INSERT INTO execution_tools (
             run_id, request_id, call_index, call_id, name, arguments_json, arguments_excerpt)
         VALUES ($run, $request, $index, $call, $name, $arguments, $excerpt);
@@ -292,7 +244,6 @@ internal sealed class LlmResponseStorage(Database database) {
           ("$run", execution.ExecutionId), ("$request", completion.RequestId), ("$index", index),
           ("$call", call.CallId), ("$name", call.Name), ("$arguments", call.Arguments),
           ("$excerpt", call.Excerpt));
-      authorize.ExecuteNonQuery();
     }
     return true;
   }
@@ -314,33 +265,20 @@ internal sealed class LlmResponseStorage(Database database) {
 
   private void ReserveCompletedCall(SqliteTransaction transaction, ExecutionIdentity execution,
       Guid requestId, string callId, string name) {
-    using SqliteCommand reserve = database.Command(transaction, """
+    database.Execute(transaction, $"""
       INSERT INTO execution_messages (
           session_id, history_revision, run_id, role, message_id, request_id, created_at, call_id, tool_name)
-      VALUES ($session, $revision, $run, 2, $entry, $request, $created, $call, $name);
-      """,
-        ("$session", execution.SessionId), ("$revision", execution.HistoryRevision),
-        ("$run", execution.ExecutionId),
+      VALUES ($session, $revision, $run, {(int)TranscriptEntryKind.Tool}, $entry, $request, $created, $call, $name);
+      """, ExecutionSql.Parameters(execution,
         ("$entry", Guid.NewGuid()), ("$request", requestId), ("$created", StorageText.UtcTimestamp()),
-        ("$call", callId), ("$name", name));
-    reserve.ExecuteNonQuery();
+        ("$call", callId), ("$name", name)));
   }
 
-  private Dictionary<string, string?> ReadObservedCalls(SqliteTransaction transaction, Guid requestId) =>
-      ReadObservedCallsInOrder(transaction, requestId).ToDictionary(call => call.CallId, call => call.Name,
-          StringComparer.Ordinal);
-
-  private List<(string CallId, string? Name)> ReadObservedCallsInOrder(SqliteTransaction transaction, Guid requestId) {
-    using SqliteCommand read = database.Command(transaction, """
-      SELECT call_id, tool_name FROM execution_messages
-      WHERE request_id = $request AND role = 2 ORDER BY ordinal;
-      """, ("$request", requestId));
-    using SqliteDataReader reader = read.ExecuteReader();
-    List<(string CallId, string? Name)> observed = [];
-    while (reader.Read())
-      observed.Add((reader.GetString(0), reader.IsDBNull(1) ? null : reader.GetString(1)));
-    return observed;
-  }
+  private List<(string CallId, string? Name)> ReadObservedCallsInOrder(SqliteTransaction transaction, Guid requestId) =>
+      database.Query(transaction, $"""
+        SELECT call_id, tool_name FROM execution_messages
+        WHERE request_id = $request AND role = {(int)TranscriptEntryKind.Tool} ORDER BY ordinal;
+        """, row => (row.String("call_id"), row.NullableString("tool_name")), ("$request", requestId));
 
   private bool MatchesCalls(SqliteTransaction transaction, Guid requestId,
       (string CallId, string Name, string Arguments, string Excerpt)[] calls) {
@@ -351,12 +289,16 @@ internal sealed class LlmResponseStorage(Database database) {
     using SqliteDataReader reader = read.ExecuteReader();
     int index = 0;
     while (reader.Read()) {
-      if (index == calls.Length || reader.GetString(0) != calls[index].CallId
-          || reader.GetString(1) != calls[index].Name || reader.GetString(2) != calls[index].Arguments
-          || reader.GetString(3) != calls[index].Excerpt)
+      if (index == calls.Length || reader.String("call_id") != calls[index].CallId
+          || reader.String("name") != calls[index].Name || reader.String("arguments_json") != calls[index].Arguments
+          || reader.String("arguments_excerpt") != calls[index].Excerpt)
         return false;
       index++;
     }
     return index == calls.Length;
   }
+
+  // Captures request and run state before completion checks or writes in the same transaction.
+  private sealed record RequestCompletionState(ExecutionOutcome? Outcome, string? Error, bool HasFinalOutput,
+      bool StopRequested, bool ExecutionSettled, bool HasLaterRequest, string? ProviderResponseJson, string? UsageJson);
 }

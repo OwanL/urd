@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Text;
 using Microsoft.Data.Sqlite;
 using Urd.Core.Sessions;
@@ -114,19 +113,22 @@ internal sealed class MessageContentReader {
   }
 
   private void CheckHistoryRevision(SqliteTransaction transaction, Guid sessionId, long historyRevision) {
-    using SqliteCommand revision = database.Command(transaction,
-        "SELECT history_revision FROM sessions WHERE session_id = $session;", ("$session", sessionId));
-    object? value = revision.ExecuteScalar();
-    if (value is null)
-      throw new KeyNotFoundException($"Session '{sessionId}' does not exist.");
-
-    if ((long)value != historyRevision)
-      throw new HistoryRevisionConflictException(historyRevision, (long)value);
+    long revision = database.Scalar<long?>(transaction,
+        "SELECT history_revision FROM sessions WHERE session_id = $session;", ("$session", sessionId))
+        ?? throw new KeyNotFoundException($"Session '{sessionId}' does not exist.");
+    if (revision != historyRevision)
+      throw new HistoryRevisionConflictException(historyRevision, revision);
   }
 
   private MessageMetadata ReadMetadata(SqliteTransaction transaction, Guid sessionId, MessageRef message) {
     // Resolve the exact indexed identity, never the first request or submission of an execution.
-    string sourceSql = message.Role == MessageRole.User ? """
+    return message.Role == MessageRole.User
+        ? ReadUserMetadata(transaction, sessionId, message)
+        : ReadOutputMetadata(transaction, sessionId, message);
+  }
+
+  private MessageMetadata ReadUserMetadata(SqliteTransaction transaction, Guid sessionId, MessageRef message) =>
+      database.QuerySingleOrDefault(transaction, """
       SELECT i.input_id, m.request_id
       FROM execution_messages m
       JOIN execution_runs r ON r.run_id = m.run_id AND r.session_id = m.session_id
@@ -135,45 +137,38 @@ internal sealed class MessageContentReader {
           AND i.input_id = m.input_id AND i.input_id = m.message_id
       WHERE m.session_id = $session AND m.run_id = $run AND m.role = $role
           AND m.message_id = $message AND m.history_revision = $revision;
-      """ : """
-      SELECT q.request_id, m.first_chunk_index, coalesce(m.end_chunk_index, q.next_chunk_index),
-          m.end_chunk_index, q.response_final, q.outcome, r.stopping, r.outcome, q.next_chunk_index
+      """, row => new MessageMetadata(row.Guid("input_id"), row.Guid("request_id"),
+          FirstChunkIndex: 0, EndChunkIndex: 1, IsClosed: true, FinalOutputCommitted: false),
+          ("$session", sessionId), ("$run", message.ExecutionId), ("$role", (int)message.Role),
+          ("$message", message.MessageId), ("$revision", message.HistoryRevision))
+          ?? throw new KeyNotFoundException("The message does not belong to this session history.");
+
+  private MessageMetadata ReadOutputMetadata(SqliteTransaction transaction, Guid sessionId, MessageRef message) =>
+      database.QuerySingleOrDefault(transaction, """
+      SELECT q.request_id, m.first_chunk_index, coalesce(m.end_chunk_index, q.next_chunk_index) AS end_chunk_index,
+          m.end_chunk_index AS saved_end_chunk_index, q.response_final, q.outcome AS request_outcome,
+          r.stopping, r.outcome AS execution_outcome, q.next_chunk_index
       FROM execution_messages m
       JOIN execution_runs r ON r.run_id = m.run_id AND r.session_id = m.session_id
           AND r.history_revision = m.history_revision
       JOIN execution_requests q ON q.request_id = m.request_id AND q.run_id = m.run_id
       WHERE m.session_id = $session AND m.run_id = $run AND m.role = $role
           AND m.message_id = $message AND m.history_revision = $revision;
-      """;
-    using SqliteCommand metadata = database.Command(transaction, sourceSql,
-        ("$session", sessionId),
-        ("$run", message.ExecutionId),
-        ("$role", (int)message.Role),
-        ("$message", message.MessageId),
-        ("$revision", message.HistoryRevision));
-    using SqliteDataReader reader = metadata.ExecuteReader();
-    if (!reader.Read())
-      throw new KeyNotFoundException("The message does not belong to this session history.");
+      """, ReadOutputMetadata, ("$session", sessionId), ("$run", message.ExecutionId),
+          ("$role", (int)message.Role), ("$message", message.MessageId), ("$revision", message.HistoryRevision))
+          ?? throw new KeyNotFoundException("The message does not belong to this session history.");
 
-    if (message.Role == MessageRole.User) {
-      return new(reader.GetGuid(0), reader.GetGuid(1), FirstChunkIndex: 0, EndChunkIndex: 1, IsClosed: true,
-          FinalOutputCommitted: false);
-    }
-
-    Guid requestId = reader.GetGuid(0);
-    long firstChunkIndex = reader.GetInt64(1);
-    long endChunkIndex = reader.GetInt64(2);
-    bool runClosed = !reader.IsDBNull(3);
-    bool finalOutputCommitted = reader.GetInt32(4) != 0
-        && endChunkIndex == reader.GetInt64(8);
-    bool requestEnded = !reader.IsDBNull(5);
-    bool stopRequested = reader.GetInt32(6) != 0;
-    bool executionSettled = !reader.IsDBNull(7);
+  private static MessageMetadata ReadOutputMetadata(SqliteDataReader reader) {
+    long firstChunkIndex = reader.Long("first_chunk_index");
+    long endChunkIndex = reader.Long("end_chunk_index");
+    bool finalOutputCommitted = reader.Bool("response_final") && endChunkIndex == reader.Long("next_chunk_index");
     if (firstChunkIndex < 0 || endChunkIndex <= firstChunkIndex)
       throw new InvalidDataException("An output message has an invalid committed range.");
 
-    bool isClosed = runClosed || finalOutputCommitted || stopRequested || executionSettled || requestEnded;
-    return new(Guid.Empty, requestId, firstChunkIndex, endChunkIndex, isClosed, finalOutputCommitted);
+    bool isClosed = reader.NullableLong("saved_end_chunk_index") is not null || finalOutputCommitted
+        || reader.Bool("stopping") || reader.NullableInt("execution_outcome") is not null
+        || reader.NullableInt("request_outcome") is not null;
+    return new(Guid.Empty, reader.Guid("request_id"), firstChunkIndex, endChunkIndex, isClosed, finalOutputCommitted);
   }
 
   private static MessageContentCursor NormalizeCursor(MessageContentCursor cursor, long firstChunkIndex) =>
@@ -205,7 +200,7 @@ internal sealed class MessageContentReader {
           Math.Min(remainingBytes, (long)remainingUtf16Units * 3) + 3);
       (long segmentByteLength, byte[] prefix) = ReadSegment(transaction, sessionId, cursor, metadata,
           segmentIndex, utf8Offset, prefixBytes);
-      int appendedBytes = AppendPrefix(prefix, text, remainingBytes, maximumUtf16Units);
+      int appendedBytes = StorageText.AppendPrefix(prefix, text, remainingBytes, maximumUtf16Units);
       utf8Offset += appendedBytes;
       utf8Bytes += appendedBytes;
       if (utf8Offset != segmentByteLength) {
@@ -226,16 +221,17 @@ internal sealed class MessageContentReader {
       MessageContentCursor cursor, MessageMetadata metadata, long segmentIndex, int utf8Offset, int prefixBytes) {
     // SQLite substr of an empty BLOB returns NULL; retain its empty-byte meaning.
     using SqliteCommand segmentRead = cursor.Message.Role == MessageRole.User
-        ? database.Command(transaction, """
-          SELECT length(original_text_utf8), coalesce(substr(original_text_utf8, $offset + 1, $count), X'')
-          FROM input_decisions WHERE session_id = $session AND input_id = $input AND decision = 1;
+        ? database.Command(transaction, $"""
+          SELECT length(original_text_utf8) AS byte_length,
+              coalesce(substr(original_text_utf8, $offset + 1, $count), X'') AS prefix
+          FROM input_decisions WHERE session_id = $session AND input_id = $input AND decision = {(int)MessageAcceptance.Accepted};
           """,
             ("$session", sessionId),
             ("$input", metadata.SubmissionId),
             ("$offset", utf8Offset),
             ("$count", prefixBytes))
         : database.Command(transaction, """
-          SELECT length(text_utf8), coalesce(substr(text_utf8, $offset + 1, $count), X'')
+          SELECT length(text_utf8) AS byte_length, coalesce(substr(text_utf8, $offset + 1, $count), X'') AS prefix
           FROM execution_output WHERE request_id = $request AND chunk_index = $segment;
           """,
             ("$request", metadata.RequestId),
@@ -246,36 +242,18 @@ internal sealed class MessageContentReader {
     if (!reader.Read())
       throw new InvalidDataException("A committed message segment is missing.");
 
-    long segmentByteLength = reader.GetInt64(0);
+    long segmentByteLength = reader.Long("byte_length");
     if (cursor.Message.Role == MessageRole.Assistant && segmentByteLength > StorageText.MaximumBytes)
       throw new InvalidDataException("An output segment exceeds the storage limit.");
 
     if (utf8Offset > segmentByteLength)
       throw new ArgumentException("The cursor offset is beyond its segment.", nameof(cursor));
 
-    byte[] prefix = (byte[])reader.GetValue(1);
+    byte[] prefix = (byte[])reader.GetValue(reader.GetOrdinal("prefix"));
     if (utf8Offset != 0 && prefix.Length != 0 && (prefix[0] & 0xc0) == 0x80)
       throw new ArgumentException("The cursor must begin at a UTF-8 scalar boundary.", nameof(cursor));
 
     return (segmentByteLength, prefix);
-  }
-
-  private static int AppendPrefix(byte[] prefix, StringBuilder text, int maximumUtf8Bytes, int maximumUtf16Units) {
-    int consumed = 0;
-    Span<char> scalar = stackalloc char[2];
-    while (consumed < prefix.Length && text.Length < maximumUtf16Units && consumed < maximumUtf8Bytes) {
-      if (Rune.DecodeFromUtf8(prefix.AsSpan(consumed), out Rune rune, out int scalarBytes) != OperationStatus.Done)
-        throw new InvalidDataException("A message segment contains invalid UTF-8.");
-
-      if (scalarBytes > maximumUtf8Bytes - consumed || rune.Utf16SequenceLength > maximumUtf16Units - text.Length)
-        break;
-
-      int units = rune.EncodeToUtf16(scalar);
-      text.Append(scalar[..units]);
-      consumed += scalarBytes;
-    }
-
-    return consumed;
   }
 
   // Describes committed message segments and their completion state.

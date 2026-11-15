@@ -1,6 +1,3 @@
-using System.Buffers;
-using System.Globalization;
-using System.Text;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.AI;
@@ -13,20 +10,19 @@ namespace Urd.Core.Storage;
 
 // Reads small session facts without loading a transcript window.
 internal sealed class SnapshotReader {
-  private const int PreviewUtf16Limit = 256;
   private const int PendingInputLimit = 8;
   private readonly Database database;
   private readonly MessageContentReader content;
 
-  internal const string FirstUserSql = """
+  internal static readonly string FirstUserSql = $"""
     SELECT run_id, message_id FROM execution_messages
-    WHERE session_id = $session AND history_revision = $revision AND role = 0
+    WHERE session_id = $session AND history_revision = $revision AND role = {(int)MessageRole.User}
     ORDER BY ordinal LIMIT 1;
     """;
 
   internal const string PendingInputsSql = """
-    SELECT i.input_id, coalesce(substr(d.original_text_utf8, 1, $bytes), X''),
-        i.request_id IS NULL AND r.stopping = 0 AND (r.input_id IS NULL OR r.input_id <> i.input_id)
+    SELECT i.input_id, coalesce(substr(d.original_text_utf8, 1, $bytes), X'') AS preview,
+        i.request_id IS NULL AND r.stopping = 0 AND (r.input_id IS NULL OR r.input_id <> i.input_id) AS can_cancel
     FROM execution_inputs i
     JOIN input_decisions d ON d.session_id = i.session_id AND d.input_id = i.input_id
     JOIN execution_runs r ON r.run_id = i.run_id
@@ -43,7 +39,8 @@ internal sealed class SnapshotReader {
     """;
 
   internal const string ContextUsageSql = """
-    SELECT c.compaction_id, c.tokens_after, q.compaction_id, q.usage_json
+    SELECT c.compaction_id AS latest_compaction_id, c.tokens_after,
+        q.compaction_id AS request_compaction_id, q.usage_json
     FROM (SELECT 1) root
     LEFT JOIN (
         SELECT compaction_id, tokens_after FROM session_compactions
@@ -63,12 +60,12 @@ internal sealed class SnapshotReader {
     ) q ON 1 = 1;
     """;
 
-  internal const string SnapshotSettlementSql = """
+  internal static readonly string SnapshotSettlementSql = $"""
     SELECT r.run_id, r.outcome,
-        CASE WHEN r.outcome = 2 THEN coalesce(
+        CASE WHEN r.outcome = {(int)ExecutionOutcome.Failed} THEN coalesce(
             (SELECT substr(q.error, 1, 1024) FROM execution_requests q
-                WHERE q.run_id = r.run_id AND q.outcome = 2 ORDER BY q.request_index DESC LIMIT 1),
-            substr(r.error, 1, 1024)) ELSE NULL END
+                WHERE q.run_id = r.run_id AND q.outcome = {(int)ExecutionOutcome.Failed} ORDER BY q.request_index DESC LIMIT 1),
+            substr(r.error, 1, 1024)) ELSE NULL END AS error
     FROM execution_runs r
     WHERE r.session_id = $session AND r.outcome IS NOT NULL
     ORDER BY r.ordinal DESC LIMIT 1;
@@ -80,7 +77,7 @@ internal sealed class SnapshotReader {
     WHERE r.session_id = $session AND r.run_id = $run;
     """;
 
-  internal const string CanContinueSql = """
+  internal static readonly string CanContinueSql = $"""
     SELECT EXISTS (SELECT 1 FROM execution_runs tail
         WHERE tail.session_id = $session AND tail.history_revision = $revision AND tail.outcome IS NOT NULL
             AND NOT EXISTS (SELECT 1 FROM execution_runs later
@@ -91,7 +88,7 @@ internal sealed class SnapshotReader {
                     AND attempted.ordinal <= tail.ordinal AND q.attempt = 2)
             AND (EXISTS (SELECT 1 FROM execution_messages m JOIN execution_requests q ON q.request_id = m.request_id
                     JOIN execution_runs source ON source.run_id = q.run_id
-                WHERE m.session_id = tail.session_id AND m.history_revision = tail.history_revision AND m.role = 0
+                WHERE m.session_id = tail.session_id AND m.history_revision = tail.history_revision AND m.role = {(int)MessageRole.User}
                     AND source.history_revision = tail.history_revision AND source.ordinal <= tail.ordinal
                     AND q.attempt = 2)
                 OR EXISTS (SELECT 1 FROM session_compactions c
@@ -129,32 +126,20 @@ internal sealed class SnapshotReader {
         CanContinue: ReadCanContinue(transaction, sessionId, historyRevision));
   }
 
-  private long ReadHistoryRevision(SqliteTransaction transaction, Guid sessionId) {
-    using SqliteCommand revisionRead = database.Command(transaction,
-        "SELECT history_revision FROM sessions WHERE session_id = $session;", ("$session", sessionId));
-    if (revisionRead.ExecuteScalar() is not long historyRevision)
-      throw new KeyNotFoundException($"Session {sessionId} does not exist.");
-
-    return historyRevision;
-  }
+  private long ReadHistoryRevision(SqliteTransaction transaction, Guid sessionId) =>
+      database.Scalar<long?>(transaction,
+          "SELECT history_revision FROM sessions WHERE session_id = $session;", ("$session", sessionId))
+          ?? throw new KeyNotFoundException($"Session {sessionId} does not exist.");
 
   private (Guid? ExecutionId, bool StopRequested, DateTimeOffset? StartedAt) ReadUnsettledExecution(
-      SqliteTransaction transaction, Guid sessionId) {
-    using SqliteCommand activeRead = database.Command(transaction, SnapshotUnsettledSql, ("$session", sessionId));
-    using SqliteDataReader reader = activeRead.ExecuteReader();
-    if (!reader.Read())
-      return (null, false, null);
+      SqliteTransaction transaction, Guid sessionId) =>
+      database.QuerySingleOrDefault(transaction, SnapshotUnsettledSql,
+          row => ((Guid?)row.Guid("run_id"), row.Bool("stopping"), row.NullableTimestamp("working_started_at")),
+          ("$session", sessionId));
 
-    DateTimeOffset? startedAt = reader.IsDBNull(2) ? null
-        : DateTimeOffset.Parse(reader.GetString(2), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
-    return (reader.GetGuid(0), reader.GetBoolean(1), startedAt);
-  }
-
-  private bool ReadCanContinue(SqliteTransaction transaction, Guid sessionId, long historyRevision) {
-    using SqliteCommand read = database.Command(transaction, CanContinueSql,
-        ("$session", sessionId), ("$revision", historyRevision));
-    return (long)read.ExecuteScalar()! == 1;
-  }
+  private bool ReadCanContinue(SqliteTransaction transaction, Guid sessionId, long historyRevision) =>
+      database.Scalar<bool>(transaction, CanContinueSql,
+          ("$session", sessionId), ("$revision", historyRevision));
 
   private SessionContextUsage? ReadContextUsage(SqliteTransaction transaction, Guid sessionId, long historyRevision) {
     using SqliteCommand read = database.Command(transaction, ContextUsageSql,
@@ -163,10 +148,10 @@ internal sealed class SnapshotReader {
     if (!reader.Read())
       throw new InvalidOperationException("The context usage query did not return its single result row.");
 
-    Guid? latestCompaction = reader.IsDBNull(0) ? null : reader.GetGuid(0);
-    long? compactionTokensAfter = reader.IsDBNull(1) ? null : reader.GetInt64(1);
-    Guid? requestCompaction = reader.IsDBNull(2) ? null : reader.GetGuid(2);
-    string? usageJson = reader.IsDBNull(3) ? null : reader.GetString(3);
+    Guid? latestCompaction = reader.NullableGuid("latest_compaction_id");
+    long? compactionTokensAfter = reader.NullableLong("tokens_after");
+    Guid? requestCompaction = reader.NullableGuid("request_compaction_id");
+    string? usageJson = reader.NullableString("usage_json");
     if (latestCompaction != requestCompaction)
       return compactionTokensAfter is { } tokens ? new(tokens, IsEstimate: true) : null;
     if (usageJson is null)
@@ -184,80 +169,36 @@ internal sealed class SnapshotReader {
     return new(ContextTokenBudget.AddSaturating(usage.InputTokenCount.Value, usage.OutputTokenCount.Value), IsEstimate: false);
   }
 
-  private SessionWorkingTime ReadWorkingTime(SqliteTransaction transaction, Guid sessionId, DateTimeOffset? startedAt) {
-    using SqliteCommand read = database.Command(transaction, """
-      SELECT completed_working_ms, working_time_incomplete FROM sessions WHERE session_id = $session;
-      """, ("$session", sessionId));
-    using SqliteDataReader reader = read.ExecuteReader();
-    if (!reader.Read())
-      throw new KeyNotFoundException($"Session {sessionId} does not exist.");
+  private SessionWorkingTime ReadWorkingTime(SqliteTransaction transaction, Guid sessionId, DateTimeOffset? startedAt) =>
+      database.QuerySingleOrDefault(transaction, """
+        SELECT completed_working_ms, working_time_incomplete FROM sessions WHERE session_id = $session;
+        """, row => new SessionWorkingTime(row.Long("completed_working_ms"), startedAt, row.Bool("working_time_incomplete")),
+          ("$session", sessionId)) ?? throw new KeyNotFoundException($"Session {sessionId} does not exist.");
 
-    return new(reader.GetInt64(0), startedAt, reader.GetBoolean(1));
-  }
-
-  private SessionExecutionResult? ReadLastSettlement(SqliteTransaction transaction, Guid sessionId) {
-    using SqliteCommand terminalRead = database.Command(transaction, SnapshotSettlementSql,
-        ("$session", sessionId));
-    using SqliteDataReader reader = terminalRead.ExecuteReader();
-    if (!reader.Read())
-      return null;
-
-    string? error = reader.IsDBNull(2) ? null : reader.GetString(2);
-    return new(reader.GetGuid(0), (ExecutionOutcome)reader.GetInt32(1), error);
-  }
+  private SessionExecutionResult? ReadLastSettlement(SqliteTransaction transaction, Guid sessionId) =>
+      database.QuerySingleOrDefault(transaction, SnapshotSettlementSql,
+          row => new SessionExecutionResult(row.Guid("run_id"), (ExecutionOutcome)row.Int("outcome"), row.NullableString("error")),
+          ("$session", sessionId));
 
   private LlmSelection? ReadLatestSelection(SqliteTransaction transaction, Guid sessionId, Guid? executionId) {
     if (executionId is null)
       return null;
 
     // The initiating submission owns selection even when it is outside the message window.
-    using SqliteCommand command = database.Command(transaction, SnapshotSelectionSql,
-        ("$session", sessionId), ("$run", executionId));
-    return LlmSelectionJson.Read(command.ExecuteScalar() as string);
+    return LlmSelectionJson.Read(database.Scalar<string?>(transaction, SnapshotSelectionSql,
+        ("$session", sessionId), ("$run", executionId)));
   }
 
   private string? ReadFirstUserPreview(SqliteTransaction transaction, Guid sessionId, long historyRevision) {
-    using SqliteCommand firstUser = database.Command(transaction, FirstUserSql,
+    MessageRef? message = database.QuerySingleOrDefault(transaction, FirstUserSql,
+        row => new MessageRef(row.Guid("run_id"), row.Guid("message_id"), MessageRole.User, historyRevision),
         ("$session", sessionId), ("$revision", historyRevision));
-    using SqliteDataReader reader = firstUser.ExecuteReader();
-    if (!reader.Read())
-      return null;
-
-    var message = new MessageRef(reader.GetGuid(0), reader.GetGuid(1), MessageRole.User, historyRevision);
-    reader.Close();
-    return content.ReadPreview(transaction, sessionId, message, PreviewUtf16Limit).Text;
+    return message is null ? null : content.ReadPreview(transaction, sessionId, message, StorageText.PreviewUtf16Limit).Text;
   }
 
-  private PendingInputPreview[] ReadPendingInputs(SqliteTransaction transaction, Guid sessionId) {
-    using SqliteCommand pendingRead = database.Command(transaction, PendingInputsSql,
-        ("$session", sessionId), ("$limit", PendingInputLimit),
-        ("$bytes", PreviewUtf16Limit * 3 + 3));
-    using SqliteDataReader reader = pendingRead.ExecuteReader();
-    var inputs = new List<PendingInputPreview>(PendingInputLimit);
-    while (reader.Read())
-      inputs.Add(new(reader.GetGuid(0), ReadPreview((byte[])reader.GetValue(1)), reader.GetBoolean(2)));
-
-    return inputs.ToArray();
-  }
-
-  internal static string ReadPreview(byte[] utf8) {
-    var text = new StringBuilder(Math.Min(PreviewUtf16Limit, utf8.Length));
-    Span<char> scalar = stackalloc char[2];
-    int offset = 0;
-    while (offset < utf8.Length && text.Length < PreviewUtf16Limit) {
-      OperationStatus status = Rune.DecodeFromUtf8(utf8.AsSpan(offset), out Rune rune, out int bytes);
-      if (status == OperationStatus.NeedMoreData)
-        break;
-      if (status != OperationStatus.Done)
-        throw new InvalidDataException("A pending input contains invalid UTF-8.");
-      if (rune.Utf16SequenceLength > PreviewUtf16Limit - text.Length)
-        break;
-
-      int units = rune.EncodeToUtf16(scalar);
-      text.Append(scalar[..units]);
-      offset += bytes;
-    }
-
-    return text.ToString();
-  }
+  private PendingInputPreview[] ReadPendingInputs(SqliteTransaction transaction, Guid sessionId) =>
+      database.Query(transaction, PendingInputsSql,
+          row => new PendingInputPreview(row.Guid("input_id"),
+              StorageText.ReadPreview((byte[])row.GetValue(row.GetOrdinal("preview"))), row.Bool("can_cancel")),
+          ("$session", sessionId), ("$limit", PendingInputLimit), ("$bytes", StorageText.PreviewByteLimit)).ToArray();
 }

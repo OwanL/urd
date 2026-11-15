@@ -6,8 +6,9 @@ namespace Urd.Core.Storage;
 
 // The partial index skips sent history, including old runs, without scanning it.
 internal sealed class NotSentInputReader(Database database) {
-  internal const string PageSql = """
-    SELECT i.input_id, i.run_id, i.ordinal, coalesce(substr(d.original_text_utf8, 1, 771), X'')
+  internal static readonly string PageSql = $"""
+    SELECT i.input_id, i.run_id, i.ordinal,
+        coalesce(substr(d.original_text_utf8, 1, {StorageText.PreviewByteLimit}), X'') AS preview
     FROM execution_inputs i
     JOIN input_decisions d ON d.session_id = i.session_id AND d.input_id = i.input_id
     WHERE i.session_id = $session AND i.not_sent = 1 AND i.ordinal < $cursor
@@ -27,8 +28,9 @@ internal sealed class NotSentInputReader(Database database) {
       var inputs = new List<NotSentInput>(60);
       long lastOrdinal = 0;
       while (inputs.Count < 60 && reader.Read()) {
-        inputs.Add(new(reader.GetGuid(0), reader.GetGuid(1), SnapshotReader.ReadPreview((byte[])reader.GetValue(3))));
-        lastOrdinal = reader.GetInt64(2);
+        inputs.Add(new(reader.Guid("input_id"), reader.Guid("run_id"),
+            StorageText.ReadPreview((byte[])reader.GetValue(reader.GetOrdinal("preview")))));
+        lastOrdinal = reader.Long("ordinal");
       }
 
       string? nextCursor = reader.Read() ? lastOrdinal.ToString(CultureInfo.InvariantCulture) : null;

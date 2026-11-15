@@ -107,7 +107,7 @@ internal sealed class ToolStorage(Database database, ToolResultCodec results) {
   }
 
   internal bool TryStart(ExecutionIdentity execution, Guid requestId, string callId, bool background = false) =>
-      database.Write(transaction => database.Execute(transaction, """
+      database.Write(transaction => database.Execute(transaction, $"""
         UPDATE execution_tools SET started = 1, started_at = $started, background = $background
         WHERE request_id = $request AND run_id = $run AND call_id = $call
             AND started = 0 AND outcome IS NULL AND result_json IS NULL
@@ -115,16 +115,14 @@ internal sealed class ToolStorage(Database database, ToolResultCodec results) {
                 JOIN execution_runs r ON r.run_id = q.run_id
                 JOIN sessions s ON s.session_id = r.session_id
                 WHERE q.request_id = $request AND q.run_id = $run AND q.outcome = $completed
-                    AND r.session_id = $session AND r.history_revision = $revision
-                    AND s.history_revision = $revision AND r.stopping = 0 AND r.outcome IS NULL
+                    AND r.session_id = $session AND {ExecutionSql.CurrentRunCondition}
                     AND NOT EXISTS (SELECT 1 FROM execution_requests later
                         WHERE later.run_id = $run AND later.request_index > q.request_index));
         """,
-          ("$session", execution.SessionId), ("$run", execution.ExecutionId),
-          ("$revision", execution.HistoryRevision), ("$request", requestId),
+          ExecutionSql.Parameters(execution, ("$request", requestId),
           ("$call", callId), ("$started", StorageText.UtcTimestamp()),
           ("$background", background ? 1 : 0),
-          ("$completed", (int)ExecutionOutcome.Completed)) == 1);
+          ("$completed", (int)ExecutionOutcome.Completed))) == 1);
 
   internal bool Complete(ExecutionIdentity execution, Guid requestId, LlmToolResult result) {
     if (!Enum.IsDefined(result.Outcome))
@@ -155,8 +153,7 @@ internal sealed class ToolStorage(Database database, ToolResultCodec results) {
               || (!background && row.Bool("has_later_request")))
             return (false, false);
           return (background, null);
-        }, ("$session", execution.SessionId), ("$run", execution.ExecutionId),
-          ("$revision", execution.HistoryRevision), ("$request", requestId), ("$call", result.CallId));
+        }, ExecutionSql.Parameters(execution, ("$request", requestId), ("$call", result.CallId)));
       if (decision is not { } allowed)
         return false;
       if (allowed.Saved is { } saved)

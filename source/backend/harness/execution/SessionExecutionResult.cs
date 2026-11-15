@@ -8,7 +8,7 @@ public sealed record SessionExecutionResult(
 
 // Shared outcome of one LLM request attempt, one tool invocation, or a whole session execution.
 public enum ExecutionOutcome {
-  Completed,
-  Cancelled,
-  Failed
+  Completed = 0,
+  Cancelled = 1,
+  Failed = 2
 }

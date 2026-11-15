@@ -19,10 +19,10 @@ internal sealed class TranscriptPositionReader(Database database, TranscriptHist
     WHERE m.run_id = $run AND m.role = $kind AND m.message_id = $entry
         AND m.session_id = $session AND m.history_revision = $revision;
     """;
-  internal const string PromptsSql = """
+  internal static readonly string PromptsSql = $"""
     SELECT p.rank, p.weight, p.prefix_weight, m.run_id, m.message_id, p.kind
     FROM transcript_positions p JOIN execution_messages m ON m.ordinal = p.entry_ordinal
-    WHERE p.session_id = $session AND p.history_revision = $revision AND p.kind = 0 AND p.rank > $after
+    WHERE p.session_id = $session AND p.history_revision = $revision AND p.kind = {(int)TranscriptEntryKind.User} AND p.rank > $after
     ORDER BY p.rank LIMIT $limit;
     """;
   internal const string WindowSql = """
@@ -114,15 +114,11 @@ internal sealed class TranscriptPositionReader(Database database, TranscriptHist
   private TranscriptPositionWindow LocateEntry(Guid sessionId, long expectedHistoryRevision,
       TranscriptEntryRef entry, string missingEntryMessage) => database.Read(transaction => {
     TranscriptPositionState state = State(transaction, sessionId, expectedHistoryRevision);
-    using SqliteCommand command = database.Command(transaction, AnchorSql,
+    TranscriptPosition target = database.QuerySingleOrDefault(transaction, AnchorSql,
+        row => Position(row, state.HistoryRevision),
         ("$run", entry.ExecutionId), ("$kind", (int)entry.Kind), ("$entry", entry.EntryId),
-        ("$session", sessionId), ("$revision", state.HistoryRevision));
-    TranscriptPosition target;
-    using (SqliteDataReader reader = command.ExecuteReader()) {
-      if (!reader.Read())
-        throw new KeyNotFoundException(missingEntryMessage);
-      target = Position(reader, state.HistoryRevision);
-    }
+        ("$session", sessionId), ("$revision", state.HistoryRevision))
+        ?? throw new KeyNotFoundException(missingEntryMessage);
     return Around(transaction, state, target);
   });
 
@@ -160,24 +156,23 @@ internal sealed class TranscriptPositionReader(Database database, TranscriptHist
   }
 
   private TranscriptPositionState State(SqliteTransaction transaction, Guid session, long expectedRevision) {
-    using SqliteCommand command = database.Command(transaction, """
-      SELECT s.history_revision, s.position_version, COALESCE(t.entry_count, 0), COALESCE(t.total_weight, 0)
+    TranscriptPositionState state = database.QuerySingleOrDefault(transaction, """
+      SELECT s.history_revision, s.position_version,
+          COALESCE(t.entry_count, 0) AS entry_count, COALESCE(t.total_weight, 0) AS total_weight
       FROM sessions s LEFT JOIN transcript_position_totals t
           ON t.session_id = s.session_id AND t.history_revision = s.history_revision
       WHERE s.session_id = $session;
-      """, ("$session", session));
-    using SqliteDataReader reader = command.ExecuteReader();
-    if (!reader.Read())
-      throw new KeyNotFoundException("The session does not exist.");
-    long revision = reader.GetInt64(0);
-    if (revision != expectedRevision)
-      throw new HistoryRevisionConflictException(expectedRevision, revision);
-    return new(session, revision, reader.GetInt64(1), reader.GetInt64(2), reader.GetInt64(3));
+      """, row => new TranscriptPositionState(session, row.Long("history_revision"), row.Long("position_version"),
+          row.Long("entry_count"), row.Long("total_weight")), ("$session", session))
+          ?? throw new KeyNotFoundException("The session does not exist.");
+    if (state.HistoryRevision != expectedRevision)
+      throw new HistoryRevisionConflictException(expectedRevision, state.HistoryRevision);
+    return state;
   }
 
   private static TranscriptPosition Position(SqliteDataReader reader, long revision) => new(
-      new(reader.GetGuid(3), reader.GetGuid(4), (TranscriptEntryKind)reader.GetInt32(5), revision),
-      reader.GetInt64(0), reader.GetInt64(1), reader.GetInt64(2));
+      new(reader.Guid("run_id"), reader.Guid("message_id"), (TranscriptEntryKind)reader.Int("kind"), revision),
+      reader.Long("rank"), reader.Long("weight"), reader.Long("prefix_weight"));
 
   private static void Validate(Guid sessionId, long expectedRevision) {
     if (sessionId == Guid.Empty)

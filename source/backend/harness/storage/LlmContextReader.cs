@@ -20,7 +20,7 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
   internal ModelHistory ReadContext(SqliteTransaction transaction, Guid sessionId,
       long historyRevision, Guid? executionId = null, Guid? requestId = null) {
     SavedHistoryCompaction? boundary = CompactionStorage.ReadLatest(database, transaction, sessionId, historyRevision);
-    using SqliteCommand read = database.Command(transaction, """
+    using SqliteCommand read = database.Command(transaction, $"""
       WITH requests AS (
           SELECT r.ordinal AS run_ordinal, q.request_index, q.request_id, q.usage_json, q.compaction_id,
               CASE WHEN EXISTS (SELECT 1 FROM execution_runs continuation
@@ -39,34 +39,34 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
                   (SELECT request_index FROM execution_requests WHERE request_id = $request))
               AND (r.ordinal > $cutRun OR (r.ordinal = $cutRun AND q.request_index >= $cutRequest))
       ), contents AS (
-          SELECT q.run_ordinal, q.request_index, q.request_id, 0 AS kind, i.ordinal AS content_index,
+          SELECT q.run_ordinal, q.request_index, q.request_id, {(int)ContextRowKind.User} AS kind, i.ordinal AS content_index,
               d.original_text_utf8 AS text_utf8, NULL AS call_id, NULL AS name, NULL AS json,
               NULL AS background, NULL AS origin_request_id, NULL AS outcome
           FROM requests q JOIN execution_inputs i ON i.request_id = q.request_id
           JOIN input_decisions d ON d.session_id = i.session_id AND d.input_id = i.input_id
           UNION ALL
-          SELECT q.run_ordinal, q.request_index, q.request_id, 1, o.chunk_index, o.text_utf8,
+          SELECT q.run_ordinal, q.request_index, q.request_id, {(int)ContextRowKind.Text}, o.chunk_index, o.text_utf8,
               NULL, NULL, NULL, NULL, NULL, NULL
           FROM requests q JOIN execution_output o ON o.request_id = q.request_id
           WHERE q.omit_assistant = 0
               AND NOT EXISTS (SELECT 1 FROM execution_provider_context c WHERE c.request_id = q.request_id)
           UNION ALL
-          SELECT q.run_ordinal, q.request_index, q.request_id, 2, t.call_index, NULL,
+          SELECT q.run_ordinal, q.request_index, q.request_id, {(int)ContextRowKind.ToolCall}, t.call_index, NULL,
               t.call_id, t.name, t.arguments_json, NULL, NULL, NULL
           FROM requests q JOIN execution_tools t ON t.request_id = q.request_id
           WHERE q.omit_assistant = 0
               AND NOT EXISTS (SELECT 1 FROM execution_provider_context c WHERE c.request_id = q.request_id)
           UNION ALL
-          SELECT q.run_ordinal, q.request_index, q.request_id, 3, t.call_index, NULL,
+          SELECT q.run_ordinal, q.request_index, q.request_id, {(int)ContextRowKind.ToolResult}, t.call_index, NULL,
               t.call_id, t.name, t.result_json, t.background, t.request_id, t.outcome
           FROM requests q JOIN execution_tools t ON t.request_id = q.request_id
           WHERE t.result_json IS NOT NULL OR (t.background = 1 AND t.started = 1)
           UNION ALL
-          SELECT q.run_ordinal, q.request_index, q.request_id, 4, 0, NULL, NULL, NULL,
+          SELECT q.run_ordinal, q.request_index, q.request_id, {(int)ContextRowKind.ProviderResponse}, 0, NULL, NULL, NULL,
               c.response_json, NULL, NULL, NULL
           FROM requests q JOIN execution_provider_context c ON c.request_id = q.request_id
           UNION ALL
-          SELECT q.run_ordinal, q.request_index, q.request_id, -1, c.ordinal, NULL,
+          SELECT q.run_ordinal, q.request_index, q.request_id, {(int)ContextRowKind.ToolCompletion}, c.ordinal, NULL,
               t.call_id, t.name, t.result_json, NULL, c.request_id, t.outcome
           FROM requests q JOIN execution_tool_completions c ON c.claimed_request_id = q.request_id
           JOIN execution_tools t ON t.request_id = c.request_id AND t.call_id = c.call_id
@@ -84,21 +84,22 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
     var messages = new List<ChatMessage>();
     var entries = new List<HistoryMessage>();
     var humanMessages = new HashSet<ChatMessage>();
-    string? previousRequest = null;
-    long runOrdinal = 0;
-    int requestIndex = 0;
+    ContextRow? previous = null;
     long? observedTokens = null;
     int observedThrough = 0;
-    string? usageJson = null;
-    Guid? usageBoundary = null;
-    bool omitAssistant = false;
     StringBuilder? text = null;
     ChatMessage? providerMessage = null;
     var calls = new List<AIContent>();
     var results = new List<AIContent>();
     while (reader.Read()) {
-      string currentRequest = reader.GetString(0);
-      if (previousRequest != currentRequest) {
+      var row = new ContextRow(reader.Guid("request_id"), (ContextRowKind)reader.Int("kind"),
+          reader.IsDBNull(reader.GetOrdinal("text_utf8")) ? null
+              : StorageText.StrictUtf8.GetString((byte[])reader.GetValue(reader.GetOrdinal("text_utf8"))),
+          reader.NullableString("call_id"), reader.NullableString("name"), reader.NullableString("json"),
+          reader.NullableInt("background") == 1, reader.NullableGuid("origin_request_id"),
+          (ExecutionOutcome?)reader.NullableInt("outcome"), reader.Long("run_ordinal"), reader.Int("request_index"),
+          reader.NullableString("usage_json"), reader.NullableGuid("compaction_id"), reader.Bool("omit_assistant"));
+      if (previous?.RequestId != row.RequestId) {
         FinishGroup();
         messages.Clear();
         humanMessages.Clear();
@@ -106,41 +107,34 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
         providerMessage = null;
         calls.Clear();
         results.Clear();
-        previousRequest = currentRequest;
-        runOrdinal = reader.GetInt64(9);
-        requestIndex = reader.GetInt32(10);
-        usageJson = reader.IsDBNull(11) ? null : reader.GetString(11);
-        usageBoundary = reader.IsDBNull(12) ? null : reader.GetGuid(12);
-        omitAssistant = reader.GetBoolean(13);
+        previous = row;
       }
 
-      switch (reader.GetInt32(1)) {
-        case -1:
+      switch (row.Kind) {
+        case ContextRowKind.ToolCompletion:
           messages.Add(new(ChatRole.User, toolResults.ReadModelCompletion(
-              Guid.Parse(reader.GetString(7)), reader.GetString(3), reader.GetString(4),
-              (ExecutionOutcome)reader.GetInt32(8), reader.GetString(5))));
+              row.OriginRequestId!.Value, row.CallId!, row.Name!, row.Outcome!.Value, row.Json!)));
           break;
-        case 0:
-          var human = new ChatMessage(ChatRole.User, StorageText.StrictUtf8.GetString((byte[])reader.GetValue(2)));
+        case ContextRowKind.User:
+          var human = new ChatMessage(ChatRole.User, row.Text);
           messages.Add(human);
           humanMessages.Add(human);
           break;
-        case 1:
-          (text ??= new()).Append(StorageText.StrictUtf8.GetString((byte[])reader.GetValue(2)));
+        case ContextRowKind.Text:
+          (text ??= new()).Append(row.Text);
           break;
-        case 2:
-          var arguments = JsonSerializer.Deserialize<Dictionary<string, object?>>(reader.GetString(5))!;
-          calls.Add(new FunctionCallContent(reader.GetString(3), reader.GetString(4), arguments));
+        case ContextRowKind.ToolCall:
+          var arguments = JsonSerializer.Deserialize<Dictionary<string, object?>>(row.Json!)!;
+          calls.Add(new FunctionCallContent(row.CallId!, row.Name!, arguments));
           break;
-        case 3:
-          object result = reader.GetInt32(6) == 1
-              ? ToolResultCodec.BackgroundStarted(Guid.Parse(reader.GetString(7)), reader.GetString(3))
-              : toolResults.ReadModelResult(reader.GetString(5));
-          results.Add(new FunctionResultContent(reader.GetString(3), result));
+        case ContextRowKind.ToolResult:
+          object result = row.Background
+              ? ToolResultCodec.BackgroundStarted(row.OriginRequestId!.Value, row.CallId!)
+              : toolResults.ReadModelResult(row.Json!);
+          results.Add(new FunctionResultContent(row.CallId!, result));
           break;
-        case 4:
-          providerMessage = LlmProviderContext.Restore(
-              JsonSerializer.Deserialize<LlmProviderResponse>(reader.GetString(5))!);
+        case ContextRowKind.ProviderResponse:
+          providerMessage = LlmProviderContext.Restore(JsonSerializer.Deserialize<LlmProviderResponse>(row.Json!)!);
           break;
       }
     }
@@ -152,26 +146,34 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
     return new(entries.AsReadOnly(), boundary, observedTokens);
 
     void FinishGroup() {
-      if (previousRequest is null)
+      if (previous is null)
         return;
-      AddResponse(messages, text, calls, results, providerMessage, omitAssistant);
-      Guid id = Guid.Parse(previousRequest);
+      AddResponse(messages, text, calls, results, providerMessage, previous.OmitAssistant);
+      Guid id = previous.RequestId;
       int first = id == boundary?.FirstRetainedMessageLocation.RequestId
           ? boundary.FirstRetainedMessageLocation.MessageIndexInRequest : 0;
       for (int index = first; index < messages.Count; index++)
-        entries.Add(new(new(id, runOrdinal, requestIndex, index), humanMessages.Contains(messages[index]), messages[index]));
-      if (usageJson is null || usageBoundary != boundary?.Id)
+        entries.Add(new(new(id, previous.RunOrdinal, previous.RequestIndex, index), humanMessages.Contains(messages[index]), messages[index]));
+      if (previous.UsageJson is null || previous.CompactionId != boundary?.Id)
         return;
-      UsageDetails? usage = JsonSerializer.Deserialize<UsageDetails>(usageJson);
-      if (usage?.InputTokenCount is not >= 0 || (!omitAssistant && usage.OutputTokenCount is not >= 0))
+      UsageDetails? usage = JsonSerializer.Deserialize<UsageDetails>(previous.UsageJson);
+      if (usage?.InputTokenCount is not >= 0 || (!previous.OmitAssistant && usage.OutputTokenCount is not >= 0))
         return;
       observedTokens = ContextTokenBudget.AddSaturating(usage.InputTokenCount.Value,
-          omitAssistant ? 0 : usage.OutputTokenCount!.Value);
+          previous.OmitAssistant ? 0 : usage.OutputTokenCount!.Value);
       observedTokens = ContextTokenBudget.AddSaturating(observedTokens.Value,
           ContextTokenBudget.EstimateMessages(messages.Where(message => message.Role == ChatRole.Tool)));
       observedThrough = entries.Count;
     }
   }
+
+  // Orders the unioned context shapes within each request.
+  private enum ContextRowKind { ToolCompletion = -1, User = 0, Text = 1, ToolCall = 2, ToolResult = 3, ProviderResponse = 4 }
+
+  // One streamed context row, including the request metadata needed when its group ends.
+  private sealed record ContextRow(Guid RequestId, ContextRowKind Kind, string? Text, string? CallId,
+      string? Name, string? Json, bool Background, Guid? OriginRequestId, ExecutionOutcome? Outcome,
+      long RunOrdinal, int RequestIndex, string? UsageJson, Guid? CompactionId, bool OmitAssistant);
 
   private static void AddResponse(List<ChatMessage> messages, StringBuilder? text,
       List<AIContent> calls, List<AIContent> results, ChatMessage? providerMessage, bool omitAssistant) {

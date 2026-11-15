@@ -7,7 +7,7 @@ public sealed record MessageRef(
     Guid ExecutionId, Guid MessageId, MessageRole Role, long HistoryRevision);
 
 // Who wrote a message.
-public enum MessageRole { User, Assistant }
+public enum MessageRole { User = 0, Assistant = 1 }
 
 // Short prefix of one message in a snapshot, with a cursor for reading the rest.
 public sealed record MessagePreview(

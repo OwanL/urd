@@ -10,7 +10,7 @@ public sealed record ContinuationSubmission(
 public sealed record ContinuationReceipt(Guid SessionId, Guid OperationId, Guid ExecutionId);
 
 internal enum ExecutionRunKind {
-  UserInput,
-  Compaction,
-  Continuation
+  UserInput = 0,
+  Compaction = 1,
+  Continuation = 2
 }

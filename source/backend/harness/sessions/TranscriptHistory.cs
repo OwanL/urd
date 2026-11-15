@@ -8,7 +8,7 @@ namespace Urd.Core.Sessions;
 public sealed record TranscriptEntryRef(
     Guid ExecutionId, Guid EntryId, TranscriptEntryKind Kind, long HistoryRevision);
 
-public enum TranscriptEntryKind { User, Text, Tool, ToolCompletion, Compaction }
+public enum TranscriptEntryKind { User = 0, Text = 1, Tool = 2, ToolCompletion = 3, Compaction = 4 }
 
 public enum TranscriptHistoryMode { Latest, Before, After, Around }
 

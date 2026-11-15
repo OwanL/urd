@@ -579,23 +579,31 @@ class API or a requirement for a generic prompt/resource framework.
 including `AGENTS.md` and append-system resources, in the context-preparation design
 alongside tools and skills. Compare designs using real Pie task/file/catalog replays
 before fixing class structure; see the [dated pruning replay evidence](pruning-replay-results.md).
-Exact source discovery, precedence, protected-document policy and production loading
-mechanics remain undecided; research scope is not approval of those policies or an
-implemented loader. Skills are listed by name, description and path when a chat
-starts: Git-tracked `SKILL.md` files under the working directory, then Urd's packaged
+Exact source discovery, precedence and production loading mechanics remain undecided;
+research scope is not approval of an implemented loader. The subsequent protection
+and category-selection direction is recorded below. Skills are listed by name,
+description and path when a chat starts: Git-tracked `SKILL.md` files under the working
+directory, then Urd's packaged
 skills; bodies are read on demand. Existing protected-capability and prefix-stability constraints
 below still apply. Exact assembly, restoration and refresh boundaries need concrete
 implementation design.
 
 **Replay checkpoint (2026-11-15):** no tested whole preparation bundle passed the
 instruction-retention gate. Smaller context and faster preparation did not establish
-a startup winner. This does not reverse the AI tool/skill-pruning direction below;
-instruction policy, follow-up experiments and production class APIs remain undecided.
+a startup winner. This does not reverse the AI tool/skill-pruning direction below.
 The [follow-up classification study](pruning-classification-results.md) isolates
 fixed guidance and weights useful-capability losses more heavily. Conservative
 parallel selection is a low-latency candidate, but no tested pruner establishes
-superiority over keep-all under the primary asymmetric-loss criterion. Production
-policy remains undecided; these are classification results, not task-success rates.
+superiority over keep-all under the primary asymmetric-loss criterion. These are
+classification results, not task-success rates or proof of the subsequent design choice.
+
+**Owner direction after replay (2026-11-15):** use parallel pruning conversations
+for skills, additional instruction documents and tools, with basic exploration tools
+and shared implementation. User preferences supply per-category model choices and
+protected-item settings; protected entries bypass selection before inputs are built.
+The [pruning plan](pruning-plan.md) is the canonical record of this direction, picker
+scope, working proposals and remaining decisions. This is design work only, not
+implementation approval or a settled class/API layout.
 
 Prompt wording is a separate research task. Inventory other harnesses' fixed
 instructions and dynamic additions without treating their presence as evidence that

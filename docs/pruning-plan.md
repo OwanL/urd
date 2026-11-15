@@ -166,6 +166,10 @@ not replace those mechanisms.
   (distinct from the settled pruning triggers), exploration limits and execution restrictions.
 - Concrete classes, APIs, preference/storage shape and implementation sequencing.
 
+**Owner steering (2026-11-15):** duplicate-name/project-override skill protection is
+an edge case not worth further design time. Leave its handling to simple implementation;
+this does not select name-based versus source-pinned protection.
+
 The [classification evidence](pruning-classification-results.md) informs this choice;
 it does not prove the complete three-category design is superior or qualify instruction
 pruning with live exploration. Earlier [replay findings](pruning-replay-results.md)

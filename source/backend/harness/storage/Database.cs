@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Data.Sqlite;
 
 namespace Urd.Core.Storage;
@@ -8,13 +9,13 @@ internal sealed class Database(SqliteConnection connection) : IDisposable {
   private bool disposed;
 
   internal T Write<T>(Func<SqliteTransaction, T> operation)
-      => Transact(operation, deferred: false);
+      => RunInTransaction(operation, deferred: false);
 
   internal T Read<T>(Func<SqliteTransaction, T> operation)
-      => Transact(operation, deferred: true);
+      => RunInTransaction(operation, deferred: true);
 
   // Runs the operation under the gate, refusing work after disposal.
-  internal T Guarded<T>(Func<T> operation) {
+  internal T RunLocked<T>(Func<T> operation) {
     lock (gate) {
       ObjectDisposedException.ThrowIf(disposed, this);
       return operation();
@@ -32,6 +33,35 @@ internal sealed class Database(SqliteConnection connection) : IDisposable {
     return command;
   }
 
+  internal int Execute(SqliteTransaction? transaction, string sql, params (string Name, object? Value)[] parameters) {
+    using SqliteCommand command = Command(transaction, sql, parameters);
+    return command.ExecuteNonQuery();
+  }
+
+  internal T Scalar<T>(SqliteTransaction? transaction, string sql, params (string Name, object? Value)[] parameters) {
+    using SqliteCommand command = Command(transaction, sql, parameters);
+    object? value = command.ExecuteScalar();
+    return value is null or DBNull ? default!
+        : (T)Convert.ChangeType(value, Nullable.GetUnderlyingType(typeof(T)) ?? typeof(T), CultureInfo.InvariantCulture);
+  }
+
+  internal List<T> Query<T>(SqliteTransaction? transaction, string sql, Func<SqliteDataReader, T> readRow,
+      params (string Name, object? Value)[] parameters) {
+    using SqliteCommand command = Command(transaction, sql, parameters);
+    using SqliteDataReader reader = command.ExecuteReader();
+    List<T> rows = [];
+    while (reader.Read())
+      rows.Add(readRow(reader));
+    return rows;
+  }
+
+  internal T? QuerySingleOrDefault<T>(SqliteTransaction? transaction, string sql, Func<SqliteDataReader, T> readRow,
+      params (string Name, object? Value)[] parameters) {
+    using SqliteCommand command = Command(transaction, sql, parameters);
+    using SqliteDataReader reader = command.ExecuteReader();
+    return reader.Read() ? readRow(reader) : default;
+  }
+
   public void Dispose() {
     lock (gate) {
       if (disposed)
@@ -42,8 +72,8 @@ internal sealed class Database(SqliteConnection connection) : IDisposable {
     }
   }
 
-  private T Transact<T>(Func<SqliteTransaction, T> operation, bool deferred) {
-    return Guarded(() => {
+  private T RunInTransaction<T>(Func<SqliteTransaction, T> operation, bool deferred) {
+    return RunLocked(() => {
       using SqliteTransaction transaction = connection.BeginTransaction(deferred);
       T result = operation(transaction);
       transaction.Commit();

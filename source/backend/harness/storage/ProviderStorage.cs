@@ -11,15 +11,9 @@ internal sealed class ProviderStorage(Database database) {
     registration_json, credentials_json, disconnecting, catalog_json
     """;
 
-  internal IReadOnlyList<ProviderConnection> List() => database.Read(transaction => {
-    using SqliteCommand command = database.Command(transaction,
-        "SELECT connection_id, name, route, api, endpoint, authentication FROM provider_connections ORDER BY rowid;");
-    using SqliteDataReader reader = command.ExecuteReader();
-    var connections = new List<ProviderConnection>();
-    while (reader.Read())
-      connections.Add(ReadConnection(reader));
-    return connections;
-  });
+  internal IReadOnlyList<ProviderConnection> List() => database.Read(transaction => database.Query(transaction,
+      "SELECT connection_id, name, route, api, endpoint, authentication FROM provider_connections ORDER BY rowid;",
+      ReadConnection));
 
   internal ProviderState Get(Guid id) => database.Read(transaction => Require(transaction, id));
 
@@ -28,19 +22,18 @@ internal sealed class ProviderStorage(Database database) {
       throw new ArgumentException("Connection ID cannot be empty.", nameof(connection));
 
     return database.Write(transaction => {
-      using SqliteCommand command = database.Command(transaction, """
+      database.Execute(transaction, """
         INSERT INTO provider_connections
             (connection_id, name, route, api, endpoint, authentication, generation, credential_version, disconnecting)
         VALUES ($id, $name, $route, $api, $endpoint, $authentication, 0, 0, 0);
         """, ("$id", connection.Id), ("$name", connection.Name), ("$route", (int)connection.Route),
           ("$api", (int)connection.Api), ("$endpoint", connection.Endpoint.AbsoluteUri),
           ("$authentication", (int)connection.Authentication));
-      command.ExecuteNonQuery();
       return Require(transaction, connection.Id);
     });
   }
 
-  internal ProviderState Rename(Guid id, string name) => Change(id, state => state with {
+  internal ProviderState Rename(Guid id, string name) => Update(id, state => state with {
     Connection = state.Connection with { Name = name }
   });
 
@@ -48,7 +41,7 @@ internal sealed class ProviderStorage(Database database) {
     if (settings.Authentication is not (AuthenticationMethod.None or AuthenticationMethod.ApiKey))
       throw new ArgumentException("Custom connections support API keys or no authentication.", nameof(settings));
 
-    return Change(id, state => {
+    return Update(id, state => {
       if (state.Connection.Route != ProviderRoute.Custom)
         throw new ArgumentException("Only custom connections can be updated.");
 
@@ -77,27 +70,24 @@ internal sealed class ProviderStorage(Database database) {
   }
 
   internal void Remove(Guid id) => database.Write(transaction => {
-    using SqliteCommand command = database.Command(transaction,
-        "DELETE FROM provider_connections WHERE connection_id = $id;", ("$id", id));
-    if (command.ExecuteNonQuery() == 0)
+    if (database.Execute(transaction,
+        "DELETE FROM provider_connections WHERE connection_id = $id;", ("$id", id)) == 0)
       throw new KeyNotFoundException("Provider connection was not found.");
     return true;
   });
 
   internal string GetOrCreateHostId() => database.Write(transaction => {
-    using SqliteCommand read = database.Command(transaction, "SELECT host_id FROM provider_host WHERE singleton = 1;");
-    if (read.ExecuteScalar() is string hostId)
+    if (database.Scalar<string?>(transaction, "SELECT host_id FROM provider_host WHERE singleton = 1;") is string hostId)
       return hostId;
 
     hostId = $"urn:uuid:{Guid.NewGuid():D}";
-    using SqliteCommand insert = database.Command(transaction,
+    database.Execute(transaction,
         "INSERT INTO provider_host (singleton, host_id) VALUES (1, $host);", ("$host", hostId));
-    insert.ExecuteNonQuery();
     return hostId;
   });
 
   internal ProviderState SetCredentials(Guid id, long expectedGeneration,
-      ProviderRegistration? registration, ProviderCredentials credentials) => Change(id, state => {
+      ProviderRegistration? registration, ProviderCredentials credentials) => Update(id, state => {
     RequireGeneration(state, expectedGeneration);
     if (state.Disconnecting)
       throw new ProviderOperationException(ProviderFailure.Disconnecting);
@@ -129,9 +119,9 @@ internal sealed class ProviderStorage(Database database) {
   });
 
   // Do not change either version: an already-running refresh may still save its rotated token.
-  internal ProviderState BeginDisconnect(Guid id) => Change(id, state => state with { Disconnecting = true });
+  internal ProviderState BeginDisconnect(Guid id) => Update(id, state => state with { Disconnecting = true });
 
-  internal ProviderState CompleteDisconnect(Guid id, long expectedGeneration) => Change(id, state => {
+  internal ProviderState CompleteDisconnect(Guid id, long expectedGeneration) => Update(id, state => {
     RequireGeneration(state, expectedGeneration);
     if (!state.Disconnecting)
       throw new ProviderOperationException(ProviderFailure.ConnectionChanged);
@@ -159,7 +149,7 @@ internal sealed class ProviderStorage(Database database) {
     });
   }
 
-  private ProviderState Change(Guid id, Func<ProviderState, ProviderState> change, bool missingIsChanged = false)
+  private ProviderState Update(Guid id, Func<ProviderState, ProviderState> change, bool missingIsChanged = false)
       => database.Write(transaction => {
         ProviderState? state = Read(transaction, id);
         if (state is null && missingIsChanged)
@@ -173,17 +163,13 @@ internal sealed class ProviderStorage(Database database) {
   private ProviderState Require(SqliteTransaction transaction, Guid id)
       => Read(transaction, id) ?? throw new KeyNotFoundException("Provider connection was not found.");
 
-  private ProviderState? Read(SqliteTransaction transaction, Guid id) {
-    using SqliteCommand command = database.Command(transaction,
-        $"SELECT {Columns} FROM provider_connections WHERE connection_id = $id;", ("$id", id));
-    using SqliteDataReader reader = command.ExecuteReader();
-    return reader.Read() ? new ProviderState(ReadConnection(reader), reader.GetInt64(6), reader.GetInt64(7),
-        ReadJson<ProviderRegistration>(reader, 8), ReadJson<ProviderCredentials>(reader, 9),
-        reader.GetBoolean(10), ReadJson<ProviderModelCatalog>(reader, 11)) : null;
-  }
+  private ProviderState? Read(SqliteTransaction transaction, Guid id) => database.QuerySingleOrDefault(transaction,
+      $"SELECT {Columns} FROM provider_connections WHERE connection_id = $id;",
+      row => new ProviderState(ReadConnection(row), row.Long("generation"), row.Long("credential_version"),
+          ReadJson<ProviderRegistration>(row, "registration_json"), ReadJson<ProviderCredentials>(row, "credentials_json"),
+          row.Bool("disconnecting"), ReadJson<ProviderModelCatalog>(row, "catalog_json")), ("$id", id));
 
-  private void Save(SqliteTransaction transaction, ProviderState state) {
-    using SqliteCommand command = database.Command(transaction, """
+  private void Save(SqliteTransaction transaction, ProviderState state) => database.Execute(transaction, """
       UPDATE provider_connections SET name = $name, api = $api, endpoint = $endpoint,
           authentication = $authentication, generation = $generation, credential_version = $version,
           registration_json = $registration, credentials_json = $credentials,
@@ -194,15 +180,13 @@ internal sealed class ProviderStorage(Database database) {
         ("$generation", state.Generation), ("$version", state.CredentialVersion),
         ("$registration", WriteJson(state.Registration)), ("$credentials", WriteJson(state.Credentials)),
         ("$disconnecting", state.Disconnecting ? 1 : 0), ("$catalog", WriteJson(state.Catalog)));
-    command.ExecuteNonQuery();
-  }
 
-  private static ProviderConnection ReadConnection(SqliteDataReader reader) => new(reader.GetGuid(0),
-      reader.GetString(1), (ProviderRoute)reader.GetInt32(2), (LlmApi)reader.GetInt32(3),
-      new Uri(reader.GetString(4), UriKind.Absolute), (AuthenticationMethod)reader.GetInt32(5));
+  private static ProviderConnection ReadConnection(SqliteDataReader row) => new(row.Guid("connection_id"),
+      row.String("name"), (ProviderRoute)row.Int("route"), (LlmApi)row.Int("api"),
+      new Uri(row.String("endpoint"), UriKind.Absolute), (AuthenticationMethod)row.Int("authentication"));
 
-  private static T? ReadJson<T>(SqliteDataReader reader, int column) where T : class
-      => reader.IsDBNull(column) ? null : JsonSerializer.Deserialize<T>(reader.GetString(column));
+  private static T? ReadJson<T>(SqliteDataReader row, string column) where T : class
+      => row.NullableString(column) is string json ? JsonSerializer.Deserialize<T>(json) : null;
 
   private static string? WriteJson<T>(T? value) where T : class
       => value is null ? null : JsonSerializer.Serialize(value);

@@ -8,29 +8,25 @@ namespace Urd.Core.Storage;
 // Claims authorized calls before invocation and retains actual results without replay.
 internal sealed class ToolStorage(Database database, ToolResultCodec results) {
   // Original output is available for inspection regardless of the next model's capabilities.
-  internal ToolOutput? ReadOutput(Guid sessionId, Guid requestId, string callId) => database.Guarded(() => {
-    using SqliteCommand read = database.Command(null, """
-      SELECT t.result_json FROM execution_tools t JOIN execution_runs r ON r.run_id = t.run_id
-      WHERE r.session_id = $session AND t.request_id = $request AND t.call_id = $call;
-      """, ("$session", sessionId), ("$request", requestId), ("$call", callId));
-    return read.ExecuteScalar() is string value ? results.Read(value) : null;
-  });
+  internal ToolOutput? ReadOutput(Guid sessionId, Guid requestId, string callId) => database.RunLocked(() =>
+      database.Scalar<string?>(null, """
+        SELECT t.result_json FROM execution_tools t JOIN execution_runs r ON r.run_id = t.run_id
+        WHERE r.session_id = $session AND t.request_id = $request AND t.call_id = $call;
+        """, ("$session", sessionId), ("$request", requestId), ("$call", callId)) is { } value ? results.Read(value) : null);
 
   internal ToolCallTranscript? ReadTranscript(Guid sessionId, long expectedHistoryRevision,
       Guid requestId, string callId, bool returned, int? characterLimit = null) => database.Read(transaction => {
-    using (SqliteCommand check = database.Command(transaction,
-        "SELECT history_revision FROM sessions WHERE session_id = $session;", ("$session", sessionId))) {
-      if (check.ExecuteScalar() is not long revision)
-        throw new KeyNotFoundException("The session does not exist.");
-      if (revision != expectedHistoryRevision)
-        throw new HistoryRevisionConflictException(expectedHistoryRevision, revision);
-    }
+    long revision = database.Scalar<long?>(transaction,
+        "SELECT history_revision FROM sessions WHERE session_id = $session;", ("$session", sessionId))
+        ?? throw new KeyNotFoundException("The session does not exist.");
+    if (revision != expectedHistoryRevision)
+      throw new HistoryRevisionConflictException(expectedHistoryRevision, revision);
 
     using SqliteCommand read = database.Command(transaction, """
-      SELECT t.rowid, t.background, t.started, t.result_json IS NOT NULL, t.outcome, t.name,
+      SELECT t.rowid AS tool_row_id, t.background, t.started, t.result_json IS NOT NULL AS has_result, t.outcome, t.name,
           EXISTS (SELECT 1 FROM execution_tool_completions c
               WHERE c.session_id = r.session_id AND c.history_revision = r.history_revision
-                  AND c.request_id = t.request_id AND c.call_id = t.call_id AND c.published = 1),
+                  AND c.request_id = t.request_id AND c.call_id = t.call_id AND c.published = 1) AS returned_published,
           (SELECT COALESCE(receiving_run.llm_selection_json, d.llm_selection_json)
               FROM execution_runs receiving_run
               JOIN execution_requests receiving ON receiving.run_id = receiving_run.run_id
@@ -45,7 +41,7 @@ internal sealed class ToolStorage(Database database, ToolResultCodec results) {
                       OR r.ordinal > receiving_compaction.first_kept_run_ordinal
                       OR (r.ordinal = receiving_compaction.first_kept_run_ordinal
                           AND q.request_index >= receiving_compaction.first_kept_request_index))
-              ORDER BY receiving_run.ordinal, receiving.request_index LIMIT 1),
+              ORDER BY receiving_run.ordinal, receiving.request_index LIMIT 1) AS result_selection_json,
           (SELECT COALESCE(receiving_run.llm_selection_json, d.llm_selection_json)
               FROM execution_tool_completions c
               JOIN execution_requests receiving ON receiving.request_id = c.claimed_request_id
@@ -61,7 +57,7 @@ internal sealed class ToolStorage(Database database, ToolResultCodec results) {
                       OR (receiving_run.ordinal = receiving_compaction.first_kept_run_ordinal
                           AND (receiving.request_index > receiving_compaction.first_kept_request_index
                               OR (receiving.request_index = receiving_compaction.first_kept_request_index
-                                  AND receiving_compaction.first_kept_message_index = 0)))))
+                                  AND receiving_compaction.first_kept_message_index = 0))))) AS completion_selection_json
       FROM execution_tools t JOIN execution_runs r ON r.run_id = t.run_id
       JOIN execution_requests q ON q.request_id = t.request_id AND q.run_id = t.run_id
       WHERE r.session_id = $session AND r.history_revision = $revision
@@ -72,17 +68,17 @@ internal sealed class ToolStorage(Database database, ToolResultCodec results) {
     if (!reader.Read())
       return null;
 
-    long rowId = reader.GetInt64(0);
+    long rowId = reader.Long("tool_row_id");
     // Do not SELECT the payloads: even a bounded managed read would materialize SQLite's full TEXT values.
     using var inputBlob = new SqliteBlob(transaction.Connection!, "execution_tools", "arguments_json", rowId, readOnly: true);
     using var inputReader = new StreamReader(inputBlob);
     string input = ToolTranscriptPreview.ReadText(inputReader, characterLimit, out bool inputTruncated);
-    bool background = reader.GetInt32(1) != 0;
-    bool started = reader.GetInt32(2) != 0;
-    bool hasResult = reader.GetBoolean(3);
-    ExecutionOutcome? outcome = reader.IsDBNull(4) ? null : (ExecutionOutcome)reader.GetInt32(4);
-    string name = reader.GetString(5);
-    bool returnedPublished = reader.GetBoolean(6);
+    bool background = reader.Bool("background");
+    bool started = reader.Bool("started");
+    bool hasResult = reader.Bool("has_result");
+    ExecutionOutcome? outcome = (ExecutionOutcome?)reader.NullableInt("outcome");
+    string name = reader.String("name");
+    bool returnedPublished = reader.Bool("returned_published");
     string? output = null;
     bool outputTruncated = false;
     bool projectionFinal = false;
@@ -94,26 +90,24 @@ internal sealed class ToolStorage(Database database, ToolResultCodec results) {
       using var resultBlob = new SqliteBlob(transaction.Connection!, "execution_tools", "result_json", rowId, readOnly: true);
       using var resultReader = new StreamReader(resultBlob);
       // Until a receiver is saved, image placeholders can still become the model's omission notice.
-      projectionFinal = !reader.IsDBNull(returned ? 8 : 7);
+      projectionFinal = reader.NullableString(returned ? "completion_selection_json" : "result_selection_json") is not null;
       output = returned
           ? results.ReadModelCompletionText(requestId, callId, name, outcome!.Value, resultReader, characterLimit,
-              ReadReceivingModelSupportsImages(reader, 8), out outputTruncated)
+              ReadReceivingModelSupportsImages(reader, "completion_selection_json"), out outputTruncated)
           : results.ReadModelResultText(resultReader, characterLimit,
-              ReadReceivingModelSupportsImages(reader, 7), out outputTruncated);
+              ReadReceivingModelSupportsImages(reader, "result_selection_json"), out outputTruncated);
     }
 
     return new ToolCallTranscript(input, output, inputTruncated || outputTruncated, projectionFinal);
   });
 
-  private static bool ReadReceivingModelSupportsImages(SqliteDataReader reader, int selectionColumn) {
+  private static bool ReadReceivingModelSupportsImages(SqliteDataReader reader, string selectionColumn) {
     // If no sent receiving request exists yet, preserve placeholders rather than infer future model support.
-    string? selectionJson = reader.IsDBNull(selectionColumn) ? null : reader.GetString(selectionColumn);
-    return LlmSelectionJson.Read(selectionJson)?.SupportsImages ?? true;
+    return LlmSelectionJson.Read(reader.NullableString(selectionColumn))?.SupportsImages ?? true;
   }
 
-  internal bool TryStart(ExecutionIdentity execution, Guid requestId, string callId, bool background = false) {
-    return database.Write(transaction => {
-      using SqliteCommand start = database.Command(transaction, """
+  internal bool TryStart(ExecutionIdentity execution, Guid requestId, string callId, bool background = false) =>
+      database.Write(transaction => database.Execute(transaction, """
         UPDATE execution_tools SET started = 1, started_at = $started, background = $background
         WHERE request_id = $request AND run_id = $run AND call_id = $call
             AND started = 0 AND outcome IS NULL AND result_json IS NULL
@@ -130,10 +124,7 @@ internal sealed class ToolStorage(Database database, ToolResultCodec results) {
           ("$revision", execution.HistoryRevision), ("$request", requestId),
           ("$call", callId), ("$started", StorageText.UtcTimestamp()),
           ("$background", background ? 1 : 0),
-          ("$completed", (int)ExecutionOutcome.Completed));
-      return start.ExecuteNonQuery() == 1;
-    });
-  }
+          ("$completed", (int)ExecutionOutcome.Completed)) == 1);
 
   internal bool Complete(ExecutionIdentity execution, Guid requestId, LlmToolResult result) {
     if (!Enum.IsDefined(result.Outcome))
@@ -144,45 +135,44 @@ internal sealed class ToolStorage(Database database, ToolResultCodec results) {
     string? error = result.Output.IsError ? result.Output.Text[..Math.Min(result.Output.Text.Length, 1024)] : null;
 
     return database.Write(transaction => {
-      bool background;
-      using (SqliteCommand read = database.Command(transaction, """
-        SELECT t.started, t.outcome, t.result_json, t.error, r.outcome, q.outcome,
+      var decision = database.QuerySingleOrDefault<(bool Background, bool? Saved)?>(transaction, """
+        SELECT t.started, t.outcome, t.result_json, t.error, r.outcome AS run_outcome, q.outcome AS request_outcome,
             EXISTS (SELECT 1 FROM execution_requests later
-                WHERE later.run_id = $run AND later.request_index > q.request_index), t.background
+                WHERE later.run_id = $run AND later.request_index > q.request_index) AS has_later_request, t.background
         FROM execution_tools t JOIN execution_requests q ON q.request_id = t.request_id
         JOIN execution_runs r ON r.run_id = q.run_id JOIN sessions s ON s.session_id = r.session_id
         WHERE t.run_id = $run AND t.request_id = $request AND t.call_id = $call
             AND r.session_id = $session AND r.history_revision = $revision AND s.history_revision = $revision;
-        """,
-          ("$session", execution.SessionId), ("$run", execution.ExecutionId),
-          ("$revision", execution.HistoryRevision), ("$request", requestId), ("$call", result.CallId)))
-      using (SqliteDataReader reader = read.ExecuteReader()) {
-        if (!reader.Read() || reader.GetInt32(0) == 0)
-          return false;
-
-        if (!reader.IsDBNull(1))
-          return reader.GetInt32(1) == (int)result.Outcome && !reader.IsDBNull(2)
-              && reader.GetString(2) == json && (reader.IsDBNull(3) ? null : reader.GetString(3)) == error;
-
-        background = reader.GetInt32(7) != 0;
-        // Stop permits result saves until settlement. Only background calls may outlive a request.
-        if (!reader.IsDBNull(4) || reader.IsDBNull(5)
-            || reader.GetInt32(5) != (int)ExecutionOutcome.Completed || (!background && reader.GetInt32(6) != 0))
-          return false;
-      }
+        """, row => {
+          if (!row.Bool("started"))
+            return (false, false);
+          if (row.NullableInt("outcome") is { } outcome)
+            return (false, outcome == (int)result.Outcome && row.NullableString("result_json") == json
+                && row.NullableString("error") == error);
+          bool background = row.Bool("background");
+          // Stop permits result saves until settlement. Only background calls may outlive a request.
+          if (row.NullableInt("run_outcome") is not null || row.NullableInt("request_outcome") != (int)ExecutionOutcome.Completed
+              || (!background && row.Bool("has_later_request")))
+            return (false, false);
+          return (background, null);
+        }, ("$session", execution.SessionId), ("$run", execution.ExecutionId),
+          ("$revision", execution.HistoryRevision), ("$request", requestId), ("$call", result.CallId));
+      if (decision is not { } allowed)
+        return false;
+      if (allowed.Saved is { } saved)
+        return saved;
 
       string ended = StorageText.UtcTimestamp();
-      using SqliteCommand save = database.Command(transaction, """
+      if (database.Execute(transaction, """
         UPDATE execution_tools SET outcome = $outcome, result_json = $result, error = $error, ended_at = $ended
         WHERE request_id = $request AND call_id = $call;
         """,
           ("$request", requestId), ("$call", result.CallId), ("$outcome", (int)result.Outcome),
-          ("$result", json), ("$error", error), ("$ended", ended));
-      if (save.ExecuteNonQuery() != 1)
+          ("$result", json), ("$error", error), ("$ended", ended)) != 1)
         return false;
 
-      if (background) {
-        using SqliteCommand completion = database.Command(transaction, """
+      if (allowed.Background)
+        database.Execute(transaction, """
           INSERT INTO execution_tool_completions (
               completion_id, session_id, history_revision, request_id, call_id, created_at)
           VALUES ($completion, $session, $revision, $request, $call, $created);
@@ -190,8 +180,6 @@ internal sealed class ToolStorage(Database database, ToolResultCodec results) {
             ("$completion", Guid.NewGuid()), ("$session", execution.SessionId),
             ("$revision", execution.HistoryRevision),
             ("$request", requestId), ("$call", result.CallId), ("$created", ended));
-        completion.ExecuteNonQuery();
-      }
       return true;
     });
   }

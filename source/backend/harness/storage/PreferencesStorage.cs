@@ -1,4 +1,3 @@
-using Microsoft.Data.Sqlite;
 using Urd.Core.Preferences;
 
 namespace Urd.Core.Storage;
@@ -18,7 +17,7 @@ internal sealed class PreferencesStorage(Database database) {
     lock (gate) {
       UserPreferences updated = update(ReadLocked());
       database.Write(transaction => {
-        using SqliteCommand command = database.Command(transaction, """
+        database.Execute(transaction, """
           INSERT INTO preferences (singleton, working_directory, compaction_trigger_token_count)
           VALUES (1, $directory, $compactionTriggerTokenCount)
           ON CONFLICT(singleton) DO UPDATE SET
@@ -26,7 +25,6 @@ internal sealed class PreferencesStorage(Database database) {
               compaction_trigger_token_count = excluded.compaction_trigger_token_count;
           """, ("$directory", updated.WorkingDirectory),
             ("$compactionTriggerTokenCount", updated.CompactionTriggerTokenCount));
-        command.ExecuteNonQuery();
         return true;
       });
       cachedPreferences = updated;
@@ -38,18 +36,11 @@ internal sealed class PreferencesStorage(Database database) {
     if (cachedPreferences is not null)
       return cachedPreferences;
 
-    UserPreferences persisted = database.Read(transaction => {
-      using SqliteCommand command = database.Command(transaction, """
+    UserPreferences persisted = database.Read(transaction => database.QuerySingleOrDefault(transaction, """
         SELECT working_directory, compaction_trigger_token_count
         FROM preferences WHERE singleton = 1;
-        """);
-      using SqliteDataReader reader = command.ExecuteReader();
-      if (!reader.Read())
-        return new UserPreferences(null, null);
-
-      return new UserPreferences(reader.IsDBNull(0) ? null : reader.GetString(0),
-          reader.IsDBNull(1) ? null : reader.GetInt32(1));
-    });
+        """, row => new UserPreferences(row.NullableString("working_directory"),
+            row.NullableInt("compaction_trigger_token_count"))) ?? new UserPreferences(null, null));
     cachedPreferences = persisted;
     return persisted;
   }

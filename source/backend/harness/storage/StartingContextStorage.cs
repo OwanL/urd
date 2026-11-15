@@ -8,31 +8,26 @@ namespace Urd.Core.Storage;
 // Stores the immutable initial instructions and tool declarations for one session.
 internal sealed class StartingContextStorage(Database database) {
   internal StartingContext? Read(Guid sessionId) => database.Read(transaction => {
-    using SqliteCommand command = database.Command(transaction,
+    string? json = database.Scalar<string?>(transaction,
         "SELECT context_json FROM session_starting_context WHERE session_id = $session;", ("$session", sessionId));
-    if (command.ExecuteScalar() is not string json)
-      return null;
-
-    return Restore(json);
+    return json is null ? null : Restore(json);
   });
 
   internal void Save(SqliteTransaction transaction, Guid sessionId, StartingContext context) {
     ArgumentNullException.ThrowIfNull(context);
-    using SqliteCommand existing = database.Command(transaction,
-        "SELECT EXISTS(SELECT 1 FROM session_starting_context WHERE session_id = $session);", ("$session", sessionId));
-    if ((long)existing.ExecuteScalar()! != 0)
+    if (database.Scalar<bool>(transaction,
+        "SELECT EXISTS(SELECT 1 FROM session_starting_context WHERE session_id = $session);", ("$session", sessionId)))
       return;
 
     var document = new StartingContextDocument(
         context.Instructions.Select(ToInstruction).ToArray(), context.Tools.Select(ToTool).ToArray());
     string json = JsonSerializer.Serialize(document);
 
-    using SqliteCommand command = database.Command(transaction, """
+    database.Execute(transaction, """
       INSERT INTO session_starting_context (session_id, context_json)
       VALUES ($session, $context)
       ON CONFLICT(session_id) DO NOTHING;
       """, ("$session", sessionId), ("$context", json));
-    command.ExecuteNonQuery();
   }
 
   private static InstructionDocument ToInstruction(ChatMessage message) {

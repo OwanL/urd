@@ -9,16 +9,12 @@ internal sealed class ModelSettingsStorage(Database database) {
     ValidateConnectionId(connectionId);
     return database.Read(transaction => {
       RequireConnection(transaction, connectionId);
-      using SqliteCommand command = database.Command(transaction, """
+      return database.Query(transaction, """
         SELECT model_id, family, supports_images, context_window FROM model_settings
         WHERE connection_id = $id ORDER BY model_id;
-        """, ("$id", connectionId));
-      using SqliteDataReader reader = command.ExecuteReader();
-      var settings = new List<ModelSettings>();
-      while (reader.Read())
-        settings.Add(new(connectionId, reader.GetString(0), (ModelFamily)reader.GetInt32(1), reader.GetBoolean(2),
-            reader.IsDBNull(3) ? null : reader.GetInt32(3)));
-      return settings;
+        """, row => new ModelSettings(connectionId, row.String("model_id"),
+            (ModelFamily)row.Int("family"), row.Bool("supports_images"),
+            row.NullableInt("context_window")), ("$id", connectionId));
     });
   }
 
@@ -32,7 +28,7 @@ internal sealed class ModelSettingsStorage(Database database) {
     ModelContextWindows.Validate(settings.ContextWindow, nameof(settings));
     return database.Write(transaction => {
       RequireConnection(transaction, settings.ConnectionId);
-      using SqliteCommand command = database.Command(transaction, """
+      database.Execute(transaction, """
         INSERT INTO model_settings (connection_id, model_id, family, supports_images, context_window)
         VALUES ($id, $model, $family, $images, $contextWindow)
         ON CONFLICT (connection_id, model_id) DO UPDATE
@@ -41,15 +37,13 @@ internal sealed class ModelSettingsStorage(Database database) {
         """, ("$id", settings.ConnectionId), ("$model", settings.ModelId),
           ("$family", (int)settings.Family), ("$images", settings.SupportsImages ? 1 : 0),
           ("$contextWindow", settings.ContextWindow));
-      command.ExecuteNonQuery();
       return settings;
     });
   }
 
   private void RequireConnection(SqliteTransaction transaction, Guid connectionId) {
-    using SqliteCommand command = database.Command(transaction,
-      "SELECT 1 FROM provider_connections WHERE connection_id = $id;", ("$id", connectionId));
-    if (command.ExecuteScalar() is null)
+    if (!database.Scalar<bool>(transaction,
+        "SELECT EXISTS(SELECT 1 FROM provider_connections WHERE connection_id = $id);", ("$id", connectionId)))
       throw new KeyNotFoundException("Provider connection was not found.");
   }
 

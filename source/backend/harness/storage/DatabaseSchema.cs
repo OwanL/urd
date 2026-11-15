@@ -37,7 +37,12 @@ internal static class DatabaseSchema {
           "An unversioned, nonempty database cannot be initialized as a session store. "
           + "To reset: stop Urd, delete urd.sqlite and its urd.sqlite-wal/urd.sqlite-shm files, then restart Urd.");
 
-    command.CommandText = """
+    command.CommandText = currentSchema;
+    command.ExecuteNonQuery();
+    transaction.Commit();
+  }
+
+  private static readonly string currentSchema = $$"""
       -- Accounting survives history replacement and session retention independently.
       CREATE TABLE usage_requests (
           id TEXT NOT NULL PRIMARY KEY,
@@ -143,7 +148,7 @@ internal static class DatabaseSchema {
       CREATE TABLE execution_output (
           request_id TEXT NOT NULL REFERENCES execution_requests(request_id),
           chunk_index INTEGER NOT NULL CHECK (chunk_index >= 0),
-          text_utf8 BLOB NOT NULL CHECK (length(text_utf8) <= 16384),
+          text_utf8 BLOB NOT NULL CHECK (length(text_utf8) <= {{StorageText.MaximumBytes}}),
           is_final INTEGER NOT NULL CHECK (is_final IN (0, 1)),
           PRIMARY KEY (request_id, chunk_index)
       ) STRICT;
@@ -336,9 +341,6 @@ internal static class DatabaseSchema {
       CREATE INDEX execution_inputs_not_sent_order ON execution_inputs(session_id, ordinal) WHERE not_sent = 1;
       CREATE INDEX execution_messages_history_order ON execution_messages(session_id, history_revision, ordinal DESC);
       CREATE INDEX execution_messages_request_order ON execution_messages(request_id, role, first_chunk_index);
-      PRAGMA user_version = 27;
+      PRAGMA user_version = {{SchemaVersion}};
       """;
-    command.ExecuteNonQuery();
-    transaction.Commit();
-  }
 }

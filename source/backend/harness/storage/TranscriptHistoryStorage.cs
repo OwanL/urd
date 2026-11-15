@@ -1,5 +1,3 @@
-using System.Data;
-using System.Globalization;
 using Microsoft.Data.Sqlite;
 using Urd.Core.Execution;
 using Urd.Core.Compaction;
@@ -17,9 +15,9 @@ internal sealed class TranscriptHistoryStorage(
     """;
   internal const string LookaheadSql = """
     SELECT EXISTS (SELECT 1 FROM execution_messages
-        WHERE session_id = $session AND history_revision = $revision AND ordinal < $first),
+        WHERE session_id = $session AND history_revision = $revision AND ordinal < $first) AS has_before,
         EXISTS (SELECT 1 FROM execution_messages
-        WHERE session_id = $session AND history_revision = $revision AND ordinal > $last);
+        WHERE session_id = $session AND history_revision = $revision AND ordinal > $last) AS has_after;
     """;
 
   // Select identities before joining metadata; never select body columns.
@@ -73,21 +71,18 @@ internal sealed class TranscriptHistoryStorage(
 
   internal static TranscriptHistoryStorage Open(Database database, SqliteTransaction transaction,
       Guid sessionId, long expectedRevision) {
-    using SqliteCommand command = database.Command(transaction,
-        "SELECT history_revision FROM sessions WHERE session_id = $session;", ("$session", sessionId));
-    if (command.ExecuteScalar() is not long revision)
-      throw new KeyNotFoundException("The session does not exist.");
+    long revision = database.Scalar<long?>(transaction,
+        "SELECT history_revision FROM sessions WHERE session_id = $session;", ("$session", sessionId))
+        ?? throw new KeyNotFoundException("The session does not exist.");
     if (revision != expectedRevision)
       throw new HistoryRevisionConflictException(expectedRevision, revision);
     return new(database, transaction, sessionId, revision);
   }
 
-  internal long OrdinalOf(TranscriptEntryRef anchor) {
-    using SqliteCommand command = Command(AnchorSql,
-        ("$run", anchor.ExecutionId), ("$kind", (int)anchor.Kind), ("$entry", anchor.EntryId));
-    return command.ExecuteScalar() is long ordinal ? ordinal
-        : throw new KeyNotFoundException("The entry does not belong to this session history.");
-  }
+  internal long OrdinalOf(TranscriptEntryRef anchor) => database.Scalar<long?>(transaction, AnchorSql,
+      ("$session", sessionId), ("$revision", revision),
+      ("$run", anchor.ExecutionId), ("$kind", (int)anchor.Kind), ("$entry", anchor.EntryId))
+      ?? throw new KeyNotFoundException("The entry does not belong to this session history.");
 
   internal List<TranscriptHistoryRow> Latest(int count) => Window(long.MaxValue, ascending: false, count);
 
@@ -97,37 +92,26 @@ internal sealed class TranscriptHistoryStorage(
 
   internal List<TranscriptHistoryRow> StartingAt(long anchor, int count) => Window(anchor, ascending: true, count);
 
-  internal (bool Before, bool After) Neighbors(long first, long last) {
-    using SqliteCommand command = Command(LookaheadSql, ("$first", first), ("$last", last));
-    using SqliteDataReader reader = command.ExecuteReader();
-    reader.Read();
-    return (reader.GetBoolean(0), reader.GetBoolean(1));
-  }
+  internal (bool Before, bool After) Neighbors(long first, long last) =>
+      database.QuerySingleOrDefault(transaction, LookaheadSql, row => (row.Bool("has_before"), row.Bool("has_after")),
+          ("$session", sessionId), ("$revision", revision), ("$first", first), ("$last", last));
 
-  private List<TranscriptHistoryRow> Window(long boundary, bool ascending, int count) {
-    using SqliteCommand command = Command(WindowSql(ascending), ("$boundary", boundary), ("$limit", count));
-    using SqliteDataReader reader = command.ExecuteReader();
-    var rows = new List<TranscriptHistoryRow>(count);
-    while (reader.Read())
-      rows.Add(ReadRow(reader));
-    return rows;
-  }
-
-  private SqliteCommand Command(string sql, params (string Name, object? Value)[] parameters) =>
-      database.Command(transaction, sql, [("$session", sessionId), ("$revision", revision), .. parameters]);
+  private List<TranscriptHistoryRow> Window(long boundary, bool ascending, int count) =>
+      database.Query(transaction, WindowSql(ascending), ReadRow,
+          ("$session", sessionId), ("$revision", revision), ("$boundary", boundary), ("$limit", count));
 
   private TranscriptHistoryRow ReadRow(SqliteDataReader reader) {
-    var reference = new TranscriptEntryRef(reader.GetGuid("run_id"), reader.GetGuid("message_id"),
-        (TranscriptEntryKind)reader.GetInt32("role"), revision);
+    var reference = new TranscriptEntryRef(reader.Guid("run_id"), reader.Guid("message_id"),
+        (TranscriptEntryKind)reader.Int("role"), revision);
     bool isTool = reference.Kind is TranscriptEntryKind.Tool or TranscriptEntryKind.ToolCompletion;
     bool isCompaction = reference.Kind == TranscriptEntryKind.Compaction;
     TranscriptTextFacts? text = isTool || isCompaction ? null : ReadTextFacts(reader, reference);
     TranscriptToolFacts? tool = isTool ? ReadToolFacts(reader) : null;
     TranscriptCompactionFacts? compaction = isCompaction ? new(
-        (CompactionReason)reader.GetInt32("compaction_reason"), reader.GetInt64("tokens_before"), reader.GetInt64("tokens_after")) : null;
-    var descriptor = new TranscriptEntryDescriptor(reference, ReadTime(reader, "created_at"), text, tool, compaction);
-    return new(reader.GetInt64("ordinal"), descriptor, ReadOutcome(reader, "execution_outcome"),
-        reader.IsDBNull("execution_error") ? null : reader.GetString("execution_error"));
+        (CompactionReason)reader.Int("compaction_reason"), reader.Long("tokens_before"), reader.Long("tokens_after")) : null;
+    var descriptor = new TranscriptEntryDescriptor(reference, reader.NullableTimestamp("created_at"), text, tool, compaction);
+    return new(reader.Long("ordinal"), descriptor, (ExecutionOutcome?)reader.NullableInt("execution_outcome"),
+        reader.NullableString("execution_error"));
   }
 
   private static TranscriptTextFacts ReadTextFacts(SqliteDataReader reader, TranscriptEntryRef entry) {
@@ -137,38 +121,30 @@ internal sealed class TranscriptHistoryStorage(
     if (isUser)
       return new(new(message, 0, 0), new(message, 1, 0), IsClosed: true, FinalOutputCommitted: false);
 
-    long firstChunk = reader.GetInt64("first_chunk_index");
-    long nextChunk = reader.GetInt64("next_chunk_index");
-    bool hasEndChunk = !reader.IsDBNull("end_chunk_index");
-    long endChunk = hasEndChunk ? reader.GetInt64("end_chunk_index") : nextChunk;
-    bool final = reader.GetBoolean("response_final") && endChunk == nextChunk;
-    bool closed = hasEndChunk || final || !reader.IsDBNull("request_outcome")
-        || reader.GetBoolean("stopping") || !reader.IsDBNull("execution_outcome");
+    long firstChunk = reader.Long("first_chunk_index");
+    long nextChunk = reader.Long("next_chunk_index");
+    long? savedEndChunk = reader.NullableLong("end_chunk_index");
+    long endChunk = savedEndChunk ?? nextChunk;
+    bool final = reader.Bool("response_final") && endChunk == nextChunk;
+    bool closed = savedEndChunk is not null || final || reader.NullableInt("request_outcome") is not null
+        || reader.Bool("stopping") || reader.NullableInt("execution_outcome") is not null;
     return new(new(message, firstChunk, 0), new(message, endChunk, 0), closed, final);
   }
 
   private static TranscriptToolFacts ReadToolFacts(SqliteDataReader reader) {
-    bool authorized = !reader.IsDBNull("started");
-    bool started = authorized && reader.GetBoolean("started");
-    bool executionSettled = !reader.IsDBNull("execution_outcome");
-    bool executionStopping = reader.GetBoolean("stopping");
-    bool requestSettled = !reader.IsDBNull("request_outcome");
-    ExecutionOutcome? outcome = ReadOutcome(reader, "tool_outcome");
+    bool authorized = reader.NullableInt("started") is not null;
+    bool started = authorized && reader.Bool("started");
+    bool executionSettled = reader.NullableInt("execution_outcome") is not null;
+    bool executionStopping = reader.Bool("stopping");
+    bool requestSettled = reader.NullableInt("request_outcome") is not null;
+    ExecutionOutcome? outcome = (ExecutionOutcome?)reader.NullableInt("tool_outcome");
     bool closed = outcome is not null || executionSettled || (!started && executionStopping)
         || (!authorized && requestSettled);
-    string? name = reader.IsDBNull("tool_name") ? null : reader.GetString("tool_name");
-    return new(reader.GetGuid("request_id"), reader.GetString("call_id"), name, started,
-        reader.GetBoolean("interrupted"), outcome, closed, ReadTime(reader, "started_at"), ReadTime(reader, "ended_at"),
-        reader.GetBoolean("background"),
-        reader.GetBoolean("batched_with_previous"), reader.GetBoolean("batched_with_next"),
-        reader.IsDBNull("arguments_excerpt") ? null : reader.GetString("arguments_excerpt"));
+    return new(reader.Guid("request_id"), reader.String("call_id"), reader.NullableString("tool_name"), started,
+        reader.Bool("interrupted"), outcome, closed, reader.NullableTimestamp("started_at"), reader.NullableTimestamp("ended_at"),
+        reader.Bool("background"), reader.Bool("batched_with_previous"), reader.Bool("batched_with_next"),
+        reader.NullableString("arguments_excerpt"));
   }
-
-  private static ExecutionOutcome? ReadOutcome(SqliteDataReader reader, string column) => reader.IsDBNull(column)
-      ? null : (ExecutionOutcome)reader.GetInt32(column);
-
-  private static DateTimeOffset? ReadTime(SqliteDataReader reader, string column) => reader.IsDBNull(column)
-      ? null : DateTimeOffset.Parse(reader.GetString(column), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
 }
 
 internal sealed record TranscriptHistoryRow(

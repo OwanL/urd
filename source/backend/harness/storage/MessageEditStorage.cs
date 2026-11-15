@@ -50,11 +50,9 @@ internal sealed class MessageEditStorage(Database database, UserMessageStorage m
     if (retained is not null)
       return retained;
     var target = ReadTarget(transaction, sessionId, submission.Message);
-    using (SqliteCommand active = database.Command(transaction,
-        "SELECT EXISTS(SELECT 1 FROM execution_runs WHERE session_id = $session AND outcome IS NULL);", ("$session", sessionId))) {
-      if ((long)active.ExecuteScalar()! != 0)
-        throw new InvalidOperationException("Editing must await execution settlement.");
-    }
+    if (database.Scalar<bool>(transaction,
+        "SELECT EXISTS(SELECT 1 FROM execution_runs WHERE session_id = $session AND outcome IS NULL);", ("$session", sessionId)))
+      throw new InvalidOperationException("Editing must await execution settlement.");
 
     RemoveSuffix(transaction, sessionId, target);
     long revision = checked(submission.Message.HistoryRevision + 1);
@@ -64,60 +62,54 @@ internal sealed class MessageEditStorage(Database database, UserMessageStorage m
     if (!admitted.NewlyAccepted || admitted.Receipt.Acceptance != MessageAcceptance.Accepted)
       throw new UserMessageConflictException(submission.OperationId);
     Guid executionId = admitted.Receipt.ExecutionId!.Value;
-    using SqliteCommand save = database.Command(transaction, """
+    database.Execute(transaction, """
       INSERT INTO message_edits (session_id, operation_id, submission_hash, history_revision, run_id)
       VALUES ($session, $operation, $hash, $revision, $run);
       """, ("$session", sessionId), ("$operation", submission.OperationId), ("$hash", hash),
         ("$revision", revision), ("$run", executionId));
-    save.ExecuteNonQuery();
     return new MessageEditReceipt(SessionId: sessionId, OperationId: submission.OperationId,
         HistoryRevision: revision, ExecutionId: executionId);
   });
 
-  private MessageEditReceipt? ReadReceipt(SqliteTransaction transaction, Guid sessionId, Guid operationId, string? hash) {
-    using SqliteCommand command = database.Command(transaction, """
-      SELECT submission_hash, history_revision, run_id FROM message_edits
-      WHERE session_id = $session AND operation_id = $operation;
-      """, ("$session", sessionId), ("$operation", operationId));
-    using SqliteDataReader reader = command.ExecuteReader();
-    if (!reader.Read())
-      return null;
-    if (hash is not null && hash != reader.GetString(0))
-      throw new UserMessageConflictException(operationId);
-    return new(SessionId: sessionId, OperationId: operationId,
-        HistoryRevision: reader.GetInt64(1), ExecutionId: reader.GetGuid(2));
-  }
+  private MessageEditReceipt? ReadReceipt(SqliteTransaction transaction, Guid sessionId, Guid operationId, string? hash) =>
+      database.QuerySingleOrDefault(transaction, """
+        SELECT submission_hash, history_revision, run_id FROM message_edits
+        WHERE session_id = $session AND operation_id = $operation;
+        """, row => {
+          if (hash is not null && hash != row.String("submission_hash"))
+            throw new UserMessageConflictException(operationId);
+          return new MessageEditReceipt(SessionId: sessionId, OperationId: operationId,
+              HistoryRevision: row.Long("history_revision"), ExecutionId: row.Guid("run_id"));
+        }, ("$session", sessionId), ("$operation", operationId));
 
   private (long EntryOrdinal, long RunOrdinal, int RequestIndex, long InputOrdinal, long MessageIndex) ReadTarget(
       SqliteTransaction transaction, Guid sessionId, MessageRef message) {
-    using SqliteCommand revision = database.Command(transaction,
-        "SELECT history_revision FROM sessions WHERE session_id = $session;", ("$session", sessionId));
-    if (revision.ExecuteScalar() is not long actual)
-      throw new KeyNotFoundException("The session does not exist.");
+    long actual = database.Scalar<long?>(transaction,
+        "SELECT history_revision FROM sessions WHERE session_id = $session;", ("$session", sessionId))
+        ?? throw new KeyNotFoundException("The session does not exist.");
     if (actual != message.HistoryRevision)
       throw new HistoryRevisionConflictException(message.HistoryRevision, actual);
-    using SqliteCommand target = database.Command(transaction, """
-      SELECT m.ordinal, r.ordinal, q.request_index, i.ordinal,
+    return database.QuerySingleOrDefault<(long, long, int, long, long)?>(transaction, """
+      SELECT m.ordinal AS entry_ordinal, r.ordinal AS run_ordinal, q.request_index, i.ordinal AS input_ordinal,
           (SELECT count(*) FROM execution_inputs previous WHERE previous.request_id = m.request_id AND previous.ordinal < i.ordinal)
-          + (SELECT count(*) FROM execution_tool_completions completed WHERE completed.claimed_request_id = m.request_id)
+          + (SELECT count(*) FROM execution_tool_completions completed WHERE completed.claimed_request_id = m.request_id) AS message_index
       FROM execution_messages m
       JOIN execution_runs r ON r.run_id = m.run_id
       JOIN execution_requests q ON q.request_id = m.request_id
       JOIN execution_inputs i ON i.session_id = m.session_id AND i.input_id = m.input_id
       WHERE m.session_id = $session AND m.history_revision = $revision
           AND m.run_id = $run AND m.message_id = $message AND m.role = 0;
-      """, ("$session", sessionId), ("$revision", actual), ("$run", message.ExecutionId), ("$message", message.MessageId));
-    using SqliteDataReader reader = target.ExecuteReader();
-    if (!reader.Read())
-      throw new KeyNotFoundException("The user message is no longer in this conversation.");
-    return (reader.GetInt64(0), reader.GetInt64(1), reader.GetInt32(2), reader.GetInt64(3), reader.GetInt64(4));
+      """, row => (row.Long("entry_ordinal"), row.Long("run_ordinal"), row.Int("request_index"),
+          row.Long("input_ordinal"), row.Long("message_index")),
+          ("$session", sessionId), ("$revision", actual), ("$run", message.ExecutionId), ("$message", message.MessageId))
+        ?? throw new KeyNotFoundException("The user message is no longer in this conversation.");
   }
 
   private void RemoveSuffix(SqliteTransaction transaction, Guid sessionId,
       (long EntryOrdinal, long RunOrdinal, int RequestIndex, long InputOrdinal, long MessageIndex) target) {
     // Automatic compaction precedes user placement. Its earlier marker can still
     // summarize an edited input in a multi-input request; compare source positions too.
-    using SqliteCommand summaries = database.Command(transaction, $"""
+    database.Execute(transaction, $"""
       UPDATE execution_requests SET compaction_id = NULL WHERE compaction_id IN ({ObsoleteSummaries});
       DELETE FROM session_compactions WHERE compaction_id IN ({ObsoleteSummaries});
       DELETE FROM execution_messages WHERE session_id = $session AND (ordinal >= $entry
@@ -132,9 +124,8 @@ internal sealed class MessageEditStorage(Database database, UserMessageStorage m
       """, ("$session", sessionId), ("$entry", target.EntryOrdinal),
         ("$input", target.InputOrdinal), ("$runOrdinal", target.RunOrdinal),
         ("$requestIndex", target.RequestIndex), ("$messageIndex", target.MessageIndex));
-    summaries.ExecuteNonQuery();
 
-    using SqliteCommand responses = database.Command(transaction, $"""
+    database.Execute(transaction, $"""
       DELETE FROM execution_tool_completions WHERE session_id = $session
           AND (request_id IN ({SuffixRequests}) OR (claimed_request_id IN ({SuffixRequests})
               AND NOT EXISTS (SELECT 1 FROM execution_messages m WHERE m.session_id = $session
@@ -146,12 +137,11 @@ internal sealed class MessageEditStorage(Database database, UserMessageStorage m
           outcome = 1, error = NULL WHERE request_id IN ({SuffixRequests});
       """, ("$session", sessionId), ("$runOrdinal", target.RunOrdinal), ("$requestIndex", target.RequestIndex),
         ("$entry", target.EntryOrdinal));
-    responses.ExecuteNonQuery();
   }
 
   private void RebuildPositions(SqliteTransaction transaction, Guid sessionId, long revision) {
     // Preserve message IDs in the kept prefix, but invalidate every old cursor and layout index.
-    using SqliteCommand command = database.Command(transaction, """
+    database.Execute(transaction, """
       UPDATE sessions SET history_revision = $revision WHERE session_id = $session;
       UPDATE execution_runs SET history_revision = $revision WHERE session_id = $session;
       UPDATE execution_messages SET history_revision = $revision WHERE session_id = $session;
@@ -167,7 +157,6 @@ internal sealed class MessageEditStorage(Database database, UserMessageStorage m
       SELECT $session, $revision, count(*), coalesce(sum(layout_weight), 0)
       FROM execution_messages WHERE session_id = $session;
       """, ("$session", sessionId), ("$revision", revision));
-    command.ExecuteNonQuery();
   }
 
   private static string Hash(MessageEditSubmission submission) =>

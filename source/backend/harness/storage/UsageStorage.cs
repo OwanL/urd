@@ -19,7 +19,7 @@ internal sealed class UsageStorage(Database database) {
     string json = Serialize(request);
     long? cost = ToNanoDollars(request.CostUsd);
     database.Write(transaction => {
-      using SqliteCommand insert = database.Command(transaction, """
+      int inserted = database.Execute(transaction, """
         INSERT INTO usage_requests (
             id, session_id, started_at, finished_at, provider, model, purpose, cost_nano_usd,
             is_estimate, problem, record_json)
@@ -32,7 +32,7 @@ internal sealed class UsageStorage(Database database) {
           ("$provider", request.Provider), ("$model", request.Model), ("$purpose", request.Purpose),
           ("$cost", cost), ("$estimate", request.IsEstimate ? 1 : 0), ("$problem", request.Problem),
           ("$record", json));
-      if (insert.ExecuteNonQuery() == 0 && ReadRequest(transaction, request.Id) != request)
+      if (inserted == 0 && ReadRequest(transaction, request.Id) != request)
         throw new InvalidOperationException($"Usage request {request.Id} already exists with different data.");
       return true;
     });
@@ -55,7 +55,7 @@ internal sealed class UsageStorage(Database database) {
       }
 
       EnsureSameBinding(existing, request);
-      using SqliteCommand update = database.Command(transaction, """
+      int updated = database.Execute(transaction, """
         UPDATE usage_requests SET session_id = $session, started_at = $started, finished_at = $finished,
             provider = $provider, model = $model, purpose = $purpose, cost_nano_usd = $cost,
             is_estimate = $estimate, problem = $problem, record_json = $record
@@ -66,20 +66,15 @@ internal sealed class UsageStorage(Database database) {
           ("$provider", request.Provider), ("$model", request.Model), ("$purpose", request.Purpose),
           ("$cost", cost), ("$estimate", request.IsEstimate ? 1 : 0), ("$problem", request.Problem),
           ("$record", json));
-      if (update.ExecuteNonQuery() != 1)
+      if (updated != 1)
         throw new InvalidOperationException($"Usage request {request.Id} changed while it was being updated.");
       return true;
     });
   }
 
   internal void RecoverInterrupted() => database.Write(transaction => {
-    List<UsageRequest> pending = [];
-    using (SqliteCommand read = database.Command(transaction,
-        "SELECT record_json FROM usage_requests WHERE finished_at IS NULL;"))
-    using (SqliteDataReader reader = read.ExecuteReader()) {
-      while (reader.Read())
-        pending.Add(Deserialize(reader.GetString(0)));
-    }
+    List<UsageRequest> pending = database.Query(transaction,
+        "SELECT record_json FROM usage_requests WHERE finished_at IS NULL;", row => Deserialize(row.String("record_json")));
 
     DateTimeOffset finishedAt = DateTimeOffset.UtcNow;
     foreach (UsageRequest request in pending) {
@@ -88,13 +83,12 @@ internal sealed class UsageStorage(Database database) {
         IsEstimate = true,
         Problem = InterruptedProblem
       };
-      using SqliteCommand update = database.Command(transaction, """
+      database.Execute(transaction, """
         UPDATE usage_requests SET finished_at = $finished, is_estimate = 1, problem = $problem, record_json = $record
         WHERE id = $id AND finished_at IS NULL;
         """,
           ("$id", interrupted.Id), ("$finished", Timestamp(finishedAt)), ("$problem", InterruptedProblem),
           ("$record", Serialize(interrupted)));
-      update.ExecuteNonQuery();
     }
     return true;
   });
@@ -161,10 +155,9 @@ internal sealed class UsageStorage(Database database) {
       ?? throw new InvalidDataException("Stored usage request is empty.");
 
   private UsageRequest? ReadRequest(SqliteTransaction transaction, Guid id) {
-    using SqliteCommand read = database.Command(transaction,
+    string? json = database.Scalar<string?>(transaction,
         "SELECT record_json FROM usage_requests WHERE id = $id;", ("$id", id));
-    object? value = read.ExecuteScalar();
-    return value is string json ? Deserialize(json) : null;
+    return json is null ? null : Deserialize(json);
   }
 
   private static void ValidateRange(Guid? sessionId, DateTimeOffset? from, DateTimeOffset? to) {
@@ -202,24 +195,19 @@ internal sealed class UsageStorage(Database database) {
   }
 
   private UsageTotals ReadTotals(SqliteTransaction transaction, string where,
-      (string Name, object? Value)[] parameters) {
-    using SqliteCommand read = database.Command(transaction, $"""
-      SELECT COALESCE(SUM(cost_nano_usd), 0), COUNT(*), COALESCE(SUM(is_estimate), 0),
-          COALESCE(SUM(CASE WHEN cost_nano_usd IS NULL OR problem IS NOT NULL THEN 1 ELSE 0 END), 0),
-          COALESCE(SUM(CASE WHEN finished_at IS NULL THEN 1 ELSE 0 END), 0)
+      (string Name, object? Value)[] parameters) => database.QuerySingleOrDefault(transaction, $"""
+      SELECT COALESCE(SUM(cost_nano_usd), 0) AS cost_nano_usd, COUNT(*) AS requests,
+          COALESCE(SUM(is_estimate), 0) AS estimated_requests,
+          COALESCE(SUM(CASE WHEN cost_nano_usd IS NULL OR problem IS NOT NULL THEN 1 ELSE 0 END), 0) AS unknown_requests,
+          COALESCE(SUM(CASE WHEN finished_at IS NULL THEN 1 ELSE 0 END), 0) AS active_requests
       FROM usage_requests {where};
-      """, parameters);
-    using SqliteDataReader reader = read.ExecuteReader();
-    reader.Read();
-    return ReadTotals(reader);
-  }
+      """, ReadTotals, parameters)!;
 
-  private static UsageTotals ReadTotals(SqliteDataReader reader) => new(ToDollars(reader.GetInt64(0)),
-      reader.GetInt64(1), reader.GetInt64(2), reader.GetInt64(3), reader.GetInt64(4));
+  private static UsageTotals ReadTotals(SqliteDataReader row) => new(ToDollars(row.Long("cost_nano_usd")),
+      row.Long("requests"), row.Long("estimated_requests"), row.Long("unknown_requests"), row.Long("active_requests"));
 
   private List<UsageBreakdown> ReadBreakdown(SqliteTransaction transaction, string where,
-      (string Name, object? Value)[] parameters) {
-    using SqliteCommand read = database.Command(transaction, $"""
+      (string Name, object? Value)[] parameters) => database.Query(transaction, $"""
       WITH usage_groups AS (
         SELECT provider, model, purpose, COALESCE(SUM(cost_nano_usd), 0) AS cost_nano_usd,
             COUNT(*) AS requests, COALESCE(SUM(is_estimate), 0) AS estimated_requests,
@@ -246,37 +234,21 @@ internal sealed class UsageStorage(Database database) {
       SELECT provider, model, purpose, cost_nano_usd, requests, estimated_requests, unknown_requests,
           active_requests, is_other
       FROM result ORDER BY sort_order;
-      """, [.. parameters, ("$maximumBreakdown", MaximumBreakdown),
+      """, row => new UsageBreakdown(row.String("provider"), row.String("model"), row.String("purpose"),
+          ReadTotals(row), row.Bool("is_other")), [.. parameters, ("$maximumBreakdown", MaximumBreakdown),
           ("$retainedBreakdown", MaximumBreakdown - 1)]);
-    using SqliteDataReader reader = read.ExecuteReader();
-    List<UsageBreakdown> values = [];
-    while (reader.Read())
-      values.Add(new UsageBreakdown(reader.GetString(0), reader.GetString(1), reader.GetString(2),
-          ReadTotalsAt(reader, 3), reader.GetInt64(8) != 0));
-    return values;
-  }
 
   private List<UsagePoint> ReadHistory(SqliteTransaction transaction, string where,
       (string Name, object? Value)[] parameters, IReadOnlyList<UsageBreakdown> breakdown) {
-    string? observedStart;
-    string? observedEnd;
-    long count;
-    using (SqliteCommand range = database.Command(transaction, $"""
-      SELECT COUNT(*), MIN(started_at), MAX(started_at) FROM usage_requests {where};
-      """, parameters))
-    using (SqliteDataReader reader = range.ExecuteReader()) {
-      reader.Read();
-      count = reader.GetInt64(0);
-      observedStart = reader.IsDBNull(1) ? null : reader.GetString(1);
-      observedEnd = reader.IsDBNull(2) ? null : reader.GetString(2);
-    }
+    (long count, DateTimeOffset? observedStart, DateTimeOffset? observedEnd) = database.QuerySingleOrDefault(transaction, $"""
+      SELECT COUNT(*) AS requests, MIN(started_at) AS started_at, MAX(started_at) AS ended_at
+      FROM usage_requests {where};
+      """, row => (row.Long("requests"), row.NullableTimestamp("started_at"), row.NullableTimestamp("ended_at")), parameters);
     if (count == 0)
       return [];
 
-    DateTimeOffset start = DateTimeOffset.Parse(observedStart!, CultureInfo.InvariantCulture,
-        DateTimeStyles.RoundtripKind);
-    DateTimeOffset end = DateTimeOffset.Parse(observedEnd!, CultureInfo.InvariantCulture,
-        DateTimeStyles.RoundtripKind);
+    DateTimeOffset start = observedStart!.Value;
+    DateTimeOffset end = observedEnd!.Value;
     int bucketCount = (int)Math.Min(MaximumHistory, count);
     string bucket = $"""
       CASE WHEN $bucketCount = 1 OR julianday($end) <= julianday($start) THEN 0
@@ -322,11 +294,11 @@ internal sealed class UsageStorage(Database database) {
         FROM ranked
       )
       SELECT filtered.bucket, bucket_times.latest_started_at, mapped.provider, mapped.model, mapped.purpose,
-          mapped.is_other, COALESCE(SUM(filtered.cost_nano_usd), 0), COUNT(*),
-          COALESCE(SUM(filtered.is_estimate), 0),
+          mapped.is_other, COALESCE(SUM(filtered.cost_nano_usd), 0) AS cost_nano_usd, COUNT(*) AS requests,
+          COALESCE(SUM(filtered.is_estimate), 0) AS estimated_requests,
           COALESCE(SUM(CASE WHEN filtered.cost_nano_usd IS NULL OR filtered.problem IS NOT NULL
-              THEN 1 ELSE 0 END), 0),
-          COALESCE(SUM(CASE WHEN filtered.finished_at IS NULL THEN 1 ELSE 0 END), 0)
+              THEN 1 ELSE 0 END), 0) AS unknown_requests,
+          COALESCE(SUM(CASE WHEN filtered.finished_at IS NULL THEN 1 ELSE 0 END), 0) AS active_requests
       FROM filtered JOIN bucket_times USING (bucket) JOIN mapped
           ON mapped.source_provider = filtered.provider AND mapped.source_model = filtered.model
               AND mapped.source_purpose = filtered.purpose
@@ -337,19 +309,18 @@ internal sealed class UsageStorage(Database database) {
       """, historyParameters))
     using (SqliteDataReader reader = read.ExecuteReader()) {
       while (reader.Read()) {
-        int bucketIndex = reader.GetInt32(0);
-        DateTimeOffset at = DateTimeOffset.Parse(reader.GetString(1), CultureInfo.InvariantCulture,
-            DateTimeStyles.RoundtripKind);
+        int bucketIndex = reader.Int("bucket");
+        DateTimeOffset at = reader.Timestamp("latest_started_at");
         if (!buckets.TryGetValue(bucketIndex, out var point)) {
           UsageTotals[] totals = new UsageTotals[breakdown.Count];
           Array.Fill(totals, emptyTotals);
           point = (at, totals);
           buckets.Add(bucketIndex, point);
         }
-        var group = (reader.GetString(2), reader.GetString(3), reader.GetString(4), reader.GetInt64(5) != 0);
+        var group = (reader.String("provider"), reader.String("model"), reader.String("purpose"), reader.Bool("is_other"));
         if (!groupIndexes.TryGetValue(group, out int groupIndex))
           throw new InvalidDataException("Usage history contains an unselected provider/model/purpose group.");
-        point.Totals[groupIndex] = ReadTotalsAt(reader, 6);
+        point.Totals[groupIndex] = ReadTotals(reader);
       }
     }
 
@@ -371,19 +342,8 @@ internal sealed class UsageStorage(Database database) {
   }
 
   private List<UsageRequest> ReadRecent(SqliteTransaction transaction, string where,
-      (string Name, object? Value)[] parameters) {
-    using SqliteCommand read = database.Command(transaction, $"""
+      (string Name, object? Value)[] parameters) => database.Query(transaction, $"""
       SELECT record_json FROM usage_requests {where}
       ORDER BY started_at DESC, id DESC LIMIT {MaximumRecent};
-      """, parameters);
-    using SqliteDataReader reader = read.ExecuteReader();
-    List<UsageRequest> recent = [];
-    while (reader.Read())
-      recent.Add(Deserialize(reader.GetString(0)));
-    return recent;
-  }
-
-  private static UsageTotals ReadTotalsAt(SqliteDataReader reader, int firstColumn) =>
-      new(ToDollars(reader.GetInt64(firstColumn)), reader.GetInt64(firstColumn + 1),
-          reader.GetInt64(firstColumn + 2), reader.GetInt64(firstColumn + 3), reader.GetInt64(firstColumn + 4));
+      """, row => Deserialize(row.String("record_json")), parameters);
 }

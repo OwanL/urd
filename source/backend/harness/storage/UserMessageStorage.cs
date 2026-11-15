@@ -41,7 +41,7 @@ internal sealed class UserMessageStorage(Database database) {
     var accepted = new UserMessageReceipt(sessionId, submission, MessageAcceptance.Accepted, null, executionId);
     InsertReceipt(transaction, accepted);
     if (currentExecutionId is null) {
-      using SqliteCommand insertExecution = database.Command(transaction, """
+      database.Execute(transaction, """
         INSERT INTO execution_runs (session_id, run_id, history_revision, input_id, kind,
             llm_selection_json, working_started_at)
         VALUES ($session, $run, $revision, $input, $kind, $selection, $started);
@@ -51,63 +51,43 @@ internal sealed class UserMessageStorage(Database database) {
           ("$kind", (int)ExecutionRunKind.UserInput),
           ("$selection", LlmSelectionJson.Write(submission.LlmSelection)),
           ("$started", StorageText.UtcTimestamp()));
-      insertExecution.ExecuteNonQuery();
     }
 
-    using SqliteCommand insert = database.Command(transaction, """
+    database.Execute(transaction, """
       INSERT INTO execution_inputs (session_id, input_id, run_id) VALUES ($session, $input, $run);
       """,
         ("$session", sessionId), ("$run", executionId), ("$input", submission.SubmissionId));
-    insert.ExecuteNonQuery();
     return (accepted, true);
   }
 
   internal UserMessageReceipt? ReadReceipt(Guid sessionId, Guid submissionId)
-      => database.Guarded(() => ReadReceipt(sessionId, submissionId, transaction: null));
+      => database.RunLocked(() => ReadReceipt(sessionId, submissionId, transaction: null));
 
-  private UserMessageReceipt? ReadReceipt(Guid sessionId, Guid submissionId, SqliteTransaction? transaction) {
-    using SqliteCommand command = database.Command(transaction, """
-      SELECT expected_history_revision, original_text_utf8, decision, run_id, refusal_reason, llm_selection_json, superseded
-      FROM input_decisions
-      WHERE session_id = $session AND input_id = $input;
-      """,
-        ("$session", sessionId),
-        ("$input", submissionId));
-    using SqliteDataReader reader = command.ExecuteReader();
-    if (!reader.Read())
-      return null;
+  private UserMessageReceipt? ReadReceipt(Guid sessionId, Guid submissionId, SqliteTransaction? transaction) =>
+      database.QuerySingleOrDefault(transaction, """
+        SELECT expected_history_revision, original_text_utf8, decision, run_id, refusal_reason, llm_selection_json, superseded
+        FROM input_decisions
+        WHERE session_id = $session AND input_id = $input;
+        """, row => {
+          if (row.Bool("superseded"))
+            throw new UserMessageConflictException(submissionId);
+          LlmSelection selection = LlmSelectionJson.Read(row.String("llm_selection_json"))
+              ?? throw new InvalidOperationException("The retained receipt has no LLM selection.");
+          var original = new UserMessageSubmission(submissionId, row.Long("expected_history_revision"),
+              StorageText.StrictUtf8.GetString((byte[])row["original_text_utf8"]), selection);
+          return new UserMessageReceipt(sessionId, original, (MessageAcceptance)row.Int("decision"),
+              (MessageRefusalReason?)row.NullableInt("refusal_reason"), row.NullableGuid("run_id"));
+        }, ("$session", sessionId), ("$input", submissionId));
 
-    if (reader.GetBoolean(6))
-      throw new UserMessageConflictException(submissionId);
-
-    // Locals name the SELECT columns in order.
-    long expectedRevision = reader.GetInt64(0);
-    string originalText = StorageText.StrictUtf8.GetString((byte[])reader.GetValue(1));
-    var acceptance = (MessageAcceptance)reader.GetInt32(2);
-    Guid? executionId = reader.IsDBNull(3) ? null : reader.GetGuid(3);
-    MessageRefusalReason? refusalReason = reader.IsDBNull(4) ? null : (MessageRefusalReason)reader.GetInt32(4);
-    LlmSelection selection = LlmSelectionJson.Read(reader.GetString(5))
-        ?? throw new InvalidOperationException("The retained receipt has no LLM selection.");
-    var original = new UserMessageSubmission(submissionId, expectedRevision, originalText, selection);
-    return new UserMessageReceipt(sessionId, original, acceptance, refusalReason, executionId);
-  }
-
-  private long ReadRevision(SqliteTransaction transaction, Guid sessionId) {
-    using SqliteCommand read = database.Command(transaction,
-        "SELECT history_revision FROM sessions WHERE session_id = $session;", ("$session", sessionId));
-    object? value = read.ExecuteScalar();
-    if (value is null)
-      throw new KeyNotFoundException($"Session {sessionId} does not exist.");
-
-    return (long)value;
-  }
+  private long ReadRevision(SqliteTransaction transaction, Guid sessionId) =>
+      database.Scalar<long?>(transaction, "SELECT history_revision FROM sessions WHERE session_id = $session;", ("$session", sessionId))
+          ?? throw new KeyNotFoundException($"Session {sessionId} does not exist.");
 
   private MessageRefusalReason? DecideRefusal(SqliteTransaction transaction, Guid sessionId, long actualRevision,
       long historyRevision, UserMessageSubmission submission, bool accepting, Guid? activeExecutionId) {
-    using SqliteCommand read = database.Command(transaction,
+    long? stopFlag = database.Scalar<long?>(transaction,
         "SELECT CASE WHEN kind = $compaction THEN 2 ELSE stopping END FROM execution_runs WHERE session_id = $session AND outcome IS NULL;",
         ("$session", sessionId), ("$compaction", (int)ExecutionRunKind.Compaction));
-    object? stopFlag = read.ExecuteScalar();
     if (!accepting || stopFlag is 1L)
       return MessageRefusalReason.Stopping;
 
@@ -123,31 +103,26 @@ internal sealed class UserMessageStorage(Database database) {
     if (activeExecutionId is null || currentExecutionId != activeExecutionId)
       return MessageRefusalReason.Capacity;
 
-    using SqliteCommand count = database.Command(transaction,
-        "SELECT COUNT(*) FROM execution_inputs WHERE run_id = $run AND outcome IS NULL;",
-        ("$run", currentExecutionId));
-    if ((long)count.ExecuteScalar()! >= 8)
+    if (database.Scalar<long>(transaction,
+        "SELECT COUNT(*) FROM execution_inputs WHERE run_id = $run AND outcome IS NULL;", ("$run", currentExecutionId)) >= 8)
       return MessageRefusalReason.Capacity;
 
-    using SqliteCommand selectionRead = database.Command(transaction, """
+    LlmSelection? initiatingSelection = LlmSelectionJson.Read(database.Scalar<string?>(transaction, """
       SELECT llm_selection_json FROM execution_runs
       WHERE session_id = $session AND run_id = $run;
-      """, ("$session", sessionId), ("$run", currentExecutionId));
-    LlmSelection? initiatingSelection = LlmSelectionJson.Read(selectionRead.ExecuteScalar() as string);
+      """, ("$session", sessionId), ("$run", currentExecutionId)));
     return LlmSelectionJson.SameOperation(initiatingSelection, submission.LlmSelection)
         ? null : MessageRefusalReason.SelectionLocked;
   }
 
-  private Guid? ReadActiveExecution(SqliteTransaction transaction, Guid sessionId) {
-    using SqliteCommand read = database.Command(transaction,
-        "SELECT run_id FROM execution_runs WHERE session_id = $session AND outcome IS NULL;",
-        ("$session", sessionId));
-    return read.ExecuteScalar() is string execution ? Guid.Parse(execution) : null;
-  }
+  private Guid? ReadActiveExecution(SqliteTransaction transaction, Guid sessionId) =>
+      database.QuerySingleOrDefault<Guid?>(transaction,
+          "SELECT run_id FROM execution_runs WHERE session_id = $session AND outcome IS NULL;",
+          row => row.Guid("run_id"), ("$session", sessionId));
 
   private void InsertReceipt(SqliteTransaction transaction, UserMessageReceipt receipt) {
     // Length-bearing UTF-8 bytes preserve embedded NUL as well as exact Unicode.
-    using SqliteCommand insert = database.Command(transaction, """
+    if (database.Execute(transaction, """
       INSERT INTO input_decisions (
           session_id, input_id, expected_history_revision, original_text_utf8, decision, run_id, refusal_reason,
           llm_selection_json)
@@ -161,8 +136,7 @@ internal sealed class UserMessageStorage(Database database) {
         ("$decision", (int)receipt.Acceptance),
         ("$run", receipt.ExecutionId),
         ("$reason", receipt.RefusalReason is { } reason ? (int)reason : null),
-        ("$selection", LlmSelectionJson.Write(receipt.Submission.LlmSelection)));
-    if (insert.ExecuteNonQuery() == 0)
+        ("$selection", LlmSelectionJson.Write(receipt.Submission.LlmSelection))) == 0)
       throw new KeyNotFoundException($"Session {receipt.SessionId} does not exist.");
   }
 

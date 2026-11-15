@@ -320,7 +320,7 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
   }
 
   internal SessionExecutionResult? ReadSettlement(Guid sessionId, Guid executionId) {
-    return database.Guarded<SessionExecutionResult?>(() => {
+    return database.RunLocked<SessionExecutionResult?>(() => {
       using SqliteCommand read = database.Command(null, """
         SELECT r.outcome,
             (SELECT substr(q.error, 1, 1024) FROM execution_requests q

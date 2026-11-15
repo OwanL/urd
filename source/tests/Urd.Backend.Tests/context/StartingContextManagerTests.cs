@@ -9,15 +9,14 @@ namespace Urd.Backend.Tests.Context;
 
 public sealed class StartingContextManagerTests {
   [Fact]
-  public async Task SessionKindAndAssignmentComposeWithSharedInstructionsWithoutAddingTheRequest() {
-    const string initialRequest = "initial request is supplied separately";
+  public void SessionKindAndAssignmentComposeWithSharedInstructions() {
     const string assignment = "Inspect the specified behavior and report back.";
     var manager = CreateManager();
 
-    StartingContext primary = await manager.CreateAsync(
-        new(SessionKind.Primary, ModelFamily.OpenAI, null, initialRequest, assignment), default);
-    StartingContext subagent = await manager.CreateAsync(
-        new(SessionKind.Subagent, ModelFamily.OpenAI, null, initialRequest, assignment), default);
+    StartingContext primary = manager.Create(
+        new(SessionKind.Primary, ModelFamily.OpenAI, null, assignment), default);
+    StartingContext subagent = manager.Create(
+        new(SessionKind.Subagent, ModelFamily.OpenAI, null, assignment), default);
     string primaryText = InstructionText(primary);
     string subagentText = InstructionText(subagent);
 
@@ -29,19 +28,17 @@ public sealed class StartingContextManagerTests {
     Assert.Contains(assignment, primaryText, StringComparison.Ordinal);
     Assert.Contains(assignment, subagentText, StringComparison.Ordinal);
     Assert.NotEqual(primaryText, subagentText);
-    Assert.DoesNotContain(initialRequest, primaryText, StringComparison.Ordinal);
-    Assert.DoesNotContain(initialRequest, subagentText, StringComparison.Ordinal);
     Assert.DoesNotContain(primary.Instructions, message => message.Role == ChatRole.User);
     Assert.DoesNotContain(subagent.Instructions, message => message.Role == ChatRole.User);
   }
 
   [Fact]
-  public async Task ImportedGuidanceKeepsPrimaryPreferencesSeparateFromChildInstructions() {
+  public void ImportedGuidanceKeepsPrimaryPreferencesSeparateFromChildInstructions() {
     var manager = CreateManager();
-    var input = new StartingContextInput(SessionKind.Primary, ModelFamily.Other, null, "request", null);
+    var input = new StartingContextInput(SessionKind.Primary, ModelFamily.Other, null, null);
 
-    StartingContext primary = await manager.CreateAsync(input, default);
-    StartingContext subagent = await manager.CreateAsync(input with { SessionKind = SessionKind.Subagent }, default);
+    StartingContext primary = manager.Create(input, default);
+    StartingContext subagent = manager.Create(input with { SessionKind = SessionKind.Subagent }, default);
     string primaryText = InstructionText(primary);
     string subagentText = InstructionText(subagent);
 
@@ -54,11 +51,11 @@ public sealed class StartingContextManagerTests {
   }
 
   [Fact]
-  public async Task ImportedGuidanceDoesNotClaimUnavailableToolsOrPieFeatures() {
+  public void ImportedGuidanceDoesNotClaimUnavailableToolsOrPieFeatures() {
     var manager = CreateManager();
     foreach (SessionKind kind in new[] { SessionKind.Primary, SessionKind.Subagent }) {
-      StartingContext context = await manager.CreateAsync(
-          new(kind, ModelFamily.Other, "C:\\workspace\\urd", "request", null), default);
+      StartingContext context = manager.Create(
+          new(kind, ModelFamily.Other, "C:\\workspace\\urd", null), default);
       string text = InstructionText(context);
 
       foreach (string unsupported in new[] { "ask_user", "session_resources", "session_changes", "request_capability", "invoke_tool", "Pie", "Pi runtime" })
@@ -67,13 +64,13 @@ public sealed class StartingContextManagerTests {
   }
 
   [Fact]
-  public async Task WorkingDirectoryIsIncludedOnlyWhenAvailable() {
+  public void WorkingDirectoryIsIncludedOnlyWhenAvailable() {
     const string workingDirectory = "C:\\workspace\\urd";
     var manager = CreateManager();
-    var input = new StartingContextInput(SessionKind.Primary, ModelFamily.Other, null, "request", null);
+    var input = new StartingContextInput(SessionKind.Primary, ModelFamily.Other, null, null);
 
-    StartingContext withoutDirectory = await manager.CreateAsync(input, default);
-    StartingContext withDirectory = await manager.CreateAsync(input with { WorkingDirectory = workingDirectory }, default);
+    StartingContext withoutDirectory = manager.Create(input, default);
+    StartingContext withDirectory = manager.Create(input with { WorkingDirectory = workingDirectory }, default);
 
     Assert.DoesNotContain("Working directory:", InstructionText(withoutDirectory), StringComparison.Ordinal);
     Assert.DoesNotContain("Assignment context:", InstructionText(withoutDirectory), StringComparison.Ordinal);
@@ -83,11 +80,11 @@ public sealed class StartingContextManagerTests {
   }
 
   [Fact]
-  public async Task ToolsKeepCatalogOrderAndUseTheExistingBackgroundDeclaration() {
+  public void ToolsKeepCatalogOrderAndUseTheExistingBackgroundDeclaration() {
     var manager = CreateManager(new TestTool("first"), new TestTool("second"));
 
-    StartingContext context = await manager.CreateAsync(
-        new(SessionKind.Primary, ModelFamily.Google, null, "request", null), default);
+    StartingContext context = manager.Create(
+        new(SessionKind.Primary, ModelFamily.Google, null, null), default);
 
     Assert.Equal(new[] { "first", "second" }, context.Tools.Select(tool => tool.Name));
     JsonElement schema = context.Tools[0].JsonSchema;
@@ -99,24 +96,24 @@ public sealed class StartingContextManagerTests {
   }
 
   [Fact]
-  public async Task ReturnedCollectionsAreReadOnly() {
+  public void ReturnedCollectionsAreReadOnly() {
     var manager = CreateManager(new TestTool("read"));
 
-    StartingContext context = await manager.CreateAsync(
-        new(SessionKind.Primary, ModelFamily.Other, null, "request", null), default);
+    StartingContext context = manager.Create(
+        new(SessionKind.Primary, ModelFamily.Other, null, null), default);
 
     Assert.True(Assert.IsAssignableFrom<IList<ChatMessage>>(context.Instructions).IsReadOnly);
     Assert.True(Assert.IsAssignableFrom<IList<AIFunctionDeclaration>>(context.Tools).IsReadOnly);
   }
 
   [Fact]
-  public async Task AdditionalGuidanceIsMergedBeforeAndAfterBuiltInGuidance() {
+  public void AdditionalGuidanceIsMergedBeforeAndAfterBuiltInGuidance() {
     var manager = CreateManagerWithGuidance(
         new TestGuidance(-1, _ => "before built-ins"),
         new TestGuidance(1000, _ => "after built-ins"));
 
-    StartingContext context = await manager.CreateAsync(
-        new(SessionKind.Primary, ModelFamily.Other, null, "request", "assignment"), default);
+    StartingContext context = manager.Create(
+        new(SessionKind.Primary, ModelFamily.Other, null, "assignment"), default);
     string[] instructions = context.Instructions.Select(message => message.Text).ToArray();
 
     int beforeBuiltInsIndex = Array.IndexOf(instructions, "before built-ins");
@@ -130,13 +127,13 @@ public sealed class StartingContextManagerTests {
   }
 
   [Fact]
-  public async Task EqualOrderGuidanceOfTheSameTypePreservesSuppliedOrder() {
+  public void EqualOrderGuidanceOfTheSameTypePreservesSuppliedOrder() {
     var manager = CreateManagerWithGuidance(
         new TestGuidance(50, _ => "first supplied"),
         new TestGuidance(50, _ => "second supplied"));
 
-    StartingContext context = await manager.CreateAsync(
-        new(SessionKind.Primary, ModelFamily.Other, null, "request", null), default);
+    StartingContext context = manager.Create(
+        new(SessionKind.Primary, ModelFamily.Other, null, null), default);
 
     string[] instructions = context.Instructions.Select(message => message.Text).ToArray();
 
@@ -145,30 +142,30 @@ public sealed class StartingContextManagerTests {
   }
 
   [Fact]
-  public async Task AdditionalGuidanceIsSessionScopedAndEvaluatedForEachSession() {
+  public void AdditionalGuidanceIsSessionScopedAndEvaluatedForEachSession() {
     var manager = CreateManagerWithGuidance(new TestGuidance(
         -1,
         input => input.SessionKind.ToString(),
         SessionKind.Primary));
-    var primaryInput = new StartingContextInput(SessionKind.Primary, ModelFamily.Other, null, "request", null);
+    var primaryInput = new StartingContextInput(SessionKind.Primary, ModelFamily.Other, null, null);
     var subagentInput = primaryInput with { SessionKind = SessionKind.Subagent };
 
-    StartingContext primary = await manager.CreateAsync(primaryInput, default);
-    StartingContext subagent = await manager.CreateAsync(subagentInput, default);
+    StartingContext primary = manager.Create(primaryInput, default);
+    StartingContext subagent = manager.Create(subagentInput, default);
 
     Assert.Contains(primary.Instructions, message => message.Text == "Primary");
     Assert.DoesNotContain(subagent.Instructions, message => message.Text == "Subagent");
   }
 
   [Fact]
-  public async Task NullAndWhitespaceAdditionalGuidanceIsOmittedAndAllInstructionsAreSystemMessages() {
+  public void NullAndWhitespaceAdditionalGuidanceIsOmittedAndAllInstructionsAreSystemMessages() {
     var manager = CreateManagerWithGuidance(
         new TestGuidance(-2, _ => null),
         new TestGuidance(-1, _ => " \t "),
         new TestGuidance(10, _ => "additional instruction"));
 
-    StartingContext context = await manager.CreateAsync(
-        new(SessionKind.Primary, ModelFamily.Other, null, "request", null), default);
+    StartingContext context = manager.Create(
+        new(SessionKind.Primary, ModelFamily.Other, null, null), default);
 
     Assert.DoesNotContain(context.Instructions, message => string.IsNullOrWhiteSpace(message.Text));
     Assert.Contains(context.Instructions, message => message.Text == "additional instruction");
@@ -176,7 +173,7 @@ public sealed class StartingContextManagerTests {
   }
 
   [Fact]
-  public async Task CancellationFromGuidancePreventsEvaluatingTheNextGuidance() {
+  public void CancellationFromGuidancePreventsEvaluatingTheNextGuidance() {
     using var source = new CancellationTokenSource();
     bool nextGuidanceEvaluated = false;
     var manager = CreateManagerWithGuidance(
@@ -189,31 +186,31 @@ public sealed class StartingContextManagerTests {
           return "must not run";
         }));
 
-    await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-        manager.CreateAsync(new(SessionKind.Primary, ModelFamily.Other, null, "request", null), source.Token));
+    Assert.ThrowsAny<OperationCanceledException>(() =>
+        manager.Create(new(SessionKind.Primary, ModelFamily.Other, null, null), source.Token));
 
     Assert.False(nextGuidanceEvaluated);
   }
 
   [Fact]
-  public async Task GuidanceExceptionsPropagate() {
+  public void GuidanceExceptionsPropagate() {
     var expected = new InvalidOperationException("guidance failed");
     var manager = CreateManagerWithGuidance(new TestGuidance(-1, _ => throw expected));
 
-    InvalidOperationException actual = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-        manager.CreateAsync(new(SessionKind.Primary, ModelFamily.Other, null, "request", null), default));
+    InvalidOperationException actual = Assert.Throws<InvalidOperationException>(() =>
+        manager.Create(new(SessionKind.Primary, ModelFamily.Other, null, null), default));
 
     Assert.Same(expected, actual);
   }
 
   [Fact]
-  public async Task CancellationStopsCompositionBeforeReturningAContext() {
+  public void CancellationStopsCompositionBeforeReturningAContext() {
     var manager = CreateManager();
     using var source = new CancellationTokenSource();
-    await source.CancelAsync();
+    source.Cancel();
 
-    OperationCanceledException exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-        manager.CreateAsync(new(SessionKind.Primary, ModelFamily.Other, null, "request", null), source.Token));
+    OperationCanceledException exception = Assert.ThrowsAny<OperationCanceledException>(() =>
+        manager.Create(new(SessionKind.Primary, ModelFamily.Other, null, null), source.Token));
 
     Assert.Equal(source.Token, exception.CancellationToken);
   }

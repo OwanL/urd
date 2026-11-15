@@ -11,12 +11,12 @@ public sealed class HistoryCompactorTests {
   private static readonly StartingContext emptyStartingContext = new([], []);
 
   [Fact]
-  public void PrepareValidatesStartingContextAndItsContents() {
+  public void CreatePlanValidatesStartingContextAndItsContents() {
     var history = new ModelHistory([]);
 
-    Assert.Throws<ArgumentNullException>(() => HistoryCompactor.Prepare(history, TestLlmSelection.Default, null!, CompactionReason.Manual));
-    Assert.Throws<ArgumentNullException>(() => HistoryCompactor.Prepare(history, TestLlmSelection.Default, new(null!, []), CompactionReason.Manual));
-    Assert.Throws<ArgumentNullException>(() => HistoryCompactor.Prepare(history, TestLlmSelection.Default, new([], null!), CompactionReason.Manual));
+    Assert.Throws<ArgumentNullException>(() => HistoryCompactor.CreatePlan(history, TestLlmSelection.Default, null!, CompactionReason.Manual));
+    Assert.Throws<ArgumentNullException>(() => HistoryCompactor.CreatePlan(history, TestLlmSelection.Default, new(null!, []), CompactionReason.Manual));
+    Assert.Throws<ArgumentNullException>(() => HistoryCompactor.CreatePlan(history, TestLlmSelection.Default, new([], null!), CompactionReason.Manual));
   }
 
   [Fact]
@@ -27,8 +27,8 @@ public sealed class HistoryCompactorTests {
     ]);
     var startingContext = new StartingContext([new ChatMessage(ChatRole.System, new string('i', 1_000))], []);
 
-    HistoryCompactionPlan emptyPlan = HistoryCompactor.Prepare(history, TestLlmSelection.Default, emptyStartingContext, CompactionReason.Manual)!;
-    HistoryCompactionPlan instructionPlan = HistoryCompactor.Prepare(history, TestLlmSelection.Default, startingContext, CompactionReason.Manual)!;
+    HistoryCompactionPlan emptyPlan = HistoryCompactor.CreatePlan(history, TestLlmSelection.Default, emptyStartingContext, CompactionReason.Manual)!;
+    HistoryCompactionPlan instructionPlan = HistoryCompactor.CreatePlan(history, TestLlmSelection.Default, startingContext, CompactionReason.Manual)!;
 
     Assert.True(instructionPlan.EstimatedContextTokensBefore > emptyPlan.EstimatedContextTokensBefore);
   }
@@ -42,10 +42,10 @@ public sealed class HistoryCompactorTests {
     ], UsageBasedContextTokens: 900);
     LlmSelection selection = TestLlmSelection.Default with { ContextWindow = 1_000 };
 
-    HistoryCompactionPlan? plan = HistoryCompactor.Prepare(context, selection, emptyStartingContext, CompactionReason.Threshold);
+    HistoryCompactionPlan? plan = HistoryCompactor.CreatePlan(context, selection, emptyStartingContext, CompactionReason.Threshold);
 
     Assert.Equal(2, plan?.FirstRetainedMessageIndex);
-    Assert.Null(HistoryCompactor.Prepare(context, selection with { ContextWindow = null }, emptyStartingContext, CompactionReason.Threshold));
+    Assert.Null(HistoryCompactor.CreatePlan(context, selection with { ContextWindow = null }, emptyStartingContext, CompactionReason.Threshold));
   }
 
   [Theory]
@@ -64,7 +64,7 @@ public sealed class HistoryCompactorTests {
     ], UsageBasedContextTokens: observedTokens);
     LlmSelection selection = TestLlmSelection.Default with { ContextWindow = contextWindow };
 
-    HistoryCompactionPlan? plan = HistoryCompactor.Prepare(history, selection, emptyStartingContext,
+    HistoryCompactionPlan? plan = HistoryCompactor.CreatePlan(history, selection, emptyStartingContext,
         CompactionReason.Threshold, compactionTriggerTokenCount: trigger);
 
     Assert.Equal(expectedStart, plan?.FirstRetainedMessageIndex);
@@ -83,9 +83,9 @@ public sealed class HistoryCompactorTests {
       Entry(3, 0, true, ChatRole.User, new string('n', 120))
     ], UsageBasedContextTokens: 50);
 
-    Assert.Null(HistoryCompactor.Prepare(history, TestLlmSelection.Default, emptyStartingContext,
+    Assert.Null(HistoryCompactor.CreatePlan(history, TestLlmSelection.Default, emptyStartingContext,
         CompactionReason.Threshold, compactionTriggerTokenCount: 100));
-    Assert.Equal(2, HistoryCompactor.Prepare(history, TestLlmSelection.Default, emptyStartingContext,
+    Assert.Equal(2, HistoryCompactor.CreatePlan(history, TestLlmSelection.Default, emptyStartingContext,
         CompactionReason.Manual, compactionTriggerTokenCount: 100)?.FirstRetainedMessageIndex);
   }
 
@@ -98,7 +98,7 @@ public sealed class HistoryCompactorTests {
       Entry(3, 0, true, ChatRole.User, "latest turn")
     ]);
 
-    HistoryCompactionPlan? plan = HistoryCompactor.Prepare(history, TestLlmSelection.Default, emptyStartingContext, CompactionReason.Manual);
+    HistoryCompactionPlan? plan = HistoryCompactor.CreatePlan(history, TestLlmSelection.Default, emptyStartingContext, CompactionReason.Manual);
 
     Assert.Equal(2, plan?.FirstRetainedMessageIndex);
   }
@@ -112,7 +112,7 @@ public sealed class HistoryCompactorTests {
       Entry(2, 0, true, ChatRole.User, "new turn")
     ], new SavedHistoryCompaction(Guid.NewGuid(), previousLocation, "summary"));
 
-    HistoryCompactionPlan? plan = HistoryCompactor.Prepare(history, TestLlmSelection.Default, emptyStartingContext, CompactionReason.Manual);
+    HistoryCompactionPlan? plan = HistoryCompactor.CreatePlan(history, TestLlmSelection.Default, emptyStartingContext, CompactionReason.Manual);
 
     Assert.Equal(2, plan?.FirstRetainedMessageIndex);
     Assert.True(plan!.FirstRetainedMessage.Location.IsAfter(previousLocation));
@@ -141,8 +141,8 @@ public sealed class HistoryCompactorTests {
     ]);
     LlmSelection selection = TestLlmSelection.Default with { ContextWindow = 1_000 };
 
-    Assert.Null(HistoryCompactor.Prepare(context, selection, emptyStartingContext, CompactionReason.Manual));
-    HistoryCompactionPlan? plan = HistoryCompactor.Prepare(context, selection, emptyStartingContext, CompactionReason.Overflow);
+    Assert.Null(HistoryCompactor.CreatePlan(context, selection, emptyStartingContext, CompactionReason.Manual));
+    HistoryCompactionPlan? plan = HistoryCompactor.CreatePlan(context, selection, emptyStartingContext, CompactionReason.Overflow);
 
     Assert.Equal(2, plan?.FirstRetainedMessageIndex);
     Assert.Equal(new string('n', 2_500), plan?.FirstRetainedMessage.Message.Contents.OfType<TextContent>().Single().Text);
@@ -157,7 +157,7 @@ public sealed class HistoryCompactorTests {
       Entry(1, 3, false, ChatRole.Assistant, "answer")
     ]);
 
-    HistoryCompactionPlan? plan = HistoryCompactor.Prepare(context, TestLlmSelection.Default, emptyStartingContext, CompactionReason.Manual);
+    HistoryCompactionPlan? plan = HistoryCompactor.CreatePlan(context, TestLlmSelection.Default, emptyStartingContext, CompactionReason.Manual);
 
     Assert.Equal(3, plan?.FirstRetainedMessageIndex);
     Assert.Equal(ChatRole.Assistant, plan?.FirstRetainedMessage.Message.Role);
@@ -175,10 +175,10 @@ public sealed class HistoryCompactorTests {
       Entry(1, 2, false, ChatRole.Tool, "", new FunctionResultContent("call", new string('r', 3_000))),
       Entry(2, 0, true, ChatRole.User, "current")
     ], previous);
-    HistoryCompactionPlan plan = HistoryCompactor.Prepare(context, TestLlmSelection.Default, emptyStartingContext, CompactionReason.Manual)!;
+    HistoryCompactionPlan plan = HistoryCompactor.CreatePlan(context, TestLlmSelection.Default, emptyStartingContext, CompactionReason.Manual)!;
     var client = new SummaryClient("Goal: keep context.\nFiles read: src/old.cs");
 
-    GeneratedCompactionSummary result = await HistoryCompactor.SummarizeAsync(client, TestLlmSelection.Default, plan, default);
+    GeneratedCompactionSummary result = await HistoryCompactor.GenerateSummaryAsync(client, TestLlmSelection.Default, plan, default);
 
     Assert.True(result.EstimatedContextTokensAfter < plan.EstimatedContextTokensBefore);
     Assert.Equal(1, client.Requests);
@@ -196,13 +196,13 @@ public sealed class HistoryCompactorTests {
       Entry(1, 0, true, ChatRole.User, new string('x', 2_000)),
       Entry(2, 0, true, ChatRole.User, "current")
     ]);
-    HistoryCompactionPlan plan = HistoryCompactor.Prepare(history, TestLlmSelection.Default, emptyStartingContext, CompactionReason.Manual)!;
+    HistoryCompactionPlan plan = HistoryCompactor.CreatePlan(history, TestLlmSelection.Default, emptyStartingContext, CompactionReason.Manual)!;
 
-    await Assert.ThrowsAsync<InvalidDataException>(() => HistoryCompactor.SummarizeAsync(
+    await Assert.ThrowsAsync<InvalidDataException>(() => HistoryCompactor.GenerateSummaryAsync(
         new SummaryClient(new string('s', 4_000)), TestLlmSelection.Default, plan, default));
-    await Assert.ThrowsAsync<InvalidDataException>(() => HistoryCompactor.SummarizeAsync(
+    await Assert.ThrowsAsync<InvalidDataException>(() => HistoryCompactor.GenerateSummaryAsync(
         new SummaryClient("summary", finishReason: ChatFinishReason.Length), TestLlmSelection.Default, plan, default));
-    await Assert.ThrowsAsync<InvalidDataException>(() => HistoryCompactor.SummarizeAsync(
+    await Assert.ThrowsAsync<InvalidDataException>(() => HistoryCompactor.GenerateSummaryAsync(
         new SummaryClient("summary", includeToolCall: true), TestLlmSelection.Default, plan, default));
   }
 
@@ -212,10 +212,10 @@ public sealed class HistoryCompactorTests {
       Entry(1, 0, true, ChatRole.User, new string('x', 2_000)),
       Entry(2, 0, true, ChatRole.User, "current")
     ]);
-    HistoryCompactionPlan plan = HistoryCompactor.Prepare(context, TestLlmSelection.Default, emptyStartingContext, CompactionReason.Manual)!;
+    HistoryCompactionPlan plan = HistoryCompactor.CreatePlan(context, TestLlmSelection.Default, emptyStartingContext, CompactionReason.Manual)!;
     var client = new SummaryClient(waitForCancellation: true);
     using var cancellation = new CancellationTokenSource();
-    Task<GeneratedCompactionSummary> pending = HistoryCompactor.SummarizeAsync(client, TestLlmSelection.Default, plan, cancellation.Token);
+    Task<GeneratedCompactionSummary> pending = HistoryCompactor.GenerateSummaryAsync(client, TestLlmSelection.Default, plan, cancellation.Token);
     await cancellation.CancelAsync();
 
     await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending);

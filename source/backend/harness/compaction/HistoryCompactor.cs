@@ -8,7 +8,7 @@ namespace Urd.Core.Compaction;
 internal static class HistoryCompactor {
   internal const int MaxSummaryCharacters = 32_768;
 
-  internal static HistoryCompactionPlan? Prepare(ModelHistory history, LlmSelection selection,
+  internal static HistoryCompactionPlan? CreatePlan(ModelHistory history, LlmSelection selection,
       StartingContext startingContext, CompactionReason reason, string? focus = null,
       int? compactionTriggerTokenCount = null) {
     ArgumentNullException.ThrowIfNull(history);
@@ -25,11 +25,11 @@ internal static class HistoryCompactor {
       return null;
 
     int retainedHistoryTokenLimit = ContextTokenBudget.RetainedHistoryLimit(trigger);
-    int? firstRetainedMessageIndex = RetainedHistorySelector.SelectStartIndex(history, retainedHistoryTokenLimit, reason);
+    int? firstRetainedMessageIndex = RetainedHistorySelector.FindFirstRetainedIndex(history, retainedHistoryTokenLimit, reason);
     return firstRetainedMessageIndex is { } index ? new(history, index, estimatedContextTokens, reason, focus) : null;
   }
 
-  internal static async Task<GeneratedCompactionSummary> SummarizeAsync(IChatClient client, LlmSelection selection,
+  internal static async Task<GeneratedCompactionSummary> GenerateSummaryAsync(IChatClient client, LlmSelection selection,
       HistoryCompactionPlan plan, CancellationToken cancellationToken, UsageContext? usageContext = null) {
     ArgumentNullException.ThrowIfNull(client);
     ArgumentNullException.ThrowIfNull(selection);

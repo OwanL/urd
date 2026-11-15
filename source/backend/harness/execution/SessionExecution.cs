@@ -148,15 +148,15 @@ internal sealed class SessionExecution : IDisposable {
         && preferences.CompactionTriggerTokenCount is null)
       return null;
     ModelHistory context = prepared ?? await session.ReadModelHistoryAsync(ExecutionId, requestId);
-    await EnsureStartingContextAsync(context.ReadMessages());
-    return HistoryCompactor.Prepare(context, selection, startingContext!, reason, focus,
+    EnsureStartingContext();
+    return HistoryCompactor.CreatePlan(context, selection, startingContext!, reason, focus,
         preferences.CompactionTriggerTokenCount);
   }
 
   private async Task<GeneratedCompactionSummary> SummarizeCompactionAsync(HistoryCompactionPlan plan) {
     chatClient ??= createChatClient(selection.Connection);
     try {
-      return await HistoryCompactor.SummarizeAsync(chatClient, selection, plan, stop.Token,
+      return await HistoryCompactor.GenerateSummaryAsync(chatClient, selection, plan, stop.Token,
           new UsageContext(session.Id, ExecutionId, "compaction"));
     } catch (OperationCanceledException) when (IsStopping) {
       throw;
@@ -165,10 +165,9 @@ internal sealed class SessionExecution : IDisposable {
     }
   }
 
-  private async Task EnsureStartingContextAsync(IReadOnlyList<ChatMessage> messages) {
-    startingContext ??= session.ReadStartingContext() ?? await startingContextManager.CreateAsync(new(
-        session.Kind, selection.Family, session.WorkingDirectory,
-        messages.FirstOrDefault(message => message.Role == ChatRole.User)?.Text ?? "", null), stop.Token);
+  private void EnsureStartingContext() {
+    startingContext ??= session.ReadStartingContext() ?? startingContextManager.Create(new(
+        session.Kind, selection.Family, session.WorkingDirectory, null), stop.Token);
     stop.Token.ThrowIfCancellationRequested();
   }
 
@@ -343,7 +342,7 @@ internal sealed class SessionExecution : IDisposable {
     try {
       CancellationToken stopToken = stop.Token;
       stopToken.ThrowIfCancellationRequested();
-      await EnsureStartingContextAsync(request.Messages);
+      EnsureStartingContext();
       if (compactBefore)
         request = await CompactContextAsync(request.RequestId, CompactionReason.Threshold, prepared: request.Context) ?? request;
       chatClient ??= createChatClient(selection.Connection);

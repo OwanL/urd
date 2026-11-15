@@ -29,7 +29,7 @@ public sealed class SkillsGuidanceTests : IDisposable {
     Write(Path.Combine(Packaged, "broken", "SKILL.md"), "no frontmatter");
     Git("add", "skills", "a");
 
-    IReadOnlyList<Skill> skills = SkillsGuidance.Find(Project, Packaged);
+    IReadOnlyList<Skill> skills = SkillCatalog.Find(Project, Packaged);
 
     Assert.Equal(
         [("deploy", "Deploy the service."), ("diagnose", "Project diagnose."), ("notes", "Take notes.")],
@@ -42,7 +42,7 @@ public sealed class SkillsGuidanceTests : IDisposable {
     Write(Path.Combine(Project, "local", "SKILL.md"), Skill("local", "Not in a repository."));
     Write(Path.Combine(Packaged, "notes", "SKILL.md"), Skill("notes", "Take <notes> & more."));
 
-    IReadOnlyList<Skill> skills = SkillsGuidance.Find(Project, Packaged);
+    IReadOnlyList<Skill> skills = SkillCatalog.Find(Project, Packaged);
     string text = SkillsGuidance.Compose(skills)!;
 
     Assert.Equal(["notes"], skills.Select(skill => skill.Name));
@@ -67,7 +67,7 @@ public sealed class SkillsGuidanceTests : IDisposable {
 
   [Fact]
   public void UrdPackagesItsDiagnoseSkill() =>
-      Assert.Contains(SkillsGuidance.Find(Project, SkillsGuidance.PackagedDirectory), skill => skill.Name == "diagnose");
+      Assert.Contains(SkillCatalog.Find(Project, SkillCatalog.PackagedDirectory), skill => skill.Name == "diagnose");
 
   private void Git(params string[] arguments) {
     string executable = (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator)

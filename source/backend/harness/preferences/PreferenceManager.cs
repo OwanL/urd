@@ -13,11 +13,9 @@ public sealed class PreferenceManager {
 
   public UserPreferences Read(string? fallbackWorkingDirectory = null) {
     UserPreferences persisted = store.Preferences.Read();
-    if (persisted.WorkingDirectory is not null) return persisted;
-    return persisted with {
-      WorkingDirectory = persisted.WorkingDirectory
-          ?? fallbackWorkingDirectory ?? Path.GetPathRoot(Environment.CurrentDirectory)
-    };
+    string? workingDirectory = persisted.WorkingDirectory
+        ?? fallbackWorkingDirectory ?? Path.GetPathRoot(Environment.CurrentDirectory);
+    return persisted.WorkingDirectory is not null ? persisted : persisted with { WorkingDirectory = workingDirectory };
   }
 
   public void SetWorkingDirectory(string? path) {

@@ -10,22 +10,22 @@ public sealed class UsagePricingTests {
   private static readonly Uri OfficialEndpoint = new("https://api.openai.com/v1/");
 
   [Fact]
-  public void FindUsesOnlyExactModelsOnOfficialProviderConnections() {
+  public void FindRatesUsesOnlyExactModelsOnOfficialProviderConnections() {
     ProviderConnection openAI = Connection(ProviderRoute.OpenAI, OfficialEndpoint);
     ProviderConnection chatGpt = Connection(ProviderRoute.ChatGpt, OfficialEndpoint);
 
-    UsageRates rates = Assert.IsType<UsageRates>(UsagePricing.Find(openAI, "gpt-5.4", CapturedAt));
+    UsageRates rates = Assert.IsType<UsageRates>(UsagePricing.FindRates(openAI, "gpt-5.4"));
     Assert.Equal(2.5m, rates.Input);
     Assert.Equal(15m, rates.Output);
     Assert.Equal(.25m, rates.CachedInput);
     Assert.Equal(CapturedAt, rates.CapturedAt);
     Assert.Equal("https://developers.openai.com/api/docs/pricing", rates.Source);
-    Assert.NotNull(UsagePricing.Find(chatGpt, "gpt-6-astra", CapturedAt));
+    Assert.NotNull(UsagePricing.FindRates(chatGpt, "gpt-6-astra"));
 
-    Assert.Null(UsagePricing.Find(openAI, "GPT-5.4", CapturedAt));
-    Assert.Null(UsagePricing.Find(openAI, "gpt-5.4-2025-09-12", CapturedAt));
-    Assert.Null(UsagePricing.Find(Connection(ProviderRoute.Custom, OfficialEndpoint), "gpt-5.4", CapturedAt));
-    Assert.Null(UsagePricing.Find(Connection(ProviderRoute.OpenAI, new Uri("https://fixture.invalid/v1/")), "gpt-5.4", CapturedAt));
+    Assert.Null(UsagePricing.FindRates(openAI, "GPT-5.4"));
+    Assert.Null(UsagePricing.FindRates(openAI, "gpt-5.4-2025-09-12"));
+    Assert.Null(UsagePricing.FindRates(Connection(ProviderRoute.Custom, OfficialEndpoint), "gpt-5.4"));
+    Assert.Null(UsagePricing.FindRates(Connection(ProviderRoute.OpenAI, new Uri("https://fixture.invalid/v1/")), "gpt-5.4"));
   }
 
   [Fact]
@@ -40,8 +40,8 @@ public sealed class UsagePricingTests {
 
   [Fact]
   public void LongContextRateAppliesToWholeRequestOnlyAboveThreshold() {
-    UsageRates rates = Assert.IsType<UsageRates>(UsagePricing.Find(
-        Connection(ProviderRoute.OpenAI, OfficialEndpoint), "gpt-5.4", CapturedAt));
+    UsageRates rates = Assert.IsType<UsageRates>(UsagePricing.FindRates(
+        Connection(ProviderRoute.OpenAI, OfficialEndpoint), "gpt-5.4"));
 
     Assert.Equal(680_015_000L, UsagePricing.NanoDollars(rates, new UsageTokens(272_000, 1, 0)));
     Assert.Equal(1_360_027_500L, UsagePricing.NanoDollars(rates, new UsageTokens(272_001, 1, 0)));

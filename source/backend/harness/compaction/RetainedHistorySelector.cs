@@ -1,7 +1,7 @@
 namespace Urd.Core.Compaction;
 
 internal static class RetainedHistorySelector {
-  internal static int? SelectStartIndex(ModelHistory history, int retainedHistoryTokenLimit, CompactionReason reason) {
+  internal static int? FindFirstRetainedIndex(ModelHistory history, int retainedHistoryTokenLimit, CompactionReason reason) {
     int? startWithinBudget = FindOldestStartWithinBudget(history, retainedHistoryTokenLimit);
     if (startWithinBudget is not null || reason != CompactionReason.Overflow) return startWithinBudget;
     return FindNewestStartForOverflow(history);

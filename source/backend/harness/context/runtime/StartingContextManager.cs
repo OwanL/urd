@@ -23,17 +23,15 @@ internal sealed class StartingContextManager {
         .ToArray());
   }
 
-  internal Task<StartingContext> CreateAsync(StartingContextInput input, CancellationToken cancellation) {
-    if (cancellation.IsCancellationRequested)
-      return Task.FromCanceled<StartingContext>(cancellation);
+  internal StartingContext Create(StartingContextInput input, CancellationToken cancellation) {
+    cancellation.ThrowIfCancellationRequested();
 
     if (input.SessionKind is not (SessionKind.Primary or SessionKind.Subagent))
       throw new ArgumentOutOfRangeException(nameof(input), input.SessionKind, "Unsupported session kind.");
 
     var instructions = new List<ChatMessage>();
     foreach (ContextGuidance item in guidance) {
-      if (cancellation.IsCancellationRequested)
-        return Task.FromCanceled<StartingContext>(cancellation);
+      cancellation.ThrowIfCancellationRequested();
 
       if (!item.AppliesTo(input))
         continue;
@@ -43,17 +41,14 @@ internal sealed class StartingContextManager {
         instructions.Add(new(ChatRole.System, text));
     }
 
-    if (cancellation.IsCancellationRequested)
-      return Task.FromCanceled<StartingContext>(cancellation);
+    cancellation.ThrowIfCancellationRequested();
 
     AIFunctionDeclaration[] tools = toolCatalog.Tools
         .Select(AgentToolDeclaration.Create)
         .ToArray();
-    if (cancellation.IsCancellationRequested)
-      return Task.FromCanceled<StartingContext>(cancellation);
+    cancellation.ThrowIfCancellationRequested();
 
-    return Task.FromResult(new StartingContext(
-        Array.AsReadOnly(instructions.ToArray()), Array.AsReadOnly(tools)));
+    return new(Array.AsReadOnly(instructions.ToArray()), Array.AsReadOnly(tools));
   }
 
 #pragma warning disable S3011 // Discover and construct only parameterless guidance in Urd Core, never external plugin types.

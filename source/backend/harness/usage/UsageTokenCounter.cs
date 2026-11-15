@@ -66,31 +66,22 @@ public sealed class UsageTokenCounter {
           continue;
         }
 
-        switch (content) {
-          case TextContent text:
-            if (output.Length + (long)text.Text.Length > 2 * 1024 * 1024) {
-              outputUnknown = true;
-              break;
-            }
-            output.Append(text.Text);
-            outputDirty = true;
-            outputVersion++;
-            break;
-          case TextReasoningContent reasoning when reasoning.ProtectedData is null:
-            if (output.Length + (long)reasoning.Text.Length > 2 * 1024 * 1024) {
-              outputUnknown = true;
-              break;
-            }
-            output.Append(reasoning.Text);
-            outputDirty = true;
-            outputVersion++;
-            break;
-          default:
-            outputUnknown = true;
-            break;
-        }
+        if (content is TextContent text) AppendVisibleText(text.Text);
+        else if (content is TextReasoningContent reasoning && reasoning.ProtectedData is null)
+          AppendVisibleText(reasoning.Text);
+        else outputUnknown = true;
       }
     }
+  }
+
+  private void AppendVisibleText(string text) {
+    if (output.Length + (long)text.Length > 2 * 1024 * 1024) {
+      outputUnknown = true;
+      return;
+    }
+    output.Append(text);
+    outputDirty = true;
+    outputVersion++;
   }
 
   public long? OutputTokens {

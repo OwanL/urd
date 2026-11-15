@@ -6,12 +6,12 @@ public static class UsagePricing {
   private static readonly Uri OfficialEndpoint = new("https://api.openai.com/v1/");
   private static readonly DateTimeOffset CapturedAt = new(2026, 11, 14, 0, 0, 0, TimeSpan.Zero);
   private const string Source = "https://developers.openai.com/api/docs/pricing";
+  private const long LongContextThreshold = 272_000;
   private static readonly IReadOnlyDictionary<string, UsageRates> Catalog = CreateCatalog();
 
-  public static UsageRates? Find(ProviderConnection connection, string model, DateTimeOffset at) {
+  public static UsageRates? FindRates(ProviderConnection connection, string model) {
     ArgumentNullException.ThrowIfNull(connection);
     ArgumentNullException.ThrowIfNull(model);
-    _ = at; // The current catalog has no effective-dated price history.
     if (connection.Route is not (ProviderRoute.OpenAI or ProviderRoute.ChatGpt) ||
         !connection.Endpoint.Equals(OfficialEndpoint)) return null;
     return Catalog.GetValueOrDefault(model);
@@ -51,11 +51,16 @@ public static class UsagePricing {
 
   private static Dictionary<string, UsageRates> CreateCatalog() {
     var rates = new Dictionary<string, UsageRates>(StringComparer.Ordinal);
-    Add("gpt-6-astra", 10m, 50m, 1m, 12.5m, 25m, 20m, 75m, 2m, 25m, 50m);
-    Add("gpt-6.1-sol", 2m, 10m, .10m, 2.5m, 5m, 4m, 15m, .20m, 5m, 10m);
-    Add("gpt-6.1-terra", 1m, 5m, .05m, 1.25m, 2.5m, 2m, 7.5m, .10m, 2.5m, 5m);
-    Add("gpt-6-luna", .1m, .5m, .01m, .125m, .25m, .2m, .75m, .02m, .25m, .5m);
-    Add("gpt-6-sol", 2m, 10m, .2m, 2.5m, 5m, 4m, 15m, .4m, 5m, 10m);
+    Add("gpt-6-astra", 10m, 50m, 1m, write30m: 12.5m, write12h: 25m,
+        longInput: 20m, longOutput: 75m, longCachedInput: 2m, longWrite30m: 25m, longWrite12h: 50m);
+    Add("gpt-6.1-sol", 2m, 10m, .10m, write30m: 2.5m, write12h: 5m,
+        longInput: 4m, longOutput: 15m, longCachedInput: .20m, longWrite30m: 5m, longWrite12h: 10m);
+    Add("gpt-6.1-terra", 1m, 5m, .05m, write30m: 1.25m, write12h: 2.5m,
+        longInput: 2m, longOutput: 7.5m, longCachedInput: .10m, longWrite30m: 2.5m, longWrite12h: 5m);
+    Add("gpt-6-luna", .1m, .5m, .01m, write30m: .125m, write12h: .25m,
+        longInput: .2m, longOutput: .75m, longCachedInput: .02m, longWrite30m: .25m, longWrite12h: .5m);
+    Add("gpt-6-sol", 2m, 10m, .2m, write30m: 2.5m, write12h: 5m,
+        longInput: 4m, longOutput: 15m, longCachedInput: .4m, longWrite30m: 5m, longWrite12h: 10m);
     Add("gpt-5.4", 2.5m, 15m, .25m, longInput: 5m, longOutput: 22.5m, longCachedInput: .5m);
     Add("gpt-5.5", 5m, 30m, .5m, longInput: 10m, longOutput: 45m, longCachedInput: 1m);
     Add("gpt-5.4-mini", .75m, 4.5m, .075m);
@@ -78,7 +83,7 @@ public static class UsagePricing {
         decimal? longInput = null, decimal? longOutput = null, decimal? longCachedInput = null,
         decimal? longWrite30m = null, decimal? longWrite12h = null) {
       rates.Add(model, new UsageRates(model, Source, CapturedAt, input, output, cachedInput,
-          write30m, write12h, longInput is null ? null : 272_000,
+          write30m, write12h, longInput is null ? null : LongContextThreshold,
           longInput, longOutput, longCachedInput, longWrite30m, longWrite12h));
     }
   }

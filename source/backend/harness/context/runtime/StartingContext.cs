@@ -11,7 +11,6 @@ internal sealed record StartingContextInput(
   SessionKind SessionKind,
   ModelFamily ModelFamily,
   string? WorkingDirectory,
-  string InitialRequest,
   string? AssignmentContext);
 
 // Read-only instructions and tool declarations supplied when a model session starts.

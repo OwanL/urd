@@ -49,7 +49,7 @@ internal static class MarkdownRoutes {
     } catch (OperationCanceledException) when (!http.RequestAborted.IsCancellationRequested) {
       return Results.StatusCode(IsApplicationStopping(http)
           ? StatusCodes.Status503ServiceUnavailable : StatusCodes.Status410Gone);
-    } catch (MarkdownPageLeases.DuplicateTokenException) {
+    } catch (MarkdownPageLeases.DuplicateLeaseIdException) {
       return Results.Conflict();
     } catch (HistoryRevisionConflictException) {
       return Results.Conflict();
@@ -111,8 +111,8 @@ internal static class MarkdownRoutes {
 
   private static Task<IResult> ReadPiecesAsync(HttpContext http, SessionEventHub hub,
       Guid streamId, Guid leaseId, CursorQuery query) {
-    if (!TryReadCursor(streamId, leaseId, query, out MarkdownRenderCursor cursor, out IResult? invalid))
-      return Task.FromResult(invalid!);
+    if (!TryReadCursor(streamId, leaseId, query, out MarkdownRenderCursor cursor))
+      return Task.FromResult<IResult>(Results.BadRequest());
     if (!TryGetPage(hub, streamId, out SessionEventPage page))
       return Task.FromResult(MissingPageResult(http));
 
@@ -122,8 +122,8 @@ internal static class MarkdownRoutes {
 
   private static Task<IResult> ReadPiecesBeforeAsync(HttpContext http, SessionEventHub hub,
       Guid streamId, Guid leaseId, CursorQuery query) {
-    if (!TryReadCursor(streamId, leaseId, query, out MarkdownRenderCursor cursor, out IResult? invalid))
-      return Task.FromResult(invalid!);
+    if (!TryReadCursor(streamId, leaseId, query, out MarkdownRenderCursor cursor))
+      return Task.FromResult<IResult>(Results.BadRequest());
     if (!TryGetPage(hub, streamId, out SessionEventPage page))
       return Task.FromResult(MissingPageResult(http));
 
@@ -220,15 +220,9 @@ internal static class MarkdownRoutes {
   }
 
   private static bool TryReadCursor(Guid streamId, Guid leaseId, CursorQuery query,
-      out MarkdownRenderCursor cursor, out IResult? invalid) {
-    if (streamId == Guid.Empty || leaseId == Guid.Empty || !TryReadCursor(query, out cursor)) {
-      cursor = default;
-      invalid = Results.BadRequest();
-      return false;
-    }
-
-    invalid = null;
-    return true;
+      out MarkdownRenderCursor cursor) {
+    cursor = default;
+    return streamId != Guid.Empty && leaseId != Guid.Empty && TryReadCursor(query, out cursor);
   }
 
   private static bool TryReadCursor(CursorQuery query, out MarkdownRenderCursor cursor) {

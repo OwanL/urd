@@ -26,7 +26,7 @@ public sealed class MarkdownPageLeaseTests {
         cancellation => service.OpenAsync(session, entry, cancellation), CancellationToken.None);
 
     Assert.Equal(first.Manifest.Generation, second.Manifest.Generation);
-    await Assert.ThrowsAsync<MarkdownPageLeases.DuplicateTokenException>(() => page.MarkdownLeases.OpenAsync(
+    await Assert.ThrowsAsync<MarkdownPageLeases.DuplicateLeaseIdException>(() => page.MarkdownLeases.OpenAsync(
         firstToken, _ => throw new InvalidOperationException("Duplicate tokens must not start another open."),
         CancellationToken.None));
     Assert.Equal("independent lease", ReadText(page, firstToken));

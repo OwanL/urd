@@ -4,76 +4,66 @@ namespace Urd.Server;
 
 // One SSE page owns each delivered lease until its client releases it or the page closes.
 internal sealed class MarkdownPageLeases {
-  private readonly object gate = new();
-  private readonly Dictionary<Guid, OpenLease> leases = new();
+  private readonly object leasesLock = new();
+  private readonly Dictionary<Guid, LeaseRegistration> leases = new();
   private bool closed;
 
-  internal async Task<MessageMarkdownLease> OpenAsync(Guid token,
+  internal async Task<MessageMarkdownLease> OpenAsync(Guid leaseId,
       Func<CancellationToken, Task<MessageMarkdownLease>> open, CancellationToken requestCancellation) {
     ArgumentNullException.ThrowIfNull(open);
     requestCancellation.ThrowIfCancellationRequested();
-    if (token == Guid.Empty)
-      throw new ArgumentException("A Markdown lease token is required.", nameof(token));
+    if (leaseId == Guid.Empty)
+      throw new ArgumentException("A Markdown lease ID is required.", nameof(leaseId));
 
-    OpenLease pending;
-    lock (gate) {
+    LeaseRegistration pending;
+    lock (leasesLock) {
       if (closed)
         throw new MarkdownUnavailableException();
-      if (leases.ContainsKey(token))
-        throw new DuplicateTokenException();
-      pending = new(this, token);
-      leases.Add(token, pending);
+      if (leases.ContainsKey(leaseId))
+        throw new DuplicateLeaseIdException();
+      pending = new(this, leaseId);
+      leases.Add(leaseId, pending);
     }
 
     CancellationToken cancellation = pending.Cancellation;
     try {
       CancellationTokenRegistration registration = requestCancellation.UnsafeRegister(
-          static state => ((OpenLease)state!).CancelFromRequest(), pending);
+          static state => ((LeaseRegistration)state!).CancelFromRequest(), pending);
       pending.SetRequestCancellation(registration);
       cancellation.ThrowIfCancellationRequested();
       MessageMarkdownLease lease = await (open(cancellation)
           ?? throw new InvalidOperationException("The Markdown lease opener returned no task."))
           .ConfigureAwait(false);
 
-      bool attached;
-      lock (gate) {
-        attached = !closed && !cancellation.IsCancellationRequested
-            && leases.TryGetValue(token, out OpenLease? current) && ReferenceEquals(current, pending);
-        if (attached)
-          pending.Lease = lease;
-        else if (leases.TryGetValue(token, out OpenLease? retained) && ReferenceEquals(retained, pending))
-          leases.Remove(token);
-      }
-
-      if (!attached) {
+      if (!TryAttachOpenedLease(leaseId, pending, lease, cancellation)) {
         lease.Dispose();
         throw new OperationCanceledException(cancellation);
       }
 
       return lease;
     } catch {
-      RemovePending(token, pending);
+      RemovePending(leaseId, pending);
       throw;
     } finally {
       pending.Dispose();
     }
   }
 
-  // Run the callback under the registry gate so release and page close cannot
-  // dispose the lease between resolving its token and completing the read.
-  internal T Read<T>(Guid token, Func<MessageMarkdownLease, T> read) {
+  // Run the callback under the leases lock so release and page close cannot
+  // dispose the lease between resolving its ID and completing the read.
+  internal T Read<T>(Guid leaseId, Func<MessageMarkdownLease, T> read) {
     ArgumentNullException.ThrowIfNull(read);
-    lock (gate) {
-      if (!leases.TryGetValue(token, out OpenLease? current) || current.Lease is not { } lease)
+    lock (leasesLock) {
+      if (!leases.TryGetValue(leaseId, out LeaseRegistration? current) || current.Lease is not { } lease)
         throw new MarkdownUnavailableException();
       return read(lease);
     }
   }
 
-  internal void Release(Guid token) {
-    OpenLease? current;
-    lock (gate) {
-      if (!leases.Remove(token, out current))
+  internal void Release(Guid leaseId) {
+    LeaseRegistration? current;
+    lock (leasesLock) {
+      if (!leases.Remove(leaseId, out current))
         return;
     }
 
@@ -85,8 +75,8 @@ internal sealed class MarkdownPageLeases {
   }
 
   internal void Close() {
-    OpenLease[] current;
-    lock (gate) {
+    LeaseRegistration[] current;
+    lock (leasesLock) {
       if (closed)
         return;
       closed = true;
@@ -94,7 +84,7 @@ internal sealed class MarkdownPageLeases {
       leases.Clear();
     }
 
-    foreach (OpenLease pending in current) {
+    foreach (LeaseRegistration pending in current) {
       pending.StopRequestCancellation();
       if (pending.Lease is { } lease)
         lease.Dispose();
@@ -103,15 +93,29 @@ internal sealed class MarkdownPageLeases {
     }
   }
 
-  private void RemovePending(Guid token, OpenLease pending) {
-    lock (gate) {
-      if (leases.TryGetValue(token, out OpenLease? current)
-          && ReferenceEquals(current, pending) && current.Lease is null)
-        leases.Remove(token);
+  private bool TryAttachOpenedLease(Guid leaseId, LeaseRegistration pending,
+      MessageMarkdownLease lease, CancellationToken cancellation) {
+    lock (leasesLock) {
+      bool attached = !closed && !cancellation.IsCancellationRequested
+          && leases.TryGetValue(leaseId, out LeaseRegistration? current) && ReferenceEquals(current, pending);
+      if (attached)
+        pending.Lease = lease;
+      else if (leases.TryGetValue(leaseId, out LeaseRegistration? retained) && ReferenceEquals(retained, pending))
+        leases.Remove(leaseId);
+      return attached;
     }
   }
 
-  private sealed class OpenLease(MarkdownPageLeases owner, Guid token) : IDisposable {
+  private void RemovePending(Guid leaseId, LeaseRegistration pending) {
+    lock (leasesLock) {
+      if (leases.TryGetValue(leaseId, out LeaseRegistration? current)
+          && ReferenceEquals(current, pending) && current.Lease is null)
+        leases.Remove(leaseId);
+    }
+  }
+
+  // Tracks an opening lease and owns its request cancellation until attachment completes.
+  private sealed class LeaseRegistration(MarkdownPageLeases owner, Guid leaseId) : IDisposable {
     private readonly object cancellationGate = new();
     private readonly CancellationTokenSource cancellation = new();
     private readonly object registrationGate = new();
@@ -145,7 +149,7 @@ internal sealed class MarkdownPageLeases {
       registration.Unregister();
     }
 
-    internal void CancelFromRequest() => owner.CancelPending(token, this);
+    internal void CancelFromRequest() => owner.CancelPending(leaseId, this);
 
     internal void Cancel() {
       lock (cancellationGate) {
@@ -187,12 +191,12 @@ internal sealed class MarkdownPageLeases {
     }
   }
 
-  private void CancelPending(Guid token, OpenLease pending) {
+  private void CancelPending(Guid leaseId, LeaseRegistration pending) {
     bool removed = false;
-    lock (gate) {
-      if (leases.TryGetValue(token, out OpenLease? current)
+    lock (leasesLock) {
+      if (leases.TryGetValue(leaseId, out LeaseRegistration? current)
           && ReferenceEquals(current, pending) && current.Lease is null) {
-        leases.Remove(token);
+        leases.Remove(leaseId);
         removed = true;
       }
     }
@@ -203,6 +207,7 @@ internal sealed class MarkdownPageLeases {
     pending.Cancel();
   }
 
-  internal sealed class DuplicateTokenException()
-      : InvalidOperationException("The Markdown lease token is already active on this page.");
+  // Rejects a lease ID already reserved or attached on this page.
+  internal sealed class DuplicateLeaseIdException()
+      : InvalidOperationException("The Markdown lease ID is already active on this page.");
 }

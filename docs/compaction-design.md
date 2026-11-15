@@ -42,7 +42,7 @@ distinct from tool-result pruning and catalog pruning (ARCHITECTURE.md, "Context
 and message index within the request; the request ID locates stored content but does not sort it.
 `HistoryCompactionPlan` identifies the prefix to summarize and the first message to retain.
 Planning takes the existing `StartingContext` so instructions and tool declarations stay together.
-`CompactionBoundarySelector` prefers whole turns, then assistant continuations, with an over-budget
+`RetainedHistorySelector` prefers whole turns, then assistant continuations, with an over-budget
 fallback only for provider overflow. `ContextTokenBudget` names the estimation allowances and limits.
 Edit summarization instructions in `CompactionPrompt`; its renderer keeps native payloads/reasoning
 out of the prompt and bounds tool-result text. `ManualCompactionRequest` starts an idle-only execution;

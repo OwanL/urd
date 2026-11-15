@@ -1,30 +1,31 @@
 namespace Urd.Core.Compaction;
 
-internal static class CompactionBoundarySelector {
-  internal static int? FindFirstRetainedMessageIndex(ModelHistory history, int retainedHistoryTokenLimit,
+internal static class RetainedHistorySelector {
+  internal static int? SelectFirstMessageIndex(ModelHistory history, int retainedHistoryTokenLimit,
       CompactionReason reason) {
-    BoundaryCandidates candidates = FindBoundaryCandidates(history, retainedHistoryTokenLimit);
-    return SelectPreferredBoundary(candidates, reason);
+    FirstMessageIndexCandidates candidates = FindFirstMessageIndexCandidates(history, retainedHistoryTokenLimit);
+    return SelectPreferredFirstMessageIndex(candidates, reason);
   }
 
-  private static BoundaryCandidates FindBoundaryCandidates(ModelHistory history, int retainedHistoryTokenLimit) {
+  private static FirstMessageIndexCandidates FindFirstMessageIndexCandidates(ModelHistory history,
+      int retainedHistoryTokenLimit) {
     int? newestUserTurnIndex = FindNewestUserTurnIndex(history.Messages);
     int? oldestAffordableTurnStart = null;
     int? oldestAffordableAssistantContinuation = null;
     int? newestOverflowTurnStart = null;
     int? newestOverflowAssistantContinuation = null;
-    long suffixTokens = 0;
+    long candidateHistoryTokens = 0;
 
     for (int index = history.Messages.Count - 1; index > 0; index--) {
       HistoryMessage message = history.Messages[index];
-      suffixTokens = ContextTokenBudget.AddSaturating(suffixTokens,
+      candidateHistoryTokens = ContextTokenBudget.AddSaturating(candidateHistoryTokens,
           ContextTokenBudget.EstimateMessage(message.Message));
-      if (!AdvancesPreviousCompaction(history, message)) continue;
+      if (!AdvancesPastPreviousCompaction(history, message)) continue;
 
-      bool suffixWithinBudget = suffixTokens <= retainedHistoryTokenLimit;
+      bool candidateWithinBudget = candidateHistoryTokens <= retainedHistoryTokenLimit;
       if (message.IsUserTurnStart) {
         newestOverflowTurnStart ??= index;
-        if (suffixWithinBudget) oldestAffordableTurnStart = index;
+        if (candidateWithinBudget) oldestAffordableTurnStart = index;
         continue;
       }
 
@@ -32,21 +33,22 @@ internal static class CompactionBoundarySelector {
 
       bool retainsNewestUserRequest = newestUserTurnIndex is null || index <= newestUserTurnIndex;
       if (retainsNewestUserRequest) newestOverflowAssistantContinuation ??= index;
-      if (suffixWithinBudget) oldestAffordableAssistantContinuation = index;
+      if (candidateWithinBudget) oldestAffordableAssistantContinuation = index;
     }
 
-    return new BoundaryCandidates(oldestAffordableTurnStart, oldestAffordableAssistantContinuation,
+    return new FirstMessageIndexCandidates(oldestAffordableTurnStart, oldestAffordableAssistantContinuation,
         newestOverflowTurnStart, newestOverflowAssistantContinuation);
   }
 
-  private static int? SelectPreferredBoundary(BoundaryCandidates candidates, CompactionReason reason) {
+  private static int? SelectPreferredFirstMessageIndex(FirstMessageIndexCandidates candidates,
+      CompactionReason reason) {
     if (candidates.OldestAffordableTurnStart is { } turnStart) return turnStart;
     if (candidates.OldestAffordableAssistantContinuation is { } assistantContinuation) return assistantContinuation;
     if (reason != CompactionReason.Overflow) return null;
     return candidates.NewestOverflowTurnStart ?? candidates.NewestOverflowAssistantContinuation;
   }
 
-  private static bool AdvancesPreviousCompaction(ModelHistory history, HistoryMessage message) =>
+  private static bool AdvancesPastPreviousCompaction(ModelHistory history, HistoryMessage message) =>
       history.PreviousCompaction is not { } previous ||
       message.Location.IsAfter(previous.FirstRetainedMessageLocation);
 
@@ -56,7 +58,7 @@ internal static class CompactionBoundarySelector {
     return null;
   }
 
-  private readonly record struct BoundaryCandidates(
+  private readonly record struct FirstMessageIndexCandidates(
       int? OldestAffordableTurnStart, int? OldestAffordableAssistantContinuation,
       int? NewestOverflowTurnStart, int? NewestOverflowAssistantContinuation);
 }

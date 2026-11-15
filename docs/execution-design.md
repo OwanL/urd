@@ -229,8 +229,10 @@ Session Design owns the integrated structure. This stream proposes only:
   record → continuation cycle, usable by both primary and bounded sessions.
   Do not introduce per-provider or per-session-kind loop subclasses.
 - **Request-only `IChatClient` path:** provider settings, native-item reconstruction
-  and truthful terminal/error conversion; auxiliary title/compaction/pruning calls
-  can use it without acquiring a tool loop or a full agent session. No extra
+  and truthful terminal/error conversion; auxiliary title/compaction calls can use it
+  without acquiring a tool loop or a full agent session. Pruning now permits exploration
+  tools; its [structural proposal](pruning-plan.md#high-level-structure-proposal) uses
+  shared tool-turn mechanics without a new session subtype. No extra
   `ModelRequestExecutor` facade is required (owner feedback via Session Design).
 - **Session/live-run owner:** accepted work, cancellation, queued steering and
   recording authority; supply that lifetime to the cycle. Browser disconnect

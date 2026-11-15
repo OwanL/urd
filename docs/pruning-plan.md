@@ -151,20 +151,93 @@ All three selectors work from the same task and grounding snapshot, excluding
 protected resources from their supplied selection context. Tools and skills do not
 wait for the instruction selector's output. Each has its own category-specific brief.
 
-Responsibilities discussed, without freezing classes or APIs:
+## High-level structure proposal
 
-| Responsibility | Owner/direction |
+**For owner review, not an approved class layout or implementation plan.** Names below
+make the responsibilities concrete; signatures, record fields and schema are not frozen.
+Paths are relative to `source/backend/harness/` unless stated otherwise.
+
+| Proposed owner/file | Change and responsibility |
 | --- | --- |
-| Discovery and source loading | Tool/skill catalogs and instruction loaders |
-| Coordination and final composition | Starting-context composition; `StartingContextManager` is the existing seam |
-| Selection and result validation | One shared pruning operation with category-specific inputs and rules |
-| Model calls, tools, cancellation and usage | Reuse common execution/provider mechanics |
-| Preferences and picker | Reuse settings/model-selection components and the same discovery sources |
+| `context/runtime/StartingContextManager.cs` | Extend the existing composer with asynchronous preparation: collect candidates, separate protections, run category selection in parallel and compose the final context. It does not own session admission or durable writes. |
+| `context/runtime/GitFiles.cs` | Extract the Git listing mechanics currently private to `SkillCatalog`; reuse a listing for matching skills and instruction files. Not a new filesystem discovery framework. |
+| `context/runtime/InstructionCatalog.cs` and `InstructionDocument.cs` | Discover/load recognised instruction documents with their source and scope. Keep existing `SkillCatalog` and `ToolCatalog`; do not merge their distinct semantics into one generic catalog. |
+| `context/pruning/CatalogPruner.cs` | One category-independent selection operation: build its brief, run the bounded conversation, validate kept IDs and return a selection or ordinary failure. Three invocations, not three implementations. |
+| `context/pruning/PruningPrompt.cs` and `Pruning.cs` | Category-specific prompt construction plus small input/result records. No skill/tool/instruction pruner subclasses or strategy/plugin hierarchy. |
+| `execution/ConversationRunner.cs` | Extract the shared streamed-response validation and tool-turn mechanics from the current execution path. Main execution and pruning use the same implementation; primary admission, steering, compaction and settlement stay outside it. Continue using `IChatClient`, existing adapters and tool dispatch rather than adding a model-client facade. |
+| `providers/ModelSelector.cs` | Shared model-choice resolution: configured bucket or explicit provider/model reference becomes the existing `LlmSelection`. Bucket resolution is not implemented today; this is a dependency, not something pruning can already call. Reuse the same owner for delegated work rather than create pruning-only buckets. |
+| Existing execution/recording/storage owners | `SessionExecution` owns the preparation lifetime and joins its branches. Extend guarded recording with distinct pruning conversation/request scopes; extend `StartingContextStorage` for selected contexts at allowed compaction boundaries. Do not make the composer a second persistence owner. |
+| Existing preferences/server/UI owners | Extend `UserPreferences`, `PreferenceManager`, `PreferencesStorage` and existing routes; reuse settings and `ModelPicker`. Add a small pruning-row renderer under `source/ui/app/`, driven by recorded category status rather than owning work. Detailed UI remains deferred. |
 
-The proposed shared operation avoids copying execution, failure handling or settings
-plumbing when a category is added. It does not require category-specific session
-subclasses or a new generic framework. Pruning conversations would not recursively
-prune their own starting context.
+`SkillsGuidance` must format the selected skill list instead of rediscovering the full
+catalog during composition. Settings and preparation use the same catalog sources.
+If shared execution or bucket resolution lands through another feature first, reuse it;
+these are responsibility boundaries, not competing implementations.
+
+### Proposed data flow
+
+1. The owning execution checks whether the current context boundary already has a saved
+   selection. Use the session's initial boundary or the latest successful compaction ID,
+   not every history change, model change or preference change.
+2. At an allowed preparation boundary, capture the task context, discovery results,
+   preferences and resolved models once. Separate protected entries before building
+   selector inputs. Each selector has its own conversation and category brief.
+3. Call the same `CatalogPruner` for the three categories in parallel. Each may use the
+   shared tool-capable execution path for exploration, but never recursively prune itself.
+4. Validate returned IDs against that category's candidate set. Keep original resources
+   in stable source/precedence order; the model does not rewrite documents or schemas.
+   Apply ordinary per-category keep-all fallback and combine with protected entries.
+5. Once all owned pruning work has settled safely, the execution records/uses the new
+   context at the main-request boundary. Ordinary requests and reopen reuse the saved
+   selection. Compaction alone does not launch selectors.
+
+**Proposed input contract:** a fresh session supplies its admitted prompt; after
+compaction, supply the summary, retained recent context and any next admitted input,
+not the discarded history. Do not copy the main system-guidance bundle into these
+inputs and thereby reintroduce protected documents. Candidate payloads are skill
+name/description/path, existing tool declarations, and full unprotected instruction
+text with source/scope. Treat candidate contents as selection material. Output is kept
+candidate IDs, not rewritten resources; invalid output is an ordinary selection failure.
+
+**Proposed instruction boundary:** compiled `ContextGuidance` blocks form fixed base
+guidance; discovered additional instruction documents are pruning candidates. The skill
+list block remains a formatter, but receives the selected skills. This is a proposed
+boundary for review, not a newly selected protection rule.
+
+### Integration constraints the design must address
+
+- **Not three full sessions.** The rows represent owned pruning conversations, not new
+  `SessionBase` subtypes, independent chats or another auxiliary-job framework. The
+  earlier request-only pruning sketch predates the selected `read`/`bash` exploration:
+  titles and compaction can remain request-only; tool-capable pruning needs shared turn
+  execution as well as `IChatClient`.
+- **Separate records, same authority.** Parallel selectors need distinct conversation and
+  request identities, isolated histories and tool-call/result pairing. Reuse the parent's
+  guarded execution authority and current tool permissions. Pruning messages/results must
+  not enter main-agent history or consume its pending user input. Track auxiliary provider
+  attempts separately: no main-agent request does not mean no provider contact occurred.
+  Preserve usage attribution to the parent and identify the pruning category.
+- **Saved context changes deliberately.** Current storage saves one context per session
+  and ignores later saves. It must support a selected snapshot associated with the allowed
+  boundary and exact ordered content on reopen. Preserve primary send-attempt/input-placement
+  atomicity; auxiliary request starts cannot use that path unchanged. Interrupted pruning
+  or its tools must not be replayed merely by loading a session. Exact prepared-versus-active
+  snapshot commit details remain an implementation-design item.
+- **Compaction planning is not pruning.** Existing `EnsureStartingContext()` also runs when
+  planning compaction. Separate access to the current composed context from asynchronous
+  selection, otherwise manual compaction would accidentally become a pruning trigger.
+  Automatic compaction must finish before preparation for the following main request.
+- **Fallback is not a catch-all.** Provider/selection failures or a cleanly terminated budget
+  expiry retain that category. Parent Stop cancels and joins all branches. Uncertain tool
+  effects, failed durable recording or failed cleanup keep the existing execution fence;
+  they must not be converted into keep-all-and-continue. A timeout requests cancellation,
+  not proof that tools have stopped. Exact exploration limits are still to choose.
+
+Suggested implementation order, subject to approval: share the existing execution mechanics
+without changing main-chat behaviour; add common model resolution and discovery; integrate
+selection and per-boundary recording; then preferences and the three status rows. Verification
+should exercise protected-input exclusion, parallel isolation, allowed triggers/reopen,
+per-category failure and Stop/recording/cleanup failures through existing test helpers.
 
 ## Selection failure
 

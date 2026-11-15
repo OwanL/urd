@@ -946,10 +946,12 @@ custom wrappers. A small class with one useful operation can be sufficient.
 
 Shared client use does not mean a process-wide serial executor or shared mutable
 request state. Provider fidelity, caller-specific retry/fallback policy and
-cancellation still need qualification; auxiliary calls do not acquire the tool
-loop. The provisional cycle direction above is separate from this composition
-boundary. [Execution design](execution-design.md) records evidence and remaining
-gates; provider integrations remain separately qualified.
+cancellation still need qualification. Request-only auxiliary calls such as titles and
+compaction do not acquire the tool loop. The later pruning direction permits `read`/`bash`
+exploration; the [structural proposal](pruning-plan.md#high-level-structure-proposal)
+therefore reuses tool-turn execution without making pruning a full session type.
+[Execution design](execution-design.md) records evidence and remaining gates; provider
+integrations remain separately qualified.
 
 ### Provider-specific context choices
 

@@ -64,8 +64,8 @@ and explicit startup recovery. Compaction and rich tool-result inspection remain
     as interrupted and possibly partly applied. It is never re-run.
 13. **Tool shape (approved code).** One class per model-facing tool name; shared behavior lives
     in ordinary helpers (e.g. `FileEditor` used by both `EditTool` and `ApplyPatchTool`). No
-    separate "surface" abstraction. A `ToolCatalog` picks the tools a chat offers per model
-    family and finds any tool by name for saved calls. Urd owns `AgentTool` rather than using
+    separate "surface" abstraction. A `ToolCatalog` holds the generic tools a chat offers
+    to every model family. Urd owns `AgentTool` rather than using
     `AIFunction` directly, converting to provider declarations at the edge.
 
     ```csharp
@@ -79,8 +79,7 @@ and explicit startup recovery. Compaction and rich tool-result inspection remain
     }
 
     internal sealed class ToolCatalog {
-      public IReadOnlyList<AgentTool> For(ModelFamily family);
-      public AgentTool? Find(string name);
+      public IReadOnlyList<AgentTool> Tools { get; }
     }
     ```
 14. **Waiting on background calls.** When the agent's reply has ended but background calls are
@@ -216,8 +215,8 @@ The queue is shared by all chats and coordinates Urd's own tools only.
 
 ```csharp
 internal sealed class FileMutationQueue {
-  public Task<T> ChangeAsync<T>(string path, Func<CancellationToken, Task<T>> change, CancellationToken cancellation);
-  public Task<T> ReadAsync<T>(string path, Func<CancellationToken, Task<T>> read, CancellationToken cancellation);
+  public Task<T> RunMutationAsync<T>(string path, Func<CancellationToken, Task<T>> change, CancellationToken cancellation);
+  public Task<T> ReadAfterMutationsAsync<T>(string path, Func<CancellationToken, Task<T>> read, CancellationToken cancellation);
 }
 internal sealed class ReadTool(FileMutationQueue files) : AgentTool { ... }   // read(path, offset?, limit?)
 internal sealed class WriteTool(FileMutationQueue files) : AgentTool { ... }  // write(path, content)
@@ -235,7 +234,7 @@ internal sealed class PendingToolCalls {
   public void Add(Guid executionId, Guid requestId, LlmToolCall call,
     Task completion, CancellationTokenSource cancellation, Func<Exception, Task>? onFailure = null);
   public IReadOnlyList<PendingToolCall> List();
-  public int RequestCancelAll(Guid callerRequestId, string callerCallId);
+  public int RequestCancelOthers(Guid callerRequestId, string callerCallId);
   public void RequestCancelExecution(Guid executionId);
   public Task JoinExecutionAsync(Guid executionId);
 }
@@ -256,7 +255,7 @@ internal sealed class ChatProcesses : IAsyncDisposable {
 internal sealed class ShellProcess : IAsyncDisposable {
   public Task<int?> WaitForExitAsync();
   public Task CancelAsync();
-  public void LeaveBackgroundProcesses();
+  public void KeepBackgroundProcesses();
 }
 internal sealed class BashTool(ChatProcesses processes, GitBash bash,
   IReadOnlyDictionary<string, string> environment) : AgentTool { ... }  // bash(command, timeout?)
@@ -385,7 +384,7 @@ product scope or approval of new class shapes.
   Reads waiting on mutations are Urd's agreed behavior, not Pi's mutation-only queue behavior.
 - Test path aliases, cancellation while queued and concurrent distinct files. The queue does
   not coordinate bash or outside editors; do not present it as filesystem-wide isolation.
-- Qualify the nested-job mechanism before treating `LeaveBackgroundProcesses` as proven.
+- Qualify the nested-job mechanism before treating `KeepBackgroundProcesses` as proven.
   Specify the ownership handoff on shell exit and retain chat ownership of survivors; timeout
   or cancellation of an unfinished call must kill/join that call's tree, not earlier survivors.
   A nonzero shell exit is still an exit, not proof that its descendants stopped.

@@ -25,11 +25,11 @@ internal sealed class WriteTool(FileMutationQueue files) : AgentTool {
 
   public override async Task<ToolOutput> RunAsync(JsonElement arguments, ToolContext context, CancellationToken cancellation) {
     try {
-      string path = ToolArguments.String(arguments, "path");
-      string content = ToolArguments.String(arguments, "content");
+      string path = ToolArguments.RequireString(arguments, "path");
+      string content = ToolArguments.RequireString(arguments, "content");
       string absolutePath = ToolPaths.Resolve(path, context.WorkingDirectory);
       // Admission is synchronous: no earlier await may reorder calls from one reply.
-      return await files.ChangeAsync(absolutePath, async token => {
+      return await files.RunMutationAsync(absolutePath, async token => {
         token.ThrowIfCancellationRequested();
         byte[] bytes = utf8.GetBytes(content);
         Directory.CreateDirectory(Path.GetDirectoryName(absolutePath)!);

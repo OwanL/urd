@@ -6,11 +6,11 @@ namespace Urd.Core.Tools;
 // One shell and its nested job; a successful handoff leaves only the job chat-owned.
 [SupportedOSPlatform("windows")]
 internal sealed class ShellProcess : IAsyncDisposable {
-  private readonly object gate = new();
+  private readonly object stateLock = new();
   private readonly SafeFileHandle job;
   private readonly Task<int?> completion;
   private Task? cancellation;
-  private bool leftBackgroundProcesses;
+  private bool keepBackgroundProcesses;
   private bool reclaimed;
 
   internal ShellProcess(SafeFileHandle job, SafeFileHandle process, SafeFileHandle output,
@@ -25,30 +25,30 @@ internal sealed class ShellProcess : IAsyncDisposable {
   public Task<int?> WaitForExitAsync() => completion;
 
   public Task CancelAsync() {
-    lock (gate) {
-      if (leftBackgroundProcesses)
+    lock (stateLock) {
+      if (keepBackgroundProcesses)
         return completion;
       return cancellation ??= CancelCoreAsync();
     }
   }
 
-  public void LeaveBackgroundProcesses() {
-    lock (gate) {
+  public void KeepBackgroundProcesses() {
+    lock (stateLock) {
       if (!completion.IsCompletedSuccessfully || cancellation is not null)
         throw new InvalidOperationException("Only a completed, uncancelled shell can leave background processes.");
-      leftBackgroundProcesses = true;
-      TryReclaim();
+      keepBackgroundProcesses = true;
+      TryCloseEmptyJob();
     }
   }
 
   public async ValueTask DisposeAsync() {
     await CancelAsync().ConfigureAwait(false);
-    TryReclaim();
+    TryCloseEmptyJob();
   }
 
   // The chat retains live nested jobs, and drops empty historical calls on the next launch.
-  internal bool TryReclaim() {
-    lock (gate) {
+  internal bool TryCloseEmptyJob() {
+    lock (stateLock) {
       if (reclaimed)
         return completion.IsCompletedSuccessfully && (cancellation is null || cancellation.IsCompletedSuccessfully);
       if (!completion.IsCompleted || cancellation is { IsCompleted: false } || WindowsShell.ActiveProcesses(job) != 0)
@@ -61,15 +61,15 @@ internal sealed class ShellProcess : IAsyncDisposable {
 
   internal async Task CloseWithChatAsync() {
     Task cleanup;
-    lock (gate) {
-      leftBackgroundProcesses = false;
+    lock (stateLock) {
+      keepBackgroundProcesses = false;
       cleanup = cancellation ??= CancelCoreAsync();
     }
     try {
       await cleanup.ConfigureAwait(false);
     } finally {
       // Kill-on-close remains the fallback if explicit cleanup failed; the failure is preserved.
-      lock (gate) {
+      lock (stateLock) {
         if (completion.IsCompleted) {
           job.Dispose();
           reclaimed = true;
@@ -83,7 +83,7 @@ internal sealed class ShellProcess : IAsyncDisposable {
     var failures = new List<Exception>();
     try {
       bool empty;
-      lock (gate) {
+      lock (stateLock) {
         empty = reclaimed;
         if (!empty)
           WindowsShell.Terminate(job);
@@ -100,7 +100,7 @@ internal sealed class ShellProcess : IAsyncDisposable {
     }
     if (failures.Count != 0)
       throw new AggregateException("Shell cancellation or output cleanup failed.", failures);
-    lock (gate) {
+    lock (stateLock) {
       job.Dispose();
       reclaimed = true;
     }
@@ -124,7 +124,8 @@ internal sealed class ShellProcess : IAsyncDisposable {
 #pragma warning restore S6966
             if (read == 0)
               throw new EndOfStreamException("Shell output closed while buffered bytes were being read.");
-            receiveOutput(buffer.AsMemory(0, read).ToArray());
+            // The callback must consume this reused buffer synchronously.
+            receiveOutput(buffer.AsMemory(0, read));
             available -= read;
           }
           if (exitCode is null)

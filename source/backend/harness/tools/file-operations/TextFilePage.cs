@@ -5,10 +5,8 @@ namespace Urd.Core.Tools;
 
 // Scans UTF-8 text while retaining only the current line and selected bounded page.
 internal sealed class TextFilePage(string path, int offset, int limit) {
-  private const int maxLines = 2000;
-  private const int maxBytes = 50 * 1024;
   private static readonly UTF8Encoding utf8 = new(false, true);
-  private readonly char[] line = new char[maxBytes + 1];
+  private readonly char[] line = new char[ToolOutputLimits.MaxBytes + 1];
   private readonly List<string> output = [];
   private long lineNumber = 1;
   private int lineLength;
@@ -21,10 +19,8 @@ internal sealed class TextFilePage(string path, int offset, int limit) {
     using var reader = new StreamReader(stream, utf8, detectEncodingFromByteOrderMarks: false, bufferSize: 8192, leaveOpen: true);
     var page = new TextFilePage(path, offset, limit);
     char[] buffer = new char[8192];
-    while (true) {
-      int count = await reader.ReadAsync(buffer, cancellation).ConfigureAwait(false);
-      if (count == 0)
-        break;
+    int count;
+    while ((count = await reader.ReadAsync(buffer, cancellation).ConfigureAwait(false)) != 0) {
       cancellation.ThrowIfCancellationRequested();
       for (int index = 0; index < count; index++)
         page.Add(buffer[index]);
@@ -50,29 +46,32 @@ internal sealed class TextFilePage(string path, int offset, int limit) {
     CompleteLine(endOfFile: true);
     if (offset > lineNumber)
       throw new ArgumentException($"Offset {offset} is beyond end of file ({lineNumber} lines total).");
-    string text = string.Join("\n", output);
     long nextOffset = (long)offset + output.Count;
+    return new ToolOutput(BuildPageText(nextOffset), [], JsonSerializer.SerializeToElement(new {
+      totalLines = lineNumber, outputLines = output.Count, nextOffset = oversized ? offset : nextOffset,
+      truncated = cutoff is not null, truncatedBy = cutoff, firstLineExceedsLimit = oversized,
+      maxLines = ToolOutputLimits.MaxLines, maxBytes = ToolOutputLimits.MaxBytes
+    }));
+  }
+
+  private string BuildPageText(long nextOffset) {
     if (oversized) {
       string bashPath = OperatingSystem.IsWindows() ? path.Replace('\\', '/') : path;
       string quotedPath = "'" + bashPath.Replace("'", "'\\''", StringComparison.Ordinal) + "'";
-      text = $"[Line {offset} exceeds the 50KB limit. Use bash: sed -n '{offset}p' -- {quotedPath} | head -c 51200]";
-    } else if (cutoff is not null) {
-      text += $"\n\n[Showing lines {offset}-{nextOffset - 1} of {lineNumber}{(cutoff == "bytes" ? " (50KB limit)" : "")}. Use offset={nextOffset} to continue.]";
-    } else if (nextOffset <= lineNumber) {
-      text += $"\n\n[{lineNumber - nextOffset + 1} more lines in file. Use offset={nextOffset} to continue.]";
+      return $"[Line {offset} exceeds the 50KB limit. Use bash: sed -n '{offset}p' -- {quotedPath} | head -c 51200]";
     }
-    return new ToolOutput(text, [], JsonSerializer.SerializeToElement(new {
-      totalLines = lineNumber, outputLines = output.Count, nextOffset = oversized ? offset : nextOffset,
-      truncated = cutoff is not null, truncatedBy = cutoff, firstLineExceedsLimit = oversized,
-      maxLines, maxBytes
-    }));
+    string text = string.Join("\n", output);
+    if (cutoff is not null)
+      return text + $"\n\n[Showing lines {offset}-{nextOffset - 1} of {lineNumber}{(cutoff == "bytes" ? " (50KB limit)" : "")}. Use offset={nextOffset} to continue.]";
+    return nextOffset <= lineNumber
+      ? text + $"\n\n[{lineNumber - nextOffset + 1} more lines in file. Use offset={nextOffset} to continue.]" : text;
   }
 
   private void CompleteLine(bool endOfFile) {
     if (lineNumber < offset || lineNumber - offset >= limit || cutoff is not null)
       return;
     // Pi counts split segments for offsets, but excludes a terminal empty one from the truncation line cap.
-    if (output.Count >= maxLines && !(endOfFile && lineLength == 0)) {
+    if (output.Count >= ToolOutputLimits.MaxLines && !(endOfFile && lineLength == 0)) {
       cutoff = "lines";
       return;
     }
@@ -80,7 +79,7 @@ internal sealed class TextFilePage(string path, int offset, int limit) {
     string text = lineLength == line.Length ? "" : new(line, 0, lineLength);
     int bytes = utf8.GetByteCount(text);
     int separatorBytes = output.Count == 0 ? 0 : 1;
-    if (lineLength == line.Length || outputBytes + separatorBytes + bytes > maxBytes) {
+    if (lineLength == line.Length || outputBytes + separatorBytes + bytes > ToolOutputLimits.MaxBytes) {
       cutoff = "bytes";
       oversized = output.Count == 0;
       return;

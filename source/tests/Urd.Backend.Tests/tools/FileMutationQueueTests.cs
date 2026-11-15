@@ -13,19 +13,19 @@ public sealed class FileMutationQueueTests : IDisposable {
     string path = Path.Combine(directory, "ordered.txt");
     var entered = Signal();
     var release = Signal();
-    var first = files.ChangeAsync(path, async cancellation => {
+    var first = files.RunMutationAsync(path, async cancellation => {
       entered.SetResult();
       await release.Task.WaitAsync(TestTimeout, cancellation);
       await File.WriteAllTextAsync(path, "first", cancellation);
       return 1;
     }, CancellationToken.None);
     await entered.Task.WaitAsync(TestTimeout);
-    var second = files.ChangeAsync(Path.Combine(directory, ".", "ordered.txt"), async cancellation => {
+    var second = files.RunMutationAsync(Path.Combine(directory, ".", "ordered.txt"), async cancellation => {
       Assert.Equal("first", await File.ReadAllTextAsync(path, cancellation));
       await File.WriteAllTextAsync(path, "second", cancellation);
       return 2;
     }, CancellationToken.None);
-    var read = files.ReadAsync(path, cancellation => File.ReadAllTextAsync(path, cancellation), CancellationToken.None);
+    var read = files.ReadAfterMutationsAsync(path, cancellation => File.ReadAllTextAsync(path, cancellation), CancellationToken.None);
     try {
       Assert.False(second.IsCompleted);
       Assert.False(read.IsCompleted);
@@ -43,22 +43,22 @@ public sealed class FileMutationQueueTests : IDisposable {
     var entered = Signal();
     var release = Signal();
     using var cancellation = new CancellationTokenSource();
-    var first = files.ChangeAsync(path, async token => {
+    var first = files.RunMutationAsync(path, async token => {
       entered.SetResult();
       await release.Task.WaitAsync(TestTimeout, token);
       return 1;
     }, CancellationToken.None);
     await entered.Task.WaitAsync(TestTimeout);
     int abandonedCalls = 0;
-    var abandoned = files.ChangeAsync(path, _ => Task.FromResult(Interlocked.Increment(ref abandonedCalls)), cancellation.Token);
+    var abandoned = files.RunMutationAsync(path, _ => Task.FromResult(Interlocked.Increment(ref abandonedCalls)), cancellation.Token);
     await cancellation.CancelAsync();
-    var later = files.ChangeAsync(path, _ => Task.FromResult(3), CancellationToken.None);
-    var read = files.ReadAsync(path, _ => Task.FromResult(4), CancellationToken.None);
+    var later = files.RunMutationAsync(path, _ => Task.FromResult(3), CancellationToken.None);
+    var read = files.ReadAfterMutationsAsync(path, _ => Task.FromResult(4), CancellationToken.None);
     try {
       await Assert.ThrowsAnyAsync<OperationCanceledException>(() => abandoned.WaitAsync(TestTimeout));
       Assert.False(later.IsCompleted);
       Assert.False(read.IsCompleted);
-      Assert.Equal(5, await files.ChangeAsync(Path.Combine(directory, "other.txt"), _ => Task.FromResult(5),
+      Assert.Equal(5, await files.RunMutationAsync(Path.Combine(directory, "other.txt"), _ => Task.FromResult(5),
         CancellationToken.None).WaitAsync(TestTimeout));
     } finally {
       release.TrySetResult();
@@ -71,9 +71,9 @@ public sealed class FileMutationQueueTests : IDisposable {
   [Fact]
   public async Task FailedMutationDoesNotPoisonFollowingWork() {
     string path = Path.Combine(directory, "failed.txt");
-    await Assert.ThrowsAsync<IOException>(() => files.ChangeAsync<int>(path,
+    await Assert.ThrowsAsync<IOException>(() => files.RunMutationAsync<int>(path,
       _ => throw new IOException("fixture failure"), CancellationToken.None));
-    Assert.Equal(7, await files.ChangeAsync(path, _ => Task.FromResult(7), CancellationToken.None).WaitAsync(TestTimeout));
+    Assert.Equal(7, await files.RunMutationAsync(path, _ => Task.FromResult(7), CancellationToken.None).WaitAsync(TestTimeout));
   }
 
   [Fact]
@@ -97,14 +97,14 @@ public sealed class FileMutationQueueTests : IDisposable {
     }
     var entered = Signal();
     var release = Signal();
-    var write = files.ChangeAsync(path, async cancellation => {
+    var write = files.RunMutationAsync(path, async cancellation => {
       entered.SetResult();
       await release.Task.WaitAsync(TestTimeout, cancellation);
       await File.WriteAllTextAsync(path, "created", cancellation);
       return true;
     }, CancellationToken.None);
     await entered.Task.WaitAsync(TestTimeout);
-    var reads = aliases.Select(alias => files.ReadAsync(alias,
+    var reads = aliases.Select(alias => files.ReadAfterMutationsAsync(alias,
       token => File.ReadAllTextAsync(ToolPaths.Resolve(alias, directory), token), CancellationToken.None)).ToArray();
     try {
       Assert.All(reads, read => Assert.False(read.IsCompleted));

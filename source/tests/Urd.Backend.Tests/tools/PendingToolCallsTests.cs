@@ -53,7 +53,7 @@ public sealed class PendingToolCallsTests {
       Assert.False(caller.IsCancellationRequested);
       Assert.True(sibling.IsCancellationRequested);
       Assert.True(otherRequest.IsCancellationRequested);
-      Assert.Equal(0, pending.RequestCancelAll(request, "cancel"));
+      Assert.Equal(0, pending.RequestCancelOthers(request, "cancel"));
       Assert.False(done.Task.IsCompleted);
       ToolOutput snapshot = await list.RunAsync(Arguments, context, CancellationToken.None);
       Assert.Equal(3, snapshot.Details!.Value.GetArrayLength());

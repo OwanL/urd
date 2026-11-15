@@ -1,21 +1,13 @@
-using System.Collections.ObjectModel;
-using Urd.Core.Providers;
-
 namespace Urd.Core.Tools;
 
-// The configured generic capabilities; family-specific names can replace them later.
+// The frozen generic capabilities offered to every model family.
 internal sealed class ToolCatalog {
-  private readonly ReadOnlyCollection<AgentTool> tools;
+  public IReadOnlyList<AgentTool> Tools { get; }
 
   internal ToolCatalog(IReadOnlyList<AgentTool> tools) {
     ArgumentNullException.ThrowIfNull(tools);
-    this.tools = Array.AsReadOnly(tools.ToArray());
-    if (this.tools.Select(tool => tool.Name).Distinct(StringComparer.Ordinal).Count() != this.tools.Count)
+    Tools = Array.AsReadOnly(tools.ToArray());
+    if (Tools.Select(tool => tool.Name).Distinct(StringComparer.Ordinal).Count() != Tools.Count)
       throw new ArgumentException("Tool names must be unique.", nameof(tools));
-  }
-
-  public IReadOnlyList<AgentTool> For(ModelFamily family) {
-    _ = family; // Version one offers the same generic capabilities to every family.
-    return tools;
   }
 }

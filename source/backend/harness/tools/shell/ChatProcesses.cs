@@ -6,7 +6,7 @@ namespace Urd.Core.Tools;
 // Owns the chat job and every nested call job, including completed-call survivors.
 [SupportedOSPlatform("windows")]
 internal sealed class ChatProcesses : IAsyncDisposable {
-  private readonly object gate = new();
+  private readonly object stateLock = new();
   private readonly GitBash bash;
   private readonly List<ShellProcess> calls = [];
   private SafeFileHandle? job;
@@ -27,9 +27,9 @@ internal sealed class ChatProcesses : IAsyncDisposable {
     if (command.Contains('\0'))
       throw new ArgumentException("Shell commands cannot contain NUL.", nameof(command));
     directory = Path.GetFullPath(directory);
-    lock (gate) {
+    lock (stateLock) {
       ObjectDisposedException.ThrowIf(shutdown is not null, this);
-      calls.RemoveAll(call => call.TryReclaim());
+      calls.RemoveAll(call => call.TryCloseEmptyJob());
       job ??= WindowsShell.CreateJob();
       SafeFileHandle callJob = WindowsShell.CreateJob();
       try {
@@ -46,7 +46,7 @@ internal sealed class ChatProcesses : IAsyncDisposable {
   }
 
   public Task KillAllAsync() {
-    lock (gate)
+    lock (stateLock)
       return shutdown ??= KillCoreAsync();
   }
 

@@ -6,8 +6,6 @@ namespace Urd.Core.Tools;
 
 // A bounded UTF-8 display tail; only truncated output is copied in full to an owned temp file.
 internal sealed class BashOutput : IDisposable {
-  private const int MaxLines = 2000;
-  private const int MaxBytes = 50 * 1024;
   private readonly Decoder decoder = Encoding.UTF8.GetDecoder();
   private readonly char[] characters = new char[4096];
   private readonly MemoryStream prefix = new();
@@ -26,14 +24,14 @@ internal sealed class BashOutput : IDisposable {
   private bool published;
 
   private long TotalLines => completedLines + (openLine ? 1 : 0);
-  private bool Truncated => TotalLines > MaxLines || decodedBytes > MaxBytes;
+  private bool Truncated => TotalLines > ToolOutputLimits.MaxLines || decodedBytes > ToolOutputLimits.MaxBytes;
 
   public void Append(ReadOnlyMemory<byte> bytes) {
     if (finished)
       throw new InvalidOperationException("Cannot append to finished bash output.");
     rawBytes += bytes.Length;
     Decode(bytes.Span, flush: false);
-    if (spill is not null || rawBytes > MaxBytes || Truncated) {
+    if (spill is not null || rawBytes > ToolOutputLimits.MaxBytes || Truncated) {
       EnsureSpill();
       spill!.Write(bytes.Span);
     } else {
@@ -75,7 +73,7 @@ internal sealed class BashOutput : IDisposable {
       truncation = new {
         truncated = Truncated, truncatedBy = snapshot.Limit, totalLines = TotalLines, totalBytes = decodedBytes,
         outputLines = snapshot.Lines, outputBytes = snapshot.Bytes, lastLinePartial = snapshot.PartialLine,
-        maxLines = MaxLines, maxBytes = MaxBytes
+        maxLines = ToolOutputLimits.MaxLines, maxBytes = ToolOutputLimits.MaxBytes
       }
     }), IsError: timedOut || exitCode is not (0 or null));
   }
@@ -118,8 +116,8 @@ internal sealed class BashOutput : IDisposable {
     }
     decodedBytes += Encoding.UTF8.GetByteCount(text);
     tail.Append(text);
-    if (tail.Length > MaxBytes * 4) {
-      int start = tail.Length - MaxBytes * 2;
+    if (tail.Length > ToolOutputLimits.MaxBytes * 4) {
+      int start = tail.Length - ToolOutputLimits.MaxBytes * 2;
       if (char.IsLowSurrogate(tail[start]))
         start++;
       tailStartsAtLineBoundary = tail[start - 1] == '\n';
@@ -143,25 +141,24 @@ internal sealed class BashOutput : IDisposable {
       if (newline >= 0 && newline < text.Length - 1)
         text = text[(newline + 1)..];
     }
-    if (!Truncated)
-      return new(text, null, checked((int)TotalLines), checked((int)decodedBytes), false);
+    return Truncated ? SelectWindow(text)
+        : new(text, null, checked((int)TotalLines), checked((int)decodedBytes), false);
+  }
+
+  private SnapshotData SelectWindow(string text) {
     string[] lines = text.Split('\n');
     int end = lines.Length - (text.EndsWith('\n') ? 1 : 0);
     int start = end;
     int bytes = 0;
     string limit = "lines";
     bool partial = false;
-    while (start > 0 && end - start < MaxLines) {
+    while (start > 0 && end - start < ToolOutputLimits.MaxLines) {
       int nextBytes = Encoding.UTF8.GetByteCount(lines[start - 1]) + (start < end ? 1 : 0);
-      if (bytes + nextBytes > MaxBytes) {
+      if (bytes + nextBytes > ToolOutputLimits.MaxBytes) {
         limit = "bytes";
         if (start == end) {
-          byte[] lastLine = Encoding.UTF8.GetBytes(lines[--start]);
-          int offset = lastLine.Length - MaxBytes;
-          while (offset < lastLine.Length && (lastLine[offset] & 0xc0) == 0x80)
-            offset++;
-          lines[start] = Encoding.UTF8.GetString(lastLine.AsSpan(offset));
-          bytes = lastLine.Length - offset;
+          start--;
+          lines[start] = ClipLastLine(lines[start], out bytes);
           partial = true;
         }
         break;
@@ -169,11 +166,20 @@ internal sealed class BashOutput : IDisposable {
       bytes += nextBytes;
       start--;
     }
-    if (end - start >= MaxLines)
+    if (end - start >= ToolOutputLimits.MaxLines)
       limit = "lines";
     else if (start == 0 && !partial)
-      limit = decodedBytes > MaxBytes ? "bytes" : "lines";
+      limit = decodedBytes > ToolOutputLimits.MaxBytes ? "bytes" : "lines";
     return new(string.Join("\n", lines, start, end - start), limit, end - start, bytes, partial);
+  }
+
+  private static string ClipLastLine(string line, out int bytes) {
+    byte[] encoded = Encoding.UTF8.GetBytes(line);
+    int offset = encoded.Length - ToolOutputLimits.MaxBytes;
+    while (offset < encoded.Length && (encoded[offset] & 0xc0) == 0x80)
+      offset++;
+    bytes = encoded.Length - offset;
+    return Encoding.UTF8.GetString(encoded.AsSpan(offset));
   }
 
   private void EnsureSpill() {

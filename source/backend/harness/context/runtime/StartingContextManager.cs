@@ -46,7 +46,7 @@ internal sealed class StartingContextManager {
     if (cancellation.IsCancellationRequested)
       return Task.FromCanceled<StartingContext>(cancellation);
 
-    AIFunctionDeclaration[] tools = toolCatalog.For(input.ModelFamily)
+    AIFunctionDeclaration[] tools = toolCatalog.Tools
         .Select(AgentToolDeclaration.Create)
         .ToArray();
     if (cancellation.IsCancellationRequested)

@@ -8,9 +8,9 @@ namespace Urd.Core.Tools;
 internal sealed class BashTool(ChatProcesses processes, GitBash bash, IReadOnlyDictionary<string, string> environment) : AgentTool {
   public override string Name => "bash";
   public override ToolRelevance RelevantWhen => ToolRelevance.Always;
-  public override string Description => """
+  public override string Description => $"""
     Execute a Git Bash command in the current working directory. Returns stdout and stderr.
-    Output is truncated to the last 2000 lines or 50KB, whichever comes first.
+    Output is truncated to the last {ToolOutputLimits.MaxLines} lines or {ToolOutputLimits.MaxBytes / 1024}KB, whichever comes first.
     If truncated, full output is saved to a temp file.
     Optionally provide a timeout in seconds; there is no default timeout.
     """;

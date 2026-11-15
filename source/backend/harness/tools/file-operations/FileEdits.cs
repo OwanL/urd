@@ -11,13 +11,13 @@ internal static class FileEdits {
     byte[] original = await File.ReadAllBytesAsync(path, cancellation).ConfigureAwait(false);
     string text = utf8.GetString(original);
     cancellation.ThrowIfCancellationRequested();
-    byte[] changed = Replace(text, edits, cancellation);
+    byte[] changed = ApplyReplacements(text, FindReplacements(text, edits, cancellation));
     cancellation.ThrowIfCancellationRequested();
     await File.WriteAllBytesAsync(path, changed, cancellation).ConfigureAwait(false);
     cancellation.ThrowIfCancellationRequested();
   }
 
-  private static byte[] Replace(string original, JsonElement edits, CancellationToken cancellation) {
+  private static List<Replacement> FindReplacements(string original, JsonElement edits, CancellationToken cancellation) {
     int bomLength = original.StartsWith('\uFEFF') ? 1 : 0;
     var normalized = new StringBuilder(original.Length);
     var positions = new List<int>(original.Length + 1);
@@ -34,8 +34,8 @@ internal static class FileEdits {
     var replacements = new List<Replacement>(edits.GetArrayLength());
     foreach (JsonElement edit in edits.EnumerateArray()) {
       cancellation.ThrowIfCancellationRequested();
-      string oldText = ToolArguments.String(edit, "oldText");
-      string newText = ToolArguments.String(edit, "newText");
+      string oldText = ToolArguments.RequireString(edit, "oldText");
+      string newText = ToolArguments.RequireString(edit, "newText");
       oldText = oldText.Replace("\r\n", "\n", StringComparison.Ordinal);
       if (oldText.Length == 0)
         throw new ArgumentException("oldText must not be empty.");
@@ -52,6 +52,10 @@ internal static class FileEdits {
       replacements.Add(new Replacement(originalStart, originalEnd, replacement));
     }
     replacements.Sort((left, right) => left.Start.CompareTo(right.Start));
+    return replacements;
+  }
+
+  private static byte[] ApplyReplacements(string original, List<Replacement> replacements) {
     var result = new StringBuilder(original.Length);
     int cursor = 0;
     foreach (Replacement replacement in replacements) {

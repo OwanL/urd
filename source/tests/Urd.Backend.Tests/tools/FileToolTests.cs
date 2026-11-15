@@ -62,7 +62,7 @@ public sealed class FileToolTests : IDisposable {
   public async Task EmittedOrderIsAdmittedBeforeSuspensionAndQueuedCancellationHasNoEffects() {
     string path = Path.Combine(directory, "ordered.txt");
     var release = Signal();
-    var held = files.ChangeAsync(path, async token => {
+    var held = files.RunMutationAsync(path, async token => {
       await release.Task.WaitAsync(TestTimeout, token);
       return true;
     }, CancellationToken.None);

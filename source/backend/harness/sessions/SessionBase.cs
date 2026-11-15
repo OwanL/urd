@@ -427,7 +427,7 @@ public abstract class SessionBase {
     var identity = new ExecutionIdentity(SessionId: Id, ExecutionId: executionId, HistoryRevision: HistoryRevision);
     var recorder = new SessionExecutionRecorder(this, store, sessionLock, identity);
     var work = new SessionExecution(recorder, this, createChatClient, selection,
-        startingContextManager, tools.For(selection.Family), pending, compaction);
+        startingContextManager, tools.Tools, pending, compaction);
     execution = new SessionExecutionDriver(this, sessionLock, work);
     executionTask = execution.RunAsync(executionStart.Task);
     return executionStart;

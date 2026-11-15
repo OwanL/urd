@@ -37,7 +37,7 @@ public sealed class ChatProcessesTests {
       Assert.Contains("supplied ☃ value", text, StringComparison.Ordinal);
       Assert.Contains("sp ace ☃", text, StringComparison.Ordinal);
       using Process survivor = OpenChild(Path.Combine(directory, "survivor.pid"));
-      call.LeaveBackgroundProcesses();
+      call.KeepBackgroundProcesses();
       await call.DisposeAsync();
       Assert.False(survivor.HasExited);
       await chat.KillAllAsync().WaitAsync(Deadline);
@@ -60,12 +60,12 @@ public sealed class ChatProcessesTests {
           "sleep 60 & child=$!; cat /proc/$child/winpid > earlier.pid", directory, environment, _ => { });
       Assert.Equal(0, await earlier.WaitForExitAsync().WaitAsync(Deadline));
       using Process survivor = OpenChild(Path.Combine(directory, "earlier.pid"));
-      earlier.LeaveBackgroundProcesses();
+      earlier.KeepBackgroundProcesses();
       await using ShellProcess active = chat.StartBash(
           "sleep 60 & child=$!; cat /proc/$child/winpid > active.pid; sleep 60", directory, environment, _ => { });
       await WaitForFileAsync(Path.Combine(directory, "active.pid"));
       using Process child = OpenChild(Path.Combine(directory, "active.pid"));
-      Assert.Throws<InvalidOperationException>(active.LeaveBackgroundProcesses);
+      Assert.Throws<InvalidOperationException>(active.KeepBackgroundProcesses);
       await Task.WhenAll(active.CancelAsync(), active.CancelAsync()).WaitAsync(Deadline);
       await child.WaitForExitAsync().WaitAsync(Deadline);
       Assert.False(survivor.HasExited);
@@ -89,7 +89,7 @@ public sealed class ChatProcessesTests {
       Assert.Same(callbackFailure, failure);
       await using ShellProcess next = chat.StartBash(":", directory, ShellEnvironment(), _ => { });
       Assert.Equal(0, await next.WaitForExitAsync().WaitAsync(Deadline));
-      next.LeaveBackgroundProcesses();
+      next.KeepBackgroundProcesses();
       AggregateException cleanup = await Assert.ThrowsAsync<AggregateException>(() => chat.KillAllAsync().WaitAsync(Deadline));
       Assert.Contains(callbackFailure, cleanup.Flatten().InnerExceptions);
     } finally {

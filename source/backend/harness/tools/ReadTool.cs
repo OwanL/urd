@@ -7,11 +7,11 @@ namespace Urd.Core.Tools;
 internal sealed class ReadTool(FileMutationQueue files) : AgentTool {
   public override string Name => "read";
   public override ToolRelevance RelevantWhen => ToolRelevance.Always;
-  public override string Description => """
+  public override string Description => $"""
     Read a file. Supports UTF-8 text and images (jpg, png, gif, webp, bmp).
     Images are processed to at most 2000×2000 and below 4.5MiB of base64; BMP is converted before attachment.
     Image source files are limited to 64MiB and decoding is memory-bounded.
-    Text output is limited to 2000 lines or 50KB, whichever comes first.
+    Text output is limited to {ToolOutputLimits.MaxLines} lines or {ToolOutputLimits.MaxBytes / 1024}KB, whichever comes first.
     Use offset/limit to page through large files; continue with the suggested offset until complete.
     """;
   public override JsonElement ParametersSchema { get; } = ToolSchema.Parse("""
@@ -28,12 +28,12 @@ internal sealed class ReadTool(FileMutationQueue files) : AgentTool {
 
   public override async Task<ToolOutput> RunAsync(JsonElement arguments, ToolContext context, CancellationToken cancellation) {
     try {
-      string path = ToolArguments.String(arguments, "path");
+      string path = ToolArguments.RequireString(arguments, "path");
       int offset = PositiveInteger(arguments, "offset", 1);
       int limit = PositiveInteger(arguments, "limit", int.MaxValue);
       string absolutePath = ToolPaths.Resolve(path, context.WorkingDirectory);
       // Admission precedes any I/O await, so reads observe earlier mutations in the reply.
-      return await files.ReadAsync(absolutePath,
+      return await files.ReadAfterMutationsAsync(absolutePath,
         token => FileReader.ReadAsync(absolutePath, offset, limit, context.ModelAcceptsImages, token), cancellation).ConfigureAwait(false);
     } catch (OperationCanceledException) {
       return new ToolOutput("read cancelled.", [], IsError: true);

@@ -23,8 +23,7 @@ internal sealed class BashCommand(ChatProcesses processes, GitBash bash, IReadOn
     try {
       output.Dispose();
     } catch (Exception cleanup) {
-      throw new ToolCleanupException("Bash output cleanup failed.", executionFailure is null
-          ? cleanup : new AggregateException(executionFailure, cleanup));
+      throw CleanupFailure("Bash output cleanup failed.", executionFailure, cleanup);
     }
     if (executionFailure is not null)
       ExceptionDispatchInfo.Capture(executionFailure).Throw();
@@ -34,7 +33,7 @@ internal sealed class BashCommand(ChatProcesses processes, GitBash bash, IReadOn
   private async Task<ToolOutput> RunCallAsync(JsonElement arguments, ToolContext context,
       BashOutput output, Stopwatch elapsed, CancellationToken cancellation) {
     try {
-      string command = ToolArguments.String(arguments, "command");
+      string command = ToolArguments.RequireString(arguments, "command");
       double? timeoutSeconds = TimeoutSeconds(arguments);
       long lastProgressMs = -100;
       void ReceiveOutput(ReadOnlyMemory<byte> bytes) {
@@ -79,13 +78,15 @@ internal sealed class BashCommand(ChatProcesses processes, GitBash bash, IReadOn
     try {
       await shell.DisposeAsync().ConfigureAwait(false);
     } catch (Exception cleanup) {
-      throw new ToolCleanupException("Bash process cleanup failed.", executionFailure is null
-          ? cleanup : new AggregateException(executionFailure, cleanup));
+      throw CleanupFailure("Bash process cleanup failed.", executionFailure, cleanup);
     }
     if (executionFailure is not null)
       ExceptionDispatchInfo.Capture(executionFailure).Throw();
     return result;
   }
+
+  private static ToolCleanupException CleanupFailure(string message, Exception? execution, Exception cleanup) =>
+      new(message, execution is null ? cleanup : new AggregateException(execution, cleanup));
 
   private static async Task<(int? ExitCode, bool TimedOut)> WaitForShellAsync(ShellProcess shell,
       double? timeoutSeconds, CancellationToken cancellation) {
@@ -102,7 +103,7 @@ internal sealed class BashCommand(ChatProcesses processes, GitBash bash, IReadOn
       return (await shell.WaitForExitAsync().ConfigureAwait(false), true);
     }
     cancellation.ThrowIfCancellationRequested();
-    shell.LeaveBackgroundProcesses();
+    shell.KeepBackgroundProcesses();
     return (exitCode, false);
   }
 

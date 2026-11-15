@@ -38,13 +38,13 @@ internal sealed class EditTool(FileMutationQueue files) : AgentTool {
 
   public override async Task<ToolOutput> RunAsync(JsonElement arguments, ToolContext context, CancellationToken cancellation) {
     try {
-      string path = ToolArguments.String(arguments, "path");
+      string path = ToolArguments.RequireString(arguments, "path");
       JsonElement edits = arguments.GetProperty("edits");
       if (edits.ValueKind != JsonValueKind.Array || edits.GetArrayLength() == 0)
         throw new ArgumentException("edits must contain at least one replacement.");
       string absolutePath = ToolPaths.Resolve(path, context.WorkingDirectory);
       // Queue before the first suspension, including the initial file read.
-      return await files.ChangeAsync(absolutePath, async token => {
+      return await files.RunMutationAsync(absolutePath, async token => {
         await FileEdits.ApplyAsync(absolutePath, edits, token).ConfigureAwait(false);
         return new ToolOutput($"Successfully replaced {edits.GetArrayLength()} block(s) in {path}.", []);
       }, cancellation).ConfigureAwait(false);

@@ -187,12 +187,12 @@ public sealed class ToolExecutionTests {
       admissions.Add(context.CallId);
       string path = Path.Combine(context.WorkingDirectory, "same-file");
       if (context.CallId == "read") {
-        Task<ToolOutput> result = files.ReadAsync(path, token =>
+        Task<ToolOutput> result = files.ReadAfterMutationsAsync(path, token =>
             Task.FromResult(new ToolOutput(string.Join(",", effects), [])), cancellation);
         readAdmitted.TrySetResult();
         return result;
       }
-      return files.ChangeAsync(path, async token => {
+      return files.RunMutationAsync(path, async token => {
         if (context.CallId == "first") {
           entered.TrySetResult();
           await release.Task.WaitAsync(token);

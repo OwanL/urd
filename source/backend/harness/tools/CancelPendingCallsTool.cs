@@ -18,7 +18,7 @@ internal sealed class CancelPendingCallsTool(PendingToolCalls pending) : AgentTo
     """);
 
   public override Task<ToolOutput> RunAsync(JsonElement arguments, ToolContext context, CancellationToken cancellation) {
-    int count = pending.RequestCancelAll(context.RequestId, context.CallId);
+    int count = pending.RequestCancelOthers(context.RequestId, context.CallId);
     return Task.FromResult(new ToolOutput($"Cancellation requested for {count} pending tool call(s). This is not cleanup completion or rollback.", [],
       JsonSerializer.SerializeToElement(new { cancellationRequested = count })));
   }

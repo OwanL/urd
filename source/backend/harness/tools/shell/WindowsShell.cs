@@ -10,6 +10,19 @@ namespace Urd.Core.Tools;
 // The Windows boundary: suspended launch, explicit inherited handles and job accounting.
 [SupportedOSPlatform("windows")]
 internal static class WindowsShell {
+  private const int ExtendedLimitInformation = 9;
+  private const int BasicAccountingInformation = 1;
+  private const uint HandleInherit = 1;
+  private const uint NoFlags = 0;
+  private const uint GenericRead = 0x80000000;
+  private const uint ShareReadWrite = 3;
+  private const uint OpenExisting = 3;
+  private const uint TerminationExitCode = 1;
+  private const uint PollImmediately = 0;
+  private const uint WaitObjectSignaled = 0;
+  private const uint WaitTimeout = 258;
+  private const uint CleanupTimeoutMilliseconds = 10_000;
+  private const int UseStandardHandles = 0x100;
   private const uint KillOnClose = 0x2000;
   private const uint CreateSuspended = 0x4;
   private const uint CreateUnicodeEnvironment = 0x400;
@@ -27,7 +40,7 @@ internal static class WindowsShell {
     }
     var limits = new JobLimits();
     limits.Basic.LimitFlags = KillOnClose;
-    if (SetInformationJobObject(job, 9, ref limits, Marshal.SizeOf<JobLimits>()))
+    if (SetInformationJobObject(job, ExtendedLimitInformation, ref limits, Marshal.SizeOf<JobLimits>()))
       return job;
     var error = Error("Set kill-on-close job limit");
     job.Dispose();
@@ -46,8 +59,8 @@ internal static class WindowsShell {
     }
     using SafeFileHandle outputWriter = write;
     try {
-      Check(SetHandleInformation(read, 1, 0), "Prevent output reader inheritance");
-      using SafeFileHandle input = CreateFileW("NUL", 0x80000000, 3, ref security, 3, 0, nint.Zero);
+      Check(SetHandleInformation(read, HandleInherit, NoFlags), "Prevent output reader inheritance");
+      using SafeFileHandle input = CreateFileW("NUL", GenericRead, ShareReadWrite, ref security, OpenExisting, NoFlags, nint.Zero);
       if (input.IsInvalid)
         throw Error("Open shell input");
       var started = StartSuspended(executable, command, directory, environment, input, outputWriter);
@@ -69,8 +82,8 @@ internal static class WindowsShell {
         throw Error("Resume owned shell");
     } catch (Exception failure) {
       try {
-        Check(TerminateProcess(process, 1), "Terminate failed shell launch");
-        if (WaitForSingleObject(process, 10000) != 0)
+        Check(TerminateProcess(process, TerminationExitCode), "Terminate failed shell launch");
+        if (WaitForSingleObject(process, CleanupTimeoutMilliseconds) != WaitObjectSignaled)
           throw new TimeoutException("Failed shell launch did not terminate within 10 seconds.");
       } catch (Exception cleanup) {
         throw new AggregateException(failure, cleanup);
@@ -86,7 +99,7 @@ internal static class WindowsShell {
       IReadOnlyDictionary<string, string> environment, SafeFileHandle input, SafeFileHandle output) {
     nint attributes = nint.Zero;
     nuint size = 0;
-    InitializeProcThreadAttributeList(nint.Zero, 1, 0, ref size);
+    InitializeProcThreadAttributeList(nint.Zero, 1, NoFlags, ref size);
     string environmentBlock = EnvironmentBlock(environment);
     nint inherited = nint.Zero;
     nint block = nint.Zero;
@@ -94,15 +107,15 @@ internal static class WindowsShell {
       inherited = Marshal.AllocHGlobal(2 * nint.Size);
       block = Marshal.StringToHGlobalUni(environmentBlock);
       attributes = Marshal.AllocHGlobal(checked((int)size));
-      Check(InitializeProcThreadAttributeList(attributes, 1, 0, ref size), "Initialize handle allowlist");
+      Check(InitializeProcThreadAttributeList(attributes, 1, NoFlags, ref size), "Initialize handle allowlist");
       try {
         Marshal.WriteIntPtr(inherited, input.DangerousGetHandle());
         Marshal.WriteIntPtr(inherited, nint.Size, output.DangerousGetHandle());
-        Check(UpdateProcThreadAttribute(attributes, 0, InheritedHandleList, inherited,
+        Check(UpdateProcThreadAttribute(attributes, NoFlags, InheritedHandleList, inherited,
             (nuint)(2 * nint.Size), nint.Zero, nint.Zero), "Set inherited handle allowlist");
         var startup = new StartupInfoEx {
           Startup = new StartupInfo {
-            Size = Marshal.SizeOf<StartupInfoEx>(), Flags = 0x100,
+            Size = Marshal.SizeOf<StartupInfoEx>(), Flags = UseStandardHandles,
             Input = input.DangerousGetHandle(), Output = output.DangerousGetHandle(), ErrorOutput = output.DangerousGetHandle()
           },
           Attributes = attributes
@@ -153,10 +166,10 @@ internal static class WindowsShell {
   }
 
   public static int? ExitCode(SafeFileHandle process) {
-    uint wait = WaitForSingleObject(process, 0);
-    if (wait == 258)
+    uint wait = WaitForSingleObject(process, PollImmediately);
+    if (wait == WaitTimeout)
       return null;
-    if (wait != 0)
+    if (wait != WaitObjectSignaled)
       throw Error("Wait for shell exit");
     Check(GetExitCodeProcess(process, out uint code), "Read shell exit code");
     return unchecked((int)code);
@@ -171,10 +184,10 @@ internal static class WindowsShell {
     throw new Win32Exception(error, "Inspect shell output pipe");
   }
 
-  public static void Terminate(SafeFileHandle job) => Check(TerminateJobObject(job, 1), "Terminate shell job");
+  public static void Terminate(SafeFileHandle job) => Check(TerminateJobObject(job, TerminationExitCode), "Terminate shell job");
 
   public static uint ActiveProcesses(SafeFileHandle job) {
-    Check(QueryInformationJobObject(job, 1, out JobAccounting accounting,
+    Check(QueryInformationJobObject(job, BasicAccountingInformation, out JobAccounting accounting,
         Marshal.SizeOf<JobAccounting>(), nint.Zero), "Read job process count");
     return accounting.ActiveProcessCount;
   }
@@ -182,7 +195,7 @@ internal static class WindowsShell {
   public static async Task WaitForEmptyAsync(SafeFileHandle job) {
     var elapsed = Stopwatch.StartNew();
     while (ActiveProcesses(job) != 0) {
-      if (elapsed.Elapsed >= TimeSpan.FromSeconds(10))
+      if (elapsed.Elapsed >= TimeSpan.FromMilliseconds(CleanupTimeoutMilliseconds))
         throw new TimeoutException("Windows job still contains processes after 10 seconds of cleanup.");
       await Task.Delay(20).ConfigureAwait(false);
     }

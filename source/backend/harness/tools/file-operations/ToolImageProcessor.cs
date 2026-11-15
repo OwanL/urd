@@ -60,8 +60,7 @@ internal static class ToolImageProcessor {
     SKImageInfo info = codec.Info;
     if (info.Width <= 0 || info.Height <= 0)
       return Error("invalid image dimensions.");
-    bool swapsAxes = codec.EncodedOrigin is SKEncodedOrigin.LeftTop or SKEncodedOrigin.RightTop
-      or SKEncodedOrigin.RightBottom or SKEncodedOrigin.LeftBottom;
+    bool swapsAxes = SwapsAxes(codec.EncodedOrigin);
     var original = swapsAxes ? new SKSizeI(info.Height, info.Width) : new SKSizeI(info.Width, info.Height);
     SKSizeI target = Fit(original);
     // JPEG supports native downsampling. Other codecs may return the full size here.
@@ -91,8 +90,7 @@ internal static class ToolImageProcessor {
       if (!rendered.TryAllocPixels(new SKImageInfo(size.Width, size.Height, SKColorType.Bgra8888, SKAlphaType.Premul)))
         return Error("could not allocate the displayed image.");
       using (var canvas = new SKCanvas(rendered)) {
-        bool swapsAxes = origin is SKEncodedOrigin.LeftTop or SKEncodedOrigin.RightTop
-          or SKEncodedOrigin.RightBottom or SKEncodedOrigin.LeftBottom;
+        bool swapsAxes = SwapsAxes(origin);
         canvas.Clear(SKColors.Transparent);
         canvas.Scale((float)size.Width / (swapsAxes ? decoded.Height : decoded.Width),
           (float)size.Height / (swapsAxes ? decoded.Width : decoded.Height));
@@ -141,6 +139,9 @@ internal static class ToolImageProcessor {
     ? new(0, 0) : new(Math.Max(1, size.Width * 3 / 4), Math.Max(1, size.Height * 3 / 4));
 
   private static bool Fits(long bytes) => 4 * ((bytes + 2) / 3) < maxBase64Bytes;
+
+  private static bool SwapsAxes(SKEncodedOrigin origin) => origin is SKEncodedOrigin.LeftTop or SKEncodedOrigin.RightTop
+    or SKEncodedOrigin.RightBottom or SKEncodedOrigin.LeftBottom;
 
   private static SKMatrix Orientation(SKEncodedOrigin origin, int width, int height) => origin switch {
     SKEncodedOrigin.TopRight => new(-1, 0, width, 0, 1, 0, 0, 0, 1),

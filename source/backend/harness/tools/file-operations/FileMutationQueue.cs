@@ -2,27 +2,27 @@ namespace Urd.Core.Tools;
 
 // Shared across chats: orders Urd mutations, not bash commands or outside writers.
 internal sealed class FileMutationQueue {
-  private readonly object gate = new();
+  private readonly object stateLock = new();
   private readonly Dictionary<string, TaskCompletionSource> mutations = new(
     OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
 
-  public Task<T> ChangeAsync<T>(string path, Func<CancellationToken, Task<T>> change, CancellationToken cancellation) {
+  public Task<T> RunMutationAsync<T>(string path, Func<CancellationToken, Task<T>> change, CancellationToken cancellation) {
     ArgumentNullException.ThrowIfNull(change);
     string identity = ToolPaths.Resolve(path, Directory.GetCurrentDirectory());
     var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
     Task preceding;
-    lock (gate) {
+    lock (stateLock) {
       preceding = mutations.TryGetValue(identity, out var pending) ? pending.Task : Task.CompletedTask;
       mutations[identity] = completion;
     }
     return ChangeAfterAsync(identity, preceding, completion, change, cancellation);
   }
 
-  public Task<T> ReadAsync<T>(string path, Func<CancellationToken, Task<T>> read, CancellationToken cancellation) {
+  public Task<T> ReadAfterMutationsAsync<T>(string path, Func<CancellationToken, Task<T>> read, CancellationToken cancellation) {
     ArgumentNullException.ThrowIfNull(read);
     string identity = ToolPaths.Resolve(path, Directory.GetCurrentDirectory());
     Task preceding;
-    lock (gate)
+    lock (stateLock)
       preceding = mutations.TryGetValue(identity, out var pending) ? pending.Task : Task.CompletedTask;
     return ReadAfterAsync(preceding, read, cancellation);
   }
@@ -57,7 +57,7 @@ internal sealed class FileMutationQueue {
   }
 
   private void Release(string identity, TaskCompletionSource completion) {
-    lock (gate) {
+    lock (stateLock) {
       if (mutations.TryGetValue(identity, out var pending) && ReferenceEquals(pending, completion))
         mutations.Remove(identity);
       completion.SetResult();

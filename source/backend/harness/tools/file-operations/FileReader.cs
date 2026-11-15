@@ -29,10 +29,8 @@ internal static class FileReader {
     try {
       using var image = new MemoryStream();
       byte[] buffer = new byte[8192];
-      while (true) {
-        int count = await stream.ReadAsync(buffer, cancellation).ConfigureAwait(false);
-        if (count == 0)
-          break;
+      int count;
+      while ((count = await stream.ReadAsync(buffer, cancellation).ConfigureAwait(false)) != 0) {
         // An outside writer may grow the file after the length check.
         if (image.Length + count > maxImageSourceBytes)
           return new ToolOutput("[Image omitted: source exceeds the 64MiB image processing limit.]", [], IsError: true);

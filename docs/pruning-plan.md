@@ -27,10 +27,16 @@ full contents of every unprotected candidate document upfront, not just paths or
 summaries requiring follow-up reads. Protected documents remain excluded. This does
 not select full skill-body loading or change the other categories' input contracts.
 
-Users choose pruning models through Settings, stored in user preferences, with a
-model choice for each category. The implementation must be modular, extendable and
-share common execution rather than duplicate pruning loops for the three categories.
-Separate conversations do not imply separate engines or new full-session subtypes.
+**Model selection decision:** each category uses the configured `small` model bucket
+by default. In Settings, users can override that default with a specific provider/model
+for each category, including a local-inference model. Store these choices in user
+preferences. An override affects that category, not the shared `small` bucket itself.
+This auxiliary-operation setting does not add an exact-model override to agent-created
+session APIs.
+
+The implementation must be modular, extendable and share common execution rather than
+duplicate pruning loops for the three categories. Separate conversations do not imply
+separate engines or new full-session subtypes.
 
 ## Pruning triggers
 
@@ -93,9 +99,9 @@ instruction loader or a decision about additional non-project instruction source
 
 | Category | Model | Protected items |
 | --- | --- | --- |
-| Tools | Model picker | Core tools plus user selections; Add… |
-| Skills | Model picker | User selections; Add… |
-| Additional instructions | Model picker | User selections; Add… |
+| Tools | Small bucket (default) or specific model | Core tools plus user selections; Add… |
+| Skills | Small bucket (default) or specific model | User selections; Add… |
+| Additional instructions | Small bucket (default) or specific model | User selections; Add… |
 
 The picker lists every discoverable skill or instruction document for the **default
 working directory**. Tools come from the registered catalog and are expected to be

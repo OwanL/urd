@@ -601,8 +601,10 @@ classification results, not task-success rates or proof of the subsequent design
 
 **Owner direction after replay (2026-11-15):** use parallel pruning conversations
 for skills, additional instruction documents and tools, with basic exploration tools
-and shared implementation. User preferences supply per-category model choices and
-protected-item settings; protected entries bypass selection before inputs are built.
+and shared implementation. Each pruner defaults to the configured `small` bucket,
+with a per-category specific-model override in user preferences, including local models.
+Preferences also supply protected-item settings; protected entries bypass selection
+before inputs are built.
 Pruning runs only on the first prompt in a fresh session and on the first message or
 continuation after successful compaction, not on compaction completion alone or other
 events. The [pruning plan](pruning-plan.md) owns these triggers, picker scope, working

@@ -6,7 +6,7 @@ import { Settings } from "../settings/Settings.tsx";
 import { Tooltip } from "../components/Tooltip.tsx";
 import { ProviderClient } from "../providers/ProviderClient.ts";
 import { PreferencesClient } from "../preferences/PreferencesClient.ts";
-import { useWorkingDirectoryPreferences } from "../preferences/useWorkingDirectoryPreferences.ts";
+import { usePreferences } from "../preferences/usePreferences.ts";
 import type { SettingsTab } from "../settings/Settings.tsx";
 import { SessionClient } from "../sessions/SessionClient.ts";
 import { MessageEditing } from "./MessageEditing.ts";
@@ -73,10 +73,10 @@ export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) 
   const transcriptPositions = useRef(new Map<string, TranscriptNavigationState>());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("providers");
-  const workingDirectoryPreferences = useWorkingDirectoryPreferences(preferencesClient);
+  const preferences = usePreferences(preferencesClient);
   const openSettings = (tab?: SettingsTab) => {
     if (tab) setSettingsTab(tab);
-    void workingDirectoryPreferences.refresh();
+    void preferences.refresh();
     setSettingsOpen(true);
   };
   const settingsAnchor = useRef<HTMLButtonElement>(null);
@@ -189,7 +189,7 @@ export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) 
         open={settingsOpen}
         anchor={settingsAnchor}
         client={providers}
-        preferences={workingDirectoryPreferences}
+        preferences={preferences}
         tab={settingsTab}
         onTabChange={setSettingsTab}
         onClose={() => setSettingsOpen(false)}
@@ -239,7 +239,7 @@ export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) 
             checking={commandState.checking[id] ?? false}
             checkingContinuation={commandState.checkingContinuations[id] ?? false}
             models={models}
-            preferences={workingDirectoryPreferences}
+            preferences={preferences}
             ready={connected}
             canPersist={canPersist}
             notice={id === activeId ? events.notice : null}

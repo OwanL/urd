@@ -27,7 +27,11 @@ The model picker loads cached catalogs immediately, discovers missing catalogs o
 rediscovers after provider changes, without polling or a routine refresh action. With no providers,
 the model and reasoning selectors are replaced by an Add provider action that opens Settings →
 Providers; search, loading, empty and failure states stay distinct.
-Settings → General holds the default working directory, selected through a folder browser.
+Settings → General holds the default working directory, selected through a folder browser,
+and an explicitly saved compaction-trigger token count. Blank/Automatic restores the default;
+positive whole counts override the trigger subject to model headroom. The shared `usePreferences`
+hook owns reads and saves; changing the trigger takes effect at the next compaction check, while
+working-directory changes still apply only to new chats.
 Before the first accepted message, the empty transcript centers the default and current
 working-directory paths with explicit Edit actions. Edit opens a single directory editor
 with breadcrumbs and an editable address, with an explicit Select folder/Cancel decision;
@@ -230,8 +234,8 @@ not retained. For manual inspection, run `npm run dev:browser:host` and open its
 Urd origin. This starts a development host, not tests.
 Playwright remains a dependency only for the separate manual `TranscriptBaseline.ts`
 diagnostic, not routine verification. Its raw-SQL seed still requires schema 16, while
-[the schema owner](../source/backend/harness/storage/DatabaseSchema.cs) is at version 26
-(as checked 2026-11-14), so it aborts before the workload. Requalify its seed SQL and
+[the schema owner](../source/backend/harness/storage/DatabaseSchema.cs) is at version 27
+(as checked 2026-11-15), so it aborts before the workload. Requalify its seed SQL and
 version guard together before using it as performance evidence; changing the guard
 alone is not qualification. Install its pinned Chromium explicitly before running it.
 Ctrl+C or POST to

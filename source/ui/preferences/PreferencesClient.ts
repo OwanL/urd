@@ -2,6 +2,7 @@ import { requestJson } from "../http/requestJson.ts";
 
 export interface Preferences {
   readonly workingDirectory: string | null;
+  readonly compactionTriggerTokenCount: number | null;
 }
 
 // Typed access to browser preferences; construction performs no I/O.
@@ -19,6 +20,12 @@ export class PreferencesClient {
   setWorkingDirectory(workingDirectory: string | null): Promise<Preferences> {
     return requestJson(new URL("/api/preferences/working-directory", this.origin), "POST", {
       workingDirectory,
+    });
+  }
+
+  setCompactionTriggerTokenCount(compactionTriggerTokenCount: number | null): Promise<Preferences> {
+    return requestJson(new URL("/api/preferences/compaction-trigger", this.origin), "POST", {
+      compactionTriggerTokenCount,
     });
   }
 }

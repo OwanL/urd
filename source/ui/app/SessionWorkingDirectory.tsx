@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { WorkingDirectoryRow } from "./WorkingDirectoryRow.tsx";
 import { RequestError } from "../http/RequestError.ts";
-import type { WorkingDirectoryPreferenceState } from "../preferences/useWorkingDirectoryPreferences.ts";
+import type { PreferencesState } from "../preferences/usePreferences.ts";
 import type { SessionClient } from "../sessions/SessionClient.ts";
 import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
 
@@ -9,7 +9,7 @@ interface SessionWorkingDirectoryProps {
   client: SessionClient;
   sessionId: string;
   workingDirectory: string | null;
-  preferences: WorkingDirectoryPreferenceState;
+  preferences: PreferencesState;
   disabled: boolean;
   onGateChange(locked: boolean, notice: string | null): void;
   onSnapshot(snapshot: SessionSnapshot): void;
@@ -47,7 +47,7 @@ export function SessionWorkingDirectory({
     setSavedDirectory(null);
     onGateChange(true, "Saving working directory…");
 
-    if (updateDefault && !(await preferences.save(nextDirectory))) {
+    if (updateDefault && !(await preferences.saveWorkingDirectory(nextDirectory))) {
       setChangeState("idle");
       operationInProgress.current = false;
       onGateChange(false, null);
@@ -135,6 +135,7 @@ export function SessionWorkingDirectory({
   }
 
   const defaultDirectory = preferences.preferences?.workingDirectory ?? null;
+  const defaultDirectoryError = preferences.errorFor("workingDirectory");
   const changeFeedback =
     failure || changeState === "uncertain" || changeState === "reconciling" ? (
       <>
@@ -153,18 +154,18 @@ export function SessionWorkingDirectory({
         label="Default working directory"
         title="Default working directory"
         directory={
-          preferences.loaded ? defaultDirectory : preferences.error ? "unavailable" : "loading…"
+          preferences.loaded ? defaultDirectory : defaultDirectoryError ? "unavailable" : "loading…"
         }
         disabled={disabled || !preferences.loaded || changeState !== "idle"}
         busy={preferences.pending || changeState !== "idle"}
         onSave={(path) => save(path, true)}
         onDraftChange={preferences.clearError}
         feedback={
-          (preferences.error || (changingDefault && changeFeedback)) && (
+          (defaultDirectoryError || (changingDefault && changeFeedback)) && (
             <>
-              {preferences.error && (
+              {defaultDirectoryError && (
                 <>
-                  <p role="alert">{preferences.error}</p>
+                  <p role="alert">{defaultDirectoryError}</p>
                   {!preferences.loaded && (
                     <button type="button" onClick={() => void preferences.refresh()}>
                       Retry

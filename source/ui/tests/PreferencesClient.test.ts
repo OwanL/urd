@@ -5,17 +5,28 @@ import { PreferencesClient } from "../preferences/PreferencesClient.ts";
 import { startHttpServer } from "./HttpTestServer.ts";
 
 void test("preferences use the browser API contract", { timeout: 5_000 }, async (t) => {
-  const saved = { workingDirectory: "C:\\work\\project" };
+  const saved = { workingDirectory: "C:\\work\\project", compactionTriggerTokenCount: 4_096 };
   const server = await startHttpServer((request, response) => {
     response.writeHead(200, { "Content-Type": "application/json" });
-    response.end(JSON.stringify(request.method === "GET" ? { workingDirectory: null } : saved));
+    response.end(
+      JSON.stringify(
+        request.method === "GET"
+          ? { workingDirectory: null, compactionTriggerTokenCount: null }
+          : saved,
+      ),
+    );
   });
   t.after(() => server.close());
 
   const client = new PreferencesClient(new URL("/ignored/path", server.origin));
-  assert.deepEqual(await client.get(), { workingDirectory: null });
+  assert.deepEqual(await client.get(), {
+    workingDirectory: null,
+    compactionTriggerTokenCount: null,
+  });
   assert.deepEqual(await client.setWorkingDirectory(saved.workingDirectory), saved);
   assert.deepEqual(await client.setWorkingDirectory(null), saved);
+  assert.deepEqual(await client.setCompactionTriggerTokenCount(4_096), saved);
+  assert.deepEqual(await client.setCompactionTriggerTokenCount(null), saved);
 
   assert.deepEqual(
     server.requests.map(({ method, url, body }) => ({ method, url, body })),
@@ -24,12 +35,22 @@ void test("preferences use the browser API contract", { timeout: 5_000 }, async 
       {
         method: "POST",
         url: "/api/preferences/working-directory",
-        body: JSON.stringify(saved),
+        body: JSON.stringify({ workingDirectory: saved.workingDirectory }),
       },
       {
         method: "POST",
         url: "/api/preferences/working-directory",
         body: JSON.stringify({ workingDirectory: null }),
+      },
+      {
+        method: "POST",
+        url: "/api/preferences/compaction-trigger",
+        body: JSON.stringify({ compactionTriggerTokenCount: 4_096 }),
+      },
+      {
+        method: "POST",
+        url: "/api/preferences/compaction-trigger",
+        body: JSON.stringify({ compactionTriggerTokenCount: null }),
       },
     ],
   );

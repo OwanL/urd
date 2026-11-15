@@ -1,22 +1,67 @@
 import type { RefObject } from "preact";
-import { useState } from "preact/hooks";
+import { useId, useState } from "preact/hooks";
 import { FolderPicker } from "../components/FolderPicker.tsx";
-import type { WorkingDirectoryPreferenceState } from "../preferences/useWorkingDirectoryPreferences.ts";
+import {
+  compactionTriggerInput,
+  parseCompactionTriggerInput,
+} from "../preferences/CompactionTriggerInput.ts";
+import type { PreferencesState } from "../preferences/usePreferences.ts";
 
 interface GeneralSettingsProps {
-  state: WorkingDirectoryPreferenceState;
+  state: PreferencesState;
   buttonRef: RefObject<HTMLButtonElement | null>;
+  compactionTriggerDraft: string;
+  onCompactionTriggerDraftChange(value: string): void;
+  onCompactionTriggerSaved(value: number | null): void;
 }
 
-export function GeneralSettings({ state, buttonRef }: GeneralSettingsProps) {
+export function GeneralSettings({
+  state,
+  buttonRef,
+  compactionTriggerDraft,
+  onCompactionTriggerDraftChange,
+  onCompactionTriggerSaved,
+}: GeneralSettingsProps) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const workingDirectory = state.preferences?.workingDirectory ?? null;
+  const workingDirectoryError = state.errorFor("workingDirectory");
+  const compactionTriggerTokenCount = state.preferences?.compactionTriggerTokenCount ?? null;
+  const [triggerValidation, setTriggerValidation] = useState<string | null>(null);
+  const [triggerSaving, setTriggerSaving] = useState(false);
+  const [triggerSaved, setTriggerSaved] = useState(false);
+  const triggerId = useId();
+  const triggerErrorId = `${triggerId}-error`;
+
+  const editTrigger = (value: string) => {
+    onCompactionTriggerDraftChange(value);
+    setTriggerValidation(null);
+    setTriggerSaved(false);
+    state.clearError();
+  };
+
+  const saveTrigger = async () => {
+    const result = parseCompactionTriggerInput(compactionTriggerDraft);
+    if (!result.valid) {
+      setTriggerValidation(result.error);
+      return;
+    }
+    if (state.pending || triggerSaving) return;
+
+    setTriggerValidation(null);
+    setTriggerSaved(false);
+    setTriggerSaving(true);
+    if (await state.saveCompactionTriggerTokenCount(result.value)) {
+      onCompactionTriggerSaved(result.value);
+      setTriggerSaved(true);
+    }
+    setTriggerSaving(false);
+  };
 
   return (
     <section
       class="general-settings"
       aria-label="General"
-      aria-busy={state.loading || state.pending}
+      aria-busy={state.loading || state.pending || triggerSaving}
     >
       <div class="general-settings-field">
         <span>Working directory</span>
@@ -38,14 +83,64 @@ export function GeneralSettings({ state, buttonRef }: GeneralSettingsProps) {
         <button
           type="button"
           disabled={state.pending || !state.loaded || workingDirectory === null}
-          onClick={() => void state.save(null)}
+          onClick={() => void state.saveWorkingDirectory(null)}
         >
           Reset to root
         </button>
       </div>
+      <div class="general-settings-field compaction-trigger-setting" aria-busy={triggerSaving}>
+        <label htmlFor={`${triggerId}-input`}>Compaction trigger (tokens)</label>
+        <div class="compaction-trigger-control">
+          <input
+            id={`${triggerId}-input`}
+            type="text"
+            inputMode="numeric"
+            autoComplete="off"
+            placeholder="Automatic"
+            value={compactionTriggerDraft}
+            aria-invalid={triggerValidation ? "true" : undefined}
+            aria-describedby={triggerValidation ? triggerErrorId : undefined}
+            disabled={!state.loaded || state.pending || triggerSaving}
+            onInput={(event) => editTrigger(event.currentTarget.value)}
+          />
+          <button
+            type="button"
+            disabled={
+              !state.loaded ||
+              state.pending ||
+              triggerSaving ||
+              (compactionTriggerDraft === "" && compactionTriggerTokenCount === null)
+            }
+            onClick={() => editTrigger("")}
+          >
+            Set automatic
+          </button>
+          <button
+            type="button"
+            disabled={
+              !state.loaded ||
+              state.pending ||
+              triggerSaving ||
+              compactionTriggerDraft === compactionTriggerInput(compactionTriggerTokenCount)
+            }
+            onClick={() => void saveTrigger()}
+          >
+            Save
+          </button>
+        </div>
+        <div class="general-settings-feedback" aria-live="polite" aria-atomic="true">
+          {triggerValidation && (
+            <p id={triggerErrorId} role="alert">
+              {triggerValidation}
+            </p>
+          )}
+          {triggerSaving && <p role="status">Saving…</p>}
+          {triggerSaved && !triggerSaving && <p role="status">Saved.</p>}
+        </div>
+      </div>
       {!pickerOpen && (
         <div class="general-settings-feedback" aria-live="polite" aria-atomic="true">
-          {state.pending && <p>Saving…</p>}
+          {state.pending && !triggerSaving && <p>Saving…</p>}
           {!state.pending && state.loading && <p>Loading…</p>}
           {state.error && <p role="alert">{state.error}</p>}
           {state.error && !state.loaded && (
@@ -61,8 +156,8 @@ export function GeneralSettings({ state, buttonRef }: GeneralSettingsProps) {
           title="Default working directory"
           initialPath={workingDirectory}
           busy={state.pending}
-          feedback={state.error && <p role="alert">{state.error}</p>}
-          onChoose={state.save}
+          feedback={workingDirectoryError && <p role="alert">{workingDirectoryError}</p>}
+          onChoose={state.saveWorkingDirectory}
           onDraftChange={state.clearError}
           onClose={(returnFocus) => {
             setPickerOpen(false);

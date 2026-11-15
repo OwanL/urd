@@ -2,26 +2,29 @@ import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { RequestError } from "../http/RequestError.ts";
 import type { Preferences, PreferencesClient } from "./PreferencesClient.ts";
 
-export interface WorkingDirectoryPreferenceState {
+export interface PreferencesState {
   preferences: Preferences | null;
   loaded: boolean;
   loading: boolean;
   pending: boolean;
   error: string | null;
+  errorFor(preference: keyof Preferences): string | null;
   refresh(): Promise<void>;
   clearError(): void;
-  save(workingDirectory: string | null): Promise<boolean>;
+  saveWorkingDirectory(workingDirectory: string | null): Promise<boolean>;
+  saveCompactionTriggerTokenCount(value: number | null): Promise<boolean>;
 }
 
 // Reads once on mount and on refresh. A save invalidates earlier reads, and reads wait
 // out a pending save so its response stays authoritative.
-export function useWorkingDirectoryPreferences(
-  client: PreferencesClient,
-): WorkingDirectoryPreferenceState {
+export function usePreferences(client: PreferencesClient): PreferencesState {
   const [preferences, setPreferences] = useState<Preferences | null>(null);
   const [loading, setLoading] = useState(false);
   const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [failure, setFailure] = useState<{
+    preference: keyof Preferences | null;
+    message: string;
+  } | null>(null);
   const version = useRef(0);
   const saving = useRef(false);
 
@@ -33,10 +36,13 @@ export function useWorkingDirectoryPreferences(
       const result = await client.get();
       if (current !== version.current) return;
       setPreferences(result);
-      setError(null);
+      setFailure(null);
     } catch (cause) {
       if (current === version.current)
-        setError(failureMessage(cause, "Preferences could not be loaded."));
+        setFailure({
+          preference: null,
+          message: failureMessage(cause, "Preferences could not be loaded."),
+        });
     } finally {
       if (current === version.current) setLoading(false);
     }
@@ -47,25 +53,48 @@ export function useWorkingDirectoryPreferences(
   }, [refresh]);
 
   const save = useCallback(
-    async (workingDirectory: string | null) => {
+    async (
+      preference: keyof Preferences,
+      request: () => Promise<Preferences>,
+      fallback: string,
+    ) => {
       if (saving.current) return false;
       saving.current = true;
       version.current++;
       setPending(true);
       setLoading(false);
-      setError(null);
+      setFailure(null);
       try {
-        setPreferences(await client.setWorkingDirectory(workingDirectory));
+        setPreferences(await request());
         return true;
       } catch (cause) {
-        setError(failureMessage(cause, "Working directory could not be saved."));
+        setFailure({ preference, message: failureMessage(cause, fallback) });
         return false;
       } finally {
         saving.current = false;
         setPending(false);
       }
     },
-    [client],
+    [],
+  );
+
+  const saveWorkingDirectory = useCallback(
+    (workingDirectory: string | null) =>
+      save(
+        "workingDirectory",
+        () => client.setWorkingDirectory(workingDirectory),
+        "Working directory could not be saved.",
+      ),
+    [client, save],
+  );
+  const saveCompactionTriggerTokenCount = useCallback(
+    (value: number | null) =>
+      save(
+        "compactionTriggerTokenCount",
+        () => client.setCompactionTriggerTokenCount(value),
+        "Compaction trigger could not be saved.",
+      ),
+    [client, save],
   );
 
   return {
@@ -73,11 +102,16 @@ export function useWorkingDirectoryPreferences(
     loaded: preferences !== null,
     loading,
     pending,
-    error,
+    error: failure?.message ?? null,
+    errorFor: (preference) =>
+      failure && (failure.preference === null || failure.preference === preference)
+        ? failure.message
+        : null,
     refresh,
-    save,
+    saveWorkingDirectory,
+    saveCompactionTriggerTokenCount,
     clearError: () => {
-      if (!saving.current && preferences !== null) setError(null);
+      if (!saving.current && preferences !== null) setFailure(null);
     },
   };
 }

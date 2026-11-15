@@ -1,10 +1,14 @@
 import type { TargetedKeyboardEvent } from "preact";
 import type { RefObject } from "preact";
-import { useId, useRef, useState } from "preact/hooks";
+import { useEffect, useId, useRef, useState } from "preact/hooks";
 import { Icon } from "../components/Icon.tsx";
 import { IconButton } from "../components/IconButton.tsx";
 import { Popover } from "../components/Popover.tsx";
-import type { WorkingDirectoryPreferenceState } from "../preferences/useWorkingDirectoryPreferences.ts";
+import {
+  compactionTriggerInput,
+  reconcileCompactionTriggerDraft,
+} from "../preferences/CompactionTriggerInput.ts";
+import type { PreferencesState } from "../preferences/usePreferences.ts";
 import type { ProviderClient } from "../providers/ProviderClient.ts";
 import { ProviderSettings, useProviderSettings } from "../providers/settings/index.ts";
 import { GeneralSettings } from "./GeneralSettings.tsx";
@@ -16,7 +20,7 @@ interface SettingsProps {
   open: boolean;
   anchor: RefObject<HTMLElement | null>;
   client: ProviderClient;
-  preferences: WorkingDirectoryPreferenceState;
+  preferences: PreferencesState;
   tab: SettingsTab;
   onTabChange: (tab: SettingsTab) => void;
   onClose: (returnFocus: boolean) => void;
@@ -36,6 +40,21 @@ export function Settings({
 }: SettingsProps) {
   const state = useProviderSettings(client, open, onChanged);
   const [search, setSearch] = useState("");
+  const savedCompactionTriggerTokenCount =
+    preferences.preferences?.compactionTriggerTokenCount ?? null;
+  const [compactionTriggerDraft, setCompactionTriggerDraft] = useState(() => ({
+    value: compactionTriggerInput(savedCompactionTriggerTokenCount),
+    edited: false,
+  }));
+  useEffect(() => {
+    setCompactionTriggerDraft((current) =>
+      reconcileCompactionTriggerDraft(
+        current.value,
+        current.edited,
+        savedCompactionTriggerTokenCount,
+      ),
+    );
+  }, [savedCompactionTriggerTokenCount]);
   const searchInput = useRef<HTMLInputElement>(null);
   const workingDirectoryButton = useRef<HTMLButtonElement>(null);
   const providersTab = useRef<HTMLButtonElement>(null);
@@ -132,7 +151,19 @@ export function Settings({
         aria-labelledby={`${id}-general-tab`}
         hidden={tab !== "general"}
       >
-        <GeneralSettings state={preferences} buttonRef={workingDirectoryButton} />
+        <GeneralSettings
+          state={preferences}
+          buttonRef={workingDirectoryButton}
+          compactionTriggerDraft={compactionTriggerDraft.value}
+          onCompactionTriggerDraftChange={(value) =>
+            setCompactionTriggerDraft(
+              reconcileCompactionTriggerDraft(value, true, savedCompactionTriggerTokenCount),
+            )
+          }
+          onCompactionTriggerSaved={(value) =>
+            setCompactionTriggerDraft({ value: compactionTriggerInput(value), edited: false })
+          }
+        />
       </section>
     </Popover>
   );

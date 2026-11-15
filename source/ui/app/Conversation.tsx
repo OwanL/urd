@@ -8,7 +8,7 @@ import { IconButton } from "../components/IconButton.tsx";
 import type { LlmSelection } from "../providers/LlmSelection.ts";
 import type { SessionClient } from "../sessions/SessionClient.ts";
 import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
-import type { WorkingDirectoryPreferenceState } from "../preferences/useWorkingDirectoryPreferences.ts";
+import type { PreferencesState } from "../preferences/usePreferences.ts";
 import { deriveConversationState } from "./ConversationState.ts";
 import type { ConversationExecutionStatus } from "./ConversationState.ts";
 import { Transcript } from "./Transcript.tsx";
@@ -139,7 +139,7 @@ interface ConversationProps {
   checking: boolean;
   checkingContinuation: boolean;
   models: WorkspaceModelState;
-  preferences: WorkingDirectoryPreferenceState;
+  preferences: PreferencesState;
   ready: boolean;
   canPersist: boolean;
   refresh: number;

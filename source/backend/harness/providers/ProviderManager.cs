@@ -1,5 +1,4 @@
 using System.Diagnostics.CodeAnalysis;
-using System.Runtime.CompilerServices;
 using Microsoft.Extensions.AI;
 using Urd.Core.Concurrency;
 using Urd.Core.Storage;
@@ -18,12 +17,11 @@ public sealed class ProviderManager : IDisposable {
   private readonly HttpClient client;
   private readonly ChatGptAuthentication authentication;
   private readonly OpenAIModelProbe modelProbe;
-  private readonly OpenAIInferenceClient inference;
   private readonly ProviderSignIns signIns;
-  private readonly List<ProviderRequest> requests = [];
+  private readonly ProviderRequests requests;
   private readonly Dictionary<Guid, Task<ProviderState>> refreshes = [];
   private readonly Dictionary<Guid, Task<ProviderDisconnectResult>> disconnects = [];
-  private readonly Dictionary<Guid, long> fenced = [];
+  private readonly Dictionary<Guid, long> signInRequired = [];
   private Task? shutdown;
   private bool stopping, disposed;
 
@@ -42,8 +40,8 @@ public sealed class ProviderManager : IDisposable {
     client = new(handler, disposeHandler: false) { Timeout = Timeout.InfiniteTimeSpan };
     authentication = new(handler, issuer);
     modelProbe = new(client, store.Usage);
-    inference = new(client);
-    signIns = new(storage, authentication, gate, callbackUri, CancelRequests);
+    requests = new(gate, storage, new(client), GetCredentialsAsync, ThrowIfStopping, EnsureAvailable, RequireCurrentGrant);
+    signIns = new(storage, authentication, gate, callbackUri, id => requests.Cancel(id));
   }
 
   // The client borrows this manager. Construction performs no network or credential access.
@@ -52,7 +50,7 @@ public sealed class ProviderManager : IDisposable {
     if (expectedBinding.Id == Guid.Empty)
       throw new ArgumentException("A saved provider connection is required.", nameof(expectedBinding));
     ObjectDisposedException.ThrowIf(disposed, this);
-    return new UsageChatClient(new ProviderChatClient(this, expectedBinding), usage, expectedBinding, disposeInner: true);
+    return new UsageChatClient(new ProviderChatClient(requests, expectedBinding), usage, expectedBinding, disposeInner: true);
   }
 
   public async Task<IReadOnlyList<ProviderConnection>> ListAsync(CancellationToken cancellationToken = default) {
@@ -96,9 +94,9 @@ public sealed class ProviderManager : IDisposable {
       if (previous.Disconnecting)
         throw new ProviderOperationException(ProviderFailure.Disconnecting);
       updated = storage.UpdateCustom(connectionId, settings);
-      cancelled = updated.Generation != previous.Generation ? CancelRequests(connectionId) : Task.CompletedTask;
+      cancelled = updated.Generation != previous.Generation ? requests.Cancel(connectionId) : Task.CompletedTask;
       if (updated.Generation != previous.Generation)
-        fenced.Remove(connectionId);
+        signInRequired.Remove(connectionId);
     }
     await cancelled;
     return updated.Connection;
@@ -111,14 +109,13 @@ public sealed class ProviderManager : IDisposable {
       if (disconnects.ContainsKey(connectionId))
         throw new ProviderOperationException(ProviderFailure.Disconnecting);
       storage.Remove(connectionId);
-      fenced.Remove(connectionId);
-      cancelled = Task.WhenAll(CancelRequests(connectionId), signIns.CancelConnection(connectionId),
-          ObserveCompletion(refreshes.GetValueOrDefault(connectionId)));
+      signInRequired.Remove(connectionId);
+      cancelled = JoinConnectionWorkAsync(connectionId);
     }
     await cancelled;
     using var held = await gate.AcquireAsync();
     signIns.Forget(connectionId);
-    fenced.Remove(connectionId);
+    signInRequired.Remove(connectionId);
   }
 
   public async Task<ProviderCredentialStatus> SetApiKeyAsync(ProviderConnection connection, string apiKey) {
@@ -136,9 +133,9 @@ public sealed class ProviderManager : IDisposable {
         throw new ArgumentException("This connection does not use an API key.", nameof(connection));
       ProviderState updated = storage.SetCredentials(connection.Id, state.Generation, null,
           new(apiKey, null, null, null, null, []));
-      fenced.Remove(connection.Id);
+      signInRequired.Remove(connection.Id);
       status = CredentialStatus(updated);
-      cancelled = CancelRequests(connection.Id);
+      cancelled = requests.Cancel(connection.Id);
     }
     await cancelled;
     return status;
@@ -155,8 +152,8 @@ public sealed class ProviderManager : IDisposable {
   public Task<ProviderSignIn> GetSignInAsync(Guid signInId, CancellationToken cancellationToken = default) =>
       signIns.GetAsync(signInId, cancellationToken);
   public Task<ProviderSignIn> CancelSignInAsync(Guid signInId) => signIns.CancelAsync(signInId);
-  public Task<ProviderSignIn> CompleteSignInAsync(string state, string callbackUrl) =>
-      signIns.CompleteAsync(state, callbackUrl);
+  public Task<ProviderSignIn> CompleteSignInAsync(string oauthState, string callbackUrl) =>
+      signIns.CompleteAsync(oauthState, callbackUrl);
 
   public async Task<ProviderDisconnectResult> DisconnectAsync(Guid connectionId) {
     Task<ProviderDisconnectResult> result;
@@ -169,8 +166,7 @@ public sealed class ProviderManager : IDisposable {
         completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
         result = completion.Task;
         disconnects.Add(connectionId, result);
-        joined = Task.WhenAll(CancelRequests(connectionId), signIns.CancelConnection(connectionId),
-            ObserveCompletion(refreshes.GetValueOrDefault(connectionId)));
+        joined = JoinConnectionWorkAsync(connectionId);
       }
     }
     if (completion is not null)
@@ -198,7 +194,7 @@ public sealed class ProviderManager : IDisposable {
     return modelSettings.Save(settings);
   }
 
-  public Task<ProviderModelCatalog> RefreshModelCatalogAsync(Guid connectionId) => RunRequestAsync(connectionId,
+  public Task<ProviderModelCatalog> RefreshModelCatalogAsync(Guid connectionId) => requests.RunRequestAsync(connectionId,
       async (state, token) => {
         IReadOnlyList<ProviderModel> fetched = await modelProbe.GetModelsAsync(state.Connection, state.Credentials, token);
         var catalog = new ProviderModelCatalog(connectionId, DateTimeOffset.UtcNow, fetched);
@@ -214,7 +210,7 @@ public sealed class ProviderManager : IDisposable {
       CancellationToken cancellationToken = default) {
     if (string.IsNullOrWhiteSpace(modelId) || modelId.Length > 256 || modelId.Any(char.IsControl))
       throw new ArgumentException("A model ID must be nonempty and at most 256 characters.", nameof(modelId));
-    return RunRequestAsync(connectionId,
+    return requests.RunRequestAsync(connectionId,
         (state, token) => modelProbe.TestModelAsync(state.Connection, state.Credentials, modelId, token), cancellationToken);
   }
 
@@ -224,7 +220,7 @@ public sealed class ProviderManager : IDisposable {
       if (shutdown is null) {
         stopping = true;
         shutdown = Task.WhenAll(signIns.Shutdown(),
-            Task.WhenAll(requests.Select(request => Task.WhenAll(request.Cancellation.CancelAsync(), request.Finished.Task))),
+            requests.Cancel(),
             Task.WhenAll(refreshes.Values.Select(task => ObserveCompletion(task))),
             Task.WhenAll(disconnects.Values.Select(task => ObserveCompletion(task))));
       }
@@ -251,86 +247,6 @@ public sealed class ProviderManager : IDisposable {
     return storage.Add(connection).Connection;
   }
 
-  private async Task<T> RunRequestAsync<T>(Guid connectionId,
-      Func<ProviderState, CancellationToken, Task<T>> operation, CancellationToken cancellationToken) {
-    var (request, generation) = await BeginRequestAsync(connectionId, cancellationToken);
-    try {
-      ProviderState state = await GetCredentialsAsync(connectionId, generation, request.Cancellation.Token);
-      request.Cancellation.Token.ThrowIfCancellationRequested();
-      T result = await operation(state, request.Cancellation.Token);
-      using var held = await gate.AcquireAsync(request.Cancellation.Token);
-      request.Cancellation.Token.ThrowIfCancellationRequested();
-      RequireCurrentGrant(state);
-      return result;
-    } finally {
-      await FinishRequestAsync(request, cancellationToken: CancellationToken.None);
-    }
-  }
-
-  internal async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
-      ProviderConnection expectedBinding, IEnumerable<ChatMessage> messages, ChatOptions options,
-      [EnumeratorCancellation] CancellationToken cancellationToken) {
-    var (request, generation) = await BeginRequestAsync(expectedBinding.Id, cancellationToken,
-        Timeout.InfiniteTimeSpan, expectedBinding);
-    ChatResponseUpdate? completion = null;
-    ProviderState? completedState = null;
-    try {
-      ProviderState state = await GetCredentialsAsync(expectedBinding.Id, generation, request.Cancellation.Token);
-      request.Cancellation.Token.ThrowIfCancellationRequested();
-      await foreach (var update in inference.GetStreamingResponseAsync(state, messages, options, request.Cancellation.Token)) {
-        if (completion is not null)
-          throw new ProviderOperationException(ProviderFailure.InvalidProviderResponse);
-        if (update.FinishReason is not null)
-          completion = update;
-        else
-          yield return update;
-      }
-      request.Cancellation.Token.ThrowIfCancellationRequested();
-      if (completion is null)
-        throw new ProviderOperationException(ProviderFailure.IncompleteResponse);
-      completedState = state;
-    } finally {
-      await FinishRequestAsync(request, completedState, cancellationToken);
-    }
-    // No executable calls or native-context completion escape before the manager accepts the result.
-    yield return completion;
-  }
-
-  private async Task<(ProviderRequest Request, long Generation)> BeginRequestAsync(Guid connectionId,
-      CancellationToken cancellationToken, TimeSpan? timeout = null, ProviderConnection? expectedBinding = null) {
-    using var held = await gate.AcquireAsync(cancellationToken);
-    ThrowIfStopping();
-    ProviderState state = storage.Get(connectionId);
-    EnsureAvailable(state);
-    if (expectedBinding is not null && !SameBinding(state.Connection, expectedBinding))
-      throw new ProviderOperationException(ProviderFailure.ConnectionChanged);
-    var request = new ProviderRequest(connectionId, cancellationToken, timeout);
-    requests.Add(request);
-    return (request, state.Generation);
-  }
-
-  private async Task FinishRequestAsync(ProviderRequest request, ProviderState? completedState = null,
-      CancellationToken cancellationToken = default) {
-    bool drained = false;
-    try {
-      await request.Cancellation.CancelAsync();
-      drained = true;
-    } finally {
-      using var held = await gate.AcquireAsync(CancellationToken.None);
-      try {
-        if (drained && completedState is not null) {
-          cancellationToken.ThrowIfCancellationRequested();
-          ThrowIfStopping();
-          RequireCurrentGrant(completedState);
-        }
-      } finally {
-        requests.Remove(request);
-        request.Cancellation.Dispose();
-        request.Finished.TrySetResult();
-      }
-    }
-  }
-
   private async Task<ProviderState> GetCredentialsAsync(Guid connectionId, long generation, CancellationToken token) {
     Task<ProviderState> refreshed;
     TaskCompletionSource<ProviderState>? completion = null;
@@ -351,7 +267,8 @@ public sealed class ProviderManager : IDisposable {
         return state;
       if (!HasPlanAccess(credentials))
         throw new ProviderOperationException(ProviderFailure.PlanAccessDenied);
-      if (credentials.ExpiresAt > DateTimeOffset.UtcNow.AddMinutes(1))
+      bool refreshRequired = !(credentials.ExpiresAt > DateTimeOffset.UtcNow.AddMinutes(1));
+      if (!refreshRequired)
         return state;
       if (state.Registration is null || string.IsNullOrEmpty(credentials.RefreshToken))
         throw new ProviderOperationException(ProviderFailure.AuthenticationRequired);
@@ -364,18 +281,21 @@ public sealed class ProviderManager : IDisposable {
     if (completion is not null)
       _ = RefreshAsync(state, completion);
     state = await refreshed.WaitAsync(token);
-    using (await gate.AcquireAsync(token)) {
-      EnsureAvailable(state);
-      if (state.Credentials?.RequiresSignIn != false)
-        throw new ProviderOperationException(ProviderFailure.AuthenticationRequired);
-      if (!HasPlanAccess(state.Credentials))
-        throw new ProviderOperationException(ProviderFailure.PlanAccessDenied);
-      ProviderState current = storage.Get(connectionId);
-      EnsureAvailable(current);
-      if (current.Generation != generation)
-        throw new ProviderOperationException(ProviderFailure.ConnectionChanged);
-      return current;
-    }
+    using (await gate.AcquireAsync(token))
+      return RevalidateRefreshedCredentials(state, generation);
+  }
+
+  private ProviderState RevalidateRefreshedCredentials(ProviderState state, long generation) {
+    EnsureAvailable(state);
+    if (state.Credentials?.RequiresSignIn != false)
+      throw new ProviderOperationException(ProviderFailure.AuthenticationRequired);
+    if (!HasPlanAccess(state.Credentials))
+      throw new ProviderOperationException(ProviderFailure.PlanAccessDenied);
+    ProviderState current = storage.Get(state.Connection.Id);
+    EnsureAvailable(current);
+    if (current.Generation != generation)
+      throw new ProviderOperationException(ProviderFailure.ConnectionChanged);
+    return current;
   }
 
   private async Task RefreshAsync(ProviderState state, TaskCompletionSource<ProviderState> completion) {
@@ -391,11 +311,11 @@ public sealed class ProviderManager : IDisposable {
       // A lost refresh acknowledgement may have rotated the remote token; require explicit recovery.
       using var held = await gate.AcquireAsync();
       if (failure is not ProviderOperationException { Failure: ProviderFailure.ProviderUnavailable or ProviderFailure.ConnectionChanged }) {
-        fenced[id] = state.Generation;
+        signInRequired[id] = state.Generation;
         try {
           storage.SaveRefresh(id, state.Generation, state.CredentialVersion, state.Credentials! with { RequiresSignIn = true });
         } catch (Exception) {
-          // If storage also failed, retain the local fence and report the original failure.
+          // If storage also failed, retain the local sign-in requirement and report the original failure.
         }
       }
       completion.TrySetException(failure);
@@ -423,7 +343,7 @@ public sealed class ProviderManager : IDisposable {
       }
       using var held = await gate.AcquireAsync();
       storage.CompleteDisconnect(id, state.Generation);
-      fenced.Remove(id);
+      signInRequired.Remove(id);
       completion.TrySetResult(new(id, true, revoked));
     } catch (Exception failure) {
       completion.TrySetException(failure);
@@ -434,14 +354,14 @@ public sealed class ProviderManager : IDisposable {
     }
   }
 
-  // Caller holds the manager guard; callbacks and joins do not execute synchronously under it.
-  private Task CancelRequests(Guid id) => Task.WhenAll(requests.Where(request => request.ConnectionId == id)
-      .Select(request => Task.WhenAll(request.Cancellation.CancelAsync(), request.Finished.Task)));
+  // Caller holds the shared guard; callbacks and joins do not execute synchronously under it.
+  private Task JoinConnectionWorkAsync(Guid connectionId) => Task.WhenAll(requests.Cancel(connectionId),
+      signIns.CancelConnection(connectionId), ObserveCompletion(refreshes.GetValueOrDefault(connectionId)));
 
   private void EnsureAvailable(ProviderState state) {
     if (state.Disconnecting)
       throw new ProviderOperationException(ProviderFailure.Disconnecting);
-    if (IsFenced(state))
+    if (RequiresSignIn(state))
       throw new ProviderOperationException(ProviderFailure.AuthenticationRequired);
   }
 
@@ -462,14 +382,14 @@ public sealed class ProviderManager : IDisposable {
 
   private ProviderCredentialStatus CredentialStatus(ProviderState state) => new(state.Connection.Id,
       state.Credentials is not null,
-      state.Credentials?.RequiresSignIn == true || IsFenced(state) ||
+      state.Credentials?.RequiresSignIn == true || RequiresSignIn(state) ||
           (state.Connection.Authentication == AuthenticationMethod.OAuth && state.Credentials is null),
       state.Registration?.Email, state.Credentials?.ExpiresAt,
       state.Connection.Authentication == AuthenticationMethod.OAuth
           ? state.Credentials is not null && HasPlanAccess(state.Credentials) : null,
       state.Disconnecting);
 
-  private bool IsFenced(ProviderState state) => fenced.TryGetValue(state.Connection.Id, out long generation)
+  private bool RequiresSignIn(ProviderState state) => signInRequired.TryGetValue(state.Connection.Id, out long generation)
       && generation == state.Generation;
 
   private static bool HasPlanAccess(ProviderCredentials credentials) =>
@@ -510,7 +430,7 @@ public sealed class ProviderManager : IDisposable {
     return settings with { Name = ValidateName(settings.Name), Endpoint = normalized.Uri };
   }
 
-  private static bool SameBinding(ProviderConnection left, ProviderConnection right) =>
+  internal static bool SameBinding(ProviderConnection left, ProviderConnection right) =>
       left.Id == right.Id && left.Route == right.Route && left.Api == right.Api &&
       left.Endpoint == right.Endpoint && left.Authentication == right.Authentication;
 }

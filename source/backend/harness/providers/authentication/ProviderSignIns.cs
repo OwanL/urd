@@ -38,12 +38,12 @@ internal sealed class ProviderSignIns(
     return Find(attemptId).Snapshot();
   }
 
-  internal async Task<ProviderSignIn> CompleteAsync(string state, string callbackUrl) {
+  internal async Task<ProviderSignIn> CompleteAsync(string oauthState, string callbackUrl) {
     ProviderSignInAttempt attempt;
     using (await gate.AcquireAsync()) {
       ThrowIfStopping();
       attempt = attempts.Values.SingleOrDefault(candidate =>
-          candidate.Flow is not null && string.Equals(candidate.Flow.State, state, StringComparison.Ordinal))
+          candidate.Flow is not null && string.Equals(candidate.Flow.State, oauthState, StringComparison.Ordinal))
           ?? throw new ProviderOperationException(ProviderFailure.SignInRejected);
       if (attempt.Status != ProviderSignInStatus.Pending || attempt.Cancellation.IsCancellationRequested)
         throw new ProviderOperationException(ProviderFailure.SignInRejected);
@@ -69,13 +69,13 @@ internal sealed class ProviderSignIns(
 
   // Called only while the shared guard is held; CancelAsync runs callbacks asynchronously.
   internal Task CancelConnection(Guid connectionId) => attempts.TryGetValue(connectionId, out var attempt)
-      ? Task.WhenAll(Cancel(attempt), attempt.Finished.Task) : Task.CompletedTask;
+      ? CancelAndWaitAsync(attempt) : Task.CompletedTask;
 
   internal void Forget(Guid connectionId) => attempts.Remove(connectionId);
 
   internal Task Shutdown() {
     stopping = true;
-    return Task.WhenAll(attempts.Values.Select(attempt => Task.WhenAll(Cancel(attempt), attempt.Finished.Task)));
+    return Task.WhenAll(attempts.Values.Select(CancelAndWaitAsync));
   }
 
   private async Task RunAsync(ProviderSignInAttempt attempt) {
@@ -138,6 +138,9 @@ internal sealed class ProviderSignIns(
 
   private ProviderSignInAttempt Find(Guid id) => attempts.Values.FirstOrDefault(attempt => attempt.Id == id)
       ?? throw new KeyNotFoundException("The sign-in attempt was not found.");
+
+  private static Task CancelAndWaitAsync(ProviderSignInAttempt attempt) =>
+      Task.WhenAll(Cancel(attempt), attempt.Finished.Task);
 
   private static Task Cancel(ProviderSignInAttempt attempt) {
     if (attempt.Finished.Task.IsCompleted || attempt.Status == ProviderSignInStatus.Completed)

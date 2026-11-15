@@ -16,55 +16,39 @@ internal static class ProviderTokenUsage {
     _ => null
   };
 
-  internal static UsageDetails? Response(ResponseTokenUsage? usage) {
-    if (usage is null) return null;
-    JsonPatch inputDetails = usage.InputTokenDetails?.Patch ?? default;
+  internal static UsageDetails? Response(ResponseTokenUsage? usage) => usage is null ? null :
+      Create(usage.Patch, "$.input_tokens"u8, "$.output_tokens"u8,
+          usage.InputTokenDetails?.Patch, usage.OutputTokenDetails?.Patch);
+
+  internal static UsageDetails? Chat(ChatTokenUsage? usage) => usage is null ? null :
+      Create(usage.Patch, "$.prompt_tokens"u8, "$.completion_tokens"u8,
+          usage.InputTokenDetails?.Patch, usage.OutputTokenDetails?.Patch);
+
+  private static UsageDetails Create(JsonPatch patch, ReadOnlySpan<byte> inputTokens, ReadOnlySpan<byte> outputTokens,
+      JsonPatch? inputDetails, JsonPatch? outputDetails) {
     var details = new UsageDetails {
-      InputTokenCount = Tokens(usage.Patch, "$.input_tokens"u8),
-      OutputTokenCount = Tokens(usage.Patch, "$.output_tokens"u8),
-      TotalTokenCount = Tokens(usage.Patch, "$.total_tokens"u8),
-      CachedInputTokenCount = usage.InputTokenDetails is null ? null : Tokens(inputDetails, "$.cached_tokens"u8),
-      ReasoningTokenCount = usage.OutputTokenDetails is null ? null :
-          Tokens(usage.OutputTokenDetails.Patch, "$.reasoning_tokens"u8),
-      InputAudioTokenCount = usage.InputTokenDetails is null ? null : Tokens(inputDetails, "$.audio_tokens"u8),
-      OutputAudioTokenCount = usage.OutputTokenDetails is null ? null :
-          Tokens(usage.OutputTokenDetails.Patch, "$.audio_tokens"u8)
+      InputTokenCount = Tokens(patch, inputTokens),
+      OutputTokenCount = Tokens(patch, outputTokens),
+      TotalTokenCount = Tokens(patch, "$.total_tokens"u8),
+      CachedInputTokenCount = Tokens(inputDetails, "$.cached_tokens"u8),
+      ReasoningTokenCount = Tokens(outputDetails, "$.reasoning_tokens"u8),
+      InputAudioTokenCount = Tokens(inputDetails, "$.audio_tokens"u8),
+      OutputAudioTokenCount = Tokens(outputDetails, "$.audio_tokens"u8)
     };
-    return EnrichMetadata(details, inputDetails, usage.InputTokenDetails is not null);
-  }
-
-  internal static UsageDetails? Chat(ChatTokenUsage? usage) {
-    if (usage is null) return null;
-    JsonPatch inputDetails = usage.InputTokenDetails?.Patch ?? default;
-    var details = new UsageDetails {
-      InputTokenCount = Tokens(usage.Patch, "$.prompt_tokens"u8),
-      OutputTokenCount = Tokens(usage.Patch, "$.completion_tokens"u8),
-      TotalTokenCount = Tokens(usage.Patch, "$.total_tokens"u8),
-      CachedInputTokenCount = usage.InputTokenDetails is null ? null : Tokens(inputDetails, "$.cached_tokens"u8),
-      ReasoningTokenCount = usage.OutputTokenDetails is null ? null :
-          Tokens(usage.OutputTokenDetails.Patch, "$.reasoning_tokens"u8),
-      InputAudioTokenCount = usage.InputTokenDetails is null ? null : Tokens(inputDetails, "$.audio_tokens"u8),
-      OutputAudioTokenCount = usage.OutputTokenDetails is null ? null :
-          Tokens(usage.OutputTokenDetails.Patch, "$.audio_tokens"u8)
-    };
-    return EnrichMetadata(details, inputDetails, usage.InputTokenDetails is not null);
-  }
-
-  internal static ProviderUsage? ToProviderUsage(UsageDetails? usage) => usage is null ? null :
-      new(usage.InputTokenCount, usage.OutputTokenCount, usage.TotalTokenCount, usage.CachedInputTokenCount);
-
-  private static UsageDetails EnrichMetadata(UsageDetails usage, JsonPatch inputDetails, bool hasInputDetails) {
-    var writes = hasInputDetails ? CacheWrites(inputDetails, usage.InputTokenCount, usage.CachedInputTokenCount) :
+    var writes = inputDetails is JsonPatch input ? CacheWrites(input, details.InputTokenCount, details.CachedInputTokenCount) :
         (ThirtyMinutes: 0L, TwelveHours: 0L);
     var additionalCounts = new AdditionalPropertiesDictionary<long> {
       ["cache_write_30m_tokens"] = writes.ThirtyMinutes,
       ["cache_write_12h_tokens"] = writes.TwelveHours
     };
-    if (usage.InputAudioTokenCount > 0 || usage.OutputAudioTokenCount > 0)
+    if (details.InputAudioTokenCount > 0 || details.OutputAudioTokenCount > 0)
       additionalCounts["unsupported_pricing_tokens"] = 1;
-    usage.AdditionalCounts = additionalCounts;
-    return usage;
+    details.AdditionalCounts = additionalCounts;
+    return details;
   }
+
+  internal static ProviderUsage? ToProviderUsage(UsageDetails? usage) => usage is null ? null :
+      new(usage.InputTokenCount, usage.OutputTokenCount, usage.TotalTokenCount, usage.CachedInputTokenCount);
 
   private static (long ThirtyMinutes, long TwelveHours) CacheWrites(JsonPatch patch, long? input, long? cached) {
     bool hasTotal = patch.TryGetValue("$.cache_write_tokens"u8, out long total);
@@ -83,8 +67,8 @@ internal static class ProviderTokenUsage {
     return (thirtyMinutes, twelveHours);
   }
 
-  private static long? Tokens(JsonPatch patch, ReadOnlySpan<byte> path) =>
-      patch.TryGetValue(path, out long value) && value >= 0 ? value : null;
+  private static long? Tokens(JsonPatch? patch, ReadOnlySpan<byte> path) =>
+      patch is JsonPatch details && details.TryGetValue(path, out long value) && value >= 0 ? value : null;
 }
 
 #pragma warning restore OPENAI001, SCME0001, MEAI001

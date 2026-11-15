@@ -578,7 +578,7 @@ class API or a requirement for a generic prompt/resource framework.
 **Owner direction (2026-11-15):** include instruction-document loading and pruning,
 including `AGENTS.md` and append-system resources, in the context-preparation design
 alongside tools and skills. Compare designs using real Pie task/file/catalog replays
-before fixing class structure; see the [pruning replay test plan](pruning-replay-test-plan.md).
+before fixing class structure; see the [dated pruning replay evidence](pruning-replay-results.md).
 Exact source discovery, precedence, protected-document policy and production loading
 mechanics remain undecided; research scope is not approval of those policies or an
 implemented loader. Skills are listed by name, description and path when a chat
@@ -586,6 +586,11 @@ starts: Git-tracked `SKILL.md` files under the working directory, then Urd's pac
 skills; bodies are read on demand. Existing protected-capability and prefix-stability constraints
 below still apply. Exact assembly, restoration and refresh boundaries need concrete
 implementation design.
+
+**Replay checkpoint (2026-11-15):** no tested whole preparation bundle passed the
+instruction-retention gate. Smaller context and faster preparation did not establish
+a startup winner. This does not reverse the AI tool/skill-pruning direction below;
+instruction policy, follow-up experiments and production class APIs remain undecided.
 
 Prompt wording is a separate research task. Inventory other harnesses' fixed
 instructions and dynamic additions without treating their presence as evidence that

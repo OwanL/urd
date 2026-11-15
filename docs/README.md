@@ -30,17 +30,14 @@ not a separate archive. Their remaining constraints belong to the current docume
 - [Source distribution](repo-foundations.md): matching source, custom-copy data and setup boundaries,
   with a dated round-trip trial; packaging and activation remain unfinished.
 
-## Active plans
-
-- [Pruning replay tests](pruning-replay-test-plan.md): real-model comparison of tool,
-  skill and instruction selection, shared exploration, latency and recovery; not
-  benchmark results or an approved production class design.
-
 ## Evidence
 
 These records preserve qualification or constraints still used by decisions.
 Experimental source is [archived outside the checkout](product-direction.md#experimental-source-archive).
 
+- [Pruning replay results](pruning-replay-results.md): dated real-model selection,
+  timing and recovery evidence; no pruning bundle qualified, and no startup winner
+  or production loading policy is established.
 - [Agent-tool qualification](agent-tools-qualification.md): scoped Windows process, adapter and
   live acceptance checkpoints; not universal tool/provider qualification.
 - [Provider qualification](provider-qualification.md): offline and separately authorized live route/model checks.

@@ -22,8 +22,8 @@ not a separate archive. Their remaining constraints belong to the current docume
 - [Application structure](application-plan.md): current/planned owners and scoped review.
 - [Sessions](session-design.md), [execution](execution-design.md) and
   [discovery](discovery-design.md): lifetime, model/tool calls, adapter limits and capability exposure.
-- [Pruning plan](pruning-plan.md): canonical design direction for parallel category selection,
-  protected entries and per-category model/protection settings; not implementation approval.
+- [Prepass plan](pruning-plan.md): parallel pruning and title generation, protection/model
+  settings and reviewed implementation milestones; not implementation approval.
 - [Agent communication](agent-communication-design.md): bounded delegation, request/reply,
   ownership and cycle handling; active design, not implementation approval.
 - [Agent tools](agent-tools-design.md): tool set, parallel/background calls, approved class shapes.

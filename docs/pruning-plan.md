@@ -325,8 +325,11 @@ context/
     SkillFrontmatter.cs             keep existing parser
   pruning/
     StartingResourcePruner.cs       new: three typed overloads, one selection core
-    PruningContext.cs               new: immutable task context and resolved models
+    PruningContext.cs               optional proposed packaging, not a required type
     StartingResourcePruningResult.cs new: retained items and outcome/diagnostic
+execution/
+  ConversationRunner.cs             proposed shared stream/tool-turn extraction
+  TitleGenerator.cs                 proposed title operation using the same mechanics
 ```
 
 `InstructionResourceDiscovery` absorbs discovery/loading from `SkillCatalog`; remove
@@ -390,10 +393,12 @@ plugin hierarchy are needed.
 - `providers/ModelSelector.cs` is a shared prerequisite: bucket or specific provider/model
   choice resolves to the existing `LlmSelection`. Bucket resolution does not exist yet.
   Reuse the same owner for delegated work, not pruning-only buckets. Resolve model choices
-  once into `PruningContext`; do not silently inherit the main chat's model.
-- `SessionExecution` owns and joins preparation. Extend guarded recording with distinct
-  pruning conversation/request scopes and `StartingContextStorage` with selected contexts
-  at allowed compaction boundaries. Do not make the builder a second persistence owner.
+  once per preparation; `PruningContext` is only a proposed container. Do not silently
+  inherit the main chat's model.
+- `SessionExecution` owns preparation and title work; `SessionExecutionDriver` joins owned
+  work before settlement/disposal. Extend guarded recording with distinct pruning/title
+  conversation/request scopes and `StartingContextStorage` with selected contexts at
+  allowed compaction boundaries. Do not make the builder a second persistence owner.
 - Extend `UserPreferences`, `PreferenceManager`, `PreferencesStorage` and their existing
   routes; reuse settings and `ModelPicker`. A small `PruningRows.tsx` under `source/ui/app/`
   renders recorded category status. Detailed UI remains deferred.
@@ -486,13 +491,90 @@ does not retain every skill. The behavior is selected; the concrete API remains 
   the existing execution fence; they must not become keep-all-and-continue. A timeout
   requests cancellation, not proof that tools have stopped.
 
-Suggested implementation order, subject to approval: share the existing execution mechanics
-without changing main-chat behaviour; add common model resolution and discovery; integrate
-selection and per-boundary recording; then preferences and the three status rows. Verification
-should exercise protected-input exclusion (including running background tools after
-compaction), all three task-input paths and omission of retained continuation context
-from selector inputs, parallel isolation, allowed triggers/reopen, per-category failure
-and Stop/recording/cleanup failures through existing test helpers.
+### Implementation milestones — proposed
+
+This is an engineering sequence for owner review, not source implementation approval.
+Each milestone should be a locally verified, task-scoped commit or small cohesive set
+of commits. Do not enable a partly integrated prepass in normal sessions.
+
+| Milestone | Change boundary | Acceptance evidence |
+| --- | --- | --- |
+| 1. Shared execution and auxiliary recording | Extract reusable stream validation/tool-turn mechanics from `SessionExecution`, `LlmResponseAccumulator`/`LlmResponseWriter` and `SessionToolExecution`. Add isolated auxiliary conversation/request recording under the existing session authority. Keep main steering, compaction and settlement with their current owners. | Existing main-chat tests unchanged; interleaved auxiliary streams/calls cannot mix histories, place pending main input or repeat tools. Stop and save/cleanup failure barriers still hold. |
+| 2. Model choices and resource discovery | Add shared bucket-or-specific-model resolution returning `LlmSelection`; persist the four independent auxiliary choices through existing preferences. Move skill discovery into `InstructionResourceDiscovery`, add document loading and make the skill contribution format supplied results. Apply the selected context type renames as callers move, without compatibility aliases. | Independent overrides, configured bucket resolution and unavailable-model handling; existing skill override rules; nested tracked versus untracked files; full document contents, exclusions and stable protection identities. |
+| 3. Boundary-aware preparation/storage | Replace once-per-session context storage with exact ordered snapshots associated with the initial boundary or committed compaction ID. Split current-context access for compaction planning from async preparation. Add guarded auxiliary status and the durable initial title-attempt claim. | Correct fresh/automatic/manual task inputs; compaction alone never starts pruning; exact restoration on reopen; request-start/input-placement atomicity; failed writes never start provider contact. |
+| 4. Three-category pruning | Implement `StartingResourcePruner` with one selection core and three independent calls. `StartingContextBuilder` separates protection, invokes pruning, validates/maps IDs and composes results. Retain original text/schemas in source/precedence order. | Protected inputs excluded, built-ins retained, running-background-tool protection after compaction, parallel isolation, successful sibling selections survive category failure, Stop prevents main-agent startup. |
+| 5. Nonblocking title generation | Add the separate tool-capable title operation to the first-message prepass. Persist/publish generated title metadata; remove the browser's first-prompt-derived naming path. Permit one invalid-output correction, otherwise retain the placeholder. | Main provider work/output can proceed while title work is held; 25-character validation; one correction only; failure leaves placeholder; no later-message/reopen regeneration; Stop and stale publication guards. |
+| 6. Settings and prepass display | Extend existing preference routes/client/hook and Settings; reuse model catalogs and picker presentation for the four choices. Add protection pickers using shared discovery for the default directory and the three recorded pruning rows. Display backend title metadata in the existing tabs. | Independent saves and errors; missing entries do not silently rebind; core defaults removable; truthful row outcomes; title updates without disturbing tab order, focus or drafts. |
+
+**Execution/recording details to establish in milestone 1:**
+
+- The current recorder and request/tool storage are main-transcript-oriented. Reuse
+  validation and guarded writes, not the main `StartRequest` input-placement path.
+  Distinguish auxiliary requests and tool results durably, with category/purpose usage
+  attribution, without introducing new session kinds or a general job framework.
+- Give each invocation its own conversation history and explicit exploration surface.
+  Offer `read`/`bash`, not the entire session catalog: that catalog also includes
+  `list_pending_calls`/`cancel_pending_calls`, which could affect sibling/session work.
+  Existing permissions still gate invocation; do not treat `bash` as technically read-only.
+- The proposed simple ownership is the initial `SessionExecution` for title work as
+  well as pruning. Extend driver Stop, failure drain and final settlement joins to
+  include auxiliary provider tasks and their tools. A main response may finish while
+  the title is pending; do not dispose its owner or abandon late recording/cleanup.
+  This can keep the execution unsettled until owned title work completes, without
+  delaying main-agent requests/output. No detached fire-and-forget task is acceptable.
+
+**Storage/activation details to establish in milestone 3:**
+
+- Resolve selection for one allowed boundary, then activate its immutable context
+  alongside main request-start/input placement in the existing guarded transaction.
+  Do not publish a partly selected context; only reuse a snapshot tied to the current
+  initial/compaction boundary. Compaction planning reads the current context without
+  triggering discovery/model selection.
+- Record auxiliary attempts independently of main send-attempt provenance. Auxiliary
+  provider contact must not turn a not-yet-sent main prompt into a sent prompt.
+  Interrupted work is inspectable but is never automatically replayed on session load.
+- Persist the title-attempt claim before its provider contact, linked to the first-message
+  boundary. Reopen/restart must neither regenerate nor replay a naming tool. Record a
+  successful title through the guarded session snapshot/change path, not browser-only state.
+- Follow the pre-release policy: replace the current database schema and bump its version
+  when the shapes change; no migrations/legacy readers. Version/discard incompatible
+  browser state if its shape changes. Never reset the user's database or profile as a
+  verification shortcut; use owned temporary data.
+
+**Bounded engineering choices, not another behavior questionnaire:**
+
+- Before milestone 2 ships, make instruction recognition, source locations, nested scope,
+  precedence and protection identities concrete in its design/tests. Preserve the selected
+  agent-facing scope, Git-backed project scan and other-harness exclusions; neither ingest
+  arbitrary Markdown nor silently limit the feature to two filenames. Do not invent new
+  user configuration locations without review.
+- Inspect the retained bucket policy when implementing the common resolver; do not guess
+  model quality from IDs, silently inherit the main chat model or widen enabled providers.
+  An unresolvable category selection is an ordinary category failure; an unresolvable title
+  choice leaves the placeholder. Exact configured resolution mechanics belong to that
+  implementation checkpoint rather than four different selection implementations.
+- Specify title counting once for server validation and tests. Preserve the approved strict
+  25-character maximum, one corrective response and unchanged-placeholder fallback; do not
+  introduce truncation, suffix exceptions or manual naming features.
+- Detailed row layout remains deferred until there is a working implementation. Share only
+  mechanics with real callers; avoid speculative wrappers, registries or a new scheduler.
+
+**Verification and handoff:** reuse `ExecutionFixture`, `ScriptedChatClient`,
+`TestAgentTool` and deterministic `TestAsync.Signal` barriers. Extend the existing
+execution/tool/starting-context/compaction tests and preference/UI model tests instead
+of building a second test harness or asserting exact selector prose. Respect the hard
+[test/helper size budget](testing.md), with one behavioral owner per guarantee.
+
+At meaningful milestones, run the relevant focused tests first. Before final handoff,
+run Release backend tests, UI static checks/unit tests, UI build, Release server build
+and the offline real-server/SDK integration flow using the repository's
+[backend](backend-development.md#prerequisite-and-commands) and
+[browser](browser-development.md#toolchain-and-checks) commands. Use fake/loopback
+providers and owned temporary profiles; these establish execution behavior, not live
+model selection quality. Review non-trivial integration independently. Build/stage
+verified artifacts only through the repository workflow without replacing an active
+host or resetting live data. No benchmark or further external-provider evaluation is
+part of this implementation plan.
 
 ## Selection failure
 

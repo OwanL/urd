@@ -167,6 +167,10 @@ Titles do not change once final. A fresh session passes through built-in placeho
 3. The generated, stable, addressable title. If generation fails, the final title is the first
    user prompt (a subagent's task) truncated to the 25-character maximum.
 
+Final titles are unique across stored sessions. A generated or fallback title that duplicates an
+existing one receives the lowest free ` (n)` suffix, for example `Fix login bug (2)`. The base is
+shortened so the suffixed title still respects the 25-character maximum.
+
 Placeholder titles are not addressable. Communication with such a session fails with a useful
 error telling the agent to wait a few seconds and retry. Use the exact final title as the
 model-facing identifier, with existing internal

@@ -114,7 +114,8 @@ not a successful fallback that hides uncertain owned work.
 **Superseded failure fallback (2026-11-16):** titles are now communication addresses, so a
 session cannot remain on a placeholder. If generation (including its one correction) fails,
 use the session's first user prompt (a subagent's task) truncated to the 25-character maximum
-as its final title. This replaces the unchanged-placeholder fallback above and in the
+as its final title. Duplicate final titles take a ` (n)` suffix within the 25-character
+maximum. This replaces the unchanged-placeholder fallback above and in the
 milestone/implementation notes below; the implemented null-title behavior must change. See
 [agent communication](agent-communication-design.md#addressing).
 

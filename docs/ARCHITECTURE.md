@@ -952,8 +952,8 @@ accepted this after rejecting an unclear `ModelRequestExecutor` name; no mandato
 interface as needed. `TitleGenerator` and `HistoryCompactor` remain working operation
 names; the pruning operation now has the selected name `StartingResourcePruner`
 ([naming decisions](pruning-plan.md#naming-decisions)). These do not establish approved
-APIs or full session types. A failed title can fall back to a bounded excerpt of the
-first prompt; precise title fallback/validation behavior remains proposed.
+APIs or full session types. The later title-failure decision below supersedes the
+earlier first-prompt-excerpt fallback proposal.
 
 **Owner extension (2026-11-15):** title generation joins the parallel prepass alongside
 pruning. It receives the user prompt, may independently explore with `read`/`bash`, and
@@ -965,8 +965,11 @@ request-only call. Title generation runs only after the first message of a sessi
 never on subsequent messages, post-compaction continuation or reopen/restart. Once
 pruning has settled safely, unfinished title work does not delay the main agent; it
 publishes separately through guarded metadata updates and remains owned cancellable
-work. Future title-based session addressing is explicitly deferred. Failure/invalid-output
-and manual-name handling remain in the [prepass plan](pruning-plan.md#parallel-title-generation).
+work. Invalid title output allows one corrective response; if still invalid or generation
+fails, leave the existing placeholder unchanged, without blocking the main agent or
+retrying on a later message. Existing cancellation and recording/cleanup safeguards
+still apply. Future title-based session addressing is explicitly deferred. Manual-name
+handling remains in the [prepass plan](pruning-plan.md#parallel-title-generation).
 This expands the design scope, not implementation approval.
 
 Keep LLM invocation, the LLM/tool execution cycle and session state/lifetime

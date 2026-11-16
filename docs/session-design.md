@@ -104,8 +104,10 @@ remains a proposal, not an implemented API.
   mechanics and provider adapters are reusable by all callers. Concurrent calls
   are allowed; this is not a global serial queue. Caller-specific prompts,
   validation and fallback policy stay with the operation. The request-only
-  client is not the tool loop. Title failure can use a snippet; compaction failure
-  must preserve usable context; pruning protects core entries before selection.
+  client is not the tool loop. Invalid title output allows one corrective response;
+  failed generation or another invalid title leaves the placeholder unchanged.
+  Compaction failure must preserve usable context; pruning excludes protected entries
+  before selection.
   Cancellation is not swallowed as ordinary fallback. A request retry cannot
   replay completed tools. Stateful request/context data must not leak between
   concurrent consumers of a shared client.

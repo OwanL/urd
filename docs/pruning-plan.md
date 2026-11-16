@@ -103,18 +103,24 @@ title registry in this slice. See [agent communication](agent-communication-desi
   permissions, cancellation and owned-tool cleanup. Keep conversation state, output
   validation and metadata publication separate from pruning and main-agent history.
 
-**Pie reference, beyond the selected 25-character maximum:** Pie limits the base title to 25 JavaScript
-string characters including spaces, targets 15–20, and permits one corrective request
-for invalid output rather than truncating it. Its title generator is request-only;
-Urd's optional exploration is an explicit addition. Pie's later trigger, retry and
-collision-suffix rules are not imported by describing Urd as similar to Pie.
+**Title validation/failure decision:** allow one corrective response when the generated
+title is invalid. If that response is still invalid, or generation fails, leave the
+existing placeholder unchanged. Do not substitute a first-prompt excerpt, block the
+main agent or retry on a later message. The correction belongs to the initial naming
+attempt; it is not a later generation trigger and must not replay completed tools.
+Cancellation and recording/cleanup failures retain the existing execution safeguards,
+not a successful fallback that hides uncertain owned work.
 
-**Still to settle for titles:** invalid-output/failure handling and interaction with
-explicit/manual session names. The precise Unicode counting rule is an implementation
-detail to specify consistently in validation and tests. Post-compaction pruning does
-not regenerate titles.
-The earlier bounded-first-prompt-excerpt fallback remains a proposal, not a new owner
-selection. The existing three-row pruning UI decision does not select a title row.
+**Pie reference:** Pie counts the base title using JavaScript string length, targets
+15–20 characters and permits one corrective request rather than truncating invalid
+output. Urd has selected the 25-character maximum and one correction, but has not
+imported Pie's counting rule, later trigger or collision-suffix rules. Pie's title
+generator is request-only; Urd's optional exploration is an explicit addition.
+
+**Still to settle for titles:** interaction with explicit/manual session names. The
+precise Unicode counting rule is an implementation detail to specify consistently in
+validation and tests. Post-compaction pruning does not regenerate titles. The existing
+three-row pruning UI decision does not select a title row.
 
 Working recommendation: preserve an explicit/manual name. This remains open for
 owner review.

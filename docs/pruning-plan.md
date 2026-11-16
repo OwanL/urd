@@ -77,8 +77,8 @@ category or a consumer of `StartingResourcePruningResult<T>`.
 **Title trigger decision:** generate only after the first message of a session, as
 part of its initial prepass. No later message, compaction/resumption, reopen/restart,
 model change or preference change triggers title generation. This is a session-level
-boundary, not a once-per-host-lifecycle opportunity. It does not add a later manual
-regeneration trigger; explicit/manual renaming is a separate operation.
+boundary, not a once-per-host-lifecycle opportunity. It does not add a later
+regeneration trigger or a manual naming/renaming feature.
 
 **Nonblocking title decision:** once pruning has settled safely, start the main agent
 without waiting for unfinished title generation. Let title work complete separately
@@ -117,13 +117,13 @@ output. Urd has selected the 25-character maximum and one correction, but has no
 imported Pie's counting rule, later trigger or collision-suffix rules. Pie's title
 generator is request-only; Urd's optional exploration is an explicit addition.
 
-**Still to settle for titles:** interaction with explicit/manual session names. The
-precise Unicode counting rule is an implementation detail to specify consistently in
-validation and tests. Post-compaction pruning does not regenerate titles. The existing
-three-row pruning UI decision does not select a title row.
-
-Working recommendation: preserve an explicit/manual name. This remains open for
-owner review.
+**Implementation details:** specify the Unicode counting rule consistently in
+validation and tests. Urd has no manual session-naming flow; do not add one or design
+manual-name arbitration as part of this feature. Existing first-prompt-preview-derived
+UI titles are not manual names; align that current naming path with generated titles
+and the selected unchanged-placeholder failure behavior. Post-compaction pruning does
+not regenerate titles. The existing three-row pruning UI decision does not select a
+title row.
 
 ## Pruning triggers
 
@@ -527,7 +527,7 @@ not replace those mechanisms.
 - Exact recognition/loading rules and non-project locations within the selected
   agent-facing Markdown scope, plus stored source identities. Other harnesses'
   instruction files remain excluded.
-- Title-specific behavior listed under [parallel title generation](#parallel-title-generation).
+- Title integration/validation details listed under [parallel title generation](#parallel-title-generation).
 - Concrete classes, APIs, preference/storage shape and implementation sequencing.
   `PruningContext` remains an optional packaging proposal, not a required shared
   investigation or a settled type/name.

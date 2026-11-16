@@ -25,6 +25,19 @@ Each pruning conversation independently decides what to inspect. Do not pool its
 exploratory findings or selection decisions into sibling conversations; sharing
 execution code does not mean sharing investigation or conversation state.
 
+**Selector task input decision:** each conversation receives instructions explaining
+its category-selection task and the user prompt, alongside its category candidates.
+Do not require a shared, preassembled grounding bundle or pool exploratory findings.
+The earlier proposal to additionally supply compaction summaries and retained history
+is not the selected input contract. Choosing the user-prompt payload for a continuation
+without a new user message remains an integration detail to resolve explicitly.
+
+**Exploration decision:** do not add pruning-specific time, turn, token or tool-call
+budgets. Each conversation decides how much exploration it needs and when to finish.
+Existing provider/tool limits, current permissions, parent Stop and owned-work cleanup
+still apply; this is not permission to bypass execution safeguards or add tools.
+Without a pruning budget, preparation has no pruning-specific upper latency bound.
+
 **Instruction input decision (2026-11-15):** supply the instruction pruner with the
 full contents of every unprotected candidate document upfront, not just paths or
 summaries requiring follow-up reads. Protected documents remain excluded. This does
@@ -69,8 +82,10 @@ an unchanged main-agent prefix.
 ## Protection happens before selection
 
 Settings also has protected-item lists for each category. Protect **`bash`, `read`,
-`write` and `edit`** as core tools. Users can add protected tools, skills and instruction
-documents.
+`write` and `edit`** by default, not as non-removable pins. Users can remove those
+protections if they wish and can add protected tools, skills and instruction documents.
+An unprotected core tool becomes an ordinary pruning candidate; its availability to
+the main agent is no longer guaranteed.
 
 Protected entries bypass pruning and remain available to the main session. Exclude
 them before constructing pruning inputs, not merely by restoring them after selection:
@@ -80,7 +95,7 @@ them before constructing pruning inputs, not merely by restoring them after sele
 - Preserve protections when applying selection results too.
 
 The pruner's exploration tools are a separate surface: it can still see and invoke
-`read` and `bash`, although those tools are not candidates it may prune. Protection
+`read` and `bash`, independently of their protection in the main-session catalog. Protection
 is not filesystem secrecy or an access sandbox; exploration could encounter a file.
 Likewise, an inspection-only brief does not make `bash` technically read-only.
 
@@ -96,7 +111,16 @@ Use the existing Git-tracked-file discovery approach beneath the working directo
 with the instruction-file matching criteria, rather than a separate filesystem crawl.
 As with project skills, this scan does not include untracked files or discover project
 candidates outside a Git repository. This is a discovery direction, not an implemented
-instruction loader or a decision about additional non-project instruction sources.
+instruction loader.
+
+**Document scope decision:** include agent-facing Markdown instruction resources,
+including `AGENTS.md` and append-system resources. Exclude files specific to other
+harnesses, such as `CLAUDE.md` and Copilot instructions. This scope is not a request to
+inject every Markdown file: ordinary project documentation remains available for
+independent exploration, and skills remain their own category. The document scope
+does not widen the agreed Git-backed project scan. Exact recognition/loading rules
+and non-project resource locations belong in the implementation design; do not
+silently reduce this direction to an exhaustive two-filename allowlist.
 
 ## Settings and picker direction
 
@@ -152,8 +176,8 @@ Discover and resolve applicable resources
 
 Each selector has its own category-specific brief and candidate inputs, excluding
 protected entries. Tools and skills do not wait for the instruction selector's output;
-each chooses its own exploratory reads. The initial task/background payload remains
-to be defined, rather than requiring a shared, preassembled grounding bundle.
+each chooses its own exploratory reads. Each receives its selection instructions,
+the user prompt and its category candidates, not a shared investigation bundle.
 
 ## High-level structure proposal
 
@@ -333,10 +357,11 @@ feature first, reuse it; these are responsibility boundaries, not competing impl
    context at the main-request boundary. Ordinary requests and reopen reuse the saved
    selection. Compaction alone does not launch selectors.
 
-**Proposed input contract:** a fresh session supplies its admitted prompt; after
-compaction, supply the summary, retained recent context and any next admitted input,
-not the discarded history. Do not copy the main system-instruction bundle into these
-inputs and thereby reintroduce protected documents. Candidate payloads are skill
+**Input contract:** each conversation receives category-selection instructions and
+the user prompt. Do not add compaction summaries or retained history as a required
+input bundle, or copy the main system instructions and thereby reintroduce protected
+documents. The precise prompt payload on input-free continuation still needs resolution.
+Candidate payloads remain proposed as skill
 name/description/path, existing tool declarations, and full unprotected instruction
 text with source/scope. Treat candidate contents as selection material. The model returns
 kept candidate IDs, not rewritten resources; the pruner validates/maps them back to the
@@ -370,11 +395,12 @@ selected skills. This is a proposed boundary for review, not a newly selected pr
   planning compaction. Separate access to the current composed context from asynchronous
   selection, otherwise manual compaction would accidentally become a pruning trigger.
   Automatic compaction must finish before preparation for the following main request.
-- **Fallback is not a catch-all.** Provider/selection failures or a cleanly terminated budget
-  expiry retain that category. Parent Stop cancels and joins all branches. Uncertain tool
-  effects, failed durable recording or failed cleanup keep the existing execution fence;
-  they must not be converted into keep-all-and-continue. A timeout requests cancellation,
-  not proof that tools have stopped. Exact exploration limits are still to choose.
+- **Fallback is not a catch-all.** Provider/selection failures, including existing
+  provider/tool timeouts, retain that category only after its owned work settles safely.
+  Do not introduce a pruning-specific budget or timeout. Parent Stop cancels and joins
+  all branches. Uncertain tool effects, failed durable recording or failed cleanup keep
+  the existing execution fence; they must not become keep-all-and-continue. A timeout
+  requests cancellation, not proof that tools have stopped.
 
 Suggested implementation order, subject to approval: share the existing execution mechanics
 without changing main-chat behaviour; add common model resolution and discovery; integrate
@@ -393,13 +419,13 @@ and instruction selections still apply.
 
 User cancellation stops the preparation; it does not activate keep-all-and-continue.
 Existing current-permission and owned-work cleanup requirements still apply. This
-settles the fallback, not retry policy, timeout values or the precise failure UI.
+settles the fallback, not retry policy or the precise failure UI. The later no-budget
+decision rules out adding a pruning-specific timeout; existing timeouts can still fail.
 
 ## Discussed working defaults
 
 These remain implementation proposals, not separately settled contracts:
 
-- Use a small exploration budget; no numeric limit has been selected.
 - Return kept candidate IDs rather than rewritten instruction documents; validate and
   combine them with protected entries in stable source/precedence order.
 - Capture model choices when preparation begins; settings changes affect subsequent
@@ -412,15 +438,16 @@ not replace those mechanisms.
 
 ## Still unresolved
 
-- Whether core protections are non-removable pins or editable defaults. Protecting the
-  four named tools is selected; the settings lock/removal behavior is not.
 - The exact boundary between the base operating prompt and additional instruction
   candidates, and any automatically protected instruction layers. This plan does not
   silently protect every applicable `AGENTS.md` or settle all instruction precedence.
-- Remaining instruction matching criteria/non-project sources, stored source identities
-  and source-loading behavior (distinct from the settled discovery approach and pruning
-  triggers), exploration limits and execution restrictions.
+- Exact recognition/loading rules and non-project locations within the selected
+  agent-facing Markdown scope, plus stored source identities. Other harnesses'
+  instruction files remain excluded.
+- The precise user-prompt payload for continuation without a new user message.
 - Concrete classes, APIs, preference/storage shape and implementation sequencing.
+  `PruningContext` remains an optional packaging proposal, not a required shared
+  investigation or a settled type/name.
 
 **Owner steering (2026-11-15):** duplicate-name/project-override skill protection is
 an edge case not worth further design time. Leave its handling to simple implementation;

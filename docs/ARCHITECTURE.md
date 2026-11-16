@@ -588,8 +588,10 @@ alongside tools and skills. Compare designs using real Pie task/file/catalog rep
 before fixing class structure; see the [dated pruning replay evidence](pruning-replay-results.md).
 Project instruction-file discovery now follows the same recursive Git-backed approach
 as skills; the [pruning plan](pruning-plan.md#project-resource-discovery) owns that direction.
-Remaining discovery details, precedence and production loading mechanics remain undecided;
-research scope is not approval of an implemented loader. The subsequent protection
+Agent-facing Markdown instructions are in scope, including `AGENTS.md` and append-system
+resources; other harnesses' files, such as `CLAUDE.md` and Copilot instructions, are excluded.
+Exact recognition rules, precedence and production loading mechanics still need
+implementation design; this direction is not approval of an implemented loader. The subsequent protection
 and category-selection direction is recorded below. Skills are listed by name,
 description and path when a chat starts: Git-tracked `SKILL.md` files under the working
 directory, then Urd's packaged
@@ -611,7 +613,11 @@ for skills, additional instruction documents and tools, with basic exploration t
 and shared implementation. Each pruner defaults to the configured `small` bucket,
 with a per-category specific-model override in user preferences, including local models.
 Preferences also supply protected-item settings; protected entries bypass selection
-before inputs are built.
+before inputs are built. Core tool protections are editable defaults: users may remove
+protection from `bash`, `read`, `write` and `edit`. Each pruning conversation receives
+its category-selection instructions, the user prompt and its candidates, and independently
+chooses exploratory reads. Do not add pruning-specific budgets; existing execution
+permissions, limits, cancellation and cleanup requirements still apply.
 Pruning runs only on the first prompt in a fresh session and on the first message or
 continuation after successful compaction, not on compaction completion alone or other
 events. The [pruning plan](pruning-plan.md) owns these triggers, picker scope, working

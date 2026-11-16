@@ -173,6 +173,7 @@ proposed concrete structure for that direction, not permission to create these f
 | The umbrella covering instruction documents and skills | **Instruction resources** |
 | The shared operation that discovers and loads instruction resources | **`InstructionResourceDiscovery`** |
 | The shared selector for tools, skills and instructions intended for starting context | **`StartingResourcePruner`** |
+| A category pruning outcome, carrying retained original items, success/fallback status and diagnostics | **`StartingResourcePruningResult<T>`** |
 
 `StartingContextContribution` defines a contribution, whether its text is fixed or
 produced from supplied session data. Preparation may exclude, prune or process it
@@ -217,7 +218,7 @@ context/
   pruning/
     StartingResourcePruner.cs       new: three typed overloads, one selection core
     PruningContext.cs               new: immutable task context and resolved models
-    PruningResult.cs                new: retained items and outcome/diagnostic
+    StartingResourcePruningResult.cs new: retained items and outcome/diagnostic
 ```
 
 `InstructionResourceDiscovery` absorbs discovery/loading from `SkillCatalog`; remove
@@ -245,19 +246,20 @@ Task<DiscoveredInstructionResources> FindAsync(
 // StartingResourcePruner: one instance for one preparation
 StartingResourcePruner(PruningContext context, ConversationRunner execution);
 
-Task<PruningResult<DiscoveredInstructionDocument>> PruneAsync(
+Task<StartingResourcePruningResult<DiscoveredInstructionDocument>> PruneAsync(
     IReadOnlyList<DiscoveredInstructionDocument> instructions, CancellationToken cancellation);
-Task<PruningResult<AIFunctionDeclaration>> PruneAsync(
+Task<StartingResourcePruningResult<AIFunctionDeclaration>> PruneAsync(
     IReadOnlyList<AIFunctionDeclaration> tools, CancellationToken cancellation);
-Task<PruningResult<DiscoveredSkill>> PruneAsync(
+Task<StartingResourcePruningResult<DiscoveredSkill>> PruneAsync(
     IReadOnlyList<DiscoveredSkill> skills, CancellationToken cancellation);
 ```
 
 These are proposed shapes, not compiled declarations or frozen APIs. Use the existing
-model-facing tool declarations, not a new tool wrapper type. `PruningResult<T>` carries
-retained original items plus the outcome and diagnostic needed to distinguish successful
-selection from keep-all fallback. Cancellation and fatal recording/cleanup failures
-propagate through the owning execution instead of becoming successful result objects.
+model-facing tool declarations, not a new tool wrapper type.
+`StartingResourcePruningResult<T>` carries retained original items plus the outcome and
+diagnostic needed to distinguish successful selection from keep-all fallback.
+Cancellation and fatal recording/cleanup failures propagate through the owning execution
+instead of becoming successful result objects.
 
 The overloads choose their category brief and resolved model, then delegate to one
 private selection core. Keep prompt formatting with `StartingResourcePruner` initially. No

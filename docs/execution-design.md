@@ -44,9 +44,9 @@ and first-message title operation through `ConversationRunner`, reusing the shar
 response/tool mechanics. `SessionExecution` owns them; the driver joins their work on
 Stop/failure and before settlement. A held title cannot block main requests/output or
 steering, although it can keep their execution unsettled. Provider/validation failures
-fall back per pruning category or, for the title, to the truncated first prompt
-(currently implemented as leaving the placeholder); durable-save/cleanup
-failures fence the parent. The [pruning plan](pruning-plan.md) owns the implemented
+fall back per pruning category or, for the title, to the first prompt truncated
+to 25 characters (required behavior; the current implementation still leaves the
+placeholder). Durable-save/cleanup failures fence the parent. The [pruning plan](pruning-plan.md) owns the implemented
 boundary/input/protection contract. No live-provider quality evaluation is implied.
 
 See [backend development](backend-development.md) for the tested scope and limitations.

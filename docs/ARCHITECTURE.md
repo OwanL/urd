@@ -96,7 +96,7 @@ span multiple decisions, and the inventory can grow as Pie is inspected.
 | Guidance and resources | Bundled guidance, user/project context, named agents, skills, discovery and precedence. |
 | Tools and integrations | Tool contracts, validation, result representation, side effects, shell/browser/computer tools and MCP. |
 | Context management | Tool/skill selection and recovery, tool-result reduction/recall, history compaction and their distinct purposes. |
-| Delegation and coordination | Bounded subagents, independently running sessions, assignments, messages, results, waits and shared-resource coordination. |
+| Delegation and coordination | Bounded subagents; whether to support independently delegated sessions; request/reply, results, waits and any shared-resource coordination. |
 | Deferred work | Timers, wakeups, event triggers, cancellation and restart expectations. |
 | UI and transport | Shared frontend, host integrations, views, commands, streaming, synchronization, paging and reconnection. |
 | Analytics and configuration | Accounting, observability, privacy, user settings and separation from execution-critical state. |
@@ -139,9 +139,10 @@ other way around. The owner rejected project-first and vague `systems/` layouts 
 they hid actual responsibilities. The accepted [application plan](application-plan.md)
 is a revisable component-led starting point, not a hierarchy of new managers or one
 project per concern. It separates authored `guidance/` from `guidance-loading/`, uses
-`execution` for the narrow model/tool loop, and names messaging, assignments and wakeups
-for their distinct purposes. Shared provider/MCP lifetimes and backend usage capture do
-not become execution-owned just because they support agents.
+`execution` for the narrow model/tool loop, and distinguishes request/reply communication
+from any separately selected assignment or wakeup responsibilities. Shared provider/MCP
+lifetimes and backend usage capture do not become execution-owned just because they
+support agents.
 
 Flat docs, optional pending `docs/scratch/`, `scripts/` for automation and no in-repository
 experiments are accepted. The [experiment archive](product-direction.md#experimental-source-archive)
@@ -284,43 +285,40 @@ share drafts. This does not select draft storage or reload persistence.
 
 <a id="preserve-bucket-based-model-selection-for-agent-created-work"></a>
 
-### Preserve bucket-based LLM selection for agent-created work
+### Preserve bucket-based LLM selection for bounded subagents
 
-**Decision:** Retain Pie's bucket system for agents creating other agents.
-The selected bucket expresses the task's complexity; configured LLM choices
-supply the actual provider/LLM. This is an LLM-selection policy, separate
-from how sessions are represented or stored internally.
+**Decision:** Retain Pie's bucket system for bounded subagents. The selected
+bucket expresses task complexity; configured LLM choices supply the actual
+provider/LLM. This is an LLM-selection policy, separate from how sessions are
+represented or stored internally.
 
-The existing `small`, `medium` and `frontier` buckets remain the reference
-behaviour. **Keep bucket-only creation for now; do not add an exact-LLM
-creation override.** In current Pie, both subagent creation and independent
-session creation require a bucket. An independent session's LLM can be
-changed afterwards through its settings; capability requirements such as image
-support are distinct from choosing an exact LLM.
+The selected buckets are `small`, `medium` and `large` (`Large` is the planned
+rename of the current `Frontier` bucket). **Keep bucket-only creation; do not add
+an exact-LLM creation override.** Pie's independent-session bucket/settings
+workflow is historical reference only; independently delegated sessions are not
+selected for Urd (see [agent communication](agent-communication-design.md#selected-direction)).
 
-**Rationale:** Preserve the current selection workflow rather than expand its
-interface during the rebuild. Internal session representation remains a separate
-design question.
+**Rationale:** Preserve bucket selection for bounded work rather than expand its
+interface. Internal session representation remains separate.
 
 **Automatic fallback:** Preserve Pie's enabled-provider/bucket selection and
-fallback workflow for delegated work: bounded subagents and independent delegated
-sessions. Switching within that configured policy does not require repeated
-approval, including when it selects an already-enabled metered provider. Do not
-silently widen the allowed provider pool. This decision does not choose automatic
-fallback for a user-selected LLM in their own chat.
+fallback workflow for bounded subagents. Switching within that configured policy
+does not require repeated approval, including when it selects an already-enabled
+metered provider. Do not silently widen the allowed provider pool. This decision
+does not choose automatic fallback for a user-selected LLM in their own chat.
 
-Creation-time selection and in-run retries are distinct paths to inspect, not
-proof that Pie implements both delegation forms identically. Detailed eligibility,
-retry and selection mechanics still need review; retaining the useful workflow
-does not approve every current implementation detail or require a new
-spending-approval system.
+Creation-time selection and in-run retries are distinct paths to inspect.
+Detailed eligibility, retry and selection mechanics still need review; retaining
+the useful bounded-work workflow does not approve every current implementation
+detail or require a new spending-approval system.
 
-### Retain bounded subagents and independent agent-created sessions
+### Bounded subagents; independent agent-created sessions not selected
 
-**Later clarification (2026-11-16):** the active bounded-subagent/communication design does not
-approve independently delegated sessions. Its ownership, question/reply and cycle rules are in
-[agent communication](agent-communication-design.md). The independent-session paragraphs below
-are an older unresolved direction and must not be treated as implementation approval.
+**Clarification (2026-11-16):** only bounded, invocation-owned subagents are selected;
+independent agent-created sessions, follow-up assignments and their coordination are
+not approved. See [agent communication](agent-communication-design.md#selected-direction).
+The earlier proposal below is retained as history only; its creator-cleanup policy is
+not selected.
 
 **Earlier direction:** Both workflows earn their place in Urd; neither is being removed
 as redundant.
@@ -336,23 +334,21 @@ sustained parallel work. Both use the retained bucket-based creation policy.
 This does not require separate agent engines or storage implementations. The
 working `SessionBase`/`PrimarySession`/`SubagentSession` sketch below shares core
 logic, without freezing APIs or every cancellation/ownership rule. The
-creator-cleanup boundary below remains agreed.
+creator-cleanup boundary below is part of this superseded proposal.
 
-**Creator cleanup after human steering:** Keep Pie's behaviour. Direct human
-steering does not remove the creator agent's authority to close its worker; an
-idle human-steered session remains eligible for parent cleanup. Retain the
-running-session skip by default and instructions to collect results and check
-human use before closing. Do not add a hard takeover/protection rule merely
-because the user has spoken in the child chat. Urd's final-closure policy still
-applies; this does not inherit Pie's normal-session history retention.
+**Superseded creator-cleanup proposal:** The following Pie behavior was part of the
+older independent-session direction and is not selected for Urd. Direct human steering,
+creator authority, cleanup eligibility and running-session skips therefore have no
+approved policy here.
 
 ### Owner decision (2026-11-07): Stop owns the bounded work tree
 
 **Required product contract:** Stop in the main session must cancel its current
 work, including tools, bounded subagents and all descendants of those subagents.
 No owned work may silently continue or be reported as “Stopped” while still live.
-Separately opened independent worker chats continue: creation by the stopped
-session or later human steering does not bring them into its Stop scope.
+This contract covers work owned by the bounded invocation; it does not select
+agent-created independent worker chats or their Stop/close scope (see
+[agent communication](agent-communication-design.md#one-bounded-task-owns-its-child-until-final-completion)).
 
 Cancellation requested is not cleanup complete. Keep the session stopping/fenced
 until owned work is confirmed stopped; admit no overlapping replacement. Future
@@ -362,8 +358,8 @@ token or disposed handle alone does not confirm that an external process exited.
 
 Stop is not close/delete or recovery: it neither deletes history nor reverses
 completed effects, and uncertain results must not be replayed as though nothing
-happened. Independent-worker close and creator-cleanup policies above and below
-are unchanged; this decision does not settle the open independent-close question.
+happened. The independent-worker close and creator-cleanup assumptions in the
+earlier sketch are not selected policies for Urd.
 
 **Implementation boundary:** Current runtime scope is primary-session/LLM work
 and configured fake `AIFunction`s only. This records the required contract, not
@@ -387,10 +383,14 @@ conversation records does not undo filesystem, network or other external effects
 already performed by tools. Exact mutation,
 concurrency and interrupted-edit rules remain to be designed.
 
-### Retain assignments and results across backend restarts
+### Superseded direction: Retain assignments and results across backend restarts
 
-**Decision:** Persist assignment records and their results, not only conversation
-history. The records must retain enough identity, participant and status
+**Earlier direction, not a current requirement (2026-11-16):** durable assignment records
+and restart-spanning coordination are not selected. Bounded subagent results return through
+their owning invocation; see [agent communication](agent-communication-design.md#one-bounded-task-owns-its-child-until-final-completion).
+
+**Superseded decision:** Persist assignment records and their results, not only
+conversation history. The records would retain enough identity, participant and status
 information to establish which work was requested and what outcome was recorded.
 
 **Rationale:** Sustained agent coordination should not lose its basic facts when
@@ -437,16 +437,18 @@ require the owner to specify every persistence barrier. Choose straightforward
 implementation mechanics against the practical requirement. No mandatory per-token checkpoint,
 exact write-ahead protocol or whole-machine power-loss guarantee has been chosen.
 
-Remembering saved assignments/results remains required. A missing tool result
+The superseded assignment-persistence direction above is not required. A missing tool result
 does not prove an external action never happened; recovery must not blindly
 repeat potentially completed effects just to make the transcript look complete.
 
-### Scale to substantial fan-out without treating estimates as limits
+### Historical fan-out estimates (not a selected requirement)
 
-**Direction:** Support as many agents as is practical while remaining performant.
-The owner's speculative sizing examples are up to 10 user-managed sessions,
+The following estimates came from the superseded independent-session proposal; they
+are exploratory scenarios, not a Urd capacity commitment. Independently delegated
+sessions are not selected; see [agent communication](agent-communication-design.md#selected-direction).
+The earlier speculative sizing examples were up to 10 user-managed sessions,
 each spawning approximately four bounded subagents or four independent sessions
-that can themselves each run approximately four subagents.
+that could themselves each run approximately four subagents.
 
 Useful exploratory scenarios are therefore roughly **50 live agents** for direct
 fan-out, and **210 live agents** for the deeper example (10 + 40 + 160). These
@@ -544,9 +546,9 @@ retention needs another explicit requirement, not a default assumption that all
 history lives indefinitely.
 
 This concerns closing a session, not closing a UI client: the agreed background
-backend behaviour remains unchanged. Assignment/result facts still needed by
-another open session remain available; closing one session does not discard them
-or reverse their agreed persistence across restarts. Exact cleanup timing,
+backend behaviour remains unchanged. The older assignment/result-persistence proposal
+is not selected; bounded subagent results remain owned by their invocation rather than
+creating resumable cross-session work. Exact cleanup timing,
 including when shared facts are no longer needed, remains to be designed.
 
 ### Keep session snoozing
@@ -567,10 +569,10 @@ silently bypass the existing idle-only safeguard.
 **Owner direction (2026-11-11):** Follow Pi's general prompt-composition direction,
 with a small shared base and separately composed parts that vary with session and
 assignment context. Do not maintain a separate complete prompt for every role.
-A primary session, bounded subagent and delegated primary can need different
-instructions while retaining most of the same prompt. A delegated primary remains
-`PrimarySession`; assignment context does not create a third session kind or alter
-its lifetime and authority.
+A primary session and bounded subagent can need different instructions while
+retaining most of the same prompt. An independently delegated primary session is
+not selected; a bounded subagent's task context does not create another session kind
+or alter its invocation-owned lifetime.
 
 A starting-context builder coordinates instruction contributions, environment facts,
 capability catalogs and pruning utilities to construct the initial model context.
@@ -771,7 +773,7 @@ Finished bounded helpers also keep inspectable messages and tool calls until
 the containing chat closes, rather than retaining only their final report.
 This is useful baseline inspection, not another feature requiring confirmation.
 Load child detail when requested instead of copying full nested histories into
-ordinary tab updates. Independent agent sessions follow their own close policy;
+ordinary tab updates. No close policy for independently delegated sessions is selected;
 explicit history edits still replace the removed conversation as agreed above.
 
 ### Keep both website automation and desktop control
@@ -890,7 +892,7 @@ shared session hierarchy and explicitly selected `PrimarySession` after rejectin
 
 ```text
 abstract SessionBase
-├── PrimarySession       ongoing, whether human- or agent-created
+├── PrimarySession       ongoing
 └── SubagentSession      bounded task → result
 ```
 
@@ -899,28 +901,25 @@ Both share core execution/history rules without separate engines. A composed
 scope remain provisional. Titles, compaction and pruning use shared LLM I/O,
 not additional full-session subtypes. [Session design](session-design.md) owns the
 responsibility/lifetime walkthrough and acceptance proposals. It separates durable
-history/assignment facts, live execution and client presentation; finished work,
-explicit task results and final closure are not interchangeable.
+session history, live execution and client presentation; finished work, explicit task
+results and final closure are not interchangeable.
 [Disposable flow tests](session-design.md#7-disposable-session-flow-qualification)
-now exercise guarded admission/Stop, edit/close and retained assignment results,
-including owned-child exit/reopen. They do not validate the hierarchy, bounded-child
-lifecycle, HTTP/client integration or composition with the native execution fixture.
+exercise guarded admission/Stop, edit/close and an earlier assignment-record prototype,
+including owned-child exit/reopen. That historical prototype does not select durable
+assignments or validate the hierarchy, bounded-child lifecycle, HTTP/client integration
+or composition with the native execution fixture. Independently delegated PrimarySessions
+are not selected; bounded delegation follows [agent communication](agent-communication-design.md#one-bounded-task-owns-its-child-until-final-completion).
 
-**Relationships and closure:** creator provenance/cleanup authority, bounded
-caller/containing chat, assignment requester/worker and UI grouping have different
-meanings. Human steering does not change session type or transfer creator authority.
-Bounded children close with their containing chat. **Independent-primary closure
-remains open:** the owner suggested survival or a warning before cascading closure,
-but needs concrete UI before choosing. Do not encode creator as implicit lifetime
-cascade or discard results still needed by another open session.
+**Relationships and closure:** bounded children are owned by their invocation; a
+final result completes the call and child addressability, while the transcript remains
+inspectable. No independently delegated PrimarySession, creator-cleanup or assignment-worker
+policy is selected. The current `ask_agent` surface addresses an agent by immutable title
+(or the `parent` relationship alias); GUIDs remain internal storage keys. Placeholder
+titles are not addressable. See [agent communication](agent-communication-design.md#addressing).
 
-Delegated-worker clutter and slow cleanup remain the motivations. Grouping,
-detachment, relative `parent` addressing and exact creation/delivery APIs are not
-selected. Stable IDs independent of mutable titles are recommended in the sketch,
-not a requirement to wait for title inference. Parent/child addressing cannot
-replace durable assignment/results. After the initial layout deferral, the owner
-selected the revisable [`Urd.Server → Urd.Core` boundary](session-design.md#5-coreserver-project-boundary--selected-revisable):
-Core owns session/execution/storage logic without ASP.NET; Server owns hosting,
+Older grouping/detachment sketches are not selected. The revisable
+[`Urd.Server → Urd.Core` boundary](session-design.md#5-coreserver-project-boundary--selected-revisable)
+remains: Core owns session/execution/storage logic without ASP.NET; Server owns hosting,
 HTTP entrypoints and composition. Fine file/folder layout and exact APIs remain
 unapproved, and the coarse example does not authorize production scaffolding.
 
@@ -971,17 +970,20 @@ publishes separately through guarded metadata updates and remains owned cancella
 work. Invalid title output allows one corrective response; if still invalid or generation
 fails, use the first user prompt truncated to 25 characters (superseding the earlier
 unchanged-placeholder decision), without blocking the main agent or
-retrying on a later message. Existing cancellation and recording/cleanup safeguards
-still apply. Future title-based session addressing is explicitly deferred. Urd has no
-manual session-naming flow, and this feature does not add one; the
+retrying on a later message. Duplicate titles receive the lowest available ` (n)` suffix
+within the 25-character maximum. Placeholder titles are not addressable; once final, the
+immutable title is the model-facing address and GUIDs remain internal storage keys. See
+[agent communication](agent-communication-design.md#addressing). Urd has no manual
+session-naming flow, and this feature does not add one; the
 [prepass plan](pruning-plan.md#parallel-title-generation) owns title integration details.
 This expands the design scope, not implementation approval.
 
 Keep LLM invocation, the LLM/tool execution cycle and session state/lifetime
 as distinct responsibilities. This does not require three framework layers or
 make every auxiliary call a session. Reuse error/retry/fallback mechanisms while
-keeping operation-specific policies explicit: a missing title is tolerable,
-failed compaction must preserve usable context, and delegated fallback approval
+keeping operation-specific policies explicit: title-generation failure is tolerable
+because the first-prompt fallback produces a final title, failed compaction must preserve
+usable context, and delegated fallback approval
 must not silently apply to a user's selected chat LLM. Cancellation should not
 be swallowed as a missing title; request retries must not replay completed tools.
 
@@ -1040,8 +1042,10 @@ attachments is not selected.
 ### Session storage: shared SQLite
 
 **Decision (2026-11-04):** Use **one shared SQLite database** as the store for
-transcripts, session metadata and assignment/result records. The working layout
-is message rows with a derived bounded-preview metadata table (the harness
+transcripts and session metadata. Durable assignment/result records are not selected;
+bounded subagent results return through their owning invocation. See
+[agent communication](agent-communication-design.md#one-bounded-task-owns-its-child-until-final-completion).
+The working layout is message rows with a derived bounded-preview metadata table (the harness
 family-1 shape); large image/binary artifacts remain files with stored
 references per the attachment direction above, not blobs in the database.
 Default durability remains WAL with `synchronous=NORMAL` as the working setting.
@@ -1056,11 +1060,10 @@ external effects follow; these words do not qualify every failure mode.
 
 **Workload and guarantees.** The store must serve click-to-visible newest-window
 reads, paged navigation, LLM-context range reads, incremental appends and
-per-batch streaming writes, suffix-replacing edits, persistent assignments
-across restarts, final-closure deletion and many-session fan-out — under a
-single backend process. For the process-crash/reopen boundary above, committed
-database state reopens intact: a transactional record is absent or complete,
-never partially applied. Live delivery alone is not a commit acknowledgement.
+per-batch streaming writes, suffix-replacing edits, final-closure deletion and
+many-session fan-out — under a single backend process. For the process-crash/reopen
+boundary above, committed database state reopens intact: a transactional record is
+absent or complete, never partially applied. Live delivery alone is not a commit acknowledgement.
 Edits replace history only and never roll back external effects; recovery does
 not invent, reorder or duplicate records. A missing acknowledgement does not
 prove that a transaction failed or that retrying it is safe.
@@ -1069,9 +1072,9 @@ prove that a transaction failed or that retrying it is safe.
 recent reads were both sub-millisecond: per-session JSONL measured 0.17 ms and
 SQLite 0.07 ms median for 210 identities with short histories. The differentiator
 was the extra file coordination work, not read speed: message-plus-summary append
-measured 1.91 ms for files versus 0.23 ms for SQLite; assignment update 1.59 versus
-0.13 ms; suffix edit 3.42 versus 0.63 ms; and reopen/list/recent-read 42.98 versus
-1.22 ms. The file prototype rewrote shared metadata and reconciled session tails
+measured 1.91 ms for files versus 0.23 ms for SQLite; the historical prototype's
+assignment-record update 1.59 versus 0.13 ms; suffix edit 3.42 versus 0.63 ms;
+and reopen/list/recent-read 42.98 versus 1.22 ms. The file prototype rewrote shared metadata and reconciled session tails
 on reopen; it was not an optimized lower bound. These measurements explain the
 choice of one transactional store over custom cross-file coordination, not a
 production performance claim or click-to-visible UI comparison.
@@ -1118,7 +1121,7 @@ reference section. This is not yet a complete dependency or lifecycle audit.
 | Tool/skill selection | The owner confirms successful use and explicitly retains AI-based catalog pruning with protected core entries. Checked-in defaults are not usage evidence. Pie's recovery discloses hidden tools for a wrapper rather than mutating the frozen native catalog; that implementation constraint is not automatically Urd's. |
 | Result reduction and history compaction | Deterministic output rewriting with raw recall is distinct from catalog selection and from summarizing old conversation. Result reduction is enabled in checked-in defaults and excludes `read`; the mechanisms have different data and fidelity needs. |
 | Files, shell, web, MCP, browser and desktop tools | Different dependency and effect boundaries: Pi-supplied core tools, Pie's warm-shell override/fallback, managed web/MCP packages, browser automation and Windows desktop integration. Dropping Pi does not make these integrations free. |
-| Delegation, coordination and deferred work | Both retained delegation forms use the agent engine. Notes, assignments/results, waits, cooperative resource leases and durable wakeups are additional capabilities to review separately; wakeups currently target persisted sessions, not bounded in-memory subagents. |
+| Delegation, coordination and deferred work | Bounded subagents use the shared agent execution; independently delegated sessions are not selected. Request/reply is selected, including sparse coordination between primary agents. Direct sibling messages, broadcasts, agent-wide discovery, shared task boards/resource coordination and durable wakeups are not selected requirements. |
 | Cost and performance visibility | Session usage/estimated cost and speed indicators, plus aggregate charts. An estimate is not necessarily an invoice; incomplete observations must not silently become zero. |
 | Historical analytics and queries | Automatic fresh capture includes provider settlements, executions, tools/file facets, activity spans and capability/feature observations, with separately addressed detail. Agent queries extend well beyond the small UI counters. Urd's agreed post-closure scope is much smaller: compact usage summaries, not detailed history. |
 | Privacy, retention and deletion | Pie's private-session close deletes associated history/analytics; normal closure/expiry includes a separate gated policy. Source implementation is not proof that the gate is active, and neither policy has been selected for Urd. |

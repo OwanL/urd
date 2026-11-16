@@ -98,39 +98,38 @@ a pending generation attempt. See [agent communication](agent-communication-desi
   not the shared bucket or the three pruning settings.
 - **Title length decision:** generated titles have a strict maximum of **25 characters,
   including spaces**. Enforce the limit in application validation rather than relying
-  solely on prompt wording. This does not approve a suffix exception to the maximum.
+  solely on prompt wording. Duplicate suffixes are included in the 25-character maximum.
 - Reuse shared request/tool-turn mechanics and existing guarded recording, current
   permissions, cancellation and owned-tool cleanup. Keep conversation state, output
   validation and metadata publication separate from pruning and main-agent history.
 
-**Title validation/failure decision:** allow one corrective response when the generated
-title is invalid. If that response is still invalid, or generation fails, leave the
-existing placeholder unchanged. Do not substitute a first-prompt excerpt, block the
-main agent or retry on a later message. The correction belongs to the initial naming
-attempt; it is not a later generation trigger and must not replay completed tools.
-Cancellation and recording/cleanup failures retain the existing execution safeguards,
-not a successful fallback that hides uncertain owned work.
+**Superseded title validation/failure decision (2026-11-15):** allow one corrective
+response when generated output is invalid, then leave the placeholder if generation fails.
+This failure fallback is superseded by the next decision and
+[agent communication](agent-communication-design.md#addressing); the one-correction limit
+and cancellation/recording/cleanup safeguards remain.
 
-**Superseded failure fallback (2026-11-16):** titles are now communication addresses, so a
+**Selected failure fallback (2026-11-16):** titles are communication addresses, so a
 session cannot remain on a placeholder. If generation (including its one correction) fails,
 use the session's first user prompt (a subagent's task) truncated to the 25-character maximum
-as its final title. Duplicate final titles take a ` (n)` suffix within the 25-character
-maximum. This replaces the unchanged-placeholder fallback above and in the
-milestone/implementation notes below; the implemented null-title behavior must change. See
+as its final title. Duplicate titles take the lowest free ` (n)` suffix; shorten the base so
+the final title remains within 25 characters. This replaces the superseded fallback above
+and the older implementation notes below. See
 [agent communication](agent-communication-design.md#addressing).
 
-**Pie reference:** Pie counts the base title using JavaScript string length, targets
-15–20 characters and permits one corrective request rather than truncating invalid
-output. Urd has selected the 25-character maximum and one correction, but has not
-imported Pie's counting rule, later trigger or collision-suffix rules. Pie's title
+**Pie reference:** Pie counts the base title using JavaScript string length and targets
+15–20 characters. Urd instead uses the selected 25-character maximum and one correction;
+its title policy also uses immutable addresses and collision suffixes within that maximum
+(see [agent communication](agent-communication-design.md#addressing)). Pie's title
 generator is request-only; Urd's optional exploration is an explicit addition.
 
 **Implementation details:** specify the Unicode counting rule consistently in
 validation and tests. Urd has no manual session-naming flow; do not add one or design
 manual-name arbitration as part of this feature. Existing first-prompt-preview-derived
 UI titles are not manual names; align that current naming path with generated titles
-and the selected unchanged-placeholder failure behavior. Post-compaction pruning does
-not regenerate titles. The existing three-row pruning UI decision does not select a
+and the selected first-prompt fallback after title-generation failure. Placeholder titles are not addressable; see
+[agent communication](agent-communication-design.md#addressing). Post-compaction pruning
+does not regenerate titles. The existing three-row pruning UI decision does not select a
 title row.
 
 ## Pruning triggers
@@ -400,7 +399,8 @@ plugin hierarchy are needed.
   API still needs the extraction design, rather than speculative interfaces here.
 - `providers/ModelSelector.cs` is a shared prerequisite: bucket or specific provider/model
   choice resolves to the existing `LlmSelection`. This is now implemented for auxiliary
-  purposes, including persisted `small`/`medium`/`frontier` mappings and exact overrides.
+  purposes, including persisted `small`/`medium`/`frontier` mappings in the current
+  implementation; the selected top bucket is `large`, with the `Frontier` rename planned.
   Delegated-agent selection/fallback still depends on the unimplemented delegation runtime.
   Reuse the same owner for delegated work, not pruning-only buckets. Resolve model choices
   once per preparation; `PruningContext` is only a proposed container. Do not silently
@@ -516,9 +516,13 @@ source. The fully integrated prepass selects three categories in parallel and ge
 the one-shot title independently; all work remains execution-owned. Boundary snapshots,
 schema 29, guarded status/title publication, model/protection Settings, three status rows
 and authoritative backend tab titles are integrated. Unicode title counting uses scalar
-values, including spaces; there is no truncation or retry after the one correction.
-Configure the `small` bucket in Settings; an unresolved choice keeps that category's
-resources or leaves the title placeholder. No main-model inheritance is introduced.
+values, including spaces; generated titles are not truncated or retried after the one
+correction. Under the settled behavior, generation failure uses the first prompt truncated
+to 25 characters. Configure the `small` bucket in Settings; an unresolved choice keeps
+that category's resources. At this checkpoint an unresolved title choice still leaves the
+placeholder (current implementation; superseded by the settled fallback in
+[agent communication](agent-communication-design.md#addressing)). No main-model inheritance
+is introduced.
 
 Earlier proposal examples in this document preserve design history, not a frozen API
 or statements that these mechanisms remain unimplemented. Concrete discovery rules live
@@ -541,7 +545,7 @@ isolated `bin/Verification/` outputs; no profile reset, installation or host act
 | 2. Model choices and resource discovery | Add shared bucket-or-specific-model resolution returning `LlmSelection`; persist the four independent auxiliary choices through existing preferences. Move skill discovery into `InstructionResourceDiscovery`, add document loading and make the skill contribution format supplied results. Apply the selected context type renames as callers move, without compatibility aliases. | Independent overrides, configured bucket resolution and unavailable-model handling; existing skill override rules; nested tracked versus untracked files; full document contents, exclusions and stable protection identities. |
 | 3. Boundary-aware preparation/storage | Replace once-per-session context storage with exact ordered snapshots associated with the initial boundary or committed compaction ID. Split current-context access for compaction planning from async preparation. Add guarded auxiliary status and the durable initial title-attempt claim. | Correct fresh/automatic/manual task inputs; compaction alone never starts pruning; exact restoration on reopen; request-start/input-placement atomicity; failed writes never start provider contact. |
 | 4. Three-category pruning | Implement `StartingResourcePruner` with one selection core and three independent calls. `StartingContextBuilder` separates protection, invokes pruning, validates/maps IDs and composes results. Retain original text/schemas in source/precedence order. | Protected inputs excluded, built-ins retained, running-background-tool protection after compaction, parallel isolation, successful sibling selections survive category failure, Stop prevents main-agent startup. |
-| 5. Nonblocking title generation | Add the separate tool-capable title operation to the first-message prepass. Persist/publish generated title metadata; remove the browser's first-prompt-derived naming path. Permit one invalid-output correction, otherwise retain the placeholder. | Main provider work/output can proceed while title work is held; 25-character validation; one correction only; failure leaves placeholder; no later-message/reopen regeneration; Stop and stale publication guards. |
+| 5. Nonblocking title generation | Add the separate tool-capable title operation to the first-message prepass. Persist/publish generated title metadata; remove the browser's first-prompt-derived naming path. Permit one invalid-output correction, then use the first prompt truncated to 25 characters if generation fails. | Main provider work/output can proceed while title work is held; 25-character validation; one correction only; failed generation produces the first-prompt fallback; no later-message/reopen regeneration; Stop and stale publication guards. |
 | 6. Settings and prepass display | Extend existing preference routes/client/hook and Settings; reuse model catalogs and picker presentation for the four choices. Add protection pickers using shared discovery for the default directory and the three recorded pruning rows. Display backend title metadata in the existing tabs. | Independent saves and errors; missing entries do not silently rebind; core defaults removable; truthful row outcomes; title updates without disturbing tab order, focus or drafts. |
 
 **Execution/recording details to establish in milestone 1:**
@@ -589,11 +593,13 @@ isolated `bin/Verification/` outputs; no profile reset, installation or host act
 - Inspect the retained bucket policy when implementing the common resolver; do not guess
   model quality from IDs, silently inherit the main chat model or widen enabled providers.
   An unresolvable category selection is an ordinary category failure; an unresolvable title
-  choice leaves the placeholder. Exact configured resolution mechanics belong to that
-  implementation checkpoint rather than four different selection implementations.
+  choice uses the first-prompt fallback (see
+  [agent communication](agent-communication-design.md#addressing)). Exact configured
+  resolution mechanics belong to that implementation checkpoint rather than four different
+  selection implementations.
 - Specify title counting once for server validation and tests. Preserve the approved strict
-  25-character maximum, one corrective response and unchanged-placeholder fallback; do not
-  introduce truncation, suffix exceptions or manual naming features.
+  25-character maximum, one corrective response and first-prompt failure fallback; duplicate
+  suffixes must also fit within 25 characters. Do not add manual naming features.
 - Detailed row layout remains deferred until there is a working implementation. Share only
   mechanics with real callers; avoid speculative wrappers, registries or a new scheduler.
 

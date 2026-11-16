@@ -1,15 +1,22 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Urd.Core.Preferences;
 
 namespace Urd.Core.Storage;
 
 // Stores and caches the shared application preferences.
 internal sealed class PreferencesStorage(Database database) {
+  private static readonly JsonSerializerOptions JsonOptions = new() {
+    Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase, allowIntegerValues: false) },
+    RespectRequiredConstructorParameters = true,
+    RespectNullableAnnotations = true
+  };
   private readonly object gate = new();
   private UserPreferences? cachedPreferences;
 
   internal UserPreferences Read() {
     lock (gate)
-      return ReadLocked();
+      return Copy(ReadLocked());
   }
 
   internal UserPreferences Update(Func<UserPreferences, UserPreferences> update) {
@@ -18,17 +25,22 @@ internal sealed class PreferencesStorage(Database database) {
       UserPreferences updated = update(ReadLocked());
       database.Write(transaction => {
         database.Execute(transaction, """
-          INSERT INTO preferences (singleton, working_directory, compaction_trigger_token_count)
-          VALUES (1, $directory, $compactionTriggerTokenCount)
+          INSERT INTO preferences (singleton, working_directory, compaction_trigger_token_count,
+              model_choices_json, protected_resources_json)
+          VALUES (1, $directory, $compactionTriggerTokenCount, $modelChoices, $protectedResources)
           ON CONFLICT(singleton) DO UPDATE SET
               working_directory = excluded.working_directory,
-              compaction_trigger_token_count = excluded.compaction_trigger_token_count;
+              compaction_trigger_token_count = excluded.compaction_trigger_token_count,
+              model_choices_json = excluded.model_choices_json,
+              protected_resources_json = excluded.protected_resources_json;
           """, ("$directory", updated.WorkingDirectory),
-            ("$compactionTriggerTokenCount", updated.CompactionTriggerTokenCount));
+            ("$compactionTriggerTokenCount", updated.CompactionTriggerTokenCount),
+            ("$modelChoices", JsonSerializer.Serialize(updated.ModelChoices, JsonOptions)),
+            ("$protectedResources", JsonSerializer.Serialize(updated.ProtectedResources, JsonOptions)));
         return true;
       });
       cachedPreferences = updated;
-      return updated;
+      return Copy(updated);
     }
   }
 
@@ -37,11 +49,25 @@ internal sealed class PreferencesStorage(Database database) {
       return cachedPreferences;
 
     UserPreferences persisted = database.Read(transaction => database.QuerySingleOrDefault(transaction, """
-        SELECT working_directory, compaction_trigger_token_count
+        SELECT working_directory, compaction_trigger_token_count, model_choices_json, protected_resources_json
         FROM preferences WHERE singleton = 1;
         """, row => new UserPreferences(row.NullableString("working_directory"),
-            row.NullableInt("compaction_trigger_token_count"))) ?? new UserPreferences(null, null));
+            row.NullableInt("compaction_trigger_token_count")) {
+          ModelChoices = Deserialize<AuxiliaryModelPreferences>(row.NullableString("model_choices_json")) ?? new(),
+          ProtectedResources = Deserialize<ProtectedResourcePreferences>(row.NullableString("protected_resources_json")) ?? new()
+        }) ?? new UserPreferences(null, null));
     cachedPreferences = persisted;
     return persisted;
   }
+
+  private static T? Deserialize<T>(string? json) =>
+      json is null ? default : JsonSerializer.Deserialize<T>(json, JsonOptions);
+
+  private static UserPreferences Copy(UserPreferences preferences) => preferences with {
+    ProtectedResources = preferences.ProtectedResources with {
+      Tools = preferences.ProtectedResources.Tools.ToArray(),
+      Skills = preferences.ProtectedResources.Skills.ToArray(),
+      Instructions = preferences.ProtectedResources.Instructions.ToArray()
+    }
+  };
 }

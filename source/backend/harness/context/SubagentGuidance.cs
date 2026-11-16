@@ -2,7 +2,7 @@ namespace Urd.Core.Context;
 
 // Instructions for sessions carrying out a delegated task.
 // Source: harness/agent-instructions/defaults/SUBAGENT_SYSTEM.md
-internal sealed class SubagentGuidance : ContextGuidance {
+internal sealed class SubagentGuidance : StartingContextContribution {
   public override int Order => 100;
 
   public override bool AppliesTo(StartingContextInput input) =>

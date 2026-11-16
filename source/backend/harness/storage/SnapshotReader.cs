@@ -38,6 +38,19 @@ internal sealed class SnapshotReader {
     WHERE session_id = $session AND outcome IS NULL;
     """;
 
+  private const string PrepassTitleSql = """
+    SELECT title FROM session_prepass_title WHERE session_id = $session;
+    """;
+
+  private const string PruningStatusesSql = """
+    SELECT category, state, total, retained, error FROM session_pruning_status
+    WHERE session_id = $session AND boundary_id = COALESCE((
+        SELECT c.compaction_id FROM session_compactions c JOIN sessions s ON s.session_id = c.session_id
+        WHERE c.session_id = $session AND c.history_revision = s.history_revision
+        ORDER BY c.ordinal DESC LIMIT 1), '00000000-0000-0000-0000-000000000000')
+    ORDER BY CASE category WHEN 'tools' THEN 0 WHEN 'skills' THEN 1 ELSE 2 END LIMIT 3;
+    """;
+
   internal const string ContextUsageSql = """
     SELECT c.compaction_id AS latest_compaction_id, c.tokens_after,
         q.compaction_id AS request_compaction_id, q.usage_json
@@ -123,7 +136,9 @@ internal sealed class SnapshotReader {
         unsettledExecution, stopRequested, lastSettlement, firstUserPreview, pendingInputs, latestSelection,
         WorkingTime: ReadWorkingTime(transaction, sessionId, startedAt),
         ContextUsage: ReadContextUsage(transaction, sessionId, historyRevision),
-        CanContinue: ReadCanContinue(transaction, sessionId, historyRevision));
+        CanContinue: ReadCanContinue(transaction, sessionId, historyRevision),
+        Title: database.Scalar<string?>(transaction, PrepassTitleSql, ("$session", sessionId)),
+        Pruning: ReadPruningStatuses(transaction, sessionId));
   }
 
   private long ReadHistoryRevision(SqliteTransaction transaction, Guid sessionId) =>
@@ -201,4 +216,13 @@ internal sealed class SnapshotReader {
           row => new PendingInputPreview(row.Guid("input_id"),
               StorageText.ReadPreview((byte[])row.GetValue(row.GetOrdinal("preview"))), row.Bool("can_cancel")),
           ("$session", sessionId), ("$limit", PendingInputLimit), ("$bytes", StorageText.PreviewByteLimit)).ToArray();
+
+  private System.Collections.ObjectModel.ReadOnlyCollection<StartingResourcePruningStatus>? ReadPruningStatuses(
+      SqliteTransaction transaction, Guid sessionId) {
+    StartingResourcePruningStatus[] statuses = database.Query(transaction, PruningStatusesSql,
+        row => new StartingResourcePruningStatus(row.String("category"), row.String("state"),
+            row.Int("total"), row.Int("retained"), row.NullableString("error")),
+        ("$session", sessionId)).ToArray();
+    return statuses.Length == 0 ? null : Array.AsReadOnly(statuses);
+  }
 }

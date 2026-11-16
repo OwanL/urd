@@ -13,7 +13,11 @@ public sealed record SessionSnapshot(
     Guid? UnsettledExecutionId, bool StopRequested, SessionExecutionResult? LastSettlement,
     string? FirstUserPreview, IReadOnlyList<PendingInputPreview> PendingInputs,
     LlmSelection? LatestLlmSelection = null, bool IsCompacting = false, SessionWorkingTime? WorkingTime = null,
-    SessionContextUsage? ContextUsage = null, string? WorkingDirectory = null, bool CanContinue = false);
+    SessionContextUsage? ContextUsage = null, string? WorkingDirectory = null, bool CanContinue = false,
+    string? Title = null, IReadOnlyList<StartingResourcePruningStatus>? Pruning = null);
+
+public sealed record StartingResourcePruningStatus(
+    string Category, string State, int Total, int Retained, string? Error = null);
 
 public sealed record SessionContextUsage(long UsedTokens, bool IsEstimate);
 

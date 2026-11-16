@@ -39,8 +39,14 @@ the main store. A successful parent settlement refuses unfinished auxiliary requ
 or tools; Stop/failure and host recovery retain actual saved results and retire unknown
 effects without replay. Auxiliary calls currently have foreground claims only; no
 background completions are delivered into the main history. The caller must own/join
-auxiliary tasks; production preparation and driver task registration are not wired yet.
-This foundation does not enable pruning or title generation.
+auxiliary tasks. Production preparation now launches the three independent pruners
+and first-message title operation through `ConversationRunner`, reusing the shared
+response/tool mechanics. `SessionExecution` owns them; the driver joins their work on
+Stop/failure and before settlement. A held title cannot block main requests/output or
+steering, although it can keep their execution unsettled. Provider/validation failures
+fall back per pruning category or leave the title placeholder; durable-save/cleanup
+failures fence the parent. The [pruning plan](pruning-plan.md) owns the implemented
+boundary/input/protection contract. No live-provider quality evaluation is implied.
 
 See [backend development](backend-development.md) for the tested scope and limitations.
 The older experiments below remain research evidence. Later separately authorized

@@ -53,6 +53,60 @@ public sealed class PreferencesTests {
   }
 
   [Fact]
+  public void AuxiliaryModelChoicesBucketMappingsAndProtectionsPersistIndependently() {
+    using var database = new TemporaryDatabase();
+    var model = new ConfiguredModel(Guid.NewGuid(), "configured-model");
+    string skillSource = Path.Combine(Path.GetTempPath(), "skills", "cleaner", "SKILL.md");
+    string instructionSource = Path.Combine(Path.GetTempPath(), "AGENTS.md");
+    using (UrdStore store = UrdStore.Open(database.Path)) {
+      var preferences = new PreferenceManager(store);
+      UserPreferences defaults = preferences.Read();
+      Assert.Equal(ModelChoice.ForBucket(ModelBucket.Small), defaults.ModelChoices.Tools);
+      Assert.Equal(ModelChoice.ForBucket(ModelBucket.Small), defaults.ModelChoices.Skills);
+      Assert.Equal(ModelChoice.ForBucket(ModelBucket.Small), defaults.ModelChoices.Instructions);
+      Assert.Equal(ModelChoice.ForBucket(ModelBucket.Small), defaults.ModelChoices.Title);
+      Assert.Equal(new[] { "bash", "read", "write", "edit" }, defaults.ProtectedResources.Tools);
+
+      preferences.SetBucketModel(ModelBucket.Small, model);
+      preferences.SetModelChoice(AuxiliaryModelPurpose.Skills, ModelChoice.ForModel(model.ConnectionId, model.ModelId));
+      preferences.SetProtectedItems(ProtectedResourceCategory.Tools, ["bash"]);
+      preferences.SetProtectedItems(ProtectedResourceCategory.Skills, [skillSource]);
+      preferences.SetProtectedItems(ProtectedResourceCategory.Instructions, [instructionSource]);
+      Assert.Equal(model, preferences.Read().ModelChoices.Small);
+      Assert.Equal(ModelChoice.ForBucket(ModelBucket.Small), preferences.Read().ModelChoices.Tools);
+    }
+
+    using UrdStore reopened = UrdStore.Open(database.Path);
+    UserPreferences saved = new PreferenceManager(reopened).Read();
+    Assert.Equal(ModelChoice.ForBucket(ModelBucket.Small), saved.ModelChoices.Tools);
+    Assert.Equal(ModelChoice.ForModel(model.ConnectionId, model.ModelId), saved.ModelChoices.Skills);
+    Assert.Null(saved.ModelChoices.Medium);
+    Assert.Equal(new[] { "bash" }, saved.ProtectedResources.Tools);
+    Assert.Equal(new[] { skillSource }, saved.ProtectedResources.Skills);
+    Assert.Equal(new[] { instructionSource }, saved.ProtectedResources.Instructions);
+  }
+
+  [Fact]
+  public void ModelAndProtectionPreferencesRejectInvalidChoicesWithoutChangingSavedValues() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    var preferences = new PreferenceManager(store);
+    preferences.SetModelChoice(AuxiliaryModelPurpose.Tools, ModelChoice.ForBucket(ModelBucket.Small));
+    preferences.SetProtectedItems(ProtectedResourceCategory.Tools, ["bash"]);
+
+    Assert.Throws<ArgumentException>(() => preferences.SetModelChoice(AuxiliaryModelPurpose.Tools,
+        new ModelChoice(ModelBucket.Small, Guid.NewGuid(), "mixed-choice")));
+    Assert.Throws<ArgumentException>(() => preferences.SetModelChoice(AuxiliaryModelPurpose.Title,
+        ModelChoice.ForModel(Guid.Empty, "model")));
+    Assert.Throws<ArgumentException>(() => preferences.SetProtectedItems(ProtectedResourceCategory.Skills, ["", " "]));
+    Assert.Throws<ArgumentException>(() => preferences.SetProtectedItems(ProtectedResourceCategory.Tools, ["bash", "bash"]));
+
+    Assert.Equal(ModelChoice.ForBucket(ModelBucket.Small), preferences.Read().ModelChoices.Tools);
+    Assert.Equal(new[] { "bash" }, preferences.Read().ProtectedResources.Tools);
+    Assert.Empty(preferences.Read().ProtectedResources.Skills);
+  }
+
+  [Fact]
   public void PreferenceManagersShareCommittedCacheAndFailedWritesDoNotPublish() {
     using var database = new TemporaryDatabase();
     string directory = Path.Combine(Path.GetDirectoryName(database.Path)!, "shared-preference-directory");

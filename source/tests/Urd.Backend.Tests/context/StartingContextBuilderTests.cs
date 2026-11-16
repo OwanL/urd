@@ -7,7 +7,7 @@ using Xunit;
 
 namespace Urd.Backend.Tests.Context;
 
-public sealed class StartingContextManagerTests {
+public sealed class StartingContextBuilderTests {
   [Fact]
   public void SessionKindAndAssignmentComposeWithSharedInstructions() {
     const string assignment = "Inspect the specified behavior and report back.";
@@ -215,9 +215,9 @@ public sealed class StartingContextManagerTests {
     Assert.Equal(source.Token, exception.CancellationToken);
   }
 
-  private static StartingContextManager CreateManager(params AgentTool[] tools) => new(new ToolCatalog(tools));
+  private static StartingContextBuilder CreateManager(params AgentTool[] tools) => new(new ToolCatalog(tools));
 
-  private static StartingContextManager CreateManagerWithGuidance(params ContextGuidance[] guidance) =>
+  private static StartingContextBuilder CreateManagerWithGuidance(params StartingContextContribution[] guidance) =>
       new(new ToolCatalog([]), guidance);
 
   private static string InstructionText(StartingContext context) =>
@@ -226,7 +226,7 @@ public sealed class StartingContextManagerTests {
   private sealed class TestGuidance(
       int order,
       Func<StartingContextInput, string?> getText,
-      SessionKind? sessionScope = null) : ContextGuidance {
+      SessionKind? sessionScope = null) : StartingContextContribution {
     public override int Order => order;
     public override bool AppliesTo(StartingContextInput input) =>
         sessionScope is null || input.SessionKind == sessionScope;

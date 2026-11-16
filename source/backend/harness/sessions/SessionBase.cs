@@ -16,9 +16,10 @@ namespace Urd.Core.Sessions;
 public abstract class SessionBase {
   private readonly UrdStore store;
   private readonly PreferenceManager preferences;
+  private readonly ModelSelector? modelSelector;
   private readonly Func<ProviderConnection, IChatClient> createChatClient;
   private readonly ToolCatalog tools;
-  private readonly StartingContextManager startingContextManager;
+  private readonly StartingContextBuilder startingContextBuilder;
   private readonly ChatProcesses? processes;
   private readonly PendingToolCalls pending;
   private readonly AsyncLock sessionLock = new();
@@ -35,7 +36,7 @@ public abstract class SessionBase {
 
   private protected SessionBase(SessionRecord record, SessionKind kind, UrdStore store, Func<ProviderConnection, IChatClient> createChatClient,
       ToolCatalog? tools = null, ChatProcesses? processes = null, PendingToolCalls? pending = null,
-      PreferenceManager? preferences = null) {
+      PreferenceManager? preferences = null, ModelSelector? modelSelector = null) {
     Id = record.Id;
     Kind = kind;
     notifications = new SessionNotifications(Id);
@@ -45,9 +46,10 @@ public abstract class SessionBase {
     WorkingDirectory = record.WorkingDirectory;
     this.store = store;
     this.preferences = preferences ?? new PreferenceManager(store);
+    this.modelSelector = modelSelector;
     this.createChatClient = createChatClient;
     this.tools = tools ?? new ToolCatalog([]);
-    startingContextManager = new(this.tools);
+    startingContextBuilder = new(this.tools);
     this.processes = processes;
     this.pending = pending ?? new PendingToolCalls();
   }
@@ -67,7 +69,11 @@ public abstract class SessionBase {
 
   // Restores the delivered starting view; opening a session alone never composes it.
   internal StartingContext? ReadStartingContext() => store.StartingContexts.Read(Id);
+  internal StartingContext? ReadStartingContext(Guid boundaryId) => store.StartingContexts.Read(Id, boundaryId);
   internal UserPreferences ReadPreferences() => preferences.Read();
+  internal Task<LlmSelection> ResolveAuxiliaryModelAsync(AuxiliaryModelPurpose purpose,
+      UserPreferences captured, CancellationToken cancellation) => modelSelector?.ResolveAsync(purpose, captured, cancellation)
+      ?? Task.FromException<LlmSelection>(new InvalidOperationException("No auxiliary model is configured."));
 
   public async Task<CompactionReceipt?> CompactAsync(ManualCompactionRequest submission) {
     ArgumentNullException.ThrowIfNull(submission);
@@ -435,7 +441,7 @@ public abstract class SessionBase {
     var identity = new ExecutionIdentity(SessionId: Id, ExecutionId: executionId, HistoryRevision: HistoryRevision);
     var recorder = new SessionExecutionRecorder(this, store, sessionLock, identity);
     var work = new SessionExecution(recorder, this, createChatClient, selection,
-        startingContextManager, tools.Tools, pending, compaction);
+        startingContextBuilder, tools.Tools, pending, compaction);
     execution = new SessionExecutionDriver(this, sessionLock, work);
     executionTask = execution.RunAsync(executionStart.Task);
     return executionStart;

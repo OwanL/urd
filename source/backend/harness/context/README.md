@@ -1,7 +1,7 @@
 # System guidance
 
 Edit the text returned by `GetText` in these files. Prompt wording belongs here,
-not in the context manager.
+not in the context builder. Applicable built-in instructions always bypass pruning.
 
 | File | Applies to | Order |
 | --- | --- | --- |
@@ -37,15 +37,15 @@ is composed for `Subagent` inputs; it does not add a delegation runtime.
 
 ## Add a block
 
-Add a concrete `ContextGuidance` subclass with a parameterless constructor. The
-manager discovers it automatically in Urd Core's assembly; there is no registration
+Add a concrete `StartingContextContribution` subclass with a parameterless constructor.
+`StartingContextBuilder` discovers it automatically in Urd Core's assembly; there is no registration
 list. Keep guidance constructors free of I/O or background work.
 
 ```csharp
 namespace Urd.Core.Context;
 
 // Extra instructions for primary sessions.
-internal sealed class ExampleGuidance : ContextGuidance {
+internal sealed class ExampleGuidance : StartingContextContribution {
   public override int Order => 150;
 
   public override bool AppliesTo(StartingContextInput input) =>
@@ -64,24 +64,46 @@ Guidance failures stop composition rather than silently dropping instructions.
 
 Blocks sort by ascending `Order`, then ordinal full type name. Multiple instances
 of the same type and order retain their supplied order. Types are discovered once;
-instances are created per manager, not shared globally.
+instances are created per builder, not shared globally.
 
-`runtime/` contains the base type, input/output records and context manager. The
-manager also accepts explicitly supplied guidance instances. Parameterized-only
-classes are not auto-created: a future `AGENTS.md` loader can construct text-backed
-instances through that path. File discovery/loading is not implemented here.
+`runtime/` contains the base type, input/output records, discovery and builder.
+The builder also accepts supplied contributions. Parameterized-only classes are not
+auto-created: `DiscoveredInstructionDocument` carries loaded text/path/scope, with no
+file I/O in its constructor or rendering. `SkillsGuidance` formats the supplied selection.
 
-Existing chats retain their saved prompts. Rebuild/restart Urd and start a new chat
-to use guidance changes.
+Sessions retain exact saved instruction/tool snapshots for each initial or successful
+compaction boundary. Ordinary requests, reopening and model/preference changes do not
+rediscover resources. The first prompt and first request after successful compaction
+prepare a selection; compaction alone does not. Built-ins bypass selection, while
+protected discovered resources are excluded from candidate input and always retained.
+See [the pruning plan](../../../../docs/pruning-plan.md) for task inputs and failure rules.
+
+## Project instruction documents
+
+`InstructionResourceDiscovery` scans Git-tracked Markdown recursively from the repository
+root. Recognized filenames, case-insensitively, are `AGENTS.md`, `APPEND_SYSTEM.md`,
+`APPEND-SYSTEM.md`, `AGENT_INSTRUCTIONS.md`, `AGENT-INSTRUCTIONS.md`, `AGENT_INSTRUCTION.md`,
+`AGENT-INSTRUCTION.md`, `INSTRUCTIONS_FOR_AGENTS.md` and `INSTRUCTIONS-FOR-AGENTS.md`.
+Untracked files and ordinary documentation are not candidates. Other harnesses' files,
+including `CLAUDE.md`, `GEMINI.md`, Copilot `*.instructions.md`/`copilot-*` and their
+configuration directories, are excluded. No additional user configuration location is read.
+
+Documents carry full text and explicit directory scope. All discovered documents are
+selection candidates; retained documents render shallower scopes first, then ordinal
+canonical paths, with a scope/source header so nested rules apply only within that directory.
+The main context preserves original text rather than accepting model-written replacements.
+Instruction/skill protection identities are full canonical file paths (case-insensitive
+on Windows); tool identities are registered names. Protection does not grant tool authority.
+Outside Git, no project instructions or skills are discovered; packaged skills remain.
 
 ## Skills
 
 `SkillsGuidance` formats skills by name, description and path, using Pi's wording;
-the model reads a skill's file when a task matches. `SkillCatalog` discovers `SKILL.md`
-files tracked by Git under the working directory, then skills packaged in `skills/`.
+the model reads a skill's file when a task matches. `InstructionResourceDiscovery` finds
+Git-tracked `SKILL.md` files under the working directory, then packaged files in `skills/`.
 A project skill replaces a packaged skill with the same name. Outside a Git repository
-only packaged skills are listed. Skills are found once, when a chat's starting context
-is composed.
+only packaged skills are listed. At each allowed preparation boundary, selected skills
+are listed by name/description/path; their bodies are not supplied to the selector.
 
 Add a packaged skill as `skills/<name>/SKILL.md` with `name` and `description`
 frontmatter. The build copies `skills/` beside the server so the model can read it.

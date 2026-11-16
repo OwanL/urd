@@ -1,7 +1,7 @@
 namespace Urd.Core.Context;
 
 // The delegated assignment, including assignments given to primary sessions.
-internal sealed class AssignmentGuidance : ContextGuidance {
+internal sealed class AssignmentGuidance : StartingContextContribution {
   public override int Order => 300;
 
   public override bool AppliesTo(StartingContextInput input) =>

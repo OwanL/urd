@@ -2,7 +2,7 @@ namespace Urd.Core.Context;
 
 // Default working guidance for primary sessions.
 // Source: harness/agent-instructions/defaults/APPEND_SYSTEM.md
-internal sealed class DefaultWorkingGuidance : ContextGuidance {
+internal sealed class DefaultWorkingGuidance : StartingContextContribution {
   public override int Order => 10;
 
   public override bool AppliesTo(StartingContextInput input) =>

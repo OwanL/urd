@@ -11,9 +11,13 @@ internal sealed record StartingContextInput(
   SessionKind SessionKind,
   ModelFamily ModelFamily,
   string? WorkingDirectory,
-  string? AssignmentContext);
+  string? AssignmentContext) {
+  public IReadOnlyList<DiscoveredSkill> SelectedSkills { get; init; } = [];
+}
 
 // Read-only instructions and tool declarations supplied when a model session starts.
 internal sealed record StartingContext(
   IReadOnlyList<ChatMessage> Instructions,
-  IReadOnlyList<AIFunctionDeclaration> Tools);
+  IReadOnlyList<AIFunctionDeclaration> Tools) {
+  internal Guid BoundaryId { get; init; }
+}

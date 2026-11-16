@@ -87,7 +87,7 @@ internal static class Program {
                   .ToDictionary(entry => (string)entry.Key, entry => (string)entry.Value!, StringComparer.OrdinalIgnoreCase))
           : null;
       manager = new SessionManager(store, client is { } supplied ? _ => supplied : providers.CreateChatClient,
-          tools, preferences);
+          tools, preferences, new ModelSelector(providers));
       eventHub = new SessionEventHub(manager);
       // Initial local limits reuse the exercised workload; transient parser memory is separate.
       markdown = createMarkdown?.Invoke() ?? new MessageMarkdownService(new(
@@ -181,7 +181,7 @@ internal static class Program {
     if (markdown is not null)
       app.MapMarkdown(manager, eventHub, markdown);
     app.MapProviders(providers);
-    app.MapPreferences(preferences);
+    app.MapPreferences(preferences, manager);
     app.MapUsage(store);
     return app;
   }

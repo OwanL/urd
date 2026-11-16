@@ -5,29 +5,58 @@ using Urd.Core.Context;
 
 namespace Urd.Core.Storage;
 
-// Stores the immutable initial instructions and tool declarations for one session.
+// Stores immutable ordered starting-context snapshots for each session boundary.
 internal sealed class StartingContextStorage(Database database) {
   internal StartingContext? Read(Guid sessionId) => database.Read(transaction => {
-    string? json = database.Scalar<string?>(transaction,
-        "SELECT context_json FROM session_starting_context WHERE session_id = $session;", ("$session", sessionId));
-    return json is null ? null : Restore(json);
+    Guid? activatedBoundary = database.QuerySingleOrDefault<Guid?>(transaction, """
+      SELECT boundary_id FROM session_starting_context_active WHERE session_id = $session;
+      """, row => row.NullableGuid("boundary_id"), ("$session", sessionId));
+    if (activatedBoundary is { } active && (active == Guid.Empty || database.Scalar<bool>(transaction, """
+        SELECT EXISTS (SELECT 1 FROM session_compactions c JOIN sessions s ON s.session_id = c.session_id
+            WHERE c.session_id = $session AND c.compaction_id = $boundary AND c.history_revision = s.history_revision);
+        """, ("$session", sessionId), ("$boundary", active)))) {
+      StartingContext? current = Read(transaction, sessionId, active);
+      if (current is not null)
+        return current;
+    }
+
+    Guid latestBoundary = database.QuerySingleOrDefault(transaction, """
+      SELECT c.compaction_id AS boundary_id
+      FROM sessions s LEFT JOIN session_compactions c ON c.session_id = s.session_id
+          AND c.history_revision = s.history_revision
+      WHERE s.session_id = $session
+      ORDER BY c.ordinal DESC LIMIT 1;
+      """, row => row.NullableGuid("boundary_id"), ("$session", sessionId)) ?? Guid.Empty;
+    return Read(transaction, sessionId, latestBoundary);
   });
 
-  internal void Save(SqliteTransaction transaction, Guid sessionId, StartingContext context) {
-    ArgumentNullException.ThrowIfNull(context);
-    if (database.Scalar<bool>(transaction,
-        "SELECT EXISTS(SELECT 1 FROM session_starting_context WHERE session_id = $session);", ("$session", sessionId)))
-      return;
+  internal StartingContext? Read(Guid sessionId, Guid boundaryId) =>
+      database.Read(transaction => Read(transaction, sessionId, boundaryId));
 
+  internal StartingContext? Read(SqliteTransaction transaction, Guid sessionId, Guid boundaryId) {
+    string? json = database.Scalar<string?>(transaction, """
+      SELECT context_json FROM session_starting_context
+      WHERE session_id = $session AND boundary_id = $boundary;
+      """, ("$session", sessionId), ("$boundary", boundaryId));
+    return json is null ? null : Restore(json, boundaryId);
+  }
+
+  // StartRequest calls this only after its transaction has validated the current boundary.
+  // The first snapshot for a boundary remains authoritative for its entire lifetime.
+  internal void Activate(SqliteTransaction transaction, Guid sessionId, StartingContext context) {
+    ArgumentNullException.ThrowIfNull(context);
     var document = new StartingContextDocument(
         context.Instructions.Select(ToInstruction).ToArray(), context.Tools.Select(ToTool).ToArray());
     string json = JsonSerializer.Serialize(document);
 
     database.Execute(transaction, """
-      INSERT INTO session_starting_context (session_id, context_json)
-      VALUES ($session, $context)
-      ON CONFLICT(session_id) DO NOTHING;
-      """, ("$session", sessionId), ("$context", json));
+      INSERT INTO session_starting_context (session_id, boundary_id, context_json)
+      VALUES ($session, $boundary, $context)
+      ON CONFLICT(session_id, boundary_id) DO NOTHING;
+      INSERT INTO session_starting_context_active (session_id, boundary_id)
+      VALUES ($session, $boundary)
+      ON CONFLICT(session_id) DO UPDATE SET boundary_id = excluded.boundary_id;
+      """, ("$session", sessionId), ("$boundary", context.BoundaryId), ("$context", json));
   }
 
   private static InstructionDocument ToInstruction(ChatMessage message) {
@@ -52,7 +81,7 @@ internal sealed class StartingContextStorage(Database database) {
     return new(tool.Name, tool.Description, tool.JsonSchema.Clone());
   }
 
-  private static StartingContext Restore(string json) {
+  private static StartingContext Restore(string json, Guid boundaryId) {
     StartingContextDocument? document;
     try {
       document = JsonSerializer.Deserialize<StartingContextDocument>(json);
@@ -67,7 +96,9 @@ internal sealed class StartingContextStorage(Database database) {
 
     ChatMessage[] instructions = document.Instructions.Select(ReadInstruction).ToArray();
     AIFunctionDeclaration[] tools = document.Tools.Select(ReadTool).ToArray();
-    return new(Array.AsReadOnly(instructions), Array.AsReadOnly(tools));
+    return new(Array.AsReadOnly(instructions), Array.AsReadOnly(tools)) {
+      BoundaryId = boundaryId
+    };
   }
 
   private static ChatMessage ReadInstruction(InstructionDocument? instruction) {

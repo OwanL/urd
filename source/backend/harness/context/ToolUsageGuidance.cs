@@ -2,7 +2,7 @@ namespace Urd.Core.Context;
 
 // Tool-use guidance for sessions with a configured working directory.
 // Source: harness/pi/packages/coding-agent/src/core/system-prompt.ts and tools/read.ts, edit.ts and write.ts.
-internal sealed class ToolUsageGuidance : ContextGuidance {
+internal sealed class ToolUsageGuidance : StartingContextContribution {
   public override int Order => 50;
 
   public override bool AppliesTo(StartingContextInput input) =>

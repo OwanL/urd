@@ -63,6 +63,43 @@ public sealed class StartingContextStorageTests {
   }
 
   [Fact]
+  public void SnapshotsAreExactByBoundaryWhileCurrentReadUsesInitialBoundary() {
+    using var database = new TemporaryDatabase();
+    Guid session;
+    using (UrdStore store = UrdStore.Open(database.Path))
+      session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
+
+    StartingContext initial = Context("initial instructions", "initial developer");
+    StartingContext afterCompaction = Context("compacted instructions", "compacted developer");
+    Guid compaction = Guid.NewGuid();
+    Save(database.Path, session, initial);
+    Save(database.Path, session, afterCompaction, compaction);
+
+    using UrdStore reopened = UrdStore.Open(database.Path);
+    Assert.Equal("initial instructions", reopened.StartingContexts.Read(session)!.Instructions[0].Text);
+    Assert.Equal(compaction, reopened.StartingContexts.Read(session, compaction)!.BoundaryId);
+    Assert.Equal("compacted instructions", reopened.StartingContexts.Read(session, compaction)!.Instructions[0].Text);
+  }
+
+  [Fact]
+  public void StartRequestRejectsContextFromAnObsoleteBoundaryWithoutPlacement() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
+    Guid execution = Guid.NewGuid();
+    var identity = new ExecutionIdentity(session, execution, 0);
+    store.UserMessages.Submit(session, 0, new(Guid.NewGuid(), 0, "request", TestLlmSelection.Default),
+        true, execution, null);
+    Guid request = store.Executions.CreateNextRequest(identity)!.RequestId;
+    StartingContext context = Context("wrong boundary", "developer") with { BoundaryId = Guid.NewGuid() };
+
+    Assert.False(store.Executions.StartRequest(identity, request, context));
+    Assert.Equal(1L, database.Scalar($"SELECT attempt FROM execution_requests WHERE request_id = '{request:D}';")); // raw-sql: rejected activation must not advance send provenance.
+    Assert.Equal(0L, database.Scalar($"SELECT COUNT(*) FROM execution_messages WHERE request_id = '{request:D}' AND role = 0;")); // raw-sql: rejected activation places no main input.
+    Assert.Null(store.StartingContexts.Read(session));
+  }
+
+  [Fact]
   public void SaveRejectsUnsupportedRolesAndNontextInstructions() {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
@@ -117,7 +154,7 @@ public sealed class StartingContextStorageTests {
     return AIFunctionFactory.CreateDeclaration(name, description, document.RootElement.Clone());
   }
 
-  private static void Save(string databasePath, Guid session, StartingContext context) {
+  private static void Save(string databasePath, Guid session, StartingContext context, Guid boundaryId = default) {
     using var connection = new SqliteConnection(new SqliteConnectionStringBuilder {
       DataSource = databasePath,
       Pooling = false
@@ -129,8 +166,9 @@ public sealed class StartingContextStorageTests {
     }
     using var database = new Database(connection);
     var storage = new StartingContextStorage(database);
+    StartingContext snapshot = context with { BoundaryId = boundaryId };
     database.Write(transaction => {
-      storage.Save(transaction, session, context);
+      storage.Activate(transaction, session, snapshot);
       return true;
     });
   }

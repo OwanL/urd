@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using Microsoft.Extensions.AI;
 using Urd.Core.Storage;
+using Urd.Core.Context;
 using Urd.Core.Concurrency;
 using Urd.Core.Providers;
 using Urd.Core.Preferences;
@@ -14,6 +15,7 @@ public sealed class SessionManager {
   private readonly Func<ProviderConnection, IChatClient> createChatClient;
   private readonly AgentToolSettings? toolSettings;
   private readonly PreferenceManager preferences;
+  private readonly ModelSelector? modelSelector;
   private readonly string? fallbackWorkingDirectory;
   private readonly GitBash? bash;
   private readonly FileMutationQueue files = new();
@@ -27,12 +29,13 @@ public sealed class SessionManager {
   public event Action<Guid>? SessionCreated;
 
   public SessionManager(UrdStore store, Func<ProviderConnection, IChatClient> createChatClient,
-      AgentToolSettings? toolSettings = null, PreferenceManager? preferences = null) {
+      AgentToolSettings? toolSettings = null, PreferenceManager? preferences = null, ModelSelector? modelSelector = null) {
     ArgumentNullException.ThrowIfNull(store);
     ArgumentNullException.ThrowIfNull(createChatClient);
     this.store = store;
     this.createChatClient = createChatClient;
     this.preferences = preferences ?? new PreferenceManager(store);
+    this.modelSelector = modelSelector;
     fallbackWorkingDirectory = Path.GetPathRoot(Environment.CurrentDirectory);
     if (toolSettings is null)
       return;
@@ -131,22 +134,41 @@ public sealed class SessionManager {
     }
   }
 
+  public async Task<StartingResourceCatalog> ReadStartingResourcesAsync(CancellationToken cancellation = default) {
+    string directory;
+    ToolCatalog catalog;
+    ChatProcesses? processes;
+    using (await sessionsLock.AcquireAsync(cancellation)) {
+      ThrowIfShuttingDown();
+      directory = preferences.Read(fallbackWorkingDirectory).WorkingDirectory!;
+      catalog = CreateToolCatalog(new PendingToolCalls(), true, out processes);
+    }
+    // Catalog construction starts no processes; still dispose its empty shell owner.
+    await using var catalogProcesses = processes;
+    DiscoveredInstructionResources resources = await new InstructionResourceDiscovery().FindAsync(directory, cancellation);
+    return new(catalog.Tools.Select(tool => new StartingResourceOption(tool.Name, tool.Name)).ToArray(),
+        resources.Skills.Select(skill => new StartingResourceOption(skill.Identity, skill.Name)).ToArray(),
+        resources.Instructions.Select(document => new StartingResourceOption(document.Identity, document.Path)).ToArray());
+  }
+
   private PrimarySession CreateSession(SessionRecord record) {
     var pending = new PendingToolCalls();
+    ToolCatalog catalog = CreateToolCatalog(pending, record.WorkingDirectory is not null, out ChatProcesses? processes);
+    return new PrimarySession(record, store, createChatClient, catalog, processes, pending, preferences, modelSelector);
+  }
+
+  private ToolCatalog CreateToolCatalog(PendingToolCalls pending, bool processTools, out ChatProcesses? processes) {
+    processes = null;
     AgentTool[] controls = [new ListPendingCallsTool(pending), new CancelPendingCallsTool(pending)];
-    // Chats created without tools keep their saved capabilities and remain readable.
-    if (toolSettings is null || record.WorkingDirectory is null) {
-      var configured = new ToolCatalog(injectedTools.Count == 0 ? [] : [.. injectedTools, .. controls]);
-      return new PrimarySession(record, store, createChatClient, configured, pending: pending, preferences: preferences);
-    }
+    if (toolSettings is null || !processTools)
+      return new(injectedTools.Count == 0 ? [] : [.. injectedTools, .. controls]);
     if (!OperatingSystem.IsWindows())
       throw new PlatformNotSupportedException("Agent tools currently require Windows and Git for Windows.");
-    var processes = new ChatProcesses(bash!);
-    var tools = new ToolCatalog([
+    processes = new ChatProcesses(bash!);
+    return new([
       new ReadTool(files), new WriteTool(files), new EditTool(files),
       new BashTool(processes, bash!, toolSettings.Environment), .. controls
     ]);
-    return new PrimarySession(record, store, createChatClient, tools, processes, pending, preferences);
   }
 
   private void ThrowIfShuttingDown() {

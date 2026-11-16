@@ -1,7 +1,7 @@
 namespace Urd.Core.Context;
 
 // The session's saved working directory, when one is available.
-internal sealed class WorkingDirectoryGuidance : ContextGuidance {
+internal sealed class WorkingDirectoryGuidance : StartingContextContribution {
   public override int Order => 200;
 
   public override bool AppliesTo(StartingContextInput input) =>

@@ -2,7 +2,7 @@ namespace Urd.Core.Context;
 
 // Shared child preferences from the subagent instructions.
 // Source: harness/agent-instructions/SUBAGENT_SYSTEM.md
-internal sealed class SubagentPreferencesGuidance : ContextGuidance {
+internal sealed class SubagentPreferencesGuidance : StartingContextContribution {
   public override int Order => 110;
 
   public override bool AppliesTo(StartingContextInput input) =>

@@ -1,7 +1,7 @@
 namespace Urd.Core.Context;
 
 // Instructions for sessions working directly with the user.
-internal sealed class PrimaryGuidance : ContextGuidance {
+internal sealed class PrimaryGuidance : StartingContextContribution {
   public override int Order => 100;
 
   public override bool AppliesTo(StartingContextInput input) =>

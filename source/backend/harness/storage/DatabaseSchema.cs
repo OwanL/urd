@@ -4,7 +4,7 @@ namespace Urd.Core.Storage;
 
 // Creates the current pre-release schema; incompatible databases require a manual reset.
 internal static class DatabaseSchema {
-  private const int SchemaVersion = 28;
+  private const int SchemaVersion = 29;
 
   internal static void Initialize(SqliteConnection connection) {
     using SqliteCommand command = connection.CreateCommand();
@@ -68,8 +68,32 @@ internal static class DatabaseSchema {
           position_version INTEGER NOT NULL DEFAULT 0 CHECK (position_version >= 0)
       ) STRICT;
       CREATE TABLE session_starting_context (
+          session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+          boundary_id TEXT NOT NULL,
+          context_json TEXT NOT NULL,
+          PRIMARY KEY (session_id, boundary_id)
+      ) STRICT;
+      CREATE TABLE session_starting_context_active (
           session_id TEXT NOT NULL PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
-          context_json TEXT NOT NULL
+          boundary_id TEXT NOT NULL,
+          FOREIGN KEY (session_id, boundary_id)
+              REFERENCES session_starting_context(session_id, boundary_id) ON DELETE CASCADE
+      ) STRICT;
+      CREATE TABLE session_prepass_title (
+          session_id TEXT NOT NULL PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
+          run_id TEXT NOT NULL REFERENCES execution_runs(run_id),
+          title TEXT
+      ) STRICT;
+      CREATE TABLE session_pruning_status (
+          session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+          run_id TEXT NOT NULL REFERENCES execution_runs(run_id),
+          boundary_id TEXT NOT NULL,
+          category TEXT NOT NULL CHECK (category IN ('tools', 'skills', 'instructions')),
+          state TEXT NOT NULL CHECK (state IN ('running', 'completed', 'fallback', 'cancelled', 'interrupted')),
+          total INTEGER NOT NULL CHECK (total >= 0),
+          retained INTEGER NOT NULL CHECK (retained >= 0 AND retained <= total),
+          error TEXT,
+          PRIMARY KEY (session_id, boundary_id, category)
       ) STRICT;
       CREATE TABLE session_creation (
           ordinal INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -404,7 +428,9 @@ internal static class DatabaseSchema {
           working_directory TEXT,
           compaction_trigger_token_count INTEGER CHECK (
               compaction_trigger_token_count IS NULL
-              OR (compaction_trigger_token_count > 0 AND compaction_trigger_token_count <= 2147483647))
+              OR (compaction_trigger_token_count > 0 AND compaction_trigger_token_count <= 2147483647)),
+          model_choices_json TEXT,
+          protected_resources_json TEXT
       ) STRICT;
       CREATE INDEX execution_runs_history_order ON execution_runs(session_id, history_revision, ordinal DESC);
       CREATE INDEX continuation_omitted_requests ON execution_runs(session_id, history_revision, continuation_omitted_request_id)

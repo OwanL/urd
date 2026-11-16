@@ -18,25 +18,31 @@ internal sealed class SessionExecution : IDisposable {
   private readonly SessionExecutionRecorder recorder;
   private readonly Func<ProviderConnection, IChatClient> createChatClient; // Returns borrowed clients.
   private readonly LlmSelection selection;
-  private readonly StartingContextManager startingContextManager;
+  private readonly StartingContextBuilder startingContextBuilder;
   private StartingContext? startingContext;
   private IChatClient? chatClient;
   private readonly SessionToolExecution toolExecution;
+  private readonly PendingToolCalls pending;
+  private readonly ConversationRunner auxiliary;
+  private Task? titleWork;
+  private int titleFinished;
+  private Guid? automaticBoundary;
   private readonly CancellationTokenSource stop = new();
   private Task? stopCallbacks;
   private readonly ManualCompactionRequest? manualCompactionRequest;
 
   internal SessionExecution(SessionExecutionRecorder recorder, SessionBase session,
       Func<ProviderConnection, IChatClient> createChatClient, LlmSelection selection,
-      StartingContextManager startingContextManager, IReadOnlyList<AgentTool>? tools = null,
+      StartingContextBuilder startingContextBuilder, IReadOnlyList<AgentTool>? tools = null,
       PendingToolCalls? pendingToolCalls = null, ManualCompactionRequest? compaction = null) {
     this.recorder = recorder;
     this.session = session;
     this.createChatClient = createChatClient;
     this.selection = selection;
-    this.startingContextManager = startingContextManager;
-    toolExecution = new SessionToolExecution(session, recorder, tools ?? [],
-        pendingToolCalls ?? new PendingToolCalls(), selection.SupportsImages, stop.Token);
+    this.startingContextBuilder = startingContextBuilder;
+    pending = pendingToolCalls ?? new PendingToolCalls();
+    toolExecution = new SessionToolExecution(session, recorder, tools ?? [], pending, selection.SupportsImages, stop.Token);
+    auxiliary = new(recorder, createChatClient, tools ?? [], session.WorkingDirectory);
     manualCompactionRequest = compaction;
     IsCompacting = compaction is not null;
   }
@@ -48,7 +54,8 @@ internal sealed class SessionExecution : IDisposable {
   internal bool IsManualCompaction => manualCompactionRequest is not null;
   internal bool IsCompacting { get; set; }
   internal bool HasPendingTools => toolExecution.HasRunningBackgroundTools;
-  internal Task JoinPendingToolsAsync() => toolExecution.JoinBackgroundToolsAsync();
+  internal bool HasPendingAuxiliary => titleWork is not null && Volatile.Read(ref titleFinished) == 0;
+  internal Task JoinOwnedWorkAsync() => Task.WhenAll(toolExecution.JoinBackgroundToolsAsync(), titleWork ?? Task.CompletedTask);
 
   // Completes once every callback registered on the stop token has finished.
   internal Task StopCallbacks => stopCallbacks ?? Task.CompletedTask;
@@ -127,6 +134,8 @@ internal sealed class SessionExecution : IDisposable {
       if (!saved)
         throw new OperationCanceledException("The compaction boundary was rejected.");
       ModelHistory compactedHistory = await session.ReadModelHistoryAsync(ExecutionId, requestId);
+      if (reason != CompactionReason.Manual)
+        automaticBoundary = compactedHistory.PreviousCompaction?.Id;
       return new(requestId ?? Guid.Empty, compactedHistory.ReadMessages(), compactedHistory);
     } finally {
       await session.SetCompactingAsync(ExecutionId, IsManualCompaction);
@@ -141,8 +150,9 @@ internal sealed class SessionExecution : IDisposable {
         && preferences.CompactionTriggerTokenCount is null)
       return null;
     ModelHistory history = currentHistory ?? await session.ReadModelHistoryAsync(ExecutionId, requestId);
-    EnsureStartingContext();
-    HistoryCompactionPlan? plan = HistoryCompactor.CreatePlan(history, selection, startingContext!, reason, focus,
+    StartingContext currentContext = startingContext ?? session.ReadStartingContext()
+        ?? startingContextBuilder.Create(ContextInput(), stop.Token);
+    HistoryCompactionPlan? plan = HistoryCompactor.CreatePlan(history, selection, currentContext, reason, focus,
         preferences.CompactionTriggerTokenCount);
     return plan is null ? null : plan with {
       BackgroundToolCalls = await session.ReadCompactionBackgroundCallsAsync(ExecutionId, plan.FirstRetainedMessage.Location)
@@ -161,10 +171,84 @@ internal sealed class SessionExecution : IDisposable {
     }
   }
 
-  private void EnsureStartingContext() {
-    startingContext ??= session.ReadStartingContext() ?? startingContextManager.Create(new(
-        session.Kind, selection.Family, session.WorkingDirectory, null), stop.Token);
+  private StartingContextInput ContextInput() => new(session.Kind, selection.Family, session.WorkingDirectory, null);
+
+  private async Task PrepareStartingContextAsync(LlmRequest request) {
+    Guid boundary = request.Context?.PreviousCompaction?.Id ?? Guid.Empty;
+    if (startingContext?.BoundaryId == boundary)
+      return;
+    startingContext = session.ReadStartingContext(boundary);
+    if (startingContext is not null)
+      return;
+
+    UserPreferences captured = session.ReadPreferences();
+    string[] newMessages = request.Context is { } history
+        ? history.Messages.Where(message => message.Location.RequestId == request.RequestId && message.StartsUserTurn)
+            .Select(message => message.Message.Text).ToArray()
+        : request.Messages.Where(message => message.Role == ChatRole.User).Select(message => message.Text).ToArray();
+    string task = boundary == Guid.Empty ? string.Join("\n\n", newMessages)
+        : request.Context!.PreviousCompaction!.Summary;
+    if (boundary != Guid.Empty && automaticBoundary != boundary && newMessages.Length > 0)
+      task += "\n\n" + string.Join("\n\n", newMessages);
+
+    if (boundary == Guid.Empty && newMessages.Length > 0 && titleWork is null) {
+      bool claimed;
+      try { claimed = await recorder.TryClaimTitleAsync(); }
+      catch (Exception failure) { throw new AuxiliaryExecutionException("Saving the title attempt failed.", failure); }
+      if (claimed)
+        titleWork = GenerateTitleAsync(newMessages[0], captured);
+    }
+
+    var pruner = new StartingResourcePruner(auxiliary,
+        (purpose, cancellation) => session.ResolveAuxiliaryModelAsync(purpose, captured, cancellation),
+        status => SavePruningStatusAsync(boundary, status), task);
+    HashSet<string> protectedTools = boundary == Guid.Empty ? []
+        : pending.List().Select(call => call.Name).ToHashSet(StringComparer.Ordinal);
+    startingContext = await startingContextBuilder.PrepareAsync(ContextInput(), boundary, task,
+        captured, protectedTools, pruner, stop.Token);
     stop.Token.ThrowIfCancellationRequested();
+  }
+
+  private async Task SavePruningStatusAsync(Guid boundary, StartingResourcePruningStatus status) {
+    try {
+      if (await recorder.RecordPruningStatusAsync(boundary, status))
+        return;
+      stop.Token.ThrowIfCancellationRequested();
+      throw new AuxiliaryExecutionException("The pruning status no longer accepts this execution.");
+    } catch (OperationCanceledException) when (IsStopping) {
+      throw;
+    } catch (Exception failure) {
+      await recorder.ReportAuxiliaryFailureAsync(failure);
+      throw new AuxiliaryExecutionException("Saving pruning progress failed.", failure);
+    }
+  }
+
+  private async Task GenerateTitleAsync(string prompt, UserPreferences captured) {
+    Exception? fatal = null;
+    try {
+      LlmSelection model = await session.ResolveAuxiliaryModelAsync(AuxiliaryModelPurpose.Title, captured, stop.Token);
+      string title = await TitleGenerator.GenerateAsync(auxiliary, model, prompt, stop.Token);
+      try {
+        if (!await recorder.PublishTitleAsync(title)) {
+          stop.Token.ThrowIfCancellationRequested();
+          throw new AuxiliaryExecutionException("The generated title was rejected by its owner.");
+        }
+      } catch (OperationCanceledException) when (IsStopping) {
+        throw;
+      } catch (Exception failure) {
+        throw new AuxiliaryExecutionException("Saving the generated title failed.", failure);
+      }
+    } catch (AuxiliaryExecutionException failure) {
+      fatal = failure;
+      throw;
+    } catch (OperationCanceledException) when (IsStopping) {
+      // Stop owns and joins the conversation; leave the placeholder unchanged.
+    } catch (Exception) {
+      // An unavailable model or failed/invalid generation never invents or retries a title.
+    } finally {
+      Volatile.Write(ref titleFinished, 1);
+      await session.ReportToolOutcomeAsync(ExecutionId, fatal);
+    }
   }
 
   private async Task<LlmRequestResult> SendLlmRequestAsync(LlmRequest request, bool allowAutomaticCompaction = true) {
@@ -173,9 +257,9 @@ internal sealed class SessionExecution : IDisposable {
     ChatOptions options;
     try {
       stop.Token.ThrowIfCancellationRequested();
-      EnsureStartingContext();
       if (allowAutomaticCompaction)
         request = await CompactHistoryAsync(request.RequestId, CompactionReason.Threshold, currentHistory: request.Context) ?? request;
+      await PrepareStartingContextAsync(request);
       client = chatClient ??= createChatClient(selection.Connection);
       options = new() {
         ModelId = selection.ModelId,
@@ -207,7 +291,7 @@ internal sealed class SessionExecution : IDisposable {
 
   private LlmRequestResult CreateRequestResult(Guid requestId, Exception? failure) {
     // A failed save is a session failure, not a failed LLM request.
-    if (failure is OutputSaveException or RequestStartSaveException or CompactionSaveException)
+    if (failure is OutputSaveException or RequestStartSaveException or CompactionSaveException or AuxiliaryExecutionException)
       ExceptionDispatchInfo.Throw(failure);
 
     bool stopped = stop.IsCancellationRequested;

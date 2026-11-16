@@ -2,7 +2,7 @@ namespace Urd.Core.Context;
 
 // Shared documentation workflow guidance.
 // Source: harness/agent-instructions/prompt-assembly/pie-harness-prompt.ts
-internal sealed class DocumentationGuidance : ContextGuidance {
+internal sealed class DocumentationGuidance : StartingContextContribution {
   public override int Order => 60;
 
   public override string? GetText(StartingContextInput input) =>

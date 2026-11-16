@@ -32,6 +32,40 @@ public sealed class PreferenceManager {
         preferences with { CompactionTriggerTokenCount = compactionTriggerTokenCount });
   }
 
+  public void SetModelChoice(AuxiliaryModelPurpose purpose, ModelChoice choice) {
+    ArgumentNullException.ThrowIfNull(choice);
+    if (!Enum.IsDefined(purpose))
+      throw new ArgumentOutOfRangeException(nameof(purpose));
+    choice.Validate();
+    store.Preferences.Update(preferences => preferences with {
+      ModelChoices = preferences.ModelChoices.WithChoice(purpose, choice)
+    });
+  }
+
+  public void SetBucketModel(ModelBucket bucket, ConfiguredModel? model) {
+    if (!Enum.IsDefined(bucket))
+      throw new ArgumentOutOfRangeException(nameof(bucket));
+    model?.Validate();
+    store.Preferences.Update(preferences => preferences with {
+      ModelChoices = preferences.ModelChoices.WithBucketModel(bucket, model)
+    });
+  }
+
+  public void SetProtectedItems(ProtectedResourceCategory category, IReadOnlyList<string> items) {
+    ArgumentNullException.ThrowIfNull(items);
+    if (!Enum.IsDefined(category))
+      throw new ArgumentOutOfRangeException(nameof(category));
+    if (items.Any(item => string.IsNullOrWhiteSpace(item) || item.Any(char.IsControl)))
+      throw new ArgumentException("Protected item identities must be nonempty and contain no control characters.", nameof(items));
+    if (items.Distinct(StringComparer.Ordinal).Count() != items.Count)
+      throw new ArgumentException("Protected item identities must be unique.", nameof(items));
+
+    string[] savedItems = items.ToArray();
+    store.Preferences.Update(preferences => preferences with {
+      ProtectedResources = preferences.ProtectedResources.WithCategory(category, savedItems)
+    });
+  }
+
   internal static string NormalizeWorkingDirectory(string path) {
     if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path))
       throw InvalidWorkingDirectory();

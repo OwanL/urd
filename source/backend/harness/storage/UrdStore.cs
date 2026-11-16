@@ -12,6 +12,7 @@ public sealed class UrdStore : IDisposable {
     var toolResults = new ToolResultCodec(new ToolImageStore(databasePath + ".tool-images"));
     Sessions = new(database);
     StartingContexts = new(database);
+    Prepass = new(database);
     Compactions = new(database, toolResults);
     UserMessages = new(database);
     Continuations = new(database, toolResults);
@@ -37,6 +38,7 @@ public sealed class UrdStore : IDisposable {
   internal PreferencesStorage Preferences { get; }
   internal SessionStorage Sessions { get; }
   internal StartingContextStorage StartingContexts { get; }
+  internal PrepassStorage Prepass { get; }
   internal CompactionStorage Compactions { get; }
   internal UserMessageStorage UserMessages { get; }
   internal ContinuationStorage Continuations { get; }

@@ -260,6 +260,10 @@ internal sealed class AuxiliaryConversationStorage(Database database, ToolResult
           AND outcome IS NULL;
       UPDATE auxiliary_conversations SET retired_at = $ended, parent_outcome = $parent_outcome
       WHERE run_id = $run AND retired_at IS NULL;
+      UPDATE session_pruning_status SET state = $pruning_state,
+          error = COALESCE(error, $pruning_error)
+      WHERE session_id = (SELECT session_id FROM execution_runs WHERE run_id = $run)
+          AND run_id = $run AND state = 'running';
       """, ("$tool_outcome", (int)(parentOutcome == ExecutionOutcome.Cancelled
           ? ExecutionOutcome.Cancelled : ExecutionOutcome.Failed)),
       ("$not_executed", notExecuted), ("$unknown", unknown),
@@ -268,6 +272,9 @@ internal sealed class AuxiliaryConversationStorage(Database database, ToolResult
           ? ExecutionOutcome.Cancelled : ExecutionOutcome.Failed)),
       ("$request_error", parentOutcome == ExecutionOutcome.Cancelled
           ? "Interrupted by parent cancellation." : "Interrupted by parent failure."),
+      ("$pruning_state", parentOutcome == ExecutionOutcome.Cancelled ? "cancelled" : "interrupted"),
+      ("$pruning_error", parentOutcome == ExecutionOutcome.Cancelled
+          ? "Pruning was cancelled with its parent execution." : "Pruning was interrupted with its parent execution."),
       ("$parent_outcome", (int)parentOutcome), ("$run", executionId));
   }
 

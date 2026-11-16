@@ -81,13 +81,17 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
                 WHERE session_id = $session AND history_revision = $revision ORDER BY ordinal DESC LIMIT 1)
         WHERE request_id = $request AND run_id = $run AND outcome IS NULL AND attempt IN (1, 2)
             AND EXISTS (SELECT 1 FROM execution_runs r JOIN sessions s ON s.session_id = r.session_id
-                WHERE r.run_id = $run AND r.session_id = $session AND {ExecutionSql.CurrentRunCondition});
-        """, ExecutionSql.Parameters(execution, ("$request", requestId)));
+                WHERE r.run_id = $run AND r.session_id = $session AND {ExecutionSql.CurrentRunCondition}
+                    AND ($boundary IS NULL OR $boundary = COALESCE((SELECT c.compaction_id
+                        FROM session_compactions c WHERE c.session_id = $session AND c.history_revision = $revision
+                        ORDER BY c.ordinal DESC LIMIT 1), '00000000-0000-0000-0000-000000000000')));
+        """, ExecutionSql.Parameters(execution, ("$request", requestId),
+          ("$boundary", startingContext?.BoundaryId)));
       if (startedRequestCount == 0)
         return false;
 
       if (startingContext is not null)
-        new StartingContextStorage(database).Save(transaction, execution.SessionId, startingContext);
+        new StartingContextStorage(database).Activate(transaction, execution.SessionId, startingContext);
 
       database.Execute(transaction, $"""
         INSERT INTO execution_messages (

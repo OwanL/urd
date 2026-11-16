@@ -2,7 +2,7 @@ namespace Urd.Core.Context;
 
 // Working preferences for primary sessions.
 // Source: harness/agent-instructions/APPEND_SYSTEM.md
-internal sealed class WorkingPreferencesGuidance : ContextGuidance {
+internal sealed class WorkingPreferencesGuidance : StartingContextContribution {
   public override int Order => 20;
 
   public override bool AppliesTo(StartingContextInput input) =>

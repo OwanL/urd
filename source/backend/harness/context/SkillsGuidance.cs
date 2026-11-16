@@ -4,16 +4,16 @@ namespace Urd.Core.Context;
 
 // Lists skills by name, description and path; the model reads a skill's file when needed.
 // Source: harness/pi/packages/coding-agent/src/core/skills.ts (formatSkillsForPrompt).
-internal sealed class SkillsGuidance : ContextGuidance {
+internal sealed class SkillsGuidance : StartingContextContribution {
   public override int Order => 220;
 
   public override bool AppliesTo(StartingContextInput input) =>
       input.WorkingDirectory is not null;
 
   public override string? GetText(StartingContextInput input) =>
-      Compose(SkillCatalog.Find(input.WorkingDirectory!, SkillCatalog.PackagedDirectory));
+      Compose(input.SelectedSkills);
 
-  internal static string? Compose(IReadOnlyList<Skill> skills) {
+  internal static string? Compose(IReadOnlyList<DiscoveredSkill> skills) {
     if (skills.Count == 0)
       return null;
 

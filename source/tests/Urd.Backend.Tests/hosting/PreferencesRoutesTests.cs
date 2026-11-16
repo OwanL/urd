@@ -106,4 +106,66 @@ public sealed class PreferencesRoutesTests {
     }
   }
 
+  [Fact]
+  public async Task AuxiliaryModelAndProtectionPreferencesUseIndependentRoutes() {
+    using var database = new TemporaryDatabase();
+    await using var server = new RunningServer(RunningServer.OptionsFor(database));
+    await server.WaitForReadyAsync();
+    Guid connectionId = Guid.NewGuid();
+    string sourcePath = Path.Combine(Path.GetTempPath(), "repo", "AGENTS.md");
+
+    using (HttpResponseMessage resources = await RequestAsync(server.Client, HttpMethod.Get, "/api/preferences/resources")) {
+      Assert.Equal(HttpStatusCode.OK, resources.StatusCode);
+      AssertPrivateResponse(resources);
+      JsonElement catalog = await resources.Content.ReadFromJsonAsync<JsonElement>();
+      string?[] tools = catalog.GetProperty("tools").EnumerateArray()
+          .Select(resource => resource.GetProperty("id").GetString()).ToArray();
+      Assert.Contains("read", tools);
+      Assert.Contains("bash", tools);
+      Assert.Contains("write", tools);
+      Assert.Contains("edit", tools);
+      Assert.Equal(JsonValueKind.Array, catalog.GetProperty("skills").ValueKind);
+      Assert.Equal(JsonValueKind.Array, catalog.GetProperty("instructions").ValueKind);
+    }
+
+    using (HttpResponseMessage bucket = await RequestAsync(server.Client, HttpMethod.Post,
+        "/api/preferences/model-bucket", JsonBody(JsonSerializer.Serialize(new {
+          bucket = "small", model = new { connectionId, modelId = "small-model" }
+        }))))
+      Assert.Equal(HttpStatusCode.OK, bucket.StatusCode);
+
+    using (HttpResponseMessage choice = await RequestAsync(server.Client, HttpMethod.Post,
+        "/api/preferences/model-choice", JsonBody(JsonSerializer.Serialize(new {
+          purpose = "skills", choice = new { bucket = (string?)null, connectionId, modelId = "skills-model" }
+        }))))
+      Assert.Equal(HttpStatusCode.OK, choice.StatusCode);
+
+    using (HttpResponseMessage protection = await RequestAsync(server.Client, HttpMethod.Post,
+        "/api/preferences/protected-resources", JsonBody(JsonSerializer.Serialize(new {
+          category = "instructions", items = new[] { sourcePath }
+        }))))
+      Assert.Equal(HttpStatusCode.OK, protection.StatusCode);
+
+    using (HttpResponseMessage defaults = await RequestAsync(server.Client, HttpMethod.Get, "/api/preferences")) {
+      JsonElement preferences = await defaults.Content.ReadFromJsonAsync<JsonElement>();
+      JsonElement models = preferences.GetProperty("modelChoices");
+      Assert.Equal("small", models.GetProperty("tools").GetProperty("bucket").GetString());
+      Assert.Equal(connectionId, models.GetProperty("small").GetProperty("connectionId").GetGuid());
+      Assert.Equal("small-model", models.GetProperty("small").GetProperty("modelId").GetString());
+      Assert.Equal(JsonValueKind.Null, models.GetProperty("skills").GetProperty("bucket").ValueKind);
+      Assert.Equal("skills-model", models.GetProperty("skills").GetProperty("modelId").GetString());
+      Assert.Equal(new[] { "bash", "read", "write", "edit" },
+          preferences.GetProperty("protectedResources").GetProperty("tools").EnumerateArray()
+              .Select(item => item.GetString()).ToArray());
+      Assert.Equal(sourcePath, Assert.Single(preferences.GetProperty("protectedResources")
+          .GetProperty("instructions").EnumerateArray()).GetString());
+    }
+
+    using HttpResponseMessage removeToolDefaults = await RequestAsync(server.Client, HttpMethod.Post,
+        "/api/preferences/protected-resources", JsonBody("{\"category\":\"tools\",\"items\":[]}"));
+    Assert.Equal(HttpStatusCode.OK, removeToolDefaults.StatusCode);
+    JsonElement saved = await removeToolDefaults.Content.ReadFromJsonAsync<JsonElement>();
+    Assert.Equal(0, saved.GetProperty("protectedResources").GetProperty("tools").GetArrayLength());
+  }
+
 }

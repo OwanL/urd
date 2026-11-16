@@ -1,7 +1,7 @@
 namespace Urd.Core.Context;
 
 // Shared identity and behavior for every session.
-internal sealed class BaseGuidance : ContextGuidance {
+internal sealed class BaseGuidance : StartingContextContribution {
   public override int Order => 0;
 
   public override string? GetText(StartingContextInput input) =>

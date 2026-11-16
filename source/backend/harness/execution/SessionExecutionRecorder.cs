@@ -38,6 +38,16 @@ internal sealed class SessionExecutionRecorder(SessionBase session, UrdStore sto
   internal Task<bool> CompleteToolAsync(Guid requestId, LlmToolResult result) =>
     RecordChangeAsync(() => store.Tools.Complete(Identity, requestId, result), allowStopping: true);
 
+  internal Task<bool> TryClaimTitleAsync() => RecordChangeAsync(() => store.Prepass.TryClaimTitle(Identity));
+
+  internal Task<bool> PublishTitleAsync(string title) => RecordChangeAsync(() => store.Prepass.PublishTitle(Identity, title));
+
+  internal Task<bool> RecordPruningStatusAsync(Guid boundaryId, StartingResourcePruningStatus status) =>
+      RecordChangeAsync(() => store.Prepass.WritePruningStatus(Identity, boundaryId, status),
+          allowStopping: status.State != "running");
+
+  internal Task ReportAuxiliaryFailureAsync(Exception failure) => session.ReportToolOutcomeAsync(Identity.ExecutionId, failure);
+
   internal async Task<AuxiliaryConversationRecorder?> CreateConversationAsync(Guid conversationId, string purpose,
       LlmSelection selection, IReadOnlyList<ChatMessage> input, IReadOnlyList<AIFunctionDeclaration> tools) {
     bool created = await RecordChangeAsync(() => store.AuxiliaryConversations.Create(

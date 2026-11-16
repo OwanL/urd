@@ -78,7 +78,7 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock sess
         session.MarkNeedsAttention();
         stopCallbacks = StopAsync();
       }
-      Task drained = Task.WhenAll(stopCallbacks, execution.JoinPendingToolsAsync());
+      Task drained = Task.WhenAll(stopCallbacks, execution.JoinOwnedWorkAsync());
       try {
         await drained;
       } catch (Exception cleanupFailure) {
@@ -102,11 +102,11 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock sess
           LlmRequest? next = ClaimContinuation();
           if (next is not null)
             return next;
-          if (execution.HasPendingTools) {
+          if (execution.HasPendingTools || execution.HasPendingAuxiliary) {
             // Install the wait under the same lock as all input/completion/Stop signals.
             executionWake ??= new(TaskCreationOptions.RunContinuationsAsynchronously);
             wake = executionWake.Task;
-            if (!IsWaitingForBackgroundTools) {
+            if (execution.HasPendingTools && !IsWaitingForBackgroundTools) {
               IsWaitingForBackgroundTools = true;
               session.PublishChange();
             }
@@ -141,7 +141,7 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock sess
   // Terminal provider failure and Stop cancel first. Even successful completion joins
   // remaining callback/notification ownership before the final guarded decision.
   private Task WaitOrJoinAsync(Task? wake, Task stopCallbacks) =>
-      wake ?? Task.WhenAll(stopCallbacks, execution.JoinPendingToolsAsync());
+      wake ?? Task.WhenAll(stopCallbacks, execution.JoinOwnedWorkAsync());
 
   // Caller holds the session lock. Admission cannot slip between recheck and settlement.
   private LlmRequest? ClaimContinuation() {

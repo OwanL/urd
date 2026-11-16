@@ -9,7 +9,7 @@ saved-primary-ID discovery, durable Send decisions, safe-boundary steering, addr
 Stop, bounded snapshot/history/content reads, known-not-sent discovery and graceful
 shutdown. The browser workspace is implemented and served as static assets by the Server.
 
-`UrdStore` owns the shared database, currently schema 28. It records whether a request
+`UrdStore` owns the shared database, currently schema 29. It records whether a request
 started sending and pages inputs known not to have been sent, so users can retrieve
 and explicitly resend them. Snapshots stay slim; transcript metadata and
 content use separate bounded reads, and reported usage is persisted per request. Session snapshots
@@ -23,7 +23,7 @@ credential behavior.
 
 Before the supported public data baseline, schema changes replace the schema rather than
 migrating it. A fresh/version-0 database creates all current tables and indexes in one
-transaction; version 28 reopens normally. Other versions fail with reset instructions:
+transaction; version 29 reopens normally. Other versions fail with reset instructions:
 stop Urd, delete `urd.sqlite`, `urd.sqlite-wal` and `urd.sqlite-shm`, then restart.
 Urd never deletes these files automatically. Requests have only known not-attempted (1)
 or attempted (2) provenance; transcript user entries require request links and receipts
@@ -55,35 +55,46 @@ test scope.
 ## Starting context
 
 Editable system guidance lives in [`harness/context/`](../source/backend/harness/context/README.md),
-one `ContextGuidance` subclass per block. Each declares its `Order`, `AppliesTo(input)`
-and `GetText(input)`; the manager automatically discovers parameterless subclasses in
-Core's assembly, with no central registration list. Runtime-constructed guidance can
-also be supplied explicitly, allowing a future instruction-file loader to use the same
-type without file I/O in the composer. Discovery caches types, not shared mutable instances.
-Ordering is ascending `Order`, then ordinal full type name; ties between instances of
-the same type retain their supplied order. No other assemblies are scanned.
+one `StartingContextContribution` subclass per block. Each declares `Order`,
+`AppliesTo(input)` and `GetText(input)`. `StartingContextBuilder` discovers parameterless
+subclasses in Core's assembly and creates per-builder instances; no other assemblies
+are scanned. Ordering is ascending `Order`, then ordinal full type name, preserving
+supplied order for ties. Applicable built-in instructions always bypass pruning.
 
-`StartingContextManager`, under `context/runtime/`, composes the applicable blocks,
-omitting null/whitespace text and propagating guidance errors and cancellation.
-It offers all configured tools through
-existing declarations; no AI pruning or instruction-file loading is implemented. Sessions with
-a working directory receive a skill list (see the context README). Primary and
-bounded-subagent composition are tested, but only the existing
-primary-session execution flow is integrated. A delegated primary uses primary guidance
-plus assignment context; this adds no production delegation/session subtype.
+`InstructionResourceDiscovery` loads Git-tracked agent-facing Markdown recursively
+from the repository and discovers project/packaged skills. The [context README](../source/backend/harness/context/README.md)
+owns recognition, scope, precedence and protection identities. Ordinary documentation
+and other harnesses' configuration are not instruction candidates. Document candidates
+include full text; skills remain name/description/path references with on-demand bodies.
 
-The first provider request records the exact ordered instruction text blocks and tool
-names/descriptions/schemas in `session_starting_context`, atomically with request-start
-and user-message placement. Opening an empty chat does not build context. Later requests
-and reopening restore the saved view rather than rereading guidance or rebuilding tool
-definitions; the initial user request remains owned by ordinary input/history storage.
-Current tool availability and declaration compatibility still control execution: removed
-or changed declarations cannot silently rebind old calls to new tool semantics.
+At a fresh session's first prompt, and the first request after successful compaction,
+`StartingContextBuilder.PrepareAsync` runs three independent, parallel selections over
+unprotected tools, skills and instruction documents. `StartingResourcePruner` validates
+kept IDs and retains the original resources in source order. Ordinary category failure
+keeps all its candidates and records fallback; successful siblings still apply. Stop
+cancels and joins preparation instead of falling back. Core tool protections are defaults,
+not mandatory; running background tools gain runtime protection after compaction.
 
-The snapshot is currently per session, including explicit model changes: all implemented
-tool families use the same generic catalog. Compaction retains this frozen starting context;
-reload and future family-specific exposure boundaries are not automatic refresh mechanisms. System
-instruction wording is intentionally minimal and can be researched independently.
+Exact ordered instruction/tool snapshots are activated per initial/compaction boundary
+in `session_starting_context`, atomically with request-start and user-message placement.
+Compaction alone starts no selectors. Planning reads the active context without discovery
+or selection. Ordinary requests, model/preference changes and reopening reuse the saved
+snapshot. Current tool availability/declaration compatibility still govern invocation.
+Primary execution is integrated; tested subagent composition adds no delegation runtime.
+
+A separate first-message-only `TitleGenerator` runs alongside pruning and may outlive
+main responses without blocking their requests/output. It validates 1–25 Unicode scalar
+values, including spaces, permits one correction and otherwise leaves the placeholder.
+The guarded title claim prevents retries on later messages/reopen; title metadata is
+published independently. Its work remains owned/joined before execution settlement.
+
+`ModelSelector` resolves configured small/medium/frontier buckets or exact provider/model
+overrides through existing preferences. Each auxiliary operation defaults to `small`;
+there is no chat-model inheritance or model-ID quality guessing. Configure that bucket
+in Settings → General. An unavailable choice yields category keep-all fallback or an
+unchanged title placeholder. Auxiliary conversations use isolated durable histories and
+only the supplied `read`/`bash` exploration capability set. See the [pruning plan](pruning-plan.md)
+for the fresh/manual/automatic input contract and evidence limits.
 
 ## Steering removal and manual Continue
 

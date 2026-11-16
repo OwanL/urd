@@ -1,7 +1,7 @@
 namespace Urd.Core.Context;
 
 // Guidance that contributes one system instruction to a starting context.
-internal abstract class ContextGuidance {
+internal abstract class StartingContextContribution {
   public abstract int Order { get; }
 
   public virtual bool AppliesTo(StartingContextInput input) => true;

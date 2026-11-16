@@ -1,20 +1,26 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Urd.Core.Preferences;
+using Urd.Core.Sessions;
 using static Urd.Server.HttpRouteHelpers;
 
 namespace Urd.Server;
 
 // Exposes simple application preferences through the local browser API.
 internal static class PreferencesRoutes {
-  internal static void MapPreferences(this IEndpointRouteBuilder app, PreferenceManager preferences) {
+  internal static void MapPreferences(this IEndpointRouteBuilder app, PreferenceManager preferences, SessionManager sessions) {
     RouteGroupBuilder routes = app.MapGroup("/api/preferences");
     routes.AddEndpointFilter<JsonRequestFilter>();
     routes.AddEndpointFilter(HandleRequestAsync);
     routes.MapGet("", (Delegate)(() => Results.Ok(preferences.Read())));
+    routes.MapGet("/resources", (Delegate)(async (HttpContext http) =>
+        Results.Ok(await sessions.ReadStartingResourcesAsync(http.RequestAborted))));
     routes.MapPost("/working-directory", (Delegate)((HttpContext http) => SetWorkingDirectoryAsync(http, preferences)));
     routes.MapPost("/compaction-trigger",
         (Delegate)((HttpContext http) => SetCompactionTriggerTokenCountAsync(http, preferences)));
+    routes.MapPost("/model-choice", (Delegate)((HttpContext http) => SetModelChoiceAsync(http, preferences)));
+    routes.MapPost("/model-bucket", (Delegate)((HttpContext http) => SetBucketModelAsync(http, preferences)));
+    routes.MapPost("/protected-resources", (Delegate)((HttpContext http) => SetProtectedItemsAsync(http, preferences)));
   }
 
   private static async Task<IResult> SetWorkingDirectoryAsync(HttpContext http, PreferenceManager preferences) {
@@ -32,6 +38,33 @@ internal static class PreferencesRoutes {
     if (body is null) return Results.BadRequest();
 
     preferences.SetCompactionTriggerTokenCount(body.CompactionTriggerTokenCount);
+    return Results.Ok(preferences.Read());
+  }
+
+  private static async Task<IResult> SetModelChoiceAsync(HttpContext http, PreferenceManager preferences) {
+    ModelChoiceRequest? body = await http.Request.ReadFromJsonAsync<ModelChoiceRequest>(http.RequestAborted);
+    if (body is null)
+      return Results.BadRequest();
+
+    preferences.SetModelChoice(body.Purpose, body.Choice);
+    return Results.Ok(preferences.Read());
+  }
+
+  private static async Task<IResult> SetBucketModelAsync(HttpContext http, PreferenceManager preferences) {
+    ModelBucketRequest? body = await http.Request.ReadFromJsonAsync<ModelBucketRequest>(http.RequestAborted);
+    if (body is null)
+      return Results.BadRequest();
+
+    preferences.SetBucketModel(body.Bucket, body.Model);
+    return Results.Ok(preferences.Read());
+  }
+
+  private static async Task<IResult> SetProtectedItemsAsync(HttpContext http, PreferenceManager preferences) {
+    ProtectedItemsRequest? body = await http.Request.ReadFromJsonAsync<ProtectedItemsRequest>(http.RequestAborted);
+    if (body is null)
+      return Results.BadRequest();
+
+    preferences.SetProtectedItems(body.Category, body.Items);
     return Results.Ok(preferences.Read());
   }
 
@@ -59,4 +92,8 @@ internal static class PreferencesRoutes {
   private sealed record WorkingDirectoryRequest(string? WorkingDirectory);
   private sealed record CompactionTriggerRequest(
       [property: JsonRequired, JsonNumberHandling(JsonNumberHandling.Strict)] int? CompactionTriggerTokenCount);
+  private sealed record ModelChoiceRequest(AuxiliaryModelPurpose Purpose, ModelChoice Choice);
+  private sealed record ModelBucketRequest(ModelBucket Bucket,
+      [property: JsonRequired] ConfiguredModel? Model);
+  private sealed record ProtectedItemsRequest(ProtectedResourceCategory Category, string[] Items);
 }

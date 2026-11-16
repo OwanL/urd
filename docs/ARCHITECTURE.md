@@ -957,14 +957,15 @@ first prompt; precise title fallback/validation behavior remains proposed.
 
 **Owner extension (2026-11-15):** title generation joins the parallel prepass alongside
 pruning. It receives the user prompt, may independently explore with `read`/`bash`, and
-emits a session title within a strict character limit. It defaults to the configured
+emits a session title with a strict maximum of **25 characters including spaces**.
+It defaults to the configured
 `small` bucket with its own provider/model override, using the same preference semantics
 as pruning. Tool-capable title generation needs the shared turn mechanics, not just a
 request-only call. Title generation runs only after the first message of a session,
 never on subsequent messages, post-compaction continuation or reopen/restart. Once
 pruning has settled safely, unfinished title work does not delay the main agent; it
 publishes separately through guarded metadata updates and remains owned cancellable
-work. Future title-based session addressing is explicitly deferred. Exact title limits
+work. Future title-based session addressing is explicitly deferred. Failure/invalid-output
 and manual-name handling remain in the [prepass plan](pruning-plan.md#parallel-title-generation).
 This expands the design scope, not implementation approval.
 

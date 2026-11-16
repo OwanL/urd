@@ -96,25 +96,28 @@ title registry in this slice. See [agent communication](agent-communication-desi
 - Default to the configured `small` bucket, with its own specific provider/model override
   in user preferences, including local models. An override affects title generation,
   not the shared bucket or the three pruning settings.
-- Produce a session title subject to a strict character limit. Enforce the limit in
-  application validation rather than relying solely on prompt wording.
+- **Title length decision:** generated titles have a strict maximum of **25 characters,
+  including spaces**. Enforce the limit in application validation rather than relying
+  solely on prompt wording. This does not approve a suffix exception to the maximum.
 - Reuse shared request/tool-turn mechanics and existing guarded recording, current
   permissions, cancellation and owned-tool cleanup. Keep conversation state, output
   validation and metadata publication separate from pruning and main-agent history.
 
-**Pie reference, not adopted behavior:** Pie limits the base title to 25 JavaScript
+**Pie reference, beyond the selected 25-character maximum:** Pie limits the base title to 25 JavaScript
 string characters including spaces, targets 15–20, and permits one corrective request
 for invalid output rather than truncating it. Its title generator is request-only;
 Urd's optional exploration is an explicit addition. Pie's later trigger, retry and
 collision-suffix rules are not imported by describing Urd as similar to Pie.
 
-**Still to settle for titles:** the exact character limit/counting rule and
-invalid-output handling, and interaction with explicit/manual session names. Post-compaction pruning does not regenerate titles.
+**Still to settle for titles:** invalid-output/failure handling and interaction with
+explicit/manual session names. The precise Unicode counting rule is an implementation
+detail to specify consistently in validation and tests. Post-compaction pruning does
+not regenerate titles.
 The earlier bounded-first-prompt-excerpt fallback remains a proposal, not a new owner
 selection. The existing three-row pruning UI decision does not select a title row.
 
-Working recommendation: use a 25-character base-title limit and preserve an
-explicit/manual name. These recommendations remain open for owner review.
+Working recommendation: preserve an explicit/manual name. This remains open for
+owner review.
 
 ## Pruning triggers
 

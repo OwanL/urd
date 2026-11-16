@@ -66,14 +66,16 @@ abstract SessionBase                 shared identity/context access/run guards
 SessionBase ── owns 0..1 active ──> SessionExecution
                                       ├── uses request-only IChatClient
                                       └── uses ToolExecutor
-TitleGenerator ─────┐
-HistoryCompactor ────┴── use request-only IChatClient too
-StartingResourcePruner ── uses shared LLM/tool-turn mechanics
+HistoryCompactor ──────── uses request-only IChatClient too
+TitleGenerator ───────┐
+StartingResourcePruner ┴─ use shared LLM/tool-turn mechanics
 ```
 
-Pruning permits optional exploration tools rather than being request-only. Its selected
-name and category design are recorded in the [pruning plan](pruning-plan.md#naming-decisions);
-the shared execution extraction remains a proposal, not an implemented API.
+Pruning and title generation permit optional exploration tools rather than being
+request-only. Title generation joins the parallel prepass with the configured `small`
+bucket by default and its own provider/model override. The [prepass plan](pruning-plan.md)
+owns the selected direction and open title behavior; the shared execution extraction
+remains a proposal, not an implemented API.
 
 **Proposed responsibility limits:**
 

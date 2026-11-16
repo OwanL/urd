@@ -1,9 +1,10 @@
-# Starting-context pruning plan
+# Starting-context pruning and title-generation plan
 
 **2026-11-15 — active design plan, not implementation approval.**
 
-This is the canonical record of the pruning direction discussed so far. Owner-selected
-requirements are separated from working proposals and unresolved details. It does not
+This is the canonical record of the pruning and parallel title-generation direction.
+Owner-selected requirements are separated from working proposals and unresolved details.
+It does not
 approve production APIs, a class hierarchy, new experiments or implementation work.
 Existing [architecture constraints](ARCHITECTURE.md) still apply.
 
@@ -65,6 +66,42 @@ session APIs.
 The implementation must be modular, extendable and share common execution rather than
 duplicate pruning loops for the three categories. Separate conversations do not imply
 separate engines or new full-session subtypes.
+
+## Parallel title generation
+
+**Owner direction:** include title generation in the same prepass planning as pruning.
+Run it in parallel with the pruning conversations, using shared execution rather than
+another auxiliary-job framework. It is a distinct operation, not a fourth pruning
+category or a consumer of `StartingResourcePruningResult<T>`.
+
+- Supply title-generation instructions and the user prompt.
+- Permit optional `read`/`bash` exploration, independently of the pruning conversations.
+- Default to the configured `small` bucket, with its own specific provider/model override
+  in user preferences, including local models. An override affects title generation,
+  not the shared bucket or the three pruning settings.
+- Produce a session title subject to a strict character limit. Enforce the limit in
+  application validation rather than relying solely on prompt wording.
+- Reuse shared request/tool-turn mechanics and existing guarded recording, current
+  permissions, cancellation and owned-tool cleanup. Keep conversation state, output
+  validation and metadata publication separate from pruning and main-agent history.
+
+**Pie reference, not adopted behavior:** Pie limits the base title to 25 JavaScript
+string characters including spaces, targets 15–20, and permits one corrective request
+for invalid output rather than truncating it. Its title generator is request-only;
+Urd's optional exploration is an explicit addition. Pie's later trigger, retry and
+collision-suffix rules are not imported by describing Urd as similar to Pie.
+
+**Still to settle for titles:** trigger frequency (fresh-session only versus later
+prepasses), whether unfinished title work delays the main agent, the exact character
+limit/counting rule and invalid-output handling, and interaction with explicit/manual
+session names. The pruning triggers below do not automatically become title triggers.
+The earlier bounded-first-prompt-excerpt fallback remains a proposal, not a new owner
+selection. The existing three-row pruning UI decision does not select a title row.
+
+Working recommendation: generate on the first fresh-session prompt without automatically
+retitling after compaction; use a 25-character base-title limit and let title work finish
+without delaying the main agent once pruning has settled. Preserve an explicit/manual
+name. These recommendations remain open for owner review.
 
 ## Pruning triggers
 
@@ -402,8 +439,8 @@ does not retain every skill. The behavior is selected; the concrete API remains 
 - **Not three full sessions.** The rows represent owned pruning conversations, not new
   `SessionBase` subtypes, independent chats or another auxiliary-job framework. The
   earlier request-only pruning sketch predates the selected `read`/`bash` exploration:
-  titles and compaction can remain request-only; tool-capable pruning needs shared turn
-  execution as well as `IChatClient`.
+  compaction can remain request-only; tool-capable pruning and title generation need
+  shared turn execution as well as `IChatClient`.
 - **Separate records, same authority.** Parallel selectors need distinct conversation and
   request identities, isolated histories and tool-call/result pairing. Reuse the parent's
   guarded execution authority and current tool permissions. Pruning messages/results must
@@ -468,6 +505,7 @@ not replace those mechanisms.
 - Exact recognition/loading rules and non-project locations within the selected
   agent-facing Markdown scope, plus stored source identities. Other harnesses'
   instruction files remain excluded.
+- Title-specific behavior listed under [parallel title generation](#parallel-title-generation).
 - Concrete classes, APIs, preference/storage shape and implementation sequencing.
   `PruningContext` remains an optional packaging proposal, not a required shared
   investigation or a settled type/name.

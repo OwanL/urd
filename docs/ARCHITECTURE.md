@@ -953,7 +953,17 @@ interface as needed. `TitleGenerator` and `HistoryCompactor` remain working oper
 names; the pruning operation now has the selected name `StartingResourcePruner`
 ([naming decisions](pruning-plan.md#naming-decisions)). These do not establish approved
 APIs or full session types. A failed title can fall back to a bounded excerpt of the
-first prompt.
+first prompt; precise title fallback/validation behavior remains proposed.
+
+**Owner extension (2026-11-15):** title generation joins the parallel prepass alongside
+pruning. It receives the user prompt, may independently explore with `read`/`bash`, and
+emits a session title within a strict character limit. It defaults to the configured
+`small` bucket with its own provider/model override, using the same preference semantics
+as pruning. Tool-capable title generation needs the shared turn mechanics, not just a
+request-only call. Exact limits, title triggers, manual-name handling and whether title
+completion gates the main agent are tracked in the
+[prepass plan](pruning-plan.md#parallel-title-generation); pruning triggers are not
+implicitly title triggers. This expands the design scope, not implementation approval.
 
 Keep LLM invocation, the LLM/tool execution cycle and session state/lifetime
 as distinct responsibilities. This does not require three framework layers or
@@ -971,10 +981,10 @@ custom wrappers. A small class with one useful operation can be sufficient.
 
 Shared client use does not mean a process-wide serial executor or shared mutable
 request state. Provider fidelity, caller-specific retry/fallback policy and
-cancellation still need qualification. Request-only auxiliary calls such as titles and
-compaction do not acquire the tool loop. The later pruning direction permits `read`/`bash`
+cancellation still need qualification. Request-only auxiliary calls such as compaction
+do not acquire the tool loop. Pruning and title generation permit `read`/`bash`
 exploration; the [structural proposal](pruning-plan.md#high-level-structure-proposal)
-therefore reuses tool-turn execution without making pruning a full session type.
+therefore reuses tool-turn execution without making either operation a full session type.
 [Execution design](execution-design.md) records evidence and remaining gates; provider
 integrations remain separately qualified.
 

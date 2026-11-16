@@ -391,7 +391,9 @@ plugin hierarchy are needed.
   steering, compaction and settlement remain outside this class; its exact execution
   API still needs the extraction design, rather than speculative interfaces here.
 - `providers/ModelSelector.cs` is a shared prerequisite: bucket or specific provider/model
-  choice resolves to the existing `LlmSelection`. Bucket resolution does not exist yet.
+  choice resolves to the existing `LlmSelection`. This is now implemented for auxiliary
+  purposes, including persisted `small`/`medium`/`frontier` mappings and exact overrides.
+  Delegated-agent selection/fallback still depends on the unimplemented delegation runtime.
   Reuse the same owner for delegated work, not pruning-only buckets. Resolve model choices
   once per preparation; `PruningContext` is only a proposed container. Do not silently
   inherit the main chat's model.

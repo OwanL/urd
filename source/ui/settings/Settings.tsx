@@ -16,9 +16,9 @@ import { ModelPreferencesSettings } from "./ModelPreferencesSettings.tsx";
 import { ProtectedResourcesSettings } from "./ProtectedResourcesSettings.tsx";
 import "./settings.css";
 
-export type SettingsTab = "providers" | "general" | "prepass";
+export type SettingsTab = "providers" | "general" | "model-buckets" | "prepass";
 
-const tabs: readonly SettingsTab[] = ["providers", "general", "prepass"];
+const tabs: readonly SettingsTab[] = ["providers", "general", "model-buckets", "prepass"];
 
 interface SettingsProps {
   open: boolean;
@@ -63,6 +63,7 @@ export function Settings({
   const workingDirectoryButton = useRef<HTMLButtonElement>(null);
   const providersTab = useRef<HTMLButtonElement>(null);
   const generalTab = useRef<HTMLButtonElement>(null);
+  const modelBucketsTab = useRef<HTMLButtonElement>(null);
   const prepassTab = useRef<HTMLButtonElement>(null);
   const id = useId();
   if (!open) return null;
@@ -78,7 +79,9 @@ export function Settings({
       ? providersTab
       : next === "general"
         ? generalTab
-        : prepassTab
+        : next === "model-buckets"
+          ? modelBucketsTab
+          : prepassTab
     ).current?.focus();
   };
   const navigateTabs = (event: TargetedKeyboardEvent<HTMLDivElement>) => {
@@ -98,7 +101,13 @@ export function Settings({
       label="Settings"
       placement="below"
       initialFocus={
-        tab === "providers" ? searchInput : tab === "general" ? workingDirectoryButton : prepassTab
+        tab === "providers"
+          ? searchInput
+          : tab === "general"
+            ? workingDirectoryButton
+            : tab === "model-buckets"
+              ? modelBucketsTab
+              : prepassTab
       }
       onClose={close}
     >
@@ -135,6 +144,18 @@ export function Settings({
           onClick={() => onTabChange("general")}
         >
           General
+        </button>
+        <button
+          ref={modelBucketsTab}
+          type="button"
+          id={`${id}-model-buckets-tab`}
+          role="tab"
+          aria-selected={tab === "model-buckets"}
+          aria-controls={`${id}-model-buckets-panel`}
+          tabIndex={tab === "model-buckets" ? 0 : -1}
+          onClick={() => onTabChange("model-buckets")}
+        >
+          Model buckets
         </button>
         <button
           ref={prepassTab}
@@ -192,6 +213,22 @@ export function Settings({
       </section>
       <section
         class="settings-page"
+        id={`${id}-model-buckets-panel`}
+        role="tabpanel"
+        aria-labelledby={`${id}-model-buckets-tab`}
+        hidden={tab !== "model-buckets"}
+      >
+        <div class="general-settings">
+          <ModelPreferencesSettings
+            client={client}
+            state={preferences}
+            view="buckets"
+            active={tab === "model-buckets"}
+          />
+        </div>
+      </section>
+      <section
+        class="settings-page"
         id={`${id}-prepass-panel`}
         role="tabpanel"
         aria-labelledby={`${id}-prepass-tab`}
@@ -201,6 +238,7 @@ export function Settings({
           <ModelPreferencesSettings
             client={client}
             state={preferences}
+            view="purposes"
             active={tab === "prepass"}
           />
           <ProtectedResourcesSettings state={preferences} active={tab === "prepass"} />

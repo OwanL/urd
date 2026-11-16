@@ -58,14 +58,18 @@
 .settings-tabs {
   display: flex;
   flex: 0 0 auto;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
   border-bottom: 1px solid var(--border-subtle);
 }
 .settings-tabs button {
+  flex: 1 0 auto;
   padding: 6px 10px;
   border: 0;
   border-bottom: 2px solid transparent;
   background: transparent;
   color: var(--text-secondary);
+  white-space: nowrap;
 }
 .settings-tabs button[aria-selected="true"] {
   border-bottom-color: var(--accent);
@@ -208,7 +212,7 @@
   font-size: 12px;
 }
 .preference-purpose-row {
-  grid-template-columns: minmax(64px, 0.45fr) minmax(100px, 0.75fr) minmax(0, 1.3fr);
+  grid-template-columns: minmax(64px, 0.45fr) max-content minmax(0, 1.3fr);
 }
 .preference-model-name {
   color: var(--text-primary);

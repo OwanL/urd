@@ -9,8 +9,11 @@ using static Urd.Backend.Tests.Support.TestAsync;
 namespace Urd.Backend.Tests.Providers;
 
 public sealed class ModelSelectorTests {
-  [Fact]
-  public async Task BucketChoiceResolvesOnlyItsExactConfiguredConnectionAndModel() {
+  [Theory]
+  [InlineData(ModelBucket.Small)]
+  [InlineData(ModelBucket.Medium)]
+  [InlineData(ModelBucket.Frontier)]
+  public async Task BucketChoiceResolvesOnlyItsExactConfiguredConnectionAndModel(ModelBucket bucket) {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     var manager = CreateManager(store, "bucket-model", "override-model");
@@ -22,7 +25,8 @@ public sealed class ModelSelectorTests {
       await manager.SaveModelSettingsAsync(new(overrideConnection.Id, "override-model", ModelFamily.Google,
           SupportsImages: false, ContextWindow: 32_000));
       var preferences = new PreferenceManager(store);
-      preferences.SetBucketModel(ModelBucket.Small, new(bucketConnection.Id, "bucket-model"));
+      preferences.SetBucketModel(bucket, new(bucketConnection.Id, "bucket-model"));
+      preferences.SetModelChoice(AuxiliaryModelPurpose.Tools, ModelChoice.ForBucket(bucket));
       preferences.SetModelChoice(AuxiliaryModelPurpose.Skills,
           ModelChoice.ForModel(overrideConnection.Id, "override-model"));
       var selector = new ModelSelector(manager);

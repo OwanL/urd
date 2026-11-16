@@ -15,7 +15,8 @@ selectors, Send, Stop and integrated [provider settings](provider-management.md#
 Tabs take the header's remaining width beside New chat and Workspace options. Each tab fits within
 its scroll strip; activation, title changes and strip resizing reveal the active tab without fighting
 a drag. Tabs have a preferred width of 180px and truncate long titles. Workspace options holds Settings
-and the unavailable Snooze action. The fresh-chat screen shows working-directory controls first, then a
+and the unavailable Snooze action; Settings has Providers, General, Model buckets and Prepass tabs.
+The fresh-chat screen shows working-directory controls first, then a
 subtle separator and labeled 24h and 7d API cost totals. These are rolling 24-hour and 168-hour windows,
 not calendar days.
 The composer keeps only session cost, context and working time. Its session-cost popover has Session,
@@ -31,13 +32,13 @@ Settings → General holds the default working directory, selected through a fol
 and an explicitly saved compaction-trigger token count. Blank/Automatic restores the default;
 positive whole counts override the trigger subject to model headroom. The shared `usePreferences`
 hook owns reads and saves; changing the trigger takes effect at the next compaction check, while
-working-directory changes still apply only to new chats. Settings → Prepass configures
-small/medium/frontier model buckets, independent tool/skill/instruction/title choices,
-and protected-resource lists. Missing models/resources remain visibly unavailable rather
-than rebinding. Protection pickers discover resources for the default directory; built-in
-instructions always remain. Session preparation shows three category rows with truthful
-running/completed/fallback/cancelled/interrupted outcomes. Tabs use guarded backend title
-metadata or the existing placeholder, never a first-prompt excerpt.
+working-directory changes still apply only to new chats. Settings → Model buckets assigns the
+shared small/medium/frontier model mappings. Settings → Prepass configures independent
+tool/skill/instruction/title model choices and protected-resource lists. Missing models/resources
+remain visibly unavailable rather than rebinding. Protection pickers discover resources for the
+default directory; built-in instructions always remain. Session preparation shows three category
+rows with truthful running/completed/fallback/cancelled/interrupted outcomes. Tabs use guarded
+backend title metadata or the existing placeholder, never a first-prompt excerpt.
 Before the first accepted message, the empty transcript centers the default and current
 working-directory paths with explicit Edit actions. Edit opens a single directory editor
 with breadcrumbs and an editable address, with an explicit Select folder/Cancel decision;
@@ -271,6 +272,12 @@ The dedicated Prepass tab was subsequently checked at both widths, including thr
 keyboard wrapping, focus on reopen, General draft preservation, saves across tab changes,
 catalog retry and reload persistence. Resource discovery made no reads while inactive.
 Fresh 680×560 transcript captures show running/completed rows and delayed title publication.
+Bucket allocation was then separated into Model buckets, leaving purpose choices and
+protections in Prepass. Four-tab navigation, reload persistence, catalog retry and Specific
+model drafts across bucket saves were checked. A real prepass routed skills through the
+Medium mapping to a second loopback provider while tools/instructions used Small and title
+used its specific override. All three bucket enums are covered by the resolver test theory.
+The narrow choice column sizes to its content so Specific model remains fully readable.
 
 ## Conversation feedback
 

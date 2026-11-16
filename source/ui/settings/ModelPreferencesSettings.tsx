@@ -37,10 +37,12 @@ interface CachedModels {
 export function ModelPreferencesSettings({
   client,
   state,
+  view,
   active,
 }: {
   client: ProviderClient;
   state: PreferencesState;
+  view: "buckets" | "purposes";
   active: boolean;
 }) {
   const reader = useMemo(() => new WorkspaceModels(client), [client]);
@@ -138,11 +140,11 @@ export function ModelPreferencesSettings({
   const busy = !state.loaded || state.pending;
 
   return (
-    <section class="preference-model-settings" aria-label="Auxiliary models">
-      <h3>Auxiliary models</h3>
-      <p class="general-settings-description">
-        Purpose choices can use a shared bucket or a specific model.
-      </p>
+    <section
+      class="preference-model-settings"
+      aria-label={view === "buckets" ? "Model buckets" : "Purpose choices"}
+    >
+      {view === "purposes" && <h3>Purpose choices</h3>}
       {catalog.error && (
         <div class="general-settings-feedback" aria-live="polite" aria-atomic="true">
           <p role="alert">{catalog.error}</p>
@@ -156,64 +158,66 @@ export function ModelPreferencesSettings({
           </button>
         </div>
       )}
-      <div class="preference-model-group" aria-label="Shared model buckets">
-        <h4>Shared buckets</h4>
-        {buckets.map((bucket) => {
-          const preferenceKey = `modelBucket:${bucket}` as const;
-          const saved = preferences?.modelChoices[bucket] ?? null;
-          const pending = state.pendingFor === preferenceKey;
-          return (
-            <div class="preference-model-row" key={bucket}>
-              <span class="preference-model-name">{bucketNames[bucket]}</span>
-              <ModelPicker
-                models={pickerModels(saved)}
-                modelKey={saved ? modelKey(saved) : null}
-                modelLabel={`${bucketNames[bucket]} mapping · ${configuredModelLabel(saved)}`}
-                onModelChange={(key) => {
-                  const model = configuredModel(key, saved);
-                  if (model) void state.saveBucketModel(bucket, model);
-                }}
-                loadingModels={catalog.loading}
-                refreshingModels={catalog.loading}
-                modelsError={catalog.error}
-                onRetryModels={readCachedModels}
-                disabled={busy || !catalog.loaded || catalog.loading}
-              />
-              <button
-                class="preference-model-clear"
-                type="button"
-                disabled={busy || saved === null}
-                onClick={() => void state.saveBucketModel(bucket, null)}
-              >
-                Clear
-              </button>
-              <SettingFeedback
-                pending={pending}
-                error={state.errorFor(preferenceKey)}
-                loaded={state.loaded}
-              />
-            </div>
-          );
-        })}
-      </div>
-      <div class="preference-model-group" aria-label="Purpose model choices">
-        <h4>Purpose choices</h4>
-        {purposes.map((purpose) => (
-          <AuxiliaryModelChoice
-            key={purpose}
-            purpose={purpose}
-            state={state}
-            loadingModels={catalog.loading}
-            catalogLoaded={catalog.loaded}
-            catalogError={catalog.error}
-            readCachedModels={readCachedModels}
-            configuredModel={configuredModel}
-            configuredModelLabel={configuredModelLabel}
-            pickerModels={pickerModels}
-            busy={busy}
-          />
-        ))}
-      </div>
+      {view === "buckets" && (
+        <div class="preference-model-group">
+          {buckets.map((bucket) => {
+            const preferenceKey = `modelBucket:${bucket}` as const;
+            const saved = preferences?.modelChoices[bucket] ?? null;
+            const pending = state.pendingFor === preferenceKey;
+            return (
+              <div class="preference-model-row" key={bucket}>
+                <span class="preference-model-name">{bucketNames[bucket]}</span>
+                <ModelPicker
+                  models={pickerModels(saved)}
+                  modelKey={saved ? modelKey(saved) : null}
+                  modelLabel={`${bucketNames[bucket]} mapping · ${configuredModelLabel(saved)}`}
+                  onModelChange={(key) => {
+                    const model = configuredModel(key, saved);
+                    if (model) void state.saveBucketModel(bucket, model);
+                  }}
+                  loadingModels={catalog.loading}
+                  refreshingModels={catalog.loading}
+                  modelsError={catalog.error}
+                  onRetryModels={readCachedModels}
+                  disabled={busy || !catalog.loaded || catalog.loading}
+                />
+                <button
+                  class="preference-model-clear"
+                  type="button"
+                  disabled={busy || saved === null}
+                  onClick={() => void state.saveBucketModel(bucket, null)}
+                >
+                  Clear
+                </button>
+                <SettingFeedback
+                  pending={pending}
+                  error={state.errorFor(preferenceKey)}
+                  loaded={state.loaded}
+                />
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {view === "purposes" && (
+        <div class="preference-model-group">
+          {purposes.map((purpose) => (
+            <AuxiliaryModelChoice
+              key={purpose}
+              purpose={purpose}
+              state={state}
+              loadingModels={catalog.loading}
+              catalogLoaded={catalog.loaded}
+              catalogError={catalog.error}
+              readCachedModels={readCachedModels}
+              configuredModel={configuredModel}
+              configuredModelLabel={configuredModelLabel}
+              pickerModels={pickerModels}
+              busy={busy}
+            />
+          ))}
+        </div>
+      )}
     </section>
   );
 }
@@ -242,14 +246,25 @@ function AuxiliaryModelChoice({
   busy: boolean;
 }) {
   const saved = state.preferences?.modelChoices[purpose] ?? null;
+  const savedBucket = saved?.bucket;
+  const savedConnectionId = saved?.connectionId;
+  const savedModelId = saved?.modelId;
   const [specific, setSpecific] = useState(saved?.bucket === null);
   const [draftChoice, setDraftChoice] = useState<ModelChoice | null>(saved);
   const preferenceKey = `modelChoice:${purpose}` as const;
 
   useEffect(() => {
-    setSpecific(saved?.bucket === null);
-    setDraftChoice(saved);
-  }, [saved]);
+    const savedChoice: ModelChoice | null =
+      savedBucket === undefined
+        ? null
+        : {
+            bucket: savedBucket,
+            connectionId: savedConnectionId ?? null,
+            modelId: savedModelId ?? null,
+          };
+    setSpecific(savedChoice?.bucket === null);
+    setDraftChoice(savedChoice);
+  }, [savedBucket, savedConnectionId, savedModelId]);
 
   const savedModel =
     saved && saved.bucket === null && saved.connectionId && saved.modelId

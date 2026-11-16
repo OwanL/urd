@@ -151,6 +151,12 @@ they are being returned. `answer_agent` implicitly answers that current question
 never handles question IDs. The answer becomes the asker's `ask_agent` result; the recipient
 then continues its own task.
 
+If the recipient's execution ends or is stopped without answering its presented question, that
+question fails with a clear "recipient finished without answering" error. When a bounded child
+finishes or is stopped, its queued questions fail the same way. Compaction re-presents the
+current question, as it does for outstanding background calls, so `answer_agent` never answers a
+question the recipient can no longer see.
+
 ### `list_agents`
 
 Takes no proposed arguments and returns all agents, clearly labelled with title, running state

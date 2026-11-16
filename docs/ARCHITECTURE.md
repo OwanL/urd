@@ -572,13 +572,15 @@ instructions while retaining most of the same prompt. A delegated primary remain
 `PrimarySession`; assignment context does not create a third session kind or alter
 its lifetime and authority.
 
-A starting-context manager is a reasonable working direction: coordinate guidance,
-environment facts, capability catalogs and pruning utilities to assemble the initial
-model context. Keep composition distinct from source discovery, relevance selection,
-resource loading, tool permission and session lifecycle. The manager can select the
-appropriate prompt parts from explicit session/assignment facts; it must not become
-another session engine. `StartingContextManager` is a working name, not an approved
-class API or a requirement for a generic prompt/resource framework.
+A starting-context builder coordinates instruction contributions, environment facts,
+capability catalogs and pruning utilities to construct the initial model context.
+Keep composition distinct from source discovery, relevance selection, resource loading,
+tool permission and session lifecycle. The builder can select the appropriate prompt
+parts from explicit session/assignment facts; it must not become another session engine.
+The owner-selected name is `StartingContextBuilder`, replacing `StartingContextManager`
+(see the [naming decisions](pruning-plan.md#naming-decisions)). This renames the existing
+component rather than adding a layer; it does not approve a class API or require a
+generic prompt/resource framework.
 
 **Owner direction (2026-11-15):** include instruction-document loading and pruning,
 including `AGENTS.md` and append-system resources, in the context-preparation design

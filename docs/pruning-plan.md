@@ -174,6 +174,7 @@ proposed concrete structure for that direction, not permission to create these f
 | The shared operation that discovers and loads instruction resources | **`InstructionResourceDiscovery`** |
 | The shared selector for tools, skills and instructions intended for starting context | **`StartingResourcePruner`** |
 | A category pruning outcome, carrying retained original items, success/fallback status and diagnostics | **`StartingResourcePruningResult<T>`** |
+| The component coordinating discovery, protection, pruning and construction of starting context | **`StartingContextBuilder`**, replacing the existing `StartingContextManager` name |
 
 `StartingContextContribution` defines a contribution, whether its text is fixed or
 produced from supplied session data. Preparation may exclude, prune or process it
@@ -207,7 +208,7 @@ naming decisions, not permission to refactor source code.
 context/
   SkillsGuidance.cs                 change: format supplied skills; no discovery
   runtime/
-    StartingContextManager.cs       change: discover → protect → prune → compose
+    StartingContextBuilder.cs       rename/extend StartingContextManager: discover → protect → prune → compose
     StartingContext.cs              change: carry selected resources into composition
     StartingContextContribution.cs  rename existing ContextGuidance abstraction
     InstructionResourceDiscovery.cs new: shared skill/instruction discovery and loading
@@ -268,11 +269,11 @@ plugin hierarchy are needed.
 
 ### Existing owners and shared prerequisites
 
-- `StartingContextManager` owns discovery/protection/pruning/composition, using private
-  helpers rather than additional coordinator classes. Capture models and task context
-  for a preparation; construct its pruner and launch the three calls before awaiting
-  their results. Merge those results with protected resources in source/precedence order.
-  The manager does not own session admission, Stop or durable writes.
+- `StartingContextBuilder` is the renamed existing manager, not an additional coordinator.
+  It coordinates discovery/protection/pruning/composition, using private helpers. Capture
+  models and task context for a preparation; construct its pruner and launch the three
+  calls before awaiting their results. Merge those results with protected resources in
+  source/precedence order. The builder does not own session admission, Stop or durable writes.
 - `execution/ConversationRunner.cs` is a proposed extraction of shared streamed-response
   validation and tool-turn mechanics, not a new provider client. It is supplied with the
   parent execution's guarded recording/tool authority; each pruning invocation has its
@@ -285,7 +286,7 @@ plugin hierarchy are needed.
   once into `PruningContext`; do not silently inherit the main chat's model.
 - `SessionExecution` owns and joins preparation. Extend guarded recording with distinct
   pruning conversation/request scopes and `StartingContextStorage` with selected contexts
-  at allowed compaction boundaries. Do not make the composer a second persistence owner.
+  at allowed compaction boundaries. Do not make the builder a second persistence owner.
 - Extend `UserPreferences`, `PreferenceManager`, `PreferencesStorage` and their existing
   routes; reuse settings and `ModelPicker`. A small `PruningRows.tsx` under `source/ui/app/`
   renders recorded category status. Detailed UI remains deferred.
@@ -293,8 +294,9 @@ plugin hierarchy are needed.
 **Revised after owner feedback:** shared discovery is a resource-level responsibility,
 not merely a Git helper below separate discoverers. `InstructionResourceDiscovery` owns
 finding/loading skills and instruction documents; `StartingResourcePruner` owns selection;
-`StartingContextManager` connects them and handles protection/composition. Resource kinds retain distinct parsing rules
-and typed values without requiring separate top-level discoverer classes.
+`StartingContextBuilder` connects them and handles protection/composition. Resource kinds
+retain distinct parsing rules and typed values without requiring separate top-level
+discoverer classes.
 
 Construct one pruner for a preparation with its immutable task context, model choices
 and owned-execution dependencies. Each overload chooses the corresponding category

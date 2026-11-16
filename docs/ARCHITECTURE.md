@@ -441,14 +441,15 @@ The superseded assignment-persistence direction above is not required. A missing
 does not prove an external action never happened; recovery must not blindly
 repeat potentially completed effects just to make the transcript look complete.
 
-### Historical fan-out estimates (not a selected requirement)
+### Scale to substantial fan-out without treating estimates as limits
 
-The following estimates came from the superseded independent-session proposal; they
-are exploratory scenarios, not a Urd capacity commitment. Independently delegated
-sessions are not selected; see [agent communication](agent-communication-design.md#selected-direction).
-The earlier speculative sizing examples were up to 10 user-managed sessions,
-each spawning approximately four bounded subagents or four independent sessions
-that could themselves each run approximately four subagents.
+**Direction:** Support as many agents as is practical while remaining performant.
+
+The deeper example below came from the superseded independent-session proposal; independently
+delegated sessions are not selected (see [agent communication](agent-communication-design.md#selected-direction)).
+Nested bounded subagents produce the same shape. The earlier speculative sizing examples were
+up to 10 user-managed sessions, each spawning approximately four bounded subagents that could
+themselves each run approximately four subagents.
 
 Useful exploratory scenarios are therefore roughly **50 live agents** for direct
 fan-out, and **210 live agents** for the deeper example (10 + 40 + 160). These

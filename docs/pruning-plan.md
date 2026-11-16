@@ -153,8 +153,9 @@ wait for the instruction selector's output. Each has its own category-specific b
 
 ## High-level structure proposal
 
-**For owner review, not an approved class layout or implementation plan.** Names below
-make the responsibilities concrete; signatures, record fields and schema are not frozen.
+**Structure for owner review, not implementation approval.** Names selected in the
+naming table below are settled; other names, signatures, record fields and schema remain
+provisional.
 Paths are relative to `source/backend/harness/` unless stated otherwise.
 
 The owner accepted the shared discoverer/single typed pruner direction. This is the
@@ -165,10 +166,16 @@ proposed concrete structure for that direction, not permission to create these f
 | Concept | Owner-selected term |
 | --- | --- |
 | Rule-bearing content, whether built-in or loaded from files | **Instructions**, rather than guidance or system prompts |
+| One identifiable, orderable contribution of text intended for the session's starting context | **`StartingContextContribution`**, replacing the existing `ContextGuidance` name |
 
-Concrete type names are being reviewed separately. Existing `Guidance` identifiers
-below identify current code or earlier proposals; they are not settled names for the
-new design. This terminology decision does not authorise source renames.
+`StartingContextContribution` defines a contribution, whether its text is fixed or
+produced from supplied session data. Preparation may exclude, prune or process it
+before composition. Its identity is not tied to becoming one particular system-message
+format. This renames the existing abstraction; it does not add a wrapper or another layer.
+
+Other concrete names remain under review. Remaining `Guidance` identifiers describe
+current code or earlier proposals, not additional settled names. These are design
+naming decisions, not permission to refactor source code.
 
 ### Files and types
 
@@ -178,10 +185,10 @@ context/
   runtime/
     StartingContextManager.cs       change: discover → protect → prune → compose
     StartingContext.cs              change: carry selected resources into composition
-    ContextGuidance.cs              reuse existing abstraction; name under review
+    StartingContextContribution.cs  rename existing ContextGuidance abstraction
     ResourceDiscovery.cs            new: shared skill/instruction discovery and loading
     Resources.cs                    new: typed discovered collections
-    FileGuidance.cs                 new: loaded file-backed ContextGuidance
+    FileGuidance.cs                 new: loaded file-backed contribution; name pending
     Skill.cs                        keep existing skill value
     SkillFrontmatter.cs             keep existing parser
   pruning/
@@ -197,11 +204,11 @@ existing packaged-skill and project-override rules. Tools remain registered reso
 from `ToolCatalog`, not files found by the discoverer.
 
 `Resources` contains `IReadOnlyList<Skill>` and `IReadOnlyList<FileGuidance>`.
-`FileGuidance : ContextGuidance` carries already-loaded text, source path and scope,
-and implements the existing ordering/applicability/rendering contract. It requires
-file data in its constructor, so the parameterless built-in block scan cannot
-create it accidentally. Neither its constructor nor `GetText` performs file I/O.
-This reuses the existing runtime-block extension point instead of introducing a
+`FileGuidance : StartingContextContribution` carries already-loaded text, source path
+and scope. It implements the existing ordering/applicability/rendering contract and
+requires file data in its constructor, so the parameterless built-in contribution scan
+cannot create it accidentally. Neither its constructor nor `GetText` performs file I/O.
+This reuses the existing contribution extension point instead of introducing a
 second prompt hierarchy or an additional instruction-document/wrapper pair.
 
 ### Proposed method surface
@@ -301,9 +308,10 @@ text with source/scope. Treat candidate contents as selection material. The mode
 kept candidate IDs, not rewritten resources; the pruner validates/maps them back to the
 original typed resources. Invalid output is an ordinary selection failure.
 
-**Proposed instruction boundary:** built-in, parameterless `ContextGuidance` blocks form
-fixed base context; discovered `FileGuidance` instances are pruning candidates. The skill
-list block remains a formatter, but receives the selected skills. This is a proposed
+**Proposed instruction boundary:** built-in, parameterless `StartingContextContribution`
+implementations form fixed base context; discovered `FileGuidance` instances are pruning
+candidates. The skill list contribution remains a formatter, but receives the selected
+skills. This is a proposed
 boundary for review, not a newly selected protection rule.
 
 ### Integration constraints the design must address

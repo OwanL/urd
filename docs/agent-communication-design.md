@@ -105,21 +105,67 @@ These are constraints and questions, not approved implementation mechanics:
 - **User input and approval:** an agent question is not user consent. Agents cannot answer or
   relay approval for another agent's protected action.
 
-## Deferred title-based addressing
+## Owner's tool surface under review
 
-**Owner direction (2026-11-15):** session titles are intended as communication lookup
-keys, for example “send message to <title>”. Design this when session communication
-is implemented, not as part of title generation. Resolution while a title is pending,
-collisions and renames remain undecided; this does not select a title registry or
-change durable session identity. The [prepass plan](pruning-plan.md#parallel-title-generation)
-allows the main agent to start once pruning settles without waiting for the title.
+The following is the proposed model-facing surface, preserved as the starting point for further
+grilling rather than replaced with a more elaborate schema. It is not yet approved or implemented.
+
+### `subagent`
+
+| Input | Meaning |
+| --- | --- |
+| `bucket` | `small`, `medium`, or `large`; selects the configured model tier. |
+| `context` | Parent context to retain. Candidate modes are `none`, user input including `ask_user` questions/answers, and trailing main-agent context analogous to compaction's recent-history retention. |
+| `task` | Text prompt describing the delegated task. |
+
+The caller does **not** supply a title. Creation runs Urd's existing pruning/title prepass and
+generates the child's immutable title. That title is the communication address. Named roles,
+model overrides, caller-selected working directories, full-history inheritance, separate numeric
+context budgets, and other invocation options are not part of this proposal.
+
+### `ask_agent`
+
+| Input | Meaning |
+| --- | --- |
+| `recipient` | Agent's immutable title, or the relationship alias `parent`. |
+| `prompt` | Question to ask the agent. |
+| `wake` | Whether this question should wake the recipient. |
+
+Every session is askable and wakeable; there are no `canAsk` or `canWake` listing fields. The
+foreground-parent restriction and cycle checks are execution rules, not schema capabilities.
+If `wake` is false and this is a blocking call to an idle recipient, return early and convert
+the pending answer wait to a background call. The result identifies that background call rather
+than leaving the caller blocked indefinitely. This conversion and its call identity need detailed
+design. The generic `background: true` option remains available on any tool.
+
+### `list_agents`
+
+Takes no proposed arguments and returns all agents, clearly labelled with title, running state
+(`idle`, `waiting for background task`, or `active`), and parent-session title where applicable.
+Do not add relationship, `canAsk`, or `canWake` fields: parent title already expresses the
+hierarchy, and every session supports asking and waking.
+
+### Addressing
+
+Titles do not change. Use the exact title as the model-facing identifier, with existing internal
+session IDs retained as storage keys. `parent` is a relationship alias, not a lookup for a session
+literally named `parent`. Duplicate eligible titles must produce an ambiguity error rather than
+silently selecting a session. Resolve the title when accepting the call and retain the internal
+identity and original tool arguments for delivery and compaction.
+
+
+
+**Owner clarification (2026-11-16):** titles are immutable communication lookup keys, including
+generated subagent titles. Exact duplicate matches are an error. There is no mutable-title or
+pending-title tool-resolution policy.
 
 ## Deliberate limits and existing alternatives
 
 - Do not use long-lived background conversations for ordinary finite delegation.
 - Do not infer that a completed background call may continue receiving follow-ups.
-- Do not add automatic wake flags, polling protocols or persistent peer registries before their
-  lifecycle semantics are settled.
+- The proposed `wake` flag and non-waking background conversion are under review, not settled.
+- Do not add polling protocols or persistent peer registries before their lifecycle semantics
+  are settled.
 - Long-running background Bash remains an escape hatch for timers and external-condition waits.
   It is not the normal answer-delivery mechanism and does not break a dependency cycle.
 - Subagent context preparation/pruning should share execution machinery; it must not motivate a

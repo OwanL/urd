@@ -85,11 +85,11 @@ without waiting for unfinished title generation. Let title work complete separat
 and publish through the existing guarded metadata path; nonblocking does not detach
 it from session cancellation or owned-tool cleanup.
 
-**Deferred communication consideration:** session titles are intended to support
-addressing such as “send message to <title>”. The owner explicitly deferred that
-design. Missing-title windows, collisions, renames and address resolution belong to
-future communication work, not a reason to delay the main agent now or introduce a
-title registry in this slice. See [agent communication](agent-communication-design.md#deferred-title-based-addressing).
+**Communication clarification (2026-11-16):** session titles are immutable addressing keys.
+Subagent creation generates the child's title during its pruning/title prepass; the caller does
+not supply one. Exact duplicate eligible titles are an ambiguity error. The nonblocking first
+message behavior above is unchanged for primary sessions; do not infer a tool-facing title from
+a pending generation attempt. See [agent communication](agent-communication-design.md#owners-tool-surface-under-review).
 
 - Supply title-generation instructions and the user prompt.
 - Permit optional `read`/`bash` exploration, independently of the pruning conversations.

@@ -164,7 +164,8 @@ Titles do not change once final. A fresh session passes through built-in placeho
 
 1. `new session`, or `new session (n)` when several exist.
 2. `generating title`, or `generating title (n)` when several exist.
-3. The generated, stable, addressable title.
+3. The generated, stable, addressable title. If generation fails, the final title is the first
+   user prompt (a subagent's task) truncated to the 25-character maximum.
 
 Placeholder titles are not addressable. Communication with such a session fails with a useful
 error telling the agent to wait a few seconds and retry. Use the exact final title as the

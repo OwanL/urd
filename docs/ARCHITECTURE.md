@@ -969,7 +969,8 @@ never on subsequent messages, post-compaction continuation or reopen/restart. On
 pruning has settled safely, unfinished title work does not delay the main agent; it
 publishes separately through guarded metadata updates and remains owned cancellable
 work. Invalid title output allows one corrective response; if still invalid or generation
-fails, leave the existing placeholder unchanged, without blocking the main agent or
+fails, use the first user prompt truncated to 25 characters (superseding the earlier
+unchanged-placeholder decision), without blocking the main agent or
 retrying on a later message. Existing cancellation and recording/cleanup safeguards
 still apply. Future title-based session addressing is explicitly deferred. Urd has no
 manual session-naming flow, and this feature does not add one; the

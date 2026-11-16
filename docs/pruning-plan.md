@@ -111,6 +111,13 @@ attempt; it is not a later generation trigger and must not replay completed tool
 Cancellation and recording/cleanup failures retain the existing execution safeguards,
 not a successful fallback that hides uncertain owned work.
 
+**Superseded failure fallback (2026-11-16):** titles are now communication addresses, so a
+session cannot remain on a placeholder. If generation (including its one correction) fails,
+use the session's first user prompt (a subagent's task) truncated to the 25-character maximum
+as its final title. This replaces the unchanged-placeholder fallback above and in the
+milestone/implementation notes below; the implemented null-title behavior must change. See
+[agent communication](agent-communication-design.md#addressing).
+
 **Pie reference:** Pie counts the base title using JavaScript string length, targets
 15–20 characters and permits one corrective request rather than truncating invalid
 output. Urd has selected the 25-character maximum and one correction, but has not

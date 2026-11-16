@@ -26,11 +26,17 @@ exploratory findings or selection decisions into sibling conversations; sharing
 execution code does not mean sharing investigation or conversation state.
 
 **Selector task input decision:** each conversation receives instructions explaining
-its category-selection task and the user prompt, alongside its category candidates.
+its category-selection task, its category candidates and the following task input:
+
+| Preparation boundary | Task input for each pruning conversation |
+| --- | --- |
+| First prompt in a fresh session | The user prompt |
+| Automatic resumption after successful compaction | The compaction summary in place of a user prompt |
+| Manual continuation after successful compaction | The compaction summary followed by the new user message |
+
+For either post-compaction path, omit retained continuation context from pruning
+inputs. This does not remove that context from the main agent's continuation.
 Do not require a shared, preassembled grounding bundle or pool exploratory findings.
-The earlier proposal to additionally supply compaction summaries and retained history
-is not the selected input contract. Choosing the user-prompt payload for a continuation
-without a new user message remains an integration detail to resolve explicitly.
 
 **Exploration decision:** do not add pruning-specific time, turn, token or tool-call
 budgets. Each conversation decides how much exploration it needs and when to finish.
@@ -85,7 +91,14 @@ Settings also has protected-item lists for each category. Protect **`bash`, `rea
 `write` and `edit`** by default, not as non-removable pins. Users can remove those
 protections if they wish and can add protected tools, skills and instruction documents.
 An unprotected core tool becomes an ordinary pruning candidate; its availability to
-the main agent is no longer guaranteed.
+the main agent is no longer guaranteed unless runtime protection applies.
+
+**Post-compaction runtime protection:** tools with currently running background calls
+are protected for that preparation, in both automatic resumption and manual
+continuation. Exclude their declarations before constructing tool-pruning candidates,
+then retain them when composing the selected context. This is runtime protection,
+independent of the user's editable defaults; it does not cancel or restart those calls,
+or bypass current permissions. Finishing a background call is not a new pruning trigger.
 
 Protected entries bypass pruning and remain available to the main session. Exclude
 them before constructing pruning inputs, not merely by restoring them after selection:
@@ -177,7 +190,8 @@ Discover and resolve applicable resources
 Each selector has its own category-specific brief and candidate inputs, excluding
 protected entries. Tools and skills do not wait for the instruction selector's output;
 each chooses its own exploratory reads. Each receives its selection instructions,
-the user prompt and its category candidates, not a shared investigation bundle.
+the boundary-specific task input defined above and its category candidates, not a
+shared investigation bundle.
 
 ## High-level structure proposal
 
@@ -345,8 +359,9 @@ feature first, reuse it; these are responsibility boundaries, not competing impl
    selection. Use the session's initial boundary or the latest successful compaction ID,
    not every history change, model change or preference change.
 2. At an allowed preparation boundary, capture the task context, discovery results,
-   preferences and resolved models once. Separate protected entries before building
-   selector inputs. Each selector has its own conversation and category brief.
+   preferences and resolved models once. At a post-compaction boundary, include tools
+   with running background calls in runtime protection. Separate protected entries
+   before building selector inputs. Each selector has its own conversation and category brief.
 3. Call the same `StartingResourcePruner` for the three typed sets in parallel. Each may
    use the shared tool-capable execution path for exploration, but never recursively
    prune itself.
@@ -357,10 +372,11 @@ feature first, reuse it; these are responsibility boundaries, not competing impl
    context at the main-request boundary. Ordinary requests and reopen reuse the saved
    selection. Compaction alone does not launch selectors.
 
-**Input contract:** each conversation receives category-selection instructions and
-the user prompt. Do not add compaction summaries or retained history as a required
-input bundle, or copy the main system instructions and thereby reintroduce protected
-documents. The precise prompt payload on input-free continuation still needs resolution.
+**Input contract:** use the boundary-specific task input in the selected direction:
+fresh user prompt, compaction summary alone for automatic resumption, or summary
+followed by the new user message for manual post-compaction continuation. Omit retained
+continuation context from post-compaction pruning inputs. Do not copy the main system
+instructions and thereby reintroduce protected documents.
 Candidate payloads remain proposed as skill
 name/description/path, existing tool declarations, and full unprotected instruction
 text with source/scope. Treat candidate contents as selection material. The model returns
@@ -405,8 +421,10 @@ selected skills. This is a proposed boundary for review, not a newly selected pr
 Suggested implementation order, subject to approval: share the existing execution mechanics
 without changing main-chat behaviour; add common model resolution and discovery; integrate
 selection and per-boundary recording; then preferences and the three status rows. Verification
-should exercise protected-input exclusion, parallel isolation, allowed triggers/reopen,
-per-category failure and Stop/recording/cleanup failures through existing test helpers.
+should exercise protected-input exclusion (including running background tools after
+compaction), all three task-input paths and omission of retained continuation context
+from selector inputs, parallel isolation, allowed triggers/reopen, per-category failure
+and Stop/recording/cleanup failures through existing test helpers.
 
 ## Selection failure
 
@@ -444,7 +462,6 @@ not replace those mechanisms.
 - Exact recognition/loading rules and non-project locations within the selected
   agent-facing Markdown scope, plus stored source identities. Other harnesses'
   instruction files remain excluded.
-- The precise user-prompt payload for continuation without a new user message.
 - Concrete classes, APIs, preference/storage shape and implementation sequencing.
   `PruningContext` remains an optional packaging proposal, not a required shared
   investigation or a settled type/name.

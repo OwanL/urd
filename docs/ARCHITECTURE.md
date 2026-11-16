@@ -615,9 +615,14 @@ with a per-category specific-model override in user preferences, including local
 Preferences also supply protected-item settings; protected entries bypass selection
 before inputs are built. Core tool protections are editable defaults: users may remove
 protection from `bash`, `read`, `write` and `edit`. Each pruning conversation receives
-its category-selection instructions, the user prompt and its candidates, and independently
-chooses exploratory reads. Do not add pruning-specific budgets; existing execution
-permissions, limits, cancellation and cleanup requirements still apply.
+its category-selection instructions, its candidates and boundary-specific task input:
+the user prompt for a fresh session; the compaction summary alone for automatic
+post-compaction resumption; or the summary followed by the new user message for manual
+post-compaction continuation. Retained continuation context is omitted from pruner inputs,
+not from the main agent's continuation. Tools with running background calls are protected
+before post-compaction pruning inputs are built, independently of editable defaults.
+Each conversation independently chooses exploratory reads. Do not add pruning-specific
+budgets; existing execution permissions, limits, cancellation and cleanup still apply.
 Pruning runs only on the first prompt in a fresh session and on the first message or
 continuation after successful compaction, not on compaction completion alone or other
 events. The [pruning plan](pruning-plan.md) owns these triggers, picker scope, working

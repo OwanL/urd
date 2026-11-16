@@ -491,11 +491,24 @@ does not retain every skill. The behavior is selected; the concrete API remains 
   the existing execution fence; they must not become keep-all-and-continue. A timeout
   requests cancellation, not proof that tools have stopped.
 
-### Implementation milestones — proposed
+### Implementation milestones
 
-This is an engineering sequence for owner review, not source implementation approval.
+**Owner approval (2026-11-16):** begin implementation with milestone 1, providing
+verified progress updates and raising material behavior changes for review. Earlier
+planning-only statements above describe their original approval state; they do not
+prohibit this subsequently approved implementation slice.
+This does not authorize live-provider evaluation, profile reset or host replacement.
 Each milestone should be a locally verified, task-scoped commit or small cohesive set
 of commits. Do not enable a partly integrated prepass in normal sessions.
+
+**Progress (2026-11-16):** milestone 1's shared response/tool mechanics and isolated
+auxiliary recording foundation are implemented. Main execution uses the extracted
+mechanics; auxiliary records use parent-guarded scopes and separate tables. Production
+prepass task creation/driver registration remains for the integration milestones;
+pruning/title generation are still disabled. Verification: 547 Release backend tests,
+339 UI tests, UI static checks/build and the offline real-server/SDK integration flow
+passed. The test/helper size budget remains satisfied. See
+[execution design](execution-design.md#implemented-core) for the delivered boundaries.
 
 | Milestone | Change boundary | Acceptance evidence |
 | --- | --- | --- |
@@ -610,7 +623,9 @@ not replace those mechanisms.
   agent-facing Markdown scope, plus stored source identities. Other harnesses'
   instruction files remain excluded.
 - Title integration/validation details listed under [parallel title generation](#parallel-title-generation).
-- Concrete classes, APIs, preference/storage shape and implementation sequencing.
+- Remaining concrete classes/APIs and preference/boundary-context storage shape.
+  The reviewed sequence above guides subsequent slices; completed source owns
+  delivered APIs.
   `PruningContext` remains an optional packaging proposal, not a required shared
   investigation or a settled type/name.
 

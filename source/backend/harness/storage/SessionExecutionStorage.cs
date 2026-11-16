@@ -6,7 +6,8 @@ using Urd.Core.Sessions;
 namespace Urd.Core.Storage;
 
 // Creates execution requests and retains stop and settlement facts. The caller joins request cleanup first.
-internal sealed class SessionExecutionStorage(Database database, ToolResultCodec toolResults) {
+internal sealed class SessionExecutionStorage(Database database, ToolResultCodec toolResults,
+    AuxiliaryConversationStorage auxiliaryConversations) {
   internal LlmRequest? CreateNextRequest(ExecutionIdentity execution) {
     return database.Write<LlmRequest?>(transaction => {
       Guid requestId = Guid.NewGuid();
@@ -149,6 +150,11 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
                     AND c.history_revision = r.history_revision AND c.claimed_request_id IS NULL)) AS pending_inputs,
             EXISTS (SELECT 1 FROM execution_tools t WHERE t.run_id = r.run_id
                 AND (t.outcome IS NULL OR t.result_json IS NULL)) AS missing_results,
+            EXISTS (SELECT 1 FROM auxiliary_conversations c WHERE c.run_id = r.run_id AND (
+                EXISTS (SELECT 1 FROM auxiliary_requests q
+                    WHERE q.conversation_id = c.conversation_id AND q.outcome IS NULL)
+                OR EXISTS (SELECT 1 FROM auxiliary_tools t
+                    WHERE t.conversation_id = c.conversation_id AND t.result_json IS NULL))) AS auxiliary_work_pending,
             EXISTS (SELECT 1 FROM execution_tools t JOIN execution_requests q ON q.request_id = t.request_id
                 WHERE q.run_id = r.run_id AND q.request_index =
                     (SELECT MAX(request_index) FROM execution_requests WHERE run_id = r.run_id)) AS needs_tool_continuation,
@@ -160,8 +166,8 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
         FROM execution_runs r WHERE r.session_id = $session AND r.run_id = $run;
         """, row => new RunFinishState((ExecutionOutcome?)row.NullableInt("outcome"), row.Bool("stopping"),
           (ExecutionOutcome?)row.NullableInt("last_outcome"), row.Bool("pending_inputs"), row.Bool("missing_results"),
-          row.Bool("needs_tool_continuation"), row.Bool("is_compaction"), row.NullableString("error"),
-          row.NullableTimestamp("working_started_at")),
+          row.Bool("needs_tool_continuation"), row.Bool("auxiliary_work_pending"), row.Bool("is_compaction"),
+          row.NullableString("error"), row.NullableTimestamp("working_started_at")),
         ("$session", sessionId), ("$run", executionId), ("$compaction", (int)ExecutionRunKind.Compaction));
       if (ChooseFinalOutcome(state, driverOutcome) is not { } settlement)
         return null;
@@ -169,6 +175,7 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
       if (settlement.AlreadySettled)
         return new(executionId, settlement.Outcome, settlement.Error);
 
+      auxiliaryConversations.Retire(transaction, executionId, settlement.Outcome);
       TimeSpan elapsed = settlement.StartedAt is { } startedAt
           ? DateTimeOffset.UtcNow - startedAt : TimeSpan.Zero;
       bool unknownDuration = settlement.StartedAt is null || elapsed < TimeSpan.Zero;
@@ -252,6 +259,7 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
             ("$unstartedResult", toolResults.Error("Interrupted before tool execution; tool was not executed.")),
             ("$unknownResult", toolResults.Error("Tool execution interrupted; effects may have occurred. Do not automatically retry.")),
             ("$ended", StorageText.UtcTimestamp()));
+        auxiliaryConversations.Retire(transaction, run.RunId, ExecutionOutcome.Failed);
         QueueMissingCompletions(transaction, run.RunId);
         PublishCompletions(transaction, run.SessionId, run.Revision);
       }
@@ -328,12 +336,13 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
           driverOutcome == ExecutionOutcome.Failed ? state.Error : null, state.StartedAt);
 
     if (state.IsCompaction)
-      return (driverOutcome, AlreadySettled: false, null, state.StartedAt);
+      return state.AuxiliaryWorkPending ? null : (driverOutcome, AlreadySettled: false, null, state.StartedAt);
 
     if (state.LastOutcome is not { } outcome)
       return null;
 
-    if (outcome == ExecutionOutcome.Completed && (state.PendingInputs || state.MissingResults || state.NeedsToolContinuation))
+    if (outcome == ExecutionOutcome.Completed && (state.PendingInputs || state.MissingResults
+        || state.AuxiliaryWorkPending || state.NeedsToolContinuation))
       return null;
 
     return (outcome, AlreadySettled: false, outcome == ExecutionOutcome.Failed ? state.Error : null, state.StartedAt);
@@ -341,6 +350,6 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
 
   // Facts used to decide whether an execution can finish before changing stored state.
   private sealed record RunFinishState(ExecutionOutcome? Outcome, bool StopRequested, ExecutionOutcome? LastOutcome,
-      bool PendingInputs, bool MissingResults, bool NeedsToolContinuation, bool IsCompaction, string? Error,
-      DateTimeOffset? StartedAt);
+      bool PendingInputs, bool MissingResults, bool NeedsToolContinuation, bool AuxiliaryWorkPending,
+      bool IsCompaction, string? Error, DateTimeOffset? StartedAt);
 }

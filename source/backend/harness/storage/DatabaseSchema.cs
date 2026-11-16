@@ -4,7 +4,7 @@ namespace Urd.Core.Storage;
 
 // Creates the current pre-release schema; incompatible databases require a manual reset.
 internal static class DatabaseSchema {
-  private const int SchemaVersion = 27;
+  private const int SchemaVersion = 28;
 
   internal static void Initialize(SqliteConnection connection) {
     using SqliteCommand command = connection.CreateCommand();
@@ -278,6 +278,83 @@ internal static class DatabaseSchema {
           request_id TEXT PRIMARY KEY NOT NULL REFERENCES execution_requests(request_id),
           response_json TEXT NOT NULL
       ) STRICT;
+      -- Auxiliary conversations retain prepass facts without entering the main model transcript.
+      CREATE TABLE auxiliary_conversations (
+          conversation_id TEXT NOT NULL PRIMARY KEY,
+          session_id TEXT NOT NULL REFERENCES sessions(session_id),
+          run_id TEXT NOT NULL REFERENCES execution_runs(run_id) ON DELETE CASCADE,
+          history_revision INTEGER NOT NULL CHECK (history_revision >= 0),
+          purpose TEXT NOT NULL CHECK (length(purpose) > 0),
+          llm_selection_json TEXT NOT NULL,
+          input_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          retired_at TEXT,
+          parent_outcome INTEGER CHECK (parent_outcome IN (0, 1, 2)),
+          CHECK ((retired_at IS NULL AND parent_outcome IS NULL)
+              OR (retired_at IS NOT NULL AND parent_outcome IS NOT NULL))
+      ) STRICT;
+      CREATE INDEX auxiliary_conversations_parent ON auxiliary_conversations(run_id, conversation_id);
+      CREATE TABLE auxiliary_requests (
+          request_id TEXT NOT NULL PRIMARY KEY,
+          conversation_id TEXT NOT NULL REFERENCES auxiliary_conversations(conversation_id) ON DELETE CASCADE,
+          request_index INTEGER NOT NULL CHECK (request_index >= 0),
+          next_chunk_index INTEGER NOT NULL DEFAULT 0 CHECK (next_chunk_index >= 0),
+          response_final INTEGER NOT NULL DEFAULT 0 CHECK (response_final IN (0, 1)),
+          outcome INTEGER CHECK (outcome IN (0, 1, 2)),
+          error TEXT,
+          usage_json TEXT,
+          provider_response_json TEXT,
+          created_at TEXT NOT NULL,
+          completed_at TEXT,
+          UNIQUE (conversation_id, request_index),
+          UNIQUE (conversation_id, request_id),
+          CHECK ((outcome IS NULL AND completed_at IS NULL)
+              OR (outcome IS NOT NULL AND completed_at IS NOT NULL))
+      ) STRICT;
+      CREATE TABLE auxiliary_output (
+          conversation_id TEXT NOT NULL,
+          request_id TEXT NOT NULL,
+          chunk_index INTEGER NOT NULL CHECK (chunk_index >= 0),
+          response_id TEXT NOT NULL,
+          text_utf8 BLOB NOT NULL CHECK (length(text_utf8) <= {{StorageText.MaximumBytes}}),
+          is_final INTEGER NOT NULL CHECK (is_final IN (0, 1)),
+          PRIMARY KEY (request_id, chunk_index),
+          FOREIGN KEY (conversation_id, request_id)
+              REFERENCES auxiliary_requests(conversation_id, request_id) ON DELETE CASCADE
+      ) STRICT;
+      CREATE TABLE auxiliary_observed_calls (
+          conversation_id TEXT NOT NULL REFERENCES auxiliary_conversations(conversation_id) ON DELETE CASCADE,
+          request_id TEXT NOT NULL,
+          observed_index INTEGER NOT NULL CHECK (observed_index >= 0),
+          next_chunk_index INTEGER NOT NULL CHECK (next_chunk_index >= 0),
+          call_id TEXT NOT NULL,
+          name TEXT,
+          PRIMARY KEY (conversation_id, call_id),
+          UNIQUE (request_id, observed_index),
+          FOREIGN KEY (conversation_id, request_id)
+              REFERENCES auxiliary_requests(conversation_id, request_id) ON DELETE CASCADE
+      ) STRICT;
+      CREATE TABLE auxiliary_tools (
+          conversation_id TEXT NOT NULL REFERENCES auxiliary_conversations(conversation_id) ON DELETE CASCADE,
+          request_id TEXT NOT NULL,
+          call_index INTEGER NOT NULL CHECK (call_index >= 0),
+          call_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          arguments_excerpt TEXT NOT NULL DEFAULT '{}',
+          started INTEGER NOT NULL DEFAULT 0 CHECK (started IN (0, 1)),
+          interrupted INTEGER NOT NULL DEFAULT 0 CHECK (interrupted IN (0, 1)),
+          outcome INTEGER CHECK (outcome IN (0, 1, 2)),
+          started_at TEXT,
+          ended_at TEXT,
+          arguments_json TEXT NOT NULL,
+          result_json TEXT,
+          error TEXT,
+          PRIMARY KEY (conversation_id, call_id),
+          UNIQUE (request_id, call_index),
+          FOREIGN KEY (conversation_id, request_id)
+              REFERENCES auxiliary_requests(conversation_id, request_id) ON DELETE CASCADE
+      ) STRICT;
+      CREATE INDEX auxiliary_tools_request_order ON auxiliary_tools(request_id, call_index);
       CREATE TABLE session_compactions (
           ordinal INTEGER PRIMARY KEY AUTOINCREMENT,
           compaction_id TEXT NOT NULL UNIQUE,

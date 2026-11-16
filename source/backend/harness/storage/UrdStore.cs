@@ -16,8 +16,9 @@ public sealed class UrdStore : IDisposable {
     UserMessages = new(database);
     Continuations = new(database, toolResults);
     MessageEdits = new(database, UserMessages);
-    Executions = new(database, toolResults);
     LlmResponses = new(database);
+    AuxiliaryConversations = new(database, toolResults);
+    Executions = new(database, toolResults, AuxiliaryConversations);
     Tools = new(database, toolResults);
     Content = new(database);
     Snapshots = new(database, Content);
@@ -42,6 +43,7 @@ public sealed class UrdStore : IDisposable {
   internal MessageEditStorage MessageEdits { get; }
   internal SessionExecutionStorage Executions { get; }
   internal LlmResponseStorage LlmResponses { get; }
+  internal AuxiliaryConversationStorage AuxiliaryConversations { get; }
   internal ToolStorage Tools { get; }
   internal SnapshotReader Snapshots { get; }
   internal MessageContentReader Content { get; }

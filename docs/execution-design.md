@@ -29,8 +29,18 @@ invocation feedback, not evidence of no effect or permission for automatic repla
 output flush and cancellation/cleanup path. `ToolInvoker` supplies definition-checked
 invocation from an explicitly supplied capability set. Main execution uses both;
 request admission, persistence, compaction, batch/background ownership and settlement
-remain with their existing session owners. This foundation does not enable pruning
-or title generation.
+remain with their existing session owners.
+
+Auxiliary conversations now have separate durable input/model/tool snapshots, ordered
+response chunks, call observations, authorized calls and results. Their scoped recorder
+uses the parent's session lock and current-run/revision/Stop guards, without placing
+main input or entering main model history. Completion/result validation is shared with
+the main store. A successful parent settlement refuses unfinished auxiliary requests
+or tools; Stop/failure and host recovery retain actual saved results and retire unknown
+effects without replay. Auxiliary calls currently have foreground claims only; no
+background completions are delivered into the main history. The caller must own/join
+auxiliary tasks; production preparation and driver task registration are not wired yet.
+This foundation does not enable pruning or title generation.
 
 See [backend development](backend-development.md) for the tested scope and limitations.
 The older experiments below remain research evidence. Later separately authorized

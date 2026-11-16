@@ -234,8 +234,8 @@ not retained. For manual inspection, run `npm run dev:browser:host` and open its
 Urd origin. This starts a development host, not tests.
 Playwright remains a dependency only for the separate manual `TranscriptBaseline.ts`
 diagnostic, not routine verification. Its raw-SQL seed still requires schema 16, while
-[the schema owner](../source/backend/harness/storage/DatabaseSchema.cs) is at version 27
-(as checked 2026-11-15), so it aborts before the workload. Requalify its seed SQL and
+[the schema owner](../source/backend/harness/storage/DatabaseSchema.cs) is at version 28
+(as checked 2026-11-16), so it aborts before the workload. Requalify its seed SQL and
 version guard together before using it as performance evidence; changing the guard
 alone is not qualification. Install its pinned Chromium explicitly before running it.
 Ctrl+C or POST to

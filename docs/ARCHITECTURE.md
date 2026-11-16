@@ -317,7 +317,12 @@ spending-approval system.
 
 ### Retain bounded subagents and independent agent-created sessions
 
-**Decision:** Both workflows earn their place in Urd; neither is being removed
+**Later clarification (2026-11-16):** the active bounded-subagent/communication design does not
+approve independently delegated sessions. Its ownership, question/reply and cycle rules are in
+[agent communication](agent-communication-design.md). The independent-session paragraphs below
+are an older unresolved direction and must not be treated as implementation approval.
+
+**Earlier direction:** Both workflows earn their place in Urd; neither is being removed
 as redundant.
 
 - **Bounded subagent:** a focused delegated task with a direct call/result

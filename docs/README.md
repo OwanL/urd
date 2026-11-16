@@ -24,6 +24,8 @@ not a separate archive. Their remaining constraints belong to the current docume
   [discovery](discovery-design.md): lifetime, model/tool calls, adapter limits and capability exposure.
 - [Pruning plan](pruning-plan.md): canonical design direction for parallel category selection,
   protected entries and per-category model/protection settings; not implementation approval.
+- [Agent communication](agent-communication-design.md): bounded delegation, request/reply,
+  ownership and cycle handling; active design, not implementation approval.
 - [Agent tools](agent-tools-design.md): tool set, parallel/background calls, approved class shapes.
 - [Compaction](compaction-design.md): implemented history compaction and its limits.
 - [Browser](BROWSER-DESIGN.md): shared UI, local access and remaining host/closure choices.

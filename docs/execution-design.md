@@ -25,6 +25,13 @@ Core-owned result encoding/save and cleanup failures instead fence continuation.
 `AIFunction` may perform binding/marshalling inside `InvokeAsync`; those exceptions remain
 invocation feedback, not evidence of no effect or permission for automatic replay.
 
+`LlmResponseRunner` now supplies the shared single-response stream validation, timed
+output flush and cancellation/cleanup path. `ToolInvoker` supplies definition-checked
+invocation from an explicitly supplied capability set. Main execution uses both;
+request admission, persistence, compaction, batch/background ownership and settlement
+remain with their existing session owners. This foundation does not enable pruning
+or title generation.
+
 See [backend development](backend-development.md) for the tested scope and limitations.
 The older experiments below remain research evidence. Later separately authorized
 live-provider evidence is in [provider qualification](provider-qualification.md#live-shared-request-qualification--2026-11-08);

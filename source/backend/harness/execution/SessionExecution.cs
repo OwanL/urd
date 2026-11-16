@@ -10,8 +10,8 @@ using Urd.Core.Usage;
 
 namespace Urd.Core.Execution;
 
-// Runs each LLM request: prepare context, stream and save the response, then run its tool calls.
-// Owns request cancellation and stream cleanup; SessionToolExecution owns tool batches.
+// Prepares each LLM request and settles its response; LlmResponseRunner owns stream cleanup.
+// SessionExecution owns request cancellation; SessionToolExecution owns tool batches.
 // SessionExecutionDriver chooses the next request and waits for cleanup before settling the execution.
 internal sealed class SessionExecution : IDisposable {
   private readonly SessionBase session;
@@ -168,39 +168,16 @@ internal sealed class SessionExecution : IDisposable {
   }
 
   private async Task<LlmRequestResult> SendLlmRequestAsync(LlmRequest request, bool allowAutomaticCompaction = true) {
-    using var requestStop = CancellationTokenSource.CreateLinkedTokenSource(stop.Token);
-    var writer = new LlmResponseWriter(request.RequestId, SaveChunkAsync,
-        (callId, name) => RecordToolCallAsync(request.RequestId, callId, name));
-    var response = new LlmResponseAccumulator(writer);
-    (Exception? failure, bool outputObserved) = await StreamLlmResponseAsync(
-        request, requestStop, allowAutomaticCompaction, writer, response);
-    if (failure is ProviderOperationException && !IsStopping) {
-      try { await writer.FlushAsync(); }
-      catch (Exception saveFailure) { failure = saveFailure; }
-    }
-    LlmRequestResult result = CreateRequestResult(request.RequestId, failure);
-    return result with {
-      ToolCalls = result.Outcome == ExecutionOutcome.Completed ? response.ToolCalls : null,
-      ProviderResponse = result.Outcome == ExecutionOutcome.Completed ? response.ProviderResponse : null,
-      Usage = response.Usage,
-      OutputObserved = outputObserved
-    };
-  }
-
-  private async Task<(Exception? Failure, bool OutputObserved)> StreamLlmResponseAsync(LlmRequest request,
-      CancellationTokenSource requestStop, bool allowAutomaticCompaction, LlmResponseWriter writer, LlmResponseAccumulator response) {
-    IAsyncEnumerator<ChatResponseUpdate>? updates = null;
-    Task<bool>? pendingRead = null;
-    Exception? failure = null;
-    bool outputObserved = false;
+    IChatClient client;
+    IReadOnlyList<ChatMessage> messages;
+    ChatOptions options;
     try {
-      CancellationToken stopToken = stop.Token;
-      stopToken.ThrowIfCancellationRequested();
+      stop.Token.ThrowIfCancellationRequested();
       EnsureStartingContext();
       if (allowAutomaticCompaction)
         request = await CompactHistoryAsync(request.RequestId, CompactionReason.Threshold, currentHistory: request.Context) ?? request;
-      chatClient ??= createChatClient(selection.Connection);
-      var options = new ChatOptions {
+      client = chatClient ??= createChatClient(selection.Connection);
+      options = new() {
         ModelId = selection.ModelId,
         Reasoning = selection.ReadReasoningEffort() is { } effort
             ? new ReasoningOptions { Effort = effort } : null,
@@ -210,38 +187,22 @@ internal sealed class SessionExecution : IDisposable {
         }
       };
       await StartRequestAsync(request.RequestId, startingContext);
-      updates = chatClient.GetStreamingResponseAsync(LlmMessageProjection.AdaptForModel(
-          [.. startingContext.Instructions, .. request.Messages], selection.SupportsImages), options, requestStop.Token)
-          .GetAsyncEnumerator(requestStop.Token);
-
-      while (await WaitForUpdateAndFlushAsync(writer, pendingRead ??= updates.MoveNextAsync().AsTask())) {
-        pendingRead = null;
-        stopToken.ThrowIfCancellationRequested();
-        outputObserved |= updates.Current.Contents.Any(content => content is not UsageContent);
-        await response.AddUpdateAsync(updates.Current);
-      }
-
-      pendingRead = null;
-      stopToken.ThrowIfCancellationRequested();
-      await response.FinishAsync();
-    } catch (Exception exception) {
-      failure = exception;
+      messages = LlmMessageProjection.AdaptForModel(
+          [.. startingContext.Instructions, .. request.Messages], selection.SupportsImages);
+    } catch (Exception failure) {
+      return CreateRequestResult(request.RequestId, failure);
     }
 
-    await CancelAndCloseResponseAsync(requestStop, pendingRead, updates, failure);
-    return (failure, outputObserved);
-  }
-
-  private async Task<bool> WaitForUpdateAndFlushAsync(LlmResponseWriter writer, Task<bool> pendingRead) {
-    Task? flushDelay = writer.FlushDelay;
-    if (flushDelay is not null &&
-        (flushDelay.IsCompleted || await Task.WhenAny(pendingRead, flushDelay) == flushDelay)) {
-      stop.Token.ThrowIfCancellationRequested();
-      // Flushing clears the deadline; only another update can start a new one.
-      await writer.FlushAsync();
-    }
-
-    return await pendingRead;
+    LlmResponseRunner.Result response = await LlmResponseRunner.RunAsync(client, messages, options,
+        request.RequestId, SaveChunkAsync,
+        (callId, name) => RecordToolCallAsync(request.RequestId, callId, name), stop.Token);
+    LlmRequestResult result = CreateRequestResult(request.RequestId, response.Failure);
+    return result with {
+      ToolCalls = result.Outcome == ExecutionOutcome.Completed ? response.ToolCalls : null,
+      ProviderResponse = result.Outcome == ExecutionOutcome.Completed ? response.ProviderResponse : null,
+      Usage = response.Usage,
+      OutputObserved = response.OutputObserved
+    };
   }
 
   private LlmRequestResult CreateRequestResult(Guid requestId, Exception? failure) {
@@ -279,34 +240,6 @@ internal sealed class SessionExecution : IDisposable {
     }
     if (!saved)
       throw new OutputRejectedException();
-  }
-
-  // Attempts every step even when an earlier one fails. A cleanup failure leaves the
-  // execution unsettled, so it is thrown to the session instead of becoming a failed request.
-  private static async Task CancelAndCloseResponseAsync(CancellationTokenSource requestStop, Task<bool>? pendingRead,
-      IAsyncEnumerator<ChatResponseUpdate>? updates, Exception? requestFailure) {
-    Exception? cancelFailure = await CaptureFailureAsync(() => new ValueTask(requestStop.CancelAsync()));
-    if (pendingRead is not null) {
-      // A read abandoned by cancellation is expected to fail. Wait for it anyway,
-      // because the enumerator must be idle before it is disposed.
-      _ = await CaptureFailureAsync(() => new ValueTask(pendingRead));
-    }
-
-    Exception? updatesFailure = updates is null ? null : await CaptureFailureAsync(updates.DisposeAsync);
-    if (cancelFailure is null && updatesFailure is null)
-      return;
-
-    Exception?[] failures = [requestFailure, cancelFailure, updatesFailure];
-    throw new AggregateException("The request could not be cleaned up.", failures.OfType<Exception>());
-  }
-
-  private static async Task<Exception?> CaptureFailureAsync(Func<ValueTask> action) {
-    try {
-      await action();
-      return null;
-    } catch (Exception exception) {
-      return exception;
-    }
   }
 
 #pragma warning disable S3871 // Private driver signals, not public exception contracts.

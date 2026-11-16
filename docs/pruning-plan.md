@@ -167,9 +167,11 @@ proposed concrete structure for that direction, not permission to create these f
 | --- | --- |
 | Rule-bearing content, whether built-in or loaded from files | **Instructions**, rather than guidance or system prompts |
 | One identifiable, orderable contribution of text intended for the session's starting context | **`StartingContextContribution`**, replacing the existing `ContextGuidance` name |
-| Project-owned result types from shared resource discovery | **`Discovered` prefix** |
+| Project-owned result types from shared instruction-resource discovery | **`Discovered` prefix** |
 | A loaded instruction document returned by resource discovery | **`DiscoveredInstructionDocument`** |
 | A skill's metadata returned by resource discovery | **`DiscoveredSkill`**, replacing the existing `Skill` name |
+| The umbrella covering instruction documents and skills | **Instruction resources** |
+| The shared operation that discovers and loads instruction resources | **`InstructionResourceDiscovery`** |
 
 `StartingContextContribution` defines a contribution, whether its text is fixed or
 produced from supplied session data. Preparation may exclude, prune or process it
@@ -180,6 +182,12 @@ format. This renames the existing abstraction; it does not add a wrapper or anot
 performs discovery. Retained resources keep these types after pruning. Instruction
 documents carry their full loaded text; skills still carry metadata for on-demand reading.
 This convention does not require separate raw, discovered and selected wrapper types.
+
+Instruction resources comprise general/project instruction documents and skills, which
+provide specialised task instructions. This umbrella excludes registered tools and
+runtime-generated context facts. `InstructionResourceDiscovery` owns finding/loading
+these resources, not pruning or context composition. The terminology does not require
+a new common resource base class.
 
 Other concrete names remain under review. Remaining `Guidance` identifiers describe
 current code or earlier proposals, not additional settled names. These are design
@@ -194,8 +202,8 @@ context/
     StartingContextManager.cs       change: discover → protect → prune → compose
     StartingContext.cs              change: carry selected resources into composition
     StartingContextContribution.cs  rename existing ContextGuidance abstraction
-    ResourceDiscovery.cs            new: shared skill/instruction discovery and loading
-    DiscoveredResources.cs          new: typed discovered collections; aggregate name proposed
+    InstructionResourceDiscovery.cs new: shared skill/instruction discovery and loading
+    DiscoveredInstructionResources.cs new: typed discovered collections; aggregate name proposed
     DiscoveredInstructionDocument.cs new: loaded file-backed contribution
     DiscoveredSkill.cs              rename existing Skill value
     SkillFrontmatter.cs             keep existing parser
@@ -205,14 +213,14 @@ context/
     PruningResult.cs                new: retained items and outcome/diagnostic
 ```
 
-`ResourceDiscovery` absorbs the discovery/loading currently in `SkillCatalog`; remove
+`InstructionResourceDiscovery` absorbs discovery/loading from `SkillCatalog`; remove
 that old owner once its callers move, rather than retain two discovery pipelines.
 Keep kind-specific parsing private to discovery and reuse `SkillFrontmatter`. Preserve
 existing packaged-skill and project-override rules. Tools remain registered resources
 from `ToolCatalog`, not files found by the discoverer.
 
-The proposed `DiscoveredResources` aggregate contains `IReadOnlyList<DiscoveredSkill>`
-and `IReadOnlyList<DiscoveredInstructionDocument>`.
+The proposed `DiscoveredInstructionResources` aggregate contains
+`IReadOnlyList<DiscoveredSkill>` and `IReadOnlyList<DiscoveredInstructionDocument>`.
 `DiscoveredInstructionDocument : StartingContextContribution` carries already-loaded
 text, source path and scope. It implements the existing ordering/applicability/rendering
 contract and requires file data in its constructor, so the parameterless contribution scan
@@ -223,8 +231,9 @@ second prompt hierarchy or an additional instruction-document/wrapper pair.
 ### Proposed method surface
 
 ```csharp
-// ResourceDiscovery
-Task<DiscoveredResources> FindAsync(string workingDirectory, CancellationToken cancellation);
+// InstructionResourceDiscovery
+Task<DiscoveredInstructionResources> FindAsync(
+    string workingDirectory, CancellationToken cancellation);
 
 // Pruner: one instance for one preparation
 Pruner(PruningContext context, ConversationRunner execution);
@@ -273,8 +282,8 @@ plugin hierarchy are needed.
   renders recorded category status. Detailed UI remains deferred.
 
 **Revised after owner feedback:** shared discovery is a resource-level responsibility,
-not merely a Git helper below separate discoverers. `ResourceDiscovery` owns finding
-and loading skills/instructions; `Pruner` owns selection; `StartingContextManager` connects
+not merely a Git helper below separate discoverers. `InstructionResourceDiscovery` owns
+finding/loading skills and instruction documents; `Pruner` owns selection; `StartingContextManager` connects
 them and handles protection/composition. Resource kinds retain distinct parsing rules
 and typed values without requiring separate top-level discoverer classes.
 
@@ -287,8 +296,8 @@ internal selection detail. Do not silently equate a failed keep-all fallback wit
 successful decision to keep every item.
 
 `SkillsGuidance` must format the selected skill list instead of rediscovering everything.
-Settings and preparation use `ResourceDiscovery`; the shared registered tool catalog
-remains the tool source. If shared execution or bucket resolution lands through another
+Settings and preparation use `InstructionResourceDiscovery`; the shared registered tool
+catalog remains the tool source. If shared execution or bucket resolution lands through another
 feature first, reuse it; these are responsibility boundaries, not competing implementations.
 
 ### Proposed data flow

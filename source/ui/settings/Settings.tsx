@@ -12,9 +12,13 @@ import type { PreferencesState } from "../preferences/usePreferences.ts";
 import type { ProviderClient } from "../providers/ProviderClient.ts";
 import { ProviderSettings, useProviderSettings } from "../providers/settings/index.ts";
 import { GeneralSettings } from "./GeneralSettings.tsx";
+import { ModelPreferencesSettings } from "./ModelPreferencesSettings.tsx";
+import { ProtectedResourcesSettings } from "./ProtectedResourcesSettings.tsx";
 import "./settings.css";
 
-export type SettingsTab = "providers" | "general";
+export type SettingsTab = "providers" | "general" | "prepass";
+
+const tabs: readonly SettingsTab[] = ["providers", "general", "prepass"];
 
 interface SettingsProps {
   open: boolean;
@@ -59,6 +63,7 @@ export function Settings({
   const workingDirectoryButton = useRef<HTMLButtonElement>(null);
   const providersTab = useRef<HTMLButtonElement>(null);
   const generalTab = useRef<HTMLButtonElement>(null);
+  const prepassTab = useRef<HTMLButtonElement>(null);
   const id = useId();
   if (!open) return null;
 
@@ -69,15 +74,21 @@ export function Settings({
   };
   const focusTab = (next: SettingsTab) => {
     onTabChange(next);
-    (next === "providers" ? providersTab : generalTab).current?.focus();
+    (next === "providers"
+      ? providersTab
+      : next === "general"
+        ? generalTab
+        : prepassTab
+    ).current?.focus();
   };
   const navigateTabs = (event: TargetedKeyboardEvent<HTMLDivElement>) => {
     if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
       event.preventDefault();
-      focusTab(tab === "providers" ? "general" : "providers");
+      const direction = event.key === "ArrowRight" ? 1 : -1;
+      focusTab(tabs[(tabs.indexOf(tab) + direction + tabs.length) % tabs.length] ?? "providers");
     } else if (event.key === "Home" || event.key === "End") {
       event.preventDefault();
-      focusTab(event.key === "Home" ? "providers" : "general");
+      focusTab(event.key === "Home" ? "providers" : "prepass");
     }
   };
   return (
@@ -86,7 +97,9 @@ export function Settings({
       class="settings-popover"
       label="Settings"
       placement="below"
-      initialFocus={tab === "providers" ? searchInput : workingDirectoryButton}
+      initialFocus={
+        tab === "providers" ? searchInput : tab === "general" ? workingDirectoryButton : prepassTab
+      }
       onClose={close}
     >
       <header class="settings-heading">
@@ -123,6 +136,18 @@ export function Settings({
         >
           General
         </button>
+        <button
+          ref={prepassTab}
+          type="button"
+          id={`${id}-prepass-tab`}
+          role="tab"
+          aria-selected={tab === "prepass"}
+          aria-controls={`${id}-prepass-panel`}
+          tabIndex={tab === "prepass" ? 0 : -1}
+          onClick={() => onTabChange("prepass")}
+        >
+          Prepass
+        </button>
       </div>
       <section
         class="settings-page"
@@ -153,8 +178,6 @@ export function Settings({
       >
         <GeneralSettings
           state={preferences}
-          client={client}
-          active={tab === "general"}
           buttonRef={workingDirectoryButton}
           compactionTriggerDraft={compactionTriggerDraft.value}
           onCompactionTriggerDraftChange={(value) =>
@@ -166,6 +189,22 @@ export function Settings({
             setCompactionTriggerDraft({ value: compactionTriggerInput(value), edited: false })
           }
         />
+      </section>
+      <section
+        class="settings-page"
+        id={`${id}-prepass-panel`}
+        role="tabpanel"
+        aria-labelledby={`${id}-prepass-tab`}
+        hidden={tab !== "prepass"}
+      >
+        <div class="general-settings">
+          <ModelPreferencesSettings
+            client={client}
+            state={preferences}
+            active={tab === "prepass"}
+          />
+          <ProtectedResourcesSettings state={preferences} active={tab === "prepass"} />
+        </div>
       </section>
     </Popover>
   );

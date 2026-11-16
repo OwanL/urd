@@ -6,14 +6,9 @@ import {
   parseCompactionTriggerInput,
 } from "../preferences/CompactionTriggerInput.ts";
 import type { PreferencesState } from "../preferences/usePreferences.ts";
-import type { ProviderClient } from "../providers/ProviderClient.ts";
-import { ModelPreferencesSettings } from "./ModelPreferencesSettings.tsx";
-import { ProtectedResourcesSettings } from "./ProtectedResourcesSettings.tsx";
 
 interface GeneralSettingsProps {
   state: PreferencesState;
-  client: ProviderClient;
-  active: boolean;
   buttonRef: RefObject<HTMLButtonElement | null>;
   compactionTriggerDraft: string;
   onCompactionTriggerDraftChange(value: string): void;
@@ -22,8 +17,6 @@ interface GeneralSettingsProps {
 
 export function GeneralSettings({
   state,
-  client,
-  active,
   buttonRef,
   compactionTriggerDraft,
   onCompactionTriggerDraftChange,
@@ -147,8 +140,6 @@ export function GeneralSettings({
           {triggerSaved && !triggerSaving && <p role="status">Saved.</p>}
         </div>
       </div>
-      <ModelPreferencesSettings client={client} state={state} active={active} />
-      <ProtectedResourcesSettings state={state} active={active} />
       {!pickerOpen && (
         <div class="general-settings-feedback" aria-live="polite" aria-atomic="true">
           {state.pending && !triggerSaving && <p>Saving…</p>}

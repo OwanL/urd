@@ -31,7 +31,7 @@ Settings → General holds the default working directory, selected through a fol
 and an explicitly saved compaction-trigger token count. Blank/Automatic restores the default;
 positive whole counts override the trigger subject to model headroom. The shared `usePreferences`
 hook owns reads and saves; changing the trigger takes effect at the next compaction check, while
-working-directory changes still apply only to new chats. General also configures
+working-directory changes still apply only to new chats. Settings → Prepass configures
 small/medium/frontier model buckets, independent tool/skill/instruction/title choices,
 and protected-resource lists. Missing models/resources remain visibly unavailable rather
 than rebinding. Protection pickers discover resources for the default directory; built-in
@@ -267,6 +267,10 @@ Preference saves restore a still-visible control only when focus fell to the doc
 delayed-write checks confirmed that moving focus or closing Settings is not overridden.
 This is a dated manual check, not retained browser coverage or live-model qualification;
 no saved credentials, live profile or running user host were used.
+The dedicated Prepass tab was subsequently checked at both widths, including three-tab
+keyboard wrapping, focus on reopen, General draft preservation, saves across tab changes,
+catalog retry and reload persistence. Resource discovery made no reads while inactive.
+Fresh 680×560 transcript captures show running/completed rows and delayed title publication.
 
 ## Conversation feedback
 

@@ -92,21 +92,20 @@ foreground parent/child restriction, which is a direct unavoidable dependency.
 
 These are constraints and questions, not approved implementation mechanics:
 
-- **Recipient states:** define durable presentation and delivery for running model requests,
-  executing tools, waiting executions and responses finishing concurrently with a question.
-- **Wakeups:** a waiting recipient must be able to receive and answer a question. Do not require
-  inbox polling. Reuse persisted inputs and existing request-boundary/wakeup machinery where
-  appropriate rather than creating a parallel scheduler.
+- **Recipient states / wakeups (decided 2026-11-16):** delivery reuses the existing opportune
+  insertion (steering) machinery. A busy recipient sees the question at its next request
+  boundary, alongside tool results; `wake: true` starts an idle or waiting recipient the same
+  way new input does. No inbox polling or parallel scheduler.
 - **Identity and provenance:** distinguish human input, agent questions/answers and tool results.
   The harness supplies sender identity; model-provided text does not confer user authority.
 - **Exactly-once state transitions:** persistence and delivery can be retried, but a question is
   answered once and cancellation is explicit. A tool result is not proof that the recipient read
   or acted on the question unless that is its defined result.
-- **Interruption:** ordinary questions are not automatically permission to abort in-flight model
-  requests or tools. Prompt delivery versus interruption needs an explicit decision based on the
-  recipient-state design.
-- **Recovery:** determine how unanswered questions, waiting callers and incoming questions are
-  restored after reopening/restart without duplicating effects or silently losing a dependency.
+- **Interruption (decided 2026-11-16):** questions never interrupt in-flight model requests or
+  tools; they wait for the next boundary. A recipient in a long tool call answers late.
+- **Recovery (decided 2026-11-16):** on restart or similar major failure, fail every pending and
+  queued question and every waiting ask with a clear error. Nothing is restored or replayed, so
+  no question is left dangling.
 - **Compaction:** outstanding questions retain their identities and full inputs just as other
   background calls do; completion delivery still associates the answer with the original ask.
 - **User input and approval:** an agent question is not user consent. Agents cannot answer or

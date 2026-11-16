@@ -74,6 +74,12 @@ Run it in parallel with the pruning conversations, using shared execution rather
 another auxiliary-job framework. It is a distinct operation, not a fourth pruning
 category or a consumer of `StartingResourcePruningResult<T>`.
 
+**Title trigger decision:** generate only after the first message of a session, as
+part of its initial prepass. No later message, compaction/resumption, reopen/restart,
+model change or preference change triggers title generation. This is a session-level
+boundary, not a once-per-host-lifecycle opportunity. It does not add a later manual
+regeneration trigger; explicit/manual renaming is a separate operation.
+
 - Supply title-generation instructions and the user prompt.
 - Permit optional `read`/`bash` exploration, independently of the pruning conversations.
 - Default to the configured `small` bucket, with its own specific provider/model override
@@ -91,15 +97,13 @@ for invalid output rather than truncating it. Its title generator is request-onl
 Urd's optional exploration is an explicit addition. Pie's later trigger, retry and
 collision-suffix rules are not imported by describing Urd as similar to Pie.
 
-**Still to settle for titles:** trigger frequency (fresh-session only versus later
-prepasses), whether unfinished title work delays the main agent, the exact character
-limit/counting rule and invalid-output handling, and interaction with explicit/manual
-session names. The pruning triggers below do not automatically become title triggers.
+**Still to settle for titles:** whether unfinished title work delays the main agent,
+the exact character limit/counting rule and invalid-output handling, and interaction
+with explicit/manual session names. Post-compaction pruning does not regenerate titles.
 The earlier bounded-first-prompt-excerpt fallback remains a proposal, not a new owner
 selection. The existing three-row pruning UI decision does not select a title row.
 
-Working recommendation: generate on the first fresh-session prompt without automatically
-retitling after compaction; use a 25-character base-title limit and let title work finish
+Working recommendation: use a 25-character base-title limit and let title work finish
 without delaying the main agent once pruning has settled. Preserve an explicit/manual
 name. These recommendations remain open for owner review.
 

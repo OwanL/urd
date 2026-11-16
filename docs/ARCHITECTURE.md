@@ -960,10 +960,11 @@ pruning. It receives the user prompt, may independently explore with `read`/`bas
 emits a session title within a strict character limit. It defaults to the configured
 `small` bucket with its own provider/model override, using the same preference semantics
 as pruning. Tool-capable title generation needs the shared turn mechanics, not just a
-request-only call. Exact limits, title triggers, manual-name handling and whether title
-completion gates the main agent are tracked in the
-[prepass plan](pruning-plan.md#parallel-title-generation); pruning triggers are not
-implicitly title triggers. This expands the design scope, not implementation approval.
+request-only call. Title generation runs only after the first message of a session,
+never on subsequent messages, post-compaction continuation or reopen/restart. Exact
+limits, manual-name handling and whether title completion gates the main agent are
+tracked in the [prepass plan](pruning-plan.md#parallel-title-generation). This expands
+the design scope, not implementation approval.
 
 Keep LLM invocation, the LLM/tool execution cycle and session state/lifetime
 as distinct responsibilities. This does not require three framework layers or

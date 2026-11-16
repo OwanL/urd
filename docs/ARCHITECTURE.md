@@ -612,6 +612,11 @@ classification results, not task-success rates or proof of the subsequent design
 for skills, additional instruction documents and tools, with basic exploration tools
 and shared implementation. Each pruner defaults to the configured `small` bucket,
 with a per-category specific-model override in user preferences, including local models.
+Urd's built-in instructions, including its built-in working defaults/preferences,
+are always included where applicable and bypass pruning. Additional instruction documents
+remain candidates unless protected; this does not automatically protect every `AGENTS.md`
+or append-system resource. The skill-list formatter uses the selected skills rather
+than bypassing skill pruning. Existing instruction applicability and ordering still apply.
 Preferences also supply protected-item settings; protected entries bypass selection
 before inputs are built. Core tool protections are editable defaults: users may remove
 protection from `bash`, `read`, `write` and `edit`. Each pruning conversation receives

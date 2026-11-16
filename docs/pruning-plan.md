@@ -44,6 +44,12 @@ Existing provider/tool limits, current permissions, parent Stop and owned-work c
 still apply; this is not permission to bypass execution safeguards or add tools.
 Without a pruning budget, preparation has no pruning-specific upper latency bound.
 
+**Built-in instruction decision:** Urd's built-in instructions are always included
+where applicable and never enter pruning, including built-in working defaults and
+preferences. Existing role/scope applicability and ordering still apply. Additional
+instruction documents remain pruning candidates unless protected; an `AGENTS.md` or
+append-system resource is not automatically protected merely because of its format.
+
 **Instruction input decision (2026-11-15):** supply the instruction pruner with the
 full contents of every unprotected candidate document upfront, not just paths or
 summaries requiring follow-up reads. Protected documents remain excluded. This does
@@ -383,10 +389,13 @@ text with source/scope. Treat candidate contents as selection material. The mode
 kept candidate IDs, not rewritten resources; the pruner validates/maps them back to the
 original typed resources. Invalid output is an ordinary selection failure.
 
-**Proposed instruction boundary:** built-in, parameterless `StartingContextContribution`
-implementations form fixed base context; `DiscoveredInstructionDocument` instances are
-pruning candidates. The skill list contribution remains a formatter, but receives the
-selected skills. This is a proposed boundary for review, not a newly selected protection rule.
+**Selected instruction boundary:** Urd's built-in instructions form fixed base context
+and bypass pruning, including the current built-in working defaults/preferences.
+Additional discovered instruction documents are candidates unless protected. In the
+proposed type layout, built-in `StartingContextContribution` implementations compose
+the base and `DiscoveredInstructionDocument` carries document candidates. The skill-list
+contribution remains a formatter receiving the selected skills; retaining that formatter
+does not retain every skill. The behavior is selected; the concrete API remains proposed.
 
 ### Integration constraints the design must address
 
@@ -456,9 +465,6 @@ not replace those mechanisms.
 
 ## Still unresolved
 
-- The exact boundary between the base operating prompt and additional instruction
-  candidates, and any automatically protected instruction layers. This plan does not
-  silently protect every applicable `AGENTS.md` or settle all instruction precedence.
 - Exact recognition/loading rules and non-project locations within the selected
   agent-facing Markdown scope, plus stored source identities. Other harnesses'
   instruction files remain excluded.

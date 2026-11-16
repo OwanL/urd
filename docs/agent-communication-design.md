@@ -138,6 +138,19 @@ the pending answer wait to a background call. The result identifies that backgro
 than leaving the caller blocked indefinitely. This conversion and its call identity need detailed
 design. The generic `background: true` option remains available on any tool.
 
+### `answer_agent`
+
+| Input | Meaning |
+| --- | --- |
+| `answer` | Response to the recipient's current question. |
+
+Each recipient has **at most one current question**. Further questions are queued in arrival
+order and presented only after the current one is answered. The current question is inserted
+into the recipient's context at its next opportune boundary, alongside other tool results when
+they are being returned. `answer_agent` implicitly answers that current question, so the model
+never handles question IDs. The answer becomes the asker's `ask_agent` result; the recipient
+then continues its own task.
+
 ### `list_agents`
 
 Takes no proposed arguments and returns all agents, clearly labelled with title, running state
@@ -147,7 +160,15 @@ hierarchy, and every session supports asking and waking.
 
 ### Addressing
 
-Titles do not change. Use the exact title as the model-facing identifier, with existing internal
+Titles do not change once final. A fresh session passes through built-in placeholder titles:
+
+1. `new session`, or `new session (n)` when several exist.
+2. `generating title`, or `generating title (n)` when several exist.
+3. The generated, stable, addressable title.
+
+Placeholder titles are not addressable. Communication with such a session fails with a useful
+error telling the agent to wait a few seconds and retry. Use the exact final title as the
+model-facing identifier, with existing internal
 session IDs retained as storage keys. `parent` is a relationship alias, not a lookup for a session
 literally named `parent`. Duplicate eligible titles must produce an ambiguity error rather than
 silently selecting a session. Resolve the title when accepting the call and retain the internal

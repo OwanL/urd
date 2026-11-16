@@ -79,6 +79,7 @@ export function usePreferences(client: PreferencesClient): PreferencesState {
   const save = useCallback(
     async (preference: PreferenceKey, request: () => Promise<Preferences>, fallback: string) => {
       if (saving.current) return false;
+      const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       saving.current = true;
       version.current++;
       setPendingFor(preference);
@@ -93,6 +94,16 @@ export function usePreferences(client: PreferencesClient): PreferencesState {
       } finally {
         saving.current = false;
         setPendingFor(null);
+        requestAnimationFrame(() => {
+          if (
+            focused?.isConnected &&
+            !saving.current &&
+            document.activeElement === document.body &&
+            focused.getClientRects().length > 0 &&
+            getComputedStyle(focused).visibility === "visible"
+          )
+            focused.focus({ preventScroll: true });
+        });
       }
     },
     [],

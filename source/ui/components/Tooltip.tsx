@@ -8,6 +8,7 @@ export interface TooltipProps {
   content: ComponentChildren;
   children: VNode;
   disabled?: boolean;
+  dismissOnClick?: boolean;
   placement?: PopoverPlacement;
 }
 
@@ -17,6 +18,7 @@ export function Tooltip({
   content,
   children,
   disabled = false,
+  dismissOnClick = true,
   placement = "above",
 }: TooltipProps) {
   const anchor = useRef<HTMLElement>(null);
@@ -86,7 +88,7 @@ export function Tooltip({
         dismiss();
         suppressed.current = false;
       }}
-      onClick={dismiss}
+      onClick={dismissOnClick ? dismiss : undefined}
     >
       {cloneElement(control, description ? { "aria-describedby": description } : {})}
       {visible && (

@@ -124,8 +124,8 @@ and cleanup can be retried. Storage access failures stay fail-closed until retry
 Before the supported public data baseline, incompatible or malformed saved workspace/draft
 shapes are discarded, not migrated. The current shape in
 [`WorkspaceState.ts`](../source/ui/app/WorkspaceState.ts) preserves explicit model metadata
-alongside placeholder/derived title provenance, so an actual first message of `New chat`
-is not mistaken for an unnamed tab. Incompatible earlier state is discarded.
+alongside placeholder/generated title provenance, so a generated backend title is not
+mistaken for an unnamed tab. Incompatible earlier state is discarded.
 The palette uses neutral black/charcoal surfaces and grey controls; semantic error
 colours remain distinct. Transcript text uses the Markdown renderer. Tool icons open a shared
 inspection card by hover, click or keyboard; hover alone preserves composer focus. The card
@@ -240,8 +240,8 @@ not retained. For manual inspection, run `npm run dev:browser:host` and open its
 Urd origin. This starts a development host, not tests.
 Playwright remains a dependency only for the separate manual `TranscriptBaseline.ts`
 diagnostic, not routine verification. Its raw-SQL seed still requires schema 16, while
-[the schema owner](../source/backend/harness/storage/DatabaseSchema.cs) is at version 28
-(as checked 2026-11-16), so it aborts before the workload. Requalify its seed SQL and
+[the schema owner](../source/backend/harness/storage/DatabaseSchema.cs) is at version 29
+(as checked 2026-11-17), so it aborts before the workload. Requalify its seed SQL and
 version guard together before using it as performance evidence; changing the guard
 alone is not qualification. Install its pinned Chromium explicitly before running it.
 Ctrl+C or POST to
@@ -250,6 +250,23 @@ belong only to the fixture process, not Urd. Only owned processes/data are clean
 up. Set `DOTNET_HOST_PATH` to a specific `dotnet` executable if needed; otherwise it
 uses PATH. Explicit fixture termination is not evidence of graceful shutdown.
 Neither command authorizes live provider/account requests.
+
+### Prepass browser acceptance — 2026-11-17
+
+An isolated real Server/SDK/SQLite host was exercised in headless Chromium at 1280×900
+and 390×844, using owned credential-free loopback providers and a temporary Git project.
+Checked model bucket/override persistence, unavailable models/resources, failed-save rollback,
+keyboard protections/full-path details, running/completed/fallback/cancelled rows, Stop before
+main startup, and main output/draft preservation while title generation was held. Protected
+instructions bypassed selection and reached the main request. Screenshot review found no
+remaining clear layout issues after removing duplicate labels and truncating secondary paths.
+A failed catalog read now exposes error/Retry outside disabled pickers. Checkbox tooltips
+opt out of click dismissal: rerendering controlled inputs between native click/change events
+had reverted keyboard toggles. Repeated Space toggles and persisted IDs were rechecked.
+Preference saves restore a still-visible control only when focus fell to the document;
+delayed-write checks confirmed that moving focus or closing Settings is not overridden.
+This is a dated manual check, not retained browser coverage or live-model qualification;
+no saved credentials, live profile or running user host were used.
 
 ## Conversation feedback
 

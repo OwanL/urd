@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
+import { Tooltip } from "../components/Tooltip.tsx";
 import { RequestError } from "../http/RequestError.ts";
 import type { PreferencesState } from "../preferences/usePreferences.ts";
 import type {
@@ -132,19 +133,28 @@ function ProtectedCategory({
         <p>Selectable resources have not loaded.</p>
       )}
       <div class="preference-protected-list">
-        {entries.map((resource) => (
-          <label class="preference-protected-item" key={resource.id}>
-            <input
-              type="checkbox"
-              aria-label={`Protect ${resource.name}`}
-              checked={draft.includes(resource.id)}
-              disabled={state.pending}
-              onChange={(event) => void saveItems(resource.id, event.currentTarget.checked)}
-            />
-            <span>{resource.name}</span>
-            <code>{resource.id}</code>
-          </label>
-        ))}
+        {entries.map((resource) => {
+          const name =
+            category === "instructions" && resource.name === resource.id
+              ? resource.name.split(/[\\/]/).pop() || resource.name
+              : resource.name;
+          const showId = resource.id !== name;
+          return (
+            <label class="preference-protected-item" key={resource.id}>
+              <Tooltip content={resource.id} disabled={!showId} dismissOnClick={false}>
+                <input
+                  type="checkbox"
+                  aria-label={`Protect ${name}`}
+                  checked={draft.includes(resource.id)}
+                  disabled={state.pending}
+                  onChange={(event) => void saveItems(resource.id, event.currentTarget.checked)}
+                />
+              </Tooltip>
+              <span>{name}</span>
+              {showId && <code title={resource.id}>{resource.id}</code>}
+            </label>
+          );
+        })}
       </div>
       {state.pendingFor === preferenceKey && (
         <p class="preference-setting-feedback" role="status">

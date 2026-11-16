@@ -143,6 +143,19 @@ export function ModelPreferencesSettings({
       <p class="general-settings-description">
         Purpose choices can use a shared bucket or a specific model.
       </p>
+      {catalog.error && (
+        <div class="general-settings-feedback" aria-live="polite" aria-atomic="true">
+          <p role="alert">{catalog.error}</p>
+          <button
+            type="button"
+            aria-label="Retry loading model catalogs"
+            disabled={catalog.loading}
+            onClick={readCachedModels}
+          >
+            Retry
+          </button>
+        </div>
+      )}
       <div class="preference-model-group" aria-label="Shared model buckets">
         <h4>Shared buckets</h4>
         {buckets.map((bucket) => {

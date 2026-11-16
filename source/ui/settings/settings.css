@@ -303,5 +303,7 @@
   color: var(--text-secondary);
   font: inherit;
   font-size: 11px;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

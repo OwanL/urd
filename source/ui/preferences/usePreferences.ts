@@ -1,18 +1,42 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { RequestError } from "../http/RequestError.ts";
-import type { Preferences, PreferencesClient } from "./PreferencesClient.ts";
+import type {
+  AuxiliaryModelPurpose,
+  ConfiguredModel,
+  ModelBucket,
+  ModelChoice,
+  Preferences,
+  PreferencesClient,
+  ProtectedResourceCategory,
+  SelectableResources,
+} from "./PreferencesClient.ts";
+
+export type PreferenceKey =
+  | "workingDirectory"
+  | "compactionTriggerTokenCount"
+  | `modelChoice:${AuxiliaryModelPurpose}`
+  | `modelBucket:${ModelBucket}`
+  | `protectedResources:${ProtectedResourceCategory}`;
 
 export interface PreferencesState {
   preferences: Preferences | null;
   loaded: boolean;
   loading: boolean;
   pending: boolean;
+  pendingFor: PreferenceKey | null;
   error: string | null;
-  errorFor(preference: keyof Preferences): string | null;
+  errorFor(preference: PreferenceKey): string | null;
   refresh(): Promise<void>;
+  getSelectableResources(signal?: AbortSignal): Promise<SelectableResources>;
   clearError(): void;
   saveWorkingDirectory(workingDirectory: string | null): Promise<boolean>;
   saveCompactionTriggerTokenCount(value: number | null): Promise<boolean>;
+  saveModelChoice(purpose: AuxiliaryModelPurpose, choice: ModelChoice): Promise<boolean>;
+  saveBucketModel(bucket: ModelBucket, model: ConfiguredModel | null): Promise<boolean>;
+  saveProtectedItems(
+    category: ProtectedResourceCategory,
+    items: readonly string[],
+  ): Promise<boolean>;
 }
 
 // Reads once on mount and on refresh. A save invalidates earlier reads, and reads wait
@@ -20,9 +44,9 @@ export interface PreferencesState {
 export function usePreferences(client: PreferencesClient): PreferencesState {
   const [preferences, setPreferences] = useState<Preferences | null>(null);
   const [loading, setLoading] = useState(false);
-  const [pending, setPending] = useState(false);
+  const [pendingFor, setPendingFor] = useState<PreferenceKey | null>(null);
   const [failure, setFailure] = useState<{
-    preference: keyof Preferences | null;
+    preference: PreferenceKey | null;
     message: string;
   } | null>(null);
   const version = useRef(0);
@@ -53,15 +77,11 @@ export function usePreferences(client: PreferencesClient): PreferencesState {
   }, [refresh]);
 
   const save = useCallback(
-    async (
-      preference: keyof Preferences,
-      request: () => Promise<Preferences>,
-      fallback: string,
-    ) => {
+    async (preference: PreferenceKey, request: () => Promise<Preferences>, fallback: string) => {
       if (saving.current) return false;
       saving.current = true;
       version.current++;
-      setPending(true);
+      setPendingFor(preference);
       setLoading(false);
       setFailure(null);
       try {
@@ -72,7 +92,7 @@ export function usePreferences(client: PreferencesClient): PreferencesState {
         return false;
       } finally {
         saving.current = false;
-        setPending(false);
+        setPendingFor(null);
       }
     },
     [],
@@ -96,20 +116,56 @@ export function usePreferences(client: PreferencesClient): PreferencesState {
       ),
     [client, save],
   );
+  const saveModelChoice = useCallback(
+    (purpose: AuxiliaryModelPurpose, choice: ModelChoice) =>
+      save(
+        `modelChoice:${purpose}`,
+        () => client.setModelChoice(purpose, choice),
+        `${purpose[0]!.toUpperCase()}${purpose.slice(1)} model could not be saved.`,
+      ),
+    [client, save],
+  );
+  const saveBucketModel = useCallback(
+    (bucket: ModelBucket, model: ConfiguredModel | null) =>
+      save(
+        `modelBucket:${bucket}`,
+        () => client.setBucketModel(bucket, model),
+        `${bucket[0]!.toUpperCase()}${bucket.slice(1)} model mapping could not be saved.`,
+      ),
+    [client, save],
+  );
+  const getSelectableResources = useCallback(
+    (signal?: AbortSignal) => client.getSelectableResources(signal),
+    [client],
+  );
+  const saveProtectedItems = useCallback(
+    (category: ProtectedResourceCategory, items: readonly string[]) =>
+      save(
+        `protectedResources:${category}`,
+        () => client.setProtectedItems(category, items),
+        `Protected ${category} could not be saved.`,
+      ),
+    [client, save],
+  );
 
   return {
     preferences,
     loaded: preferences !== null,
     loading,
-    pending,
+    pending: pendingFor !== null,
+    pendingFor,
     error: failure?.message ?? null,
     errorFor: (preference) =>
       failure && (failure.preference === null || failure.preference === preference)
         ? failure.message
         : null,
     refresh,
+    getSelectableResources,
     saveWorkingDirectory,
     saveCompactionTriggerTokenCount,
+    saveModelChoice,
+    saveBucketModel,
+    saveProtectedItems,
     clearError: () => {
       if (!saving.current && preferences !== null) setFailure(null);
     },

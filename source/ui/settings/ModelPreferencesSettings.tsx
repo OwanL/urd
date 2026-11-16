@@ -1,0 +1,346 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { WorkspaceModels } from "../app/WorkspaceModels.ts";
+import { ModelPicker } from "../chat/ModelPicker.tsx";
+import type { ComposerModel } from "../chat/ComposerTypes.ts";
+import type { ModelOption } from "../app/WorkspaceModels.ts";
+import type { PreferencesState } from "../preferences/usePreferences.ts";
+import type {
+  AuxiliaryModelPurpose,
+  ConfiguredModel,
+  ModelBucket,
+  ModelChoice,
+} from "../preferences/PreferencesClient.ts";
+import type { ProviderClient } from "../providers/ProviderClient.ts";
+
+const buckets: readonly ModelBucket[] = ["small", "medium", "frontier"];
+const purposes: readonly AuxiliaryModelPurpose[] = ["tools", "skills", "instructions", "title"];
+const bucketNames: Record<ModelBucket, string> = {
+  small: "Small",
+  medium: "Medium",
+  frontier: "Frontier",
+};
+const purposeNames: Record<AuxiliaryModelPurpose, string> = {
+  tools: "Tools",
+  skills: "Skills",
+  instructions: "Instructions",
+  title: "Title",
+};
+
+interface CachedModels {
+  readonly options: readonly ModelOption[];
+  readonly providers: readonly { readonly id: string; readonly name: string }[];
+  readonly loading: boolean;
+  readonly loaded: boolean;
+  readonly error: string | null;
+}
+
+export function ModelPreferencesSettings({
+  client,
+  state,
+  active,
+}: {
+  client: ProviderClient;
+  state: PreferencesState;
+  active: boolean;
+}) {
+  const reader = useMemo(() => new WorkspaceModels(client), [client]);
+  const [catalog, setCatalog] = useState<CachedModels>({
+    options: [],
+    providers: [],
+    loading: false,
+    loaded: false,
+    error: null,
+  });
+  const readAbort = useRef<AbortController | null>(null);
+  const readCachedModels = useCallback(() => {
+    readAbort.current?.abort();
+    const abort = new AbortController();
+    readAbort.current = abort;
+    setCatalog((current) => ({ ...current, loading: true, error: null }));
+    void reader
+      .readCached(abort.signal)
+      .then((result) => {
+        if (readAbort.current !== abort || abort.signal.aborted) return;
+        setCatalog({
+          options: result.options ?? [],
+          providers: (result.providers ?? []).map(({ id, name }) => ({ id, name })),
+          loading: false,
+          loaded: result.options !== null,
+          error: result.error ? "Saved model catalogs could not all be read." : null,
+        });
+      })
+      .catch(() => {
+        if (readAbort.current !== abort || abort.signal.aborted) return;
+        setCatalog((current) => ({
+          ...current,
+          loading: false,
+          loaded: true,
+          error: "Saved model catalogs could not be read.",
+        }));
+      });
+  }, [reader]);
+
+  useEffect(() => {
+    if (!active) return;
+    readCachedModels();
+    return () => {
+      readAbort.current?.abort();
+      readAbort.current = null;
+    };
+  }, [active, readCachedModels]);
+
+  const models: readonly ComposerModel[] = useMemo(
+    () =>
+      catalog.options.map(({ key, modelLabel, providerLabel }) => ({
+        key,
+        modelLabel,
+        providerLabel,
+      })),
+    [catalog.options],
+  );
+  const modelByKey = useMemo(
+    () => new Map(catalog.options.map((option) => [option.key, option] as const)),
+    [catalog.options],
+  );
+  const preferences = state.preferences;
+  const configuredModelLabel = (model: ConfiguredModel | null): string => {
+    if (!model) return "Not configured";
+    const option = modelByKey.get(modelKey(model));
+    if (option) return `${option.providerLabel} · ${option.modelLabel}`;
+    const provider = catalog.providers.find(({ id }) => id === model.connectionId);
+    const identity = `${provider?.name ?? model.connectionId} · ${model.modelId}`;
+    if (!catalog.loaded && !catalog.error)
+      return `${catalog.loading ? "Checking saved catalog" : "Saved model"} · ${identity}`;
+    if (catalog.error) return `Catalog unavailable · ${identity}`;
+    return `Unavailable · ${identity}`;
+  };
+  const configuredModel = (
+    key: string,
+    unavailable: ConfiguredModel | null = null,
+  ): ConfiguredModel | null => {
+    const option = modelByKey.get(key);
+    if (option)
+      return { connectionId: option.selection.connection.id, modelId: option.selection.modelId };
+    return unavailable && modelKey(unavailable) === key ? unavailable : null;
+  };
+  const pickerModels = (saved: ConfiguredModel | null): readonly ComposerModel[] => {
+    if (!saved || modelByKey.has(modelKey(saved))) return models;
+    const provider = catalog.providers.find(({ id }) => id === saved.connectionId);
+    return [
+      ...models,
+      {
+        key: modelKey(saved),
+        modelLabel: `${saved.modelId} (unavailable)`,
+        providerLabel: provider?.name ?? saved.connectionId,
+      },
+    ];
+  };
+  const busy = !state.loaded || state.pending;
+
+  return (
+    <section class="preference-model-settings" aria-label="Auxiliary models">
+      <h3>Auxiliary models</h3>
+      <p class="general-settings-description">
+        Purpose choices can use a shared bucket or a specific model.
+      </p>
+      <div class="preference-model-group" aria-label="Shared model buckets">
+        <h4>Shared buckets</h4>
+        {buckets.map((bucket) => {
+          const preferenceKey = `modelBucket:${bucket}` as const;
+          const saved = preferences?.modelChoices[bucket] ?? null;
+          const pending = state.pendingFor === preferenceKey;
+          return (
+            <div class="preference-model-row" key={bucket}>
+              <span class="preference-model-name">{bucketNames[bucket]}</span>
+              <ModelPicker
+                models={pickerModels(saved)}
+                modelKey={saved ? modelKey(saved) : null}
+                modelLabel={`${bucketNames[bucket]} mapping · ${configuredModelLabel(saved)}`}
+                onModelChange={(key) => {
+                  const model = configuredModel(key, saved);
+                  if (model) void state.saveBucketModel(bucket, model);
+                }}
+                loadingModels={catalog.loading}
+                refreshingModels={catalog.loading}
+                modelsError={catalog.error}
+                onRetryModels={readCachedModels}
+                disabled={busy || !catalog.loaded || catalog.loading}
+              />
+              <button
+                class="preference-model-clear"
+                type="button"
+                disabled={busy || saved === null}
+                onClick={() => void state.saveBucketModel(bucket, null)}
+              >
+                Clear
+              </button>
+              <SettingFeedback
+                pending={pending}
+                error={state.errorFor(preferenceKey)}
+                loaded={state.loaded}
+              />
+            </div>
+          );
+        })}
+      </div>
+      <div class="preference-model-group" aria-label="Purpose model choices">
+        <h4>Purpose choices</h4>
+        {purposes.map((purpose) => (
+          <AuxiliaryModelChoice
+            key={purpose}
+            purpose={purpose}
+            state={state}
+            loadingModels={catalog.loading}
+            catalogLoaded={catalog.loaded}
+            catalogError={catalog.error}
+            readCachedModels={readCachedModels}
+            configuredModel={configuredModel}
+            configuredModelLabel={configuredModelLabel}
+            pickerModels={pickerModels}
+            busy={busy}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function AuxiliaryModelChoice({
+  purpose,
+  state,
+  loadingModels,
+  catalogLoaded,
+  catalogError,
+  readCachedModels,
+  configuredModel,
+  configuredModelLabel,
+  pickerModels,
+  busy,
+}: {
+  purpose: AuxiliaryModelPurpose;
+  state: PreferencesState;
+  loadingModels: boolean;
+  catalogLoaded: boolean;
+  catalogError: string | null;
+  readCachedModels(): void;
+  configuredModel(key: string, unavailable?: ConfiguredModel | null): ConfiguredModel | null;
+  configuredModelLabel(model: ConfiguredModel | null): string;
+  pickerModels(model: ConfiguredModel | null): readonly ComposerModel[];
+  busy: boolean;
+}) {
+  const saved = state.preferences?.modelChoices[purpose] ?? null;
+  const [specific, setSpecific] = useState(saved?.bucket === null);
+  const [draftChoice, setDraftChoice] = useState<ModelChoice | null>(saved);
+  const preferenceKey = `modelChoice:${purpose}` as const;
+
+  useEffect(() => {
+    setSpecific(saved?.bucket === null);
+    setDraftChoice(saved);
+  }, [saved]);
+
+  const savedModel =
+    saved && saved.bucket === null && saved.connectionId && saved.modelId
+      ? { connectionId: saved.connectionId, modelId: saved.modelId }
+      : null;
+  const draftModel =
+    draftChoice && draftChoice.bucket === null && draftChoice.connectionId && draftChoice.modelId
+      ? { connectionId: draftChoice.connectionId, modelId: draftChoice.modelId }
+      : savedModel;
+  const pickerLabel = specific
+    ? `${purposeNames[purpose]} specific model · ${configuredModelLabel(draftModel)}`
+    : saved?.bucket
+      ? `${bucketNames[saved.bucket]} · ${configuredModelLabel(state.preferences?.modelChoices[saved.bucket] ?? null)}`
+      : "Choose a model";
+
+  const chooseBucket = async (value: string) => {
+    state.clearError();
+    if (value === "specific") {
+      setSpecific(true);
+      setDraftChoice(null);
+      return;
+    }
+    if (!buckets.includes(value as ModelBucket)) return;
+    const bucket = value as ModelBucket;
+    const next: ModelChoice = { bucket, connectionId: null, modelId: null };
+    setSpecific(false);
+    setDraftChoice(next);
+    if (!(await state.saveModelChoice(purpose, next))) {
+      setSpecific(saved?.bucket === null);
+      setDraftChoice(saved);
+    }
+  };
+
+  const chooseModel = async (key: string) => {
+    const model = configuredModel(key, draftModel);
+    if (!model) return;
+    const next: ModelChoice = { bucket: null, ...model };
+    setDraftChoice(next);
+    if (!(await state.saveModelChoice(purpose, next))) setDraftChoice(saved);
+  };
+
+  return (
+    <div class="preference-model-row preference-purpose-row" key={purpose}>
+      <label class="preference-model-name" htmlFor={`auxiliary-model-${purpose}`}>
+        {purposeNames[purpose]}
+      </label>
+      <select
+        id={`auxiliary-model-${purpose}`}
+        value={specific ? "specific" : (saved?.bucket ?? "specific")}
+        disabled={busy}
+        onChange={(event) => void chooseBucket(event.currentTarget.value)}
+      >
+        {buckets.map((bucket) => (
+          <option key={bucket} value={bucket}>
+            {bucketNames[bucket]}
+          </option>
+        ))}
+        <option value="specific">Specific model</option>
+      </select>
+      {specific && (
+        <ModelPicker
+          models={pickerModels(draftModel)}
+          modelKey={draftModel ? modelKey(draftModel) : null}
+          modelLabel={pickerLabel}
+          onModelChange={(key) => void chooseModel(key)}
+          loadingModels={loadingModels}
+          refreshingModels={loadingModels}
+          modelsError={catalogError}
+          onRetryModels={readCachedModels}
+          disabled={busy || !catalogLoaded || loadingModels}
+        />
+      )}
+      {!specific && saved?.bucket && (
+        <span class="preference-model-resolution">
+          {configuredModelLabel(state.preferences?.modelChoices[saved.bucket] ?? null)}
+        </span>
+      )}
+      <SettingFeedback
+        pending={state.pendingFor === preferenceKey}
+        error={state.errorFor(preferenceKey)}
+        loaded={state.loaded}
+      />
+    </div>
+  );
+}
+
+function SettingFeedback({
+  pending,
+  error,
+  loaded,
+}: {
+  pending: boolean;
+  error: string | null;
+  loaded: boolean;
+}) {
+  if (!loaded || (!pending && !error)) return null;
+  return (
+    <span class="preference-setting-feedback" aria-live="polite" aria-atomic="true">
+      {pending && <span role="status">Saving…</span>}
+      {!pending && error && <span role="alert">{error}</span>}
+    </span>
+  );
+}
+
+function modelKey(model: ConfiguredModel): string {
+  return `${model.connectionId}/${model.modelId}`;
+}

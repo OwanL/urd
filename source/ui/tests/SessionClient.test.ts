@@ -65,6 +65,8 @@ const snapshot: SessionSnapshot = {
   lastSettlement: null,
   latestLlmSelection: null,
   firstUserPreview: "first input preview",
+  title: "Backend title",
+  pruning: [{ category: "tools", state: "running", total: 4, retained: 3, error: null }],
   pendingInputs: [{ submissionId, preview: "queued follow-up" }],
 };
 const selection: LlmSelection = {

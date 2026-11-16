@@ -20,6 +20,14 @@ export interface SessionContextUsage {
   readonly isEstimate: boolean;
 }
 
+export interface SessionPruningStatus {
+  readonly category: string;
+  readonly state: string;
+  readonly total: number;
+  readonly retained: number;
+  readonly error?: string | null;
+}
+
 export interface SessionSnapshot {
   readonly sessionId: string;
   readonly historyRevision: number;
@@ -33,6 +41,8 @@ export interface SessionSnapshot {
   readonly lastSettlement: SessionExecutionResult | null;
   readonly latestLlmSelection: LlmSelection | null;
   readonly firstUserPreview: string | null;
+  readonly title?: string | null;
+  readonly pruning?: readonly SessionPruningStatus[] | null;
   readonly pendingInputs: readonly PendingInputPreview[];
   readonly workingTime?: SessionWorkingTime | null;
   readonly contextUsage?: SessionContextUsage | null;

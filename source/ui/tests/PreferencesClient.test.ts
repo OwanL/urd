@@ -5,14 +5,38 @@ import { PreferencesClient } from "../preferences/PreferencesClient.ts";
 import { startHttpServer } from "./HttpTestServer.ts";
 
 void test("preferences use the browser API contract", { timeout: 5_000 }, async (t) => {
-  const saved = { workingDirectory: "C:\\work\\project", compactionTriggerTokenCount: 4_096 };
+  const saved = {
+    workingDirectory: "C:\\work\\project",
+    compactionTriggerTokenCount: 4_096,
+    modelChoices: {
+      tools: { bucket: null, connectionId: "connection-1", modelId: "tool-model" },
+      skills: { bucket: "small", connectionId: null, modelId: null },
+      instructions: { bucket: "small", connectionId: null, modelId: null },
+      title: { bucket: "small", connectionId: null, modelId: null },
+      small: { connectionId: "connection-1", modelId: "small-model" },
+      medium: null,
+      frontier: null,
+    },
+    protectedResources: {
+      tools: ["bash", "read"],
+      skills: ["C:\\work\\project\\skills\\safe\\SKILL.md"],
+      instructions: [],
+    },
+  };
+  const resources = {
+    tools: [{ id: "bash", name: "bash" }],
+    skills: [{ id: "C:\\work\\project\\skills\\safe\\SKILL.md", name: "Safe" }],
+    instructions: [{ id: "C:\\work\\project\\AGENTS.md", name: "AGENTS.md" }],
+  };
   const server = await startHttpServer((request, response) => {
     response.writeHead(200, { "Content-Type": "application/json" });
     response.end(
       JSON.stringify(
-        request.method === "GET"
-          ? { workingDirectory: null, compactionTriggerTokenCount: null }
-          : saved,
+        request.url === "/api/preferences/resources"
+          ? resources
+          : request.method === "GET"
+            ? { ...saved, workingDirectory: null, compactionTriggerTokenCount: null }
+            : saved,
       ),
     );
   });
@@ -20,18 +44,38 @@ void test("preferences use the browser API contract", { timeout: 5_000 }, async 
 
   const client = new PreferencesClient(new URL("/ignored/path", server.origin));
   assert.deepEqual(await client.get(), {
+    ...saved,
     workingDirectory: null,
     compactionTriggerTokenCount: null,
   });
+  assert.deepEqual(await client.getSelectableResources(), resources);
   assert.deepEqual(await client.setWorkingDirectory(saved.workingDirectory), saved);
   assert.deepEqual(await client.setWorkingDirectory(null), saved);
   assert.deepEqual(await client.setCompactionTriggerTokenCount(4_096), saved);
   assert.deepEqual(await client.setCompactionTriggerTokenCount(null), saved);
+  assert.deepEqual(
+    await client.setModelChoice("tools", {
+      bucket: null,
+      connectionId: "connection-1",
+      modelId: "tool-model",
+    }),
+    saved,
+  );
+  assert.deepEqual(
+    await client.setBucketModel("small", { connectionId: "connection-1", modelId: "small-model" }),
+    saved,
+  );
+  assert.deepEqual(await client.setBucketModel("medium", null), saved);
+  assert.deepEqual(
+    await client.setProtectedItems("skills", ["C:\\work\\project\\skills\\safe\\SKILL.md"]),
+    saved,
+  );
 
   assert.deepEqual(
     server.requests.map(({ method, url, body }) => ({ method, url, body })),
     [
       { method: "GET", url: "/api/preferences", body: "" },
+      { method: "GET", url: "/api/preferences/resources", body: "" },
       {
         method: "POST",
         url: "/api/preferences/working-directory",
@@ -51,6 +95,35 @@ void test("preferences use the browser API contract", { timeout: 5_000 }, async 
         method: "POST",
         url: "/api/preferences/compaction-trigger",
         body: JSON.stringify({ compactionTriggerTokenCount: null }),
+      },
+      {
+        method: "POST",
+        url: "/api/preferences/model-choice",
+        body: JSON.stringify({
+          purpose: "tools",
+          choice: { bucket: null, connectionId: "connection-1", modelId: "tool-model" },
+        }),
+      },
+      {
+        method: "POST",
+        url: "/api/preferences/model-bucket",
+        body: JSON.stringify({
+          bucket: "small",
+          model: { connectionId: "connection-1", modelId: "small-model" },
+        }),
+      },
+      {
+        method: "POST",
+        url: "/api/preferences/model-bucket",
+        body: JSON.stringify({ bucket: "medium", model: null }),
+      },
+      {
+        method: "POST",
+        url: "/api/preferences/protected-resources",
+        body: JSON.stringify({
+          category: "skills",
+          items: ["C:\\work\\project\\skills\\safe\\SKILL.md"],
+        }),
       },
     ],
   );

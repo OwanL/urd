@@ -153,6 +153,8 @@ export function Settings({
       >
         <GeneralSettings
           state={preferences}
+          client={client}
+          active={tab === "general"}
           buttonRef={workingDirectoryButton}
           compactionTriggerDraft={compactionTriggerDraft.value}
           onCompactionTriggerDraftChange={(value) =>

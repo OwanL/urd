@@ -31,7 +31,13 @@ Settings → General holds the default working directory, selected through a fol
 and an explicitly saved compaction-trigger token count. Blank/Automatic restores the default;
 positive whole counts override the trigger subject to model headroom. The shared `usePreferences`
 hook owns reads and saves; changing the trigger takes effect at the next compaction check, while
-working-directory changes still apply only to new chats.
+working-directory changes still apply only to new chats. General also configures
+small/medium/frontier model buckets, independent tool/skill/instruction/title choices,
+and protected-resource lists. Missing models/resources remain visibly unavailable rather
+than rebinding. Protection pickers discover resources for the default directory; built-in
+instructions always remain. Session preparation shows three category rows with truthful
+running/completed/fallback/cancelled/interrupted outcomes. Tabs use guarded backend title
+metadata or the existing placeholder, never a first-prompt excerpt.
 Before the first accepted message, the empty transcript centers the default and current
 working-directory paths with explicit Edit actions. Edit opens a single directory editor
 with breadcrumbs and an editable address, with an explicit Select folder/Cancel decision;
@@ -77,7 +83,7 @@ normal composer draft. Pending-input and attachment editing are outside this fea
 independently of mounted/virtualized rows. A missing acknowledgement stays uncertain; receipt
 lookup and explicit Retry save preserve the original operation, text and model. Pending
 Save blocks new Send, and cancellation is unavailable once Save is dispatched. Reload checks
-receipts rather than blindly repeating edits. Workspace shape **6** discards incompatible
+receipts rather than blindly repeating edits. Workspace shape **7** discards incompatible
 older saved browser state under the pre-release policy.
 
 Drag tabs with a pointer, or focus a tab and use Alt+Shift+Left/Right to move it.

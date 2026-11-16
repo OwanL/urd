@@ -1,8 +1,52 @@
 import { requestJson } from "../http/requestJson.ts";
 
+export type AuxiliaryModelPurpose = "tools" | "skills" | "instructions" | "title";
+export type ProtectedResourceCategory = "tools" | "skills" | "instructions";
+export type ModelBucket = "small" | "medium" | "frontier";
+
+export interface ConfiguredModel {
+  readonly connectionId: string;
+  readonly modelId: string;
+}
+
+export interface ModelChoice {
+  readonly bucket: ModelBucket | null;
+  readonly connectionId: string | null;
+  readonly modelId: string | null;
+}
+
+export interface AuxiliaryModelPreferences {
+  readonly tools: ModelChoice;
+  readonly skills: ModelChoice;
+  readonly instructions: ModelChoice;
+  readonly title: ModelChoice;
+  readonly small: ConfiguredModel | null;
+  readonly medium: ConfiguredModel | null;
+  readonly frontier: ConfiguredModel | null;
+}
+
+export interface ProtectedResourcePreferences {
+  readonly tools: readonly string[];
+  readonly skills: readonly string[];
+  readonly instructions: readonly string[];
+}
+
+export interface SelectableResource {
+  readonly id: string;
+  readonly name: string;
+}
+
+export interface SelectableResources {
+  readonly tools: readonly SelectableResource[];
+  readonly skills: readonly SelectableResource[];
+  readonly instructions: readonly SelectableResource[];
+}
+
 export interface Preferences {
   readonly workingDirectory: string | null;
   readonly compactionTriggerTokenCount: number | null;
+  readonly modelChoices: AuxiliaryModelPreferences;
+  readonly protectedResources: ProtectedResourcePreferences;
 }
 
 // Typed access to browser preferences; construction performs no I/O.
@@ -17,6 +61,15 @@ export class PreferencesClient {
     return requestJson(new URL("/api/preferences", this.origin), "GET", undefined, signal);
   }
 
+  getSelectableResources(signal?: AbortSignal): Promise<SelectableResources> {
+    return requestJson(
+      new URL("/api/preferences/resources", this.origin),
+      "GET",
+      undefined,
+      signal,
+    );
+  }
+
   setWorkingDirectory(workingDirectory: string | null): Promise<Preferences> {
     return requestJson(new URL("/api/preferences/working-directory", this.origin), "POST", {
       workingDirectory,
@@ -26,6 +79,30 @@ export class PreferencesClient {
   setCompactionTriggerTokenCount(compactionTriggerTokenCount: number | null): Promise<Preferences> {
     return requestJson(new URL("/api/preferences/compaction-trigger", this.origin), "POST", {
       compactionTriggerTokenCount,
+    });
+  }
+
+  setModelChoice(purpose: AuxiliaryModelPurpose, choice: ModelChoice): Promise<Preferences> {
+    return requestJson(new URL("/api/preferences/model-choice", this.origin), "POST", {
+      purpose,
+      choice,
+    });
+  }
+
+  setBucketModel(bucket: ModelBucket, model: ConfiguredModel | null): Promise<Preferences> {
+    return requestJson(new URL("/api/preferences/model-bucket", this.origin), "POST", {
+      bucket,
+      model,
+    });
+  }
+
+  setProtectedItems(
+    category: ProtectedResourceCategory,
+    items: readonly string[],
+  ): Promise<Preferences> {
+    return requestJson(new URL("/api/preferences/protected-resources", this.origin), "POST", {
+      category,
+      items,
     });
   }
 }

@@ -61,6 +61,8 @@ void test("causal snapshot reads release accepted work outside the recent window
     lastSettlement: { executionId: newer, outcome: "completed" },
     latestLlmSelection: selection,
     firstUserPreview: "first user input",
+    title: null,
+    pruning: null,
     pendingInputs: [],
   };
   assert.equal(executionSettled(snapshot, executionId, null), false);
@@ -115,7 +117,7 @@ function sending(submission = original) {
 
 function workspace(): WorkspaceState {
   return {
-    version: 6,
+    version: 7,
     tabs: [sessionId],
     activeId: sessionId,
     chats: { [sessionId]: sending() },
@@ -125,7 +127,7 @@ function workspace(): WorkspaceState {
 
 void test("new state is independent, empty and does not invent a selection", () => {
   assert.deepEqual(emptyWorkspace(), {
-    version: 6,
+    version: 7,
     tabs: [],
     activeId: null,
     chats: {},
@@ -364,6 +366,11 @@ void test("malformed acceptance decisions never resolve a pending Send", () => {
 
 void test("reload keeps the complete original but marks every saved Send uncertain", () => {
   const state = workspace();
+  state.chats[sessionId] = {
+    ...state.chats[sessionId]!,
+    title: "Backend title",
+    titleProvenance: "generated",
+  };
   state.tabs.push("second");
   state.chats.second = sending({ ...original, llmSelection: null });
   const raw = encodeWorkspace(state);
@@ -392,8 +399,8 @@ void test("reload retains later edits while reconciling an uncertain submission"
   assert.equal(resolved.pending, null);
 });
 
-void test("version 5 saved workspaces are discarded, not migrated", () => {
-  const saved = { ...workspace(), version: 5 };
+void test("version 6 saved workspaces are discarded, not migrated", () => {
+  const saved = { ...workspace(), version: 6 };
   assert.throws(() => decodeWorkspace(JSON.stringify(saved)), TypeError);
 });
 
@@ -407,7 +414,8 @@ void test("corrupt saved structure throws instead of resetting or discarding dra
     { ...workspace(), version: 3 },
     { ...workspace(), version: 4 },
     { ...workspace(), version: 5 },
-    { ...workspace(), version: 7 },
+    { ...workspace(), version: 6 },
+    { ...workspace(), version: 8 },
     { ...workspace(), tabs: [sessionId, sessionId] },
     { ...workspace(), tabs: ["missing"] },
     { ...workspace(), tabs: [1] },

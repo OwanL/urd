@@ -6,9 +6,14 @@ import {
   parseCompactionTriggerInput,
 } from "../preferences/CompactionTriggerInput.ts";
 import type { PreferencesState } from "../preferences/usePreferences.ts";
+import type { ProviderClient } from "../providers/ProviderClient.ts";
+import { ModelPreferencesSettings } from "./ModelPreferencesSettings.tsx";
+import { ProtectedResourcesSettings } from "./ProtectedResourcesSettings.tsx";
 
 interface GeneralSettingsProps {
   state: PreferencesState;
+  client: ProviderClient;
+  active: boolean;
   buttonRef: RefObject<HTMLButtonElement | null>;
   compactionTriggerDraft: string;
   onCompactionTriggerDraftChange(value: string): void;
@@ -17,6 +22,8 @@ interface GeneralSettingsProps {
 
 export function GeneralSettings({
   state,
+  client,
+  active,
   buttonRef,
   compactionTriggerDraft,
   onCompactionTriggerDraftChange,
@@ -26,6 +33,8 @@ export function GeneralSettings({
   const workingDirectory = state.preferences?.workingDirectory ?? null;
   const workingDirectoryError = state.errorFor("workingDirectory");
   const compactionTriggerTokenCount = state.preferences?.compactionTriggerTokenCount ?? null;
+  const generalError =
+    state.errorFor("workingDirectory") ?? state.errorFor("compactionTriggerTokenCount");
   const [triggerValidation, setTriggerValidation] = useState<string | null>(null);
   const [triggerSaving, setTriggerSaving] = useState(false);
   const [triggerSaved, setTriggerSaved] = useState(false);
@@ -138,12 +147,14 @@ export function GeneralSettings({
           {triggerSaved && !triggerSaving && <p role="status">Saved.</p>}
         </div>
       </div>
+      <ModelPreferencesSettings client={client} state={state} active={active} />
+      <ProtectedResourcesSettings state={state} active={active} />
       {!pickerOpen && (
         <div class="general-settings-feedback" aria-live="polite" aria-atomic="true">
           {state.pending && !triggerSaving && <p>Saving…</p>}
           {!state.pending && state.loading && <p>Loading…</p>}
-          {state.error && <p role="alert">{state.error}</p>}
-          {state.error && !state.loaded && (
+          {generalError && <p role="alert">{generalError}</p>}
+          {generalError && !state.loaded && (
             <button type="button" onClick={() => void state.refresh()}>
               Retry
             </button>

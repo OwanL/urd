@@ -82,6 +82,8 @@ void test(
       lastSettlement: null,
       latestLlmSelection: null,
       firstUserPreview: null,
+      title: null,
+      pruning: null,
       pendingInputs: [],
       contextUsage: null,
       workingTime: { completedMilliseconds: 0, startedAt: null, hasUnknownDuration: false },

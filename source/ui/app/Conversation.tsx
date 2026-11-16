@@ -13,6 +13,7 @@ import { deriveConversationState } from "./ConversationState.ts";
 import type { ConversationExecutionStatus } from "./ConversationState.ts";
 import { Transcript } from "./Transcript.tsx";
 import { SessionWorkingDirectory } from "./SessionWorkingDirectory.tsx";
+import { PruningRows } from "./PruningRows.tsx";
 import type { ReadingPosition } from "./Transcript.tsx";
 import type { TranscriptDisplay } from "./TranscriptDisplay.ts";
 import type { TranscriptNavigationState } from "../sessions/TranscriptNavigationStorage.ts";
@@ -371,6 +372,7 @@ export function Conversation({
             </section>
           )}
           <div class="chat-status" aria-live="polite">
+            <PruningRows pruning={snapshot?.pruning} />
             {error && <span class="inline-error">{error} </span>}
             {workingDirectoryNotice && !showWorkingDirectory && (
               <span class={workingDirectoryLocked ? "inline-error" : undefined}>

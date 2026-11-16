@@ -21,6 +21,9 @@ Each conversation sees its whole unprotected category and can use basic tools,
 including `read` and `bash`, to explore when necessary. Exploration is optional,
 not a required preliminary stage. Keep useful capabilities rather than aggressively
 pruning uncertain candidates: losing something useful is the more costly error.
+Each pruning conversation independently decides what to inspect. Do not pool its
+exploratory findings or selection decisions into sibling conversations; sharing
+execution code does not mean sharing investigation or conversation state.
 
 **Instruction input decision (2026-11-15):** supply the instruction pruner with the
 full contents of every unprotected candidate document upfront, not just paths or
@@ -147,9 +150,10 @@ Discover and resolve applicable resources
                            Main starting context
 ```
 
-All three selectors work from the same task and grounding snapshot, excluding
-protected resources from their supplied selection context. Tools and skills do not
-wait for the instruction selector's output. Each has its own category-specific brief.
+Each selector has its own category-specific brief and candidate inputs, excluding
+protected entries. Tools and skills do not wait for the instruction selector's output;
+each chooses its own exploratory reads. The initial task/background payload remains
+to be defined, rather than requiring a shared, preassembled grounding bundle.
 
 ## High-level structure proposal
 

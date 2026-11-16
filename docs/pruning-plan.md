@@ -160,6 +160,16 @@ Paths are relative to `source/backend/harness/` unless stated otherwise.
 The owner accepted the shared discoverer/single typed pruner direction. This is the
 proposed concrete structure for that direction, not permission to create these files.
 
+### Naming decisions
+
+| Concept | Owner-selected term |
+| --- | --- |
+| Rule-bearing content, whether built-in or loaded from files | **Instructions**, rather than guidance or system prompts |
+
+Concrete type names are being reviewed separately. Existing `Guidance` identifiers
+below identify current code or earlier proposals; they are not settled names for the
+new design. This terminology decision does not authorise source renames.
+
 ### Files and types
 
 ```text
@@ -168,7 +178,7 @@ context/
   runtime/
     StartingContextManager.cs       change: discover → protect → prune → compose
     StartingContext.cs              change: carry selected resources into composition
-    ContextGuidance.cs              keep existing guidance abstraction
+    ContextGuidance.cs              reuse existing abstraction; name under review
     ResourceDiscovery.cs            new: shared skill/instruction discovery and loading
     Resources.cs                    new: typed discovered collections
     FileGuidance.cs                 new: loaded file-backed ContextGuidance
@@ -189,9 +199,9 @@ from `ToolCatalog`, not files found by the discoverer.
 `Resources` contains `IReadOnlyList<Skill>` and `IReadOnlyList<FileGuidance>`.
 `FileGuidance : ContextGuidance` carries already-loaded text, source path and scope,
 and implements the existing ordering/applicability/rendering contract. It requires
-file data in its constructor, so the parameterless built-in guidance scan cannot
+file data in its constructor, so the parameterless built-in block scan cannot
 create it accidentally. Neither its constructor nor `GetText` performs file I/O.
-This reuses the existing runtime-guidance extension point instead of introducing a
+This reuses the existing runtime-block extension point instead of introducing a
 second prompt hierarchy or an additional instruction-document/wrapper pair.
 
 ### Proposed method surface
@@ -204,7 +214,7 @@ Task<Resources> FindAsync(string workingDirectory, CancellationToken cancellatio
 Pruner(PruningContext context, ConversationRunner execution);
 
 Task<PruningResult<FileGuidance>> PruneAsync(
-    IReadOnlyList<FileGuidance> guidance, CancellationToken cancellation);
+    IReadOnlyList<FileGuidance> instructions, CancellationToken cancellation);
 Task<PruningResult<AIFunctionDeclaration>> PruneAsync(
     IReadOnlyList<AIFunctionDeclaration> tools, CancellationToken cancellation);
 Task<PruningResult<Skill>> PruneAsync(
@@ -248,7 +258,7 @@ plugin hierarchy are needed.
 
 **Revised after owner feedback:** shared discovery is a resource-level responsibility,
 not merely a Git helper below separate discoverers. `ResourceDiscovery` owns finding
-and loading skills/guidance; `Pruner` owns selection; `StartingContextManager` connects
+and loading skills/instructions; `Pruner` owns selection; `StartingContextManager` connects
 them and handles protection/composition. Resource kinds retain distinct parsing rules
 and typed values without requiring separate top-level discoverer classes.
 
@@ -284,7 +294,7 @@ feature first, reuse it; these are responsibility boundaries, not competing impl
 
 **Proposed input contract:** a fresh session supplies its admitted prompt; after
 compaction, supply the summary, retained recent context and any next admitted input,
-not the discarded history. Do not copy the main system-guidance bundle into these
+not the discarded history. Do not copy the main system-instruction bundle into these
 inputs and thereby reintroduce protected documents. Candidate payloads are skill
 name/description/path, existing tool declarations, and full unprotected instruction
 text with source/scope. Treat candidate contents as selection material. The model returns
@@ -292,7 +302,7 @@ kept candidate IDs, not rewritten resources; the pruner validates/maps them back
 original typed resources. Invalid output is an ordinary selection failure.
 
 **Proposed instruction boundary:** built-in, parameterless `ContextGuidance` blocks form
-fixed base guidance; discovered `FileGuidance` instances are pruning candidates. The skill
+fixed base context; discovered `FileGuidance` instances are pruning candidates. The skill
 list block remains a formatter, but receives the selected skills. This is a proposed
 boundary for review, not a newly selected protection rule.
 

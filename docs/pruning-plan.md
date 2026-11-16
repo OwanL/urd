@@ -167,11 +167,19 @@ proposed concrete structure for that direction, not permission to create these f
 | --- | --- |
 | Rule-bearing content, whether built-in or loaded from files | **Instructions**, rather than guidance or system prompts |
 | One identifiable, orderable contribution of text intended for the session's starting context | **`StartingContextContribution`**, replacing the existing `ContextGuidance` name |
+| Project-owned result types from shared resource discovery | **`Discovered` prefix** |
+| A loaded instruction document returned by resource discovery | **`DiscoveredInstructionDocument`** |
+| A skill's metadata returned by resource discovery | **`DiscoveredSkill`**, replacing the existing `Skill` name |
 
 `StartingContextContribution` defines a contribution, whether its text is fixed or
 produced from supplied session data. Preparation may exclude, prune or process it
 before composition. Its identity is not tied to becoming one particular system-message
 format. This renames the existing abstraction; it does not add a wrapper or another layer.
+
+`Discovered` identifies provenance, not a temporary processing state or an object that
+performs discovery. Retained resources keep these types after pruning. Instruction
+documents carry their full loaded text; skills still carry metadata for on-demand reading.
+This convention does not require separate raw, discovered and selected wrapper types.
 
 Other concrete names remain under review. Remaining `Guidance` identifiers describe
 current code or earlier proposals, not additional settled names. These are design
@@ -187,9 +195,9 @@ context/
     StartingContext.cs              change: carry selected resources into composition
     StartingContextContribution.cs  rename existing ContextGuidance abstraction
     ResourceDiscovery.cs            new: shared skill/instruction discovery and loading
-    Resources.cs                    new: typed discovered collections
-    FileGuidance.cs                 new: loaded file-backed contribution; name pending
-    Skill.cs                        keep existing skill value
+    DiscoveredResources.cs          new: typed discovered collections; aggregate name proposed
+    DiscoveredInstructionDocument.cs new: loaded file-backed contribution
+    DiscoveredSkill.cs              rename existing Skill value
     SkillFrontmatter.cs             keep existing parser
   pruning/
     Pruner.cs                       new: three typed overloads, one selection core
@@ -203,10 +211,11 @@ Keep kind-specific parsing private to discovery and reuse `SkillFrontmatter`. Pr
 existing packaged-skill and project-override rules. Tools remain registered resources
 from `ToolCatalog`, not files found by the discoverer.
 
-`Resources` contains `IReadOnlyList<Skill>` and `IReadOnlyList<FileGuidance>`.
-`FileGuidance : StartingContextContribution` carries already-loaded text, source path
-and scope. It implements the existing ordering/applicability/rendering contract and
-requires file data in its constructor, so the parameterless built-in contribution scan
+The proposed `DiscoveredResources` aggregate contains `IReadOnlyList<DiscoveredSkill>`
+and `IReadOnlyList<DiscoveredInstructionDocument>`.
+`DiscoveredInstructionDocument : StartingContextContribution` carries already-loaded
+text, source path and scope. It implements the existing ordering/applicability/rendering
+contract and requires file data in its constructor, so the parameterless contribution scan
 cannot create it accidentally. Neither its constructor nor `GetText` performs file I/O.
 This reuses the existing contribution extension point instead of introducing a
 second prompt hierarchy or an additional instruction-document/wrapper pair.
@@ -215,17 +224,17 @@ second prompt hierarchy or an additional instruction-document/wrapper pair.
 
 ```csharp
 // ResourceDiscovery
-Task<Resources> FindAsync(string workingDirectory, CancellationToken cancellation);
+Task<DiscoveredResources> FindAsync(string workingDirectory, CancellationToken cancellation);
 
 // Pruner: one instance for one preparation
 Pruner(PruningContext context, ConversationRunner execution);
 
-Task<PruningResult<FileGuidance>> PruneAsync(
-    IReadOnlyList<FileGuidance> instructions, CancellationToken cancellation);
+Task<PruningResult<DiscoveredInstructionDocument>> PruneAsync(
+    IReadOnlyList<DiscoveredInstructionDocument> instructions, CancellationToken cancellation);
 Task<PruningResult<AIFunctionDeclaration>> PruneAsync(
     IReadOnlyList<AIFunctionDeclaration> tools, CancellationToken cancellation);
-Task<PruningResult<Skill>> PruneAsync(
-    IReadOnlyList<Skill> skills, CancellationToken cancellation);
+Task<PruningResult<DiscoveredSkill>> PruneAsync(
+    IReadOnlyList<DiscoveredSkill> skills, CancellationToken cancellation);
 ```
 
 These are proposed shapes, not compiled declarations or frozen APIs. Use the existing
@@ -309,10 +318,9 @@ kept candidate IDs, not rewritten resources; the pruner validates/maps them back
 original typed resources. Invalid output is an ordinary selection failure.
 
 **Proposed instruction boundary:** built-in, parameterless `StartingContextContribution`
-implementations form fixed base context; discovered `FileGuidance` instances are pruning
-candidates. The skill list contribution remains a formatter, but receives the selected
-skills. This is a proposed
-boundary for review, not a newly selected protection rule.
+implementations form fixed base context; `DiscoveredInstructionDocument` instances are
+pruning candidates. The skill list contribution remains a formatter, but receives the
+selected skills. This is a proposed boundary for review, not a newly selected protection rule.
 
 ### Integration constraints the design must address
 

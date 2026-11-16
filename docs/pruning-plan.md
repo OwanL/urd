@@ -89,7 +89,7 @@ it from session cancellation or owned-tool cleanup.
 Subagent creation generates the child's title during its pruning/title prepass; the caller does
 not supply one. Exact duplicate eligible titles are an ambiguity error. The nonblocking first
 message behavior above is unchanged for primary sessions; do not infer a tool-facing title from
-a pending generation attempt. See [agent communication](agent-communication-design.md#owners-tool-surface-under-review).
+a pending generation attempt. See [agent communication](agent-communication-design.md#addressing).
 
 - Supply title-generation instructions and the user prompt.
 - Permit optional `read`/`bash` exploration, independently of the pruning conversations.

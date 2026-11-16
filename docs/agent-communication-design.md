@@ -2,7 +2,8 @@
 
 **2026-11-16 — active design, not implementation approval.** This records the selected
 direction after comparing delegation, handoff, workflow and messaging models in other
-harnesses. It does not approve classes, schemas, independent agent-created sessions or a
+harnesses. The model-facing tool surface and runtime behavior below are settled; it does not
+approve classes, storage schemas, independent agent-created sessions or a
 workflow runtime. Existing [execution](execution-design.md), [agent tool](agent-tools-design.md)
 and [architecture](ARCHITECTURE.md) constraints still apply; reconcile their older delegation
 sketches before implementation.
@@ -88,9 +89,9 @@ cannot rely solely on an in-memory graph if blocked work can survive them.
 This is a safeguard for an exceptional case, not a workflow scheduler. It does not replace the
 foreground parent/child restriction, which is a direct unavoidable dependency.
 
-## Required behavior to design next
+## Runtime behavior (settled 2026-11-16)
 
-These are constraints and questions, not approved implementation mechanics:
+These settle runtime behavior; exact implementation mechanics remain for implementation:
 
 - **Recipient states / wakeups (decided 2026-11-16):** delivery reuses the existing opportune
   insertion (steering) machinery. A busy recipient sees the question at its next request
@@ -111,10 +112,9 @@ These are constraints and questions, not approved implementation mechanics:
 - **User input and approval:** an agent question is not user consent. Agents cannot answer or
   relay approval for another agent's protected action.
 
-## Owner's tool surface under review
+## Owner's tool surface (settled 2026-11-16)
 
-The following is the proposed model-facing surface, preserved as the starting point for further
-grilling rather than replaced with a more elaborate schema. It is not yet approved or implemented.
+The owner's model-facing surface, settled after review. Not yet implemented.
 
 ### `subagent`
 
@@ -201,7 +201,7 @@ pending-title tool-resolution policy.
 
 - Do not use long-lived background conversations for ordinary finite delegation.
 - Do not infer that a completed background call may continue receiving follow-ups.
-- The proposed `wake` flag and non-waking background conversion are under review, not settled.
+- The `wake` flag is settled: `wake: false` answers are opportunistic and may never arrive.
 - Do not add polling protocols or persistent peer registries before their lifecycle semantics
   are settled.
 - Long-running background Bash remains an escape hatch for timers and external-condition waits.

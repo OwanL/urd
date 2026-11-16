@@ -67,9 +67,13 @@ SessionBase ── owns 0..1 active ──> SessionExecution
                                       ├── uses request-only IChatClient
                                       └── uses ToolExecutor
 TitleGenerator ─────┐
-HistoryCompactor ───┼── use request-only IChatClient too
-CatalogPruner ──────┘
+HistoryCompactor ────┴── use request-only IChatClient too
+StartingResourcePruner ── uses shared LLM/tool-turn mechanics
 ```
+
+Pruning permits optional exploration tools rather than being request-only. Its selected
+name and category design are recorded in the [pruning plan](pruning-plan.md#naming-decisions);
+the shared execution extraction remains a proposal, not an implemented API.
 
 **Proposed responsibility limits:**
 

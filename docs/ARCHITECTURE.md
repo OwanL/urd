@@ -931,9 +931,11 @@ composition: title generation uses LLM I/O rather than inheriting from it.
 directly for shared execution and auxiliary operations where it fits. The owner
 accepted this after rejecting an unclear `ModelRequestExecutor` name; no mandatory
 `ModelClient` facade replaces it. Thin provider adapters can implement the selected
-interface as needed. `TitleGenerator`, `HistoryCompactor` and `CatalogPruner` are
-working operation names, not approved APIs or full session types. A failed title
-can fall back to a bounded excerpt of the first prompt.
+interface as needed. `TitleGenerator` and `HistoryCompactor` remain working operation
+names; the pruning operation now has the selected name `StartingResourcePruner`
+([naming decisions](pruning-plan.md#naming-decisions)). These do not establish approved
+APIs or full session types. A failed title can fall back to a bounded excerpt of the
+first prompt.
 
 Keep LLM invocation, the LLM/tool execution cycle and session state/lifetime
 as distinct responsibilities. This does not require three framework layers or

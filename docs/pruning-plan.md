@@ -172,6 +172,7 @@ proposed concrete structure for that direction, not permission to create these f
 | A skill's metadata returned by resource discovery | **`DiscoveredSkill`**, replacing the existing `Skill` name |
 | The umbrella covering instruction documents and skills | **Instruction resources** |
 | The shared operation that discovers and loads instruction resources | **`InstructionResourceDiscovery`** |
+| The shared selector for tools, skills and instructions intended for starting context | **`StartingResourcePruner`** |
 
 `StartingContextContribution` defines a contribution, whether its text is fixed or
 produced from supplied session data. Preparation may exclude, prune or process it
@@ -188,6 +189,12 @@ provide specialised task instructions. This umbrella excludes registered tools a
 runtime-generated context facts. `InstructionResourceDiscovery` owns finding/loading
 these resources, not pruning or context composition. The terminology does not require
 a new common resource base class.
+
+`StartingResourcePruner` handles all three categories through separate invocations of
+one implementation. It selects from supplied, unprotected candidates; it does not
+discover resources, prune conversation history or assemble the final context. Its name
+identifies the resources' destination, not a once-per-session execution limit. The
+owning preparation still controls the agreed fresh-session/post-compaction triggers.
 
 Other concrete names remain under review. Remaining `Guidance` identifiers describe
 current code or earlier proposals, not additional settled names. These are design
@@ -208,7 +215,7 @@ context/
     DiscoveredSkill.cs              rename existing Skill value
     SkillFrontmatter.cs             keep existing parser
   pruning/
-    Pruner.cs                       new: three typed overloads, one selection core
+    StartingResourcePruner.cs       new: three typed overloads, one selection core
     PruningContext.cs               new: immutable task context and resolved models
     PruningResult.cs                new: retained items and outcome/diagnostic
 ```
@@ -235,8 +242,8 @@ second prompt hierarchy or an additional instruction-document/wrapper pair.
 Task<DiscoveredInstructionResources> FindAsync(
     string workingDirectory, CancellationToken cancellation);
 
-// Pruner: one instance for one preparation
-Pruner(PruningContext context, ConversationRunner execution);
+// StartingResourcePruner: one instance for one preparation
+StartingResourcePruner(PruningContext context, ConversationRunner execution);
 
 Task<PruningResult<DiscoveredInstructionDocument>> PruneAsync(
     IReadOnlyList<DiscoveredInstructionDocument> instructions, CancellationToken cancellation);
@@ -253,7 +260,7 @@ selection from keep-all fallback. Cancellation and fatal recording/cleanup failu
 propagate through the owning execution instead of becoming successful result objects.
 
 The overloads choose their category brief and resolved model, then delegate to one
-private selection core. Keep prompt formatting with `Pruner` initially. No
+private selection core. Keep prompt formatting with `StartingResourcePruner` initially. No
 `SkillPruner`/`ToolPruner`/`InstructionPruner` classes, resource-handler registry or
 plugin hierarchy are needed.
 
@@ -283,8 +290,8 @@ plugin hierarchy are needed.
 
 **Revised after owner feedback:** shared discovery is a resource-level responsibility,
 not merely a Git helper below separate discoverers. `InstructionResourceDiscovery` owns
-finding/loading skills and instruction documents; `Pruner` owns selection; `StartingContextManager` connects
-them and handles protection/composition. Resource kinds retain distinct parsing rules
+finding/loading skills and instruction documents; `StartingResourcePruner` owns selection;
+`StartingContextManager` connects them and handles protection/composition. Resource kinds retain distinct parsing rules
 and typed values without requiring separate top-level discoverer classes.
 
 Construct one pruner for a preparation with its immutable task context, model choices
@@ -308,8 +315,9 @@ feature first, reuse it; these are responsibility boundaries, not competing impl
 2. At an allowed preparation boundary, capture the task context, discovery results,
    preferences and resolved models once. Separate protected entries before building
    selector inputs. Each selector has its own conversation and category brief.
-3. Call the same `Pruner` for the three typed sets in parallel. Each may use the
-   shared tool-capable execution path for exploration, but never recursively prune itself.
+3. Call the same `StartingResourcePruner` for the three typed sets in parallel. Each may
+   use the shared tool-capable execution path for exploration, but never recursively
+   prune itself.
 4. Validate returned IDs against that category's candidate set. Keep original resources
    in stable source/precedence order; the model does not rewrite documents or schemas.
    Apply ordinary per-category keep-all fallback and combine with protected entries.

@@ -961,10 +961,12 @@ emits a session title within a strict character limit. It defaults to the config
 `small` bucket with its own provider/model override, using the same preference semantics
 as pruning. Tool-capable title generation needs the shared turn mechanics, not just a
 request-only call. Title generation runs only after the first message of a session,
-never on subsequent messages, post-compaction continuation or reopen/restart. Exact
-limits, manual-name handling and whether title completion gates the main agent are
-tracked in the [prepass plan](pruning-plan.md#parallel-title-generation). This expands
-the design scope, not implementation approval.
+never on subsequent messages, post-compaction continuation or reopen/restart. Once
+pruning has settled safely, unfinished title work does not delay the main agent; it
+publishes separately through guarded metadata updates and remains owned cancellable
+work. Future title-based session addressing is explicitly deferred. Exact title limits
+and manual-name handling remain in the [prepass plan](pruning-plan.md#parallel-title-generation).
+This expands the design scope, not implementation approval.
 
 Keep LLM invocation, the LLM/tool execution cycle and session state/lifetime
 as distinct responsibilities. This does not require three framework layers or

@@ -105,6 +105,15 @@ These are constraints and questions, not approved implementation mechanics:
 - **User input and approval:** an agent question is not user consent. Agents cannot answer or
   relay approval for another agent's protected action.
 
+## Deferred title-based addressing
+
+**Owner direction (2026-11-15):** session titles are intended as communication lookup
+keys, for example “send message to <title>”. Design this when session communication
+is implemented, not as part of title generation. Resolution while a title is pending,
+collisions and renames remain undecided; this does not select a title registry or
+change durable session identity. The [prepass plan](pruning-plan.md#parallel-title-generation)
+allows the main agent to start once pruning settles without waiting for the title.
+
 ## Deliberate limits and existing alternatives
 
 - Do not use long-lived background conversations for ordinary finite delegation.

@@ -80,6 +80,17 @@ model change or preference change triggers title generation. This is a session-l
 boundary, not a once-per-host-lifecycle opportunity. It does not add a later manual
 regeneration trigger; explicit/manual renaming is a separate operation.
 
+**Nonblocking title decision:** once pruning has settled safely, start the main agent
+without waiting for unfinished title generation. Let title work complete separately
+and publish through the existing guarded metadata path; nonblocking does not detach
+it from session cancellation or owned-tool cleanup.
+
+**Deferred communication consideration:** session titles are intended to support
+addressing such as “send message to <title>”. The owner explicitly deferred that
+design. Missing-title windows, collisions, renames and address resolution belong to
+future communication work, not a reason to delay the main agent now or introduce a
+title registry in this slice. See [agent communication](agent-communication-design.md#deferred-title-based-addressing).
+
 - Supply title-generation instructions and the user prompt.
 - Permit optional `read`/`bash` exploration, independently of the pruning conversations.
 - Default to the configured `small` bucket, with its own specific provider/model override
@@ -97,15 +108,13 @@ for invalid output rather than truncating it. Its title generator is request-onl
 Urd's optional exploration is an explicit addition. Pie's later trigger, retry and
 collision-suffix rules are not imported by describing Urd as similar to Pie.
 
-**Still to settle for titles:** whether unfinished title work delays the main agent,
-the exact character limit/counting rule and invalid-output handling, and interaction
-with explicit/manual session names. Post-compaction pruning does not regenerate titles.
+**Still to settle for titles:** the exact character limit/counting rule and
+invalid-output handling, and interaction with explicit/manual session names. Post-compaction pruning does not regenerate titles.
 The earlier bounded-first-prompt-excerpt fallback remains a proposal, not a new owner
 selection. The existing three-row pruning UI decision does not select a title row.
 
-Working recommendation: use a 25-character base-title limit and let title work finish
-without delaying the main agent once pruning has settled. Preserve an explicit/manual
-name. These recommendations remain open for owner review.
+Working recommendation: use a 25-character base-title limit and preserve an
+explicit/manual name. These recommendations remain open for owner review.
 
 ## Pruning triggers
 

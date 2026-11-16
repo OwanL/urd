@@ -493,22 +493,37 @@ does not retain every skill. The behavior is selected; the concrete API remains 
 
 ### Implementation milestones
 
-**Owner approval (2026-11-16):** begin implementation with milestone 1, providing
-verified progress updates and raising material behavior changes for review. Earlier
-planning-only statements above describe their original approval state; they do not
-prohibit this subsequently approved implementation slice.
+**Owner approval (2026-11-16):** begin with milestone 1, then continue the staged
+implementation through completion, providing verified progress updates and raising
+material behavior changes for review. Earlier planning-only statements above preserve
+their original approval state; they do not prohibit the subsequently approved work.
 This does not authorize live-provider evaluation, profile reset or host replacement.
 Each milestone should be a locally verified, task-scoped commit or small cohesive set
 of commits. Do not enable a partly integrated prepass in normal sessions.
 
-**Progress (2026-11-16):** milestone 1's shared response/tool mechanics and isolated
-auxiliary recording foundation are implemented. Main execution uses the extracted
-mechanics; auxiliary records use parent-guarded scopes and separate tables. Production
-prepass task creation/driver registration remains for the integration milestones;
-pruning/title generation are still disabled. Verification: 547 Release backend tests,
-339 UI tests, UI static checks/build and the offline real-server/SDK integration flow
-passed. The test/helper size budget remains satisfied. See
-[execution design](execution-design.md#implemented-core) for the delivered boundaries.
+**Implementation checkpoint (2026-11-16):** all six milestones are implemented in
+source. The fully integrated prepass selects three categories in parallel and generates
+the one-shot title independently; all work remains execution-owned. Boundary snapshots,
+schema 29, guarded status/title publication, model/protection Settings, three status rows
+and authoritative backend tab titles are integrated. Unicode title counting uses scalar
+values, including spaces; there is no truncation or retry after the one correction.
+Configure the `small` bucket in Settings; an unresolved choice keeps that category's
+resources or leaves the title placeholder. No main-model inheritance is introduced.
+
+Earlier proposal examples in this document preserve design history, not a frozen API
+or statements that these mechanisms remain unimplemented. Concrete discovery rules live
+in the [context README](../source/backend/harness/context/README.md); implemented ownership
+is described in [backend development](backend-development.md#starting-context) and
+[execution design](execution-design.md#implemented-core). Verification uses fake/loopback
+providers and owned temporary profiles; it does not establish pruning quality or a
+winner over keep-all. The running host and live database have not been changed.
+
+Final local verification: **579 Release backend tests**, **338 UI tests**, formatter,
+type-aware lint, strict TypeScript, production UI build and the offline real-server/SDK
+integration flow passed. Independent execution, storage, discovery/settings and title/UI
+reviews found no remaining supported blockers. The physical-line budget is **30,812
+test/helper lines / 42,279 application lines**. Assets and server are staged only under
+isolated `bin/Verification/` outputs; no profile reset, installation or host activation.
 
 | Milestone | Change boundary | Acceptance evidence |
 | --- | --- | --- |

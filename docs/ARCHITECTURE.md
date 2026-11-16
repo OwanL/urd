@@ -590,14 +590,17 @@ Project instruction-file discovery now follows the same recursive Git-backed app
 as skills; the [pruning plan](pruning-plan.md#project-resource-discovery) owns that direction.
 Agent-facing Markdown instructions are in scope, including `AGENTS.md` and append-system
 resources; other harnesses' files, such as `CLAUDE.md` and Copilot instructions, are excluded.
-Exact recognition rules, precedence and production loading mechanics still need
-implementation design; this direction is not approval of an implemented loader. The subsequent protection
-and category-selection direction is recorded below. Skills are listed by name,
+The implemented recognition rules, precedence and protection identities are documented
+in the [context README](../source/backend/harness/context/README.md), with acceptance
+coverage in `InstructionResourceDiscoveryTests`. The subsequent protection and
+category-selection direction is recorded below. Skills are listed by name,
 description and path when a chat starts: Git-tracked `SKILL.md` files under the working
 directory, then Urd's packaged
 skills; bodies are read on demand. Existing protected-capability and prefix-stability constraints
-below still apply. Exact assembly, restoration and refresh boundaries need concrete
-implementation design.
+below still apply. The implemented builder persists exact boundary-scoped snapshots;
+ordinary requests and reopen reuse them, while the first request after successful
+compaction prepares a new selection. See [backend development](backend-development.md#starting-context)
+for the implemented execution and restoration boundary.
 
 **Replay checkpoint (2026-11-15):** no tested whole preparation bundle passed the
 instruction-retention gate. Smaller context and faster preparation did not establish

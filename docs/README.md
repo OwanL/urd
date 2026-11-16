@@ -23,7 +23,7 @@ not a separate archive. Their remaining constraints belong to the current docume
 - [Sessions](session-design.md), [execution](execution-design.md) and
   [discovery](discovery-design.md): lifetime, model/tool calls, adapter limits and capability exposure.
 - [Prepass plan](pruning-plan.md): parallel pruning and title generation, protection/model
-  settings and reviewed implementation milestones; not implementation approval.
+  settings, implemented milestones and their verification limits.
 - [Agent communication](agent-communication-design.md): bounded delegation, request/reply,
   ownership and cycle handling; active design, not implementation approval.
 - [Agent tools](agent-tools-design.md): tool set, parallel/background calls, approved class shapes.

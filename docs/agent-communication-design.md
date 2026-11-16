@@ -121,7 +121,7 @@ grilling rather than replaced with a more elaborate schema. It is not yet approv
 
 | Input | Meaning |
 | --- | --- |
-| `bucket` | `small`, `medium`, or `large`; selects the configured model tier. |
+| `bucket` | `small`, `medium`, or `large`; selects the configured model tier. Existing `Frontier` is renamed `Large` everywhere, folded into the schema-version bump this feature will need anyway. |
 | `context` | Parent context to retain. Candidate modes are `none`, user input including `ask_user` questions/answers, and trailing main-agent context analogous to compaction's recent-history retention. |
 | `task` | Text prompt describing the delegated task. |
 

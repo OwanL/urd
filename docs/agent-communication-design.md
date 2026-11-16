@@ -31,6 +31,13 @@ Returning the final result completes the task, its owning call and the child's a
 There is no silently resumable completed child or permanent idle worker. Its transcript may
 remain inspectable. This direction does not approve independently delegated sessions.
 
+**Disposal (2026-11-16):** a child is finished, and is disposed, once it has produced its final
+response and has no pending background calls. A disposed child leaves `list_agents`; asks to it
+fail with a clear "agent has finished" error. Its transcript remains inspectable. A child may
+deliberately stay alive by keeping a long-running background call such as `sleep`, so it can
+answer later questions. That child is still running, so its owning `subagent` call and the
+parent's result are delayed until it finishes. Every *live* session remains askable and wakeable.
+
 ### Use request/reply for exceptional runtime communication
 
 Provide an **`ask_agent`-style operation** for questions needing another agent's answer:
@@ -159,7 +166,7 @@ question the recipient can no longer see.
 
 ### `list_agents`
 
-Takes no proposed arguments and returns all agents, clearly labelled with title, running state
+Takes no proposed arguments and returns all live agents (disposed children are excluded), clearly labelled with title, running state
 (`idle`, `waiting for background task`, or `active`), and parent-session title where applicable.
 Do not add relationship, `canAsk`, or `canWake` fields: parent title already expresses the
 hierarchy, and every session supports asking and waking.

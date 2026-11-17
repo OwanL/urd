@@ -114,7 +114,7 @@ public sealed class TranscriptHistoryTests(ITestOutputHelper output) {
     RichFixture fixture = SeedRichHistory(database, session, otherSession);
     TranscriptHistoryPage page = store.History.Read(session, new(TranscriptHistoryMode.Latest, 3));
 
-    Assert.Equal(new[] { "Compaction", "CreatedAt", "Entry", "Text", "Tool" },
+    Assert.Equal(new[] { "Compaction", "CreatedAt", "Entry", "Pruning", "Text", "Tool" },
         typeof(TranscriptEntryDescriptor).GetProperties().Select(property => property.Name).Order(StringComparer.Ordinal));
     Assert.Equal(new[] { "AvailableThrough", "FinalOutputCommitted", "From", "IsClosed" },
         typeof(TranscriptTextFacts).GetProperties().Select(property => property.Name).Order(StringComparer.Ordinal));
@@ -303,6 +303,97 @@ public sealed class TranscriptHistoryTests(ITestOutputHelper output) {
       """)!;
     Assert.Equal(249_975_000L, payloadBytes);
     output.WriteLine($"Latest history latency (100,000 entries, {payloadBytes:N0} body bytes): first cold SQLite page-cache read {coldMilliseconds:F3} ms; warm median {warmMedianMilliseconds:F3} ms (OS file cache not flushed).");
+  }
+
+  [Fact]
+  public void PruningStatusesAnchorOnlyToTheFirstUserEntryAndRefreshWithoutHistoryRewrites() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
+    TranscriptEntryRef[] entries = SeedUsers(database, session, 0, 3);
+    var boundary = Guid.Empty;
+    SeedPruningStatuses(database, session, entries[0].ExecutionId, boundary,
+        new("tools", "running", 5, 5), new("skills", "fallback", 1, 1, "Pruning failed."));
+
+    TranscriptHistoryPage latest = store.History.Read(session, new(TranscriptHistoryMode.Latest, 0));
+    Assert.Equal(new StartingResourcePruningStatus[] {
+        new("tools", "running", 5, 5), new("skills", "fallback", 1, 1, "Pruning failed.")
+      }, latest.Entries[0].Pruning);
+    Assert.All(latest.Entries.Skip(1), entry => Assert.Null(entry.Pruning));
+
+    // A window without the revision's first user entry never surfaces the empty-boundary statuses.
+    TranscriptHistoryPage afterFirstTurn =
+        store.History.Read(session, new(TranscriptHistoryMode.After, 0, entries[1]));
+    Assert.Equal(entries[2..], afterFirstTurn.Entries.Select(entry => entry.Entry));
+    Assert.All(afterFirstTurn.Entries, entry => Assert.Null(entry.Pruning));
+
+    // Status transitions refresh the anchored descriptor without touching history entries.
+    database.Execute($"""
+      UPDATE session_pruning_status SET state = 'completed', retained = 4
+      WHERE session_id = '{session:D}' AND boundary_id = '{boundary:D}' AND category = 'tools';
+      """);
+    TranscriptHistoryPage refreshed = store.History.Read(session, new(TranscriptHistoryMode.Latest, 0));
+    Assert.Equal(new("tools", "completed", 5, 4),
+        Assert.Single(refreshed.Entries[0].Pruning!, status => status.Category == "tools"));
+    Assert.Equal(new("skills", "fallback", 1, 1, "Pruning failed."), refreshed.Entries[0].Pruning![1]);
+    Assert.All(refreshed.Entries.Skip(1), entry => Assert.Null(entry.Pruning));
+  }
+
+  [Fact]
+  public void CompactionMarkersCarryTheirBoundaryStatusesWhichSurviveReopen() {
+    using var database = new TemporaryDatabase();
+    Guid session = Guid.NewGuid(), otherSession = Guid.NewGuid();
+    using UrdStore store = UrdStore.Open(database.Path);
+    store.Sessions.CreatePrimary(session);
+    store.Sessions.CreatePrimary(otherSession);
+    database.Execute($"UPDATE sessions SET history_revision = 3 WHERE session_id IN ('{session:D}', '{otherSession:D}');");
+
+    RichFixture fixture = SeedRichHistory(database, session, otherSession);
+    Guid compactionId = Guid.NewGuid(), compactionRun = Guid.NewGuid();
+    database.Execute($"""
+      INSERT INTO execution_runs (session_id, run_id, history_revision, kind, llm_selection_json, outcome)
+      VALUES ('{session:D}', '{compactionRun:D}', 3, 1, 'x', 0);
+      INSERT INTO session_compactions
+          (compaction_id, session_id, history_revision, run_id, first_kept_request_id, first_kept_message_index,
+              first_kept_run_ordinal, first_kept_request_index, reason, tokens_before, tokens_after, created_at, summary)
+      VALUES ('{compactionId:D}', '{session:D}', 3, '{compactionRun:D}', '{fixture.ToolOnlyRequest:D}', 0, 0, 0,
+          0, 100, 42, '2026-11-09T12:01:00+00:00', 'summary');
+      INSERT INTO execution_messages (session_id, history_revision, run_id, role, message_id, created_at)
+      VALUES ('{session:D}', 3, '{compactionRun:D}', {(int)TranscriptEntryKind.Compaction}, '{compactionId:D}',
+          '2026-11-09T12:01:00+00:00');
+      """);
+    SeedPruningStatuses(database, session, fixture.Entries[0].ExecutionId, Guid.Empty,
+        new StartingResourcePruningStatus("tools", "completed", 5, 4));
+    SeedPruningStatuses(database, session, compactionRun, compactionId,
+        new("tools", "completed", 4, 3), new("instructions", "running", 2, 2));
+
+    TranscriptHistoryPage page = store.History.Read(session, new(TranscriptHistoryMode.Latest, 3));
+    store.Dispose();
+    Assert.Equal(new StartingResourcePruningStatus[] { new("tools", "completed", 5, 4) },
+        Assert.Single(page.Entries, entry => entry.Entry == fixture.Entries[0]).Pruning);
+    Assert.All(page.Entries.Where(entry => entry.Entry.Kind != TranscriptEntryKind.Compaction
+            && entry.Entry != fixture.Entries[0]),
+        entry => Assert.Null(entry.Pruning));
+    Assert.Equal(new StartingResourcePruningStatus[] { new("tools", "completed", 4, 3), new("instructions", "running", 2, 2) },
+        Assert.Single(page.Entries, entry => entry.Entry.Kind == TranscriptEntryKind.Compaction).Pruning);
+
+    // Both anchors keep their boundary statuses for reopened readers; no revision lives on the statuses.
+    using UrdStore reopened = UrdStore.Open(database.Path);
+    TranscriptHistoryPage reopenedPage = reopened.History.Read(session, new(TranscriptHistoryMode.Latest, 3));
+    Assert.Equal(new StartingResourcePruningStatus[] { new("tools", "completed", 5, 4) },
+        Assert.Single(reopenedPage.Entries, entry => entry.Entry == fixture.Entries[0]).Pruning);
+    Assert.Equal(new StartingResourcePruningStatus[] { new("tools", "completed", 4, 3), new("instructions", "running", 2, 2) },
+        Assert.Single(reopenedPage.Entries, entry => entry.Entry.Kind == TranscriptEntryKind.Compaction).Pruning);
+  }
+
+  private static void SeedPruningStatuses(TemporaryDatabase database, Guid session, Guid run, Guid boundary,
+      params StartingResourcePruningStatus[] statuses) {
+    database.Execute($"""
+      INSERT INTO session_pruning_status (session_id, run_id, boundary_id, category, state, total, retained, error)
+      VALUES {string.Join(",\n", statuses.Select(status =>
+          $"('{session:D}', '{run:D}', '{boundary:D}', '{status.Category}', '{status.State}', {status.Total}, "
+          + $"{status.Retained}, {(status.Error is null ? "NULL" : $"'{status.Error}'")})"))};
+      """);
   }
 
   private static void AssertTextFacts(TranscriptEntryDescriptor descriptor, Guid execution, Guid entry,

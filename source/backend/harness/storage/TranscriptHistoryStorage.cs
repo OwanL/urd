@@ -19,6 +19,18 @@ internal sealed class TranscriptHistoryStorage(
         EXISTS (SELECT 1 FROM execution_messages
         WHERE session_id = $session AND history_revision = $revision AND ordinal > $last) AS has_after;
     """;
+  internal const string FirstUserOrdinalSql = """
+    SELECT ordinal FROM execution_messages
+    WHERE session_id = $session AND history_revision = $revision AND role = 0
+    ORDER BY ordinal LIMIT 1;
+    """;
+
+  internal static string PruningStatusesSql(int boundaryCount) => $$"""
+    SELECT boundary_id, category, state, total, retained, error FROM session_pruning_status
+    WHERE session_id = $session AND boundary_id IN ({{string.Join(", ",
+        Enumerable.Range(0, boundaryCount).Select(boundary => $"$boundary{boundary}"))}})
+    ORDER BY CASE category WHEN 'tools' THEN 0 WHEN 'skills' THEN 1 ELSE 2 END;
+    """;
 
   // Select identities before joining metadata; never select body columns.
   internal static string WindowSql(bool ascending) => $$"""
@@ -95,6 +107,39 @@ internal sealed class TranscriptHistoryStorage(
   internal (bool Before, bool After) Neighbors(long first, long last) =>
       database.QuerySingleOrDefault(transaction, LookaheadSql, row => (row.Bool("has_before"), row.Bool("has_after")),
           ("$session", sessionId), ("$revision", revision), ("$first", first), ("$last", last));
+
+  // Preparation statuses persist per boundary without a revision, so historical anchors keep their rows
+  // across compactions and reopen. The window's boundaries are read in one query: compaction markers bind
+  // their own boundary, and the empty boundary binds only the revision's first user entry when in window.
+  internal Dictionary<long, IReadOnlyList<StartingResourcePruningStatus>> BoundaryPruningStatuses(
+      List<TranscriptHistoryRow> rows) {
+    List<(Guid Boundary, long Ordinal)> anchors = [.. rows
+        .Where(row => row.Descriptor.Entry.Kind == TranscriptEntryKind.Compaction)
+        .Select(row => (row.Descriptor.Entry.EntryId, row.Ordinal))];
+    if (rows.Any(row => row.Descriptor.Entry.Kind == TranscriptEntryKind.User)
+        && database.Scalar<long?>(transaction, FirstUserOrdinalSql,
+            ("$session", sessionId), ("$revision", revision)) is { } firstUserOrdinal
+        && rows.Exists(row => row.Ordinal == firstUserOrdinal))
+      anchors.Add((Guid.Empty, firstUserOrdinal));
+    if (anchors.Count == 0)
+      return [];
+
+    string[] boundaryParameters = [.. Enumerable.Range(0, anchors.Count).Select(index => $"$boundary{index}")];
+    var statuses = database.Query(transaction, PruningStatusesSql(boundaryParameters.Length),
+        row => (Boundary: row.Guid("boundary_id"),
+            Status: new StartingResourcePruningStatus(row.String("category"), row.String("state"),
+                row.Int("total"), row.Int("retained"), row.NullableString("error"))),
+        [("$session", sessionId),
+            .. boundaryParameters.Select((parameter, index) => (parameter, (object?)anchors[index].Boundary))]);
+    var byBoundary = statuses.ToLookup(status => status.Boundary, status => status.Status);
+    Dictionary<long, IReadOnlyList<StartingResourcePruningStatus>> anchored = [];
+    foreach (var (boundary, ordinal) in anchors) {
+      StartingResourcePruningStatus[] owned = [.. byBoundary[boundary]];
+      if (owned.Length > 0)
+        anchored[ordinal] = Array.AsReadOnly(owned);
+    }
+    return anchored;
+  }
 
   private List<TranscriptHistoryRow> Window(long boundary, bool ascending, int count) =>
       database.Query(transaction, WindowSql(ascending), ReadRow,

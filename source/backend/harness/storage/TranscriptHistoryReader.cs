@@ -40,6 +40,7 @@ internal sealed class TranscriptHistoryReader(Database database) {
     long first = rows.Count == 0 ? anchor : rows[0].Ordinal;
     long last = rows.Count == 0 ? anchor : rows[^1].Ordinal;
     (bool hasBefore, bool hasAfter) = history.Neighbors(first, last);
+    Dictionary<long, IReadOnlyList<StartingResourcePruningStatus>> pruning = history.BoundaryPruningStatuses(rows);
     // An empty strict-neighbor page still has its anchor on the opposite side.
     if (rows.Count == 0 && query.Anchor is not null) {
       hasBefore |= query.Mode == TranscriptHistoryMode.After;
@@ -48,8 +49,9 @@ internal sealed class TranscriptHistoryReader(Database database) {
     var settlements = rows.Where(row => row.Settlement is not null)
         .Select(row => new SessionExecutionResult(row.Descriptor.Entry.ExecutionId, row.Settlement!.Value, row.Error))
         .DistinctBy(result => result.ExecutionId).ToArray();
-    return new(sessionId, query.ExpectedHistoryRevision, rows.Select(row => row.Descriptor).ToArray(),
-        hasBefore, hasAfter, settlements);
+    return new(sessionId, query.ExpectedHistoryRevision, rows.Select(row => pruning.TryGetValue(row.Ordinal,
+        out IReadOnlyList<StartingResourcePruningStatus>? statuses) ? row.Descriptor with { Pruning = statuses }
+        : row.Descriptor).ToArray(), hasBefore, hasAfter, settlements);
   }
 
   private static void Validate(Guid session, TranscriptHistoryQuery query) {

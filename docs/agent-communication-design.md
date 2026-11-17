@@ -213,6 +213,27 @@ identity and original tool arguments for delivery and compaction.
 generated subagent titles. Exact duplicate matches are an error. There is no mutable-title or
 pending-title tool-resolution policy.
 
+## Implementation plan (draft, 2026-11-16)
+
+Start after the in-progress prepass/display work lands; it touches the same execution, prepass
+and schema files. Milestones are cohesive, locally verified slices.
+
+| Milestone | Change boundary | Acceptance evidence |
+| --- | --- | --- |
+| 1. Schema and titles | One schema-version bump (database recreation): session kind, parent session and owning call; title state (`new session`/`generating title` placeholders, final title) with final-title uniqueness; input provenance on `execution_inputs`; question records. Rename `Frontier` to `Large` everywhere. Title fallback to the truncated first prompt and lowest free ` (n)` suffix within 25 characters. | Placeholder numbering; generated, fallback and suffixed titles; duplicates impossible; existing title tests updated; old `frontier` preferences are not silently accepted. |
+| 2. Harness tool context | Give harness-owned tools the calling session/execution identity and session services, without exposing them to ordinary tools. | Existing tools unchanged; a harness tool can resolve its caller and parent. |
+| 3. `subagent` | Child session type created by the tool: resolve `bucket` through `ModelSelector` to an `LlmSelection`, assemble `context`, run the normal prepass with `SessionKind.Subagent`, run to disposal and return the final report. Register children with `SessionManager` for lookup and shutdown, and keep them out of the primary-session tab list (`ListPrimaryIds` currently returns every session). Foreground and background calls; cancelling the call stops the child tree; disposal; restart marks children interrupted like other tools. | Foreground and background results; nested children; Stop cascades through the tree; disposal after the final response with no pending background calls; stay-alive via background call delays the result; restart leaves no live children. |
+| 4. `list_agents` | List live sessions with title, state and parent title. | Disposed children and placeholder-only states shown correctly; parent titles. |
+| 5. `ask_agent` / `answer_agent` | Resolve `recipient` once (exact final title or `parent` alias; ambiguity is an error) and pin the internal identity with the original arguments. Per-recipient question queue; present the current question through the existing insertion path with agent provenance; `wake: true` starts idle/waiting recipients like new input. The ask call waits on its question record; `answer_agent` completes that exact call, and failure or cancellation releases it. Reject asks to placeholders, disposed children and from any descendant of a foreground delegation to its waiting ancestors; detect blocking cycles, including a wait that turns an outstanding non-blocking ask into a cycle. Because restart fails all questions, the dependency graph can be in-memory. Fail questions when the recipient's execution ends unanswered, the child is disposed, or on restart. Re-present the current question after compaction. | Busy/idle/waiting recipients; queue ordering; one answer per question; each rejection and failure path; cycle detection; compaction; restart. |
+| 6. Guidance | Tool descriptions and simple subagent guidance asking for a final report, built on existing `SubagentGuidance`. | Starting-context composition tests for primary and subagent sessions. |
+
+UI presentation (tool-call display and tab hover list) follows after the backend.
+
+**Open for refinement:** how `wake: false` converts a blocking ask to a background call (today
+background is chosen at dispatch, and no tool can switch mid-call); `context` mode names; whether
+trailing context reuses compaction's retained amount; how a child's tool calls appear in the
+parent's transcript before UI work.
+
 ## Deliberate limits and existing alternatives
 
 - Do not use long-lived background conversations for ordinary finite delegation.

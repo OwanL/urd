@@ -131,7 +131,8 @@ context budgets, and other invocation options are not part of this proposal.
 
 **Child tools (2026-11-16):** a child runs the same prepass as a primary session and receives
 all tools minus whatever that prepass prunes, including `subagent` and the communication tools.
-There is no separate child tool list or nesting-depth limit.
+There is no separate child tool list or nesting-depth limit; runaway nesting is accepted, with
+Stop on the owning tree as the remedy.
 
 **Result (2026-11-16):** the parent's `subagent` call returns the child's final report (its final
 response), or an error if it failed or was stopped. Keep the guidance asking for that report

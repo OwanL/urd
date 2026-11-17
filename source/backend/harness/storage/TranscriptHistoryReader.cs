@@ -4,7 +4,7 @@ using Urd.Core.Sessions;
 
 namespace Urd.Core.Storage;
 
-internal sealed class TranscriptHistoryReader(Database database) {
+internal sealed class TranscriptHistoryReader(Database database, PrepassDetailsReader prepassDetails) {
   internal const int PageSize = 60;
 
   internal TranscriptHistoryPage Read(Guid sessionId, TranscriptHistoryQuery query) {
@@ -14,7 +14,7 @@ internal sealed class TranscriptHistoryReader(Database database) {
 
   internal TranscriptHistoryPage Read(SqliteTransaction transaction, Guid sessionId, TranscriptHistoryQuery query) {
     // Check the revision before resolving an anchor, which may have been deleted.
-    var history = TranscriptHistoryStorage.Open(database, transaction, sessionId, query.ExpectedHistoryRevision);
+    var history = TranscriptHistoryStorage.Open(database, prepassDetails, transaction, sessionId, query.ExpectedHistoryRevision);
     long anchor = query.Anchor is { } entry ? history.OrdinalOf(entry) : long.MaxValue;
     List<TranscriptHistoryRow> rows = query.Mode switch {
       TranscriptHistoryMode.Latest => history.Latest(PageSize),
@@ -40,7 +40,7 @@ internal sealed class TranscriptHistoryReader(Database database) {
     long first = rows.Count == 0 ? anchor : rows[0].Ordinal;
     long last = rows.Count == 0 ? anchor : rows[^1].Ordinal;
     (bool hasBefore, bool hasAfter) = history.Neighbors(first, last);
-    Dictionary<long, IReadOnlyList<StartingResourcePruningStatus>> pruning = history.BoundaryPruningStatuses(rows);
+    Dictionary<long, IReadOnlyList<PrepassSummary>> preparation = history.BoundaryPrepassSummaries(rows);
     // An empty strict-neighbor page still has its anchor on the opposite side.
     if (rows.Count == 0 && query.Anchor is not null) {
       hasBefore |= query.Mode == TranscriptHistoryMode.After;
@@ -49,8 +49,8 @@ internal sealed class TranscriptHistoryReader(Database database) {
     var settlements = rows.Where(row => row.Settlement is not null)
         .Select(row => new SessionExecutionResult(row.Descriptor.Entry.ExecutionId, row.Settlement!.Value, row.Error))
         .DistinctBy(result => result.ExecutionId).ToArray();
-    return new(sessionId, query.ExpectedHistoryRevision, rows.Select(row => pruning.TryGetValue(row.Ordinal,
-        out IReadOnlyList<StartingResourcePruningStatus>? statuses) ? row.Descriptor with { Pruning = statuses }
+    return new(sessionId, query.ExpectedHistoryRevision, rows.Select(row => preparation.TryGetValue(row.Ordinal,
+        out IReadOnlyList<PrepassSummary>? summaries) ? row.Descriptor with { Preparation = summaries }
         : row.Descriptor).ToArray(), hasBefore, hasAfter, settlements);
   }
 

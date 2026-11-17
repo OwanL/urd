@@ -5,7 +5,7 @@ using Urd.Core.Providers;
 namespace Urd.Core.Execution;
 
 // Keeps visible text separate from completed calls and opaque provider continuation state.
-internal sealed class LlmResponseAccumulator(LlmResponseWriter writer) {
+internal sealed class LlmResponseAccumulator(LlmResponseWriter writer, LlmResponseWriter? reasoningWriter) {
   private const int ToolCallLimit = 16;
   private readonly List<LlmToolCall> calls = [];
   private readonly HashSet<string> callIds = new(StringComparer.Ordinal);
@@ -28,10 +28,13 @@ internal sealed class LlmResponseAccumulator(LlmResponseWriter writer) {
         (Usage ??= new()).Add(usage.Details);
         continue;
       }
-      if (content is TextReasoningContent) {
+      if (content is TextReasoningContent reasoning) {
         hasReasoning = true;
         if (finishReason is not null)
           throw new InvalidDataException("The response contained reasoning after its finish reason.");
+        // The preview captures only the provider's reasoning text; opaque continuation state stays excluded.
+        if (reasoningWriter is not null && reasoning.Text is { Length: > 0 } reasoningText)
+          await reasoningWriter.AppendTextAsync(reasoningText);
         continue;
       }
 
@@ -65,13 +68,15 @@ internal sealed class LlmResponseAccumulator(LlmResponseWriter writer) {
     ProviderResponse = providerResponse;
   }
 
-  internal Task FinishAsync() {
+  internal async Task FinishAsync() {
     if (finishReason is null)
       throw new InvalidDataException("The response ended without a supported finish reason.");
     if (hasReasoning && ProviderResponse is null)
       throw new InvalidDataException("The response contained reasoning without provider context.");
 
-    return writer.FinishResponseAsync();
+    if (reasoningWriter is not null)
+      await reasoningWriter.FinishResponseAsync();
+    await writer.FinishResponseAsync();
   }
 
   private async Task AddCallAsync(FunctionCallContent call) {

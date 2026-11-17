@@ -22,8 +22,9 @@ public sealed class UrdStore : IDisposable {
     Executions = new(database, toolResults, AuxiliaryConversations);
     Tools = new(database, toolResults);
     Content = new(database);
-    Snapshots = new(database, Content);
-    History = new(database);
+    PrepassDetails = new(database);
+    Snapshots = new(database, Content, PrepassDetails);
+    History = new(database, PrepassDetails);
     Positions = new(database, History);
     NotSentInputs = new(database);
     Providers = new(database);
@@ -50,6 +51,7 @@ public sealed class UrdStore : IDisposable {
   internal SnapshotReader Snapshots { get; }
   internal MessageContentReader Content { get; }
   internal TranscriptHistoryReader History { get; }
+  internal PrepassDetailsReader PrepassDetails { get; }
   internal TranscriptPositionReader Positions { get; }
   internal NotSentInputReader NotSentInputs { get; }
 

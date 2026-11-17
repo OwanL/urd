@@ -142,6 +142,7 @@ public sealed class ToolCallDisplayRoutesTests {
     const int resultTextLength = 70000;
     outputLength = resultTextLength;
     string workingDirectory = Path.Combine(Path.GetTempPath(), "urd-tool-call-routes");
+    string selection = JsonSerializer.Serialize(TestLlmSelection.Default);
     string arguments = "{\"path\":\"file.txt\"}";
     string excerpt = "{\"path\":\"file.txt\",\"private\":\"do-not-send\"}";
     string result = JsonSerializer.Serialize(new {
@@ -152,12 +153,12 @@ public sealed class ToolCallDisplayRoutesTests {
 
     database.Execute($"""
       INSERT INTO execution_runs (session_id, run_id, history_revision, kind, llm_selection_json, outcome)
-      VALUES ('{sessionId:D}', '{runId:D}', 0, 1, 'test', 0);
+      VALUES ('{sessionId:D}', '{runId:D}', 0, 1, {Sql(selection)}, 0);
       INSERT INTO execution_requests (request_id, run_id, request_index, response_final, outcome)
       VALUES ('{requestId:D}', '{runId:D}', 0, 1, 0);
       INSERT INTO input_decisions
           (session_id, input_id, expected_history_revision, original_text_utf8, decision, run_id, llm_selection_json)
-      VALUES ('{sessionId:D}', '{promptEntryId:D}', 0, X'70', 1, '{runId:D}', 'test');
+      VALUES ('{sessionId:D}', '{promptEntryId:D}', 0, X'70', 1, '{runId:D}', {Sql(selection)});
       INSERT INTO execution_messages
           (session_id, history_revision, run_id, role, message_id, input_id, request_id)
       VALUES ('{sessionId:D}', 0, '{runId:D}', 0, '{promptEntryId:D}', '{promptEntryId:D}', '{requestId:D}');

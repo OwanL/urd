@@ -16,11 +16,11 @@ public sealed record TranscriptHistoryQuery(
     TranscriptHistoryMode Mode, long ExpectedHistoryRevision, TranscriptEntryRef? Anchor = null);
 
 // Metadata only. Neither message text nor tool arguments/results belong in a history page.
-// Pruning anchors boundary preparation rows: the empty boundary belongs to the revision's first
-// user entry, each compaction marker carries its own, and every other entry stays unanchored.
+// Response headers appear once per execution; preparation summaries are anchored to their boundary.
 public sealed record TranscriptEntryDescriptor(
     TranscriptEntryRef Entry, DateTimeOffset? CreatedAt, TranscriptTextFacts? Text, TranscriptToolFacts? Tool,
-    TranscriptCompactionFacts? Compaction = null, IReadOnlyList<StartingResourcePruningStatus>? Pruning = null);
+    TranscriptCompactionFacts? Compaction = null, ResponseHeaderInfo? Response = null,
+    IReadOnlyList<PrepassSummary>? Preparation = null);
 
 public sealed record TranscriptCompactionFacts(CompactionReason Reason, long EstimatedContextTokensBefore, long EstimatedContextTokensAfter);
 

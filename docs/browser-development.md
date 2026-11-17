@@ -39,7 +39,10 @@ remain visibly unavailable rather than rebinding. Protection pickers discover re
 default directory; built-in instructions always remain. Response headers freeze the model, effort
 (`medium` shown as a bare label) and start time. Boundary-anchored preparation rows cover tools,
 skills, instructions and title, with truthful running/completed/fallback/cancelled/interrupted
-outcomes. Read-only tooltips load detail and resource pages on demand, including model, elapsed
+outcomes. Rows stay visible while preparation runs, then collapse beneath the response header.
+The disclosure flags settled issues and restores the rows on demand; rows being inspected stay
+open until pointer and keyboard focus leave. Read-only tooltips load detail and resource pages
+on demand, including model, elapsed
 time, cost (unknown or estimated where applicable), and bounded provider-emitted reasoning and
 output previews; reasoning is never inferred. Tabs use guarded
 backend title metadata or the existing placeholder, never a first-prompt excerpt.

@@ -1,5 +1,5 @@
 import type { ComponentChildren } from "preact";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { SessionClient } from "../sessions/SessionClient.ts";
 import type { TranscriptDisplay } from "./TranscriptDisplay.ts";
 import { IconButton } from "../components/IconButton.tsx";
@@ -9,6 +9,8 @@ import { ToolRow } from "../chat/ToolRow.tsx";
 import { ToolRowInteractionsProvider } from "../chat/ToolRowInteractions.tsx";
 import { toolCallLabel } from "./ToolRowPresentation.ts";
 import { TranscriptContentReader } from "./TranscriptContentReader.ts";
+import { boundaryResponseStatus } from "./PreparationRows.tsx";
+import type { ResponseStatusContext } from "./PreparationRows.tsx";
 import { isTextEntry } from "../sessions/Messages.ts";
 import type { TranscriptNavigationState } from "../sessions/TranscriptNavigationStorage.ts";
 import { VirtualTranscript } from "./VirtualTranscript.tsx";
@@ -246,6 +248,8 @@ export interface TranscriptProps {
   onPositionChange: (position: ReadingPosition) => void;
   transcriptPosition?: TranscriptNavigationState | undefined;
   onTranscriptPositionChange?: (position: TranscriptNavigationState) => void;
+  // Catalog-cache names for response headers; absent or ambiguous IDs stay opaque.
+  modelNames?: ReadonlyMap<string, string>;
 }
 
 export function Transcript(props: TranscriptProps) {
@@ -275,6 +279,7 @@ export function Transcript(props: TranscriptProps) {
         historyRevision={props.historyRevision ?? props.history?.historyRevision ?? null}
         notice={props.notice ?? null}
         visible={props.visible}
+        modelNames={props.modelNames}
         navigation={props.transcriptPosition}
         onNavigationChange={props.onTranscriptPositionChange ?? ignoreNavigationChange}
       >
@@ -297,6 +302,7 @@ function PlainTranscript({
   visible,
   position,
   onPositionChange,
+  modelNames,
 }: TranscriptProps) {
   const RichBody = display?.MessageBody;
   const scroll = useRef<HTMLDivElement>(null);
@@ -311,6 +317,10 @@ function PlainTranscript({
   const [selecting, setSelecting] = useState(false);
   const [shown, setShown] = useState(history);
   const visibleHistory = shown?.sessionId === sessionId ? shown : null;
+  const statusContext: ResponseStatusContext = useMemo(
+    () => ({ client, sessionId, modelNames: modelNames ?? new Map(), visible }),
+    [client, sessionId, modelNames, visible],
+  );
   const mountScroll = useCallback((node: HTMLDivElement | null) => {
     scroll.current = node;
     setRoot(node);
@@ -422,12 +432,20 @@ function PlainTranscript({
             {visibleHistory?.entries.map((descriptor) => {
               const entry = descriptor.entry;
               const key = `${entry.executionId}/${entry.entryId}/${entry.kind}/${entry.historyRevision}`;
+              const status = boundaryResponseStatus(
+                entry.kind,
+                descriptor.response,
+                descriptor.preparation,
+                statusContext,
+                entry.historyRevision,
+              );
               return (
                 <div
                   key={key}
                   data-message={key}
                   class={descriptor.tool ? "transcript-tool-entry" : undefined}
                 >
+                  {status.before}
                   {isTextEntry(entry) && descriptor.text ? (
                     <EditableMessage entry={entry} text={descriptor.text}>
                       {display && RichBody ? (
@@ -468,6 +486,7 @@ function PlainTranscript({
                       paused={!visible || documentHidden}
                     />
                   ) : null}
+                  {status.after}
                 </div>
               );
             })}

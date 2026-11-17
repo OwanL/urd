@@ -93,6 +93,35 @@ public sealed class TranscriptHistoryRoutesTests {
       Assert.Equal(HttpStatusCode.NotFound, notFound.StatusCode);
   }
 
+  [Fact]
+  public async Task PrepassDetailsRouteValidatesInputsAndChecksRevisionBeforeBoundaryLookup() {
+    using var database = new TemporaryDatabase();
+    await using var server = new RunningServer(RunningServer.OptionsFor(database));
+    await server.WaitForReadyAsync();
+    Guid sessionId = await CreateSessionAsync(server.Client);
+    string path = $"/api/sessions/{sessionId}/prepass/{Guid.Empty:D}";
+
+    using (HttpResponseMessage invalidCategory = await RequestAsync(server.Client, HttpMethod.Get,
+        $"{path}/unknown?historyRevision=0")) {
+      Assert.Equal(HttpStatusCode.BadRequest, invalidCategory.StatusCode);
+      AssertPrivateResponse(invalidCategory);
+    }
+    using (HttpResponseMessage invalidOffset = await RequestAsync(server.Client, HttpMethod.Get,
+        $"{path}/tools?historyRevision=0&candidateOffset=-1")) {
+      Assert.Equal(HttpStatusCode.BadRequest, invalidOffset.StatusCode);
+      AssertPrivateResponse(invalidOffset);
+    }
+    using (HttpResponseMessage staleRevision = await RequestAsync(server.Client, HttpMethod.Get,
+        $"{path}/tools?historyRevision=1")) {
+      Assert.Equal(HttpStatusCode.Conflict, staleRevision.StatusCode);
+      AssertPrivateResponse(staleRevision);
+    }
+    using HttpResponseMessage missing = await RequestAsync(server.Client, HttpMethod.Get,
+        $"{path}/tools?historyRevision=0");
+    Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
+    AssertPrivateResponse(missing);
+  }
+
   [Theory]
   [InlineData("unknown", "&expectedHistoryRevision=0")]
   [InlineData("latest", "")]

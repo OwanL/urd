@@ -12,13 +12,15 @@ internal sealed class StartingResourcePruner(
     ConversationRunner runner,
     Func<AuxiliaryModelPurpose, CancellationToken, Task<LlmSelection>> resolveModel,
     Func<StartingResourcePruningStatus, Task> saveStatus,
-    string taskInput) {
+    string taskInput,
+    Func<StartingResourcePruningStatus, IReadOnlyList<PrepassResource>, IReadOnlyList<string>?, Task>? saveProgress = null) {
   private readonly ConversationRunner runner = runner ?? throw new ArgumentNullException(nameof(runner));
   private readonly Func<AuxiliaryModelPurpose, CancellationToken, Task<LlmSelection>> resolveModel =
       resolveModel ?? throw new ArgumentNullException(nameof(resolveModel));
   private readonly Func<StartingResourcePruningStatus, Task> saveStatus =
       saveStatus ?? throw new ArgumentNullException(nameof(saveStatus));
   private readonly string taskInput = taskInput ?? throw new ArgumentNullException(nameof(taskInput));
+  private readonly Func<StartingResourcePruningStatus, IReadOnlyList<PrepassResource>, IReadOnlyList<string>?, Task>? saveProgress = saveProgress;
 
   internal Task<StartingResourcePruningResult<DiscoveredInstructionDocument>> PruneAsync(
       IReadOnlyList<DiscoveredInstructionDocument> candidates, int protectedCount, CancellationToken cancellation) =>
@@ -26,6 +28,7 @@ internal sealed class StartingResourcePruner(
           "Select the project instruction documents that are relevant to the task. Preserve applicable rules and avoid redundant documents.",
           document => document.Identity,
           (document, id) => new InstructionCandidate(id, "instruction", document.Text, document.Path, document.Scope),
+          document => new(document.Identity, System.IO.Path.GetFileName(document.Path), document.Path),
           cancellation);
 
   internal Task<StartingResourcePruningResult<DiscoveredSkill>> PruneAsync(
@@ -34,6 +37,7 @@ internal sealed class StartingResourcePruner(
           "Select the specialized skills that are relevant to the task. Keep a skill when its instructions may materially help.",
           skill => skill.Identity,
           (skill, id) => new SkillCandidate(id, "skill", skill.Name, skill.Description, skill.Path),
+          skill => new(skill.Identity, skill.Name, skill.Path),
           cancellation);
 
   internal Task<StartingResourcePruningResult<AIFunctionDeclaration>> PruneAsync(
@@ -42,6 +46,7 @@ internal sealed class StartingResourcePruner(
           "Select the tools that are useful for completing the task. Keep a tool when it enables a relevant action.",
           tool => tool.Name,
           (tool, id) => new ToolCandidate(id, "tool", tool.Name, tool.Description, tool.JsonSchema),
+          tool => new(tool.Name, tool.Name),
           cancellation);
 
   private async Task<StartingResourcePruningResult<T>> PruneAsync<T, TMetadata>(
@@ -52,23 +57,26 @@ internal sealed class StartingResourcePruner(
       string categoryBrief,
       Func<T, string> getIdentity,
       Func<T, string, TMetadata> createMetadata,
+      Func<T, PrepassResource> createResource,
       CancellationToken cancellation) {
     ArgumentNullException.ThrowIfNull(candidates);
     ArgumentNullException.ThrowIfNull(getIdentity);
     ArgumentNullException.ThrowIfNull(createMetadata);
+    ArgumentNullException.ThrowIfNull(createResource);
     ArgumentOutOfRangeException.ThrowIfNegative(protectedCount);
 
     string[] identities = candidates.Select(getIdentity).ToArray();
     if (identities.Any(string.IsNullOrWhiteSpace) || identities.Distinct(StringComparer.Ordinal).Count() != identities.Length)
       throw new ArgumentException("Pruning candidate identities must be nonempty and unique.", nameof(candidates));
 
+    PrepassResource[] resources = candidates.Select(createResource).ToArray();
     int total = checked(candidates.Count + protectedCount);
     var running = new StartingResourcePruningStatus(category, "running", total, total);
     try {
       cancellation.ThrowIfCancellationRequested();
-      await saveStatus(running);
+      await SaveStatusAsync(running, resources, null);
     } catch (OperationCanceledException) when (cancellation.IsCancellationRequested) {
-      await SaveCancelledStatusAsync(category, total, protectedCount);
+      await SaveCancelledStatusAsync(category, total, protectedCount, resources);
       throw;
     }
 
@@ -104,25 +112,26 @@ internal sealed class StartingResourcePruner(
       }
       cancellation.ThrowIfCancellationRequested();
     } catch (OperationCanceledException) when (cancellation.IsCancellationRequested) {
-      await SaveCancelledStatusAsync(category, total, protectedCount);
+      await SaveCancelledStatusAsync(category, total, protectedCount, resources);
       throw;
     } catch (AuxiliaryExecutionException) {
       if (cancellation.IsCancellationRequested)
-        await SaveCancelledStatusAsync(category, total, protectedCount);
+        await SaveCancelledStatusAsync(category, total, protectedCount, resources);
       throw;
     } catch (Exception failure) {
       if (cancellation.IsCancellationRequested) {
-        await SaveCancelledStatusAsync(category, total, protectedCount);
+        await SaveCancelledStatusAsync(category, total, protectedCount, resources);
         throw new OperationCanceledException(cancellation);
       }
 
-      await saveStatus(new(category, "fallback", total, total, failure.Message));
+      await SaveStatusAsync(new(category, "fallback", total, total, failure.Message), resources, identities);
       return new(Array.AsReadOnly(candidates.ToArray()), IsFallback: true, Error: failure.Message);
     }
 
     var selected = new HashSet<string>(selectedIds, StringComparer.Ordinal);
     T[] retained = candidates.Where((_, index) => selected.Contains(identities[index])).ToArray();
-    await saveStatus(new(category, "completed", total, checked(retained.Length + protectedCount)));
+    string[] resultIds = identities.Where(selected.Contains).ToArray();
+    await SaveStatusAsync(new(category, "completed", total, checked(retained.Length + protectedCount)), resources, resultIds);
     return new(Array.AsReadOnly(retained));
   }
 
@@ -152,8 +161,12 @@ internal sealed class StartingResourcePruner(
     return selected.ToArray();
   }
 
-  private Task SaveCancelledStatusAsync(string category, int total, int retained) =>
-      saveStatus(new(category, "cancelled", total, retained));
+  private Task SaveStatusAsync(StartingResourcePruningStatus status, IReadOnlyList<PrepassResource> resources,
+      IReadOnlyList<string>? resultIds) => saveProgress is null ? saveStatus(status) : saveProgress(status, resources, resultIds);
+
+  private Task SaveCancelledStatusAsync(string category, int total, int retained,
+      IReadOnlyList<PrepassResource> resources) =>
+      SaveStatusAsync(new(category, "cancelled", total, retained), resources, null);
 
   private static InvalidDataException InvalidResult() =>
       new("The pruning response must contain exactly one keptIds array with unique known candidate IDs.");

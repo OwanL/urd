@@ -1,5 +1,6 @@
 import type { CompactionReason } from "./Compaction.ts";
 import type { ExecutionOutcome, SessionExecutionResult } from "./SessionExecutionResult.ts";
+import type { ResponseHeaderInfo, PrepassSummary } from "./Prepass.ts";
 
 // Identifies one message within a session's history revision.
 export interface MessageRef {
@@ -37,6 +38,9 @@ export interface TranscriptEntryDescriptor {
   readonly text: TranscriptTextFacts | null;
   readonly tool: TranscriptToolFacts | null;
   readonly compaction?: TranscriptCompactionFacts;
+  // Response-header and preparation facts anchor only to boundary entries.
+  readonly response?: ResponseHeaderInfo;
+  readonly preparation?: readonly PrepassSummary[];
 }
 
 export interface TranscriptCompactionFacts {

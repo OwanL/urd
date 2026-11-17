@@ -21,6 +21,7 @@ export function Tooltip({
   dismissOnClick = true,
   placement = "above",
 }: TooltipProps) {
+  const wrapper = useRef<HTMLSpanElement>(null);
   const anchor = useRef<HTMLElement>(null);
   const id = useId();
   const [open, setOpen] = useState(false);
@@ -43,11 +44,17 @@ export function Tooltip({
   useLayoutEffect(() => {
     if (disabled) dismiss();
     document.addEventListener("urd:popover-open", dismiss);
-    document.addEventListener("pointerdown", dismiss, true);
+    // Pointer work on the open surface itself, including scrollbar drags or drag-selecting
+    // its text, must not dismiss it; only outside presses do.
+    const onPointerDown = (event: Event) => {
+      if (wrapper.current?.contains(event.target as Node)) return;
+      dismiss();
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
     return () => {
       clearTimers();
       document.removeEventListener("urd:popover-open", dismiss);
-      document.removeEventListener("pointerdown", dismiss, true);
+      document.removeEventListener("pointerdown", onPointerDown, true);
     };
   }, [disabled, dismiss, clearTimers]);
 
@@ -60,6 +67,7 @@ export function Tooltip({
   return (
     <span
       ref={(element) => {
+        wrapper.current = element;
         anchor.current = (element?.firstElementChild as HTMLElement | null) ?? null;
       }}
       class="tooltip-anchor"

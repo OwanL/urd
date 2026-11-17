@@ -13,6 +13,7 @@ internal sealed class SnapshotReader {
   private const int PendingInputLimit = 8;
   private readonly Database database;
   private readonly MessageContentReader content;
+  private readonly PrepassDetailsReader prepassDetails;
 
   internal static readonly string FirstUserSql = $"""
     SELECT run_id, message_id FROM execution_messages
@@ -108,9 +109,10 @@ internal sealed class SnapshotReader {
                     WHERE c.session_id = tail.session_id AND c.history_revision = tail.history_revision)));
     """;
 
-  internal SnapshotReader(Database database, MessageContentReader content) {
+  internal SnapshotReader(Database database, MessageContentReader content, PrepassDetailsReader prepassDetails) {
     this.database = database;
     this.content = content;
+    this.prepassDetails = prepassDetails;
   }
 
   // Reads stored facts only. SessionBase supplies live admission and Stop state before exposure.
@@ -130,6 +132,8 @@ internal sealed class SnapshotReader {
         transaction, sessionId, unsettledExecution ?? lastSettlement?.ExecutionId);
     string? firstUserPreview = ReadFirstUserPreview(transaction, sessionId, historyRevision);
     PendingInputPreview[] pendingInputs = ReadPendingInputs(transaction, sessionId);
+    PendingResponse? pendingResponse = ReadPendingResponse(transaction, sessionId, historyRevision,
+        unsettledExecution, latestSelection);
 
     // Storage cannot establish live admission eligibility; the session replaces this fence.
     return new(sessionId, historyRevision, AdmissionFenced: true, CanChangeWorkingDirectory: false,
@@ -138,7 +142,7 @@ internal sealed class SnapshotReader {
         ContextUsage: ReadContextUsage(transaction, sessionId, historyRevision),
         CanContinue: ReadCanContinue(transaction, sessionId, historyRevision),
         Title: database.Scalar<string?>(transaction, PrepassTitleSql, ("$session", sessionId)),
-        Pruning: ReadPruningStatuses(transaction, sessionId));
+        Pruning: ReadPruningStatuses(transaction, sessionId), PendingResponse: pendingResponse);
   }
 
   private long ReadHistoryRevision(SqliteTransaction transaction, Guid sessionId) =>
@@ -151,6 +155,31 @@ internal sealed class SnapshotReader {
       database.QuerySingleOrDefault(transaction, SnapshotUnsettledSql,
           row => ((Guid?)row.Guid("run_id"), row.Bool("stopping"), row.NullableTimestamp("working_started_at")),
           ("$session", sessionId));
+
+  private PendingResponse? ReadPendingResponse(SqliteTransaction transaction, Guid sessionId, long historyRevision,
+      Guid? unsettledExecution, LlmSelection? selection) {
+    if (unsettledExecution is not Guid runId || selection is null || database.Scalar<bool>(transaction, """
+        SELECT EXISTS (SELECT 1 FROM execution_messages
+            WHERE session_id = $session AND history_revision = $revision AND run_id = $run);
+        """, ("$session", sessionId), ("$revision", historyRevision), ("$run", runId)))
+      return null;
+
+    Guid boundary = database.QuerySingleOrDefault(transaction, """
+        SELECT compaction_id FROM session_compactions
+        WHERE session_id = $session AND history_revision = $revision ORDER BY ordinal DESC LIMIT 1;
+        """, row => row.Guid("compaction_id"), ("$session", sessionId), ("$revision", historyRevision));
+    IReadOnlyList<PrepassSummary> preparation = prepassDetails.ReadRunSummaries(
+        transaction, sessionId, boundary, runId);
+    if (preparation.Count == 0)
+      return null;
+
+    DateTimeOffset? startedAt = database.QuerySingleOrDefault(transaction, """
+        SELECT created_at FROM execution_runs WHERE session_id = $session AND run_id = $run;
+        """, row => row.NullableTimestamp("created_at"), ("$session", sessionId), ("$run", runId));
+    var header = new ResponseHeaderInfo(selection.ModelId,
+        PrepassDetailsReader.ReadReasoningEffort(selection), startedAt);
+    return new PendingResponse(header, preparation);
+  }
 
   private bool ReadCanContinue(SqliteTransaction transaction, Guid sessionId, long historyRevision) =>
       database.Scalar<bool>(transaction, CanContinueSql,

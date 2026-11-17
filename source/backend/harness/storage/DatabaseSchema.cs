@@ -4,7 +4,7 @@ namespace Urd.Core.Storage;
 
 // Creates the current pre-release schema; incompatible databases require a manual reset.
 internal static class DatabaseSchema {
-  private const int SchemaVersion = 29;
+  private const int SchemaVersion = 30;
 
   internal static void Initialize(SqliteConnection connection) {
     using SqliteCommand command = connection.CreateCommand();
@@ -95,6 +95,28 @@ internal static class DatabaseSchema {
           error TEXT,
           PRIMARY KEY (session_id, boundary_id, category)
       ) STRICT;
+      CREATE TABLE session_prepass_details (
+          session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+          run_id TEXT NOT NULL,
+          boundary_id TEXT NOT NULL,
+          category TEXT NOT NULL CHECK (category IN ('tools', 'skills', 'instructions', 'title')),
+          state TEXT NOT NULL CHECK (state IN ('running', 'completed', 'fallback', 'cancelled', 'interrupted', 'failed')),
+          started_at TEXT NOT NULL,
+          finished_at TEXT,
+          llm_selection_json TEXT,
+          candidates_json TEXT,
+          results_json TEXT,
+          reasoning_text TEXT NOT NULL DEFAULT '',
+          output_text TEXT NOT NULL DEFAULT '',
+          reasoning_truncated INTEGER NOT NULL DEFAULT 0 CHECK (reasoning_truncated IN (0, 1)),
+          output_truncated INTEGER NOT NULL DEFAULT 0 CHECK (output_truncated IN (0, 1)),
+          error TEXT,
+          PRIMARY KEY (session_id, boundary_id, category),
+          FOREIGN KEY (session_id, run_id) REFERENCES execution_runs(session_id, run_id) ON DELETE CASCADE,
+          CHECK ((state = 'running' AND finished_at IS NULL)
+              OR (state <> 'running' AND finished_at IS NOT NULL))
+      ) STRICT;
+      CREATE INDEX session_prepass_details_running ON session_prepass_details(session_id, run_id) WHERE state = 'running';
       CREATE TABLE session_creation (
           ordinal INTEGER PRIMARY KEY AUTOINCREMENT,
           session_id TEXT NOT NULL UNIQUE REFERENCES sessions(session_id) ON DELETE CASCADE
@@ -141,7 +163,9 @@ internal static class DatabaseSchema {
           stopping INTEGER NOT NULL DEFAULT 0 CHECK (stopping IN (0, 1)),
           working_started_at TEXT,
           outcome INTEGER CHECK (outcome IN (0, 1, 2)),
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
           UNIQUE (session_id, input_id),
+          UNIQUE (session_id, run_id),
           FOREIGN KEY (session_id, input_id) REFERENCES input_decisions(session_id, input_id),
           CHECK (
               (kind = 0 AND input_id IS NOT NULL AND continuation_expected_history_revision IS NULL

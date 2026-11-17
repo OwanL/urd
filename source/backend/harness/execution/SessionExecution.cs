@@ -201,7 +201,8 @@ internal sealed class SessionExecution : IDisposable {
 
     var pruner = new StartingResourcePruner(auxiliary,
         (purpose, cancellation) => session.ResolveAuxiliaryModelAsync(purpose, captured, cancellation),
-        status => SavePruningStatusAsync(boundary, status), task);
+        status => SavePruningStatusAsync(boundary, status), task,
+        (status, candidates, resultIds) => SavePruningProgressAsync(boundary, status, candidates, resultIds));
     HashSet<string> protectedTools = boundary == Guid.Empty ? []
         : pending.List().Select(call => call.Name).ToHashSet(StringComparer.Ordinal);
     startingContext = await startingContextBuilder.PrepareAsync(ContextInput(), boundary, task,
@@ -220,6 +221,34 @@ internal sealed class SessionExecution : IDisposable {
     } catch (Exception failure) {
       await recorder.ReportAuxiliaryFailureAsync(failure);
       throw new AuxiliaryExecutionException("Saving pruning progress failed.", failure);
+    }
+  }
+
+  private async Task SavePruningProgressAsync(Guid boundary, StartingResourcePruningStatus status,
+      IReadOnlyList<PrepassResource> candidates, IReadOnlyList<string>? resultIds) {
+    try {
+      if (await recorder.RecordPruningProgressAsync(boundary, status, candidates, resultIds))
+        return;
+      stop.Token.ThrowIfCancellationRequested();
+      throw new AuxiliaryExecutionException("The pruning detail no longer accepts this execution.");
+    } catch (OperationCanceledException) when (IsStopping) {
+      throw;
+    } catch (Exception failure) {
+      await recorder.ReportAuxiliaryFailureAsync(failure);
+      throw new AuxiliaryExecutionException("Saving pruning details failed.", failure);
+    }
+  }
+
+  private async Task SaveTitleOutcomeAsync(string state, string? error) {
+    try {
+      if (await recorder.RecordTitleOutcomeAsync(state, error))
+        return;
+      throw new AuxiliaryExecutionException("The title outcome no longer accepts this execution.");
+    } catch (AuxiliaryExecutionException) {
+      throw;
+    } catch (Exception failure) {
+      await recorder.ReportAuxiliaryFailureAsync(failure);
+      throw new AuxiliaryExecutionException("Saving the title outcome failed.", failure);
     }
   }
 
@@ -242,9 +271,19 @@ internal sealed class SessionExecution : IDisposable {
       fatal = failure;
       throw;
     } catch (OperationCanceledException) when (IsStopping) {
-      // Stop owns and joins the conversation; leave the placeholder unchanged.
-    } catch (Exception) {
-      // An unavailable model or failed/invalid generation never invents or retries a title.
+      try {
+        await SaveTitleOutcomeAsync("cancelled", null);
+      } catch (AuxiliaryExecutionException failure) {
+        fatal = failure;
+        throw;
+      }
+    } catch (Exception failure) {
+      try {
+        await SaveTitleOutcomeAsync("failed", failure.Message);
+      } catch (AuxiliaryExecutionException recordingFailure) {
+        fatal = recordingFailure;
+        throw;
+      }
     } finally {
       Volatile.Write(ref titleFinished, 1);
       await session.ReportToolOutcomeAsync(ExecutionId, fatal);

@@ -1,3 +1,4 @@
+using System.Text;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Execution;
 using Urd.Core.Sessions;
@@ -53,5 +54,52 @@ public sealed class PrepassStorageTests {
         store.Executions.TryFinish(session, execution, ExecutionOutcome.Completed)!.Outcome);
     Assert.Contains(store.Snapshots.ReadPersisted(session).Pruning!,
         status => status.Category == "skills" && status.State == "running");
+  }
+
+  [Fact]
+  public void PreviewTailsHandleSplitUnicodeAndTitleFailureSurvivesReopen() {
+    using var database = new TemporaryDatabase();
+    Guid session;
+    Guid execution = Guid.NewGuid();
+    string longError = new('x', 1100);
+    using (UrdStore store = UrdStore.Open(database.Path)) {
+      session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
+      var identity = new ExecutionIdentity(session, execution, 0);
+      store.UserMessages.Submit(session, 0, new(Guid.NewGuid(), 0, "request", TestLlmSelection.Default),
+          true, execution, null);
+      Assert.True(store.Prepass.TryClaimTitle(identity));
+      Assert.True(store.Prepass.RecordModel(identity, "title", TestLlmSelection.Default));
+
+      PrepassPreviewWrite highSurrogate = store.Prepass.RecordPreview(identity, "title", "\ud83d");
+      Assert.True(highSurrogate.Accepted);
+      PrepassPreviewWrite completedPair = store.Prepass.RecordPreview(identity, "title",
+          "\ude80" + new string('a', 8191), pendingOutput: highSurrogate.PendingOutput);
+      Assert.True(completedPair.Accepted);
+      PrepassPreviewWrite outputTail = store.Prepass.RecordPreview(identity, "title", "b",
+          pendingOutput: completedPair.PendingOutput);
+      Assert.True(outputTail.Accepted);
+      Assert.True(store.Prepass.RecordPreview(identity, "title", reasoning: new string('r', 8193)).Accepted);
+      Assert.True(store.Prepass.RecordTitleOutcome(identity, "failed", longError));
+      Assert.False(store.Prepass.PublishTitle(identity, "Late title"));
+    }
+
+    using UrdStore reopened = UrdStore.Open(database.Path);
+    Assert.Null(reopened.Snapshots.ReadPersisted(session).Title);
+    string output = database.ReadRows("SELECT output_text FROM session_prepass_details WHERE category = 'title';",
+        row => row.GetString(0)).Single();
+    string reasoning = database.ReadRows("SELECT reasoning_text FROM session_prepass_details WHERE category = 'title';",
+        row => row.GetString(0)).Single();
+    Assert.Equal(8192, output.EnumerateRunes().Count());
+    Assert.StartsWith("a", output, StringComparison.Ordinal);
+    Assert.EndsWith("b", output, StringComparison.Ordinal);
+    Assert.Equal(8192, reasoning.EnumerateRunes().Count());
+    Assert.Equal(1L, database.Scalar("SELECT output_truncated FROM session_prepass_details WHERE category = 'title';")); // raw-sql: stored bounds and terminal state are the subject under test
+    Assert.Equal(1L, database.Scalar("SELECT reasoning_truncated FROM session_prepass_details WHERE category = 'title';")); // raw-sql: stored bounds and terminal state are the subject under test
+    Assert.Equal("failed", database.Scalar("SELECT state FROM session_prepass_details WHERE category = 'title';")); // raw-sql: stored bounds and terminal state are the subject under test
+    Assert.Equal(1L, database.Scalar("SELECT finished_at IS NOT NULL FROM session_prepass_details WHERE category = 'title';")); // raw-sql: stored bounds and terminal state are the subject under test
+    Assert.Equal(1024L, database.Scalar("SELECT length(error) FROM session_prepass_details WHERE category = 'title';")); // raw-sql: stored bounds and terminal state are the subject under test
+    Assert.Contains(TestLlmSelection.Default.ModelId,
+        database.ReadRows("SELECT llm_selection_json FROM session_prepass_details WHERE category = 'title';",
+            row => row.GetString(0)).Single(), StringComparison.Ordinal);
   }
 }

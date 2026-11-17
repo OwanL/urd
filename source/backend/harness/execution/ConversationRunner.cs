@@ -136,9 +136,12 @@ internal sealed class ConversationRunner(SessionExecutionRecorder parent,
           async chunk => {
             text.Append(chunk.Text);
             await RequireAcceptedAsync(recorder.RecordOutputAsync(chunk), cancellation);
+            // Preview capture is advisory; a parent with no active prepass work stays benign.
+            await parent.RecordPrepassPreviewAsync(purpose, output: chunk.Text);
           },
           (callId, name) => RequireAcceptedAsync(recorder.RecordToolCallAsync(requestId, callId, name), cancellation),
-          cancellation);
+          cancellation,
+          chunk => parent.RecordPrepassPreviewAsync(purpose, reasoning: chunk.Text));
     } catch (AggregateException cleanup) {
       throw new AuxiliaryExecutionException("The auxiliary request could not be cleaned up.", cleanup);
     }

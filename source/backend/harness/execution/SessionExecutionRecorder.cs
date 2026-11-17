@@ -10,6 +10,7 @@ namespace Urd.Core.Execution;
 // Persists request and tool progress under the session lock, rejecting stale or stopped work.
 internal sealed class SessionExecutionRecorder(SessionBase session, UrdStore store, AsyncLock sessionLock,
     ExecutionIdentity identity) {
+  private readonly Dictionary<(string Purpose, string Channel), char> pendingPreviewSurrogates = [];
   internal ExecutionIdentity Identity { get; } = identity;
 
   internal Task<bool> StartRequestAsync(Guid requestId, StartingContext startingContext) =>
@@ -46,13 +47,50 @@ internal sealed class SessionExecutionRecorder(SessionBase session, UrdStore sto
       RecordChangeAsync(() => store.Prepass.WritePruningStatus(Identity, boundaryId, status),
           allowStopping: status.State != "running");
 
+  internal Task<bool> RecordPruningProgressAsync(Guid boundaryId, StartingResourcePruningStatus status,
+      IReadOnlyList<PrepassResource> candidates, IReadOnlyList<string>? resultIds) =>
+      RecordChangeAsync(() => store.Prepass.WritePruningProgress(Identity, boundaryId, status, candidates, resultIds),
+          allowStopping: status.State != "running");
+
+  internal Task<bool> RecordTitleOutcomeAsync(string state, string? error) =>
+      RecordChangeAsync(() => store.Prepass.RecordTitleOutcome(Identity, state, error), allowStopping: true);
+
+  internal async Task<bool> RecordPrepassPreviewAsync(string purpose, string? output = null, string? reasoning = null) {
+    using var _ = await sessionLock.AcquireAsync();
+    if (!session.CanRecordExecution(Identity))
+      return false;
+
+    char? pendingOutput = ReadPending(purpose, "output");
+    char? pendingReasoning = ReadPending(purpose, "reasoning");
+    PrepassPreviewWrite recorded = session.WriteToStore(() => store.Prepass.RecordPreview(
+        Identity, purpose, output, reasoning, pendingOutput, pendingReasoning));
+    if (!recorded.Accepted)
+      return false;
+
+    SavePending(purpose, "output", recorded.PendingOutput);
+    SavePending(purpose, "reasoning", recorded.PendingReasoning);
+    session.PublishChange();
+    return true;
+  }
+
   internal Task ReportAuxiliaryFailureAsync(Exception failure) => session.ReportToolOutcomeAsync(Identity.ExecutionId, failure);
 
   internal async Task<AuxiliaryConversationRecorder?> CreateConversationAsync(Guid conversationId, string purpose,
       LlmSelection selection, IReadOnlyList<ChatMessage> input, IReadOnlyList<AIFunctionDeclaration> tools) {
-    bool created = await RecordChangeAsync(() => store.AuxiliaryConversations.Create(
-        Identity, conversationId, purpose, selection, input, tools));
+    bool created = await RecordChangeAsync(() => store.Prepass.RecordModel(Identity, purpose, selection)
+        && store.AuxiliaryConversations.Create(Identity, conversationId, purpose, selection, input, tools));
     return created ? new(this, store.AuxiliaryConversations, conversationId) : null;
+  }
+
+  private char? ReadPending(string purpose, string channel) =>
+      pendingPreviewSurrogates.TryGetValue((purpose, channel), out char pending) ? pending : null;
+
+  private void SavePending(string purpose, string channel, char? pending) {
+    var key = (purpose, channel);
+    if (pending is { } character)
+      pendingPreviewSurrogates[key] = character;
+    else
+      pendingPreviewSurrogates.Remove(key);
   }
 
   internal async Task<bool> RecordChangeAsync(Func<bool> record, bool allowStopping = false) {

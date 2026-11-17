@@ -1,5 +1,6 @@
 import type { LlmSelection } from "../providers/LlmSelection.ts";
 import type { SessionExecutionResult } from "./SessionExecutionResult.ts";
+import type { PendingResponse } from "./Prepass.ts";
 
 // Bounded committed session facts combined with current admission and Stop state.
 export interface PendingInputPreview {
@@ -43,6 +44,7 @@ export interface SessionSnapshot {
   readonly firstUserPreview: string | null;
   readonly title?: string | null;
   readonly pruning?: readonly SessionPruningStatus[] | null;
+  readonly pendingResponse?: PendingResponse | null;
   readonly pendingInputs: readonly PendingInputPreview[];
   readonly workingTime?: SessionWorkingTime | null;
   readonly contextUsage?: SessionContextUsage | null;

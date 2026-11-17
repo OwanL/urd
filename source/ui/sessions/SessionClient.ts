@@ -19,6 +19,7 @@ import type {
   ManualCompactionRequest,
   CompactionSummary,
 } from "./Compaction.ts";
+import type { PrepassDetails, PrepassDetailsQuery } from "./Prepass.ts";
 import type { ContinuationReceipt, ContinuationSubmission } from "./Continuation.ts";
 import type { MessageEditReceipt, MessageEditSubmission } from "./MessageEdit.ts";
 import type { SessionIdPage } from "./SessionIdPage.ts";
@@ -342,6 +343,25 @@ export class SessionClient {
       `/${encodeURIComponent(sessionId)}/compactions/${encodeURIComponent(compactionId)}`,
     );
     url.searchParams.set("expectedHistoryRevision", String(expectedHistoryRevision));
+    return requestJson(url, "GET", undefined, signal);
+  }
+
+  getPrepassDetails(
+    sessionId: string,
+    query: PrepassDetailsQuery,
+    signal?: AbortSignal,
+  ): Promise<PrepassDetails> {
+    if (!Number.isSafeInteger(query.historyRevision) || query.historyRevision < 0)
+      throw new TypeError("Prepass revision must be a nonnegative integer.");
+    for (const offset of [query.candidateOffset, query.resultOffset])
+      if (!Number.isSafeInteger(offset)) throw new TypeError("Prepass offsets must be integers.");
+    const url = this.url(
+      `/${encodeURIComponent(sessionId)}/prepass/${encodeURIComponent(query.boundaryId)}` +
+        `/${encodeURIComponent(query.category)}`,
+    );
+    url.searchParams.set("historyRevision", String(query.historyRevision));
+    url.searchParams.set("candidateOffset", String(query.candidateOffset));
+    url.searchParams.set("resultOffset", String(query.resultOffset));
     return requestJson(url, "GET", undefined, signal);
   }
 

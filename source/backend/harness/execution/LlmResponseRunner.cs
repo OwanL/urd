@@ -17,15 +17,22 @@ internal static class LlmResponseRunner {
       IReadOnlyList<ChatMessage> messages, ChatOptions options, Guid requestId,
       Func<LlmResponseChunk, Task> saveChunkAsync,
       Func<string, string?, Task> recordToolCallAsync,
-      CancellationToken cancellation) {
+      CancellationToken cancellation, Func<LlmResponseChunk, Task>? saveReasoningAsync = null) {
     using var requestStop = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
     var writer = new LlmResponseWriter(requestId, saveChunkAsync, recordToolCallAsync);
-    var response = new LlmResponseAccumulator(writer);
+    // Reasoning preview reuses the same bounded writer; its text runs are never tool-call
+    // reservations, so the second writer keeps its own tool-call identity unused.
+    LlmResponseWriter? reasoningWriter = saveReasoningAsync is null ? null
+        : new(requestId, saveReasoningAsync, (_, _) => Task.CompletedTask);
+    var response = new LlmResponseAccumulator(writer, reasoningWriter);
     (Exception? failure, bool outputObserved) = await StreamAsync(
-        borrowedClient, messages, options, requestStop, writer, response, cancellation);
+        borrowedClient, messages, options, requestStop, writer, reasoningWriter, response, cancellation);
     if (failure is ProviderOperationException && !cancellation.IsCancellationRequested) {
-      try { await writer.FlushAsync(); }
-      catch (Exception saveFailure) { failure = saveFailure; }
+      try {
+        await writer.FlushAsync();
+        if (reasoningWriter is not null)
+          await reasoningWriter.FlushAsync();
+      } catch (Exception saveFailure) { failure = saveFailure; }
     }
 
     return new(failure, outputObserved, response.ToolCalls, response.ProviderResponse, response.Usage);
@@ -33,7 +40,8 @@ internal static class LlmResponseRunner {
 
   private static async Task<(Exception? Failure, bool OutputObserved)> StreamAsync(IChatClient borrowedClient,
       IReadOnlyList<ChatMessage> messages, ChatOptions options, CancellationTokenSource requestStop,
-      LlmResponseWriter writer, LlmResponseAccumulator response, CancellationToken cancellation) {
+      LlmResponseWriter writer, LlmResponseWriter? reasoningWriter, LlmResponseAccumulator response,
+      CancellationToken cancellation) {
     IAsyncEnumerator<ChatResponseUpdate>? updates = null;
     Task<bool>? pendingRead = null;
     Exception? failure = null;
@@ -43,7 +51,8 @@ internal static class LlmResponseRunner {
       updates = borrowedClient.GetStreamingResponseAsync(messages, options, requestStop.Token)
           .GetAsyncEnumerator(requestStop.Token);
 
-      while (await WaitForUpdateAndFlushAsync(writer, pendingRead ??= updates.MoveNextAsync().AsTask(), cancellation)) {
+      while (await WaitForUpdateAndFlushAsync(writer, reasoningWriter,
+          pendingRead ??= updates.MoveNextAsync().AsTask(), cancellation)) {
         pendingRead = null;
         cancellation.ThrowIfCancellationRequested();
         outputObserved |= updates.Current.Contents.Any(content => content is not UsageContent);
@@ -62,16 +71,29 @@ internal static class LlmResponseRunner {
   }
 
   private static async Task<bool> WaitForUpdateAndFlushAsync(LlmResponseWriter writer,
-      Task<bool> pendingRead, CancellationToken cancellation) {
-    Task? flushDelay = writer.FlushDelay;
+      LlmResponseWriter? reasoningWriter, Task<bool> pendingRead, CancellationToken cancellation) {
+    Task? flushDelay = EarliestFlushDelay(writer, reasoningWriter);
     if (flushDelay is not null &&
         (flushDelay.IsCompleted || await Task.WhenAny(pendingRead, flushDelay) == flushDelay)) {
       cancellation.ThrowIfCancellationRequested();
       // Flushing clears the deadline; only another update can start a new one.
       await writer.FlushAsync();
+      if (reasoningWriter is not null)
+        await reasoningWriter.FlushAsync();
     }
 
     return await pendingRead;
+  }
+
+  // Either writer's oldest unsaved text may mature while the provider idles.
+  private static Task? EarliestFlushDelay(LlmResponseWriter writer, LlmResponseWriter? reasoningWriter) {
+    Task? main = writer.FlushDelay;
+    Task? reasoning = reasoningWriter?.FlushDelay;
+    if (main is null || reasoning is null)
+      return main ?? reasoning;
+    if (reasoning.IsCompleted)
+      return reasoning;
+    return main.IsCompleted ? main : Task.WhenAny(main, reasoning);
   }
 
   // Attempts every step even when an earlier one fails. A cleanup failure leaves the

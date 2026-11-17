@@ -254,7 +254,7 @@ public sealed class TranscriptPositionQueryTests {
 
   private static TranscriptEntryRef[] SeedUsers(TemporaryDatabase database, Guid session, long revision,
       params int[] weights) {
-    string selection = "{}";
+    string selection = System.Text.Json.JsonSerializer.Serialize(TestLlmSelection.Default);
     SeededEntry[] seeded = weights.Select(weight => new SeededEntry(
         Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), weight)).ToArray();
     string decisions = string.Join(",\n", seeded.Select(entry =>

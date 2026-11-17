@@ -30,6 +30,8 @@ import { ToolRow } from "../chat/ToolRow.tsx";
 import { ToolRowInteractionsProvider } from "../chat/ToolRowInteractions.tsx";
 import { toolCallLabel } from "./ToolRowPresentation.ts";
 import { TranscriptPositionReader } from "./TranscriptPositionReader.ts";
+import { boundaryResponseStatus } from "./PreparationRows.tsx";
+import type { ResponseStatusContext } from "./PreparationRows.tsx";
 import "../chat/transcript.css";
 
 const layoutProfile = { version: 1 as const, pixelsPerWeight: 0.1 };
@@ -46,6 +48,7 @@ interface VirtualTranscriptProps {
   historyRevision: number | null;
   notice: string | null;
   visible: boolean;
+  modelNames?: ReadonlyMap<string, string> | undefined;
   navigation: TranscriptNavigationState | undefined;
   onNavigationChange: (state: TranscriptNavigationState) => void;
 }
@@ -174,6 +177,7 @@ function VirtualEntry({
   root,
   paused,
   saved,
+  statusContext,
   onMeasure,
   onSourceCapture,
   onSourceRestore,
@@ -190,6 +194,7 @@ function VirtualEntry({
   root: HTMLElement | null;
   paused: boolean;
   saved: MarkdownSavedSourcePosition | undefined;
+  statusContext: ResponseStatusContext;
   onMeasure: (descriptor: TranscriptEntryDescriptor, rank: number, height: number) => void;
   onSourceCapture: (
     key: string,
@@ -222,6 +227,13 @@ function VirtualEntry({
   }, [descriptor, rank, onMeasure]);
 
   const role = descriptor.entry.kind === "user" ? "user" : "assistant";
+  const status = boundaryResponseStatus(
+    descriptor.entry.kind,
+    descriptor.response,
+    descriptor.preparation,
+    statusContext,
+    descriptor.entry.historyRevision,
+  );
   return (
     <div
       ref={row}
@@ -231,6 +243,7 @@ function VirtualEntry({
       data-entry-rank={rank}
       style={{ top: `${top}px` }}
     >
+      {status.before}
       {isTextEntry(descriptor.entry) && descriptor.text ? (
         <EditableMessage entry={descriptor.entry} text={descriptor.text}>
           <display.MessageBody
@@ -265,6 +278,7 @@ function VirtualEntry({
       ) : (
         <div class={`message message-${role}`} />
       )}
+      {status.after}
     </div>
   );
 }
@@ -278,6 +292,7 @@ export function VirtualTranscript({
   historyRevision,
   notice,
   visible,
+  modelNames,
   navigation,
   onNavigationChange,
 }: VirtualTranscriptProps) {
@@ -286,6 +301,10 @@ export function VirtualTranscript({
   const [tailHeight, setTailHeight] = useState(0);
   const [root, setRoot] = useState<HTMLDivElement | null>(null);
   const [positionWindow, setPositionWindow] = useState<TranscriptPositionWindow | null>(null);
+  const statusContext: ResponseStatusContext = useMemo(
+    () => ({ client, sessionId, modelNames: modelNames ?? new Map(), visible }),
+    [client, sessionId, modelNames, visible],
+  );
   const positionReader = useMemo(
     () => new TranscriptPositionReader(client, sessionId),
     [client, sessionId],
@@ -1161,6 +1180,7 @@ export function VirtualTranscript({
                   root={root}
                   paused={!visible || documentInactive}
                   saved={saved}
+                  statusContext={statusContext}
                   onMeasure={onMeasure}
                   onSourceCapture={onSourceCapture}
                   onSourceRestore={onSourceRestore}

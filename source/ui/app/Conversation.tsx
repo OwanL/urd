@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { MessageEditingContext, InlineMessageEditor } from "./EditableMessage.tsx";
 import type { MessageEditing } from "./MessageEditing.ts";
 import { Composer } from "../chat/Composer.tsx";
@@ -13,7 +13,9 @@ import { deriveConversationState } from "./ConversationState.ts";
 import type { ConversationExecutionStatus } from "./ConversationState.ts";
 import { Transcript } from "./Transcript.tsx";
 import { SessionWorkingDirectory } from "./SessionWorkingDirectory.tsx";
-import { PruningRows } from "./PruningRows.tsx";
+import { PendingResponseStatus } from "./PreparationRows.tsx";
+import type { ResponseStatusContext } from "./PreparationRows.tsx";
+import { uniqueModelNames } from "./PrepassValues.ts";
 import type { ReadingPosition } from "./Transcript.tsx";
 import type { TranscriptDisplay } from "./TranscriptDisplay.ts";
 import type { TranscriptNavigationState } from "../sessions/TranscriptNavigationStorage.ts";
@@ -219,6 +221,21 @@ export function Conversation({
   );
   const pendingInputs = snapshot?.pendingInputs ?? [];
   const pendingExecutionId = snapshot?.unsettledExecutionId ?? null;
+  const statusContext: ResponseStatusContext = useMemo(
+    () => ({
+      client,
+      sessionId,
+      modelNames: uniqueModelNames(
+        models.options.map((option) => ({
+          modelId: option.selection.modelId,
+          modelLabel: option.modelLabel,
+        })),
+      ),
+      visible: visible && notice !== null,
+    }),
+    [client, sessionId, models.options, visible, notice],
+  );
+  const pendingResponse = snapshot?.pendingResponse ?? null;
   const unlistedInputRemovals = unresolvedInputRemovals.filter(
     (removal) =>
       pendingExecutionId !== removal.executionId ||
@@ -303,76 +320,89 @@ export function Conversation({
             ) : null
           }
         >
-          {(pendingInputs.length > 0 || unlistedInputRemovals.length > 0) && (
-            <section class="chat-pending-inputs" aria-label="Queued inputs">
-              <div class="chat-pending-inputs-label">
-                {pendingInputs.length ? `Queued · ${pendingInputs.length}` : "Queue update"}
-              </div>
-              {pendingInputs.map((input) => {
-                const executionId = pendingExecutionId;
-                const removable = input.canRemove === true && executionId !== null;
-                const removal = executionId
-                  ? commands.pendingInputRemoval(sessionId, executionId, input.submissionId)
-                  : undefined;
-                return (
-                  <PendingInputBubble
-                    key={input.submissionId}
-                    preview={input.preview}
-                    removalStatus={removal?.status}
-                    removeLabel={removable ? `Remove queued input: ${input.preview}` : undefined}
-                    checkLabel={`Check removal status for pending input: ${input.preview}`}
-                    disabled={!ready}
-                    onRemove={
-                      removable
-                        ? () => {
-                            void commands.removePendingInput(
-                              sessionId,
-                              executionId!,
-                              input.submissionId,
-                              removable,
-                            );
-                          }
-                        : undefined
-                    }
-                    onCheck={
-                      removal?.status === "uncertain" && executionId
-                        ? () => {
-                            void commands.checkPendingInputRemoval(
-                              sessionId,
-                              executionId,
-                              input.submissionId,
-                            );
-                          }
-                        : undefined
-                    }
-                  />
-                );
-              })}
-              {unlistedInputRemovals.map((removal) => {
-                return (
-                  <PendingInputBubble
-                    key={removal.submissionId}
-                    preview={null}
-                    removalStatus={removal.status}
-                    checkLabel={`Check removal status for input ${removal.submissionId}`}
-                    onCheck={
-                      removal.status === "uncertain"
-                        ? () => {
-                            void commands.checkPendingInputRemoval(
-                              sessionId,
-                              removal.executionId,
-                              removal.submissionId,
-                            );
-                          }
-                        : undefined
-                    }
-                  />
-                );
-              })}
-            </section>
+          {(pendingInputs.length > 0 || unlistedInputRemovals.length > 0 || pendingResponse) && (
+            <>
+              {(pendingInputs.length > 0 || unlistedInputRemovals.length > 0) && (
+                <section class="chat-pending-inputs" aria-label="Queued inputs">
+                  <div class="chat-pending-inputs-label">
+                    {pendingInputs.length ? `Queued · ${pendingInputs.length}` : "Queue update"}
+                  </div>
+                  {pendingInputs.map((input) => {
+                    const executionId = pendingExecutionId;
+                    const removable = input.canRemove === true && executionId !== null;
+                    const removal = executionId
+                      ? commands.pendingInputRemoval(sessionId, executionId, input.submissionId)
+                      : undefined;
+                    return (
+                      <PendingInputBubble
+                        key={input.submissionId}
+                        preview={input.preview}
+                        removalStatus={removal?.status}
+                        removeLabel={
+                          removable ? `Remove queued input: ${input.preview}` : undefined
+                        }
+                        checkLabel={`Check removal status for pending input: ${input.preview}`}
+                        disabled={!ready}
+                        onRemove={
+                          removable
+                            ? () => {
+                                void commands.removePendingInput(
+                                  sessionId,
+                                  executionId!,
+                                  input.submissionId,
+                                  removable,
+                                );
+                              }
+                            : undefined
+                        }
+                        onCheck={
+                          removal?.status === "uncertain" && executionId
+                            ? () => {
+                                void commands.checkPendingInputRemoval(
+                                  sessionId,
+                                  executionId,
+                                  input.submissionId,
+                                );
+                              }
+                            : undefined
+                        }
+                      />
+                    );
+                  })}
+                  {unlistedInputRemovals.map((removal) => {
+                    return (
+                      <PendingInputBubble
+                        key={removal.submissionId}
+                        preview={null}
+                        removalStatus={removal.status}
+                        checkLabel={`Check removal status for input ${removal.submissionId}`}
+                        onCheck={
+                          removal.status === "uncertain"
+                            ? () => {
+                                void commands.checkPendingInputRemoval(
+                                  sessionId,
+                                  removal.executionId,
+                                  removal.submissionId,
+                                );
+                              }
+                            : undefined
+                        }
+                      />
+                    );
+                  })}
+                </section>
+              )}
+              {pendingResponse && (
+                <PendingResponseStatus
+                  header={pendingResponse.header}
+                  preparation={pendingResponse.preparation}
+                  context={statusContext}
+                  historyRevision={snapshot?.historyRevision ?? 0}
+                />
+              )}
+            </>
           )}
           <div class="chat-status" aria-live="polite">
-            <PruningRows pruning={snapshot?.pruning} />
             {error && <span class="inline-error">{error} </span>}
             {workingDirectoryNotice && !showWorkingDirectory && (
               <span class={workingDirectoryLocked ? "inline-error" : undefined}>

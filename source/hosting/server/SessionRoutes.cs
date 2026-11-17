@@ -58,6 +58,7 @@ internal static class SessionRoutes {
           return Results.Ok(await session.ReadNotSentInputsAsync(cursor, http.RequestAborted));
         }));
     routes.MapSessionTranscriptRoutes(sessions);
+    routes.MapSessionPrepassRoutes(sessions);
     return routes;
   }
 

@@ -88,9 +88,38 @@ public sealed class StartingPrepassTests {
       new StartingResourcePruningStatus("skills", "fallback", 1, 1, FailingPruningMessage),
       new StartingResourcePruningStatus("instructions", "completed", 0, 0, null)
     }, fixture.Store.Snapshots.ReadPersisted(fixture.Session.Id).Pruning);
+    string[] toolCandidates = ReadCandidateIds("tools");
+    Assert.Equal(["lookup", "grep"], toolCandidates);
+    Assert.DoesNotContain("read", toolCandidates);
+    Assert.DoesNotContain("bash", toolCandidates);
+    Assert.DoesNotContain("vault", toolCandidates);
+    Assert.Equal(["lookup"], ReadResultIds("tools"));
+    Assert.Equal("completed", ReadDetailState("tools"));
+    string skillIdentity = Assert.Single(ReadCandidateIds("skills"));
+    Assert.EndsWith(Path.Combine("diagnose", "SKILL.md"), skillIdentity, StringComparison.Ordinal);
+    Assert.Equal([skillIdentity], ReadResultIds("skills"));
+    Assert.Equal("fallback", ReadDetailState("skills"));
+    Assert.Equal([], ReadCandidateIds("instructions"));
+    Assert.Equal([], ReadResultIds("instructions"));
+    Assert.Equal("completed", ReadDetailState("instructions"));
+    Assert.Equal("completed", ReadDetailState("title"));
     StartingContext context = Assert.IsType<StartingContext>(fixture.Store.StartingContexts.Read(fixture.Session.Id));
     Assert.Equal(new[] { "read", "bash", "lookup", "vault" }, context.Tools.Select(tool => tool.Name));
     Assert.Contains("diagnose", string.Join('\n', context.Instructions.Select(message => message.Text)), StringComparison.Ordinal);
+
+    string[] ReadCandidateIds(string category) => ReadJsonArray(category, "candidates_json");
+    string[] ReadResultIds(string category) => ReadJsonArray(category, "results_json");
+    string ReadDetailState(string category) => fixture.Database.ReadRows(
+        $"SELECT state FROM session_prepass_details WHERE run_id = '{execution:D}' AND category = '{category}';",
+        row => row.GetString(0)).Single();
+    string[] ReadJsonArray(string category, string column) {
+      string json = fixture.Database.ReadRows(
+          $"SELECT {column} FROM session_prepass_details WHERE run_id = '{execution:D}' AND category = '{category}';",
+          row => row.GetString(0)).Single();
+      using JsonDocument document = JsonDocument.Parse(json);
+      return document.RootElement.EnumerateArray().Select(value => value.ValueKind == JsonValueKind.String
+          ? value.GetString()! : value.GetProperty("Id").GetString()!).ToArray();
+    }
 
     IAsyncEnumerable<ChatResponseUpdate> Route(ScriptedRequest request, CancellationToken token) {
       switch (request.Purpose) {
@@ -118,6 +147,34 @@ public sealed class StartingPrepassTests {
       await skillsStarted.Task.WaitAsync(TestTimeout, token);
       await foreach (ChatResponseUpdate update in TextUpdates([ToolsKeepLookup], token)) yield return update;
     }
+  }
+
+  [Fact]
+  public async Task FailedTitleIsRecordedWithoutChangingTheExecutionOrRetrying() {
+    const string titleFailure = "Title model unavailable.";
+    var client = new ScriptedChatClient((request, token) => request.Purpose switch {
+      "conversation" => TextUpdates(["done"], token),
+      "pruning.skills" => TextUpdates([KeepNothing], token),
+      "title" => throw new InvalidOperationException(titleFailure),
+      _ => throw new InvalidOperationException($"Unexpected purpose '{request.Purpose}'.")
+    });
+    ProviderManager providers = null!;
+    await using var fixture = new ExecutionFixture(client, Array.Empty<AgentTool>(), store => providers = CreateProviders(store));
+    await ConfigureAuxiliaryModelAsync(fixture, providers);
+
+    Guid execution = await SubmitAndSettleAsync(fixture, "orbit compass title failure");
+
+    Assert.Equal(ExecutionOutcome.Completed,
+        (await fixture.Session.WaitForExecutionFinishAsync(execution).WaitAsync(TestTimeout)).Outcome);
+    Assert.Null(fixture.Store.Snapshots.ReadPersisted(fixture.Session.Id).Title);
+    Assert.Equal("failed", fixture.Database.ReadRows(
+        $"SELECT state FROM session_prepass_details WHERE run_id = '{execution:D}' AND category = 'title';",
+        row => row.GetString(0)).Single());
+    Assert.NotNull(fixture.Database.ReadRows(
+        $"SELECT error FROM session_prepass_details WHERE run_id = '{execution:D}' AND category = 'title';",
+        row => row.GetString(0)).Single());
+    Assert.Equal(1L, fixture.Database.Scalar("SELECT COUNT(*) FROM session_prepass_title;")); // raw-sql: the one-shot title claim survives failure
+    Assert.Equal(1L, fixture.Database.Scalar("SELECT COUNT(*) FROM auxiliary_conversations WHERE purpose = 'title';")); // raw-sql: failed title work is not retried
   }
 
   [Fact]
@@ -313,6 +370,9 @@ public sealed class StartingPrepassTests {
       Assert.Equal(ExecutionOutcome.Cancelled, result.Outcome);
       SessionSnapshot snapshot = fixture.Store.Snapshots.ReadPersisted(fixture.Session.Id);
       Assert.Null(snapshot.Title);
+      Assert.Equal("cancelled", fixture.Database.ReadRows(
+          $"SELECT state FROM session_prepass_details WHERE run_id = '{execution:D}' AND category = 'title';",
+          row => row.GetString(0)).Single());
       Assert.Equal([1L], fixture.Database.ReadRows("""
           SELECT r.outcome FROM auxiliary_requests r JOIN auxiliary_conversations c ON c.conversation_id = r.conversation_id
           WHERE c.purpose = 'title' ORDER BY r.request_index;

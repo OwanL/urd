@@ -203,6 +203,13 @@ public abstract class SessionBase {
     };
   }
 
+  public async Task<PrepassDetails?> ReadPrepassDetailsAsync(Guid boundaryId, string category,
+      long historyRevision, int candidateOffset = 0, int resultOffset = 0,
+      CancellationToken cancellation = default) {
+    using var _ = await sessionLock.AcquireAsync(cancellation);
+    return store.PrepassDetails.Read(Id, historyRevision, boundaryId, category, candidateOffset, resultOffset);
+  }
+
   public async Task<string?> TryChangeWorkingDirectoryAsync(string path) {
     string normalized = PreferenceManager.NormalizeWorkingDirectory(path);
     using (await sessionLock.AcquireAsync()) {

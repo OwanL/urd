@@ -1,13 +1,14 @@
 using Microsoft.Data.Sqlite;
 using Urd.Core.Execution;
 using Urd.Core.Compaction;
+using Urd.Core.Providers;
 using Urd.Core.Sessions;
 
 namespace Urd.Core.Storage;
 
 // Metadata-only queries within one transaction, session and verified history revision.
 internal sealed class TranscriptHistoryStorage(
-    Database database, SqliteTransaction transaction, Guid sessionId, long revision) {
+    Database database, PrepassDetailsReader prepassDetails, SqliteTransaction transaction, Guid sessionId, long revision) {
   internal const string AnchorSql = """
     SELECT ordinal FROM execution_messages
     WHERE run_id = $run AND role = $kind AND message_id = $entry
@@ -25,17 +26,10 @@ internal sealed class TranscriptHistoryStorage(
     ORDER BY ordinal LIMIT 1;
     """;
 
-  internal static string PruningStatusesSql(int boundaryCount) => $$"""
-    SELECT boundary_id, category, state, total, retained, error FROM session_pruning_status
-    WHERE session_id = $session AND boundary_id IN ({{string.Join(", ",
-        Enumerable.Range(0, boundaryCount).Select(boundary => $"$boundary{boundary}"))}})
-    ORDER BY CASE category WHEN 'tools' THEN 0 WHEN 'skills' THEN 1 ELSE 2 END;
-    """;
-
   // Select identities before joining metadata; never select body columns.
   internal static string WindowSql(bool ascending) => $$"""
     WITH window AS (
-        SELECT ordinal, run_id, role, message_id, request_id,
+        SELECT ordinal, session_id, history_revision, run_id, role, message_id, request_id,
             first_chunk_index, end_chunk_index, created_at, call_id, tool_name
         FROM execution_messages
         WHERE session_id = $session AND history_revision = $revision
@@ -58,6 +52,16 @@ internal sealed class TranscriptHistoryStorage(
             AS batched_with_next,
         CASE WHEN t.call_id IS NOT NULL THEN t.arguments_excerpt ELSE NULL END AS arguments_excerpt,
         c.reason AS compaction_reason, c.tokens_before, c.tokens_after,
+        CASE WHEN m.role <> 4 AND NOT EXISTS (SELECT 1 FROM execution_messages first
+            WHERE first.session_id = m.session_id AND first.history_revision = m.history_revision
+                AND first.run_id = m.run_id AND first.role <> 4 AND first.ordinal < m.ordinal)
+            THEN COALESCE(r.llm_selection_json,
+                (SELECT d.llm_selection_json FROM input_decisions d
+                    WHERE d.session_id = r.session_id AND d.input_id = r.input_id)) END AS response_selection_json,
+        CASE WHEN m.role <> 4 AND NOT EXISTS (SELECT 1 FROM execution_messages first
+            WHERE first.session_id = m.session_id AND first.history_revision = m.history_revision
+                AND first.run_id = m.run_id AND first.role <> 4 AND first.ordinal < m.ordinal)
+            THEN r.created_at END AS response_started_at,
         CASE WHEN r.outcome = 2 THEN coalesce(
             (SELECT substr(f.error, 1, 1024) FROM execution_requests f
                 WHERE f.run_id = r.run_id AND f.outcome = 2 ORDER BY f.request_index DESC LIMIT 1),
@@ -81,14 +85,14 @@ internal sealed class TranscriptHistoryStorage(
     ORDER BY m.ordinal {{(ascending ? "ASC" : "DESC")}};
     """;
 
-  internal static TranscriptHistoryStorage Open(Database database, SqliteTransaction transaction,
-      Guid sessionId, long expectedRevision) {
+  internal static TranscriptHistoryStorage Open(Database database, PrepassDetailsReader prepassDetails,
+      SqliteTransaction transaction, Guid sessionId, long expectedRevision) {
     long revision = database.Scalar<long?>(transaction,
         "SELECT history_revision FROM sessions WHERE session_id = $session;", ("$session", sessionId))
         ?? throw new KeyNotFoundException("The session does not exist.");
     if (revision != expectedRevision)
       throw new HistoryRevisionConflictException(expectedRevision, revision);
-    return new(database, transaction, sessionId, revision);
+    return new(database, prepassDetails, transaction, sessionId, revision);
   }
 
   internal long OrdinalOf(TranscriptEntryRef anchor) => database.Scalar<long?>(transaction, AnchorSql,
@@ -108,10 +112,9 @@ internal sealed class TranscriptHistoryStorage(
       database.QuerySingleOrDefault(transaction, LookaheadSql, row => (row.Bool("has_before"), row.Bool("has_after")),
           ("$session", sessionId), ("$revision", revision), ("$first", first), ("$last", last));
 
-  // Preparation statuses persist per boundary without a revision, so historical anchors keep their rows
-  // across compactions and reopen. The window's boundaries are read in one query: compaction markers bind
-  // their own boundary, and the empty boundary binds only the revision's first user entry when in window.
-  internal Dictionary<long, IReadOnlyList<StartingResourcePruningStatus>> BoundaryPruningStatuses(
+  // Boundary summaries are fetched together for this bounded window. The initial boundary belongs to
+  // the current revision's first user entry; each compaction marker carries its own boundary.
+  internal Dictionary<long, IReadOnlyList<PrepassSummary>> BoundaryPrepassSummaries(
       List<TranscriptHistoryRow> rows) {
     List<(Guid Boundary, long Ordinal)> anchors = [.. rows
         .Where(row => row.Descriptor.Entry.Kind == TranscriptEntryKind.Compaction)
@@ -124,17 +127,12 @@ internal sealed class TranscriptHistoryStorage(
     if (anchors.Count == 0)
       return [];
 
-    string[] boundaryParameters = [.. Enumerable.Range(0, anchors.Count).Select(index => $"$boundary{index}")];
-    var statuses = database.Query(transaction, PruningStatusesSql(boundaryParameters.Length),
-        row => (Boundary: row.Guid("boundary_id"),
-            Status: new StartingResourcePruningStatus(row.String("category"), row.String("state"),
-                row.Int("total"), row.Int("retained"), row.NullableString("error"))),
-        [("$session", sessionId),
-            .. boundaryParameters.Select((parameter, index) => (parameter, (object?)anchors[index].Boundary))]);
-    var byBoundary = statuses.ToLookup(status => status.Boundary, status => status.Status);
-    Dictionary<long, IReadOnlyList<StartingResourcePruningStatus>> anchored = [];
+    IReadOnlyList<PrepassSummary> summaries = prepassDetails.ReadSummaries(transaction, sessionId,
+        anchors.Select(anchor => anchor.Boundary).ToArray());
+    var byBoundary = summaries.ToLookup(summary => summary.BoundaryId);
+    Dictionary<long, IReadOnlyList<PrepassSummary>> anchored = [];
     foreach (var (boundary, ordinal) in anchors) {
-      StartingResourcePruningStatus[] owned = [.. byBoundary[boundary]];
+      PrepassSummary[] owned = [.. byBoundary[boundary]];
       if (owned.Length > 0)
         anchored[ordinal] = Array.AsReadOnly(owned);
     }
@@ -154,9 +152,21 @@ internal sealed class TranscriptHistoryStorage(
     TranscriptToolFacts? tool = isTool ? ReadToolFacts(reader) : null;
     TranscriptCompactionFacts? compaction = isCompaction ? new(
         (CompactionReason)reader.Int("compaction_reason"), reader.Long("tokens_before"), reader.Long("tokens_after")) : null;
-    var descriptor = new TranscriptEntryDescriptor(reference, reader.NullableTimestamp("created_at"), text, tool, compaction);
+    LlmSelection? selection = ReadResponseSelection(reader.NullableString("response_selection_json"));
+    ResponseHeaderInfo? response = selection is null ? null : new ResponseHeaderInfo(selection.ModelId,
+        PrepassDetailsReader.ReadReasoningEffort(selection), reader.NullableTimestamp("response_started_at"));
+    var descriptor = new TranscriptEntryDescriptor(reference, reader.NullableTimestamp("created_at"), text, tool,
+        compaction, response);
     return new(reader.Long("ordinal"), descriptor, (ExecutionOutcome?)reader.NullableInt("execution_outcome"),
         reader.NullableString("execution_error"));
+  }
+
+  private static LlmSelection? ReadResponseSelection(string? json) {
+    try {
+      return LlmSelectionJson.Read(json);
+    } catch (System.Text.Json.JsonException failure) {
+      throw new InvalidDataException("A stored response model selection is invalid.", failure);
+    }
   }
 
   private static TranscriptTextFacts ReadTextFacts(SqliteDataReader reader, TranscriptEntryRef entry) {

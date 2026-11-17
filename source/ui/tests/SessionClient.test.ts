@@ -29,6 +29,7 @@ const sessionId = "10000000-0000-0000-0000-000000000001";
 const executionId = "20000000-0000-0000-0000-000000000002";
 const submissionId = "30000000-0000-0000-0000-000000000003";
 const operationId = "60000000-0000-0000-0000-000000000006";
+const boundaryId = "80000000-0000-0000-0000-000000000008";
 const compactionId = "70000000-0000-0000-0000-000000000007";
 const cursor: MessageContentCursor = {
   message: {
@@ -143,6 +144,30 @@ const promptPage: TranscriptPromptPage = {
   state: positionSummary,
   prompts: [position],
   nextAfterRank: 3,
+};
+const prepassDetails = {
+  executionId,
+  boundaryId,
+  category: "skills",
+  state: "completed",
+  modelId: "provider/model-id",
+  reasoningEffort: "medium",
+  startedAt: "2026-10-12T12:00:00Z",
+  finishedAt: "2026-10-12T12:00:02Z",
+  costUsd: 0.0003,
+  costIsEstimated: true,
+  candidateCount: 2,
+  resultCount: 0,
+  candidates: [{ id: "tool:skill", label: "skill", path: null }],
+  results: [],
+  candidateOffset: 1,
+  resultOffset: 1,
+  reasoning: "",
+  output: "provider-emitted preview",
+  reasoningTruncated: false,
+  outputTruncated: false,
+  title: null,
+  error: null,
 };
 
 interface MappingCase {
@@ -489,6 +514,21 @@ const mappings: MappingCase[] = [
     query: { expectedHistoryRevision: "8" },
     response: compactionSummary,
   },
+  {
+    name: "prepass details page by revision and offsets",
+    call: (client) =>
+      client.getPrepassDetails(sessionId, {
+        boundaryId,
+        category: "skills",
+        historyRevision: 7,
+        candidateOffset: 3,
+        resultOffset: 1,
+      }),
+    method: "GET",
+    path: `/api/sessions/${sessionId}/prepass/${boundaryId}/skills`,
+    query: { historyRevision: "7", candidateOffset: "3", resultOffset: "1" },
+    response: prepassDetails,
+  },
 ];
 
 for (const mapping of mappings) {
@@ -544,6 +584,28 @@ void test("position client rejects invalid fractions, cursors, limits and prompt
     TypeError,
   );
   assert.throws(() => client.activatePrompt(sessionId, { ...promptRef, kind: "text" }), TypeError);
+  assert.throws(
+    () =>
+      client.getPrepassDetails(sessionId, {
+        boundaryId,
+        category: "skills",
+        historyRevision: -1,
+        candidateOffset: 0,
+        resultOffset: 0,
+      }),
+    TypeError,
+  );
+  assert.throws(
+    () =>
+      client.getPrepassDetails(sessionId, {
+        boundaryId,
+        category: "skills",
+        historyRevision: 7,
+        candidateOffset: 1.5,
+        resultOffset: 0,
+      }),
+    TypeError,
+  );
   assert.equal(fetchMock.mock.callCount(), 0);
 });
 

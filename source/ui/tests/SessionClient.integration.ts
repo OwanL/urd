@@ -84,6 +84,7 @@ void test(
       firstUserPreview: null,
       title: null,
       pruning: null,
+      pendingResponse: null,
       pendingInputs: [],
       contextUsage: null,
       workingTime: { completedMilliseconds: 0, startedAt: null, hasUnknownDuration: false },

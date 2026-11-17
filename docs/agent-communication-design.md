@@ -155,10 +155,10 @@ amount rather than adding a new setting.
 
 Every session is askable and wakeable; there are no `canAsk` or `canWake` listing fields. The
 foreground-parent restriction and cycle checks are execution rules, not schema capabilities.
-If `wake` is false and this is a blocking call to an idle recipient, return early and convert
-the pending answer wait to a background call. The result identifies that background call rather
-than leaving the caller blocked indefinitely. This conversion and its call identity need detailed
-design. The generic `background: true` option remains available on any tool.
+If `wake` is false, the ask always runs as a background call, regardless of the recipient's
+state: its answer is opportunistic and may never arrive, so blocking on it is never safe. No
+mid-call conversion is needed. With `wake: true` the ask blocks normally unless the model passes
+the generic `background: true` option, which remains available on any tool.
 
 ### `answer_agent`
 
@@ -229,8 +229,7 @@ and schema files. Milestones are cohesive, locally verified slices.
 
 UI presentation (tool-call display and tab hover list) follows after the backend.
 
-**Open for refinement:** how `wake: false` converts a blocking ask to a background call (today
-background is chosen at dispatch, and no tool can switch mid-call); `context` mode names; whether
+**Open for refinement:** `context` mode names; whether
 trailing context reuses compaction's retained amount; how a child's tool calls appear in the
 parent's transcript before UI work.
 

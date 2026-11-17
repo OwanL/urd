@@ -226,7 +226,8 @@ and schema files. Milestones are cohesive, locally verified slices.
 
 UI presentation (tool-call display and tab hover list) follows after the backend.
 
-**Open for refinement:** how a child's tool calls appear in the parent's transcript before UI work.
+Until the UI work, a subagent appears only as an ordinary tool call (its arguments and final
+report); the child's own activity is not shown in the parent's transcript.
 
 ## Deliberate limits and existing alternatives
 

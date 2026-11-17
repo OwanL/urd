@@ -52,7 +52,7 @@ internal sealed class ProviderStreamState(LlmProviderScope scope, IEnumerable<AI
           // Opaque native items live in the codec, not the portable streamed content.
           break;
         default:
-          throw Invalid();
+          throw Invalid("unsupported streamed content type");
       }
     }
     update.Contents = update.Contents.Where(content => content is TextContent or TextReasoningContent or UsageContent).ToList();
@@ -64,21 +64,22 @@ internal sealed class ProviderStreamState(LlmProviderScope scope, IEnumerable<AI
   }
 
   private void AcceptResponses(ChatResponseUpdate update) {
-    if (terminal is not null) throw Invalid();
+    if (terminal is not null) throw Invalid("response update after terminal");
     switch (update.RawRepresentation) {
       case StreamingResponseCompletedUpdate completed:
-        if (completed.Response?.Status != ResponseStatus.Completed || completed.Response.Error is not null ||
-            completed.Response.IncompleteStatusDetails is not null)
-          throw Invalid();
+        if (completed.Response?.Status != ResponseStatus.Completed) throw Invalid("response status is not completed");
+        if (completed.Response.Error is not null) throw Invalid("completed response includes provider error");
+        if (completed.Response.IncompleteStatusDetails is not null) throw Invalid("completed response includes incomplete details");
         output = completed.Response.OutputItems.ToArray();
         int bytes = 0;
         for (int index = 0; index < output.Length; index++) {
           ValidateItem(output[index]);
           string json = Encode(output[index]);
-          bytes = Add(bytes, Encoding.UTF8.GetByteCount(json));
-          if (completedItems.TryGetValue(index, out string? previous) && previous != json) throw Invalid();
+          bytes = Add(bytes, Encoding.UTF8.GetByteCount(json), "completed output size limit exceeded");
+          if (completedItems.TryGetValue(index, out string? previous) && previous != json)
+            throw Invalid("completed output item differs from streamed item");
         }
-        if (completedItems.Keys.Any(index => index >= output.Length)) throw Invalid();
+        if (completedItems.Keys.Any(index => index >= output.Length)) throw Invalid("output item index outside completed output");
         terminal = update;
         break;
       case StreamingResponseIncompleteUpdate:
@@ -91,32 +92,39 @@ internal sealed class ProviderStreamState(LlmProviderScope scope, IEnumerable<AI
       case StreamingResponseOutputItemDoneUpdate done:
         ValidateItem(done.Item);
         string encoded = Encode(done.Item);
-        completedBytes = Add(completedBytes, Encoding.UTF8.GetByteCount(encoded));
-        if (done.OutputIndex < 0 || !completedItems.TryAdd(done.OutputIndex, encoded)) throw Invalid();
+        completedBytes = Add(completedBytes, Encoding.UTF8.GetByteCount(encoded), "completed output size limit exceeded");
+        if (done.OutputIndex < 0) throw Invalid("negative output item index");
+        if (!completedItems.TryAdd(done.OutputIndex, encoded)) throw Invalid("duplicate output item index");
         break;
       case null:
-        throw Invalid();
+        throw Invalid("missing native response update");
     }
   }
 
   private void AcceptChat(ChatResponseUpdate update) {
     if (update.RawRepresentation is not StreamingChatCompletionUpdate native) {
       // The official adapter assembles function arguments after the native enumerator has closed.
-      if (update.RawRepresentation is not null || update.Contents.Any(content => content is not FunctionCallContent)) throw Invalid();
+      if (update.RawRepresentation is not null) throw Invalid("unexpected non-native chat update");
+      if (update.Contents.Any(content => content is not FunctionCallContent))
+        throw Invalid("unexpected content in adapted chat update");
       return;
     }
     AcceptChatReasoning(native, update);
     bool hasContent = native.ContentUpdate.Count != 0 || native.ToolCallUpdates.Count != 0 ||
         native.RefusalUpdate is not null || native.OutputAudioUpdate is not null ||
         update.Contents.Any(content => content is TextContent or TextReasoningContent);
-    if (terminal is not null && (hasContent || native.FinishReason is not null)) throw Invalid();
-    if (native.RefusalUpdate is not null || native.OutputAudioUpdate is not null) throw Invalid();
+    if (terminal is not null && hasContent) throw Invalid("chat content after finish");
+    if (terminal is not null && native.FinishReason is not null) throw Invalid("duplicate chat finish");
+    if (native.RefusalUpdate is not null) throw Invalid("unsupported refusal update");
+    if (native.OutputAudioUpdate is not null) throw Invalid("unsupported audio update");
     foreach (var call in native.ToolCallUpdates) {
-      if (call.Index < 0 || call.Kind is { } kind && kind != ChatToolCallKind.Function) throw Invalid();
+      if (call.Index < 0) throw Invalid("negative tool call index");
+      if (call.Kind is { } kind && kind != ChatToolCallKind.Function) throw Invalid("unsupported tool call kind");
       // Empty argument fragments still allocate an assembly entry inside the official adapter.
-      if (chatCallIndexes.Add(call.Index)) argumentBytes = Add(argumentBytes, 256);
-      argumentBytes = Add(argumentBytes, call.FunctionArgumentsUpdate?.ToMemory().Length ?? 0);
-      argumentBytes = Add(argumentBytes, Encoding.UTF8.GetByteCount(call.ToolCallId ?? "") + Encoding.UTF8.GetByteCount(call.FunctionName ?? ""));
+      if (chatCallIndexes.Add(call.Index)) argumentBytes = Add(argumentBytes, 256, "tool call size limit exceeded");
+      argumentBytes = Add(argumentBytes, call.FunctionArgumentsUpdate?.ToMemory().Length ?? 0, "tool call size limit exceeded");
+      argumentBytes = Add(argumentBytes, Encoding.UTF8.GetByteCount(call.ToolCallId ?? "") + Encoding.UTF8.GetByteCount(call.FunctionName ?? ""),
+          "tool call size limit exceeded");
     }
     if (native.FinishReason is not { } finish) return;
     if (finish != OpenAI.Chat.ChatFinishReason.Stop && finish != OpenAI.Chat.ChatFinishReason.ToolCalls)
@@ -130,14 +138,14 @@ internal sealed class ProviderStreamState(LlmProviderScope scope, IEnumerable<AI
     string? standard = ReadReasoning(native, "$.choices[0].delta.reasoning_content"u8);
     bool hasAlternate = !string.IsNullOrEmpty(alternate);
     bool hasStandard = !string.IsNullOrEmpty(standard);
-    if (hasAlternate && hasStandard) throw Invalid();
+    if (hasAlternate && hasStandard) throw Invalid("multiple reasoning fields in one update");
     if (!hasAlternate && !hasStandard) return;
     string field = hasAlternate ? "reasoning" : "reasoning_content";
-    if (reasoningField is not null && reasoningField != field) throw Invalid();
+    if (reasoningField is not null && reasoningField != field) throw Invalid("reasoning field changed during stream");
     reasoningField = field;
     // MEAI already extracts reasoning_content; the compatible reasoning alias needs explicit preservation.
     if (hasAlternate) {
-      if (update.Contents.Any(content => content is TextReasoningContent)) throw Invalid();
+      if (update.Contents.Any(content => content is TextReasoningContent)) throw Invalid("duplicate reasoning content");
       update.Contents.Add(new TextReasoningContent(alternate));
     }
   }
@@ -148,16 +156,19 @@ internal sealed class ProviderStreamState(LlmProviderScope scope, IEnumerable<AI
   internal ChatResponseUpdate Complete() {
     if (terminal is null) throw new ProviderOperationException(ProviderFailure.IncompleteResponse);
     var calls = scope.Api == LlmApi.OpenAIResponses ? ResponseCalls() : chatCalls;
-    if (scope.Api == LlmApi.OpenAIChatCompletions &&
-        (chatCallIndexes.Count != calls.Count || toolFinish != (calls.Count > 0))) throw Invalid();
-    if (calls.Select(call => call.CallId).Distinct(StringComparer.Ordinal).Count() != calls.Count) throw Invalid();
+    if (scope.Api == LlmApi.OpenAIChatCompletions && chatCallIndexes.Count != calls.Count)
+      throw Invalid("tool call count does not match streamed indexes");
+    if (scope.Api == LlmApi.OpenAIChatCompletions && toolFinish != (calls.Count > 0))
+      throw Invalid("tool finish does not match tool calls");
+    if (calls.Select(call => call.CallId).Distinct(StringComparer.Ordinal).Count() != calls.Count)
+      throw Invalid("duplicate function call ID");
     foreach (var call in calls) ValidateCall(call);
     LlmProviderResponse response;
     if (scope.Api == LlmApi.OpenAIResponses) {
       // A completed envelope must agree with what was already shown to the caller.
       string finalText = string.Concat(output!.OfType<MessageResponseItem>()
           .SelectMany(item => item.Content).Select(part => part.Text));
-      if (finalText != text.ToString()) throw Invalid();
+      if (finalText != text.ToString()) throw Invalid("final text differs from streamed text");
       response = LlmProviderContext.CaptureResponses(scope, output!);
     } else {
       var message = new ChatMessage(ChatRole.Assistant, text.ToString());
@@ -180,7 +191,7 @@ internal sealed class ProviderStreamState(LlmProviderScope scope, IEnumerable<AI
     List<FunctionCallContent> calls = [];
     foreach (var item in output!.OfType<FunctionCallResponseItem>()) {
       using var arguments = JsonDocument.Parse(item.FunctionArguments);
-      if (arguments.RootElement.ValueKind != JsonValueKind.Object) throw Invalid();
+      if (arguments.RootElement.ValueKind != JsonValueKind.Object) throw Invalid("function call arguments are not an object");
       var values = JsonSerializer.Deserialize<Dictionary<string, object?>>(item.FunctionArguments.ToString())!;
       calls.Add(new FunctionCallContent(item.CallId, item.FunctionName, values));
     }
@@ -188,9 +199,12 @@ internal sealed class ProviderStreamState(LlmProviderScope scope, IEnumerable<AI
   }
 
   private void ValidateCall(FunctionCallContent call) {
-    if (string.IsNullOrWhiteSpace(call.CallId) || string.IsNullOrWhiteSpace(call.Name) ||
-        !allowedFunctions.Contains(call.Name) || call.Arguments is null || call.Exception is not null || call.InformationalOnly)
-      throw Invalid();
+    if (string.IsNullOrWhiteSpace(call.CallId)) throw Invalid("missing function call ID");
+    if (string.IsNullOrWhiteSpace(call.Name)) throw Invalid("missing function name");
+    if (!allowedFunctions.Contains(call.Name)) throw Invalid("call to undeclared tool", call.Name);
+    if (call.Arguments is null) throw Invalid("missing function call arguments");
+    if (call.Exception is not null) throw Invalid("function call contains execution error");
+    if (call.InformationalOnly) throw Invalid("informational function call");
   }
 
   private void ValidateItem(ResponseItem item) {
@@ -198,24 +212,38 @@ internal sealed class ProviderStreamState(LlmProviderScope scope, IEnumerable<AI
     var root = document.RootElement;
     string? type = root.GetProperty("type").GetString();
     if (type is "message") {
-      if (root.GetProperty("role").GetString() != "assistant" || root.GetProperty("content").EnumerateArray()
-          .Any(part => part.GetProperty("type").GetString() != "output_text")) throw Invalid();
+      if (root.GetProperty("role").GetString() != "assistant") throw Invalid("message role is not assistant");
+      if (root.GetProperty("content").EnumerateArray().Any(part => part.GetProperty("type").GetString() != "output_text"))
+        throw Invalid("unsupported message content type");
     } else if (type is "function_call") {
-      if (root.TryGetProperty("status", out var status) && status.GetString() != "completed") throw Invalid();
+      if (root.TryGetProperty("status", out var status) && status.GetString() != "completed")
+        throw Invalid("function call is not completed");
       string? functionNamespace = root.TryGetProperty("namespace", out var ns) ? ns.GetString() : null;
-      if (isChatGpt ? functionNamespace != "urd" : functionNamespace is not null) throw Invalid();
+      if (isChatGpt ? functionNamespace != "urd" : functionNamespace is not null)
+        throw Invalid("function call namespace mismatch");
     } else if (type != "reasoning") {
-      throw Invalid();
+      throw Invalid("unexpected output item type", type);
     }
   }
 
-  private void Count(string? value) => contentBytes = Add(contentBytes, Encoding.UTF8.GetByteCount(value ?? ""));
-  private static int Add(int total, int count) => count <= LlmProviderContext.MaximumBytes - total ? total + count : throw Invalid();
+  private void Count(string? value) => contentBytes = Add(contentBytes, Encoding.UTF8.GetByteCount(value ?? ""),
+      "streamed content size limit exceeded");
+  private static int Add(int total, int count, string reason) =>
+      count <= LlmProviderContext.MaximumBytes - total ? total + count : throw Invalid(reason);
   private static string Encode(ResponseItem item) => ModelReaderWriter.Write(item).ToString();
   private ProviderOperationException StreamFailure(string? code, string? message, string? param) =>
       ProviderOperationException.FromProviderStreamError(code, message, param, credentials);
 
-  private static ProviderOperationException Invalid() => new(ProviderFailure.InvalidProviderResponse);
+  private static ProviderOperationException Invalid(string reason, string? identifier = null) {
+    if (IsSafeIdentifier(identifier)) reason += $" '{identifier}'";
+    return new(ProviderFailure.InvalidProviderResponse, reason);
+  }
+
+  private static bool IsSafeIdentifier(string? value) {
+    if (value is not { Length: > 0 and <= 64 }) return false;
+    return value.All(character => character is >= 'A' and <= 'Z' or >= 'a' and <= 'z' or >= '0' and <= '9' or
+        '_' or '.' or ':' or '-');
+  }
 }
 
 #pragma warning restore OPENAI001, MEAI001, SCME0001

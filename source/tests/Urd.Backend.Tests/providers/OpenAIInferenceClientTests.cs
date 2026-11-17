@@ -157,6 +157,17 @@ public sealed class OpenAIInferenceClientTests {
         State(route: ProviderRoute.ChatGpt), Options(tools: true));
   }
 
+  [Fact]
+  public async Task InvalidResponsesExposeSafeReasonLabels() {
+    const string unsupportedItem = """{"type":"web_search_call","id":"search_fixture","status":"completed","action":{"type":"search","query":"fixture"}}""";
+    await Rejected(Responses([unsupportedItem]), ProviderFailure.InvalidProviderResponse,
+        reason: "unexpected output item type 'web_search_call'");
+
+    string undeclaredCall = Call.Replace("\"name\":\"lookup\"", "\"name\":\"missing\"", StringComparison.Ordinal);
+    await Rejected(Responses([undeclaredCall]), ProviderFailure.InvalidProviderResponse, options: Options(tools: true),
+        reason: "call to undeclared tool 'missing'");
+  }
+
   [Theory]
   [InlineData("\"reasoning\":42")]
   [InlineData("\"reasoning_content\":42")]
@@ -235,7 +246,8 @@ public sealed class OpenAIInferenceClientTests {
     Assert.Equal(expected, Convert.FromBase64String(dataUrl[prefix.Length..]));
   }
 
-  private static async Task Rejected(string wire, ProviderFailure failure, ProviderState? state = null, ChatOptions? options = null) {
+  private static async Task Rejected(string wire, ProviderFailure failure, ProviderState? state = null,
+      ChatOptions? options = null, string? reason = null) {
     using var handler = new ScriptedOpenAIHandler(wire);
     using var http = new HttpClient(handler);
     List<ChatResponseUpdate> observed = [];
@@ -247,6 +259,10 @@ public sealed class OpenAIInferenceClientTests {
     });
 
     Assert.Equal(failure, error.Failure);
+    if (reason is not null) {
+      Assert.Equal(reason, error.Reason);
+      Assert.Equal($"{failure}: {reason}", error.Message);
+    }
     Assert.DoesNotContain(observed.SelectMany(update => update.Contents), content => content is FunctionCallContent);
     Assert.All(observed, update => Assert.Null(update.FinishReason));
     Assert.All(observed, update => Assert.Null(LlmProviderContext.GetResponse(update)));

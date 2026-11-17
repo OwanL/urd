@@ -9,11 +9,18 @@ public sealed class ProviderOperationException : Exception {
   private const int MaximumErrorBodyBytes = 16 * 1024;
   private const int MaximumMessageLength = 1024;
 
-  public ProviderOperationException(ProviderFailure failure) : base(failure.ToString()) => Failure = failure;
+  public ProviderOperationException(ProviderFailure failure) : this(failure, failure.ToString(), null) { }
 
-  private ProviderOperationException(ProviderFailure failure, string message) : base(message) => Failure = failure;
+  internal ProviderOperationException(ProviderFailure failure, string reason) :
+      this(failure, $"{failure}: {reason}", reason) { }
+
+  private ProviderOperationException(ProviderFailure failure, string message, string? reason) : base(message) {
+    Failure = failure;
+    Reason = reason;
+  }
 
   public ProviderFailure Failure { get; }
+  public string? Reason { get; }
 
   internal static ProviderOperationException FromProviderError(Exception error,
       bool discovery = false, bool contextWindow = false, ProviderCredentials? credentials = null) {
@@ -31,7 +38,7 @@ public sealed class ProviderOperationException : Exception {
     if (details is not null)
       return Create(failure, details.Message, details.Code, details.Param, details.RequestId, details.Status, credentials);
 
-    return new(failure, FormatMessage(failure, null, null, null, null, null, error.GetType().Name, credentials));
+    return new(failure, FormatMessage(failure, null, null, null, null, null, error.GetType().Name, credentials), null);
   }
 
   internal static ProviderOperationException FromProviderStreamError(string? code, string? message,
@@ -46,7 +53,7 @@ public sealed class ProviderOperationException : Exception {
 
   private static ProviderOperationException Create(ProviderFailure failure, string? message, string? code,
       string? param, string? requestId, int? status, ProviderCredentials? credentials) =>
-      new(failure, FormatMessage(failure, message, code, param, requestId, status, null, credentials));
+      new(failure, FormatMessage(failure, message, code, param, requestId, status, null, credentials), null);
 
   private static string FormatMessage(ProviderFailure failure, string? message, string? code, string? param,
       string? requestId, int? status, string? exceptionType, ProviderCredentials? credentials) {

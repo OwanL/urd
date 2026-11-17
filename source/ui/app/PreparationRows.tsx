@@ -18,6 +18,7 @@ import {
   orderedPreparation,
   prepassRowModel,
   preparationOutcome,
+  preparationUsedSessionModel,
 } from "./PrepassValues.ts";
 import type { PrepassRowModel } from "./PrepassValues.ts";
 import "./response-status.css";
@@ -28,6 +29,8 @@ export interface ResponseStatusContext {
   readonly sessionId: string;
   readonly modelNames: ReadonlyMap<string, string>;
   readonly visible: boolean;
+  // Opens Settings on the model-buckets tab; absent when the surface cannot open Settings.
+  readonly onChooseModels?: (() => void) | undefined;
 }
 
 function scrollTooltipDetails(event: TargetedKeyboardEvent<HTMLSpanElement>) {
@@ -138,6 +141,7 @@ export function PreparationRows({
   const open = outcome === null || expanded || pointerHold || focusHold;
   // Do not shift inspected rows (and their open tooltip) by inserting the summary above them.
   const toggleVisible = outcome !== null && (expanded || (!pointerHold && !focusHold));
+  const usedSessionModel = preparationUsedSessionModel(preparation);
   const leftGroup = (
     event: TargetedPointerEvent<HTMLDivElement> | TargetedFocusEvent<HTMLDivElement>,
   ) => {
@@ -189,6 +193,16 @@ export function PreparationRows({
         </span>
         <span class="response-status-value">{outcome}</span>
       </button>
+      {usedSessionModel && (
+        <p class="response-status-session-model">
+          Used the chat model for preparation
+          {context.onChooseModels && (
+            <button type="button" onClick={context.onChooseModels}>
+              Choose models
+            </button>
+          )}
+        </p>
+      )}
       <div class="response-status-list" id={listId}>
         {open
           ? rows.map((summary) => (
@@ -231,7 +245,11 @@ function PreparationRow({
       dismissOnClick={false}
       disabled={!context.visible}
     >
-      <span class="response-status-row" tabIndex={0} onKeyDown={scrollTooltipDetails}>
+      <span
+        class={`response-status-row${row.mood === "warned" ? " is-warned" : ""}`}
+        tabIndex={0}
+        onKeyDown={scrollTooltipDetails}
+      >
         <RowStatusMood mood={row.mood} />
         <span class="response-status-kind">{row.label}</span>
         <span aria-hidden="true" class="response-status-separator">
@@ -274,6 +292,23 @@ function RowStatusMood({ mood }: { mood: PrepassRowModel["mood"] }) {
         aria-hidden="true"
       >
         <path d="M6 6l4 4m0-4-4 4" />
+      </svg>
+    );
+  }
+  if (mood === "warned") {
+    return (
+      <svg
+        class="response-status-icon"
+        viewBox="0 0 16 16"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M8 3.3 14 12.9H2Z" />
+        <path d="M8 7.4v2.6m0 1.6v.01" />
       </svg>
     );
   }

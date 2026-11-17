@@ -8,11 +8,13 @@ import {
   modelDisplayName,
   orderedPreparation,
   preparationOutcome,
+  preparationUsedSessionModel,
   prepassCostLabel,
   prepassRowModel,
   prepassRowMood,
   uniqueModelNames,
 } from "../app/PrepassValues.ts";
+import { initialBoundaryId } from "../sessions/Prepass.ts";
 import type { PrepassSummary } from "../sessions/Prepass.ts";
 
 function summary(overrides: Partial<PrepassSummary>): PrepassSummary {
@@ -117,9 +119,9 @@ void test("title rows use their own progress wording", () => {
   );
 });
 
-void test("fallback retains everything and stopped states stay truthful", () => {
-  assert.equal(prepassRowModel(summary({ state: "fallback" })).value, "All retained");
-  assert.equal(prepassRowMood(summary({ state: "fallback" })), "settled");
+void test("fallback rows read as failed selection that kept every candidate", () => {
+  assert.equal(prepassRowModel(summary({ state: "fallback" })).value, "Failed · kept all");
+  assert.equal(prepassRowMood(summary({ state: "fallback" })), "warned");
   assert.equal(prepassRowModel(summary({ state: "cancelled" })).value, "Cancelled");
   assert.equal(prepassRowModel(summary({ state: "interrupted" })).value, "Interrupted");
   assert.equal(prepassRowMood(summary({ state: "interrupted" })), "stopped");
@@ -192,4 +194,20 @@ void test("reasoning effort passes through verbatim or stays hidden", () => {
   assert.equal(effortLabel(null), null);
   assert.equal(effortLabel(undefined), null);
   assert.equal(effortLabel(""), null);
+});
+
+void test("the chat-model fallback warns only on the initial boundary", () => {
+  assert.equal(
+    preparationUsedSessionModel([
+      summary({ boundaryId: initialBoundaryId, usedSessionModel: true }),
+      summary({ boundaryId: initialBoundaryId, category: "skills" }),
+    ]),
+    true,
+  );
+  // Compaction boundaries never warn, even when a summary used the chat model.
+  assert.equal(preparationUsedSessionModel([summary({ usedSessionModel: true })]), false);
+  assert.equal(preparationUsedSessionModel([summary({ boundaryId: initialBoundaryId })]), false);
+  assert.equal(preparationUsedSessionModel([]), false);
+  assert.equal(preparationUsedSessionModel(null), false);
+  assert.equal(preparationUsedSessionModel(undefined), false);
 });

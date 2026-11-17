@@ -1,3 +1,4 @@
+import { initialBoundaryId } from "../sessions/Prepass.ts";
 import type { PrepassSummary } from "../sessions/Prepass.ts";
 
 const categoryOrder = ["tools", "skills", "instructions", "title"] as const;
@@ -7,7 +8,7 @@ export interface PrepassRowModel {
   readonly boundaryId: string;
   readonly label: string;
   readonly value: string;
-  readonly mood: "settled" | "running" | "pending" | "stopped";
+  readonly mood: "settled" | "warned" | "running" | "pending" | "stopped";
 }
 
 const labels: Record<string, string> = {
@@ -46,7 +47,8 @@ export function preparationOutcome(
 export function prepassRowMood(summary: PrepassSummary): PrepassRowModel["mood"] {
   if (summary.state === "running") return "running";
   if (summary.state === "pending") return "pending";
-  if (summary.state === "completed" || summary.state === "fallback") return "settled";
+  if (summary.state === "completed") return "settled";
+  if (summary.state === "fallback") return "warned";
   return "stopped";
 }
 
@@ -73,7 +75,7 @@ function prepassRowValue(summary: PrepassSummary): string {
     case "pending":
       return "Pending";
     case "fallback":
-      return "All retained";
+      return "Failed · kept all";
     case "cancelled":
       return "Cancelled";
     case "interrupted":
@@ -90,6 +92,18 @@ function prepassRowValue(summary: PrepassSummary): string {
 
 function summarizeState(state: string): string {
   return state ? `${state[0]!.toUpperCase()}${state.slice(1)}` : "Unknown";
+}
+
+// The chat-model fallback only warrants a warning on the initial boundary; compaction
+// boundaries carry their own history and never re-run the first-message preparation.
+export function preparationUsedSessionModel(
+  preparation: readonly PrepassSummary[] | null | undefined,
+): boolean {
+  return (
+    preparation?.some(
+      (summary) => summary.usedSessionModel === true && summary.boundaryId === initialBoundaryId,
+    ) ?? false
+  );
 }
 
 export function formatClockTime(startedAt: string | null | undefined): string | null {

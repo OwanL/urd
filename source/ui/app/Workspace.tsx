@@ -246,6 +246,7 @@ export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) 
             refresh={refresh}
             onRefresh={refreshSnapshot}
             onSetUpProvider={() => openSettings("providers")}
+            onChooseModels={() => openSettings("model-buckets")}
             editDraft={workspace.editDraft}
             selectModel={workspace.selectModel}
             position={readingPositions.current.get(id)}

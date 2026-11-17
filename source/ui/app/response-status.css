@@ -139,6 +139,10 @@
   animation: response-status-pulse 2.4s ease-in-out infinite;
 }
 
+.response-status-row.is-warned .response-status-icon {
+  color: #d5b77d;
+}
+
 .response-status-kind {
   flex: none;
   color: #a0a0a0;
@@ -164,6 +168,39 @@
 .response-status-row:hover .response-status-value {
   text-decoration: underline dotted #858585;
   text-underline-offset: 3px;
+}
+
+.response-status-session-model {
+  display: flex;
+  align-items: baseline;
+  justify-self: start;
+  gap: 5px;
+  min-width: 0;
+  margin: 0;
+  color: #d5b77d;
+  font-size: 10.5px;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+  flex-wrap: wrap;
+}
+
+.response-status-session-model button {
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-decoration: underline;
+  text-decoration-color: rgb(213 183 125 / 45%);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.response-status-session-model button:hover {
+  color: #e6cfa3;
 }
 
 @keyframes response-status-pulse {

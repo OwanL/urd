@@ -49,6 +49,7 @@ interface VirtualTranscriptProps {
   notice: string | null;
   visible: boolean;
   modelNames?: ReadonlyMap<string, string> | undefined;
+  onChooseModels?: (() => void) | undefined;
   navigation: TranscriptNavigationState | undefined;
   onNavigationChange: (state: TranscriptNavigationState) => void;
 }
@@ -293,6 +294,7 @@ export function VirtualTranscript({
   notice,
   visible,
   modelNames,
+  onChooseModels,
   navigation,
   onNavigationChange,
 }: VirtualTranscriptProps) {
@@ -302,8 +304,8 @@ export function VirtualTranscript({
   const [root, setRoot] = useState<HTMLDivElement | null>(null);
   const [positionWindow, setPositionWindow] = useState<TranscriptPositionWindow | null>(null);
   const statusContext: ResponseStatusContext = useMemo(
-    () => ({ client, sessionId, modelNames: modelNames ?? new Map(), visible }),
-    [client, sessionId, modelNames, visible],
+    () => ({ client, sessionId, modelNames: modelNames ?? new Map(), visible, onChooseModels }),
+    [client, sessionId, modelNames, visible, onChooseModels],
   );
   const positionReader = useMemo(
     () => new TranscriptPositionReader(client, sessionId),

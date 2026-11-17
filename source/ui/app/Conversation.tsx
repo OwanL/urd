@@ -149,6 +149,7 @@ interface ConversationProps {
   notice: string | null;
   onRefresh(): void;
   onSetUpProvider(): void;
+  onChooseModels(): void;
   editDraft(id: string, text: string): boolean;
   selectModel(id: string, selection: LlmSelection): boolean;
   position: ReadingPosition | undefined;
@@ -178,6 +179,7 @@ export function Conversation({
   notice,
   onRefresh,
   onSetUpProvider,
+  onChooseModels,
   editDraft,
   selectModel,
   position,
@@ -232,8 +234,9 @@ export function Conversation({
         })),
       ),
       visible: visible && notice !== null,
+      onChooseModels,
     }),
-    [client, sessionId, models.options, visible, notice],
+    [client, sessionId, models.options, visible, notice, onChooseModels],
   );
   const pendingResponse = snapshot?.pendingResponse ?? null;
   const unlistedInputRemovals = unresolvedInputRemovals.filter(
@@ -302,6 +305,7 @@ export function Conversation({
           onPositionChange={onPositionChange}
           transcriptPosition={transcriptPosition}
           onTranscriptPositionChange={onTranscriptPositionChange}
+          onChooseModels={onChooseModels}
           emptyState={
             (showWorkingDirectory || workingDirectoryLocked) && snapshot ? (
               <div class="empty-chat-overview">

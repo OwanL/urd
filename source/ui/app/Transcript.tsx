@@ -250,6 +250,7 @@ export interface TranscriptProps {
   onTranscriptPositionChange?: (position: TranscriptNavigationState) => void;
   // Catalog-cache names for response headers; absent or ambiguous IDs stay opaque.
   modelNames?: ReadonlyMap<string, string>;
+  onChooseModels?: (() => void) | undefined;
 }
 
 export function Transcript(props: TranscriptProps) {
@@ -280,6 +281,7 @@ export function Transcript(props: TranscriptProps) {
         notice={props.notice ?? null}
         visible={props.visible}
         modelNames={props.modelNames}
+        onChooseModels={props.onChooseModels}
         navigation={props.transcriptPosition}
         onNavigationChange={props.onTranscriptPositionChange ?? ignoreNavigationChange}
       >
@@ -303,6 +305,7 @@ function PlainTranscript({
   position,
   onPositionChange,
   modelNames,
+  onChooseModels,
 }: TranscriptProps) {
   const RichBody = display?.MessageBody;
   const scroll = useRef<HTMLDivElement>(null);
@@ -318,8 +321,8 @@ function PlainTranscript({
   const [shown, setShown] = useState(history);
   const visibleHistory = shown?.sessionId === sessionId ? shown : null;
   const statusContext: ResponseStatusContext = useMemo(
-    () => ({ client, sessionId, modelNames: modelNames ?? new Map(), visible }),
-    [client, sessionId, modelNames, visible],
+    () => ({ client, sessionId, modelNames: modelNames ?? new Map(), visible, onChooseModels }),
+    [client, sessionId, modelNames, visible, onChooseModels],
   );
   const mountScroll = useCallback((node: HTMLDivElement | null) => {
     scroll.current = node;

@@ -1,5 +1,9 @@
 // Response-header and preparation facts from the session contract. History entries and
 // snapshots carry slim summaries; full candidate/result/preview detail is read on demand.
+
+// The boundary of the first exchanged message, before any compaction boundary exists.
+export const initialBoundaryId = "00000000-0000-0000-0000-000000000000";
+
 export interface ResponseHeaderInfo {
   readonly modelId: string;
   readonly reasoningEffort: string;
@@ -19,6 +23,8 @@ export interface PrepassSummary {
   readonly candidateCount: number | null;
   readonly resultCount: number | null;
   readonly error?: string | null;
+  // True when no prepass model was configured so the chat's own model did the work.
+  readonly usedSessionModel?: boolean;
 }
 
 export interface PendingResponse {

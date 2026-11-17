@@ -539,6 +539,23 @@ reviews found no remaining supported blockers. The physical-line budget is **30,
 test/helper lines / 42,279 application lines**. Assets and server are staged only under
 isolated `bin/Verification/` outputs; no profile reset, installation or host activation.
 
+**Implementation checkpoint (2026-11-17):** source now uses schema 30. Response headers
+freeze model, effort and start time; preparation rows are boundary-anchored for tools,
+skills, instructions and title. Pending response state is transient until a transcript
+entry provides its anchor. On-demand detail pages hold up to 60 resources per page; provider-emitted reasoning
+and output preview tails are bounded to 8,192 Unicode scalars. Candidate counts exclude
+protected resources. Title failure still leaves the existing placeholder; the planned
+first-prompt fallback has not been implemented.
+
+Verification passed **590 Release backend tests**, **349 UI tests**, formatting, type-aware
+lint, strict TypeScript, the production UI build and the offline real-server/SDK flow.
+Manual browser acceptance covered desktop and 320px layouts, live reasoning, keyboard paging,
+hover/focus/Escape, polling cleanup on close/hidden tabs, draft preservation, reload, delayed
+title publication and keep-all failure fallback. Visual review approved the final captures.
+The physical-line budget is **31,465 test/helper lines / 44,271 application lines**.
+All provider calls used credential-free loopback fixtures and owned temporary profiles;
+the existing host and databases were untouched. This is not live-model quality evidence.
+
 | Milestone | Change boundary | Acceptance evidence |
 | --- | --- | --- |
 | 1. Shared execution and auxiliary recording | Extract reusable stream validation/tool-turn mechanics from `SessionExecution`, `LlmResponseAccumulator`/`LlmResponseWriter` and `SessionToolExecution`. Add isolated auxiliary conversation/request recording under the existing session authority. Keep main steering, compaction and settlement with their current owners. | Existing main-chat tests unchanged; interleaved auxiliary streams/calls cannot mix histories, place pending main input or repeat tools. Stop and save/cleanup failure barriers still hold. |

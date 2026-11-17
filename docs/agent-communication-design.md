@@ -129,6 +129,21 @@ generates the child's immutable title. That title is the communication address. 
 model overrides, caller-selected working directories, full-history inheritance, separate numeric
 context budgets, and other invocation options are not part of this proposal.
 
+**Child tools (2026-11-16):** a child runs the same prepass as a primary session and receives
+all tools minus whatever that prepass prunes, including `subagent` and the communication tools.
+There is no separate child tool list or nesting-depth limit.
+
+**Result (2026-11-16):** the parent's `subagent` call returns the child's final report (its final
+response), or an error if it failed or was stopped. Keep the guidance asking for that report
+simple; there is no structured result schema.
+
+**Presentation (2026-11-16, deferred):** a child appears as a normal tool call in the parent's
+transcript, and hovering a session tab lists its subagents. Detailed UI is deferred until the
+backend is complete and needs its own ideation.
+
+**Open (proposed):** the trailing-context mode reuses compaction's retained recent-history
+amount rather than adding a new setting.
+
 ### `ask_agent`
 
 | Input | Meaning |

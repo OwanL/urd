@@ -36,8 +36,12 @@ working-directory changes still apply only to new chats. Settings → Model buck
 shared small/medium/frontier model mappings. Settings → Prepass configures independent
 tool/skill/instruction/title model choices and protected-resource lists. Missing models/resources
 remain visibly unavailable rather than rebinding. Protection pickers discover resources for the
-default directory; built-in instructions always remain. Session preparation shows three category
-rows with truthful running/completed/fallback/cancelled/interrupted outcomes. Tabs use guarded
+default directory; built-in instructions always remain. Response headers freeze the model, effort
+(`medium` shown as a bare label) and start time. Boundary-anchored preparation rows cover tools,
+skills, instructions and title, with truthful running/completed/fallback/cancelled/interrupted
+outcomes. Read-only tooltips load detail and resource pages on demand, including model, elapsed
+time, cost (unknown or estimated where applicable), and bounded provider-emitted reasoning and
+output previews; reasoning is never inferred. Tabs use guarded
 backend title metadata or the existing placeholder, never a first-prompt excerpt.
 Before the first accepted message, the empty transcript centers the default and current
 working-directory paths with explicit Edit actions. Edit opens a single directory editor

@@ -121,7 +121,7 @@ The owner's model-facing surface, settled after review. Not yet implemented.
 | Input | Meaning |
 | --- | --- |
 | `bucket` | `small`, `medium`, or `large`; selects the configured model tier. Existing `Frontier` is renamed `Large` everywhere, folded into the schema-version bump this feature will need anyway. |
-| `context` | Parent context to retain. Candidate modes are `none`, user input including `ask_user` questions/answers, and trailing main-agent context analogous to compaction's recent-history retention. |
+| `context` | Parent context to retain: `none` (task only), `user` (the user's messages plus `ask_user` questions/answers), or `recent` (the parent's recent conversation, using the same amount compaction retains; no new setting). |
 | `task` | Text prompt describing the delegated task. |
 
 The caller does **not** supply a title. Creation runs Urd's existing pruning/title prepass and
@@ -141,9 +141,6 @@ simple; there is no structured result schema.
 **Presentation (2026-11-16, deferred):** a child appears as a normal tool call in the parent's
 transcript, and hovering a session tab lists its subagents. Detailed UI is deferred until the
 backend is complete and needs its own ideation.
-
-**Open (proposed):** the trailing-context mode reuses compaction's retained recent-history
-amount rather than adding a new setting.
 
 ### `ask_agent`
 
@@ -229,9 +226,7 @@ and schema files. Milestones are cohesive, locally verified slices.
 
 UI presentation (tool-call display and tab hover list) follows after the backend.
 
-**Open for refinement:** `context` mode names; whether
-trailing context reuses compaction's retained amount; how a child's tool calls appear in the
-parent's transcript before UI work.
+**Open for refinement:** how a child's tool calls appear in the parent's transcript before UI work.
 
 ## Deliberate limits and existing alternatives
 

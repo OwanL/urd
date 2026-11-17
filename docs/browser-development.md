@@ -22,8 +22,8 @@ not calendar days.
 The composer keeps only session cost, context and working time. Its session-cost popover has Session,
 24h and 7d tabs; switching scopes reads that scope on demand without changing the session-cost chip.
 When the row cannot fit the session indicators, they move into More without displacing model,
-reasoning, Stop or Send/Continue. There is no separate accounting footer. The conversation is centered
-and width-bounded on wide screens.
+reasoning, Stop or Send/Continue. There is no separate accounting footer. The conversation uses the
+available workspace width.
 The model picker loads cached catalogs immediately, discovers missing catalogs on startup and
 rediscovers after provider changes, without polling or a routine refresh action. With no providers,
 the model and reasoning selectors are replaced by an Add provider action that opens Settings →

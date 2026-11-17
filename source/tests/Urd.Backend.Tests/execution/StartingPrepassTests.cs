@@ -103,6 +103,8 @@ public sealed class StartingPrepassTests {
     Assert.Equal([], ReadResultIds("instructions"));
     Assert.Equal("completed", ReadDetailState("instructions"));
     Assert.Equal("completed", ReadDetailState("title"));
+    Assert.All(["tools", "skills", "instructions", "title"], category => Assert.Equal(0L, fixture.Database.Scalar(
+        $"SELECT used_session_model FROM session_prepass_details WHERE run_id = '{execution:D}' AND category = '{category}';"))); // raw-sql: the configured auxiliary path never records the session-model stand-in
     StartingContext context = Assert.IsType<StartingContext>(fixture.Store.StartingContexts.Read(fixture.Session.Id));
     Assert.Equal(new[] { "read", "bash", "lookup", "vault" }, context.Tools.Select(tool => tool.Name));
     Assert.Contains("diagnose", string.Join('\n', context.Instructions.Select(message => message.Text)), StringComparison.Ordinal);
@@ -146,6 +148,93 @@ public sealed class StartingPrepassTests {
     async IAsyncEnumerable<ChatResponseUpdate> AfterSkills([EnumeratorCancellation] CancellationToken token) {
       await skillsStarted.Task.WaitAsync(TestTimeout, token);
       await foreach (ChatResponseUpdate update in TextUpdates([ToolsKeepLookup], token)) yield return update;
+    }
+  }
+
+  [Fact]
+  public async Task MissingAuxiliaryModelRunsPrepassOnTheChatSelectionAndFlagsTheSummaries() {
+    const string launch = "orbit compass no auxiliary";
+    var skillsStarted = Signal();
+    var skillsRelease = Signal();
+    var mainRelease = Signal();
+    ReasoningEffort? titleEffort = null;
+    ReasoningEffort? skillsEffort = null;
+    string? titlePrompt = null;
+    var client = new ScriptedChatClient(Route);
+    ProviderManager providers = null!;
+    await using var fixture = new ExecutionFixture(client, Array.Empty<AgentTool>(), store => providers = CreateProviders(store));
+    // No bucket model is configured, so every purpose stands in the run's own chat selection.
+
+    try {
+      long revision = (await fixture.Session.ReadSnapshotAsync().WaitAsync(TestTimeout)).HistoryRevision;
+      UserMessageReceipt receipt = await fixture.Session.SubmitUserMessageAsync(new UserMessageSubmission(
+          Guid.NewGuid(), revision, launch, TestLlmSelection.Default with { ReasoningEffort = "low" }));
+      Assert.Equal(MessageAcceptance.Accepted, receipt.Acceptance);
+      Guid execution = Assert.IsType<Guid>(receipt.ExecutionId);
+      await skillsStarted.Task.WaitAsync(TestTimeout);
+
+      // The pending preparation summaries already carry the chat-selection stand-in.
+      PendingResponse? pending = null;
+      using (var wait = new CancellationTokenSource(TestTimeout)) {
+        while (true) {
+          pending = (await fixture.Session.ReadSnapshotAsync().WaitAsync(wait.Token)).PendingResponse;
+          if (pending is not null && pending.Preparation.Count(summary => summary.Category is "skills" or "title") == 2)
+            break;
+          await Task.Delay(10, wait.Token);
+        }
+      }
+      Assert.True(pending.Preparation.Single(summary => summary.Category == "skills").UsedSessionModel);
+      Assert.True(pending.Preparation.Single(summary => summary.Category == "title").UsedSessionModel);
+      Assert.All(pending.Preparation.Where(summary => summary.Category is "tools" or "instructions"),
+          summary => Assert.False(summary.UsedSessionModel));
+
+      mainRelease.TrySetResult();
+      skillsRelease.TrySetResult();
+      Assert.Equal(ExecutionOutcome.Completed,
+          (await fixture.Session.WaitForExecutionFinishAsync(execution).WaitAsync(TestTimeout)).Outcome);
+
+      // The chat model and its own reasoning effort stand in unchanged for every conversation that ran.
+      Assert.Equal(ReasoningEffort.Low, titleEffort);
+      Assert.Equal(ReasoningEffort.Low, skillsEffort);
+      Assert.Equal(launch, titlePrompt);
+      Assert.Equal([0L, 1L, 1L, 0L], fixture.Database.ReadRows(
+          $"SELECT used_session_model FROM session_prepass_details WHERE run_id = '{execution:D}' ORDER BY category;",
+          row => row.GetInt64(0))); // raw-sql: skills and title record the stand-in; categories without candidates record none
+
+      revision = (await fixture.Session.ReadSnapshotAsync().WaitAsync(TestTimeout)).HistoryRevision;
+      TranscriptHistoryPage history = fixture.Store.History.Read(fixture.Session.Id,
+          new(TranscriptHistoryMode.Latest, revision));
+      IReadOnlyList<PrepassSummary> preparation = Assert.Single(history.Entries,
+          entry => entry.Entry.Kind == TranscriptEntryKind.User).Preparation!;
+      Assert.True(preparation.Single(summary => summary.Category == "skills").UsedSessionModel);
+      Assert.True(preparation.Single(summary => summary.Category == "title").UsedSessionModel);
+      Assert.False(preparation.Single(summary => summary.Category == "tools").UsedSessionModel);
+      Assert.False(preparation.Single(summary => summary.Category == "instructions").UsedSessionModel);
+    } finally {
+      mainRelease.TrySetResult();
+      skillsRelease.TrySetResult();
+    }
+
+    IAsyncEnumerable<ChatResponseUpdate> Route(ScriptedRequest request, CancellationToken token) {
+      switch (request.Purpose) {
+        case "conversation":
+          return Paused(Signal(), mainRelease, token);
+        case "title":
+          titlePrompt = request.Messages[^1].Text;
+          titleEffort = Assert.IsType<ReasoningOptions>(request.Options!.Reasoning).Effort;
+          return TextUpdates([PublishedTitle], token);
+        case "pruning.skills":
+          skillsEffort = Assert.IsType<ReasoningOptions>(request.Options!.Reasoning).Effort;
+          return HeldSkills(token);
+        default:
+          throw new InvalidOperationException($"Unexpected purpose '{request.Purpose}'.");
+      }
+    }
+
+    async IAsyncEnumerable<ChatResponseUpdate> HeldSkills([EnumeratorCancellation] CancellationToken token) {
+      skillsStarted.TrySetResult();
+      await skillsRelease.Task.WaitAsync(token);
+      await foreach (ChatResponseUpdate update in TextUpdates([KeepNothing], token)) yield return update;
     }
   }
 

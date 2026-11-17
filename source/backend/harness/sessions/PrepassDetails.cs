@@ -6,7 +6,7 @@ public sealed record PrepassResource(string Id, string Label, string? Path = nul
 
 // Slim boundary metadata; resource lists and debugging output are read only on demand.
 public sealed record PrepassSummary(Guid BoundaryId, string Category, string State,
-    int? CandidateCount, int? ResultCount, string? Error = null);
+    int? CandidateCount, int? ResultCount, string? Error = null, bool UsedSessionModel = false);
 
 public sealed record PendingResponse(ResponseHeaderInfo Header, IReadOnlyList<PrepassSummary> Preparation);
 

@@ -4,7 +4,7 @@ namespace Urd.Core.Storage;
 
 // Creates the current pre-release schema; incompatible databases require a manual reset.
 internal static class DatabaseSchema {
-  private const int SchemaVersion = 30;
+  private const int SchemaVersion = 31;
 
   internal static void Initialize(SqliteConnection connection) {
     using SqliteCommand command = connection.CreateCommand();
@@ -104,6 +104,7 @@ internal static class DatabaseSchema {
           started_at TEXT NOT NULL,
           finished_at TEXT,
           llm_selection_json TEXT,
+          used_session_model INTEGER NOT NULL DEFAULT 0 CHECK (used_session_model IN (0, 1)),
           candidates_json TEXT,
           results_json TEXT,
           reasoning_text TEXT NOT NULL DEFAULT '',

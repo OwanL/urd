@@ -35,6 +35,11 @@ internal static class ProviderModelStreams {
     return stream;
   }
 
+  internal static string ChatText(string text) => "data: " + JsonSerializer.Serialize(new {
+    id = "chatcmpl_fixture", @object = "chat.completion.chunk", created = 1700000000, model = "fixture-model",
+    choices = new[] { new { index = 0, delta = new { role = "assistant", content = text }, finish_reason = "stop" } }
+  }) + "\n\ndata: [DONE]\n\n";
+
   internal static string ChatCalls(string finish = "tool_calls", bool reasoning = false,
       string arguments = "{\"key\":\"abc\"}", string name = "lookup") {
     string Chunk(object delta, string? reason = null) => "data: " + JsonSerializer.Serialize(new {

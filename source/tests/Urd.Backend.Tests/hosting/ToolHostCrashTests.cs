@@ -38,15 +38,24 @@ public sealed class ToolHostCrashTests {
       var builder = WebApplication.CreateBuilder();
       builder.WebHost.ConfigureKestrel(kestrel => kestrel.Listen(IPAddress.Loopback, 0));
       await using WebApplication provider = builder.Build();
-      int providerCalls = 0;
+      int mainProviderCalls = 0;
       string command = """
           printf x >> effect.marker
           powershell.exe -NoProfile -WindowStyle Hidden -Command '$tmp="child.pid.tmp"; [IO.File]::WriteAllText($tmp, [string]$PID, [Text.Encoding]::ASCII); [IO.File]::Move($tmp, "child.pid"); Start-Sleep -Seconds 3600'
           """;
       string arguments = JsonSerializer.Serialize(new { command });
       provider.MapPost("/v1/chat/completions", async (HttpContext context) => {
-        Interlocked.Increment(ref providerCalls);
+        using JsonDocument request = await JsonDocument.ParseAsync(context.Request.Body);
+        // The provider wire omits UsageContext; auxiliary loops expose only read/bash tools.
+        bool mainConversation = request.RootElement.GetProperty("tools").EnumerateArray().Any(tool =>
+            tool.GetProperty("function").GetProperty("name").GetString() == "write");
         context.Response.ContentType = "text/event-stream";
+        if (!mainConversation) {
+          await context.Response.WriteAsync(ProviderModelStreams.ChatText("Crash fixture"));
+          return;
+        }
+
+        Interlocked.Increment(ref mainProviderCalls);
         await context.Response.WriteAsync(ProviderModelStreams.ChatCalls(arguments: arguments, name: "bash"));
       });
       await provider.StartAsync().WaitAsync(TestTimeout);
@@ -135,7 +144,7 @@ public sealed class ToolHostCrashTests {
           Assert.Contains("interrupted", tool.Error ?? "", StringComparison.OrdinalIgnoreCase);
           Assert.Contains("Do not automatically retry", tool.Error ?? "", StringComparison.Ordinal);
         }
-        Assert.Equal(1, Volatile.Read(ref providerCalls));
+        Assert.Equal(1, Volatile.Read(ref mainProviderCalls));
         Assert.Equal("x", await File.ReadAllTextAsync(Path.Combine(workingDirectory, "effect.marker")));
       } finally {
         recoveredClient?.Dispose();

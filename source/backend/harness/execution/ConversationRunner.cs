@@ -18,21 +18,22 @@ internal sealed class ConversationRunner(SessionExecutionRecorder parent,
   // Runs one auxiliary conversation and returns its accepted final answer. validateResult
   // returns null for an accepted answer or corrective user input; one corrected final
   // answer is permitted (tool turns are not counted), a second rejected one throws.
-  internal async Task<string> RunAsync(string purpose, LlmSelection selection,
+  internal async Task<string> RunAsync(string purpose, AuxiliaryModelResolution model,
       IReadOnlyList<ChatMessage> input, Func<string, string?>? validateResult, CancellationToken cancellation) {
     try {
-      return await RunCoreAsync(purpose, selection, input, validateResult, cancellation);
+      return await RunCoreAsync(purpose, model, input, validateResult, cancellation);
     } catch (AuxiliaryExecutionException failure) {
       await parent.ReportAuxiliaryFailureAsync(failure);
       throw;
     }
   }
 
-  private async Task<string> RunCoreAsync(string purpose, LlmSelection selection,
+  private async Task<string> RunCoreAsync(string purpose, AuxiliaryModelResolution model,
       IReadOnlyList<ChatMessage> input, Func<string, string?>? validateResult, CancellationToken cancellation) {
     ArgumentException.ThrowIfNullOrWhiteSpace(purpose);
-    ArgumentNullException.ThrowIfNull(selection);
+    ArgumentNullException.ThrowIfNull(model);
     ArgumentNullException.ThrowIfNull(input);
+    LlmSelection selection = model.Selection;
     selection.Validate();
     cancellation.ThrowIfCancellationRequested();
 
@@ -41,7 +42,7 @@ internal sealed class ConversationRunner(SessionExecutionRecorder parent,
     AgentTool[] allowed = [.. tools.Where(tool => tool.Name is "read" or "bash")];
     AIFunctionDeclaration[] offered = [.. allowed.Select(AgentToolDeclaration.Create)];
     List<ChatMessage> messages = [.. input]; // Isolated copy; the caller's history is never mutated.
-    AuxiliaryConversationRecorder recorder = await CreateConversationAsync(purpose, selection, messages, offered, cancellation);
+    AuxiliaryConversationRecorder recorder = await CreateConversationAsync(purpose, model, messages, offered, cancellation);
     IChatClient client = createChatClient(selection.Connection); // Borrowed; disposal stays with its owner.
     int answers = 0;
 
@@ -103,11 +104,11 @@ internal sealed class ConversationRunner(SessionExecutionRecorder parent,
   }
 
   // A scoped durable conversation freezes this run's purpose, selection, input and definitions.
-  private async Task<AuxiliaryConversationRecorder> CreateConversationAsync(string purpose, LlmSelection selection,
+  private async Task<AuxiliaryConversationRecorder> CreateConversationAsync(string purpose, AuxiliaryModelResolution model,
       IReadOnlyList<ChatMessage> input, IReadOnlyList<AIFunctionDeclaration> offered, CancellationToken cancellation) {
     AuxiliaryConversationRecorder? recorder;
     try {
-      recorder = await parent.CreateConversationAsync(Guid.NewGuid(), purpose, selection, input, offered);
+      recorder = await parent.CreateConversationAsync(Guid.NewGuid(), purpose, model, input, offered);
     } catch (ArgumentException) {
       throw; // Caller-invalid input, not a recording fault.
     } catch (Exception failure) {

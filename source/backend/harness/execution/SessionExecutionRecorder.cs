@@ -76,9 +76,9 @@ internal sealed class SessionExecutionRecorder(SessionBase session, UrdStore sto
   internal Task ReportAuxiliaryFailureAsync(Exception failure) => session.ReportToolOutcomeAsync(Identity.ExecutionId, failure);
 
   internal async Task<AuxiliaryConversationRecorder?> CreateConversationAsync(Guid conversationId, string purpose,
-      LlmSelection selection, IReadOnlyList<ChatMessage> input, IReadOnlyList<AIFunctionDeclaration> tools) {
-    bool created = await RecordChangeAsync(() => store.Prepass.RecordModel(Identity, purpose, selection)
-        && store.AuxiliaryConversations.Create(Identity, conversationId, purpose, selection, input, tools));
+      AuxiliaryModelResolution model, IReadOnlyList<ChatMessage> input, IReadOnlyList<AIFunctionDeclaration> tools) {
+    bool created = await RecordChangeAsync(() => store.Prepass.RecordModel(Identity, purpose, model)
+        && store.AuxiliaryConversations.Create(Identity, conversationId, purpose, model.Selection, input, tools));
     return created ? new(this, store.AuxiliaryConversations, conversationId) : null;
   }
 

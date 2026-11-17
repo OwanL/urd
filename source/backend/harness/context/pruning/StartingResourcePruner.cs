@@ -10,12 +10,12 @@ namespace Urd.Core.Context;
 // Prunes one resource category in an isolated auxiliary conversation.
 internal sealed class StartingResourcePruner(
     ConversationRunner runner,
-    Func<AuxiliaryModelPurpose, CancellationToken, Task<LlmSelection>> resolveModel,
+    Func<AuxiliaryModelPurpose, CancellationToken, Task<AuxiliaryModelResolution>> resolveModel,
     Func<StartingResourcePruningStatus, Task> saveStatus,
     string taskInput,
     Func<StartingResourcePruningStatus, IReadOnlyList<PrepassResource>, IReadOnlyList<string>?, Task>? saveProgress = null) {
   private readonly ConversationRunner runner = runner ?? throw new ArgumentNullException(nameof(runner));
-  private readonly Func<AuxiliaryModelPurpose, CancellationToken, Task<LlmSelection>> resolveModel =
+  private readonly Func<AuxiliaryModelPurpose, CancellationToken, Task<AuxiliaryModelResolution>> resolveModel =
       resolveModel ?? throw new ArgumentNullException(nameof(resolveModel));
   private readonly Func<StartingResourcePruningStatus, Task> saveStatus =
       saveStatus ?? throw new ArgumentNullException(nameof(saveStatus));
@@ -86,7 +86,7 @@ internal sealed class StartingResourcePruner(
       if (candidates.Count == 0) {
         selectedIds = [];
       } else {
-        LlmSelection selection = await resolveModel(purpose, cancellation);
+        AuxiliaryModelResolution model = await resolveModel(purpose, cancellation);
         cancellation.ThrowIfCancellationRequested();
         object[] metadata = candidates.Select((candidate, index) =>
             (object)createMetadata(candidate, identities[index])!).ToArray();
@@ -106,7 +106,7 @@ internal sealed class StartingResourcePruner(
               {JsonSerializer.Serialize(metadata)}
               """)
         ];
-        string answer = await runner.RunAsync($"pruning.{category}", selection, input, null, cancellation);
+        string answer = await runner.RunAsync($"pruning.{category}", model, input, null, cancellation);
         cancellation.ThrowIfCancellationRequested();
         selectedIds = ReadKeptIds(answer, identities);
       }

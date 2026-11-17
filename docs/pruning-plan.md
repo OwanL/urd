@@ -518,11 +518,13 @@ schema 29, guarded status/title publication, model/protection Settings, three st
 and authoritative backend tab titles are integrated. Unicode title counting uses scalar
 values, including spaces; generated titles are not truncated or retried after the one
 correction. Under the settled behavior, generation failure uses the first prompt truncated
-to 25 characters. Configure the `small` bucket in Settings; an unresolved choice keeps
-that category's resources. At this checkpoint an unresolved title choice still leaves the
-placeholder (current implementation; superseded by the settled fallback in
-[agent communication](agent-communication-design.md#addressing)). No main-model inheritance
-is introduced.
+to 25 characters. Configure the `small` bucket in Settings; an unresolvable category or
+unavailable title choice runs that prepass on the run's own chat selection, including its
+reasoning effort, and the preparation summaries report `usedSessionModel` for the browser.
+No silent main-model inheritance is introduced: the stand-in is recorded, not hidden. A title
+attempt that still fails keeps the placeholder (current implementation; superseded by the
+settled fallback in
+[agent communication](agent-communication-design.md#addressing)).
 
 Earlier proposal examples in this document preserve design history, not a frozen API
 or statements that these mechanisms remain unimplemented. Concrete discovery rules live
@@ -539,7 +541,7 @@ reviews found no remaining supported blockers. The physical-line budget is **30,
 test/helper lines / 42,279 application lines**. Assets and server are staged only under
 isolated `bin/Verification/` outputs; no profile reset, installation or host activation.
 
-**Implementation checkpoint (2026-11-17):** source now uses schema 30. Response headers
+**Implementation checkpoint (2026-11-17):** source now uses schema 31. Response headers
 freeze model, effort and start time; preparation rows are boundary-anchored for tools,
 skills, instructions and title. Pending response state is transient until a transcript
 entry provides its anchor. On-demand detail pages hold up to 60 resources per page; provider-emitted reasoning
@@ -608,9 +610,9 @@ the existing host and databases were untouched. This is not live-model quality e
   arbitrary Markdown nor silently limit the feature to two filenames. Do not invent new
   user configuration locations without review.
 - Inspect the retained bucket policy when implementing the common resolver; do not guess
-  model quality from IDs, silently inherit the main chat model or widen enabled providers.
-  An unresolvable category selection is an ordinary category failure; an unresolvable title
-  choice uses the first-prompt fallback (see
+  model quality from IDs or widen enabled providers. When a purpose choice is unresolvable,
+  that category runs on the run's chat selection with the stand-in recorded in its summary;
+  a title attempt that still fails uses the first-prompt fallback (see
   [agent communication](agent-communication-design.md#addressing)). Exact configured
   resolution mechanics belong to that implementation checkpoint rather than four different
   selection implementations.

@@ -95,7 +95,7 @@ internal sealed class PrepassDetailsReader(Database database) {
       parameters.Add(("$run", run));
 
     return database.Query(transaction, $$"""
-      SELECT boundary_id, category, state,
+      SELECT boundary_id, category, state, used_session_model,
           CASE WHEN category = 'title' OR candidates_json IS NULL THEN NULL ELSE json_array_length(candidates_json) END
               AS candidate_count,
           CASE WHEN category = 'title' OR results_json IS NULL THEN NULL ELSE json_array_length(results_json) END
@@ -107,7 +107,8 @@ internal sealed class PrepassDetailsReader(Database database) {
           WHEN 'instructions' THEN 2 ELSE 3 END;
       """, row => new PrepassSummary(row.Guid("boundary_id"), row.String("category"), row.String("state"),
           row.NullableInt("candidate_count"), row.NullableInt("result_count"),
-          ScalarPrefix(row.NullableString("error"), MaximumErrorScalars)), parameters.ToArray());
+          ScalarPrefix(row.NullableString("error"), MaximumErrorScalars), row.Bool("used_session_model")),
+      parameters.ToArray());
   }
 
   private List<PrepassResource> ReadResourcePage(SqliteTransaction transaction, string json, int offset) =>

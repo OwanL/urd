@@ -32,7 +32,7 @@ public sealed class StartingContextPreparationTests {
       await using RunningParent parent = await StartParentAsync();
       var runner = new ConversationRunner(parent.Fixture.Session.Recorder, _ => auxiliary, [], project);
       var statuses = new ConcurrentQueue<StartingResourcePruningStatus>();
-      var pruner = new StartingResourcePruner(runner, (_, _) => Task.FromResult(TestLlmSelection.Default), status => {
+      var pruner = new StartingResourcePruner(runner, (_, _) => Task.FromResult(TestLlmSelection.DefaultResolution), status => {
         statuses.Enqueue(status);
         return Task.CompletedTask;
       }, "Apply the project guidance.");

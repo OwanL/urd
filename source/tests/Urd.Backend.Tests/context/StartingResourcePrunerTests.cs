@@ -29,7 +29,7 @@ public sealed class StartingResourcePrunerTests {
     var pruner = new StartingResourcePruner(runner, (purpose, _) => {
       Assert.Equal(AuxiliaryModelPurpose.Skills, purpose);
       Interlocked.Increment(ref resolutions);
-      return Task.FromResult(TestLlmSelection.Default);
+      return Task.FromResult(TestLlmSelection.DefaultResolution);
     }, status => {
       statuses.Enqueue(status);
       return Task.CompletedTask;
@@ -123,7 +123,7 @@ public sealed class StartingResourcePrunerTests {
     var client = new ScriptedChatClient(token => TextUpdates(["unused"], token));
     await using RunningParent parent = await StartParentAsync();
     var runner = new ConversationRunner(parent.Fixture.Session.Recorder, _ => client, [], parent.Fixture.Session.WorkingDirectory);
-    var pruner = new StartingResourcePruner(runner, (_, _) => Task.FromResult(TestLlmSelection.Default),
+    var pruner = new StartingResourcePruner(runner, (_, _) => Task.FromResult(TestLlmSelection.DefaultResolution),
         _ => Task.FromException(expected), "task");
 
     InvalidOperationException actual = await Assert.ThrowsAsync<InvalidOperationException>(() =>
@@ -143,7 +143,7 @@ public sealed class StartingResourcePrunerTests {
       """);
     var statuses = new ConcurrentQueue<StartingResourcePruningStatus>();
     var runner = new ConversationRunner(parent.Fixture.Session.Recorder, _ => client, [], parent.Fixture.Session.WorkingDirectory);
-    var pruner = new StartingResourcePruner(runner, (_, _) => Task.FromResult(TestLlmSelection.Default), status => {
+    var pruner = new StartingResourcePruner(runner, (_, _) => Task.FromResult(TestLlmSelection.DefaultResolution), status => {
       statuses.Enqueue(status);
       return Task.CompletedTask;
     }, "task");
@@ -160,7 +160,7 @@ public sealed class StartingResourcePrunerTests {
     await using RunningParent parent = await StartParentAsync();
     var runner = new ConversationRunner(parent.Fixture.Session.Recorder, _ => client, [], parent.Fixture.Session.WorkingDirectory);
     var statuses = new ConcurrentQueue<StartingResourcePruningStatus>();
-    var pruner = new StartingResourcePruner(runner, (_, _) => Task.FromResult(TestLlmSelection.Default), status => {
+    var pruner = new StartingResourcePruner(runner, (_, _) => Task.FromResult(TestLlmSelection.DefaultResolution), status => {
       statuses.Enqueue(status);
       return Task.CompletedTask;
     }, "task");
@@ -177,7 +177,7 @@ public sealed class StartingResourcePrunerTests {
   private static StartingResourcePruner CreatePruner(
       ConversationRunner runner,
       Func<StartingResourcePruningStatus, Task> saveStatus) =>
-      new(runner, (_, _) => Task.FromResult(TestLlmSelection.Default), saveStatus, "Choose relevant resources.");
+      new(runner, (_, _) => Task.FromResult(TestLlmSelection.DefaultResolution), saveStatus, "Choose relevant resources.");
 
   private static DiscoveredSkill Skill(string name, string description) =>
       new(name, description, Path.GetFullPath(Path.Combine(Path.GetTempPath(), $"{name}.SKILL.md")));

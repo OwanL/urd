@@ -31,7 +31,7 @@ public sealed class ConversationRunnerTests {
     var runner = new ConversationRunner(fixture.Session.Recorder, _ => client, tools, fixture.Session.WorkingDirectory);
     ChatMessage[] input = [new(ChatRole.System, "Choose resources."), new(ChatRole.User, "explore")];
 
-    string answer = await runner.RunAsync("examination", TestLlmSelection.Default, input, null,
+    string answer = await runner.RunAsync("examination", TestLlmSelection.DefaultResolution, input, null,
         CancellationToken.None).WaitAsync(TestTimeout);
 
     Assert.Equal("done", answer);
@@ -106,7 +106,7 @@ public sealed class ConversationRunnerTests {
     }
     var runner = new ConversationRunner(fixture.Session.Recorder, _ => client, [], fixture.Session.WorkingDirectory);
 
-    string answer = await runner.RunAsync("title", TestLlmSelection.Default,
+    string answer = await runner.RunAsync("title", TestLlmSelection.DefaultResolution,
         [new(ChatRole.User, "name this session")], Evaluate, CancellationToken.None).WaitAsync(TestTimeout);
 
     Assert.Equal("second", answer);
@@ -143,7 +143,7 @@ public sealed class ConversationRunnerTests {
     var client = new ScriptedChatClient(token => Script(token));
     var runner = new ConversationRunner(fixture.Session.Recorder, _ => client, [], fixture.Session.WorkingDirectory);
 
-    await Assert.ThrowsAsync<InvalidDataException>(() => runner.RunAsync("title", TestLlmSelection.Default,
+    await Assert.ThrowsAsync<InvalidDataException>(() => runner.RunAsync("title", TestLlmSelection.DefaultResolution,
         [new(ChatRole.User, "name this session")], _ => "still wrong", CancellationToken.None).WaitAsync(TestTimeout));
 
     Assert.Equal(2, client.Calls);
@@ -179,7 +179,7 @@ public sealed class ConversationRunnerTests {
     var runner = new ConversationRunner(fixture.Session.Recorder, _ => client, [], fixture.Session.WorkingDirectory);
 
     try {
-      await Assert.ThrowsAsync<AuxiliaryExecutionException>(() => runner.RunAsync("title", TestLlmSelection.Default,
+      await Assert.ThrowsAsync<AuxiliaryExecutionException>(() => runner.RunAsync("title", TestLlmSelection.DefaultResolution,
           [new(ChatRole.User, "private title task")], null, CancellationToken.None).WaitAsync(TestTimeout));
       Assert.Equal(1, client.Calls);
       Assert.Equal(0, client.DisposeCalls);
@@ -203,7 +203,7 @@ public sealed class ConversationRunnerTests {
     var client = new ScriptedChatClient(token => TextUpdates(["ignored"], token));
     var runner = new ConversationRunner(fixture.Session.Recorder, _ => client, [], fixture.Session.WorkingDirectory);
 
-    await Assert.ThrowsAsync<OperationCanceledException>(() => runner.RunAsync("title", TestLlmSelection.Default,
+    await Assert.ThrowsAsync<OperationCanceledException>(() => runner.RunAsync("title", TestLlmSelection.DefaultResolution,
         [new(ChatRole.User, "private title task")], null, new CancellationToken(canceled: true)).WaitAsync(TestTimeout));
 
     Assert.Equal(0, client.Calls);

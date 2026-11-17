@@ -9,7 +9,7 @@ saved-primary-ID discovery, durable Send decisions, safe-boundary steering, addr
 Stop, bounded snapshot/history/content reads, known-not-sent discovery and graceful
 shutdown. The browser workspace is implemented and served as static assets by the Server.
 
-`UrdStore` owns the shared database, currently schema 30. It records whether a request
+`UrdStore` owns the shared database, currently schema 31. It records whether a request
 started sending and pages inputs known not to have been sent, so users can retrieve
 and explicitly resend them. Snapshots stay slim; transcript metadata and
 content use separate bounded reads, and reported usage is persisted per request. Session snapshots
@@ -23,7 +23,7 @@ credential behavior.
 
 Before the supported public data baseline, schema changes replace the schema rather than
 migrating it. A fresh/version-0 database creates all current tables and indexes in one
-transaction; version 30 reopens normally. Other versions fail with reset instructions:
+transaction; version 31 reopens normally. Other versions fail with reset instructions:
 stop Urd, delete `urd.sqlite`, `urd.sqlite-wal` and `urd.sqlite-shm`, then restart.
 Urd never deletes these files automatically. Requests have only known not-attempted (1)
 or attempted (2) provenance; transcript user entries require request links and receipts
@@ -89,10 +89,13 @@ The guarded title claim prevents retries on later messages/reopen; title metadat
 published independently. Its work remains owned/joined before execution settlement.
 
 `ModelSelector` resolves configured small/medium/frontier buckets or exact provider/model
-overrides through existing preferences. Each auxiliary operation defaults to `small`;
-there is no chat-model inheritance or model-ID quality guessing. Configure that bucket
-in Settings → General. An unavailable choice yields category keep-all fallback or an
-unchanged title placeholder. Auxiliary conversations use isolated durable histories and
+overrides through existing preferences. Each auxiliary operation defaults to `small`; there is no
+model-ID quality guessing. Configure that bucket in Settings → Model buckets. When a purpose has no
+configured choice, or the configured provider/model is unavailable, prepass runs on the run's own
+chat selection unchanged, including its reasoning effort, and each preparation summary reports
+`usedSessionModel` so the browser can show the stand-in. Genuine provider call failures after
+resolution keep all category candidates or leave the title unpublished.
+Auxiliary conversations use isolated durable histories and
 only the supplied `read`/`bash` exploration capability set. See the [pruning plan](pruning-plan.md)
 for the fresh/manual/automatic input contract and evidence limits.
 

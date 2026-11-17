@@ -29,13 +29,14 @@ public sealed class ModelSelector {
       catalog = await providers.GetModelCatalogAsync(connection.Id, cancellationToken);
       settings = await providers.GetModelSettingsAsync(connection.Id, cancellationToken);
     } catch (KeyNotFoundException failure) {
-      throw new InvalidOperationException("The configured model provider is unavailable; select a different model.", failure);
+      throw new AuxiliaryModelUnavailableException(
+          "The configured model provider is unavailable; select a different model.", failure);
     }
 
     ProviderModel? catalogModel = catalog.Models.FirstOrDefault(candidate =>
         string.Equals(candidate.Id, configured.ModelId, StringComparison.Ordinal));
     if (catalogModel is null)
-      throw new InvalidOperationException("The configured model is unavailable; select a different model.");
+      throw new AuxiliaryModelUnavailableException("The configured model is unavailable; select a different model.");
 
     ModelSettings? modelSettings = settings.FirstOrDefault(candidate =>
         string.Equals(candidate.ModelId, configured.ModelId, StringComparison.Ordinal));
@@ -45,5 +46,6 @@ public sealed class ModelSelector {
 
   private static ConfiguredModel ResolveBucket(AuxiliaryModelPreferences choices, ModelBucket bucket) =>
       choices.ModelFor(bucket)
-      ?? throw new InvalidOperationException($"No model is configured for the {bucket.ToString().ToLowerInvariant()} bucket.");
+      ?? throw new AuxiliaryModelUnavailableException(
+          $"No model is configured for the {bucket.ToString().ToLowerInvariant()} bucket.");
 }

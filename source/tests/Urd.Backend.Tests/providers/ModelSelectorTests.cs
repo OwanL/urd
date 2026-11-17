@@ -61,13 +61,13 @@ public sealed class ModelSelectorTests {
       var preferences = new PreferenceManager(store);
       var selector = new ModelSelector(manager);
 
-      InvalidOperationException missingBucket = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+      InvalidOperationException missingBucket = await Assert.ThrowsAsync<AuxiliaryModelUnavailableException>(() =>
           selector.ResolveAsync(AuxiliaryModelPurpose.Tools, preferences.Read()));
       Assert.Contains("small bucket", missingBucket.Message, StringComparison.OrdinalIgnoreCase);
 
       preferences.SetBucketModel(ModelBucket.Small, new(connection.Id, "configured-model"));
       preferences.SetModelChoice(AuxiliaryModelPurpose.Title, ModelChoice.ForModel(connection.Id, "unavailable-model"));
-      InvalidOperationException unavailableOverride = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+      AuxiliaryModelUnavailableException unavailableOverride = await Assert.ThrowsAsync<AuxiliaryModelUnavailableException>(() =>
           selector.ResolveAsync(AuxiliaryModelPurpose.Title, preferences.Read()));
       Assert.Contains("configured model is unavailable", unavailableOverride.Message, StringComparison.OrdinalIgnoreCase);
     } finally {

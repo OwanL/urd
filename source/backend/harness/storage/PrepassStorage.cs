@@ -129,25 +129,25 @@ internal sealed class PrepassStorage(Database database) {
 
   // Selection facts are saved before an auxiliary conversation can contact its provider.
   // Unrelated auxiliary purposes, which have no prepass detail, are intentionally harmless.
-  internal bool RecordModel(ExecutionIdentity parent, string purpose, LlmSelection selection) {
+  internal bool RecordModel(ExecutionIdentity parent, string purpose, AuxiliaryModelResolution model) {
     ArgumentException.ThrowIfNullOrWhiteSpace(purpose);
-    ArgumentNullException.ThrowIfNull(selection);
+    ArgumentNullException.ThrowIfNull(model);
     string? category = CategoryForPurpose(purpose);
     if (category is null)
       return true;
-    selection.Validate();
-    string selectionJson = LlmSelectionJson.Write(selection)!;
+    model.Selection.Validate();
+    string selectionJson = LlmSelectionJson.Write(model.Selection)!;
 
     return database.Write(transaction => {
       Guid boundaryId = category == "title" ? Guid.Empty : CurrentBoundary(transaction, parent);
       int changed = database.Execute(transaction, $"""
-        UPDATE session_prepass_details SET llm_selection_json = $selection
+        UPDATE session_prepass_details SET llm_selection_json = $selection, used_session_model = $used
         WHERE session_id = $session AND run_id = $run AND boundary_id = $boundary AND category = $category
             AND state = 'running'
             AND EXISTS (SELECT 1 FROM execution_runs r JOIN sessions s ON s.session_id = r.session_id
                 WHERE r.session_id = $session AND r.run_id = $run AND {ExecutionSql.CurrentRunCondition});
         """, ExecutionSql.Parameters(parent, ("$boundary", boundaryId), ("$category", category),
-          ("$selection", selectionJson)));
+          ("$selection", selectionJson), ("$used", model.UsedSessionModel ? 1 : 0)));
       if (changed == 1)
         return true;
 
@@ -250,6 +250,9 @@ internal sealed class PrepassStorage(Database database) {
           llm_selection_json = CASE WHEN session_prepass_details.run_id = excluded.run_id
               THEN COALESCE(excluded.llm_selection_json, session_prepass_details.llm_selection_json)
               ELSE excluded.llm_selection_json END,
+          -- Same-run model facts persist; a new run's detail loses the previous run's recorded model.
+          used_session_model = CASE WHEN session_prepass_details.run_id = excluded.run_id
+              THEN session_prepass_details.used_session_model ELSE 0 END,
           candidates_json = CASE WHEN session_prepass_details.run_id = excluded.run_id
               THEN COALESCE(excluded.candidates_json, session_prepass_details.candidates_json)
               ELSE excluded.candidates_json END,

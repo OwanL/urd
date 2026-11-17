@@ -62,7 +62,7 @@ public sealed class AuxiliaryRecordingTests {
     async Task RunScopeAsync(string purpose, ScriptedChatClient client) {
       ChatMessage[] input = [new(ChatRole.System, "Select resources."), new(ChatRole.User, purpose + " private task")];
       AuxiliaryConversationRecorder recorder = Assert.IsType<AuxiliaryConversationRecorder>(
-          await fixture.Session.Recorder.CreateConversationAsync(Guid.NewGuid(), purpose, TestLlmSelection.Default, input, [definition]));
+          await fixture.Session.Recorder.CreateConversationAsync(Guid.NewGuid(), purpose, TestLlmSelection.DefaultResolution, input, [definition]));
       Guid request = Guid.NewGuid();
       Assert.True(await recorder.StartRequestAsync(request));
       var options = new ChatOptions {
@@ -103,12 +103,14 @@ public sealed class AuxiliaryRecordingTests {
   public async Task AuxiliaryWriteFailureImmediatelyFencesAdmissionWithoutPlacingMoreMainInput() {
     var waiting = Signal();
     var release = Signal();
-    var client = new ScriptedChatClient(token => Paused(waiting, release, token));
+    var cleanupEntered = Signal();
+    var cleanupRelease = Signal();
+    var client = new ScriptedChatClient(token => Paused(waiting, release, token, cleanupEntered, cleanupRelease));
     await using var fixture = new ExecutionFixture(client);
     Guid execution = await fixture.StartExecutionAsync("main input");
     await waiting.Task.WaitAsync(TestTimeout);
     AuxiliaryConversationRecorder recorder = Assert.IsType<AuxiliaryConversationRecorder>(
-        await fixture.Session.Recorder.CreateConversationAsync(Guid.NewGuid(), "title", TestLlmSelection.Default,
+        await fixture.Session.Recorder.CreateConversationAsync(Guid.NewGuid(), "title", TestLlmSelection.DefaultResolution,
           [new(ChatRole.User, "private title task")], []));
     Guid request = Guid.NewGuid();
     Assert.True(await recorder.StartRequestAsync(request));
@@ -122,11 +124,13 @@ public sealed class AuxiliaryRecordingTests {
       Assert.Equal("main input", (await fixture.Session.ReadSnapshotAsync()).FirstUserPreview);
       Assert.Equal(1, client.Calls);
       await fixture.Session.RequestStopAsync(execution).WaitAsync(TestTimeout);
+      await cleanupEntered.Task.WaitAsync(TestTimeout);
       Assert.False(await recorder.StartRequestAsync(Guid.NewGuid()));
       Assert.True(await recorder.CompleteRequestAsync(new(request, ExecutionOutcome.Cancelled)));
       Assert.False(await recorder.RecordOutputAsync(new(request, Guid.NewGuid(), 0, "late", true)));
     } finally {
       release.TrySetResult();
+      cleanupRelease.TrySetResult();
     }
   }
 }

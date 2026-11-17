@@ -38,7 +38,7 @@ public sealed class TitleGeneratorTests {
     var client = new ScriptedChatClient(token => Script(token));
     var runner = new ConversationRunner(fixture.Session.Recorder, _ => client, [], fixture.Session.WorkingDirectory);
 
-    string title = await TitleGenerator.GenerateAsync(runner, TestLlmSelection.Default,
+    string title = await TitleGenerator.GenerateAsync(runner, TestLlmSelection.DefaultResolution,
         "name this session", CancellationToken.None).WaitAsync(TestTimeout);
 
     Assert.Equal(corrected, title);

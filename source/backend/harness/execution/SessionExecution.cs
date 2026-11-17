@@ -200,7 +200,7 @@ internal sealed class SessionExecution : IDisposable {
     }
 
     var pruner = new StartingResourcePruner(auxiliary,
-        (purpose, cancellation) => session.ResolveAuxiliaryModelAsync(purpose, captured, cancellation),
+        (purpose, cancellation) => ResolvePrepassModelAsync(purpose, captured, cancellation),
         status => SavePruningStatusAsync(boundary, status), task,
         (status, candidates, resultIds) => SavePruningProgressAsync(boundary, status, candidates, resultIds));
     HashSet<string> protectedTools = boundary == Guid.Empty ? []
@@ -252,10 +252,21 @@ internal sealed class SessionExecution : IDisposable {
     }
   }
 
+  // An unset or unresolvable purpose choice runs on the run's own chat selection, recorded so the
+  // UI can flag it; provider call failures after resolution keep their existing fallback behavior.
+  private async Task<AuxiliaryModelResolution> ResolvePrepassModelAsync(AuxiliaryModelPurpose purpose,
+      UserPreferences captured, CancellationToken cancellation) {
+    try {
+      return new AuxiliaryModelResolution(await session.ResolveAuxiliaryModelAsync(purpose, captured, cancellation), false);
+    } catch (AuxiliaryModelUnavailableException) {
+      return new AuxiliaryModelResolution(selection, true);
+    }
+  }
+
   private async Task GenerateTitleAsync(string prompt, UserPreferences captured) {
     Exception? fatal = null;
     try {
-      LlmSelection model = await session.ResolveAuxiliaryModelAsync(AuxiliaryModelPurpose.Title, captured, stop.Token);
+      AuxiliaryModelResolution model = await ResolvePrepassModelAsync(AuxiliaryModelPurpose.Title, captured, stop.Token);
       string title = await TitleGenerator.GenerateAsync(auxiliary, model, prompt, stop.Token);
       try {
         if (!await recorder.PublishTitleAsync(title)) {

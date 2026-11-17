@@ -31,8 +31,9 @@ internal sealed class ExecutionFixture : IAsyncDisposable {
     Database = new TemporaryDatabase();
     store = UrdStore.Open(Database.Path);
     this.providers = providers?.Invoke(store);
+    IChatClient executionClient = PrepassTolerantChatClient.WrapIfNeeded(client, disposeInner: false);
     Session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid(),
-        Path.GetDirectoryName(Database.Path)), store, _ => client, tools,
+        Path.GetDirectoryName(Database.Path)), store, _ => executionClient, tools,
         modelSelector: this.providers is null ? null : new ModelSelector(this.providers));
   }
 

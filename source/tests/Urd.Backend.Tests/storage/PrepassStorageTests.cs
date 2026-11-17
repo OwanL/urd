@@ -68,7 +68,8 @@ public sealed class PrepassStorageTests {
       store.UserMessages.Submit(session, 0, new(Guid.NewGuid(), 0, "request", TestLlmSelection.Default),
           true, execution, null);
       Assert.True(store.Prepass.TryClaimTitle(identity));
-      Assert.True(store.Prepass.RecordModel(identity, "title", TestLlmSelection.Default));
+      Assert.True(store.Prepass.RecordModel(identity, "title", TestLlmSelection.UsedSessionResolution));
+      Assert.Equal(1L, database.Scalar("SELECT used_session_model FROM session_prepass_details WHERE category = 'title';")); // raw-sql: the session-model stand-in is recorded with the model
 
       PrepassPreviewWrite highSurrogate = store.Prepass.RecordPreview(identity, "title", "\ud83d");
       Assert.True(highSurrogate.Accepted);
@@ -101,5 +102,41 @@ public sealed class PrepassStorageTests {
     Assert.Contains(TestLlmSelection.Default.ModelId,
         database.ReadRows("SELECT llm_selection_json FROM session_prepass_details WHERE category = 'title';",
             row => row.GetString(0)).Single(), StringComparison.Ordinal);
+  }
+
+  [Fact]
+  public void UsedSessionModelSurvivesSameRunUpdatesAndResetsPerRun() {
+    using var database = new TemporaryDatabase();
+    Guid session;
+    Guid execution = Guid.NewGuid();
+    using (UrdStore store = UrdStore.Open(database.Path)) {
+      session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
+      var identity = new ExecutionIdentity(session, execution, 0);
+      store.UserMessages.Submit(session, 0, new(Guid.NewGuid(), 0, "request", TestLlmSelection.Default),
+          true, execution, null);
+      Assert.True(store.Prepass.WritePruningStatus(identity, Guid.Empty,
+          new StartingResourcePruningStatus("tools", "running", 2, 2)));
+      Assert.True(store.Prepass.RecordModel(identity, "pruning.tools", TestLlmSelection.UsedSessionResolution));
+
+      // Same-run updates keep whichever recording happened on the running detail.
+      Assert.True(store.Prepass.WritePruningStatus(identity, Guid.Empty,
+          new StartingResourcePruningStatus("tools", "completed", 2, 1)));
+      Assert.Equal(1L, database.Scalar("SELECT used_session_model FROM session_prepass_details WHERE category = 'tools';")); // raw-sql: the last recorded model fact survives same-run updates
+
+      // A new run's detail starts without the previous run's recorded model fact.
+      store.Executions.RequestStop(session, execution, ownsExecution: true);
+      Assert.Equal(ExecutionOutcome.Cancelled,
+          store.Executions.TryFinish(session, execution, ExecutionOutcome.Completed)!.Outcome);
+      Guid retry = Guid.NewGuid();
+      var retryIdentity = new ExecutionIdentity(session, retry, 0);
+      store.UserMessages.Submit(session, 0, new(Guid.NewGuid(), 0, "retry", TestLlmSelection.Default), true, retry, null);
+      Assert.True(store.Prepass.WritePruningStatus(retryIdentity, Guid.Empty,
+          new StartingResourcePruningStatus("tools", "running", 2, 2)));
+      Assert.Equal(0L, database.Scalar("SELECT used_session_model FROM session_prepass_details WHERE category = 'tools';")); // raw-sql: the recorded model fact resets for a new run
+    }
+
+    using UrdStore reopened = UrdStore.Open(database.Path);
+    Assert.Contains(reopened.Snapshots.ReadPersisted(session).Pruning!,
+        status => status.Category == "tools" && status.State == "running");
   }
 }

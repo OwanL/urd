@@ -22,11 +22,27 @@ internal static class ScriptedResponses {
   }
 
   // Yields visible text, signals waiting, then finishes only after release.
-  internal static async IAsyncEnumerable<ChatResponseUpdate> Paused(TaskCompletionSource waiting,
-      TaskCompletionSource release, [EnumeratorCancellation] CancellationToken token) {
+  internal static IAsyncEnumerable<ChatResponseUpdate> Paused(TaskCompletionSource waiting,
+      TaskCompletionSource release, CancellationToken token,
+      TaskCompletionSource? cleanupEntered = null, TaskCompletionSource? cleanupRelease = null) {
+    if ((cleanupEntered is null) != (cleanupRelease is null))
+      throw new ArgumentException("Cleanup barriers must be supplied together.");
+    return Pause(waiting, release, cleanupEntered, cleanupRelease, token);
+  }
+
+  private static async IAsyncEnumerable<ChatResponseUpdate> Pause(TaskCompletionSource waiting,
+      TaskCompletionSource release, TaskCompletionSource? cleanupEntered, TaskCompletionSource? cleanupRelease,
+      [EnumeratorCancellation] CancellationToken token) {
     yield return Text("visible");
     waiting.TrySetResult();
-    await release.Task.WaitAsync(token);
+    try {
+      await release.Task.WaitAsync(token);
+    } finally {
+      if (cleanupEntered is not null) {
+        cleanupEntered.TrySetResult();
+        await cleanupRelease!.Task;
+      }
+    }
     yield return new() { FinishReason = ChatFinishReason.Stop };
   }
 

@@ -313,13 +313,14 @@ public sealed class TranscriptHistoryTests(ITestOutputHelper output) {
     TranscriptEntryRef[] entries = SeedUsers(database, session, 0, 3);
     SeedPrepassDetail(database, session, entries[0].ExecutionId, Guid.Empty, "tools", "running",
         "[{\"id\":\"tool-a\",\"label\":\"Build\",\"path\":\"src/build\"}]", "[\"tool-a\"]");
+    database.Execute("UPDATE session_prepass_details SET used_session_model = 1 WHERE category = 'tools';"); // raw-sql: the summary stand-in flag is the subject under test
 
     TranscriptHistoryPage latest = store.History.Read(session, new(TranscriptHistoryMode.Latest, 0));
     ResponseHeaderInfo response = Assert.IsType<ResponseHeaderInfo>(latest.Entries[0].Response);
     Assert.Equal(TestLlmSelection.Default.ModelId, response.ModelId);
     Assert.Equal("high", response.ReasoningEffort);
     Assert.NotNull(response.StartedAt);
-    Assert.Equal(new PrepassSummary(Guid.Empty, "tools", "running", 1, 1),
+    Assert.Equal(new PrepassSummary(Guid.Empty, "tools", "running", 1, 1, null, true),
         Assert.Single(latest.Entries[0].Preparation!));
     Assert.All(latest.Entries.Skip(1), entry => Assert.Null(entry.Preparation));
     Assert.All(latest.Entries.Skip(1), entry => Assert.NotNull(entry.Response));

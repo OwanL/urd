@@ -25,14 +25,20 @@ internal sealed class ScriptedChatClient : IChatClient {
 
   internal ScriptedChatClient(Func<CancellationToken, IAsyncEnumerable<ChatResponseUpdate>> script,
       Func<CancellationToken, Task<ChatResponse>>? response = null)
-      : this((_, token) => script(token), response is null ? null : (_, token) => response(token)) { }
+      : this((_, token) => script(token), response is null ? null : (_, token) => response(token), purposeAware: false) { }
 
   internal ScriptedChatClient(Func<ScriptedRequest, CancellationToken, IAsyncEnumerable<ChatResponseUpdate>> stream,
-      Func<ScriptedRequest, CancellationToken, Task<ChatResponse>>? response = null) {
+      Func<ScriptedRequest, CancellationToken, Task<ChatResponse>>? response = null)
+      : this(stream, response, purposeAware: true) { }
+
+  private ScriptedChatClient(Func<ScriptedRequest, CancellationToken, IAsyncEnumerable<ChatResponseUpdate>> stream,
+      Func<ScriptedRequest, CancellationToken, Task<ChatResponse>>? response, bool purposeAware) {
     routeStream = stream;
     routeResponse = response;
+    IsPurposeAware = purposeAware;
   }
 
+  internal bool IsPurposeAware { get; }
   internal int Calls => Volatile.Read(ref calls);
   internal int DisposeCalls => Volatile.Read(ref disposeCalls);
   internal IReadOnlyList<ChatMessage> LastRequest { get; private set; } = [];

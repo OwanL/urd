@@ -22,7 +22,7 @@ internal sealed class RunningServer : IAsyncDisposable {
     run = Program.RunServerAsync(options, origin => {
       onReady?.Invoke(origin);
       ready.TrySetResult(origin);
-    }, createClient ?? (static () => new FakeChatClient()), stopping.Token, createProviders, createMarkdown);
+    }, () => PrepassTolerantChatClient.WrapIfNeeded(createClient?.Invoke() ?? new FakeChatClient()), stopping.Token, createProviders, createMarkdown);
   }
 
   internal static ServerOptions OptionsFor(TemporaryDatabase database) => new(Path.GetDirectoryName(database.Path)!, 0);

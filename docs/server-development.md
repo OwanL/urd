@@ -215,7 +215,7 @@ compact command identities/hashes and usage remain. Removed Send receipts return
 than exposing deleted text or allowing an old Send to recreate it. History replacement does
 not undo external tool effects. There is no branch archive or undo.
 
-The current schema is **27**, including the compaction-trigger preference. Existing schemas require explicit database
+The current schema is **31**, including the compaction-trigger preference. Existing schemas require explicit database
 recreation under the pre-release policy. Never reset an active profile as part of verification
 or automatically activate this build against one.
 

@@ -12,8 +12,8 @@ internal static class TitleGenerator {
       && title == title.Trim() && !title.Any(char.IsControl)
       && title.EnumerateRunes().Count() <= MaximumCharacters;
 
-  internal static Task<string> GenerateAsync(ConversationRunner runner, LlmSelection selection,
-      string prompt, CancellationToken cancellation) => runner.RunAsync("title", selection, [
+  internal static Task<string> GenerateAsync(ConversationRunner runner, AuxiliaryModelResolution model,
+      string prompt, CancellationToken cancellation) => runner.RunAsync("title", model, [
         new(ChatRole.System, "Name this session from its first user message. You may independently explore with read/bash. "
             + "Return only a short plain-text title, at most 25 characters including spaces. No quotes, markup or explanation."),
         new(ChatRole.User, prompt)

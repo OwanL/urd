@@ -22,6 +22,7 @@ not a separate archive. Their remaining constraints belong to the current docume
 - [Application structure](application-plan.md): current/planned owners and scoped review.
 - [Sessions](session-design.md), [execution](execution-design.md) and
   [discovery](discovery-design.md): lifetime, model/tool calls, adapter limits and capability exposure.
+- [Instruction-resource catalog plan](instruction-resource-catalog-plan.md): cwd-scoped discovery, bundled filename scan and incremental updates.
 - [Prepass plan](pruning-plan.md): parallel pruning and title generation, protection/model
   settings, implemented milestones and their verification limits.
 - [Agent communication](agent-communication-design.md): bounded delegation, request/reply,

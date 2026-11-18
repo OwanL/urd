@@ -190,22 +190,19 @@ precedence, rather than being injected into unrelated projects.
 
 ## Project resource discovery
 
-**Owner decision:** discover project instruction files the same way as skills:
-recursively enumerate matching files through Git, including nested instruction files.
-Use the existing Git-tracked-file discovery approach beneath the working directory,
-with the instruction-file matching criteria, rather than a separate filesystem crawl.
-As with project skills, this scan does not include untracked files or discover project
-candidates outside a Git repository. This is a discovery direction, not an implemented
-instruction loader.
+**Updated direction (2026-11-18):** replace Git-tracked project discovery with a catalog of
+matching files in the cwd and its descendants. No ancestor or sibling project guidance;
+Urd's packaged skills remain available. This supersedes the earlier Git-only discovery
+decision, not the pruning triggers or protection contract. See the
+[instruction-resource catalog plan](instruction-resource-catalog-plan.md) for delivery and verification.
+The [context guide](../source/backend/harness/context/README.md) describes the currently shipped Git-backed loader.
 
 **Document scope decision:** include agent-facing Markdown instruction resources,
 including `AGENTS.md` and append-system resources. Exclude files specific to other
 harnesses, such as `CLAUDE.md` and Copilot instructions. This scope is not a request to
 inject every Markdown file: ordinary project documentation remains available for
-independent exploration, and skills remain their own category. The document scope
-does not widen the agreed Git-backed project scan. Exact recognition/loading rules
-and non-project resource locations belong in the implementation design; do not
-silently reduce this direction to an exhaustive two-filename allowlist.
+independent exploration, and skills remain their own category. Changing how files are
+found does not turn ordinary Markdown or another harness's instructions into candidates.
 
 ## Settings and picker direction
 
@@ -606,7 +603,7 @@ the existing host and databases were untouched. This is not live-model quality e
 
 - Before milestone 2 ships, make instruction recognition, source locations, nested scope,
   precedence and protection identities concrete in its design/tests. Preserve the selected
-  agent-facing scope, Git-backed project scan and other-harness exclusions; neither ingest
+  agent-facing filename scope and other-harness exclusions as discovery changes; neither ingest
   arbitrary Markdown nor silently limit the feature to two filenames. Do not invent new
   user configuration locations without review.
 - Inspect the retained bucket policy when implementing the common resolver; do not guess

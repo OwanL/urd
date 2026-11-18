@@ -1,0 +1,34 @@
+<Project>
+  <PropertyGroup>
+    <_FdTargetRuntimeIdentifier Condition="'$(RuntimeIdentifier)' != ''">$(RuntimeIdentifier)</_FdTargetRuntimeIdentifier>
+    <_FdTargetRuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">$(NETCoreSdkRuntimeIdentifier)</_FdTargetRuntimeIdentifier>
+    <_FdAssetRid Condition="'$(_FdTargetRuntimeIdentifier)' == 'win-x64'">win-x64</_FdAssetRid>
+    <_FdAssetRid Condition="'$(_FdTargetRuntimeIdentifier)' == 'win-arm64'">win-arm64</_FdAssetRid>
+    <_FdAssetRid Condition="'$(_FdTargetRuntimeIdentifier)' == 'osx-x64'">osx-x64</_FdAssetRid>
+    <_FdAssetRid Condition="'$(_FdTargetRuntimeIdentifier)' == 'osx-arm64'">osx-arm64</_FdAssetRid>
+    <_FdAssetRid Condition="'$(_FdTargetRuntimeIdentifier)' == 'linux-x64' or '$(_FdTargetRuntimeIdentifier)' == 'linux-musl-x64'">linux-x64</_FdAssetRid>
+    <_FdAssetRid Condition="'$(_FdTargetRuntimeIdentifier)' == 'linux-arm64' or '$(_FdTargetRuntimeIdentifier)' == 'linux-musl-arm64'">linux-arm64</_FdAssetRid>
+    <_FdExecutable>fd</_FdExecutable>
+    <_FdExecutable Condition="'$(_FdAssetRid)' == 'win-x64' or '$(_FdAssetRid)' == 'win-arm64'">fd.exe</_FdExecutable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Content Include="$(MSBuildThisFileDirectory)$(_FdAssetRid)/$(_FdExecutable)" Condition="'$(_FdAssetRid)' != ''">
+      <Link>fd/$(_FdAssetRid)/$(_FdExecutable)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </Content>
+    <Content Include="$(MSBuildThisFileDirectory)LICENSE-MIT;$(MSBuildThisFileDirectory)LICENSE-APACHE">
+      <Link>fd/%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </Content>
+  </ItemGroup>
+  <Target Name="MakeFdExecutableAfterBuild" AfterTargets="Build" Condition="'$(OS)' != 'Windows_NT' and '$(_FdAssetRid)' != '' and '$(_FdExecutable)' == 'fd'">
+    <Exec Command="chmod +x &quot;$(TargetDir)fd/$(_FdAssetRid)/fd&quot;" />
+  </Target>
+  <Target Name="MakeFdExecutableAfterPublish" AfterTargets="Publish" Condition="'$(OS)' != 'Windows_NT' and '$(_FdAssetRid)' != '' and '$(_FdExecutable)' == 'fd'">
+    <Exec Command="chmod +x &quot;$(PublishDir)fd/$(_FdAssetRid)/fd&quot;" />
+  </Target>
+</Project>

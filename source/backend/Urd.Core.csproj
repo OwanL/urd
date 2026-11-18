@@ -26,4 +26,5 @@
     <None Remove="harness/context/skills/**" />
     <None Include="harness/context/skills/**" Link="skills/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+  <Import Project="../vendor/fd/fd.targets" />
 </Project>

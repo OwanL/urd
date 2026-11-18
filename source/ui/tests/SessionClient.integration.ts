@@ -6,6 +6,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { SessionClient } from "../sessions/SessionClient.ts";
 import type { UserMessageSubmission } from "../sessions/UserMessageSubmission.ts";
 import { RequestError } from "../http/RequestError.ts";
+import { PreferencesClient } from "../preferences/PreferencesClient.ts";
 import { ServerProcess } from "./ServerProcess.ts";
 import { startLocalModelServer } from "./LocalModelServer.ts";
 
@@ -36,6 +37,21 @@ void test(
     const deadline = performance.now() + 20_000;
     const signal = AbortSignal.timeout(20_000);
     const request = <T>(operation: Promise<T>) => beforeDeadline(operation, deadline);
+
+    // Keep prepass from consuming the scripted main-chat reply or counting toward chat retries.
+    const prepass = await startLocalModelServer();
+    t.after(() => prepass.close());
+    const auxiliary = await request(prepass.install(server.origin));
+    const preferences = new PreferencesClient(server.origin);
+    for (const purpose of ["tools", "skills", "instructions", "title"] as const) {
+      await request(
+        preferences.setModelChoice(purpose, {
+          bucket: null,
+          connectionId: auxiliary.id,
+          modelId: "fixture-a",
+        }),
+      );
+    }
 
     const page = await fetch(server.origin, { signal });
     assert.equal(page.status, 200);

@@ -252,8 +252,8 @@ internal sealed class SessionExecution : IDisposable {
     }
   }
 
-  // A failed generation publishes the truncated prompt as the final title; a rejected fallback
-  // publication keeps the plain failure recording.
+  // A failed or cancelled generation publishes the truncated prompt as the final title; a rejected
+  // fallback publication keeps the plain failure recording.
   private async Task SaveFallbackTitleAsync(string prompt, string error) {
     string? fallback = TitleGenerator.CreateFallback(prompt);
     if (fallback is not null && await recorder.PublishFallbackTitleAsync(fallback, error))
@@ -277,8 +277,8 @@ internal sealed class SessionExecution : IDisposable {
     }
   }
 
-  // Title work never blocks or changes the execution. Generation failure falls back to the first
-  // prompt as the final title; cancellation of the execution itself leaves no title at all.
+  // Title work never blocks or changes the execution. A failed or cancelled generation publishes
+  // the first prompt as the final title, so the session is addressable once the execution settles.
   private async Task GenerateTitleAsync(string prompt, UserPreferences captured) {
     Exception? fatal = null;
     try {
@@ -298,9 +298,9 @@ internal sealed class SessionExecution : IDisposable {
       fatal = failure;
       throw;
     } catch (OperationCanceledException) when (IsStopping) {
-      // Cancelling the execution is not a generation failure: the title stays unset.
+      // A cancelled generation still settles the one-shot attempt with the prompt fallback.
       try {
-        await SaveTitleOutcomeAsync("cancelled", null);
+        await SaveFallbackTitleAsync(prompt, "Title generation was cancelled.");
       } catch (AuxiliaryExecutionException failure) {
         fatal = failure;
         throw;

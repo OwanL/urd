@@ -12,10 +12,10 @@ internal static class TitleGenerator {
       && title == title.Trim() && !title.Any(char.IsControl)
       && title.EnumerateRunes().Count() <= MaximumCharacters;
 
-  // A failed generation attempt falls back to the first prompt. Whitespace and control characters
-  // collapse into single spaces so the fallback keeps the published shape; an empty result has
-  // no title and the attempt stays failed. Cancellation of the execution itself is handled by the
-  // caller and leaves no title at all.
+  // A failed or cancelled generation attempt falls back to the first prompt. Whitespace and control
+  // characters collapse into single spaces so the fallback keeps the published shape; an empty
+  // result has no title and the attempt stays failed. Cancellation is settled by the caller with
+  // this same publication.
   internal static string? CreateFallback(string prompt) {
     var collapsed = new StringBuilder(prompt.Length);
     bool pendingSpace = false;

@@ -48,11 +48,11 @@ internal sealed class SessionExecutionRecorder(SessionBase session, UrdStore sto
   internal Task<bool> PublishTitleAsync(string title) => RecordTitleAsync(() => store.Prepass.PublishTitle(Identity, title));
 
   internal Task<bool> PublishFallbackTitleAsync(string title, string? error) =>
-      RecordTitleAsync(() => store.Prepass.PublishFallbackTitle(Identity, title, error));
+      RecordTitleAsync(() => store.Prepass.PublishFallbackTitle(Identity, title, error), allowStopping: true);
 
-  private async Task<bool> RecordTitleAsync(Func<string?> publish) {
+  private async Task<bool> RecordTitleAsync(Func<string?> publish, bool allowStopping = false) {
     using var _ = await sessionLock.AcquireAsync();
-    if (!session.CanRecordExecution(Identity) || session.WriteToStore(publish) is not { } title)
+    if (!session.CanRecordExecution(Identity, allowStopping) || session.WriteToStore(publish) is not { } title)
       return false;
 
     session.PublishChange(title);

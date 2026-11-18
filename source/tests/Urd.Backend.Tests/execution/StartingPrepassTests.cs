@@ -429,7 +429,7 @@ public sealed class StartingPrepassTests {
   }
 
   [Fact]
-  public async Task StopJoinsHeldTitleCleanupAndPreventsItsLatePublication() {
+  public async Task StopJoinsHeldTitleCleanupAndPublishesThePromptFallback() {
     var titleHeld = Signal();
     var titleRelease = Signal();
     var mainCompleted = Signal();
@@ -453,14 +453,18 @@ public sealed class StartingPrepassTests {
       Assert.False(settlement.IsCompleted);
       Assert.Null(fixture.Store.Snapshots.ReadPersisted(fixture.Session.Id).Title);
 
-      // A late answer delivered after Stop is neither recorded nor published.
+      // The late generated answer is neither recorded nor published, but Stop still settles the
+      // one-shot attempt with the first prompt as the fallback title.
       titleRelease.TrySetResult();
       SessionExecutionResult result = await settlement.WaitAsync(TestTimeout);
       Assert.Equal(ExecutionOutcome.Cancelled, result.Outcome);
       SessionSnapshot snapshot = fixture.Store.Snapshots.ReadPersisted(fixture.Session.Id);
-      Assert.Null(snapshot.Title);
-      Assert.Equal("cancelled", fixture.Database.ReadRows(
+      Assert.Equal("orbit compass stop", snapshot.Title);
+      Assert.Equal("fallback", fixture.Database.ReadRows(
           $"SELECT state FROM session_prepass_details WHERE run_id = '{execution:D}' AND category = 'title';",
+          row => row.GetString(0)).Single());
+      Assert.Equal("Title generation was cancelled.", fixture.Database.ReadRows(
+          $"SELECT error FROM session_prepass_details WHERE run_id = '{execution:D}' AND category = 'title';",
           row => row.GetString(0)).Single());
       Assert.Equal([1L], fixture.Database.ReadRows("""
           SELECT r.outcome FROM auxiliary_requests r JOIN auxiliary_conversations c ON c.conversation_id = r.conversation_id

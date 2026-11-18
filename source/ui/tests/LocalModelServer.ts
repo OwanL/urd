@@ -6,16 +6,24 @@ import type { ProviderConnection } from "../providers/ProviderConnection.ts";
 import { startHttpServer } from "./HttpTestServer.ts";
 
 export interface FixtureReply {
+  // Empty with a toolCall: a tool-call reply streams no assistant text.
   text: string;
+  toolCall?: { id: string; name: string; arguments: Record<string, unknown> };
   delayMs?: number;
   chunkSize?: number;
   usage?: { inputTokens: number; outputTokens: number };
+}
+
+export interface ToolDeclaration {
+  type?: string;
+  function?: { name?: string; description?: string; parameters?: unknown };
 }
 
 export interface ModelRequest {
   model: string;
   reasoning_effort?: string;
   messages: unknown[];
+  tools?: ToolDeclaration[];
 }
 
 // A loopback-only, credential-free provider fixture. Urd still uses its real SDK,
@@ -52,6 +60,7 @@ export async function startLocalModelServer(onShutdown?: () => void) {
       if (
         typeof reply.text !== "string" ||
         reply.text.length > 128_000 ||
+        !isValidToolCall(reply.toolCall) ||
         (reply.delayMs !== undefined &&
           (!Number.isInteger(reply.delayMs) || reply.delayMs < 0 || reply.delayMs > 1_000)) ||
         (reply.chunkSize !== undefined &&
@@ -116,7 +125,23 @@ export async function startLocalModelServer(onShutdown?: () => void) {
           offset += chunkSize;
         }
       }
-      frame({}, "stop");
+      // OpenAI-style streamed function call: one delta carrying the complete arguments.
+      if (reply.toolCall) {
+        frame({
+          tool_calls: [
+            {
+              index: 0,
+              id: reply.toolCall.id,
+              type: "function",
+              function: {
+                name: reply.toolCall.name,
+                arguments: JSON.stringify(reply.toolCall.arguments),
+              },
+            },
+          ],
+        });
+      }
+      frame({}, reply.toolCall ? "tool_calls" : "stop");
       if (reply.usage) {
         response.write(
           `data: ${JSON.stringify({
@@ -166,6 +191,25 @@ export async function startLocalModelServer(onShutdown?: () => void) {
       await server.close();
     },
   };
+}
+
+function isValidToolCall(toolCall: unknown) {
+  if (toolCall === undefined) return true;
+  if (typeof toolCall !== "object" || toolCall === null) return false;
+  const record = toolCall as Record<string, unknown>;
+  const id = record["id"];
+  const name = record["name"];
+  const callArguments = record["arguments"];
+  if (typeof id !== "string" || id.trim() === "") return false;
+  if (typeof name !== "string" || name.trim() === "") return false;
+  if (typeof callArguments !== "object" || callArguments === null || Array.isArray(callArguments))
+    return false;
+  try {
+    JSON.stringify(callArguments);
+  } catch {
+    return false;
+  }
+  return true;
 }
 
 function json(response: ServerResponse, body: unknown) {

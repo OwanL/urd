@@ -27,4 +27,5 @@ public sealed record SessionWorkingTime(
     long CompletedMilliseconds, DateTimeOffset? StartedAt, bool HasUnknownDuration = false);
 
 // A bounded preview of an accepted input whose containing request has not started sending.
-public sealed record PendingInputPreview(Guid SubmissionId, string Preview, bool CanRemove = false);
+// Claimed inputs are assigned to a request, but are not yet recorded as attempted.
+public sealed record PendingInputPreview(Guid SubmissionId, string Preview, bool CanRemove, bool IsClaimed);

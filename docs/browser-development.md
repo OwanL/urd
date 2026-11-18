@@ -68,8 +68,10 @@ or the current location when no child is selected. Pending reads and uncommitted
 block selection; failed reads retain the last location and can be retried.
 Unknown directory saves block Send until an explicit snapshot read confirms the current
 directory; writes are never automatically repeated.
-Busy Send remains opportunistic steering. Queued inputs form a quiet, compact stack at the transcript
-tail under one count label. Hovering a row or focusing its controls reveals removal and preview actions;
+Busy Send remains opportunistic steering. Unclaimed inputs form a quiet, compact queue at the
+transcript tail. Once a request claims an input, its preview moves to Preparing, including during
+startup and post-compaction pruning. It becomes a transcript message only when the send attempt
+starts. Hovering a row or focusing its controls reveals removal and preview actions;
 touch devices show these actions permanently. Uncertain removals keep their explicit status and Check
 action visible. A small chevron expands long previews on request; claimed inputs cannot be removed.
 Removal never stops active work. With an empty composer, an eligible idle conversation offers Continue

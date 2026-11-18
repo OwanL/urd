@@ -23,6 +23,7 @@ internal sealed class SnapshotReader {
 
   internal const string PendingInputsSql = """
     SELECT i.input_id, coalesce(substr(d.original_text_utf8, 1, $bytes), X'') AS preview,
+        i.request_id IS NOT NULL AS is_claimed,
         i.request_id IS NULL AND r.stopping = 0 AND (r.input_id IS NULL OR r.input_id <> i.input_id) AS can_cancel
     FROM execution_inputs i
     JOIN input_decisions d ON d.session_id = i.session_id AND d.input_id = i.input_id
@@ -247,7 +248,8 @@ internal sealed class SnapshotReader {
   private PendingInputPreview[] ReadPendingInputs(SqliteTransaction transaction, Guid sessionId) =>
       database.Query(transaction, PendingInputsSql,
           row => new PendingInputPreview(row.Guid("input_id"),
-              StorageText.ReadPreview((byte[])row.GetValue(row.GetOrdinal("preview"))), row.Bool("can_cancel")),
+              StorageText.ReadPreview((byte[])row.GetValue(row.GetOrdinal("preview"))),
+              row.Bool("can_cancel"), row.Bool("is_claimed")),
           ("$session", sessionId), ("$limit", PendingInputLimit), ("$bytes", StorageText.PreviewByteLimit)).ToArray();
 
   private System.Collections.ObjectModel.ReadOnlyCollection<StartingResourcePruningStatus>? ReadPruningStatuses(

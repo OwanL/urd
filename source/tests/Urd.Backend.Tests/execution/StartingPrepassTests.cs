@@ -558,6 +558,8 @@ public sealed class StartingPrepassTests {
   public async Task AutomaticCompactionPrunesFromTheSummaryAloneOmittingRetainedAndNewContext() {
     const string oldestMark = "ancient-turn:";
     const string currentTurn = "compass turn";
+    var pruningStarted = Signal();
+    var pruningRelease = Signal();
     var pruningTasks = new ConcurrentQueue<string>();
     var client = new ScriptedChatClient(Route, RouteResponse);
     ProviderManager providers = null!;
@@ -568,10 +570,37 @@ public sealed class StartingPrepassTests {
     long revision = (await fixture.Session.ReadSnapshotAsync()).HistoryRevision;
     var context = fixture.Store.Compactions.ReadContext(fixture.Session.Id, revision);
     Assert.Null(context.PreviousCompaction);
-    _ = await SubmitAndSettleAsync(fixture, currentTurn, TestLlmSelection.Default with { ContextWindow = 8_192 });
-
-    context = fixture.Store.Compactions.ReadContext(fixture.Session.Id, revision);
-    Assert.NotNull(context.PreviousCompaction);
+    var selection = TestLlmSelection.Default with { ContextWindow = 8_192 };
+    var current = new UserMessageSubmission(Guid.NewGuid(), revision, currentTurn, selection);
+    UserMessageReceipt receipt = await fixture.Session.SubmitUserMessageAsync(current);
+    Guid execution = Assert.IsType<Guid>(receipt.ExecutionId);
+    var followUp = new UserMessageSubmission(Guid.NewGuid(), revision, "follow-up during pruning", selection);
+    try {
+      await pruningStarted.Task.WaitAsync(TestTimeout);
+      Assert.Equal(execution, (await fixture.Session.SubmitUserMessageAsync(followUp)).ExecutionId);
+      SessionSnapshot snapshot = await fixture.Session.ReadSnapshotAsync();
+      Assert.False(snapshot.IsCompacting);
+      Assert.Collection(snapshot.PendingInputs,
+          input => {
+            Assert.Equal(current.SubmissionId, input.SubmissionId);
+            Assert.True(input.IsClaimed);
+            Assert.False(input.CanRemove);
+          }, input => {
+            Assert.Equal(followUp.SubmissionId, input.SubmissionId);
+            Assert.False(input.IsClaimed);
+            Assert.True(input.CanRemove);
+          });
+      TranscriptHistoryPage history = fixture.Store.History.Read(fixture.Session.Id,
+          new(TranscriptHistoryMode.Latest, revision));
+      TranscriptEntryDescriptor marker = Assert.Single(history.Entries, entry => entry.Entry.Kind == TranscriptEntryKind.Compaction);
+      Assert.Contains(marker.Preparation!, summary => summary.Category == "skills" && summary.State == "running");
+      Assert.DoesNotContain(history.Entries, entry => entry.Entry.EntryId == current.SubmissionId);
+    } finally {
+      pruningRelease.TrySetResult();
+    }
+    Assert.Equal(ExecutionOutcome.Completed,
+        (await fixture.Session.WaitForExecutionFinishAsync(execution).WaitAsync(TestTimeout)).Outcome);
+    Assert.Empty((await fixture.Session.ReadSnapshotAsync()).PendingInputs);
 
     // The automatic compaction boundary prunes from the summary alone: neither the new
     // message nor the retained history is fed back into the pruning task input.
@@ -591,10 +620,17 @@ public sealed class StartingPrepassTests {
           return TextUpdates([PublishedTitle], token);
         case "pruning.skills":
           pruningTasks.Enqueue(request.LastUserText);
-          return TextUpdates([KeepNothing], token);
+          return request.LastUserText.Contains(CompactedSummary, StringComparison.Ordinal)
+              ? HoldPruning(token) : TextUpdates([KeepNothing], token);
         default:
           throw new InvalidOperationException($"Unexpected purpose '{request.Purpose}'.");
       }
+    }
+
+    async IAsyncEnumerable<ChatResponseUpdate> HoldPruning([EnumeratorCancellation] CancellationToken token) {
+      pruningStarted.TrySetResult();
+      await pruningRelease.Task.WaitAsync(token);
+      await foreach (ChatResponseUpdate update in TextUpdates([KeepNothing], token)) yield return update;
     }
 
     Task<ChatResponse> RouteResponse(ScriptedRequest request, CancellationToken token) {

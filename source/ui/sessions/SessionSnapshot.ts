@@ -6,6 +6,7 @@ import type { PendingResponse } from "./Prepass.ts";
 export interface PendingInputPreview {
   readonly submissionId: string;
   readonly preview: string;
+  readonly isClaimed: boolean;
   // Missing capability fields in older fixtures are treated as non-removable.
   readonly canRemove?: boolean;
 }

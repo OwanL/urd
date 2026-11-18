@@ -72,8 +72,10 @@ public sealed class SessionSnapshotStorageTests {
     PendingInputPreview pending = Assert.Single(snapshot.PendingInputs);
     Assert.Equal(input, pending.SubmissionId);
     Assert.Equal(text[..256], pending.Preview);
+    Assert.False(pending.IsClaimed);
+    Assert.False(pending.CanRemove); // The lead cannot be removed, even before its request is claimed.
     Guid request = store.Executions.CreateNextRequest(identity)!.RequestId;
-    Assert.Equal(pending, Assert.Single(store.Snapshots.ReadPersisted(session).PendingInputs));
+    Assert.Equal(pending with { IsClaimed = true }, Assert.Single(store.Snapshots.ReadPersisted(session).PendingInputs));
     Assert.Equal(text, store.UserMessages.ReadReceipt(session, input)!.Submission.Text);
     Assert.True(store.Executions.StartRequest(identity, request));
     Assert.Empty(store.Snapshots.ReadPersisted(session).PendingInputs);

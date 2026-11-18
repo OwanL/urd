@@ -22,6 +22,7 @@ internal sealed class SessionExecution : IDisposable {
   private StartingContext? startingContext;
   private IChatClient? chatClient;
   private readonly SessionToolExecution toolExecution;
+  private readonly AIFunctionDeclaration? answerAgentDeclaration;
   private readonly PendingToolCalls pending;
   private readonly ConversationRunner auxiliary;
   private Task? titleWork;
@@ -42,6 +43,8 @@ internal sealed class SessionExecution : IDisposable {
     this.startingContextBuilder = startingContextBuilder;
     pending = pendingToolCalls ?? new PendingToolCalls();
     toolExecution = new SessionToolExecution(session, recorder, tools ?? [], pending, selection.SupportsImages, stop.Token);
+    if (tools?.OfType<AnswerAgentTool>().SingleOrDefault() is { } answerTool)
+      answerAgentDeclaration = AgentToolDeclaration.Create(answerTool);
     auxiliary = new(recorder, createChatClient, tools ?? [], session.WorkingDirectory);
     manualCompactionRequest = compaction;
     IsCompacting = compaction is not null;
@@ -76,7 +79,7 @@ internal sealed class SessionExecution : IDisposable {
   // Called sequentially outside the session lock. Foreground calls join here;
   // registered background calls remain owned until the session drains them.
   internal async Task<ExecutionOutcome> RunRequestAsync(LlmRequest request) {
-    LlmRequestResult result = await SendLlmRequestAsync(request);
+    (LlmRequestResult result, IReadOnlyList<AIFunctionDeclaration> offeredTools) = await SendLlmRequestAsync(request);
     // Retry only the rejected model exchange, never a tool or any observed partial output.
     bool canCompactAndRetry = result.Failure == ProviderFailure.ContextWindowExceeded
         && !result.OutputObserved && !IsStopping;
@@ -84,7 +87,7 @@ internal sealed class SessionExecution : IDisposable {
       try {
         LlmRequest? reducedRequest = await CompactHistoryAsync(request.RequestId, CompactionReason.Overflow);
         if (reducedRequest is not null)
-          result = await SendLlmRequestAsync(reducedRequest, allowAutomaticCompaction: false);
+          (result, offeredTools) = await SendLlmRequestAsync(reducedRequest, allowAutomaticCompaction: false);
       } catch (Exception failure) {
         result = CreateRequestResult(request.RequestId, failure);
       }
@@ -96,7 +99,7 @@ internal sealed class SessionExecution : IDisposable {
     if (result.Outcome != ExecutionOutcome.Completed)
       return result.Outcome;
 
-    return await toolExecution.RunBatchAsync(request.RequestId, result.ToolCalls ?? [], startingContext?.Tools ?? []);
+    return await toolExecution.RunBatchAsync(request.RequestId, result.ToolCalls ?? [], offeredTools);
   }
 
   internal async Task<ExecutionOutcome> RunCompactionAsync() {
@@ -318,9 +321,11 @@ internal sealed class SessionExecution : IDisposable {
     }
   }
 
-  private async Task<LlmRequestResult> SendLlmRequestAsync(LlmRequest request, bool allowAutomaticCompaction = true) {
+  private async Task<(LlmRequestResult Result, IReadOnlyList<AIFunctionDeclaration> OfferedTools)> SendLlmRequestAsync(
+      LlmRequest request, bool allowAutomaticCompaction = true) {
     IChatClient client;
     IReadOnlyList<ChatMessage> messages;
+    IReadOnlyList<AIFunctionDeclaration> offeredTools;
     ChatOptions options;
     try {
       stop.Token.ThrowIfCancellationRequested();
@@ -328,32 +333,39 @@ internal sealed class SessionExecution : IDisposable {
         request = await CompactHistoryAsync(request.RequestId, CompactionReason.Threshold, currentHistory: request.Context) ?? request;
       await PrepareStartingContextAsync(request);
       client = chatClient ??= createChatClient(selection.Connection);
+      StartingContext context = startingContext!;
+      await StartRequestAsync(request.RequestId, context);
+      (bool presented, ChatMessage? reminder) = session.ReadQuestionForRequest(request);
+      offeredTools = context.Tools;
+      if (presented && answerAgentDeclaration is { } answer && offeredTools.All(tool => tool.Name != answer.Name))
+        offeredTools = [.. offeredTools, answer];
       options = new() {
         ModelId = selection.ModelId,
         Reasoning = selection.ReadReasoningEffort() is { } effort
             ? new ReasoningOptions { Effort = effort } : null,
-        Tools = [.. startingContext!.Tools],
+        Tools = [.. offeredTools],
         AdditionalProperties = new() {
           [UsageContext.PropertyName] = new UsageContext(session.Id, ExecutionId, "conversation")
         }
       };
-      await StartRequestAsync(request.RequestId, startingContext);
-      messages = LlmMessageProjection.AdaptForModel(
-          [.. startingContext.Instructions, .. request.Messages], selection.SupportsImages);
+      List<ChatMessage> input = [.. context.Instructions, .. request.Messages];
+      if (reminder is not null)
+        input.Add(reminder);
+      messages = LlmMessageProjection.AdaptForModel(input, selection.SupportsImages);
     } catch (Exception failure) {
-      return CreateRequestResult(request.RequestId, failure);
+      return (CreateRequestResult(request.RequestId, failure), []);
     }
 
     LlmResponseRunner.Result response = await LlmResponseRunner.RunAsync(client, messages, options,
         request.RequestId, SaveChunkAsync,
         (callId, name) => RecordToolCallAsync(request.RequestId, callId, name), stop.Token);
     LlmRequestResult result = CreateRequestResult(request.RequestId, response.Failure);
-    return result with {
+    return (result with {
       ToolCalls = result.Outcome == ExecutionOutcome.Completed ? response.ToolCalls : null,
       ProviderResponse = result.Outcome == ExecutionOutcome.Completed ? response.ProviderResponse : null,
       Usage = response.Usage,
       OutputObserved = response.OutputObserved
-    };
+    }, offeredTools);
   }
 
   private LlmRequestResult CreateRequestResult(Guid requestId, Exception? failure) {

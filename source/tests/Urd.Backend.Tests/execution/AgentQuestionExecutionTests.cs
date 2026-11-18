@@ -3,7 +3,11 @@ using System.Text.Json;
 using System.Threading.Channels;
 using Microsoft.Extensions.AI;
 using Urd.Backend.Tests.Support;
+using Urd.Core.Compaction;
+using Urd.Core.Context;
 using Urd.Core.Execution;
+using Urd.Core.Preferences;
+using Urd.Core.Providers;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
 using Urd.Core.Tools;
@@ -14,6 +18,9 @@ using static Urd.Backend.Tests.Support.TestAsync;
 namespace Urd.Backend.Tests.Execution;
 
 public sealed class AgentQuestionExecutionTests {
+  private const string Reminder = "[CURRENT QUESTION REMINDER]\n";
+  private static readonly string compactedPrompt = "  exact question 🧭\r\n" + new string('?', 100_000) + "\n  ";
+
   [Fact]
   public async Task BusyRecipientPresentsFifoAlongsideToolResultsAndRejectsLateAnswers() {
     await using var fixture = await QuestionFixture.OpenAsync();
@@ -227,6 +234,128 @@ public sealed class AgentQuestionExecutionTests {
         (await recipient.WaitForExecutionFinishAsync(execution).WaitAsync(TestTimeout)).Outcome);
   }
 
+  [Theory]
+  [InlineData(false)]
+  [InlineData(true)]
+  public async Task CompactionRepresentsOnlyTheLiveQuestionAndRestoresThePrunedAnswerTool(bool overflow) {
+    await using var fixture = await QuestionFixture.OpenAsync(Summarize);
+    Assert.DoesNotContain(fixture.Recipient.ReadStartingContext()!.Tools, tool => tool.Name == "answer_agent");
+    fixture.Respond(Probe("original"));
+    if (overflow)
+      fixture.Respond(_ => throw new ProviderOperationException(ProviderFailure.ContextWindowExceeded));
+    fixture.Respond(token => ToolBatch(token, new FunctionCallContent("reply", "answer_agent",
+        new Dictionary<string, object?> { ["answer"] = "exact answer" })), Complete);
+
+    Task<AgentQuestionResult> ask = fixture.Ask(compactedPrompt, wake: true);
+    CapturedCall original = await fixture.NextCallAsync();
+    if (!overflow)
+      fixture.CompactNextRequest();
+    string described = AgentQuestionContext.Describe(fixture.SenderTitle, compactedPrompt);
+    ScriptedRequest presented = fixture.ConversationRequests[^1];
+    Assert.Single(presented.Messages, message => message.Text == described);
+    Assert.DoesNotContain(presented.Messages, IsReminder);
+    Assert.Single(presented.Options!.Tools!, tool => tool is AIFunctionDeclaration { Name: "answer_agent" });
+
+    await fixture.SteerAsync(original, "new steering after the question");
+    Assert.Equal("exact answer", (await ask.WaitAsync(TestTimeout)).Answer);
+    Assert.Equal(ExecutionOutcome.Completed, (await fixture.FinishAsync(original.Context.ExecutionId)).Outcome);
+
+    ScriptedRequest[] requests = fixture.ConversationRequests;
+    if (overflow) {
+      Assert.Single(requests[^3].Messages, message => message.Text == described);
+      Assert.DoesNotContain(requests[^3].Messages, IsReminder);
+    }
+    ScriptedRequest compacted = requests[^2];
+    Assert.Equal(Reminder + described, Assert.Single(compacted.Messages, IsReminder).Text);
+    Assert.DoesNotContain(compacted.Messages, message => message.Text == described);
+    Assert.Single(compacted.Options!.Tools!, tool => tool is AIFunctionDeclaration { Name: "answer_agent" });
+    AssertNoQuestionOffer(requests[^1]);
+    Assert.Single(fixture.QuestionRows());
+    ModelHistory saved = fixture.Store.Compactions.ReadContext(fixture.Recipient.Id, 0);
+    SavedHistoryCompaction boundary = Assert.IsType<SavedHistoryCompaction>(saved.PreviousCompaction);
+    Assert.DoesNotContain(Reminder, boundary.Summary, StringComparison.Ordinal);
+    Assert.DoesNotContain(saved.Messages, entry => entry.AgentQuestionId is not null || IsReminder(entry.Message));
+    Assert.DoesNotContain(fixture.Recipient.ReadStartingContext(boundary.Id)!.Tools, tool => tool.Name == "answer_agent");
+  }
+
+  [Fact]
+  public async Task CancellingDuringCompactionDoesNotRemindOrAnswerTheSuccessorFromTheOldRequest() {
+    var summaryEntered = Signal();
+    var summaryRelease = Signal();
+    await using var fixture = await QuestionFixture.OpenAsync(async cancellation => {
+      summaryEntered.TrySetResult();
+      await summaryRelease.Task.WaitAsync(cancellation);
+      return await Summarize(cancellation);
+    });
+    using var cancelAsk = new CancellationTokenSource();
+    fixture.Respond(Probe("original"), Probe("after cut"), Probe("successor"), Complete);
+    Task<AgentQuestionResult> cancelled = fixture.Ask(compactedPrompt, wake: true, cancelAsk.Token);
+    CapturedCall original = await fixture.NextCallAsync();
+    Task<AgentQuestionResult> next = fixture.Ask("queued successor", wake: false);
+    await fixture.WaitForQueueAsync(2);
+    fixture.CompactNextRequest();
+    await fixture.SteerAsync(original, "new steering after the question");
+    try {
+      await summaryEntered.Task.WaitAsync(TestTimeout);
+      await cancelAsk.CancelAsync();
+      await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await cancelled.WaitAsync(TestTimeout));
+    } finally {
+      summaryRelease.TrySetResult();
+    }
+
+    CapturedCall afterCut = await fixture.NextCallAsync();
+    Assert.NotNull(fixture.Store.Compactions.ReadContext(fixture.Recipient.Id, 0).PreviousCompaction);
+    AssertNoQuestionOffer(fixture.ConversationRequests[^1]);
+    Assert.DoesNotContain(fixture.ConversationRequests[^1].Messages,
+        message => message.Text.Contains("queued successor", StringComparison.Ordinal));
+    Assert.Single(fixture.QuestionRows());
+    afterCut.Release.TrySetResult();
+
+    CapturedCall successor = await fixture.NextCallAsync();
+    Assert.False(fixture.Questions.AnswerAgent(afterCut.Context, "stale answer"));
+    Assert.False(next.IsCompleted);
+    Assert.True(fixture.Questions.AnswerAgent(successor.Context, "successor answer"));
+    Assert.Equal("successor answer", (await next.WaitAsync(TestTimeout)).Answer);
+    successor.Release.TrySetResult();
+    Assert.Equal(ExecutionOutcome.Completed, (await fixture.FinishAsync(original.Context.ExecutionId)).Outcome);
+  }
+
+  [Fact]
+  public async Task RestartDoesNotReplayTheReminderForAnOutstandingCompactedQuestion() {
+    await using var fixture = await QuestionFixture.OpenAsync(Summarize);
+    fixture.Respond(Probe("original"), Probe("after cut"));
+    Task<AgentQuestionResult> pending = fixture.Ask(compactedPrompt, wake: true);
+    CapturedCall original = await fixture.NextCallAsync();
+    fixture.CompactNextRequest();
+    await fixture.SteerAsync(original, "new steering after the question");
+    await fixture.NextCallAsync();
+    Assert.Single(fixture.ConversationRequests[^1].Messages, IsReminder);
+    await fixture.Manager.ShutdownSessionsAsync().WaitAsync(TestTimeout);
+    Assert.Equal(AgentQuestions.RecipientFinished, (await pending.WaitAsync(TestTimeout)).Error);
+
+    await using SessionManager restarted = fixture.CreateManager();
+    PrimarySession recipient = await restarted.GetPrimaryAsync(fixture.Recipient.Id);
+    fixture.Respond(Probe("after restart"), Complete);
+    Guid execution = await QuestionFixture.StartAsync(recipient, "new run");
+    CapturedCall call = await fixture.NextCallAsync();
+    AssertNoQuestionOffer(fixture.ConversationRequests[^1]);
+    Assert.False(((IAgentQuestions)restarted).AnswerAgent(call.Context, "stale answer"));
+    Assert.Single(fixture.QuestionRows());
+    call.Release.TrySetResult();
+    Assert.Equal(ExecutionOutcome.Completed,
+        (await recipient.WaitForExecutionFinishAsync(execution).WaitAsync(TestTimeout)).Outcome);
+  }
+
+  private static bool IsReminder(ChatMessage message) => message.Text.StartsWith(Reminder, StringComparison.Ordinal);
+
+  private static void AssertNoQuestionOffer(ScriptedRequest request) {
+    Assert.DoesNotContain(request.Messages, IsReminder);
+    Assert.DoesNotContain(request.Options!.Tools!, tool => tool is AIFunctionDeclaration { Name: "answer_agent" });
+  }
+
+  private static Task<ChatResponse> Summarize(CancellationToken _) => Task.FromResult(
+      new ChatResponse(new ChatMessage(ChatRole.Assistant, "Goal: continue the work.")) { FinishReason = ChatFinishReason.Stop });
+
   private static JsonElement AnswerArguments(string answer) => JsonSerializer.SerializeToElement(new { answer });
 
   private static Func<CancellationToken, IAsyncEnumerable<ChatResponseUpdate>> Probe(string callId) =>
@@ -266,6 +395,8 @@ public sealed class AgentQuestionExecutionTests {
     private readonly UrdStore store;
     private readonly QuestionProbe probe = new();
     private readonly ConcurrentQueue<Func<CancellationToken, IAsyncEnumerable<ChatResponseUpdate>>> responses = new();
+    private readonly ConcurrentQueue<ScriptedRequest> conversationRequests = new();
+    private readonly IReadOnlyList<AgentTool> tools;
     private HarnessToolContext senderContext = null!;
 
     internal ScriptedChatClient Client { get; }
@@ -276,17 +407,36 @@ public sealed class AgentQuestionExecutionTests {
     internal string SenderTitle { get; private set; } = null!;
     private string recipientTitle = null!;
     internal IAgentQuestions Questions => Manager;
+    internal ScriptedRequest[] ConversationRequests => conversationRequests.ToArray();
 
-    private QuestionFixture() {
+    private QuestionFixture(Func<CancellationToken, Task<ChatResponse>>? summarize) {
       store = UrdStore.Open(database.Path);
-      Client = new ScriptedChatClient(token => responses.TryDequeue(out var response)
-          ? response(token) : throw new InvalidOperationException("No scripted response remains."));
-      IChatClient client = PrepassTolerantChatClient.WrapIfNeeded(Client, disposeInner: false);
-      Manager = new SessionManager(store, _ => client, [probe], Path.GetDirectoryName(database.Path)!);
+      tools = summarize is null ? [probe] : [probe, new AnswerAgentTool()];
+      Client = summarize is null ? new ScriptedChatClient(RespondToConversation) : new ScriptedChatClient(
+          (request, cancellation) => request.Purpose switch {
+            "title" => TextUpdates(["Test session"], cancellation),
+            "pruning.tools" => TextUpdates(["""{"keptIds":["question_probe"]}"""], cancellation),
+            "pruning.skills" or "pruning.instructions" => TextUpdates([PrepassTolerantChatClient.KeepAll(request.Messages)], cancellation),
+            _ => CaptureConversation(request, cancellation)
+          }, async (_, cancellation) => {
+            ChatResponse summary = await summarize(cancellation);
+            new PreferenceManager(store).SetCompactionTriggerTokenCount(int.MaxValue);
+            return summary;
+          });
+      Manager = CreateManager();
     }
 
-    internal static async Task<QuestionFixture> OpenAsync() {
-      var fixture = new QuestionFixture();
+    private IAsyncEnumerable<ChatResponseUpdate> CaptureConversation(ScriptedRequest request, CancellationToken cancellation) {
+      conversationRequests.Enqueue(request);
+      return RespondToConversation(cancellation);
+    }
+
+    private IAsyncEnumerable<ChatResponseUpdate> RespondToConversation(CancellationToken cancellation) =>
+        responses.TryDequeue(out var response) ? response(cancellation)
+            : throw new InvalidOperationException("No scripted response remains.");
+
+    internal static async Task<QuestionFixture> OpenAsync(Func<CancellationToken, Task<ChatResponse>>? summarize = null) {
+      var fixture = new QuestionFixture(summarize);
       try {
         fixture.Sender = await fixture.Manager.CreatePrimaryAsync();
         fixture.Respond(Probe("sender"), Complete);
@@ -331,9 +481,18 @@ public sealed class AgentQuestionExecutionTests {
     internal Task<SessionExecutionResult> FinishAsync(Guid execution) =>
         Recipient.WaitForExecutionFinishAsync(execution).WaitAsync(TestTimeout);
 
-    internal Task<AgentQuestionResult> Ask(string prompt, bool wake) =>
+    internal Task<AgentQuestionResult> Ask(string prompt, bool wake, CancellationToken cancellation = default) =>
         Questions.AskAgentAsync(senderContext with { CallId = Guid.NewGuid().ToString("N") },
-            recipientTitle, prompt, wake, CancellationToken.None);
+            recipientTitle, prompt, wake, cancellation);
+
+    internal void CompactNextRequest() => new PreferenceManager(store).SetCompactionTriggerTokenCount(1_000);
+
+    internal async Task SteerAsync(CapturedCall active, string text) {
+      UserMessageReceipt receipt = await Recipient.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, text, TestLlmSelection.Default));
+      Assert.Equal(MessageAcceptance.Accepted, receipt.Acceptance);
+      Assert.Equal(active.Context.ExecutionId, receipt.ExecutionId);
+      active.Release.TrySetResult();
+    }
 
     internal async Task WaitForQueueAsync(int count) {
       using var timeout = new CancellationTokenSource(TestTimeout);
@@ -346,7 +505,7 @@ public sealed class AgentQuestionExecutionTests {
         row => (Guid.Parse(row.GetString(0)), Guid.Parse(row.GetString(1)), row.GetInt32(2)));
 
     internal SessionManager CreateManager() => new(store,
-        _ => PrepassTolerantChatClient.WrapIfNeeded(Client, disposeInner: false), [probe], Path.GetDirectoryName(database.Path)!);
+        _ => PrepassTolerantChatClient.WrapIfNeeded(Client, disposeInner: false), tools, Path.GetDirectoryName(database.Path)!);
 
     private async Task<string> TitleAsync(Guid id) {
       using var timeout = new CancellationTokenSource(TestTimeout);

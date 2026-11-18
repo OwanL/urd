@@ -182,16 +182,27 @@ internal sealed class AgentQuestions {
     ArgumentException.ThrowIfNullOrWhiteSpace(answer);
     Question head;
     lock (stateLock) {
-      if (!mailboxes.TryGetValue(recipientId, out Mailbox? mailbox) || mailbox.Questions.Count == 0
-          || mailbox.Questions[0].PresentedRequests?.Contains(requestId) != true)
+      if (!mailboxes.TryGetValue(recipientId, out Mailbox? mailbox) || PresentedHead(mailbox, requestId) is not { } presented)
         return false;
 
-      head = Detach(mailbox, mailbox.Questions[0]);
+      head = Detach(mailbox, presented);
     }
 
     Settle(head, new(answer, null));
     return true;
   }
+
+  // A compaction reminder can only describe the same live head this request was bound to.
+  internal (Guid QuestionId, Guid SenderId, string Prompt)? ReadPresented(Guid recipientId, Guid requestId) {
+    lock (stateLock)
+      return mailboxes.TryGetValue(recipientId, out Mailbox? mailbox) && PresentedHead(mailbox, requestId) is { } head
+          ? (head.QuestionId, head.SenderId, head.Prompt) : null;
+  }
+
+  // Caller holds stateLock.
+  private static Question? PresentedHead(Mailbox mailbox, Guid requestId) =>
+      mailbox.Questions.Count > 0 && mailbox.Questions[0].PresentedRequests?.Contains(requestId) == true
+          ? mailbox.Questions[0] : null;
 
   // Captures the head for one recipient request claim. The first capture is the presentation the
   // caller writes to history; later captures let following requests answer the same question.

@@ -533,6 +533,19 @@ public abstract class SessionBase {
     }
   }
 
+  // Project a live, request-bound question after context preparation. Neither the reminder nor
+  // the temporary answer-tool offer belongs in saved history or the starting-context cache.
+  internal (bool Presented, ChatMessage? Reminder) ReadQuestionForRequest(LlmRequest request) {
+    if (agentQuestions?.ReadPresented(Id, request.RequestId) is not { } question)
+      return (false, null);
+    if (request.Context is not { PreviousCompaction: not null } history
+        || history.Messages.Any(message => message.AgentQuestionId == question.QuestionId))
+      return (true, null);
+
+    string? title = store.Sessions.ReadAgentTitle(question.SenderId).Title;
+    return (true, new(ChatRole.User, "[CURRENT QUESTION REMINDER]\n" + AgentQuestionContext.Describe(title, question.Prompt)));
+  }
+
   // The driver calls these under the session lock at the actual wait/wake transitions.
   internal void ParkBackgroundWait(Guid executionId) => agentQuestions?.Park(Id, executionId);
   internal void UnparkBackgroundWait(Guid executionId) => agentQuestions?.Unpark(Id, executionId);

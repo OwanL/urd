@@ -21,6 +21,7 @@ internal sealed record ModelHistory(
 }
 
 internal sealed record HistoryMessage(HistoryMessageLocation Location, bool StartsUserTurn, ChatMessage Message) {
+  internal Guid? AgentQuestionId { get; init; }
   internal bool IsUserTurnStart => StartsUserTurn && Message.Role == ChatRole.User;
   internal bool IsAssistantContinuation => !StartsUserTurn && Message.Role == ChatRole.Assistant;
 }

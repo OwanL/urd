@@ -15,6 +15,13 @@ internal sealed class StartingResourcePruner(
     Func<StartingResourcePruningStatus, Task> saveStatus,
     string taskInput,
     Func<StartingResourcePruningStatus, IReadOnlyList<PrepassResource>, IReadOnlyList<string>?, Task>? saveProgress = null) {
+  private const string FileGuidanceScope = """
+      The agent doing the work runs in Urd, regardless of the model or provider.
+      Use each candidate's file path together with its other fields to judge where and for which harness its guidance applies.
+      Drop guidance clearly meant only for another harness unless the task requires following that harness's workflow.
+      A directory name alone does not make otherwise portable guidance irrelevant.
+      """;
+
   private readonly ConversationRunner runner = runner ?? throw new ArgumentNullException(nameof(runner));
   private readonly Func<AuxiliaryModelPurpose, CancellationToken, Task<AuxiliaryModelResolution>> resolveModel =
       resolveModel ?? throw new ArgumentNullException(nameof(resolveModel));
@@ -26,7 +33,10 @@ internal sealed class StartingResourcePruner(
   internal Task<StartingResourcePruningResult<DiscoveredInstructionDocument>> PruneAsync(
       IReadOnlyList<DiscoveredInstructionDocument> candidates, int protectedCount, CancellationToken cancellation) =>
       PruneAsync(candidates, protectedCount, AuxiliaryModelPurpose.Instructions, "instructions",
-          "Select the project instruction documents that are relevant to the task. Preserve applicable rules and avoid redundant documents.",
+          $"""
+          Select the project instruction documents that are relevant to the task. Preserve applicable rules and avoid redundant documents.
+          {FileGuidanceScope}
+          """,
           document => document.Identity,
           (document, id) => new InstructionCandidate(id, "instruction", document.Text, document.Path, document.Scope),
           document => new(document.Identity, System.IO.Path.GetFileName(document.Path), document.Path),
@@ -35,7 +45,10 @@ internal sealed class StartingResourcePruner(
   internal Task<StartingResourcePruningResult<DiscoveredSkill>> PruneAsync(
       IReadOnlyList<DiscoveredSkill> candidates, int protectedCount, CancellationToken cancellation) =>
       PruneAsync(candidates, protectedCount, AuxiliaryModelPurpose.Skills, "skills",
-          "Select the specialized skills that are relevant to the task. Keep a skill when its instructions may materially help.",
+          $"""
+          Select the specialized skills that are relevant to the task. Keep a skill when its instructions may materially help.
+          {FileGuidanceScope}
+          """,
           skill => skill.Identity,
           (skill, id) => new SkillCandidate(id, "skill", skill.Name, skill.Description, skill.Path),
           skill => new(skill.Identity, skill.Name, skill.Path),

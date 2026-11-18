@@ -76,6 +76,8 @@ compaction boundary. Ordinary requests, reopening and model/preference changes d
 rediscover resources. The first prompt and first request after successful compaction
 prepare a selection; compaction alone does not. Built-ins bypass selection, while
 protected discovered resources are excluded from candidate input and always retained.
+Instruction and skill selectors receive each candidate's file path and use it as a signal
+of applicability to Urd, not as an automatic exclusion.
 See [the pruning plan](../../../../docs/pruning-plan.md) for task inputs and failure rules.
 
 ## Project instruction documents

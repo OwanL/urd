@@ -44,7 +44,10 @@ public sealed class StartingResourcePrunerTests {
     Assert.Same(second, Assert.Single(result.Retained));
     Assert.Equal(1, resolutions);
     Assert.Contains(taskInput, client.LastRequest[^1].Text, StringComparison.Ordinal);
-    Assert.Contains(JsonSerializer.Serialize(second.Path), client.LastRequest[^1].Text, StringComparison.Ordinal);
+    Assert.Contains("runs in Urd", client.LastRequest[0].Text, StringComparison.Ordinal);
+    Assert.Contains("file path", client.LastRequest[0].Text, StringComparison.Ordinal);
+    using JsonDocument skillCandidates = ParseCandidates(client.LastRequest);
+    Assert.Equal(second.Path, skillCandidates.RootElement[1].GetProperty("Path").GetString());
     Assert.DoesNotContain(protectedSkill.Name, client.LastRequest[^1].Text, StringComparison.Ordinal);
     Assert.Equal(new[] { ("skills", "running", 3, 3), ("skills", "completed", 3, 2) },
         statuses.Select(status => (status.Category, status.State, status.Total, status.Retained)));
@@ -201,6 +204,10 @@ public sealed class StartingResourcePrunerTests {
     Assert.False(result.IsFallback);
     Assert.Equal(new[] { documents[3], documents[4] }, result.Retained);
     Assert.Equal(3, client.Calls);
+    Assert.Contains("runs in Urd", client.Requests[0][0].Text, StringComparison.Ordinal);
+    using JsonDocument instructionCandidates = ParseCandidates(client.Requests[0]);
+    Assert.Equal(documents[0].Path, instructionCandidates.RootElement[0].GetProperty("Source").GetString());
+    Assert.Equal(documents[0].Scope, instructionCandidates.RootElement[0].GetProperty("Scope").GetString());
     Assert.Equal(documents.Select(document => document.Identity), CandidateIds(client.Requests[0]));
     Assert.Equal(new[] { documents[0].Identity, documents[2].Identity, documents[3].Identity, documents[4].Identity },
         CandidateIds(client.Requests[1]));
@@ -271,11 +278,15 @@ public sealed class StartingResourcePrunerTests {
   }
 
   private static string[] CandidateIds(IReadOnlyList<ChatMessage> request) {
+    using JsonDocument json = ParseCandidates(request);
+    return json.RootElement.EnumerateArray().Select(candidate => candidate.GetProperty("Id").GetString()!).ToArray();
+  }
+
+  private static JsonDocument ParseCandidates(IReadOnlyList<ChatMessage> request) {
     string text = request[^1].Text;
     int start = text.IndexOf("Candidates:", StringComparison.Ordinal);
     Assert.True(start >= 0);
-    using JsonDocument json = JsonDocument.Parse(text[(start + "Candidates:".Length)..]);
-    return json.RootElement.EnumerateArray().Select(candidate => candidate.GetProperty("Id").GetString()!).ToArray();
+    return JsonDocument.Parse(text[(start + "Candidates:".Length)..]);
   }
 
   private static DiscoveredInstructionDocument Instruction(string name, string text) =>

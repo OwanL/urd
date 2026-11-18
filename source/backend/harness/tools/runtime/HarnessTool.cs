@@ -11,7 +11,9 @@ internal abstract class HarnessTool : AgentTool {
   public abstract Task<ToolOutput> RunAsync(JsonElement arguments, HarnessToolContext context, CancellationToken cancellation);
 }
 
-internal sealed record HarnessToolContext(Guid SessionId, Guid ExecutionId, string CallId, IHarnessSessionServices Sessions);
+internal sealed record HarnessToolContext(Guid SessionId, Guid ExecutionId, string CallId, IHarnessSessionServices Sessions) {
+  internal Guid RequestId { get; init; }
+}
 
 // Resolves durable session identities without exposing storage or session management to tools.
 internal interface IHarnessSessionServices {

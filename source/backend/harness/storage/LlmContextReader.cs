@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.AI;
 using Urd.Core.Compaction;
+using Urd.Core.Context;
 using Urd.Core.Execution;
 using Urd.Core.Providers;
 using Urd.Core.Sessions;
@@ -20,9 +21,24 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
   internal ModelHistory ReadContext(SqliteTransaction transaction, Guid sessionId,
       long historyRevision, Guid? executionId = null, Guid? requestId = null) {
     SavedHistoryCompaction? boundary = CompactionStorage.ReadLatest(database, transaction, sessionId, historyRevision);
+    return ReadContext(transaction, sessionId, historyRevision, executionId, requestId,
+        boundary?.FirstRetainedMessageLocation, boundary, forDelegation: false);
+  }
+
+  // Only inputs to the invoking request were visible before its response. Exclude the whole
+  // response so concurrent sibling results cannot change the inherited snapshot.
+  internal IReadOnlyList<HistoryMessage> ReadBeforeResponse(SqliteTransaction transaction, ExecutionIdentity parent,
+      Guid requestId, HistoryMessageLocation? firstRetained) =>
+      ReadContext(transaction, parent.SessionId, parent.HistoryRevision, parent.ExecutionId, requestId,
+          firstRetained, boundary: null, forDelegation: true).Messages;
+
+  private ModelHistory ReadContext(SqliteTransaction transaction, Guid sessionId, long historyRevision,
+      Guid? executionId, Guid? requestId, HistoryMessageLocation? firstRetained, SavedHistoryCompaction? boundary,
+      bool forDelegation) {
     using SqliteCommand read = database.Command(transaction, $"""
       WITH requests AS (
           SELECT r.ordinal AS run_ordinal, q.request_index, q.request_id, q.usage_json, q.compaction_id,
+              ($delegation = 0 OR q.request_id <> $request) AS include_response,
               CASE WHEN EXISTS (SELECT 1 FROM execution_runs continuation
                   WHERE continuation.session_id = r.session_id
                       AND continuation.history_revision = r.history_revision
@@ -41,30 +57,31 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
       ), contents AS (
           SELECT q.run_ordinal, q.request_index, q.request_id, {(int)ContextRowKind.User} AS kind, i.ordinal AS content_index,
               d.original_text_utf8 AS text_utf8, NULL AS call_id, NULL AS name, NULL AS json,
-              NULL AS background, NULL AS origin_request_id, NULL AS outcome
+              NULL AS background, i.sender_session_id AS origin_request_id, NULL AS outcome
           FROM requests q JOIN execution_inputs i ON i.request_id = q.request_id
           JOIN input_decisions d ON d.session_id = i.session_id AND d.input_id = i.input_id
           UNION ALL
           SELECT q.run_ordinal, q.request_index, q.request_id, {(int)ContextRowKind.Text}, o.chunk_index, o.text_utf8,
               NULL, NULL, NULL, NULL, NULL, NULL
           FROM requests q JOIN execution_output o ON o.request_id = q.request_id
-          WHERE q.omit_assistant = 0
+          WHERE q.include_response = 1 AND q.omit_assistant = 0
               AND NOT EXISTS (SELECT 1 FROM execution_provider_context c WHERE c.request_id = q.request_id)
           UNION ALL
           SELECT q.run_ordinal, q.request_index, q.request_id, {(int)ContextRowKind.ToolCall}, t.call_index, NULL,
               t.call_id, t.name, t.arguments_json, NULL, NULL, NULL
           FROM requests q JOIN execution_tools t ON t.request_id = q.request_id
-          WHERE q.omit_assistant = 0
+          WHERE q.include_response = 1 AND q.omit_assistant = 0
               AND NOT EXISTS (SELECT 1 FROM execution_provider_context c WHERE c.request_id = q.request_id)
           UNION ALL
           SELECT q.run_ordinal, q.request_index, q.request_id, {(int)ContextRowKind.ToolResult}, t.call_index, NULL,
               t.call_id, t.name, t.result_json, t.background, t.request_id, t.outcome
           FROM requests q JOIN execution_tools t ON t.request_id = q.request_id
-          WHERE t.result_json IS NOT NULL OR (t.background = 1 AND t.started = 1)
+          WHERE q.include_response = 1 AND (t.result_json IS NOT NULL OR (t.background = 1 AND t.started = 1))
           UNION ALL
           SELECT q.run_ordinal, q.request_index, q.request_id, {(int)ContextRowKind.ProviderResponse}, 0, NULL, NULL, NULL,
               c.response_json, NULL, NULL, NULL
           FROM requests q JOIN execution_provider_context c ON c.request_id = q.request_id
+          WHERE q.include_response = 1
           UNION ALL
           SELECT q.run_ordinal, q.request_index, q.request_id, {(int)ContextRowKind.ToolCompletion}, c.ordinal, NULL,
               t.call_id, t.name, t.result_json, NULL, c.request_id, t.outcome
@@ -78,12 +95,12 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
       """,
         ("$session", sessionId), ("$run", executionId), ("$revision", historyRevision), ("$request", requestId),
         ("$continuation", (int)ExecutionRunKind.Continuation),
-        ("$cutRun", boundary?.FirstRetainedMessageLocation.ExecutionOrdinal ?? -1),
-        ("$cutRequest", boundary?.FirstRetainedMessageLocation.RequestIndexInExecution ?? 0));
+        ("$cutRun", firstRetained?.ExecutionOrdinal ?? -1),
+        ("$cutRequest", firstRetained?.RequestIndexInExecution ?? 0), ("$delegation", forDelegation ? 1 : 0));
     using SqliteDataReader reader = read.ExecuteReader();
     var messages = new List<ChatMessage>();
     var entries = new List<HistoryMessage>();
-    var humanMessages = new HashSet<ChatMessage>();
+    var inputMessages = new HashSet<ChatMessage>();
     ContextRow? previous = null;
     long? observedTokens = null;
     int observedThrough = 0;
@@ -102,7 +119,7 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
       if (previous?.RequestId != row.RequestId) {
         FinishGroup();
         messages.Clear();
-        humanMessages.Clear();
+        inputMessages.Clear();
         text = null;
         providerMessage = null;
         calls.Clear();
@@ -112,13 +129,14 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
 
       switch (row.Kind) {
         case ContextRowKind.ToolCompletion:
-          messages.Add(new(ChatRole.User, toolResults.ReadModelCompletion(
-              row.OriginRequestId!.Value, row.CallId!, row.Name!, row.Outcome!.Value, row.Json!)));
+          messages.Add(ReadToolCompletion(row, forDelegation));
           break;
         case ContextRowKind.User:
-          var human = new ChatMessage(ChatRole.User, row.Text);
-          messages.Add(human);
-          humanMessages.Add(human);
+          var input = new ChatMessage(ChatRole.User, row.Text);
+          messages.Add(input);
+          inputMessages.Add(input);
+          if (forDelegation && row.OriginRequestId is { } sender)
+            input.AuthorName = sender.ToString("D");
           break;
         case ContextRowKind.Text:
           (text ??= new()).Append(row.Text);
@@ -128,9 +146,7 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
           calls.Add(new FunctionCallContent(row.CallId!, row.Name!, arguments));
           break;
         case ContextRowKind.ToolResult:
-          object result = row.Background
-              ? ToolResultCodec.BackgroundStarted(row.OriginRequestId!.Value, row.CallId!)
-              : toolResults.ReadModelResult(row.Json!);
+          object result = ReadToolResult(row, forDelegation);
           results.Add(new FunctionResultContent(row.CallId!, result));
           break;
         case ContextRowKind.ProviderResponse:
@@ -150,11 +166,10 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
         return;
       AddResponse(messages, text, calls, results, providerMessage, previous.OmitAssistant);
       Guid id = previous.RequestId;
-      int first = id == boundary?.FirstRetainedMessageLocation.RequestId
-          ? boundary.FirstRetainedMessageLocation.MessageIndexInRequest : 0;
+      int first = id == firstRetained?.RequestId ? firstRetained.MessageIndexInRequest : 0;
       for (int index = first; index < messages.Count; index++)
-        entries.Add(new(new(id, previous.RunOrdinal, previous.RequestIndex, index), humanMessages.Contains(messages[index]), messages[index]));
-      if (previous.UsageJson is null || previous.CompactionId != boundary?.Id)
+        entries.Add(new(new(id, previous.RunOrdinal, previous.RequestIndex, index), inputMessages.Contains(messages[index]), messages[index]));
+      if (forDelegation || previous.UsageJson is null || previous.CompactionId != boundary?.Id)
         return;
       UsageDetails? usage = JsonSerializer.Deserialize<UsageDetails>(previous.UsageJson);
       if (usage?.InputTokenCount is not >= 0 || (!previous.OmitAssistant && usage.OutputTokenCount is not >= 0))
@@ -174,6 +189,25 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
   private sealed record ContextRow(Guid RequestId, ContextRowKind Kind, string? Text, string? CallId,
       string? Name, string? Json, bool Background, Guid? OriginRequestId, ExecutionOutcome? Outcome,
       long RunOrdinal, int RequestIndex, string? UsageJson, Guid? CompactionId, bool OmitAssistant);
+
+  private ChatMessage ReadToolCompletion(ContextRow row, bool forDelegation) {
+    Guid origin = row.OriginRequestId!.Value;
+    if (!forDelegation)
+      return new(ChatRole.User, toolResults.ReadModelCompletion(origin, row.CallId!, row.Name!, row.Outcome!.Value, row.Json!));
+    using var result = new StringReader(row.Json!);
+    string text = toolResults.ReadModelCompletionText(origin, row.CallId!, row.Name!, row.Outcome!.Value,
+        result, null, supportsImages: false, out _);
+    return SubagentContext.DescribeCompletion(text, origin, row.CallId!, row.Name!);
+  }
+
+  private object ReadToolResult(ContextRow row, bool forDelegation) {
+    if (row.Background)
+      return ToolResultCodec.BackgroundStarted(row.OriginRequestId!.Value, row.CallId!);
+    if (!forDelegation)
+      return toolResults.ReadModelResult(row.Json!);
+    using var result = new StringReader(row.Json!);
+    return toolResults.ReadModelResultText(result, null, supportsImages: false, out _);
+  }
 
   private static void AddResponse(List<ChatMessage> messages, StringBuilder? text,
       List<AIContent> calls, List<AIContent> results, ChatMessage? providerMessage, bool omitAssistant) {

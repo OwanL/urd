@@ -29,7 +29,7 @@ internal static class ToolInvoker {
       if (tool is HarnessTool harnessTool) {
         HarnessToolContext context = createHarnessContext?.Invoke(call.CallId)
             ?? throw new InvalidOperationException("Harness tools require a session execution.");
-        output = await harnessTool.RunAsync(arguments, context, cancellation);
+        output = await harnessTool.RunAsync(arguments, context with { RequestId = requestId }, cancellation);
       } else {
         string directory = workingDirectory ?? (tool is WebSearchTool or WebReadTool or ListPendingCallsTool or CancelPendingCallsTool
             ? string.Empty : throw new InvalidOperationException("The chat has no saved working folder."));

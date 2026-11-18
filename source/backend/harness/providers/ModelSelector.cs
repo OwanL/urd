@@ -19,6 +19,28 @@ public sealed class ModelSelector {
     choice.Validate();
 
     ConfiguredModel configured = choice.ConfiguredModel() ?? ResolveBucket(choices, choice.Bucket!.Value);
+    return await ResolveConfiguredAsync(configured, cancellationToken);
+  }
+
+  public async Task<LlmSelection> ResolveAsync(
+      string bucket, UserPreferences preferences, CancellationToken cancellationToken = default) {
+    ModelBucket parsed = bucket switch {
+      "small" => ModelBucket.Small,
+      "medium" => ModelBucket.Medium,
+      "large" => ModelBucket.Large,
+      _ => throw new ArgumentException($"Unknown model bucket '{bucket}'. Expected small, medium, or large.", nameof(bucket))
+    };
+    return await ResolveAsync(parsed, preferences, cancellationToken);
+  }
+
+  public async Task<LlmSelection> ResolveAsync(
+      ModelBucket bucket, UserPreferences preferences, CancellationToken cancellationToken = default) {
+    ArgumentNullException.ThrowIfNull(preferences);
+    return await ResolveConfiguredAsync(ResolveBucket(preferences.ModelChoices, bucket), cancellationToken);
+  }
+
+  private async Task<LlmSelection> ResolveConfiguredAsync(
+      ConfiguredModel configured, CancellationToken cancellationToken) {
     configured.Validate();
 
     ProviderConnection connection;

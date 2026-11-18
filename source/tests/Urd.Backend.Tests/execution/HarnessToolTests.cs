@@ -34,6 +34,7 @@ public sealed class HarnessToolTests {
       HarnessToolContext context = Assert.IsType<HarnessToolContext>(tool.Context);
       Assert.Equal(child.Id, context.SessionId);
       Assert.Equal(executionId, context.ExecutionId);
+      Assert.Equal(Assert.Single(StoredTools.Read(database)).RequestId, context.RequestId);
       Assert.Equal("call", context.CallId);
       Assert.Equal(child, tool.Caller);
       Assert.Equal(parent, tool.Parent);

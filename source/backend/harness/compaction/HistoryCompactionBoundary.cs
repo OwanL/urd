@@ -5,7 +5,8 @@ namespace Urd.Core.Compaction;
 internal static class HistoryCompactionBoundary {
   internal static int? FindFirstRetainedMessageIndex(ModelHistory history, int retainedHistoryTokenLimit,
       CompactionReason reason) {
-    int? boundaryWithinBudget = FindBoundaryWithinTokenBudget(history, retainedHistoryTokenLimit);
+    int? boundaryWithinBudget = FindBoundaryWithinTokenBudget(history.Messages, retainedHistoryTokenLimit,
+        minimumIndex: 1, previousBoundary: history.PreviousCompaction?.FirstRetainedMessageLocation);
     if (boundaryWithinBudget is not null || reason != CompactionReason.Overflow)
       return boundaryWithinBudget;
 
@@ -13,18 +14,23 @@ internal static class HistoryCompactionBoundary {
     return FindBoundaryPreservingLatestUserTurn(history);
   }
 
-  private static int? FindBoundaryWithinTokenBudget(ModelHistory history, int retainedHistoryTokenLimit) {
+  // A copy may keep all available history, including the first message of an existing suffix.
+  internal static int? FindRecentSuffix(IReadOnlyList<HistoryMessage> messages, int retainedHistoryTokenLimit) =>
+      FindBoundaryWithinTokenBudget(messages, retainedHistoryTokenLimit, minimumIndex: 0, previousBoundary: null);
+
+  private static int? FindBoundaryWithinTokenBudget(IReadOnlyList<HistoryMessage> messages,
+      int retainedHistoryTokenLimit, int minimumIndex, HistoryMessageLocation? previousBoundary) {
     int? oldestUserTurnIndexWithinBudget = null;
     int? oldestAssistantIndexWithinBudget = null;
     long retainedHistoryTokens = 0;
 
-    for (int messageIndex = history.Messages.Count - 1; messageIndex > 0; messageIndex--) {
-      HistoryMessage message = history.Messages[messageIndex];
+    for (int messageIndex = messages.Count - 1; messageIndex >= minimumIndex; messageIndex--) {
+      HistoryMessage message = messages[messageIndex];
       retainedHistoryTokens = ContextTokenBudget.AddSaturating(retainedHistoryTokens,
           ContextTokenBudget.EstimateMessage(message.Message));
       if (retainedHistoryTokens > retainedHistoryTokenLimit)
         break;
-      if (!CanBeginRetainedHistory(history, message))
+      if (!CanBeginRetainedHistory(message, previousBoundary))
         continue;
 
       if (message.IsUserTurnStart)
@@ -43,7 +49,7 @@ internal static class HistoryCompactionBoundary {
 
     for (int messageIndex = history.Messages.Count - 1; messageIndex > 0; messageIndex--) {
       HistoryMessage message = history.Messages[messageIndex];
-      if (!CanBeginRetainedHistory(history, message))
+      if (!CanBeginRetainedHistory(message, history.PreviousCompaction?.FirstRetainedMessageLocation))
         continue;
       if (message.IsUserTurnStart)
         return messageIndex;
@@ -56,12 +62,9 @@ internal static class HistoryCompactionBoundary {
     return latestAssistantIndexKeepingUserTurn;
   }
 
-  private static bool CanBeginRetainedHistory(ModelHistory history, HistoryMessage message) =>
-      (message.IsUserTurnStart || message.IsAssistantContinuation) && AdvancesPreviousBoundary(history, message);
-
-  private static bool AdvancesPreviousBoundary(ModelHistory history, HistoryMessage message) =>
-      history.PreviousCompaction is not { } previous ||
-      message.Location.IsAfter(previous.FirstRetainedMessageLocation);
+  private static bool CanBeginRetainedHistory(HistoryMessage message, HistoryMessageLocation? previousBoundary) =>
+      (message.IsUserTurnStart || message.IsAssistantContinuation) &&
+      (previousBoundary is null || message.Location.IsAfter(previousBoundary));
 
   private static int? FindLatestUserTurnIndex(IReadOnlyList<HistoryMessage> messages) {
     for (int messageIndex = messages.Count - 1; messageIndex >= 0; messageIndex--)

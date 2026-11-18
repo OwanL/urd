@@ -50,6 +50,49 @@ public sealed class ModelSelectorTests {
     }
   }
 
+  [Theory]
+  [InlineData(ModelBucket.Small)]
+  [InlineData(ModelBucket.Medium)]
+  [InlineData(ModelBucket.Large)]
+  public async Task DirectBucketResolutionIgnoresPurposeOverrides(ModelBucket bucket) {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    var manager = CreateManager(store, "bucket-model", "override-model");
+    try {
+      ProviderConnection connection = await AddConnectionAsync(manager, "provider");
+      var preferences = new PreferenceManager(store);
+      preferences.SetBucketModel(bucket, new(connection.Id, "bucket-model"));
+      preferences.SetModelChoice(AuxiliaryModelPurpose.Tools, ModelChoice.ForModel(connection.Id, "override-model"));
+
+      LlmSelection selection = await new ModelSelector(manager).ResolveAsync(
+          bucket.ToString().ToLowerInvariant(), preferences.Read()).WaitAsync(TestTimeout);
+
+      Assert.Equal(connection, selection.Connection);
+      Assert.Equal("bucket-model", selection.ModelId);
+    } finally {
+      await CloseAsync(manager);
+    }
+  }
+
+  [Fact]
+  public async Task DirectBucketResolutionRejectsMissingAndInvalidBuckets() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    var manager = CreateManager(store);
+    try {
+      var selector = new ModelSelector(manager);
+      UserPreferences preferences = new PreferenceManager(store).Read();
+      AuxiliaryModelUnavailableException missing = await Assert.ThrowsAsync<AuxiliaryModelUnavailableException>(
+          () => selector.ResolveAsync(ModelBucket.Medium, preferences));
+      Assert.Contains("medium bucket", missing.Message, StringComparison.OrdinalIgnoreCase);
+      await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => selector.ResolveAsync((ModelBucket)999, preferences));
+      ArgumentException unknown = await Assert.ThrowsAsync<ArgumentException>(() => selector.ResolveAsync("unknown", preferences));
+      Assert.Contains("Unknown model bucket", unknown.Message);
+    } finally {
+      await CloseAsync(manager);
+    }
+  }
+
   [Fact]
   public async Task MissingBucketOrUnavailableSpecificModelFailsWithoutRebinding() {
     using var database = new TemporaryDatabase();

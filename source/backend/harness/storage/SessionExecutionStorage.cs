@@ -1,52 +1,84 @@
 using Microsoft.Data.Sqlite;
 using Urd.Core.Context;
 using Urd.Core.Execution;
+using Urd.Core.Providers;
 using Urd.Core.Sessions;
 
 namespace Urd.Core.Storage;
 
 // Creates execution requests and retains stop and settlement facts. The caller joins request cleanup first.
 internal sealed class SessionExecutionStorage(Database database, ToolResultCodec toolResults,
-    AuxiliaryConversationStorage auxiliaryConversations) {
-  internal LlmRequest? CreateNextRequest(ExecutionIdentity execution) {
-    return database.Write<LlmRequest?>(transaction => {
-      Guid requestId = Guid.NewGuid();
-      int insertedRequestCount = database.Execute(transaction, $"""
-        INSERT INTO execution_requests (request_id, run_id, request_index, attempt)
-        SELECT $request, r.run_id,
-            COALESCE((SELECT MAX(request_index) + 1 FROM execution_requests WHERE run_id = r.run_id), 0), 1
-        FROM execution_runs r JOIN sessions s ON s.session_id = r.session_id
-        WHERE r.session_id = $session AND r.run_id = $run
-            AND {ExecutionSql.CurrentRunCondition}
-            AND NOT EXISTS (SELECT 1 FROM execution_requests q
-                WHERE q.run_id = r.run_id AND (q.outcome IS NULL OR q.outcome <> {(int)ExecutionOutcome.Completed}))
-            AND NOT EXISTS (SELECT 1 FROM execution_tools t WHERE t.run_id = r.run_id
-                AND (t.background = 0 OR t.started = 0) AND (t.outcome IS NULL OR t.result_json IS NULL))
-            AND (EXISTS (SELECT 1 FROM execution_tool_completions c
-                    WHERE c.session_id = $session AND c.history_revision = $revision AND c.claimed_request_id IS NULL)
-                OR EXISTS (SELECT 1 FROM execution_inputs i WHERE i.run_id = r.run_id
-                    AND i.request_id IS NULL AND i.outcome IS NULL)
-                OR EXISTS (SELECT 1 FROM execution_tools t JOIN execution_requests q ON q.request_id = t.request_id
-                    WHERE q.run_id = r.run_id AND q.request_index =
-                        (SELECT MAX(request_index) FROM execution_requests WHERE run_id = r.run_id))
-                OR (r.kind = $continuation AND NOT EXISTS (
-                    SELECT 1 FROM execution_requests first_request WHERE first_request.run_id = r.run_id)));
-        """,
-          ExecutionSql.Parameters(execution, ("$request", requestId), ("$continuation", (int)ExecutionRunKind.Continuation)));
-      if (insertedRequestCount == 0)
-        return null;
+    AuxiliaryConversationStorage auxiliaryConversations, UserMessageStorage userMessages) {
+  // A first-presented agent question is written into the request it is claimed by. A waking
+  // question may create the request on its own; otherwise it rides along with other ready work.
+  internal LlmRequest? CreateNextRequest(ExecutionIdentity execution, Guid? requestId = null,
+      QuestionPresentation? question = null) =>
+      database.Write(transaction => CreateNextRequest(transaction, execution, requestId ?? Guid.NewGuid(), question));
 
-      PublishCompletions(transaction, execution.SessionId, execution.HistoryRevision, requestId);
-      database.Execute(transaction, """
-        UPDATE execution_tool_completions SET claimed_request_id = $request
-        WHERE session_id = $session AND history_revision = $revision AND claimed_request_id IS NULL;
-        UPDATE execution_inputs SET request_id = $request
-        WHERE run_id = $run AND request_id IS NULL AND outcome IS NULL;
-        """, ExecutionSql.Parameters(execution, ("$request", requestId)));
-      var context = new LlmContextReader(database, toolResults).ReadContext(transaction,
-          execution.SessionId, execution.HistoryRevision, execution.ExecutionId, requestId);
-      return new LlmRequest(requestId, context.ReadMessages(), context);
-    });
+  // Starts an idle session's run for its broker head: the question is admitted like new input
+  // with agent provenance, and the run's first request claims it in the same transaction, so the
+  // driver never owns a run without a claim. Any refusal rolls the whole start back.
+  internal LlmRequest StartQuestionRun(ExecutionIdentity run, Guid requestId, QuestionPresentation question,
+      LlmSelection selection) => database.Write(transaction => {
+    var submission = new UserMessageSubmission(question.QuestionId, run.HistoryRevision, question.Prompt, selection);
+    (UserMessageReceipt receipt, bool accepted) = userMessages.Submit(transaction, run.SessionId, run.HistoryRevision,
+        submission, accepting: true, run.ExecutionId, provenance: InputProvenance.AgentQuestion,
+        senderSessionId: question.SenderId);
+    if (!accepted || receipt.ExecutionId != run.ExecutionId)
+      throw new InvalidOperationException("The recipient agent refused new work.");
+    return CreateNextRequest(transaction, run, requestId, question: null)
+        ?? throw new InvalidOperationException("The recipient agent's run could not claim its question.");
+  });
+
+  // An idle wake uses the most recent saved run selection, not a new model choice.
+  internal LlmSelection? ReadLatestSelection(Guid sessionId) => database.Read(transaction =>
+    LlmSelectionJson.Read(database.Scalar<string?>(transaction, """
+      SELECT COALESCE(r.llm_selection_json, d.llm_selection_json) FROM execution_runs r
+      LEFT JOIN input_decisions d ON d.session_id = r.session_id AND d.input_id = r.input_id
+      WHERE r.session_id = $session AND COALESCE(r.llm_selection_json, d.llm_selection_json) IS NOT NULL
+      ORDER BY r.ordinal DESC LIMIT 1;
+      """, ("$session", sessionId))));
+
+  private LlmRequest? CreateNextRequest(SqliteTransaction transaction, ExecutionIdentity execution, Guid requestId,
+      QuestionPresentation? question) {
+    int insertedRequestCount = database.Execute(transaction, $"""
+      INSERT INTO execution_requests (request_id, run_id, request_index, attempt)
+      SELECT $request, r.run_id,
+          COALESCE((SELECT MAX(request_index) + 1 FROM execution_requests WHERE run_id = r.run_id), 0), 1
+      FROM execution_runs r JOIN sessions s ON s.session_id = r.session_id
+      WHERE r.session_id = $session AND r.run_id = $run
+          AND {ExecutionSql.CurrentRunCondition}
+          AND NOT EXISTS (SELECT 1 FROM execution_requests q
+              WHERE q.run_id = r.run_id AND (q.outcome IS NULL OR q.outcome <> {(int)ExecutionOutcome.Completed}))
+          AND NOT EXISTS (SELECT 1 FROM execution_tools t WHERE t.run_id = r.run_id
+              AND (t.background = 0 OR t.started = 0) AND (t.outcome IS NULL OR t.result_json IS NULL))
+          AND ($presents = 1 OR EXISTS (SELECT 1 FROM execution_tool_completions c
+                  WHERE c.session_id = $session AND c.history_revision = $revision AND c.claimed_request_id IS NULL)
+              OR EXISTS (SELECT 1 FROM execution_inputs i WHERE i.run_id = r.run_id
+                  AND i.request_id IS NULL AND i.outcome IS NULL)
+              OR EXISTS (SELECT 1 FROM execution_tools t JOIN execution_requests q ON q.request_id = t.request_id
+                  WHERE q.run_id = r.run_id AND q.request_index =
+                      (SELECT MAX(request_index) FROM execution_requests WHERE run_id = r.run_id))
+              OR (r.kind = $continuation AND NOT EXISTS (
+                  SELECT 1 FROM execution_requests first_request WHERE first_request.run_id = r.run_id)));
+      """,
+        ExecutionSql.Parameters(execution, ("$request", requestId), ("$continuation", (int)ExecutionRunKind.Continuation),
+          ("$presents", question is { Wakes: true } ? 1 : 0)));
+    if (insertedRequestCount == 0)
+      return null;
+
+    PublishCompletions(transaction, execution.SessionId, execution.HistoryRevision, requestId);
+    database.Execute(transaction, """
+      UPDATE execution_tool_completions SET claimed_request_id = $request
+      WHERE session_id = $session AND history_revision = $revision AND claimed_request_id IS NULL;
+      UPDATE execution_inputs SET request_id = $request
+      WHERE run_id = $run AND request_id IS NULL AND outcome IS NULL;
+      """, ExecutionSql.Parameters(execution, ("$request", requestId)));
+    if (question is { First: true })
+      userMessages.InsertPresentedQuestion(transaction, execution, requestId, question);
+    var context = new LlmContextReader(database, toolResults).ReadContext(transaction,
+        execution.SessionId, execution.HistoryRevision, execution.ExecutionId, requestId);
+    return new LlmRequest(requestId, context.ReadMessages(), context);
   }
 
   internal bool RemovePendingInput(ExecutionIdentity execution, Guid submissionId) => database.Write(transaction =>
@@ -129,12 +161,12 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
         UPDATE execution_runs SET stopping = 1
         WHERE session_id = $session AND run_id = $run AND stopping = 0 AND outcome IS NULL;
         UPDATE execution_inputs SET outcome = {(int)ExecutionOutcome.Cancelled},
-            not_sent = CASE WHEN NOT EXISTS (SELECT 1 FROM execution_messages m
+            not_sent = CASE WHEN provenance <> $agentQuestion AND NOT EXISTS (SELECT 1 FROM execution_messages m
                 WHERE m.run_id = execution_inputs.run_id AND m.role = {(int)TranscriptEntryKind.User}
                     AND m.input_id = execution_inputs.input_id) THEN 1 ELSE 0 END
         WHERE session_id = $session AND run_id = $run AND request_id IS NULL AND outcome IS NULL
             AND EXISTS (SELECT 1 FROM execution_runs WHERE run_id = $run AND stopping = 1 AND outcome IS NULL);
-        """, ("$session", sessionId), ("$run", executionId));
+        """, ("$session", sessionId), ("$run", executionId), ("$agentQuestion", (int)InputProvenance.AgentQuestion));
       return receipt;
     });
   }
@@ -202,7 +234,7 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
         WHERE run_id = $run AND role = {(int)TranscriptEntryKind.Text} AND end_chunk_index IS NULL;
         UPDATE execution_requests SET outcome = $outcome WHERE run_id = $run AND outcome IS NULL;
         UPDATE execution_inputs SET outcome = $outcome,
-            not_sent = CASE WHEN (request_id IS NULL OR EXISTS (
+            not_sent = CASE WHEN provenance <> $agentQuestion AND (request_id IS NULL OR EXISTS (
                 SELECT 1 FROM execution_requests q WHERE q.request_id = execution_inputs.request_id AND q.attempt = 1))
                 AND NOT EXISTS (SELECT 1 FROM execution_messages m WHERE m.run_id = execution_inputs.run_id
                     AND m.role = {(int)TranscriptEntryKind.User} AND m.input_id = execution_inputs.input_id) THEN 1 ELSE 0 END
@@ -216,6 +248,7 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
         WHERE session_id = $session AND run_id = $run;
         """,
           ("$session", sessionId), ("$run", executionId), ("$outcome", (int)settlement.Outcome),
+          ("$agentQuestion", (int)InputProvenance.AgentQuestion),
           ("$ended", StorageText.UtcTimestamp()),
           ("$unstartedResult", toolResults.Error("Tool was not executed.")),
           ("$unknownResult", toolResults.Error("Tool result unavailable; effects may have occurred.")),
@@ -245,23 +278,26 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
               SELECT next_chunk_index FROM execution_requests q WHERE q.request_id = execution_messages.request_id)
           WHERE run_id = $run AND role = {(int)TranscriptEntryKind.Text} AND end_chunk_index IS NULL;
           UPDATE execution_inputs SET outcome = $failed,
-              not_sent = CASE WHEN request_id IS NULL OR EXISTS (SELECT 1 FROM execution_requests q
-                  WHERE q.request_id = execution_inputs.request_id AND q.attempt = 1) THEN 1 ELSE 0 END
+              not_sent = CASE WHEN provenance <> $agentQuestion AND (request_id IS NULL OR EXISTS (SELECT 1 FROM execution_requests q
+                  WHERE q.request_id = execution_inputs.request_id AND q.attempt = 1)) THEN 1 ELSE 0 END
           WHERE run_id = $run AND outcome IS NULL;
           UPDATE execution_requests SET outcome = $failed, error = 'Interrupted by backend shutdown.'
           WHERE run_id = $run AND outcome IS NULL;
           UPDATE execution_tools SET outcome = $failed, interrupted = 1,
-              error = CASE WHEN started = 0 THEN $unstarted ELSE $unknown END,
-              result_json = CASE WHEN started = 0 THEN $unstartedResult ELSE $unknownResult END,
+              error = CASE WHEN started = 0 THEN $unstarted WHEN name = $ask THEN $askInterrupted ELSE $unknown END,
+              result_json = CASE WHEN started = 0 THEN $unstartedResult
+                  WHEN name = $ask THEN $askInterruptedResult ELSE $unknownResult END,
               ended_at = CASE WHEN started = 1 THEN $ended ELSE NULL END
           WHERE run_id = $run AND result_json IS NULL;
           UPDATE sessions SET working_time_incomplete = 1 WHERE session_id = $session;
           UPDATE execution_runs SET outcome = $failed, working_started_at = NULL WHERE run_id = $run;
           """, ("$run", run.RunId), ("$session", run.SessionId), ("$failed", (int)ExecutionOutcome.Failed),
+            ("$agentQuestion", (int)InputProvenance.AgentQuestion),
             ("$unstarted", "Interrupted before tool execution; tool was not executed."),
             ("$unknown", "Tool execution interrupted; effects may have occurred. Do not automatically retry."),
             ("$unstartedResult", toolResults.Error("Interrupted before tool execution; tool was not executed.")),
             ("$unknownResult", toolResults.Error("Tool execution interrupted; effects may have occurred. Do not automatically retry.")),
+            ("$ask", "ask_agent"), ("$askInterrupted", AskInterrupted), ("$askInterruptedResult", toolResults.Error(AskInterrupted)),
             ("$ended", StorageText.UtcTimestamp()));
         auxiliaryConversations.Retire(transaction, run.RunId, ExecutionOutcome.Failed);
         QueueMissingCompletions(transaction, run.RunId);
@@ -270,6 +306,10 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
       return true;
     });
   }
+
+  // Questions are in-memory only, so a restart discards every outstanding ask and its question.
+  private const string AskInterrupted =
+      "Interrupted by backend shutdown before an answer arrived; the question was discarded. Ask again if still needed.";
 
   // Synthetic interruption results need the same one-event guarantee as real completions.
   private void QueueMissingCompletions(SqliteTransaction transaction, Guid executionId) {

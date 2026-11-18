@@ -26,7 +26,7 @@ public sealed class UrdStore : IDisposable {
     MessageEdits = new(database, UserMessages);
     LlmResponses = new(database);
     AuxiliaryConversations = new(database, toolResults);
-    Executions = new(database, toolResults, AuxiliaryConversations);
+    Executions = new(database, toolResults, AuxiliaryConversations, UserMessages);
     Tools = new(database, toolResults);
     Content = new(database);
     Subagents = new(database, toolResults);

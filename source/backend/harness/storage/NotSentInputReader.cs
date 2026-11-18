@@ -4,7 +4,8 @@ using Urd.Core.Sessions;
 
 namespace Urd.Core.Storage;
 
-// The partial index skips sent history, including old runs, without scanning it.
+// The partial index skips sent history, including old runs, without scanning it. An unsent agent
+// question is never offered back as the user's own message.
 internal sealed class NotSentInputReader(Database database) {
   internal static readonly string PageSql = $"""
     SELECT i.input_id, i.run_id, i.ordinal,
@@ -12,6 +13,7 @@ internal sealed class NotSentInputReader(Database database) {
     FROM execution_inputs i
     JOIN input_decisions d ON d.session_id = i.session_id AND d.input_id = i.input_id
     WHERE i.session_id = $session AND i.not_sent = 1 AND i.ordinal < $cursor
+        AND i.provenance <> {(int)InputProvenance.AgentQuestion}
     ORDER BY i.ordinal DESC LIMIT 61;
     """;
 

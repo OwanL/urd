@@ -56,7 +56,9 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
               AND (r.ordinal > $cutRun OR (r.ordinal = $cutRun AND q.request_index >= $cutRequest))
       ), contents AS (
           SELECT q.run_ordinal, q.request_index, q.request_id, {(int)ContextRowKind.User} AS kind, i.ordinal AS content_index,
-              d.original_text_utf8 AS text_utf8, NULL AS call_id, NULL AS name, NULL AS json,
+              d.original_text_utf8 AS text_utf8, NULL AS call_id,
+              CASE WHEN i.provenance = {(int)InputProvenance.AgentQuestion} THEN (SELECT t.title
+                  FROM session_prepass_title t WHERE t.session_id = i.sender_session_id) END AS name, NULL AS json,
               NULL AS background, i.sender_session_id AS origin_request_id, NULL AS outcome, i.provenance AS input_provenance
           FROM requests q JOIN execution_inputs i ON i.request_id = q.request_id
           JOIN input_decisions d ON d.session_id = i.session_id AND d.input_id = i.input_id
@@ -132,7 +134,11 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
           messages.Add(ReadToolCompletion(row, forDelegation));
           break;
         case ContextRowKind.User:
-          var input = new ChatMessage(ChatRole.User, row.Text);
+          // A presented question is agent-authored data labelled with its sender, never human input.
+          // User rows carry the asking session's final title in the name column.
+          var input = new ChatMessage(ChatRole.User,
+              row.InputProvenance == InputProvenance.AgentQuestion && !forDelegation
+                  ? AgentQuestionContext.Describe(row.Name, row.Text!) : row.Text);
           messages.Add(input);
           inputMessages.Add(input);
           if (forDelegation) {

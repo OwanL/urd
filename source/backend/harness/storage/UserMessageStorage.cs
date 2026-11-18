@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using Urd.Core.Execution;
 using Urd.Core.Providers;
 using Urd.Core.Sessions;
 
@@ -62,6 +63,27 @@ internal sealed class UserMessageStorage(Database database) {
         ("$session", sessionId), ("$run", executionId), ("$input", submission.SubmissionId),
         ("$provenance", (int)provenance), ("$sender", senderSessionId));
     return (accepted, true);
+  }
+
+  // Writes one agent question into the request presenting it: an accepted decision on the run's own
+  // selection and an input already claimed by that request, attributed to the asking session.
+  internal void InsertPresentedQuestion(SqliteTransaction transaction, ExecutionIdentity run, Guid requestId,
+      QuestionPresentation question) {
+    if (database.Execute(transaction, """
+      INSERT INTO input_decisions (
+          session_id, input_id, expected_history_revision, original_text_utf8, decision, run_id, llm_selection_json)
+      SELECT r.session_id, $input, r.history_revision, $text, $accepted, r.run_id,
+          COALESCE(r.llm_selection_json, d.llm_selection_json)
+      FROM execution_runs r LEFT JOIN input_decisions d ON d.session_id = r.session_id AND d.input_id = r.input_id
+      WHERE r.session_id = $session AND r.run_id = $run;
+      INSERT INTO execution_inputs (session_id, input_id, run_id, request_id, provenance, sender_session_id)
+      VALUES ($session, $input, $run, $request, $provenance, $sender);
+      """,
+        ("$session", run.SessionId), ("$run", run.ExecutionId), ("$request", requestId),
+        ("$input", question.QuestionId), ("$text", StorageText.StrictUtf8.GetBytes(question.Prompt)),
+        ("$accepted", (int)MessageAcceptance.Accepted), ("$provenance", (int)InputProvenance.AgentQuestion),
+        ("$sender", question.SenderId)) != 2)
+      throw new InvalidOperationException("The presented question could not be saved.");
   }
 
   internal UserMessageReceipt? ReadReceipt(Guid sessionId, Guid submissionId)

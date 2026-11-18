@@ -28,12 +28,21 @@ public sealed class AgentQuestionsTests {
     Assert.True(queued[0].Wake);
     Assert.False(queued[1].Wake);
 
-    Assert.True(questions.AnswerCurrent(Recipient, "head answer"));
+    Guid firstRecipientRequestId = Guid.NewGuid();
+    QuestionPresentation firstPresentation = Assert.IsType<QuestionPresentation>(
+        questions.Present(Recipient, firstRecipientRequestId));
+    Assert.True(firstPresentation.First);
+    Assert.True(questions.AnswerPresented(Recipient, firstRecipientRequestId, "head answer"));
     Assert.Equal("head answer", (await first.WaitAsync(TestTimeout)).Answer);
     queued = questions.Queued(Recipient).ToArray();
     Assert.Equal(["call-2"], queued.Select(question => question.CallId));
 
-    Assert.True(questions.Answer(Recipient, queued[0].QuestionId, "second answer"));
+    Guid secondRecipientRequestId = Guid.NewGuid();
+    QuestionPresentation secondPresentation = Assert.IsType<QuestionPresentation>(
+        questions.Present(Recipient, secondRecipientRequestId));
+    Assert.True(secondPresentation.First);
+    Assert.False(questions.AnswerPresented(Recipient, firstRecipientRequestId, "late first answer"));
+    Assert.True(questions.AnswerPresented(Recipient, secondRecipientRequestId, "second answer"));
     Assert.Equal("second answer", (await second.WaitAsync(TestTimeout)).Answer);
     Assert.Empty(questions.Queued(Recipient));
   }
@@ -43,10 +52,11 @@ public sealed class AgentQuestionsTests {
     var questions = new AgentQuestions();
     using var token = new CancellationTokenSource();
     Task<AgentQuestionResult> ask = questions.Enqueue(Recipient, Sender, RequestId, "call-1", "why?", true, token.Token);
-    Guid questionId = questions.Queued(Recipient).Single().QuestionId;
+    Guid recipientRequestId = Guid.NewGuid();
+    Assert.NotNull(questions.Present(Recipient, recipientRequestId));
 
-    Assert.True(questions.Answer(Recipient, questionId, "the answer"));
-    Assert.False(questions.Answer(Recipient, questionId, "the repeat"));
+    Assert.True(questions.AnswerPresented(Recipient, recipientRequestId, "the answer"));
+    Assert.False(questions.AnswerPresented(Recipient, recipientRequestId, "the repeat"));
     AgentQuestionResult result = await ask.WaitAsync(TestTimeout);
     Assert.Equal("the answer", result.Answer);
     Assert.Null(result.Error);
@@ -54,14 +64,18 @@ public sealed class AgentQuestionsTests {
   }
 
   [Fact]
-  public async Task AnswerCurrentRefusesAnEmptyMailboxAndUnknownRecipients() {
+  public async Task AnswerPresentedRequiresAQuestionShownToThatRequest() {
     var questions = new AgentQuestions();
     using var token = new CancellationTokenSource();
-    Assert.False(questions.AnswerCurrent(Recipient, "nobody answered"));
+    Guid recipientRequestId = Guid.NewGuid();
+    Assert.False(questions.AnswerPresented(Recipient, recipientRequestId, "nobody answered"));
     Task<AgentQuestionResult> ask = questions.Enqueue(Recipient, Sender, RequestId, "call-1", "why?", true, token.Token);
-    Assert.True(questions.AnswerCurrent(Recipient, "the answer"));
+    Assert.False(questions.AnswerPresented(Recipient, recipientRequestId, "not presented"));
+    Assert.NotNull(questions.Present(Recipient, recipientRequestId));
+    Assert.False(questions.AnswerPresented(Recipient, Guid.NewGuid(), "not this request"));
+    Assert.True(questions.AnswerPresented(Recipient, recipientRequestId, "the answer"));
     Assert.Equal("the answer", (await ask.WaitAsync(TestTimeout)).Answer);
-    Assert.False(questions.AnswerCurrent(Recipient, "answered twice"));
+    Assert.False(questions.AnswerPresented(Recipient, recipientRequestId, "answered twice"));
   }
 
   [Fact]
@@ -76,8 +90,9 @@ public sealed class AgentQuestionsTests {
     Assert.Equal(["call-2"], questions.Queued(Recipient).Select(question => question.CallId));
     await Assert.ThrowsAsync<TaskCanceledException>(() => ask.WaitAsync(TestTimeout));
 
-    Guid otherId = questions.Queued(Recipient).Single().QuestionId;
-    Assert.True(questions.Answer(Recipient, otherId, "still answerable"));
+    Guid recipientRequestId = Guid.NewGuid();
+    Assert.NotNull(questions.Present(Recipient, recipientRequestId));
+    Assert.True(questions.AnswerPresented(Recipient, recipientRequestId, "still answerable"));
     Assert.Equal("still answerable", (await other.WaitAsync(TestTimeout)).Answer);
   }
 
@@ -100,12 +115,13 @@ public sealed class AgentQuestionsTests {
       var cancellation = new CancellationTokenSource();
       try {
         Task<AgentQuestionResult> ask = questions.Enqueue(Recipient, Sender, RequestId, "call-1", "why?", true, cancellation.Token);
-        Guid questionId = questions.Queued(Recipient).Single().QuestionId;
+        Guid recipientRequestId = Guid.NewGuid();
+        Assert.NotNull(questions.Present(Recipient, recipientRequestId));
 
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Task<bool> answered = Task.Run(async () => {
           await gate.Task;
-          return questions.Answer(Recipient, questionId, "the answer");
+          return questions.AnswerPresented(Recipient, recipientRequestId, "the answer");
         });
         Task cancelled = Task.Run(async () => {
           await gate.Task;

@@ -151,14 +151,16 @@ public sealed class AgentRecipientsTests {
       SessionRecord child = fixture.Store.Sessions.CreateSubagent(Guid.NewGuid(), parent.Id, "spawn");
 
       IAgentQuestions questions = fixture.Manager;
+      using var cancellation = new CancellationTokenSource();
       Task<AgentQuestionResult> ask = questions.AskAgentAsync(fixture.Caller(child.Id, "ask-1"),
-          "parent", "what now?", wake: true, CancellationToken.None).WaitAsync(TestTimeout);
-      await fixture.WaitForQueuedAsync(parent.Id).WaitAsync(TestTimeout);
-      Assert.True(questions.AnswerAgent(fixture.Caller(parent.Id, "answer-1"), "parent answer"));
+          "parent", "what now?", wake: false, cancellation.Token).WaitAsync(TestTimeout);
+      QueuedQuestion question = await fixture.WaitForQueuedAsync(parent.Id).WaitAsync(TestTimeout);
+      Assert.Equal(parent.Id, question.RecipientId);
+      Assert.Equal(child.Id, question.SenderId);
+      Assert.Equal("what now?", question.Prompt);
 
-      AgentQuestionResult result = await ask;
-      Assert.Null(result.Error);
-      Assert.Equal("parent answer", result.Answer);
+      await cancellation.CancelAsync().WaitAsync(TestTimeout);
+      await Assert.ThrowsAsync<TaskCanceledException>(() => ask);
       Assert.Empty(fixture.Manager.Questions.Queued(parent.Id));
     } finally {
       await parent.StopAcceptingUserMessagesAsync();

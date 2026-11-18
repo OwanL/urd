@@ -21,6 +21,7 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock sess
 
   // Caller holds the session lock. The driver joins callbacks before settlement.
   internal Task StopAsync() {
+    session.FailPresentedQuestion();
     Task callbacks = execution.StopAsync();
     Wake();
     return callbacks;
@@ -31,9 +32,10 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock sess
     if (failure is not null) {
       backgroundToolFailure ??= failure;
       session.MarkNeedsAttention();
-      _ = execution.StopAsync();
+      _ = StopAsync();
+    } else {
+      Wake();
     }
-    Wake();
   }
 
   // Caller holds the session lock.
@@ -49,7 +51,7 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock sess
     Wake();
   }
 
-  internal async Task RunAsync(Task lockReleased) {
+  internal async Task RunAsync(Task lockReleased, LlmRequest? firstRequest) {
     try {
       await lockReleased;
       if (execution.IsManualCompaction) {
@@ -58,7 +60,7 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock sess
       }
       LlmRequest? request;
       using (await sessionLock.AcquireAsync())
-        request = ClaimContinuation();
+        request = IsStopping ? null : firstRequest ?? ClaimContinuation();
       if (request is null) {
         if (!IsStopping)
           throw new InvalidOperationException("The execution has no initial request and was not stopped.");
@@ -113,7 +115,7 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock sess
           }
         }
         stopCallbacks = outcome != ExecutionOutcome.Completed || IsStopping
-            ? execution.StopAsync() : execution.StopCallbacks;
+            ? StopAsync() : execution.StopCallbacks;
       }
       await WaitOrJoinAsync(wake, stopCallbacks);
       // Notifications are hints; always recheck durable request readiness.

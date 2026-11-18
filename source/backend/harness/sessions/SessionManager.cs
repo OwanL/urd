@@ -402,24 +402,22 @@ public sealed class SessionManager : IAsyncDisposable, ISubagentRunner, IAgentQu
     if (recipientId is not { } pinned)
       return new(null, error);
 
-    Task<AgentQuestionResult>? waiting;
+    SessionBase? target;
     using (await sessionsLock.AcquireAsync(cancellation)) {
       ThrowIfShuttingDown();
-      // The pinned identity is rechecked here so a disposal that raced resolution fences enqueue.
-      waiting = sessions.ContainsKey(pinned) || children.ContainsKey(pinned)
-          ? agentQuestions.Enqueue(pinned, caller.SessionId, caller.RequestId, caller.CallId, prompt, wake, cancellation)
-          : null;
+      target = sessions.TryGetValue(pinned, out PrimarySession? primary) ? primary : children.GetValueOrDefault(pinned);
     }
 
-    if (waiting is null)
-      return new(null, FinishedMessage(recipient));
-    return await waiting;
+    // Admission takes the recipient's lock after releasing the registry. A racing disposal or
+    // shutdown closes the mailbox, fencing admission even if we already captured the handle.
+    return target is null ? new(null, FinishedMessage(recipient))
+        : await target.QueueQuestionAsync(caller, prompt, wake, cancellation);
   }
 
   bool IAgentQuestions.AnswerAgent(HarnessToolContext caller, string answer) {
     ArgumentNullException.ThrowIfNull(caller);
     ArgumentException.ThrowIfNullOrWhiteSpace(answer);
-    return agentQuestions.AnswerCurrent(caller.SessionId, answer);
+    return agentQuestions.AnswerPresented(caller.SessionId, caller.RequestId, answer);
   }
 
   private async Task<(Guid? RecipientId, string? Error)> ResolveTitleAsync(string recipient, CancellationToken cancellation) {

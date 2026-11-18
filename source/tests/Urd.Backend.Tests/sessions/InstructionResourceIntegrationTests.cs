@@ -4,6 +4,7 @@ using Microsoft.Extensions.AI;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Execution;
 using Urd.Core.Preferences;
+using Urd.Core.Providers;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
 using Xunit;
@@ -17,12 +18,16 @@ public sealed class InstructionResourceIntegrationTests(ITestOutputHelper output
   [Theory]
   [InlineData(true)]
   [InlineData(false)]
-  public async Task FirstChatPreparesLargeInstructionCatalog(bool rejectSelector) {
+  public async Task FirstChatPreparesLargeInstructionCatalog(bool overflowSelector) {
     const int count = 1900;
+    const int outlierIndex = 0;
+    const int outlierPaddingBytes = 256 * 1024;
     const string launch = "Apply the project instructions.";
-    const string rejection = "400 Bad Request: maximum context length exceeded in instruction selector";
     string selectedPath = "";
-    ScriptedRequest? selector = null;
+    string outlierPath = "";
+    int outlierBytes = 0;
+    int? selectorThreshold = null;
+    var selectors = new List<ScriptedRequest>();
     ScriptedRequest? main = null;
     await using var fixture = new ExecutionFixture(new ScriptedChatClient(Route), [],
         store => new(store, () => throw new InvalidOperationException("No callback expected."),
@@ -33,49 +38,77 @@ public sealed class InstructionResourceIntegrationTests(ITestOutputHelper output
       string directory = Path.Combine(project, $"part-{index:D4}");
       Directory.CreateDirectory(directory);
       string path = Path.Combine(directory, "AGENTS.md");
-      string content = $"Instruction marker {index:D4}.";
+      string content = $"Instruction marker {index:D4}.\n{new string('x', index % 97)}";
+      if (index == outlierIndex)
+        content += new string('z', outlierPaddingBytes);
       await File.WriteAllTextAsync(path, content);
       expected.Add(path, content);
     }
 
     selectedPath = Path.Combine(project, "part-0950", "AGENTS.md");
+    outlierPath = Path.Combine(project, $"part-{outlierIndex:D4}", "AGENTS.md");
+    outlierBytes = Encoding.UTF8.GetByteCount(expected[outlierPath]);
+    Assert.True(outlierBytes > expected.Where(pair => pair.Key != outlierPath)
+        .Max(pair => Encoding.UTF8.GetByteCount(pair.Value)));
     Guid execution = await fixture.StartExecutionAsync(launch);
     SessionExecutionResult result = await fixture.Session.WaitForExecutionFinishAsync(execution).WaitAsync(TimeSpan.FromMinutes(2));
     Assert.Equal(ExecutionOutcome.Completed, result.Outcome);
 
-    Assert.NotNull(selector);
-    const string marker = "Candidates:\n";
-    string prompt = selector.LastUserText.ReplaceLineEndings("\n");
-    int start = prompt.LastIndexOf(marker, StringComparison.Ordinal);
-    Assert.True(start >= 0);
-    using JsonDocument candidates = JsonDocument.Parse(prompt[(start + marker.Length)..]);
-    var actual = candidates.RootElement.EnumerateArray().ToDictionary(entry => entry.GetProperty("Id").GetString()!,
-        entry => entry.GetProperty("Content").GetString()!, StringComparer.Ordinal);
+    Assert.NotEmpty(selectors);
+    var actual = ReadCandidates(selectors[0]);
     Assert.Equal(expected.OrderBy(pair => pair.Key), actual.OrderBy(pair => pair.Key));
-    output.WriteLine($"Selector user message: {Encoding.UTF8.GetByteCount(selector.LastUserText)} UTF-8 bytes for {actual.Count} documents.");
+    output.WriteLine($"Selector user message: {Encoding.UTF8.GetByteCount(selectors[0].LastUserText)} UTF-8 bytes for {actual.Count} documents.");
+    if (overflowSelector) {
+      Assert.Equal(2, selectors.Count);
+      int firstBytes = Encoding.UTF8.GetByteCount(selectors[0].LastUserText);
+      int retryBytes = Encoding.UTF8.GetByteCount(selectors[1].LastUserText);
+      int threshold = Assert.IsType<int>(selectorThreshold);
+      var retryCandidates = ReadCandidates(selectors[1]);
+      var expectedRetry = expected.Where(pair => pair.Key != outlierPath).ToDictionary(pair => pair.Key, pair => pair.Value,
+          StringComparer.Ordinal);
+      Assert.Equal(expectedRetry.OrderBy(pair => pair.Key), retryCandidates.OrderBy(pair => pair.Key));
+      Assert.True(firstBytes > threshold);
+      Assert.True(retryBytes <= threshold);
+      Assert.True(firstBytes - retryBytes >= outlierBytes);
+      output.WriteLine($"Selector context overflow retry: {retryBytes} UTF-8 bytes (threshold {threshold}) for {retryCandidates.Count} documents; dropped largest document ({outlierBytes} UTF-8 bytes).");
+    } else {
+      Assert.Single(selectors);
+    }
 
     Assert.NotNull(main);
     Assert.Equal(launch, main.LastUserText);
     string[] system = main.Messages.Where(message => message.Role == ChatRole.System).Select(message => message.Text).ToArray();
     string[] retained = system.SelectMany(text => text.Split('\n')).Select(line => line.TrimEnd('\r'))
         .Where(line => line.StartsWith("Instruction marker ", StringComparison.Ordinal)).Order(StringComparer.Ordinal).ToArray();
-    Assert.Equal(rejectSelector ? expected.Values.Order(StringComparer.Ordinal).ToArray() : [expected[selectedPath]], retained);
+    string[] expectedRetained = overflowSelector
+        ? expected.Where(pair => pair.Key != outlierPath).Select(pair => pair.Value.Split('\n')[0]).Order(StringComparer.Ordinal).ToArray()
+        : [expected[selectedPath].Split('\n')[0]];
+    Assert.Equal(expectedRetained, retained);
     output.WriteLine($"Main system messages: {system.Sum(Encoding.UTF8.GetByteCount)} UTF-8 bytes.");
     var status = Assert.Single(fixture.Store.Snapshots.ReadPersisted(fixture.Session.Id).Pruning!,
         item => item.Category == "instructions");
-    Assert.Equal(rejectSelector ? "fallback" : "completed", status.State);
+    Assert.Equal("completed", status.State);
     Assert.Equal(count, status.Total);
     Assert.Equal(retained.Length, status.Retained);
-    if (rejectSelector)
-      Assert.Contains(rejection, status.Error, StringComparison.Ordinal);
+    if (overflowSelector)
+      Assert.Contains("Skipped 1 instruction file", status.Error, StringComparison.Ordinal);
+    else
+      Assert.Null(status.Error);
 
     IAsyncEnumerable<ChatResponseUpdate> Route(ScriptedRequest request, CancellationToken token) {
       switch (request.Purpose) {
-        case "pruning.instructions":
-          selector = request;
-          if (rejectSelector && Encoding.UTF8.GetByteCount(request.LastUserText) > 128 * 1024)
-            throw new InvalidOperationException(rejection);
+        case "pruning.instructions": {
+          selectors.Add(request);
+          string[] candidateIds = ReadCandidateIds(request);
+          if (overflowSelector) {
+            int requestBytes = Encoding.UTF8.GetByteCount(request.LastUserText);
+            selectorThreshold ??= requestBytes - outlierBytes / 2;
+            if (requestBytes > selectorThreshold.Value)
+              throw new ProviderOperationException(ProviderFailure.ContextWindowExceeded);
+            return TextUpdates([JsonSerializer.Serialize(new { keptIds = candidateIds })], token);
+          }
           return TextUpdates([JsonSerializer.Serialize(new { keptIds = new[] { selectedPath } })], token);
+        }
         case "pruning.skills":
         case "pruning.tools":
           return TextUpdates(["{\"keptIds\":[]}"], token);
@@ -88,6 +121,19 @@ public sealed class InstructionResourceIntegrationTests(ITestOutputHelper output
           throw new InvalidOperationException($"Unexpected mock request purpose '{request.Purpose}'.");
       }
     }
+  }
+
+  private static string[] ReadCandidateIds(ScriptedRequest request) =>
+      ReadCandidates(request).Keys.ToArray();
+
+  private static Dictionary<string, string> ReadCandidates(ScriptedRequest request) {
+    const string marker = "Candidates:\n";
+    string prompt = request.LastUserText.ReplaceLineEndings("\n");
+    int start = prompt.LastIndexOf(marker, StringComparison.Ordinal);
+    Assert.True(start >= 0);
+    using JsonDocument candidates = JsonDocument.Parse(prompt[(start + marker.Length)..]);
+    return candidates.RootElement.EnumerateArray().ToDictionary(entry => entry.GetProperty("Id").GetString()!,
+        entry => entry.GetProperty("Content").GetString()!, StringComparer.Ordinal);
   }
 
   [Fact]

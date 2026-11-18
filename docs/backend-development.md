@@ -80,9 +80,13 @@ At a fresh session's first prompt, and the first request after successful compac
 `StartingContextBuilder.PrepareAsync` runs three independent, parallel selections over
 unprotected tools, skills and instruction documents. `StartingResourcePruner` validates
 kept IDs and retains the original resources in source order. Ordinary category failure
-keeps all its candidates and records fallback; successful siblings still apply. Stop
-cancels and joins preparation instead of falling back. Core tool protections are defaults,
-not mandatory; running background tools gain runtime protection after compaction.
+keeps all its candidates and records fallback; successful siblings still apply. The
+approved exception is confirmed instruction-context overflow: retry instruction selection
+with the largest unprotected files omitted first (by UTF-8 body size) and surface a
+cumulative warning. A later failure keeps the remaining files, not the omitted ones.
+Tools and skills retain their existing fallback. Stop cancels and joins preparation instead of falling back. Core tool
+protections are defaults, not mandatory; running background tools gain runtime protection
+after compaction.
 
 Exact ordered instruction/tool snapshots are activated per initial/compaction boundary
 in `session_starting_context`, atomically with request-start and user-message placement.
@@ -102,8 +106,8 @@ overrides through existing preferences. Each auxiliary operation defaults to `sm
 model-ID quality guessing. Configure that bucket in Settings → Model buckets. When a purpose has no
 configured choice, or the configured provider/model is unavailable, prepass runs on the run's own
 chat selection unchanged, including its reasoning effort, and each preparation summary reports
-`usedSessionModel` so the browser can show the stand-in. Genuine provider call failures after
-resolution keep all category candidates or leave the title unpublished.
+`usedSessionModel` so the browser can show the stand-in. The instruction context-limit retry
+above does not change how the auxiliary model is selected.
 Auxiliary conversations use isolated durable histories and
 only the supplied `read`/`bash` exploration capability set. See the [pruning plan](pruning-plan.md)
 for the fresh/manual/automatic input contract and evidence limits.

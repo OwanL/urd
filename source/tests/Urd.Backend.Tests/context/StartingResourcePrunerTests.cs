@@ -5,6 +5,7 @@ using Urd.Backend.Tests.Support;
 using Urd.Core.Context;
 using Urd.Core.Execution;
 using Urd.Core.Preferences;
+using Urd.Core.Providers;
 using Urd.Core.Sessions;
 using Urd.Core.Usage;
 using Xunit;
@@ -173,6 +174,112 @@ public sealed class StartingResourcePrunerTests {
     Assert.Equal(new[] { ("cancelled", 2, 1) }, statuses.Select(status => (status.State, status.Total, status.Retained)));
     Assert.Equal(0, client.Calls);
   }
+
+  [Fact]
+  public async Task InstructionOverflowDropsLargestUtf8BodiesWithStableTiesAndDoubles() {
+    DiscoveredInstructionDocument[] documents = [
+      Instruction("short", "12345"),
+      Instruction("tie-first", "ééé"),
+      Instruction("tie-second", "abcdef"),
+      Instruction("medium", "22"),
+      Instruction("last", "1")
+    ];
+    int attempt = 0;
+    var client = new ScriptedChatClient(token => {
+      if (Interlocked.Increment(ref attempt) <= 2)
+        throw new ProviderOperationException(ProviderFailure.ContextWindowExceeded);
+      return TextUpdates([JsonSerializer.Serialize(new { keptIds = new[] { documents[4].Identity, documents[3].Identity } })], token);
+    });
+    await using RunningParent parent = await StartParentAsync();
+    var runner = new ConversationRunner(parent.Fixture.Session.Recorder, _ => client, [], parent.Fixture.Session.WorkingDirectory);
+    var statuses = new ConcurrentQueue<StartingResourcePruningStatus>();
+    var pruner = CreatePruner(runner, status => { statuses.Enqueue(status); return Task.CompletedTask; });
+
+    StartingResourcePruningResult<DiscoveredInstructionDocument> result =
+        await pruner.PruneAsync(documents, protectedCount: 2, CancellationToken.None).WaitAsync(TestTimeout);
+
+    Assert.False(result.IsFallback);
+    Assert.Equal(new[] { documents[3], documents[4] }, result.Retained);
+    Assert.Equal(3, client.Calls);
+    Assert.Equal(documents.Select(document => document.Identity), CandidateIds(client.Requests[0]));
+    Assert.Equal(new[] { documents[0].Identity, documents[2].Identity, documents[3].Identity, documents[4].Identity },
+        CandidateIds(client.Requests[1]));
+    Assert.Equal(new[] { documents[3].Identity, documents[4].Identity }, CandidateIds(client.Requests[2]));
+    Assert.Contains("Skipped 1 instruction file", statuses.ElementAt(1).Error, StringComparison.Ordinal);
+    Assert.Contains("Skipped 3 instruction files", statuses.Last().Error, StringComparison.Ordinal);
+    Assert.Equal(new[] { ("running", 7, 7), ("running", 7, 6), ("running", 7, 4), ("completed", 7, 4) },
+        statuses.Select(status => (status.State, status.Total, status.Retained)));
+  }
+
+  [Fact]
+  public async Task InstructionOverflowAlwaysTriesLastCandidateThenFallsBackToProtectedOnly() {
+    DiscoveredInstructionDocument[] documents = [Instruction("one", "1"), Instruction("two", "22"), Instruction("three", "333")];
+    var client = new ScriptedChatClient(_ => throw new ProviderOperationException(ProviderFailure.ContextWindowExceeded));
+    await using RunningParent parent = await StartParentAsync();
+    var runner = new ConversationRunner(parent.Fixture.Session.Recorder, _ => client, [], parent.Fixture.Session.WorkingDirectory);
+    var statuses = new ConcurrentQueue<StartingResourcePruningStatus>();
+    var pruner = CreatePruner(runner, status => { statuses.Enqueue(status); return Task.CompletedTask; });
+
+    StartingResourcePruningResult<DiscoveredInstructionDocument> result =
+        await pruner.PruneAsync(documents, protectedCount: 1, CancellationToken.None).WaitAsync(TestTimeout);
+
+    Assert.True(result.IsFallback);
+    Assert.NotNull(result.Error);
+    Assert.Empty(result.Retained);
+    Assert.Equal(3, client.Calls);
+    Assert.Equal(new[] { documents[0].Identity }, CandidateIds(client.Requests[2]));
+    Assert.Contains("Skipped 3 instruction files", result.Error, StringComparison.Ordinal);
+    Assert.Equal(new[] { ("running", 4, 4), ("running", 4, 3), ("running", 4, 2), ("fallback", 4, 1) },
+        statuses.Select(status => (status.State, status.Total, status.Retained)));
+  }
+
+  [Fact]
+  public async Task UnrelatedFailureAfterInstructionOverflowKeepsOnlyRemainingCandidates() {
+    DiscoveredInstructionDocument[] documents = [Instruction("small", "1"), Instruction("large", "12345")];
+    int attempt = 0;
+    var client = new ScriptedChatClient(_ => throw new ProviderOperationException(
+        Interlocked.Increment(ref attempt) == 1 ? ProviderFailure.ContextWindowExceeded : ProviderFailure.ProviderUnavailable));
+    await using RunningParent parent = await StartParentAsync();
+    var runner = new ConversationRunner(parent.Fixture.Session.Recorder, _ => client, [], parent.Fixture.Session.WorkingDirectory);
+    var pruner = CreatePruner(runner, _ => Task.CompletedTask);
+
+    StartingResourcePruningResult<DiscoveredInstructionDocument> result =
+        await pruner.PruneAsync(documents, protectedCount: 1, CancellationToken.None).WaitAsync(TestTimeout);
+
+    Assert.True(result.IsFallback);
+    Assert.Contains("Skipped 1 instruction file", result.Error, StringComparison.Ordinal);
+    Assert.Contains("ProviderUnavailable", result.Error, StringComparison.Ordinal);
+    Assert.Same(documents[0], Assert.Single(result.Retained));
+    Assert.Equal(2, client.Calls);
+    Assert.Equal(new[] { documents[0].Identity }, CandidateIds(client.Requests[1]));
+  }
+
+  [Fact]
+  public async Task SkillContextOverflowDoesNotRetryOrExcludeCandidates() {
+    DiscoveredSkill[] skills = [Skill("first-overflow", "First"), Skill("second-overflow", "Second")];
+    var client = new ScriptedChatClient(_ => throw new ProviderOperationException(ProviderFailure.ContextWindowExceeded));
+    await using RunningParent parent = await StartParentAsync();
+    var runner = new ConversationRunner(parent.Fixture.Session.Recorder, _ => client, [], parent.Fixture.Session.WorkingDirectory);
+    var pruner = CreatePruner(runner, _ => Task.CompletedTask);
+
+    StartingResourcePruningResult<DiscoveredSkill> result =
+        await pruner.PruneAsync(skills, protectedCount: 1, CancellationToken.None).WaitAsync(TestTimeout);
+
+    Assert.True(result.IsFallback);
+    Assert.Equal(skills, result.Retained);
+    Assert.Equal(1, client.Calls);
+  }
+
+  private static string[] CandidateIds(IReadOnlyList<ChatMessage> request) {
+    string text = request[^1].Text;
+    int start = text.IndexOf("Candidates:", StringComparison.Ordinal);
+    Assert.True(start >= 0);
+    using JsonDocument json = JsonDocument.Parse(text[(start + "Candidates:".Length)..]);
+    return json.RootElement.EnumerateArray().Select(candidate => candidate.GetProperty("Id").GetString()!).ToArray();
+  }
+
+  private static DiscoveredInstructionDocument Instruction(string name, string text) =>
+      new(text, Path.Combine(Path.GetTempPath(), $"{name}.instructions.md"), Path.GetTempPath());
 
   private static StartingResourcePruner CreatePruner(
       ConversationRunner runner,

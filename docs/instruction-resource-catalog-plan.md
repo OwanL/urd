@@ -92,15 +92,14 @@ they are not an exhaustive OS matrix or a proof of discovery completeness on arb
 filesystems. The current implementation and tests do not establish pruning quality or a
 winner over keep-all fallback.
 
-A Windows first-chat integration test creates 1,900 short instruction files in a disposable
-workspace. The selector received all 1,900 paths and bodies in one 870,252-byte user message.
-When the scripted selector chose one document, the main request contained just that document
-and 5,350 bytes of system messages. When a simulated selector rejected messages over 128 KiB,
-the persisted status reported fallback and all 1,900 documents reached the main request
-(643,414 bytes of system messages). Sizes depend on path and body length; bytes are not
-tokens. The scripted main provider accepted both requests. A real provider may reject the
-keep-all request too. No candidate is silently truncated, and no context-fit guarantee or
-live-provider quality claim follows from this test.
+A Windows first-chat test created 1,900 instruction files in a disposable workspace. The
+selector received all paths and bodies (1,226,256 UTF-8 bytes); a scripted provider rejected
+that request with a context-window error. The retry omitted the largest file (262,169 bytes),
+and the provider accepted the smaller request (963,652 bytes). All 1,899 remaining files were
+selected and reached the main chat; the persisted preparation warning reported one skipped
+file. Without an overflow, the selector ran once and could choose just one file. These are
+request-size measurements with a scripted provider, not token counts or a guarantee that
+the main chat will fit. No live project data was sent.
 
 The 2026-11-18 Windows measurements below are historical filename-scan experiments, not
 release acceptance or cross-platform performance guarantees: two four-thread `fd` walks of

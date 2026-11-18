@@ -53,8 +53,10 @@ append-system resource is not automatically protected merely because of its form
 
 **Instruction input decision (2026-11-15):** supply the instruction pruner with the
 full contents of every unprotected candidate document upfront, not just paths or
-summaries requiring follow-up reads. Protected documents remain excluded. This does
-not select full skill-body loading or change the other categories' input contracts.
+summaries requiring follow-up reads. For a confirmed instruction-context overflow,
+retry with the largest unprotected files omitted first (by UTF-8 body size)
+and surface a cumulative warning. Protected documents remain excluded. This does not
+select full skill-body loading or change the other categories' input contracts.
 
 **Model selection decision:** each category uses the configured `small` model bucket
 by default. In Settings, users can override that default with a specific provider/model
@@ -646,10 +648,18 @@ successful pruning, but do not block the main agent merely because selection fai
 For example, failed tool pruning retains all available tools while successful skill
 and instruction selections still apply.
 
+**Approved exception:** a confirmed instruction-context overflow retries instruction
+selection with the largest unprotected files omitted first (by UTF-8 body size).
+Drop one, then two, then four on successive rejections; always try the smallest file
+alone before dropping it. Surface a cumulative warning for the omissions, even after
+success. A later fallback keeps the remaining files. Tools and skills are unchanged.
+
 User cancellation stops the preparation; it does not activate keep-all-and-continue.
 Existing current-permission and owned-work cleanup requirements still apply. This
-settles the fallback, not retry policy or the precise failure UI. The later no-budget
-decision rules out adding a pruning-specific timeout; existing timeouts can still fail.
+settles the general fallback; the approved instruction-overflow exception above defines
+that retry path, while other retry details and the precise failure UI remain unsettled.
+The later no-budget decision rules out adding a pruning-specific timeout; existing
+timeouts can still fail.
 
 ## Discussed working defaults
 

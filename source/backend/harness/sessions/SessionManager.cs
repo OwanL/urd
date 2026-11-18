@@ -107,6 +107,37 @@ public sealed class SessionManager : IAsyncDisposable, ISubagentRunner {
     return store.Sessions.ListPrimaryIds(cursor);
   }
 
+  // Capture open handles only; saved primaries that have never been opened are not live here.
+  // Read each session outside the registry lock and recheck children after those reads.
+  async Task<IReadOnlyList<LiveAgent>> ISubagentRunner.ListLiveAgentsAsync(CancellationToken cancellation) {
+    SessionBase[] handles;
+    using (await sessionsLock.AcquireAsync(cancellation))
+      handles = [.. sessions.Values, .. children.Values];
+
+    var observations = new List<(Guid Id, Guid? ParentId, string? Title, bool Generating, string State)>();
+    foreach (SessionBase session in handles) {
+      string? status = null;
+      using IDisposable subscription = await session.SubscribeAsync(change => status ??= change.Status, watched: false, cancellation);
+      SessionSnapshot snapshot = await session.ReadSnapshotAsync(cancellation);
+      (string? title, bool generating) = store.Sessions.ReadAgentTitle(session.Id);
+      SessionRecord record = store.Sessions.Read(session.Id)!;
+      string state = status switch {
+        "waiting" => "waiting for background task",
+        "running" or "compacting" => "active",
+        _ => snapshot.UnsettledExecutionId is null ? "idle" : "active"
+      };
+      observations.Add((session.Id, record.ParentSessionId, title, generating, state));
+    }
+
+    using (await sessionsLock.AcquireAsync(cancellation))
+      observations.RemoveAll(agent => !sessions.ContainsKey(agent.Id) && !children.ContainsKey(agent.Id));
+
+    IReadOnlyDictionary<Guid, AgentTitle> titles = AgentTitles.ForListing(
+        observations.Select(agent => (agent.Id, agent.Title, agent.Generating)).ToArray());
+    return observations.Select(agent => new LiveAgent(titles[agent.Id], agent.State,
+        agent.ParentId is { } parent && titles.TryGetValue(parent, out AgentTitle? parentTitle) ? parentTitle : null)).ToArray();
+  }
+
   // Fences new work and stops this manager's primary sessions and children, waiting for saved
   // settlement. Cancellation abandons only this wait. The caller still owns the store and client.
   public async Task ShutdownSessionsAsync(CancellationToken waitCancellation = default) {
@@ -184,7 +215,7 @@ public sealed class SessionManager : IAsyncDisposable, ISubagentRunner {
   private ToolCatalog CreateToolCatalog(PendingToolCalls pending, bool processTools, out ChatProcesses? processes) {
     processes = null;
     AgentTool[] shared = [new WebSearchTool(browser), new WebReadTool(browser),
-      new ListPendingCallsTool(pending), new CancelPendingCallsTool(pending), new SubagentTool()];
+      new ListPendingCallsTool(pending), new CancelPendingCallsTool(pending), new SubagentTool(), new ListAgentsTool()];
     if (toolSettings is null || !processTools)
       return new([.. injectedTools, .. shared]);
     if (!OperatingSystem.IsWindows())

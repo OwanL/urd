@@ -19,6 +19,7 @@ internal sealed record HarnessToolContext(Guid SessionId, Guid ExecutionId, stri
 // session management to tools.
 internal interface IHarnessSessionServices {
   SessionRecord? Read(Guid sessionId);
+  Task<IReadOnlyList<LiveAgent>> ListLiveAgentsAsync(CancellationToken cancellation);
 
   // Runs one child to its final report under the invoking session model. The caller context
   // owns the invoking request and call identity.

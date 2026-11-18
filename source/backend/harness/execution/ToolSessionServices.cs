@@ -9,6 +9,10 @@ internal sealed class ToolSessionServices(SessionStorage sessions, ISubagentRunn
     : IHarnessSessionServices {
   public SessionRecord? Read(Guid sessionId) => sessions.Read(sessionId);
 
+  public Task<IReadOnlyList<LiveAgent>> ListLiveAgentsAsync(CancellationToken cancellation) =>
+      subagents?.ListLiveAgentsAsync(cancellation)
+          ?? throw new InvalidOperationException("This session does not support agent listing.");
+
   public Task<SubagentRunResult> RunSubagentAsync(HarnessToolContext caller, SubagentRunRequest request,
       CancellationToken cancellation) =>
       subagents?.RunSubagentAsync(caller, request, cancellation)

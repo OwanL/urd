@@ -64,6 +64,15 @@ internal sealed class SessionStorage(Database database) {
       "SELECT session_id, history_revision, working_directory, kind, parent_session_id, owning_call_id FROM sessions WHERE session_id = $id;",
       ReadRecord, ("$id", sessionId)));
 
+  // Read title and generation state together so a completed attempt is never shown as a placeholder.
+  internal (string? Title, bool Generating) ReadAgentTitle(Guid sessionId) => database.RunLocked(() =>
+      database.QuerySingleOrDefault(null, """
+        SELECT t.title, EXISTS(SELECT 1 FROM session_prepass_details d
+            WHERE d.session_id = s.session_id AND d.category = 'title' AND d.state = 'running') AS generating
+        FROM sessions s LEFT JOIN session_prepass_title t ON t.session_id = s.session_id
+        WHERE s.session_id = $id;
+        """, row => (row.NullableString("title"), row.Bool("generating")), ("$id", sessionId)));
+
   internal bool HasAcceptedInput(Guid sessionId) => database.RunLocked(() => database.Scalar<bool>(null, """
       SELECT EXISTS(SELECT 1 FROM input_decisions WHERE session_id = $session AND decision = 1);
       """, ("$session", sessionId)));

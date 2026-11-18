@@ -446,6 +446,155 @@ public sealed class SubagentRunTests {
   }
 
   [Fact]
+  public async Task ListsOpenPrimariesAndNestedChildrenThroughTheToolUntilDisposal() {
+    const string nestedTask = "nested list mission";
+    var entered = Signal();
+    var release = Signal();
+    var client = new ScriptedChatClient(Route);
+    await using var fixture = await SubagentRunFixture.OpenAsync(client);
+    PrimarySession parent = await fixture.Manager.CreatePrimaryAsync();
+    await fixture.Manager.CreatePrimaryAsync(); // an idle, untitled live primary
+    Guid execution = await StartParentAsync(parent);
+    try {
+      await entered.Task.WaitAsync(TestTimeout);
+      SessionRecord child = ChildForCall(fixture, "outer-list");
+      SessionRecord nested = ChildForCall(fixture, "inner-list");
+      string parentTitle = fixture.Store.Snapshots.ReadPersisted(parent.Id).Title!;
+      string childTitle = fixture.Store.Snapshots.ReadPersisted(child.Id).Title!;
+      string nestedTitle = fixture.Store.Snapshots.ReadPersisted(nested.Id).Title!;
+      IReadOnlyList<LiveAgent> agents = await ((ISubagentRunner)fixture.Manager).ListLiveAgentsAsync(CancellationToken.None);
+      Assert.Equal(4, agents.Count); // the fixture's stored-but-unopened primary is excluded
+      Assert.Contains(agents, agent => agent.Title.Text == "new session" && agent.Title.IsPlaceholder && agent.State == "idle");
+      Assert.Contains(agents, agent => agent.Title.Text == parentTitle && !agent.Title.IsPlaceholder
+          && agent.State == "active" && agent.ParentTitle is null);
+      Assert.Contains(agents, agent => agent.Title.Text == childTitle && agent.State == "active"
+          && agent.ParentTitle?.Text == parentTitle);
+      Assert.Contains(agents, agent => agent.Title.Text == nestedTitle && agent.State == "active"
+          && agent.ParentTitle?.Text == childTitle);
+      FunctionResultContent listed = Assert.Single(client.Requests.SelectMany(messages => messages)
+          .SelectMany(message => message.Contents).OfType<FunctionResultContent>(), result => result.CallId == "list-live");
+      string text = listed.Result!.ToString()!;
+      Assert.Contains($"title: {nestedTitle} | state: active | parent: {childTitle}", text, StringComparison.Ordinal);
+      Assert.Contains("title: new session [not addressable] | state: idle", text, StringComparison.Ordinal);
+      Assert.DoesNotContain("canAsk", text, StringComparison.Ordinal);
+    } finally {
+      release.TrySetResult();
+    }
+    Assert.Equal(ExecutionOutcome.Completed,
+        (await parent.WaitForExecutionFinishAsync(execution).WaitAsync(TestTimeout)).Outcome);
+    IReadOnlyList<LiveAgent> after = await ((ISubagentRunner)fixture.Manager).ListLiveAgentsAsync(CancellationToken.None);
+    Assert.Equal(2, after.Count);
+    Assert.All(after, agent => Assert.Null(agent.ParentTitle));
+
+    IAsyncEnumerable<ChatResponseUpdate> Route(ScriptedRequest request, CancellationToken token) {
+      switch (request.Purpose) {
+        case "title":
+          return TextUpdates([ChildTitle], token);
+        case "conversation":
+          if (HasUserText(request, nestedTask))
+            return HasResult(request, "list-live") ? Paused(entered, release, token)
+                : ToolBatch(token, new FunctionCallContent("list-live", "list_agents"));
+          if (HasUserText(request, AssignmentTask))
+            return HasResult(request, "inner-list") ? TextUpdates([ChildReport], token)
+                : ToolBatch(token, Delegate("inner-list", nestedTask));
+          return HasResult(request, "outer-list") ? Complete(token)
+              : ToolBatch(token, Delegate("outer-list", AssignmentTask));
+        case { } pruning when pruning.StartsWith("pruning.", StringComparison.Ordinal):
+          return TextUpdates([PrepassTolerantChatClient.KeepAll(request.Messages)], token);
+        default:
+          throw new InvalidOperationException($"Unexpected purpose '{request.Purpose}'.");
+      }
+    }
+  }
+
+  [Fact]
+  public async Task ListsNumberedPlaceholdersWhileTitleGenerationRuns() {
+    var bothGenerating = Signal();
+    var titleEntered = Signal();
+    var release = Signal();
+    int titleCalls = 0;
+    var client = new ScriptedChatClient(Route);
+    await using var fixture = await SubagentRunFixture.OpenAsync(client);
+    PrimarySession first = await fixture.Manager.CreatePrimaryAsync();
+    PrimarySession second = await fixture.Manager.CreatePrimaryAsync();
+    await fixture.Manager.CreatePrimaryAsync();
+    await fixture.Manager.CreatePrimaryAsync();
+    Guid firstExecution = await StartParentAsync(first);
+    Guid secondExecution = await StartParentAsync(second);
+    try {
+      await bothGenerating.Task.WaitAsync(TestTimeout);
+      IReadOnlyList<LiveAgent> agents = await ((ISubagentRunner)fixture.Manager).ListLiveAgentsAsync(CancellationToken.None);
+      Assert.Equal(new[] { "generating title", "generating title (2)", "new session", "new session (2)" },
+          agents.Select(agent => agent.Title.Text));
+      Assert.All(agents, agent => Assert.True(agent.Title.IsPlaceholder));
+    } finally {
+      release.TrySetResult();
+    }
+    await first.WaitForExecutionFinishAsync(firstExecution).WaitAsync(TestTimeout);
+    await second.WaitForExecutionFinishAsync(secondExecution).WaitAsync(TestTimeout);
+
+    IAsyncEnumerable<ChatResponseUpdate> Route(ScriptedRequest request, CancellationToken token) {
+      switch (request.Purpose) {
+        case "title":
+          if (Interlocked.Increment(ref titleCalls) == 2)
+            bothGenerating.TrySetResult();
+          return Paused(titleEntered, release, token);
+        case "conversation":
+          return Complete(token);
+        case { } pruning when pruning.StartsWith("pruning.", StringComparison.Ordinal):
+          return TextUpdates([PrepassTolerantChatClient.KeepAll(request.Messages)], token);
+        default:
+          throw new InvalidOperationException($"Unexpected purpose '{request.Purpose}'.");
+      }
+    }
+  }
+
+  [Fact]
+  public async Task ListsWaitingForBackgroundTask() {
+    var entered = Signal();
+    var release = Signal();
+    var waiting = Signal();
+    var sleeper = new TestAgentTool("sleeper", async (_, _, cancellation) => {
+      entered.TrySetResult();
+      await release.Task.WaitAsync(cancellation);
+      return new ToolOutput("woke", []);
+    });
+    var client = new ScriptedChatClient(Route);
+    await using var fixture = await SubagentRunFixture.OpenAsync(client, [sleeper]);
+    PrimarySession parent = await fixture.Manager.CreatePrimaryAsync();
+    using IDisposable subscription = await parent.SubscribeAsync(change => {
+      if (change.Status == "waiting")
+        waiting.TrySetResult();
+    }, watched: false);
+    Guid execution = await StartParentAsync(parent);
+    try {
+      await entered.Task.WaitAsync(TestTimeout);
+      await waiting.Task.WaitAsync(TestTimeout);
+      LiveAgent agent = Assert.Single(await ((ISubagentRunner)fixture.Manager).ListLiveAgentsAsync(CancellationToken.None));
+      Assert.Equal("waiting for background task", agent.State);
+    } finally {
+      release.TrySetResult();
+    }
+    Assert.Equal(ExecutionOutcome.Completed,
+        (await parent.WaitForExecutionFinishAsync(execution).WaitAsync(TestTimeout)).Outcome);
+
+    IAsyncEnumerable<ChatResponseUpdate> Route(ScriptedRequest request, CancellationToken token) {
+      switch (request.Purpose) {
+        case "title":
+          return TextUpdates([ChildTitle], token);
+        case "conversation":
+          return HasResult(request, "sleep") ? Complete(token)
+              : ToolBatch(token, new FunctionCallContent("sleep", "sleeper",
+                  new Dictionary<string, object?> { ["background"] = true }));
+        case { } pruning when pruning.StartsWith("pruning.", StringComparison.Ordinal):
+          return TextUpdates([PrepassTolerantChatClient.KeepAll(request.Messages)], token);
+        default:
+          throw new InvalidOperationException($"Unexpected purpose '{request.Purpose}'.");
+      }
+    }
+  }
+
+  [Fact]
   public async Task ParentStopCascadesThroughNestedSubagentsAndJoinsCleanup() {
     const string nestedTask = "nested compass mission";
     var entered = Signal();

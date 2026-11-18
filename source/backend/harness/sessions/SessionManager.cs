@@ -218,7 +218,8 @@ public sealed class SessionManager : IAsyncDisposable, ISubagentRunner, IAgentQu
   private ToolCatalog CreateToolCatalog(PendingToolCalls pending, bool processTools, out ChatProcesses? processes) {
     processes = null;
     AgentTool[] shared = [new WebSearchTool(browser), new WebReadTool(browser),
-      new ListPendingCallsTool(pending), new CancelPendingCallsTool(pending), new SubagentTool(), new ListAgentsTool()];
+      new ListPendingCallsTool(pending), new CancelPendingCallsTool(pending), new SubagentTool(), new ListAgentsTool(),
+      new AskAgentTool(), new AnswerAgentTool()];
     if (toolSettings is null || !processTools)
       return new([.. injectedTools, .. shared]);
     if (!OperatingSystem.IsWindows())

@@ -34,7 +34,7 @@ public sealed class AgentRecipientsTests {
       await releaseChildTool.Task.WaitAsync(cancellation);
       return new ToolOutput("echoed", []);
     });
-    await using var fixture = await AgentFixture.OpenAsync(client, [echo, new AnswerAgentTool()]);
+    await using var fixture = await AgentFixture.OpenAsync(client, [echo]);
     ISubagentRunner runner = fixture.Manager;
     Task<SubagentRunResult> run = runner.RunSubagentAsync(fixture.Caller(fixture.ParentSessionId, "spawn"),
         new("small", SubagentContextMode.None, ChildTask), CancellationToken.None).WaitAsync(TestTimeout);

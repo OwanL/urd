@@ -282,9 +282,8 @@ public sealed class AgentWaitCycleTests {
           new ScriptedOpenAIHandler("""
             {"object":"list","data":[{"id":"wait-test","object":"model","created":1700000000,"owned_by":"fixture","context_window":32000}]}
             """, "application/json"));
-      // Opt in only here; production does not expose either communication tool yet.
-      Manager = new SessionManager(store, _ => client, [new AskAgentTool(), new AnswerAgentTool()],
-          Path.GetDirectoryName(database.Path)!, new ModelSelector(providers));
+      // The default catalog already carries both communication tools; asks run end to end.
+      Manager = new SessionManager(store, _ => client, modelSelector: new ModelSelector(providers));
     }
 
     internal async Task ConfigureBucketAsync() {

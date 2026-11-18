@@ -39,7 +39,7 @@ public sealed class ToolCompositionTests {
         sessionId = session.Id;
         await SubmitAsync(session);
         Assert.Equal("original", await File.ReadAllTextAsync(Path.Combine(first, "note.txt")));
-        Assert.All(client.Options, options => Assert.Equal(new[] { "bash", "cancel_pending_calls", "edit", "list_agents", "list_pending_calls", "read", "subagent", "web_read", "web_search", "write" },
+        Assert.All(client.Options, options => Assert.Equal(new[] { "answer_agent", "ask_agent", "bash", "cancel_pending_calls", "edit", "list_agents", "list_pending_calls", "read", "subagent", "web_read", "web_search", "write" },
             options!.Tools!.Select(tool => tool.Name).Order(StringComparer.Ordinal)));
       } finally {
         await manager.ShutdownSessionsAsync().WaitAsync(TestTimeout);
@@ -62,7 +62,7 @@ public sealed class ToolCompositionTests {
       Assert.Empty(Directory.EnumerateFileSystemEntries(second));
       PrimarySession toolFree = await loadedManager.GetPrimaryAsync(toolFreeId);
       await SubmitAsync(toolFree);
-      Assert.Equal(new[] { "cancel_pending_calls", "list_agents", "list_pending_calls", "subagent", "web_read", "web_search" },
+      Assert.Equal(new[] { "answer_agent", "ask_agent", "cancel_pending_calls", "list_agents", "list_pending_calls", "subagent", "web_read", "web_search" },
           nextClient.Options[^1]!.Tools!.Select(tool => tool.Name).Order(StringComparer.Ordinal));
       Assert.Null(reopened.Sessions.Read(toolFreeId)!.WorkingDirectory);
     } finally {
@@ -84,7 +84,7 @@ public sealed class ToolCompositionTests {
       PrimarySession session = await manager.CreatePrimaryAsync();
       Assert.Null(store.Sessions.Read(session.Id)!.WorkingDirectory);
       await SubmitAsync(session);
-      Assert.Equal(new[] { "cancel_pending_calls", "list_agents", "list_pending_calls", "subagent", "web_read", "web_search" },
+      Assert.Equal(new[] { "answer_agent", "ask_agent", "cancel_pending_calls", "list_agents", "list_pending_calls", "subagent", "web_read", "web_search" },
           client.Options[0]!.Tools!.Select(tool => tool.Name).Order(StringComparer.Ordinal));
       Assert.Contains(client.Requests.SelectMany(input => input).SelectMany(message => message.Contents),
           content => content is FunctionResultContent result && result.Result?.ToString()?.Contains("web_read failed:") == true);

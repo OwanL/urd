@@ -458,7 +458,7 @@ public sealed class AgentQuestionExecutionTests {
 
   private sealed record CapturedCall(HarnessToolContext Context, TaskCompletionSource Release);
 
-  // Captures real request identities without registering ask_agent or answer_agent in the catalog.
+  // Captures real request identities; the two communication tools live in the shared catalog.
   private sealed class QuestionProbe : HarnessTool {
     internal Channel<CapturedCall> Calls { get; } = Channel.CreateUnbounded<CapturedCall>();
     internal TaskCompletionSource? CleanupEntered { get; set; }
@@ -511,7 +511,7 @@ public sealed class AgentQuestionExecutionTests {
       // prepass model resolution fails and pruning keeps every candidate.
       if (summarize is not null)
         providers = new ProviderManager(store, () => new Uri("http://localhost:54321/api/providers/callback"));
-      tools = summarize is null ? [probe] : [probe, new AnswerAgentTool()];
+      tools = [probe];
       Client = summarize is null ? new ScriptedChatClient(RespondToConversation) : new ScriptedChatClient(
           (request, cancellation) => request.Purpose switch {
             "title" => TextUpdates(["Test session"], cancellation),

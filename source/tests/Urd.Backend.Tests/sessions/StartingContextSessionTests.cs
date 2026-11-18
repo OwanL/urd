@@ -47,7 +47,7 @@ public sealed class StartingContextSessionTests {
       await SubmitAndWaitAsync(session, "second input");
 
       StartingContext saved = Assert.IsType<StartingContext>(reopened.StartingContexts.Read(sessionId));
-      Assert.Equal(new[] { "work", "web_search", "web_read", "list_pending_calls", "cancel_pending_calls", "subagent", "list_agents" }, saved.Tools.Select(item => item.Name));
+      Assert.Equal(new[] { "work", "web_search", "web_read", "list_pending_calls", "cancel_pending_calls", "subagent", "list_agents", "ask_agent", "answer_agent" }, saved.Tools.Select(item => item.Name));
       IReadOnlyList<IReadOnlyList<ChatMessage>> requests = client.Requests;
       Assert.Equal(3, requests.Count);
       for (int index = 0; index < requests.Count; index++) {

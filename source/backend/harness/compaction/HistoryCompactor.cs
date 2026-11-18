@@ -69,8 +69,7 @@ internal static class HistoryCompactor {
       throw new InvalidDataException("The compaction summary did not finish successfully.");
 
     string summary = string.Concat(response.Messages.Where(message => message.Role == ChatRole.Assistant)
-        .SelectMany(message => message.Contents.OfType<TextContent>()
-            .Where(content => content.RawRepresentation is null).Select(content => content.Text))).Trim();
+        .SelectMany(message => message.Contents.OfType<TextContent>().Select(content => content.Text))).Trim();
     if (summary.Length == 0 || summary.Length > MaxSummaryCharacters)
       throw new InvalidDataException("The compaction summary was empty or exceeded its size limit.");
     return summary;

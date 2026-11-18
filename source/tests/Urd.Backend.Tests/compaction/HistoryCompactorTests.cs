@@ -182,6 +182,7 @@ public sealed class HistoryCompactorTests {
     GeneratedCompactionSummary result = await HistoryCompactor.GenerateSummaryAsync(client, TestLlmSelection.Default, plan, default);
 
     Assert.True(result.EstimatedContextTokensAfter < plan.EstimatedContextTokensBefore);
+    Assert.Equal("Goal: keep context.\nFiles read: src/old.cs", result.Summary);
     Assert.Equal(ContextTokenBudget.EstimateMessages(
         new[] { ModelHistory.SummaryMessage(plan.AppendBackgroundToolCalls(result.Summary)) }
             .Concat(context.Messages.Skip(plan.FirstRetainedMessageIndex).Select(entry => entry.Message))),
@@ -244,10 +245,11 @@ public sealed class HistoryCompactorTests {
 
   private static ScriptedChatClient CreateClient(string summary, ChatFinishReason? finishReason = null,
       bool includeToolCall = false) => new(_ => throw new NotSupportedException(), _ => {
+    var text = new TextContent(summary) { RawRepresentation = new object() };
     ChatMessage response = includeToolCall
-        ? new ChatMessage(ChatRole.Assistant, [new TextContent(summary),
+        ? new ChatMessage(ChatRole.Assistant, [text,
             new FunctionCallContent("summary-call", "lookup", new Dictionary<string, object?>())])
-        : new ChatMessage(ChatRole.Assistant, summary);
+        : new ChatMessage(ChatRole.Assistant, [text]);
     return Task.FromResult(new ChatResponse(response) { FinishReason = finishReason ?? ChatFinishReason.Stop });
   });
 

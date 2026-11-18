@@ -565,18 +565,6 @@ export class WorkspaceCommands {
 
   observeSnapshot(snapshot: SessionSnapshot, knownWhenRead: string | null): void {
     const saved = this.access.read().chats[snapshot.sessionId];
-    const title = snapshot.title;
-    if (
-      saved &&
-      title !== null &&
-      title !== undefined &&
-      (saved.title !== title || saved.titleProvenance !== "generated")
-    )
-      this.access.updateChat(snapshot.sessionId, (previous) => ({
-        ...previous,
-        title,
-        titleProvenance: "generated",
-      }));
     if (
       saved?.knownExecutionId &&
       executionSettled(snapshot, saved.knownExecutionId, knownWhenRead)

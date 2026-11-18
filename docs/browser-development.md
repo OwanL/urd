@@ -48,8 +48,9 @@ compaction preparations never show it. The disclosure flags settled issues and r
 open until pointer and keyboard focus leave. Read-only tooltips load detail and resource pages
 on demand, including model, elapsed
 time, cost (unknown or estimated where applicable), and bounded provider-emitted reasoning and
-output previews; reasoning is never inferred. Tabs use guarded
-backend title metadata or the existing placeholder, never a first-prompt excerpt.
+output previews; reasoning is never inferred. Open tabs receive backend title metadata via
+session status, including inactive tabs, without reading their transcripts. Without a published
+title they keep the existing placeholder.
 Before the first accepted message, the empty transcript centers the default and current
 working-directory paths with explicit Edit actions. Edit opens a single directory editor
 with breadcrumbs and an editable address, with an explicit Select folder/Cancel decision;

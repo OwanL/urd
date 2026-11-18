@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   applyContinuationReceipt,
   applyReceipt,
+  applySessionTitle,
   beginContinuation,
   beginSubmission,
   decodeWorkspace,
@@ -145,6 +146,31 @@ void test("new state is independent, empty and does not invent a selection", () 
   assert.equal(typeof chat.title, "string");
   assert.equal(chat.titleProvenance, "placeholder");
   assert.deepEqual(decodeWorkspace(encodeWorkspace(emptyWorkspace())), emptyWorkspace());
+});
+
+void test("an inactive tab's title leaves its draft, pending send and navigation intact", () => {
+  const before = workspace();
+  const activeId = "active";
+  before.tabs.push(activeId);
+  before.chats[activeId] = newChat(null);
+  before.activeId = activeId;
+  assert.equal(applySessionTitle(before, sessionId, null), before);
+  assert.equal(applySessionTitle(before, "missing", "Backend title"), before);
+
+  const after = applySessionTitle(before, sessionId, "Backend title");
+  assert.deepEqual(after, {
+    ...before,
+    chats: {
+      ...before.chats,
+      [sessionId]: {
+        ...before.chats[sessionId],
+        title: "Backend title",
+        titleProvenance: "generated",
+      },
+    },
+  });
+  assert.equal(applySessionTitle(after, sessionId, "Backend title"), after);
+  assert.equal(applySessionTitle(after, sessionId, null), after);
 });
 
 void test("draft edits increment the version without mutating earlier state", () => {

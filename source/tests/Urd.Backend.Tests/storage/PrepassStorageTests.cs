@@ -21,8 +21,8 @@ public sealed class PrepassStorageTests {
 
     Assert.True(store.Prepass.TryClaimTitle(identity));
     Assert.False(store.Prepass.TryClaimTitle(identity));
-    Assert.True(store.Prepass.PublishTitle(identity, "First request"));
-    Assert.False(store.Prepass.PublishTitle(identity, "Replacement title"));
+    Assert.Equal("First request", store.Prepass.PublishTitle(identity, "First request"));
+    Assert.Null(store.Prepass.PublishTitle(identity, "Replacement title"));
     Assert.True(store.Prepass.WritePruningStatus(identity, Guid.Empty,
         new StartingResourcePruningStatus("tools", "running", 4, 3)));
     Assert.True(store.Prepass.WritePruningStatus(identity, Guid.Empty,
@@ -48,7 +48,7 @@ public sealed class PrepassStorageTests {
         true, retry, null);
     var retryIdentity = new ExecutionIdentity(session, retry, 0);
     Assert.False(store.Prepass.TryClaimTitle(retryIdentity));
-    Assert.False(store.Prepass.PublishTitle(identity, "Late old title"));
+    Assert.Null(store.Prepass.PublishTitle(identity, "Late old title"));
     Assert.True(store.Prepass.WritePruningStatus(retryIdentity, Guid.Empty,
         new StartingResourcePruningStatus("skills", "running", 2, 2)));
     Assert.Equal(ExecutionOutcome.Cancelled,
@@ -82,7 +82,7 @@ public sealed class PrepassStorageTests {
       Assert.True(outputTail.Accepted);
       Assert.True(store.Prepass.RecordPreview(identity, "title", reasoning: new string('r', 8193)).Accepted);
       Assert.True(store.Prepass.RecordTitleOutcome(identity, "failed", longError));
-      Assert.False(store.Prepass.PublishTitle(identity, "Late title"));
+      Assert.Null(store.Prepass.PublishTitle(identity, "Late title"));
     }
 
     using UrdStore reopened = UrdStore.Open(database.Path);
@@ -169,13 +169,12 @@ public sealed class PrepassStorageTests {
     using UrdStore storeA = UrdStore.Open(database.Path);
     using UrdStore storeB = UrdStore.Open(database.Path);
 
-    bool[] published = await Task.WhenAll(
+    string?[] published = await Task.WhenAll(
         Task.Run(() => storeA.Prepass.PublishTitle(first.Identity, "Shared launch")),
         Task.Run(() => storeB.Prepass.PublishTitle(second.Identity, "Shared launch"))).WaitAsync(TestTimeout);
-    Assert.All(published, Assert.True);
-
-    string[] titles = [storeA.Snapshots.ReadPersisted(first.Session).Title!,
-        storeB.Snapshots.ReadPersisted(second.Session).Title!];
+    Assert.Equal(storeA.Snapshots.ReadPersisted(first.Session).Title, published[0]);
+    Assert.Equal(storeB.Snapshots.ReadPersisted(second.Session).Title, published[1]);
+    string[] titles = published.Select(title => Assert.IsType<string>(title)).ToArray();
     Assert.Equal(["Shared launch", "Shared launch (2)"], [.. titles.OrderBy(title => title, StringComparer.Ordinal)]);
   }
 
@@ -184,8 +183,9 @@ public sealed class PrepassStorageTests {
     store.UserMessages.Submit(execution.SessionId, 0,
         new(Guid.NewGuid(), 0, "requested", TestLlmSelection.Default), true, execution.ExecutionId, null);
     Assert.True(store.Prepass.TryClaimTitle(execution));
-    Assert.True(store.Prepass.PublishTitle(execution, title));
-    return store.Snapshots.ReadPersisted(execution.SessionId).Title!;
+    string published = Assert.IsType<string>(store.Prepass.PublishTitle(execution, title));
+    Assert.Equal(published, store.Snapshots.ReadPersisted(execution.SessionId).Title);
+    return published;
   }
 
   private static (Guid Session, ExecutionIdentity Identity) ClaimedTitle(string databasePath) {

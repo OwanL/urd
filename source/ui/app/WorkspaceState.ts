@@ -88,6 +88,20 @@ export function newChat(selection: LlmSelection | null): ChatState {
   };
 }
 
+export function applySessionTitle(
+  state: WorkspaceState,
+  sessionId: string,
+  title: string | null,
+): WorkspaceState {
+  const chat = state.chats[sessionId];
+  if (title === null || !chat || (chat.title === title && chat.titleProvenance === "generated"))
+    return state;
+  return {
+    ...state,
+    chats: { ...state.chats, [sessionId]: { ...chat, title, titleProvenance: "generated" } },
+  };
+}
+
 export function editDraft(chat: ChatState, text: string): ChatState {
   if (!isRevision(chat.draftVersion + 1)) throw new TypeError("Draft version is out of range.");
   return { ...chat, draft: text, draftVersion: chat.draftVersion + 1 };

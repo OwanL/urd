@@ -36,12 +36,12 @@ internal sealed class PrepassStorage(Database database) {
 
   // Publishing settles the one-shot title attempt exactly once: a generated title completes the
   // attempt, while a failed attempt publishes its fallback and keeps the generation error.
-  internal bool PublishTitle(ExecutionIdentity parent, string title) => SettleTitle(parent, title, "completed", null);
+  internal string? PublishTitle(ExecutionIdentity parent, string title) => SettleTitle(parent, title, "completed", null);
 
-  internal bool PublishFallbackTitle(ExecutionIdentity parent, string title, string? generationError) =>
+  internal string? PublishFallbackTitle(ExecutionIdentity parent, string title, string? generationError) =>
       SettleTitle(parent, title, "fallback", generationError);
 
-  private bool SettleTitle(ExecutionIdentity parent, string title, string detailState, string? error) {
+  private string? SettleTitle(ExecutionIdentity parent, string title, string detailState, string? error) {
     ArgumentNullException.ThrowIfNull(title);
     _ = StorageText.StrictUtf8.GetByteCount(title);
     if (!TitleGenerator.IsValid(title))
@@ -51,6 +51,7 @@ internal sealed class PrepassStorage(Database database) {
     return database.Write(transaction => {
       // The uniqueness check and the write share one immediate transaction, so concurrent sessions
       // publishing the same title serialize before either observes the other's choice.
+      string finalTitle = FinalizeTitle(transaction, title);
       int updated = database.Execute(transaction, $"""
         UPDATE session_prepass_title SET title = $title
         WHERE session_id = $session AND run_id = $run AND title IS NULL
@@ -59,9 +60,9 @@ internal sealed class PrepassStorage(Database database) {
                     AND d.boundary_id = $boundary AND d.state = 'running')
             AND EXISTS (SELECT 1 FROM execution_runs r JOIN sessions s ON s.session_id = r.session_id
                 WHERE r.session_id = $session AND r.run_id = $run AND {ExecutionSql.CurrentRunCondition});
-        """, ExecutionSql.Parameters(parent, ("$title", FinalizeTitle(transaction, title)), ("$boundary", Guid.Empty)));
+        """, ExecutionSql.Parameters(parent, ("$title", finalTitle), ("$boundary", Guid.Empty)));
       if (updated == 0)
-        return false;
+        return null;
 
       if (database.Execute(transaction, $"""
           UPDATE session_prepass_details SET state = $state, finished_at = $finished, error = $error
@@ -72,7 +73,7 @@ internal sealed class PrepassStorage(Database database) {
           """, ExecutionSql.Parameters(parent, ("$boundary", Guid.Empty), ("$state", detailState),
             ("$finished", StorageText.UtcTimestamp()), ("$error", boundedError))) != 1)
         throw new InvalidOperationException("The published title has no matching running detail.");
-      return true;
+      return finalTitle;
     });
   }
 

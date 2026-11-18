@@ -4,8 +4,9 @@ using Urd.Core.Providers;
 
 namespace Urd.Core.Sessions;
 
-// Status is present for initial registration and status transitions; null marks a watched content change.
-public sealed record SessionChange([property: JsonPropertyName("session")] Guid SessionId, long Version, string? Status = null);
+// Status and title describe tab metadata. A null status marks a watched content change.
+public sealed record SessionChange([property: JsonPropertyName("session")] Guid SessionId, long Version,
+    string? Status = null, string? Title = null);
 
 // Bounded committed facts combined with live admission and Stop state by SessionBase.
 public sealed record SessionSnapshot(

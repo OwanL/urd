@@ -1,7 +1,7 @@
 export interface SessionEventCallbacks {
   connected(boot: string, streamId: string): void;
   change(session: string, notice: string): void;
-  status(session: string, status: string): void;
+  status(session: string, status: string, title: string | null): void;
   created(session: string): void;
   disconnected(): void;
   error?(message: string): void;
@@ -264,7 +264,10 @@ export class SessionEvents {
       )
         registration.statuses.add(event.session);
       if (!this.desiredOpen.includes(event.session)) return;
-      this.call(() => this.callbacks.status(event.session as string, event.status as string));
+      const title = typeof event.title === "string" && event.title ? event.title : null;
+      this.call(() =>
+        this.callbacks.status(event.session as string, event.status as string, title),
+      );
       if (registration !== null) this.releasePendingChange(registration, event.session);
     }
   }

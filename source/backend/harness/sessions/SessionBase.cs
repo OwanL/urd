@@ -232,7 +232,8 @@ public abstract class SessionBase {
     using var _ = await sessionLock.AcquireAsync(cancellation);
     SessionSnapshot stored = store.Snapshots.ReadPersisted(Id);
     status.Update(stored, execution);
-    return notifications.Subscribe(observer, watched, status.CurrentStatus(stored, IsAcceptingWork, needsAttention, execution));
+    return notifications.Subscribe(observer, watched,
+        status.CurrentStatus(stored, IsAcceptingWork, needsAttention, execution), stored.Title);
   }
 
   private protected async Task<ContinuationReceipt?> AdmitContinuationAsync(ContinuationSubmission submission) {
@@ -520,7 +521,8 @@ public abstract class SessionBase {
   private bool HasAcceptedInput() => hasAcceptedInput ??= store.Sessions.HasAcceptedInput(Id);
 
   // Caller holds the session lock.
-  internal void PublishChange() => notifications.Publish(status.ReadCurrent(IsAcceptingWork, needsAttention, execution));
+  internal void PublishChange(string? publishedTitle = null) =>
+      notifications.Publish(status.ReadCurrent(IsAcceptingWork, needsAttention, execution), publishedTitle);
 
   // Caller holds the session lock.
   internal void MarkNeedsAttention() {

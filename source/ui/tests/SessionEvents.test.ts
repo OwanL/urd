@@ -10,7 +10,7 @@ void test("parses chunked SSE events and sends the browser registration", async 
   const connected: string[] = [];
   const streamIds: string[] = [];
   const changes: Array<[string, string]> = [];
-  const statuses: Array<[string, string]> = [];
+  const statuses: Array<[string, string, string | null]> = [];
   const created: string[] = [];
   const errors: string[] = [];
   let disconnected = 0;
@@ -27,7 +27,8 @@ void test("parses chunked SSE events and sends the browser registration", async 
             streamController = controller;
             const wire = [
               '\uFEFFevent: connected\r\ndata: {"stream":"stream-a","boot":"boot-a"}\r\n\r\n',
-              'event: status\ndata: {"session":"s1","boot":"boot-a","version":4,\ndata: "status":"running"}\n\n',
+              'event: status\ndata: {"session":"s1","boot":"boot-a","version":4,\ndata: "status":"running","title":null}\n\n',
+              'event: status\ndata: {"session":"s2","boot":"boot-a","version":1,"status":"idle","title":"Saved 雪"}\n\n',
               'event: change\ndata: {"session":"s1","boot":"boot-a","version":3}\n\n',
               'event: session-created\ndata: {"session":"session-雪"}\n\n',
             ].join("");
@@ -55,8 +56,8 @@ void test("parses chunked SSE events and sends the browser registration", async 
       changes.push([session, notice]);
       throw new Error("consumer failed");
     },
-    status(session, status) {
-      statuses.push([session, status]);
+    status(session, status, title) {
+      statuses.push([session, status, title]);
     },
     created(session) {
       created.push(session);
@@ -69,7 +70,7 @@ void test("parses chunked SSE events and sends the browser registration", async 
     },
   });
   t.after(() => events.stop());
-  events.update(["s1"], ["s1"]);
+  events.update(["s1", "s2"], ["s1"]);
   events.start();
   await waitFor(
     () =>
@@ -81,7 +82,10 @@ void test("parses chunked SSE events and sends the browser registration", async 
   assert.deepEqual(connected, ["boot-a"]);
   assert.deepEqual(streamIds, ["stream-a"]);
   assert.deepEqual(changes, [["s1", "1:boot-a:3:1"]]);
-  assert.deepEqual(statuses, [["s1", "running"]]);
+  assert.deepEqual(statuses, [
+    ["s1", "running", null],
+    ["s2", "idle", "Saved 雪"],
+  ]);
   assert.deepEqual(created, ["session-雪"]);
   assert.ok(errors.some((message) => message === "consumer failed"));
 
@@ -98,7 +102,7 @@ void test("parses chunked SSE events and sends the browser registration", async 
   const post = calls.find((call) => call.url.pathname === "/api/events/stream-a");
   assert.ok(post);
   assert.equal(post.options?.method, "POST");
-  assert.deepEqual(JSON.parse(String(post.options?.body)), { open: ["s1"], watched: ["s1"] });
+  assert.deepEqual(JSON.parse(String(post.options?.body)), { open: ["s1", "s2"], watched: ["s1"] });
   const postHeaders = new Headers(post.options?.headers);
   assert.equal(postHeaders.get("X-Urd-Client"), "browser");
   assert.equal(postHeaders.get("Content-Type"), "application/json");

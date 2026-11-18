@@ -106,7 +106,7 @@ public sealed class SessionSubscriptionTests {
 
     SessionChange[] notifications = changes.ToArray();
     SessionChange[] statuses = notifications.Where(change => change.Status is not null).ToArray();
-    Assert.Equal(new[] { "idle", "running", "idle" }, statuses.Select(change => change.Status));
+    Assert.Equal(new[] { "idle", "running", "idle" }, StatusTransitions(statuses));
     Assert.All(statuses, status => Assert.Contains(notifications,
         change => change.Status is null && change.Version == status.Version));
     Assert.All(notifications.Zip(notifications.Skip(1)), pair =>
@@ -139,7 +139,7 @@ public sealed class SessionSubscriptionTests {
     try {
       Guid executionId = await fixture.StartExecutionAsync("start");
       await toolEntered.Task.WaitAsync(TestTimeout);
-      long runningVersion = watched.Single(change => change.Status == "running").Version;
+      long runningVersion = watched.First(change => change.Status == "running").Version;
       StoredTool runningTool = Assert.Single(StoredTools.Read(fixture.Database));
       Assert.Equal("call", runningTool.CallId);
       Assert.Equal("wait", runningTool.Name);
@@ -182,13 +182,12 @@ public sealed class SessionSubscriptionTests {
     Assert.All(watchedChanges.Zip(watchedChanges.Skip(1)), pair =>
         Assert.True(pair.First.Version < pair.Second.Version));
     SessionChange[] statuses = changes.Where(change => change.Status is not null).ToArray();
-    Assert.Equal(new[] { "idle", "running", "idle" }, statuses.Select(change => change.Status));
+    Assert.Equal(new[] { "idle", "running", "idle" }, StatusTransitions(statuses));
     Assert.All(statuses, status => Assert.Contains(watchedChanges, change => change.Version == status.Version));
     long settledVersion = statuses[^1].Version;
     Assert.Contains(watchedChanges, change => change.Version > versionAtStop && change.Version < settledVersion);
     Assert.Equal(settledVersion, watchedChanges[^1].Version);
-    Assert.Equal(new[] { "idle", "running", "idle" },
-        unwatched.Select(change => change.Status).ToArray());
+    Assert.Equal(new[] { "idle", "running", "idle" }, StatusTransitions(unwatched));
     Assert.All(unwatched, change => Assert.NotNull(change.Status));
   }
 
@@ -222,9 +221,9 @@ public sealed class SessionSubscriptionTests {
     Assert.Equal(ExecutionOutcome.Completed,
         (await fixture.Session.WaitForExecutionFinishAsync(executionId).WaitAsync(TestTimeout)).Outcome);
 
-    string?[] settlementStatuses = settlementChanges.Select(change => change.Status).ToArray();
-    Assert.True(settlementStatuses.SequenceEqual(new string?[] { "idle" })
-        || settlementStatuses.SequenceEqual(new string?[] { "running", "idle" }));
+    string[] settlementStatuses = StatusTransitions(settlementChanges);
+    Assert.True(settlementStatuses.SequenceEqual(new[] { "idle" })
+        || settlementStatuses.SequenceEqual(new[] { "running", "idle" }));
     Assert.All(settlementChanges, change => Assert.NotNull(change.Status));
     settlementRegistration.Dispose();
 
@@ -307,5 +306,10 @@ public sealed class SessionSubscriptionTests {
 
     Assert.Equal("needs-attention", changes.Last().Status);
     Assert.True((await session.ReadSnapshotAsync()).AdmissionFenced);
+  }
+
+  private static string[] StatusTransitions(IEnumerable<SessionChange> changes) {
+    string[] statuses = changes.Select(change => change.Status).OfType<string>().ToArray();
+    return statuses.Where((status, index) => index == 0 || status != statuses[index - 1]).ToArray();
   }
 }

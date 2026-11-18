@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { SessionClient } from "../sessions/SessionClient.ts";
 import { SessionEvents } from "../sessions/SessionEvents.ts";
 import type { WorkspaceCommandAccess } from "./WorkspaceCommands.ts";
-import { newChat } from "./WorkspaceState.ts";
+import { applySessionTitle, newChat } from "./WorkspaceState.ts";
 import { enumerateSessionPages } from "./enumerateSessionPages.ts";
 import {
   emptySessionActivity,
@@ -87,10 +87,13 @@ export function useSessionEvents(
       change(session, notice) {
         setNotices((previous) => ({ ...previous, [session]: notice }));
       },
-      status(session, status) {
+      status(session, status, title) {
         setActivity((previous) =>
           recordSessionStatus(previous, session, status, desired.current.active),
         );
+        const state = access.read();
+        const titled = applySessionTitle(state, session, title);
+        if (titled !== state) access.save(titled);
       },
       created: add,
       disconnected() {

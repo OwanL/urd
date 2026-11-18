@@ -618,34 +618,6 @@ void test("uncertain not-sent resend reloads with its new ID and reconciles the 
   assert.equal(workspace.read().chats[sessionId]?.draft, "submitted text");
 });
 
-void test("session titles come only from backend metadata and preserve workspace state", async () => {
-  const workspace = fixture();
-  const coordinator = commands(workspace.access, emptyClient());
-  await coordinator.send(sessionId, snapshot(), false, true);
-  const before = workspace.read();
-
-  coordinator.observeSnapshot(
-    snapshot({ firstUserPreview: "Preview is never a title", title: null }),
-    null,
-  );
-  assert.equal(workspace.read().chats[sessionId]?.title, "New chat");
-  assert.equal(workspace.read().chats[sessionId]?.titleProvenance, "placeholder");
-
-  coordinator.observeSnapshot(snapshot({ title: "Backend title" }), null);
-  assert.equal(workspace.read().chats[sessionId]?.title, "Backend title");
-  assert.equal(workspace.read().chats[sessionId]?.titleProvenance, "generated");
-
-  coordinator.observeSnapshot(snapshot({ title: "Updated backend title" }), null);
-  assert.equal(workspace.read().chats[sessionId]?.title, "Updated backend title");
-  coordinator.observeSnapshot(snapshot({ firstUserPreview: "Another preview", title: null }), null);
-  assert.equal(workspace.read().chats[sessionId]?.title, "Updated backend title");
-
-  const after = workspace.read();
-  assert.deepEqual(after.tabs, before.tabs);
-  assert.equal(after.activeId, before.activeId);
-  assert.equal(after.chats[sessionId]?.draft, before.chats[sessionId]?.draft);
-});
-
 void test("a late Stop failure for an earlier execution cannot replace or block Stop for its successor", async () => {
   const workspace = fixture();
   const first = deferred<StopReceipt>();

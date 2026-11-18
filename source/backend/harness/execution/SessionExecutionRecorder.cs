@@ -45,10 +45,19 @@ internal sealed class SessionExecutionRecorder(SessionBase session, UrdStore sto
 
   internal Task<bool> TryClaimTitleAsync() => RecordChangeAsync(() => store.Prepass.TryClaimTitle(Identity));
 
-  internal Task<bool> PublishTitleAsync(string title) => RecordChangeAsync(() => store.Prepass.PublishTitle(Identity, title));
+  internal Task<bool> PublishTitleAsync(string title) => RecordTitleAsync(() => store.Prepass.PublishTitle(Identity, title));
 
   internal Task<bool> PublishFallbackTitleAsync(string title, string? error) =>
-      RecordChangeAsync(() => store.Prepass.PublishFallbackTitle(Identity, title, error));
+      RecordTitleAsync(() => store.Prepass.PublishFallbackTitle(Identity, title, error));
+
+  private async Task<bool> RecordTitleAsync(Func<string?> publish) {
+    using var _ = await sessionLock.AcquireAsync();
+    if (!session.CanRecordExecution(Identity) || session.WriteToStore(publish) is not { } title)
+      return false;
+
+    session.PublishChange(title);
+    return true;
+  }
 
   internal Task<bool> RecordPruningStatusAsync(Guid boundaryId, StartingResourcePruningStatus status) =>
       RecordChangeAsync(() => store.Prepass.WritePruningStatus(Identity, boundaryId, status),

@@ -21,10 +21,9 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock sess
 
   // Caller holds the session lock. The driver joins callbacks before settlement.
   internal Task StopAsync() {
-    session.FailPresentedQuestion();
-    Task callbacks = execution.StopAsync();
     Wake();
-    return callbacks;
+    session.FailPresentedQuestion();
+    return execution.StopAsync();
   }
 
   // Caller holds the session lock. Notifications never join their own tool task.
@@ -40,7 +39,10 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock sess
 
   // Caller holds the session lock.
   internal void Wake() {
-    executionWake?.TrySetResult();
+    if (executionWake is null)
+      return;
+    session.UnparkBackgroundWait(ExecutionId);
+    executionWake.TrySetResult();
     executionWake = null;
   }
 
@@ -104,11 +106,14 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock sess
           LlmRequest? next = ClaimContinuation();
           if (next is not null)
             return next;
-          if (execution.HasPendingTools || execution.HasPendingAuxiliary) {
+          bool hasPendingTools = execution.HasPendingTools;
+          if (hasPendingTools || execution.HasPendingAuxiliary) {
             // Install the wait under the same lock as all input/completion/Stop signals.
-            executionWake ??= new(TaskCreationOptions.RunContinuationsAsynchronously);
+            executionWake = new(TaskCreationOptions.RunContinuationsAsynchronously);
             wake = executionWake.Task;
-            if (execution.HasPendingTools && !IsWaitingForBackgroundTools) {
+            if (hasPendingTools)
+              session.ParkBackgroundWait(ExecutionId);
+            if (hasPendingTools && !IsWaitingForBackgroundTools) {
               IsWaitingForBackgroundTools = true;
               session.PublishChange();
             }

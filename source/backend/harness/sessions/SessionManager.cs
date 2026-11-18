@@ -256,7 +256,7 @@ public sealed class SessionManager : IAsyncDisposable, ISubagentRunner, IAgentQu
 
     SubagentSession? child = null;
     try {
-      child = await CreateSubagentAsync(assignment, cancellation);
+      child = await CreateSubagentAsync(assignment, new(caller.SessionId, caller.ExecutionId, caller.Background), cancellation);
       return await RunChildAsync(child, assignment, cancellation);
     } finally {
       if (child is not null) {
@@ -304,14 +304,16 @@ public sealed class SessionManager : IAsyncDisposable, ISubagentRunner, IAgentQu
         caller.RequestId, caller.CallId, request.Context, parentSelection?.ContextWindow, parentCompactionTriggerTokens);
   }
 
-  private async Task<SubagentSession> CreateSubagentAsync(SubagentAssignment assignment, CancellationToken cancellation) {
-    using (await sessionsLock.AcquireAsync(cancellation)) {
-      ThrowIfShuttingDown();
-      // Children are deliberately absent from SessionCreated: presentation is deferred and the
-      // primary tab list never includes them.
-      return TrackChild(CreateChild(store.Sessions.CreateSubagent(Guid.NewGuid(),
-          assignment.ParentSessionId, assignment.OwningCallId, assignment.WorkingDirectory)));
-    }
+  private async Task<SubagentSession> CreateSubagentAsync(SubagentAssignment assignment, AgentWaitSource owner,
+      CancellationToken cancellation) {
+    using var _ = await sessionsLock.AcquireAsync(cancellation);
+    ThrowIfShuttingDown();
+    // Install ownership before publishing the handle or starting the assignment.
+    var child = CreateChild(store.Sessions.CreateSubagent(Guid.NewGuid(),
+        assignment.ParentSessionId, assignment.OwningCallId, assignment.WorkingDirectory));
+    agentQuestions.TrackDelegation(child.Id, owner);
+    // Children are deliberately absent from SessionCreated and the primary tab list.
+    return TrackChild(child);
   }
 
   private async Task<SubagentRunResult> RunChildAsync(SubagentSession child, SubagentAssignment assignment,

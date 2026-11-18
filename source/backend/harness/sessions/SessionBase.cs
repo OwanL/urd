@@ -470,8 +470,8 @@ public abstract class SessionBase {
         return new(null, "The recipient agent is not accepting work.");
 
       AgentQuestions broker = agentQuestions!;
-      waiting = broker.Enqueue(Id, caller.SessionId, caller.RequestId, caller.CallId, prompt, wake, cancellation,
-          out Guid questionId);
+      var source = new AgentWaitSource(caller.SessionId, caller.ExecutionId, caller.Background || !wake);
+      waiting = broker.Enqueue(Id, source, caller.RequestId, caller.CallId, prompt, wake, cancellation, out Guid questionId);
       if (wake && !waiting.IsCompleted) {
         if (execution is { IsStopping: false } active)
           active.Wake();
@@ -532,6 +532,10 @@ public abstract class SessionBase {
         agentQuestions!.Withdraw(Id, question, requestId);
     }
   }
+
+  // The driver calls these under the session lock at the actual wait/wake transitions.
+  internal void ParkBackgroundWait(Guid executionId) => agentQuestions?.Park(Id, executionId);
+  internal void UnparkBackgroundWait(Guid executionId) => agentQuestions?.Unpark(Id, executionId);
 
   // Caller holds the session lock. Abort releases question waiters before joining owned work.
   internal void FailPresentedQuestion() => agentQuestions?.FailPresented(Id);

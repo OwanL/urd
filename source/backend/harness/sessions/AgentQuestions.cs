@@ -11,19 +11,26 @@ internal sealed class AgentQuestions {
 
   private readonly object stateLock = new();
   private readonly Dictionary<Guid, Mailbox> mailboxes = [];
+  // Child -> owning call. Background dependencies are active only while their own execution parks.
+  private readonly Dictionary<Guid, AgentWaitSource> delegations = [];
+  private readonly Dictionary<Guid, Guid> parked = [];
   private bool closed;
+
+  private const string SelfAsk = "An agent cannot ask itself a question.";
+  private const string ForegroundAncestor = "The ancestor agent is waiting for a foreground delegation to finish. Interactive delegation requires a background child.";
+  private const string WaitCycle = "The question would create a wait cycle: the recipient is already waiting on the asking agent, directly or indirectly.";
 
   internal Task<AgentQuestionResult> Enqueue(Guid recipientId, Guid senderId, Guid requestId, string callId,
       string prompt, bool wake, CancellationToken cancellation) =>
-      Enqueue(recipientId, senderId, requestId, callId, prompt, wake, cancellation, out _);
+      Enqueue(recipientId, new(senderId, Guid.Empty, Background: !wake), requestId, callId, prompt, wake,
+          cancellation, out _);
 
-  // Enqueues one question in FIFO order and returns its settling task. The ask's cancellation
-  // removes its own record whenever it has not already settled; a closed mailbox returns the
-  // task already failed, so the ask never waits on a recipient that cannot answer.
-  internal Task<AgentQuestionResult> Enqueue(Guid recipientId, Guid senderId, Guid requestId, string callId,
+  // Enqueues one question in FIFO order and returns its settling task. Admission checks the
+  // wait graph in the same transition that makes the question visible to other calls.
+  internal Task<AgentQuestionResult> Enqueue(Guid recipientId, AgentWaitSource source, Guid requestId, string callId,
       string prompt, bool wake, CancellationToken cancellation, out Guid questionId) {
     ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
-    var record = new Question(recipientId, senderId, requestId, callId, prompt, wake);
+    var record = new Question(recipientId, source, requestId, callId, prompt, wake);
     questionId = record.QuestionId;
     lock (stateLock) {
       Mailbox? mailbox = closed ? null : GetOrCreate(recipientId);
@@ -34,6 +41,12 @@ internal sealed class AgentQuestions {
 
       if (cancellation.IsCancellationRequested) {
         record.Completion.TrySetCanceled(cancellation);
+        return record.Completion.Task;
+      }
+
+      string? rejection = RejectAsk(source, recipientId);
+      if (rejection is not null) {
+        record.Completion.TrySetResult(new(null, rejection));
         return record.Completion.Task;
       }
 
@@ -50,6 +63,107 @@ internal sealed class AgentQuestions {
     }
     registration.Unregister();
     return record.Completion.Task;
+  }
+
+  // Install ownership before the child can run or be addressed. A delegation is never the
+  // victim of a cycle; fail the implicated ask(s) if a delegation edge closes it instead.
+  internal void TrackDelegation(Guid childId, AgentWaitSource owner) {
+    List<Question> rejected = [];
+    lock (stateLock) {
+      if (closed)
+        return;
+      delegations.Add(childId, owner);
+      if (IsBlocking(owner))
+        BreakDelegationCycles(owner.SessionId, childId, rejected);
+    }
+    SettleCycles(rejected);
+  }
+
+  // Install the real driver wait, not a latched UI status. An ask may have been queued before
+  // this transition, or arrive later while this execution is already parked.
+  internal void Park(Guid sessionId, Guid executionId) {
+    List<Question> rejected = [];
+    lock (stateLock) {
+      if (closed)
+        return;
+      parked.Add(sessionId, executionId);
+      var source = new AgentWaitSource(sessionId, executionId, Background: true);
+      foreach (var (childId, owner) in delegations) {
+        if (owner == source)
+          BreakDelegationCycles(sessionId, childId, rejected);
+      }
+      foreach (Mailbox mailbox in mailboxes.Values) {
+        for (int index = 0; index < mailbox.Questions.Count;) {
+          Question question = mailbox.Questions[index];
+          if (question.Source == source && TryFindCycle(sessionId, question.RecipientId, out _))
+            rejected.Add(Detach(mailbox, question));
+          else
+            index++;
+        }
+      }
+    }
+    SettleCycles(rejected);
+  }
+
+  internal void Unpark(Guid sessionId, Guid executionId) {
+    lock (stateLock) {
+      if (parked.TryGetValue(sessionId, out Guid current) && current == executionId)
+        parked.Remove(sessionId);
+    }
+  }
+
+  // All graph queries below run under stateLock. Walk ownership independently of the wait
+  // graph: a descendant cannot reach a waiting foreground ancestor by backgrounding its ask
+  // or by being delegated in the background at an intermediate level.
+  private string? RejectAsk(AgentWaitSource source, Guid recipientId) {
+    if (source.SessionId == recipientId)
+      return SelfAsk;
+    for (Guid childId = source.SessionId; delegations.TryGetValue(childId, out AgentWaitSource owner);
+        childId = owner.SessionId) {
+      if (owner.SessionId == recipientId && !owner.Background)
+        return ForegroundAncestor;
+    }
+    return IsBlocking(source) && TryFindCycle(source.SessionId, recipientId, out _) ? WaitCycle : null;
+  }
+
+  private bool IsBlocking(AgentWaitSource source) => !source.Background
+      || (parked.TryGetValue(source.SessionId, out Guid executionId) && executionId == source.ExecutionId);
+
+  private void BreakDelegationCycles(Guid senderId, Guid recipientId, List<Question> rejected) {
+    // Delegations alone form a tree, so every return path must contain a question.
+    while (TryFindCycle(senderId, recipientId, out Question? ask) && ask is not null)
+      rejected.Add(Detach(mailboxes[ask.RecipientId], ask));
+  }
+
+  private static void SettleCycles(List<Question> rejected) {
+    foreach (Question ask in rejected)
+      Settle(ask, new(null, WaitCycle));
+  }
+
+  // To check sender -> recipient, walk the incoming edges from sender back to recipient.
+  // Mailboxes and ownership are already indexed by destination; no duplicate graph is needed.
+  private bool TryFindCycle(Guid senderId, Guid recipientId, out Question? implicatedAsk) {
+    var visited = new HashSet<Guid>();
+    var pending = new Stack<(Guid SessionId, Question? Ask)>();
+    pending.Push((senderId, null));
+    while (pending.TryPop(out var step)) {
+      if (!visited.Add(step.SessionId))
+        continue;
+      if (step.SessionId == recipientId) {
+        implicatedAsk = step.Ask;
+        return true;
+      }
+      if (delegations.TryGetValue(step.SessionId, out AgentWaitSource owner) && IsBlocking(owner))
+        pending.Push((owner.SessionId, step.Ask));
+      if (mailboxes.TryGetValue(step.SessionId, out Mailbox? mailbox)) {
+        foreach (Question question in mailbox.Questions) {
+          if (IsBlocking(question.Source))
+            pending.Push((question.SenderId, question));
+        }
+      }
+    }
+    implicatedAsk = null;
+    return false;
   }
 
   // Cancels one waiting record exactly once; absent or already settled records stay untouched.
@@ -138,6 +252,7 @@ internal sealed class AgentQuestions {
     lock (stateLock) {
       if (closed)
         return;
+      delegations.Remove(recipientId);
       Mailbox mailbox = GetOrCreate(recipientId);
       mailbox.Closed = true;
       unsettled = [.. mailbox.Questions];
@@ -159,6 +274,8 @@ internal sealed class AgentQuestions {
       foreach (Question question in unsettled)
         question.Settled = true;
       mailboxes.Clear();
+      delegations.Clear();
+      parked.Clear();
     }
 
     foreach (Question question in unsettled)
@@ -206,10 +323,11 @@ internal sealed class AgentQuestions {
 
   // One waiting ask with its pinned sender, recipient and calling identity. The broker owns
   // settlement, cancellation and cleanup for exactly one terminal transition per record.
-  private sealed class Question(Guid recipientId, Guid senderId, Guid requestId, string callId, string prompt, bool wake) {
+  private sealed class Question(Guid recipientId, AgentWaitSource source, Guid requestId, string callId, string prompt, bool wake) {
     public Guid QuestionId { get; } = Guid.NewGuid();
     public Guid RecipientId { get; } = recipientId;
-    public Guid SenderId { get; } = senderId;
+    public AgentWaitSource Source { get; } = source;
+    public Guid SenderId => Source.SessionId;
     public Guid RequestId { get; } = requestId;
     public string CallId { get; } = callId;
     public string Prompt { get; } = prompt;
@@ -230,6 +348,9 @@ internal sealed class AgentQuestions {
     public List<Question> Questions { get; } = []; // Head first.
   }
 }
+
+// Ownership and effective mode of an ask or a delegated child.
+internal readonly record struct AgentWaitSource(Guid SessionId, Guid ExecutionId, bool Background);
 
 // One settled ask: the answer text, or the stated reason no answer arrived.
 internal sealed record AgentQuestionResult(string? Answer, string? Error);

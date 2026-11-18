@@ -125,6 +125,7 @@ hidden-icons overflow, unless it has been hidden in Settings → Personalization
 | GET `/api/sessions/{sessionId}/compactions/{compactionId}` | `expectedHistoryRevision` → 200 `CompactionSummary`, or 404 |
 | GET `/api/sessions/{sessionId}/snapshot` | 200 slim `SessionSnapshot` |
 | GET `/api/sessions/{sessionId}/history` | Mode/revision and optional entry anchor → 200 bounded `TranscriptHistoryPage` with `toolLabels` |
+| GET `/api/sessions/{sessionId}/markdown-images/{executionId}/{messageId}/{key}` | `historyRevision` and an image key from the assistant Markdown projection → 200 managed raster bytes, or 404 if unavailable |
 | GET `/api/sessions/{sessionId}/prepass/{boundaryId}/{category}` | `historyRevision`, optional `candidateOffset` and `resultOffset` → 200 paged `PrepassDetails`, or 404 |
 | GET `/api/sessions/{sessionId}/tool-calls/{requestId}/{callId}` | `expectedHistoryRevision`, `returned`, `full` → 200 `ToolCallTranscript`, or 404 |
 | GET `/api/sessions/{sessionId}/not-sent?cursor=...` | Optional opaque cursor → 200 page of known-not-sent inputs |

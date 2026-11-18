@@ -4,7 +4,7 @@ namespace Urd.Core.Storage;
 
 // Creates the current pre-release schema; incompatible databases require a manual reset.
 internal static class DatabaseSchema {
-  private const int SchemaVersion = 35;
+  private const int SchemaVersion = 36;
 
   internal static void Initialize(SqliteConnection connection) {
     using SqliteCommand command = connection.CreateCommand();
@@ -253,6 +253,15 @@ internal static class DatabaseSchema {
               OR (role = 4 AND input_id IS NULL AND request_id IS NULL
                       AND call_id IS NULL AND tool_name IS NULL AND end_chunk_index IS NULL))
       ) STRICT;
+      CREATE TABLE markdown_images (
+          message_ordinal INTEGER NOT NULL REFERENCES execution_messages(ordinal) ON DELETE CASCADE,
+          image_key TEXT NOT NULL,
+          file_hash TEXT NOT NULL,
+          media_type TEXT NOT NULL CHECK (media_type IN ('image/png', 'image/jpeg', 'image/webp')),
+          byte_length INTEGER NOT NULL CHECK (byte_length > 0),
+          PRIMARY KEY (message_ordinal, image_key)
+      ) STRICT;
+      CREATE INDEX markdown_images_file ON markdown_images(file_hash);
       CREATE TABLE transcript_position_totals (
           session_id TEXT NOT NULL REFERENCES sessions(session_id),
           history_revision INTEGER NOT NULL CHECK (history_revision >= 0),

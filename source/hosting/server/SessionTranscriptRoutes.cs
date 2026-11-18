@@ -28,6 +28,9 @@ internal static class SessionTranscriptRoutes {
     routes.MapGet("/{sessionId}/positions/prompts/{executionId}/{entryId}", (HttpContext http, Guid sessionId,
         Guid executionId, Guid entryId, [AsParameters] PromptActivationQuery query) =>
         ActivatePromptAsync(http, sessions, sessionId, executionId, entryId, query));
+    routes.MapGet("/{sessionId:guid}/markdown-images/{executionId:guid}/{messageId:guid}/{key}",
+        (HttpContext http, Guid sessionId, Guid executionId, Guid messageId, string key, long historyRevision) =>
+            ReadMarkdownImageAsync(http, sessions, sessionId, executionId, messageId, key, historyRevision));
     routes.MapGet("/{sessionId}/content", (HttpContext http, Guid sessionId, [AsParameters] ContentQuery query) =>
         ReadContentAsync(http, sessions, sessionId, query));
   }
@@ -167,6 +170,17 @@ internal static class SessionTranscriptRoutes {
   private static IReadOnlyDictionary<string, ToolCallLabel> CreateToolLabels(
       PrimarySession session, IEnumerable<TranscriptEntryDescriptor> descriptors) =>
       ToolCallLabelSet.CreateLookup(descriptors, session.WorkingDirectory);
+
+  private static Task<IResult> ReadMarkdownImageAsync(HttpContext http, SessionManager sessions, Guid sessionId,
+      Guid executionId, Guid messageId, string key, long historyRevision) {
+    if (executionId == Guid.Empty || messageId == Guid.Empty || historyRevision < 0)
+      return Task.FromResult<IResult>(Results.BadRequest());
+    var message = new MessageRef(executionId, messageId, MessageRole.Assistant, historyRevision);
+    return WithSessionAsync(http, sessions, sessionId, async session => {
+      var image = await session.Transcript.ReadMarkdownImageAsync(message, key, http.RequestAborted);
+      return image is null ? Results.NotFound() : Results.Bytes(image.Data, image.MediaType);
+    });
+  }
 
   private static Task<IResult> ReadContentAsync(
       HttpContext http, SessionManager sessions, Guid sessionId, ContentQuery query) {

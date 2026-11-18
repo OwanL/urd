@@ -58,7 +58,8 @@ internal sealed class SessionExecution : IDisposable {
   internal bool IsCompacting { get; set; }
   internal bool HasPendingTools => toolExecution.HasRunningBackgroundTools;
   internal bool HasPendingAuxiliary => titleWork is not null && Volatile.Read(ref titleFinished) == 0;
-  internal Task JoinOwnedWorkAsync() => Task.WhenAll(toolExecution.JoinBackgroundToolsAsync(), titleWork ?? Task.CompletedTask);
+  internal Task JoinOwnedWorkAsync() => Task.WhenAll(toolExecution.JoinBackgroundToolsAsync(),
+      titleWork ?? Task.CompletedTask, recorder.JoinImageImportsAsync());
 
   // Completes once every callback registered on the stop token has finished.
   internal Task StopCallbacks => stopCallbacks ?? Task.CompletedTask;

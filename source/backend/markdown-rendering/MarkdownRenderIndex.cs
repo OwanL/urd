@@ -1,7 +1,7 @@
 namespace Urd.Core.MarkdownRendering;
 
 internal sealed class MarkdownRenderIndex {
-  internal const string PipelineVersion = "markdig-1.6.0-commonmark-gfm-tables-display-1";
+  internal const string PipelineVersion = "markdig-1.6.0-commonmark-gfm-tables-display-2";
   readonly MarkdownTextPiece[] pieces;
   readonly int[] pieceUtf8Bytes;
   readonly MarkdownRenderContext[] contexts;

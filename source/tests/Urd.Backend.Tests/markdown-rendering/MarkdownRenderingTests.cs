@@ -98,6 +98,35 @@ public sealed class MarkdownRenderingTests {
   }
 
   [Fact]
+  public void CompleteLocalImageEmbedsAreProjectedWithoutTreatingCodeOrLinksAsImages() {
+    const string source = "é ![Before](<C:/temp/my screenshot.png>)\n\n`![code](ignored.png)`\n\n[link](ignored.png)\n\n![web](https://example.test/image.png)\n\n![incomplete](unfinished.png";
+    var index = MarkdownParser.Parse(source);
+    var image = Assert.Single(Contexts(index), context => context.Kind == MarkdownElementKind.Image);
+    var target = Assert.Single(MarkdownParser.ReadImageTargets(source));
+    Assert.Equal("C:/temp/my screenshot.png", target.Destination);
+    Assert.Equal(target.Key, Metadata(index, image.Id, MarkdownValueKind.ImageKey));
+    Assert.DoesNotContain(Contexts(MarkdownParser.Parse(source, localImages: false)),
+      context => context.Kind == MarkdownElementKind.Image);
+    Assert.Equal("![Before](<C:/temp/my screenshot.png>)",
+      Encoding.UTF8.GetString(Encoding.UTF8.GetBytes(source)[image.Source.Start..image.Source.End]));
+    Assert.Equal("Before", ContextText(index, image));
+    Assert.Single(Contexts(index), context => context.Kind == MarkdownElementKind.Link);
+    Assert.Contains(Pieces(index), piece => piece.Text == "![web](https://example.test/image.png)" && piece.Kind == MarkdownTextKind.Literal);
+  }
+
+  [Fact]
+  public void ImageTargetsResolveMarkdownReferencesButRejectNonLocalDestinations() {
+    const string source = "![][shot]\n\n[shot]: ./my%20shot.webp\n\n![share](<//server/path.png>)\n\n![encoded](%2F%2Fserver/path.png)\n\n![data](data:image/png;base64,AA)";
+    var target = Assert.Single(MarkdownParser.ReadImageTargets(source));
+    Assert.Equal("./my shot.webp", target.Destination);
+    var index = MarkdownParser.Parse(source);
+    var image = Assert.Single(Contexts(index), context => context.Kind == MarkdownElementKind.Image);
+    Assert.Equal(target.Key, Metadata(index, image.Id, MarkdownValueKind.ImageKey));
+    Assert.Equal(new(index.Generation, image.FirstPiece), index.Locate(image.Source.Start));
+    Assert.Empty(index.Piece(image.FirstPiece).Text);
+  }
+
+  [Fact]
   public void NestedRawHtmlAndReferenceImagesRemainLiteralInTheirContainer() {
     var index = MarkdownParser.Parse("> <div>\r\n> literal 😀\r\n> </div>\r\n\n![alt][image]\n\n[image]: https://example.test/image\n");
     Assert.Equal("<div>\r\nliteral 😀\r\n</div>\r\n![alt][image]", string.Concat(Pieces(index).Select(p => p.Text)));

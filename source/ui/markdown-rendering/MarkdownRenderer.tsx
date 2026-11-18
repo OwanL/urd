@@ -1,5 +1,7 @@
 import { createElement, type ComponentChildren, type VNode } from "preact";
 import { useId } from "preact/hooks";
+import type { MarkdownImageResource } from "./MarkdownImageWindow.ts";
+import { MarkdownInlineImage, markdownImageFallback } from "./MarkdownInlineImage.tsx";
 import type {
   AssembledMarkdownContext,
   MarkdownRenderSnapshot,
@@ -34,8 +36,8 @@ function rangeAttributes(source: MarkdownSourceRange) {
   return { "data-source-start": source.start, "data-source-end": source.end };
 }
 
-function pieceNode(piece: MarkdownTextPiece) {
-  const attributes = {
+function pieceAttributes(piece: MarkdownTextPiece) {
+  return {
     ...rangeAttributes(piece.source),
     "data-piece": piece.id,
     "data-part": piece.part,
@@ -43,6 +45,10 @@ function pieceNode(piece: MarkdownTextPiece) {
     "data-mapping": piece.mapping,
     "data-text-kind": piece.kind,
   };
+}
+
+function pieceNode(piece: MarkdownTextPiece) {
+  const attributes = pieceAttributes(piece);
   if (piece.kind === "thematicBreak") return null;
   if (piece.kind === "hardBreak") return <br key={`p${piece.id}`} {...attributes} />;
   // One stable keyed wrapper/text node per producer piece. Never concatenate
@@ -58,9 +64,11 @@ function pieceNode(piece: MarkdownTextPiece) {
 export function MarkdownRenderer({
   snapshot,
   geometry,
+  images,
 }: {
   snapshot: MarkdownRenderSnapshot;
   geometry?: MarkdownWindowGeometry | undefined;
+  images?: { resources: ReadonlyMap<number, MarkdownImageResource>; scrollport: HTMLElement };
 }) {
   const instance = useId();
   const children = new Map<number, AssembledMarkdownContext[]>();
@@ -209,6 +217,15 @@ export function MarkdownRenderer({
     return result.sort((a, b) => a.at - b.at).map((entry) => entry.node);
   }
 
+  function hasLinkAncestor(id: number): boolean {
+    let ancestor = snapshot.contexts.get(id);
+    while (ancestor) {
+      if (ancestor.context.kind === "link") return true;
+      ancestor = snapshot.contexts.get(ancestor.context.parent);
+    }
+    return false;
+  }
+
   function markdownContextNode(entry: AssembledMarkdownContext): VNode {
     const { context, values } = entry;
     const key = `c${context.id}`;
@@ -223,9 +240,11 @@ export function MarkdownRenderer({
       "data-position": context.position,
       "data-mapping": "container",
     };
-    // Tables group rows below; do not construct their entire subtree twice.
+    // These contexts render their pieces or children directly.
     const content =
-      context.kind === "table" || context.kind === "code" ? null : contents(context.id);
+      context.kind === "table" || context.kind === "code" || context.kind === "image"
+        ? null
+        : contents(context.id);
     switch (context.kind) {
       case "document":
         return (
@@ -319,6 +338,30 @@ export function MarkdownRenderer({
           <a key={key} {...attributes} href={href} title={values.title}>
             {content}
           </a>
+        );
+      }
+      case "image": {
+        const altPieces = (pieces.get(context.id) ?? []).sort((a, b) => a.id - b.id);
+        const firstPiece = altPieces[0];
+        const alt = altPieces.map((piece) => piece.text).join("");
+        const resource = images?.resources.get(context.id);
+        return (
+          <span key={key} {...attributes}>
+            {firstPiece && (
+              <span {...pieceAttributes(firstPiece)} data-markdown-image-piece="">
+                {resource && images ? (
+                  <MarkdownInlineImage
+                    alt={alt}
+                    resource={resource}
+                    scrollport={images.scrollport}
+                    canOpen={!hasLinkAncestor(context.parent)}
+                  />
+                ) : (
+                  markdownImageFallback(alt)
+                )}
+              </span>
+            )}
+          </span>
         );
       }
       case "thematicBreak":

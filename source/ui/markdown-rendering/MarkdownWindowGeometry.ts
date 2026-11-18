@@ -327,7 +327,7 @@ export class MarkdownWindowGeometry {
     const viewport = this.visibleBounds(root, scrollport);
     if (!viewport) return null;
     for (const element of root.querySelectorAll<HTMLElement>("[data-piece]")) {
-      const rect = this.textRect(element);
+      const rect = this.pieceRect(element);
       if (!rect || rect.bottom <= viewport.top || rect.top >= viewport.bottom) continue;
       if (rect.right <= viewport.left || rect.left >= viewport.right) continue;
       return {
@@ -357,11 +357,11 @@ export class MarkdownWindowGeometry {
         piece.dataset.sourceEnd === anchor.end,
     );
     if (!element) return false;
-    const rect = this.textRect(element);
+    const rect = this.pieceRect(element);
     if (!rect) return false;
     const delta = rect.top - scrollport.getBoundingClientRect().top - anchor.offset;
     scrollport.scrollTop += delta;
-    const restored = this.textRect(element);
+    const restored = this.pieceRect(element);
     const restoredViewport = this.visibleBounds(root, scrollport);
     return (
       restored !== null &&
@@ -392,9 +392,10 @@ export class MarkdownWindowGeometry {
     );
   }
 
-  private textRect(element: HTMLElement): DOMRect | null {
-    if (!element.textContent || !element.dataset.sourceStart || !element.dataset.sourceEnd)
-      return null;
+  private pieceRect(element: HTMLElement): DOMRect | null {
+    if (!element.dataset.sourceStart || !element.dataset.sourceEnd) return null;
+    if (element.dataset.markdownImagePiece !== undefined) return element.getBoundingClientRect();
+    if (!element.textContent) return null;
     const range = element.ownerDocument.createRange();
     range.selectNodeContents(element);
     return range.getClientRects()[0] ?? null;

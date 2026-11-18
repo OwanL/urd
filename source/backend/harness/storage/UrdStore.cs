@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Urd.Core.Usage;
 using Urd.Core.Context;
+using Urd.Core.MarkdownRendering;
 
 namespace Urd.Core.Storage;
 
@@ -25,6 +26,8 @@ public sealed class UrdStore : IDisposable {
     Continuations = new(database, toolResults);
     MessageEdits = new(database, UserMessages);
     LlmResponses = new(database);
+    MarkdownImageFiles = new(database, databasePath + ".markdown-images");
+    MarkdownImageImports = new(MarkdownImageFiles);
     AuxiliaryConversations = new(database, toolResults);
     Executions = new(database, toolResults, AuxiliaryConversations, UserMessages);
     Tools = new(database, toolResults);
@@ -55,6 +58,8 @@ public sealed class UrdStore : IDisposable {
   internal MessageEditStorage MessageEdits { get; }
   internal SessionExecutionStorage Executions { get; }
   internal LlmResponseStorage LlmResponses { get; }
+  internal MarkdownImageStorage MarkdownImageFiles { get; }
+  internal MarkdownImageImports MarkdownImageImports { get; }
   internal AuxiliaryConversationStorage AuxiliaryConversations { get; }
   internal ToolStorage Tools { get; }
   internal SnapshotReader Snapshots { get; }
@@ -89,6 +94,7 @@ public sealed class UrdStore : IDisposable {
   public void RecoverInterruptedExecutions() {
     Usage.RecoverInterrupted();
     Executions.RecoverInterruptedExecutions();
+    MarkdownImageFiles.RemoveUnreferencedFiles();
   }
 
   public UsageSummary ReadUsage(Guid? sessionId = null, DateTimeOffset? from = null,
@@ -115,6 +121,7 @@ public sealed class UrdStore : IDisposable {
     instructionCatalog.DisposeAsync().AsTask().GetAwaiter().GetResult();
     instructionWarm?.GetAwaiter().GetResult();
     instructionWarmStop.Dispose();
+    MarkdownImageImports.Dispose();
     database.Dispose();
   }
 }

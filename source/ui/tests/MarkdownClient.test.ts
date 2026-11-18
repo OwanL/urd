@@ -250,10 +250,18 @@ void test("maps every Markdown wire enum number through the client", async (t) =
     "inlineCode",
     "link",
     "thematicBreak",
+    "image",
   ] as const;
   const textKinds = ["text", "literal", "code", "softBreak", "hardBreak", "thematicBreak"] as const;
   const sourceMappings = ["exact", "containing", "container"] as const;
-  const valueKinds = ["destination", "title", "language", "fenceInfo", "orderedStart"] as const;
+  const valueKinds = [
+    "destination",
+    "title",
+    "language",
+    "fenceInfo",
+    "orderedStart",
+    "imageKey",
+  ] as const;
   const alignments = ["none", "left", "center", "right"] as const;
   const pieces = textKinds.flatMap((_, kind) =>
     sourceMappings.map((__, mapping) =>
@@ -337,6 +345,51 @@ void test("maps every Markdown wire enum number through the client", async (t) =
   await source.dispose();
 });
 
+void test("loads a managed image through the private message route without opening a lease", async (t) => {
+  const key = "a".repeat(64);
+  const missingKey = "b".repeat(64);
+  const unsupportedKey = "c".repeat(64);
+  const route = `/api/sessions/${sessionId}/markdown-images/${executionId}/${entryId}`;
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aSugAAAAASUVORK5CYII=",
+    "base64",
+  );
+  const server = await startHttpServer((request, response) => {
+    if (request.url === `${route}/${key}?historyRevision=7`) {
+      response.writeHead(200, { "Content-Type": "image/png" });
+      response.end(png);
+    } else if (request.url === `${route}/${unsupportedKey}?historyRevision=7`) {
+      response.writeHead(200, { "Content-Type": "image/svg+xml" });
+      response.end("<svg />");
+    } else {
+      response.writeHead(404);
+      response.end();
+    }
+  });
+  t.after(() => server.close());
+
+  const { imageLoader } = new MarkdownClient(server.origin).request(streamId, sessionId, entry);
+  assert.ok(imageLoader);
+  const signal = new AbortController().signal;
+  const blob = await imageLoader.load(key, signal);
+  assert.equal(blob.type, "image/png");
+  assert.deepEqual(Buffer.from(await blob.arrayBuffer()), png);
+  await assert.rejects(
+    imageLoader.load(missingKey, signal),
+    (error: unknown) => error instanceof RequestError && error.status === 404,
+  );
+  await assert.rejects(imageLoader.load(unsupportedKey, signal), TypeError);
+  await assert.rejects(imageLoader.load("../../outside.png", signal), TypeError);
+  assert.deepEqual(
+    server.requests.map(({ method, url, headers }) => [method, url, headers["x-urd-client"]]),
+    [key, missingKey, unsupportedKey].map((key) => [
+      "GET",
+      `${route}/${key}?historyRevision=7`,
+      "browser",
+    ]),
+  );
+});
+
 interface InvalidWirePageCase {
   readonly name: string;
   readonly response: unknown;
@@ -359,7 +412,7 @@ const invalidWirePages: readonly InvalidWirePageCase[] = [
   },
   {
     name: "context kind index",
-    response: { generation, from: 0, next: 1, hasMore: false, contexts: [context({ kind: 16 })] },
+    response: { generation, from: 0, next: 1, hasMore: false, contexts: [context({ kind: 17 })] },
     read: (source, signal) => source.readContexts([0], { generation, index: 0 }, signal),
     expected: /unknown Markdown context kind index/u,
   },
@@ -384,7 +437,7 @@ const invalidWirePages: readonly InvalidWirePageCase[] = [
       from: 0,
       next: 1,
       hasMore: false,
-      values: [{ kind: 5, text: "", part: 0, continued: false }],
+      values: [{ kind: 6, text: "", part: 0, continued: false }],
     },
     read: (source, signal) => source.readContext(0, { generation, index: 0 }, signal),
     expected: /unknown Markdown value kind index/u,

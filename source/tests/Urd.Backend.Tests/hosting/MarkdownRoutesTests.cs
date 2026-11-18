@@ -163,6 +163,55 @@ public sealed class MarkdownRoutesTests {
     await AssertStatusAsync(server.Client, HttpMethod.Post, path + "/release", HttpStatusCode.NoContent, "{}");
   }
 
+  [Fact]
+  public async Task ManagedImageBytesArePrivateAndScopedToTheOwningMessage() {
+    using var database = new TemporaryDatabase();
+    byte[] png = Convert.FromBase64String(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aXioAAAAASUVORK5CYII=");
+    string path = database.Path + ".png";
+    await File.WriteAllBytesAsync(path, png);
+    string embed = $"![Before](<{path.Replace('\\', '/')}>)";
+    var target = Assert.Single(MarkdownParser.ReadImageTargets(embed));
+    var messageId = Guid.NewGuid();
+    Guid sessionId, runId;
+    try {
+      using UrdStore store = UrdStore.Open(database.Path);
+      sessionId = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
+      runId = Guid.NewGuid();
+      var identity = new ExecutionIdentity(sessionId, runId, 0);
+      store.UserMessages.Submit(sessionId, 0, new(Guid.NewGuid(), 0, "show screenshot", TestLlmSelection.Default), true, runId);
+      var request = store.Executions.CreateNextRequest(identity)!;
+      Assert.True(store.Executions.StartRequest(identity, request.RequestId));
+      Assert.True(store.LlmResponses.Append(identity, new(request.RequestId, messageId, 0, embed, false)));
+      store.MarkdownImageFiles.SaveImage(identity, messageId, target, null);
+    } finally {
+      File.Delete(path);
+    }
+
+    string mediaDirectory = database.Path + ".markdown-images";
+    string orphan = Path.Combine(mediaDirectory, new string('0', 64));
+    string unrelated = Path.Combine(mediaDirectory, "notes.txt");
+    await File.WriteAllBytesAsync(orphan, png);
+    await File.WriteAllTextAsync(unrelated, "leave this alone");
+
+    await using var server = new RunningServer(RunningServer.OptionsFor(database));
+    await server.WaitForReadyAsync();
+    Assert.False(File.Exists(orphan));
+    Assert.True(File.Exists(unrelated));
+    string Url(Guid entryId, int revision = 0) =>
+        $"/api/sessions/{sessionId}/markdown-images/{runId}/{entryId}/{target.Key}?historyRevision={revision}";
+    using var denied = await RequestAsync(server.Client, HttpMethod.Get, Url(messageId), marker: false);
+    Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+    using var found = await RequestAsync(server.Client, HttpMethod.Get, Url(messageId));
+    Assert.Equal(HttpStatusCode.OK, found.StatusCode);
+    AssertPrivateResponse(found);
+    Assert.Equal("image/png", found.Content.Headers.ContentType?.MediaType);
+    Assert.Equal(png, await found.Content.ReadAsByteArrayAsync());
+    await AssertStatusAsync(server.Client, HttpMethod.Get, Url(Guid.NewGuid()), HttpStatusCode.NotFound);
+    await AssertStatusAsync(server.Client, HttpMethod.Get, Url(messageId, revision: 1), HttpStatusCode.NotFound);
+    await AssertStatusAsync(server.Client, HttpMethod.Get, Url(messageId).Replace(target.Key, "invalid"), HttpStatusCode.BadRequest);
+  }
+
   [Theory]
   [InlineData(false, 410)]
   [InlineData(true, 503)]

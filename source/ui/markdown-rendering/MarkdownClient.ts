@@ -1,5 +1,5 @@
 import { RequestError } from "../http/RequestError.ts";
-import { requestEmpty, requestJson } from "../http/requestJson.ts";
+import { requestBlob, requestEmpty, requestJson } from "../http/requestJson.ts";
 import type {
   MessageContentCursor,
   TranscriptEntryRef,
@@ -10,6 +10,7 @@ import type {
   MarkdownContextDescriptorPage,
   MarkdownElementKind,
   MarkdownGenerationRequest,
+  MarkdownImageLoader,
   MarkdownOwnedGeneration,
   MarkdownPiecePage,
   MarkdownRenderContext,
@@ -21,6 +22,7 @@ import type {
   MarkdownValueFragment,
   MarkdownValueKind,
 } from "./MarkdownRenderModel.ts";
+import { isMarkdownImageKey } from "./MarkdownRenderModel.ts";
 import { copyMarkdownManifest } from "./MarkdownWindowAssembler.ts";
 
 const elementKinds = [
@@ -40,6 +42,7 @@ const elementKinds = [
   "inlineCode",
   "link",
   "thematicBreak",
+  "image",
 ] as const satisfies readonly MarkdownElementKind[];
 const textKinds = [
   "text",
@@ -60,7 +63,9 @@ const valueKinds = [
   "language",
   "fenceInfo",
   "orderedStart",
+  "imageKey",
 ] as const satisfies readonly MarkdownValueKind[];
+const imageMediaTypes = ["image/png", "image/jpeg", "image/webp"];
 const alignments = ["none", "left", "center", "right"] as const;
 const guidPattern = /^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/iu;
 
@@ -72,6 +77,7 @@ export interface MarkdownOwnedTextGeneration extends MarkdownOwnedGeneration {
 }
 
 export interface MarkdownClientRequest extends MarkdownGenerationRequest {
+  readonly imageLoader: MarkdownImageLoader | null;
   open(signal: AbortSignal): Promise<MarkdownOwnedTextGeneration>;
 }
 
@@ -85,6 +91,21 @@ export class MarkdownClient {
   request(streamId: string, sessionId: string, entry: TranscriptEntryRef): MarkdownClientRequest {
     return {
       open: (signal) => this.open(streamId, sessionId, entry, signal),
+      imageLoader: entry.kind === "text" ? this.createImageLoader(sessionId, entry) : null,
+    };
+  }
+
+  private createImageLoader(sessionId: string, entry: TranscriptEntryRef): MarkdownImageLoader {
+    const path = `/api/sessions/${encodeURIComponent(sessionId)}/markdown-images/${encodeURIComponent(entry.executionId)}/${encodeURIComponent(entry.entryId)}`;
+    const revision = String(entry.historyRevision);
+    return {
+      scope: `${this.origin}${path}?historyRevision=${revision}`,
+      load: async (key, signal) => {
+        if (!isMarkdownImageKey(key)) throw new TypeError("Invalid Markdown image key.");
+        const url = new URL(`${path}/${key}`, this.origin);
+        url.searchParams.set("historyRevision", revision);
+        return requestBlob(url, imageMediaTypes, signal);
+      },
     };
   }
 

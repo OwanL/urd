@@ -5,12 +5,12 @@ namespace Urd.Core.MarkdownRendering;
 // not this index. IDs/cursors must never be persisted as source anchors.
 public enum MarkdownElementKind {
   Document = 0, Paragraph = 1, Heading = 2, Quote = 3, List = 4, Item = 5, Code = 6, CodeLine = 7,
-  Table = 8, Row = 9, Cell = 10, Emphasis = 11, Strong = 12, InlineCode = 13, Link = 14, ThematicBreak = 15
+  Table = 8, Row = 9, Cell = 10, Emphasis = 11, Strong = 12, InlineCode = 13, Link = 14, ThematicBreak = 15, Image = 16
 }
 
 public enum MarkdownTextKind { Text = 0, Literal = 1, Code = 2, SoftBreak = 3, HardBreak = 4, ThematicBreak = 5 }
 public enum MarkdownSourceMapping { Exact = 0, Containing = 1, Container = 2 }
-public enum MarkdownValueKind { Destination = 0, Title = 1, Language = 2, FenceInfo = 3, OrderedStart = 4 }
+public enum MarkdownValueKind { Destination = 0, Title = 1, Language = 2, FenceInfo = 3, OrderedStart = 4, ImageKey = 5 }
 public enum MarkdownTableAlignment { None = 0, Left = 1, Center = 2, Right = 3 }
 
 public readonly record struct MarkdownSourceRange(int Start, int End);

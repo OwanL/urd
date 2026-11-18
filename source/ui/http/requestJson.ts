@@ -17,6 +17,20 @@ export async function requestJson<T>(
   return (await response.json()) as T;
 }
 
+export async function requestBlob(
+  url: URL,
+  mediaTypes: readonly string[],
+  signal: AbortSignal,
+): Promise<Blob> {
+  const response = await request(url, "GET", undefined, signal, mediaTypes.join(", "));
+  const mediaType = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
+  if (!mediaType || !mediaTypes.includes(mediaType)) {
+    await response.body?.cancel();
+    throw new TypeError("Server returned an unsupported media type.");
+  }
+  return response.blob();
+}
+
 export async function requestEmpty(url: URL, method: "POST", body: unknown): Promise<void> {
   const response = await request(url, method, body);
   if (response.status === 204) return;
@@ -29,10 +43,11 @@ async function request(
   method: "GET" | "POST",
   body?: unknown,
   signal?: AbortSignal,
+  accept = "application/json",
 ): Promise<Response> {
   const headers: Record<string, string> = {
     "X-Urd-Client": "browser",
-    Accept: "application/json",
+    Accept: accept,
   };
   const options: RequestInit = {
     method,

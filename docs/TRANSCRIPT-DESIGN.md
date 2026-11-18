@@ -601,8 +601,26 @@ bytes, report them unavailable rather than substituting another file, erasing th
 silently rereading a mutable source or rerunning the producer. Final cleanup must coordinate
 with new references, active publication and readers/tool uses: a zero-reference query or
 SQLite snapshot does not pin a file, and delays or repeat scans do not close the race.
-The exact exclusion/lease mechanism remains unselected. These are required failure
-boundaries, not claims of an implemented attachment lifecycle.
+The exact exclusion/lease mechanism remains unselected for general attachments.
+
+#### Assistant local-image embeds
+
+The first managed-image slice is assistant-to-user display, independent of model
+vision. A complete Markdown image node with a local destination asks Urd to
+capture the file. Resolve relative paths against the session's working directory;
+allow absolute local paths, including temporary screenshots. Do not resolve bare
+links, code, user messages, tool output, network shares, or external URLs in this
+pipeline. No agent-specific link syntax or explicit sharing tool is needed.
+
+Capture while assistant text is streaming, outside the text-save gate. The same
+image should remain in place across Markdown generations. Pending capture must
+not hold up the text. Preserve Markdown source; serve only committed managed bytes
+through the private browser API, scoped to the transcript message. A failed import
+leaves an alt-text fallback and reopening history never reads the original path.
+References follow the owning entry's history lifetime; the next exclusive host
+startup removes unreferenced bytes. The first slice accepts bounded PNG, JPEG,
+and WebP files, with bounded source scans and a best-effort import queue. It does
+not add uploads, external-image fetching, or provider image delivery.
 
 ## Grill queue — resolve dependencies, one scenario at a time
 
@@ -681,12 +699,11 @@ production parser, projection format or a browser virtualizer.
    inspection data only when needed and release it when no longer useful. Verify
    draft-to-final identity, failure/cancellation, offscreen streaming and interrupted
    observation. No pruner, raw-log archive or opaque-continuation exposure.
-4. **Managed images and clipboard input.** Complete storage/publication/reference
-   ownership, metadata/previews, gated binary delivery, upload/draft lifecycle and
-   bounded viewer resources. Provider image input/output is its own capability path,
-   not proof obtained from rendering a picture. This slice may need broader execution
-   and model-context changes; bound and approve those before starting rather than
-   treating the feature as a transcript-only frontend patch.
+4. **Managed images and clipboard input.** Begin with the approved
+   [assistant local-image embeds](#assistant-local-image-embeds) slice. Upload/draft
+   lifecycle, clipboard and provider image delivery remain separate. Provider image
+   input/output is its own capability path, not proof obtained from rendering a picture.
+   Bound and approve further execution and model-context changes separately.
 5. **Later cross-stage qualification and tuning.** Repeated long-session navigation,
    concurrent streaming, many tool calls and screenshots under realistic resource
    contention. Measure both browser and backend, warm and cold paths, persistent index

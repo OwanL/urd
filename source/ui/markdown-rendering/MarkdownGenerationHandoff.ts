@@ -329,12 +329,14 @@ export class MarkdownGenerationHandoff {
       if (this.view.pinned()) return;
       const located = window.snapshot.pieces.get(cursor.index);
       // Empty table cells can share the following visible piece's source start.
-      // Locate correctly returns the first tie, but geometry needs a text rectangle.
-      const piece = located?.text
-        ? located
-        : [...window.snapshot.pieces.values()]
-            .filter((piece) => piece.text && piece.source.start === located?.source.start)
-            .sort((a, b) => a.id - b.id)[0];
+      // Locate correctly returns the first tie, but geometry needs a visible piece.
+      const piece =
+        located &&
+        (located.text || window.snapshot.contexts.get(located.context)?.context.kind === "image")
+          ? located
+          : [...window.snapshot.pieces.values()]
+              .filter((piece) => piece.text && piece.source.start === located?.source.start)
+              .sort((a, b) => a.id - b.id)[0];
       const replacement =
         anchor && piece
           ? {

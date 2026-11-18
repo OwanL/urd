@@ -23,7 +23,7 @@ internal sealed class MessageMarkdownScheduler : IAsyncDisposable {
     this.limits = limits ?? throw new ArgumentNullException(nameof(limits));
     this.limits.Validate();
     cache = new(this.limits);
-    this.parse = parse ?? (source => MarkdownParser.Parse(source.Source));
+    this.parse = parse ?? (source => MarkdownParser.Parse(source.Source, source.Message.Role == MessageRole.Assistant));
     // An injected delegate must support concurrent calls, just like MarkdownParser.
     for (int lane = 0; lane < active.Length; lane++) {
       int selected = lane;

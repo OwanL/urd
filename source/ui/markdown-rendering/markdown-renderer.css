@@ -132,6 +132,21 @@
   outline-offset: 2px;
 }
 
+.markdown-renderer [data-markdown-image-piece] {
+  display: inline-block;
+  max-inline-size: 100%;
+  vertical-align: middle;
+}
+.markdown-renderer-image,
+.markdown-renderer-image > a {
+  display: block;
+}
+.markdown-renderer-image img {
+  display: block;
+  max-inline-size: min(100%, calc(var(--markdown-image-ratio) * min(28rem, 50vh)));
+  block-size: auto;
+}
+
 .markdown-renderer hr {
   border: 0;
   border-top: 1px solid var(--border-subtle, #303030);

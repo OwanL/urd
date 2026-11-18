@@ -1,6 +1,7 @@
 using Microsoft.Extensions.AI;
 using Urd.Core.Context;
 using Urd.Core.Concurrency;
+using Urd.Core.MarkdownRendering;
 using Urd.Core.Sessions;
 using Urd.Core.Providers;
 using Urd.Core.Storage;
@@ -12,6 +13,7 @@ namespace Urd.Core.Execution;
 internal sealed class SessionExecutionRecorder(SessionBase session, UrdStore store, AsyncLock sessionLock,
     ExecutionIdentity identity, ISubagentRunner? subagents = null) {
   private readonly Dictionary<(string Purpose, string Channel), char> pendingPreviewSurrogates = [];
+  private readonly MarkdownImageImports.Observer imageImports = store.MarkdownImageImports.ObserveExecution(identity, session.WorkingDirectory);
   internal ExecutionIdentity Identity { get; } = identity;
 
   // One calling context per tool call. The manager owns both bounded child runs and the
@@ -29,16 +31,20 @@ internal sealed class SessionExecutionRecorder(SessionBase session, UrdStore sto
         || !store.LlmResponses.Append(Identity, chunk))
       return false;
 
+    imageImports.Observe(chunk);
     session.PublishChange();
     return true;
   }
 
   internal Task<bool> RecordToolCallAsync(Guid requestId, string callId, string? name) =>
-    RecordChangeAsync(() => store.LlmResponses.RecordToolCall(Identity, requestId, callId, name));
+    RecordChangeAsync(() => store.LlmResponses.RecordToolCall(Identity, requestId, callId, name),
+      afterSave: imageImports.CloseResponse);
 
   internal Task<bool> CompleteRequestAsync(LlmRequestResult outcome) =>
     RecordChangeAsync(() => store.LlmResponses.CompleteRequest(Identity, outcome),
-      allowStopping: outcome.Outcome != ExecutionOutcome.Completed);
+      allowStopping: outcome.Outcome != ExecutionOutcome.Completed, afterSave: imageImports.CloseResponse);
+
+  internal Task JoinImageImportsAsync() => imageImports.JoinAsync();
 
   internal Task<bool> TryStartToolAsync(Guid requestId, string callId, bool runInBackground = false) =>
     RecordChangeAsync(() => store.Tools.TryStart(Identity, requestId, callId, runInBackground));
@@ -112,11 +118,12 @@ internal sealed class SessionExecutionRecorder(SessionBase session, UrdStore sto
       pendingPreviewSurrogates.Remove(key);
   }
 
-  internal async Task<bool> RecordChangeAsync(Func<bool> record, bool allowStopping = false) {
+  internal async Task<bool> RecordChangeAsync(Func<bool> record, bool allowStopping = false, Action? afterSave = null) {
     using var _ = await sessionLock.AcquireAsync();
     if (!session.CanRecordExecution(Identity, allowStopping) || !session.WriteToStore(record))
       return false;
 
+    afterSave?.Invoke();
     session.PublishChange();
     return true;
   }

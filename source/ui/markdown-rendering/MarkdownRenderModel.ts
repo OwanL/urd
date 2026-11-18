@@ -16,7 +16,8 @@ export type MarkdownElementKind =
   | "strong"
   | "inlineCode"
   | "link"
-  | "thematicBreak";
+  | "thematicBreak"
+  | "image";
 export type MarkdownTextKind =
   | "text"
   | "literal"
@@ -25,7 +26,23 @@ export type MarkdownTextKind =
   | "hardBreak"
   | "thematicBreak";
 export type MarkdownSourceMapping = "exact" | "containing" | "container";
-export type MarkdownValueKind = "destination" | "title" | "language" | "fenceInfo" | "orderedStart";
+export type MarkdownValueKind =
+  | "destination"
+  | "title"
+  | "language"
+  | "fenceInfo"
+  | "orderedStart"
+  | "imageKey";
+
+export interface MarkdownImageLoader {
+  // Stable for a message within a history revision; not tied to a render lease.
+  readonly scope: string;
+  load(key: string, signal: AbortSignal): Promise<Blob>;
+}
+
+export function isMarkdownImageKey(value: string | undefined): value is string {
+  return value?.length === 64 && /^[a-f0-9]+$/u.test(value);
+}
 
 // Half-open UTF-8 byte ranges in the original source; never JS string indices.
 export interface MarkdownSourceRange {

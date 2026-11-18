@@ -2,8 +2,10 @@ import { render } from "preact";
 import type { MessageContentCursor } from "../sessions/Messages.ts";
 import type { MarkdownClientRequest, MarkdownOwnedTextGeneration } from "./MarkdownClient.ts";
 import { MarkdownGenerationHandoff } from "./MarkdownGenerationHandoff.ts";
+import { MarkdownImageWindow } from "./MarkdownImageWindow.ts";
 import { MarkdownRenderer } from "./MarkdownRenderer.tsx";
 import type {
+  MarkdownImageLoader,
   MarkdownPieceInterval,
   MarkdownRenderCursor,
   MarkdownRenderSnapshot,
@@ -33,7 +35,10 @@ type PendingRequest = {
 };
 type Direction = "forward" | "backward";
 type ViewRange = MarkdownPieceInterval | null;
-type TrackedTextGeneration = MarkdownOwnedTextGeneration & { readonly isDisposed: boolean };
+type TrackedTextGeneration = MarkdownOwnedTextGeneration & {
+  readonly isDisposed: boolean;
+  readonly imageLoader: MarkdownImageLoader | null;
+};
 
 // Owns only the supplied empty host. The transcript remains the sole scrollport.
 export class MarkdownMessageView {
@@ -42,6 +47,8 @@ export class MarkdownMessageView {
   private readonly retainedPieceCount: number;
   private readonly callbacks: MarkdownMessageViewCallbacks;
   private readonly geometry = new MarkdownWindowGeometry();
+  private readonly images = new MarkdownImageWindow(() => this.imageChanged());
+  private imageLayoutPending = false;
   private readonly ownedGenerations = new Set<TrackedTextGeneration>();
   private readonly mutationControllers = new Set<AbortController>();
   private readonly sourceReads = new Map<AbortController, Promise<unknown>>();
@@ -113,6 +120,7 @@ export class MarkdownMessageView {
     if (this.disposed || this.paused === paused) return;
     this.paused = paused;
     if (!paused) {
+      if (this.imageLayoutPending) this.imageChanged();
       this.startPendingRequest();
       return;
     }
@@ -320,6 +328,7 @@ export class MarkdownMessageView {
   dispose(): Promise<void> {
     if (this.disposal) return this.disposal;
     this.disposed = true;
+    this.images.dispose();
     this.pendingRequest?.resolve("cancelled");
     this.pendingRequest = null;
     this.requestController?.abort();
@@ -391,7 +400,10 @@ export class MarkdownMessageView {
   ): Promise<MarkdownPublication> {
     let source: TrackedTextGeneration | null = null;
     try {
-      source = this.trackGeneration(await pending.request.open(signal));
+      source = this.trackGeneration(
+        await pending.request.open(signal),
+        pending.request.imageLoader,
+      );
       signal.throwIfAborted();
       const location = await source.locateSource(
         pending.saved?.cursor ?? source.source.availableThrough,
@@ -454,21 +466,26 @@ export class MarkdownMessageView {
   ): Promise<MarkdownPublication> {
     const handoff = this.handoff;
     if (!handoff) return "cancelled";
-    return handoff.request(this.wrapRequest(pending.request), signal);
+    const { request } = pending;
+    return handoff.request(
+      {
+        open: async (signal) =>
+          this.trackGeneration(await request.open(signal), request.imageLoader),
+      },
+      signal,
+    );
   }
 
-  private wrapRequest(request: MarkdownTextRequest): MarkdownTextRequest {
-    return {
-      open: async (signal) => this.trackGeneration(await request.open(signal)),
-    };
-  }
-
-  private trackGeneration(source: MarkdownOwnedTextGeneration): TrackedTextGeneration {
+  private trackGeneration(
+    source: MarkdownOwnedTextGeneration,
+    imageLoader: MarkdownImageLoader | null,
+  ): TrackedTextGeneration {
     let isDisposed = false;
     let release: Promise<void> | null = null;
     const tracked: TrackedTextGeneration = {
       manifest: source.manifest,
       source: source.source,
+      imageLoader,
       get isDisposed() {
         return isDisposed;
       },
@@ -687,6 +704,18 @@ export class MarkdownMessageView {
     return "forward";
   }
 
+  private imageChanged(): void {
+    if (this.disposed) return;
+    this.imageLayoutPending = this.paused;
+    if (this.paused || !this.rendererRoot || !this.handoff) return;
+    try {
+      const anchor = this.geometry.capture(this.rendererRoot, this.scrollport);
+      this.publishSnapshot(this.handoff.snapshot, anchor);
+    } catch (error) {
+      this.callbacks.error(error);
+    }
+  }
+
   private publishSnapshot(
     snapshot: MarkdownRenderSnapshot,
     anchor: MarkdownWindowAnchor | null,
@@ -706,12 +735,20 @@ export class MarkdownMessageView {
     }
     const width = this.host.getBoundingClientRect().width;
     this.geometry.configure(snapshot.generation, width > 0 ? width : 1, "message");
-    render(<MarkdownRenderer snapshot={snapshot} geometry={this.geometry} />, this.host);
-    this.rendererRoot = this.host.querySelector<HTMLElement>(".markdown-renderer");
-    if (this.rendererRoot && this.geometry.measure(this.rendererRoot, this.scrollport)) {
-      render(<MarkdownRenderer snapshot={snapshot} geometry={this.geometry} />, this.host);
+    const images = {
+      resources: this.images.update(snapshot, this.activeGeneration?.imageLoader ?? null),
+      scrollport: this.scrollport,
+    };
+    const renderWindow = () => {
+      render(
+        <MarkdownRenderer snapshot={snapshot} geometry={this.geometry} images={images} />,
+        this.host,
+      );
       this.rendererRoot = this.host.querySelector<HTMLElement>(".markdown-renderer");
-    }
+    };
+    renderWindow();
+    if (this.rendererRoot && this.geometry.measure(this.rendererRoot, this.scrollport))
+      renderWindow();
     if (this.rendererRoot) this.geometry.restore(this.rendererRoot, anchor, this.scrollport);
     this.lastScrollTop = this.scrollport.scrollTop;
     if (this.rendererRoot && !this.pins) {
@@ -752,7 +789,9 @@ export class MarkdownMessageView {
     offset: number,
     preferred?: MarkdownPieceInterval,
   ): MarkdownWindowAnchor | null {
-    const pieces = [...snapshot.pieces.values()].filter((candidate) => candidate.text.length > 0);
+    const pieces = [...snapshot.pieces.values()].filter(
+      (piece) => piece.text || snapshot.contexts.get(piece.context)?.context.kind === "image",
+    );
     const orderByDistance = (left: (typeof pieces)[number], right: (typeof pieces)[number]) =>
       Math.abs(left.id - cursor.index) - Math.abs(right.id - cursor.index);
     const piece =

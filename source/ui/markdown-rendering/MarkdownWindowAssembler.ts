@@ -32,6 +32,7 @@ const markdownElementKinds = new Set<MarkdownRenderContext["kind"]>([
   "inlineCode",
   "link",
   "thematicBreak",
+  "image",
 ]);
 const markdownTextKinds = new Set<MarkdownTextPiece["kind"]>([
   "text",
@@ -48,6 +49,7 @@ const markdownValueKinds = new Set<MarkdownValueKind>([
   "language",
   "fenceInfo",
   "orderedStart",
+  "imageKey",
 ]);
 const alignments = new Set<MarkdownRenderContext["alignment"]>(["none", "left", "center", "right"]);
 

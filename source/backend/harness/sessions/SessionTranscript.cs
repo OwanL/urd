@@ -1,3 +1,5 @@
+using Microsoft.Extensions.AI;
+using Urd.Core.MarkdownRendering;
 using Urd.Core.Storage;
 using Urd.Core.Concurrency;
 
@@ -18,6 +20,21 @@ public sealed class SessionTranscript {
   public Task<MessageContentPage> ReadContentAsync(
       MessageContentCursor cursor, CancellationToken cancellation = default) =>
       ReadUnderLockAsync(() => store.Content.Read(sessionId, cursor), cancellation);
+
+  public async Task<DataContent?> ReadMarkdownImageAsync(MessageRef message, string key,
+      CancellationToken cancellation = default) {
+    if (message.Role != MessageRole.Assistant || !MarkdownImageTarget.IsKey(key))
+      throw new ArgumentException("A managed image requires an assistant message and a valid image key.");
+    cancellation.ThrowIfCancellationRequested();
+    Task pending = store.MarkdownImageImports.WaitForPendingAsync(sessionId, message.ExecutionId, message.MessageId, cancellation);
+    bool alreadyProcessed = pending.IsCompletedSuccessfully;
+    DataContent? captured = store.MarkdownImageFiles.Read(sessionId, message, key);
+    if (captured is not null || alreadyProcessed)
+      return captured;
+
+    await pending;
+    return store.MarkdownImageFiles.Read(sessionId, message, key);
+  }
 
   internal Task<MessageContentExtent> CaptureContentExtentAsync(
       MessageRef message, TranscriptTextFacts expected, CancellationToken cancellation = default) =>

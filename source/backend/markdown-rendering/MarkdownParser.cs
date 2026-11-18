@@ -15,26 +15,45 @@ internal sealed class MarkdownParser {
   // concurrent scheduler lanes never share mutable extension/parser state.
   [ThreadStatic] static MarkdownPipeline? pipeline;
   readonly string source;
+  readonly bool localImages;
   readonly List<MarkdownRenderContext> contexts = [];
   readonly List<MarkdownTextPiece> pieces = [];
   readonly List<MarkdownValueFragment> values = [];
   readonly Dictionary<int, int> lastChildren = [];
 
-  MarkdownParser(string source) => this.source = source;
+  MarkdownParser(string source, bool localImages) {
+    this.source = source;
+    this.localImages = localImages;
+  }
 
-  internal static MarkdownRenderIndex Parse(string source) {
+  internal static MarkdownRenderIndex Parse(string source, bool localImages = true) =>
+    Extract(source, ParseDocument(source), localImages);
+
+  internal static IEnumerable<MarkdownImageTarget> ReadImageTargets(string source) =>
+    ParseDocument(source).Descendants<LinkInline>().Select(ImageTarget).OfType<MarkdownImageTarget>();
+
+  static MarkdownDocument ParseDocument(string source) {
     ArgumentNullException.ThrowIfNull(source);
     pipeline ??= new MarkdownPipelineBuilder()
       .UsePipeTables(new PipeTableOptions { UseGfmRules = true })
       .UsePreciseSourceLocation().Build();
-    return Extract(source, Markdown.Parse(source, pipeline));
+    return Markdown.Parse(source, pipeline);
+  }
+
+  // An image in another image's label contributes only alternative text.
+  static MarkdownImageTarget? ImageTarget(LinkInline link) {
+    if (!link.IsImage)
+      return null;
+    for (ContainerInline? parent = link.Parent; parent is not null; parent = parent.Parent)
+      if (parent is LinkInline { IsImage: true }) return null;
+    return MarkdownImageTarget.FromDestination(link.Url);
   }
 
   // Internal extraction boundary also permits checking unknown-node rejection.
   // Supplied parser locations must refer to this exact, unnormalized source.
-  internal static MarkdownRenderIndex Extract(string source, MarkdownDocument document) {
+  internal static MarkdownRenderIndex Extract(string source, MarkdownDocument document, bool localImages = true) {
     var extent = MarkdownSourceMap.Convert(source, [0, source.Length])[source.Length];
-    var parser = new MarkdownParser(source);
+    var parser = new MarkdownParser(source, localImages);
     var root = parser.AddContext(MarkdownElementKind.Document, -1, new(0, source.Length));
     parser.ParseBlocks(document, root, 0);
     parser.FinishContext(root);
@@ -213,7 +232,10 @@ internal sealed class MarkdownParser {
         FinishContext(emphasisId);
         break;
       case LinkInline link when link.IsImage:
-        AddLiteralSource(parent, range);
+        if (localImages && ImageTarget(link) is { } image)
+          ParseImage(link, image, parent, range);
+        else
+          AddLiteralSource(parent, range);
         break;
       case LinkInline link:
         ParseLink(link, parent, range, depth);
@@ -237,6 +259,23 @@ internal sealed class MarkdownParser {
       default:
         throw Unsupported(inline);
     }
+  }
+
+  void ParseImage(LinkInline link, MarkdownImageTarget image, int parent, MarkdownSourceRange range) {
+    var id = AddContext(MarkdownElementKind.Image, parent, range);
+    AddValueFragments(MarkdownValueKind.ImageKey, image.Key, id);
+    var alt = string.Concat(link.Descendants().Select(node => node switch {
+      LiteralInline literal => literal.Content.ToString(),
+      HtmlEntityInline entity => entity.Transcoded.ToString(),
+      CodeInline code => code.Content,
+      LineBreakInline => " ",
+      _ => ""
+    }));
+    if (alt.Length == 0)
+      AddPiece(id, MarkdownTextKind.Text, "", range, MarkdownSourceMapping.Containing, 0, false);
+    else
+      AddTextPieces(alt, id, MarkdownTextKind.Text, range, allowExact: false);
+    FinishContext(id);
   }
 
   void ParseLink(LinkInline link, int parent, MarkdownSourceRange range, int depth) {

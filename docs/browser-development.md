@@ -164,6 +164,12 @@ and their synthetic renderer harness were removed by owner decision on 2026-11-1
 real layout, selection, focus and clipboard behavior no longer have automated browser
 coverage. Earlier composed browser probes remain dated evidence, not current tests.
 
+Use `![Before](<C:/path to/before.png>)` in an assistant reply to show a local
+screenshot inline. Relative paths use the session's working directory. Urd
+captures standard PNG, JPEG and WebP files while the reply streams and keeps a
+copy for history; missing or unsupported files leave an alt-text fallback.
+This does not apply to external URLs, user messages, or tool-output text.
+
 ## Workspace composition
 
 `app/Workspace.tsx` connects the behavioral owners and renders the workspace shell.

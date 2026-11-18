@@ -22,7 +22,7 @@ internal static class ToolPaths {
       Path.GetFullPath(WindowsDrivePath(workingDirectory)));
   }
 
-  private static string WindowsDrivePath(string path) {
+  internal static string WindowsDrivePath(string path) {
     if (!OperatingSystem.IsWindows() || path.Length < 2 || path[0] != '/' || !char.IsAsciiLetter(path[1]))
       return path;
     if (path.Length == 2)

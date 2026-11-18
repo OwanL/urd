@@ -608,13 +608,14 @@ public abstract class SessionBase {
   private TaskCompletionSource? StartPendingQuestionRun() {
     if (!CanStartWork || agentQuestions is null)
       return null;
-    QueuedQuestion? waking = agentQuestions.Queued(Id).FirstOrDefault(question => question.Wake);
-    if (waking is null)
+    QueuedQuestion[] waking = [.. agentQuestions.Queued(Id).Where(question => question.Wake)];
+    if (waking.Length == 0)
       return null;
     try {
       return StartQuestionRun(agentQuestions);
     } catch (Exception failure) {
-      agentQuestions.Fail(Id, waking.QuestionId, failure.Message);
+      foreach (QueuedQuestion question in waking)
+        agentQuestions.Fail(Id, question.QuestionId, failure.Message);
       return null;
     }
   }

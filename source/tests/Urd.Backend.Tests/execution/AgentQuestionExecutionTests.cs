@@ -405,6 +405,57 @@ public sealed class AgentQuestionExecutionTests {
   }
 
   [Fact]
+  public async Task FailedPendingWakeAdmissionFailsEveryWakeAndLeavesBackgroundAsksQueued() {
+    var summaryEntered = Signal();
+    var summaryRelease = Signal();
+    await using var fixture = await QuestionFixture.OpenAsync(async cancellation => {
+      summaryEntered.TrySetResult();
+      await summaryRelease.Task.WaitAsync(cancellation);
+      return await Summarize(cancellation);
+    });
+    try {
+      fixture.Respond(Complete, Complete);
+      Guid bulk = await fixture.StartAsync("bulk: " + new string('x', 100_000));
+      Assert.Equal(ExecutionOutcome.Completed, (await fixture.FinishAsync(bulk)).Outcome);
+      Guid steer = await fixture.StartAsync("latest decision");
+      Assert.Equal(ExecutionOutcome.Completed, (await fixture.FinishAsync(steer)).Outcome);
+
+      long revision = (await fixture.Recipient.ReadSnapshotAsync()).HistoryRevision;
+      CompactionReceipt compaction = Assert.IsType<CompactionReceipt>(await fixture.Recipient.CompactAsync(
+          new ManualCompactionRequest(Guid.NewGuid(), revision, TestLlmSelection.Default with { ContextWindow = 8_192 })));
+      await summaryEntered.Task.WaitAsync(TestTimeout);
+
+      Task<AgentQuestionResult> backgroundHead = fixture.Ask("background head", wake: false);
+      await fixture.WaitForQueueAsync(1);
+      Task<AgentQuestionResult> firstWake = fixture.Ask("first wake", wake: true);
+      await fixture.WaitForQueueAsync(2);
+      Task<AgentQuestionResult> backgroundTail = fixture.Ask("background tail", wake: false);
+      await fixture.WaitForQueueAsync(3);
+      Task<AgentQuestionResult> secondWake = fixture.Ask("second wake", wake: true);
+      await fixture.WaitForQueueAsync(4);
+
+      fixture.FailNextQuestionRunAdmission();
+      summaryRelease.TrySetResult();
+      Assert.Equal(ExecutionOutcome.Completed, (await fixture.FinishAsync(compaction.ExecutionId)).Outcome);
+
+      AgentQuestionResult firstFailure = await firstWake.WaitAsync(TestTimeout);
+      AgentQuestionResult secondFailure = await secondWake.WaitAsync(TestTimeout);
+      Assert.Null(firstFailure.Answer);
+      Assert.Null(secondFailure.Answer);
+      string failure = Assert.IsType<string>(firstFailure.Error);
+      Assert.Equal(failure, secondFailure.Error);
+      Assert.Contains("question admission failed", failure, StringComparison.OrdinalIgnoreCase);
+      Assert.False(backgroundHead.IsCompleted);
+      Assert.False(backgroundTail.IsCompleted);
+      QueuedQuestion[] remaining = [.. fixture.Manager.Questions.Queued(fixture.Recipient.Id)];
+      Assert.Equal(2, remaining.Length);
+      Assert.All(remaining, question => Assert.False(question.Wake));
+    } finally {
+      summaryRelease.TrySetResult();
+    }
+  }
+
+  [Fact]
   public async Task StopDuringManualCompactionDoesNotAutoStartThePendingWakingAsk() {
     var summaryEntered = Signal();
     var summaryRelease = Signal();
@@ -599,6 +650,11 @@ public sealed class AgentQuestionExecutionTests {
             recipientTitle, prompt, wake, cancellation);
 
     internal void CompactNextRequest() => new PreferenceManager(store).SetCompactionTriggerTokenCount(1_000);
+
+    internal void FailNextQuestionRunAdmission() => database.Execute("""
+      CREATE TRIGGER fail_question_run BEFORE INSERT ON execution_runs
+      BEGIN SELECT RAISE(ABORT, 'question admission failed'); END;
+      """);
 
     internal async Task SteerAsync(CapturedCall active, string text) {
       UserMessageReceipt receipt = await Recipient.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, text, TestLlmSelection.Default));

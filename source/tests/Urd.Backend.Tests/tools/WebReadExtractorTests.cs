@@ -72,6 +72,58 @@ public sealed class WebReadExtractorTests {
   }
 
   [Fact]
+  public void ExtractionKeepsInlineTextAroundNestedBlocksInDocumentOrder() {
+    string html = """
+      <html><body><main>
+        <div class="quote"><span class="text">“The world is our thinking.”</span><span> by <small>Albert Einstein</small></span><div class="tags">Tags: <a href="/tag/thinking">thinking</a></div><span>After tags</span></div>
+        <section>Before <em>nested content</em><div><p>Inner paragraph</p></div>After nested content</section>
+      </main></body></html>
+      """;
+    WebPageExtraction extraction = WebPageExtractor.Extract(html, "https://example.com/");
+    Assert.Equal("""
+      “The world is our thinking.” by Albert Einstein
+
+      Tags: [thinking](https://example.com/tag/thinking)
+
+      After tags
+
+      Before nested content
+
+      Inner paragraph
+
+      After nested content
+      """, extraction.Markdown);
+    Assert.False(extraction.Truncated);
+  }
+
+  [Fact]
+  public void ExtractionKeepsNestedListsAndLinkedCardBlocksSeparate() {
+    string html = """
+      <html><body><main>
+        <a href="/story"><h2>Title</h2><p>Summary with <em>emphasis</em>.</p></a>
+        <ul><li><a href="/single"><div>Single card</div></a></li><li>Parent<ul><li>Child</li></ul>After child</li></ul>
+        <p>Read <a href="/more">more</a>.</p>
+      </main></body></html>
+      """;
+    WebPageExtraction extraction = WebPageExtractor.Extract(html, "https://example.com/");
+    Assert.Equal("""
+      ## [Title](https://example.com/story)
+
+      [Summary with emphasis.](https://example.com/story)
+
+      [Single card](https://example.com/single)
+
+      - Parent
+
+      - Child
+
+      - After child
+
+      Read [more](https://example.com/more).
+      """, extraction.Markdown);
+  }
+
+  [Fact]
   public void EmptyOrEmptyAfterStrippingDocumentsProduceEmptyMarkdown() {
     Assert.Equal("", WebPageExtractor.Extract("<html><body></body></html>", "https://example.com/").Markdown);
     Assert.Equal("", WebPageExtractor.Extract("<html><body><nav>only chrome</nav></body></html>", "https://example.com/").Markdown);

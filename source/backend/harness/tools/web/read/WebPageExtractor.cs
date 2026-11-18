@@ -23,21 +23,67 @@ internal static class WebPageExtractor {
     if (root is null)
       return new WebPageExtraction("", false);
 
-    var captured = new HashSet<IElement>();
     var builder = new StringBuilder();
+    var inline = new StringBuilder();
     long bytes = 0;
     int links = 0;
     bool truncated = false;
 
-    foreach (IElement element in root.QuerySelectorAll(blockSelector)) {
-      if (captured.Contains(element))
-        continue;
-      if (element.TagName is "DIV" or "SECTION" or "ARTICLE" && !IsLeafContainer(element))
-        continue;
-      string text = BlockText(element);
-      if (text.Length == 0)
-        continue;
-      string block = element.TagName switch {
+    Walk(root, root.TagName, null);
+    Flush(root.TagName, null);
+    return new WebPageExtraction(builder.ToString(), truncated);
+
+    // Flush inline runs on either side of nested blocks, rather than dropping the parent text.
+    void Walk(IElement element, string blockTag, string? href) {
+      foreach (INode node in element.ChildNodes) {
+        if (truncated)
+          return;
+        if (node is IText text) {
+          inline.Append(text.Data);
+        } else if (node is IElement child) {
+          if (IsBlock(child.TagName)) {
+            Flush(blockTag, href);
+            if (truncated)
+              return;
+            if (child.TagName is "PRE" or "TR") {
+              string content = child.TagName == "PRE" ? child.TextContent.Trim() :
+                string.Join(" | ", child.QuerySelectorAll("th,td")
+                  .Select(cell => Collapse(InlineText(cell))).Where(cell => cell.Length > 0));
+              AddBlock(child.TagName, content, href);
+            } else {
+              Walk(child, child.TagName, href);
+              Flush(child.TagName, href);
+            }
+          } else if (child.TagName == "A" && child.QuerySelector(blockSelector) is not null) {
+            // Linked cards can wrap several blocks; keep both their structure and destination.
+            Flush(blockTag, href);
+            string? destination = Href(child);
+            Walk(child, blockTag, destination);
+            Flush(blockTag, destination);
+          } else if (Anchor(child) is { } link) {
+            inline.Append(CultureInfo.InvariantCulture, $"[{link.Label}]({link.Href})");
+          } else {
+            Walk(child, blockTag, href);
+          }
+        }
+      }
+    }
+
+    void Flush(string tag, string? href) {
+      string text = Collapse(inline.ToString());
+      inline.Clear();
+      if (!truncated)
+        AddBlock(tag, text, href);
+    }
+
+    void AddBlock(string tag, string text, string? href) {
+      if (text.Length == 0 || truncated)
+        return;
+      if (href is not null && tag != "PRE" && links < MaxLinks) {
+        links++;
+        text = $"[{text}]({href})";
+      }
+      string block = tag switch {
         "H1" => "# " + text,
         "H2" => "## " + text,
         "H3" => "### " + text,
@@ -46,47 +92,29 @@ internal static class WebPageExtractor {
         "H6" => "###### " + text,
         "LI" or "DT" or "DD" => "- " + text,
         "PRE" => "```\n" + text + "\n```",
-        "HR" => "---",
         _ => text
       };
       if (builder.Length > 0)
         builder.Append("\n\n");
       builder.Append(block);
       bytes += Encoding.UTF8.GetByteCount(block) + 2;
-      if (bytes > MaxOutputBytes) {
+      if (bytes > MaxOutputBytes)
         truncated = true;
-        break;
-      }
-    }
-    return new WebPageExtraction(builder.ToString(), truncated);
-
-    // Standalone text containers; containers holding blocks are reduced to their blocks instead.
-    bool IsLeafContainer(IElement element) =>
-      element.QuerySelector(blockSelector) is null;
-
-    string BlockText(IElement element) {
-      string raw = element.TagName switch {
-        "TR" => string.Join(" | ", element.QuerySelectorAll("th,td")
-          .Select(cell => Collapse(InlineText(cell))).Where(cell => cell.Length > 0)),
-        "PRE" => element.TextContent.Trim(),
-        _ => Collapse(InlineText(element))
-      };
-      return raw.Trim();
     }
 
     string InlineText(IElement element) {
-    var inline = new StringBuilder();
+      var content = new StringBuilder();
       Append(element);
-      return inline.ToString();
+      return content.ToString();
 
       void Append(IElement current) {
         foreach (INode node in current.ChildNodes) {
           if (node is IText text) {
-            inline.Append(text.Data);
+            content.Append(text.Data);
           } else if (node is IElement child) {
             (string Label, string Href)? anchor = Anchor(child);
             if (anchor is { } link)
-              inline.Append(CultureInfo.InvariantCulture, $"[{link.Label}]({link.Href})");
+              content.Append(CultureInfo.InvariantCulture, $"[{link.Label}]({link.Href})");
             else
               Append(child);
           }
@@ -95,20 +123,31 @@ internal static class WebPageExtractor {
     }
 
     (string Label, string Href)? Anchor(IElement element) {
-      if (element.TagName != "A")
+      string? href = Href(element);
+      if (href is null)
         return null;
-      string raw = element.GetAttribute("href") ?? "";
-      if (raw.Length == 0 || raw.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase) ||
-          raw.StartsWith("javascript:", StringComparison.OrdinalIgnoreCase) || links >= MaxLinks)
-        return null;
-      string href = Resolve(baseUrl, raw);
       string label = Collapse(element.TextContent);
-      if (label.Length == 0 || !href.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+      if (label.Length == 0)
         return null;
       links++;
       return (label, href);
     }
+
+    string? Href(IElement element) {
+      if (element.TagName != "A" || links >= MaxLinks)
+        return null;
+      string raw = element.GetAttribute("href") ?? "";
+      if (raw.Length == 0 || raw.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase) ||
+          raw.StartsWith("javascript:", StringComparison.OrdinalIgnoreCase))
+        return null;
+      string href = Resolve(baseUrl, raw);
+      return href.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? href : null;
+    }
   }
+
+  private static bool IsBlock(string tag) => tag is
+    "H1" or "H2" or "H3" or "H4" or "H5" or "H6" or "P" or "LI" or "DT" or "DD" or
+    "BLOCKQUOTE" or "PRE" or "TR" or "HR" or "DIV" or "SECTION";
 
   private static string Resolve(string baseUri, string href) {
     if (Uri.TryCreate(href, UriKind.Absolute, out Uri? absolute))

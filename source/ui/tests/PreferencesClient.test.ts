@@ -13,10 +13,14 @@ void test("preferences use the browser API contract", { timeout: 5_000 }, async 
       skills: { bucket: "small", connectionId: null, modelId: null },
       instructions: { bucket: "small", connectionId: null, modelId: null },
       title: { bucket: "small", connectionId: null, modelId: null },
-      small: { connectionId: "connection-1", modelId: "small-model" },
-      medium: null,
-      large: null,
+      small: [
+        { connectionId: "connection-1", modelId: "small-model" },
+        { connectionId: "connection-2", modelId: "small-model" },
+      ],
+      medium: [],
+      large: [],
     },
+    subagentProviderConnectionIds: ["connection-2"],
     protectedResources: {
       tools: ["bash", "read"],
       skills: ["C:\\work\\project\\skills\\safe\\SKILL.md"],
@@ -61,11 +65,11 @@ void test("preferences use the browser API contract", { timeout: 5_000 }, async 
     }),
     saved,
   );
-  assert.deepEqual(
-    await client.setBucketModel("small", { connectionId: "connection-1", modelId: "small-model" }),
-    saved,
-  );
-  assert.deepEqual(await client.setBucketModel("medium", null), saved);
+  assert.deepEqual(await client.setBucketModels("small", saved.modelChoices.small), saved);
+  assert.deepEqual(await client.setBucketModels("medium", []), saved);
+  for (const ids of [null, [], ["connection-2"]]) {
+    assert.deepEqual(await client.setSubagentProviders(ids), saved);
+  }
   assert.deepEqual(
     await client.setProtectedItems("skills", ["C:\\work\\project\\skills\\safe\\SKILL.md"]),
     saved,
@@ -109,13 +113,27 @@ void test("preferences use the browser API contract", { timeout: 5_000 }, async 
         url: "/api/preferences/model-bucket",
         body: JSON.stringify({
           bucket: "small",
-          model: { connectionId: "connection-1", modelId: "small-model" },
+          models: [
+            { connectionId: "connection-1", modelId: "small-model" },
+            { connectionId: "connection-2", modelId: "small-model" },
+          ],
         }),
       },
       {
         method: "POST",
         url: "/api/preferences/model-bucket",
-        body: JSON.stringify({ bucket: "medium", model: null }),
+        body: JSON.stringify({ bucket: "medium", models: [] }),
+      },
+      {
+        method: "POST",
+        url: "/api/preferences/subagent-providers",
+        body: '{"connectionIds":null}',
+      },
+      { method: "POST", url: "/api/preferences/subagent-providers", body: '{"connectionIds":[]}' },
+      {
+        method: "POST",
+        url: "/api/preferences/subagent-providers",
+        body: '{"connectionIds":["connection-2"]}',
       },
       {
         method: "POST",

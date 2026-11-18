@@ -4,6 +4,8 @@ import { ModelPicker } from "../chat/ModelPicker.tsx";
 import type { ComposerModel } from "../chat/ComposerTypes.ts";
 import type { ModelOption } from "../app/WorkspaceModels.ts";
 import type { PreferencesState } from "../preferences/usePreferences.ts";
+import { describeBucket, modelKey } from "../preferences/ModelBucketSelection.ts";
+import { ModelBucketSetting } from "./ModelBucketSetting.tsx";
 import type {
   AuxiliaryModelPurpose,
   ConfiguredModel,
@@ -13,6 +15,7 @@ import type {
 import type { ProviderClient } from "../providers/ProviderClient.ts";
 
 const buckets: readonly ModelBucket[] = ["small", "medium", "large"];
+const emptyBucket: readonly ConfiguredModel[] = [];
 const purposes: readonly AuxiliaryModelPurpose[] = ["tools", "skills", "instructions", "title"];
 const bucketNames: Record<ModelBucket, string> = {
   small: "Small",
@@ -104,7 +107,6 @@ export function ModelPreferencesSettings({
     () => new Map(catalog.options.map((option) => [option.key, option] as const)),
     [catalog.options],
   );
-  const preferences = state.preferences;
   const configuredModelLabel = (model: ConfiguredModel | null): string => {
     if (!model) return "Not configured";
     const option = modelByKey.get(modelKey(model));
@@ -159,45 +161,51 @@ export function ModelPreferencesSettings({
         </div>
       )}
       {view === "buckets" && (
-        <div class="preference-model-group">
-          {buckets.map((bucket) => {
-            const preferenceKey = `modelBucket:${bucket}` as const;
-            const saved = preferences?.modelChoices[bucket] ?? null;
-            const pending = state.pendingFor === preferenceKey;
-            return (
-              <div class="preference-model-row" key={bucket}>
-                <span class="preference-model-name">{bucketNames[bucket]}</span>
-                <ModelPicker
-                  models={pickerModels(saved)}
-                  modelKey={saved ? modelKey(saved) : null}
-                  modelLabel={`${bucketNames[bucket]} mapping · ${configuredModelLabel(saved)}`}
-                  onModelChange={(key) => {
-                    const model = configuredModel(key, saved);
-                    if (model) void state.saveBucketModel(bucket, model);
-                  }}
-                  loadingModels={catalog.loading}
-                  refreshingModels={catalog.loading}
-                  modelsError={catalog.error}
-                  onRetryModels={readCachedModels}
-                  disabled={busy || !catalog.loaded || catalog.loading}
-                />
-                <button
-                  class="preference-model-clear"
-                  type="button"
-                  disabled={busy || saved === null}
-                  onClick={() => void state.saveBucketModel(bucket, null)}
-                >
-                  Clear
-                </button>
-                <SettingFeedback
-                  pending={pending}
-                  error={state.errorFor(preferenceKey)}
-                  loaded={state.loaded}
-                />
-              </div>
-            );
-          })}
-        </div>
+        <>
+          <p class="model-bucket-explanation">
+            Urd picks an eligible model at random. For subagents, Auto uses the provider’s catalog
+            when no bucket entry applies.
+          </p>
+          {!state.loaded ? (
+            <div class="general-settings-feedback">
+              {state.error ? (
+                <>
+                  <p role="alert">{state.error}</p>
+                  <button
+                    type="button"
+                    disabled={state.loading}
+                    onClick={() => void state.refresh()}
+                  >
+                    Retry preferences
+                  </button>
+                </>
+              ) : (
+                <p role="status">Loading preferences…</p>
+              )}
+            </div>
+          ) : (
+            <div class="preference-model-group">
+              {buckets.map((bucket) => {
+                const preferenceKey = `modelBucket:${bucket}` as const;
+                return (
+                  <ModelBucketSetting
+                    key={bucket}
+                    name={bucketNames[bucket]}
+                    models={models}
+                    members={state.preferences?.modelChoices[bucket] ?? emptyBucket}
+                    label={configuredModelLabel}
+                    modelForKey={configuredModel}
+                    busy={busy}
+                    catalogReady={catalog.loaded && !catalog.loading}
+                    pending={state.pendingFor === preferenceKey}
+                    error={state.errorFor(preferenceKey)}
+                    save={(next) => state.saveBucketModels(bucket, next)}
+                  />
+                );
+              })}
+            </div>
+          )}
+        </>
       )}
       {view === "purposes" && (
         <div class="preference-model-group">
@@ -274,11 +282,8 @@ function AuxiliaryModelChoice({
     draftChoice && draftChoice.bucket === null && draftChoice.connectionId && draftChoice.modelId
       ? { connectionId: draftChoice.connectionId, modelId: draftChoice.modelId }
       : savedModel;
-  const pickerLabel = specific
-    ? `${purposeNames[purpose]} specific model · ${configuredModelLabel(draftModel)}`
-    : saved?.bucket
-      ? `${bucketNames[saved.bucket]} · ${configuredModelLabel(state.preferences?.modelChoices[saved.bucket] ?? null)}`
-      : "Choose a model";
+  const pickerLabel = `${purposeNames[purpose]} specific model · ${configuredModelLabel(draftModel)}`;
+  const bucketModels = saved?.bucket ? state.preferences?.modelChoices[saved.bucket] : undefined;
 
   const chooseBucket = async (value: string) => {
     state.clearError();
@@ -339,7 +344,7 @@ function AuxiliaryModelChoice({
       )}
       {!specific && saved?.bucket && (
         <span class="preference-model-resolution">
-          {configuredModelLabel(state.preferences?.modelChoices[saved.bucket] ?? null)}
+          {bucketModels?.length ? describeBucket(bucketModels) : "No models configured"}
         </span>
       )}
       <SettingFeedback
@@ -367,8 +372,4 @@ function SettingFeedback({
       {!pending && error && <span role="alert">{error}</span>}
     </span>
   );
-}
-
-function modelKey(model: ConfiguredModel): string {
-  return `${model.connectionId}/${model.modelId}`;
 }

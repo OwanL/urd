@@ -56,6 +56,7 @@ public sealed class PreferencesTests {
   public void AuxiliaryModelChoicesBucketMappingsAndProtectionsPersistIndependently() {
     using var database = new TemporaryDatabase();
     var model = new ConfiguredModel(Guid.NewGuid(), "configured-model");
+    var another = new ConfiguredModel(Guid.NewGuid(), "another-model");
     string skillSource = Path.Combine(Path.GetTempPath(), "skills", "cleaner", "SKILL.md");
     string instructionSource = Path.Combine(Path.GetTempPath(), "AGENTS.md");
     using (UrdStore store = UrdStore.Open(database.Path)) {
@@ -67,12 +68,12 @@ public sealed class PreferencesTests {
       Assert.Equal(ModelChoice.ForBucket(ModelBucket.Small), defaults.ModelChoices.Title);
       Assert.Equal(new[] { "bash", "read", "write", "edit" }, defaults.ProtectedResources.Tools);
 
-      preferences.SetBucketModel(ModelBucket.Small, model);
+      preferences.SetBucketModels(ModelBucket.Small, [model, another]);
       preferences.SetModelChoice(AuxiliaryModelPurpose.Skills, ModelChoice.ForModel(model.ConnectionId, model.ModelId));
       preferences.SetProtectedItems(ProtectedResourceCategory.Tools, ["bash"]);
       preferences.SetProtectedItems(ProtectedResourceCategory.Skills, [skillSource]);
       preferences.SetProtectedItems(ProtectedResourceCategory.Instructions, [instructionSource]);
-      Assert.Equal(model, preferences.Read().ModelChoices.Small);
+      Assert.Equal(new[] { model, another }, preferences.Read().ModelChoices.Small);
       Assert.Equal(ModelChoice.ForBucket(ModelBucket.Small), preferences.Read().ModelChoices.Tools);
     }
 
@@ -80,7 +81,8 @@ public sealed class PreferencesTests {
     UserPreferences saved = new PreferenceManager(reopened).Read();
     Assert.Equal(ModelChoice.ForBucket(ModelBucket.Small), saved.ModelChoices.Tools);
     Assert.Equal(ModelChoice.ForModel(model.ConnectionId, model.ModelId), saved.ModelChoices.Skills);
-    Assert.Null(saved.ModelChoices.Medium);
+    Assert.Equal(new[] { model, another }, saved.ModelChoices.Small);
+    Assert.Empty(saved.ModelChoices.Medium);
     Assert.Equal(new[] { "bash" }, saved.ProtectedResources.Tools);
     Assert.Equal(new[] { skillSource }, saved.ProtectedResources.Skills);
     Assert.Equal(new[] { instructionSource }, saved.ProtectedResources.Instructions);
@@ -104,6 +106,58 @@ public sealed class PreferencesTests {
     Assert.Equal(ModelChoice.ForBucket(ModelBucket.Small), preferences.Read().ModelChoices.Tools);
     Assert.Equal(new[] { "bash" }, preferences.Read().ProtectedResources.Tools);
     Assert.Empty(preferences.Read().ProtectedResources.Skills);
+  }
+
+  [Fact]
+  public void BucketReplacementRejectsInvalidOrDuplicatePairsAndCopiesLists() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    var preferences = new PreferenceManager(store);
+    var model = new ConfiguredModel(Guid.NewGuid(), "model");
+    var alternate = new ConfiguredModel(model.ConnectionId, "other-model");
+    ConfiguredModel[] input = [model, alternate];
+    preferences.SetBucketModels(ModelBucket.Small, input);
+
+    input[0] = alternate;
+    Assert.Throws<ArgumentException>(() => preferences.SetBucketModels(ModelBucket.Small, [model, model]));
+    Assert.Throws<ArgumentException>(() => preferences.SetBucketModels(ModelBucket.Small, [new(Guid.Empty, "model")]));
+    Assert.Throws<ArgumentException>(() => preferences.SetBucketModels(ModelBucket.Small, [new(model.ConnectionId, " ")]));
+    Assert.Throws<ArgumentNullException>(() => preferences.SetBucketModels(ModelBucket.Small, [null!]));
+    Assert.Equal(new[] { model, alternate }, preferences.Read().ModelChoices.Small);
+
+    preferences.SetBucketModels(ModelBucket.Small, []);
+    Assert.Empty(preferences.Read().ModelChoices.Small);
+  }
+
+  [Fact]
+  public void SubagentProviderPreferencePersistsNullEmptyAndSelectedListsSeparately() {
+    using var database = new TemporaryDatabase();
+    Guid first = Guid.NewGuid(), second = Guid.NewGuid();
+    using (UrdStore store = UrdStore.Open(database.Path)) {
+      var preferences = new PreferenceManager(store);
+      Assert.Null(preferences.Read().SubagentProviderConnectionIds);
+      Guid[] input = [first, second];
+      preferences.SetSubagentProviders(input);
+      input[0] = second;
+      Assert.Throws<ArgumentException>(() => preferences.SetSubagentProviders([Guid.Empty]));
+      Assert.Throws<ArgumentException>(() => preferences.SetSubagentProviders([first, first]));
+      Assert.Equal(new[] { first, second }, preferences.Read().SubagentProviderConnectionIds);
+    }
+
+    using (UrdStore store = UrdStore.Open(database.Path)) {
+      var preferences = new PreferenceManager(store);
+      Assert.Equal(new[] { first, second }, preferences.Read().SubagentProviderConnectionIds);
+      preferences.SetSubagentProviders([]);
+    }
+
+    using (UrdStore store = UrdStore.Open(database.Path)) {
+      var preferences = new PreferenceManager(store);
+      Assert.Empty(preferences.Read().SubagentProviderConnectionIds!);
+      preferences.SetSubagentProviders(null);
+    }
+
+    using UrdStore reopened = UrdStore.Open(database.Path);
+    Assert.Null(new PreferenceManager(reopened).Read().SubagentProviderConnectionIds);
   }
 
   [Fact]

@@ -290,7 +290,7 @@ public sealed class AgentWaitCycleTests {
       ProviderConnection connection = await providers.AddCustomAsync(new("wait-test", LlmApi.OpenAIResponses,
           new Uri("https://fixture.invalid/v1"), AuthenticationMethod.None)).WaitAsync(TestTimeout);
       await providers.RefreshModelCatalogAsync(connection.Id).WaitAsync(TestTimeout);
-      new PreferenceManager(store).SetBucketModel(ModelBucket.Small, new(connection.Id, "wait-test"));
+      new PreferenceManager(store).SetBucketModels(ModelBucket.Small, [new(connection.Id, "wait-test")]);
     }
 
     internal async Task<PrimarySession> BootAsync(string title) {

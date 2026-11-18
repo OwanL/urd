@@ -628,7 +628,7 @@ public sealed class StartingPrepassTests {
     ProviderConnection connection = await providers.AddCustomAsync(new("prepass-auxiliary", LlmApi.OpenAIResponses,
         new Uri("https://fixture.invalid/v1"), AuthenticationMethod.None)).WaitAsync(TestTimeout);
     await providers.RefreshModelCatalogAsync(connection.Id).WaitAsync(TestTimeout);
-    new PreferenceManager(fixture.Store).SetBucketModel(ModelBucket.Small, new(connection.Id, AuxiliaryModel));
+    new PreferenceManager(fixture.Store).SetBucketModels(ModelBucket.Small, [new(connection.Id, AuxiliaryModel)]);
   }
 
   private static string Catalog(string modelId) => JsonSerializer.Serialize(new {

@@ -336,7 +336,11 @@ internal sealed class SessionExecution : IDisposable {
       StartingContext context = startingContext!;
       await StartRequestAsync(request.RequestId, context);
       (bool presented, ChatMessage? reminder) = session.ReadQuestionForRequest(request);
+      // Provider policy can change between requests without rebuilding the saved starting context.
       offeredTools = context.Tools;
+      if (offeredTools.Any(tool => tool.Name == SubagentTool.ToolName)
+          && !await session.HasSubagentProvidersAsync(stop.Token))
+        offeredTools = offeredTools.Where(tool => tool.Name != SubagentTool.ToolName).ToArray();
       if (presented && answerAgentDeclaration is { } answer && offeredTools.All(tool => tool.Name != answer.Name))
         offeredTools = [.. offeredTools, answer];
       options = new() {

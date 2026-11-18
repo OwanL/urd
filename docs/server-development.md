@@ -40,6 +40,15 @@ headroom; retained history is capped at half that count and 20,000 tokens, exclu
 An explicit count works for unknown model windows too; Automatic without a known window does
 not trigger compaction. See [compaction design](compaction-design.md).
 
+Settings → Model buckets sets the models for each tier and the delegation provider defaults
+for **new** chats. `POST /api/preferences/model-bucket` replaces one tier's array using
+`{ "bucket": "small", "models": [{ "connectionId": "…", "modelId": "…" }] }`.
+`POST /api/preferences/subagent-providers` replaces the default provider selection. The composer’s
+Subagents control changes only its own chat using `GET` and `POST /api/sessions/{sessionId}/subagent-providers`.
+The two write routes for provider selection accept `{ "connectionIds": null }` for all saved
+connections, an explicit connection-ID list, or `{ "connectionIds": [] }` to disable delegation.
+Session routes return the chat's `connectionIds`; the defaults route returns the full preferences.
+
 Before its first accepted message, a chat can override its own directory with
 `POST /api/sessions/{sessionId}/working-directory` and `{ "workingDirectory": "C:\\path" }`.
 The response contains the normalized `workingDirectory`; invalid paths return 400, missing

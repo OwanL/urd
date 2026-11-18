@@ -117,6 +117,7 @@ function commands(
     | "continueSession"
     | "getContinuationReceipt"
     | "startCompaction"
+    | "setSubagentProviders"
     | "getCompactionOperation"
     | "removePendingInput"
     | "getSnapshot"
@@ -183,6 +184,7 @@ function emptyClient(
   | "continueSession"
   | "getContinuationReceipt"
   | "startCompaction"
+  | "setSubagentProviders"
   | "getCompactionOperation"
   | "removePendingInput"
   | "getSnapshot"
@@ -197,6 +199,7 @@ function emptyClient(
     startCompaction: async () => {
       throw new Error("Unexpected compaction");
     },
+    setSubagentProviders: async (_id, connectionIds) => ({ connectionIds }),
     getCompactionOperation: async () => null,
     removePendingInput: async () => true,
     getSnapshot: async () => snapshot(),
@@ -227,6 +230,34 @@ async function withVisibleDocument<T>(action: () => Promise<T>): Promise<T> {
     else Reflect.deleteProperty(globalThis, "document");
   }
 }
+
+void test("Send and Continue do not dispatch while this session's provider change is pending", async () => {
+  const workspace = fixture();
+  const save = deferred<{ connectionIds: readonly string[] | null }>();
+  const dispatched: string[] = [];
+  const coordinator = commands(workspace.access, {
+    ...emptyClient(async (_id, submission) => {
+      dispatched.push("send");
+      return receipt(submission);
+    }),
+    continueSession: async (_id, submission) => {
+      dispatched.push("continue");
+      return continuationReceipt(submission);
+    },
+    setSubagentProviders: () => save.promise,
+  });
+
+  const saving = coordinator.saveSubagentProviders(sessionId, []);
+  await coordinator.send(sessionId, snapshot(), false, true);
+  await coordinator.continueSession(sessionId, continuableSnapshot(), true);
+  assert.deepEqual(dispatched, []);
+  assert.equal(workspace.read().chats[sessionId]?.draft, "submitted text");
+
+  save.resolve({ connectionIds: [] });
+  await saving;
+  await coordinator.continueSession(sessionId, continuableSnapshot(), true);
+  assert.deepEqual(dispatched, ["continue"]);
+});
 
 void test("a failed synchronous Send journal stays unsaved and dispatches nothing", async () => {
   const workspace = fixture();

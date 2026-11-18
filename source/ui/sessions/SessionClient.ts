@@ -2,6 +2,10 @@ import { RequestError } from "../http/RequestError.ts";
 import { requestEmpty } from "../http/requestJson.ts";
 import { requestJson } from "../http/requestJson.ts";
 import type {
+  SubagentProviderConnectionIds,
+  SubagentProviders,
+} from "../providers/SubagentProviderSelection.ts";
+import type {
   MessageContentCursor,
   MessageContentPage,
   NotSentPage,
@@ -60,6 +64,24 @@ export class SessionClient {
       undefined,
       signal,
     );
+  }
+
+  getSubagentProviders(sessionId: string, signal?: AbortSignal): Promise<SubagentProviders> {
+    return requestJson(
+      this.url(`/${encodeURIComponent(sessionId)}/subagent-providers`),
+      "GET",
+      undefined,
+      signal,
+    );
+  }
+
+  setSubagentProviders(
+    sessionId: string,
+    connectionIds: SubagentProviderConnectionIds,
+  ): Promise<SubagentProviders> {
+    return requestJson(this.url(`/${encodeURIComponent(sessionId)}/subagent-providers`), "POST", {
+      connectionIds,
+    });
   }
 
   async setWorkingDirectory(sessionId: string, workingDirectory: string): Promise<string> {

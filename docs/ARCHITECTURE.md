@@ -300,16 +300,23 @@ selected for Urd (see [agent communication](agent-communication-design.md#select
 **Rationale:** Preserve bucket selection for bounded work rather than expand its
 interface. Internal session representation remains separate.
 
-**Automatic fallback:** Preserve Pie's enabled-provider/bucket selection and
-fallback workflow for bounded subagents. Switching within that configured policy
-does not require repeated approval, including when it selects an already-enabled
-metered provider. Do not silently widen the allowed provider pool. This decision
-does not choose automatic fallback for a user-selected LLM in their own chat.
+**Provider scope:** Primary sessions start with the current Settings default
+for delegation providers. The session can change its own selection at any time;
+children and descendants use that primary session's live selection. Automatic
+scope permits available connections; an explicit list permits only those
+connections, and an empty list turns delegation off. Changing the scope gates
+new work and does not cancel children already admitted. The main chat model and
+primary-chat prepass are selected separately.
 
-Creation-time selection and in-run retries are distinct paths to inspect.
-Detailed eligibility, retry and selection mechanics still need review; retaining
-the useful bounded-work workflow does not approve every current implementation
-detail or require a new spending-approval system.
+**Creation-time routing:** A bucket may contain several explicit provider/model
+pairs. On each allowed connection, use its usable explicit models for this tier;
+if none are available, derive one candidate from its cached catalog: the highest
+numeric version of Luna (`small`), Terra (`medium`) or Sol (`large`). Choose
+randomly from the resulting models, with high reasoning. This does not persist a
+mapping, use a different tier, request access to another connection, or fall back
+to the parent's chat model. Switching inside the enabled pool does not require
+per-call approval, including for metered connections. In-run retries and
+failover are a separate policy and are not introduced by this selection.
 
 ### Bounded subagents; independent agent-created sessions not selected
 

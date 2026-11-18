@@ -118,8 +118,52 @@
   cursor: default;
   opacity: 0.6;
 }
+.composer-subagent-providers,
 .composer-overflow {
   flex: none;
+}
+.composer-subagent-trigger {
+  position: relative;
+}
+.composer-subagent-trigger[data-save-error="true"]::after {
+  content: "!";
+  position: absolute;
+  top: 1px;
+  right: 3px;
+  color: var(--danger);
+  font-size: 11px;
+  font-weight: 600;
+}
+.composer-subagent-trigger[aria-expanded="true"] {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.composer-subagent-trigger .icon {
+  width: 16px;
+  height: 16px;
+}
+.composer-subagent-popover {
+  width: 240px;
+  padding: 8px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.composer-subagent-popover > p {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.composer-subagent-popover > .composer-subagent-error {
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+.composer-subagent-announcement {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 .composer-overflow-popover {
   width: 240px;

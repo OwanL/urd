@@ -242,8 +242,8 @@ public sealed class AgentRecipientsTests {
           new("recipients-fixture", LlmApi.OpenAIResponses, new Uri("https://fixture.invalid/v1"),
               AuthenticationMethod.None)).WaitAsync(TestTimeout);
       await fixture.providers.RefreshModelCatalogAsync(connection.Id).WaitAsync(TestTimeout);
-      new PreferenceManager(fixture.store).SetBucketModel(ModelBucket.Small,
-          new(connection.Id, "recipients-fixture"));
+      new PreferenceManager(fixture.store).SetBucketModels(ModelBucket.Small,
+          [new(connection.Id, "recipients-fixture")]);
       return fixture;
     }
 

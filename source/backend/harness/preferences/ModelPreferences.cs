@@ -35,15 +35,15 @@ public sealed record ModelChoice(ModelBucket? Bucket, Guid? ConnectionId, string
       && modelId.Length <= 256 && !modelId.Any(char.IsControl);
 }
 
-// Bucket mappings are exact configured models; operation choices remain independent.
+// Buckets store explicit provider/model pairs; operation choices remain independent.
 public sealed record AuxiliaryModelPreferences {
   public ModelChoice Tools { get; init; } = ModelChoice.ForBucket(ModelBucket.Small);
   public ModelChoice Skills { get; init; } = ModelChoice.ForBucket(ModelBucket.Small);
   public ModelChoice Instructions { get; init; } = ModelChoice.ForBucket(ModelBucket.Small);
   public ModelChoice Title { get; init; } = ModelChoice.ForBucket(ModelBucket.Small);
-  public ConfiguredModel? Small { get; init; }
-  public ConfiguredModel? Medium { get; init; }
-  public ConfiguredModel? Large { get; init; }
+  public IReadOnlyList<ConfiguredModel> Small { get; init; } = [];
+  public IReadOnlyList<ConfiguredModel> Medium { get; init; } = [];
+  public IReadOnlyList<ConfiguredModel> Large { get; init; } = [];
 
   internal ModelChoice ChoiceFor(AuxiliaryModelPurpose purpose) => purpose switch {
     AuxiliaryModelPurpose.Tools => Tools,
@@ -53,7 +53,7 @@ public sealed record AuxiliaryModelPreferences {
     _ => throw new ArgumentOutOfRangeException(nameof(purpose))
   };
 
-  internal ConfiguredModel? ModelFor(ModelBucket bucket) => bucket switch {
+  internal IReadOnlyList<ConfiguredModel> ModelsFor(ModelBucket bucket) => bucket switch {
     ModelBucket.Small => Small,
     ModelBucket.Medium => Medium,
     ModelBucket.Large => Large,
@@ -68,10 +68,10 @@ public sealed record AuxiliaryModelPreferences {
     _ => throw new ArgumentOutOfRangeException(nameof(purpose))
   };
 
-  internal AuxiliaryModelPreferences WithBucketModel(ModelBucket bucket, ConfiguredModel? model) => bucket switch {
-    ModelBucket.Small => this with { Small = model },
-    ModelBucket.Medium => this with { Medium = model },
-    ModelBucket.Large => this with { Large = model },
+  internal AuxiliaryModelPreferences WithBucketModels(ModelBucket bucket, IReadOnlyList<ConfiguredModel> models) => bucket switch {
+    ModelBucket.Small => this with { Small = models },
+    ModelBucket.Medium => this with { Medium = models },
+    ModelBucket.Large => this with { Large = models },
     _ => throw new ArgumentOutOfRangeException(nameof(bucket))
   };
 }

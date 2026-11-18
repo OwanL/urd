@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Urd.Core.Context;
 using Urd.Core.Sessions;
@@ -7,28 +8,31 @@ namespace Urd.Core.Storage;
 
 // Creates and reads durable session identities, creation order and history revisions.
 internal sealed class SessionStorage(Database database) {
-  internal SessionRecord CreatePrimary(Guid sessionId, string? workingDirectory = null)
-      => Create(sessionId, workingDirectory, SessionKind.Primary, null, null);
+  internal SessionRecord CreatePrimary(Guid sessionId, string? workingDirectory = null,
+      IReadOnlyList<Guid>? subagentProviders = null) =>
+      Create(sessionId, workingDirectory, SessionKind.Primary, null, null, subagentProviders);
 
   internal SessionRecord CreateSubagent(Guid sessionId, Guid parentSessionId, string owningCallId, string? workingDirectory = null) {
     if (parentSessionId == Guid.Empty || parentSessionId == sessionId)
       throw new ArgumentException("Parent session ID must identify a different session.", nameof(parentSessionId));
     ArgumentException.ThrowIfNullOrWhiteSpace(owningCallId);
-    return Create(sessionId, workingDirectory, SessionKind.Subagent, parentSessionId, owningCallId);
+    return Create(sessionId, workingDirectory, SessionKind.Subagent, parentSessionId, owningCallId, null);
   }
 
-  private SessionRecord Create(Guid sessionId, string? workingDirectory, SessionKind kind, Guid? parentSessionId, string? owningCallId) {
+  private SessionRecord Create(Guid sessionId, string? workingDirectory, SessionKind kind, Guid? parentSessionId,
+      string? owningCallId, IReadOnlyList<Guid>? subagentProviders) {
     if (sessionId == Guid.Empty)
       throw new ArgumentException("Session ID cannot be empty.", nameof(sessionId));
 
     return database.Write(transaction => database.QuerySingleOrDefault(transaction, """
-        INSERT INTO sessions (session_id, history_revision, working_directory, kind, parent_session_id, owning_call_id)
-        VALUES ($id, 0, $directory, $kind, $parent, $call);
+        INSERT INTO sessions (session_id, history_revision, working_directory, kind, parent_session_id,
+            owning_call_id, subagent_providers_json)
+        VALUES ($id, 0, $directory, $kind, $parent, $call, $providers);
         INSERT INTO session_creation (session_id) VALUES ($id);
         SELECT session_id, history_revision, working_directory, kind, parent_session_id, owning_call_id
         FROM sessions WHERE session_id = $id;
         """, ReadRecord, ("$id", sessionId), ("$directory", workingDirectory), ("$kind", (int)kind),
-        ("$parent", parentSessionId), ("$call", owningCallId))!);
+        ("$parent", parentSessionId), ("$call", owningCallId), ("$providers", SerializeProviders(subagentProviders)))!);
   }
 
   internal SessionIdPage ListPrimaryIds(string? cursor) {
@@ -63,6 +67,30 @@ internal sealed class SessionStorage(Database database) {
   internal SessionRecord? Read(Guid sessionId) => database.RunLocked(() => database.QuerySingleOrDefault(null,
       "SELECT session_id, history_revision, working_directory, kind, parent_session_id, owning_call_id FROM sessions WHERE session_id = $id;",
       ReadRecord, ("$id", sessionId)));
+
+  // All descendants consult the primary's current policy, not a stale copy taken at delegation.
+  internal Guid[]? ReadSubagentProviders(Guid sessionId) => database.RunLocked(() => {
+    string? json = database.QuerySingleOrDefault(null, """
+        WITH RECURSIVE ancestors (session_id, parent_session_id, subagent_providers_json) AS (
+          SELECT session_id, parent_session_id, subagent_providers_json FROM sessions WHERE session_id = $session
+          UNION ALL
+          SELECT s.session_id, s.parent_session_id, s.subagent_providers_json
+          FROM sessions s JOIN ancestors a ON s.session_id = a.parent_session_id
+        )
+        SELECT subagent_providers_json FROM ancestors WHERE parent_session_id IS NULL;
+        """, row => row.NullableString("subagent_providers_json"), ("$session", sessionId));
+    return json is null ? null : JsonSerializer.Deserialize<Guid[]>(json);
+  });
+
+  internal void SetSubagentProviders(Guid sessionId, Guid[]? connectionIds) => database.Write(transaction => {
+    if (database.Execute(transaction, """
+        UPDATE sessions SET subagent_providers_json = $providers WHERE session_id = $session AND kind = $kind;
+        """, ("$providers", SerializeProviders(connectionIds)), ("$session", sessionId), ("$kind", (int)SessionKind.Primary)) == 0)
+      throw new KeyNotFoundException($"Primary session {sessionId} does not exist.");
+    return true;
+  });
+
+  private static string? SerializeProviders(IReadOnlyList<Guid>? ids) => ids is null ? null : JsonSerializer.Serialize(ids);
 
   // Read title and generation state together so a completed attempt is never shown as a placeholder.
   internal (string? Title, bool Generating) ReadAgentTitle(Guid sessionId) => database.RunLocked(() =>

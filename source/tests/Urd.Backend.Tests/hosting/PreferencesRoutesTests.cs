@@ -130,7 +130,10 @@ public sealed class PreferencesRoutesTests {
 
     using (HttpResponseMessage bucket = await RequestAsync(server.Client, HttpMethod.Post,
         "/api/preferences/model-bucket", JsonBody(JsonSerializer.Serialize(new {
-          bucket = "small", model = new { connectionId, modelId = "small-model" }
+          bucket = "small", models = new[] {
+            new { connectionId, modelId = "small-model" },
+            new { connectionId, modelId = "another-small-model" }
+          }
         }))))
       Assert.Equal(HttpStatusCode.OK, bucket.StatusCode);
 
@@ -150,8 +153,11 @@ public sealed class PreferencesRoutesTests {
       JsonElement preferences = await defaults.Content.ReadFromJsonAsync<JsonElement>();
       JsonElement models = preferences.GetProperty("modelChoices");
       Assert.Equal("small", models.GetProperty("tools").GetProperty("bucket").GetString());
-      Assert.Equal(connectionId, models.GetProperty("small").GetProperty("connectionId").GetGuid());
-      Assert.Equal("small-model", models.GetProperty("small").GetProperty("modelId").GetString());
+      JsonElement[] small = models.GetProperty("small").EnumerateArray().ToArray();
+      Assert.Equal(new[] { "small-model", "another-small-model" },
+          small.Select(model => model.GetProperty("modelId").GetString()));
+      Assert.All(small, model => Assert.Equal(connectionId, model.GetProperty("connectionId").GetGuid()));
+      Assert.Empty(models.GetProperty("medium").EnumerateArray());
       Assert.Equal(JsonValueKind.Null, models.GetProperty("skills").GetProperty("bucket").ValueKind);
       Assert.Equal("skills-model", models.GetProperty("skills").GetProperty("modelId").GetString());
       Assert.Equal(new[] { "bash", "read", "write", "edit" },
@@ -161,6 +167,17 @@ public sealed class PreferencesRoutesTests {
           .GetProperty("instructions").EnumerateArray()).GetString());
     }
 
+    using (HttpResponseMessage invalid = await RequestAsync(server.Client, HttpMethod.Post,
+        "/api/preferences/model-bucket", JsonBody("""{"bucket":"small","models":null}""")))
+      Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+
+    using (HttpResponseMessage cleared = await RequestAsync(server.Client, HttpMethod.Post,
+        "/api/preferences/model-bucket", JsonBody("""{"bucket":"small","models":[]}"""))) {
+      Assert.Equal(HttpStatusCode.OK, cleared.StatusCode);
+      JsonElement preferences = await cleared.Content.ReadFromJsonAsync<JsonElement>();
+      Assert.Empty(preferences.GetProperty("modelChoices").GetProperty("small").EnumerateArray());
+    }
+
     using HttpResponseMessage removeToolDefaults = await RequestAsync(server.Client, HttpMethod.Post,
         "/api/preferences/protected-resources", JsonBody("{\"category\":\"tools\",\"items\":[]}"));
     Assert.Equal(HttpStatusCode.OK, removeToolDefaults.StatusCode);
@@ -168,4 +185,44 @@ public sealed class PreferencesRoutesTests {
     Assert.Equal(0, saved.GetProperty("protectedResources").GetProperty("tools").GetArrayLength());
   }
 
+  [Fact]
+  public async Task SubagentProviderRouteDistinguishesOmittedNullEmptyAndSelectedProviderIds() {
+    using var database = new TemporaryDatabase();
+    await using var server = new RunningServer(RunningServer.OptionsFor(database));
+    await server.WaitForReadyAsync();
+    Guid connectionId = Guid.NewGuid();
+    const string path = "/api/preferences/subagent-providers";
+
+    using (HttpResponseMessage selected = await RequestAsync(server.Client, HttpMethod.Post, path,
+        JsonBody(JsonSerializer.Serialize(new { connectionIds = new[] { connectionId } })))) {
+      Assert.Equal(HttpStatusCode.OK, selected.StatusCode);
+      JsonElement preferences = await selected.Content.ReadFromJsonAsync<JsonElement>();
+      Assert.Equal(connectionId, Assert.Single(
+          preferences.GetProperty("subagentProviderConnectionIds").EnumerateArray()).GetGuid());
+    }
+
+    foreach (string invalidBody in new[] { "{}", """{"connectionIds":["00000000-0000-0000-0000-000000000000"]}""" }) {
+      using HttpResponseMessage invalid = await RequestAsync(server.Client, HttpMethod.Post, path, JsonBody(invalidBody));
+      Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+    }
+
+    using (HttpResponseMessage current = await RequestAsync(server.Client, HttpMethod.Get, "/api/preferences")) {
+      JsonElement preferences = await current.Content.ReadFromJsonAsync<JsonElement>();
+      Assert.Equal(connectionId, Assert.Single(
+          preferences.GetProperty("subagentProviderConnectionIds").EnumerateArray()).GetGuid());
+    }
+
+    using (HttpResponseMessage none = await RequestAsync(server.Client, HttpMethod.Post, path,
+        JsonBody("""{"connectionIds":[]}"""))) {
+      Assert.Equal(HttpStatusCode.OK, none.StatusCode);
+      JsonElement preferences = await none.Content.ReadFromJsonAsync<JsonElement>();
+      Assert.Empty(preferences.GetProperty("subagentProviderConnectionIds").EnumerateArray());
+    }
+
+    using HttpResponseMessage all = await RequestAsync(server.Client, HttpMethod.Post, path,
+        JsonBody("""{"connectionIds":null}"""));
+    Assert.Equal(HttpStatusCode.OK, all.StatusCode);
+    JsonElement reset = await all.Content.ReadFromJsonAsync<JsonElement>();
+    Assert.Equal(JsonValueKind.Null, reset.GetProperty("subagentProviderConnectionIds").ValueKind);
+  }
 }

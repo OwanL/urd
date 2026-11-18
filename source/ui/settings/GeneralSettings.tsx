@@ -142,7 +142,7 @@ export function GeneralSettings({
       </div>
       {!pickerOpen && (
         <div class="general-settings-feedback" aria-live="polite" aria-atomic="true">
-          {state.pending && !triggerSaving && <p>Saving…</p>}
+          {state.pendingFor === "workingDirectory" && <p>Saving…</p>}
           {!state.pending && state.loading && <p>Loading…</p>}
           {generalError && <p role="alert">{generalError}</p>}
           {generalError && !state.loaded && (

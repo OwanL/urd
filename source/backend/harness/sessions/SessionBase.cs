@@ -75,9 +75,16 @@ public abstract class SessionBase {
   internal StartingContext? ReadStartingContext() => store.StartingContexts.Read(Id);
   internal StartingContext? ReadStartingContext(Guid boundaryId) => store.StartingContexts.Read(Id, boundaryId);
   internal UserPreferences ReadPreferences() => preferences.Read();
+  public IReadOnlyList<Guid>? ReadSubagentProviders() => store.Sessions.ReadSubagentProviders(Id);
+
   internal Task<LlmSelection> ResolveAuxiliaryModelAsync(AuxiliaryModelPurpose purpose,
-      UserPreferences captured, CancellationToken cancellation) => modelSelector?.ResolveAsync(purpose, captured, cancellation)
+      UserPreferences captured, CancellationToken cancellation) => modelSelector?.ResolveAsync(purpose, captured,
+          Kind == SessionKind.Subagent ? ReadSubagentProviders() : null, cancellation)
       ?? Task.FromException<LlmSelection>(new InvalidOperationException("No auxiliary model is configured."));
+
+  internal Task<bool> HasSubagentProvidersAsync(CancellationToken cancellation) =>
+      modelSelector?.HasSubagentProvidersAsync(ReadSubagentProviders(), cancellation)
+      ?? Task.FromResult(false);
 
   public async Task<CompactionReceipt?> CompactAsync(ManualCompactionRequest submission) {
     ArgumentNullException.ThrowIfNull(submission);

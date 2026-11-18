@@ -20,6 +20,54 @@ public sealed class SessionRoutesTests {
   };
 
   [Fact]
+  public async Task SessionProviderChoicesAreIndependentOfLaterDefaultsAndOtherSessions() {
+    using var database = new TemporaryDatabase();
+    await using var server = new RunningServer(RunningServer.OptionsForIsolatedWorkspace(database));
+    await server.WaitForReadyAsync();
+    Guid personal = Guid.NewGuid();
+    Guid work = Guid.NewGuid();
+
+    Guid original = await CreateAsync();
+    Assert.Null(await ReadAsync(original));
+    await SetDefaultAsync([personal]);
+    Guid next = await CreateAsync();
+    await SetDefaultAsync([work]);
+    Guid latest = await CreateAsync();
+    Assert.Null(await ReadAsync(original));
+    Assert.Equal(new[] { personal }, await ReadAsync(next));
+    Assert.Equal(new[] { work }, await ReadAsync(latest));
+
+    using HttpResponseMessage set = await RequestAsync(server.Client, HttpMethod.Post, PathFor(next),
+        JsonBody("""{"connectionIds":[]}"""));
+    Assert.Equal(HttpStatusCode.OK, set.StatusCode);
+    AssertPrivateResponse(set);
+    Assert.Empty((await ReadAsync(next))!);
+    Assert.Equal(new[] { work }, await ReadAsync(latest));
+
+    async Task<Guid> CreateAsync() {
+      using HttpResponseMessage response = await RequestAsync(server.Client, HttpMethod.Post, "/api/sessions", JsonBody("{}"));
+      Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+      using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+      return body.RootElement.GetProperty("sessionId").GetGuid();
+    }
+
+    async Task SetDefaultAsync(Guid[] ids) {
+      using HttpResponseMessage response = await RequestAsync(server.Client, HttpMethod.Post,
+          "/api/preferences/subagent-providers", JsonContent.Create(new { connectionIds = ids }));
+      Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    async Task<Guid[]?> ReadAsync(Guid sessionId) {
+      using HttpResponseMessage response = await RequestAsync(server.Client, HttpMethod.Get, PathFor(sessionId));
+      Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+      using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+      return body.RootElement.GetProperty("connectionIds").Deserialize<Guid[]>();
+    }
+
+    static string PathFor(Guid sessionId) => $"/api/sessions/{sessionId:D}/subagent-providers";
+  }
+
+  [Fact]
   public async Task CreateSendReceiptSnapshotAndContentKeepTheirWireShape() {
     using var database = new TemporaryDatabase();
     await using var server = new RunningServer(RunningServer.OptionsForIsolatedWorkspace(database));

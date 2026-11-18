@@ -6,7 +6,7 @@ import { Settings } from "../settings/Settings.tsx";
 import { Tooltip } from "../components/Tooltip.tsx";
 import { ProviderClient } from "../providers/ProviderClient.ts";
 import { PreferencesClient } from "../preferences/PreferencesClient.ts";
-import { usePreferences } from "../preferences/usePreferences.ts";
+import { preferenceSaveBlocks, usePreferences } from "../preferences/usePreferences.ts";
 import type { SettingsTab } from "../settings/Settings.tsx";
 import { SessionClient } from "../sessions/SessionClient.ts";
 import { MessageEditing } from "./MessageEditing.ts";
@@ -40,6 +40,8 @@ export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) 
   const [persistence] = useState(() => new WorkspacePersistence(() => sessionStorage, storageKey));
   const workspace = usePersistedWorkspace(persistence);
   const models = useWorkspaceModels(providers);
+  const preferences = usePreferences(preferencesClient);
+  const creatingPreferencePending = preferenceSaveBlocks(preferences.pendingFor, "create");
   const [commandError, setCommandError] = useState<string | null>(null);
   const [commandState, setCommandState] = useState<WorkspaceCommandState>(
     emptyWorkspaceCommandState,
@@ -54,6 +56,7 @@ export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) 
         setCommandState,
         setCommandError,
         refreshSnapshot,
+        preferences.saveBlocks,
       ),
   );
   const [messageEditing] = useState(
@@ -73,7 +76,6 @@ export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) 
   const transcriptPositions = useRef(new Map<string, TranscriptNavigationState>());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("providers");
-  const preferences = usePreferences(preferencesClient);
   const openSettings = (tab?: SettingsTab) => {
     if (tab) setSettingsTab(tab);
     void preferences.refresh();
@@ -123,12 +125,14 @@ export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) 
           hint={
             commandState.creating
               ? "Creating chat…"
-              : connected
-                ? "New chat"
-                : "New chat unavailable while disconnected"
+              : creatingPreferencePending
+                ? "Saving default subagent providers…"
+                : connected
+                  ? "New chat"
+                  : "New chat unavailable while disconnected"
           }
           placement="below"
-          disabled={commandState.creating || !connected || !canPersist}
+          disabled={commandState.creating || creatingPreferencePending || !connected || !canPersist}
           aria-busy={commandState.creating}
           onClick={() => {
             if (connected) void create();
@@ -228,6 +232,7 @@ export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) 
           <Conversation
             key={id}
             client={sessions}
+            providerClient={providers}
             sessionId={id}
             chat={chats[id]!}
             active={id === activeId}

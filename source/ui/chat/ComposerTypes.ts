@@ -10,11 +10,12 @@ export interface ModelPickerProps {
   models: readonly ComposerModel[];
   modelKey: string | null;
   modelLabel: string;
+  ariaLabel?: string;
   onModelChange: (key: string) => void;
-  loadingModels: boolean;
-  refreshingModels: boolean;
-  modelsError: string | null;
-  onRetryModels: () => void;
+  loadingModels?: boolean;
+  refreshingModels?: boolean;
+  modelsError?: string | null;
+  onRetryModels?: () => void;
   disabled: boolean;
 }
 
@@ -35,6 +36,7 @@ export interface ComposerProps {
   reasoningOptions: readonly string[];
   onReasoningChange: (effort: string | null) => void;
   selectionLocked: boolean;
+  configurationPending: boolean;
   canSend: boolean;
   canContinue: boolean;
   continuationAvailable: boolean;
@@ -43,5 +45,6 @@ export interface ComposerProps {
   onSend: () => void;
   onContinue: () => void;
   onStop: () => void;
+  subagentProviders?: ComponentChildren;
   indicators?: ComponentChildren;
 }

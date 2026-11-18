@@ -342,6 +342,65 @@ public sealed class SubagentRunTests {
   }
 
   [Fact]
+  public async Task ProviderToggleRejectsAStaleCallAndRestoresDelegationWithoutRebuildingContext() {
+    var firstRequest = new TaskCompletionSource<ScriptedRequest>(TaskCreationOptions.RunContinuationsAsynchronously);
+    var release = Signal();
+    var deniedRequest = new TaskCompletionSource<ScriptedRequest>(TaskCreationOptions.RunContinuationsAsynchronously);
+    var childRequest = new TaskCompletionSource<ScriptedRequest>(TaskCreationOptions.RunContinuationsAsynchronously);
+    var client = new ScriptedChatClient(Route);
+    await using var fixture = await SubagentRunFixture.OpenAsync(client);
+    PrimarySession parent = await fixture.Manager.CreatePrimaryAsync();
+    Guid providerId = fixture.Store.Preferences.Read().ModelChoices.Small.Single().ConnectionId;
+    Guid execution = await StartParentAsync(parent);
+    try {
+      Assert.Contains((await firstRequest.Task.WaitAsync(TestTimeout)).Options!.Tools!, tool => tool.Name == "subagent");
+      await fixture.Manager.SetSubagentProvidersAsync(parent.Id, []);
+      release.TrySetResult();
+      Assert.Equal(ExecutionOutcome.Completed,
+          (await parent.WaitForExecutionFinishAsync(execution).WaitAsync(TestTimeout)).Outcome);
+      Assert.DoesNotContain((await deniedRequest.Task.WaitAsync(TestTimeout)).Options!.Tools!, tool => tool.Name == "subagent");
+      Assert.Equal(ExecutionOutcome.Failed, Assert.Single(StoredTools.Read(fixture.Database), call => call.CallId == "stale").Outcome);
+      Assert.Equal(0L, fixture.Database.Scalar("SELECT EXISTS(SELECT 1 FROM sessions WHERE kind = 1);")); // raw-sql: rejected delegation must not create a child
+
+      await fixture.Manager.SetSubagentProvidersAsync(parent.Id, [providerId]);
+      Guid secondExecution = await StartParentAsync(parent, "Try again");
+      Assert.Equal(ExecutionOutcome.Completed,
+          (await parent.WaitForExecutionFinishAsync(secondExecution).WaitAsync(TestTimeout)).Outcome);
+      ScriptedRequest child = await childRequest.Task.WaitAsync(TestTimeout);
+      Assert.Equal("gpt-5.10-terra", child.Options!.ModelId);
+      Assert.Equal(ExecutionOutcome.Completed, Assert.Single(StoredTools.Read(fixture.Database), call => call.CallId == "auto").Outcome);
+    } finally {
+      release.TrySetResult();
+      await parent.StopExecutionAsync().WaitAsync(TestTimeout);
+    }
+
+    IAsyncEnumerable<ChatResponseUpdate> Route(ScriptedRequest request, CancellationToken token) {
+      if (request.Purpose == "title")
+        return TextUpdates([ChildTitle], token);
+      if (request.Purpose != "conversation")
+        return TextUpdates([PrepassTolerantChatClient.KeepAll(request.Messages)], token);
+      if (request.LastUserText == AssignmentTask) {
+        childRequest.TrySetResult(request);
+        return TextUpdates([ChildReport], token);
+      }
+      if (request.LastUserText == "Try again")
+        return HasResult(request, "auto") ? Complete(token) : ToolBatch(token, Delegate("auto", AssignmentTask, bucket: "medium"));
+      if (HasResult(request, "stale")) {
+        deniedRequest.TrySetResult(request);
+        return Complete(token);
+      }
+      firstRequest.TrySetResult(request);
+      return StaleCall(token);
+    }
+
+    async IAsyncEnumerable<ChatResponseUpdate> StaleCall([System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken token) {
+      await release.Task.WaitAsync(token);
+      await foreach (ChatResponseUpdate update in ToolBatch(token, Delegate("stale", AssignmentTask)))
+        yield return update;
+    }
+  }
+
+  [Fact]
   public async Task BackgroundSubagentDeliversItsReportAfterTheParentContinues() {
     var childEntered = Signal();
     var childRelease = Signal();
@@ -812,10 +871,10 @@ public sealed class SubagentRunTests {
     }
   }
 
-  private static async Task<Guid> StartParentAsync(PrimarySession parent) {
+  private static async Task<Guid> StartParentAsync(PrimarySession parent, string text = "parent mission") {
     long revision = (await parent.ReadSnapshotAsync().WaitAsync(TestTimeout)).HistoryRevision;
     UserMessageReceipt receipt = await parent.SubmitUserMessageAsync(
-        new(Guid.NewGuid(), revision, "parent mission", TestLlmSelection.Default));
+        new(Guid.NewGuid(), revision, text, TestLlmSelection.Default));
     return Assert.IsType<Guid>(receipt.ExecutionId);
   }
 
@@ -905,8 +964,8 @@ public sealed class SubagentRunTests {
           new("subagent-fixture", LlmApi.OpenAIResponses, new Uri("https://fixture.invalid/v1"),
               AuthenticationMethod.None)).WaitAsync(TestTimeout);
       await fixture.providers.RefreshModelCatalogAsync(connection.Id).WaitAsync(TestTimeout);
-      new PreferenceManager(fixture.store).SetBucketModel(ModelBucket.Small,
-          new(connection.Id, "subagent-fixture"));
+      new PreferenceManager(fixture.store).SetBucketModels(ModelBucket.Small,
+          [new(connection.Id, "subagent-fixture")]);
       return fixture;
     }
 
@@ -924,10 +983,8 @@ public sealed class SubagentRunTests {
 
     private static string BucketCatalog => JsonSerializer.Serialize(new {
       @object = "list",
-      data = new[] {
-        new { id = "subagent-fixture", @object = "model", created = 1_700_000_000, owned_by = "fixture",
-          context_window = 32_000 }
-      }
+      data = new[] { "subagent-fixture", "gpt-5.9-terra", "gpt-5.10-terra" }.Select(id =>
+          new { id, @object = "model", created = 1_700_000_000, owned_by = "fixture", context_window = 32_000 })
     });
   }
 }

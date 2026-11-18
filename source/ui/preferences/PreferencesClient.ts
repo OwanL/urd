@@ -1,4 +1,5 @@
 import { requestJson } from "../http/requestJson.ts";
+import type { SubagentProviderConnectionIds } from "../providers/SubagentProviderSelection.ts";
 
 export type AuxiliaryModelPurpose = "tools" | "skills" | "instructions" | "title";
 export type ProtectedResourceCategory = "tools" | "skills" | "instructions";
@@ -20,9 +21,9 @@ export interface AuxiliaryModelPreferences {
   readonly skills: ModelChoice;
   readonly instructions: ModelChoice;
   readonly title: ModelChoice;
-  readonly small: ConfiguredModel | null;
-  readonly medium: ConfiguredModel | null;
-  readonly large: ConfiguredModel | null;
+  readonly small: readonly ConfiguredModel[];
+  readonly medium: readonly ConfiguredModel[];
+  readonly large: readonly ConfiguredModel[];
 }
 
 export interface ProtectedResourcePreferences {
@@ -47,6 +48,7 @@ export interface Preferences {
   readonly compactionTriggerTokenCount: number | null;
   readonly modelChoices: AuxiliaryModelPreferences;
   readonly protectedResources: ProtectedResourcePreferences;
+  readonly subagentProviderConnectionIds: SubagentProviderConnectionIds;
 }
 
 // Typed access to browser preferences; construction performs no I/O.
@@ -89,10 +91,16 @@ export class PreferencesClient {
     });
   }
 
-  setBucketModel(bucket: ModelBucket, model: ConfiguredModel | null): Promise<Preferences> {
+  setBucketModels(bucket: ModelBucket, models: readonly ConfiguredModel[]): Promise<Preferences> {
     return requestJson(new URL("/api/preferences/model-bucket", this.origin), "POST", {
       bucket,
-      model,
+      models,
+    });
+  }
+
+  setSubagentProviders(connectionIds: SubagentProviderConnectionIds): Promise<Preferences> {
+    return requestJson(new URL("/api/preferences/subagent-providers", this.origin), "POST", {
+      connectionIds,
     });
   }
 

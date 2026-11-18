@@ -19,6 +19,7 @@ export type IconName =
   | "cancel"
   | "tool"
   | "background"
+  | "subagents"
   | "return";
 
 const paths: Record<IconName, string> = {
@@ -44,6 +45,7 @@ const paths: Record<IconName, string> = {
   cancel: "M6 6h12v12H6ZM9 9l6 6m0-6-6 6",
   tool: "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9Z",
   background: "M7 17 17 7M8 7h9v9",
+  subagents: "M12 8V5m0 3H6v6m6-6h6v6M9 2h6v3H9ZM3 14h6v6H3Zm12 0h6v6h-6Z",
   return: "M9 10 4 15l5 5M20 4v7a4 4 0 0 1-4 4H4",
 };
 

@@ -42,13 +42,28 @@ public sealed class PreferenceManager {
     });
   }
 
-  public void SetBucketModel(ModelBucket bucket, ConfiguredModel? model) {
+  public void SetBucketModels(ModelBucket bucket, IReadOnlyList<ConfiguredModel> models) {
+    ArgumentNullException.ThrowIfNull(models);
     if (!Enum.IsDefined(bucket))
       throw new ArgumentOutOfRangeException(nameof(bucket));
-    model?.Validate();
+
+    ConfiguredModel[] savedModels = models.ToArray();
+    var seen = new HashSet<ConfiguredModel>();
+    foreach (ConfiguredModel model in savedModels) {
+      ArgumentNullException.ThrowIfNull(model);
+      model.Validate();
+      if (!seen.Add(model))
+        throw new ArgumentException("Bucket provider/model pairs must be unique.", nameof(models));
+    }
+
     store.Preferences.Update(preferences => preferences with {
-      ModelChoices = preferences.ModelChoices.WithBucketModel(bucket, model)
+      ModelChoices = preferences.ModelChoices.WithBucketModels(bucket, savedModels)
     });
+  }
+
+  public void SetSubagentProviders(IReadOnlyList<Guid>? connectionIds) {
+    Guid[]? savedIds = NormalizeSubagentProviders(connectionIds);
+    store.Preferences.Update(preferences => preferences with { SubagentProviderConnectionIds = savedIds });
   }
 
   public void SetProtectedItems(ProtectedResourceCategory category, IReadOnlyList<string> items) {
@@ -64,6 +79,18 @@ public sealed class PreferenceManager {
     store.Preferences.Update(preferences => preferences with {
       ProtectedResources = preferences.ProtectedResources.WithCategory(category, savedItems)
     });
+  }
+
+  internal static Guid[]? NormalizeSubagentProviders(IReadOnlyList<Guid>? ids) {
+    if (ids is null)
+      return null;
+
+    Guid[] savedIds = ids.ToArray();
+    if (savedIds.Contains(Guid.Empty))
+      throw new ArgumentException("Subagent provider connection IDs cannot be empty.", nameof(ids));
+    if (savedIds.ToHashSet().Count != savedIds.Length)
+      throw new ArgumentException("Subagent provider connection IDs must be unique.", nameof(ids));
+    return savedIds;
   }
 
   internal static string NormalizeWorkingDirectory(string path) {

@@ -4,7 +4,9 @@ using Urd.Core.Context;
 namespace Urd.Core.Tools;
 
 internal sealed class SubagentTool : HarnessTool {
-  public override string Name => "subagent";
+  internal const string ToolName = "subagent";
+
+  public override string Name => ToolName;
   public override ToolRelevance RelevantWhen => ToolRelevance.Always;
   public override string Description => "Delegate a self-contained task to a fresh agent and return its final report.";
   public override JsonElement ParametersSchema { get; } = ToolSchema.Parse("""

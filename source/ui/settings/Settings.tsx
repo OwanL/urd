@@ -12,6 +12,7 @@ import type { PreferencesState } from "../preferences/usePreferences.ts";
 import type { ProviderClient } from "../providers/ProviderClient.ts";
 import { ProviderSettings, useProviderSettings } from "../providers/settings/index.ts";
 import { GeneralSettings } from "./GeneralSettings.tsx";
+import { DefaultSubagentProviders } from "./DefaultSubagentProviders.tsx";
 import { ModelPreferencesSettings } from "./ModelPreferencesSettings.tsx";
 import { ProtectedResourcesSettings } from "./ProtectedResourcesSettings.tsx";
 import "./settings.css";
@@ -226,6 +227,9 @@ export function Settings({
             active={tab === "model-buckets"}
           />
         </div>
+        {tab === "model-buckets" && (
+          <DefaultSubagentProviders providers={state} state={preferences} />
+        )}
       </section>
       <section
         class="settings-page"

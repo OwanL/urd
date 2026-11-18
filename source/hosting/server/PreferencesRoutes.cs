@@ -19,7 +19,8 @@ internal static class PreferencesRoutes {
     routes.MapPost("/compaction-trigger",
         (Delegate)((HttpContext http) => SetCompactionTriggerTokenCountAsync(http, preferences)));
     routes.MapPost("/model-choice", (Delegate)((HttpContext http) => SetModelChoiceAsync(http, preferences)));
-    routes.MapPost("/model-bucket", (Delegate)((HttpContext http) => SetBucketModelAsync(http, preferences)));
+    routes.MapPost("/model-bucket", (Delegate)((HttpContext http) => SetBucketModelsAsync(http, preferences)));
+    routes.MapPost("/subagent-providers", (Delegate)((HttpContext http) => SetSubagentProvidersAsync(http, preferences)));
     routes.MapPost("/protected-resources", (Delegate)((HttpContext http) => SetProtectedItemsAsync(http, preferences)));
   }
 
@@ -50,12 +51,21 @@ internal static class PreferencesRoutes {
     return Results.Ok(preferences.Read());
   }
 
-  private static async Task<IResult> SetBucketModelAsync(HttpContext http, PreferenceManager preferences) {
+  private static async Task<IResult> SetBucketModelsAsync(HttpContext http, PreferenceManager preferences) {
     ModelBucketRequest? body = await http.Request.ReadFromJsonAsync<ModelBucketRequest>(http.RequestAborted);
     if (body is null)
       return Results.BadRequest();
 
-    preferences.SetBucketModel(body.Bucket, body.Model);
+    preferences.SetBucketModels(body.Bucket, body.Models);
+    return Results.Ok(preferences.Read());
+  }
+
+  private static async Task<IResult> SetSubagentProvidersAsync(HttpContext http, PreferenceManager preferences) {
+    SubagentProvidersRequest? body = await http.Request.ReadFromJsonAsync<SubagentProvidersRequest>(http.RequestAborted);
+    if (body is null)
+      return Results.BadRequest();
+
+    preferences.SetSubagentProviders(body.ConnectionIds);
     return Results.Ok(preferences.Read());
   }
 
@@ -94,6 +104,7 @@ internal static class PreferencesRoutes {
       [property: JsonRequired, JsonNumberHandling(JsonNumberHandling.Strict)] int? CompactionTriggerTokenCount);
   private sealed record ModelChoiceRequest(AuxiliaryModelPurpose Purpose, ModelChoice Choice);
   private sealed record ModelBucketRequest(ModelBucket Bucket,
-      [property: JsonRequired] ConfiguredModel? Model);
+      [property: JsonRequired] ConfiguredModel[] Models);
+  private sealed record SubagentProvidersRequest([property: JsonRequired] Guid[]? ConnectionIds);
   private sealed record ProtectedItemsRequest(ProtectedResourceCategory Category, string[] Items);
 }

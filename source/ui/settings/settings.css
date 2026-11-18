@@ -228,8 +228,7 @@
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
 }
-.preference-model-row select,
-.preference-model-clear {
+.preference-model-row select {
   min-width: 0;
   min-height: 32px;
   padding: 5px 8px;
@@ -239,16 +238,68 @@
   background: var(--surface-input);
   font: inherit;
 }
-.preference-model-clear {
-  background: transparent;
-  cursor: pointer;
+.model-bucket-explanation {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
 }
-.preference-model-clear:hover:not(:disabled) {
-  background: var(--surface-hover);
+.model-bucket {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
 }
-.preference-model-clear:disabled {
+.model-bucket-heading,
+.model-bucket-members li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.model-bucket-heading h4 {
+  color: var(--text-primary);
+}
+.model-bucket-heading .composer-model {
+  flex: none;
+  margin-left: auto;
+}
+.model-bucket-summary,
+.model-bucket-feedback {
+  color: var(--text-secondary);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.model-bucket-feedback[role="alert"] {
+  color: var(--danger);
+}
+.model-bucket-members {
+  display: grid;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+  font-size: 12px;
+}
+.model-bucket-members li > span:first-child {
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+.model-bucket-members .icon-button .icon {
+  width: 14px;
+  height: 14px;
+}
+.model-bucket-members .icon-button[aria-disabled="true"] {
   opacity: 0.5;
-  cursor: default;
+}
+.default-subagent-providers {
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+}
+.default-subagent-providers h3 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
 }
 .preference-model-resolution {
   min-width: 0;

@@ -139,7 +139,9 @@ public sealed class StartingContextSessionTests {
     }
   }
 
-  private static void AssertSameTools(IReadOnlyList<AIFunctionDeclaration> expected, ChatOptions? options) {
+  private static void AssertSameTools(IReadOnlyList<AIFunctionDeclaration> saved, ChatOptions? options) {
+    // These fixtures have no subagent provider. The remaining declarations must match exactly.
+    AIFunctionDeclaration[] expected = saved.Where(tool => tool.Name != "subagent").ToArray();
     AIFunctionDeclaration[] actual = options!.Tools!
         .Select(tool => Assert.IsAssignableFrom<AIFunctionDeclaration>(tool)).ToArray();
     Assert.Equal(expected.Select(tool => tool.Name), actual.Select(tool => tool.Name));

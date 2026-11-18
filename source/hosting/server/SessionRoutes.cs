@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Urd.Core.Execution;
 using Urd.Core.Compaction;
 using Urd.Core.Sessions;
@@ -52,6 +53,16 @@ internal static class SessionRoutes {
     routes.MapGet("/{sessionId}/snapshot", (HttpContext http, Guid sessionId) =>
         WithSessionAsync(http, sessions, sessionId, async session =>
             Results.Ok(await session.ReadSnapshotAsync(http.RequestAborted))));
+    routes.MapGet("/{sessionId}/subagent-providers", (HttpContext http, Guid sessionId) =>
+        WithSessionAsync(http, sessions, sessionId, session =>
+            Task.FromResult(Results.Ok(new SubagentProvidersRequest(session.ReadSubagentProviders())))));
+    routes.MapPost("/{sessionId}/subagent-providers", (HttpContext http, Guid sessionId) =>
+        WithSessionAsync(http, sessions, sessionId, async session => {
+          SubagentProvidersRequest? request = await http.Request.ReadFromJsonAsync<SubagentProvidersRequest>(http.RequestAborted);
+          return request is null ? Results.BadRequest()
+              : Results.Ok(new SubagentProvidersRequest(await sessions.SetSubagentProvidersAsync(session.Id,
+                  request.ConnectionIds, http.RequestAborted)));
+        }));
     routes.MapGet("/{sessionId}/not-sent", (HttpContext http, Guid sessionId) =>
         WithSessionAsync(http, sessions, sessionId, async session => {
           string? cursor = http.Request.Query.TryGetValue("cursor", out var supplied) ? supplied.ToString() : null;
@@ -79,6 +90,8 @@ internal static class SessionRoutes {
       return Results.StatusCode(failure.StatusCode);
     } catch (ArgumentException) {
       return Results.BadRequest();
+    } catch (InvalidOperationException) when (IsApplicationStopping(http)) {
+      return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
     } catch (Exception failure) when (IsStorageFailure(failure)) {
       return HttpStorageFailure.Unavailable(http, failure);
     }
@@ -230,4 +243,5 @@ internal static class SessionRoutes {
   }
 
   private sealed record WorkingDirectoryRequest(string? WorkingDirectory);
+  private sealed record SubagentProvidersRequest([property: JsonRequired] IReadOnlyList<Guid>? ConnectionIds);
 }

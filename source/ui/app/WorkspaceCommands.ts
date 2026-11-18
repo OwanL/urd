@@ -1,4 +1,8 @@
 import { RequestError } from "../http/RequestError.ts";
+import type {
+  SubagentProviderConnectionIds,
+  SubagentProviders,
+} from "../providers/SubagentProviderSelection.ts";
 import type { ContinuationReceipt, ContinuationSubmission } from "../sessions/Continuation.ts";
 import type { CompactionReceipt } from "../sessions/Compaction.ts";
 import {
@@ -38,6 +42,8 @@ type WorkspaceCompactionState =
 
 export interface WorkspaceCommandState {
   readonly creating: boolean;
+  readonly savingSubagentProviders: ReadonlySet<string>;
+  readonly subagentProviderError: { readonly sessionId: string; readonly message: string } | null;
   readonly compactions: Readonly<Record<string, WorkspaceCompactionState>>;
   readonly stopping: Readonly<Record<string, WorkspaceStopState>>;
   readonly checking: Readonly<Record<string, boolean>>;
@@ -59,6 +65,8 @@ export interface WorkspaceCommandAccess {
 
 export const emptyWorkspaceCommandState: WorkspaceCommandState = {
   creating: false,
+  savingSubagentProviders: new Set(),
+  subagentProviderError: null,
   compactions: {},
   stopping: {},
   checking: {},
@@ -72,6 +80,7 @@ type WorkspaceCommandClient = Pick<
   | "submitMessage"
   | "getMessageReceipt"
   | "getSnapshot"
+  | "setSubagentProviders"
   | "continueSession"
   | "getContinuationReceipt"
   | "startCompaction"
@@ -95,6 +104,7 @@ export class WorkspaceCommands {
   private readonly changed: (state: WorkspaceCommandState) => void;
   private readonly reportError: (message: string | null) => void;
   private readonly refreshSnapshot: () => void;
+  private readonly preferenceSaveBlocks: (command: "create" | "execute") => boolean;
   private state = emptyWorkspaceCommandState;
   private createPending = false;
   private readonly checks = new Set<string>();
@@ -111,12 +121,14 @@ export class WorkspaceCommands {
     changed: (state: WorkspaceCommandState) => void,
     reportError: (message: string | null) => void,
     refreshSnapshot: () => void,
+    preferenceSaveBlocks: (command: "create" | "execute") => boolean = () => false,
   ) {
     this.client = client;
     this.access = access;
     this.changed = changed;
     this.reportError = reportError;
     this.refreshSnapshot = refreshSnapshot;
+    this.preferenceSaveBlocks = preferenceSaveBlocks;
   }
 
   get status(): WorkspaceCommandState {
@@ -139,8 +151,42 @@ export class WorkspaceCommands {
     );
   }
 
+  async saveSubagentProviders(
+    id: string,
+    connectionIds: SubagentProviderConnectionIds,
+  ): Promise<SubagentProviders | null> {
+    if (this.state.savingSubagentProviders.has(id)) return null;
+    this.publish({
+      savingSubagentProviders: new Set([...this.state.savingSubagentProviders, id]),
+      subagentProviderError:
+        this.state.subagentProviderError?.sessionId === id
+          ? null
+          : this.state.subagentProviderError,
+    });
+    try {
+      return await this.client.setSubagentProviders(id, connectionIds);
+    } catch (cause) {
+      this.publish({
+        subagentProviderError: {
+          sessionId: id,
+          message: `Subagent provider change could not be confirmed. ${cause instanceof RequestError ? requestErrorDescription(cause) : description(cause)}`,
+        },
+      });
+      return null;
+    } finally {
+      const next = new Set(this.state.savingSubagentProviders);
+      next.delete(id);
+      this.publish({ savingSubagentProviders: next });
+    }
+  }
+
+  private executionSettingsSaving(id: string): boolean {
+    return this.state.savingSubagentProviders.has(id) || this.preferenceSaveBlocks("execute");
+  }
+
   async create(): Promise<void> {
-    if (!this.access.canPersist() || this.createPending) return;
+    if (!this.access.canPersist() || this.createPending || this.preferenceSaveBlocks("create"))
+      return;
     if (!this.access.save(this.access.read())) return;
 
     this.createPending = true;
@@ -169,7 +215,13 @@ export class WorkspaceCommands {
     active: boolean,
     canSend: boolean,
   ): Promise<void> {
-    if (!canSend || !this.access.canPersist() || this.isCompacting(id)) return;
+    if (
+      !canSend ||
+      !this.access.canPersist() ||
+      this.isCompacting(id) ||
+      this.executionSettingsSaving(id)
+    )
+      return;
     const latest = this.access.read().chats[id];
     const selection = active
       ? snapshot.latestLlmSelection
@@ -219,6 +271,7 @@ export class WorkspaceCommands {
     const expectedLastExecutionId = snapshot.lastSettlement?.executionId;
     if (
       !canContinue ||
+      this.executionSettingsSaving(id) ||
       !this.access.canPersist() ||
       snapshot.sessionId !== id ||
       snapshot.canContinue !== true ||
@@ -264,6 +317,7 @@ export class WorkspaceCommands {
     const selection = chat?.selection ?? snapshot.latestLlmSelection;
     if (
       !canCompact ||
+      this.executionSettingsSaving(id) ||
       snapshot.sessionId !== id ||
       snapshot.canCompact !== true ||
       snapshot.unsettledExecutionId !== null ||
@@ -374,6 +428,7 @@ export class WorkspaceCommands {
     const latest = this.access.read().chats[id];
     if (
       snapshot.sessionId !== id ||
+      this.executionSettingsSaving(id) ||
       this.isCompacting(id) ||
       !latest ||
       latest.pending ||
@@ -505,7 +560,7 @@ export class WorkspaceCommands {
     if (
       !original ||
       this.continuationChecks.has(id) ||
-      (retry && !this.access.canPersist()) ||
+      (retry && (!this.access.canPersist() || this.executionSettingsSaving(id))) ||
       (!retry && document.hidden)
     )
       return null;
@@ -611,7 +666,7 @@ export class WorkspaceCommands {
     if (
       !original ||
       this.checks.has(id) ||
-      (retry && !this.access.canPersist()) ||
+      (retry && (!this.access.canPersist() || this.executionSettingsSaving(id))) ||
       (!retry && document.hidden)
     )
       return null;

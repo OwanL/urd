@@ -4,7 +4,7 @@ namespace Urd.Core.Storage;
 
 // Creates the current pre-release schema; incompatible databases require a manual reset.
 internal static class DatabaseSchema {
-  private const int SchemaVersion = 34;
+  private const int SchemaVersion = 35;
 
   internal static void Initialize(SqliteConnection connection) {
     using SqliteCommand command = connection.CreateCommand();
@@ -66,6 +66,7 @@ internal static class DatabaseSchema {
           kind INTEGER NOT NULL DEFAULT 0 CHECK (kind IN (0, 1)), -- SessionKind: primary, subagent
           parent_session_id TEXT REFERENCES sessions(session_id),
           owning_call_id TEXT,
+          subagent_providers_json TEXT,
           completed_working_ms INTEGER NOT NULL DEFAULT 0 CHECK (completed_working_ms >= 0),
           working_time_incomplete INTEGER NOT NULL DEFAULT 0 CHECK (working_time_incomplete IN (0, 1)),
           position_version INTEGER NOT NULL DEFAULT 0 CHECK (position_version >= 0),
@@ -467,6 +468,7 @@ internal static class DatabaseSchema {
               compaction_trigger_token_count IS NULL
               OR (compaction_trigger_token_count > 0 AND compaction_trigger_token_count <= 2147483647)),
           model_choices_json TEXT,
+          subagent_providers_json TEXT,
           protected_resources_json TEXT
       ) STRICT;
       CREATE INDEX execution_runs_history_order ON execution_runs(session_id, history_revision, ordinal DESC);

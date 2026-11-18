@@ -42,10 +42,9 @@ async function setup(t: TestContext) {
     connectionId: titleConnection.id,
     modelId: "fixture-a",
   });
-  await preferences.setBucketModel("small", {
-    connectionId: secondConnection.id,
-    modelId: "fixture-a",
-  });
+  await preferences.setBucketModels("small", [
+    { connectionId: secondConnection.id, modelId: "fixture-a" },
+  ]);
 
   const signal = AbortSignal.timeout(45_000);
   async function poll<T>(read: () => Promise<T>, ready: (value: T) => boolean): Promise<T> {

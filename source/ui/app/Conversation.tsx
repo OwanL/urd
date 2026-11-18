@@ -2,13 +2,16 @@ import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "preact/
 import { MessageEditingContext, InlineMessageEditor } from "./EditableMessage.tsx";
 import type { MessageEditing } from "./MessageEditing.ts";
 import { Composer } from "../chat/Composer.tsx";
+import { SubagentProviderControl } from "../chat/SubagentProviderControl.tsx";
 import { SessionIndicators } from "../chat/SessionIndicators.tsx";
 import { UsageOverview } from "../usage/UsageOverview.tsx";
 import { IconButton } from "../components/IconButton.tsx";
 import type { LlmSelection } from "../providers/LlmSelection.ts";
 import type { SessionClient } from "../sessions/SessionClient.ts";
 import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
+import { preferenceSaveBlocks } from "../preferences/usePreferences.ts";
 import type { PreferencesState } from "../preferences/usePreferences.ts";
+import type { ProviderClient } from "../providers/ProviderClient.ts";
 import { deriveConversationState } from "./ConversationState.ts";
 import type { ConversationExecutionStatus } from "./ConversationState.ts";
 import { Transcript } from "./Transcript.tsx";
@@ -131,6 +134,7 @@ function PendingInputBubble({
 
 interface ConversationProps {
   client: SessionClient;
+  providerClient: ProviderClient;
   sessionId: string;
   active?: boolean;
   transcript?: TranscriptDisplay | undefined;
@@ -164,6 +168,7 @@ interface ConversationProps {
 // Normal startup retains three recent chats plus focused or selected views.
 export function Conversation({
   client,
+  providerClient,
   sessionId,
   active = true,
   transcript,
@@ -194,6 +199,10 @@ export function Conversation({
   onTranscriptPositionChange,
 }: ConversationProps) {
   const ready = connected && !unavailable;
+  const savingSubagentProviders = commands.status.savingSubagentProviders.has(sessionId);
+  const executionSettingsSaving =
+    savingSubagentProviders || preferenceSaveBlocks(preferences.pendingFor, "execute");
+  const subagentProviderError = commands.status.subagentProviderError;
   const observeSnapshot = useCallback(
     (snapshot: SessionSnapshot, knownWhenRead: string | null) =>
       commands.observeSnapshot(snapshot, knownWhenRead),
@@ -274,7 +283,8 @@ export function Conversation({
     state.selection &&
     !state.selectionLocked &&
     !stop &&
-    !workingDirectoryLocked,
+    !workingDirectoryLocked &&
+    !executionSettingsSaving,
   );
   const showWorkingDirectory = Boolean(
     snapshot?.canChangeWorkingDirectory === true &&
@@ -480,7 +490,7 @@ export function Conversation({
                       Check receipt
                     </button>
                     <button
-                      disabled={!canPersist || checking}
+                      disabled={!canPersist || checking || executionSettingsSaving}
                       onClick={() => {
                         void commands.retryOriginalSubmission(sessionId);
                       }}
@@ -509,7 +519,7 @@ export function Conversation({
                       Check receipt
                     </button>
                     <button
-                      disabled={!canPersist || checkingContinuation}
+                      disabled={!canPersist || checkingContinuation || executionSettingsSaving}
                       onClick={() => {
                         void commands.retryOriginalContinuation(sessionId);
                       }}
@@ -562,6 +572,23 @@ export function Conversation({
           />
         )}
       <Composer
+        subagentProviders={
+          active && (
+            <SubagentProviderControl
+              sessionId={sessionId}
+              sessionClient={client}
+              providerClient={providerClient}
+              ready={ready}
+              saving={savingSubagentProviders}
+              saveError={
+                subagentProviderError?.sessionId === sessionId
+                  ? subagentProviderError.message
+                  : null
+              }
+              onSave={(ids) => commands.saveSubagentProviders(sessionId, ids)}
+            />
+          )
+        }
         indicators={
           <SessionIndicators
             contextUsage={snapshot?.contextUsage ?? null}
@@ -606,8 +633,9 @@ export function Conversation({
           if (selection) choose({ ...selection, reasoningEffort: effort });
         }}
         selectionLocked={state.selectionLocked}
-        canSend={state.canSend && !workingDirectoryLocked}
-        canContinue={state.canContinue && !workingDirectoryLocked}
+        configurationPending={executionSettingsSaving}
+        canSend={state.canSend && !workingDirectoryLocked && !executionSettingsSaving}
+        canContinue={state.canContinue && !workingDirectoryLocked && !executionSettingsSaving}
         continuationAvailable={state.continuationAvailable}
         working={state.active}
         stopping={state.executionStatus === "stopping"}

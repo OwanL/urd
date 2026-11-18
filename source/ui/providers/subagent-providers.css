@@ -1,0 +1,50 @@
+.subagent-provider-fields {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  min-inline-size: 0;
+  border: 0;
+  font-size: 12px;
+}
+.subagent-provider-fields legend {
+  padding: 0;
+  margin-bottom: 4px;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.subagent-provider-fields p {
+  margin: 4px 0;
+  color: var(--text-secondary);
+}
+.subagent-provider-mode {
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: 4px;
+}
+.subagent-provider-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 4px 6px;
+  border-radius: 5px;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.subagent-provider-option:hover:not(:has(input[aria-disabled="true"])) {
+  background: var(--surface-hover);
+}
+.subagent-provider-option:has(input[aria-disabled="true"]) {
+  color: var(--text-secondary);
+  cursor: default;
+}
+.subagent-provider-option input {
+  flex: none;
+  margin: 0;
+  accent-color: var(--accent);
+}
+.subagent-provider-option input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

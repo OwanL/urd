@@ -72,10 +72,10 @@ public sealed class SessionManager : IAsyncDisposable, ISubagentRunner, IAgentQu
     PrimarySession session;
     using (await sessionsLock.AcquireAsync()) {
       ThrowIfShuttingDown();
-      // Changing the preference affects only chats created afterwards.
-      string? workingDirectory = toolSettings is null && injectedTools.Count == 0
-          ? null : preferences.Read(fallbackWorkingDirectory).WorkingDirectory;
-      SessionRecord record = store.Sessions.CreatePrimary(Guid.NewGuid(), workingDirectory);
+      // Session defaults are captured once; later preference changes apply to new sessions.
+      UserPreferences defaults = preferences.Read(fallbackWorkingDirectory);
+      string? workingDirectory = toolSettings is null && injectedTools.Count == 0 ? null : defaults.WorkingDirectory;
+      SessionRecord record = store.Sessions.CreatePrimary(Guid.NewGuid(), workingDirectory, defaults.SubagentProviderConnectionIds);
       session = Track(CreateSession(record));
     }
 
@@ -97,6 +97,15 @@ public sealed class SessionManager : IAsyncDisposable, ISubagentRunner, IAgentQu
     if (record.Kind != SessionKind.Primary)
       throw new InvalidOperationException($"Session '{sessionId}' is a subagent session, not a primary session.");
     return Track(CreateSession(record));
+  }
+
+  public async Task<IReadOnlyList<Guid>?> SetSubagentProvidersAsync(Guid sessionId, IReadOnlyList<Guid>? connectionIds,
+      CancellationToken cancellation = default) {
+    Guid[]? normalized = PreferenceManager.NormalizeSubagentProviders(connectionIds);
+    using var _ = await sessionsLock.AcquireAsync(cancellation);
+    ThrowIfShuttingDown();
+    store.Sessions.SetSubagentProviders(sessionId, normalized);
+    return normalized;
   }
 
   // Discovers saved identities without opening handles or starting execution.
@@ -286,9 +295,10 @@ public sealed class SessionManager : IAsyncDisposable, ISubagentRunner, IAgentQu
       throw new InvalidOperationException("Subagent buckets require a configured model selector.");
 
     UserPreferences captured = preferences.Read();
-    LlmSelection selection = await modelSelector.ResolveAsync(request.Bucket, captured, cancellation);
     SessionRecord parent = store.Sessions.Read(caller.SessionId)
         ?? throw new InvalidOperationException($"The calling session '{caller.SessionId}' does not exist.");
+    LlmSelection selection = await modelSelector.ResolveSubagentAsync(request.Bucket, captured,
+        store.Sessions.ReadSubagentProviders(parent.Id), cancellation);
     string? contextBlock = ReadParentContext(parent, caller, request, captured.CompactionTriggerTokenCount);
     return new(parent.Id, caller.CallId, parent.WorkingDirectory, request.Task, contextBlock, selection);
   }
@@ -309,6 +319,11 @@ public sealed class SessionManager : IAsyncDisposable, ISubagentRunner, IAgentQu
       CancellationToken cancellation) {
     using var _ = await sessionsLock.AcquireAsync(cancellation);
     ThrowIfShuttingDown();
+    // Serialize admission with user toggles. The model may have returned a tool call from an
+    // older request, or the provider may have been disabled while routing was in progress.
+    if (store.Sessions.ReadSubagentProviders(assignment.ParentSessionId) is { } allowed
+        && !allowed.Contains(assignment.Selection.Connection.Id))
+      throw new AuxiliaryModelUnavailableException("This session no longer allows the selected subagent provider.");
     // Install ownership before publishing the handle or starting the assignment.
     var child = CreateChild(store.Sessions.CreateSubagent(Guid.NewGuid(),
         assignment.ParentSessionId, assignment.OwningCallId, assignment.WorkingDirectory));

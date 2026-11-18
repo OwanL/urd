@@ -181,6 +181,28 @@ public sealed class ProviderManager : IDisposable {
     return storage.Get(connectionId).Catalog ?? new(connectionId, null, []);
   }
 
+  internal async Task<bool> HasSelectedProvidersAsync(IReadOnlyList<Guid>? connectionIds,
+      CancellationToken cancellationToken) {
+    if (connectionIds is { Count: 0 })
+      return false;
+
+    using var held = await gate.AcquireAsync(cancellationToken);
+    ObjectDisposedException.ThrowIf(disposed, this);
+    IReadOnlyList<ProviderConnection> saved = storage.List();
+    if (connectionIds is null)
+      return saved.Count > 0;
+    HashSet<Guid> allowed = connectionIds.ToHashSet();
+    return saved.Any(connection => allowed.Contains(connection.Id));
+  }
+
+  internal async Task<IReadOnlyList<(ProviderConnection Connection, ProviderModelCatalog Catalog)>>
+      ListAvailableModelCatalogsAsync(IReadOnlyList<Guid>? connectionIds, CancellationToken cancellationToken) {
+    using var held = await gate.AcquireAsync(cancellationToken);
+    ObjectDisposedException.ThrowIf(disposed, this);
+    return AvailableProviders(connectionIds).Where(state => state.Catalog is { Models.Count: > 0 })
+        .Select(state => (state.Connection, state.Catalog!)).ToArray();
+  }
+
   public async Task<IReadOnlyList<ModelSettings>> GetModelSettingsAsync(
       Guid connectionId, CancellationToken cancellationToken = default) {
     using var held = await gate.AcquireAsync(cancellationToken);
@@ -357,6 +379,34 @@ public sealed class ProviderManager : IDisposable {
   // Caller holds the shared guard; callbacks and joins do not execute synchronously under it.
   private Task JoinConnectionWorkAsync(Guid connectionId) => Task.WhenAll(requests.Cancel(connectionId),
       signIns.CancelConnection(connectionId), ObserveCompletion(refreshes.GetValueOrDefault(connectionId)));
+
+  // Admission uses local state only; the actual request may refresh credentials or fail remotely.
+  private IEnumerable<ProviderState> AvailableProviders(IReadOnlyList<Guid>? connectionIds) {
+    if (connectionIds is { Count: 0 })
+      return [];
+
+    HashSet<Guid>? allowed = connectionIds?.ToHashSet();
+    DateTimeOffset freshAfter = DateTimeOffset.UtcNow.AddMinutes(1);
+    return storage.List().Where(connection => allowed?.Contains(connection.Id) != false)
+        .Select(connection => storage.Get(connection.Id)).Where(state => CanUseWithoutSignIn(state, freshAfter));
+  }
+
+  private bool CanUseWithoutSignIn(ProviderState state, DateTimeOffset freshAfter) {
+    if (state.Disconnecting || RequiresSignIn(state))
+      return false;
+    if (state.Connection.Authentication == AuthenticationMethod.None)
+      return true;
+    if (state.Credentials is not { RequiresSignIn: false } credentials)
+      return false;
+
+    return state.Connection.Authentication switch {
+      AuthenticationMethod.ApiKey => !string.IsNullOrWhiteSpace(credentials.ApiKey),
+      AuthenticationMethod.OAuth => HasPlanAccess(credentials) && (credentials.ExpiresAt > freshAfter
+          ? !string.IsNullOrWhiteSpace(credentials.AccessToken)
+          : state.Registration is not null && !string.IsNullOrEmpty(credentials.RefreshToken)),
+      _ => false
+    };
+  }
 
   private void EnsureAvailable(ProviderState state) {
     if (state.Disconnecting)

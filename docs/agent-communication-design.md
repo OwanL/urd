@@ -125,7 +125,7 @@ There is no `ask_user` tool yet; user-mode context therefore contains human inpu
 
 | Input | Meaning |
 | --- | --- |
-| `bucket` | `small`, `medium`, or `large`; selects the configured model tier. `Frontier` was renamed `Large` as part of this feature's schema-version bump. |
+| `bucket` | `small`, `medium`, or `large`; selects a model in the requested tier under the session's enabled-provider policy. |
 | `context` | Parent context to retain: `none` (task only), `user` (human inputs sent in attempted requests up to this call; nested inherited context is filtered to entries marked human input only), or `recent` (the parent's recent conversation, using the same amount compaction retains; no new setting). `user` excludes agent questions and answers; `ask_user` is not yet present. |
 | `task` | Text prompt describing the delegated task. |
 
@@ -134,10 +134,13 @@ generates the child's immutable title. That title is the communication address. 
 model overrides, caller-selected working directories, full-history inheritance, separate numeric
 context budgets, and other invocation options are not part of this proposal.
 
-**Child tools (2026-11-16):** a child runs the same prepass as a primary session and receives
-all tools minus whatever that prepass prunes, including `subagent` and the communication tools.
-There is no separate child tool list or nesting-depth limit; runaway nesting is accepted, with
-Stop on the owning tree as the remedy.
+**Tool availability:** a child runs the same prepass as a primary session. Before every model
+request, Urd omits `subagent` if no saved connection is selected by the primary session's
+provider policy. Tool admission checks the current selection again, so an in-flight model response
+cannot start a child on a newly disabled provider. This applies to descendants as well, without
+cancelling already admitted children, changing the main chat provider, or hiding the separate
+communication tools. The cached starting context can be reused as providers are toggled.
+There is no separate child tool list or nesting-depth limit; Stop owns the whole work tree.
 
 **Result (2026-11-16):** the parent's `subagent` call returns the child's final report (its final
 response), or an error if it failed or was stopped. Keep the guidance asking for that report

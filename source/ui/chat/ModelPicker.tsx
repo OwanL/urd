@@ -9,6 +9,7 @@ export function ModelPicker({
   models,
   modelKey,
   modelLabel,
+  ariaLabel = `Model: ${modelLabel}`,
   onModelChange,
   loadingModels,
   refreshingModels,
@@ -26,6 +27,7 @@ export function ModelPicker({
   const expanded = open && !disabled;
 
   const groups = useMemo(() => {
+    if (!expanded) return [];
     const term = query.trim().toLocaleLowerCase();
     const result = new Map<string, ComposerModel[]>();
     for (const model of models) {
@@ -36,7 +38,7 @@ export function ModelPicker({
       else result.set(model.providerLabel, [model]);
     }
     return [...result];
-  }, [models, query]);
+  }, [expanded, models, query]);
   const options = useMemo(() => groups.flatMap(([, group]) => group), [groups]);
   const optionIndexes = useMemo(
     () => new Map(options.map((model, index) => [model, index])),
@@ -97,7 +99,7 @@ export function ModelPicker({
           type="button"
           ref={trigger}
           disabled={disabled}
-          aria-label={`Model: ${modelLabel}`}
+          aria-label={ariaLabel}
           aria-haspopup="dialog"
           aria-expanded={expanded}
           aria-controls={expanded ? `${id}-popover` : undefined}
@@ -196,17 +198,19 @@ export function ModelPicker({
               <div class="composer-model-error" role="status">
                 {modelsError}
               </div>
-              <button
-                class="composer-model-retry"
-                type="button"
-                aria-label="Retry loading models"
-                disabled={refreshingModels}
-                aria-busy={refreshingModels}
-                onClick={onRetryModels}
-              >
-                <Icon name="refresh" />
-                {refreshingModels ? "Retrying…" : "Retry"}
-              </button>
+              {onRetryModels && (
+                <button
+                  class="composer-model-retry"
+                  type="button"
+                  aria-label="Retry loading models"
+                  disabled={refreshingModels}
+                  aria-busy={refreshingModels}
+                  onClick={onRetryModels}
+                >
+                  <Icon name="refresh" />
+                  {refreshingModels ? "Retrying…" : "Retry"}
+                </button>
+              )}
             </div>
           )}
         </Popover>

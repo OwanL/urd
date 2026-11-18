@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { RequestError } from "../http/RequestError.ts";
+import type { SubagentProviderConnectionIds } from "../providers/SubagentProviderSelection.ts";
 import type {
   AuxiliaryModelPurpose,
   ConfiguredModel,
@@ -14,6 +15,7 @@ import type {
 export type PreferenceKey =
   | "workingDirectory"
   | "compactionTriggerTokenCount"
+  | "subagentProviderConnectionIds"
   | `modelChoice:${AuxiliaryModelPurpose}`
   | `modelBucket:${ModelBucket}`
   | `protectedResources:${ProtectedResourceCategory}`;
@@ -32,7 +34,9 @@ export interface PreferencesState {
   saveWorkingDirectory(workingDirectory: string | null): Promise<boolean>;
   saveCompactionTriggerTokenCount(value: number | null): Promise<boolean>;
   saveModelChoice(purpose: AuxiliaryModelPurpose, choice: ModelChoice): Promise<boolean>;
-  saveBucketModel(bucket: ModelBucket, model: ConfiguredModel | null): Promise<boolean>;
+  saveBucketModels(bucket: ModelBucket, models: readonly ConfiguredModel[]): Promise<boolean>;
+  saveSubagentProviders(connectionIds: SubagentProviderConnectionIds): Promise<boolean>;
+  saveBlocks(command: "create" | "execute"): boolean;
   saveProtectedItems(
     category: ProtectedResourceCategory,
     items: readonly string[],
@@ -50,7 +54,11 @@ export function usePreferences(client: PreferencesClient): PreferencesState {
     message: string;
   } | null>(null);
   const version = useRef(0);
-  const saving = useRef(false);
+  const saving = useRef<PreferenceKey | null>(null);
+  const saveBlocks = useCallback(
+    (command: "create" | "execute") => preferenceSaveBlocks(saving.current, command),
+    [],
+  );
 
   const refresh = useCallback(async () => {
     if (saving.current) return;
@@ -80,7 +88,7 @@ export function usePreferences(client: PreferencesClient): PreferencesState {
     async (preference: PreferenceKey, request: () => Promise<Preferences>, fallback: string) => {
       if (saving.current) return false;
       const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      saving.current = true;
+      saving.current = preference;
       version.current++;
       setPendingFor(preference);
       setLoading(false);
@@ -92,7 +100,7 @@ export function usePreferences(client: PreferencesClient): PreferencesState {
         setFailure({ preference, message: failureMessage(cause, fallback) });
         return false;
       } finally {
-        saving.current = false;
+        saving.current = null;
         setPendingFor(null);
         requestAnimationFrame(() => {
           if (
@@ -136,12 +144,21 @@ export function usePreferences(client: PreferencesClient): PreferencesState {
       ),
     [client, save],
   );
-  const saveBucketModel = useCallback(
-    (bucket: ModelBucket, model: ConfiguredModel | null) =>
+  const saveBucketModels = useCallback(
+    (bucket: ModelBucket, models: readonly ConfiguredModel[]) =>
       save(
         `modelBucket:${bucket}`,
-        () => client.setBucketModel(bucket, model),
-        `${bucket[0]!.toUpperCase()}${bucket.slice(1)} model mapping could not be saved.`,
+        () => client.setBucketModels(bucket, models),
+        `${bucket[0]!.toUpperCase()}${bucket.slice(1)} bucket could not be saved.`,
+      ),
+    [client, save],
+  );
+  const saveSubagentProviders = useCallback(
+    (connectionIds: SubagentProviderConnectionIds) =>
+      save(
+        "subagentProviderConnectionIds",
+        () => client.setSubagentProviders(connectionIds),
+        "Default subagent providers could not be saved.",
       ),
     [client, save],
   );
@@ -175,12 +192,24 @@ export function usePreferences(client: PreferencesClient): PreferencesState {
     saveWorkingDirectory,
     saveCompactionTriggerTokenCount,
     saveModelChoice,
-    saveBucketModel,
+    saveBucketModels,
+    saveSubagentProviders,
+    saveBlocks,
     saveProtectedItems,
     clearError: () => {
       if (!saving.current && preferences !== null) setFailure(null);
     },
   };
+}
+
+export function preferenceSaveBlocks(
+  pending: PreferenceKey | null,
+  command: "create" | "execute",
+): boolean {
+  if (command === "create") return pending === "subagentProviderConnectionIds";
+  return (
+    pending?.startsWith("modelBucket:") === true || pending?.startsWith("modelChoice:") === true
+  );
 }
 
 function failureMessage(cause: unknown, fallback: string): string {

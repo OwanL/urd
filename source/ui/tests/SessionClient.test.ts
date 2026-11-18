@@ -25,6 +25,32 @@ import type {
 } from "../sessions/UserMessageSubmission.ts";
 import { startHttpServer } from "./HttpTestServer.ts";
 
+void test("session subagent provider requests preserve all, none, and explicit IDs", async (t) => {
+  const path = "/api/sessions/session%2Fid/subagent-providers";
+  const server = await startHttpServer((request, response) => {
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.end(request.method === "GET" ? '{"connectionIds":null}' : request.body);
+  });
+  t.after(() => server.close());
+
+  const client = new SessionClient(server.origin);
+  assert.deepEqual(await client.getSubagentProviders("session/id"), { connectionIds: null });
+  assert.deepEqual(await client.setSubagentProviders("session/id", []), { connectionIds: [] });
+  assert.deepEqual(await client.setSubagentProviders("session/id", null), { connectionIds: null });
+  assert.deepEqual(await client.setSubagentProviders("session/id", ["provider"]), {
+    connectionIds: ["provider"],
+  });
+  assert.deepEqual(
+    server.requests.map(({ method, url, body }) => [method, url, body]),
+    [
+      ["GET", path, ""],
+      ["POST", path, '{"connectionIds":[]}'],
+      ["POST", path, '{"connectionIds":null}'],
+      ["POST", path, '{"connectionIds":["provider"]}'],
+    ],
+  );
+});
+
 const sessionId = "10000000-0000-0000-0000-000000000001";
 const executionId = "20000000-0000-0000-0000-000000000002";
 const submissionId = "30000000-0000-0000-0000-000000000003";

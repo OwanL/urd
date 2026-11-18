@@ -31,6 +31,7 @@ export function Composer({
   reasoningOptions,
   onReasoningChange,
   selectionLocked,
+  configurationPending,
   canSend,
   canContinue,
   continuationAvailable,
@@ -39,6 +40,7 @@ export function Composer({
   onSend,
   onContinue,
   onStop,
+  subagentProviders,
   indicators,
 }: ComposerProps) {
   const input = useRef<HTMLTextAreaElement>(null);
@@ -199,6 +201,7 @@ export function Composer({
           </div>
         )}
         <div class="composer-actions" ref={actions}>
+          {subagentProviders}
           {!inlineAccounting && (
             <div class="composer-overflow">
               <IconButton
@@ -240,11 +243,16 @@ export function Composer({
             icon="send"
             label={submission.label}
             hint={
-              <>
-                {submission.label} <kbd>Enter</kbd>
-              </>
+              configurationPending ? (
+                "Saving model settings…"
+              ) : (
+                <>
+                  {submission.label} <kbd>Enter</kbd>
+                </>
+              )
             }
             class="composer-send"
+            aria-busy={configurationPending}
             type="submit"
             disabled={!canSubmit}
           />

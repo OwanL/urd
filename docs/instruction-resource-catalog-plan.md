@@ -92,6 +92,16 @@ they are not an exhaustive OS matrix or a proof of discovery completeness on arb
 filesystems. The current implementation and tests do not establish pruning quality or a
 winner over keep-all fallback.
 
+A Windows first-chat integration test creates 1,900 short instruction files in a disposable
+workspace. The selector received all 1,900 paths and bodies in one 870,252-byte user message.
+When the scripted selector chose one document, the main request contained just that document
+and 5,350 bytes of system messages. When a simulated selector rejected messages over 128 KiB,
+the persisted status reported fallback and all 1,900 documents reached the main request
+(643,414 bytes of system messages). Sizes depend on path and body length; bytes are not
+tokens. The scripted main provider accepted both requests. A real provider may reject the
+keep-all request too. No candidate is silently truncated, and no context-fit guarantee or
+live-provider quality claim follows from this test.
+
 The 2026-11-18 Windows measurements below are historical filename-scan experiments, not
 release acceptance or cross-platform performance guarantees: two four-thread `fd` walks of
 `C:\` took 121 s and 133 s for 1,902 raw filename matches; the paths-only cache was 444 KiB

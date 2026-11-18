@@ -132,8 +132,10 @@ public sealed class HistoryCompactorTests {
     Assert.False(location.IsAfter(sameOrderDifferentId));
   }
 
-  [Fact]
-  public void OverflowForcesProgressWhileKeepingNewestTurn() {
+  [Theory]
+  [InlineData(CompactionReason.Manual)]
+  [InlineData(CompactionReason.Overflow)]
+  public void ManualAndOverflowCanKeepAnOverBudgetLatestTurn(CompactionReason reason) {
     var context = new ModelHistory([
       Entry(0, 0, true, ChatRole.User, "older"),
       Entry(1, 0, true, ChatRole.User, new string('o', 2_500)),
@@ -141,8 +143,8 @@ public sealed class HistoryCompactorTests {
     ]);
     LlmSelection selection = TestLlmSelection.Default with { ContextWindow = 1_000 };
 
-    Assert.Null(HistoryCompactor.CreatePlan(context, selection, emptyStartingContext, CompactionReason.Manual));
-    HistoryCompactionPlan? plan = HistoryCompactor.CreatePlan(context, selection, emptyStartingContext, CompactionReason.Overflow);
+    Assert.Null(HistoryCompactor.CreatePlan(context, selection, emptyStartingContext, CompactionReason.Threshold));
+    HistoryCompactionPlan? plan = HistoryCompactor.CreatePlan(context, selection, emptyStartingContext, reason);
 
     Assert.Equal(2, plan?.FirstRetainedMessageIndex);
     Assert.Equal(new string('n', 2_500), plan?.FirstRetainedMessage.Message.Contents.OfType<TextContent>().Single().Text);

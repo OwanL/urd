@@ -7,10 +7,10 @@ internal static class HistoryCompactionBoundary {
       CompactionReason reason) {
     int? boundaryWithinBudget = FindBoundaryWithinTokenBudget(history.Messages, retainedHistoryTokenLimit,
         minimumIndex: 1, previousBoundary: history.PreviousCompaction?.FirstRetainedMessageLocation);
-    if (boundaryWithinBudget is not null || reason != CompactionReason.Overflow)
+    if (boundaryWithinBudget is not null || reason == CompactionReason.Threshold)
       return boundaryWithinBudget;
 
-    // Overflow recovery may exceed the retention budget rather than leave all history unchanged.
+    // Manual and overflow compaction may exceed the budget to preserve the latest turn.
     return FindBoundaryPreservingLatestUserTurn(history);
   }
 

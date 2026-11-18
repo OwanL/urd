@@ -24,8 +24,9 @@ distinct from tool-result pruning and catalog pruning (ARCHITECTURE.md, "Context
    services only); user-editable. An unknown limit still allows Send; compaction then happens
    only on overflow or on request. The configured limit stays fixed. Headroom is the smaller
    of 16,384 tokens and one fifth of the window; recent history is at most 20,000 tokens,
-   reduced to half the threshold for small windows. Summary output is capped at 8,192 tokens
-   or one quarter of a known window, whichever is smaller.
+   reduced to half the threshold for small windows. The summary request caps output at 8,192
+   tokens or one quarter of a known window, whichever is smaller. The ChatGPT route does not
+   accept an output cap; the same local completion, size and context-reduction checks still apply.
 3. **Existing Urd requirements still hold:**
    - original history stays readable (session-design.md, ARCHITECTURE.md);
    - a transcript marker shows where compaction took effect, with the summary inspectable
@@ -51,17 +52,18 @@ distinct from tool-result pruning and catalog pruning (ARCHITECTURE.md, "Context
 and message index within the request; the request ID locates stored content but does not sort it.
 `HistoryCompactionPlan` identifies the prefix to summarize and the first message to retain.
 Planning takes the existing `StartingContext` so instructions and tool declarations stay together.
-`RetainedHistorySelector` prefers whole turns, then assistant continuations, with an over-budget
-fallback only for provider overflow. `ContextTokenBudget` names the estimation allowances and limits.
+`HistoryCompactionBoundary` prefers whole turns, then assistant continuations.
+`ContextTokenBudget` names the estimation allowances and limits.
 `CompactionTriggerTokenCount` is an optional application preference, read once at each compaction check.
 Automatic uses the model window minus fixed headroom (20% of the window, capped at 16,384 tokens).
 A configured positive count triggers above that count, capped at the same window-minus-headroom limit;
 it also enables automatic compaction when the model window is unknown. Without either a count or a
 known window, only manual/overflow compaction is available. The retention budget is the smaller of
 20,000 tokens and half the effective trigger; without any trigger it remains 20,000. The summary is
-separate from this retention budget, with its existing output limit unchanged. Overflow recovery may
-still exceed the budget to keep a safe recent turn. Saved preferences apply to the next check in
-existing sessions; an already prepared compaction plan does not change midway.
+separate from this retention budget. If no safe split fits the budget, manual compaction and
+provider-overflow recovery can keep the latest turn intact and still summarize older history.
+Saved preferences apply to the next check in existing sessions; an already prepared compaction
+plan does not change midway.
 Edit summarization instructions in `CompactionPrompt`; its renderer keeps native payloads/reasoning
 out of the prompt and bounds tool-result text. `ManualCompactionRequest` starts an idle-only execution;
 a `CompactionReceipt` acknowledges that execution, not necessarily a saved summary.

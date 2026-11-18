@@ -39,7 +39,9 @@ internal static class HistoryCompactor {
 
     var options = new ChatOptions {
       ModelId = selection.ModelId,
-      MaxOutputTokens = ContextTokenBudget.SummaryOutputLimit(selection.ContextWindow),
+      // ChatGPT's subscription endpoint rejects max_output_tokens; its summaries rely on the model's default ceiling.
+      MaxOutputTokens = selection.Connection.Route == ProviderRoute.ChatGpt
+          ? null : ContextTokenBudget.SummaryOutputLimit(selection.ContextWindow),
       Tools = []
     };
     if (usageContext is not null)

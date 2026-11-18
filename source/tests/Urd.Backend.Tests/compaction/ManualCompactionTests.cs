@@ -5,6 +5,7 @@ using Urd.Core.Execution;
 using Urd.Core.Providers;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
+using Urd.Core.Tools;
 using Xunit;
 using static Urd.Backend.Tests.Support.ScriptedResponses;
 using static Urd.Backend.Tests.Support.TestAsync;
@@ -77,6 +78,64 @@ public sealed class ManualCompactionTests {
       Assert.Null(await session.ReadCompactionAsync(saved.Id, reset.HistoryRevision));
       Assert.DoesNotContain(client.Requests[^1], message => message.Text?.Contains(Summary, StringComparison.Ordinal) == true);
     }
+  }
+
+  [Fact]
+  public async Task OversizedLatestToolResultKeepsWholeTurnAndCompactsOlderHistory() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    string toolResult = new('r', 100_000);
+    var tool = new TestAgentTool("lookup", (_, _, _) => Task.FromResult(new ToolOutput(toolResult, [])));
+    int streamCalls = 0;
+    int summaryCalls = 0;
+    using var client = new ScriptedChatClient(token => Interlocked.Increment(ref streamCalls) switch {
+      1 => Complete(token),
+      2 => ToolBatch(token, new FunctionCallContent("lookup-call", "lookup", new Dictionary<string, object?>())),
+      3 => FailContinuation(token),
+      _ => throw new InvalidOperationException("Unexpected model request.")
+    }, _ => {
+      Interlocked.Increment(ref summaryCalls);
+      return Task.FromResult(SummaryResponse());
+    });
+    var manager = new SessionManager(store, _ => client, [tool], Path.GetDirectoryName(database.Path)!);
+    try {
+      PrimarySession session = await manager.CreatePrimaryAsync();
+      await SubmitTurnAsync(session, "older-turn: " + new string('x', 10_000));
+      UserMessageReceipt latest = await session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, "latest-turn", Selection));
+      Assert.Equal(ExecutionOutcome.Failed,
+          (await session.WaitForExecutionFinishAsync(Assert.IsType<Guid>(latest.ExecutionId)).WaitAsync(TestTimeout)).Outcome);
+      long revision = (await session.ReadSnapshotAsync()).HistoryRevision;
+      ModelHistory before = store.Compactions.ReadContext(session.Id, revision);
+      HistoryMessage latestStart = Assert.Single(before.Messages, message => message.Message.Text == "latest-turn");
+
+      CompactionReceipt receipt = Assert.IsType<CompactionReceipt>(await session.CompactAsync(
+          new(Guid.NewGuid(), revision, Selection)));
+      Assert.Equal(ExecutionOutcome.Completed,
+          (await session.WaitForExecutionFinishAsync(receipt.ExecutionId).WaitAsync(TestTimeout)).Outcome);
+
+      ModelHistory after = store.Compactions.ReadContext(session.Id, revision);
+      SavedHistoryCompaction saved = Assert.IsType<SavedHistoryCompaction>(after.PreviousCompaction);
+      Assert.Equal(latestStart.Location, saved.FirstRetainedMessageLocation);
+      Assert.Equal(Summary, Assert.IsType<CompactionSummary>(await session.ReadCompactionAsync(saved.Id, revision)).Summary);
+      Assert.Single((await session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, revision))).Entries,
+          entry => entry.Entry.Kind == TranscriptEntryKind.Compaction);
+      Assert.DoesNotContain(after.Messages, message => message.Message.Text?.Contains("older-turn:") == true);
+      Assert.Equal(before.Messages.SkipWhile(message => message.Location != latestStart.Location).Select(Position),
+          after.Messages.Select(Position));
+      Assert.Contains(after.Messages, message => message.Message.Role == ChatRole.Assistant &&
+          message.Message.Contents.OfType<FunctionCallContent>().Any(call => call.CallId == "lookup-call"));
+      Assert.Contains(after.Messages, message => message.Message.Role == ChatRole.Tool &&
+          message.Message.Contents.OfType<FunctionResultContent>().Any(result => result.CallId == "lookup-call" &&
+              Equals(result.Result, toolResult)));
+      Assert.Equal(1, summaryCalls);
+    } finally {
+      await manager.ShutdownSessionsAsync().WaitAsync(TestTimeout);
+    }
+  }
+
+  private static IAsyncEnumerable<ChatResponseUpdate> FailContinuation(CancellationToken token) {
+    token.ThrowIfCancellationRequested();
+    throw new ProviderOperationException(ProviderFailure.ProviderUnavailable);
   }
 
   [Fact]

@@ -22,7 +22,10 @@ internal sealed class TranscriptPositionReader(Database database, TranscriptHist
   internal static readonly string PromptsSql = $"""
     SELECT p.rank, p.weight, p.prefix_weight, m.run_id, m.message_id, p.kind
     FROM transcript_positions p JOIN execution_messages m ON m.ordinal = p.entry_ordinal
-    WHERE p.session_id = $session AND p.history_revision = $revision AND p.kind = {(int)TranscriptEntryKind.User} AND p.rank > $after
+    WHERE p.session_id = $session AND p.history_revision = $revision AND p.kind = {(int)TranscriptEntryKind.User}
+        AND p.rank > $after AND NOT EXISTS (SELECT 1 FROM execution_inputs i
+            WHERE i.session_id = m.session_id AND i.input_id = m.input_id
+                AND i.provenance = {(int)InputProvenance.AgentQuestion})
     ORDER BY p.rank LIMIT $limit;
     """;
   internal const string WindowSql = """

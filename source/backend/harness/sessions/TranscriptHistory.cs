@@ -20,7 +20,9 @@ public sealed record TranscriptHistoryQuery(
 public sealed record TranscriptEntryDescriptor(
     TranscriptEntryRef Entry, DateTimeOffset? CreatedAt, TranscriptTextFacts? Text, TranscriptToolFacts? Tool,
     TranscriptCompactionFacts? Compaction = null, ResponseHeaderInfo? Response = null,
-    IReadOnlyList<PrepassSummary>? Preparation = null);
+    IReadOnlyList<PrepassSummary>? Preparation = null, TranscriptAgentQuestionFacts? AgentQuestion = null);
+
+public sealed record TranscriptAgentQuestionFacts(string? SenderTitle);
 
 public sealed record TranscriptCompactionFacts(CompactionReason Reason, long EstimatedContextTokensBefore, long EstimatedContextTokensAfter);
 

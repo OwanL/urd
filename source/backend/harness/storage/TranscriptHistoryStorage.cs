@@ -30,7 +30,7 @@ internal sealed class TranscriptHistoryStorage(
   internal static string WindowSql(bool ascending) => $$"""
     WITH window AS (
         SELECT ordinal, session_id, history_revision, run_id, role, message_id, request_id,
-            first_chunk_index, end_chunk_index, created_at, call_id, tool_name
+            first_chunk_index, end_chunk_index, created_at, call_id, tool_name, input_id
         FROM execution_messages
         WHERE session_id = $session AND history_revision = $revision
             AND ordinal {{(ascending ? ">=" : "<=")}} $boundary
@@ -52,6 +52,7 @@ internal sealed class TranscriptHistoryStorage(
             AS batched_with_next,
         CASE WHEN t.call_id IS NOT NULL THEN t.arguments_excerpt ELSE NULL END AS arguments_excerpt,
         c.reason AS compaction_reason, c.tokens_before, c.tokens_after,
+        i.input_id AS question_input_id, sender_title.title AS sender_title,
         CASE WHEN m.role <> 4 AND NOT EXISTS (SELECT 1 FROM execution_messages first
             WHERE first.session_id = m.session_id AND first.history_revision = m.history_revision
                 AND first.run_id = m.run_id AND first.role <> 4 AND first.ordinal < m.ordinal)
@@ -82,6 +83,9 @@ internal sealed class TranscriptHistoryStorage(
             AND neighbor.ordinal > m.ordinal ORDER BY neighbor.ordinal LIMIT 1)
     LEFT JOIN execution_tools next_tool ON next_tool.request_id = next.request_id AND next_tool.call_id = next.call_id
     LEFT JOIN session_compactions c ON c.compaction_id = m.message_id AND m.role = 4
+    LEFT JOIN execution_inputs i ON m.role = 0 AND i.session_id = m.session_id AND i.input_id = m.input_id
+        AND i.provenance = {{(int)InputProvenance.AgentQuestion}}
+    LEFT JOIN session_prepass_title sender_title ON sender_title.session_id = i.sender_session_id
     ORDER BY m.ordinal {{(ascending ? "ASC" : "DESC")}};
     """;
 
@@ -155,8 +159,10 @@ internal sealed class TranscriptHistoryStorage(
     LlmSelection? selection = ReadResponseSelection(reader.NullableString("response_selection_json"));
     ResponseHeaderInfo? response = selection is null ? null : new ResponseHeaderInfo(selection.ModelId,
         PrepassDetailsReader.ReadReasoningEffort(selection), reader.NullableTimestamp("response_started_at"));
+    TranscriptAgentQuestionFacts? agentQuestion = reader.NullableGuid("question_input_id") is null ? null :
+        new(reader.NullableString("sender_title"));
     var descriptor = new TranscriptEntryDescriptor(reference, reader.NullableTimestamp("created_at"), text, tool,
-        compaction, response);
+        compaction, response, AgentQuestion: agentQuestion);
     return new(reader.Long("ordinal"), descriptor, (ExecutionOutcome?)reader.NullableInt("execution_outcome"),
         reader.NullableString("execution_error"));
   }

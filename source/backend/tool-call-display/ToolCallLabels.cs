@@ -29,6 +29,8 @@ public static class ToolCallLabels {
       return toolName switch {
         "bash" => BashLabeler.Create(arguments),
         "cancel_pending_calls" => CancelPendingLabeler.Create(arguments),
+        "ask_agent" => AgentQuestionLabeler.CreateAsk(arguments),
+        "answer_agent" => AgentQuestionLabeler.CreateAnswer(arguments),
         _ => CreateLabel(ToolCallIcon.Generic, fallbackTitle, ToolCallExcerpt.FormatCompactArguments(arguments), null)
       };
     }
@@ -40,6 +42,8 @@ public static class ToolCallLabels {
     "write" => CreateLabel(ToolCallIcon.Write, fallbackTitle, null, null),
     "edit" => CreateLabel(ToolCallIcon.Edit, fallbackTitle, null, null),
     "cancel_pending_calls" => CancelPendingLabeler.Fallback(),
+    "ask_agent" => AgentQuestionLabeler.FallbackAsk(),
+    "answer_agent" => AgentQuestionLabeler.FallbackAnswer(),
     _ => CreateLabel(ToolCallIcon.Generic, fallbackTitle, null, null)
   };
 

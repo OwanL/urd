@@ -275,6 +275,29 @@ void test(
     assert.ok(question);
     assert.ok(text(question).includes('[QUESTION FROM agent "Fixture Asker"'));
     assert.ok(text(question).endsWith(prompt));
+    const history = await f.client.getHistory(
+      recipient,
+      { mode: "latest", expectedHistoryRevision: 0 },
+      f.signal,
+    );
+    const questionEntry = history.entries.find(
+      (entry) => entry.entry.executionId === wakeId && entry.entry.kind === "user",
+    );
+    assert.ok(questionEntry);
+    assert.equal(questionEntry.agentQuestion?.senderTitle, askerTitle);
+    assert.equal(
+      history.entries.find((entry) => entry.entry.executionId === recipientBoot)?.agentQuestion,
+      null,
+    );
+    const promptPage = await f.client.getPromptMarkers(
+      recipient,
+      { expectedHistoryRevision: 0 },
+      f.signal,
+    );
+    assert.deepEqual(
+      promptPage.prompts.map((prompt) => prompt.executionId),
+      [recipientBoot],
+    );
     assertToolResult(
       f.first.calls[2]!.request,
       "answer_agent",

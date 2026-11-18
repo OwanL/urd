@@ -262,6 +262,8 @@ public sealed class TranscriptPositionQueryTests {
     string runs = string.Join(",\n", seeded.Select(entry =>
         $"('{session:D}', '{entry.RunId:D}', {revision}, '{entry.InputId:D}', 0)"));
     string requests = string.Join(",\n", seeded.Select(entry => $"('{entry.RequestId:D}', '{entry.RunId:D}')"));
+    string inputs = string.Join(",\n", seeded.Select(entry =>
+        $"('{session:D}', '{entry.InputId:D}', '{entry.RunId:D}', '{entry.RequestId:D}')"));
     string messages = string.Join(",\n", seeded.Select(entry =>
         $"('{session:D}', {revision}, '{entry.RunId:D}', 0, '{entry.InputId:D}', '{entry.InputId:D}', "
         + $"'{entry.RequestId:D}', {entry.Weight})"));
@@ -276,6 +278,8 @@ public sealed class TranscriptPositionQueryTests {
       VALUES {runs};
       INSERT INTO execution_requests (request_id, run_id)
       VALUES {requests};
+      INSERT INTO execution_inputs (session_id, input_id, run_id, request_id)
+      VALUES {inputs};
       INSERT INTO execution_messages
           (session_id, history_revision, run_id, role, message_id, input_id, request_id, layout_weight)
       VALUES {messages};
@@ -299,6 +303,8 @@ public sealed class TranscriptPositionQueryTests {
       VALUES ('{session:D}', '{run:D}', {revision}, '{input:D}');
       INSERT INTO execution_requests (request_id, run_id, next_chunk_index, response_final)
       VALUES ('{request:D}', '{run:D}', 1, 1);
+      INSERT INTO execution_inputs (session_id, input_id, run_id, request_id)
+      VALUES ('{session:D}', '{input:D}', '{run:D}', '{request:D}');
       INSERT INTO execution_tools (run_id, request_id, call_index, call_id, name, arguments_json,
           started, outcome, result_json)
       VALUES ('{run:D}', '{request:D}', 0, 'call', 'shell', 'not-json', 1, {(int)outcome}, 'not-json');

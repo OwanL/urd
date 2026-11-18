@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Urd.Core.Execution;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
@@ -104,6 +105,40 @@ public sealed class ToolCallLabelsTests {
     Assert.Equal(ToolCallIcon.CancelPending, cancel.Icon);
     Assert.Equal("cancel 5 calls", cancel.Title);
     Assert.Null(cancel.Path);
+  }
+
+  [Fact]
+  public void AgentQuestionLabelsShowRecipientPromptAndAnswerExcerptWithWireIcons() {
+    ToolCallLabel ask = ToolCallLabels.Create("ask_agent",
+      "{\"recipient\":\"worker\",\"prompt\":\"inspect the failing test\",\"wake\":true}", null);
+    ToolCallLabel answer = ToolCallLabels.Create("answer_agent",
+      "{\"answer\":{\"$truncated\":\"the test fails because\",\"length\":900}}", null);
+
+    Assert.Equal(ToolCallIcon.AskAgent, ask.Icon);
+    Assert.Equal("worker", ask.Title);
+    Assert.Equal("inspect the failing test", ask.Detail);
+    Assert.Equal(ToolCallIcon.AnswerAgent, answer.Icon);
+    Assert.Equal("answer", answer.Title);
+    Assert.Equal("the test fails because…", answer.Detail);
+
+    var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+    options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase, allowIntegerValues: false));
+    using JsonDocument askJson = JsonDocument.Parse(JsonSerializer.Serialize(ask, options));
+    using JsonDocument answerJson = JsonDocument.Parse(JsonSerializer.Serialize(answer, options));
+    Assert.Equal("askAgent", askJson.RootElement.GetProperty("icon").GetString());
+    Assert.Equal("answerAgent", answerJson.RootElement.GetProperty("icon").GetString());
+  }
+
+  [Theory]
+  [InlineData("ask_agent", ToolCallIcon.AskAgent)]
+  [InlineData("answer_agent", ToolCallIcon.AnswerAgent)]
+  public void AgentQuestionFallbacksKeepTheirIconAndToolName(string toolName, ToolCallIcon icon) {
+    ToolCallLabel label = ToolCallLabels.Create(toolName, "{malformed", null);
+
+    Assert.Equal(icon, label.Icon);
+    Assert.Equal(toolName, label.Title);
+    Assert.Null(label.Detail);
+    Assert.Null(label.Path);
   }
 
   [Fact]

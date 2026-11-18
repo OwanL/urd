@@ -4,7 +4,7 @@ namespace Urd.Core.Storage;
 
 // Creates the current pre-release schema; incompatible databases require a manual reset.
 internal static class DatabaseSchema {
-  private const int SchemaVersion = 31;
+  private const int SchemaVersion = 32;
 
   internal static void Initialize(SqliteConnection connection) {
     using SqliteCommand command = connection.CreateCommand();
@@ -63,9 +63,15 @@ internal static class DatabaseSchema {
           session_id TEXT NOT NULL PRIMARY KEY,
           history_revision INTEGER NOT NULL CHECK (history_revision >= 0),
           working_directory TEXT,
+          kind INTEGER NOT NULL DEFAULT 0 CHECK (kind IN (0, 1)), -- SessionKind: primary, subagent
+          parent_session_id TEXT REFERENCES sessions(session_id),
+          owning_call_id TEXT,
           completed_working_ms INTEGER NOT NULL DEFAULT 0 CHECK (completed_working_ms >= 0),
           working_time_incomplete INTEGER NOT NULL DEFAULT 0 CHECK (working_time_incomplete IN (0, 1)),
-          position_version INTEGER NOT NULL DEFAULT 0 CHECK (position_version >= 0)
+          position_version INTEGER NOT NULL DEFAULT 0 CHECK (position_version >= 0),
+          CHECK ((kind = 0 AND parent_session_id IS NULL AND owning_call_id IS NULL)
+              OR (kind = 1 AND parent_session_id IS NOT NULL AND parent_session_id <> session_id
+                  AND owning_call_id IS NOT NULL AND length(owning_call_id) > 0))
       ) STRICT;
       CREATE TABLE session_starting_context (
           session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
@@ -209,8 +215,12 @@ internal static class DatabaseSchema {
           request_id TEXT REFERENCES execution_requests(request_id),
           outcome INTEGER CHECK (outcome IN (0, 1, 2)),
           not_sent INTEGER NOT NULL DEFAULT 0 CHECK (not_sent IN (0, 1)),
+          provenance INTEGER NOT NULL DEFAULT 0 CHECK (provenance IN (0, 1)), -- human input, agent question
+          sender_session_id TEXT REFERENCES sessions(session_id),
           UNIQUE (session_id, input_id),
-          FOREIGN KEY (session_id, input_id) REFERENCES input_decisions(session_id, input_id)
+          FOREIGN KEY (session_id, input_id) REFERENCES input_decisions(session_id, input_id),
+          CHECK ((provenance = 0 AND sender_session_id IS NULL)
+              OR (provenance = 1 AND sender_session_id IS NOT NULL))
       ) STRICT;
       CREATE TABLE execution_messages (
           ordinal INTEGER PRIMARY KEY AUTOINCREMENT,

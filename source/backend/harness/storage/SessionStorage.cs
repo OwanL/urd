@@ -1,20 +1,34 @@
 using System.Globalization;
 using Microsoft.Data.Sqlite;
+using Urd.Core.Context;
 using Urd.Core.Sessions;
 
 namespace Urd.Core.Storage;
 
 // Creates and reads durable session identities, creation order and history revisions.
 internal sealed class SessionStorage(Database database) {
-  internal SessionRecord CreatePrimary(Guid sessionId, string? workingDirectory = null) {
+  internal SessionRecord CreatePrimary(Guid sessionId, string? workingDirectory = null)
+      => Create(sessionId, workingDirectory, SessionKind.Primary, null, null);
+
+  internal SessionRecord CreateSubagent(Guid sessionId, Guid parentSessionId, string owningCallId, string? workingDirectory = null) {
+    if (parentSessionId == Guid.Empty || parentSessionId == sessionId)
+      throw new ArgumentException("Parent session ID must identify a different session.", nameof(parentSessionId));
+    ArgumentException.ThrowIfNullOrWhiteSpace(owningCallId);
+    return Create(sessionId, workingDirectory, SessionKind.Subagent, parentSessionId, owningCallId);
+  }
+
+  private SessionRecord Create(Guid sessionId, string? workingDirectory, SessionKind kind, Guid? parentSessionId, string? owningCallId) {
     if (sessionId == Guid.Empty)
       throw new ArgumentException("Session ID cannot be empty.", nameof(sessionId));
 
     return database.Write(transaction => database.QuerySingleOrDefault(transaction, """
-        INSERT INTO sessions (session_id, history_revision, working_directory) VALUES ($id, 0, $directory);
+        INSERT INTO sessions (session_id, history_revision, working_directory, kind, parent_session_id, owning_call_id)
+        VALUES ($id, 0, $directory, $kind, $parent, $call);
         INSERT INTO session_creation (session_id) VALUES ($id);
-        SELECT session_id, history_revision, working_directory FROM sessions WHERE session_id = $id;
-        """, ReadRecord, ("$id", sessionId), ("$directory", workingDirectory))!);
+        SELECT session_id, history_revision, working_directory, kind, parent_session_id, owning_call_id
+        FROM sessions WHERE session_id = $id;
+        """, ReadRecord, ("$id", sessionId), ("$directory", workingDirectory), ("$kind", (int)kind),
+        ("$parent", parentSessionId), ("$call", owningCallId))!);
   }
 
   internal SessionIdPage ListPrimaryIds(string? cursor) {
@@ -25,11 +39,14 @@ internal sealed class SessionStorage(Database database) {
 
     return database.RunLocked(() => {
       using SqliteCommand command = cursor is null
-          ? database.Command(null, "SELECT session_id, ordinal FROM session_creation ORDER BY ordinal DESC LIMIT 61;")
+          ? database.Command(null, """
+              SELECT c.session_id, c.ordinal FROM session_creation c JOIN sessions s ON s.session_id = c.session_id
+              WHERE s.kind = $kind ORDER BY c.ordinal DESC LIMIT 61;
+              """, ("$kind", (int)SessionKind.Primary))
           : database.Command(null, """
-              SELECT session_id, ordinal FROM session_creation
-              WHERE ordinal < $cursor ORDER BY ordinal DESC LIMIT 61;
-              """, ("$cursor", boundary));
+              SELECT c.session_id, c.ordinal FROM session_creation c JOIN sessions s ON s.session_id = c.session_id
+              WHERE s.kind = $kind AND c.ordinal < $cursor ORDER BY c.ordinal DESC LIMIT 61;
+              """, ("$kind", (int)SessionKind.Primary), ("$cursor", boundary));
       using SqliteDataReader reader = command.ExecuteReader();
       var ids = new List<Guid>(60);
       long lastOrdinal = 0;
@@ -44,7 +61,7 @@ internal sealed class SessionStorage(Database database) {
   }
 
   internal SessionRecord? Read(Guid sessionId) => database.RunLocked(() => database.QuerySingleOrDefault(null,
-      "SELECT session_id, history_revision, working_directory FROM sessions WHERE session_id = $id;",
+      "SELECT session_id, history_revision, working_directory, kind, parent_session_id, owning_call_id FROM sessions WHERE session_id = $id;",
       ReadRecord, ("$id", sessionId)));
 
   internal bool HasAcceptedInput(Guid sessionId) => database.RunLocked(() => database.Scalar<bool>(null, """
@@ -60,5 +77,6 @@ internal sealed class SessionStorage(Database database) {
   });
 
   private static SessionRecord ReadRecord(SqliteDataReader row)
-      => new(row.Guid("session_id"), row.Long("history_revision"), row.NullableString("working_directory"));
+      => new(row.Guid("session_id"), row.Long("history_revision"), row.NullableString("working_directory"),
+          (SessionKind)row.Int("kind"), row.NullableGuid("parent_session_id"), row.NullableString("owning_call_id"));
 }

@@ -570,21 +570,16 @@ The transcript is not a dump of hidden instructions or private native continuati
 
 Keep these boundaries distinct: underlying process/service output; the tool's
 returned result; and its post-processing/model-facing representation. Owner assigns
-omission/recall policy to the **pruner/producer**, not the transcript. For enormous
-output, that component may substitute an omission note and instructions/reference
-for retrieving the material. Urd prunes eligible text once at tool completion. Unambiguous grep matches can share a path header, and runs of identical lines
-can carry a repeat count. Neither creates a recall file. Distinct progress lines
-stay visible. Only detailed directory listings and commit logs get a summary
-with a recall note, and only if `read` is offered and the summary saves at least
-256 estimated tokens compared with keeping the details inline, including the note.
-The note points to the pre-pruning tool result in OS temp storage. Recall is
-best-effort: deleting that file does not invalidate the saved model-facing text.
+omission policy to the **producer**, not the transcript. Tools can still spill
+oversized output and return a path. The pruner never writes a recall file: it
+normalizes eligible text, groups unambiguous grep matches, and counts repeated
+lines. Distinct progress lines, listing metadata, and commit details stay inline.
 
 Transcript responsibilities stop at faithfully retaining/projecting the supplied
 model-facing content and its explicit references, then loading/rendering on demand.
 Viewport eviction must not alter the model-facing result; the UI must not invent
 omission notes, independently prune content or become a second raw-output archive.
-Temporary recall paths are not durable transcript attachments. The shared-reference
+Tool-provided temporary paths are not durable transcript attachments. The shared-reference
 lifetime contract still applies to attachments owned by transcript storage.
 
 Keep raw process/service output, a tool's returned result and the exact

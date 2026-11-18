@@ -47,8 +47,7 @@ internal static class ToolInvoker {
     // Storage freezes output and publishes images outside the ordinary invocation-error catch.
     // A tool may return an error instead of throwing after cancellation; Stop still takes priority.
     if (!cancellation.IsCancellationRequested)
-      output = await ToolResultPruner.PruneAsync(call.Name, call.Arguments, output,
-          offeredDefinitions.Any(definition => definition.Name == "read")).ConfigureAwait(false);
+      output = ToolResultPruner.Prune(call.Name, call.Arguments, output);
     ExecutionOutcome outcome = output.IsError ? ExecutionOutcome.Failed : ExecutionOutcome.Completed;
     if (cancellation.IsCancellationRequested)
       outcome = ExecutionOutcome.Cancelled;

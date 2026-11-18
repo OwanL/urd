@@ -27,6 +27,7 @@ not a separate archive. Their remaining constraints belong to the current docume
 - [Agent communication](agent-communication-design.md): bounded delegation, request/reply,
   ownership and cycle handling; active design, not implementation approval.
 - [Agent tools](agent-tools-design.md): tool set, parallel/background calls, approved class shapes.
+- [Web access plan](web-access-plan.md): merged search, browser-first reading and local acceptance criteria.
 - [Compaction](compaction-design.md): implemented history compaction and its limits.
 - [Browser](BROWSER-DESIGN.md): shared UI, local access and remaining host/closure choices.
 - [Transcript](TRANSCRIPT-DESIGN.md): approved requirements, delivered foundation and remaining

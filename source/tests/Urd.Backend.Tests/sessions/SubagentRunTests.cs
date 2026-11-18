@@ -260,13 +260,14 @@ public sealed class SubagentRunTests {
   }
 
   [Fact]
-  public async Task HarnessToolServicesRunAChildWithCapturedParentContext() {
+  public async Task ForegroundSubagentReturnsAReportWithCapturedParentContext() {
     const string parentTask = "parent orbit request";
     const string parentContinuation = "parent wrapped the child";
-    string? lastTitlePrompt = null;
+    var childTitlePrompt = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+    var capturedRequests = new System.Collections.Concurrent.ConcurrentQueue<ScriptedRequest>();
     var client = new ScriptedChatClient(Route);
-    var tool = new SubagentTool();
-    await using var fixture = await SubagentRunFixture.OpenAsync(client, [tool]);
+    var unused = new TestAgentTool("unused", (_, _, _) => Task.FromResult(new ToolOutput("unused", [])));
+    await using var fixture = await SubagentRunFixture.OpenAsync(client, [unused]);
     PrimarySession parent = await fixture.Manager.CreatePrimaryAsync();
     long revision = (await parent.ReadSnapshotAsync().WaitAsync(TestTimeout)).HistoryRevision;
     UserMessageReceipt receipt = await parent.SubmitUserMessageAsync(
@@ -276,20 +277,27 @@ public sealed class SubagentRunTests {
       Assert.Equal(ExecutionOutcome.Completed,
           (await parent.WaitForExecutionFinishAsync(parentExecution).WaitAsync(TestTimeout)).Outcome);
 
-      SubagentRunResult result = Assert.IsType<SubagentRunResult>(tool.Result);
-      Assert.Null(result.Error);
-      Assert.Equal(ChildReport, result.Report);
-      Assert.Equal(parentExecution, tool.Context!.ExecutionId);
-      Assert.Equal(Assert.Single(StoredTools.Read(fixture.Database)).RequestId, tool.Context.RequestId);
-      await AssertOwnedChild(fixture, tool.Context.SessionId, result.ChildSessionId, "delegate");
-      Assert.Equal(AssignmentTask, lastTitlePrompt);
-      Assert.Equal(fixture.DatabaseDirectory,
-          Assert.IsType<SessionRecord>(fixture.Store.Sessions.Read(result.ChildSessionId)).WorkingDirectory);
+      StoredTool call = Assert.Single(StoredTools.Read(fixture.Database), call => call.Name == "subagent");
+      Assert.Equal(parentExecution, call.ExecutionId);
+      Assert.Equal(ExecutionOutcome.Completed, call.Outcome);
+      SessionRecord child = ChildForCall(fixture, "delegate");
+      await AssertOwnedChild(fixture, parent.Id, child.Id, "delegate");
+      Assert.Equal(AssignmentTask, await childTitlePrompt.Task.WaitAsync(TestTimeout));
+      Assert.Equal(fixture.DatabaseDirectory, child.WorkingDirectory);
 
-      ScriptedRequest[] requests = [.. client.Requests.Zip(client.Options,
-          (messages, options) => new ScriptedRequest(messages, options))];
-      ScriptedRequest childRequest = Assert.Single(requests, request => request.Messages.Any(
+      ScriptedRequest[] requests = capturedRequests.ToArray();
+      ScriptedRequest childRequest = Assert.Single(requests, request => request.Purpose == "conversation" && request.Messages.Any(
           message => message.Role == ChatRole.User && message.Text.StartsWith("[PARENT CONTEXT:", StringComparison.Ordinal)));
+      ScriptedRequest parentRequest = Assert.Single(requests, request => request.Purpose == "conversation"
+          && HasUserText(request, parentTask) && !HasResult(request, "delegate"));
+      var declaration = Assert.IsAssignableFrom<AIFunctionDeclaration>(Assert.Single(parentRequest.Options!.Tools!,
+          definition => definition.Name == "subagent"));
+      JsonElement properties = declaration.JsonSchema.GetProperty("properties");
+      Assert.Equal("string", properties.GetProperty("bucket").GetProperty("type").GetString());
+      Assert.Equal("string", properties.GetProperty("context").GetProperty("type").GetString());
+      Assert.Equal("string", properties.GetProperty("task").GetProperty("type").GetString());
+      Assert.Equal("boolean", properties.GetProperty("background").GetProperty("type").GetString());
+      Assert.Contains(childRequest.Options!.Tools!, definition => definition.Name == "subagent");
       ChatMessage[] childInputs = [.. childRequest.Messages.Where(message => message.Role == ChatRole.User)];
       Assert.StartsWith("[PARENT CONTEXT:", childInputs[0].Text, StringComparison.Ordinal);
       Assert.Contains(parentTask, childInputs[0].Text, StringComparison.Ordinal);
@@ -310,9 +318,11 @@ public sealed class SubagentRunTests {
     }
 
     IAsyncEnumerable<ChatResponseUpdate> Route(ScriptedRequest request, CancellationToken token) {
+      capturedRequests.Enqueue(request);
       switch (request.Purpose) {
         case "title":
-          lastTitlePrompt = request.LastUserText;
+          if (request.LastUserText == AssignmentTask)
+            childTitlePrompt.TrySetResult(request.LastUserText);
           return TextUpdates([ChildTitle], token);
         case "conversation":
           if (request.Messages.Any(message => message.Role == ChatRole.User
@@ -331,6 +341,257 @@ public sealed class SubagentRunTests {
     }
   }
 
+  [Fact]
+  public async Task BackgroundSubagentDeliversItsReportAfterTheParentContinues() {
+    var childEntered = Signal();
+    var childRelease = Signal();
+    var parentContinued = Signal();
+    var client = new ScriptedChatClient(Route);
+    await using var fixture = await SubagentRunFixture.OpenAsync(client);
+    PrimarySession parent = await fixture.Manager.CreatePrimaryAsync();
+    Guid execution = await StartParentAsync(parent);
+    Task<SessionExecutionResult> settlement = parent.WaitForExecutionFinishAsync(execution);
+    try {
+      await childEntered.Task.WaitAsync(TestTimeout);
+      await parentContinued.Task.WaitAsync(TestTimeout);
+      SessionRecord child = ChildForCall(fixture, "background-child");
+      Assert.True(await fixture.Manager.IsSubagentLiveAsync(child.Id).WaitAsync(TestTimeout));
+      Assert.False(settlement.IsCompleted);
+      FunctionResultContent placeholder = Assert.Single(client.Requests.SelectMany(messages => messages)
+          .SelectMany(message => message.Contents).OfType<FunctionResultContent>(), result => result.CallId == "background-child");
+      Assert.StartsWith("Background tool started:", Assert.IsType<string>(placeholder.Result));
+      childRelease.TrySetResult();
+      Assert.Equal(ExecutionOutcome.Completed, (await settlement.WaitAsync(TestTimeout)).Outcome);
+      await AssertOwnedChild(fixture, parent.Id, child.Id, "background-child");
+      Assert.Equal(ExecutionOutcome.Completed, Assert.Single(StoredTools.Read(fixture.Database),
+          call => call.CallId == "background-child").Outcome);
+      Assert.Contains(client.Requests.SelectMany(messages => messages), message =>
+          message.Text.Contains("[TOOL-ORIGIN: background tool completion", StringComparison.Ordinal)
+          && message.Text.Contains(ChildReport, StringComparison.Ordinal));
+    } finally {
+      childRelease.TrySetResult();
+      await parent.StopExecutionAsync().WaitAsync(TestTimeout);
+    }
+
+    IAsyncEnumerable<ChatResponseUpdate> Route(ScriptedRequest request, CancellationToken token) {
+      switch (request.Purpose) {
+        case "title":
+          return TextUpdates([ChildTitle], token);
+        case "conversation":
+          if (HasUserText(request, AssignmentTask))
+            return ChildResponse(token);
+          if (HasResult(request, "background-child")) {
+            parentContinued.TrySetResult();
+            return Complete(token);
+          }
+          if (request.Messages.Any(message => message.Text.Contains("[TOOL-ORIGIN: background tool completion", StringComparison.Ordinal)))
+            return Complete(token);
+          return ToolBatch(token, Delegate("background-child", AssignmentTask, background: true));
+        case { } pruning when pruning.StartsWith("pruning.", StringComparison.Ordinal):
+          return TextUpdates([PrepassTolerantChatClient.KeepAll(request.Messages)], token);
+        default:
+          throw new InvalidOperationException($"Unexpected purpose '{request.Purpose}'.");
+      }
+    }
+
+    async IAsyncEnumerable<ChatResponseUpdate> ChildResponse(
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken token) {
+      childEntered.TrySetResult();
+      await childRelease.Task.WaitAsync(token);
+      yield return Text(ChildReport);
+      yield return new() { FinishReason = ChatFinishReason.Stop };
+    }
+  }
+
+  [Fact]
+  public async Task NestedSubagentReturnsReportsThroughBothOwningCalls() {
+    const string nestedTask = "nested compass mission";
+    const string nestedReport = "nested report";
+    var client = new ScriptedChatClient(Route);
+    await using var fixture = await SubagentRunFixture.OpenAsync(client);
+    PrimarySession parent = await fixture.Manager.CreatePrimaryAsync();
+    Guid execution = await StartParentAsync(parent);
+    Assert.Equal(ExecutionOutcome.Completed,
+        (await parent.WaitForExecutionFinishAsync(execution).WaitAsync(TestTimeout)).Outcome);
+
+    SessionRecord child = ChildForCall(fixture, "outer");
+    SessionRecord nested = ChildForCall(fixture, "inner");
+    await AssertOwnedChild(fixture, parent.Id, child.Id, "outer");
+    await AssertOwnedChild(fixture, child.Id, nested.Id, "inner");
+    Assert.All(StoredTools.Read(fixture.Database).Where(call => call.Name == "subagent"),
+        call => Assert.Equal(ExecutionOutcome.Completed, call.Outcome));
+    Assert.Contains(client.Requests.SelectMany(messages => messages).SelectMany(message => message.Contents)
+        .OfType<FunctionResultContent>(), result => result.CallId == "inner" && Equals(result.Result, nestedReport));
+    Assert.Contains(client.Requests.SelectMany(messages => messages).SelectMany(message => message.Contents)
+        .OfType<FunctionResultContent>(), result => result.CallId == "outer" && Equals(result.Result, ChildReport));
+
+    IAsyncEnumerable<ChatResponseUpdate> Route(ScriptedRequest request, CancellationToken token) {
+      switch (request.Purpose) {
+        case "title":
+          return TextUpdates([ChildTitle], token);
+        case "conversation":
+          if (HasUserText(request, nestedTask))
+            return TextUpdates([nestedReport], token);
+          if (HasUserText(request, AssignmentTask))
+            return HasResult(request, "inner") ? TextUpdates([ChildReport], token)
+                : ToolBatch(token, Delegate("inner", nestedTask));
+          return HasResult(request, "outer") ? Complete(token)
+              : ToolBatch(token, Delegate("outer", AssignmentTask));
+        case { } pruning when pruning.StartsWith("pruning.", StringComparison.Ordinal):
+          return TextUpdates([PrepassTolerantChatClient.KeepAll(request.Messages)], token);
+        default:
+          throw new InvalidOperationException($"Unexpected purpose '{request.Purpose}'.");
+      }
+    }
+  }
+
+  [Fact]
+  public async Task ParentStopCascadesThroughNestedSubagentsAndJoinsCleanup() {
+    const string nestedTask = "nested compass mission";
+    var entered = Signal();
+    var never = Signal();
+    var cleanupEntered = Signal();
+    var cleanupRelease = Signal();
+    var client = new ScriptedChatClient(Route);
+    await using var fixture = await SubagentRunFixture.OpenAsync(client);
+    PrimarySession parent = await fixture.Manager.CreatePrimaryAsync();
+    Guid execution = await StartParentAsync(parent);
+    Task<SessionExecutionResult> settlement = parent.WaitForExecutionFinishAsync(execution);
+    try {
+      await entered.Task.WaitAsync(TestTimeout);
+      SessionRecord child = ChildForCall(fixture, "outer-stop");
+      SessionRecord nested = ChildForCall(fixture, "inner-stop");
+      Assert.Equal(child.Id, nested.ParentSessionId);
+      Assert.True(await fixture.Manager.IsSubagentLiveAsync(child.Id).WaitAsync(TestTimeout));
+      Assert.True(await fixture.Manager.IsSubagentLiveAsync(nested.Id).WaitAsync(TestTimeout));
+      Assert.Equal(StopStatus.Requested, (await parent.RequestStopAsync(execution)).Status);
+      await cleanupEntered.Task.WaitAsync(TestTimeout);
+      Assert.False(settlement.IsCompleted);
+      cleanupRelease.TrySetResult();
+      Assert.Equal(ExecutionOutcome.Cancelled, (await settlement.WaitAsync(TestTimeout)).Outcome);
+      await AssertOwnedChild(fixture, parent.Id, child.Id, "outer-stop");
+      await AssertOwnedChild(fixture, child.Id, nested.Id, "inner-stop");
+      Assert.Equal(ExecutionOutcome.Cancelled, fixture.Store.Snapshots.ReadPersisted(child.Id).LastSettlement!.Outcome);
+      Assert.Equal(ExecutionOutcome.Cancelled, fixture.Store.Snapshots.ReadPersisted(nested.Id).LastSettlement!.Outcome);
+      Assert.All(StoredTools.Read(fixture.Database).Where(call => call.Name == "subagent"),
+          call => Assert.Equal(ExecutionOutcome.Cancelled, call.Outcome));
+    } finally {
+      cleanupRelease.TrySetResult();
+      await parent.StopExecutionAsync().WaitAsync(TestTimeout);
+    }
+
+    IAsyncEnumerable<ChatResponseUpdate> Route(ScriptedRequest request, CancellationToken token) {
+      switch (request.Purpose) {
+        case "title":
+          return TextUpdates([ChildTitle], token);
+        case "conversation":
+          if (HasUserText(request, nestedTask))
+            return Paused(entered, never, token, cleanupEntered, cleanupRelease);
+          return HasUserText(request, AssignmentTask)
+              ? ToolBatch(token, Delegate("inner-stop", nestedTask))
+              : ToolBatch(token, Delegate("outer-stop", AssignmentTask));
+        case { } pruning when pruning.StartsWith("pruning.", StringComparison.Ordinal):
+          return TextUpdates([PrepassTolerantChatClient.KeepAll(request.Messages)], token);
+        default:
+          throw new InvalidOperationException($"Unexpected purpose '{request.Purpose}'.");
+      }
+    }
+  }
+
+  [Fact]
+  public async Task UnknownBucketReturnsToolErrorWithoutCreatingAChild() {
+    var client = new ScriptedChatClient(Route);
+    await using var fixture = await SubagentRunFixture.OpenAsync(client);
+    PrimarySession parent = await fixture.Manager.CreatePrimaryAsync();
+    Guid execution = await StartParentAsync(parent);
+    Assert.Equal(ExecutionOutcome.Completed,
+        (await parent.WaitForExecutionFinishAsync(execution).WaitAsync(TestTimeout)).Outcome);
+    StoredTool call = Assert.Single(StoredTools.Read(fixture.Database), call => call.CallId == "unknown-bucket");
+    Assert.Equal(ExecutionOutcome.Failed, call.Outcome);
+    Assert.Contains("bucket", call.Error!, StringComparison.OrdinalIgnoreCase);
+    Assert.Contains("unknown", call.Error!, StringComparison.OrdinalIgnoreCase);
+    Assert.Empty(fixture.Database.ReadRows("SELECT session_id FROM sessions WHERE kind = 1;", row => row.GetString(0)));
+    Assert.Contains(client.Requests.SelectMany(messages => messages).SelectMany(message => message.Contents)
+        .OfType<FunctionResultContent>(), result => result.CallId == "unknown-bucket"
+          && result.Result?.ToString()?.Contains("bucket", StringComparison.OrdinalIgnoreCase) == true);
+
+    IAsyncEnumerable<ChatResponseUpdate> Route(ScriptedRequest request, CancellationToken token) {
+      switch (request.Purpose) {
+        case "title":
+          return TextUpdates([ChildTitle], token);
+        case "conversation":
+          return HasResult(request, "unknown-bucket") ? Complete(token)
+              : ToolBatch(token, Delegate("unknown-bucket", AssignmentTask, bucket: "unknown"));
+        case { } pruning when pruning.StartsWith("pruning.", StringComparison.Ordinal):
+          return TextUpdates([PrepassTolerantChatClient.KeepAll(request.Messages)], token);
+        default:
+          throw new InvalidOperationException($"Unexpected purpose '{request.Purpose}'.");
+      }
+    }
+  }
+
+  [Fact]
+  public async Task RestartDoesNotReviveStoppedChildren() {
+    var entered = Signal();
+    var never = Signal();
+    var client = new ScriptedChatClient(Route);
+    await using var fixture = await SubagentRunFixture.OpenAsync(client);
+    PrimarySession parent = await fixture.Manager.CreatePrimaryAsync();
+    Guid execution = await StartParentAsync(parent);
+    await entered.Task.WaitAsync(TestTimeout);
+    SessionRecord child = ChildForCall(fixture, "restart-child");
+    Assert.True(await fixture.Manager.IsSubagentLiveAsync(child.Id).WaitAsync(TestTimeout));
+    await fixture.Manager.ShutdownSessionsAsync().WaitAsync(TestTimeout);
+    Assert.Equal(ExecutionOutcome.Cancelled,
+        (await parent.WaitForExecutionFinishAsync(execution).WaitAsync(TestTimeout)).Outcome);
+    int callsBeforeRestart = client.Calls;
+    using UrdStore reopened = UrdStore.Open(fixture.Database.Path);
+    var restarted = new SessionManager(reopened, _ => client);
+    try {
+      Assert.False(await restarted.IsSubagentLiveAsync(child.Id).WaitAsync(TestTimeout));
+      Assert.Equal(parent.Id, (await restarted.GetPrimaryAsync(parent.Id).WaitAsync(TestTimeout)).Id);
+      Assert.False(await restarted.IsSubagentLiveAsync(child.Id).WaitAsync(TestTimeout));
+      Assert.Equal(callsBeforeRestart, client.Calls);
+      Assert.Equal(parent.Id, reopened.Sessions.Read(child.Id)!.ParentSessionId);
+      Assert.Equal(ExecutionOutcome.Cancelled, reopened.Snapshots.ReadPersisted(child.Id).LastSettlement!.Outcome);
+    } finally {
+      await restarted.ShutdownSessionsAsync().WaitAsync(TestTimeout);
+    }
+
+    IAsyncEnumerable<ChatResponseUpdate> Route(ScriptedRequest request, CancellationToken token) {
+      switch (request.Purpose) {
+        case "title":
+          return TextUpdates([ChildTitle], token);
+        case "conversation":
+          return HasUserText(request, AssignmentTask) ? Paused(entered, never, token)
+              : ToolBatch(token, Delegate("restart-child", AssignmentTask));
+        case { } pruning when pruning.StartsWith("pruning.", StringComparison.Ordinal):
+          return TextUpdates([PrepassTolerantChatClient.KeepAll(request.Messages)], token);
+        default:
+          throw new InvalidOperationException($"Unexpected purpose '{request.Purpose}'.");
+      }
+    }
+  }
+
+  private static async Task<Guid> StartParentAsync(PrimarySession parent) {
+    long revision = (await parent.ReadSnapshotAsync().WaitAsync(TestTimeout)).HistoryRevision;
+    UserMessageReceipt receipt = await parent.SubmitUserMessageAsync(
+        new(Guid.NewGuid(), revision, "parent mission", TestLlmSelection.Default));
+    return Assert.IsType<Guid>(receipt.ExecutionId);
+  }
+
+  private static FunctionCallContent Delegate(string callId, string task, bool background = false, string bucket = "small") =>
+      new(callId, "subagent", new Dictionary<string, object?> {
+        ["bucket"] = bucket, ["context"] = "none", ["task"] = task, ["background"] = background
+      });
+
+  private static bool HasUserText(ScriptedRequest request, string text) =>
+      request.Messages.Any(message => message.Role == ChatRole.User && message.Text == text);
+
+  private static bool HasResult(ScriptedRequest request, string callId) =>
+      request.Messages.SelectMany(message => message.Contents).OfType<FunctionResultContent>()
+          .Any(result => result.CallId == callId);
+
   private static async Task<SubagentRunResult> RunTaskAsync(SubagentRunFixture fixture, string task) {
     ISubagentRunner runner = fixture.Manager;
     return await runner.RunSubagentAsync(Caller(fixture), new("small", SubagentContextMode.None, task),
@@ -347,7 +608,7 @@ public sealed class SubagentRunTests {
     Assert.Equal(SessionKind.Subagent, record.Kind);
     Assert.Equal(parentSessionId, record.ParentSessionId);
     Assert.Equal(owningCallId, record.OwningCallId);
-    Assert.Equal(fixture.DatabaseDirectory, record.WorkingDirectory);
+    Assert.Equal(fixture.Store.Sessions.Read(parentSessionId)!.WorkingDirectory, record.WorkingDirectory);
     Assert.DoesNotContain(childSessionId, fixture.Store.Sessions.ListPrimaryIds(null).SessionIds);
     Assert.False(await fixture.Manager.IsSubagentLiveAsync(childSessionId).WaitAsync(TestTimeout));
     Exception failure = await Assert.ThrowsAnyAsync<InvalidOperationException>(
@@ -355,33 +616,11 @@ public sealed class SubagentRunTests {
     Assert.Contains("subagent session", failure.Message, StringComparison.Ordinal);
   }
 
-  private sealed class SubagentTool : HarnessTool {
-    public override string Name => "subagent";
-    public override string Description => "Runs a child to its final report.";
-    public override ToolRelevance RelevantWhen => ToolRelevance.Always;
-    public override JsonElement ParametersSchema { get; } = JsonSerializer.SerializeToElement(new {
-      type = "object",
-      properties = new {
-        bucket = new { type = "string" },
-        context = new { type = "string" },
-        task = new { type = "string" }
-      }
-    });
-
-    internal SubagentRunResult? Result { get; private set; }
-    internal HarnessToolContext? Context { get; private set; }
-
-    public override async Task<ToolOutput> RunAsync(JsonElement arguments, HarnessToolContext context,
-        CancellationToken cancellation) {
-      Context = context;
-      var request = new SubagentRunRequest(
-          arguments.GetProperty("bucket").GetString()!,
-          arguments.GetProperty("context").GetString()! == "recent"
-              ? SubagentContextMode.Recent : SubagentContextMode.None,
-          arguments.GetProperty("task").GetString()!);
-      Result = await context.Sessions.RunSubagentAsync(context, request, cancellation);
-      return new(Result.Report ?? Result.Error!, [], IsError: Result.Error is not null);
-    }
+  private static SessionRecord ChildForCall(SubagentRunFixture fixture, string callId) {
+    Guid[] childIds = [.. fixture.Database.ReadRows(
+        "SELECT session_id FROM sessions WHERE kind = 1;", row => Guid.Parse(row.GetString(0)))];
+    return Assert.Single(childIds.Select(id => fixture.Store.Sessions.Read(id)!),
+        child => child.OwningCallId == callId);
   }
 
   private sealed class SubagentRunFixture : IAsyncDisposable {

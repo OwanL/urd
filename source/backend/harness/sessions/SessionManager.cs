@@ -184,7 +184,7 @@ public sealed class SessionManager : IAsyncDisposable, ISubagentRunner {
   private ToolCatalog CreateToolCatalog(PendingToolCalls pending, bool processTools, out ChatProcesses? processes) {
     processes = null;
     AgentTool[] shared = [new WebSearchTool(browser), new WebReadTool(browser),
-      new ListPendingCallsTool(pending), new CancelPendingCallsTool(pending)];
+      new ListPendingCallsTool(pending), new CancelPendingCallsTool(pending), new SubagentTool()];
     if (toolSettings is null || !processTools)
       return new([.. injectedTools, .. shared]);
     if (!OperatingSystem.IsWindows())
@@ -226,9 +226,18 @@ public sealed class SessionManager : IAsyncDisposable, ISubagentRunner {
       return await RunChildAsync(child, assignment, cancellation);
     } finally {
       if (child is not null) {
-        await child.KillProcessesAsync();
-        await UnregisterSubagentAsync(child.Id);
+        await CleanupChildAsync(child);
       }
+    }
+  }
+
+  private async Task CleanupChildAsync(SubagentSession child) {
+    try {
+      await child.KillProcessesAsync();
+    } catch (Exception failure) {
+      throw new ToolCleanupException("Subagent process cleanup failed.", failure);
+    } finally {
+      await UnregisterSubagentAsync(child.Id);
     }
   }
 
@@ -280,7 +289,7 @@ public sealed class SessionManager : IAsyncDisposable, ISubagentRunner {
       } catch (Exception) when (cancellation.IsCancellationRequested) {
         // Creation saw the cancellation after registration: stop the owned child before it runs.
         owned = false;
-        await child.StopExecutionAsync();
+        await StopChildAsync(child);
         return Error(child.Id, CancelledReport);
       }
 
@@ -293,19 +302,21 @@ public sealed class SessionManager : IAsyncDisposable, ISubagentRunner {
       } catch (OperationCanceledException) {
         // Cancellation stops the child and joins its settlement before the report is lost with it.
         owned = false;
-        await child.StopExecutionAsync();
+        await StopChildAsync(child);
         return Error(child.Id, CancelledReport);
       }
     } finally {
       if (owned) {
-        // A non-cancellation failure may leave bounded work behind; joining stays best effort
-        // because the original failure is already the caller's observable result.
-        try {
-          await child.StopExecutionAsync();
-        } catch (Exception) {
-          // The child's own failure or the caller's is already observable.
-        }
+        await StopChildAsync(child);
       }
+    }
+  }
+
+  private static async Task StopChildAsync(SubagentSession child) {
+    try {
+      await child.StopExecutionAsync();
+    } catch (Exception failure) {
+      throw new ToolCleanupException("Subagent stop cleanup failed.", failure);
     }
   }
 

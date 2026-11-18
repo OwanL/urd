@@ -135,10 +135,14 @@ request validation and transport without inheriting each other's session state. 
 a client view does not dispose the manager or another consumer's transport.
 
 Both Responses and compatible Chat Completions stream through the official SDK/MEAI
-adapter. Ordinary requests have no Urd wall-clock cutoff: callers can impose a deadline,
-and Stop, disconnect or shutdown still cancel and drain owned work. Diagnostics retain
-their separate two-minute limit. There are no automatic retries, fallback providers,
-provider-hosted conversations or tool execution inside the client. `GetResponseAsync`
+adapter. Ordinary inference has no total wall-clock cutoff. While reading from the
+provider, Urd allows up to two minutes for response headers, the first decoded stream
+event, or each next event (including the end of the stream). Non-text events count as
+progress; time spent processing updates locally does not. A timeout cancels and drains
+the read, then reports the phase that stalled. It does not prove the provider never
+received the request. Stop, disconnect and shutdown still cancel and drain owned work.
+Diagnostics retain their separate two-minute total limit. There are no automatic retries,
+fallback providers, provider-hosted conversations or tool execution inside the client. `GetResponseAsync`
 consumes the same guarded streaming path, not a second unvalidated implementation.
 
 ChatGPT maps system instructions to `developer` messages at the request boundary; the plan

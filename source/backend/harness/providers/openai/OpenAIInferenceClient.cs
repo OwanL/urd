@@ -13,10 +13,14 @@ using ChatMessage = Microsoft.Extensions.AI.ChatMessage;
 namespace Urd.Core.Providers;
 
 // One streaming exchange. The manager owns credentials, cancellation and the borrowed transport.
-internal sealed class OpenAIInferenceClient(HttpClient httpClient) {
+internal sealed class OpenAIInferenceClient(HttpClient httpClient, TimeSpan? readTimeout = null) {
+  private static readonly TimeSpan defaultReadTimeout = TimeSpan.FromMinutes(2);
+
   internal async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(ProviderState state,
       IEnumerable<ChatMessage> messages, ChatOptions options,
       [EnumeratorCancellation] CancellationToken cancellationToken) {
+    using var readStop = new ProviderCancellation(Timeout.InfiniteTimeSpan, cancellationToken);
+    var progress = new InferenceStreamProgress(readStop, readTimeout ?? defaultReadTimeout);
     IChatClient client;
     IReadOnlyList<ChatMessage> history;
     ChatOptions wireOptions;
@@ -29,7 +33,7 @@ internal sealed class OpenAIInferenceClient(HttpClient httpClient) {
       // ChatGPT's Responses endpoint rejects system messages, including saved starting context.
       if (state.Connection.Route == ProviderRoute.ChatGpt)
         history = history.Select(ForChatGpt).ToArray();
-      client = CreateClient(state, options.ModelId!);
+      client = CreateClient(state, options.ModelId!, progress);
     } catch (Exception error) when (CanClassify(error, cancellationToken)) {
       throw ProviderOperationException.FromProviderError(error, contextWindow: true, credentials: state.Credentials);
     }
@@ -39,14 +43,16 @@ internal sealed class OpenAIInferenceClient(HttpClient httpClient) {
           state.Credentials);
       IAsyncEnumerator<ChatResponseUpdate> stream;
       try {
-        stream = client.GetStreamingResponseAsync(history, wireOptions, cancellationToken).GetAsyncEnumerator(cancellationToken);
+        stream = client.GetStreamingResponseAsync(history, wireOptions, progress.Token).GetAsyncEnumerator(progress.Token);
       } catch (Exception error) when (CanClassify(error, cancellationToken)) {
         cancellationToken.ThrowIfCancellationRequested();
         throw ProviderOperationException.FromProviderError(error, contextWindow: true, credentials: state.Credentials);
       }
       try {
-        while (await MoveNextAsync(stream, state.Credentials, cancellationToken).ConfigureAwait(false)) {
+        while (await MoveNextAsync(stream, progress, state.Credentials, cancellationToken).ConfigureAwait(false)) {
           ChatResponseUpdate nativeUpdate = stream.Current;
+          if (nativeUpdate.RawRepresentation is not null)
+            progress.RecordUpdate();
           UsageDetails? usage = ProviderTokenUsage.Read(nativeUpdate.RawRepresentation);
           if (usage is not null) {
             nativeUpdate.Contents = nativeUpdate.Contents.Where(content => content is not UsageContent).ToList();
@@ -67,7 +73,12 @@ internal sealed class OpenAIInferenceClient(HttpClient httpClient) {
           if (update is not null) yield return update;
         }
       } finally {
-        await DisposeAsync(stream, state.Credentials, cancellationToken).ConfigureAwait(false);
+        try {
+          await DisposeAsync(stream, progress, state.Credentials, cancellationToken).ConfigureAwait(false);
+        } finally {
+          // A timeout starts its own cancellation callbacks; join them before releasing the stream.
+          await readStop.CancelAsync().ConfigureAwait(false);
+        }
       }
       cancellationToken.ThrowIfCancellationRequested();
       ChatResponseUpdate final;
@@ -90,42 +101,55 @@ internal sealed class OpenAIInferenceClient(HttpClient httpClient) {
     return instruction;
   }
 
-  private IChatClient CreateClient(ProviderState state, string model) {
+  private IChatClient CreateClient(ProviderState state, string model, InferenceStreamProgress progress) {
     var connection = state.Connection;
     var authentication = ProviderSdkAuthentication.Create(connection, state.Credentials);
     return connection.Api switch {
-      LlmApi.OpenAIResponses => new ResponsesClient(authentication, new ResponsesClientOptions {
-        Endpoint = connection.Endpoint,
-        Transport = new HttpClientPipelineTransport(httpClient),
-        RetryPolicy = new ClientRetryPolicy(0),
-        NetworkTimeout = Timeout.InfiniteTimeSpan
-      }).AsIChatClient(),
-      LlmApi.OpenAIChatCompletions => new ChatClient(model, authentication, new OpenAIClientOptions {
-        Endpoint = connection.Endpoint,
-        Transport = new HttpClientPipelineTransport(httpClient),
-        RetryPolicy = new ClientRetryPolicy(0),
-        NetworkTimeout = Timeout.InfiniteTimeSpan
-      }).AsIChatClient(),
+      LlmApi.OpenAIResponses => new ResponsesClient(authentication,
+          Configure(new ResponsesClientOptions { Endpoint = connection.Endpoint })).AsIChatClient(),
+      LlmApi.OpenAIChatCompletions => new ChatClient(model, authentication,
+          Configure(new OpenAIClientOptions { Endpoint = connection.Endpoint })).AsIChatClient(),
       _ => throw new ProviderOperationException(ProviderFailure.InvalidProviderResponse)
     };
+
+    T Configure<T>(T options) where T : ClientPipelineOptions {
+      options.Transport = new HttpClientPipelineTransport(httpClient);
+      options.RetryPolicy = new ClientRetryPolicy(0);
+      options.NetworkTimeout = Timeout.InfiniteTimeSpan;
+      options.AddPolicy(progress, PipelinePosition.BeforeTransport);
+      return options;
+    }
   }
 
   private static async ValueTask<bool> MoveNextAsync(IAsyncEnumerator<ChatResponseUpdate> stream,
-      ProviderCredentials? credentials, CancellationToken ct) {
+      InferenceStreamProgress progress, ProviderCredentials? credentials, CancellationToken ct) {
+    progress.BeginRead();
     try {
-      return await stream.MoveNextAsync().ConfigureAwait(false);
+      bool next;
+      try {
+        next = await stream.MoveNextAsync().ConfigureAwait(false);
+      } finally {
+        // Consumer work (durable output writes, for example) is not provider silence.
+        progress.EndRead();
+      }
+      progress.Token.ThrowIfCancellationRequested();
+      return next;
     } catch (Exception error) when (CanClassify(error, ct)) {
       ct.ThrowIfCancellationRequested();
+      if (progress.Token.IsCancellationRequested)
+        throw progress.TimeoutFailure();
       throw ProviderOperationException.FromProviderError(error, contextWindow: true, credentials: credentials);
     }
   }
 
   private static async ValueTask DisposeAsync(IAsyncEnumerator<ChatResponseUpdate> stream,
-      ProviderCredentials? credentials, CancellationToken ct) {
+      InferenceStreamProgress progress, ProviderCredentials? credentials, CancellationToken ct) {
     try {
       await stream.DisposeAsync().ConfigureAwait(false);
     } catch (Exception error) when (CanClassify(error, ct)) {
       ct.ThrowIfCancellationRequested();
+      if (progress.Token.IsCancellationRequested)
+        throw progress.TimeoutFailure(cleanupFailed: true);
       throw ProviderOperationException.FromProviderError(error, contextWindow: true, credentials: credentials);
     }
   }

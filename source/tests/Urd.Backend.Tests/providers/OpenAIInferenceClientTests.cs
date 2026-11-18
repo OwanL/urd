@@ -233,6 +233,102 @@ public sealed class OpenAIInferenceClientTests {
     Assert.Single(handler.Requests);
   }
 
+  [Theory]
+  [InlineData(LlmApi.OpenAIResponses)]
+  [InlineData(LlmApi.OpenAIChatCompletions)]
+  public async Task NoResponseHeadersFailsWithoutRetrying(LlmApi api) {
+    bool transportDrained = false;
+    using var handler = new ControlledProviderHandler(async (_, token) => {
+      try {
+        await Task.Delay(Timeout.InfiniteTimeSpan, token);
+        throw new InvalidOperationException("The fixture must be cancelled.");
+      } finally {
+        transportDrained = true;
+      }
+    });
+    using var http = new HttpClient(handler);
+    using var watchdog = new CancellationTokenSource(TestTimeout);
+
+    var error = await Assert.ThrowsAsync<ProviderOperationException>(async () => {
+      await foreach (var _ in new OpenAIInferenceClient(http, TimeSpan.FromMilliseconds(250)).GetStreamingResponseAsync(
+          State(api), History(), Options(), watchdog.Token))
+        Assert.Fail("The stalled request produced a response.");
+    });
+
+    Assert.Equal(ProviderFailure.ProviderUnavailable, error.Failure);
+    Assert.Contains("response headers", error.Reason, StringComparison.Ordinal);
+    Assert.True(transportDrained);
+    Assert.Single(handler.Requests);
+  }
+
+  [Theory]
+  [InlineData(LlmApi.OpenAIResponses, "no events", "", "first")]
+  [InlineData(LlmApi.OpenAIChatCompletions, "no events", "", "first")]
+  [InlineData(LlmApi.OpenAIResponses, "created", "", "next")]
+  [InlineData(LlmApi.OpenAIResponses, "text", "hello", "next")]
+  [InlineData(LlmApi.OpenAIChatCompletions, "text", "hello", "next")]
+  public async Task SilentResponseBodyFailsAndDisposesTheStream(
+      LlmApi api, string events, string expectedText, string stalledEvent) {
+    string wire = (api, events) switch {
+      (_, "no events") => string.Empty,
+      (_, "created") => Responses(terminal: null, text: "", itemDone: false),
+      (LlmApi.OpenAIResponses, _) => Responses(terminal: null, itemDone: false),
+      _ => ChatStream(finish: null, done: false)
+    };
+    using var handler = new ScriptedOpenAIHandler(wire) { HoldAtEnd = true };
+    using var http = new HttpClient(handler);
+    using var watchdog = new CancellationTokenSource(TestTimeout);
+    List<ChatResponseUpdate> observed = [];
+
+    var error = await Assert.ThrowsAsync<ProviderOperationException>(async () => {
+      await foreach (var update in new OpenAIInferenceClient(http, TimeSpan.FromMilliseconds(300)).GetStreamingResponseAsync(
+          State(api), History(), Options(), watchdog.Token))
+        observed.Add(update);
+    });
+
+    Assert.Equal(ProviderFailure.ProviderUnavailable, error.Failure);
+    Assert.Contains($"{stalledEvent} provider stream event", error.Reason, StringComparison.Ordinal);
+    Assert.Equal(expectedText, string.Concat(observed.Select(update => update.Text)));
+    Assert.All(observed, update => Assert.Null(update.FinishReason));
+    Assert.Equal(1, handler.StreamDisposals);
+    Assert.Single(handler.Requests);
+  }
+
+  [Fact]
+  public async Task CallerCanStopAnIdleStreamWithoutAProviderFailure() {
+    using var handler = new ScriptedOpenAIHandler("") { HoldAtEnd = true };
+    using var http = new HttpClient(handler);
+    using var stop = new CancellationTokenSource(TestTimeout);
+    await using var stream = new OpenAIInferenceClient(http).GetStreamingResponseAsync(
+        State(), History(), Options(), stop.Token).GetAsyncEnumerator();
+    Task<bool> pending = stream.MoveNextAsync().AsTask();
+    try {
+      await handler.ReachedEnd.Task.WaitAsync(TestTimeout);
+    } finally {
+      await stop.CancelAsync();
+      await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending.WaitAsync(TestTimeout));
+    }
+    Assert.Equal(1, handler.StreamDisposals);
+  }
+
+  [Fact]
+  public async Task SlowConsumerDoesNotTimeOutAnOtherwiseCompleteProviderStream() {
+    using var handler = new ScriptedOpenAIHandler(Responses());
+    using var http = new HttpClient(handler);
+    var readTimeout = TimeSpan.FromMilliseconds(250);
+    using var watchdog = new CancellationTokenSource(TestTimeout);
+    await using var stream = new OpenAIInferenceClient(http, readTimeout).GetStreamingResponseAsync(
+        State(), History(), Options(), watchdog.Token).GetAsyncEnumerator();
+    Assert.True(await stream.MoveNextAsync());
+    Assert.Equal("hello", stream.Current.Text);
+
+    await Task.Delay(readTimeout + readTimeout, watchdog.Token);
+
+    Assert.True(await stream.MoveNextAsync());
+    Assert.Equal(ChatFinishReason.Stop, stream.Current.FinishReason);
+    Assert.False(await stream.MoveNextAsync());
+  }
+
   private static FunctionResultContent ForegroundResult(string callId, ToolOutput output) =>
       new(callId, output.Images.Count == 0 ? output.Text :
           new AIContent[] { new TextContent(output.Text) }.Concat(output.Images).ToArray());

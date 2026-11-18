@@ -7,6 +7,11 @@ import { EditableMessage } from "./EditableMessage.tsx";
 import { CompactionMarker } from "./CompactionMarker.tsx";
 import { ToolRow } from "../chat/ToolRow.tsx";
 import { ToolRowInteractionsProvider } from "../chat/ToolRowInteractions.tsx";
+import {
+  AgentQuestionExchange,
+  AgentToolExchange,
+  isAgentExchange,
+} from "../chat/AgentExchange.tsx";
 import { toolCallLabel } from "./ToolRowPresentation.ts";
 import { TranscriptContentReader } from "./TranscriptContentReader.ts";
 import { boundaryResponseStatus } from "./PreparationRows.tsx";
@@ -442,43 +447,72 @@ function PlainTranscript({
                 statusContext,
                 entry.historyRevision,
               );
+              const label = descriptor.tool
+                ? toolCallLabel(descriptor.tool, visibleHistory?.toolLabels ?? {})
+                : null;
+              const agentExchange = isAgentExchange(descriptor, label);
+              const body = (text: TranscriptTextFacts) =>
+                display && RichBody ? (
+                  <RichBody
+                    display={display}
+                    streamId={streamId}
+                    sessionId={sessionId}
+                    entry={entry}
+                    text={text}
+                    root={root}
+                    paused={!visible || documentHidden}
+                  />
+                ) : (
+                  <MessageBody
+                    client={client}
+                    contentReader={contentReader}
+                    sessionId={sessionId}
+                    entry={entry}
+                    text={text}
+                    root={root}
+                    paused={selecting || !visible || documentHidden}
+                  />
+                );
               return (
                 <div
                   key={key}
                   data-message={key}
-                  class={descriptor.tool ? "transcript-tool-entry" : undefined}
+                  class={
+                    agentExchange
+                      ? "agent-exchange-entry"
+                      : descriptor.tool
+                        ? "transcript-tool-entry"
+                        : undefined
+                  }
                 >
                   {status.before}
                   {isTextEntry(entry) && descriptor.text ? (
-                    <EditableMessage entry={entry} text={descriptor.text}>
-                      {display && RichBody ? (
-                        <RichBody
-                          display={display}
-                          streamId={streamId}
-                          sessionId={sessionId}
-                          entry={entry}
-                          text={descriptor.text}
-                          root={root}
-                          paused={!visible || documentHidden}
-                        />
-                      ) : (
-                        <MessageBody
-                          client={client}
-                          contentReader={contentReader}
-                          sessionId={sessionId}
-                          entry={entry}
-                          text={descriptor.text}
-                          root={root}
-                          paused={selecting || !visible || documentHidden}
-                        />
-                      )}
-                    </EditableMessage>
+                    descriptor.agentQuestion ? (
+                      <AgentQuestionExchange
+                        senderTitle={descriptor.agentQuestion.senderTitle}
+                        body={body(descriptor.text)}
+                      />
+                    ) : (
+                      <EditableMessage entry={entry} text={descriptor.text}>
+                        {body(descriptor.text)}
+                      </EditableMessage>
+                    )
                   ) : descriptor.compaction ? (
                     <CompactionMarker
                       client={client}
                       sessionId={sessionId}
                       entry={entry}
                       compaction={descriptor.compaction}
+                    />
+                  ) : descriptor.tool && label && agentExchange ? (
+                    <AgentToolExchange
+                      client={client}
+                      sessionId={sessionId}
+                      entry={entry}
+                      tool={descriptor.tool}
+                      label={label}
+                      root={root}
+                      paused={!visible || documentHidden}
                     />
                   ) : descriptor.tool ? (
                     <ToolRow

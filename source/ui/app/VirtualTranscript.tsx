@@ -28,6 +28,11 @@ import { EditableMessage } from "./EditableMessage.tsx";
 import { CompactionMarker } from "./CompactionMarker.tsx";
 import { ToolRow } from "../chat/ToolRow.tsx";
 import { ToolRowInteractionsProvider } from "../chat/ToolRowInteractions.tsx";
+import {
+  AgentQuestionExchange,
+  AgentToolExchange,
+  isAgentExchange,
+} from "../chat/AgentExchange.tsx";
 import { toolCallLabel } from "./ToolRowPresentation.ts";
 import { TranscriptPositionReader } from "./TranscriptPositionReader.ts";
 import { boundaryResponseStatus } from "./PreparationRows.tsx";
@@ -228,6 +233,31 @@ function VirtualEntry({
   }, [descriptor, rank, onMeasure]);
 
   const role = descriptor.entry.kind === "user" ? "user" : "assistant";
+  const text = isTextEntry(descriptor.entry) ? descriptor.text : null;
+  const richBody =
+    text !== null ? (
+      <display.MessageBody
+        display={display}
+        streamId={streamId}
+        sessionId={sessionId}
+        entry={descriptor.entry}
+        text={text}
+        root={root}
+        paused={paused}
+        {...(saved ? { saved } : {})}
+        registerSource={registerSource}
+        registerRestore={registerRestore}
+        onPublished={published}
+      />
+    ) : null;
+  const agentExchange = isAgentExchange(descriptor, toolLabel);
+  const entryClass = [
+    "transcript-entry",
+    descriptor.tool && !agentExchange ? "transcript-tool-entry" : "",
+    agentExchange ? "agent-exchange-entry" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
   const status = boundaryResponseStatus(
     descriptor.entry.kind,
     descriptor.response,
@@ -238,35 +268,40 @@ function VirtualEntry({
   return (
     <div
       ref={row}
-      class={`transcript-entry${descriptor.tool ? " transcript-tool-entry" : ""}`}
+      class={entryClass}
       data-transcript-entry=""
       data-entry-key={key}
       data-entry-rank={rank}
       style={{ top: `${top}px` }}
     >
       {status.before}
-      {isTextEntry(descriptor.entry) && descriptor.text ? (
-        <EditableMessage entry={descriptor.entry} text={descriptor.text}>
-          <display.MessageBody
-            display={display}
-            streamId={streamId}
-            sessionId={sessionId}
-            entry={descriptor.entry}
-            text={descriptor.text}
-            root={root}
-            paused={paused}
-            {...(saved ? { saved } : {})}
-            registerSource={registerSource}
-            registerRestore={registerRestore}
-            onPublished={published}
+      {richBody !== null && text !== null ? (
+        descriptor.agentQuestion ? (
+          <AgentQuestionExchange
+            senderTitle={descriptor.agentQuestion.senderTitle}
+            body={richBody}
           />
-        </EditableMessage>
+        ) : (
+          <EditableMessage entry={descriptor.entry} text={text}>
+            {richBody}
+          </EditableMessage>
+        )
       ) : descriptor.compaction ? (
         <CompactionMarker
           client={client}
           sessionId={sessionId}
           entry={descriptor.entry}
           compaction={descriptor.compaction}
+        />
+      ) : descriptor.tool && toolLabel && agentExchange ? (
+        <AgentToolExchange
+          client={client}
+          sessionId={sessionId}
+          entry={descriptor.entry}
+          tool={descriptor.tool}
+          label={toolLabel}
+          root={root}
+          paused={paused}
         />
       ) : descriptor.tool ? (
         <ToolRow

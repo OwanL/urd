@@ -1,6 +1,7 @@
 # Delegation and agent communication — design decisions and backend status
 
-**2026-11-18 — backend implemented; UI deferred.** This records the selected direction after
+**2026-11-18 — backend implemented; UI deferred.** (2026-11-19: agent question presentation
+landed; see below.) This records the selected direction after
 comparing delegation, handoff, workflow and messaging models in other harnesses. The backend
 implements the model-facing tool surface and runtime behavior below. Dedicated UI presentation
 remains deferred. Existing [execution](execution-design.md), [agent tool](agent-tools-design.md)
@@ -232,10 +233,26 @@ evidence are retained to make the implemented scope explicit; UI presentation is
 | 5. `ask_agent` / `answer_agent` | Resolve `recipient` once (exact final title or `parent` alias; ambiguity is an error) and pin the internal identity with the original arguments. Per-recipient in-memory question queue; present the current question through the existing insertion path with agent provenance; `wake: true` starts idle/waiting recipients like new input. The ask call waits on its question record; `answer_agent` completes that exact call, and failure or cancellation releases it. Reject asks to placeholders, disposed children and from any descendant of a foreground delegation to its waiting ancestors; detect blocking cycles, including a wait that turns an outstanding non-blocking ask into a cycle. Because restart fails all questions, the dependency graph can be in-memory. Fail questions when the recipient's execution ends unanswered, the child is disposed, or on restart. Re-present the current question after compaction. | Busy/idle/waiting recipients; queue ordering; one answer per question; each rejection and failure path; cycle detection; compaction; restart. |
 | 6. Guidance | Tool descriptions and simple subagent guidance asking for a final report, built on existing `SubagentGuidance`. | Starting-context composition tests for primary and subagent sessions. |
 
-UI presentation (dedicated tool-call display and tab hover list) is deferred.
+UI presentation of subagents (dedicated tool-call display and tab hover list) is deferred.
 
 Until that UI work lands, a subagent appears only as an ordinary tool call (its arguments and
 final report); the child's own activity is not shown in the parent's transcript.
+
+### Agent question presentation (2026-11-19)
+
+Questions and answers render as an agent exchange, never as user messages. Each part appears
+in chronological order with a tool-row header and a left-ruled body:
+
+- A received question shows "‹sender title› asked" over the question. History descriptors carry
+  `agentQuestion: { senderTitle }` for these user entries. They cannot be edited and are not
+  prompt-navigation stops.
+- An `answer_agent` call shows "Answer" over the full answer.
+- A foreground `ask_agent` call shows "Asked ‹recipient›" over the question, then the answer or
+  "Not answered". A background ask shows the question only; its completion stays an ordinary
+  completion row.
+
+Headers carry no paired answered/waiting status: the transcript does not persist question
+outcomes, and the answer row itself records the reply.
 
 ## Deliberate limits and existing alternatives
 

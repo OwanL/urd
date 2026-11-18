@@ -41,6 +41,8 @@ export interface TranscriptEntryDescriptor {
   // Response-header and preparation facts anchor only to boundary entries.
   readonly response?: ResponseHeaderInfo;
   readonly preparation?: readonly PrepassSummary[];
+  // Present on user entries that present another agent's question.
+  readonly agentQuestion?: { readonly senderTitle: string | null } | null;
 }
 
 export interface TranscriptCompactionFacts {
@@ -86,6 +88,8 @@ export interface ToolCallLabel {
     | "edit"
     | "listPending"
     | "cancelPending"
+    | "askAgent"
+    | "answerAgent"
     | "generic";
   readonly title: string;
   readonly detail: string | null;

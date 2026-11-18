@@ -1,0 +1,92 @@
+.agent-exchange {
+  min-width: 0;
+}
+
+.agent-exchange-entry {
+  margin-bottom: 18px;
+}
+
+/* Virtual rows carry their own entry padding instead of a margin. */
+.transcript-entry.agent-exchange-entry {
+  margin-bottom: 0;
+  padding-bottom: 18px;
+}
+
+/* A plain tool row directly before an exchange keeps entry spacing, not 2px. */
+.transcript-tool-entry:has(+ .transcript-entry.agent-exchange-entry) {
+  padding-bottom: 18px;
+}
+
+.transcript-tool-entry:has(+ .agent-exchange-entry:not(.transcript-entry)) {
+  margin-bottom: 18px;
+}
+
+.agent-exchange .tool-row-title {
+  flex: none;
+  font-weight: 500;
+  max-width: 40%;
+}
+
+/* The answer continues an exchange; only the speaker of a question is emphasised. */
+.agent-exchange.is-answer .tool-row-title {
+  font-weight: 400;
+}
+
+.agent-exchange .tool-row-icon.is-static {
+  cursor: default;
+}
+
+.agent-exchange .tool-row-icon.is-static:hover {
+  color: var(--text-secondary);
+}
+
+.agent-exchange-body {
+  margin: 0 0 0 7px;
+  padding: 0 0 2px 15px;
+  border-left: 1px solid #2c2c2c;
+}
+
+.agent-exchange-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.agent-exchange-question {
+  color: var(--text-secondary);
+}
+
+.agent-exchange-error {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.agent-exchange-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 1px;
+  color: var(--text-faint, #6e6e6e);
+  font-size: 12px;
+}
+
+.agent-exchange-label .icon {
+  width: 12px;
+  height: 12px;
+}
+
+/* The question body is an ordinary message reader; drop its user bubble. */
+.agent-exchange-body .message {
+  margin-bottom: 0;
+}
+
+.agent-exchange-body .message-user {
+  width: auto;
+  max-width: none;
+  margin-left: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--text-secondary);
+}

@@ -40,6 +40,8 @@ const iconNames: Record<ToolCallLabel["icon"], IconName> = {
   edit: "edit",
   listPending: "list",
   cancelPending: "cancel",
+  askAgent: "ask",
+  answerAgent: "return",
   generic: "tool",
 };
 
@@ -50,6 +52,8 @@ const iconLabels: Record<ToolCallLabel["icon"], string> = {
   edit: "Edit file",
   listPending: "List pending calls",
   cancelPending: "Cancel pending call",
+  askAgent: "Ask agent",
+  answerAgent: "Answer agent",
   generic: "Tool",
 };
 

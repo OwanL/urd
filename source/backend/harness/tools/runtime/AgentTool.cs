@@ -10,6 +10,12 @@ internal abstract class AgentTool {
   public abstract ToolRelevance RelevantWhen { get; }
   public abstract string Description { get; }
   public abstract JsonElement ParametersSchema { get; }
+
+  // Whether the tool's own arguments force a background invocation. This is decided before the
+  // durable claim; an ask with wake false runs in the background because its answer may arrive
+  // only opportunistically.
+  internal virtual bool ForcesBackground(JsonElement arguments) => false;
+
   public abstract Task<ToolOutput> RunAsync(
     JsonElement arguments, ToolContext context, CancellationToken cancellation);
 }

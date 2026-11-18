@@ -153,7 +153,7 @@ internal sealed class ConversationRunner(SessionExecutionRecorder parent,
       AIFunctionDeclaration[] offered, LlmSelection selection, CancellationToken cancellation) {
     try {
       return await ToolInvoker.InvokeAsync(requestId, call, allowed, offered, workingDirectory,
-          selection.SupportsImages, cancellation);
+          selection.SupportsImages, background: false, cancellation);
     } catch (ToolCleanupException cleanup) {
       throw new AuxiliaryExecutionException("The auxiliary tool could not be cleaned up.", cleanup);
     }

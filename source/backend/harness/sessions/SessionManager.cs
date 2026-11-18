@@ -13,7 +13,7 @@ namespace Urd.Core.Sessions;
 // Creates, discovers and opens sessions, keeping one live instance per opened session ID.
 // Bounded subagent children are created here too: they are registered under the shutdown fence
 // and unregistered again once their owning run settles and their disposable resources are gone.
-public sealed class SessionManager : IAsyncDisposable, ISubagentRunner {
+public sealed class SessionManager : IAsyncDisposable, ISubagentRunner, IAgentQuestions {
   public ValueTask DisposeAsync() => new(ShutdownSessionsAsync());
   private readonly UrdStore store;
   private readonly Func<ProviderConnection, IChatClient> createChatClient;
@@ -25,6 +25,7 @@ public sealed class SessionManager : IAsyncDisposable, ISubagentRunner {
   private readonly FileMutationQueue files = new();
   private bool browserProvisioningActive;
   private readonly WebBrowser browser;
+  private readonly AgentQuestions agentQuestions = new();
   private readonly ReadOnlyCollection<AgentTool> injectedTools = new([]);
   private readonly AsyncLock sessionsLock = new();
   private readonly Dictionary<Guid, PrimarySession> sessions = new();
@@ -145,6 +146,8 @@ public sealed class SessionManager : IAsyncDisposable, ISubagentRunner {
     SessionBase[]? sessionsToStop = null;
     using (await sessionsLock.AcquireAsync(CancellationToken.None)) {
       if (sessionShutdown is null) {
+        // Nothing survives shutdown: every waiting ask fails before its caller is stopped.
+        agentQuestions.CloseAll();
         sessionsToStop = [.. sessions.Values, .. children.Values];
         sessionShutdown = new(TaskCreationOptions.RunContinuationsAsynchronously);
       }
@@ -268,6 +271,7 @@ public sealed class SessionManager : IAsyncDisposable, ISubagentRunner {
     } catch (Exception failure) {
       throw new ToolCleanupException("Subagent process cleanup failed.", failure);
     } finally {
+      agentQuestions.CloseRecipient(child.Id);
       await UnregisterSubagentAsync(child.Id);
     }
   }
@@ -380,6 +384,94 @@ public sealed class SessionManager : IAsyncDisposable, ISubagentRunner {
     using (await sessionsLock.AcquireAsync())
       return children.ContainsKey(sessionId);
   }
+
+  // Test observation of the question broker without opening a session handle.
+  internal AgentQuestions Questions => agentQuestions;
+
+  // Resolves the recipient once, pins its internal identity and never resolves again. The ask
+  // waits on its broker record, which settles exactly once for every terminal outcome.
+  async Task<AgentQuestionResult> IAgentQuestions.AskAgentAsync(HarnessToolContext caller, string recipient,
+      string prompt, bool wake, CancellationToken cancellation) {
+    ArgumentNullException.ThrowIfNull(caller);
+    ArgumentException.ThrowIfNullOrWhiteSpace(recipient);
+    ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
+
+    (Guid? recipientId, string? error) = recipient == ParentAlias
+        ? await ResolveParentAsync(caller.SessionId, cancellation)
+        : await ResolveTitleAsync(recipient, cancellation);
+    if (recipientId is not { } pinned)
+      return new(null, error);
+
+    Task<AgentQuestionResult>? waiting;
+    using (await sessionsLock.AcquireAsync(cancellation)) {
+      ThrowIfShuttingDown();
+      // The pinned identity is rechecked here so a disposal that raced resolution fences enqueue.
+      waiting = sessions.ContainsKey(pinned) || children.ContainsKey(pinned)
+          ? agentQuestions.Enqueue(pinned, caller.SessionId, caller.RequestId, caller.CallId, prompt, wake, cancellation)
+          : null;
+    }
+
+    if (waiting is null)
+      return new(null, FinishedMessage(recipient));
+    return await waiting;
+  }
+
+  bool IAgentQuestions.AnswerAgent(HarnessToolContext caller, string answer) {
+    ArgumentNullException.ThrowIfNull(caller);
+    ArgumentException.ThrowIfNullOrWhiteSpace(answer);
+    return agentQuestions.AnswerCurrent(caller.SessionId, answer);
+  }
+
+  private async Task<(Guid? RecipientId, string? Error)> ResolveTitleAsync(string recipient, CancellationToken cancellation) {
+    SessionBase[] handles;
+    using (await sessionsLock.AcquireAsync(cancellation))
+      handles = [.. sessions.Values, .. children.Values];
+
+    // The same live-handle snapshot as list_agents, so addressing agrees with discovery.
+    List<(Guid Id, string? Title, bool Generating)> titled = [.. handles.Select(session => {
+      (string? title, bool generating) = store.Sessions.ReadAgentTitle(session.Id);
+      return (session.Id, title, generating);
+    })];
+
+    RecipientLookup lookup = AgentAddresses.Match(AgentTitles.ForListing(titled), recipient);
+    if (lookup.SessionId is { } matched)
+      return (matched, null);
+    if (lookup.Ambiguous)
+      return (null, $"The title '{recipient}' matches multiple live agents; address a different title.");
+    if (lookup.PlaceholderMatch)
+      return (null, PlaceholderMessage(recipient));
+
+    // A finished child keeps its immutable final title in storage and is recognized here.
+    IReadOnlyList<Guid> finished = store.Sessions.ReadSubagentIdsByTitle(recipient);
+    return (null, finished.Count > 0 ? FinishedMessage(recipient) : UnknownMessage(recipient));
+  }
+
+  private async Task<(Guid? RecipientId, string? Error)> ResolveParentAsync(Guid callerId, CancellationToken cancellation) {
+    SessionRecord? caller = store.Sessions.Read(callerId);
+    if (caller?.ParentSessionId is not { } parentId)
+      return (null, "The calling agent has no parent.");
+
+    bool live;
+    using (await sessionsLock.AcquireAsync(cancellation))
+      live = sessions.ContainsKey(parentId) || children.ContainsKey(parentId);
+    if (!live)
+      return (null, "The parent agent has finished and cannot answer questions.");
+
+    if (store.Sessions.ReadAgentTitle(parentId).Title is null)
+      return (null, "The parent agent has no final title yet; wait a few seconds and try again.");
+    return (parentId, null);
+  }
+
+  private const string ParentAlias = "parent";
+
+  private static string PlaceholderMessage(string recipient) =>
+      $"The agent '{recipient}' has no final title yet; wait a few seconds and try again.";
+
+  private static string FinishedMessage(string recipient) =>
+      $"The agent '{recipient}' has finished and cannot answer questions.";
+
+  private static string UnknownMessage(string recipient) =>
+      $"No live agent has the title '{recipient}'; use list_agents for current titles.";
 
   // Final result message for runs the parent cannot observe a report from.
   private const string CancelledReport = "The subagent task was cancelled.";

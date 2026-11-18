@@ -80,11 +80,11 @@ public sealed class AuxiliaryRecordingTests {
       Assert.True(await recorder.TryStartToolAsync(request, call.CallId));
       Assert.False(await recorder.TryStartToolAsync(request, call.CallId));
       LlmToolResult result = await ToolInvoker.InvokeAsync(request, call, [allowed], [definition],
-          fixture.Session.WorkingDirectory, false, CancellationToken.None);
+          fixture.Session.WorkingDirectory, false, background: false, CancellationToken.None);
       Assert.True(await recorder.CompleteToolAsync(request, result));
       Assert.Equal(ExecutionOutcome.Completed, result.Outcome);
       LlmToolResult refused = await ToolInvoker.InvokeAsync(request, call with { Name = excluded.Name }, [allowed], [definition],
-          fixture.Session.WorkingDirectory, false, CancellationToken.None);
+          fixture.Session.WorkingDirectory, false, background: false, CancellationToken.None);
       Assert.Equal(ExecutionOutcome.Failed, refused.Outcome);
     }
 

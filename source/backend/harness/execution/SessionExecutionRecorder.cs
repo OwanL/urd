@@ -14,8 +14,11 @@ internal sealed class SessionExecutionRecorder(SessionBase session, UrdStore sto
   private readonly Dictionary<(string Purpose, string Channel), char> pendingPreviewSurrogates = [];
   internal ExecutionIdentity Identity { get; } = identity;
 
-  internal HarnessToolContext CreateHarnessToolContext(string callId) =>
-      new(Identity.SessionId, Identity.ExecutionId, callId, new ToolSessionServices(store.Sessions, subagents));
+  // One calling context per tool call. The manager owns both bounded child runs and the
+  // question broker, so ask support derives from the same instance as subagent runs.
+  internal HarnessToolContext CreateHarnessToolContext(string callId, bool background) =>
+      new(Identity.SessionId, Identity.ExecutionId, callId,
+          new ToolSessionServices(store.Sessions, subagents, (IAgentQuestions?)subagents)) { Background = background };
 
   internal Task<bool> StartRequestAsync(Guid requestId, StartingContext startingContext) =>
     RecordChangeAsync(() => session.WriteToStore(() => store.Executions.StartRequest(Identity, requestId, startingContext)));

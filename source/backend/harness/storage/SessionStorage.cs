@@ -77,6 +77,14 @@ internal sealed class SessionStorage(Database database) {
       SELECT EXISTS(SELECT 1 FROM input_decisions WHERE session_id = $session AND decision = 1);
       """, ("$session", sessionId)));
 
+  // Finished children keep their final title in storage; only subagent records match, because
+  // primary titles from other runs are not live addresses for this manager.
+  internal IReadOnlyList<Guid> ReadSubagentIdsByTitle(string title) => database.RunLocked(() => database.Query(null,
+      """
+      SELECT s.session_id FROM sessions s JOIN session_prepass_title t ON t.session_id = s.session_id
+      WHERE s.kind = $kind AND t.title = $title;
+      """, row => row.Guid("session_id"), ("$kind", (int)SessionKind.Subagent), ("$title", title)).ToArray());
+
   internal void SetWorkingDirectory(Guid sessionId, string workingDirectory) => database.Write(transaction => {
     if (database.Execute(transaction, """
         UPDATE sessions SET working_directory = $directory WHERE session_id = $session;

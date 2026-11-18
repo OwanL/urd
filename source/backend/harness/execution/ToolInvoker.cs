@@ -11,8 +11,8 @@ namespace Urd.Core.Execution;
 internal static class ToolInvoker {
   internal static async Task<LlmToolResult> InvokeAsync(Guid requestId, LlmToolCall call,
       IReadOnlyList<AgentTool> allowedTools, IReadOnlyList<AIFunctionDeclaration> offeredDefinitions,
-      string? workingDirectory, bool supportsImages, CancellationToken cancellation,
-      Func<string, HarnessToolContext>? createHarnessContext = null) {
+      string? workingDirectory, bool supportsImages, bool background, CancellationToken cancellation,
+      Func<string, bool, HarnessToolContext>? createHarnessContext = null) {
     ToolOutput output;
     try {
       cancellation.ThrowIfCancellationRequested();
@@ -27,7 +27,7 @@ internal static class ToolInvoker {
         throw new InvalidOperationException($"Tool '{call.Name}' no longer matches its offered definition.");
       JsonElement arguments = StripBackgroundOption(call.Arguments);
       if (tool is HarnessTool harnessTool) {
-        HarnessToolContext context = createHarnessContext?.Invoke(call.CallId)
+        HarnessToolContext context = createHarnessContext?.Invoke(call.CallId, background)
             ?? throw new InvalidOperationException("Harness tools require a session execution.");
         output = await harnessTool.RunAsync(arguments, context with { RequestId = requestId }, cancellation);
       } else {

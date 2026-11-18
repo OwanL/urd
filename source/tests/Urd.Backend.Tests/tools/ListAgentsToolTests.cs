@@ -29,5 +29,8 @@ public sealed class ListAgentsToolTests {
     public Task<IReadOnlyList<LiveAgent>> ListLiveAgentsAsync(CancellationToken cancellation) => Task.FromResult(agents);
     public Task<SubagentRunResult> RunSubagentAsync(HarnessToolContext caller, SubagentRunRequest request,
         CancellationToken cancellation) => throw new NotSupportedException();
+    public Task<AgentQuestionResult> AskAgentAsync(HarnessToolContext caller, string recipient, string prompt,
+        bool wake, CancellationToken cancellation) => throw new NotSupportedException();
+    public bool AnswerAgent(HarnessToolContext caller, string answer) => throw new NotSupportedException();
   }
 }

@@ -156,10 +156,8 @@ internal sealed class AgentQuestions {
       if (delegations.TryGetValue(step.SessionId, out AgentWaitSource owner) && IsBlocking(owner))
         pending.Push((owner.SessionId, step.Ask));
       if (mailboxes.TryGetValue(step.SessionId, out Mailbox? mailbox)) {
-        foreach (Question question in mailbox.Questions) {
-          if (IsBlocking(question.Source))
-            pending.Push((question.SenderId, question));
-        }
+        foreach (Question question in mailbox.Questions.Where(question => IsBlocking(question.Source)))
+          pending.Push((question.SenderId, question));
       }
     }
     implicatedAsk = null;

@@ -122,7 +122,7 @@ internal sealed class SessionToolExecution {
       IReadOnlyList<AIFunctionDeclaration> offeredDefinitions, CancellationToken cancellation) {
     try {
       LlmToolResult result = await ToolInvoker.InvokeAsync(requestId, call, tools, offeredDefinitions,
-          session.WorkingDirectory, supportsImages, cancellation);
+          session.WorkingDirectory, supportsImages, cancellation, recorder.CreateHarnessToolContext);
       // A rejected or failed save leaves effects uncertain, never an ordinary tool error.
       if (!await recorder.CompleteToolAsync(requestId, result))
         throw new InvalidOperationException("The tool result could not be saved.");

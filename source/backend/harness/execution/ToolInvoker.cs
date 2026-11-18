@@ -11,7 +11,8 @@ namespace Urd.Core.Execution;
 internal static class ToolInvoker {
   internal static async Task<LlmToolResult> InvokeAsync(Guid requestId, LlmToolCall call,
       IReadOnlyList<AgentTool> allowedTools, IReadOnlyList<AIFunctionDeclaration> offeredDefinitions,
-      string? workingDirectory, bool supportsImages, CancellationToken cancellation) {
+      string? workingDirectory, bool supportsImages, CancellationToken cancellation,
+      Func<string, HarnessToolContext>? createHarnessContext = null) {
     ToolOutput output;
     try {
       cancellation.ThrowIfCancellationRequested();
@@ -24,11 +25,18 @@ internal static class ToolInvoker {
       if (offered is null || offered.Description != current.Description
           || offered.JsonSchema.GetRawText() != current.JsonSchema.GetRawText())
         throw new InvalidOperationException($"Tool '{call.Name}' no longer matches its offered definition.");
-      string directory = workingDirectory ?? (tool is WebSearchTool or WebReadTool or ListPendingCallsTool or CancelPendingCallsTool
-          ? string.Empty : throw new InvalidOperationException("The chat has no saved working folder."));
-      // Progress is intentionally inert until transcript progress integration is available.
-      var context = new ToolContext(directory, requestId, call.CallId, supportsImages, static _ => { });
-      output = await tool.RunAsync(StripBackgroundOption(call.Arguments), context, cancellation);
+      JsonElement arguments = StripBackgroundOption(call.Arguments);
+      if (tool is HarnessTool harnessTool) {
+        HarnessToolContext context = createHarnessContext?.Invoke(call.CallId)
+            ?? throw new InvalidOperationException("Harness tools require a session execution.");
+        output = await harnessTool.RunAsync(arguments, context, cancellation);
+      } else {
+        string directory = workingDirectory ?? (tool is WebSearchTool or WebReadTool or ListPendingCallsTool or CancelPendingCallsTool
+            ? string.Empty : throw new InvalidOperationException("The chat has no saved working folder."));
+        // Progress is intentionally inert until transcript progress integration is available.
+        var context = new ToolContext(directory, requestId, call.CallId, supportsImages, static _ => { });
+        output = await tool.RunAsync(arguments, context, cancellation);
+      }
     } catch (OperationCanceledException) when (cancellation.IsCancellationRequested) {
       return CreateToolErrorResult(call, ExecutionOutcome.Cancelled,
           "Tool execution was cancelled; effects may have occurred.");

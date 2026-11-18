@@ -4,6 +4,7 @@ using Urd.Core.Concurrency;
 using Urd.Core.Sessions;
 using Urd.Core.Providers;
 using Urd.Core.Storage;
+using Urd.Core.Tools;
 
 namespace Urd.Core.Execution;
 
@@ -12,6 +13,9 @@ internal sealed class SessionExecutionRecorder(SessionBase session, UrdStore sto
     ExecutionIdentity identity) {
   private readonly Dictionary<(string Purpose, string Channel), char> pendingPreviewSurrogates = [];
   internal ExecutionIdentity Identity { get; } = identity;
+
+  internal HarnessToolContext CreateHarnessToolContext(string callId) =>
+      new(Identity.SessionId, Identity.ExecutionId, callId, new ToolSessionServices(store.Sessions));
 
   internal Task<bool> StartRequestAsync(Guid requestId, StartingContext startingContext) =>
     RecordChangeAsync(() => session.WriteToStore(() => store.Executions.StartRequest(Identity, requestId, startingContext)));

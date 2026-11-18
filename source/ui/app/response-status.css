@@ -140,7 +140,7 @@
 
 .response-status-icon.is-running {
   color: #a0a0a0;
-  animation: response-status-pulse 2.4s ease-in-out infinite;
+  animation: response-status-spin 1s linear infinite;
 }
 
 .response-status-row.is-warned .response-status-icon {
@@ -207,20 +207,14 @@
   color: #e6cfa3;
 }
 
-@keyframes response-status-pulse {
-  0%,
-  100% {
-    opacity: 0.55;
-  }
-
-  50% {
-    opacity: 1;
+@keyframes response-status-spin {
+  to {
+    transform: rotate(1turn);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .response-status-icon.is-running {
     animation: none;
-    opacity: 1;
   }
 }

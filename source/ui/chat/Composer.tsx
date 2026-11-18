@@ -194,6 +194,7 @@ export function Composer({
               disabled={locked || !modelKey}
             />
           )}
+          {subagentProviders}
         </div>
         {inlineAccounting && (
           <div class="composer-accounting" ref={accounting}>
@@ -201,7 +202,6 @@ export function Composer({
           </div>
         )}
         <div class="composer-actions" ref={actions}>
-          {subagentProviders}
           {!inlineAccounting && (
             <div class="composer-overflow">
               <IconButton

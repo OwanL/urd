@@ -46,7 +46,8 @@ const paths: Record<IconName, string> = {
   cancel: "M6 6h12v12H6ZM9 9l6 6m0-6-6 6",
   tool: "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9Z",
   background: "M7 17 17 7M8 7h9v9",
-  subagents: "M12 8V5m0 3H6v6m6-6h6v6M9 2h6v3H9ZM3 14h6v6H3Zm12 0h6v6h-6Z",
+  subagents:
+    "M8 7h8a4 4 0 0 1 4 4v6a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4v-6a4 4 0 0 1 4-4ZM12 7V3m-2 0h4M2 13h2m16 0h2M9 13h.01m6 0h.01M9 17h6",
   return: "M9 10 4 15l5 5M20 4v7a4 4 0 0 1-4 4H4",
   ask: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z",
 };

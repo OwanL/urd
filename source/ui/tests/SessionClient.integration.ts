@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { parse } from "node:path";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, parse } from "node:path";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { SessionClient } from "../sessions/SessionClient.ts";
@@ -91,6 +93,7 @@ void test(
       workingDirectory: parse(process.cwd()).root,
       canChangeWorkingDirectory: true,
       canContinue: false,
+      canCompact: true,
       admissionFenced: false,
       isCompacting: false,
       unsettledExecutionId: null,
@@ -105,6 +108,14 @@ void test(
       contextUsage: null,
       workingTime: { completedMilliseconds: 0, startedAt: null, hasUnknownDuration: false },
     });
+
+    const workingDirectory = await mkdtemp(join(tmpdir(), "urd-session-execution-"));
+    t.after(() => rm(workingDirectory, { recursive: true, force: true }));
+    const expectedWorkingDirectory = await realpath(workingDirectory);
+    assert.equal(
+      await request(client.setWorkingDirectory(id, workingDirectory)),
+      expectedWorkingDirectory,
+    );
 
     // Deliberately retain whitespace, CRLF, non-ASCII and astral scalars, well beyond the preview.
     const submission: UserMessageSubmission = {
@@ -138,13 +149,17 @@ void test(
 
     let settled = await request(client.getSnapshot(id, signal));
     while (settled.lastSettlement?.executionId !== executionId) {
+      assert.equal(settled.unsettledExecutionId, executionId);
+      assert.equal(settled.canCompact, false);
       assert.ok(performance.now() < deadline, "Execution did not settle before the deadline");
       await delay(Math.min(20, Math.max(1, deadline - performance.now())), undefined, { signal });
       settled = await request(client.getSnapshot(id, signal));
     }
     assert.equal(settled.sessionId, id);
+    assert.equal(settled.workingDirectory, expectedWorkingDirectory);
     assert.equal(settled.historyRevision, initial.historyRevision);
     assert.equal(settled.admissionFenced, false);
+    assert.equal(settled.canCompact, true);
     assert.equal(settled.unsettledExecutionId, null);
     assert.equal(settled.stopRequested, false);
     assert.deepEqual(settled.lastSettlement, { executionId, outcome: "completed", error: null });

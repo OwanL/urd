@@ -15,6 +15,7 @@ import type { LlmSelection } from "../providers/LlmSelection.ts";
 import type { SessionClient } from "../sessions/SessionClient.ts";
 import type { ContinuationReceipt, ContinuationSubmission } from "../sessions/Continuation.ts";
 import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
+import type { CompactionReceipt } from "../sessions/Compaction.ts";
 import type { StopReceipt } from "../sessions/Stop.ts";
 import type {
   UserMessageReceipt,
@@ -48,6 +49,7 @@ function snapshot(overrides: Partial<SessionSnapshot> = {}): SessionSnapshot {
     canChangeWorkingDirectory: true,
     admissionFenced: false,
     canContinue: false,
+    canCompact: true,
     unsettledExecutionId: null,
     stopRequested: false,
     lastSettlement: null,
@@ -114,6 +116,8 @@ function commands(
     | "getMessageReceipt"
     | "continueSession"
     | "getContinuationReceipt"
+    | "startCompaction"
+    | "getCompactionOperation"
     | "removePendingInput"
     | "getSnapshot"
     | "stopExecution"
@@ -155,6 +159,13 @@ function continuationReceipt(submission: ContinuationSubmission): ContinuationRe
   };
 }
 
+function compactionReceipt(
+  operationId: string,
+  outcome: CompactionReceipt["outcome"] = "completed",
+): CompactionReceipt {
+  return { executionId: operationId, outcome };
+}
+
 function emptyClient(
   submitMessage: SessionClient["submitMessage"] = async () => {
     throw new Error("Unexpected Send");
@@ -171,6 +182,8 @@ function emptyClient(
   | "getMessageReceipt"
   | "continueSession"
   | "getContinuationReceipt"
+  | "startCompaction"
+  | "getCompactionOperation"
   | "removePendingInput"
   | "getSnapshot"
   | "stopExecution"
@@ -181,6 +194,10 @@ function emptyClient(
     getMessageReceipt: async () => null,
     continueSession: async (_id, submission) => continuationReceipt(submission),
     getContinuationReceipt: async () => null,
+    startCompaction: async () => {
+      throw new Error("Unexpected compaction");
+    },
+    getCompactionOperation: async () => null,
     removePendingInput: async () => true,
     getSnapshot: async () => snapshot(),
     stopExecution,
@@ -382,6 +399,129 @@ void test("a definite Continue conflict checks for an earlier accepted receipt b
 
   assert.equal(workspace.read().chats[sessionId]?.pendingContinuation, null);
   assert.equal(workspace.read().chats[sessionId]?.knownExecutionId, original.operationId);
+});
+
+void test("compaction requires an idle snapshot even when the command is enabled", async () => {
+  const workspace = fixture();
+  let starts = 0;
+  const coordinator = commands(workspace.access, {
+    ...emptyClient(),
+    startCompaction: async () => {
+      starts++;
+      return compactionReceipt("unused");
+    },
+  });
+
+  await coordinator.compact(sessionId, snapshot({ unsettledExecutionId: firstExecutionId }), true);
+
+  assert.equal(starts, 0);
+  assert.equal(coordinator.status.compactions[sessionId], undefined);
+});
+
+void test("compaction ignores duplicate starts while the first start is pending", async () => {
+  const workspace = fixture();
+  const start = deferred<CompactionReceipt>();
+  const started = deferred<void>();
+  let starts = 0;
+  let operationId = "";
+  const coordinator = commands(workspace.access, {
+    ...emptyClient(),
+    startCompaction: async (_id, submission) => {
+      starts++;
+      operationId = submission.operationId;
+      started.resolve();
+      return start.promise;
+    },
+  });
+
+  const first = coordinator.compact(sessionId, snapshot(), true);
+  await started.promise;
+  await coordinator.compact(sessionId, snapshot(), true);
+  assert.equal(starts, 1);
+
+  start.resolve(compactionReceipt(operationId));
+  await first;
+  assert.deepEqual(coordinator.status.compactions[sessionId], {
+    phase: "settled",
+    message: "History compacted.",
+  });
+});
+
+void test("a snapshot reads the addressed compaction receipt and reports an unconfirmed no-op", async () => {
+  const workspace = fixture();
+  const settled = deferred<void>();
+  const receiptReads: string[] = [];
+  const coordinator = commands(
+    workspace.access,
+    {
+      ...emptyClient(),
+      startCompaction: async () => {
+        throw new Error("acknowledgement lost");
+      },
+      getCompactionOperation: async (_id, operationId) => {
+        receiptReads.push(operationId);
+        return null;
+      },
+    },
+    (state) => {
+      if (state.compactions[sessionId]?.phase === "settled") settled.resolve();
+    },
+  );
+
+  await coordinator.compact(sessionId, snapshot(), true);
+  const operation = coordinator.status.compactions[sessionId];
+  assert.equal(operation?.phase, "observing");
+  if (operation?.phase !== "observing") return;
+  coordinator.observeSnapshot(snapshot(), null);
+  await settled.promise;
+
+  assert.deepEqual(receiptReads, [operation.operationId]);
+  assert.deepEqual(coordinator.status.compactions[sessionId], {
+    phase: "settled",
+    message: "Compaction was not confirmed.",
+  });
+  assert.equal(workspace.read().chats[sessionId]?.draft, "submitted text");
+});
+
+void test("a transient compaction receipt read recovers on the next snapshot", async () => {
+  const workspace = fixture();
+  const uncertain = deferred<void>();
+  const settled = deferred<void>();
+  const receiptReads: string[] = [];
+  const coordinator = commands(
+    workspace.access,
+    {
+      ...emptyClient(),
+      startCompaction: async () => {
+        throw new Error("acknowledgement lost");
+      },
+      getCompactionOperation: async (_id, operationId) => {
+        receiptReads.push(operationId);
+        if (receiptReads.length === 1) throw new Error("receipt unavailable");
+        return compactionReceipt(operationId);
+      },
+    },
+    (state) => {
+      const phase = state.compactions[sessionId]?.phase;
+      if (phase === "uncertain") uncertain.resolve();
+      if (phase === "settled") settled.resolve();
+    },
+  );
+
+  await coordinator.compact(sessionId, snapshot(), true);
+  const operation = coordinator.status.compactions[sessionId];
+  assert.equal(operation?.phase, "observing");
+  if (operation?.phase !== "observing") return;
+  coordinator.observeSnapshot(snapshot(), null);
+  await uncertain.promise;
+  coordinator.observeSnapshot(snapshot(), null);
+  await settled.promise;
+
+  assert.deepEqual(receiptReads, [operation.operationId, operation.operationId]);
+  assert.deepEqual(coordinator.status.compactions[sessionId], {
+    phase: "settled",
+    message: "History compacted.",
+  });
 });
 
 void test("pending-input removal reports progress and reads the snapshot after a race", async () => {

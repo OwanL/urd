@@ -1,4 +1,4 @@
-import { UsagePopover } from "./UsagePopover.tsx";
+import { HoverPopover } from "../components/HoverPopover.tsx";
 import type { UsagePoint } from "./UsageTypes.ts";
 import type { UsageProvider } from "./UsageValues.ts";
 import { formatUsageCost, formatUsageTime, usageColors, usageProviders } from "./UsageValues.ts";
@@ -14,7 +14,7 @@ export function UsageProviders({
   return (
     <div class="usage-provider-legend" role="group" aria-label="Providers">
       {providers.map((provider) => (
-        <UsagePopover
+        <HoverPopover
           key={provider.key}
           label={`${provider.label} ${formatUsageCost(provider.totals)}; model breakdown`}
           surfaceLabel={`${provider.label} models`}
@@ -34,7 +34,7 @@ export function UsageProviders({
           <span class="usage-swatch" style={{ background: colors[provider.key] }} />
           <span class="usage-provider-label">{provider.label}</span>
           <span>{formatUsageCost(provider.totals)}</span>
-        </UsagePopover>
+        </HoverPopover>
       ))}
     </div>
   );

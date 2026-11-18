@@ -16,7 +16,8 @@ distinct from tool-result pruning and catalog pruning (ARCHITECTURE.md, "Context
    - structured summary (goal, constraints, progress, decisions, next steps, critical context,
      files read/modified), each new summary building on the previous one;
    - when a provider rejects a request as too long, compact and retry that request;
-   - a manual "compact now" with optional focus instructions.
+   - a manual "Compact now" action. The HTTP operation accepts optional focus instructions;
+     the browser control does not expose that field.
 2. **Models carry their context limit.** Model metadata gains a context-window value, as with
    model family on saved model settings. Source order: provider-reported where the API supplies
    it, else a built-in table seeded from Pi's model registry (exact known model IDs on known
@@ -82,14 +83,19 @@ Previously executed tools are not retried. Generic HTTP failures and message tex
 this recovery. Reported usage anchors the next threshold check; later history is estimated
 with a four-characters-per-token fallback, not a tokenizer guarantee.
 
-The manual compaction HTTP operation is idle-only and accepts optional focus instructions.
-It is a separate, addressable execution: Stop cancels and joins its summary request, and reopening
-never replays it. The workspace does not expose it as a control; successful automatic compaction
-appears as a **History compacted** transcript entry with an inspectable summary.
-Busy Send cannot steer into manual compaction. Failure, cancellation and stale boundaries do
-not replace the previous summary. The pre-release schema policy requires a fresh disposable
-database or an explicit owner-approved reset of incompatible data; no automatic migration
-or deletion is performed. See [backend development](backend-development.md) for the current schema.
+The manual compaction HTTP operation accepts optional focus instructions; the browser's
+**Compact now** action does not expose that field. The action is in the interactive Context
+popover, also reachable from More when context indicators overflow. It is enabled only when the
+session is truly idle—including after background tools and cleanup have finished—and a model is
+selected. It leaves composer drafts unchanged and does not automatically repeat a no-op or failure.
+Manual compaction is a separate, addressable execution: Stop cancels and joins its summary request,
+and reopening never replays it. Busy Send cannot steer into manual compaction. Successful manual
+or automatic compaction appears as a **History compacted** transcript entry with an inspectable
+summary. No-op and failure feedback do not add a boundary; failure, cancellation and stale
+boundaries do not replace the previous summary. The pre-release schema policy requires a fresh
+disposable database or an explicit owner-approved reset of incompatible data; no automatic
+migration or deletion is performed. See [backend development](backend-development.md) for the
+current schema.
 
 ## Verification
 

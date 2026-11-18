@@ -1,4 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
+import { HoverPopover } from "../components/HoverPopover.tsx";
 import { Tooltip } from "../components/Tooltip.tsx";
 import { UsageControl } from "../usage/UsageControl.tsx";
 import type { SessionContextUsage, SessionWorkingTime } from "../sessions/SessionSnapshot.ts";
@@ -18,6 +19,11 @@ interface SessionIndicatorsProps {
   usageActive: boolean;
   usageBusy: boolean;
   usageRefresh: number | string;
+  canCompact: boolean;
+  compacting: boolean;
+  compactionMessage: string | null;
+  onCheckCompaction: (() => void) | undefined;
+  onCompact(): void;
 }
 
 export function SessionIndicators({
@@ -30,6 +36,11 @@ export function SessionIndicators({
   usageActive,
   usageBusy,
   usageRefresh,
+  canCompact,
+  compacting,
+  compactionMessage,
+  onCheckCompaction,
+  onCompact,
 }: SessionIndicatorsProps) {
   const [now, setNow] = useState(Date.now);
   const startedAt = workingTime?.startedAt;
@@ -41,6 +52,11 @@ export function SessionIndicators({
   }, [active, startedAt, fenced]);
 
   const contextLabel = `${formatContextTokens(contextUsage?.usedTokens)}/${formatContextTokens(contextWindow)}`;
+  const compactDisabled = !canCompact || compacting;
+  const compactStatus = compacting
+    ? "Compacting…"
+    : (compactionMessage ??
+      (!canCompact ? "Available when the session is idle and a model is selected." : null));
   const ratio = contextUsage && contextWindow ? contextUsage.usedTokens / contextWindow : 0;
   const incomplete = workingTime?.hasUnknownDuration || (fenced && Boolean(startedAt));
   const duration = workingTime
@@ -68,10 +84,14 @@ export function SessionIndicators({
         <span class="session-indicator-name" aria-hidden="true">
           Context
         </span>
-        <Tooltip
+        <HoverPopover
+          label={`Context window: ${contextLabel}${contextUsage?.isEstimate ? ", estimated" : ""}`}
+          surfaceLabel="Context window details"
+          class={`session-indicator ${ratio >= 0.85 ? "is-critical" : ratio >= 0.7 ? "is-warning" : ""}`}
+          surfaceClass="session-compaction-popover"
           content={
-            <>
-              Context window
+            <div class="session-compaction-details">
+              <span>Context window</span>
               <span class="tooltip-detail">
                 {contextUsage
                   ? `${contextUsage.isEstimate ? "Estimated" : "Last reported"}: ${contextUsage.usedTokens.toLocaleString()} tokens`
@@ -79,17 +99,27 @@ export function SessionIndicators({
                 {contextWindow ? ` / ${contextWindow.toLocaleString()}` : " / limit unknown"}
               </span>
               <span class="tooltip-detail">Pending input and in-flight output not included.</span>
-            </>
+              <button
+                type="button"
+                class="session-compaction-action"
+                aria-disabled={compactDisabled && !onCheckCompaction}
+                onClick={() => {
+                  if (onCheckCompaction) onCheckCompaction();
+                  else if (!compactDisabled) onCompact();
+                }}
+              >
+                {onCheckCompaction ? "Check compaction" : "Compact now"}
+              </button>
+              {compactStatus && (
+                <span class="tooltip-detail session-compaction-status" role="status">
+                  {compactStatus}
+                </span>
+              )}
+            </div>
           }
         >
-          <button
-            type="button"
-            class={`session-indicator ${ratio >= 0.85 ? "is-critical" : ratio >= 0.7 ? "is-warning" : ""}`}
-            aria-label={`Context window: ${contextLabel}${contextUsage?.isEstimate ? ", estimated" : ""}`}
-          >
-            {contextLabel}
-          </button>
-        </Tooltip>
+          {contextLabel}
+        </HoverPopover>
       </div>
       {duration !== null && (
         <div class="session-indicator-item">

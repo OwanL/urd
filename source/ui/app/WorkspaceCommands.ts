@@ -1,5 +1,6 @@
 import { RequestError } from "../http/RequestError.ts";
 import type { ContinuationReceipt, ContinuationSubmission } from "../sessions/Continuation.ts";
+import type { CompactionReceipt } from "../sessions/Compaction.ts";
 import {
   applyContinuationReceipt,
   applyReceipt,
@@ -30,8 +31,14 @@ export interface PendingInputRemovalState {
   readonly status: "removing" | "checking" | "uncertain";
 }
 
+type WorkspaceCompactionState =
+  | { readonly phase: "starting" | "observing"; readonly operationId: string }
+  | { readonly phase: "uncertain"; readonly operationId: string; readonly message: string }
+  | { readonly phase: "settled"; readonly message: string };
+
 export interface WorkspaceCommandState {
   readonly creating: boolean;
+  readonly compactions: Readonly<Record<string, WorkspaceCompactionState>>;
   readonly stopping: Readonly<Record<string, WorkspaceStopState>>;
   readonly checking: Readonly<Record<string, boolean>>;
   readonly checkingContinuations: Readonly<Record<string, boolean>>;
@@ -52,6 +59,7 @@ export interface WorkspaceCommandAccess {
 
 export const emptyWorkspaceCommandState: WorkspaceCommandState = {
   creating: false,
+  compactions: {},
   stopping: {},
   checking: {},
   checkingContinuations: {},
@@ -66,6 +74,8 @@ type WorkspaceCommandClient = Pick<
   | "getSnapshot"
   | "continueSession"
   | "getContinuationReceipt"
+  | "startCompaction"
+  | "getCompactionOperation"
   | "removePendingInput"
   | "stopExecution"
 >;
@@ -93,6 +103,7 @@ export class WorkspaceCommands {
   private readonly continuationReceiptReads = new Map<string, AbortController>();
   private readonly pendingInputRemovals = new Set<string>();
   private readonly stoppingRequests = new Set<string>();
+  private readonly compactionReads = new Map<string, boolean>();
 
   constructor(
     client: WorkspaceCommandClient,
@@ -158,7 +169,7 @@ export class WorkspaceCommands {
     active: boolean,
     canSend: boolean,
   ): Promise<void> {
-    if (!canSend || !this.access.canPersist()) return;
+    if (!canSend || !this.access.canPersist() || this.isCompacting(id)) return;
     const latest = this.access.read().chats[id];
     const selection = active
       ? snapshot.latestLlmSelection
@@ -222,7 +233,8 @@ export class WorkspaceCommands {
       latest.messageEdit ||
       latest.knownExecutionId ||
       this.state.stopping[id] ||
-      this.hasPendingInputRemoval(id)
+      this.hasPendingInputRemoval(id) ||
+      this.isCompacting(id)
     )
       return;
 
@@ -247,6 +259,113 @@ export class WorkspaceCommands {
     await this.retryOriginalContinuation(id);
   }
 
+  async compact(id: string, snapshot: SessionSnapshot, canCompact: boolean): Promise<void> {
+    const chat = this.access.read().chats[id];
+    const selection = chat?.selection ?? snapshot.latestLlmSelection;
+    if (
+      !canCompact ||
+      snapshot.sessionId !== id ||
+      snapshot.canCompact !== true ||
+      snapshot.unsettledExecutionId !== null ||
+      snapshot.admissionFenced ||
+      snapshot.stopRequested ||
+      !chat ||
+      !this.access.canPersist() ||
+      !selection ||
+      chat.pending ||
+      chat.pendingContinuation ||
+      chat.messageEdit ||
+      chat.knownExecutionId ||
+      this.state.stopping[id] ||
+      this.hasPendingInputRemoval(id) ||
+      this.isCompacting(id) ||
+      this.state.compactions[id]?.phase === "uncertain"
+    )
+      return;
+
+    const operationId = crypto.randomUUID();
+    this.setCompaction(id, { phase: "starting", operationId });
+    try {
+      const receipt = await this.client.startCompaction(id, {
+        operationId,
+        expectedHistoryRevision: snapshot.historyRevision,
+        llmSelection: selection,
+      });
+      this.applyCompactionReceipt(id, operationId, receipt);
+    } catch (cause) {
+      if (cause instanceof RequestError && cause.status === 409)
+        this.setCompaction(id, {
+          phase: "settled",
+          message: "Session changed. Compaction not started.",
+        });
+      else this.setCompaction(id, { phase: "observing", operationId });
+    } finally {
+      this.refreshSnapshot();
+    }
+  }
+
+  private isCompacting(id: string): boolean {
+    const phase = this.state.compactions[id]?.phase;
+    return phase === "starting" || phase === "observing";
+  }
+
+  private async checkCompaction(id: string, operationId: string): Promise<void> {
+    if (this.compactionReads.has(operationId)) {
+      this.compactionReads.set(operationId, true);
+      return;
+    }
+    this.compactionReads.set(operationId, false);
+    try {
+      const receipt = await this.client.getCompactionOperation(id, operationId);
+      if (!this.observesCompaction(id, operationId)) return;
+      if (receipt) this.applyCompactionReceipt(id, operationId, receipt);
+      else this.setCompaction(id, { phase: "settled", message: "Compaction was not confirmed." });
+    } catch {
+      if (this.observesCompaction(id, operationId))
+        this.setCompaction(id, {
+          phase: "uncertain",
+          operationId,
+          message: "Compaction outcome unavailable.",
+        });
+    } finally {
+      const queued = this.compactionReads.get(operationId);
+      this.compactionReads.delete(operationId);
+      if (queued && this.observesCompaction(id, operationId))
+        void this.checkCompaction(id, operationId);
+    }
+  }
+
+  private observesCompaction(id: string, operationId: string): boolean {
+    const operation = this.state.compactions[id];
+    return (
+      (operation?.phase === "observing" || operation?.phase === "uncertain") &&
+      operation.operationId === operationId
+    );
+  }
+
+  private applyCompactionReceipt(
+    id: string,
+    operationId: string,
+    receipt: CompactionReceipt,
+  ): void {
+    if (receipt.executionId !== operationId) throw new Error("Unexpected compaction receipt.");
+    if (receipt.outcome === null) {
+      this.setCompaction(id, { phase: "observing", operationId });
+      return;
+    }
+    const message =
+      receipt.outcome === "completed"
+        ? (receipt.error ?? "History compacted.")
+        : receipt.outcome === "cancelled"
+          ? "Compaction stopped."
+          : "Compaction failed. Previous context kept.";
+    this.setCompaction(id, { phase: "settled", message });
+  }
+
+  private setCompaction(id: string, compaction: WorkspaceCompactionState): void {
+    this.publish({ compactions: { ...this.state.compactions, [id]: compaction } });
+  }
+
   async resendNotSent(
     id: string,
     snapshot: SessionSnapshot,
@@ -255,6 +374,7 @@ export class WorkspaceCommands {
     const latest = this.access.read().chats[id];
     if (
       snapshot.sessionId !== id ||
+      this.isCompacting(id) ||
       !latest ||
       latest.pending ||
       latest.pendingContinuation ||
@@ -564,6 +684,13 @@ export class WorkspaceCommands {
   }
 
   observeSnapshot(snapshot: SessionSnapshot, knownWhenRead: string | null): void {
+    const compaction = this.state.compactions[snapshot.sessionId];
+    if (
+      (compaction?.phase === "observing" || compaction?.phase === "uncertain") &&
+      snapshot.unsettledExecutionId !== compaction.operationId
+    )
+      void this.checkCompaction(snapshot.sessionId, compaction.operationId);
+
     const saved = this.access.read().chats[snapshot.sessionId];
     if (
       saved?.knownExecutionId &&

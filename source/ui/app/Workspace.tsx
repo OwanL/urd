@@ -242,6 +242,7 @@ export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) 
             preferences={preferences}
             connected={connected}
             unavailable={events.knownStatuses[id] === "unavailable"}
+            sessionStatus={events.statuses[id]}
             canPersist={canPersist}
             notice={id === activeId ? events.notice : null}
             provisioning={id === activeId ? events.provisioning : null}

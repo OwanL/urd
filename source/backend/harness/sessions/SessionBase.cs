@@ -89,7 +89,7 @@ public abstract class SessionBase {
     CompactionReceipt? receipt;
     using (await sessionLock.AcquireAsync()) {
       var admission = WriteToStore(() => store.Compactions.Start(Id, submission,
-          CanStartWork && submission.ExpectedHistoryRevision == HistoryRevision));
+          CanStartWork && execution is null && submission.ExpectedHistoryRevision == HistoryRevision));
       if (admission is null)
         return null;
       receipt = admission.Value.Receipt;
@@ -201,6 +201,7 @@ public abstract class SessionBase {
       WorkingDirectory = WorkingDirectory,
       CanChangeWorkingDirectory = CanChangeWorkingDirectory(snapshot),
       CanContinue = snapshot.CanContinue && locallyIdle,
+      CanCompact = locallyIdle,
       PendingInputs = snapshot.PendingInputs.Select(input => input with {
         CanRemove = input.CanRemove && canRemovePending
       }).ToArray()

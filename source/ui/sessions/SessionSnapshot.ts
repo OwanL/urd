@@ -36,6 +36,7 @@ export interface SessionSnapshot {
   readonly canChangeWorkingDirectory: boolean;
   readonly admissionFenced: boolean;
   readonly canContinue: boolean;
+  readonly canCompact?: boolean;
   readonly unsettledExecutionId: string | null;
   readonly isCompacting?: boolean;
   readonly stopRequested: boolean;

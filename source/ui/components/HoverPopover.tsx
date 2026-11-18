@@ -1,13 +1,13 @@
 import type { ComponentChildren } from "preact";
 import { useEffect, useId, useRef, useState } from "preact/hooks";
-import { Popover } from "../components/Popover.tsx";
+import { Popover } from "./Popover.tsx";
 
-// Cost surfaces share hover intent, deliberate activation and nested focus handling.
-export function UsagePopover({
+// Shared hover intent, deliberate activation and nested focus handling for interactive details.
+export function HoverPopover({
   label,
   surfaceLabel,
   class: className,
-  surfaceClass = "usage-popover",
+  surfaceClass = "hover-popover",
   enabled = true,
   onReveal,
   children,

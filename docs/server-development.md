@@ -129,6 +129,11 @@ hidden-icons overflow, unless it has been hidden in Settings → Personalization
 [`SessionRoutes.cs`](../source/hosting/server/SessionRoutes.cs) owns the route inventory;
 [`SessionClient.ts`](../source/ui/sessions/SessionClient.ts) supplies the browser query shapes.
 
+Session snapshots include `canCompact`, a live hint that is true only while the session is
+locally idle, with no active execution, durable unsettled run, admission fence or Stop request.
+The compaction POST rechecks admission in Core and returns 409 when unavailable; exact retries
+of an already accepted operation still return its retained receipt.
+
 History and descriptor-carrying position windows attach `toolLabels`; full arguments,
 results and storage excerpts are never included. Tool inspection requires explicit `returned`
 and `full` booleans. Previews (`full=false`) cap each field at 65,536 characters and report

@@ -145,6 +145,7 @@ interface ConversationProps {
   preferences: PreferencesState;
   connected: boolean;
   unavailable: boolean;
+  sessionStatus: string | undefined;
   canPersist: boolean;
   refresh: number;
   notice: string | null;
@@ -177,6 +178,7 @@ export function Conversation({
   preferences,
   connected,
   unavailable,
+  sessionStatus,
   canPersist,
   refresh,
   notice,
@@ -223,6 +225,8 @@ export function Conversation({
     setWorkingDirectoryNotice(message);
   }, []);
   const pendingInputRemoval = commands.hasPendingInputRemoval(sessionId);
+  const compaction = commands.status.compactions[sessionId];
+  const compactionPending = compaction?.phase === "starting" || compaction?.phase === "observing";
   const unresolvedInputRemovals = Object.values(commands.status.pendingInputRemovals).filter(
     (removal) => removal.sessionId === sessionId,
   );
@@ -255,7 +259,22 @@ export function Conversation({
     stop,
     ready,
     canPersist,
-    pendingInputRemoval,
+    pendingInputRemoval || compactionPending,
+  );
+  const canCompact = Boolean(
+    active &&
+    visible &&
+    ready &&
+    notice !== null &&
+    !readError &&
+    (sessionStatus === "idle" || sessionStatus === "failed") &&
+    snapshot?.canCompact === true &&
+    compaction?.phase !== "uncertain" &&
+    canPersist &&
+    state.selection &&
+    !state.selectionLocked &&
+    !stop &&
+    !workingDirectoryLocked,
   );
   const showWorkingDirectory = Boolean(
     snapshot?.canChangeWorkingDirectory === true &&
@@ -263,7 +282,8 @@ export function Conversation({
     !chat.pending &&
     !chat.pendingContinuation &&
     !chat.knownExecutionId &&
-    !pendingInputRemoval,
+    !pendingInputRemoval &&
+    !compactionPending,
   );
   const selection = state.selection;
   const modelKey = selection ? `${selection.connection.id}/${selection.modelId}` : null;
@@ -280,7 +300,8 @@ export function Conversation({
       !snapshot.admissionFenced &&
       !chat.pending &&
       !chat.pendingContinuation &&
-      !pendingInputRemoval,
+      !pendingInputRemoval &&
+      !compactionPending,
     ),
   };
   function choose(next: LlmSelection) {
@@ -545,6 +566,14 @@ export function Conversation({
           <SessionIndicators
             contextUsage={snapshot?.contextUsage ?? null}
             contextWindow={selection?.contextWindow ?? null}
+            canCompact={canCompact}
+            compacting={compactionPending || (state.active && snapshot?.isCompacting === true)}
+            compactionMessage={compaction && "message" in compaction ? compaction.message : null}
+            onCheckCompaction={compaction?.phase === "uncertain" && ready ? onRefresh : undefined}
+            onCompact={() => {
+              if (!workingDirectoryGate.current && snapshot)
+                void commands.compact(sessionId, snapshot, canCompact);
+            }}
             workingTime={snapshot?.workingTime ?? null}
             active={active && visible && notice !== null}
             fenced={snapshot?.admissionFenced ?? true}

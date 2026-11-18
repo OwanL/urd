@@ -2,7 +2,7 @@ import { useMemo } from "preact/hooks";
 import type { UsageRange } from "./UsageTypes.ts";
 import { UsageClient } from "./UsageClient.ts";
 import { UsageDetails } from "./UsageDetails.tsx";
-import { UsagePopover } from "./UsagePopover.tsx";
+import { HoverPopover } from "../components/HoverPopover.tsx";
 import { formatUsageCost } from "./UsageValues.ts";
 import { useUsageSummary } from "./useUsageSummary.ts";
 import "./usage.css";
@@ -41,10 +41,11 @@ export function UsageControl({
   const staleLabel = state.stale ? (state.summary ? ", stale" : ", unavailable") : "";
   const scope = sessionId ? "Session" : label;
   return (
-    <UsagePopover
+    <HoverPopover
       label={`${scope} API-equivalent cost: ${value}${staleLabel}`}
       surfaceLabel={`Usage details: ${sessionId ? "this session" : label}`}
       class={`usage-control${className ? ` ${className}` : ""}`}
+      surfaceClass="usage-popover"
       enabled={active}
       content={
         <UsageDetails
@@ -60,6 +61,6 @@ export function UsageControl({
           · stale
         </span>
       )}
-    </UsagePopover>
+    </HoverPopover>
   );
 }

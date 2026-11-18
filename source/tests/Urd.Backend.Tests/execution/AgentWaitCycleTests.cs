@@ -120,10 +120,11 @@ public sealed class AgentWaitCycleTests {
     Assert.Empty(fixture.Manager.Questions.Queued(alpha.Id));
 
     IAsyncEnumerable<ChatResponseUpdate> Route(ScriptedRequest request, CancellationToken token) {
-      if ((nested && HasText(request, descendantTask)) || (!nested && HasText(request, childTask)))
-        return HasAnyResult(request) ? Complete(token)
-            : ToolBatch(token, Ask("ask-ancestor", nested ? Alpha : "parent", BetaQuestion, wake));
-      if (HasText(request, childTask))
+      if (HasAssignment(request, nested ? descendantTask : childTask)) {
+        string ancestor = nested ? Alpha : "parent";
+        return HasAnyResult(request) ? Complete(token) : ToolBatch(token, Ask("ask-ancestor", ancestor, BetaQuestion, wake));
+      }
+      if (HasAssignment(request, childTask))
         return HasAnyResult(request) ? Complete(token) : ToolBatch(token, Delegate("inner", descendantTask, background: true));
       if (HasText(request, AlphaTask) && !HasResult(request, "outer"))
         return ToolBatch(token, Delegate("outer", childTask, background: false));
@@ -169,7 +170,7 @@ public sealed class AgentWaitCycleTests {
     }
 
     IAsyncEnumerable<ChatResponseUpdate> Route(ScriptedRequest request, CancellationToken token) {
-      if (HasText(request, childTask)) {
+      if (HasAssignment(request, childTask)) {
         if (HasResult(request, "child-ask"))
           return Complete(token);
         return WaitThenAskAsync(token);
@@ -218,6 +219,12 @@ public sealed class AgentWaitCycleTests {
 
   private static bool HasText(ScriptedRequest request, string text) => request.Messages.Any(message =>
       message.Role == ChatRole.User && message.Text.Contains(text, StringComparison.Ordinal));
+
+  // A delegated task reaches its child as a whole user assignment. Recipients only quote the task
+  // back incidentally inside larger envelopes (a presented question cites the asker's title), so
+  // matching the complete input text is what separates child requests from primary requests.
+  private static bool HasAssignment(ScriptedRequest request, string task) => request.Messages.Any(
+      message => message.Role == ChatRole.User && message.Text == task);
 
   private static IEnumerable<FunctionResultContent> Results(ScriptedRequest request) =>
       request.Messages.SelectMany(message => message.Contents).OfType<FunctionResultContent>();

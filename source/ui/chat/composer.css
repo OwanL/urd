@@ -94,20 +94,14 @@
 .session-indicator.is-critical {
   color: var(--danger);
 }
-.session-compaction-popover {
-  width: min(21rem, calc(100vw - 16px));
-  padding: 10px 12px;
-}
 .session-compaction-details {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 5px;
   font-size: 12px;
 }
 .session-compaction-action {
   min-height: 30px;
-  margin-top: 3px;
   padding: 5px 8px;
   border: 0;
   border-radius: 5px;
@@ -123,9 +117,6 @@
   color: var(--text-secondary);
   cursor: default;
   opacity: 0.6;
-}
-.session-compaction-status {
-  margin-top: 2px;
 }
 .composer-overflow {
   flex: none;

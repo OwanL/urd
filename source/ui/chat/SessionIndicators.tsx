@@ -53,10 +53,7 @@ export function SessionIndicators({
 
   const contextLabel = `${formatContextTokens(contextUsage?.usedTokens)}/${formatContextTokens(contextWindow)}`;
   const compactDisabled = !canCompact || compacting;
-  const compactStatus = compacting
-    ? "Compacting…"
-    : (compactionMessage ??
-      (!canCompact ? "Available when the session is idle and a model is selected." : null));
+  const compactStatus = compacting ? "Compacting…" : compactionMessage;
   const ratio = contextUsage && contextWindow ? contextUsage.usedTokens / contextWindow : 0;
   const incomplete = workingTime?.hasUnknownDuration || (fenced && Boolean(startedAt));
   const duration = workingTime
@@ -88,17 +85,8 @@ export function SessionIndicators({
           label={`Context window: ${contextLabel}${contextUsage?.isEstimate ? ", estimated" : ""}`}
           surfaceLabel="Context window details"
           class={`session-indicator ${ratio >= 0.85 ? "is-critical" : ratio >= 0.7 ? "is-warning" : ""}`}
-          surfaceClass="session-compaction-popover"
           content={
             <div class="session-compaction-details">
-              <span>Context window</span>
-              <span class="tooltip-detail">
-                {contextUsage
-                  ? `${contextUsage.isEstimate ? "Estimated" : "Last reported"}: ${contextUsage.usedTokens.toLocaleString()} tokens`
-                  : "Usage unknown"}
-                {contextWindow ? ` / ${contextWindow.toLocaleString()}` : " / limit unknown"}
-              </span>
-              <span class="tooltip-detail">Pending input and in-flight output not included.</span>
               <button
                 type="button"
                 class="session-compaction-action"
@@ -111,7 +99,7 @@ export function SessionIndicators({
                 {onCheckCompaction ? "Check compaction" : "Compact now"}
               </button>
               {compactStatus && (
-                <span class="tooltip-detail session-compaction-status" role="status">
+                <span class="tooltip-detail" role="status">
                   {compactStatus}
                 </span>
               )}

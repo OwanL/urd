@@ -282,7 +282,7 @@ public abstract class SessionBase {
 
   // Admits a bounded assignment into its first execution in one lock hold, so every input shares
   // the first request. Refusals throw: a bounded child owns no retries and no resumptions.
-  private protected async Task<Guid> AdmitAssignmentAsync(IReadOnlyList<UserMessageSubmission> submissions) {
+  private protected async Task<Guid> AdmitAssignmentAsync(IReadOnlyList<UserMessageSubmission> submissions, Guid parentSessionId) {
     if (submissions.Count == 0)
       throw new ArgumentException("An assignment requires at least one input.", nameof(submissions));
 
@@ -290,14 +290,17 @@ public abstract class SessionBase {
     Guid executionId;
     using (await sessionLock.AcquireAsync()) {
       UserMessageReceipt lead = WriteToStore(() => store.UserMessages.Submit(
-          Id, HistoryRevision, submissions[0], IsAcceptingWork, Guid.NewGuid())).Receipt;
+          Id, HistoryRevision, submissions[0], IsAcceptingWork, Guid.NewGuid(),
+          provenance: submissions.Count == 1 ? InputProvenance.AgentAssignment : InputProvenance.InheritedContext,
+          senderSessionId: parentSessionId)).Receipt;
       if (lead.Acceptance != MessageAcceptance.Accepted)
         throw new InvalidOperationException($"The assignment was refused ({lead.RefusalReason}).");
 
       executionId = lead.ExecutionId!.Value;
       foreach (UserMessageSubmission steered in submissions.Skip(1)) {
         UserMessageReceipt receipt = WriteToStore(() => store.UserMessages.Submit(
-            Id, HistoryRevision, steered, IsAcceptingWork, Guid.NewGuid(), executionId)).Receipt;
+            Id, HistoryRevision, steered, IsAcceptingWork, Guid.NewGuid(), executionId,
+            provenance: InputProvenance.AgentAssignment, senderSessionId: parentSessionId)).Receipt;
         if (receipt.Acceptance != MessageAcceptance.Accepted)
           throw new InvalidOperationException($"The assignment was refused ({receipt.RefusalReason}).");
       }

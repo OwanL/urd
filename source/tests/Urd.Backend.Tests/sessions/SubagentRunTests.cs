@@ -445,6 +445,96 @@ public sealed class SubagentRunTests {
     }
   }
 
+  [Theory]
+  [InlineData("user", "user", true)]
+  [InlineData("recent", "user", true)]
+  [InlineData("none", "user", false)]
+  [InlineData("recent", "recent", true)]
+  public async Task NestedContextPreservesHumanProvenance(string childContext, string nestedContext, bool inheritsHuman) {
+    const string firstHuman = "parent mission";
+    const string secondHuman = "another human request";
+    const string parentAssistant = "parent assistant observation";
+    const string parentToolResult = "parent tool observation";
+    const string nestedTask = "nested provenance mission";
+    ScriptedRequest? childRequest = null;
+    ScriptedRequest? nestedRequest = null;
+    var client = new ScriptedChatClient(Route);
+    var lookup = new TestAgentTool("lookup", (_, _, _) => Task.FromResult(new ToolOutput(parentToolResult, [])));
+    await using var fixture = await SubagentRunFixture.OpenAsync(client, [lookup]);
+    PrimarySession parent = await fixture.Manager.CreatePrimaryAsync();
+    Guid firstExecution = await StartParentAsync(parent);
+    Assert.Equal(ExecutionOutcome.Completed,
+        (await parent.WaitForExecutionFinishAsync(firstExecution).WaitAsync(TestTimeout)).Outcome);
+    long revision = (await parent.ReadSnapshotAsync().WaitAsync(TestTimeout)).HistoryRevision;
+    UserMessageReceipt receipt = await parent.SubmitUserMessageAsync(
+        new(Guid.NewGuid(), revision, secondHuman, TestLlmSelection.Default));
+    Guid execution = Assert.IsType<Guid>(receipt.ExecutionId);
+    Assert.Equal(ExecutionOutcome.Completed,
+        (await parent.WaitForExecutionFinishAsync(execution).WaitAsync(TestTimeout)).Outcome);
+    Assert.NotNull(childRequest);
+    Assert.NotNull(nestedRequest);
+    Assert.Equal(ExecutionOutcome.Completed, Assert.Single(StoredTools.Read(fixture.Database),
+        call => call.CallId == "provenance-outer").Outcome);
+    Assert.Equal(ExecutionOutcome.Completed, Assert.Single(StoredTools.Read(fixture.Database),
+        call => call.CallId == "provenance-inner").Outcome);
+
+    SubagentContextEntry[] childEntries = ContextEntries(childRequest);
+    if (childContext == "recent") {
+      Assert.Contains(childEntries, entry => entry.Source == "human input" && entry.Text == firstHuman);
+      Assert.Contains(childEntries, entry => entry.Source == "human input" && entry.Text == secondHuman);
+      Assert.Contains(childEntries, entry => entry.Source == "assistant" && entry.Text == parentAssistant);
+      Assert.Contains(childEntries, entry => entry.Source == "tool result" && entry.Text == parentToolResult);
+    }
+
+    SubagentContextEntry[] nestedEntries = ContextEntries(nestedRequest);
+    SubagentContextEntry[] nestedHuman = [.. nestedEntries.Where(entry => entry.Source == "human input")];
+    Assert.Equal(inheritsHuman ? new[] { firstHuman, secondHuman } : [], nestedHuman.Select(entry => entry.Text));
+    Assert.DoesNotContain(nestedHuman, entry => entry.Text.Contains(AssignmentTask, StringComparison.Ordinal)
+        || entry.Text.Contains(parentAssistant, StringComparison.Ordinal)
+        || entry.Text.Contains(parentToolResult, StringComparison.Ordinal));
+    if (nestedContext == "user") {
+      Assert.All(nestedEntries, entry => Assert.Equal("human input", entry.Source));
+    } else {
+      Assert.Contains(nestedEntries, entry => entry.Source == "assistant" && entry.Text == parentAssistant);
+      Assert.Contains(nestedEntries, entry => entry.Source == "tool result" && entry.Text == parentToolResult);
+      Assert.Contains(nestedEntries, entry => entry.Source == "agent assignment" && entry.Text == AssignmentTask);
+    }
+
+    IAsyncEnumerable<ChatResponseUpdate> Route(ScriptedRequest request, CancellationToken token) {
+      switch (request.Purpose) {
+        case "title":
+          return TextUpdates([ChildTitle], token);
+        case "conversation":
+          if (HasUserText(request, nestedTask)) {
+            nestedRequest = request;
+            return TextUpdates(["nested report"], token);
+          }
+          if (HasUserText(request, AssignmentTask)) {
+            if (HasResult(request, "provenance-inner"))
+              return TextUpdates([ChildReport], token);
+            childRequest = request;
+            return ToolBatch(token, Delegate("provenance-inner", nestedTask, context: nestedContext));
+          }
+          if (!HasUserText(request, secondHuman) || HasResult(request, "provenance-outer"))
+            return Complete(token);
+          return HasResult(request, "provenance-lookup")
+              ? ToolBatch(token, Delegate("provenance-outer", AssignmentTask, context: childContext))
+              : Lookup(token);
+        case { } pruning when pruning.StartsWith("pruning.", StringComparison.Ordinal):
+          return TextUpdates([PrepassTolerantChatClient.KeepAll(request.Messages)], token);
+        default:
+          throw new InvalidOperationException($"Unexpected purpose '{request.Purpose}'.");
+      }
+    }
+
+    async IAsyncEnumerable<ChatResponseUpdate> Lookup(
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken token) {
+      yield return Text(parentAssistant);
+      await foreach (ChatResponseUpdate update in ToolBatch(token, new FunctionCallContent("provenance-lookup", "lookup")))
+        yield return update;
+    }
+  }
+
   [Fact]
   public async Task ListsOpenPrimariesAndNestedChildrenThroughTheToolUntilDisposal() {
     const string nestedTask = "nested list mission";
@@ -729,10 +819,22 @@ public sealed class SubagentRunTests {
     return Assert.IsType<Guid>(receipt.ExecutionId);
   }
 
-  private static FunctionCallContent Delegate(string callId, string task, bool background = false, string bucket = "small") =>
+  private static FunctionCallContent Delegate(string callId, string task, bool background = false, string bucket = "small",
+      string context = "none") =>
       new(callId, "subagent", new Dictionary<string, object?> {
-        ["bucket"] = bucket, ["context"] = "none", ["task"] = task, ["background"] = background
+        ["bucket"] = bucket, ["context"] = context, ["task"] = task, ["background"] = background
       });
+
+  private static SubagentContextEntry[] ContextEntries(ScriptedRequest request) {
+    ChatMessage[] contexts = [.. request.Messages.Where(message => message.Role == ChatRole.User
+        && message.Text.StartsWith("[PARENT CONTEXT:", StringComparison.Ordinal))];
+    Assert.True(contexts.Length <= 1);
+    if (contexts.Length == 0)
+      return [];
+    string text = contexts[0].Text;
+    string json = text[(text.IndexOf('\n', StringComparison.Ordinal) + 1)..];
+    return JsonSerializer.Deserialize<SubagentContextEntry[]>(json, JsonSerializerOptions.Web)!;
+  }
 
   private static bool HasUserText(ScriptedRequest request, string text) =>
       request.Messages.Any(message => message.Role == ChatRole.User && message.Text == text);

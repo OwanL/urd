@@ -11,12 +11,12 @@ public sealed class DatabaseSchemaTests {
   public void FreshDatabaseCreatesAndReopensCurrentSchema() {
     using var database = new TemporaryDatabase();
     using (UrdStore store = UrdStore.Open(database.Path)) {
-      Assert.Equal(33L, database.Scalar("PRAGMA user_version;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
+      Assert.Equal(34L, database.Scalar("PRAGMA user_version;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
       store.Sessions.CreatePrimary(Guid.NewGuid());
     }
 
     using UrdStore reopened = UrdStore.Open(database.Path);
-    Assert.Equal(33L, database.Scalar("PRAGMA user_version;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
+    Assert.Equal(34L, database.Scalar("PRAGMA user_version;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
     Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM sessions;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
     Assert.Equal(1L, database.Scalar("SELECT \"notnull\" FROM pragma_table_info('execution_runs') WHERE name = 'created_at';")); // raw-sql: current schema creation, rejection or constraint is the subject under test
     Assert.Contains("strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
@@ -49,7 +49,7 @@ public sealed class DatabaseSchemaTests {
   [Fact]
   public void OldDatabaseIsRejectedWithManualResetInstructions() {
     using var database = new TemporaryDatabase();
-    database.Execute("PRAGMA user_version = 31;");
+    database.Execute("PRAGMA user_version = 33;");
 
     NotSupportedException error = Assert.Throws<NotSupportedException>(() => UrdStore.Open(database.Path));
 
@@ -60,7 +60,7 @@ public sealed class DatabaseSchemaTests {
     Assert.Contains("-shm", error.Message, StringComparison.OrdinalIgnoreCase);
     Assert.Contains("restart", error.Message, StringComparison.OrdinalIgnoreCase);
     Assert.True(File.Exists(database.Path));
-    Assert.Equal(31L, database.Scalar("PRAGMA user_version;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
+    Assert.Equal(33L, database.Scalar("PRAGMA user_version;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
   }
 
   [Fact]

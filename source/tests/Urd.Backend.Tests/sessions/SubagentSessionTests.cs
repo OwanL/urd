@@ -36,8 +36,9 @@ public sealed class SubagentSessionTests {
     // An unconfigured bucket resolver makes the title prepass run with the child's own chat model.
     var providers = new ProviderManager(store, () => new Uri("http://localhost:54321/api/providers/callback"));
     var tool = new TestAgentTool("unused", (_, _, _) => Task.FromResult(new ToolOutput("unused", [])));
+    Guid parentId = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     var session = new SubagentSession(store.Sessions.CreateSubagent(Guid.NewGuid(),
-        store.Sessions.CreatePrimary(Guid.NewGuid()).Id, "owning-call", Path.GetDirectoryName(database.Path)),
+        parentId, "owning-call", Path.GetDirectoryName(database.Path)),
         store, _ => executionClient, new ToolCatalog([tool]), modelSelector: new ModelSelector(providers));
     try {
       Guid execution = await session.StartAssignmentAsync(AssignmentTask, ParentContextBlock,
@@ -58,6 +59,13 @@ public sealed class SubagentSessionTests {
       Assert.Equal(ExecutionOutcome.Completed,
           (await session.WaitForExecutionFinishAsync(execution).WaitAsync(TestTimeout)).Outcome);
       Assert.Equal(ChildTitle, store.Snapshots.ReadPersisted(session.Id).Title);
+      var provenance = database.ReadRows($"""
+        SELECT i.provenance, i.sender_session_id, d.original_text_utf8
+        FROM execution_inputs i JOIN input_decisions d ON d.session_id = i.session_id AND d.input_id = i.input_id
+        WHERE i.session_id = '{session.Id:D}' ORDER BY i.ordinal;
+        """, row => (Kind: row.GetInt32(0), Sender: Guid.Parse(row.GetString(1)),
+            Text: System.Text.Encoding.UTF8.GetString((byte[])row[2]))); // raw-sql: persisted assignment provenance is under test.
+      Assert.Equal(new[] { (2, parentId, ParentContextBlock), (3, parentId, AssignmentTask) }, provenance);
     } finally {
       mainRelease.TrySetResult();
       await session.StopAcceptingUserMessagesAsync();

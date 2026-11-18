@@ -57,39 +57,39 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
       ), contents AS (
           SELECT q.run_ordinal, q.request_index, q.request_id, {(int)ContextRowKind.User} AS kind, i.ordinal AS content_index,
               d.original_text_utf8 AS text_utf8, NULL AS call_id, NULL AS name, NULL AS json,
-              NULL AS background, i.sender_session_id AS origin_request_id, NULL AS outcome
+              NULL AS background, i.sender_session_id AS origin_request_id, NULL AS outcome, i.provenance AS input_provenance
           FROM requests q JOIN execution_inputs i ON i.request_id = q.request_id
           JOIN input_decisions d ON d.session_id = i.session_id AND d.input_id = i.input_id
           UNION ALL
           SELECT q.run_ordinal, q.request_index, q.request_id, {(int)ContextRowKind.Text}, o.chunk_index, o.text_utf8,
-              NULL, NULL, NULL, NULL, NULL, NULL
+              NULL, NULL, NULL, NULL, NULL, NULL, NULL
           FROM requests q JOIN execution_output o ON o.request_id = q.request_id
           WHERE q.include_response = 1 AND q.omit_assistant = 0
               AND NOT EXISTS (SELECT 1 FROM execution_provider_context c WHERE c.request_id = q.request_id)
           UNION ALL
           SELECT q.run_ordinal, q.request_index, q.request_id, {(int)ContextRowKind.ToolCall}, t.call_index, NULL,
-              t.call_id, t.name, t.arguments_json, NULL, NULL, NULL
+              t.call_id, t.name, t.arguments_json, NULL, NULL, NULL, NULL
           FROM requests q JOIN execution_tools t ON t.request_id = q.request_id
           WHERE q.include_response = 1 AND q.omit_assistant = 0
               AND NOT EXISTS (SELECT 1 FROM execution_provider_context c WHERE c.request_id = q.request_id)
           UNION ALL
           SELECT q.run_ordinal, q.request_index, q.request_id, {(int)ContextRowKind.ToolResult}, t.call_index, NULL,
-              t.call_id, t.name, t.result_json, t.background, t.request_id, t.outcome
+              t.call_id, t.name, t.result_json, t.background, t.request_id, t.outcome, NULL
           FROM requests q JOIN execution_tools t ON t.request_id = q.request_id
           WHERE q.include_response = 1 AND (t.result_json IS NOT NULL OR (t.background = 1 AND t.started = 1))
           UNION ALL
           SELECT q.run_ordinal, q.request_index, q.request_id, {(int)ContextRowKind.ProviderResponse}, 0, NULL, NULL, NULL,
-              c.response_json, NULL, NULL, NULL
+              c.response_json, NULL, NULL, NULL, NULL
           FROM requests q JOIN execution_provider_context c ON c.request_id = q.request_id
           WHERE q.include_response = 1
           UNION ALL
           SELECT q.run_ordinal, q.request_index, q.request_id, {(int)ContextRowKind.ToolCompletion}, c.ordinal, NULL,
-              t.call_id, t.name, t.result_json, NULL, c.request_id, t.outcome
+              t.call_id, t.name, t.result_json, NULL, c.request_id, t.outcome, NULL
           FROM requests q JOIN execution_tool_completions c ON c.claimed_request_id = q.request_id
           JOIN execution_tools t ON t.request_id = c.request_id AND t.call_id = c.call_id
           WHERE c.session_id = $session AND c.history_revision = $revision
       ) SELECT c.request_id, c.kind, c.text_utf8, c.call_id, c.name, c.json, c.background,
-          c.origin_request_id, c.outcome, c.run_ordinal, c.request_index, q.usage_json, q.compaction_id, q.omit_assistant
+          c.origin_request_id, c.outcome, c.input_provenance, c.run_ordinal, c.request_index, q.usage_json, q.compaction_id, q.omit_assistant
       FROM contents c JOIN requests q ON q.request_id = c.request_id
       ORDER BY c.run_ordinal, c.request_index, c.kind, c.content_index;
       """,
@@ -114,7 +114,7 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
               : StorageText.StrictUtf8.GetString((byte[])reader.GetValue(reader.GetOrdinal("text_utf8"))),
           reader.NullableString("call_id"), reader.NullableString("name"), reader.NullableString("json"),
           reader.NullableInt("background") == 1, reader.NullableGuid("origin_request_id"),
-          (ExecutionOutcome?)reader.NullableInt("outcome"), reader.Long("run_ordinal"), reader.Int("request_index"),
+          (ExecutionOutcome?)reader.NullableInt("outcome"), (InputProvenance?)reader.NullableInt("input_provenance"), reader.Long("run_ordinal"), reader.Int("request_index"),
           reader.NullableString("usage_json"), reader.NullableGuid("compaction_id"), reader.Bool("omit_assistant"));
       if (previous?.RequestId != row.RequestId) {
         FinishGroup();
@@ -135,8 +135,12 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
           var input = new ChatMessage(ChatRole.User, row.Text);
           messages.Add(input);
           inputMessages.Add(input);
-          if (forDelegation && row.OriginRequestId is { } sender)
-            input.AuthorName = sender.ToString("D");
+          if (forDelegation) {
+            if (row.OriginRequestId is { } sender)
+              input.AuthorName = sender.ToString("D");
+            if (row.InputProvenance is InputProvenance.InheritedContext or InputProvenance.AgentAssignment)
+              SubagentContext.MarkInput(input, row.InputProvenance == InputProvenance.InheritedContext);
+          }
           break;
         case ContextRowKind.Text:
           (text ??= new()).Append(row.Text);
@@ -188,7 +192,7 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
   // One streamed context row, including the request metadata needed when its group ends.
   private sealed record ContextRow(Guid RequestId, ContextRowKind Kind, string? Text, string? CallId,
       string? Name, string? Json, bool Background, Guid? OriginRequestId, ExecutionOutcome? Outcome,
-      long RunOrdinal, int RequestIndex, string? UsageJson, Guid? CompactionId, bool OmitAssistant);
+      InputProvenance? InputProvenance, long RunOrdinal, int RequestIndex, string? UsageJson, Guid? CompactionId, bool OmitAssistant);
 
   private ChatMessage ReadToolCompletion(ContextRow row, bool forDelegation) {
     Guid origin = row.OriginRequestId!.Value;

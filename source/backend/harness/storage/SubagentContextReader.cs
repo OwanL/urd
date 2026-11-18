@@ -49,7 +49,7 @@ internal sealed class SubagentContextReader(Database database, ToolResultCodec t
         ExecutionSql.Parameters(parent, ("$request", requestId), ("$call", callId)))
       ?? throw new InvalidOperationException("The invoking subagent call is not in the parent history revision.");
 
-  // User mode reads only attempted human input, including the compacted prefix.
+  // User mode reads attempted human input, including humans in inherited context and the compacted prefix.
   private List<SubagentContextEntry> ReadUserContext(SqliteTransaction transaction, ExecutionIdentity parent,
       Invocation invocation) => database.Query(transaction, """
         WITH requests AS (
@@ -58,16 +58,20 @@ internal sealed class SubagentContextReader(Database database, ToolResultCodec t
           WHERE r.session_id = $session AND r.history_revision = $revision AND q.attempt = 2
               AND (r.ordinal, q.request_index) <= ($ordinal, $index)
         )
-        SELECT q.request_id, d.original_text_utf8
+        SELECT q.request_id, d.original_text_utf8, i.provenance
         FROM requests q JOIN execution_inputs i ON i.request_id = q.request_id AND i.session_id = $session
         JOIN input_decisions d ON d.session_id = i.session_id AND d.input_id = i.input_id
-        WHERE i.provenance = 0 AND i.not_sent = 0 AND d.superseded = 0
+        WHERE i.provenance IN (0, 2) AND i.not_sent = 0 AND d.superseded = 0
         ORDER BY q.run_ordinal, q.request_index, i.ordinal;
         """, ReadUserEntry, ("$session", parent.SessionId), ("$revision", parent.HistoryRevision),
-      ("$ordinal", invocation.RunOrdinal), ("$index", invocation.RequestIndex));
+      ("$ordinal", invocation.RunOrdinal), ("$index", invocation.RequestIndex)).SelectMany(entries => entries).ToList();
 
-  private static SubagentContextEntry ReadUserEntry(SqliteDataReader row) =>
-      new("human input", StorageText.StrictUtf8.GetString((byte[])row["original_text_utf8"]), row.Guid("request_id"));
+  private static IEnumerable<SubagentContextEntry> ReadUserEntry(SqliteDataReader row) {
+    string text = StorageText.StrictUtf8.GetString((byte[])row["original_text_utf8"]);
+    if ((InputProvenance)row.Int("provenance") == InputProvenance.InheritedContext)
+      return SubagentContext.ReadInherited(text).Where(entry => entry.Source == "human input");
+    return [new("human input", text, row.Guid("request_id"))];
+  }
 
   private sealed record Invocation(long RunOrdinal, int RequestIndex, HistoryMessageLocation? FirstRetained);
 }

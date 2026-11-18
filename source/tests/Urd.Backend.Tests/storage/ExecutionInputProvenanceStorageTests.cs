@@ -42,7 +42,7 @@ public sealed class ExecutionInputProvenanceStorageTests {
       UPDATE execution_inputs SET sender_session_id = NULL WHERE input_id = '{question:D}';
       """)).SqliteExtendedErrorCode);
     Assert.Equal(275, Assert.Throws<SqliteException>(() => database.Execute($"""
-      UPDATE execution_inputs SET provenance = 2 WHERE input_id = '{question:D}';
+      UPDATE execution_inputs SET provenance = 4 WHERE input_id = '{question:D}';
       """)).SqliteExtendedErrorCode);
     Assert.Equal(1299, Assert.Throws<SqliteException>(() => database.Execute($"""
       UPDATE execution_inputs SET provenance = NULL WHERE input_id = '{question:D}';

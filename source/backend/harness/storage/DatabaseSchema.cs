@@ -4,7 +4,7 @@ namespace Urd.Core.Storage;
 
 // Creates the current pre-release schema; incompatible databases require a manual reset.
 internal static class DatabaseSchema {
-  private const int SchemaVersion = 33;
+  private const int SchemaVersion = 34;
 
   internal static void Initialize(SqliteConnection connection) {
     using SqliteCommand command = connection.CreateCommand();
@@ -217,12 +217,12 @@ internal static class DatabaseSchema {
           request_id TEXT REFERENCES execution_requests(request_id),
           outcome INTEGER CHECK (outcome IN (0, 1, 2)),
           not_sent INTEGER NOT NULL DEFAULT 0 CHECK (not_sent IN (0, 1)),
-          provenance INTEGER NOT NULL DEFAULT 0 CHECK (provenance IN (0, 1)), -- human input, agent question
+          provenance INTEGER NOT NULL DEFAULT 0 CHECK (provenance IN (0, 1, 2, 3)), -- human, agent question, inherited context, assignment
           sender_session_id TEXT REFERENCES sessions(session_id),
           UNIQUE (session_id, input_id),
           FOREIGN KEY (session_id, input_id) REFERENCES input_decisions(session_id, input_id),
           CHECK ((provenance = 0 AND sender_session_id IS NULL)
-              OR (provenance = 1 AND sender_session_id IS NOT NULL))
+              OR (provenance IN (1, 2, 3) AND sender_session_id IS NOT NULL))
       ) STRICT;
       CREATE TABLE execution_messages (
           ordinal INTEGER PRIMARY KEY AUTOINCREMENT,

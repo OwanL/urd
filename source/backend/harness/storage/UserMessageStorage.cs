@@ -4,19 +4,21 @@ using Urd.Core.Sessions;
 
 namespace Urd.Core.Storage;
 
+internal enum InputProvenance { Human, AgentQuestion, InheritedContext, AgentAssignment }
+
 // Retains idempotent message acceptances/refusals and submits each accepted message with its execution.
 internal sealed class UserMessageStorage(Database database) {
   internal (UserMessageReceipt Receipt, bool NewlyAccepted) Submit(
       Guid sessionId, long historyRevision, UserMessageSubmission submission, bool accepting, Guid proposedExecutionId,
-      Guid? activeExecutionId = null) {
+      Guid? activeExecutionId = null, InputProvenance provenance = InputProvenance.Human, Guid? senderSessionId = null) {
     ArgumentNullException.ThrowIfNull(submission);
     return database.Write(transaction => Submit(transaction, sessionId, historyRevision, submission,
-        accepting, proposedExecutionId, activeExecutionId));
+        accepting, proposedExecutionId, activeExecutionId, provenance, senderSessionId));
   }
 
   internal (UserMessageReceipt Receipt, bool NewlyAccepted) Submit(SqliteTransaction transaction,
       Guid sessionId, long historyRevision, UserMessageSubmission submission, bool accepting, Guid proposedExecutionId,
-      Guid? activeExecutionId = null) {
+      Guid? activeExecutionId = null, InputProvenance provenance = InputProvenance.Human, Guid? senderSessionId = null) {
     UserMessageReceipt? retained = ReadReceipt(sessionId, submission.SubmissionId, transaction);
     if (retained is not null) {
       EnsureSameSubmission(retained, submission);
@@ -54,9 +56,11 @@ internal sealed class UserMessageStorage(Database database) {
     }
 
     database.Execute(transaction, """
-      INSERT INTO execution_inputs (session_id, input_id, run_id) VALUES ($session, $input, $run);
+      INSERT INTO execution_inputs (session_id, input_id, run_id, provenance, sender_session_id)
+      VALUES ($session, $input, $run, $provenance, $sender);
       """,
-        ("$session", sessionId), ("$run", executionId), ("$input", submission.SubmissionId));
+        ("$session", sessionId), ("$run", executionId), ("$input", submission.SubmissionId),
+        ("$provenance", (int)provenance), ("$sender", senderSessionId));
     return (accepted, true);
   }
 

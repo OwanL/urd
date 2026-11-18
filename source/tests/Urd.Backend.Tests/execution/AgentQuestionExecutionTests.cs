@@ -346,6 +346,101 @@ public sealed class AgentQuestionExecutionTests {
         (await recipient.WaitForExecutionFinishAsync(execution).WaitAsync(TestTimeout)).Outcome);
   }
 
+  // A manual compaction claim never presents the queue head, so its ordinary settlement used to
+  // leave an idle recipient with an enqueued waking ask pending forever. The settlement must run
+  // the authorized wake itself, FIFO, presented on a fresh run.
+  [Fact]
+  public async Task OrdinaryManualCompactionSettlementRunsThePendingWakingAskInQueueOrder() {
+    var summaryEntered = Signal();
+    var summaryRelease = Signal();
+    await using var fixture = await QuestionFixture.OpenAsync(async cancellation => {
+      summaryEntered.TrySetResult();
+      await summaryRelease.Task.WaitAsync(cancellation);
+      return await Summarize(cancellation);
+    });
+    try {
+      fixture.Respond(Complete, Complete);
+      Guid bulk = await fixture.StartAsync("bulk: " + new string('x', 100_000));
+      Assert.Equal(ExecutionOutcome.Completed, (await fixture.FinishAsync(bulk)).Outcome);
+      Guid steer = await fixture.StartAsync("latest decision");
+      Assert.Equal(ExecutionOutcome.Completed, (await fixture.FinishAsync(steer)).Outcome);
+
+      long revision = (await fixture.Recipient.ReadSnapshotAsync()).HistoryRevision;
+      CompactionReceipt compaction = Assert.IsType<CompactionReceipt>(await fixture.Recipient.CompactAsync(
+          new ManualCompactionRequest(Guid.NewGuid(), revision, TestLlmSelection.Default with { ContextWindow = 8_192 })));
+      await summaryEntered.Task.WaitAsync(TestTimeout);
+
+      Task<AgentQuestionResult> head = fixture.Ask("queued head", wake: false);
+      await fixture.WaitForQueueAsync(1);
+      Task<AgentQuestionResult> waking = fixture.Ask("waking ask", wake: true);
+      await fixture.WaitForQueueAsync(2);
+      Assert.Empty(fixture.QuestionRows());
+      Assert.False(waking.IsCompleted);
+
+      fixture.Respond(Probe("compacted"), Probe("woken"), Complete);
+      summaryRelease.TrySetResult();
+      Assert.Equal(ExecutionOutcome.Completed, (await fixture.FinishAsync(compaction.ExecutionId)).Outcome);
+
+      CapturedCall headClaim = await fixture.NextCallAsync();
+      Assert.NotEqual(compaction.ExecutionId, headClaim.Context.ExecutionId);
+      ScriptedRequest headRequest = fixture.ConversationRequests[^1];
+      Assert.Contains(headRequest.Messages, message => message.Text.Contains("queued head", StringComparison.Ordinal));
+      Assert.DoesNotContain(headRequest.Messages, message => message.Text.Contains("waking ask", StringComparison.Ordinal));
+      Assert.True(fixture.Questions.AnswerAgent(headClaim.Context, "head answer"));
+      Assert.Equal("head answer", (await head.WaitAsync(TestTimeout)).Answer);
+      headClaim.Release.TrySetResult();
+
+      CapturedCall wakingClaim = await fixture.NextCallAsync();
+      Assert.Equal(headClaim.Context.ExecutionId, wakingClaim.Context.ExecutionId);
+      Assert.Contains(fixture.ConversationRequests[^1].Messages,
+          message => message.Text.Contains("waking ask", StringComparison.Ordinal));
+      Assert.True(fixture.Questions.AnswerAgent(wakingClaim.Context, "wake answer"));
+      Assert.Equal("wake answer", (await waking.WaitAsync(TestTimeout)).Answer);
+      Assert.Equal(2, fixture.QuestionRows().Count);
+      wakingClaim.Release.TrySetResult();
+      Assert.Equal(ExecutionOutcome.Completed, (await fixture.FinishAsync(headClaim.Context.ExecutionId)).Outcome);
+    } finally {
+      summaryRelease.TrySetResult();
+    }
+  }
+
+  [Fact]
+  public async Task StopDuringManualCompactionDoesNotAutoStartThePendingWakingAsk() {
+    var summaryEntered = Signal();
+    var summaryRelease = Signal();
+    await using var fixture = await QuestionFixture.OpenAsync(async cancellation => {
+      summaryEntered.TrySetResult();
+      await summaryRelease.Task.WaitAsync(cancellation);
+      return await Summarize(cancellation);
+    });
+    try {
+      fixture.Respond(Complete, Complete);
+      Guid bulk = await fixture.StartAsync("bulk: " + new string('x', 100_000));
+      Assert.Equal(ExecutionOutcome.Completed, (await fixture.FinishAsync(bulk)).Outcome);
+      Guid steer = await fixture.StartAsync("latest decision");
+      Assert.Equal(ExecutionOutcome.Completed, (await fixture.FinishAsync(steer)).Outcome);
+
+      long revision = (await fixture.Recipient.ReadSnapshotAsync()).HistoryRevision;
+      CompactionReceipt compaction = Assert.IsType<CompactionReceipt>(await fixture.Recipient.CompactAsync(
+          new ManualCompactionRequest(Guid.NewGuid(), revision, TestLlmSelection.Default with { ContextWindow = 8_192 })));
+      await summaryEntered.Task.WaitAsync(TestTimeout);
+      Task<AgentQuestionResult> waking = fixture.Ask("waking ask", wake: true);
+      await fixture.WaitForQueueAsync(1);
+
+      Assert.Equal(StopStatus.Requested, (await fixture.Recipient.RequestStopAsync(compaction.ExecutionId)).Status);
+      summaryRelease.TrySetResult();
+      Assert.Equal(ExecutionOutcome.Cancelled, (await fixture.FinishAsync(compaction.ExecutionId)).Outcome);
+
+      // A cancelled settlement never restarts on its own; the unpresented ask stays queued.
+      Assert.Null((await fixture.Recipient.ReadSnapshotAsync()).UnsettledExecutionId);
+      Assert.Empty(fixture.QuestionRows());
+      Assert.Single(fixture.Manager.Questions.Queued(fixture.Recipient.Id));
+      Assert.False(waking.IsCompleted);
+    } finally {
+      summaryRelease.TrySetResult();
+    }
+  }
+
   private static bool IsReminder(ChatMessage message) => message.Text.StartsWith(Reminder, StringComparison.Ordinal);
 
   private static void AssertNoQuestionOffer(ScriptedRequest request) {

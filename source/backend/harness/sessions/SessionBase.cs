@@ -582,9 +582,11 @@ public abstract class SessionBase {
     return executionStart;
   }
 
-  // Caller holds the session lock. Save before releasing resources and publishing;
-  // only then may the driver complete its settlement task.
-  internal SessionExecutionResult FinishExecution(SessionExecutionDriver execution, ExecutionOutcome outcome) {
+  // Caller holds the session lock. Save before releasing resources and publishing; only then may
+  // the driver complete its settlement task. An ordinary settlement also admits a queued waking
+  // ask, so authorization cannot be stranded by a settlement that never presented it.
+  internal SessionExecutionResult FinishExecution(SessionExecutionDriver execution, ExecutionOutcome outcome,
+      out TaskCompletionSource? wakeStart) {
     SessionExecutionResult saved = store.Executions.TryFinish(Id, execution.ExecutionId, outcome)
         ?? throw new InvalidOperationException("The current execution could not be settled.");
 
@@ -596,7 +598,25 @@ public abstract class SessionBase {
     this.execution = null;
     status.Settled(saved);
     PublishChange();
+    wakeStart = saved.Outcome == ExecutionOutcome.Completed ? StartPendingQuestionRun() : null;
     return saved;
+  }
+
+  // Caller holds the session lock. A settlement that ends without presenting the queue head, such
+  // as a manual compaction, must not leave the recipient idle with an authorized waking ask
+  // pending: run it now, FIFO, or settle it with a clear failure instead of hanging the asker.
+  private TaskCompletionSource? StartPendingQuestionRun() {
+    if (!CanStartWork || agentQuestions is null)
+      return null;
+    QueuedQuestion? waking = agentQuestions.Queued(Id).FirstOrDefault(question => question.Wake);
+    if (waking is null)
+      return null;
+    try {
+      return StartQuestionRun(agentQuestions);
+    } catch (Exception failure) {
+      agentQuestions.Fail(Id, waking.QuestionId, failure.Message);
+      return null;
+    }
   }
 
   private bool IsCurrentExecution(Guid executionId) => execution?.ExecutionId == executionId;

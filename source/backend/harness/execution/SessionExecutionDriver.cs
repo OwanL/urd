@@ -97,6 +97,7 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock sess
 
   private async Task<LlmRequest?> AdvanceAsync(ExecutionOutcome outcome) {
     bool settled = false;
+    TaskCompletionSource? wakeStart = null;
     while (!settled) {
       Task? wake = null;
       Task stopCallbacks;
@@ -136,12 +137,14 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock sess
                 return next;
             }
             SessionExecutionResult saved = session.FinishExecution(this, outcome == ExecutionOutcome.Completed && IsStopping
-                ? ExecutionOutcome.Cancelled : outcome);
+                ? ExecutionOutcome.Cancelled : outcome, out wakeStart);
             settlement.TrySetResult(saved);
           }
         }
       }
     }
+    // The waking run gates on this start signal, so release it only outside the settlement lock.
+    wakeStart?.SetResult();
     return null;
   }
 

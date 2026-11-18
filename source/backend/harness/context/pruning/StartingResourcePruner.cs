@@ -38,7 +38,8 @@ internal sealed class StartingResourcePruner(
           {FileGuidanceScope}
           """,
           document => document.Identity,
-          (document, id) => new InstructionCandidate(id, "instruction", document.Text, document.Path, document.Scope),
+          documents => documents.Select(document => new InstructionCandidate(document.Identity, "instruction",
+              document.Text, document.Path, document.Scope)).ToArray(),
           document => new(document.Identity, System.IO.Path.GetFileName(document.Path), document.Path),
           document => Encoding.UTF8.GetByteCount(document.Text), cancellation);
 
@@ -47,10 +48,14 @@ internal sealed class StartingResourcePruner(
       PruneAsync(candidates, protectedCount, AuxiliaryModelPurpose.Skills, "skills",
           $"""
           Select the specialized skills that are relevant to the task. Keep a skill when its instructions may materially help.
+          Each path is a separate candidate ID. Grouped files share name and description, not necessarily instructions.
+          Choose by name, description and path when sufficient; inspect a file only when it could change what you keep.
           {FileGuidanceScope}
           """,
           skill => skill.Identity,
-          (skill, id) => new SkillCandidate(id, "skill", skill.Name, skill.Description, skill.Path),
+          skills => skills.GroupBy(skill => (skill.Name, skill.Description))
+              .Select(group => new SkillCandidates(group.Key.Name, group.Key.Description,
+                  group.Select(skill => skill.Path).ToArray())).ToArray(),
           skill => new(skill.Identity, skill.Name, skill.Path),
           null, cancellation);
 
@@ -59,18 +64,18 @@ internal sealed class StartingResourcePruner(
       PruneAsync(candidates, protectedCount, AuxiliaryModelPurpose.Tools, "tools",
           "Select the tools that are useful for completing the task. Keep a tool when it enables a relevant action.",
           tool => tool.Name,
-          (tool, id) => new ToolCandidate(id, "tool", tool.Name, tool.Description, tool.JsonSchema),
+          tools => tools.Select(tool => new ToolCandidate(tool.Name, "tool", tool.Name, tool.Description, tool.JsonSchema)).ToArray(),
           tool => new(tool.Name, tool.Name),
           null, cancellation);
 
-  private async Task<StartingResourcePruningResult<T>> PruneAsync<T, TMetadata>(
+  private async Task<StartingResourcePruningResult<T>> PruneAsync<T>(
       IReadOnlyList<T> candidates,
       int protectedCount,
       AuxiliaryModelPurpose purpose,
       string category,
       string categoryBrief,
       Func<T, string> getIdentity,
-      Func<T, string, TMetadata> createMetadata,
+      Func<IEnumerable<T>, object[]> createMetadata,
       Func<T, PrepassResource> createResource,
       Func<T, int>? getSize,
       CancellationToken cancellation) {
@@ -110,9 +115,7 @@ internal sealed class StartingResourcePruner(
         int nextDropCount = 1;
         while (true) {
           string[] submittedIds = identities.Where((_, index) => !excluded[index]).ToArray();
-          object[] metadata = candidates.Select((candidate, index) => (candidate, index))
-              .Where(item => !excluded[item.index])
-              .Select(item => (object)createMetadata(item.candidate, identities[item.index])!).ToArray();
+          object[] metadata = createMetadata(candidates.Where((_, index) => !excluded[index]));
           ChatMessage[] input = CreateSelectorInput(categoryBrief, metadata);
           try {
             string answer = await runner.RunAsync($"pruning.{category}", model, input, null, cancellation);
@@ -231,6 +234,6 @@ internal sealed class StartingResourcePruner(
       new("The pruning response must contain exactly one keptIds array with unique known candidate IDs.");
 
   private sealed record InstructionCandidate(string Id, string Type, string Content, string Source, string Scope);
-  private sealed record SkillCandidate(string Id, string Type, string Name, string Description, string Path);
+  private sealed record SkillCandidates(string Name, string Description, string[] Paths);
   private sealed record ToolCandidate(string Id, string Type, string Name, string? Description, JsonElement Schema);
 }

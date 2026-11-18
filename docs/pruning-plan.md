@@ -457,9 +457,10 @@ fresh user prompt, compaction summary alone for automatic resumption, or summary
 followed by the new user message for manual post-compaction continuation. Omit retained
 continuation context from post-compaction pruning inputs. Do not copy the main system
 instructions and thereby reintroduce protected documents.
-Candidate payloads remain proposed as skill
-name/description/path, existing tool declarations, and full unprotected instruction
-text with source/scope. Treat candidate contents as selection material. The model returns
+Candidate payloads are skill name/description with paths grouped by identical metadata,
+existing tool declarations, and full unprotected instruction text with source/scope.
+Every skill file remains independently selectable by its exact path, even when it shares
+metadata with other files. Treat candidate contents as selection material. The model returns
 kept candidate IDs, not rewritten resources; the pruner validates/maps them back to the
 original typed resources. Invalid output is an ordinary selection failure.
 

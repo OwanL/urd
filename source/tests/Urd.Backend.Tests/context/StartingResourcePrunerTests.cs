@@ -47,13 +47,35 @@ public sealed class StartingResourcePrunerTests {
     Assert.Contains("runs in Urd", client.LastRequest[0].Text, StringComparison.Ordinal);
     Assert.Contains("file path", client.LastRequest[0].Text, StringComparison.Ordinal);
     using JsonDocument skillCandidates = ParseCandidates(client.LastRequest);
-    Assert.Equal(second.Path, skillCandidates.RootElement[1].GetProperty("Path").GetString());
+    Assert.Equal(second.Path, Assert.Single(skillCandidates.RootElement[1].GetProperty("Paths").EnumerateArray()).GetString());
     Assert.DoesNotContain(protectedSkill.Name, client.LastRequest[^1].Text, StringComparison.Ordinal);
     Assert.Equal(new[] { ("skills", "running", 3, 3), ("skills", "completed", 3, 2) },
         statuses.Select(status => (status.Category, status.State, status.Total, status.Retained)));
 
     Assert.Equal("pruning.skills", Assert.IsType<UsageContext>(
         client.Options.Single()!.AdditionalProperties![UsageContext.PropertyName]).Purpose);
+  }
+
+  [Fact]
+  public async Task RepeatedSkillMetadataIsSentOnceWithoutMergingSelectablePaths() {
+    const string sharedDescription = "Repeated skill metadata across several installations.";
+    DiscoveredSkill first = Skill("first", sharedDescription) with { Name = "shared" };
+    DiscoveredSkill second = Skill("second", sharedDescription) with { Name = "shared" };
+    DiscoveredSkill different = Skill("different", "Different guidance.") with { Name = "shared" };
+    string answer = JsonSerializer.Serialize(new { keptIds = new[] { second.Path, different.Path } });
+    var client = new ScriptedChatClient(token => TextUpdates([answer], token));
+    await using RunningParent parent = await StartParentAsync();
+    var runner = new ConversationRunner(parent.Fixture.Session.Recorder, _ => client, [], parent.Fixture.Session.WorkingDirectory);
+    var pruner = CreatePruner(runner, _ => Task.CompletedTask);
+
+    var result = await pruner.PruneAsync([first, different, second], 0, CancellationToken.None).WaitAsync(TestTimeout);
+
+    Assert.False(result.IsFallback);
+    Assert.Equal(new[] { different, second }, result.Retained);
+    string payload = client.LastRequest[^1].Text;
+    Assert.Equal(2, payload.Split(sharedDescription, StringSplitOptions.None).Length);
+    foreach (DiscoveredSkill skill in new[] { first, second, different })
+      Assert.Equal(2, payload.Split(JsonSerializer.Serialize(skill.Path), StringSplitOptions.None).Length);
   }
 
   [Fact]

@@ -129,6 +129,8 @@ the model reads a skill's file when a task matches. Project `SKILL.md` files are
 the working directory without Git. Project and packaged skills are both candidates, including
 same-name entries. When a project skill is selected, the packaged same-name entry is omitted;
 a protected packaged entry is retained. Skill bodies are not supplied to the selector.
+The selector lists each exact path once and groups paths with identical names and
+descriptions; it can still select any of those paths independently.
 
 Add a packaged skill as `skills/<name>/SKILL.md` with `name` and `description`
 frontmatter. The build copies `skills/` beside the server so the model can read it.

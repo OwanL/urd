@@ -3,6 +3,7 @@ using Microsoft.Extensions.AI;
 using Urd.Core.Storage;
 using Urd.Core.Context;
 using Urd.Core.Concurrency;
+using Urd.Core.Execution;
 using Urd.Core.Providers;
 using Urd.Core.Preferences;
 using Urd.Core.Tools;
@@ -10,7 +11,9 @@ using Urd.Core.Tools;
 namespace Urd.Core.Sessions;
 
 // Creates, discovers and opens sessions, keeping one live instance per opened session ID.
-public sealed class SessionManager : IAsyncDisposable {
+// Bounded subagent children are created here too: they are registered under the shutdown fence
+// and unregistered again once their owning run settles and their disposable resources are gone.
+public sealed class SessionManager : IAsyncDisposable, ISubagentRunner {
   public ValueTask DisposeAsync() => new(ShutdownSessionsAsync());
   private readonly UrdStore store;
   private readonly Func<ProviderConnection, IChatClient> createChatClient;
@@ -25,6 +28,7 @@ public sealed class SessionManager : IAsyncDisposable {
   private readonly ReadOnlyCollection<AgentTool> injectedTools = new([]);
   private readonly AsyncLock sessionsLock = new();
   private readonly Dictionary<Guid, PrimarySession> sessions = new();
+  private readonly Dictionary<Guid, SubagentSession> children = new();
   private TaskCompletionSource? sessionShutdown;
 
   public Guid BootId { get; } = Guid.NewGuid();
@@ -57,7 +61,8 @@ public sealed class SessionManager : IAsyncDisposable {
 
   // Focused execution tests supply Urd-owned tools without composing Windows processes.
   internal SessionManager(UrdStore store, Func<ProviderConnection, IChatClient> createChatClient,
-      IReadOnlyList<AgentTool> tools, string workingDirectory) : this(store, createChatClient) {
+      IReadOnlyList<AgentTool> tools, string workingDirectory, ModelSelector? modelSelector = null)
+      : this(store, createChatClient, (AgentToolSettings?)null, null, modelSelector) {
     injectedTools = Array.AsReadOnly(tools.ToArray());
     fallbackWorkingDirectory = Path.GetFullPath(workingDirectory);
   }
@@ -83,8 +88,13 @@ public sealed class SessionManager : IAsyncDisposable {
     if (sessions.TryGetValue(sessionId, out PrimarySession? cached))
       return cached;
 
+    if (children.ContainsKey(sessionId))
+      throw new InvalidOperationException($"Session '{sessionId}' is a subagent session, not a primary session.");
+
     SessionRecord record = store.Sessions.Read(sessionId)
         ?? throw new KeyNotFoundException($"Session '{sessionId}' does not exist.");
+    if (record.Kind != SessionKind.Primary)
+      throw new InvalidOperationException($"Session '{sessionId}' is a subagent session, not a primary session.");
     return Track(CreateSession(record));
   }
 
@@ -97,14 +107,14 @@ public sealed class SessionManager : IAsyncDisposable {
     return store.Sessions.ListPrimaryIds(cursor);
   }
 
-  // Fences new work and stops this manager's live sessions, waiting for saved settlement.
-  // Cancellation abandons only this wait. The caller still owns the store and client.
+  // Fences new work and stops this manager's primary sessions and children, waiting for saved
+  // settlement. Cancellation abandons only this wait. The caller still owns the store and client.
   public async Task ShutdownSessionsAsync(CancellationToken waitCancellation = default) {
     TaskCompletionSource shutdown;
-    PrimarySession[]? sessionsToStop = null;
+    SessionBase[]? sessionsToStop = null;
     using (await sessionsLock.AcquireAsync(CancellationToken.None)) {
       if (sessionShutdown is null) {
-        sessionsToStop = sessions.Values.ToArray();
+        sessionsToStop = [.. sessions.Values, .. children.Values];
         sessionShutdown = new(TaskCreationOptions.RunContinuationsAsynchronously);
       }
 
@@ -118,7 +128,7 @@ public sealed class SessionManager : IAsyncDisposable {
     await shutdown.Task.WaitAsync(waitCancellation);
   }
 
-  private async Task StopSessionsAsync(PrimarySession[] sessions, TaskCompletionSource shutdown) {
+  private async Task StopSessionsAsync(SessionBase[] sessions, TaskCompletionSource shutdown) {
     var failures = new List<Exception>();
     // Fence every handle before a Stop callback can submit a user message to another session.
     await JoinAsync(Task.WhenAll(sessions.Select(session => session.StopAcceptingUserMessagesAsync())));
@@ -162,7 +172,13 @@ public sealed class SessionManager : IAsyncDisposable {
   private PrimarySession CreateSession(SessionRecord record) {
     var pending = new PendingToolCalls();
     ToolCatalog catalog = CreateToolCatalog(pending, record.WorkingDirectory is not null, out ChatProcesses? processes);
-    return new PrimarySession(record, store, createChatClient, catalog, processes, pending, preferences, modelSelector);
+    return new PrimarySession(record, store, createChatClient, catalog, processes, pending, preferences, modelSelector, this);
+  }
+
+  private SubagentSession CreateChild(SessionRecord record) {
+    var pending = new PendingToolCalls();
+    ToolCatalog catalog = CreateToolCatalog(pending, record.WorkingDirectory is not null, out ChatProcesses? processes);
+    return new SubagentSession(record, store, createChatClient, catalog, processes, pending, preferences, modelSelector, this);
   }
 
   private ToolCatalog CreateToolCatalog(PendingToolCalls pending, bool processTools, out ChatProcesses? processes) {
@@ -190,8 +206,148 @@ public sealed class SessionManager : IAsyncDisposable {
     return session;
   }
 
+  private SubagentSession TrackChild(SubagentSession child) {
+    children.Add(child.Id, child);
+    return child;
+  }
+
+  // Runs one bounded child to its final report. The child is registered under the shutdown fence
+  // before any of its work runs, cancellation stops and joins it, and its processes and registry
+  // entry are released only after the run finishes. Cross-session waits hold no manager locks.
+  async Task<SubagentRunResult> ISubagentRunner.RunSubagentAsync(HarnessToolContext caller, SubagentRunRequest request,
+      CancellationToken cancellation) {
+    ArgumentNullException.ThrowIfNull(caller);
+    ArgumentNullException.ThrowIfNull(request);
+    SubagentAssignment assignment = await PrepareAssignmentAsync(caller, request, cancellation);
+
+    SubagentSession? child = null;
+    try {
+      child = await CreateSubagentAsync(assignment, cancellation);
+      return await RunChildAsync(child, assignment, cancellation);
+    } finally {
+      if (child is not null) {
+        await child.KillProcessesAsync();
+        await UnregisterSubagentAsync(child.Id);
+      }
+    }
+  }
+
+  // Reads the parent identity, inherits its working directory, resolves the bucket chat and
+  // captures the chosen parent context. A misdirected caller context fails here, not in the child.
+  private async Task<SubagentAssignment> PrepareAssignmentAsync(HarnessToolContext caller,
+      SubagentRunRequest request, CancellationToken cancellation) {
+    ArgumentException.ThrowIfNullOrWhiteSpace(request.Task);
+    if (modelSelector is null)
+      throw new InvalidOperationException("Subagent buckets require a configured model selector.");
+
+    UserPreferences captured = preferences.Read();
+    LlmSelection selection = await modelSelector.ResolveAsync(request.Bucket, captured, cancellation);
+    SessionRecord parent = store.Sessions.Read(caller.SessionId)
+        ?? throw new InvalidOperationException($"The calling session '{caller.SessionId}' does not exist.");
+    string? contextBlock = ReadParentContext(parent, caller, request, captured.CompactionTriggerTokenCount);
+    return new(parent.Id, caller.CallId, parent.WorkingDirectory, request.Task, contextBlock, selection);
+  }
+
+  private string? ReadParentContext(SessionRecord parent, HarnessToolContext caller, SubagentRunRequest request,
+      int? parentCompactionTriggerTokens) {
+    if (request.Context == SubagentContextMode.None)
+      return null;
+
+    // Only Recent budgets need the parent's own chat selection; stored facts are enough here.
+    LlmSelection? parentSelection = request.Context == SubagentContextMode.Recent
+        ? store.Snapshots.ReadRunSelection(parent.Id, caller.ExecutionId) : null;
+    return store.Subagents.Read(new ExecutionIdentity(parent.Id, caller.ExecutionId, parent.HistoryRevision),
+        caller.RequestId, caller.CallId, request.Context, parentSelection?.ContextWindow, parentCompactionTriggerTokens);
+  }
+
+  private async Task<SubagentSession> CreateSubagentAsync(SubagentAssignment assignment, CancellationToken cancellation) {
+    using (await sessionsLock.AcquireAsync(cancellation)) {
+      ThrowIfShuttingDown();
+      // Children are deliberately absent from SessionCreated: presentation is deferred and the
+      // primary tab list never includes them.
+      return TrackChild(CreateChild(store.Sessions.CreateSubagent(Guid.NewGuid(),
+          assignment.ParentSessionId, assignment.OwningCallId, assignment.WorkingDirectory)));
+    }
+  }
+
+  private async Task<SubagentRunResult> RunChildAsync(SubagentSession child, SubagentAssignment assignment,
+      CancellationToken cancellation) {
+    bool owned = true;
+    try {
+      Guid executionId;
+      try {
+        executionId = await child.StartAssignmentAsync(assignment.Task, assignment.ContextBlock, assignment.Selection);
+      } catch (Exception) when (cancellation.IsCancellationRequested) {
+        // Creation saw the cancellation after registration: stop the owned child before it runs.
+        owned = false;
+        await child.StopExecutionAsync();
+        return Error(child.Id, CancelledReport);
+      }
+
+      try {
+        SessionExecutionResult settled = await child.WaitForExecutionFinishAsync(executionId, CancellationToken.None)
+            .WaitAsync(cancellation);
+        SubagentRunResult result = ReadReport(child.Id, settled);
+        owned = false;
+        return result;
+      } catch (OperationCanceledException) {
+        // Cancellation stops the child and joins its settlement before the report is lost with it.
+        owned = false;
+        await child.StopExecutionAsync();
+        return Error(child.Id, CancelledReport);
+      }
+    } finally {
+      if (owned) {
+        // A non-cancellation failure may leave bounded work behind; joining stays best effort
+        // because the original failure is already the caller's observable result.
+        try {
+          await child.StopExecutionAsync();
+        } catch (Exception) {
+          // The child's own failure or the caller's is already observable.
+        }
+      }
+    }
+  }
+
+  private SubagentRunResult ReadReport(Guid childSessionId, SessionExecutionResult settled) {
+    switch (settled.Outcome) {
+      case ExecutionOutcome.Completed:
+        string report = store.Executions.ReadFinalReport(childSessionId, settled.ExecutionId);
+        return string.IsNullOrWhiteSpace(report)
+            ? Error(childSessionId, "The subagent task produced no report.")
+            : new(childSessionId, report, Error: null);
+      case ExecutionOutcome.Cancelled:
+        return Error(childSessionId, CancelledReport);
+      default:
+        return Error(childSessionId, settled.Error is { } failure
+            ? $"The subagent task failed: {failure}" : "The subagent task failed.");
+    }
+  }
+
+  private static SubagentRunResult Error(Guid childSessionId, string message) =>
+      new(childSessionId, Report: null, Error: message);
+
+  // Removed children are finished or already fenced; their transcripts stay inspectable.
+  private async Task UnregisterSubagentAsync(Guid childSessionId) {
+    using (await sessionsLock.AcquireAsync())
+      children.Remove(childSessionId);
+  }
+
+  // Test observation of live child ownership without opening a removed handle.
+  internal async Task<bool> IsSubagentLiveAsync(Guid sessionId) {
+    using (await sessionsLock.AcquireAsync())
+      return children.ContainsKey(sessionId);
+  }
+
+  // Final result message for runs the parent cannot observe a report from.
+  private const string CancelledReport = "The subagent task was cancelled.";
+
+  // One prepared bounded child: ownership, inherited directory and its whole assignment.
+  private sealed record SubagentAssignment(Guid ParentSessionId, string OwningCallId, string? WorkingDirectory,
+      string Task, string? ContextBlock, LlmSelection Selection);
+
   // Translates raw install reports into provisioning notices, suppressing terminal reports
-  // that follow unrelated launch failures while no download was surfaced.
+  // that follow an unrelated launch failure while no download was surfaced.
   internal void OnBrowserProgress(string report) {
     if (report == WebBrowserInstall.DownloadStarted)
       browserProvisioningActive = true;

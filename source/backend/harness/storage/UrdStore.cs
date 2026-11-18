@@ -29,6 +29,7 @@ public sealed class UrdStore : IDisposable {
     Executions = new(database, toolResults, AuxiliaryConversations);
     Tools = new(database, toolResults);
     Content = new(database);
+    Subagents = new(database, toolResults);
     PrepassDetails = new(database);
     Snapshots = new(database, Content, PrepassDetails);
     History = new(database, PrepassDetails);
@@ -62,6 +63,7 @@ public sealed class UrdStore : IDisposable {
   internal PrepassDetailsReader PrepassDetails { get; }
   internal TranscriptPositionReader Positions { get; }
   internal NotSentInputReader NotSentInputs { get; }
+  internal SubagentContextReader Subagents { get; }
 
   public static UrdStore Open(string databasePath) {
     ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);

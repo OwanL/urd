@@ -45,7 +45,7 @@ internal sealed class PrepassTolerantChatClient(IChatClient inner, bool disposeI
     _ => null
   };
 
-  private static string KeepAll(IEnumerable<ChatMessage> messages) {
+  internal static string KeepAll(IEnumerable<ChatMessage> messages) {
     string prompt = messages.Last(message => message.Role == ChatRole.User).Text;
     const string marker = "Candidates:\n";
     int start = prompt.LastIndexOf(marker, StringComparison.Ordinal);

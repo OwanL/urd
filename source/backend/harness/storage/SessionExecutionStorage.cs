@@ -324,6 +324,19 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
             (ExecutionOutcome)outcome == ExecutionOutcome.Failed ? row.NullableString("error") : null);
       }, ("$session", sessionId), ("$run", executionId)));
 
+  // A settled subagent's report is the ordered output text of its last completed request only.
+  internal string ReadFinalReport(Guid sessionId, Guid runId) => database.Read(transaction =>
+    string.Concat(database.Query(transaction, $"""
+      SELECT o.text_utf8 FROM execution_output o
+      JOIN execution_requests q ON q.request_id = o.request_id
+      JOIN execution_runs r ON r.run_id = q.run_id
+      WHERE r.session_id = $session AND q.run_id = $run AND q.outcome = {(int)ExecutionOutcome.Completed}
+          AND q.request_index = (SELECT MAX(request_index) FROM execution_requests
+              WHERE run_id = $run AND outcome = {(int)ExecutionOutcome.Completed})
+      ORDER BY o.chunk_index;
+      """, row => StorageText.StrictUtf8.GetString((byte[])row["text_utf8"]),
+      ("$session", sessionId), ("$run", runId))));
+
   private static (ExecutionOutcome Outcome, bool AlreadySettled, string? Error, DateTimeOffset? StartedAt)? ChooseFinalOutcome(
       RunFinishState? state, ExecutionOutcome driverOutcome) {
     if (state is null)

@@ -15,7 +15,13 @@ internal sealed record HarnessToolContext(Guid SessionId, Guid ExecutionId, stri
   internal Guid RequestId { get; init; }
 }
 
-// Resolves durable session identities without exposing storage or session management to tools.
+// Resolves durable session identities and bounded child runs without exposing storage or
+// session management to tools.
 internal interface IHarnessSessionServices {
   SessionRecord? Read(Guid sessionId);
+
+  // Runs one child to its final report under the invoking session model. The caller context
+  // owns the invoking request and call identity.
+  Task<SubagentRunResult> RunSubagentAsync(HarnessToolContext caller, SubagentRunRequest request,
+      CancellationToken cancellation);
 }

@@ -11,8 +11,9 @@ namespace Urd.Core.Sessions;
 public sealed class PrimarySession : SessionBase {
   internal PrimarySession(SessionRecord record, UrdStore store, Func<ProviderConnection, IChatClient> createChatClient,
       ToolCatalog? tools = null, ChatProcesses? processes = null, PendingToolCalls? pending = null,
-      PreferenceManager? preferences = null, ModelSelector? modelSelector = null)
-      : base(record, SessionKind.Primary, store, createChatClient, tools, processes, pending, preferences, modelSelector) {
+      PreferenceManager? preferences = null, ModelSelector? modelSelector = null, ISubagentRunner? subagents = null)
+      : base(record, SessionKind.Primary, store, createChatClient, tools, processes, pending, preferences,
+          modelSelector, subagents) {
   }
 
   // Returns a saved acceptance/refusal, without waiting for the LLM answer.

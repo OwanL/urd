@@ -10,12 +10,12 @@ namespace Urd.Core.Execution;
 
 // Persists request and tool progress under the session lock, rejecting stale or stopped work.
 internal sealed class SessionExecutionRecorder(SessionBase session, UrdStore store, AsyncLock sessionLock,
-    ExecutionIdentity identity) {
+    ExecutionIdentity identity, ISubagentRunner? subagents = null) {
   private readonly Dictionary<(string Purpose, string Channel), char> pendingPreviewSurrogates = [];
   internal ExecutionIdentity Identity { get; } = identity;
 
   internal HarnessToolContext CreateHarnessToolContext(string callId) =>
-      new(Identity.SessionId, Identity.ExecutionId, callId, new ToolSessionServices(store.Sessions));
+      new(Identity.SessionId, Identity.ExecutionId, callId, new ToolSessionServices(store.Sessions, subagents));
 
   internal Task<bool> StartRequestAsync(Guid requestId, StartingContext startingContext) =>
     RecordChangeAsync(() => session.WriteToStore(() => store.Executions.StartRequest(Identity, requestId, startingContext)));

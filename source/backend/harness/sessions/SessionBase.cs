@@ -17,6 +17,7 @@ public abstract class SessionBase {
   private readonly UrdStore store;
   private readonly PreferenceManager preferences;
   private readonly ModelSelector? modelSelector;
+  private readonly ISubagentRunner? subagents;
   private readonly Func<ProviderConnection, IChatClient> createChatClient;
   private readonly ToolCatalog tools;
   private readonly StartingContextBuilder startingContextBuilder;
@@ -36,7 +37,7 @@ public abstract class SessionBase {
 
   private protected SessionBase(SessionRecord record, SessionKind kind, UrdStore store, Func<ProviderConnection, IChatClient> createChatClient,
       ToolCatalog? tools = null, ChatProcesses? processes = null, PendingToolCalls? pending = null,
-      PreferenceManager? preferences = null, ModelSelector? modelSelector = null) {
+      PreferenceManager? preferences = null, ModelSelector? modelSelector = null, ISubagentRunner? subagents = null) {
     Id = record.Id;
     Kind = kind;
     notifications = new SessionNotifications(Id);
@@ -47,6 +48,7 @@ public abstract class SessionBase {
     this.store = store;
     this.preferences = preferences ?? new PreferenceManager(store);
     this.modelSelector = modelSelector;
+    this.subagents = subagents;
     this.createChatClient = createChatClient;
     this.tools = tools ?? new ToolCatalog([]);
     startingContextBuilder = new(this.tools, instructionDiscovery: store.InstructionDiscovery);
@@ -277,6 +279,37 @@ public abstract class SessionBase {
     return receipt;
   }
 
+  // Admits a bounded assignment into its first execution in one lock hold, so every input shares
+  // the first request. Refusals throw: a bounded child owns no retries and no resumptions.
+  private protected async Task<Guid> AdmitAssignmentAsync(IReadOnlyList<UserMessageSubmission> submissions) {
+    if (submissions.Count == 0)
+      throw new ArgumentException("An assignment requires at least one input.", nameof(submissions));
+
+    TaskCompletionSource? executionStart = null;
+    Guid executionId;
+    using (await sessionLock.AcquireAsync()) {
+      UserMessageReceipt lead = WriteToStore(() => store.UserMessages.Submit(
+          Id, HistoryRevision, submissions[0], IsAcceptingWork, Guid.NewGuid())).Receipt;
+      if (lead.Acceptance != MessageAcceptance.Accepted)
+        throw new InvalidOperationException($"The assignment was refused ({lead.RefusalReason}).");
+
+      executionId = lead.ExecutionId!.Value;
+      foreach (UserMessageSubmission steered in submissions.Skip(1)) {
+        UserMessageReceipt receipt = WriteToStore(() => store.UserMessages.Submit(
+            Id, HistoryRevision, steered, IsAcceptingWork, Guid.NewGuid(), executionId)).Receipt;
+        if (receipt.Acceptance != MessageAcceptance.Accepted)
+          throw new InvalidOperationException($"The assignment was refused ({receipt.RefusalReason}).");
+      }
+
+      hasAcceptedInput = true;
+      executionStart = StartExecutionAfterUnlock(executionId, submissions[0].LlmSelection!);
+      PublishChange();
+    }
+
+    executionStart?.SetResult();
+    return executionId;
+  }
+
   public Task<MessageEditReceipt?> ReadMessageEditReceiptAsync(Guid operationId, CancellationToken cancellation = default) =>
       ReadUnderLockAsync(() => store.MessageEdits.ReadReceipt(Id, operationId), cancellation);
 
@@ -446,7 +479,7 @@ public abstract class SessionBase {
   private TaskCompletionSource StartExecutionAfterUnlock(Guid executionId, LlmSelection selection, ManualCompactionRequest? compaction = null) {
     var executionStart = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
     var identity = new ExecutionIdentity(SessionId: Id, ExecutionId: executionId, HistoryRevision: HistoryRevision);
-    var recorder = new SessionExecutionRecorder(this, store, sessionLock, identity);
+    var recorder = new SessionExecutionRecorder(this, store, sessionLock, identity, subagents);
     var work = new SessionExecution(recorder, this, createChatClient, selection,
         startingContextBuilder, tools.Tools, pending, compaction);
     execution = new SessionExecutionDriver(this, sessionLock, work);

@@ -196,7 +196,7 @@ internal sealed class SessionExecution : IDisposable {
       try { claimed = await recorder.TryClaimTitleAsync(); }
       catch (Exception failure) { throw new AuxiliaryExecutionException("Saving the title attempt failed.", failure); }
       if (claimed)
-        titleWork = GenerateTitleAsync(newMessages[0], captured);
+        titleWork = GenerateTitleAsync(TitlePrompt(newMessages), captured);
     }
 
     var pruner = new StartingResourcePruner(auxiliary,
@@ -260,6 +260,11 @@ internal sealed class SessionExecution : IDisposable {
       return;
     await SaveTitleOutcomeAsync("failed", error);
   }
+
+  // A primary titles itself from its first prompt; an inherited context block is quoted parent
+  // data, so a subagent titles from its task input alone.
+  private string TitlePrompt(string[] prompts) =>
+      session.Kind == SessionKind.Subagent ? prompts[^1] : prompts[0];
 
   // An unset or unresolvable purpose choice runs on the run's own chat selection, recorded so the
   // UI can flag it; provider call failures after resolution keep their existing fallback behavior.

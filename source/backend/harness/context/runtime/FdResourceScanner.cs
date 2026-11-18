@@ -52,7 +52,7 @@ internal sealed class FdResourceScanner {
     return paths.Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal).ToArray();
   }
 
-  private async Task<string[]> ScanAsync(ResourceMountPolicy.Scan scan, CancellationToken cancellation) {
+  internal async Task<string[]> ScanAsync(ResourceMountPolicy.Scan scan, CancellationToken cancellation) {
     var platform = OperatingSystem.IsWindows() ? "win" : "linux";
     if (OperatingSystem.IsMacOS())
       platform = "osx";
@@ -72,12 +72,12 @@ internal sealed class FdResourceScanner {
     };
     foreach (var argument in new[] { "--absolute-path", "--hidden", "--no-ignore", "--type", "file", "--print0", "--ignore-case", "--threads", "4" })
       start.ArgumentList.Add(argument);
-    if (!OperatingSystem.IsWindows()) {
+    if (!OperatingSystem.IsWindows())
       start.ArgumentList.Add("--one-file-system");
-      foreach (string excluded in scan.Excludes) {
-        start.ArgumentList.Add("--exclude");
-        start.ArgumentList.Add(EscapeGlob(excluded));
-      }
+    foreach (string excluded in scan.Excludes) {
+      start.ArgumentList.Add("--exclude");
+      // A leading slash anchors fd's glob to the scan root on every OS.
+      start.ArgumentList.Add('/' + EscapeGlob(excluded));
     }
     foreach (string argument in new[] { "--", Pattern, scan.Root })
       start.ArgumentList.Add(argument);

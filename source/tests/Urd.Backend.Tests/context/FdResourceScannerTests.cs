@@ -33,6 +33,32 @@ public sealed class FdResourceScannerTests {
   }
 
   [Fact]
+  public async Task ExcludesOnlyMountPathsRelativeToTheScanRoot() {
+    var root = Path.Combine(Path.GetTempPath(), $"urd-fd-excludes-{Guid.NewGuid():N}");
+    try {
+      string[] directories = [
+        Path.Combine(root, "proc"),
+        Path.Combine(root, "safe", "proc"),
+        Path.Combine(root, "remote", "share"),
+        Path.Combine(root, "safe", "remote", "share")
+      ];
+      foreach (string directory in directories) {
+        Directory.CreateDirectory(directory);
+        await File.WriteAllTextAsync(Path.Combine(directory, "AGENTS.md"), "");
+      }
+      var scan = new ResourceMountPolicy.Scan(root, ["proc", "remote/share"]);
+      var paths = await new FdResourceScanner().ScanAsync(scan, CancellationToken.None);
+      Assert.DoesNotContain(Path.Combine(root, "proc", "AGENTS.md"), paths);
+      Assert.DoesNotContain(Path.Combine(root, "remote", "share", "AGENTS.md"), paths);
+      Assert.Contains(Path.Combine(root, "safe", "proc", "AGENTS.md"), paths);
+      Assert.Contains(Path.Combine(root, "safe", "remote", "share", "AGENTS.md"), paths);
+    } finally {
+      if (Directory.Exists(root))
+        Directory.Delete(root, recursive: true);
+    }
+  }
+
+  [Fact]
   public void PlansLocalMountsAndPrunesVirtualAndRemoteMounts() {
     const string mounts = """
         1 0 8:1 / / rw - ext4 /dev/root rw

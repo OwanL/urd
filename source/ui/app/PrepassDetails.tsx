@@ -14,6 +14,7 @@ export function PrepassDetailsView({
   category,
   historyRevision,
   modelNames,
+  summaryError,
 }: {
   client: SessionClient;
   sessionId: string;
@@ -21,6 +22,7 @@ export function PrepassDetailsView({
   category: string;
   historyRevision: number;
   modelNames: ReadonlyMap<string, string>;
+  summaryError?: string | null | undefined;
 }) {
   const [hidden, setHidden] = useState(document.hidden);
   const [details, setDetails] = useState<PrepassDetails | null>(null);
@@ -135,7 +137,7 @@ export function PrepassDetailsView({
     loadMore.current?.();
   };
 
-  if (details === null && error === null)
+  if (details === null && error === null && !summaryError)
     return (
       <p class="prepass-details-note" role="status">
         Loading…
@@ -154,8 +156,12 @@ export function PrepassDetailsView({
   return (
     <div class="prepass-details" onScroll={detailsScroll}>
       <MetaSegments model={model} elapsed={elapsed} cost={cost} />
+      {summaryError && <p class="prepass-details-error">{summaryError}</p>}
       {error && <p class="prepass-details-error">{error}</p>}
-      {details?.error && <p class="prepass-details-error">{details.error}</p>}
+      {details?.error && details.error !== summaryError && (
+        <p class="prepass-details-error">{details.error}</p>
+      )}
+      {details === null && error === null && <p class="prepass-details-note">Loading…</p>}
       {details && (
         <>
           {details.candidateCount > 0 && candidatesList.length > 0 && (

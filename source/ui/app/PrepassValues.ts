@@ -39,12 +39,14 @@ export function preparationOutcome(
 ): "Complete" | "Finished with issues" | null {
   const terminal = ["completed", "fallback", "cancelled", "interrupted", "failed"];
   if (!preparation.length || preparation.some((row) => !terminal.includes(row.state))) return null;
-  return preparation.every((row) => row.state === "completed")
+  return preparation.every((row) => row.state === "completed" && !row.error)
     ? "Complete"
     : "Finished with issues";
 }
 
 export function prepassRowMood(summary: PrepassSummary): PrepassRowModel["mood"] {
+  if (summary.error && (summary.state === "completed" || summary.state === "running"))
+    return "warned";
   if (summary.state === "running") return "running";
   if (summary.state === "pending") return "pending";
   if (summary.state === "completed") return "settled";
@@ -75,7 +77,11 @@ function prepassRowValue(summary: PrepassSummary): string {
     case "pending":
       return "Pending";
     case "fallback":
-      return "Failed · kept all";
+      return summary.candidateCount !== null &&
+        summary.resultCount !== null &&
+        summary.resultCount < summary.candidateCount
+        ? `Failed · kept ${summary.resultCount}/${summary.candidateCount}`
+        : "Failed · kept all";
     case "cancelled":
       return "Cancelled";
     case "interrupted":

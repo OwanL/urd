@@ -169,7 +169,7 @@ export function PreparationRows({
     >
       <button
         type="button"
-        class={`response-status-toggle${open ? " is-open" : ""}`}
+        class={`response-status-toggle${open ? " is-open" : ""}${outcome === "Finished with issues" ? " is-warned" : ""}`}
         hidden={!toggleVisible}
         aria-expanded={toggleVisible ? open : undefined}
         aria-controls={listId}
@@ -239,6 +239,7 @@ function PreparationRow({
           category={row.category}
           historyRevision={historyRevision}
           modelNames={context.modelNames}
+          summaryError={summary.error}
         />
       }
       placement="below"
@@ -255,7 +256,10 @@ function PreparationRow({
         <span aria-hidden="true" class="response-status-separator">
           ·
         </span>
-        <span class="response-status-value">{row.value}</span>
+        <span class="response-status-value">
+          {row.value}
+          {summary.error ? ` · Warning: ${summary.error}` : ""}
+        </span>
       </span>
     </Tooltip>
   );

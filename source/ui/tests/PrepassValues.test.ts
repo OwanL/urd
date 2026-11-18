@@ -68,6 +68,15 @@ void test("settled preparation issues remain explicit in the collapsed summary",
   }
 });
 
+void test("instruction errors remain warnings even when running or completed", () => {
+  for (const state of ["running", "completed"]) {
+    const row = summary({ category: "instructions", state, error: "Instructions omitted" });
+    assert.equal(prepassRowMood(row), "warned");
+    assert.equal(preparationOutcome([row]), state === "running" ? null : "Finished with issues");
+  }
+  assert.equal(prepassRowMood(summary({ category: "instructions", error: null })), "settled");
+});
+
 void test("completed rows show pruned candidate shares", () => {
   assert.equal(
     prepassRowModel(summary({ state: "completed", candidateCount: 2, resultCount: 0 })).value,
@@ -122,6 +131,10 @@ void test("title rows use their own progress wording", () => {
 void test("fallback rows read as failed selection that kept every candidate", () => {
   assert.equal(prepassRowModel(summary({ state: "fallback" })).value, "Failed · kept all");
   assert.equal(prepassRowMood(summary({ state: "fallback" })), "warned");
+  assert.equal(
+    prepassRowModel(summary({ state: "fallback", candidateCount: 4, resultCount: 2 })).value,
+    "Failed · kept 2/4",
+  );
   assert.equal(prepassRowModel(summary({ state: "cancelled" })).value, "Cancelled");
   assert.equal(prepassRowModel(summary({ state: "interrupted" })).value, "Interrupted");
   assert.equal(prepassRowMood(summary({ state: "interrupted" })), "stopped");

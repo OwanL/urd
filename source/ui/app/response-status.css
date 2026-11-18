@@ -101,6 +101,10 @@
   color: #898d93;
 }
 
+.response-status-toggle.is-warned .response-status-value {
+  color: #d5b77d;
+}
+
 .response-status-toggle:hover .response-status-kind,
 .response-status-toggle:hover .response-status-value {
   color: #b8b8b8;

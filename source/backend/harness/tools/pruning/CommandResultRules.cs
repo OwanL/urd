@@ -14,9 +14,8 @@ internal static class CommandResultRules {
   private static readonly Regex lsTotal = new(@"^total[ \t]+\d+$", RegexOptions.None, regexTimeout);
   private static readonly Regex gitLogOption = new(@"^(?:-\d+|--max-count=\d+|--all|--branches|--tags)$", RegexOptions.None, regexTimeout);
   private static readonly Regex lineBreaks = new("\\r?\\n", RegexOptions.None, regexTimeout);
-  private static readonly Regex grepCommand = new("[\\r\\n;#$`\\\\&<>(){}'\"]", RegexOptions.None, regexTimeout);
 
-  internal static string Apply(string toolName, JsonElement arguments, string text, List<string> applied) {
+  internal static string Summarize(string toolName, JsonElement arguments, string text, List<string> applied) {
     string? command = arguments.ValueKind == JsonValueKind.Object && arguments.TryGetProperty("command", out JsonElement value)
         && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
     string? result = null;
@@ -28,18 +27,21 @@ internal static class CommandResultRules {
       } else if (IsGitLog(command)) {
         result = GitLog(text);
         rule = "git-log";
-      } else if (IsGrep(command)) {
-        result = GrepGroup(text);
-        rule = "grep-group";
       }
-    } else if (toolName == "grep") {
-      result = GrepGroup(text);
-      rule = "grep-group";
     }
     if (result is null || result == text)
       return text;
     applied.Add(rule!);
     return result;
+  }
+
+  internal static string GroupMatches(string toolName, JsonElement arguments, string text) {
+    if (toolName == "grep") return GrepGroup(text) ?? text;
+    if (toolName != "bash" || arguments.ValueKind != JsonValueKind.Object
+        || !arguments.TryGetProperty("command", out JsonElement value) || value.ValueKind != JsonValueKind.String)
+      return text;
+    string? command = value.GetString();
+    return command is not null && IsGrep(command) ? GrepGroup(text) ?? text : text;
   }
 
   private static bool SimpleCommand(string command) => !simpleCommand.IsMatch(command);
@@ -106,49 +108,56 @@ internal static class CommandResultRules {
   }
 
   private static bool IsGrep(string command) {
-    if (grepCommand.IsMatch(command)) return false;
-    string[][] segments = command.Split('|').Select(segment => segment.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).ToArray();
-    string[] first = segments[0];
+    var segments = new List<List<string>> { new() };
+    var word = new System.Text.StringBuilder();
+    char quote = '\0';
+    bool started = false;
+    foreach (char c in command) {
+      if (c is '\r' or '\n' || (quote != '\'' && c is '\\' or '$' or '`')) return false;
+      if (quote != '\0') {
+        if (c == quote) quote = '\0';
+        else word.Append(c);
+        continue;
+      }
+      if (c is '\'' or '"') { quote = c; started = true; continue; }
+      if (c is ';' or '&' or '<' or '>' or '(' or ')' or '{' or '}' or '#') return false;
+      if (char.IsWhiteSpace(c) || c == '|') {
+        if (started) { segments[^1].Add(word.ToString()); word.Clear(); started = false; }
+        if (c == '|') segments.Add(new());
+      } else { word.Append(c); started = true; }
+    }
+    if (quote != '\0') return false;
+    if (started) segments[^1].Add(word.ToString());
+    List<string> first = segments[0];
     int i = 0;
-    if (i < first.Length && first[i] == "time") i++;
-    if (i < first.Length && first[i] == "sudo") i++;
-    if (i == first.Length) return false;
+    if (i < first.Count && first[i] == "time") i++;
+    if (i < first.Count && first[i] == "sudo") i++;
+    if (i == first.Count) return false;
     if (first[i] == "git") {
-      if (++i == first.Length || first[i] != "grep") return false;
+      if (++i == first.Count || first[i] != "grep") return false;
     } else if (first[i] is not ("rg" or "ripgrep" or "rga" or "grep" or "egrep" or "fgrep")) return false;
-    return segments.Skip(1).All(segment => segment.Length > 0 && (segment[0] is "head" or "sort"));
+    return segments.Skip(1).All(segment => segment.Count > 0 && (segment[0] is "head" or "sort"));
   }
 
   private static string? GrepGroup(string text) {
     bool trailing = text.EndsWith('\n');
-    int trailingNewlineLength = text.EndsWith("\r\n", StringComparison.Ordinal) ? 2 : 1;
-    string body = trailing ? text[..^trailingNewlineLength] : text;
-    string[] lines = lineBreaks.Split(body);
-    var matches = new Match?[lines.Length];
-    var counts = new Dictionary<string, int>(StringComparer.Ordinal);
-    int matched = 0, nonBlank = 0;
-    for (int i = 0; i < lines.Length; i++) {
-      if (string.IsNullOrWhiteSpace(lines[i])) continue;
-      nonBlank++;
-      Match match = grepMatch.Match(lines[i]);
-      if (!match.Success || match.Groups[1].Length < 2 || !pathy.IsMatch(match.Groups[1].Value)) continue;
-      matches[i] = match;
-      matched++;
-      string path = match.Groups[1].Value;
-      counts.TryGetValue(path, out int count);
-      counts[path] = count + 1;
-    }
-    if (matched == 0 || matched * 5 < nonBlank * 3 || !counts.Values.Any(count => count >= 2)) return null;
+    string newline = text.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+    if (trailing && !text.EndsWith(newline, StringComparison.Ordinal)) return null;
+    string body = trailing ? text[..^newline.Length] : text;
+    string[] lines = body.Split(newline);
     var output = new List<string>();
     string? current = null;
-    for (int i = 0; i < lines.Length; i++) {
-      Match? match = matches[i];
-      if (match is null) { output.Add(lines[i]); current = null; continue; }
+    foreach (string line in lines) {
+      if (line.Length == 0 || line.Contains('\r') || line.Contains('\n') || char.IsWhiteSpace(line[0])) return null;
+      Match match = grepMatch.Match(line);
+      if (!match.Success || match.Groups[1].Length < 2 || !pathy.IsMatch(match.Groups[1].Value)) return null;
+      // A second delimiter could instead belong to the path, so the record has no unique parse.
+      if (Regex.IsMatch(line[(match.Groups[3].Index - 1)..], @":\d+:", RegexOptions.None, regexTimeout)) return null;
       string path = match.Groups[1].Value;
       if (path != current) { output.Add(path); current = path; }
-      output.Add($"  {match.Groups[2].Value}: {match.Groups[3].Value}");
+      output.Add($"  {match.Groups[2].Value}:{match.Groups[3].Value}");
     }
-    string rewritten = string.Join("\n", output) + (trailing ? "\n" : "");
+    string rewritten = string.Join(newline, output) + (trailing ? newline : "");
     return rewritten.Length < text.Length ? rewritten : null;
   }
 }

@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.AI;
+using Urd.Core.Compaction;
 using Urd.Core.Tools;
 using Xunit;
 
@@ -26,17 +27,83 @@ public sealed class ToolResultPrunerTests : IDisposable {
   }
 
   [Fact]
-  public async Task KeepsOutputWhenPruningWouldNotSaveTheMinimumTokens() {
-    const string source = "src/a.cs:1:x\nsrc/a.cs:2:y\n";
-    var applied = new List<string>();
-    Assert.Equal("src/a.cs\n  1: x\n  2: y\n", CommandResultRules.Apply("grep", Arguments(null), source, applied));
-    Assert.Equal(new[] { "grep-group" }, applied);
+  public async Task KeepsUnprofitableGrepGroupingUnchanged() {
+    const string source = "a.cs:1:x\nb.cs:2:y\n";
+    Assert.Equal(source, CommandResultRules.GroupMatches("grep", Arguments(null), source));
     ToolOutput output = new(source, []);
 
     ToolOutput result = await PruneAsync("grep", output);
 
     Assert.Equal(source, result.Text);
     Assert.Empty(Directory.GetFiles(directory));
+  }
+
+  [Theory]
+  [InlineData("grep", null)]
+  [InlineData("bash", "rg needle .")]
+  public async Task GroupsGrepMatchesInline(string name, string? command) {
+    const string source = "src/long-name.cs:1:first\nsrc/long-name.cs:2:second\n";
+    const string expected = "src/long-name.cs\n  1:first\n  2:second\n";
+    Assert.Equal(expected, CommandResultRules.GroupMatches(name, Arguments(command), source));
+    ToolOutput result = await PruneAsync(name, new ToolOutput(source, []), command);
+    Assert.Equal(expected, result.Text);
+    Assert.Empty(Directory.GetFiles(directory));
+  }
+
+  [Fact]
+  public async Task CollapsesDuplicatesInlineWithoutRecall() {
+    ToolOutput result = await PruneAsync("bash", new ToolOutput(RepeatedLines(), []), canRecall: false);
+    Assert.Equal("same repeated status line\n  (... 23 identical lines)\n", result.Text);
+    Assert.DoesNotContain("Read original", result.Text);
+    Assert.Empty(Directory.GetFiles(directory));
+  }
+
+  [Fact]
+  public async Task KeepsDistinctProgressLines() {
+    const string source = "[=====     ] 50%\n[======    ] 60%\n[=======   ] 70%\n";
+    ToolOutput result = await PruneAsync("bash", new ToolOutput(source, []));
+    Assert.Equal(source, result.Text);
+    Assert.Empty(Directory.GetFiles(directory));
+  }
+
+  [Theory]
+  [InlineData("ls -l", "-rw-r--r-- 1 u g 3 Jul 6 12:34 file\n")]
+  [InlineData("git log", "commit abcdef123456789\nAuthor: A\nDate:   today\n\n    Subject\n")]
+  public async Task SmallCommandDetailsStayInline(string command, string source) {
+    ToolOutput result = await PruneAsync("bash", new ToolOutput(source, []), command);
+    Assert.Equal(TextResultRules.Normalize(source), result.Text);
+    Assert.DoesNotContain("Read original", result.Text);
+    Assert.Empty(Directory.GetFiles(directory));
+  }
+
+  [Theory]
+  [InlineData("ls -l", "ls-long", 255)]
+  [InlineData("ls -l", "ls-long", 256)]
+  [InlineData("git log", "git-log", 255)]
+  [InlineData("git log", "git-log", 256)]
+  public async Task CommandSummariesStashOnlyAtNetThreshold(string command, string rule, int saving) {
+    string placeholderPath = Path.Combine(directory, $"urd-result-{new string('0', 32)}.txt");
+    string source = "", reduced = "";
+    for (int padding = 0; padding < 4096; padding++) {
+      source = command == "ls -l"
+          ? $"-rw-r--r-- 1 {new string('u', padding + 1)} g 3 Jul 6 12:34 file\r\n"
+          : $"commit abcdef123456789\r\nAuthor: A\r\nDate:   today\r\n\r\n    Subject\r\n    {new string('x', padding)}\r\n";
+      reduced = CommandResultRules.Summarize("bash", Arguments(command), TextResultRules.Normalize(source), []);
+      string marked = $"[Pruned: {rule}. Read original: {placeholderPath}]\n{reduced}";
+      if (ContextTokenBudget.EstimateText(TextResultRules.Normalize(source)) - ContextTokenBudget.EstimateText(marked) == saving)
+        break;
+    }
+    string candidate = $"[Pruned: {rule}. Read original: {placeholderPath}]\n{reduced}";
+    Assert.Equal(saving, ContextTokenBudget.EstimateText(TextResultRules.Normalize(source)) - ContextTokenBudget.EstimateText(candidate));
+    ToolOutput result = await PruneAsync("bash", new ToolOutput(source, []), command);
+    if (saving == 255) {
+      Assert.Equal(TextResultRules.Normalize(source), result.Text);
+      Assert.Empty(Directory.GetFiles(directory));
+    } else {
+      string path = Assert.Single(Directory.GetFiles(directory));
+      Assert.Equal($"[Pruned: {rule}. Read original: {path}]\n{reduced}", result.Text);
+      Assert.Equal(Encoding.UTF8.GetBytes(source), await File.ReadAllBytesAsync(path));
+    }
   }
 
   [Fact]

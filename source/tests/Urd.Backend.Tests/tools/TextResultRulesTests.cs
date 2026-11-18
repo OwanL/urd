@@ -32,36 +32,40 @@ public sealed class TextResultRulesTests {
   }
 
   [Fact]
-  public void ReduceAppliesProgressBeforeDuplicateCollapseAndReportsOnlyChanges() {
-    string input = "⠋ fetching\n" + string.Concat(Enumerable.Repeat("building module A\n", 3)) + "done\n";
-    var applied = new List<string>();
-    Assert.Equal("building module A\n  (... 2 identical lines)\ndone\n", TextResultRules.Reduce(input, applied));
-    Assert.Equal(new[] { "progress-noise", "duplicate-collapse" }, applied);
+  public void CollapseDuplicatesPreservesLineAndExactRepeatCount() {
+    string input = "start\n" + string.Concat(Enumerable.Repeat("  building module A  \n", 4)) + "done\n";
+    Assert.Equal("start\n  building module A  \n  (... 3 identical lines)\ndone\n", TextResultRules.CollapseDuplicates(input));
   }
 
   [Fact]
-  public void ReducePreservesSeverityLinesAndNonProgressPercentages() {
-    string input = "⠋ fetching\nWARNING: ⠋ retry\nCoverage: 85%\nDone\n";
-    var applied = new List<string>();
-    Assert.Equal("WARNING: ⠋ retry\nCoverage: 85%\nDone\n", TextResultRules.Reduce(input, applied));
-    Assert.Equal(new[] { "progress-noise" }, applied);
+  public void CollapseDuplicatesLeavesLiteralCountNotationAlone() {
+    string input = string.Concat(Enumerable.Repeat("building module A\n", 3)) + "literal: (... 2 identical lines)\n";
+    Assert.Equal(input, TextResultRules.CollapseDuplicates(input));
   }
 
   [Theory]
-  [InlineData("⠋\n⠙\n")]
+  [InlineData("⠋ fetching")]
+  [InlineData("- fetching")]
+  [InlineData("[50%] fetching")]
+  [InlineData("[====> ] 50%")]
+  [InlineData("WARNING: retry")]
+  [InlineData("ERROR: failed")]
+  public void CollapseDuplicatesPreservesProgressAndSeverity(string line) {
+    string input = string.Concat(Enumerable.Repeat(line + "\n", 10));
+    Assert.Equal(input, TextResultRules.CollapseDuplicates(input));
+  }
+
+  [Theory]
   [InlineData("x\nx\nx\n")]
-  [InlineData("WARNING: retry\nWARNING: retry\nWARNING: retry\n")]
   [InlineData("building module A\nbuilding module A\n")]
-  public void ReduceKeepsNoiseOnlyShortOrSeverityRuns(string input) {
-    var applied = new List<string>();
-    Assert.Equal(input, TextResultRules.Reduce(input, applied));
-    Assert.Empty(applied);
+  [InlineData("\n\n\n")]
+  public void CollapseDuplicatesRequiresThreeLinesAndShorterOutput(string input) {
+    Assert.Equal(input, TextResultRules.CollapseDuplicates(input));
   }
 
   [Fact]
-  public void ReduceHandlesCrLfAndPreservesBareCarriageReturn() {
-    var applied = new List<string>();
-    Assert.Equal("done\r", TextResultRules.Reduce("⠋ fetching\r\ndone\r", applied));
-    Assert.Equal(new[] { "progress-noise" }, applied);
+  public void CollapseDuplicatesPreservesLineEndingsAndFinalNewlineState() {
+    string input = string.Concat(Enumerable.Repeat("building module A\r\n", 3)) + "done\r";
+    Assert.Equal("building module A\r\n  (... 2 identical lines)\r\ndone\r", TextResultRules.CollapseDuplicates(input));
   }
 }

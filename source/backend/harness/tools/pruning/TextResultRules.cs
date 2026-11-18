@@ -9,25 +9,13 @@ internal static class TextResultRules {
   private static readonly Regex ansi = new(@"[\u001B\u009B][\[\]()#;?]*(?:(?:(?:[a-zA-Z\d]*(?:;[-a-zA-Z\d/#&.:=?%@~_]*)*)?\u0007)|(?:(?:\d{1,4}(?:;\d{0,4})*)?[\dA-PR-TZcf-nq-uy=><~]))", RegexOptions.CultureInvariant, regexTimeout);
   private static readonly Regex severity = new(@"\b(?:error|warn|warning|fatal|fail|failed|failure|exception|panic|notice)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.ECMAScript, regexTimeout);
   private static readonly Regex bracketedPercent = new(@"^\s*[\(\[].*%[\)\]]", RegexOptions.CultureInvariant, regexTimeout);
+  private static readonly Regex asciiProgress = new(@"^\s*(?:[|/\\-]\s+|\[[=\-#>. ]+\]\s*\d{1,3}%|\d{1,3}%\s*\[[=\-#>. ]+\])", RegexOptions.CultureInvariant, regexTimeout);
+  private static readonly Regex countNotation = new(@"\(\.\.\. \d+ identical lines\)", RegexOptions.CultureInvariant, regexTimeout);
 
   internal static string Normalize(string text) {
     text = ansi.Replace(text, "").Replace("\r\n", "\n", StringComparison.Ordinal);
     text = CollapseBlankRuns(text);
     return MinifyJson(text);
-  }
-
-  internal static string Reduce(string text, List<string> applied) {
-    string reduced = RemoveProgress(text);
-    if (reduced != text) {
-      applied.Add("progress-noise");
-      text = reduced;
-    }
-    reduced = CollapseDuplicates(text);
-    if (reduced != text) {
-      applied.Add("duplicate-collapse");
-      text = reduced;
-    }
-    return text;
   }
 
   private static string CollapseBlankRuns(string text) {
@@ -84,47 +72,29 @@ internal static class TextResultRules {
     return output.ToString();
   }
 
-  private static string RemoveProgress(string text) {
-    if (!text.Contains('\n')) return text;
-    bool trailing = text.EndsWith('\n');
-    string normalized = text.Replace("\r\n", "\n", StringComparison.Ordinal);
-    string body = trailing ? normalized[..^1] : normalized;
-    string[] lines = body.Split('\n');
-    var kept = new List<string>(lines.Length);
-    bool removed = false;
-    foreach (string line in lines) {
-      if (IsProgress(line)) removed = true;
-      else kept.Add(line);
-    }
-    if (!removed || !kept.Any(line => !string.IsNullOrWhiteSpace(line))) return text;
-    string result = string.Join('\n', kept) + (trailing ? "\n" : "");
-    return result.Length < text.Length ? result : text;
-  }
-
   private static bool IsProgress(string line) {
     if (string.IsNullOrWhiteSpace(line) || severity.IsMatch(line)) return false;
-    if (line.Any(c => c is >= '\u2800' and <= '\u28ff')) return true;
+    if (line.Any(c => c is >= '\u2800' and <= '\u28ff') || asciiProgress.IsMatch(line)) return true;
     return line.Contains('%') && (line.Any(c => c is >= '\u2588' and <= '\u259f' or >= '\u25a0' and <= '\u25a9') || bracketedPercent.IsMatch(line));
   }
 
-  private static string CollapseDuplicates(string text) {
-    if (!text.Contains('\n')) return text;
+  internal static string CollapseDuplicates(string text) {
+    if (!text.Contains('\n') || countNotation.IsMatch(text)) return text;
     bool trailing = text.EndsWith('\n');
-    string normalized = text.Replace("\r\n", "\n", StringComparison.Ordinal);
-    string body = trailing ? normalized[..^1] : normalized;
+    string body = trailing ? text[..^1] : text;
     string[] lines = body.Split('\n');
     var output = new List<string>(lines.Length);
     int removed = 0;
     for (int i = 0; i < lines.Length;) {
       string line = lines[i];
       int end = i + 1;
-      if (!string.IsNullOrWhiteSpace(line) && !severity.IsMatch(line)) {
+      if (!string.IsNullOrWhiteSpace(line) && !severity.IsMatch(line) && !IsProgress(line)) {
         while (end < lines.Length && lines[end] == line) end++;
       }
       int count = end - i;
       output.Add(line);
       if (count >= 3) {
-        output.Add($"  (... {count - 1} identical lines)");
+        output.Add($"  (... {count - 1} identical lines){(line.EndsWith('\r') ? "\r" : "")}");
         removed += count - 1;
       } else if (count == 2) output.Add(line);
       i = end;

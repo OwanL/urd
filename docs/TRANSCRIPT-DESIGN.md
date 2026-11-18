@@ -572,8 +572,11 @@ Keep these boundaries distinct: underlying process/service output; the tool's
 returned result; and its post-processing/model-facing representation. Owner assigns
 omission/recall policy to the **pruner/producer**, not the transcript. For enormous
 output, that component may substitute an omission note and instructions/reference
-for retrieving the material. Urd prunes eligible text once at tool completion. Lossy reductions require `read`
-to be offered and must save at least eight estimated tokens after the recall note.
+for retrieving the material. Urd prunes eligible text once at tool completion. Unambiguous grep matches can share a path header, and runs of identical lines
+can carry a repeat count. Neither creates a recall file. Distinct progress lines
+stay visible. Only detailed directory listings and commit logs get a summary
+with a recall note, and only if `read` is offered and the summary saves at least
+256 estimated tokens compared with keeping the details inline, including the note.
 The note points to the pre-pruning tool result in OS temp storage. Recall is
 best-effort: deleting that file does not invalidate the saved model-facing text.
 

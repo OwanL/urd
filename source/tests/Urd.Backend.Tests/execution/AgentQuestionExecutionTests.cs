@@ -488,6 +488,7 @@ public sealed class AgentQuestionExecutionTests {
   private sealed class QuestionFixture : IAsyncDisposable {
     private readonly TemporaryDatabase database = new();
     private readonly UrdStore store;
+    private readonly ProviderManager? providers;
     private readonly QuestionProbe probe = new();
     private readonly ConcurrentQueue<Func<CancellationToken, IAsyncEnumerable<ChatResponseUpdate>>> responses = new();
     private readonly ConcurrentQueue<ScriptedRequest> conversationRequests = new();
@@ -506,11 +507,15 @@ public sealed class AgentQuestionExecutionTests {
 
     private QuestionFixture(Func<CancellationToken, Task<ChatResponse>>? summarize) {
       store = UrdStore.Open(database.Path);
+      // A selector with no configured bucket falls back to the session model; without one,
+      // prepass model resolution fails and pruning keeps every candidate.
+      if (summarize is not null)
+        providers = new ProviderManager(store, () => new Uri("http://localhost:54321/api/providers/callback"));
       tools = summarize is null ? [probe] : [probe, new AnswerAgentTool()];
       Client = summarize is null ? new ScriptedChatClient(RespondToConversation) : new ScriptedChatClient(
           (request, cancellation) => request.Purpose switch {
             "title" => TextUpdates(["Test session"], cancellation),
-            "pruning.tools" => TextUpdates(["""{"keptIds":["question_probe"]}"""], cancellation),
+            "pruning.tools" => TextUpdates([KeepProbe(request)], cancellation),
             "pruning.skills" or "pruning.instructions" => TextUpdates([PrepassTolerantChatClient.KeepAll(request.Messages)], cancellation),
             _ => CaptureConversation(request, cancellation)
           }, async (_, cancellation) => {
@@ -519,6 +524,14 @@ public sealed class AgentQuestionExecutionTests {
             return summary;
           });
       Manager = CreateManager();
+    }
+
+    private static string KeepProbe(ScriptedRequest request) {
+      // A pending probe is runtime-protected at a compaction boundary, not a candidate.
+      using JsonDocument candidates = JsonDocument.Parse(PrepassTolerantChatClient.KeepAll(request.Messages));
+      string[] keptIds = candidates.RootElement.GetProperty("keptIds").EnumerateArray()
+          .Select(value => value.GetString()!).Where(id => id == "question_probe").ToArray();
+      return JsonSerializer.Serialize(new { keptIds });
     }
 
     private IAsyncEnumerable<ChatResponseUpdate> CaptureConversation(ScriptedRequest request, CancellationToken cancellation) {
@@ -543,6 +556,11 @@ public sealed class AgentQuestionExecutionTests {
         fixture.Respond(Complete);
         Guid recipientRun = await fixture.StartAsync("recipient boot");
         Assert.Equal(ExecutionOutcome.Completed, (await fixture.FinishAsync(recipientRun)).Outcome);
+        if (summarize is not null) {
+          StartingContext starting = Assert.IsType<StartingContext>(fixture.Recipient.ReadStartingContext());
+          Assert.Contains(starting.Tools, tool => tool.Name == "question_probe");
+          Assert.DoesNotContain(starting.Tools, tool => tool.Name == "answer_agent");
+        }
         fixture.recipientTitle = await fixture.TitleAsync(fixture.Recipient.Id).WaitAsync(TestTimeout);
         return fixture;
       } catch {
@@ -600,7 +618,8 @@ public sealed class AgentQuestionExecutionTests {
         row => (Guid.Parse(row.GetString(0)), Guid.Parse(row.GetString(1)), row.GetInt32(2)));
 
     internal SessionManager CreateManager() => new(store,
-        _ => PrepassTolerantChatClient.WrapIfNeeded(Client, disposeInner: false), tools, Path.GetDirectoryName(database.Path)!);
+        _ => PrepassTolerantChatClient.WrapIfNeeded(Client, disposeInner: false), tools, Path.GetDirectoryName(database.Path)!,
+        providers is null ? null : new ModelSelector(providers));
 
     private async Task<string> TitleAsync(Guid id) {
       using var timeout = new CancellationTokenSource(TestTimeout);
@@ -613,6 +632,10 @@ public sealed class AgentQuestionExecutionTests {
 
     public async ValueTask DisposeAsync() {
       await Manager.ShutdownSessionsAsync().WaitAsync(TestTimeout);
+      if (providers is not null) {
+        await providers.ShutdownAsync().WaitAsync(TestTimeout);
+        providers.Dispose();
+      }
       store.Dispose();
       Client.Dispose();
       database.Dispose();

@@ -26,6 +26,23 @@ public sealed class ModelContextWindowsTests {
   }
 
   [Fact]
+  public void OpenAiGpt56DefaultsUseOfficialWindowWithoutChangingChatGptOrOverrides() {
+    var official = Connection(ProviderRoute.OpenAI, "https://api.openai.com/v1/");
+    var chatGpt = Connection(ProviderRoute.ChatGpt, "https://chatgpt.com/backend-api");
+    var custom = Connection(ProviderRoute.Custom, "https://fixture.invalid/v1/");
+    using JsonDocument reported = JsonDocument.Parse("{\"context_window\":123456}");
+
+    foreach (string modelId in new[] { "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol" }) {
+      Assert.Equal(272_000, ModelContextWindows.DefaultFor(official, modelId));
+      Assert.Equal(372_000, ModelContextWindows.DefaultFor(chatGpt, modelId));
+      Assert.Equal(123_456, ModelContextWindows.Resolve(official, modelId, reported.RootElement));
+      Assert.Null(ModelContextWindows.DefaultFor(custom, modelId));
+    }
+
+    Assert.Null(ModelContextWindows.DefaultFor(official, "gpt-5.6-luna-custom"));
+  }
+
+  [Fact]
   public void PositiveReportedWindowWinsAndInvalidValuesFallBack() {
     var official = Connection(ProviderRoute.OpenAI, "https://api.openai.com/v1/");
     using JsonDocument positive = JsonDocument.Parse("{\"context_window\":4096}");

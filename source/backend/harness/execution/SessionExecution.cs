@@ -252,6 +252,15 @@ internal sealed class SessionExecution : IDisposable {
     }
   }
 
+  // A failed generation publishes the truncated prompt as the final title; a rejected fallback
+  // publication keeps the plain failure recording.
+  private async Task SaveFallbackTitleAsync(string prompt, string error) {
+    string? fallback = TitleGenerator.CreateFallback(prompt);
+    if (fallback is not null && await recorder.PublishFallbackTitleAsync(fallback, error))
+      return;
+    await SaveTitleOutcomeAsync("failed", error);
+  }
+
   // An unset or unresolvable purpose choice runs on the run's own chat selection, recorded so the
   // UI can flag it; provider call failures after resolution keep their existing fallback behavior.
   private async Task<AuxiliaryModelResolution> ResolvePrepassModelAsync(AuxiliaryModelPurpose purpose,
@@ -263,6 +272,8 @@ internal sealed class SessionExecution : IDisposable {
     }
   }
 
+  // Title work never blocks or changes the execution. Generation failure falls back to the first
+  // prompt as the final title; cancellation of the execution itself leaves no title at all.
   private async Task GenerateTitleAsync(string prompt, UserPreferences captured) {
     Exception? fatal = null;
     try {
@@ -282,6 +293,7 @@ internal sealed class SessionExecution : IDisposable {
       fatal = failure;
       throw;
     } catch (OperationCanceledException) when (IsStopping) {
+      // Cancelling the execution is not a generation failure: the title stays unset.
       try {
         await SaveTitleOutcomeAsync("cancelled", null);
       } catch (AuxiliaryExecutionException failure) {
@@ -290,7 +302,7 @@ internal sealed class SessionExecution : IDisposable {
       }
     } catch (Exception failure) {
       try {
-        await SaveTitleOutcomeAsync("failed", failure.Message);
+        await SaveFallbackTitleAsync(prompt, failure.Message);
       } catch (AuxiliaryExecutionException recordingFailure) {
         fatal = recordingFailure;
         throw;

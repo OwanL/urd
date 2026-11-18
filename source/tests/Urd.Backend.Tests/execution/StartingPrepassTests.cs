@@ -239,7 +239,7 @@ public sealed class StartingPrepassTests {
   }
 
   [Fact]
-  public async Task FailedTitleIsRecordedWithoutChangingTheExecutionOrRetrying() {
+  public async Task FailedTitleFallsBackToTheTruncatedPromptWithoutChangingTheExecutionOrRetrying() {
     const string titleFailure = "Title model unavailable.";
     var client = new ScriptedChatClient((request, token) => request.Purpose switch {
       "conversation" => TextUpdates(["done"], token),
@@ -251,12 +251,12 @@ public sealed class StartingPrepassTests {
     await using var fixture = new ExecutionFixture(client, Array.Empty<AgentTool>(), store => providers = CreateProviders(store));
     await ConfigureAuxiliaryModelAsync(fixture, providers);
 
-    Guid execution = await SubmitAndSettleAsync(fixture, "orbit compass title failure");
+    Guid execution = await SubmitAndSettleAsync(fixture, "orbit compass title");
 
     Assert.Equal(ExecutionOutcome.Completed,
         (await fixture.Session.WaitForExecutionFinishAsync(execution).WaitAsync(TestTimeout)).Outcome);
-    Assert.Null(fixture.Store.Snapshots.ReadPersisted(fixture.Session.Id).Title);
-    Assert.Equal("failed", fixture.Database.ReadRows(
+    Assert.Equal("orbit compass title", fixture.Store.Snapshots.ReadPersisted(fixture.Session.Id).Title);
+    Assert.Equal("fallback", fixture.Database.ReadRows(
         $"SELECT state FROM session_prepass_details WHERE run_id = '{execution:D}' AND category = 'title';",
         row => row.GetString(0)).Single());
     Assert.NotNull(fixture.Database.ReadRows(

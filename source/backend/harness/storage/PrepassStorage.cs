@@ -34,13 +34,23 @@ internal sealed class PrepassStorage(Database database) {
     return true;
   });
 
-  internal bool PublishTitle(ExecutionIdentity parent, string title) {
+  // Publishing settles the one-shot title attempt exactly once: a generated title completes the
+  // attempt, while a failed attempt publishes its fallback and keeps the generation error.
+  internal bool PublishTitle(ExecutionIdentity parent, string title) => SettleTitle(parent, title, "completed", null);
+
+  internal bool PublishFallbackTitle(ExecutionIdentity parent, string title, string? generationError) =>
+      SettleTitle(parent, title, "fallback", generationError);
+
+  private bool SettleTitle(ExecutionIdentity parent, string title, string detailState, string? error) {
     ArgumentNullException.ThrowIfNull(title);
     _ = StorageText.StrictUtf8.GetByteCount(title);
     if (!TitleGenerator.IsValid(title))
       throw new ArgumentException("A published title must contain 1–25 characters on one line.", nameof(title));
+    string? boundedError = BoundError(error);
 
     return database.Write(transaction => {
+      // The uniqueness check and the write share one immediate transaction, so concurrent sessions
+      // publishing the same title serialize before either observes the other's choice.
       int updated = database.Execute(transaction, $"""
         UPDATE session_prepass_title SET title = $title
         WHERE session_id = $session AND run_id = $run AND title IS NULL
@@ -49,20 +59,42 @@ internal sealed class PrepassStorage(Database database) {
                     AND d.boundary_id = $boundary AND d.state = 'running')
             AND EXISTS (SELECT 1 FROM execution_runs r JOIN sessions s ON s.session_id = r.session_id
                 WHERE r.session_id = $session AND r.run_id = $run AND {ExecutionSql.CurrentRunCondition});
-        """, ExecutionSql.Parameters(parent, ("$title", title), ("$boundary", Guid.Empty)));
+        """, ExecutionSql.Parameters(parent, ("$title", FinalizeTitle(transaction, title)), ("$boundary", Guid.Empty)));
       if (updated == 0)
         return false;
 
       if (database.Execute(transaction, $"""
-          UPDATE session_prepass_details SET state = 'completed', finished_at = $finished
+          UPDATE session_prepass_details SET state = $state, finished_at = $finished, error = $error
           WHERE session_id = $session AND run_id = $run AND boundary_id = $boundary AND category = 'title'
               AND state = 'running'
               AND EXISTS (SELECT 1 FROM execution_runs r JOIN sessions s ON s.session_id = r.session_id
                   WHERE r.session_id = $session AND r.run_id = $run AND {ExecutionSql.CurrentRunCondition});
-          """, ExecutionSql.Parameters(parent, ("$boundary", Guid.Empty), ("$finished", StorageText.UtcTimestamp()))) != 1)
+          """, ExecutionSql.Parameters(parent, ("$boundary", Guid.Empty), ("$state", detailState),
+            ("$finished", StorageText.UtcTimestamp()), ("$error", boundedError))) != 1)
         throw new InvalidOperationException("The published title has no matching running detail.");
       return true;
     });
+  }
+
+  // Final titles are unique across stored sessions. A duplicate base takes the lowest free " (n)"
+  // suffix starting at 2, shortening the base so the suffixed title respects the character limit.
+  private string FinalizeTitle(SqliteTransaction transaction, string candidate) {
+    HashSet<string> stored = database.Query(transaction,
+        "SELECT title FROM session_prepass_title WHERE title IS NOT NULL", row => row.String("title")).ToHashSet();
+    if (!stored.Contains(candidate))
+      return candidate;
+
+    int suffix = 1;
+    string final;
+    do {
+      suffix++;
+      string suffixText = $" ({suffix})";
+      int room = TitleGenerator.MaximumCharacters - suffixText.Length;
+      if (room < 1)
+        throw new InvalidOperationException("No unique title suffix fits within the character limit.");
+      final = TitleGenerator.LimitScalars(candidate, room).TrimEnd() + suffixText;
+    } while (stored.Contains(final));
+    return final;
   }
 
   internal bool RecordTitleOutcome(ExecutionIdentity parent, string state, string? error) {
@@ -295,7 +327,7 @@ internal sealed class PrepassStorage(Database database) {
     if (error is null)
       return null;
     _ = StorageText.StrictUtf8.GetByteCount(error);
-    return LimitScalars(error, MaximumErrorScalars);
+    return TitleGenerator.LimitScalars(error, MaximumErrorScalars);
   }
 
   private static string WriteCandidates(IReadOnlyList<PrepassResource> candidates) {
@@ -350,12 +382,6 @@ internal sealed class PrepassStorage(Database database) {
     foreach (Rune rune in runes)
       tail.Append(rune.ToString());
     return tail.ToString();
-  }
-
-  private static string LimitScalars(string value, int maximumScalars) {
-    return value.EnumerateRunes().Skip(maximumScalars).Any()
-        ? string.Concat(value.EnumerateRunes().Take(maximumScalars).Select(rune => rune.ToString()))
-        : value;
   }
 
   private sealed record PreviewState(string Output, string Reasoning, bool OutputTruncated, bool ReasoningTruncated,

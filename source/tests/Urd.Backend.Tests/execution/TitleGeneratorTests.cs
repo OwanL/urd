@@ -23,6 +23,15 @@ public sealed class TitleGeneratorTests {
   }
 
   [Fact]
+  public void FallbackCollapsesWhitespaceAndControlCharactersAndKeepsTwentyFiveScalars() {
+    Assert.Equal("first prompt here", TitleGenerator.CreateFallback("  first \r\n prompt \t here  "));
+    Assert.Equal("a b c", TitleGenerator.CreateFallback("a\u0000b\u0007\nc\t\t "));
+    Assert.Null(TitleGenerator.CreateFallback(" \u0007\t \u0001"));
+    // Truncation counts 25 Unicode scalars and would never split a surrogate pair.
+    Assert.Equal(new string('a', 24) + "🧭", TitleGenerator.CreateFallback(new string('a', 24) + "🧭🧭🧭"));
+  }
+
+  [Fact]
   public async Task GenerationCorrectsOneTwentySixRuneAnswerAndAcceptsTheCorrectedTitle() {
     var mainWaiting = Signal();
     var mainRelease = Signal();

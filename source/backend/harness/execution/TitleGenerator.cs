@@ -12,6 +12,34 @@ internal static class TitleGenerator {
       && title == title.Trim() && !title.Any(char.IsControl)
       && title.EnumerateRunes().Count() <= MaximumCharacters;
 
+  // A failed generation attempt falls back to the first prompt. Whitespace and control characters
+  // collapse into single spaces so the fallback keeps the published shape; an empty result has
+  // no title and the attempt stays failed. Cancellation of the execution itself is handled by the
+  // caller and leaves no title at all.
+  internal static string? CreateFallback(string prompt) {
+    var collapsed = new StringBuilder(prompt.Length);
+    bool pendingSpace = false;
+    foreach (Rune rune in prompt.EnumerateRunes()) {
+      if (Rune.IsWhiteSpace(rune) || Rune.IsControl(rune)) {
+        pendingSpace = collapsed.Length > 0;
+        continue;
+      }
+      if (pendingSpace) {
+        collapsed.Append(' ');
+        pendingSpace = false;
+      }
+      collapsed.Append(rune.ToString());
+    }
+    return collapsed.Length == 0 ? null : LimitScalars(collapsed.ToString(), MaximumCharacters);
+  }
+
+  // Keeps the leading Unicode scalars, dropping any partial trailing surrogate pair with them.
+  internal static string LimitScalars(string value, int maximumScalars) {
+    return value.EnumerateRunes().Skip(maximumScalars).Any()
+        ? string.Concat(value.EnumerateRunes().Take(maximumScalars).Select(rune => rune.ToString()))
+        : value;
+  }
+
   internal static Task<string> GenerateAsync(ConversationRunner runner, AuxiliaryModelResolution model,
       string prompt, CancellationToken cancellation) => runner.RunAsync("title", model, [
         new(ChatRole.System, "Name this session from its first user message. You may independently explore with read/bash. "

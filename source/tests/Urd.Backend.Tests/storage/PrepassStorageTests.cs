@@ -4,6 +4,7 @@ using Urd.Core.Execution;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
 using Xunit;
+using static Urd.Backend.Tests.Support.TestAsync;
 
 namespace Urd.Backend.Tests.Storage;
 
@@ -138,5 +139,61 @@ public sealed class PrepassStorageTests {
     using UrdStore reopened = UrdStore.Open(database.Path);
     Assert.Contains(reopened.Snapshots.ReadPersisted(session).Pruning!,
         status => status.Category == "tools" && status.State == "running");
+  }
+
+  [Fact]
+  public void DuplicateTitlesTakeTheLowestFreeSuffixShortenedWithinTheLimit() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    string longBase = new string('b', 25);
+
+    Assert.Equal("Fix login bug", Published(store, "Fix login bug"));
+    Assert.Equal("Fix login bug (2)", Published(store, "Fix login bug"));
+    Assert.Equal("Fix login bug (3)", Published(store, "Fix login bug"));
+    Assert.Equal(longBase, Published(store, longBase));
+
+    // The base shortens so the suffixed title stays at or below 25 scalars.
+    string second = Published(store, longBase);
+    Assert.Equal(25, second.EnumerateRunes().Count());
+    Assert.EndsWith(" (2)", second, StringComparison.Ordinal);
+    string third = Published(store, longBase);
+    Assert.Equal(25, third.EnumerateRunes().Count());
+    Assert.EndsWith(" (3)", third, StringComparison.Ordinal);
+  }
+
+  [Fact]
+  public async Task ConcurrentStoresPublishingTheSameTitleDoNotCollide() {
+    using var database = new TemporaryDatabase();
+    var first = ClaimedTitle(database.Path);
+    var second = ClaimedTitle(database.Path);
+    using UrdStore storeA = UrdStore.Open(database.Path);
+    using UrdStore storeB = UrdStore.Open(database.Path);
+
+    bool[] published = await Task.WhenAll(
+        Task.Run(() => storeA.Prepass.PublishTitle(first.Identity, "Shared launch")),
+        Task.Run(() => storeB.Prepass.PublishTitle(second.Identity, "Shared launch"))).WaitAsync(TestTimeout);
+    Assert.All(published, Assert.True);
+
+    string[] titles = [storeA.Snapshots.ReadPersisted(first.Session).Title!,
+        storeB.Snapshots.ReadPersisted(second.Session).Title!];
+    Assert.Equal(["Shared launch", "Shared launch (2)"], [.. titles.OrderBy(title => title, StringComparer.Ordinal)]);
+  }
+
+  private static string Published(UrdStore store, string title) {
+    var execution = new ExecutionIdentity(store.Sessions.CreatePrimary(Guid.NewGuid()).Id, Guid.NewGuid(), 0);
+    store.UserMessages.Submit(execution.SessionId, 0,
+        new(Guid.NewGuid(), 0, "requested", TestLlmSelection.Default), true, execution.ExecutionId, null);
+    Assert.True(store.Prepass.TryClaimTitle(execution));
+    Assert.True(store.Prepass.PublishTitle(execution, title));
+    return store.Snapshots.ReadPersisted(execution.SessionId).Title!;
+  }
+
+  private static (Guid Session, ExecutionIdentity Identity) ClaimedTitle(string databasePath) {
+    using UrdStore store = UrdStore.Open(databasePath);
+    var identity = new ExecutionIdentity(store.Sessions.CreatePrimary(Guid.NewGuid()).Id, Guid.NewGuid(), 0);
+    store.UserMessages.Submit(identity.SessionId, 0,
+        new(Guid.NewGuid(), 0, "requested", TestLlmSelection.Default), true, identity.ExecutionId, null);
+    Assert.True(store.Prepass.TryClaimTitle(identity));
+    return (identity.SessionId, identity);
   }
 }

@@ -4,7 +4,7 @@ namespace Urd.Core.Storage;
 
 // Creates the current pre-release schema; incompatible databases require a manual reset.
 internal static class DatabaseSchema {
-  private const int SchemaVersion = 32;
+  private const int SchemaVersion = 33;
 
   internal static void Initialize(SqliteConnection connection) {
     using SqliteCommand command = connection.CreateCommand();
@@ -90,6 +90,8 @@ internal static class DatabaseSchema {
           run_id TEXT NOT NULL REFERENCES execution_runs(run_id),
           title TEXT
       ) STRICT;
+      -- Final titles are unique addressable keys; the suffixing publish relies on this backstop.
+      CREATE UNIQUE INDEX one_final_title ON session_prepass_title(title) WHERE title IS NOT NULL;
       CREATE TABLE session_pruning_status (
           session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
           run_id TEXT NOT NULL REFERENCES execution_runs(run_id),

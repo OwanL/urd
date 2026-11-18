@@ -5,6 +5,7 @@ using Urd.Backend.Tests.Support;
 using Urd.Core.Execution;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
+using Urd.Core.Tools;
 using Urd.Server;
 using Xunit;
 using static Urd.Backend.Tests.Support.ScriptedResponses;
@@ -148,6 +149,49 @@ public sealed class SessionEventHubTests {
       release.TrySetResult();
       await sessions.ShutdownSessionsAsync().WaitAsync(TestTimeout);
     }
+  }
+
+  [Fact]
+  public async Task BrowserProvisioningBroadcastsToLivePagesAndReplaysWhileDownloading() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    using var client = new FakeChatClient();
+    var sessions = new SessionManager(store, _ => client);
+    using var hub = new SessionEventHub(sessions);
+    Assert.True(hub.TryCreate(out SessionEventPage page));
+    using (page) {
+      sessions.OnBrowserProgress(WebBrowserInstall.DownloadStarted);
+      SessionSseEvent download = Assert.IsType<SessionSseEvent>(
+          (await page.ReadNextAsync(CancellationToken.None).WaitAsync(TestTimeout)).Event);
+      Assert.Equal("browser-provisioning", download.Name);
+      Assert.Null(download.Session);
+      Assert.Equal("downloading", ReadString(download.Data, "state"));
+      Assert.Equal(WebBrowserInstall.DownloadStarted, ReadString(download.Data, "detail"));
+
+      Assert.True(hub.TryCreate(out SessionEventPage replayed));
+      using (replayed) {
+        SessionSseEvent replay = Assert.IsType<SessionSseEvent>(
+            (await replayed.ReadNextAsync(CancellationToken.None).WaitAsync(TestTimeout)).Event);
+        Assert.Equal("browser-provisioning", replay.Name);
+        Assert.Equal("downloading", ReadString(replay.Data, "state"));
+      }
+
+      sessions.OnBrowserProgress(WebBrowserInstall.DownloadFinished);
+      SessionSseEvent ready = Assert.IsType<SessionSseEvent>(
+          (await page.ReadNextAsync(CancellationToken.None).WaitAsync(TestTimeout)).Event);
+      Assert.Equal("browser-provisioning", ready.Name);
+      Assert.Equal("ready", ReadString(ready.Data, "state"));
+      Assert.Null(ReadString(ready.Data, "detail"));
+
+      // Terminal notices are not replayed to pages opened after the provisioning ended.
+      Assert.True(hub.TryCreate(out SessionEventPage afterTerminal));
+      afterTerminal.Dispose();
+      SessionSseRead empty = await afterTerminal.ReadNextAsync(CancellationToken.None).WaitAsync(TestTimeout);
+      Assert.True(empty.Closed);
+      Assert.Null(empty.Event);
+    }
+
+    await sessions.ShutdownSessionsAsync().WaitAsync(TestTimeout);
   }
 
   [Fact]

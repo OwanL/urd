@@ -10,7 +10,8 @@ using Urd.Core.Tools;
 namespace Urd.Core.Sessions;
 
 // Creates, discovers and opens sessions, keeping one live instance per opened session ID.
-public sealed class SessionManager {
+public sealed class SessionManager : IAsyncDisposable {
+  public ValueTask DisposeAsync() => new(ShutdownSessionsAsync());
   private readonly UrdStore store;
   private readonly Func<ProviderConnection, IChatClient> createChatClient;
   private readonly AgentToolSettings? toolSettings;
@@ -19,6 +20,8 @@ public sealed class SessionManager {
   private readonly string? fallbackWorkingDirectory;
   private readonly GitBash? bash;
   private readonly FileMutationQueue files = new();
+  private bool browserProvisioningActive;
+  private readonly WebBrowser browser;
   private readonly ReadOnlyCollection<AgentTool> injectedTools = new([]);
   private readonly AsyncLock sessionsLock = new();
   private readonly Dictionary<Guid, PrimarySession> sessions = new();
@@ -28,12 +31,16 @@ public sealed class SessionManager {
 
   public event Action<Guid>? SessionCreated;
 
+  // Notices are host-wide, ephemeral facts about the shared browser's first-use install.
+  public event Action<BrowserProvisioningNotice>? BrowserProvisioningChanged;
+
   public SessionManager(UrdStore store, Func<ProviderConnection, IChatClient> createChatClient,
       AgentToolSettings? toolSettings = null, PreferenceManager? preferences = null, ModelSelector? modelSelector = null) {
     ArgumentNullException.ThrowIfNull(store);
     ArgumentNullException.ThrowIfNull(createChatClient);
     this.store = store;
     this.createChatClient = createChatClient;
+    browser = new WebBrowser(progress: new BrowserSetupProgress(OnBrowserProgress));
     this.preferences = preferences ?? new PreferenceManager(store);
     this.modelSelector = modelSelector;
     fallbackWorkingDirectory = Path.GetPathRoot(Environment.CurrentDirectory);
@@ -111,13 +118,14 @@ public sealed class SessionManager {
     await shutdown.Task.WaitAsync(waitCancellation);
   }
 
-  private static async Task StopSessionsAsync(PrimarySession[] sessions, TaskCompletionSource shutdown) {
+  private async Task StopSessionsAsync(PrimarySession[] sessions, TaskCompletionSource shutdown) {
     var failures = new List<Exception>();
     // Fence every handle before a Stop callback can submit a user message to another session.
     await JoinAsync(Task.WhenAll(sessions.Select(session => session.StopAcceptingUserMessagesAsync())));
     await JoinAsync(Task.WhenAll(sessions.Select(session => session.StopExecutionAsync())));
     // Ordinary Stop preserves earlier survivors; backend shutdown kills them only after work drains.
     await JoinAsync(Task.WhenAll(sessions.Select(session => session.KillProcessesAsync())));
+    await JoinAsync(browser.DisposeAsync().AsTask());
     if (failures.Count == 0)
       shutdown.TrySetResult();
     else {
@@ -159,15 +167,16 @@ public sealed class SessionManager {
 
   private ToolCatalog CreateToolCatalog(PendingToolCalls pending, bool processTools, out ChatProcesses? processes) {
     processes = null;
-    AgentTool[] controls = [new ListPendingCallsTool(pending), new CancelPendingCallsTool(pending)];
+    AgentTool[] shared = [new WebSearchTool(browser), new WebReadTool(browser),
+      new ListPendingCallsTool(pending), new CancelPendingCallsTool(pending)];
     if (toolSettings is null || !processTools)
-      return new(injectedTools.Count == 0 ? [] : [.. injectedTools, .. controls]);
+      return new([.. injectedTools, .. shared]);
     if (!OperatingSystem.IsWindows())
       throw new PlatformNotSupportedException("Agent tools currently require Windows and Git for Windows.");
     processes = new ChatProcesses(bash!);
     return new([
       new ReadTool(files), new WriteTool(files), new EditTool(files),
-      new BashTool(processes, bash!, toolSettings.Environment), .. controls
+      new BashTool(processes, bash!, toolSettings.Environment), .. shared
     ]);
   }
 
@@ -179,6 +188,39 @@ public sealed class SessionManager {
   private PrimarySession Track(PrimarySession session) {
     sessions.Add(session.Id, session);
     return session;
+  }
+
+  // Translates raw install reports into provisioning notices, suppressing terminal reports
+  // that follow unrelated launch failures while no download was surfaced.
+  internal void OnBrowserProgress(string report) {
+    if (report == WebBrowserInstall.DownloadStarted)
+      browserProvisioningActive = true;
+    else if (!browserProvisioningActive)
+      return;
+    else if (report is WebBrowserInstall.DownloadFinished or WebBrowserInstall.SetupFailed)
+      browserProvisioningActive = false;
+
+    BrowserProvisioningStage stage = report switch {
+      WebBrowserInstall.DownloadStarted => BrowserProvisioningStage.Downloading,
+      WebBrowserInstall.DownloadFinished => BrowserProvisioningStage.Ready,
+      _ => BrowserProvisioningStage.Failed
+    };
+    NotifyBrowserProvisioning(
+        new BrowserProvisioningNotice(stage, stage == BrowserProvisioningStage.Downloading ? report : null));
+  }
+
+  private void NotifyBrowserProvisioning(BrowserProvisioningNotice notice) {
+    Action<BrowserProvisioningNotice>? callbacks = BrowserProvisioningChanged;
+    if (callbacks is null)
+      return;
+
+    foreach (Delegate callback in callbacks.GetInvocationList()) {
+      try {
+        ((Action<BrowserProvisioningNotice>)callback)(notice);
+      } catch (Exception) {
+        // Provisioning is observable only; subscriber failures are ignored.
+      }
+    }
   }
 
   // Subscribers should enqueue the notice without blocking; creation is already durable here.

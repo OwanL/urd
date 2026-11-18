@@ -244,6 +244,7 @@ export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) 
             unavailable={events.knownStatuses[id] === "unavailable"}
             canPersist={canPersist}
             notice={id === activeId ? events.notice : null}
+            provisioning={id === activeId ? events.provisioning : null}
             refresh={refresh}
             onRefresh={refreshSnapshot}
             onSetUpProvider={() => openSettings("providers")}

@@ -59,7 +59,7 @@ public sealed class ServerProcessTests {
     UserMessageReceipt receipt = (await submitted.Content.ReadFromJsonAsync<UserMessageReceipt>(json))!;
 
     await entered.Task.WaitAsync(TestTimeout);
-    Assert.Equal(new[] { "bash", "cancel_pending_calls", "edit", "list_pending_calls", "read", "write" },
+    Assert.Equal(new[] { "bash", "cancel_pending_calls", "edit", "list_pending_calls", "read", "web_read", "web_search", "write" },
         chatClient.Options[0]!.Tools!.Select(tool => tool.Name).Order(StringComparer.Ordinal));
     SessionSnapshot settled = await HttpTest.SettledAsync(receipt.ExecutionId!.Value, async () =>
         (await server.Client.GetFromJsonAsync<SessionSnapshot>($"/api/sessions/{sessionId}/snapshot", json))!);

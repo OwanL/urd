@@ -35,6 +35,11 @@
         "resolved": "4.0.1",
         "contentHash": "8CoAaZkniVekR1ycJyxn+hOz+6ZQCDPcoIsIs6ujd4WyFcBMlxGNU15Qb8Uxd4iO4UmOuETb0M6vzBbwX/mfLA=="
       },
+      "AngleSharp": {
+        "type": "Transitive",
+        "resolved": "1.10.4",
+        "contentHash": "pv8cLA19oRc8UwczC1ogMeq5mTBWn8V1N12CVMfrAjykf8imNDHt82yzompriVN/Z7ededDP0Fg5ZWAtG5DB+Q=="
+      },
       "Duende.IdentityModel": {
         "type": "Transitive",
         "resolved": "8.1.0",
@@ -69,6 +74,11 @@
         "type": "Transitive",
         "resolved": "1.6.0",
         "contentHash": "rJEpDfPM8wrfXUgkNejjg2bJN9bciy44uVyRwKUI+92CnSmbaLeJTLPYcCdvgM4RFsKrhs8d2H2hO78yZpMl3g=="
+      },
+      "Microsoft.Bcl.AsyncInterfaces": {
+        "type": "Transitive",
+        "resolved": "6.0.0",
+        "contentHash": "UcSjPsst+DfAdJGVDsu346FX0ci0ah+lw3WRtn18NUwEqRt70HaOQ7lI72vy3+1LxtqI3T5GWwV39rQSrCzAeg=="
       },
       "Microsoft.Bcl.Cryptography": {
         "type": "Transitive",
@@ -220,6 +230,15 @@
           "Microsoft.ML.Tokenizers": "3.0.0"
         }
       },
+      "Microsoft.Playwright": {
+        "type": "Transitive",
+        "resolved": "1.65.0",
+        "contentHash": "xzxOg/X6NHNGfG4ctVtnp/d2vGEi01mWE7Nq0s8yIHtAd9Kfx7ZWe0xjpDprpOs0CYcaGhRgKCDYQX9UxXEXCQ==",
+        "dependencies": {
+          "Microsoft.Bcl.AsyncInterfaces": "6.0.0",
+          "System.ComponentModel.Annotations": "5.0.0"
+        }
+      },
       "Microsoft.TestPlatform.ObjectModel": {
         "type": "Transitive",
         "resolved": "18.11.0",
@@ -238,6 +257,15 @@
         "resolved": "10.0.0",
         "contentHash": "bYdnhuD0XxcVTrxc8RyBjXo+AXYWJPnda3clhGz2Kakleyun1PyrzYV8RezT7ZYmR9OBSOgvpFQcvHo/K8Y90w=="
       },
+      "ModelContextProtocol.Core": {
+        "type": "Transitive",
+        "resolved": "2.3.1",
+        "contentHash": "cuYIbAWWhVSY0PRaz0LiDoxxnpLdps1tKXjo2LN91CObgWBFcKg3Ebz4kF95O++2Do7GXI2Tl5KQOYM8UoAyZA==",
+        "dependencies": {
+          "Microsoft.Extensions.AI.Abstractions": "10.11.0",
+          "Microsoft.Extensions.Logging.Abstractions": "10.0.13"
+        }
+      },
       "OpenAI": {
         "type": "Transitive",
         "resolved": "2.14.0",
@@ -245,6 +273,11 @@
         "dependencies": {
           "System.ClientModel": "1.15.0"
         }
+      },
+      "PdfPig": {
+        "type": "Transitive",
+        "resolved": "0.1.16",
+        "contentHash": "qQcbsNMYVY+K5ELptax2S8thNMk0+rSQq3H/KdYj3LLcko8yTCz8y5KIvsKxIyAuTN0ZYNnfsZkM+0EvxTwHVA=="
       },
       "SkiaSharp": {
         "type": "Transitive",
@@ -303,6 +336,11 @@
           "System.Memory.Data": "10.0.9"
         }
       },
+      "System.ComponentModel.Annotations": {
+        "type": "Transitive",
+        "resolved": "5.0.0",
+        "contentHash": "dMkqfy2el8A8/I76n2Hi1oBFEbG1SfxD2l5nhwXV3XjlnOmwxJlQbYpJH4W51odnU9sARCSAgv7S3CyAFMkpYg=="
+      },
       "System.Drawing.Common": {
         "type": "Transitive",
         "resolved": "10.0.0",
@@ -359,6 +397,7 @@
       "urd.core": {
         "type": "Project",
         "dependencies": {
+          "AngleSharp": "[1.10.4, 1.10.4]",
           "Duende.IdentityModel": "[8.1.0, )",
           "Duende.IdentityModel.OidcClient": "[7.1.1, )",
           "Markdig": "[1.6.0, 1.6.0]",
@@ -368,7 +407,10 @@
           "Microsoft.IdentityModel.JsonWebTokens": "[8.23.0, )",
           "Microsoft.ML.Tokenizers": "[3.0.0, )",
           "Microsoft.ML.Tokenizers.Data.O200kBase": "[3.0.0, )",
+          "Microsoft.Playwright": "[1.65.0, 1.65.0]",
+          "ModelContextProtocol.Core": "[2.3.1, 2.3.1]",
           "OpenAI": "[2.14.0, )",
+          "PdfPig": "[0.1.16, 0.1.16]",
           "SkiaSharp": "[4.155.0, )"
         }
       },

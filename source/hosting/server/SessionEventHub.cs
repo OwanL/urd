@@ -2,17 +2,20 @@ using Urd.Core.Sessions;
 
 namespace Urd.Server;
 
-// Owns the process-wide page limit and forwards session-creation hints to live pages.
+// Owns the process-wide page limit, forwards session-creation hints and browser
+// provisioning notices to live pages.
 internal sealed class SessionEventHub : IDisposable {
   internal const int MaxPages = 128;
   private readonly object gate = new();
   private readonly SessionManager sessions;
+  private SessionSseEvent? downloading;
   private readonly Dictionary<Guid, SessionEventPage> pages = new();
   private bool disposed;
 
   internal SessionEventHub(SessionManager sessions) {
     this.sessions = sessions;
     sessions.SessionCreated += OnSessionCreated;
+    sessions.BrowserProvisioningChanged += OnBrowserProvisioningChanged;
   }
 
   internal bool TryCreate(out SessionEventPage page) {
@@ -24,6 +27,9 @@ internal sealed class SessionEventHub : IDisposable {
 
       page = new SessionEventPage(sessions.BootId, Remove);
       pages.Add(page.Id, page);
+      // Pages opened mid-download learn the still-active provisioning notice.
+      if (downloading is { } replay)
+        page.EnqueueBroadcast(replay);
       return true;
     }
   }
@@ -43,8 +49,27 @@ internal sealed class SessionEventHub : IDisposable {
 
     var message = new SessionSseEvent("session-created", sessionId, new { session = sessionId });
     foreach (SessionEventPage page in current)
-      page.EnqueueCreation(message);
+      page.EnqueueBroadcast(message);
   }
+
+  // Only an in-flight download is replayed: terminal notices are never stale state to recreate.
+  private void OnBrowserProvisioningChanged(BrowserProvisioningNotice notice) {
+    SessionEventPage[] current;
+    SessionSseEvent message = BrowserProvisioningMessage(notice);
+    lock (gate) {
+      if (disposed)
+        return;
+      downloading = notice.Stage == BrowserProvisioningStage.Downloading ? message : null;
+      current = pages.Values.ToArray();
+    }
+
+    foreach (SessionEventPage page in current)
+      page.EnqueueBroadcast(message);
+  }
+
+  private static SessionSseEvent BrowserProvisioningMessage(BrowserProvisioningNotice notice) =>
+      new("browser-provisioning", null,
+          new { state = notice.Stage.ToString().ToLowerInvariant(), detail = notice.Detail });
 
   private void Remove(SessionEventPage page) {
     lock (gate) {
@@ -65,6 +90,7 @@ internal sealed class SessionEventHub : IDisposable {
     }
 
     sessions.SessionCreated -= OnSessionCreated;
+    sessions.BrowserProvisioningChanged -= OnBrowserProvisioningChanged;
     foreach (SessionEventPage page in current)
       page.Close();
   }

@@ -26,6 +26,7 @@ export function useSessionEvents(
 ) {
   const [notices, setNotices] = useState<Record<string, string>>({});
   const [activity, setActivity] = useState(emptySessionActivity);
+  const [provisioning, setProvisioning] = useState<string | null>(null);
   const [connectionState, setConnectionState] = useState<SessionConnectionState>("connecting");
   const [hasConnected, setHasConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -98,6 +99,11 @@ export function useSessionEvents(
         setConnectionState("disconnected");
         setActivity(resetSessionTransitionStatuses);
         setNotices({});
+        // Reconnection replay restores an in-flight download; stale notices are dropped.
+        setProvisioning(null);
+      },
+      provisioning(stage, detail) {
+        setProvisioning(stage === "downloading" && detail ? detail : null);
       },
       error(message) {
         setError(message);
@@ -163,6 +169,7 @@ export function useSessionEvents(
     connectionState,
     streamId,
     notice: watched === active && active ? (notices[active] ?? null) : null,
+    provisioning,
     unread: activity.unread,
     knownStatuses: Object.fromEntries(open.map((session) => [session, activity.statuses[session]])),
     statuses: Object.fromEntries(

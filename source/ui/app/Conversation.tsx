@@ -148,6 +148,7 @@ interface ConversationProps {
   canPersist: boolean;
   refresh: number;
   notice: string | null;
+  provisioning: string | null;
   onRefresh(): void;
   onSetUpProvider(): void;
   onChooseModels(): void;
@@ -179,6 +180,7 @@ export function Conversation({
   canPersist,
   refresh,
   notice,
+  provisioning,
   onRefresh,
   onSetUpProvider,
   onChooseModels,
@@ -419,6 +421,7 @@ export function Conversation({
               </span>
             )}
             {readError && <button onClick={onRefresh}>Refresh</button>}
+            {provisioning && <span>{provisioning} </span>}
             {state.admissionFenced && <span>Session admission is fenced. </span>}
             {state.unsettledWhileFenced && <span>Unsettled execution. </span>}
             {state.executionStatus && (

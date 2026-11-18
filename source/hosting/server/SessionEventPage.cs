@@ -28,7 +28,7 @@ internal sealed class SessionEventPage : IDisposable {
     }
   }
 
-  internal void EnqueueCreation(SessionSseEvent message) => queue.Enqueue(message);
+  internal void EnqueueBroadcast(SessionSseEvent message) => queue.Enqueue(message);
 
   internal async Task UpdateAsync(SessionManager sessions, Guid[] open, Guid[] watched, CancellationToken cancellation) {
     await updateGate.WaitAsync(cancellation);

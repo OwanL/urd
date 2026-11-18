@@ -1,6 +1,6 @@
 # Web search and reading
 
-Status: implementation plan, not shipped behavior. Scope: public, read-only web access for any tool-capable model. Urd owns both tools. No provider-native answers, search-provider picker, personal browser profile or general-purpose browser control.
+Status: implemented and locally qualified on Windows. Live search-to-read and PDF checks exercised the tools directly; the original five-task model-answer replay and other platforms have not been qualified. Scope: public, read-only web access for any tool-capable model. Urd owns both tools. No provider-native answers, search-provider picker, personal browser profile or general-purpose browser control.
 
 ## Tool contract
 

@@ -5,7 +5,12 @@ export interface SessionEventCallbacks {
   created(session: string): void;
   disconnected(): void;
   error?(message: string): void;
+  provisioning?(stage: BrowserProvisioningStage, detail: string | null): void;
 }
+
+// Host-wide browser provisioning stages; detail carries the installer's report while downloading.
+export type BrowserProvisioningStage = "downloading" | "ready" | "failed";
+const provisioningStages = new Set<BrowserProvisioningStage>(["downloading", "ready", "failed"]);
 
 interface SessionEventMessage {
   readonly event: string;
@@ -199,7 +204,24 @@ export class SessionEvents {
       return;
     }
 
-    if (!this.connected || typeof event.session !== "string" || !event.session) return;
+    if (!this.connected) return;
+
+    // Browser provisioning is a host-wide notice; it carries no session identity.
+    if (message.event === "browser-provisioning") {
+      if (
+        typeof event.state !== "string" ||
+        !provisioningStages.has(event.state as BrowserProvisioningStage)
+      )
+        return;
+      const detail = typeof event.detail === "string" ? event.detail : null;
+      this.call(() =>
+        this.callbacks.provisioning?.(event.state as BrowserProvisioningStage, detail),
+      );
+      return;
+    }
+
+    if (typeof event.session !== "string" || !event.session) return;
+
     if (message.event === "session-created") {
       this.call(() => this.callbacks.created(event.session as string));
       return;

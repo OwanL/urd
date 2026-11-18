@@ -24,8 +24,8 @@ internal static class ToolInvoker {
       if (offered is null || offered.Description != current.Description
           || offered.JsonSchema.GetRawText() != current.JsonSchema.GetRawText())
         throw new InvalidOperationException($"Tool '{call.Name}' no longer matches its offered definition.");
-      string directory = workingDirectory
-          ?? throw new InvalidOperationException("The chat has no saved working folder.");
+      string directory = workingDirectory ?? (tool is WebSearchTool or WebReadTool or ListPendingCallsTool or CancelPendingCallsTool
+          ? string.Empty : throw new InvalidOperationException("The chat has no saved working folder."));
       // Progress is intentionally inert until transcript progress integration is available.
       var context = new ToolContext(directory, requestId, call.CallId, supportsImages, static _ => { });
       output = await tool.RunAsync(StripBackgroundOption(call.Arguments), context, cancellation);

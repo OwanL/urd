@@ -7,13 +7,7 @@ namespace Urd.Core.Tools;
 internal sealed class ReadTool(FileMutationQueue files) : AgentTool {
   public override string Name => "read";
   public override ToolRelevance RelevantWhen => ToolRelevance.Always;
-  public override string Description => $"""
-    Read a file. Supports UTF-8 text and images (jpg, png, gif, webp, bmp).
-    Images are processed to at most 2000×2000 and below 4.5MiB of base64; BMP is converted before attachment.
-    Image source files are limited to 64MiB and decoding is memory-bounded.
-    Text output is limited to {ToolOutputLimits.MaxLines} lines or {ToolOutputLimits.MaxBytes / 1024}KB, whichever comes first.
-    Use offset/limit to page through large files; continue with the suggested offset until complete.
-    """;
+  public override string Description => "Read UTF-8 text or a supported image; use offset/limit to page through large text files.";
   public override JsonElement ParametersSchema { get; } = ToolSchema.Parse("""
     {
       "type": "object",

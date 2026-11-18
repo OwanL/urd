@@ -7,10 +7,7 @@ namespace Urd.Core.Tools;
 internal sealed class WriteTool(FileMutationQueue files) : AgentTool {
   public override string Name => "write";
   public override ToolRelevance RelevantWhen => ToolRelevance.Always;
-  public override string Description => """
-    Write content to a file. Creates the file if it doesn't exist, overwrites if it does.
-    Automatically creates parent directories. Use only for new files or complete rewrites.
-    """;
+  public override string Description => "Write UTF-8 content to a file, creating parent directories. Use for new files or complete rewrites.";
   public override JsonElement ParametersSchema { get; } = ToolSchema.Parse("""
     {
       "type": "object",

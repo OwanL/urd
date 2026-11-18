@@ -23,7 +23,7 @@ public sealed class StartingContextBuilderTests {
     Assert.Contains("Urd", primaryText, StringComparison.Ordinal);
     Assert.Contains("Urd", subagentText, StringComparison.Ordinal);
     Assert.Contains("user", primaryText, StringComparison.OrdinalIgnoreCase);
-    Assert.Contains("task boundaries", subagentText, StringComparison.OrdinalIgnoreCase);
+    Assert.Contains("final report", subagentText, StringComparison.OrdinalIgnoreCase);
     Assert.Contains("result", subagentText, StringComparison.OrdinalIgnoreCase);
     Assert.Contains(assignment, primaryText, StringComparison.Ordinal);
     Assert.Contains(assignment, subagentText, StringComparison.Ordinal);
@@ -46,6 +46,8 @@ public sealed class StartingContextBuilderTests {
     Assert.Contains("# Working preferences", primaryText, StringComparison.Ordinal);
     Assert.DoesNotContain("# Shared child guidance", primaryText, StringComparison.Ordinal);
     Assert.Contains("# Shared child guidance", subagentText, StringComparison.Ordinal);
+    Assert.Contains("final report", subagentText, StringComparison.OrdinalIgnoreCase);
+    Assert.DoesNotContain("final report", primaryText, StringComparison.OrdinalIgnoreCase);
     Assert.DoesNotContain("# Default working guidance", subagentText, StringComparison.Ordinal);
     Assert.DoesNotContain("# Working preferences", subagentText, StringComparison.Ordinal);
   }

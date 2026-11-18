@@ -9,10 +9,8 @@ internal sealed class BashTool(ChatProcesses processes, GitBash bash, IReadOnlyD
   public override string Name => "bash";
   public override ToolRelevance RelevantWhen => ToolRelevance.Always;
   public override string Description => $"""
-    Execute a Git Bash command in the current working directory. Returns stdout and stderr.
-    Output is truncated to the last {ToolOutputLimits.MaxLines} lines or {ToolOutputLimits.MaxBytes / 1024}KB, whichever comes first.
-    If truncated, full output is saved to a temp file.
-    Optionally provide a timeout in seconds; there is no default timeout.
+    Run a Git Bash command in the working directory. Optional timeout; no default timeout.
+    Long output is truncated and saved to a temp file.
     """;
   public override JsonElement ParametersSchema => schema;
 

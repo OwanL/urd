@@ -8,10 +8,7 @@ internal sealed class EditTool(FileMutationQueue files) : AgentTool {
   public override string Name => "edit";
   public override ToolRelevance RelevantWhen => ToolRelevance.Always;
   public override string Description => """
-    Edit a single file using exact text replacement.
-    Every edits[].oldText must match a unique, non-overlapping region of the original file.
-    CRLF and LF are equivalent. No fuzzy matching.
-    Merge nearby changes into one edit; do not pad with large unchanged regions.
+    Replace exact, unique, non-overlapping text in one file. Edits match the original snapshot; no fuzzy matching.
     """;
   public override JsonElement ParametersSchema { get; } = ToolSchema.Parse("""
     {

@@ -24,6 +24,7 @@ interface RegistrationHandshake {
 
 const maxFrameLength = 64 * 1024;
 const heartbeatTimeout = 90_000;
+const registrationTimeout = 15_000;
 const initialRetryDelay = 250;
 const maxRetryDelay = 5_000;
 
@@ -270,6 +271,10 @@ export class SessionEvents {
           acknowledged: false,
         };
         this.registration = registration;
+        const timeout = setTimeout(
+          () => controller.abort(new Error("Session event registration timed out.")),
+          registrationTimeout,
+        );
 
         try {
           const response = await fetch(
@@ -287,16 +292,17 @@ export class SessionEvents {
               signal: controller.signal,
             },
           );
+          controller.signal.throwIfAborted();
           if (response.status !== 204)
             throw new Error(`Session event registration failed (HTTP ${response.status}).`);
         } catch (error) {
-          if (this.isCurrent(generation) && !controller.signal.aborted) {
+          if (this.isCurrent(generation) && this.updateController === controller) {
             this.reportError(errorMessage(error));
-            this.updatePending = false;
             this.disconnectStream();
           }
           return;
         } finally {
+          clearTimeout(timeout);
           if (this.updateController === controller) this.updateController = null;
         }
 

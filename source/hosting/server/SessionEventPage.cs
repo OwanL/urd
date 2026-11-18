@@ -36,13 +36,17 @@ internal sealed class SessionEventPage : IDisposable {
       if (IsClosed)
         throw new KeyNotFoundException("The event stream is closed.");
 
-      var opened = new Dictionary<Guid, PrimarySession>(open.Length);
-      foreach (Guid sessionId in open)
-        opened.Add(sessionId, await sessions.GetPrimaryAsync(sessionId));
+      var opened = new Dictionary<Guid, PrimarySession?>(open.Length);
+      foreach (Guid sessionId in open) {
+        cancellation.ThrowIfCancellationRequested();
+        try {
+          opened.Add(sessionId, await sessions.GetPrimaryAsync(sessionId));
+        } catch (KeyNotFoundException) {
+          opened.Add(sessionId, null);
+        }
+      }
 
-      var replaced = new List<Registration>();
-      var added = new List<(Guid Id, PrimarySession Session, Registration Registration)>();
-      var retained = new List<(PrimarySession Session, Registration Registration)>();
+      var refresh = new List<(PrimarySession? Session, Registration Registration, bool Added)>();
       var watchedIds = watched.ToHashSet();
       lock (gate) {
         if (disposed || queue.IsClosed)
@@ -53,33 +57,31 @@ internal sealed class SessionEventPage : IDisposable {
             registrations.Remove(sessionId);
             registration.Deactivate();
             queue.RemoveSessionUpdates(sessionId);
-            replaced.Add(registration);
           }
         }
 
-        foreach ((Guid sessionId, PrimarySession session) in opened) {
-          if (registrations.TryGetValue(sessionId, out Registration? existing)) {
-            retained.Add((session, existing));
-            continue;
+        foreach ((Guid sessionId, PrimarySession? session) in opened) {
+          bool added = !registrations.TryGetValue(sessionId, out Registration? registration);
+          if (registration is null) {
+            registration = new Registration(this, sessionId, watchedIds.Contains(sessionId));
+            registrations.Add(sessionId, registration);
           }
-          var registration = new Registration(this, sessionId, watchedIds.Contains(sessionId));
-          registrations.Add(sessionId, registration);
-          added.Add((sessionId, session, registration));
+          refresh.Add((session, registration, added));
         }
       }
 
-      foreach (Registration registration in replaced)
-        registration.Deactivate();
-
       try {
-        foreach (var (_, session, registration) in added) {
-          IDisposable subscription = await session.SubscribeAsync(registration.Notify, registration.Watched, cancellation);
-          registration.Attach(subscription);
-        }
+        foreach (var (session, registration, added) in refresh) {
+          if (session is null) {
+            registration.Notify(new SessionChange(registration.Session, 0, "unavailable"));
+            continue;
+          }
 
-        foreach (var (session, registration) in retained) {
-          using IDisposable handshake = await session.SubscribeAsync(
-              registration.Notify, registration.Watched, cancellation);
+          IDisposable subscription = await session.SubscribeAsync(registration.Notify, registration.Watched, cancellation);
+          if (added)
+            registration.Attach(subscription);
+          else
+            subscription.Dispose();
         }
       } catch {
         Dispose();

@@ -15,6 +15,7 @@ const statusLabels: Record<string, string> = {
   failed: "Failed",
   fenced: "Fenced",
   "needs-attention": "Needs attention",
+  unavailable: "Session unavailable",
   "updates-paused": "Updates paused",
 };
 

@@ -240,7 +240,8 @@ export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) 
             checkingContinuation={commandState.checkingContinuations[id] ?? false}
             models={models}
             preferences={preferences}
-            ready={connected}
+            connected={connected}
+            unavailable={events.knownStatuses[id] === "unavailable"}
             canPersist={canPersist}
             notice={id === activeId ? events.notice : null}
             refresh={refresh}

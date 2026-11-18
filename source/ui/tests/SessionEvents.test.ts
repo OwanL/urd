@@ -581,6 +581,80 @@ for (const failure of ["network", "HTTP"] as const) {
   });
 }
 
+void test("a stalled registration reconnects with the latest watch despite stream heartbeats", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const streams: ReadableStreamDefaultController<Uint8Array>[] = [];
+  const registrations: string[][] = [];
+  const changes: string[] = [];
+  const errors: string[] = [];
+  let disconnected = 0;
+  t.mock.method(globalThis, "fetch", async (url: URL, options: RequestInit) => {
+    if (url.pathname === "/api/events") {
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            streams.push(controller);
+            controller.enqueue(
+              encoder.encode(
+                `event: connected\ndata: {"stream":"page-${streams.length}","boot":"boot"}\n\n`,
+              ),
+            );
+          },
+        }),
+        { headers: { "Content-Type": "text/event-stream" } },
+      );
+    }
+    const { watched } = JSON.parse(String(options.body)) as { watched: string[] };
+    registrations.push(watched);
+    if (registrations.length === 1) {
+      const signal = options.signal!;
+      return new Promise<Response>((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    }
+    return new Response(null, { status: 204 });
+  });
+  const events = new SessionEvents(new URL("https://server.example"), {
+    connected() {},
+    change(session) {
+      changes.push(session);
+    },
+    status() {},
+    created() {},
+    disconnected() {
+      disconnected++;
+    },
+    error(message) {
+      errors.push(message);
+    },
+  });
+  t.after(() => events.stop());
+  events.update(["a"], ["a"]);
+  events.start();
+  await flush();
+  assert.deepEqual(registrations, [["a"]]);
+  events.update(["a", "b"], ["b"]);
+  t.mock.timers.tick(5_000);
+  streams[0]!.enqueue(encoder.encode(": heartbeat\n\n"));
+  await flush();
+  t.mock.timers.tick(10_000);
+  await flush();
+  assert.equal(disconnected, 1);
+  assert.deepEqual(errors, ["Session event registration timed out."]);
+
+  t.mock.timers.tick(250);
+  await flush();
+  assert.deepEqual(registrations, [["a"], ["b"]]);
+  streams[1]!.enqueue(
+    encoder.encode(
+      'event: status\ndata: {"session":"b","boot":"boot","version":1,"status":"idle"}\n\n' +
+        'event: change\ndata: {"session":"b","boot":"boot","version":1}\n\n',
+    ),
+  );
+  await flush();
+  assert.deepEqual(changes, ["b"]);
+});
+
 void test("heartbeat resets the watchdog and stop cancels its retry", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   let getCount = 0;

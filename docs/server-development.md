@@ -150,14 +150,16 @@ on Windows. It starts Explorer directly without a shell; missing paths return 40
 `GET /api/events` opens a transient server-sent event stream. Its `connected` event provides
 stream and process-boot IDs. Register a page's open and watched session IDs with
 `POST /api/events/{streamId}` using `{open, watched}`. For each registration the server
-subscribes before returning success and sends an initial `status` for every open session;
-a watched session also gets an initial `change` hint. The browser waits for both the
-registration response and that initial status before releasing a racing change, then reads
+subscribes before returning success and sends an initial `status` for every open session.
+An unknown ID gets `unavailable` without blocking other registrations. A watched session
+that exists also gets an initial `change` hint. The browser waits for both the registration
+response and that initial status before releasing a racing change, then reads
 a bounded snapshot/history. This subscribe-before-read handshake avoids a gap between
 initial state and live updates. Changes coalesce per session; if more arrive during a
 snapshot/history read, the client performs a trailing read rather than overlapping reads.
 Later `status` events update tab status, `change` notices prompt bounded reads, and
-`session-created` events are discovery hints. Heartbeats keep the stream active. Events are
+`session-created` events are discovery hints. Heartbeats keep the stream active; an unacknowledged
+registration independently times out and reconnects with the latest open/watched set. Events are
 not durable history or message payloads. Reconnect performs saved-ID discovery again. The
 existing local API marker and gates apply.
 

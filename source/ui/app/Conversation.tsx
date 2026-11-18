@@ -143,7 +143,8 @@ interface ConversationProps {
   checkingContinuation: boolean;
   models: WorkspaceModelState;
   preferences: PreferencesState;
-  ready: boolean;
+  connected: boolean;
+  unavailable: boolean;
   canPersist: boolean;
   refresh: number;
   notice: string | null;
@@ -173,7 +174,8 @@ export function Conversation({
   checkingContinuation,
   models,
   preferences,
-  ready,
+  connected,
+  unavailable,
   canPersist,
   refresh,
   notice,
@@ -187,6 +189,7 @@ export function Conversation({
   transcriptPosition,
   onTranscriptPositionChange,
 }: ConversationProps) {
+  const ready = connected && !unavailable;
   const observeSnapshot = useCallback(
     (snapshot: SessionSnapshot, knownWhenRead: string | null) =>
       commands.observeSnapshot(snapshot, knownWhenRead),
@@ -206,7 +209,7 @@ export function Conversation({
     chat.pending?.status === "sending",
     observeSnapshot,
     notice,
-    active,
+    active && !unavailable,
     transcript === undefined,
   );
   const [workingDirectoryLocked, setWorkingDirectoryLocked] = useState(false);
@@ -307,7 +310,9 @@ export function Conversation({
           onTranscriptPositionChange={onTranscriptPositionChange}
           onChooseModels={onChooseModels}
           emptyState={
-            (showWorkingDirectory || workingDirectoryLocked) && snapshot ? (
+            unavailable ? (
+              <p>Session unavailable on this server.</p>
+            ) : (showWorkingDirectory || workingDirectoryLocked) && snapshot ? (
               <div class="empty-chat-overview">
                 <SessionWorkingDirectory
                   client={client}

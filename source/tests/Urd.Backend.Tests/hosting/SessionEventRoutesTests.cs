@@ -41,13 +41,21 @@ public sealed class SessionEventRoutesTests {
     Assert.Equal(sessionId, announced.GetProperty("session").GetGuid());
     Assert.Single(announced.EnumerateObject());
 
-    using HttpResponseMessage registered = await UpdateAsync(server.Client, streamId, [sessionId], [sessionId]);
+    Guid missingId = Guid.NewGuid();
+    using HttpResponseMessage registered = await UpdateAsync(server.Client, streamId,
+        [missingId, sessionId], [missingId, sessionId]);
     Assert.Equal(HttpStatusCode.NoContent, registered.StatusCode);
-    JsonElement status = await ReadEventAsync(reader, "status");
-    Assert.Equal(sessionId, status.GetProperty("session").GetGuid());
+    var handshake = new (string Name, JsonElement Data)[3];
+    for (int index = 0; index < handshake.Length; index++)
+      handshake[index] = await ReadEventAsync(reader);
+    JsonElement missing = Assert.Single(handshake, frame => frame.Name == "status"
+        && frame.Data.GetProperty("session").GetGuid() == missingId).Data;
+    Assert.Equal("unavailable", missing.GetProperty("status").GetString());
+    JsonElement status = Assert.Single(handshake, frame => frame.Name == "status"
+        && frame.Data.GetProperty("session").GetGuid() == sessionId).Data;
     Assert.Equal("idle", status.GetProperty("status").GetString());
     Assert.Equal(connected.GetProperty("boot").GetGuid(), status.GetProperty("boot").GetGuid());
-    JsonElement change = await ReadEventAsync(reader, "change");
+    JsonElement change = Assert.Single(handshake, frame => frame.Name == "change").Data;
     Assert.Equal(sessionId, change.GetProperty("session").GetGuid());
     Assert.Equal(status.GetProperty("version").GetInt64(), change.GetProperty("version").GetInt64());
 
@@ -137,8 +145,13 @@ public sealed class SessionEventRoutesTests {
       RequestAsync(client, HttpMethod.Post, $"/api/events/{streamId}", JsonBody(jsonBody));
 
   private static async Task<JsonElement> ReadEventAsync(StreamReader reader, string expectedName) {
-    string actualName = await ReadEventNameAsync(reader);
-    Assert.Equal(expectedName, actualName);
+    (string name, JsonElement data) = await ReadEventAsync(reader);
+    Assert.Equal(expectedName, name);
+    return data;
+  }
+
+  private static async Task<(string Name, JsonElement Data)> ReadEventAsync(StreamReader reader) {
+    string name = await ReadEventNameAsync(reader);
     string? data = null;
     while (true) {
       string? line = await reader.ReadLineAsync().WaitAsync(TestAsync.TestTimeout);
@@ -150,7 +163,7 @@ public sealed class SessionEventRoutesTests {
     }
     Assert.NotNull(data);
     using JsonDocument document = JsonDocument.Parse(data);
-    return document.RootElement.Clone();
+    return (name, document.RootElement.Clone());
   }
 
   private static async Task<string> ReadEventNameAsync(StreamReader reader) {

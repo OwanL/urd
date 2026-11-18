@@ -303,6 +303,7 @@ export function VirtualTranscript({
   const [tailHeight, setTailHeight] = useState(0);
   const [root, setRoot] = useState<HTMLDivElement | null>(null);
   const [positionWindow, setPositionWindow] = useState<TranscriptPositionWindow | null>(null);
+  const hasWindow = positionWindow !== null;
   const statusContext: ResponseStatusContext = useMemo(
     () => ({ client, sessionId, modelNames: modelNames ?? new Map(), visible, onChooseModels }),
     [client, sessionId, modelNames, visible, onChooseModels],
@@ -342,6 +343,7 @@ export function VirtualTranscript({
   const widthGeneration = useRef(0);
   const suspended = useRef(false);
   const initialized = useRef(false);
+  const initialReadNotice = useRef<string | null>(null);
   const scrollAdjustment = useRef<number | null>(null);
   const programmaticScroll = useRef<number | null>(null);
   const seekTimer = useRef<number | null>(null);
@@ -618,8 +620,8 @@ export function VirtualTranscript({
 
   const loadWindow = useCallback(
     async (fraction: number) => {
-      const revision = latest.current.historyRevision;
-      if (suspended.current || !latest.current.visible || revision === null) return;
+      const { historyRevision: revision, visible, notice } = latest.current;
+      if (suspended.current || !visible || revision === null) return;
 
       desiredFraction.current = fraction;
       setLoading(true);
@@ -634,6 +636,7 @@ export function VirtualTranscript({
           latest.current.historyRevision !== revision
         )
           return;
+        if (!initialized.current) initialReadNotice.current = notice;
         setWindow(next, fraction, !initialized.current);
         initialized.current = true;
       } catch (cause) {
@@ -707,6 +710,7 @@ export function VirtualTranscript({
       ? { kind: "entry" as const, entry: restore.entry }
       : { kind: "fraction" as const, historyRevision, fraction: 1 };
     setLoading(true);
+    const noticeWhenRead = latest.current.notice;
     const read = positionReader.read(target);
     void read
       .then((next) => {
@@ -718,6 +722,7 @@ export function VirtualTranscript({
           latest.current.historyRevision !== historyRevision
         )
           return;
+        initialReadNotice.current = noticeWhenRead;
         setWindow(next, 1, true);
         initialized.current = true;
       })
@@ -746,7 +751,11 @@ export function VirtualTranscript({
   ]);
 
   useEffect(() => {
-    if (!initialized.current || !visible || historyRevision === null || notice === null) return;
+    if (!hasWindow || !visible || historyRevision === null || notice === null) return;
+    // Revisit notices that arrived before the first window was published, but don't reread it otherwise.
+    const coveredNotice = initialReadNotice.current;
+    initialReadNotice.current = null;
+    if (coveredNotice === notice) return;
     const model = viewport.current;
     const node = scroll.current;
     if (!model || !node) return;
@@ -755,7 +764,7 @@ export function VirtualTranscript({
       ? 1
       : model.positionFractionAtPixel(node.scrollTop + node.clientHeight / 2 - topPadding);
     void loadWindow(fraction);
-  }, [historyRevision, notice, visible, loadWindow]);
+  }, [hasWindow, historyRevision, notice, visible, loadWindow]);
 
   useLayoutEffect(() => {
     const node = scroll.current;

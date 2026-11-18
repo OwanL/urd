@@ -420,7 +420,7 @@ share a file per concept. Read them alongside their owners.
 ## Prerequisite and commands
 
 Install the exact SDK declared in `source/global.json` without changing that pin
-just to match another machine. SDK **10.0.403** is a stable .NET 10 LTS servicing
+just to match another machine. SDK **10.0.404** is a stable .NET 10 LTS servicing
 release; Microsoft's channel metadata lists active support through 2028-11-14.
 It supports this slice's `net10.0` target. No bootstrap/install script is provided.
 

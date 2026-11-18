@@ -15,7 +15,7 @@ void test("preferences use the browser API contract", { timeout: 5_000 }, async 
       title: { bucket: "small", connectionId: null, modelId: null },
       small: { connectionId: "connection-1", modelId: "small-model" },
       medium: null,
-      frontier: null,
+      large: null,
     },
     protectedResources: {
       tools: ["bash", "read"],

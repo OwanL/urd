@@ -1,6 +1,6 @@
 namespace Urd.Core.Preferences;
 
-public enum ModelBucket { Small, Medium, Frontier }
+public enum ModelBucket { Small, Medium, Large }
 public enum AuxiliaryModelPurpose { Tools, Skills, Instructions, Title }
 public enum ProtectedResourceCategory { Tools, Skills, Instructions }
 
@@ -43,7 +43,7 @@ public sealed record AuxiliaryModelPreferences {
   public ModelChoice Title { get; init; } = ModelChoice.ForBucket(ModelBucket.Small);
   public ConfiguredModel? Small { get; init; }
   public ConfiguredModel? Medium { get; init; }
-  public ConfiguredModel? Frontier { get; init; }
+  public ConfiguredModel? Large { get; init; }
 
   internal ModelChoice ChoiceFor(AuxiliaryModelPurpose purpose) => purpose switch {
     AuxiliaryModelPurpose.Tools => Tools,
@@ -56,7 +56,7 @@ public sealed record AuxiliaryModelPreferences {
   internal ConfiguredModel? ModelFor(ModelBucket bucket) => bucket switch {
     ModelBucket.Small => Small,
     ModelBucket.Medium => Medium,
-    ModelBucket.Frontier => Frontier,
+    ModelBucket.Large => Large,
     _ => throw new ArgumentOutOfRangeException(nameof(bucket))
   };
 
@@ -71,7 +71,7 @@ public sealed record AuxiliaryModelPreferences {
   internal AuxiliaryModelPreferences WithBucketModel(ModelBucket bucket, ConfiguredModel? model) => bucket switch {
     ModelBucket.Small => this with { Small = model },
     ModelBucket.Medium => this with { Medium = model },
-    ModelBucket.Frontier => this with { Frontier = model },
+    ModelBucket.Large => this with { Large = model },
     _ => throw new ArgumentOutOfRangeException(nameof(bucket))
   };
 }

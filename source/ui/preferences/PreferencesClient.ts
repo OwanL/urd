@@ -2,7 +2,7 @@ import { requestJson } from "../http/requestJson.ts";
 
 export type AuxiliaryModelPurpose = "tools" | "skills" | "instructions" | "title";
 export type ProtectedResourceCategory = "tools" | "skills" | "instructions";
-export type ModelBucket = "small" | "medium" | "frontier";
+export type ModelBucket = "small" | "medium" | "large";
 
 export interface ConfiguredModel {
   readonly connectionId: string;
@@ -22,7 +22,7 @@ export interface AuxiliaryModelPreferences {
   readonly title: ModelChoice;
   readonly small: ConfiguredModel | null;
   readonly medium: ConfiguredModel | null;
-  readonly frontier: ConfiguredModel | null;
+  readonly large: ConfiguredModel | null;
 }
 
 export interface ProtectedResourcePreferences {

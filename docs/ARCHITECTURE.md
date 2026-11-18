@@ -292,9 +292,8 @@ bucket expresses task complexity; configured LLM choices supply the actual
 provider/LLM. This is an LLM-selection policy, separate from how sessions are
 represented or stored internally.
 
-The selected buckets are `small`, `medium` and `large` (`Large` is the planned
-rename of the current `Frontier` bucket). **Keep bucket-only creation; do not add
-an exact-LLM creation override.** Pie's independent-session bucket/settings
+The selected buckets are `small`, `medium` and `large`. **Keep bucket-only creation;
+do not add an exact-LLM creation override.** Pie's independent-session bucket/settings
 workflow is historical reference only; independently delegated sessions are not
 selected for Urd (see [agent communication](agent-communication-design.md#selected-direction)).
 

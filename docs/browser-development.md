@@ -33,7 +33,7 @@ and an explicitly saved compaction-trigger token count. Blank/Automatic restores
 positive whole counts override the trigger subject to model headroom. The shared `usePreferences`
 hook owns reads and saves; changing the trigger takes effect at the next compaction check, while
 working-directory changes still apply only to new chats. Settings → Model buckets assigns the
-shared small/medium/frontier model mappings. Settings → Prepass configures independent
+shared small/medium/large model mappings. Settings → Prepass configures independent
 tool/skill/instruction/title model choices and protected-resource lists. Missing models/resources
 remain visibly unavailable rather than rebinding. Protection pickers discover resources for the
 default directory; built-in instructions always remain. Response headers freeze the model, effort

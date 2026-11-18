@@ -12,12 +12,12 @@ import type {
 } from "../preferences/PreferencesClient.ts";
 import type { ProviderClient } from "../providers/ProviderClient.ts";
 
-const buckets: readonly ModelBucket[] = ["small", "medium", "frontier"];
+const buckets: readonly ModelBucket[] = ["small", "medium", "large"];
 const purposes: readonly AuxiliaryModelPurpose[] = ["tools", "skills", "instructions", "title"];
 const bucketNames: Record<ModelBucket, string> = {
   small: "Small",
   medium: "Medium",
-  frontier: "Frontier",
+  large: "Large",
 };
 const purposeNames: Record<AuxiliaryModelPurpose, string> = {
   tools: "Tools",

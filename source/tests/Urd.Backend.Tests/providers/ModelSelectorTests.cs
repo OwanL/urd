@@ -12,7 +12,7 @@ public sealed class ModelSelectorTests {
   [Theory]
   [InlineData(ModelBucket.Small)]
   [InlineData(ModelBucket.Medium)]
-  [InlineData(ModelBucket.Frontier)]
+  [InlineData(ModelBucket.Large)]
   public async Task BucketChoiceResolvesOnlyItsExactConfiguredConnectionAndModel(ModelBucket bucket) {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);

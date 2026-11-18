@@ -396,8 +396,8 @@ plugin hierarchy are needed.
   API still needs the extraction design, rather than speculative interfaces here.
 - `providers/ModelSelector.cs` is a shared prerequisite: bucket or specific provider/model
   choice resolves to the existing `LlmSelection`. This is now implemented for auxiliary
-  purposes, including persisted `small`/`medium`/`frontier` mappings in the current
-  implementation; the selected top bucket is `large`, with the `Frontier` rename planned.
+  purposes, including persisted `small`/`medium`/`large` mappings in the current
+  implementation.
   Delegated-agent selection/fallback still depends on the unimplemented delegation runtime.
   Reuse the same owner for delegated work, not pruning-only buckets. Resolve model choices
   once per preparation; `PruningContext` is only a proposed container. Do not silently

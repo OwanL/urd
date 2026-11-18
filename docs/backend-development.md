@@ -88,7 +88,7 @@ values, including spaces, permits one correction and otherwise leaves the placeh
 The guarded title claim prevents retries on later messages/reopen; title metadata is
 published independently. Its work remains owned/joined before execution settlement.
 
-`ModelSelector` resolves configured small/medium/frontier buckets or exact provider/model
+`ModelSelector` resolves configured small/medium/large buckets or exact provider/model
 overrides through existing preferences. Each auxiliary operation defaults to `small`; there is no
 model-ID quality guessing. Configure that bucket in Settings → Model buckets. When a purpose has no
 configured choice, or the configured provider/model is unavailable, prepass runs on the run's own

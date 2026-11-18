@@ -5,8 +5,17 @@ namespace Urd.Core.Context;
 // is ignored.
 internal static class SkillFrontmatter {
   internal static Dictionary<string, string> Read(string file) {
+    using var reader = File.OpenText(file);
+    return Read(reader);
+  }
+
+  internal static Dictionary<string, string> Read(TextReader reader) {
     var fields = new Dictionary<string, string>(StringComparer.Ordinal);
-    using var lines = File.ReadLines(file).GetEnumerator();
+    IEnumerable<string> ReadLines() {
+      while (reader.ReadLine() is { } line)
+        yield return line;
+    }
+    using var lines = ReadLines().GetEnumerator();
     if (!lines.MoveNext() || lines.Current.Trim() != "---")
       return fields;
 

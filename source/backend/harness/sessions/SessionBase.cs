@@ -49,7 +49,7 @@ public abstract class SessionBase {
     this.modelSelector = modelSelector;
     this.createChatClient = createChatClient;
     this.tools = tools ?? new ToolCatalog([]);
-    startingContextBuilder = new(this.tools);
+    startingContextBuilder = new(this.tools, instructionDiscovery: store.InstructionDiscovery);
     this.processes = processes;
     this.pending = pending ?? new PendingToolCalls();
   }

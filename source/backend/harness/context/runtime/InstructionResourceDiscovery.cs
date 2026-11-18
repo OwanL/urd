@@ -1,160 +1,85 @@
-using System.ComponentModel;
-using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text;
+using Microsoft.Win32.SafeHandles;
 
 namespace Urd.Core.Context;
 
-// Discovers Git-tracked project instructions and skills, plus packaged skills.
+// Discovers cwd-scoped project instructions and skills, plus packaged skills.
 internal sealed class InstructionResourceDiscovery {
-  private static readonly TimeSpan gitTimeout = TimeSpan.FromSeconds(10);
   private static readonly string[] harnessConfigurationDirectories = [
     ".claude", ".cursor", ".windsurf", ".continue", ".roo", ".gemini", ".opencode", ".github",
   ];
+  private static readonly StringComparer pathComparer = OperatingSystem.IsWindows()
+      ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
 
+  private readonly InstructionResourceCatalog catalog;
   private readonly string packagedDirectory;
 
   internal static string PackagedDirectory { get; } = Path.Combine(AppContext.BaseDirectory, "skills");
 
-  internal InstructionResourceDiscovery() : this(PackagedDirectory) { }
-
-  internal InstructionResourceDiscovery(string packagedDirectory) =>
-      this.packagedDirectory = Path.GetFullPath(packagedDirectory);
+  internal InstructionResourceDiscovery(InstructionResourceCatalog catalog, string packagedDirectory) {
+    ArgumentNullException.ThrowIfNull(catalog);
+    this.catalog = catalog;
+    this.packagedDirectory = Path.GetFullPath(packagedDirectory);
+  }
 
   internal async Task<DiscoveredInstructionResources> FindAsync(
       string workingDirectory,
       CancellationToken cancellation) {
-    cancellation.ThrowIfCancellationRequested();
-    workingDirectory = Path.GetFullPath(workingDirectory);
-
-    string? git = FindGit();
-    string? root = git is null ? null : await FindRepositoryRootAsync(git, workingDirectory, cancellation);
-    string[] trackedFiles = root is null
-        ? []
-        : await FindTrackedMarkdownFilesAsync(git!, root, cancellation);
-
-    var skills = new List<DiscoveredSkill>();
+    var (skills, paths) = await FindMetadataAsync(workingDirectory, cancellation);
     var instructions = new List<DiscoveredInstructionDocument>();
-    foreach (string relativePath in trackedFiles) {
+    foreach (string path in paths) {
       cancellation.ThrowIfCancellationRequested();
-      string path = Path.GetFullPath(relativePath, root!);
-      string fileName = Path.GetFileName(path);
-      if (fileName.Equals("SKILL.md", StringComparison.OrdinalIgnoreCase)) {
-        DiscoveredSkill? skill = IsWithinDirectory(path, workingDirectory) ? ReadSkill(path) : null;
-        if (skill is not null)
-          skills.Add(skill);
-        continue;
-      }
-
-      if (!IsInstructionDocument(relativePath))
-        continue;
-
       try {
-        string text = await File.ReadAllTextAsync(path, cancellation);
+        using FileStream? stream = OpenProjectFile(path, workingDirectory);
+        if (stream is null)
+          continue;
+        using var reader = new StreamReader(stream);
+        string text = await reader.ReadToEndAsync(cancellation);
         instructions.Add(new(text, path, Path.GetDirectoryName(path)!));
       } catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) {
-        // A removed or unreadable tracked resource is unavailable for this discovery.
+        // A removed or unreadable resource is unavailable for this discovery.
       }
     }
-
-    skills.AddRange(PackagedSkills(cancellation));
-    DiscoveredSkill[] selectedSkills = skills
-        .DistinctBy(skill => skill.Name, StringComparer.OrdinalIgnoreCase)
-        .ToArray();
-    DiscoveredInstructionDocument[] orderedInstructions = instructions
-        .OrderBy(instruction => instruction.Order)
-        .ThenBy(instruction => instruction.Path, StringComparer.Ordinal)
-        .ToArray();
-
     cancellation.ThrowIfCancellationRequested();
-    return new(Array.AsReadOnly(selectedSkills), Array.AsReadOnly(orderedInstructions));
+    return new(skills, Array.AsReadOnly(instructions.OrderBy(instruction => instruction.Order)
+        .ThenBy(instruction => instruction.Path, StringComparer.Ordinal).ToArray()));
   }
 
-  private static async Task<string?> FindRepositoryRootAsync(
-      string git,
+  // The settings picker needs paths and skill frontmatter, not instruction bodies.
+  internal async Task<(IReadOnlyList<DiscoveredSkill> Skills, IReadOnlyList<string> Instructions)> FindMetadataAsync(
       string workingDirectory,
       CancellationToken cancellation) {
-    string? output = await RunGitAsync(git, ["-C", workingDirectory, "rev-parse", "--show-toplevel"], cancellation);
-    string root = output?.TrimEnd('\r', '\n') ?? "";
-    return root.Length == 0 ? null : Path.GetFullPath(root);
-  }
-
-  private static async Task<string[]> FindTrackedMarkdownFilesAsync(
-      string git,
-      string repositoryRoot,
-      CancellationToken cancellation) {
-    string? output = await RunGitAsync(git, [
-      "-C", repositoryRoot,
-      "ls-files", "-z", "--full-name", "--", ":(glob,icase)**/*.md",
-    ], cancellation);
-    return output?.Split('\0', StringSplitOptions.RemoveEmptyEntries)
-        .Order(StringComparer.Ordinal)
-        .ToArray() ?? [];
-  }
-
-  private static async Task<string?> RunGitAsync(
-      string git,
-      IReadOnlyList<string> arguments,
-      CancellationToken cancellation) {
-    var start = new ProcessStartInfo(git) {
-      RedirectStandardOutput = true,
-      RedirectStandardError = true,
-      StandardOutputEncoding = Encoding.UTF8,
-      StandardErrorEncoding = Encoding.UTF8,
-      UseShellExecute = false,
-      CreateNoWindow = true,
-    };
-    foreach (string argument in arguments)
-      start.ArgumentList.Add(argument);
-
-    using var process = new Process { StartInfo = start };
-    try {
-      if (!process.Start())
-        return null;
-    } catch (Win32Exception) {
-      return null;
-    }
-
-    using var timeout = new CancellationTokenSource(gitTimeout);
-    using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellation, timeout.Token);
-    Task<string> output = process.StandardOutput.ReadToEndAsync(linked.Token);
-    Task<string> error = process.StandardError.ReadToEndAsync(linked.Token);
-    try {
-      await process.WaitForExitAsync(linked.Token);
-      await Task.WhenAll(output, error);
-    } catch (OperationCanceledException) {
-      await StopAndJoinGitAsync(process, output, error);
+    cancellation.ThrowIfCancellationRequested();
+    workingDirectory = Path.GetFullPath(workingDirectory);
+    IReadOnlyList<string> paths = await catalog.FindPathsAsync(workingDirectory, cancellation);
+    var skills = new List<DiscoveredSkill>();
+    var instructions = new List<string>();
+    foreach (string path in paths.Select(Path.GetFullPath).Distinct(pathComparer).Order(StringComparer.Ordinal)) {
       cancellation.ThrowIfCancellationRequested();
-      return null;
-    } catch (IOException) {
-      await StopAndJoinGitAsync(process, output, error);
-      return null;
+      if (!IsWithinDirectory(path, workingDirectory))
+        continue;
+      if (Path.GetFileName(path).Equals("SKILL.md", StringComparison.OrdinalIgnoreCase)) {
+        DiscoveredSkill? skill = ReadSkill(path, workingDirectory);
+        if (skill is not null)
+          skills.Add(skill);
+      } else if (IsInstructionDocument(path)) {
+        try {
+          using FileStream? stream = OpenProjectFile(path, workingDirectory);
+          if (stream is not null)
+            instructions.Add(path);
+        } catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) {
+          // A removed or unreadable resource is unavailable for this discovery.
+        }
+      }
     }
-
-    return process.ExitCode == 0 ? await output : null;
+    skills.AddRange(PackagedSkills(cancellation));
+    cancellation.ThrowIfCancellationRequested();
+    return (Array.AsReadOnly(skills.DistinctBy(skill => skill.Identity, pathComparer).ToArray()),
+        Array.AsReadOnly(instructions.ToArray()));
   }
 
-  private static async Task StopAndJoinGitAsync(Process process, Task<string> output, Task<string> error) {
-    try {
-      if (!process.HasExited)
-        process.Kill(entireProcessTree: true);
-    } catch (InvalidOperationException) {
-      // The process exited between the check and Kill.
-    } catch (Win32Exception) {
-      // Still join the process and redirected reads if termination is unavailable.
-    }
-
-    try {
-      await process.WaitForExitAsync(CancellationToken.None);
-    } catch (InvalidOperationException) {
-      // The process has already been disposed or exited.
-    }
-
-    try {
-      await Task.WhenAll(output, error);
-    } catch (Exception exception) when (exception is IOException or OperationCanceledException) {
-      // Both redirected reads have completed; their contents are not needed on failure.
-    }
-  }
+  internal bool IsPackagedSkill(DiscoveredSkill skill) => IsWithinDirectory(skill.Path, packagedDirectory);
 
   private IEnumerable<DiscoveredSkill> PackagedSkills(CancellationToken cancellation) {
     if (!Directory.Exists(packagedDirectory))
@@ -169,10 +94,18 @@ internal sealed class InstructionResourceDiscovery {
     }
   }
 
-  private static DiscoveredSkill? ReadSkill(string file) {
+  private static DiscoveredSkill? ReadSkill(string file, string? workingDirectory = null) {
     Dictionary<string, string> fields;
     try {
-      fields = SkillFrontmatter.Read(file);
+      if (workingDirectory is null) {
+        fields = SkillFrontmatter.Read(file);
+      } else {
+        using FileStream? stream = OpenProjectFile(file, workingDirectory);
+        if (stream is null)
+          return null;
+        using var reader = new StreamReader(stream);
+        fields = SkillFrontmatter.Read(reader);
+      }
     } catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) {
       return null;
     }
@@ -182,6 +115,63 @@ internal sealed class InstructionResourceDiscovery {
     string name = fields.GetValueOrDefault("name") ?? Path.GetFileName(Path.GetDirectoryName(file)!);
     return new(name, description, Path.GetFullPath(file));
   }
+
+  // Validate the opened object, not the pathname that may have changed since indexing.
+  // Unsupported platforms fail closed rather than reading an unverified project resource.
+  private static FileStream? OpenProjectFile(string path, string directory) {
+    if (InstructionResourceCatalogWatch.Entry(path) != FileAttributes.Normal)
+      return null;
+    var stream = File.OpenRead(path);
+    try {
+      string? actual = OpenFilePath(stream.SafeFileHandle);
+      if (actual is not null && pathComparer.Equals(actual, path) && IsWithinDirectory(actual, directory))
+        return stream;
+    } catch {
+      stream.Dispose();
+      throw;
+    }
+    stream.Dispose();
+    return null;
+  }
+
+  private static string? OpenFilePath(SafeFileHandle handle) {
+    if (OperatingSystem.IsWindows()) {
+      var buffer = new char[512];
+      uint length = GetFinalPathNameByHandle(handle, buffer, (uint)buffer.Length, 0);
+      if (length >= buffer.Length && length <= 32768) {
+        buffer = new char[length];
+        length = GetFinalPathNameByHandle(handle, buffer, (uint)buffer.Length, 0);
+      }
+      if (length == 0 || length >= buffer.Length)
+        return null;
+      string path = new(buffer, 0, (int)length);
+      if (path.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase))
+        return @"\\" + path[8..];
+      return path.StartsWith(@"\\?\", StringComparison.Ordinal) ? path[4..] : null;
+    }
+    if (OperatingSystem.IsLinux()) {
+      // procfs exposes the kernel's path for this descriptor. The calling FileStream owns
+      // the handle for this entire synchronous lookup; only its numeric identifier is needed.
+#pragma warning disable S3869
+      string descriptor = $"/proc/self/fd/{handle.DangerousGetHandle()}";
+#pragma warning restore S3869
+      return new FileInfo(descriptor).LinkTarget;
+    }
+    if (OperatingSystem.IsMacOS()) {
+      var buffer = new byte[1024];
+      if (fcntl(handle, 50, buffer) == -1)
+        return null;
+      int length = Array.IndexOf(buffer, (byte)0);
+      return length < 0 ? null : Encoding.UTF8.GetString(buffer, 0, length);
+    }
+    return null;
+  }
+
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+  private static extern uint GetFinalPathNameByHandle(SafeFileHandle handle, [Out] char[] path, uint length, uint flags);
+
+  [DllImport("libc", SetLastError = true)]
+  private static extern int fcntl(SafeFileHandle handle, int command, byte[] path);
 
   private static bool IsWithinDirectory(string path, string directory) {
     string relative = Path.GetRelativePath(directory, path);
@@ -213,11 +203,4 @@ internal sealed class InstructionResourceDiscovery {
         name.Equals("INSTRUCTIONS_FOR_AGENTS.md", StringComparison.OrdinalIgnoreCase) ||
         name.Equals("INSTRUCTIONS-FOR-AGENTS.md", StringComparison.OrdinalIgnoreCase);
   }
-
-  private static string? FindGit() =>
-      (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator)
-          .Select(entry => entry.Trim().Trim('"'))
-          .Where(Path.IsPathFullyQualified)
-          .Select(directory => Path.Combine(directory, OperatingSystem.IsWindows() ? "git.exe" : "git"))
-          .FirstOrDefault(File.Exists);
 }

@@ -153,10 +153,10 @@ public sealed class SessionManager : IAsyncDisposable {
     }
     // Catalog construction starts no processes; still dispose its empty shell owner.
     await using var catalogProcesses = processes;
-    DiscoveredInstructionResources resources = await new InstructionResourceDiscovery().FindAsync(directory, cancellation);
+    var (skills, instructions) = await store.InstructionDiscovery.FindMetadataAsync(directory, cancellation);
     return new(catalog.Tools.Select(tool => new StartingResourceOption(tool.Name, tool.Name)).ToArray(),
-        resources.Skills.Select(skill => new StartingResourceOption(skill.Identity, skill.Name)).ToArray(),
-        resources.Instructions.Select(document => new StartingResourceOption(document.Identity, document.Path)).ToArray());
+        skills.Select(skill => new StartingResourceOption(skill.Identity, skill.Name)).ToArray(),
+        instructions.Select(path => new StartingResourceOption(path, path)).ToArray());
   }
 
   private PrimarySession CreateSession(SessionRecord record) {

@@ -190,12 +190,13 @@ precedence, rather than being injected into unrelated projects.
 
 ## Project resource discovery
 
-**Updated direction (2026-11-18):** replace Git-tracked project discovery with a catalog of
-matching files in the cwd and its descendants. No ancestor or sibling project guidance;
-Urd's packaged skills remain available. This supersedes the earlier Git-only discovery
-decision, not the pruning triggers or protection contract. See the
-[instruction-resource catalog plan](instruction-resource-catalog-plan.md) for delivery and verification.
-The [context guide](../source/backend/harness/context/README.md) describes the currently shipped Git-backed loader.
+**Implemented direction (2026-11-18):** project instructions and skills are discovered
+from matching files in the working directory and descendants, without requiring Git. No
+ancestor or sibling project guidance is included; Urd's packaged skills remain available.
+This supersedes the earlier Git-only discovery decision, not the pruning triggers or
+protection contract. The [context guide](../source/backend/harness/context/README.md)
+owns recognition and current behavior; the [instruction-resource catalog record](instruction-resource-catalog-plan.md)
+describes the path-only cache, scanner and fallback behavior.
 
 **Document scope decision:** include agent-facing Markdown instruction resources,
 including `AGENTS.md` and append-system resources. Exclude files specific to other

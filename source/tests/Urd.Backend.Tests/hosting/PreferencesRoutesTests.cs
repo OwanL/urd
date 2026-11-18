@@ -109,7 +109,7 @@ public sealed class PreferencesRoutesTests {
   [Fact]
   public async Task AuxiliaryModelAndProtectionPreferencesUseIndependentRoutes() {
     using var database = new TemporaryDatabase();
-    await using var server = new RunningServer(RunningServer.OptionsFor(database));
+    await using var server = new RunningServer(RunningServer.OptionsForIsolatedWorkspace(database));
     await server.WaitForReadyAsync();
     Guid connectionId = Guid.NewGuid();
     string sourcePath = Path.Combine(Path.GetTempPath(), "repo", "AGENTS.md");

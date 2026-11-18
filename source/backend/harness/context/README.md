@@ -80,30 +80,53 @@ See [the pruning plan](../../../../docs/pruning-plan.md) for task inputs and fai
 
 ## Project instruction documents
 
-`InstructionResourceDiscovery` scans Git-tracked Markdown recursively from the repository
-root. Recognized filenames, case-insensitively, are `AGENTS.md`, `APPEND_SYSTEM.md`,
-`APPEND-SYSTEM.md`, `AGENT_INSTRUCTIONS.md`, `AGENT-INSTRUCTIONS.md`, `AGENT_INSTRUCTION.md`,
-`AGENT-INSTRUCTION.md`, `INSTRUCTIONS_FOR_AGENTS.md` and `INSTRUCTIONS-FOR-AGENTS.md`.
-Untracked files and ordinary documentation are not candidates. Other harnesses' files,
-including `CLAUDE.md`, `GEMINI.md`, Copilot `*.instructions.md`/`copilot-*` and their
-configuration directories, are excluded. No additional user configuration location is read.
+`InstructionResourceDiscovery` asks the shared catalog for matching files in the session's
+working directory and descendants. The working directory, not a Git root, is the boundary:
+no ancestor or sibling project files are included. Git is not required; hidden, ignored and
+untracked files are eligible. Discovery recognizes these filenames case-insensitively:
+`AGENTS.md`, `APPEND_SYSTEM.md`, `APPEND-SYSTEM.md`, `AGENT_INSTRUCTIONS.md`,
+`AGENT-INSTRUCTIONS.md`, `AGENT_INSTRUCTION.md`, `AGENT-INSTRUCTION.md`,
+`INSTRUCTIONS_FOR_AGENTS.md` and `INSTRUCTIONS-FOR-AGENTS.md`. `SKILL.md` files are
+catalogued separately. Other harnesses' files, including `CLAUDE.md`, `GEMINI.md`, Copilot
+`*.instructions.md`/`copilot-*` and their configuration directories, are excluded.
 
-Documents carry full text and explicit directory scope. All discovered documents are
-selection candidates; retained documents render shallower scopes first, then ordinal
-canonical paths, with a scope/source header so nested rules apply only within that directory.
-The main context preserves original text rather than accepting model-written replacements.
-Instruction/skill protection identities are full canonical file paths (case-insensitive
-on Windows); tool identities are registered names. Protection does not grant tool authority.
-Outside Git, no project instructions or skills are discovered; packaged skills remain.
+The catalog indexes paths only; it does not cache instruction text or skill frontmatter.
+The backend's shared derived SQLite index is `<DataRoot>/urd.sqlite.instructions.sqlite`
+(the session database is `<DataRoot>/urd.sqlite`). It survives backend restarts, but a
+requested tree is rescanned on restart before it is considered current. The catalog watches
+active roots and reconciles file/directory create, delete and rename notifications. If a
+watcher cannot be established or loses coverage, requests use a fresh scan rather than
+trusting stale rows. A caller cancelling its wait does not cancel a scan shared with other
+callers. Cache schema/integrity problems rebuild this derived index when it is identified as
+Urd's catalog. A nonempty foreign file is left untouched and causes an error; a fresh
+empty SQLite file can be initialized as the derived cache.
+
+The scanner is bundled `fd` v10.3.0, resolved beside the backend under
+`fd/<platform>-<architecture>/`; it is not looked up on `PATH`. It searches exact eligible
+basenames, including hidden and ignored files, emits NUL-delimited paths and does not follow
+links. Mount-aware scans fail closed for
+unknown/remote filesystems and avoid virtual OS trees. Unsafe or out-of-scope roots return
+no project candidates; unsupported-platform, scanner and index failures are surfaced rather
+than treated as successful empty scans. Packaged skills remain available independently of the
+working directory. Checked-in scanner binaries cover Windows, macOS and Linux x64/arm64
+targets; this document does not claim published-layout or end-to-end verification on every
+target.
+
+Documents carry full text and explicit directory scope when loaded for preparation. All
+discovered documents are selection candidates; retained documents render shallower scopes
+first, then ordinal canonical paths, with a scope/source header so nested rules apply only
+within that directory. The main context preserves original text rather than accepting
+model-written replacements. Instruction/skill protection identities are full canonical
+file paths (case-insensitive on Windows); tool identities are registered names. Protection
+does not grant tool authority.
 
 ## Skills
 
-`SkillsGuidance` formats skills by name, description and path, using Pi's wording;
-the model reads a skill's file when a task matches. `InstructionResourceDiscovery` finds
-Git-tracked `SKILL.md` files under the working directory, then packaged files in `skills/`.
-A project skill replaces a packaged skill with the same name. Outside a Git repository
-only packaged skills are listed. At each allowed preparation boundary, selected skills
-are listed by name/description/path; their bodies are not supplied to the selector.
+`SkillsGuidance` formats selected skills by name, description and path, using Pi's wording;
+the model reads a skill's file when a task matches. Project `SKILL.md` files are found under
+the working directory without Git. Project and packaged skills are both candidates, including
+same-name entries. When a project skill is selected, the packaged same-name entry is omitted;
+a protected packaged entry is retained. Skill bodies are not supplied to the selector.
 
 Add a packaged skill as `skills/<name>/SKILL.md` with `name` and `description`
 frontmatter. The build copies `skills/` beside the server so the model can read it.

@@ -73,7 +73,7 @@ public sealed class SessionEventRoutesTests {
   public async Task UnwatchedOpenSessionReportsStatusButNotContentChanges() {
     using var database = new TemporaryDatabase();
     var client = new ScriptedChatClient(WaitForever);
-    await using var server = new RunningServer(RunningServer.OptionsFor(database), createClient: () => client);
+    await using var server = new RunningServer(RunningServer.OptionsForIsolatedWorkspace(database), createClient: () => client);
     await server.WaitForReadyAsync();
 
     using HttpResponseMessage stream = await OpenStreamAsync(server.Client);

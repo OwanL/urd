@@ -18,7 +18,7 @@ public sealed class TranscriptHistoryRoutesTests {
   [Fact]
   public async Task ReadsAllHistoryModesAsPrivateMetadataOnlyResponses() {
     using var database = new TemporaryDatabase();
-    await using var server = new RunningServer(RunningServer.OptionsFor(database));
+    await using var server = new RunningServer(RunningServer.OptionsForIsolatedWorkspace(database));
     await server.WaitForReadyAsync();
     Guid sessionId = await CreateSessionAsync(server.Client);
     UserMessageReceipt receipt = await SendAsync(server.Client, sessionId, 0, "private prompt text");
@@ -72,7 +72,7 @@ public sealed class TranscriptHistoryRoutesTests {
   [Fact]
   public async Task RevisionConflictPrecedesMissingAnchorAndWrongSessionAnchorIsNotReplacedByLatest() {
     using var database = new TemporaryDatabase();
-    await using var server = new RunningServer(RunningServer.OptionsFor(database));
+    await using var server = new RunningServer(RunningServer.OptionsForIsolatedWorkspace(database));
     await server.WaitForReadyAsync();
     Guid firstSession = await CreateSessionAsync(server.Client);
     UserMessageReceipt receipt = await SendAsync(server.Client, firstSession, 0, "first");
@@ -144,7 +144,7 @@ public sealed class TranscriptHistoryRoutesTests {
   [Fact]
   public async Task NormalSendAdmitsUserEntryFirstInHistory() {
     using var database = new TemporaryDatabase();
-    await using var server = new RunningServer(RunningServer.OptionsFor(database));
+    await using var server = new RunningServer(RunningServer.OptionsForIsolatedWorkspace(database));
     await server.WaitForReadyAsync();
     Guid sessionId = await CreateSessionAsync(server.Client);
     UserMessageReceipt receipt = await SendAsync(server.Client, sessionId, 0, "admission order");

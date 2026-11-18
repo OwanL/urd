@@ -1,5 +1,6 @@
 using Microsoft.Extensions.AI;
 using Urd.Core.MarkdownRendering;
+using Urd.Core.Preferences;
 using Urd.Core.Providers;
 using Urd.Core.Storage;
 using Urd.Server;
@@ -26,6 +27,14 @@ internal sealed class RunningServer : IAsyncDisposable {
   }
 
   internal static ServerOptions OptionsFor(TemporaryDatabase database) => new(Path.GetDirectoryName(database.Path)!, 0);
+
+  internal static ServerOptions OptionsForIsolatedWorkspace(TemporaryDatabase database) {
+    string workspace = Path.Combine(Path.GetDirectoryName(database.Path)!, "workspace");
+    Directory.CreateDirectory(workspace);
+    using UrdStore store = UrdStore.Open(database.Path);
+    new PreferenceManager(store).SetWorkingDirectory(workspace);
+    return OptionsFor(database);
+  }
 
   internal HttpClient Client { get; }
   internal bool IsReady => ready.Task.IsCompletedSuccessfully;

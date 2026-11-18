@@ -86,8 +86,8 @@ public sealed class SessionWorkingDirectoryTests {
   public async Task AcceptedInputLocksDirectoryEvenWhenProviderSetupFailsBeforeVisibleHistory() {
     using var database = new TemporaryDatabase();
     UrdStore store = UrdStore.Open(database.Path);
-    string original = Path.GetTempPath();
     string alternate = Path.GetDirectoryName(database.Path)!;
+    string original = Directory.CreateDirectory(Path.Combine(alternate, "workspace")).FullName;
     var session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid(), original), store,
         _ => throw new InvalidOperationException("Provider setup failed."));
     try {

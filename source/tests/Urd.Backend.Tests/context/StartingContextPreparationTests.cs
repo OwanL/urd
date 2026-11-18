@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Diagnostics;
 using System.Text.Json;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Context;
@@ -22,10 +21,8 @@ public sealed class StartingContextPreparationTests {
     string packaged = Path.Combine(root, "packaged");
     Directory.CreateDirectory(project);
     try {
-      Git(project, "init", "--quiet");
       string rootDocument = Write(project, "AGENTS.md", "Root rule.\n");
       string nestedDocument = Write(project, Path.Combine("nested", "AGENTS.md"), "Nested rule.\nFull nested content.\n");
-      Git(project, "add", "AGENTS.md", "nested/AGENTS.md");
 
       string answer = JsonSerializer.Serialize(new { keptIds = new[] { rootDocument, nestedDocument } });
       var auxiliary = new ScriptedChatClient(token => TextUpdates([answer], token));
@@ -36,9 +33,10 @@ public sealed class StartingContextPreparationTests {
         statuses.Enqueue(status);
         return Task.CompletedTask;
       }, "Apply the project guidance.");
+      await using var catalog = Catalog(root, [rootDocument, nestedDocument]);
       var builder = new StartingContextBuilder(new ToolCatalog([
         TestTool("read"), TestTool("write")
-      ]), instructionDiscovery: new InstructionResourceDiscovery(packaged));
+      ]), instructionDiscovery: new InstructionResourceDiscovery(catalog, packaged));
       var preferences = new UserPreferences(project, null) {
         ProtectedResources = new() { Tools = ["write"], Skills = [], Instructions = [] }
       };
@@ -75,6 +73,66 @@ public sealed class StartingContextPreparationTests {
     }
   }
 
+  [Theory]
+  [InlineData(false, false, true, true, true, false)]
+  [InlineData(false, false, false, true, false, true)]
+  [InlineData(false, true, true, false, true, true)]
+  [InlineData(true, false, false, true, true, false)]
+  public async Task DuplicateSkillsArePrunedByPathAndProtectedPackagedSkillsSurviveOverride(
+      bool protectProject, bool protectPackaged, bool keepProject, bool keepPackaged,
+      bool expectProject, bool expectPackaged) {
+    string root = Path.Combine(Path.GetTempPath(), $"urd-context-{Guid.NewGuid():N}");
+    string project = Path.Combine(root, "project");
+    string packaged = Path.Combine(root, "packaged");
+    Directory.CreateDirectory(project);
+    try {
+      string projectSkill = Write(project, "skills/project/SKILL.md", "---\nname: shared\ndescription: Project skill.\n---\n");
+      string packagedSkill = Write(packaged, "shared/SKILL.md", "---\nname: shared\ndescription: Packaged skill.\n---\n");
+      string[] kept = new[] {
+        keepProject && !protectProject ? projectSkill : null,
+        keepPackaged && !protectPackaged ? packagedSkill : null
+      }.OfType<string>().ToArray();
+      string answer = JsonSerializer.Serialize(new { keptIds = kept });
+      var auxiliary = new ScriptedChatClient(token => TextUpdates([answer], token));
+      await using RunningParent parent = await StartParentAsync();
+      var runner = new ConversationRunner(parent.Fixture.Session.Recorder, _ => auxiliary, [], project);
+      var statuses = new ConcurrentQueue<StartingResourcePruningStatus>();
+      var pruner = new StartingResourcePruner(runner, (_, _) => Task.FromResult(TestLlmSelection.DefaultResolution), status => {
+        statuses.Enqueue(status);
+        return Task.CompletedTask;
+      }, "Use the skill.");
+      await using var catalog = Catalog(root, [projectSkill, projectSkill]);
+      var builder = new StartingContextBuilder(new ToolCatalog([]),
+          instructionDiscovery: new InstructionResourceDiscovery(catalog, packaged));
+      var preferences = new UserPreferences(project, null) {
+        ProtectedResources = new() {
+          Tools = [], Skills = new[] {
+            protectProject ? projectSkill : null, protectPackaged ? packagedSkill : null
+          }.OfType<string>().ToArray(), Instructions = []
+        }
+      };
+
+      StartingContext context = await builder.PrepareAsync(
+          new(SessionKind.Primary, ModelFamily.Other, project, null), Guid.NewGuid(), "Use the skill.",
+          preferences, new HashSet<string>(StringComparer.Ordinal), pruner, CancellationToken.None)
+          .WaitAsync(TestTimeout);
+
+      string text = string.Join("\n", context.Instructions.Select(message => message.Text));
+      Assert.Equal(expectProject, text.Contains("Project skill.", StringComparison.Ordinal));
+      Assert.Equal(expectPackaged, text.Contains("Packaged skill.", StringComparison.Ordinal));
+      Assert.Equal(1, auxiliary.Calls);
+      string request = auxiliary.LastRequest[^1].Text;
+      Assert.Equal(!protectProject, request.Contains("Project skill.", StringComparison.Ordinal));
+      Assert.Equal(!protectPackaged, request.Contains("Packaged skill.", StringComparison.Ordinal));
+      int retained = (protectProject || keepProject ? 1 : 0) + (protectPackaged || keepPackaged ? 1 : 0);
+      Assert.Contains(statuses, status => status.Category == "skills" && status.State == "completed"
+          && status.Total == 2 && status.Retained == retained);
+    } finally {
+      if (Directory.Exists(root))
+        Directory.Delete(root, recursive: true);
+    }
+  }
+
   private static TestAgentTool TestTool(string name) =>
       new TestAgentTool(name, (_, _, _) => Task.FromResult(new ToolOutput("unused", [])));
 
@@ -85,17 +143,8 @@ public sealed class StartingContextPreparationTests {
     return Path.GetFullPath(path);
   }
 
-  private static void Git(string workingDirectory, params string[] arguments) {
-    string executable = (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator)
-        .Select(directory => Path.Combine(directory.Trim('"'), "git.exe"))
-        .First(File.Exists);
-    var start = new ProcessStartInfo(executable) { WorkingDirectory = workingDirectory, UseShellExecute = false };
-    foreach (string argument in arguments)
-      start.ArgumentList.Add(argument);
-    using Process git = Process.Start(start)!;
-    git.WaitForExit();
-    Assert.Equal(0, git.ExitCode);
-  }
+  private static InstructionResourceCatalog Catalog(string root, string[] paths) =>
+      new(Path.Combine(root, "catalog.db"), (_, _) => Task.FromResult(paths), (_, _, _) => null);
 
   private static async Task<RunningParent> StartParentAsync() {
     var mainWaiting = Signal();

@@ -31,7 +31,7 @@ public sealed class SessionHttpLifetimeTests {
       return Paused(entered, finish, token);
     });
     var database = new TemporaryDatabase();
-    var server = new RunningServer(RunningServer.OptionsFor(database),
+    var server = new RunningServer(RunningServer.OptionsForIsolatedWorkspace(database),
         createClient: () => client);
     try {
       Uri origin = await server.WaitForReadyAsync();
@@ -87,7 +87,7 @@ public sealed class SessionHttpLifetimeTests {
     var client = new ScriptedChatClient(token => Response(token));
     var database = new TemporaryDatabase();
     string dataRoot = Path.GetDirectoryName(database.Path)!;
-    var server = new RunningServer(RunningServer.OptionsFor(database), createClient: () => client);
+    var server = new RunningServer(RunningServer.OptionsForIsolatedWorkspace(database), createClient: () => client);
     try {
       await server.WaitForReadyAsync();
       server.Client.DefaultRequestHeaders.Add("X-Urd-Client", "browser");

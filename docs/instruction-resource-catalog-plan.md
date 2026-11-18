@@ -1,32 +1,100 @@
 # Incremental instruction-resource catalog
 
-Status: implementation plan, not shipped behavior. Urd should discover every eligible project instruction and skill **in the current working directory and below it**. Discovery supplies the candidates; the existing pruner decides relevance. No user-installed search tool, elevated service or OS search configuration should be necessary.
+**Status: implemented in source.** This record describes current behavior and limits; it
+is not a claim that every packaged platform has been verified. The catalog supplies paths
+to the existing `InstructionResourceDiscovery`; it does not select resources or replace the
+[pruning contract](pruning-plan.md).
 
-## Scope
+## Scope and discovery
 
-- The cwd is the boundary, not its Git root. A chat at `C:\` sees matching files across that drive; one at `C:\dev\repos\urd` sees that repo's tree, not `C:\dev\AGENTS.md` or a sibling repo. A chat in `urd/source` sees only `source` and below. The protection picker uses the same rule with the default cwd. Filter by path components before reading any project document or skill metadata, even when reusing a broader catalog. A protected path outside the tree stays saved but is not injected.
-- Keep Urd's packaged skills available independently of cwd, and leave built-in guidance alone. Keep the instruction filename rules and harness-specific exclusions in the [context guide](../source/backend/harness/context/README.md). Include eligible hidden, untracked and ignored files; Git is no longer a requirement. Do not follow symlinks or junctions outside the tree. For `/`, qualify actual mounted user directories on macOS and Linux; blindly using a single-filesystem flag can omit a separately mounted `/home`. Do not crawl virtual OS trees like `/proc` or auto-connect remote shares.
-- Keep canonical file paths as identities. The same path found via two routes is one resource. Distinct project skills sharing a name must not disappear before pruning; show their paths to distinguish them. Qualify project-versus-packaged name collisions explicitly: keep the packaged fallback when no project version is selected and never discard a protected selection by name.
+The session's working directory is the boundary, not its Git root. Discovery includes
+matching resources in that directory and descendants, but not ancestors or sibling trees.
+Git is not required: hidden, ignored and untracked files are included. Instruction filenames,
+other-harness exclusions, skill parsing and scope are owned by the
+[context guide](../source/backend/harness/context/README.md). Urd's packaged skills are
+available independently of the working directory. Project and packaged same-name skills
+remain candidates; when a project skill is selected it replaces the packaged same-name
+entry, unless that packaged entry is protected.
 
-## Runtime ownership
+The bundled scanner searches filenames only. It does not follow symbolic links or junctions;
+project files are opened and checked against the actual opened path before their contents are
+read. On Linux and macOS, mount-aware traversal excludes virtual and remote filesystems, and
+unknown or ambiguous filesystem types fail closed. Windows rejects network roots and unsafe
+reparse-point roots. Checked-in binaries cover Windows, macOS and Linux x64/arm64 (Linux musl
+uses the corresponding Linux asset). Asset presence and source branches are not end-to-end
+verification on every OS or architecture.
 
-**Decision: one persistent, incrementally updated SQLite index per Urd backend data root.** All chats and the settings picker query that index; none creates its own. Store matching paths and which directory trees have been scanned, not instruction bodies. The existing session store still owns the exact guidance used by each session.
+## Runtime ownership and cache
 
-- `InstructionResourceCatalog` owns the index and is its only writer. It returns paths under the caller's cwd. File notifications cause it to insert, remove or rename the affected rows, not rebuild the table.
-- `FdResourceScanner` runs bundled `fd` for the initial scan and when the catalog needs to check a tree. On restart, reopen the **same index** and compare the affected tree with disk to catch missed changes; commit only differences. A restart is not a reason to delete the index.
-- `InstructionResourceDiscovery` uses those paths to read instructions and skill metadata and adds packaged skills. It does not own a scanner, watcher or database. Pruning stays separate.
+There is one catalog per backend `UrdStore`, shared by session preparation and the Settings
+resource picker. It stores matching paths, not instruction text or skill frontmatter. The
+actual cache path is the session database path plus `.instructions.sqlite`; for the normal
+server database this is `<DataRoot>/urd.sqlite.instructions.sqlite`, beside but separate
+from `<DataRoot>/urd.sqlite`. The catalog cache has its own versioned schema (currently 1)
+and is rebuildable without resetting session data. A cache recognized as Urd's catalog is
+rebuilt if its schema or integrity is incompatible. Nonempty foreign files are not deleted
+and opening them fails; a fresh empty SQLite file can be initialized as the derived cache.
 
-## Build in three slices
+The index file remains across backend restarts, but cached rows alone do not prove freshness.
+A requested tree is scanned and reconciled with disk after restart before it is treated as
+current. During a process lifetime, roots with working watchers can serve cached paths;
+file and directory create/delete/rename events update matching rows. Moving a populated
+directory triggers a scan of its destination subtree. Text and skill metadata are read later
+by discovery, so editing a file does not require rescanning paths and takes effect at the
+next preparation boundary.
 
-1. **Bundle the scanner and establish scope.** Ship a pinned [fd](https://github.com/sharkdp/fd) executable with each supported Windows, macOS and Linux build, including license notices and verified release checksums. Resolve it from Urd's installation, not `PATH`; no download at first chat. Invoke it directly to search for matching filenames, not file contents. Use case-insensitive exact basenames, hidden and ignored files, NUL-delimited output and no link following. Stream results; distinguish an empty successful scan from a missing binary, cancellation or failed scan. Skip inaccessible entries without logging a drive's file listing. Update `InstructionResourceDiscovery` and its Git-only tests. Verify the scanner in published layouts, not just a developer shell.
-2. **Share a small catalog.** Keep the shared SQLite index across backend restarts; it is rebuildable if damaged. Start warming the default cwd in the background; another cwd uses a covered subtree or starts its own scan. Share overlapping work where practical. Both `StartingContextBuilder` and `SessionManager.ReadStartingResourcesAsync` use that catalog, with the session's actual cwd and default cwd respectively. Publish a scan result atomically; never present a partial or cancelled scan as ready. The UI opens without waiting; only consumers needing a complete catalog wait, with cancellable indexing status. Cancelling one waiter must not abort work another chat needs. Release watchers and join scanner processes on backend shutdown. A corrupt or incompatible derived cache can be rebuilt without resetting session data.
-3. **Maintain it incrementally.** `fd` is a scanner, not a watcher. Use .NET `FileSystemWatcher` (native notifications underneath) for active roots. Add/remove matching paths for file creates, deletes and renames. On a directory move, remove the old prefix and scan the destination subtree if in scope: it may arrive already populated with resources. Watch directory events as well as filenames. Editing an existing file needs no path scan; discovery reads current instruction text and skill frontmatter at the next preparation boundary. Changes never rewrite context already sent.
+Production startup requests best-effort warming of the saved default working directory
+when one exists. Warming failures are ignored; a later consumer retries and observes a
+scan failure if it persists. Other working directories scan on demand. Concurrent callers
+can share covered scans. Cancelling a caller cancels only its wait, not shared scan work.
+Watchers and scanner processes are owned by the catalog and drained on backend shutdown.
 
-Start watching **before** a baseline scan; buffer changes with a bound and reconcile touched paths/subtrees before marking the catalog ready. Treat restart, overflow or lost coverage as requiring another scan. Coalesce recovery scans. If recursive watching is unavailable (e.g. Linux watch limits), do not require a sysctl or pretend the cache is current: use a fresh scan for requests needing completeness until watching works again. A warm SQLite read is not evidence that no files appeared while Urd was stopped.
+### Fresh-scan fallback
 
-## Integration and acceptance
+A watcher is used only when coverage can be established safely. If it is unavailable (for
+example, recursive watching cannot safely cover a tree with nested mounts), each request
+performs a fresh scan instead of trusting persisted rows. Watcher errors, notification
+overflow or lost coverage trigger a reconciliation scan before results are returned. A
+failed or cancelled scan is not published as a ready partial result; scan/index errors reach
+the requesting operation. A warm cache read is never used to claim that changes made while
+Urd was stopped have been observed.
 
-- Keep the [pruning contract](pruning-plan.md): protection before selection, full text for instruction candidates, metadata for skills, directory scope on retained instructions, and immutable first-prompt/post-compaction snapshots. Do not rerun pruning on watcher events. A drive-root cwd can send eligible documents from unrelated repos to the configured pruning provider; filename-only indexing does not change that. Do not prefilter by inferred relevance or silently cap candidates. Before enabling broad roots, exercise a large set through the real preparation path including selector context limits and keep-all failure behavior. If a set cannot fit, resolve selection in bounded groups or agree a different explicit policy; do not call truncation complete.
-- Test with a temporary tree, not the developer's drive: root vs nested cwd, siblings with the same name, no Git, hidden/untracked files, a link pointing outside, a protected parent and a packaged skill. Drive both settings and first-prompt preparation. Assert out-of-scope documents are never sent even when the shared catalog covers their parent. Verify stable source/scope order and unchanged ordinary continuation.
-- Compare the live catalog with an independent fresh scan after create, rename, delete, moving a populated directory in/out, changes during the initial scan, simulated watcher loss, and offline changes followed by restart. Verify concurrent readers, cancellation, and cleanup. Run local smoke tests on each target OS, including default watch limits, permission-denied paths and mount behavior. No new CI requirement.
-- **Windows baseline, 2026-11-18:** Two four-thread `fd` walks of `C:\` took 121 s and 133 s for 1,902 raw filename matches. The paths-only cache was 444 KiB; reopening and reading it took 5 ms. `C:\dev` took 36 s. FastFind's standard-provider whole-volume SQLite index was still incomplete at the 8-minute cutoff (~829 MiB). These are filename measurements on one machine, not cold-boot guarantees, watcher costs or pruning latency. Benchmark idle watcher memory and recovery on large trees before release.
+The derived cache location uses SQLite sidecars as needed. Rebuilding the catalog does not
+remove or rewrite the session database. The catalog itself does not delete project files or
+change saved session context; a new selection is activated only at the existing initial or
+successful-compaction preparation boundary.
+
+## Scanner and packaging
+
+The scanner is **fd v10.3.0**, bundled from the checked-in release executables and MIT/Apache
+license notices in `../source/vendor/fd/`. It is resolved from the backend's application
+base directory under `fd/<platform>-<architecture>/fd` (or `fd.exe`), not from `PATH`; Linux
+musl maps to the canonical Linux folder. The build target maps a runtime identifier to its
+asset. A clean Windows x64 server publish contained one runnable fd binary and both license notices.
+The scanner uses exact eligible basenames, case-insensitive matching, hidden
+and ignored files, NUL-delimited output, and four threads. It limits traversal to the requested
+root and applies platform-specific mount/link safety rules. See the
+[fd asset README](../source/vendor/fd/README.md) for hashes and packaging details.
+
+The executable implementation contains Windows, macOS and Linux branches, and assets for
+x64/arm64 on those platforms. This document does **not** claim that published layouts,
+watcher behavior, mount behavior or native executable invocation have been verified on every
+RID. Mount-policy unit tests use parsed/synthetic mount data; they do not prove behavior on
+every live filesystem. Do not infer all-platform acceptance from the asset table.
+
+## Retained test coverage and evidence limits
+
+Retained tests exercise hidden/ignored matching, mount-plan parsing and fail-closed malformed
+mount data; catalog tests cover shared/overlapping roots, watcher updates, directory moves,
+restart reconciliation, lost coverage, unavailable watchers, cancellation, cache rebuild and
+protection against scanning through links. These cases establish the tested behavior only;
+they are not an exhaustive OS matrix or a proof of discovery completeness on arbitrary
+filesystems. The current implementation and tests do not establish pruning quality or a
+winner over keep-all fallback.
+
+The 2026-11-18 Windows measurements below are historical filename-scan experiments, not
+release acceptance or cross-platform performance guarantees: two four-thread `fd` walks of
+`C:\` took 121 s and 133 s for 1,902 raw filename matches; the paths-only cache was 444 KiB
+and reopening/reading it took 5 ms. `C:\dev` took 36 s. FastFind's standard-provider
+whole-volume SQLite index was still incomplete at the 8-minute cutoff (~829 MiB). These
+measurements do not cover cold-boot guarantees, watcher cost, or pruning latency.

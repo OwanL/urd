@@ -61,11 +61,20 @@ subclasses in Core's assembly and creates per-builder instances; no other assemb
 are scanned. Ordering is ascending `Order`, then ordinal full type name, preserving
 supplied order for ties. Applicable built-in instructions always bypass pruning.
 
-`InstructionResourceDiscovery` loads Git-tracked agent-facing Markdown recursively
-from the repository and discovers project/packaged skills. The [context README](../source/backend/harness/context/README.md)
-owns recognition, scope, precedence and protection identities. Ordinary documentation
-and other harnesses' configuration are not instruction candidates. Document candidates
-include full text; skills remain name/description/path references with on-demand bodies.
+`InstructionResourceDiscovery` loads eligible agent-facing Markdown and skill metadata
+from the working directory and descendants, independently of Git, and adds packaged skills.
+The [context README](../source/backend/harness/context/README.md) owns recognition, scope,
+precedence and protection identities. Ordinary documentation and other harnesses'
+configuration are not instruction candidates. Document candidates include full text; skills
+remain name/description/path references with on-demand bodies. A shared, path-only SQLite
+catalog is stored beside the session database at `<DataRoot>/urd.sqlite.instructions.sqlite`;
+it is retained across restarts but requested trees are rescanned before being trusted after a
+restart. Active roots are watched and reconciled incrementally. If watching is unavailable or
+coverage is lost, requests fall back to a fresh scan; a caller cancelling its wait does not
+cancel shared scan work. The bundled scanner is fd v10.3.0, resolved from the backend layout,
+not `PATH`. Unknown/remote mount traversal fails closed. Checked-in scanner binaries cover
+Windows, macOS and Linux x64/arm64 targets; published-layout and end-to-end verification
+has not been established for every platform.
 
 At a fresh session's first prompt, and the first request after successful compaction,
 `StartingContextBuilder.PrepareAsync` runs three independent, parallel selections over
@@ -554,8 +563,10 @@ Git attributes normalize text to LF, preserve detected binary files, and check o
 ## Outputs and data
 
 Normal generated `bin/`, `obj/` and test results stay inside the repository and are
-ignored. NuGet uses its standard package cache. Tests own disposable temporary
-SQLite directories; they must not open personal sessions, credentials or copy `data/`.
-Build/test never resets application data. No clean, package or activation workflow
+ignored. NuGet uses its standard package cache. The instruction-resource catalog is a
+rebuildable sidecar at `<DataRoot>/urd.sqlite.instructions.sqlite` (plus SQLite sidecars),
+separate from the durable `<DataRoot>/urd.sqlite` session database. Tests own disposable
+temporary SQLite directories; they must not open personal sessions, credentials or copy
+`data/`. Build/test never resets application data. No clean, package or activation workflow
 is implemented by this slice. During coordinated agent work, restore/build/test
 must acquire, start and release the exact exclusive resource `urd:dotnet`.

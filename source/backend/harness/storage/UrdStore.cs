@@ -1,14 +1,21 @@
 using Microsoft.Data.Sqlite;
 using Urd.Core.Usage;
+using Urd.Core.Context;
 
 namespace Urd.Core.Storage;
 
 // Opens the shared database and exposes its focused storage operations.
 public sealed class UrdStore : IDisposable {
   private readonly Database database;
+  private readonly InstructionResourceCatalog instructionCatalog;
+  private readonly CancellationTokenSource instructionWarmStop = new();
+  private Task? instructionWarm;
+  private int disposed;
 
   private UrdStore(SqliteConnection connection, string databasePath) {
     database = new(connection);
+    instructionCatalog = new(databasePath + ".instructions.sqlite", new FdResourceScanner());
+    InstructionDiscovery = new(instructionCatalog, InstructionResourceDiscovery.PackagedDirectory);
     var toolResults = new ToolResultCodec(new ToolImageStore(databasePath + ".tool-images"));
     Sessions = new(database);
     StartingContexts = new(database);
@@ -33,6 +40,7 @@ public sealed class UrdStore : IDisposable {
     Usage = new(database);
   }
 
+  internal InstructionResourceDiscovery InstructionDiscovery { get; }
   internal UsageStorage Usage { get; }
   internal ProviderStorage Providers { get; }
   internal ModelSettingsStorage ModelSettings { get; }
@@ -84,5 +92,27 @@ public sealed class UrdStore : IDisposable {
   public UsageSummary ReadUsage(Guid? sessionId = null, DateTimeOffset? from = null,
       DateTimeOffset? to = null, bool detail = true) => Usage.Read(sessionId, from, to, detail);
 
-  public void Dispose() => database.Dispose();
+  // Host startup opts in; ordinary stores and test fixtures never initiate a broad scan.
+  public void WarmInstructionResources(string directory) {
+    ArgumentException.ThrowIfNullOrWhiteSpace(directory);
+    if (instructionWarm is not null)
+      throw new InvalidOperationException("Instruction resource warming has already started.");
+    instructionWarm = Task.Run(async () => {
+      try {
+        await instructionCatalog.FindPathsAsync(directory, instructionWarmStop.Token);
+      } catch (Exception) {
+        // A later consumer retries and observes any failure; warming is best effort.
+      }
+    }, CancellationToken.None);
+  }
+
+  public void Dispose() {
+    if (Interlocked.Exchange(ref disposed, 1) != 0)
+      return;
+    instructionWarmStop.Cancel();
+    instructionCatalog.DisposeAsync().AsTask().GetAwaiter().GetResult();
+    instructionWarm?.GetAwaiter().GetResult();
+    instructionWarmStop.Dispose();
+    database.Dispose();
+  }
 }

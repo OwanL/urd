@@ -26,7 +26,7 @@ public sealed class ServerProcessTests {
   }
 
   [Fact]
-  public async Task DefaultWorkingFolderOffersGenericToolsAndReadsAnAbsoluteFile() {
+  public async Task WorkingFolderOffersGenericToolsAndReadsAnAbsoluteFile() {
     if (!OperatingSystem.IsWindows())
       return;
     using var database = new TemporaryDatabase();
@@ -40,7 +40,7 @@ public sealed class ServerProcessTests {
           new FunctionCallContent("read-call", "read", new Dictionary<string, object?> { ["path"] = file }))
           : Complete(token);
     });
-    await using var server = new RunningServer(RunningServer.OptionsFor(database),
+    await using var server = new RunningServer(RunningServer.OptionsForIsolatedWorkspace(database),
         createClient: () => chatClient);
     await server.WaitForReadyAsync();
     server.Client.DefaultRequestHeaders.Add("X-Urd-Client", "browser");

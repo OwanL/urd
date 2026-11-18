@@ -39,7 +39,7 @@ internal static class Program {
         }));
         if (options.ShowTray && OperatingSystem.IsWindowsVersionAtLeast(6, 1))
           tray = ServerTray.Show(options.DataRoot, origin, stopping.Cancel);
-      }, stopping.Token);
+      }, stopping.Token, warmInstructions: true);
       return 0;
     } catch (Exception failure) {
       await Console.Error.WriteLineAsync(failure.ToString());
@@ -49,14 +49,15 @@ internal static class Program {
     }
   }
 
-  internal static Task RunServerAsync(ServerOptions options, Action<Uri> onReady, CancellationToken stopping) =>
-      RunServerAsync(options, onReady, null, stopping);
+  internal static Task RunServerAsync(ServerOptions options, Action<Uri> onReady, CancellationToken stopping,
+      bool warmInstructions = false) =>
+      RunServerAsync(options, onReady, null, stopping, warmInstructions: warmInstructions);
 
   // Production borrows provider-managed clients. Tests may supply an owned client;
   // the run disposes it only after successful drain, never through a session.
   internal static async Task RunServerAsync(ServerOptions options, Action<Uri> onReady, Func<IChatClient>? createClient,
       CancellationToken stopping, Func<UrdStore, Func<Uri>, ProviderManager>? createProviders = null,
-      Func<MessageMarkdownService>? createMarkdown = null) {
+      Func<MessageMarkdownService>? createMarkdown = null, bool warmInstructions = false) {
     ArgumentNullException.ThrowIfNull(options);
     ArgumentNullException.ThrowIfNull(onReady);
     Directory.CreateDirectory(options.DataRoot);
@@ -81,6 +82,8 @@ internal static class Program {
           ?? throw new InvalidOperationException("The server is not ready."), "/auth/callback");
       providers = createProviders?.Invoke(store, CallbackUri) ?? new ProviderManager(store, CallbackUri);
       var preferences = new PreferenceManager(store);
+      if (warmInstructions && preferences.Read().WorkingDirectory is { } defaultDirectory)
+        store.WarmInstructionResources(defaultDirectory);
       AgentToolSettings? tools = OperatingSystem.IsWindows() || options.GitBashPath is not null
           ? new AgentToolSettings(options.GitBashPath,
               Environment.GetEnvironmentVariables().Cast<System.Collections.DictionaryEntry>()

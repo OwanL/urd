@@ -14,14 +14,14 @@ internal sealed class StartingContextBuilder {
 
   private readonly ToolCatalog toolCatalog;
   private readonly IReadOnlyList<StartingContextContribution> guidance;
-  private readonly InstructionResourceDiscovery instructionDiscovery;
+  private readonly InstructionResourceDiscovery? instructionDiscovery;
 
   internal StartingContextBuilder(ToolCatalog toolCatalog,
       IReadOnlyList<StartingContextContribution>? additionalGuidance = null,
       InstructionResourceDiscovery? instructionDiscovery = null) {
     ArgumentNullException.ThrowIfNull(toolCatalog);
     this.toolCatalog = toolCatalog;
-    this.instructionDiscovery = instructionDiscovery ?? new InstructionResourceDiscovery();
+    this.instructionDiscovery = instructionDiscovery;
     guidance = Array.AsReadOnly(guidanceTypes
         .Select(CreateGuidance)
         .Concat(additionalGuidance ?? [])
@@ -53,10 +53,12 @@ internal sealed class StartingContextBuilder {
     ArgumentNullException.ThrowIfNull(runtimeProtectedTools);
     ArgumentNullException.ThrowIfNull(pruner);
     cancellation.ThrowIfCancellationRequested();
+    InstructionResourceDiscovery discovery = instructionDiscovery
+        ?? throw new InvalidOperationException("Starting context preparation requires instruction resource discovery.");
 
     DiscoveredInstructionResources resources = input.WorkingDirectory is null
         ? new(Array.Empty<DiscoveredSkill>(), Array.Empty<DiscoveredInstructionDocument>())
-        : await instructionDiscovery.FindAsync(input.WorkingDirectory, cancellation);
+        : await discovery.FindAsync(input.WorkingDirectory, cancellation);
     cancellation.ThrowIfCancellationRequested();
 
     HashSet<string> protectedToolNames = new(preferences.ProtectedResources.Tools, StringComparer.Ordinal);
@@ -102,9 +104,17 @@ internal sealed class StartingContextBuilder {
     AIFunctionDeclaration[] selectedTools = allTools
         .Where(tool => protectedToolNames.Contains(tool.Name) || retainedToolNames.Contains(tool.Name))
         .ToArray();
-    DiscoveredSkill[] selectedSkills = resources.Skills
+    DiscoveredSkill[] retainedSkills = resources.Skills
         .Where(skill => protectedSkills.Contains(CanonicalPath(skill.Identity))
             || retainedSkillPaths.Contains(CanonicalPath(skill.Identity)))
+        .ToArray();
+    HashSet<string> selectedProjectNames = retainedSkills
+        .Where(skill => !discovery.IsPackagedSkill(skill))
+        .Select(skill => skill.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+    DiscoveredSkill[] selectedSkills = retainedSkills
+        .Where(skill => !discovery.IsPackagedSkill(skill)
+            || protectedSkills.Contains(CanonicalPath(skill.Identity))
+            || !selectedProjectNames.Contains(skill.Name))
         .ToArray();
     DiscoveredInstructionDocument[] selectedInstructions = resources.Instructions
         .Where(document => protectedInstructions.Contains(CanonicalPath(document.Identity))

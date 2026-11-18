@@ -19,7 +19,8 @@ public sealed class SessionWorkingDirectoryRoutesTests {
   public async Task ChangesDirectoryAndReturnsValidationMissingSessionAndAcceptedInputStatuses() {
     using var database = new TemporaryDatabase();
     string dataRoot = Path.GetDirectoryName(database.Path)!;
-    string initialDirectory = Path.GetTempPath();
+    string initialDirectory = Path.Combine(dataRoot, "initial");
+    Directory.CreateDirectory(initialDirectory);
     string alternateDirectory = Path.Combine(dataRoot, "alternate");
     Directory.CreateDirectory(alternateDirectory);
     Guid sessionId;

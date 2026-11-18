@@ -22,7 +22,7 @@ public sealed class SessionRoutesTests {
   [Fact]
   public async Task CreateSendReceiptSnapshotAndContentKeepTheirWireShape() {
     using var database = new TemporaryDatabase();
-    await using var server = new RunningServer(RunningServer.OptionsFor(database));
+    await using var server = new RunningServer(RunningServer.OptionsForIsolatedWorkspace(database));
     await server.WaitForReadyAsync();
 
     using HttpResponseMessage created = await RequestAsync(server.Client, HttpMethod.Post, "/api/sessions", JsonBody("{}"));
@@ -286,7 +286,7 @@ public sealed class SessionRoutesTests {
   [Fact]
   public async Task ContinuationReceiptIsRetainedAndMissingPendingInputRemovalReturnsFalse() {
     using var database = new TemporaryDatabase();
-    await using var server = new RunningServer(RunningServer.OptionsFor(database));
+    await using var server = new RunningServer(RunningServer.OptionsForIsolatedWorkspace(database));
     await server.WaitForReadyAsync();
     using HttpResponseMessage created = await RequestAsync(server.Client, HttpMethod.Post,
         "/api/sessions", JsonBody("{}"));

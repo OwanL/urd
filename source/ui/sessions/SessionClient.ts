@@ -306,6 +306,23 @@ export class SessionClient {
     return requestJson(this.url(path), "GET", undefined, signal);
   }
 
+  async getPendingInputText(
+    sessionId: string,
+    submissionId: string,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    const receipt = await this.getMessageReceipt(sessionId, submissionId, signal);
+    if (
+      !receipt ||
+      receipt.sessionId !== sessionId ||
+      receipt.submission.submissionId !== submissionId ||
+      receipt.acceptance !== "accepted" ||
+      typeof receipt.submission.text !== "string"
+    )
+      throw new Error("Pending input is unavailable.");
+    return receipt.submission.text;
+  }
+
   editMessage(sessionId: string, submission: MessageEditSubmission): Promise<MessageEditReceipt> {
     return requestJson(
       this.url(`/${encodeURIComponent(sessionId)}/message-edits`),

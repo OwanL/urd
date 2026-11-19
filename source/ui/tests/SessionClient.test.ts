@@ -655,6 +655,27 @@ void test("a missing receipt is null, not a refused submission", { timeout: 5_00
   assert.equal(server.requests.length, 2);
 });
 
+void test(
+  "pending input reads the original receipt text on demand",
+  { timeout: 5_000 },
+  async (t) => {
+    const text = "long input 🦉 ".repeat(200);
+    const responses: unknown[] = [{ ...receipt, submission: { ...submission, text } }, null];
+    const server = await startHttpServer((_request, response) => {
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify(responses.shift()));
+    });
+    t.after(() => server.close());
+    const client = new SessionClient(server.origin);
+    assert.equal(await client.getPendingInputText(sessionId, submissionId), text);
+    await assert.rejects(client.getPendingInputText(sessionId, submissionId), /unavailable/);
+    assert.equal(
+      server.requests[0]?.url,
+      `/api/sessions/${sessionId}/message-submissions/${submissionId}`,
+    );
+  },
+);
+
 void test("create rejects invalid session identities", { timeout: 5_000 }, async (t) => {
   const invalid = [
     {},

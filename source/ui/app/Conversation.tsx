@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { MessageEditingContext, InlineMessageEditor } from "./EditableMessage.tsx";
 import type { MessageEditing } from "./MessageEditing.ts";
 import { Composer } from "../chat/Composer.tsx";
@@ -42,6 +42,9 @@ const executionLabels: Record<Exclude<ConversationExecutionStatus, null>, string
 const settlementLabels = { failed: "Execution failed.", cancelled: "Cancelled." };
 
 function PendingInputBubble({
+  client,
+  sessionId,
+  submissionId,
   preview,
   removalStatus,
   removeLabel,
@@ -50,6 +53,9 @@ function PendingInputBubble({
   onRemove,
   onCheck,
 }: {
+  client?: SessionClient;
+  sessionId?: string;
+  submissionId?: string;
   preview: string | null;
   removalStatus: PendingInputRemovalState["status"] | undefined;
   removeLabel?: string | undefined;
@@ -61,6 +67,30 @@ function PendingInputBubble({
   const previewElement = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [canExpand, setCanExpand] = useState(false);
+  const [fullText, setFullText] = useState<string | null>(null);
+  const [loadStatus, setLoadStatus] = useState<"loading" | "failed" | null>(null);
+  const [retry, setRetry] = useState(0);
+  // A supplementary scalar may leave the 256-unit preview at 255 units.
+  const mayBeTruncated = preview !== null && preview.length >= 255;
+
+  useEffect(() => {
+    if (!expanded || !mayBeTruncated || fullText !== null || !client || !sessionId || !submissionId)
+      return;
+    const controller = new AbortController();
+    setLoadStatus("loading");
+    void client.getPendingInputText(sessionId, submissionId, controller.signal).then(
+      (text) => {
+        if (!controller.signal.aborted) {
+          setFullText(text);
+          setLoadStatus(null);
+        }
+      },
+      () => {
+        if (!controller.signal.aborted) setLoadStatus("failed");
+      },
+    );
+    return () => controller.abort();
+  }, [client, sessionId, submissionId, expanded, mayBeTruncated, fullText, retry]);
 
   useLayoutEffect(() => {
     const node = previewElement.current;
@@ -89,10 +119,10 @@ function PendingInputBubble({
         role={preview === null ? "status" : undefined}
         class={`chat-pending-input-preview message-text${expanded ? " is-expanded" : ""}`}
       >
-        {preview ?? status}
+        {(expanded ? fullText : null) ?? preview ?? status}
       </div>
       <div class="chat-pending-input-actions">
-        {canExpand && (
+        {(canExpand || mayBeTruncated) && (
           <IconButton
             icon="chevron"
             label={`${expanded ? "Collapse" : "Expand"} input preview`}
@@ -123,6 +153,18 @@ function PendingInputBubble({
           />
         )}
       </div>
+      {expanded && mayBeTruncated && fullText === null && (
+        <span class="chat-pending-input-status" role="status">
+          {loadStatus === "failed" ? (
+            <>
+              Input unavailable.{" "}
+              <button onClick={() => setRetry((value) => value + 1)}>Retry</button>
+            </>
+          ) : (
+            "Loading input…"
+          )}
+        </span>
+      )}
       {preview !== null && status && (
         <span class="chat-pending-input-status" role="status">
           {status}
@@ -340,6 +382,9 @@ export function Conversation({
     return (
       <PendingInputBubble
         key={input.submissionId}
+        client={client}
+        sessionId={sessionId}
+        submissionId={input.submissionId}
         preview={input.preview}
         removalStatus={removal?.status}
         removeLabel={onRemove ? `Remove queued input: ${input.preview}` : undefined}

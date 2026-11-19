@@ -50,6 +50,14 @@ internal sealed class SessionExecutionRecorder(SessionBase session, UrdStore sto
     return saved;
   }
 
+  internal async Task SetCompactingAsync(bool compacting) {
+    using var _ = await sessionLock.AcquireAsync();
+    if (session.CanRecordExecution(Identity.ExecutionId, allowStopping: true)) {
+      session.CurrentExecution!.SetCompacting(compacting);
+      session.PublishChange();
+    }
+  }
+
   internal async Task RecordCompactionErrorAsync(string? error) {
     using var _ = await sessionLock.AcquireAsync();
     if (session.CanRecordExecution(Identity.ExecutionId, allowStopping: true))

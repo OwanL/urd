@@ -30,9 +30,9 @@ internal sealed class ManualCompaction(SessionBase session, UrdStore store, Asyn
     return receipt;
   }
 
-  internal Task<CompactionReceipt?> ReadCompactionReceiptAsync(Guid operationId, CancellationToken cancellation = default) =>
+  internal Task<CompactionReceipt?> ReadReceiptAsync(Guid operationId, CancellationToken cancellation = default) =>
       session.ReadUnderLockAsync(() => store.Compactions.ReadReceipt(session.Id, operationId), cancellation);
 
-  internal Task<CompactionSummary?> ReadCompactionAsync(Guid id, long revision, CancellationToken cancellation = default) =>
+  internal Task<CompactionSummary?> ReadSummaryAsync(Guid id, long revision, CancellationToken cancellation = default) =>
       session.ReadUnderLockAsync(() => store.Compactions.Read(session.Id, revision, id), cancellation);
 }

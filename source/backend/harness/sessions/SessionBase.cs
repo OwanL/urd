@@ -17,7 +17,6 @@ public abstract class SessionBase {
   private readonly UrdStore store;
   private readonly PreferenceManager preferences;
   private readonly ModelSelector? modelSelector;
-  private readonly QuestionDelivery questions;
   private readonly SessionInputs inputs;
   private readonly ManualCompaction manualCompaction;
   private readonly MessageEditing messageEditing;
@@ -29,7 +28,6 @@ public abstract class SessionBase {
   private bool acceptingUserMessages = true;
   private bool needsAttention;
   private bool? hasAcceptedInput;
-  private SessionExecutionDriver? execution => activeExecution.Current;
 
   private protected SessionBase(SessionRecord record, SessionKind kind, UrdStore store, Func<ProviderConnection, IChatClient> createChatClient,
       ToolCatalog? tools = null, ChatProcesses? processes = null, PendingToolCalls? pending = null,
@@ -46,7 +44,7 @@ public abstract class SessionBase {
     this.modelSelector = modelSelector;
     inputs = new SessionInputs(this, store, sessionLock);
     manualCompaction = new ManualCompaction(this, store, sessionLock);
-    questions = new QuestionDelivery(this, store, sessionLock, (subagents as SessionManager)?.Questions);
+    Questions = new QuestionDelivery(this, store, sessionLock, (subagents as SessionManager)?.Questions);
     activeExecution = new ActiveExecution(this, store, sessionLock, createChatClient,
         tools ?? new ToolCatalog([]), pending ?? new PendingToolCalls(), subagents);
     messageEditing = new MessageEditing(this, store, sessionLock, activeExecution);
@@ -58,7 +56,8 @@ public abstract class SessionBase {
   public string? WorkingDirectory { get; private set; }
 
   internal SessionKind Kind { get; }
-  internal SessionExecutionRecorder Recorder => execution?.Recorder
+  internal QuestionDelivery Questions { get; }
+  internal SessionExecutionRecorder Recorder => CurrentExecution?.Recorder
       ?? throw new InvalidOperationException("The session has no active execution recorder.");
 
   internal long HistoryRevision { get; private set; }
@@ -77,7 +76,7 @@ public abstract class SessionBase {
   }
 
   // Caller holds the session lock.
-  internal void FenceUserMessages() {
+  private void FenceUserMessages() {
     if (acceptingUserMessages) {
       acceptingUserMessages = false;
       PublishChange();
@@ -85,7 +84,7 @@ public abstract class SessionBase {
   }
 
   // Caller holds the session lock.
-  internal SessionExecutionDriver? CurrentExecution => execution;
+  internal SessionExecutionDriver? CurrentExecution => activeExecution.Current;
 
   // Caller holds the session lock.
   internal void MarkAcceptedInput() => hasAcceptedInput = true;
@@ -106,35 +105,33 @@ public abstract class SessionBase {
       ?? Task.FromResult(false);
 
   public Task<CompactionReceipt?> CompactAsync(ManualCompactionRequest submission) => manualCompaction.CompactAsync(submission);
-  public Task<CompactionReceipt?> ReadCompactionReceiptAsync(Guid operationId, CancellationToken cancellation = default) => manualCompaction.ReadCompactionReceiptAsync(operationId, cancellation);
-  public Task<CompactionSummary?> ReadCompactionAsync(Guid id, long revision, CancellationToken cancellation = default) => manualCompaction.ReadCompactionAsync(id, revision, cancellation);
-
-  internal async Task SetCompactingAsync(Guid executionId, bool compacting) {
-    using var _ = await sessionLock.AcquireAsync();
-    if (IsCurrentExecution(executionId)) {
-      execution!.SetCompacting(compacting);
-      PublishChange();
-    }
-  }
+  public Task<CompactionReceipt?> ReadCompactionReceiptAsync(Guid operationId, CancellationToken cancellation = default) =>
+      manualCompaction.ReadReceiptAsync(operationId, cancellation);
+  public Task<CompactionSummary?> ReadCompactionAsync(Guid id, long revision, CancellationToken cancellation = default) =>
+      manualCompaction.ReadSummaryAsync(id, revision, cancellation);
 
   // Manager shutdown joins executions before terminating deliberately retained processes.
   internal Task KillProcessesAsync() => OperatingSystem.IsWindows() && processes is not null
       ? processes.KillAllAsync() : Task.CompletedTask;
 
-  public Task<UserMessageReceipt?> ReadUserMessageReceiptAsync(Guid submissionId, CancellationToken cancellation = default) => inputs.ReadUserMessageReceiptAsync(submissionId, cancellation);
-  public Task<ContinuationReceipt?> ReadContinuationReceiptAsync(Guid operationId, CancellationToken cancellation = default) => inputs.ReadContinuationReceiptAsync(operationId, cancellation);
-  public Task<NotSentPage> ReadNotSentInputsAsync(string? cursor = null, CancellationToken cancellation = default) => inputs.ReadNotSentInputsAsync(cursor, cancellation);
-  public Task<bool> RemovePendingInputAsync(Guid executionId, Guid submissionId) => inputs.RemovePendingInputAsync(executionId, submissionId);
+  public Task<UserMessageReceipt?> ReadUserMessageReceiptAsync(Guid submissionId, CancellationToken cancellation = default) =>
+      inputs.ReadUserMessageReceiptAsync(submissionId, cancellation);
+  public Task<ContinuationReceipt?> ReadContinuationReceiptAsync(Guid operationId, CancellationToken cancellation = default) =>
+      inputs.ReadContinuationReceiptAsync(operationId, cancellation);
+  public Task<NotSentPage> ReadNotSentInputsAsync(string? cursor = null, CancellationToken cancellation = default) =>
+      inputs.ReadNotSentInputsAsync(cursor, cancellation);
+  public Task<bool> RemovePendingInputAsync(Guid executionId, Guid submissionId) =>
+      inputs.RemovePendingInputAsync(executionId, submissionId);
 
   public async Task<SessionSnapshot> ReadSnapshotAsync(CancellationToken cancellation = default) {
     using var _ = await sessionLock.AcquireAsync(cancellation);
     SessionSnapshot snapshot = ReadCurrentSnapshot();
-    bool locallyIdle = CanStartWork && execution is null
+    bool locallyIdle = CanStartWork && CurrentExecution is null
         && snapshot.UnsettledExecutionId is null && !snapshot.AdmissionFenced && !snapshot.StopRequested;
     bool canRemovePending = CanStartWork && !snapshot.AdmissionFenced && !snapshot.StopRequested
-        && execution is { IsStopping: false } && snapshot.UnsettledExecutionId == execution.ExecutionId;
+        && CurrentExecution is { IsStopping: false } && snapshot.UnsettledExecutionId == CurrentExecution.ExecutionId;
     return snapshot with {
-      IsCompacting = execution?.IsCompacting == true,
+      IsCompacting = CurrentExecution?.IsCompacting == true,
       WorkingDirectory = WorkingDirectory,
       CanChangeWorkingDirectory = CanChangeWorkingDirectory(snapshot),
       CanContinue = snapshot.CanContinue && locallyIdle,
@@ -171,39 +168,43 @@ public abstract class SessionBase {
     ArgumentNullException.ThrowIfNull(observer);
     using var _ = await sessionLock.AcquireAsync(cancellation);
     SessionSnapshot stored = store.Snapshots.ReadPersisted(Id);
-    status.Update(stored, execution);
+    status.Update(stored, CurrentExecution);
     return notifications.Subscribe(observer, watched,
-        status.CurrentStatus(stored, IsAcceptingWork, needsAttention, execution), stored.Title);
+        status.CurrentStatus(stored, IsAcceptingWork, needsAttention, CurrentExecution), stored.Title);
   }
 
-  private protected Task<ContinuationReceipt?> AdmitContinuationAsync(ContinuationSubmission submission) => inputs.AdmitContinuationAsync(submission);
-  private protected Task<UserMessageReceipt> AdmitUserMessageAsync(UserMessageSubmission submission) => inputs.AdmitUserMessageAsync(submission);
-  private protected Task<Guid> AdmitAssignmentAsync(IReadOnlyList<UserMessageSubmission> submissions, Guid parentSessionId) => inputs.AdmitAssignmentAsync(submissions, parentSessionId);
+  private protected Task<ContinuationReceipt?> AdmitContinuationAsync(ContinuationSubmission submission) =>
+      inputs.AdmitContinuationAsync(submission);
+  private protected Task<UserMessageReceipt> AdmitUserMessageAsync(UserMessageSubmission submission) =>
+      inputs.AdmitUserMessageAsync(submission);
+  private protected Task<Guid> AdmitAssignmentAsync(IReadOnlyList<UserMessageSubmission> submissions, Guid parentSessionId) =>
+      inputs.AdmitAssignmentAsync(submissions, parentSessionId);
 
-  public Task<MessageEditReceipt?> ReadMessageEditReceiptAsync(Guid operationId, CancellationToken cancellation = default) => messageEditing.ReadMessageEditReceiptAsync(operationId, cancellation);
-  private protected Task<MessageEditReceipt> ReplaceUserMessageAsync(MessageEditSubmission submission) => messageEditing.ReplaceUserMessageAsync(submission);
-  internal Task StopAcceptingUserMessagesAsync() => messageEditing.StopAcceptingUserMessagesAsync();
-  internal Task StopExecutionAsync() => messageEditing.StopExecutionAsync();
+  public Task<MessageEditReceipt?> ReadMessageEditReceiptAsync(Guid operationId, CancellationToken cancellation = default) =>
+      messageEditing.ReadReceiptAsync(operationId, cancellation);
+  private protected Task<MessageEditReceipt> ReplaceUserMessageAsync(MessageEditSubmission submission) =>
+      messageEditing.ReplaceAsync(submission);
+
+  internal async Task StopAcceptingUserMessagesAsync() {
+    using var _ = await sessionLock.AcquireAsync();
+    FenceUserMessages();
+  }
+
+  // A failed Stop write must not prevent cancellation or skip joining owned work.
+  internal async Task StopExecutionAsync() {
+    Task? pendingEdit;
+    using (await sessionLock.AcquireAsync())
+      pendingEdit = messageEditing.PendingEdit;
+    await Task.WhenAll(activeExecution.StopAndDrainAsync(), MessageEditing.JoinPendingEditAsync(pendingEdit));
+  }
+
   public Task<StopReceipt> RequestStopAsync(Guid executionId) => activeExecution.RequestStopAsync(executionId);
-  internal Task<SessionExecutionResult> WaitForExecutionFinishAsync(Guid executionId, CancellationToken cancellation = default) => activeExecution.WaitForExecutionFinishAsync(executionId, cancellation);
-
-  internal Task<AgentQuestionResult> QueueQuestionAsync(HarnessToolContext caller, string prompt,
-      bool wake, CancellationToken cancellation) => questions.QueueQuestionAsync(caller, prompt, wake, cancellation);
-
-  // Caller holds the session lock.
-  internal LlmRequest? CreateNextRequest(ExecutionIdentity identity) => questions.CreateNextRequest(identity);
-
-  internal (bool Presented, ChatMessage? Reminder) ReadQuestionForRequest(LlmRequest request) =>
-      questions.ReadQuestionForRequest(request);
-
-  // Caller holds the session lock.
-  internal void ParkBackgroundWait(Guid executionId) => questions.ParkBackgroundWait(executionId);
-  internal void UnparkBackgroundWait(Guid executionId) => questions.UnparkBackgroundWait(executionId);
-  internal void FailPresentedQuestion() => questions.FailPresentedQuestion();
+  internal Task<SessionExecutionResult> WaitForExecutionFinishAsync(Guid executionId, CancellationToken cancellation = default) =>
+      activeExecution.WaitForFinishAsync(executionId, cancellation);
 
   // Caller holds the session lock. Results may finish during Stop, but no new work may start.
   internal bool CanRecordExecution(Guid executionId, bool allowStopping = false) =>
-      IsCurrentExecution(executionId) && (allowStopping || !execution!.IsStopping);
+      IsCurrentExecution(executionId) && (allowStopping || !CurrentExecution!.IsStopping);
 
   // Captured identities can outlive a history edit; never authorize their writes in a new revision.
   internal bool CanRecordExecution(ExecutionIdentity identity, bool allowStopping = false) =>
@@ -214,7 +215,7 @@ public abstract class SessionBase {
   internal async Task ReportToolOutcomeAsync(Guid executionId, Exception? failure = null) {
     using var _ = await sessionLock.AcquireAsync();
     if (IsCurrentExecution(executionId))
-      execution!.ReportToolOutcome(failure);
+      CurrentExecution!.ReportToolOutcome(failure);
   }
 
   // Caller holds the session lock. The driver starts only after admission releases it.
@@ -230,12 +231,12 @@ public abstract class SessionBase {
     SessionExecutionResult saved = store.Executions.TryFinish(Id, execution.ExecutionId, outcome)
         ?? throw new InvalidOperationException("The current execution could not be settled.");
 
-    questions.FinishExecution();
+    Questions.FinishExecution();
     execution.Release();
     activeExecution.Clear();
     status.Settled(saved);
     PublishChange();
-    wakeStart = saved.Outcome == ExecutionOutcome.Completed ? questions.StartPendingQuestionRun() : null;
+    wakeStart = saved.Outcome == ExecutionOutcome.Completed ? Questions.StartPendingQuestionRun() : null;
     return saved;
   }
 
@@ -248,11 +249,11 @@ public abstract class SessionBase {
 
   // Caller holds the session lock.
   internal SessionSnapshot ReadCurrentSnapshot() =>
-      status.WithLiveState(store.Snapshots.ReadPersisted(Id), IsAcceptingWork, execution);
+      status.WithLiveState(store.Snapshots.ReadPersisted(Id), IsAcceptingWork, CurrentExecution);
 
   // Caller holds the session lock.
   private bool CanChangeWorkingDirectory(SessionSnapshot snapshot) =>
-      WorkingDirectory is not null && CanStartWork && execution is null
+      WorkingDirectory is not null && CanStartWork && CurrentExecution is null
       && snapshot.UnsettledExecutionId is null && !snapshot.AdmissionFenced && !HasAcceptedInput();
 
   // Caller holds the session lock. Accepted decisions never become eligible again.
@@ -260,7 +261,7 @@ public abstract class SessionBase {
 
   // Caller holds the session lock.
   internal void PublishChange(string? publishedTitle = null) =>
-      notifications.Publish(status.ReadCurrent(IsAcceptingWork, needsAttention, execution), publishedTitle);
+      notifications.Publish(status.ReadCurrent(IsAcceptingWork, needsAttention, CurrentExecution), publishedTitle);
 
   // Caller holds the session lock.
   internal void MarkNeedsAttention() {

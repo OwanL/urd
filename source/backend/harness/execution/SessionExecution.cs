@@ -129,7 +129,7 @@ internal sealed class SessionExecution : IDisposable {
     HistoryCompactionPlan? plan = await CreateCompactionPlanAsync(requestId, reason, focus, currentHistory);
     if (plan is null)
       return null;
-    await session.SetCompactingAsync(ExecutionId, true);
+    await recorder.SetCompactingAsync(true);
     try {
       GeneratedCompactionSummary result = await GenerateHistorySummaryAsync(plan);
       stop.Token.ThrowIfCancellationRequested();
@@ -146,7 +146,7 @@ internal sealed class SessionExecution : IDisposable {
         automaticBoundary = compactedHistory.PreviousCompaction?.Id;
       return new(requestId ?? Guid.Empty, compactedHistory.ReadMessages(), compactedHistory);
     } finally {
-      await session.SetCompactingAsync(ExecutionId, IsManualCompaction);
+      await recorder.SetCompactingAsync(IsManualCompaction);
     }
   }
 
@@ -347,7 +347,7 @@ internal sealed class SessionExecution : IDisposable {
       client = chatClient ??= createChatClient(selection.Connection);
       StartingContext context = startingContext!;
       await StartRequestAsync(request.RequestId, context);
-      (bool presented, ChatMessage? reminder) = session.ReadQuestionForRequest(request);
+      (bool presented, ChatMessage? reminder) = session.Questions.ReadQuestionForRequest(request);
       // Provider policy can change between requests without rebuilding the saved starting context.
       offeredTools = context.Tools;
       if (offeredTools.Any(tool => tool.Name == SubagentTool.ToolName)

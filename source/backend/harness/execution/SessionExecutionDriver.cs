@@ -22,7 +22,7 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock sess
   // Caller holds the session lock. The driver joins callbacks before settlement.
   internal Task StopAsync() {
     Wake();
-    session.FailPresentedQuestion();
+    session.Questions.FailPresentedQuestion();
     return execution.StopAsync();
   }
 
@@ -41,7 +41,7 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock sess
   internal void Wake() {
     if (executionWake is null)
       return;
-    session.UnparkBackgroundWait(ExecutionId);
+    session.Questions.UnparkBackgroundWait(ExecutionId);
     executionWake.TrySetResult();
     executionWake = null;
   }
@@ -113,7 +113,7 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock sess
             executionWake = new(TaskCreationOptions.RunContinuationsAsynchronously);
             wake = executionWake.Task;
             if (hasPendingTools)
-              session.ParkBackgroundWait(ExecutionId);
+              session.Questions.ParkBackgroundWait(ExecutionId);
             if (hasPendingTools && !IsWaitingForBackgroundTools) {
               IsWaitingForBackgroundTools = true;
               session.PublishChange();
@@ -155,7 +155,7 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock sess
 
   // Caller holds the session lock. Admission cannot slip between recheck and settlement.
   private LlmRequest? ClaimContinuation() {
-    LlmRequest? next = execution.IsManualCompaction ? null : session.CreateNextRequest(Identity);
+    LlmRequest? next = execution.IsManualCompaction ? null : session.Questions.CreateNextRequest(Identity);
     if (next is not null) {
       IsWaitingForBackgroundTools = false;
       session.PublishChange();

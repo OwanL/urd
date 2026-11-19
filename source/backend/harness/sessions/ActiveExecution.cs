@@ -37,7 +37,7 @@ internal sealed class ActiveExecution(SessionBase session, UrdStore store, Async
   // Caller holds the session lock; retain the task after settlement for shutdown.
   internal void Clear() => Current = null;
 
-  internal async Task StopActiveExecutionAsync() {
+  internal async Task StopAndDrainAsync() {
     Task pendingExecution;
     Task pendingSettlement;
     Task stopCallbacks = Task.CompletedTask;
@@ -86,7 +86,7 @@ internal sealed class ActiveExecution(SessionBase session, UrdStore store, Async
     }
   }
 
-  internal async Task<SessionExecutionResult> WaitForExecutionFinishAsync(Guid executionId, CancellationToken cancellation = default) {
+  internal async Task<SessionExecutionResult> WaitForFinishAsync(Guid executionId, CancellationToken cancellation = default) {
     Task pendingExecution;
     Task<SessionExecutionResult> pendingSettlement;
     using (await sessionLock.AcquireAsync(cancellation)) {

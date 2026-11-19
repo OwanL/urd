@@ -45,7 +45,7 @@ internal sealed class AgentRecipients(UrdStore store, AgentQuestions questions, 
     SessionBase? target = await registry.FindOpenAsync(pinned, cancellation);
     // A racing disposal or shutdown closes the mailbox after the handle is captured.
     return target is null ? new(null, FinishedMessage(recipient))
-        : await target.QueueQuestionAsync(caller, prompt, wake, cancellation);
+        : await target.Questions.QueueQuestionAsync(caller, prompt, wake, cancellation);
   }
 
   internal bool AnswerAgent(HarnessToolContext caller, string answer) {

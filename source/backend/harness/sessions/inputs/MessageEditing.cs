@@ -11,20 +11,10 @@ internal sealed class MessageEditing(SessionBase session, UrdStore store, AsyncL
 
   internal bool IsEditing => editTask is not null;
 
-  internal async Task StopAcceptingUserMessagesAsync() {
-    using var _ = await sessionLock.AcquireAsync();
-    session.FenceUserMessages();
-  }
+  // Caller holds the session lock.
+  internal Task? PendingEdit => editTask;
 
-  // A failed Stop write must not prevent cancellation or skip joining owned work.
-  internal async Task StopExecutionAsync() {
-    Task? pendingEdit;
-    using (await sessionLock.AcquireAsync())
-      pendingEdit = editTask;
-    await Task.WhenAll(activeExecution.StopActiveExecutionAsync(), JoinEditAsync(pendingEdit));
-  }
-
-  private static async Task JoinEditAsync(Task? pendingEdit) {
+  internal static async Task JoinPendingEditAsync(Task? pendingEdit) {
     if (pendingEdit is null)
       return;
     try {
@@ -34,10 +24,10 @@ internal sealed class MessageEditing(SessionBase session, UrdStore store, AsyncL
     }
   }
 
-  internal Task<MessageEditReceipt?> ReadMessageEditReceiptAsync(Guid operationId, CancellationToken cancellation = default) =>
+  internal Task<MessageEditReceipt?> ReadReceiptAsync(Guid operationId, CancellationToken cancellation = default) =>
       session.ReadUnderLockAsync(() => store.MessageEdits.ReadReceipt(session.Id, operationId), cancellation);
 
-  internal async Task<MessageEditReceipt> ReplaceUserMessageAsync(MessageEditSubmission submission) {
+  internal async Task<MessageEditReceipt> ReplaceAsync(MessageEditSubmission submission) {
     MessageEditStorage.Validate(submission);
     Task<MessageEditReceipt> work;
     TaskCompletionSource? released = null;
@@ -66,7 +56,7 @@ internal sealed class MessageEditing(SessionBase session, UrdStore store, AsyncL
     await admitted;
     TaskCompletionSource? executionStart = null;
     try {
-      await activeExecution.StopActiveExecutionAsync();
+      await activeExecution.StopAndDrainAsync();
       using var _ = await sessionLock.AcquireAsync();
       if (!session.CanAcceptEdits)
         throw new UserMessageConflictException(submission.OperationId);

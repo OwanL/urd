@@ -35,6 +35,8 @@ not a separate archive. Their remaining constraints belong to the current docume
   staged work. Stage 2 is active; historical checkpoints are not overall acceptance.
 - [Source distribution](repo-foundations.md): matching source, custom-copy data and setup boundaries,
   with a dated round-trip trial; packaging and activation remain unfinished.
+- [First Windows release plan](first-windows-release-plan.md): candidate selection, source packaging,
+  local performance qualification and pre-publication review after active work settles.
 
 ## Evidence
 

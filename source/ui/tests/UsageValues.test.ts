@@ -34,20 +34,22 @@ const breakdown = (
   ...(isOther === undefined ? {} : { isOther }),
 });
 
-void test("USD formatting preserves positive sub-cent costs and compact precision", () => {
+void test("USD formatting uses two decimals and distinguishes sub-cent costs from zero", () => {
   assert.equal(formatCostUsd(0), "$0.00");
   assert.equal(formatCostUsd(1.2), "$1.20");
-  assert.equal(formatCostUsd(0.005), "$0.005");
-  assert.equal(formatCostUsd(0.000012), "$0.000012");
-  assert.equal(formatCostUsd(0.0000001), "<$0.000001");
+  assert.equal(formatCostUsd(0.126), "$0.13");
+  assert.equal(formatCostUsd(0.01), "$0.01");
+  assert.equal(formatCostUsd(0.005), "<$0.01");
+  assert.equal(formatCostUsd(0.0000001), "<$0.01");
+  assert.equal(formatCostUsd(-0.005), "−<$0.01");
   assert.equal(formatCostUsd(null), "—");
   assert.equal(formatUsageCost(totals({ requests: 2, unknownRequests: 2 })), "Unknown");
   assert.equal(formatUsageCost(totals()), "$0.00");
   assert.equal(
     formatUsageCost(totals({ costUsd: 0.005, unknownRequests: 2 })),
-    "$0.005 + 2 unknown",
+    "<$0.01 + 2 unknown",
   );
-  assert.equal(formatUsageCost(totals({ costUsd: 0.005, estimatedRequests: 1 })), "~$0.005");
+  assert.equal(formatUsageCost(totals({ costUsd: 0.005, estimatedRequests: 1 })), "~<$0.01");
 });
 
 void test("history accumulates returned interval costs and counts chronologically", () => {

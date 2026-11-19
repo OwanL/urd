@@ -1,5 +1,6 @@
 import { initialBoundaryId } from "../sessions/Prepass.ts";
 import type { PrepassSummary } from "../sessions/Prepass.ts";
+import { formatCostUsd } from "../usage/UsageValues.ts";
 
 const categoryOrder = ["tools", "skills", "instructions", "title"] as const;
 
@@ -148,7 +149,7 @@ export function prepassCostLabel(
 ): string {
   if (!finished) return "Cost pending";
   if (costUsd === null || costUsd === undefined || !Number.isFinite(costUsd)) return "—";
-  const amount = `$${costUsd}`;
+  const amount = formatCostUsd(costUsd);
   return costIsEstimated ? `~${amount}` : amount;
 }
 

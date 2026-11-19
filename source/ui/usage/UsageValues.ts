@@ -156,15 +156,14 @@ export function emptyUsageTotals(): UsageTotals {
 
 export function formatCostUsd(costUsd: number | null): string {
   if (costUsd === null || !Number.isFinite(costUsd)) return "—";
-  if (costUsd === 0) return "$0.00";
   const absolute = Math.abs(costUsd);
-  if (absolute < 0.0000005) return `${costUsd < 0 ? "−" : ""}<$0.000001`;
-  const decimals = absolute >= 1 ? 2 : 6;
+  const sign = costUsd < 0 ? "−" : "";
+  if (absolute > 0 && absolute < 0.01) return `${sign}<$0.01`;
   const formatted = absolute.toLocaleString("en-US", {
     minimumFractionDigits: 2,
-    maximumFractionDigits: decimals,
+    maximumFractionDigits: 2,
   });
-  return `${costUsd < 0 ? "−" : ""}$${formatted}`;
+  return `${sign}$${formatted}`;
 }
 
 export function formatUsageCost(totals: UsageTotals): string {

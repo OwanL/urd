@@ -3,11 +3,9 @@ using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Providers;
-using Urd.Core.Tools;
 using Xunit;
 using static Urd.Backend.Tests.Support.OpenAIStreams;
 using static Urd.Backend.Tests.Support.ProviderModelStreams;
-using static Urd.Backend.Tests.Support.TestAsync;
 
 #pragma warning disable MEAI001
 
@@ -37,136 +35,11 @@ public sealed class OpenAIInferenceClientTests {
   }
 
   [Theory]
-  [InlineData(LlmApi.OpenAIResponses)]
-  [InlineData(LlmApi.OpenAIChatCompletions)]
-  public async Task ForegroundToolImagesUseNativeProviderSerialization(LlmApi api) {
-    byte[] firstImage = [0, 1, 2, 253, 254, 255];
-    byte[] secondImage = [9, 8, 7, 6, 5];
-    const string details = "DETAILS_SENTINEL";
-    var firstOutput = new ToolOutput("first result text", [new DataContent(firstImage, "image/png")],
-        JsonSerializer.SerializeToElement(new { privateDetails = details }));
-    var middleOutput = new ToolOutput("middle result text", [],
-        JsonSerializer.SerializeToElement(new { privateDetails = details }));
-    var lastOutput = new ToolOutput("last result text", [new DataContent(secondImage, "image/jpeg")],
-        JsonSerializer.SerializeToElement(new { privateDetails = details }));
-    ChatMessage[] history = [
-      new(ChatRole.User, "read these files"),
-      new(ChatRole.Assistant, new AIContent[] {
-        new FunctionCallContent("call-first", "read", new Dictionary<string, object?>()),
-        new FunctionCallContent("call-middle", "read", new Dictionary<string, object?>()),
-        new FunctionCallContent("call-last", "read", new Dictionary<string, object?>())
-      }),
-      new(ChatRole.Tool, new AIContent[] {
-        ForegroundResult("call-first", firstOutput),
-        ForegroundResult("call-middle", middleOutput),
-        ForegroundResult("call-last", lastOutput)
-      })
-    ];
-    using var handler = new ScriptedOpenAIHandler(api == LlmApi.OpenAIResponses
-        ? Responses([Message]) : ChatStream());
-    using var http = new HttpClient(handler);
-
-    await foreach (ChatResponseUpdate _ in new OpenAIInferenceClient(http).GetStreamingResponseAsync(
-        State(api), history, Options(), default)) {
-      // Drain the scripted response before inspecting its recorded request.
-    }
-
-    ScriptedOpenAIRequest request = Assert.Single(handler.Requests);
-    Assert.DoesNotContain("DETAILS_SENTINEL", request.Body);
-    using JsonDocument document = JsonDocument.Parse(request.Body);
-    JsonElement root = document.RootElement;
-    if (api == LlmApi.OpenAIResponses) {
-      JsonElement[] input = root.GetProperty("input").EnumerateArray().ToArray();
-      JsonElement[] calls = input.Where(item => item.TryGetProperty("type", out JsonElement type) &&
-          type.GetString() == "function_call").ToArray();
-      Assert.Equal(["call-first", "call-middle", "call-last"], calls.Select(item => item.GetProperty("call_id").GetString()));
-      JsonElement[] results = input.Where(item => item.TryGetProperty("type", out JsonElement type) &&
-          type.GetString() == "function_call_output").ToArray();
-      Assert.Equal(["call-first", "call-middle", "call-last"], results.Select(item => item.GetProperty("call_id").GetString()));
-      JsonElement[] firstParts = results[0].GetProperty("output").EnumerateArray().ToArray();
-      Assert.Equal("input_text", firstParts[0].GetProperty("type").GetString());
-      Assert.Equal("first result text", firstParts[0].GetProperty("text").GetString());
-      Assert.Equal("input_image", firstParts[1].GetProperty("type").GetString());
-      AssertImageBytes(firstParts[1], "image/png", firstImage);
-      Assert.Equal("middle result text", results[1].GetProperty("output").GetString());
-      JsonElement[] lastParts = results[2].GetProperty("output").EnumerateArray().ToArray();
-      Assert.Equal("last result text", lastParts[0].GetProperty("text").GetString());
-      Assert.Equal("input_image", lastParts[1].GetProperty("type").GetString());
-      AssertImageBytes(lastParts[1], "image/jpeg", secondImage);
-    } else {
-      JsonElement[] messages = root.GetProperty("messages").EnumerateArray().ToArray();
-      JsonElement assistant = messages.Single(message => message.GetProperty("role").GetString() == "assistant");
-      JsonElement[] calls = assistant.GetProperty("tool_calls").EnumerateArray().ToArray();
-      Assert.Equal(["call-first", "call-middle", "call-last"], calls.Select(call => call.GetProperty("id").GetString()));
-      JsonElement[] results = messages.Where(message => message.GetProperty("role").GetString() == "tool").ToArray();
-      Assert.Equal(["call-first", "call-middle", "call-last"], results.Select(result => result.GetProperty("tool_call_id").GetString()));
-      Assert.Equal("first result text", results[0].GetProperty("content").GetString());
-      Assert.Equal("middle result text", results[1].GetProperty("content").GetString());
-      Assert.Equal("last result text", results[2].GetProperty("content").GetString());
-
-      int lastToolIndex = Array.FindLastIndex(messages,
-          message => message.GetProperty("role").GetString() == "tool");
-      JsonElement[] imageMessages = messages.Skip(lastToolIndex + 1)
-          .Where(message => message.GetProperty("role").GetString() == "user" &&
-              message.GetProperty("content").ValueKind == JsonValueKind.Array).ToArray();
-      Assert.Equal(2, imageMessages.Length);
-      Assert.Contains("call_id=call-first", imageMessages[0].GetProperty("content")[0].GetProperty("text").GetString());
-      Assert.Contains("origin=tool result", imageMessages[0].GetProperty("content")[0].GetProperty("text").GetString());
-      Assert.Contains("untrusted", imageMessages[0].GetProperty("content")[0].GetProperty("text").GetString());
-      AssertImageBytes(imageMessages[0].GetProperty("content")[1], "image/png", firstImage);
-      Assert.Contains("call_id=call-last", imageMessages[1].GetProperty("content")[0].GetProperty("text").GetString());
-      AssertImageBytes(imageMessages[1].GetProperty("content")[1], "image/jpeg", secondImage);
-    }
-  }
-
-  [Theory]
-  [InlineData(LlmApi.OpenAIResponses)]
-  [InlineData(LlmApi.OpenAIChatCompletions)]
-  public async Task CallsAndFinishRemainWithheldWhenNativeStreamCleanupFails(LlmApi api) {
-    using var handler = new DisposalFailingOpenAIHandler(
-        api == LlmApi.OpenAIResponses ? Responses([Message, Call]) : ChatCalls());
-    using var http = new HttpClient(handler);
-    List<ChatResponseUpdate> observed = [];
-
-    var error = await Assert.ThrowsAsync<ProviderOperationException>(async () => {
-      await foreach (var update in new OpenAIInferenceClient(http).GetStreamingResponseAsync(
-          State(api), History(), Options(tools: true), default))
-        observed.Add(update);
-    });
-
-    Assert.Equal(ProviderFailure.ProviderUnavailable, error.Failure);
-    Assert.Null(error.InnerException);
-    Assert.Equal(1, handler.StreamDisposals);
-    Assert.DoesNotContain(observed.SelectMany(update => update.Contents), content => content is FunctionCallContent);
-    Assert.All(observed, update => Assert.Null(update.FinishReason));
-  }
-
-  [Theory]
   [InlineData("response.failed", ProviderFailure.ProviderUnavailable)]
   [InlineData("response.incomplete", ProviderFailure.IncompleteResponse)]
   [InlineData(null, ProviderFailure.IncompleteResponse)]
   public async Task ResponsesFailureOrMissingTerminalNeverReleasesCalls(string? terminal, ProviderFailure failure) =>
       await Rejected(Responses([Message, Call], terminal), failure, options: Options(tools: true));
-
-  [Theory]
-  [InlineData("")]
-  [InlineData(",\"namespace\":\"other\"")]
-  public async Task PlanRejectsUnqualifiedOrWrongNamespaceCalls(string ns) {
-    string call = Call.Replace("\"name\":\"lookup\"", "\"name\":\"lookup\"" + ns, StringComparison.Ordinal);
-    await Rejected(Responses([Message, call]), ProviderFailure.InvalidProviderResponse,
-        State(route: ProviderRoute.ChatGpt), Options(tools: true));
-  }
-
-  [Fact]
-  public async Task InvalidResponsesExposeSafeReasonLabels() {
-    const string unsupportedItem = """{"type":"web_search_call","id":"search_fixture","status":"completed","action":{"type":"search","query":"fixture"}}""";
-    await Rejected(Responses([unsupportedItem]), ProviderFailure.InvalidProviderResponse,
-        reason: "unexpected output item type 'web_search_call'");
-
-    string undeclaredCall = Call.Replace("\"name\":\"lookup\"", "\"name\":\"missing\"", StringComparison.Ordinal);
-    await Rejected(Responses([undeclaredCall]), ProviderFailure.InvalidProviderResponse, options: Options(tools: true),
-        reason: "call to undeclared tool 'missing'");
-  }
 
   [Theory]
   [InlineData("\"reasoning\":42")]
@@ -202,16 +75,6 @@ public sealed class OpenAIInferenceClientTests {
   }
 
   [Theory]
-  [InlineData("response.failed")]
-  [InlineData("error")]
-  public async Task ResponsesStreamClassifiesExplicitContextWindowErrors(string terminal) {
-    string wire = terminal == "error"
-        ? ResponseStream(terminal).Replace("server_error", "context_length_exceeded", StringComparison.Ordinal)
-        : Responses(terminal: terminal).Replace("server_error", "context_length_exceeded", StringComparison.Ordinal);
-    await Rejected(wire, ProviderFailure.ContextWindowExceeded);
-  }
-
-  [Theory]
   [InlineData(HttpStatusCode.Unauthorized, ProviderFailure.AuthenticationRequired)]
   [InlineData(HttpStatusCode.Forbidden, ProviderFailure.PlanAccessDenied)]
   [InlineData(HttpStatusCode.InternalServerError, ProviderFailure.ProviderUnavailable)]
@@ -231,115 +94,6 @@ public sealed class OpenAIInferenceClientTests {
     Assert.Contains("private-token", error.Message); // Provider text is retained; credential redaction has separate coverage.
     Assert.Null(error.InnerException);
     Assert.Single(handler.Requests);
-  }
-
-  [Theory]
-  [InlineData(LlmApi.OpenAIResponses)]
-  [InlineData(LlmApi.OpenAIChatCompletions)]
-  public async Task NoResponseHeadersFailsWithoutRetrying(LlmApi api) {
-    bool transportDrained = false;
-    using var handler = new ControlledProviderHandler(async (_, token) => {
-      try {
-        await Task.Delay(Timeout.InfiniteTimeSpan, token);
-        throw new InvalidOperationException("The fixture must be cancelled.");
-      } finally {
-        transportDrained = true;
-      }
-    });
-    using var http = new HttpClient(handler);
-    using var watchdog = new CancellationTokenSource(TestTimeout);
-
-    var error = await Assert.ThrowsAsync<ProviderOperationException>(async () => {
-      await foreach (var _ in new OpenAIInferenceClient(http, TimeSpan.FromMilliseconds(250)).GetStreamingResponseAsync(
-          State(api), History(), Options(), watchdog.Token))
-        Assert.Fail("The stalled request produced a response.");
-    });
-
-    Assert.Equal(ProviderFailure.ProviderUnavailable, error.Failure);
-    Assert.Contains("response headers", error.Reason, StringComparison.Ordinal);
-    Assert.True(transportDrained);
-    Assert.Single(handler.Requests);
-  }
-
-  [Theory]
-  [InlineData(LlmApi.OpenAIResponses, "no events", "", "first")]
-  [InlineData(LlmApi.OpenAIChatCompletions, "no events", "", "first")]
-  [InlineData(LlmApi.OpenAIResponses, "created", "", "next")]
-  [InlineData(LlmApi.OpenAIResponses, "text", "hello", "next")]
-  [InlineData(LlmApi.OpenAIChatCompletions, "text", "hello", "next")]
-  public async Task SilentResponseBodyFailsAndDisposesTheStream(
-      LlmApi api, string events, string expectedText, string stalledEvent) {
-    string wire = (api, events) switch {
-      (_, "no events") => string.Empty,
-      (_, "created") => Responses(terminal: null, text: "", itemDone: false),
-      (LlmApi.OpenAIResponses, _) => Responses(terminal: null, itemDone: false),
-      _ => ChatStream(finish: null, done: false)
-    };
-    using var handler = new ScriptedOpenAIHandler(wire) { HoldAtEnd = true };
-    using var http = new HttpClient(handler);
-    using var watchdog = new CancellationTokenSource(TestTimeout);
-    List<ChatResponseUpdate> observed = [];
-
-    var error = await Assert.ThrowsAsync<ProviderOperationException>(async () => {
-      await foreach (var update in new OpenAIInferenceClient(http, TimeSpan.FromMilliseconds(300)).GetStreamingResponseAsync(
-          State(api), History(), Options(), watchdog.Token))
-        observed.Add(update);
-    });
-
-    Assert.Equal(ProviderFailure.ProviderUnavailable, error.Failure);
-    Assert.Contains($"{stalledEvent} provider stream event", error.Reason, StringComparison.Ordinal);
-    Assert.Equal(expectedText, string.Concat(observed.Select(update => update.Text)));
-    Assert.All(observed, update => Assert.Null(update.FinishReason));
-    Assert.Equal(1, handler.StreamDisposals);
-    Assert.Single(handler.Requests);
-  }
-
-  [Fact]
-  public async Task CallerCanStopAnIdleStreamWithoutAProviderFailure() {
-    using var handler = new ScriptedOpenAIHandler("") { HoldAtEnd = true };
-    using var http = new HttpClient(handler);
-    using var stop = new CancellationTokenSource(TestTimeout);
-    await using var stream = new OpenAIInferenceClient(http).GetStreamingResponseAsync(
-        State(), History(), Options(), stop.Token).GetAsyncEnumerator();
-    Task<bool> pending = stream.MoveNextAsync().AsTask();
-    try {
-      await handler.ReachedEnd.Task.WaitAsync(TestTimeout);
-    } finally {
-      await stop.CancelAsync();
-      await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending.WaitAsync(TestTimeout));
-    }
-    Assert.Equal(1, handler.StreamDisposals);
-  }
-
-  [Fact]
-  public async Task SlowConsumerDoesNotTimeOutAnOtherwiseCompleteProviderStream() {
-    using var handler = new ScriptedOpenAIHandler(Responses());
-    using var http = new HttpClient(handler);
-    var readTimeout = TimeSpan.FromMilliseconds(250);
-    using var watchdog = new CancellationTokenSource(TestTimeout);
-    await using var stream = new OpenAIInferenceClient(http, readTimeout).GetStreamingResponseAsync(
-        State(), History(), Options(), watchdog.Token).GetAsyncEnumerator();
-    Assert.True(await stream.MoveNextAsync());
-    Assert.Equal("hello", stream.Current.Text);
-
-    await Task.Delay(readTimeout + readTimeout, watchdog.Token);
-
-    Assert.True(await stream.MoveNextAsync());
-    Assert.Equal(ChatFinishReason.Stop, stream.Current.FinishReason);
-    Assert.False(await stream.MoveNextAsync());
-  }
-
-  private static FunctionResultContent ForegroundResult(string callId, ToolOutput output) =>
-      new(callId, output.Images.Count == 0 ? output.Text :
-          new AIContent[] { new TextContent(output.Text) }.Concat(output.Images).ToArray());
-
-  private static void AssertImageBytes(JsonElement image, string mediaType, byte[] expected) {
-    JsonElement imageUrl = image.GetProperty("image_url");
-    string dataUrl = imageUrl.ValueKind == JsonValueKind.String
-        ? imageUrl.GetString()! : imageUrl.GetProperty("url").GetString()!;
-    string prefix = $"data:{mediaType};base64,";
-    Assert.StartsWith(prefix, dataUrl);
-    Assert.Equal(expected, Convert.FromBase64String(dataUrl[prefix.Length..]));
   }
 
   private static async Task Rejected(string wire, ProviderFailure failure, ProviderState? state = null,

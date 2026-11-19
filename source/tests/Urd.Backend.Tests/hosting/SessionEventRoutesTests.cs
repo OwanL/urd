@@ -1,15 +1,11 @@
 using System.Net;
 using System.Net.Http.Json;
-using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Microsoft.Extensions.AI;
 using Urd.Backend.Tests.Support;
-using Urd.Core.Sessions;
 using Urd.Server;
 using Xunit;
 using static Urd.Backend.Tests.Support.HttpTest;
-using static Urd.Backend.Tests.Support.ScriptedResponses;
 
 namespace Urd.Backend.Tests.Hosting;
 
@@ -68,61 +64,6 @@ public sealed class SessionEventRoutesTests {
     stream.Dispose();
     using HttpResponseMessage stale = await WaitForDisconnectedAsync(server.Client, streamId, sessionId);
     Assert.Equal(HttpStatusCode.NotFound, stale.StatusCode);
-  }
-
-  [Fact]
-  public async Task UnwatchedOpenSessionUpdatesAndReplaysItsTitleWithoutContentChanges() {
-    const string title = "Background tab title";
-    var publishTitle = TestAsync.Signal();
-    using var database = new TemporaryDatabase();
-    var client = new ScriptedChatClient((request, token) => request.Purpose switch {
-      "title" => HeldTitle(token),
-      "conversation" => WaitForever(token),
-      _ => TextUpdates([PrepassTolerantChatClient.KeepAll(request.Messages)], token)
-    });
-    await using var server = new RunningServer(RunningServer.OptionsForIsolatedWorkspace(database), createClient: () => client);
-    await server.WaitForReadyAsync();
-
-    using HttpResponseMessage stream = await OpenStreamAsync(server.Client);
-    using var reader = new StreamReader(await stream.Content.ReadAsStreamAsync());
-    JsonElement connected = await ReadEventAsync(reader, "connected");
-    Guid streamId = connected.GetProperty("stream").GetGuid();
-
-    using HttpResponseMessage created = await RequestAsync(server.Client, HttpMethod.Post, "/api/sessions", JsonBody("{}"));
-    Guid sessionId = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("sessionId").GetGuid();
-    Assert.Equal("session-created", await ReadEventNameAsync(reader));
-    using HttpResponseMessage registered = await UpdateAsync(server.Client, streamId, [sessionId], []);
-    Assert.Equal(HttpStatusCode.NoContent, registered.StatusCode);
-    JsonElement initial = await ReadEventAsync(reader, "status");
-    Assert.Equal("idle", initial.GetProperty("status").GetString());
-    Assert.Equal(JsonValueKind.Null, initial.GetProperty("title").ValueKind);
-
-    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "wait", TestLlmSelection.Default);
-    using HttpResponseMessage sent = await RequestAsync(server.Client, HttpMethod.Post,
-        $"/api/sessions/{sessionId}/message-submissions", JsonContent.Create(submission, options: json));
-    Assert.Equal(HttpStatusCode.OK, sent.StatusCode);
-    JsonElement running = await ReadEventAsync(reader, "status");
-    Assert.Equal("running", running.GetProperty("status").GetString());
-    Assert.Equal(JsonValueKind.Null, running.GetProperty("title").ValueKind);
-
-    publishTitle.SetResult();
-    JsonElement titled = await ReadEventAsync(reader, "status");
-    Assert.Equal("running", titled.GetProperty("status").GetString());
-    Assert.Equal(title, titled.GetProperty("title").GetString());
-    await AssertNoEventAsync(reader, TimeSpan.FromMilliseconds(200));
-
-    using HttpResponseMessage reconnected = await OpenStreamAsync(server.Client);
-    using var replay = new StreamReader(await reconnected.Content.ReadAsStreamAsync());
-    Guid newStreamId = (await ReadEventAsync(replay, "connected")).GetProperty("stream").GetGuid();
-    using HttpResponseMessage restored = await UpdateAsync(server.Client, newStreamId, [sessionId], []);
-    Assert.Equal(HttpStatusCode.NoContent, restored.StatusCode);
-    Assert.Equal(title, (await ReadEventAsync(replay, "status")).GetProperty("title").GetString());
-
-    async IAsyncEnumerable<ChatResponseUpdate> HeldTitle([EnumeratorCancellation] CancellationToken token) {
-      await publishTitle.Task.WaitAsync(token);
-      await foreach (ChatResponseUpdate update in TextUpdates([title], token))
-        yield return update;
-    }
   }
 
   [Fact]
@@ -207,11 +148,5 @@ public sealed class SessionEventRoutesTests {
   private static async Task AssertNoEventAsync(StreamReader reader, TimeSpan duration) {
     using var cancellation = new CancellationTokenSource(duration);
     await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await reader.ReadLineAsync(cancellation.Token));
-  }
-
-  private static async IAsyncEnumerable<ChatResponseUpdate> WaitForever(
-      [EnumeratorCancellation] CancellationToken cancellation) {
-    await Task.Delay(Timeout.InfiniteTimeSpan, cancellation);
-    yield break;
   }
 }

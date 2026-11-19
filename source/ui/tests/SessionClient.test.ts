@@ -111,8 +111,6 @@ const selection: LlmSelection = {
   contextWindow: null,
   reasoningEffort: null,
 };
-const selectedSubmission: UserMessageSubmission = { ...submission, llmSelection: selection };
-const selectedReceipt: UserMessageReceipt = { ...receipt, submission: selectedSubmission };
 const continuationSubmission: ContinuationSubmission = {
   operationId,
   expectedHistoryRevision: 7,
@@ -212,7 +210,7 @@ const opaqueCursor = "opaque /+?&=#%雪";
 const page = { sessionIds: [sessionId], nextCursor: opaqueCursor };
 const notSentPage = {
   inputs: [{ submissionId, executionId, preview: "not-sent preview" }],
-  nextCursor: opaqueCursor,
+  nextCursor: null,
 };
 const stopReceipt = { executionId, status: "requested", outcome: null };
 const compactionSubmission: ManualCompactionRequest = {
@@ -230,41 +228,12 @@ const compactionSummary: CompactionSummary = {
   estimatedContextTokensAfter: 900,
   createdAt: "2026-10-12T12:00:00Z",
 };
-const selectedRefusal: UserMessageReceipt = {
-  ...selectedReceipt,
-  acceptance: "refused",
-  refusalReason: "selectionLocked",
-  executionId: null,
-};
-const activeSnapshot: SessionSnapshot = { ...snapshot, latestLlmSelection: selection };
-const settledSnapshot: SessionSnapshot = {
-  ...snapshot,
-  unsettledExecutionId: null,
-  lastSettlement: { executionId, outcome: "completed" },
-  latestLlmSelection: selection,
-};
 const mappings: MappingCase[] = [
   {
     name: "list without a cursor",
     call: (client) => client.list(),
     method: "GET",
     path: "/api/sessions",
-    response: page,
-  },
-  {
-    name: "list preserves an opaque cursor",
-    call: (client) => client.list(opaqueCursor),
-    method: "GET",
-    path: "/api/sessions",
-    query: { cursor: opaqueCursor },
-    response: page,
-  },
-  {
-    name: "list preserves a supplied empty cursor",
-    call: (client) => client.list(""),
-    method: "GET",
-    path: "/api/sessions",
-    query: { cursor: "" },
     response: page,
   },
   {
@@ -300,13 +269,6 @@ const mappings: MappingCase[] = [
     response: continuationReceipt,
   },
   {
-    name: "missing manual Continue receipt is null",
-    call: (client) => client.getContinuationReceipt(sessionId, operationId),
-    method: "GET",
-    path: `/api/sessions/${sessionId}/continuations/${operationId}`,
-    response: null,
-  },
-  {
     name: "pending-input removal targets its execution and submission",
     call: (client) => client.removePendingInput(sessionId, executionId, submissionId),
     method: "POST",
@@ -332,76 +294,46 @@ const mappings: MappingCase[] = [
     response: notSentPage,
   },
   {
-    name: "not-sent preserves an opaque cursor",
-    call: (client) => client.getNotSent(sessionId, opaqueCursor),
-    method: "GET",
-    path: `/api/sessions/${sessionId}/not-sent`,
-    query: { cursor: opaqueCursor },
-    response: notSentPage,
-  },
-  ...(
-    [
-      ["latest", "tool"],
-      ["before", "tool"],
-      ["after", "tool"],
-      ["around", "tool"],
-      ["after", "toolCompletion"],
-      ["after", "compaction"],
-    ] as const
-  ).map(([mode, kind]): MappingCase => ({
-    name: `history ${mode} preserves its exact ${kind} reference`,
-    call: (client) =>
-      client.getHistory(
-        sessionId,
-        mode === "latest"
-          ? { mode, expectedHistoryRevision: 7 }
-          : {
-              mode,
-              expectedHistoryRevision: 7,
-              anchor: {
-                executionId,
-                entryId: submissionId,
-                kind,
-                historyRevision: 7,
-              },
-            },
-      ),
+    name: "latest history is fenced by revision",
+    call: (client) => client.getHistory(sessionId, { mode: "latest", expectedHistoryRevision: 7 }),
     method: "GET",
     path: `/api/sessions/${sessionId}/history`,
-    query: {
-      mode,
-      expectedHistoryRevision: "7",
-      ...(mode === "latest" ? {} : { executionId, entryId: submissionId, kind }),
-    },
+    query: { mode: "latest", expectedHistoryRevision: "7" },
     response: {
       sessionId,
       historyRevision: 7,
-      entries:
-        kind === "toolCompletion"
-          ? [
-              {
-                entry: { executionId, entryId: submissionId, kind, historyRevision: 7 },
-                createdAt: null,
-                text: null,
-                tool: {
-                  requestId: executionId,
-                  callId: "call",
-                  name: "read",
-                  started: true,
-                  interrupted: false,
-                  outcome: "failed",
-                  isClosed: true,
-                  startedAt: null,
-                  endedAt: null,
-                },
-              },
-            ]
-          : [],
+      entries: [],
       hasBefore: true,
       hasAfter: false,
       settlements: [],
     },
-  })),
+  },
+  {
+    name: "anchored history preserves its exact entry reference",
+    call: (client) =>
+      client.getHistory(sessionId, {
+        mode: "around",
+        expectedHistoryRevision: 7,
+        anchor: promptRef,
+      }),
+    method: "GET",
+    path: `/api/sessions/${sessionId}/history`,
+    query: {
+      mode: "around",
+      expectedHistoryRevision: "7",
+      executionId,
+      entryId: submissionId,
+      kind: "user",
+    },
+    response: {
+      sessionId,
+      historyRevision: 7,
+      entries: [],
+      hasBefore: false,
+      hasAfter: false,
+      settlements: [],
+    },
+  },
   {
     name: "position summary is fenced by history revision",
     call: (client) => client.getPositionSummary(sessionId, 7),
@@ -436,14 +368,6 @@ const mappings: MappingCase[] = [
     response: positionWindow,
   },
   {
-    name: "exact entry position retains kind and revision",
-    call: (client) => client.getEntryPosition(sessionId, { ...promptRef, kind: "text" }),
-    method: "GET",
-    path: `/api/sessions/${sessionId}/positions/entries/${executionId}/${submissionId}`,
-    query: { expectedHistoryRevision: "7", kind: "text" },
-    response: positionWindow,
-  },
-  {
     name: "content flattens every cursor member",
     call: (client) => client.getMessageContent(sessionId, cursor),
     method: "GET",
@@ -465,35 +389,6 @@ const mappings: MappingCase[] = [
     path: `/api/sessions/${sessionId}/message-submissions`,
     body: submission,
     response: receipt,
-  },
-  {
-    name: "submit roundtrips the full initiating selection",
-    call: (client) => client.submitMessage(sessionId, selectedSubmission),
-    method: "POST",
-    path: `/api/sessions/${sessionId}/message-submissions`,
-    body: selectedSubmission,
-    response: selectedReceipt,
-  },
-  {
-    name: "selection-locked refusal preserves the submitted selection",
-    call: (client) => client.getMessageReceipt(sessionId, submissionId),
-    method: "GET",
-    path: `/api/sessions/${sessionId}/message-submissions/${submissionId}`,
-    response: selectedRefusal,
-  },
-  {
-    name: "active snapshot preserves the latest initiating selection",
-    call: (client) => client.getSnapshot(sessionId),
-    method: "GET",
-    path: `/api/sessions/${sessionId}/snapshot`,
-    response: activeSnapshot,
-  },
-  {
-    name: "settled snapshot retains the latest initiating selection",
-    call: (client) => client.getSnapshot(sessionId),
-    method: "GET",
-    path: `/api/sessions/${sessionId}/snapshot`,
-    response: settledSnapshot,
   },
   {
     name: "receipt",
@@ -524,13 +419,6 @@ const mappings: MappingCase[] = [
     method: "GET",
     path: `/api/sessions/${sessionId}/compactions/operations/${operationId}`,
     response: compactionReceipt,
-  },
-  {
-    name: "missing compaction operation receipt is null",
-    call: (client) => client.getCompactionOperation(sessionId, operationId),
-    method: "GET",
-    path: `/api/sessions/${sessionId}/compactions/operations/${operationId}`,
-    response: null,
   },
   {
     name: "compaction summary is fenced by history revision",
@@ -595,43 +483,11 @@ void test("construction does no I/O", (t) => {
   assert.equal(fetchMock.mock.callCount(), 0);
 });
 
-void test("position client rejects invalid fractions, cursors, limits and prompt kinds", (t) => {
+void test("position client rejects an invalid fraction without sending a request", (t) => {
   const fetchMock = t.mock.method(globalThis, "fetch", async () => new Response("null"));
   const client = new SessionClient(new URL("https://server.example"));
 
-  for (const fraction of [-0.1, 1.1, Number.NaN, Number.POSITIVE_INFINITY])
-    assert.throws(() => client.locatePosition(sessionId, 7, fraction), TypeError);
-  assert.throws(
-    () => client.getPromptMarkers(sessionId, { expectedHistoryRevision: 7, afterRank: -1 }),
-    TypeError,
-  );
-  assert.throws(
-    () => client.getPromptMarkers(sessionId, { expectedHistoryRevision: 7, limit: 61 }),
-    TypeError,
-  );
-  assert.throws(() => client.activatePrompt(sessionId, { ...promptRef, kind: "text" }), TypeError);
-  assert.throws(
-    () =>
-      client.getPrepassDetails(sessionId, {
-        boundaryId,
-        category: "skills",
-        historyRevision: -1,
-        candidateOffset: 0,
-        resultOffset: 0,
-      }),
-    TypeError,
-  );
-  assert.throws(
-    () =>
-      client.getPrepassDetails(sessionId, {
-        boundaryId,
-        category: "skills",
-        historyRevision: 7,
-        candidateOffset: 1.5,
-        resultOffset: 0,
-      }),
-    TypeError,
-  );
+  assert.throws(() => client.locatePosition(sessionId, 7, 1.1), TypeError);
   assert.equal(fetchMock.mock.callCount(), 0);
 });
 
@@ -676,26 +532,15 @@ void test(
   },
 );
 
-void test("create rejects invalid session identities", { timeout: 5_000 }, async (t) => {
-  const invalid = [
-    {},
-    { sessionId: null },
-    { sessionId: 42 },
-    { sessionId: "" },
-    { sessionId: "not-a-session-id" },
-    { sessionId: "00000000-0000-0000-0000-000000000000" },
-  ];
-  const responses: unknown[] = [...invalid];
+void test("create rejects an invalid session identity", { timeout: 5_000 }, async (t) => {
   const server = await startHttpServer((_request, response) => {
     response.writeHead(201, { "Content-Type": "application/json" });
-    response.end(JSON.stringify(responses.shift()));
+    response.end('{"sessionId":""}');
   });
   t.after(() => server.close());
-  const client = new SessionClient(server.origin);
 
-  for (const response of invalid)
-    await assert.rejects(client.create(), TypeError, JSON.stringify(response));
-  assert.equal(server.requests.length, invalid.length);
+  await assert.rejects(new SessionClient(server.origin).create(), TypeError);
+  assert.equal(server.requests.length, 1);
 });
 
 void test(
@@ -723,122 +568,30 @@ void test(
   },
 );
 
-const commands: { name: string; call: (client: SessionClient) => Promise<unknown> }[] = [
-  { name: "create", call: (client) => client.create() },
-  { name: "submit", call: (client) => client.submitMessage(sessionId, submission) },
-  {
-    name: "Continue",
-    call: (client) => client.continueSession(sessionId, continuationSubmission),
-  },
-  {
-    name: "pending-input removal",
-    call: (client) => client.removePendingInput(sessionId, executionId, submissionId),
-  },
-  { name: "Stop", call: (client) => client.stopExecution(sessionId, executionId) },
-  {
-    name: "working-directory change",
-    call: (client) => client.setWorkingDirectory(sessionId, "C:\\workspace\\next"),
-  },
-  {
-    name: "manual compaction",
-    call: (client) => client.startCompaction(sessionId, compactionSubmission),
-  },
-];
-for (const command of commands) {
-  for (const phase of ["request", "acknowledgement"] as const) {
-    void test(
-      `${command.name} never retries after ${phase} disconnect`,
-      { timeout: 5_000 },
-      async (t) => {
-        const server = await startHttpServer((_request, response) => {
-          if (phase === "request") {
-            response.destroy();
-            return;
-          }
-          response.writeHead(200, { "Content-Type": "application/json", "Content-Length": "1000" });
-          response.flushHeaders();
-          response.write('{"partial":', () => response.destroy());
-        });
-        t.after(() => server.close());
+void test("a disconnected submission is not retried", { timeout: 5_000 }, async (t) => {
+  const server = await startHttpServer((_request, response) => response.destroy());
+  t.after(() => server.close());
 
-        await assert.rejects(command.call(new SessionClient(server.origin)));
-        assert.equal(server.requests.length, 1);
-        assert.equal(server.requests[0]?.method, "POST");
-      },
-    );
-  }
-}
+  await assert.rejects(new SessionClient(server.origin).submitMessage(sessionId, submission));
+  assert.equal(server.requests.length, 1);
+  assert.equal(server.requests[0]?.method, "POST");
+});
 
-const reads: {
-  name: string;
-  call: (client: SessionClient, signal: AbortSignal) => Promise<unknown>;
-}[] = [
-  { name: "list", call: (client, signal) => client.list(undefined, signal) },
-  { name: "snapshot", call: (client, signal) => client.getSnapshot(sessionId, signal) },
-  {
-    name: "not-sent",
-    call: (client, signal) => client.getNotSent(sessionId, undefined, signal),
-  },
-  {
-    name: "history",
-    call: (client, signal) =>
-      client.getHistory(sessionId, { mode: "latest", expectedHistoryRevision: 7 }, signal),
-  },
-  {
-    name: "position summary",
-    call: (client, signal) => client.getPositionSummary(sessionId, 7, signal),
-  },
-  {
-    name: "weighted locate",
-    call: (client, signal) => client.locatePosition(sessionId, 7, 0.5, signal),
-  },
-  {
-    name: "prompt markers",
-    call: (client, signal) =>
-      client.getPromptMarkers(sessionId, { expectedHistoryRevision: 7 }, signal),
-  },
-  {
-    name: "prompt activation",
-    call: (client, signal) => client.activatePrompt(sessionId, promptRef, signal),
-  },
-  {
-    name: "content",
-    call: (client, signal) => client.getMessageContent(sessionId, cursor, signal),
-  },
-  {
-    name: "receipt",
-    call: (client, signal) => client.getMessageReceipt(sessionId, submissionId, signal),
-  },
-  {
-    name: "compaction receipt",
-    call: (client, signal) => client.getCompactionOperation(sessionId, operationId, signal),
-  },
-  {
-    name: "compaction summary",
-    call: (client, signal) => client.getCompactionSummary(sessionId, compactionId, 8, signal),
-  },
-];
-for (const read of reads) {
-  void test(
-    `cancelling ${read.name} remains a cancelled read and never sends Stop`,
-    { timeout: 5_000 },
-    async (t) => {
-      let received!: () => void;
-      const requestReceived = new Promise<void>((resolve) => {
-        received = resolve;
-      });
-      const server = await startHttpServer(() => received());
-      t.after(() => server.close());
-      const controller = new AbortController();
-      t.after(() => controller.abort());
-      const pending = read.call(new SessionClient(server.origin), controller.signal);
-      const rejected = assert.rejects(pending, { name: "AbortError" });
-      await requestReceived;
-      controller.abort();
-      await rejected;
+void test("cancelling a read never sends Stop", { timeout: 5_000 }, async (t) => {
+  let received!: () => void;
+  const requestReceived = new Promise<void>((resolve) => {
+    received = resolve;
+  });
+  const server = await startHttpServer(() => received());
+  t.after(() => server.close());
+  const controller = new AbortController();
+  t.after(() => controller.abort());
+  const pending = new SessionClient(server.origin).list(undefined, controller.signal);
+  const rejected = assert.rejects(pending, { name: "AbortError" });
+  await requestReceived;
+  controller.abort();
+  await rejected;
 
-      assert.equal(server.requests.length, 1);
-      assert.equal(server.requests[0]?.method, "GET");
-    },
-  );
-}
+  assert.equal(server.requests.length, 1);
+  assert.equal(server.requests[0]?.method, "GET");
+});

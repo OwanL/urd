@@ -1,5 +1,4 @@
 using System.Collections;
-using System.Diagnostics;
 using System.Runtime.Versioning;
 using System.Text;
 using System.Text.Json;
@@ -81,53 +80,6 @@ public sealed class BashToolTests {
         File.Delete(spill);
       Directory.Delete(directory, recursive: true);
     }
-  }
-
-  [Fact]
-  public async Task TimeoutAndCallerCancellationCleanTheirCallButKeepAnEarlierCompletedServer() {
-    if (!OperatingSystem.IsWindows())
-      return;
-    string directory = Directory.CreateTempSubdirectory("urd-bash-cancel-test-").FullName;
-    try {
-      var bash = new GitBash();
-      await using var processes = new ChatProcesses(bash);
-      var tool = new BashTool(processes, bash, ShellEnvironment());
-      ToolOutput earlier = await tool.RunAsync(Arguments("sleep 60 & child=$!; cat /proc/$child/winpid > earlier.pid; exit 3"),
-          Context(directory), CancellationToken.None).WaitAsync(Deadline);
-      Assert.True(earlier.IsError);
-      using Process survivor = Process.GetProcessById(int.Parse((await File.ReadAllTextAsync(Path.Combine(directory, "earlier.pid"))).Trim(),
-          System.Globalization.CultureInfo.InvariantCulture));
-      _ = survivor.Handle;
-      ToolOutput timedOut = await tool.RunAsync(Arguments("printf partial☃; sleep 60", timeout: 1),
-          Context(directory), CancellationToken.None).WaitAsync(Deadline);
-      Assert.True(timedOut.IsError);
-      Assert.True(timedOut.Details!.Value.GetProperty("timedOut").GetBoolean());
-      Assert.Contains("partial☃", timedOut.Text, StringComparison.Ordinal);
-      Assert.Contains("timed out", timedOut.Text, StringComparison.Ordinal);
-      Assert.False(survivor.HasExited);
-      using var cancellation = new CancellationTokenSource();
-      await Assert.ThrowsAnyAsync<OperationCanceledException>(() => tool.RunAsync(Arguments("printf ready; sleep 60"),
-          Context(directory, _ => cancellation.Cancel()), cancellation.Token).WaitAsync(Deadline));
-      Assert.False(survivor.HasExited);
-      await Assert.ThrowsAnyAsync<OperationCanceledException>(() => tool.RunAsync(Arguments("touch must-not-exist"),
-          Context(directory), cancellation.Token).WaitAsync(Deadline));
-      Assert.False(File.Exists(Path.Combine(directory, "must-not-exist")));
-      await processes.KillAllAsync().WaitAsync(Deadline);
-      await survivor.WaitForExitAsync().WaitAsync(Deadline);
-    } finally {
-      Directory.Delete(directory, recursive: true);
-    }
-  }
-
-  [Fact]
-  public void DecoderPreservesCharactersSplitAcrossCallbacksAndStripsTheInitialBom() {
-    using var output = new BashOutput();
-    foreach (byte value in Encoding.UTF8.GetBytes("\uFEFF☃😊\n"))
-      output.Append(new byte[] { value });
-    output.Finish();
-    ToolOutput result = output.Result(0, 0, false, null, "test bash");
-    Assert.Equal("☃😊\n", result.Text);
-    Assert.False(result.IsError);
   }
 
   private static JsonElement Arguments(string command, double? timeout = null) => timeout is { } seconds

@@ -64,27 +64,4 @@ public sealed class ChatGptAuthenticationTests {
     Assert.DoesNotContain("synthetic-private", error.ToString());
   }
 
-  [Theory]
-  [InlineData("none", 1, true)]
-  [InlineData("changed-client", 0, false)]
-  [InlineData("other-subject", 1, false)]
-  public async Task ReturningSignInCannotChangeTheBoundClientOrSubject(string fault, int expectedPosts, bool succeeds) {
-    using var issuer = new FakeOpenAIIdentity { Fault = fault };
-    var auth = new ChatGptAuthentication(issuer, FakeOpenAIIdentity.Issuer);
-    var registration = new ProviderRegistration(FakeOpenAIIdentity.ClientId, FakeOpenAIIdentity.Subject, "old@example.invalid");
-    using var attempt = await auth.BeginAsync(HostId, FakeOpenAIIdentity.Callback, registration, CancellationToken.None);
-    var query = FakeOpenAIIdentity.Parse(attempt.AuthorizationUrl.Query);
-    Assert.Equal(registration.ClientId, query["client_id"]);
-
-    if (succeeds) {
-      var result = await ChatGptAuthentication.CompleteAsync(attempt, await issuer.AuthorizeAsync(attempt), CancellationToken.None);
-      Assert.Equal(registration.Subject, result.Registration.Subject);
-      Assert.Equal("hint@example.invalid", result.Registration.Email);
-    } else {
-      var error = await Assert.ThrowsAsync<ProviderOperationException>(async () =>
-          await ChatGptAuthentication.CompleteAsync(attempt, await issuer.AuthorizeAsync(attempt), CancellationToken.None));
-      Assert.Equal(ProviderFailure.SignInRejected, error.Failure);
-    }
-    Assert.Equal(expectedPosts, issuer.CodePosts);
-  }
 }

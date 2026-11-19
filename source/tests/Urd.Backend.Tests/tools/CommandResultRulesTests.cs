@@ -7,8 +7,6 @@ namespace Urd.Backend.Tests.Tools;
 public sealed class CommandResultRulesTests {
   [Theory]
   [InlineData("bash", "rg 'foo bar' . | head")]
-  [InlineData("bash", "rg '\\bfoo\\b' .")]
-  [InlineData("bash", "rg \"foo bar\" .")]
   [InlineData("grep", null)]
   public void GrepGroupsLosslessly(string tool, string? command) {
     const string input = "src/long-name.cs:01: first \r\nsrc/long-name.cs:2:\tsecond\r\nsrc/long-name.cs:2:\tsecond\r\nother/long-name.cs:3:\r\nsrc/long-name.cs:4:last\r\n";
@@ -20,20 +18,10 @@ public sealed class CommandResultRulesTests {
 
   [Theory]
   [InlineData("rg foo .; echo done")]
-  [InlineData("echo foo | rg foo")]
-  [InlineData("rg foo . | cat")]
-  [InlineData("rg \"$pattern\" .")]
-  [InlineData("rg 'unfinished")]
   public void GrepRejectsAmbiguousCommands(string command) => AssertGrepUnchanged("bash", command, "src/long-name.cs:1:a\nsrc/long-name.cs:2:b\n");
 
   [Theory]
   [InlineData("src/long-name.cs:1:a\nsrc/long-name.cs:2:b\nwarning\n")]
-  [InlineData("src/long-name.cs:1:a\n\nsrc/long-name.cs:2:b\n")]
-  [InlineData("src/long-name.cs:1:2:ambiguous\nsrc/long-name.cs:2:b\n")]
-  [InlineData("src/long-name.cs:1:a:23:b\nsrc/long-name.cs:2:b\n")]
-  [InlineData("  src/long-name.cs:1:a\n  src/long-name.cs:2:b\n")]
-  [InlineData("src/long-name.cs:1:a\nsrc/long-name.cs\n  2:b\n")]
-  [InlineData("src/long-name.cs:1:a\r\nsrc/long-name.cs:2:b\n")]
   [InlineData("a.c:1:x\na.c:2:y\n")]
   public void GrepRejectsCollisionsAndUnprofitableOutput(string input) => AssertGrepUnchanged("grep", null, input);
 

@@ -29,32 +29,6 @@ public sealed class ProviderErrorDetailsTests {
     Assert.Null(error.InnerException);
   }
 
-  [Fact]
-  public async Task HttpTopLevelDetailIsRetained() {
-    var error = await RequestFailureAsync("{\"detail\":\"System messages are not allowed\"}",
-        "application/json", HttpStatusCode.BadRequest);
-
-    Assert.Contains("HTTP 400", error.Message);
-    Assert.Contains("System messages are not allowed", error.Message);
-  }
-
-  [Fact]
-  public async Task MalformedHttpBodyStillReportsStatus() {
-    var error = await RequestFailureAsync("not valid json", "application/json", HttpStatusCode.BadGateway);
-
-    Assert.Contains("HTTP 502", error.Message);
-    Assert.DoesNotContain("not valid json", error.Message);
-  }
-
-  [Fact]
-  public async Task LongHttpMessageIsBounded() {
-    string body = System.Text.Json.JsonSerializer.Serialize(new { error = new { message = new string('x', 5000) } });
-    var error = await RequestFailureAsync(body, "application/json", HttpStatusCode.BadRequest);
-
-    Assert.Contains("HTTP 400", error.Message);
-    Assert.True(error.Message.Length <= 1024);
-  }
-
   [Theory]
   [InlineData("response.failed")]
   [InlineData("error")]

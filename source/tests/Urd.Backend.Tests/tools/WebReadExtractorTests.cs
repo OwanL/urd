@@ -51,27 +51,6 @@ public sealed class WebReadExtractorTests {
   }
 
   [Fact]
-  public void ExtractionResolvesAbsoluteLinksAndRendersMeaninglessAnchorsAsText() {
-    string html = """
-      <html><body><article>
-        <p>Read <a href="../guides/index.html">the guide</a>, <a>an anchor without href</a>,
-        <a href="mailto:support@example.com">mail support</a>, <a href="javascript:void(0)">do it</a> or
-        <a href="https://other.example.org/">an absolute site</a>.</p>
-        <div><p>only the inner paragraph</p></div>
-        <div>standalone wrapper text</div>
-      </article></body></html>
-      """;
-    WebPageExtraction extraction = WebPageExtractor.Extract(html, "https://example.com/a/page.html");
-    Assert.DoesNotContain("[an anchor without href]", extraction.Markdown, StringComparison.Ordinal);
-    Assert.Contains("[the guide](https://example.com/guides/index.html)", extraction.Markdown, StringComparison.Ordinal);
-    Assert.Contains("[an absolute site](https://other.example.org/)", extraction.Markdown, StringComparison.Ordinal);
-    Assert.DoesNotContain("[mail support]", extraction.Markdown, StringComparison.Ordinal);
-    Assert.DoesNotContain("[do it]", extraction.Markdown, StringComparison.Ordinal);
-    Assert.Contains("only the inner paragraph", extraction.Markdown, StringComparison.Ordinal);
-    Assert.Contains("standalone wrapper text", extraction.Markdown, StringComparison.Ordinal);
-  }
-
-  [Fact]
   public void ExtractionKeepsInlineTextAroundNestedBlocksInDocumentOrder() {
     string html = """
       <html><body><main>
@@ -94,33 +73,6 @@ public sealed class WebReadExtractorTests {
       After nested content
       """, extraction.Markdown);
     Assert.False(extraction.Truncated);
-  }
-
-  [Fact]
-  public void ExtractionKeepsNestedListsAndLinkedCardBlocksSeparate() {
-    string html = """
-      <html><body><main>
-        <a href="/story"><h2>Title</h2><p>Summary with <em>emphasis</em>.</p></a>
-        <ul><li><a href="/single"><div>Single card</div></a></li><li>Parent<ul><li>Child</li></ul>After child</li></ul>
-        <p>Read <a href="/more">more</a>.</p>
-      </main></body></html>
-      """;
-    WebPageExtraction extraction = WebPageExtractor.Extract(html, "https://example.com/");
-    Assert.Equal("""
-      ## [Title](https://example.com/story)
-
-      [Summary with emphasis.](https://example.com/story)
-
-      [Single card](https://example.com/single)
-
-      - Parent
-
-      - Child
-
-      - After child
-
-      Read [more](https://example.com/more).
-      """, extraction.Markdown);
   }
 
   [Fact]

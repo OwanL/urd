@@ -2,10 +2,7 @@ import assert from "node:assert/strict";
 import type { ServerResponse } from "node:http";
 import test from "node:test";
 import { RequestError } from "../http/RequestError.ts";
-import {
-  MarkdownClient,
-  type MarkdownOwnedTextGeneration,
-} from "../markdown-rendering/MarkdownClient.ts";
+import { MarkdownClient } from "../markdown-rendering/MarkdownClient.ts";
 import type { TranscriptEntryRef } from "../sessions/Messages.ts";
 import { startHttpServer } from "./HttpTestServer.ts";
 
@@ -68,20 +65,6 @@ function context(overrides: Record<string, unknown> = {}) {
 
 function opened() {
   return { manifest, source: sourceFacts };
-}
-
-function piece(overrides: Record<string, unknown> = {}) {
-  return {
-    id: 0,
-    context: 0,
-    kind: 0,
-    text: "Hi",
-    source: { start: 0, end: 2 },
-    mapping: 0,
-    part: 0,
-    continued: false,
-    ...overrides,
-  };
 }
 
 function sendJson(response: ServerResponse, value: unknown, status = 200) {
@@ -232,119 +215,6 @@ void test("maps lease and page routes, bodies, and numeric Markdown enums", asyn
   assert.deepEqual(JSON.parse(server.requests.at(-1)!.body), {});
 });
 
-void test("maps every Markdown wire enum number through the client", async (t) => {
-  const elementKinds = [
-    "document",
-    "paragraph",
-    "heading",
-    "quote",
-    "list",
-    "item",
-    "code",
-    "codeLine",
-    "table",
-    "row",
-    "cell",
-    "emphasis",
-    "strong",
-    "inlineCode",
-    "link",
-    "thematicBreak",
-    "image",
-  ] as const;
-  const textKinds = ["text", "literal", "code", "softBreak", "hardBreak", "thematicBreak"] as const;
-  const sourceMappings = ["exact", "containing", "container"] as const;
-  const valueKinds = [
-    "destination",
-    "title",
-    "language",
-    "fenceInfo",
-    "orderedStart",
-    "imageKey",
-  ] as const;
-  const alignments = ["none", "left", "center", "right"] as const;
-  const pieces = textKinds.flatMap((_, kind) =>
-    sourceMappings.map((__, mapping) =>
-      piece({ id: kind * sourceMappings.length + mapping, kind, mapping }),
-    ),
-  );
-  const contexts = elementKinds.flatMap((_, kind) =>
-    alignments.map((__, alignment) =>
-      context({ id: kind * alignments.length + alignment, kind, alignment }),
-    ),
-  );
-  const values = valueKinds.map((_, kind) => ({ kind, text: "", part: 0, continued: false }));
-  const enumManifest = {
-    ...manifest,
-    pieceCount: pieces.length,
-    contextCount: contexts.length,
-  };
-  const server = await startHttpServer((request, response) => {
-    if (request.url.endsWith("/release")) {
-      response.writeHead(204);
-      response.end();
-    } else if (request.method === "POST" && !request.url.endsWith("/contexts"))
-      sendJson(response, { manifest: enumManifest, source: sourceFacts });
-    else if (request.url.includes("/pieces?"))
-      sendJson(response, { generation, from: 0, next: pieces.length, hasMore: false, pieces });
-    else if (request.url.includes("/contexts/0?"))
-      sendJson(response, {
-        generation,
-        context: context(),
-        from: 0,
-        next: values.length,
-        hasMore: false,
-        values,
-      });
-    else if (request.url.endsWith("/contexts"))
-      sendJson(response, {
-        generation,
-        from: 0,
-        next: contexts.length,
-        hasMore: false,
-        contexts,
-      });
-    else {
-      response.writeHead(404);
-      response.end();
-    }
-  });
-  t.after(() => server.close());
-
-  const client = new MarkdownClient(server.origin);
-  const signal = new AbortController().signal;
-  const source = await client.request(streamId, sessionId, entry).open(signal);
-  const piecePage = await source.readPieces({ generation, index: 0 }, signal);
-  const contextPage = await source.readContext(0, { generation, index: 0 }, signal);
-  const descriptorPage = await source.readContexts(
-    contexts.map((_, id) => id),
-    { generation, index: 0 },
-    signal,
-  );
-
-  assert.deepEqual(
-    piecePage.pieces.map(({ kind }) => kind),
-    textKinds.flatMap((kind) => sourceMappings.map(() => kind)),
-  );
-  assert.deepEqual(
-    piecePage.pieces.map(({ mapping }) => mapping),
-    textKinds.flatMap(() => sourceMappings),
-  );
-  assert.deepEqual(
-    contextPage.values.map(({ kind }) => kind),
-    valueKinds,
-  );
-  assert.deepEqual(
-    descriptorPage.contexts.map(({ kind }) => kind),
-    elementKinds.flatMap((kind) => alignments.map(() => kind)),
-  );
-  assert.deepEqual(
-    descriptorPage.contexts.map(({ alignment }) => alignment),
-    elementKinds.flatMap(() => alignments),
-  );
-  await source.dispose();
-});
-
 void test("loads a managed image through the private message route without opening a lease", async (t) => {
   const key = "a".repeat(64);
   const missingKey = "b".repeat(64);
@@ -390,157 +260,70 @@ void test("loads a managed image through the private message route without openi
   );
 });
 
-interface InvalidWirePageCase {
-  readonly name: string;
-  readonly response: unknown;
-  read(source: MarkdownOwnedTextGeneration, signal: AbortSignal): Promise<unknown>;
-  readonly expected: RegExp;
-}
-
-const invalidWirePages: readonly InvalidWirePageCase[] = [
-  {
-    name: "piece kind index",
-    response: { generation, from: 0, next: 1, hasMore: true, pieces: [piece({ kind: 6 })] },
-    read: (source, signal) => source.readPieces({ generation, index: 0 }, signal),
-    expected: /unknown Markdown text kind index/u,
-  },
-  {
-    name: "source mapping index",
-    response: { generation, from: 0, next: 1, hasMore: true, pieces: [piece({ mapping: 3 })] },
-    read: (source, signal) => source.readPieces({ generation, index: 0 }, signal),
-    expected: /unknown Markdown source mapping index/u,
-  },
-  {
-    name: "context kind index",
-    response: { generation, from: 0, next: 1, hasMore: false, contexts: [context({ kind: 17 })] },
-    read: (source, signal) => source.readContexts([0], { generation, index: 0 }, signal),
-    expected: /unknown Markdown context kind index/u,
-  },
-  {
-    name: "alignment index",
-    response: {
-      generation,
-      context: context({ alignment: 4 }),
-      from: 0,
-      next: 1,
-      hasMore: false,
-      values: [],
-    },
-    read: (source, signal) => source.readContext(0, { generation, index: 0 }, signal),
-    expected: /unknown Markdown table alignment index/u,
-  },
-  {
-    name: "value kind index",
-    response: {
-      generation,
-      context: context(),
-      from: 0,
-      next: 1,
-      hasMore: false,
-      values: [{ kind: 6, text: "", part: 0, continued: false }],
-    },
-    read: (source, signal) => source.readContext(0, { generation, index: 0 }, signal),
-    expected: /unknown Markdown value kind index/u,
-  },
-  {
-    name: "page from another generation",
-    response: {
-      generation: "00000000-0000-4000-8000-000000000099",
-      from: 0,
-      next: 1,
-      hasMore: true,
-      pieces: [piece()],
-    },
-    read: (source, signal) => source.readPieces({ generation, index: 0 }, signal),
-    expected: /generation changed/u,
-  },
-];
-
-for (const invalid of invalidWirePages) {
-  void test(`rejects an unknown ${invalid.name} response`, async (t) => {
-    const server = await startHttpServer((request, response) => {
-      if (request.url.endsWith("/release")) {
-        response.writeHead(204);
-        response.end();
-      } else if (request.method === "POST" && !request.url.endsWith("/contexts"))
-        sendJson(response, opened());
-      else sendJson(response, invalid.response);
-    });
-    t.after(() => server.close());
-
-    const client = new MarkdownClient(server.origin);
-    const signal = new AbortController().signal;
-    const source = await client.request(streamId, sessionId, entry).open(signal);
-    await assert.rejects(invalid.read(source, signal), invalid.expected);
-    assert.equal(server.requests.length, 2);
-    await source.dispose();
+void test("rejects a page from another generation", async (t) => {
+  const server = await startHttpServer((request, response) => {
+    if (request.url.endsWith("/release")) {
+      response.writeHead(204);
+      response.end();
+    } else if (request.method === "POST" && !request.url.endsWith("/contexts"))
+      sendJson(response, opened());
+    else
+      sendJson(response, {
+        generation: "00000000-0000-4000-8000-000000000099",
+        from: 0,
+        next: 0,
+        hasMore: false,
+        pieces: [],
+      });
   });
-}
+  t.after(() => server.close());
 
-for (const releasedStatus of [404, 410]) {
-  void test(`treats HTTP ${releasedStatus} as an already released Markdown lease`, async (t) => {
-    const server = await startHttpServer((request, response) => {
-      if (request.url.endsWith("/release")) {
-        response.writeHead(releasedStatus);
-        response.end();
-      } else sendJson(response, opened());
-    });
-    t.after(() => server.close());
+  const signal = new AbortController().signal;
+  const source = await new MarkdownClient(server.origin)
+    .request(streamId, sessionId, entry)
+    .open(signal);
+  await assert.rejects(source.readPieces({ generation, index: 0 }, signal), /generation changed/u);
+  assert.equal(server.requests.length, 2);
+  await source.dispose();
+});
 
-    const source = await new MarkdownClient(server.origin)
+void test("treats HTTP 404 as an already released Markdown lease", async (t) => {
+  const server = await startHttpServer((request, response) => {
+    if (request.url.endsWith("/release")) {
+      response.writeHead(404);
+      response.end();
+    } else sendJson(response, opened());
+  });
+  t.after(() => server.close());
+
+  const source = await new MarkdownClient(server.origin)
+    .request(streamId, sessionId, entry)
+    .open(new AbortController().signal);
+  await source.dispose();
+  await source.dispose();
+  assert.equal(server.requests.length, 2);
+});
+
+void test("releases the client lease after a malformed open payload", async (t) => {
+  const server = await startHttpServer((request, response) => {
+    if (isRoute(request, "POST", "/release")) {
+      response.writeHead(204);
+      response.end();
+    } else sendJson(response, { manifest });
+  });
+  t.after(() => server.close());
+
+  await assert.rejects(
+    new MarkdownClient(server.origin)
       .request(streamId, sessionId, entry)
-      .open(new AbortController().signal);
-    await source.dispose();
-    await source.dispose();
-    assert.equal(server.requests.length, 2);
-  });
-}
-
-for (const failure of [
-  {
-    name: "HTTP failure",
-    respond(response: ServerResponse) {
-      sendJson(response, { error: "failed" }, 503);
-    },
-    expected: RequestError,
-  },
-  {
-    name: "malformed JSON",
-    respond(response: ServerResponse) {
-      response.writeHead(200, { "Content-Type": "application/json" });
-      response.end("{broken");
-    },
-    expected: SyntaxError,
-  },
-  {
-    name: "malformed open payload",
-    respond(response: ServerResponse) {
-      sendJson(response, { manifest });
-    },
-    expected: TypeError,
-  },
-]) {
-  void test(`releases the client lease after ${failure.name}`, async (t) => {
-    const server = await startHttpServer((request, response) => {
-      if (isRoute(request, "POST", "/release")) {
-        response.writeHead(204);
-        response.end();
-      } else failure.respond(response);
-    });
-    t.after(() => server.close());
-
-    await assert.rejects(
-      new MarkdownClient(server.origin)
-        .request(streamId, sessionId, entry)
-        .open(new AbortController().signal),
-      failure.expected,
-    );
-    assert.equal(server.requests.length, 2);
-    const openPath = new URL(server.requests[0]!.url, server.origin).pathname;
-    const releasePath = new URL(server.requests[1]!.url, server.origin).pathname;
-    assert.equal(releasePath, `${openPath}/release`);
-  });
-}
+      .open(new AbortController().signal),
+    TypeError,
+  );
+  assert.equal(server.requests.length, 2);
+  const openPath = new URL(server.requests[0]!.url, server.origin).pathname;
+  const releasePath = new URL(server.requests[1]!.url, server.origin).pathname;
+  assert.equal(releasePath, `${openPath}/release`);
+});
 
 void test("aborted opens release the known lease before rejecting", async (t) => {
   let sawOpen!: () => void;
@@ -600,44 +383,7 @@ void test("waits for failed-open lease cleanup and does not hide cleanup failure
   assert.equal(settled, true);
 });
 
-interface InvalidReadCase {
-  readonly name: string;
-  run(source: MarkdownOwnedTextGeneration, signal: AbortSignal): Promise<unknown>;
-  readonly expected: RegExp;
-}
-
-const invalidReads: readonly InvalidReadCase[] = [
-  {
-    name: "different generation",
-    run(source, signal) {
-      return source.readPieces({ generation: "different", index: 0 }, signal);
-    },
-    expected: /generation changed/u,
-  },
-  {
-    name: "piece index beyond manifest",
-    run(source, signal) {
-      return source.readPieces({ generation, index: manifest.pieceCount + 1 }, signal);
-    },
-    expected: /index/u,
-  },
-  {
-    name: "unknown context ID",
-    run(source, signal) {
-      return source.readContext(manifest.contextCount, { generation, index: 0 }, signal);
-    },
-    expected: /context ID/u,
-  },
-  {
-    name: "duplicate context IDs",
-    run(source, signal) {
-      return source.readContexts([0, 0], { generation, index: 0 }, signal);
-    },
-    expected: /distinct/u,
-  },
-];
-
-void test("rejects invalid generations and indices before making read requests", async (t) => {
+void test("rejects duplicate context IDs before making read requests", async (t) => {
   const server = await startHttpServer((request, response) => {
     if (request.url.endsWith("/release")) {
       response.writeHead(204);
@@ -646,11 +392,11 @@ void test("rejects invalid generations and indices before making read requests",
   });
   t.after(() => server.close());
 
-  const client = new MarkdownClient(server.origin);
   const signal = new AbortController().signal;
-  const source = await client.request(streamId, sessionId, entry).open(signal);
-  for (const invalid of invalidReads)
-    await assert.rejects(invalid.run(source, signal), invalid.expected, invalid.name);
+  const source = await new MarkdownClient(server.origin)
+    .request(streamId, sessionId, entry)
+    .open(signal);
+  await assert.rejects(source.readContexts([0, 0], { generation, index: 0 }, signal), /distinct/u);
   assert.equal(server.requests.length, 1);
   await source.dispose();
 });

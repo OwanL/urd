@@ -1,4 +1,3 @@
-using Microsoft.Data.Sqlite;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Providers;
 using Urd.Core.Storage;
@@ -58,72 +57,6 @@ public sealed class ProviderRefreshRecoveryTests {
       Assert.NotNull(reopened.Providers.Get(id).Registration);
     } finally {
       await CloseAsync(reopenedManager);
-    }
-  }
-
-  [Fact]
-  public async Task NewValidatedSignInClearsPersistedAndInMemoryRecoveryFences() {
-    using var database = new TemporaryDatabase();
-    using UrdStore store = UrdStore.Open(database.Path);
-    var identity = new FakeOpenAIIdentity();
-    var catalog = Catalog();
-    var responses = new ScriptedOpenAIHandler(ResponseStream());
-    var manager = Manager(store, identity, catalog, responses);
-    try {
-      Guid id = (await manager.AddChatGptAsync("Plan")).Id;
-      await SignInAsync(manager, identity, id);
-      Expire(store, id);
-      identity.Fault = "refresh-network";
-      await AssertFailureAsync(ProviderFailure.RefreshUncertain, () => manager.RefreshModelCatalogAsync(id));
-      AssertPersistedRecovery(store, id);
-      long previousGeneration = store.Providers.Get(id).Generation;
-
-      identity.Fault = "none";
-      await SignInAsync(manager, identity, id);
-      Assert.True(store.Providers.Get(id).Generation > previousGeneration);
-      Assert.False(store.Providers.Get(id).Credentials!.RequiresSignIn);
-      Assert.False((await manager.GetCredentialStatusAsync(id)).RequiresSignIn);
-      Assert.NotNull((await manager.RefreshModelCatalogAsync(id)).RefreshedAt);
-      Assert.Equal("hello", (await manager.TestModelAsync(id, "fixture-model")).Text);
-      Assert.Equal(2, identity.CodePosts);
-      Assert.Equal(1, identity.RefreshPosts);
-      Assert.Single(catalog.Requests);
-      Assert.Single(responses.Requests);
-    } finally {
-      await CloseAsync(manager);
-    }
-  }
-
-  [Fact]
-  public async Task FailedRotatedTokenSavePersistsRecoveryFromOriginalCredentialSnapshot() {
-    using var database = new TemporaryDatabase();
-    using UrdStore store = UrdStore.Open(database.Path);
-    var identity = new FakeOpenAIIdentity();
-    var catalog = Catalog();
-    var responses = new ScriptedOpenAIHandler(ResponseStream());
-    var manager = Manager(store, identity, catalog, responses);
-    try {
-      Guid id = (await manager.AddChatGptAsync("Plan")).Id;
-      await SignInAsync(manager, identity, id);
-      Expire(store, id);
-      identity.Fault = "omitted-scope";
-      database.Execute("""
-        CREATE TRIGGER fail_rotated_token BEFORE UPDATE ON provider_connections
-        WHEN instr(NEW.credentials_json, 'synthetic-access-2') > 0
-        BEGIN SELECT RAISE(ABORT, 'synthetic credential write failure'); END;
-        """);
-
-      await Assert.ThrowsAsync<SqliteException>(() => manager.RefreshModelCatalogAsync(id).WaitAsync(TestTimeout));
-
-      AssertPersistedRecovery(store, id);
-      Assert.True((await manager.GetCredentialStatusAsync(id)).RequiresSignIn);
-      await AssertFailureAsync(ProviderFailure.AuthenticationRequired, () => manager.TestModelAsync(id, "fixture-model"));
-      Assert.Equal(1, identity.RefreshPosts);
-      Assert.Empty(catalog.Requests);
-      Assert.Empty(responses.Requests);
-    } finally {
-      database.Execute("DROP TRIGGER IF EXISTS fail_rotated_token;");
-      await CloseAsync(manager);
     }
   }
 

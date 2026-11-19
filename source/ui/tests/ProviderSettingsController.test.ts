@@ -90,36 +90,24 @@ function setup(overrides: Partial<ProviderSettingsClient> = {}) {
 }
 
 void test("setup membership uses saved credentials, not current provider health", () => {
+  const apiKeyConnection = { ...connection, authentication: "apiKey" } as const;
   assert.equal(
     providerSetupState({ ...connection, authentication: "none" }, undefined),
     "complete",
   );
-  for (const authentication of ["apiKey", "oAuth"] as const) {
-    const item = { ...connection, authentication };
-    assert.equal(providerSetupState(item, undefined), "unknown");
-    assert.equal(providerSetupState(item, credential), "incomplete");
-    assert.equal(
-      providerSetupState(item, { ...credential, hasCredentials: true, requiresSignIn: false }),
-      "complete",
-    );
-    assert.equal(
-      providerSetupState(item, {
-        ...credential,
-        hasCredentials: true,
-        expiresAt: "2000-01-01T00:00:00Z",
-        planAccessGranted: false,
-        isDisconnecting: true,
-      }),
-      "complete",
-    );
-  }
-});
-
-void test("snapshot is exposed through a read-only controller getter", () => {
-  const { state } = setup();
-  const snapshot = state.snapshot;
-  assert.equal(Reflect.set(state, "snapshot", {}), false);
-  assert.equal(state.snapshot, snapshot);
+  assert.equal(providerSetupState(apiKeyConnection, undefined), "unknown");
+  assert.equal(providerSetupState(apiKeyConnection, credential), "incomplete");
+  assert.equal(
+    providerSetupState(apiKeyConnection, {
+      ...credential,
+      hasCredentials: true,
+      requiresSignIn: false,
+      expiresAt: "2000-01-01T00:00:00Z",
+      planAccessGranted: false,
+      isDisconnecting: true,
+    }),
+    "complete",
+  );
 });
 
 void test("names come from endpoint hostnames only when creating or saving", async () => {
@@ -227,54 +215,18 @@ void test("lost acknowledgement auto-reads but still requires explicit permissio
   state.setActivity(false, false);
 });
 
-void test("only explicit terminal HTTP rejection is called rejected; server failures remain uncertain", async () => {
-  for (const [status, uncertain] of [
-    [409, false],
-    [503, true],
-  ] as const) {
-    const { state } = setup({
-      refreshModels: async () => {
-        throw new RequestError(status, { secret: "never display" });
-      },
-    });
-    state.setActivity(true, true);
-    await flush();
-    await state.refreshModels(connection);
-    assert.equal(state.snapshot.uncertain, uncertain);
-    assert.equal(state.snapshot.notice?.outcome, uncertain ? "uncertain" : "rejected");
-    assert.equal(state.snapshot.notice?.httpStatus, status);
-    state.setActivity(false, false);
-  }
-});
-
-void test("aborted obsolete reads cannot overwrite state, and ordinary reads preserve drafts", async () => {
-  const stale = deferred<readonly ProviderConnection[]>();
-  let signal: AbortSignal | undefined;
-  const { state, client } = setup({
-    list: (readSignal) => {
-      signal = readSignal;
-      return stale.promise;
+void test("an HTTP conflict is reported as a rejected command", async () => {
+  const { state } = setup({
+    refreshModels: async () => {
+      throw new RequestError(409, { secret: "never display" });
     },
   });
   state.setActivity(true, true);
-  state.setActivity(false, true);
-  assert.equal(signal?.aborted, true);
-  client.list = async () => [connection];
-  state.setActivity(true, true);
   await flush();
-  client.list = async () => [{ ...connection, name: "Remote name" }];
-  await state.read();
-  assert.equal(state.snapshot.drafts.one?.name, "Remote name");
-  state.edit("one", { name: "Unsaved name" });
-  state.setApiKey("synthetic");
-  await state.read();
-  assert.equal(state.snapshot.drafts.one?.name, "Unsaved name");
-  stale.resolve([{ ...connection, name: "Stale" }]);
-  await flush();
-  assert.equal(state.snapshot.connections[0]?.name, "Remote name");
-  assert.equal(state.snapshot.apiKey, "synthetic");
-  state.select(null);
-  assert.equal(state.snapshot.apiKey, "");
+  await state.refreshModels(connection);
+  assert.equal(state.snapshot.uncertain, false);
+  assert.equal(state.snapshot.notice?.outcome, "rejected");
+  assert.equal(state.snapshot.notice?.httpStatus, 409);
   state.setActivity(false, false);
 });
 
@@ -299,63 +251,6 @@ void test("a failed individual status read or list read retains records and othe
   assert.equal(state.snapshot.connections.length, 2);
   assert.ok(state.snapshot.errors.connections);
   state.setActivity(false, false);
-});
-
-void test("metadata refreshes every ten seconds without overlap or changing edits, and recovers after errors", async (context) => {
-  context.mock.timers.enable({ apis: ["setTimeout"] });
-  const delayed = deferred<readonly ProviderConnection[]>();
-  let lists = 0;
-  let credentials = 0;
-  let models = 0;
-  const { state, client } = setup({
-    list: async () => (++lists === 2 ? delayed.promise : [connection]),
-    getCredentials: async () => {
-      credentials++;
-      return credential;
-    },
-    getModels: async () => {
-      models++;
-      return emptyCatalog;
-    },
-  });
-  state.setActivity(true, true);
-  await flush();
-  state.edit("one", { endpoint: "https://edited.example/" });
-  state.editAdd({ endpoint: "https://draft.example/" });
-  state.setApiKey("synthetic");
-  state.requestConfirmation("disconnect", connection);
-  context.mock.timers.tick(9999);
-  assert.equal(lists, 1);
-  context.mock.timers.tick(1);
-  await state.read();
-  context.mock.timers.tick(30000);
-  assert.equal(lists, 2);
-  delayed.resolve([connection]);
-  await flush();
-  assert.equal(credentials, 2);
-  assert.equal(models, 2);
-  assert.equal(state.snapshot.drafts.one?.endpoint, "https://edited.example/");
-  assert.equal(state.snapshot.add.endpoint, "https://draft.example/");
-  assert.equal(state.snapshot.apiKey, "synthetic");
-  assert.equal(state.snapshot.confirmation?.kind, "disconnect");
-  state.setActivity(true, false);
-  context.mock.timers.tick(30000);
-  assert.equal(lists, 2);
-  client.list = async () => {
-    throw new TypeError("offline");
-  };
-  state.setActivity(true, true);
-  await flush();
-  assert.ok(state.snapshot.errors.connections);
-  client.list = async () => [connection];
-  context.mock.timers.tick(10000);
-  await flush();
-  assert.equal(state.snapshot.errors.connections, undefined);
-  state.setActivity(false, false);
-  const before = credentials;
-  context.mock.timers.tick(30000);
-  await flush();
-  assert.equal(credentials, before);
 });
 
 void test("polling is visible-only, non-overlapping, terminal-bounded, and rereads credentials", async (context) => {
@@ -395,186 +290,42 @@ void test("polling is visible-only, non-overlapping, terminal-bounded, and rerea
   state.setActivity(false, false);
 });
 
-void test("a rejected unrelated command resumes observation without repeating the command", async (context) => {
-  context.mock.timers.enable({ apis: ["setTimeout"] });
-  let reads = 0;
-  let discoveries = 0;
-  const { state } = setup({
-    beginSignIn: async () => pending,
-    getSignIn: async () => {
-      reads++;
-      return pending;
-    },
-    refreshModels: async () => {
-      discoveries++;
-      throw new RequestError(409, undefined);
-    },
-  });
-  state.setActivity(true, true);
-  await flush();
-  await state.beginSignIn(connection);
-  await state.refreshModels(connection);
-  context.mock.timers.tick(2000);
-  await flush();
-  assert.equal(reads, 2);
-  assert.equal(discoveries, 1);
-  state.setActivity(false, false);
-});
-
-void test("hiding aborts pending reads and only known attempts are polled", async (context) => {
-  context.mock.timers.enable({ apis: ["setTimeout"] });
-  const delayed = deferred<ProviderSignIn>();
-  let reads = 0;
-  let pollSignal: AbortSignal | undefined;
-  const { state } = setup({
-    beginSignIn: async () => pending,
-    getSignIn: (_id, signal) => {
-      reads++;
-      if (reads === 1) return Promise.resolve(pending);
-      pollSignal = signal;
-      return delayed.promise;
-    },
-  });
-  state.setActivity(true, true);
-  await flush();
-  context.mock.timers.tick(10000);
-  await flush();
-  assert.equal(reads, 0);
-  await state.beginSignIn(connection);
-  context.mock.timers.tick(2000);
-  await flush();
-  state.setActivity(true, false);
-  assert.equal(pollSignal?.aborted, true);
-  delayed.resolve({ ...pending, status: "completed" });
-  await flush();
-  assert.equal(state.snapshot.signIns.one?.status, "pending");
-  context.mock.timers.tick(20000);
-  assert.equal(reads, 2);
-  state.setActivity(false, false);
-});
-
-void test("read errors slow pending observation to ten seconds and recover automatically", async (context) => {
-  context.mock.timers.enable({ apis: ["setTimeout"] });
-  let reads = 0;
-  const { state, client } = setup({
-    beginSignIn: async () => pending,
-    getSignIn: async () => {
-      reads++;
-      throw new TypeError("unavailable");
-    },
-  });
-  state.setActivity(true, true);
-  await flush();
-  await state.beginSignIn(connection);
-  context.mock.timers.tick(2000);
-  await flush();
-  assert.equal(reads, 1);
-  assert.equal(state.snapshot.signIns.one?.status, "pending");
-  client.getSignIn = async () => {
-    reads++;
-    return pending;
-  };
-  context.mock.timers.tick(7999);
-  await flush();
-  assert.equal(reads, 1);
-  context.mock.timers.tick(1);
-  await flush();
-  assert.equal(reads, 2);
-  assert.equal(state.snapshot.errors["signIn:one"], undefined);
-  context.mock.timers.tick(2000);
-  await flush();
-  assert.equal(reads, 3);
-  state.setActivity(false, false);
-});
-
-void test("a missing sign-in after server restart permits an explicit fresh sign-in", async () => {
-  let starts = 0;
-  const { state } = setup({
-    beginSignIn: async () => ({ ...pending, id: `attempt-${++starts}` }),
-    getSignIn: async () => {
-      if (starts === 1) throw new RequestError(404, undefined);
-      return { ...pending, id: `attempt-${starts}` };
-    },
-  });
-  state.setActivity(true, true);
-  await flush();
-  await state.beginSignIn(connection);
-  assert.equal(Object.hasOwn(state.snapshot.signIns, "one"), false);
-  await state.beginSignIn(connection);
-  assert.equal(starts, 2);
-  assert.equal(state.snapshot.signIns.one?.id, "attempt-2");
-  state.setActivity(false, false);
-});
-
-void test("binding edits, disconnect and removal require confirmation; remote revocation is not invented", async () => {
+void test("binding edits, disconnect and removal require confirmation", async () => {
   const custom: ProviderConnection = { ...connection, route: "custom", authentication: "apiKey" };
-  for (const remoteRevocationConfirmed of [false, null] as const) {
-    let updates = 0;
-    let disconnects = 0;
-    let removes = 0;
-    const { state } = setup({
-      list: async () => [custom],
-      updateCustom: async (_id, settings) => {
-        updates++;
-        assert.equal(settings.name, "new.example");
-        return { ...custom, ...settings };
-      },
-      disconnect: async () => {
-        disconnects++;
-        return { connectionId: "one", localCredentialsCleared: true, remoteRevocationConfirmed };
-      },
-      remove: async () => {
-        removes++;
-      },
-    });
-    state.setActivity(true, true);
-    await flush();
-    state.edit("one", { endpoint: "https://new.example/v1/" });
-    await state.save(custom);
-    assert.equal(updates, 0);
-    assert.equal(state.snapshot.confirmation?.kind, "binding");
-    await state.confirm();
-    assert.equal(updates, 1);
-    state.requestConfirmation("disconnect", custom);
-    assert.equal(disconnects, 0);
-    await state.confirm();
-    assert.equal(disconnects, 1);
-    assert.deepEqual(state.snapshot.notice, {
-      operation: "disconnect",
-      outcome: "succeeded",
-      disconnect: {
+  let updates = 0;
+  let disconnects = 0;
+  let removes = 0;
+  const { state } = setup({
+    list: async () => [custom],
+    updateCustom: async (_id, settings) => {
+      updates++;
+      assert.equal(settings.name, "new.example");
+      return { ...custom, ...settings };
+    },
+    disconnect: async () => {
+      disconnects++;
+      return {
         connectionId: "one",
         localCredentialsCleared: true,
-        remoteRevocationConfirmed,
-      },
-    });
-    state.requestConfirmation("remove", custom);
-    assert.equal(removes, 0);
-    state.dismissConfirmation();
-    assert.equal(removes, 0);
-    state.setActivity(false, false);
-  }
-});
-
-void test("an older disconnect reconciliation cannot overwrite a newer uncertain command notice", async () => {
-  const delayed = deferred<readonly ProviderConnection[]>();
-  const { state, client } = setup({
-    disconnect: async () => ({
-      connectionId: "one",
-      localCredentialsCleared: true,
-      remoteRevocationConfirmed: false,
-    }),
-    refreshModels: async () => {
-      throw new TypeError("acknowledgement lost");
+        remoteRevocationConfirmed: false,
+      };
+    },
+    remove: async () => {
+      removes++;
     },
   });
   state.setActivity(true, true);
   await flush();
-  client.list = () => delayed.promise;
-  state.requestConfirmation("disconnect", connection);
-  const disconnect = state.confirm();
-  await flush();
-  assert.equal(state.snapshot.pending, null);
+  state.edit("one", { endpoint: "https://new.example/v1/" });
+  await state.save(custom);
+  assert.equal(updates, 0);
+  assert.equal(state.snapshot.confirmation?.kind, "binding");
+  await state.confirm();
+  assert.equal(updates, 1);
+  state.requestConfirmation("disconnect", custom);
+  assert.equal(disconnects, 0);
+  await state.confirm();
+  assert.equal(disconnects, 1);
   assert.deepEqual(state.snapshot.notice, {
     operation: "disconnect",
     outcome: "succeeded",
@@ -584,13 +335,10 @@ void test("an older disconnect reconciliation cannot overwrite a newer uncertain
       remoteRevocationConfirmed: false,
     },
   });
-  const discovery = state.refreshModels(connection);
-  await flush();
-  assert.equal(state.snapshot.uncertain, true);
-  delayed.resolve([connection]);
-  await Promise.all([disconnect, discovery]);
-  assert.equal(state.snapshot.notice?.operation, "refreshModels");
-  assert.equal(state.snapshot.notice?.outcome, "uncertain");
+  state.requestConfirmation("remove", custom);
+  assert.equal(removes, 0);
+  state.dismissConfirmation();
+  assert.equal(removes, 0);
   state.setActivity(false, false);
 });
 
@@ -648,81 +396,7 @@ void test("model metadata drafts survive reads, refresh and disconnect; saves ar
   assert.equal(state.snapshot.modelDrafts.one, undefined);
 });
 
-void test("aborted model settings reads cannot publish over a newer read", async (context) => {
-  const stale = deferred<readonly ModelSettings[]>();
-  const current: ModelSettings = {
-    connectionId: "one",
-    modelId: "opaque",
-    family: "other",
-    supportsImages: false,
-    contextWindow: null,
-  };
-  let signal: AbortSignal | undefined;
-  const { state, client } = setup({
-    getModelSettings: (_id, readSignal) => {
-      signal = readSignal;
-      return stale.promise;
-    },
-  });
-  context.after(() => state.setActivity(false, false));
-  state.setActivity(true, true);
-  await flush();
-  state.setActivity(true, false);
-  assert.equal(signal?.aborted, true);
-  client.getModelSettings = async () => [current];
-  state.setActivity(true, true);
-  await flush();
-  stale.resolve([{ ...current, family: "openAI", supportsImages: true }]);
-  await flush();
-  assert.deepEqual(state.snapshot.modelSettings.one, [current]);
-});
-
-void test("unknown model settings writes are not retried and require metadata reread before allowing commands", async (context) => {
-  const record: ModelSettings = {
-    connectionId: "one",
-    modelId: "opaque",
-    family: "other",
-    supportsImages: false,
-    contextWindow: null,
-  };
-  let readsFail = false;
-  let writes = 0;
-  const { state, client } = setup({
-    getModelSettings: async () => {
-      if (readsFail) throw new TypeError("offline");
-      return [record];
-    },
-    saveModelSettings: async () => {
-      writes++;
-      readsFail = true;
-      throw new TypeError("acknowledgement lost");
-    },
-  });
-  context.after(() => state.setActivity(false, false));
-  state.setActivity(true, true);
-  await flush();
-  const draft = { ...record, supportsImages: true };
-  state.editModel(record, { supportsImages: true });
-  await state.saveModelSettings(draft);
-  assert.equal(state.snapshot.uncertain, true);
-  assert.equal(state.snapshot.connectionsReloadedAfterUncertainty, false);
-  assert.deepEqual(state.snapshot.modelSettings.one, [record]);
-  assert.ok(state.snapshot.errors["modelSettings:one"]);
-  state.allowNewCommands();
-  await state.saveModelSettings(draft);
-  assert.equal(writes, 1);
-  client.getModelSettings = async () => [draft];
-  await state.read();
-  assert.equal(state.snapshot.connectionsReloadedAfterUncertainty, true);
-  assert.equal(state.snapshot.errors["modelSettings:one"], undefined);
-  assert.equal(state.snapshot.uncertain, true);
-  state.allowNewCommands();
-  assert.equal(state.snapshot.uncertain, false);
-  assert.equal(writes, 1);
-});
-
-void test("model discovery is explicit and status text does not imply model entitlement", async (context) => {
-  context.mock.timers.enable({ apis: ["setTimeout"] });
+void test("model discovery is explicit and credential summaries distinguish missing from connected", async () => {
   let refreshes = 0;
   const { state } = setup({
     refreshModels: async () => {
@@ -732,34 +406,11 @@ void test("model discovery is explicit and status text does not imply model enti
   });
   state.setActivity(true, true);
   await flush();
-  context.mock.timers.tick(10000);
-  await flush();
   assert.equal(refreshes, 0);
   await state.refreshModels(connection);
   assert.equal(refreshes, 1);
   assert.equal(credentialState(connection, undefined), "unknown");
-  assert.equal(
-    credentialState({ ...connection, authentication: "none" }, credential),
-    "noAuthentication",
-  );
   assert.equal(credentialState(connection, credential), "noCredentials");
-  assert.equal(
-    credentialState(connection, { ...credential, hasCredentials: true, requiresSignIn: true }),
-    "signInRequired",
-  );
-  assert.equal(
-    credentialState(connection, { ...credential, isDisconnecting: true }),
-    "disconnecting",
-  );
-  assert.equal(
-    credentialState(connection, {
-      ...credential,
-      hasCredentials: true,
-      requiresSignIn: false,
-      planAccessGranted: false,
-    }),
-    "planAccessMissing",
-  );
   assert.equal(
     credentialState(connection, { ...credential, hasCredentials: true, requiresSignIn: false }),
     "connected",

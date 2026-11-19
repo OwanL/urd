@@ -53,6 +53,14 @@ checkpoints; they are not evidence that every old scenario remains in the curren
 suite. New regressions should replace a weak scenario or extend an existing
 behavioral owner where possible, while respecting the hard budget.
 
+## Aggressive suite reduction
+
+A later owner-approved reduction removed substantial additional coverage, not just
+redundant tests. This includes HTTP failure and validation cases, provider cancellation
+and refresh races, tool and image edge cases, opt-in live-web scenarios, and browser
+client malformed-response and settings races. Representative paths remain, including
+a host-crash child-cleanup test; the suite is not exhaustive at these boundaries.
+
 ## Routine test runtime
 
 The routine suite no longer seeds a 100,000-entry transcript solely to report lookup

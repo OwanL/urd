@@ -205,16 +205,6 @@ public sealed class SessionRoutesTests {
     using JsonDocument activatedBody = JsonDocument.Parse(await activated.Content.ReadAsStringAsync());
     Assert.Equal(submission.SubmissionId, activatedBody.RootElement.GetProperty("target").GetProperty("entryId").GetGuid());
 
-    foreach (string fraction in new[] { "-0.1", "1.1", "NaN", "Infinity" }) {
-      using HttpResponseMessage invalid = await RequestAsync(server.Client, HttpMethod.Get,
-          $"/api/sessions/{sessionId}/positions/locate?expectedHistoryRevision={snapshot.HistoryRevision}&fraction={fraction}");
-      Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
-    }
-    foreach (string query in new[] { "limit=0", "limit=61", "limit=", "afterRank=-1", "afterRank=" }) {
-      using HttpResponseMessage invalid = await RequestAsync(server.Client, HttpMethod.Get,
-          $"/api/sessions/{sessionId}/positions/prompts?expectedHistoryRevision={snapshot.HistoryRevision}&{query}");
-      Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
-    }
     using (HttpResponseMessage stale = await RequestAsync(server.Client, HttpMethod.Get,
         $"/api/sessions/{sessionId}/positions?expectedHistoryRevision={snapshot.HistoryRevision + 1}"))
       Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
@@ -321,11 +311,6 @@ public sealed class SessionRoutesTests {
     using (HttpResponseMessage retry = await RequestAsync(server.Client, HttpMethod.Post,
         $"/api/sessions/{sessionId}/message-submissions", JsonContent.Create(submission, options: json)))
       Assert.Equal(receipt, await retry.Content.ReadFromJsonAsync<UserMessageReceipt>(json));
-    foreach (string cursor in new[] { "", "-1", "0", "9223372036854775808" }) {
-      using HttpResponseMessage invalid = await RequestAsync(server.Client, HttpMethod.Get,
-          $"/api/sessions/{sessionId}/not-sent?cursor={cursor}");
-      Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
-    }
     using HttpResponseMessage missing = await RequestAsync(server.Client, HttpMethod.Get,
         $"/api/sessions/{Guid.NewGuid()}/not-sent");
     Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);

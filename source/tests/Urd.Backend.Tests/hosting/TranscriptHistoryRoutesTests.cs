@@ -122,41 +122,6 @@ public sealed class TranscriptHistoryRoutesTests {
     AssertPrivateResponse(missing);
   }
 
-  [Theory]
-  [InlineData("unknown", "&expectedHistoryRevision=0")]
-  [InlineData("latest", "")]
-  [InlineData("latest", "&expectedHistoryRevision=0&executionId=00000000-0000-0000-0000-000000000001")]
-  [InlineData("before", "&expectedHistoryRevision=0&executionId=00000000-0000-0000-0000-000000000001")]
-  [InlineData("after", "&expectedHistoryRevision=0&entryId=00000000-0000-0000-0000-000000000001&kind=user")]
-  [InlineData("around", "&expectedHistoryRevision=0&executionId=00000000-0000-0000-0000-000000000001&entryId=00000000-0000-0000-0000-000000000001&kind=invalid")]
-  public async Task RejectsInvalidModesMissingRevisionAndPartialOrInvalidAnchors(string mode, string query) {
-    using var database = new TemporaryDatabase();
-    await using var server = new RunningServer(RunningServer.OptionsFor(database));
-    await server.WaitForReadyAsync();
-    Guid sessionId = await CreateSessionAsync(server.Client);
-
-    using HttpResponseMessage response = await RequestAsync(server.Client, HttpMethod.Get,
-        $"/api/sessions/{sessionId}/history?mode={mode}{query}");
-    Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-    AssertPrivateResponse(response);
-  }
-
-  [Fact]
-  public async Task NormalSendAdmitsUserEntryFirstInHistory() {
-    using var database = new TemporaryDatabase();
-    await using var server = new RunningServer(RunningServer.OptionsForIsolatedWorkspace(database));
-    await server.WaitForReadyAsync();
-    Guid sessionId = await CreateSessionAsync(server.Client);
-    UserMessageReceipt receipt = await SendAsync(server.Client, sessionId, 0, "admission order");
-    SessionSnapshot snapshot = await SettledAsync(receipt.ExecutionId!.Value,
-        () => ReadSnapshotAsync(server.Client, sessionId));
-    TranscriptHistoryPage page = await ReadHistoryAsync(server.Client,
-        HistoryPath(sessionId, "latest", snapshot.HistoryRevision));
-
-    Assert.Equal(TranscriptEntryKind.User, page.Entries[0].Entry.Kind);
-    Assert.Equal(receipt.ExecutionId, page.Entries[0].Entry.ExecutionId);
-  }
-
   private static async Task<Guid> CreateSessionAsync(HttpClient client) {
     using HttpResponseMessage response = await RequestAsync(client, HttpMethod.Post, "/api/sessions", JsonBody("{}"));
     Assert.Equal(HttpStatusCode.Created, response.StatusCode);

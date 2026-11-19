@@ -65,39 +65,6 @@ public sealed class LlmProviderContextTests {
   }
 
   [Fact]
-  public void UnknownNativeItemFailsInsteadOfDisappearingOnScopeChange() {
-    LlmProviderResponse captured = LlmProviderContext.CaptureResponses(Responses, [
-      Item("""{"type":"future_visible_item","payload":{"position":1}}""")
-    ]);
-    ChatMessage restored = LlmProviderContext.Restore(Reload(captured));
-
-    Assert.Throws<NotSupportedException>(() => LlmMessageProjection.Prepare([restored], Chat));
-  }
-
-  [Fact]
-  public void ToolResultsAcceptOnlyTextAndInMemoryImages() {
-    var unsupported = new ChatMessage(ChatRole.Tool, [
-      new FunctionResultContent("call-1", new AIContent[] { new TextContent("text"), new AIContent() })
-    ]);
-    var single = new ChatMessage(ChatRole.Tool, [
-      new FunctionResultContent("call-2", new TextContent("not a list"))
-    ]);
-    var uriImage = new ChatMessage(ChatRole.Tool, [
-      new FunctionResultContent("call-3", new AIContent[] {
-        new TextContent("text"), new UriContent(new Uri("https://example.invalid/image.png"), "image/png")
-      })
-    ]);
-    byte[] assistantImageBytes = [1, 2, 3];
-    var assistantImage = new ChatMessage(ChatRole.Assistant, [new DataContent(assistantImageBytes, "image/png")]);
-
-    Assert.Throws<NotSupportedException>(() => LlmMessageProjection.Prepare([unsupported], Chat));
-    Assert.Throws<NotSupportedException>(() => LlmMessageProjection.Prepare([single], Chat));
-    Assert.Throws<NotSupportedException>(() => LlmMessageProjection.Prepare([uriImage], Chat));
-    Assert.Throws<NotSupportedException>(() => LlmMessageProjection.Prepare([assistantImage], Chat));
-    Assert.Throws<NotSupportedException>(() => LlmMessageProjection.AdaptForModel([unsupported], supportsImages: false));
-  }
-
-  [Fact]
   public void AdaptForModelPreservesNestedImagesWhenSupportedAndLabelsOmittedImagesOtherwise() {
     byte[] bytes = [1, 2, 3, 4];
     var call = new FunctionCallContent("call-image", "read", new Dictionary<string, object?>());

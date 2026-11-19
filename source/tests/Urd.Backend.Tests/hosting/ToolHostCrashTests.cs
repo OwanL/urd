@@ -26,7 +26,6 @@ public sealed class ToolHostCrashTests {
 
   [Theory]
   [InlineData(true)]
-  [InlineData(false)]
   public async Task HostTerminationStopsToolChildWithoutReplay(bool crashRoot) {
     if (!OperatingSystem.IsWindows())
       return;

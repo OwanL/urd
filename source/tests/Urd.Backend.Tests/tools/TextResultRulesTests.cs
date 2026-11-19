@@ -11,8 +11,6 @@ public sealed class TextResultRulesTests {
 
   [Theory]
   [InlineData("\n\nfirst\n\n\n\nsecond\n\n", "first\n\nsecond\n")]
-  [InlineData("\n\n", "\n")]
-  [InlineData("first\n\nsecond\n", "first\n\nsecond\n")]
   public void NormalizeCollapsesBlankRuns(string input, string expected) {
     Assert.Equal(expected, TextResultRules.Normalize(input));
   }
@@ -25,8 +23,6 @@ public sealed class TextResultRulesTests {
 
   [Theory]
   [InlineData("{ invalid json }")]
-  [InlineData("{\"x\": 1} trailing")]
-  [InlineData("42")]
   public void InvalidOrScalarJsonIsNotMinified(string input) {
     Assert.Equal(input, TextResultRules.Normalize(input));
   }
@@ -45,20 +41,14 @@ public sealed class TextResultRulesTests {
 
   [Theory]
   [InlineData("⠋ fetching")]
-  [InlineData("- fetching")]
-  [InlineData("[50%] fetching")]
-  [InlineData("[====> ] 50%")]
   [InlineData("WARNING: retry")]
-  [InlineData("ERROR: failed")]
   public void CollapseDuplicatesPreservesProgressAndSeverity(string line) {
     string input = string.Concat(Enumerable.Repeat(line + "\n", 10));
     Assert.Equal(input, TextResultRules.CollapseDuplicates(input));
   }
 
   [Theory]
-  [InlineData("x\nx\nx\n")]
   [InlineData("building module A\nbuilding module A\n")]
-  [InlineData("\n\n\n")]
   public void CollapseDuplicatesRequiresThreeLinesAndShorterOutput(string input) {
     Assert.Equal(input, TextResultRules.CollapseDuplicates(input));
   }

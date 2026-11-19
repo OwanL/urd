@@ -1,9 +1,7 @@
 using System.Text;
 using System.Text.Json;
-using SkiaSharp;
 using Urd.Core.Tools;
 using Xunit;
-using static Urd.Backend.Tests.Support.TestAsync;
 
 namespace Urd.Backend.Tests.Tools;
 
@@ -59,34 +57,6 @@ public sealed class FileToolTests : IDisposable {
   }
 
   [Fact]
-  public async Task EmittedOrderIsAdmittedBeforeSuspensionAndQueuedCancellationHasNoEffects() {
-    string path = Path.Combine(directory, "ordered.txt");
-    var release = Signal();
-    var held = files.RunMutationAsync(path, async token => {
-      await release.Task.WaitAsync(TestTimeout, token);
-      return true;
-    }, CancellationToken.None);
-    using var cancellation = new CancellationTokenSource();
-    var write = Run(new WriteTool(files), new { path, content = "first" });
-    var cancelled = Run(new EditTool(files), new { path, edits = new[] { new { oldText = "first", newText = "wrong" } } }, cancellation: cancellation.Token);
-    var edit = Run(new EditTool(files), new { path, edits = new[] { new { oldText = "first", newText = "last" } } });
-    var read = Run(new ReadTool(files), new { path });
-    await cancellation.CancelAsync();
-    try {
-      Assert.True((await cancelled.WaitAsync(TestTimeout)).IsError);
-      Assert.False(write.IsCompleted);
-      Assert.False(edit.IsCompleted);
-      Assert.False(read.IsCompleted);
-    } finally {
-      release.TrySetResult();
-    }
-    await held.WaitAsync(TestTimeout);
-    Assert.False((await write.WaitAsync(TestTimeout)).IsError);
-    Assert.False((await edit.WaitAsync(TestTimeout)).IsError);
-    Assert.Equal("last", (await read.WaitAsync(TestTimeout)).Text);
-  }
-
-  [Fact]
   public async Task ReadPagesRespectLineAndUtf8ByteLimitsAndExplainContinuation() {
     string path = Path.Combine(directory, "pages.txt");
     await File.WriteAllTextAsync(path, string.Join("\n", Enumerable.Range(1, 2003)));
@@ -118,47 +88,6 @@ public sealed class FileToolTests : IDisposable {
     await File.WriteAllTextAsync(path, "one\r\ntwo\n");
     Assert.Equal("one\r\ntwo\n", (await Run(tool, new { path })).Text);
     Assert.Equal("", (await Run(tool, new { path, offset = 3 })).Text);
-  }
-
-  [Fact]
-  public async Task ReadProcessesImagesForBothModelKindsAndRejectsBinaryText() {
-    string path = Path.Combine(directory, "image.data");
-    using var bitmap = new SKBitmap(1, 1);
-    bitmap.Erase(SKColors.Red);
-    using var source = SKImage.FromBitmap(bitmap);
-    using var encoded = source.Encode(SKEncodedImageFormat.Png, 100);
-    byte[] png = encoded.ToArray();
-    await File.WriteAllBytesAsync(path, png);
-    foreach (bool acceptsImages in new[] { true, false }) {
-      var result = await Run(new ReadTool(files), new { path }, acceptsImages: acceptsImages);
-      Assert.False(result.IsError, result.Text);
-      var image = Assert.Single(result.Images);
-      Assert.Equal("image/png", image.MediaType);
-      Assert.Equal(png, image.Data.ToArray());
-      Assert.Equal(!acceptsImages, result.Text.Contains("omitted from the model request", StringComparison.Ordinal));
-      Assert.False(result.Details!.Value.GetProperty("wasTransformed").GetBoolean());
-    }
-    await using (var oversized = new FileStream(path, FileMode.Open, FileAccess.Write))
-      oversized.SetLength(64 * 1024 * 1024 + 1);
-    var tooLarge = await Run(new ReadTool(files), new { path });
-    Assert.True(tooLarge.IsError);
-    Assert.Empty(tooLarge.Images);
-    Assert.Contains("64MiB image processing limit", tooLarge.Text, StringComparison.Ordinal);
-    byte[] bmpHeader = new byte[30];
-    bmpHeader[0] = (byte)'B';
-    bmpHeader[1] = (byte)'M';
-    bmpHeader[14] = 40;
-    bmpHeader[26] = 1;
-    bmpHeader[28] = 24;
-    await File.WriteAllBytesAsync(path, bmpHeader);
-    var bmp = await Run(new ReadTool(files), new { path });
-    Assert.True(bmp.IsError);
-    Assert.Empty(bmp.Images);
-    Assert.Contains("Image omitted", bmp.Text, StringComparison.Ordinal);
-    await File.WriteAllBytesAsync(path, [0x61, 0, 0x62]);
-    Assert.True((await Run(new ReadTool(files), new { path })).IsError);
-    await File.WriteAllBytesAsync(path, [0xC3, 0x28]);
-    Assert.Contains("not valid UTF-8", (await Run(new ReadTool(files), new { path })).Text, StringComparison.Ordinal);
   }
 
   private Task<ToolOutput> Run(AgentTool tool, object arguments,

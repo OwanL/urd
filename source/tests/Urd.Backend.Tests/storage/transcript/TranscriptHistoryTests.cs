@@ -1,15 +1,13 @@
-using System.Diagnostics;
 using System.Text.Json;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Execution;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
 using Xunit;
-using Xunit.Abstractions;
 
 namespace Urd.Backend.Tests.Storage;
 
-public sealed class TranscriptHistoryTests(ITestOutputHelper output) {
+public sealed class TranscriptHistoryTests {
   [Fact]
   public void KeysetModesReturnOldestFirstPagesAndRefillAtHistoryBoundaries() {
     using var database = new TemporaryDatabase();
@@ -254,55 +252,6 @@ public sealed class TranscriptHistoryTests(ITestOutputHelper output) {
       if (sql != TranscriptHistoryStorage.AnchorSql)
         Assert.Contains(plan, step => step.Contains("execution_messages_history_order", StringComparison.OrdinalIgnoreCase));
     }
-  }
-
-  [Fact]
-  public void LatestWindowLatencyIsMeasuredOnAnOwnedHundredThousandEntryWorkload() {
-    using var database = new TemporaryDatabase("urd-transcript-history-workload");
-    Guid session = Guid.NewGuid();
-    using (UrdStore store = UrdStore.Open(database.Path))
-      store.Sessions.CreatePrimary(session);
-
-    SeedLargeMixedHistory(database, session);
-    double coldMilliseconds, warmMedianMilliseconds;
-    using (UrdStore store = UrdStore.Open(database.Path)) {
-      long started = Stopwatch.GetTimestamp();
-      TranscriptHistoryPage cold = store.History.Read(session, new(TranscriptHistoryMode.Latest, 0));
-      coldMilliseconds = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
-      Assert.Equal(60, cold.Entries.Count);
-
-      long positionStarted = Stopwatch.GetTimestamp();
-      TranscriptPositionWindow distant = store.Positions.Locate(session, 0, 50_000L * 256);
-      double positionMilliseconds = Stopwatch.GetElapsedTime(positionStarted).TotalMilliseconds;
-      Assert.Equal(100_000L, distant.State.EntryCount);
-      Assert.Equal(50_000L, distant.Target!.Rank);
-      Assert.Equal(60, distant.Entries.Count);
-      TranscriptPromptPage prompts = store.Positions.Prompts(session, 0, distant.Target.Rank);
-      Assert.Equal(60, prompts.Prompts.Count);
-      TranscriptPositionWindow exact = store.Positions.ActivatePrompt(session, 0, prompts.Prompts[^1].Entry);
-      Assert.Equal(prompts.Prompts[^1], exact.Target);
-      output.WriteLine($"Weighted distant lookup (100,000 synthetic fixed-weight entries, first position read): {positionMilliseconds:F3} ms; marker page and exact activation verified.");
-
-      double[] warmSamples = new double[9];
-      for (int sample = 0; sample < warmSamples.Length; sample++) {
-        started = Stopwatch.GetTimestamp();
-        TranscriptHistoryPage warm = store.History.Read(session, new(TranscriptHistoryMode.Latest, 0));
-        warmSamples[sample] = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
-        Assert.Equal(60, warm.Entries.Count);
-      }
-      Array.Sort(warmSamples);
-      warmMedianMilliseconds = warmSamples[warmSamples.Length / 2];
-    }
-
-    Assert.Equal(100_000L, database.Scalar($"SELECT COUNT(*) FROM execution_messages WHERE session_id = '{session:D}';"));
-    long payloadBytes = (long)database.Scalar($"""
-      SELECT (SELECT SUM(length(original_text_utf8)) FROM input_decisions WHERE session_id = '{session:D}')
-          + (SELECT SUM(length(o.text_utf8)) FROM execution_output o
-              JOIN execution_requests q ON q.request_id = o.request_id
-              JOIN execution_runs r ON r.run_id = q.run_id WHERE r.session_id = '{session:D}');
-      """)!;
-    Assert.Equal(249_975_000L, payloadBytes);
-    output.WriteLine($"Latest history latency (100,000 entries, {payloadBytes:N0} body bytes): first cold SQLite page-cache read {coldMilliseconds:F3} ms; warm median {warmMedianMilliseconds:F3} ms (OS file cache not flushed).");
   }
 
   [Fact]
@@ -619,69 +568,6 @@ public sealed class TranscriptHistoryTests(ITestOutputHelper output) {
 
     return kinds.Select((entry, index) => new TranscriptEntryRef(run, messageIds[index],
         entry.IsTool ? TranscriptEntryKind.Tool : TranscriptEntryKind.Text, 0)).ToArray();
-  }
-
-  private static void SeedLargeMixedHistory(TemporaryDatabase database, Guid session) {
-    const int runs = 45_000;
-    const int inputBytes = 2_777;
-    const int outputBytes = 2_778;
-    string inputPrefix = Prefix(), runPrefix = Prefix(), requestPrefix = Prefix();
-    string outputPrefix = Prefix(), toolEntryPrefix = Prefix();
-    string selection = JsonSerializer.Serialize(TestLlmSelection.Default);
-    database.Execute($"""
-      BEGIN;
-      WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x + 1 FROM n WHERE x < {runs})
-      INSERT INTO input_decisions
-          (session_id, input_id, expected_history_revision, original_text_utf8, decision, run_id, refusal_reason,
-              llm_selection_json)
-      SELECT '{session:D}', '{inputPrefix}' || printf('%012d', x), 0, zeroblob({inputBytes}), 1,
-          '{runPrefix}' || printf('%012d', x), NULL, '{selection}' FROM n;
-      INSERT INTO execution_runs (session_id, run_id, history_revision, input_id, outcome)
-      SELECT session_id, run_id, expected_history_revision, input_id, 0 FROM input_decisions
-      WHERE session_id = '{session:D}' AND input_id LIKE '{inputPrefix}%' ORDER BY input_id;
-      INSERT INTO execution_requests (request_id, run_id, request_index, response_id, next_chunk_index, response_final, outcome)
-      SELECT '{requestPrefix}' || substr(input_id, 25), run_id, 0,
-          '{outputPrefix}' || substr(input_id, 25), 1, 1, 0
-      FROM execution_runs WHERE session_id = '{session:D}' AND input_id LIKE '{inputPrefix}%';
-      INSERT INTO execution_output (request_id, chunk_index, text_utf8, is_final)
-      SELECT request_id, 0, zeroblob({outputBytes}), 1 FROM execution_requests
-      WHERE request_id LIKE '{requestPrefix}%';
-      INSERT INTO execution_inputs (session_id, input_id, run_id, request_id, outcome)
-      SELECT r.session_id, r.input_id, r.run_id, q.request_id, 0
-      FROM execution_runs r JOIN execution_requests q ON q.run_id = r.run_id
-      WHERE r.session_id = '{session:D}' AND r.input_id LIKE '{inputPrefix}%';
-      INSERT INTO execution_tools
-          (run_id, request_id, call_index, call_id, name, arguments_json, started, outcome, result_json, started_at, ended_at)
-      SELECT r.run_id, q.request_id, 0, 'call-' || substr(r.input_id, 25), 'bulk-tool', 'bulk-args', 1, 0, 'bulk-result',
-          '2026-11-09T12:00:00+00:00', '2026-11-09T12:00:01+00:00'
-      FROM execution_runs r JOIN execution_requests q ON q.run_id = r.run_id
-      WHERE r.session_id = '{session:D}' AND r.input_id LIKE '{inputPrefix}%'
-          AND CAST(substr(r.input_id, 25) AS INTEGER) BETWEEN 1 AND 40000
-          AND CAST(substr(r.input_id, 25) AS INTEGER) % 4 = 0;
-      INSERT INTO execution_messages
-          (session_id, history_revision, run_id, role, message_id, input_id, request_id,
-              first_chunk_index, end_chunk_index, call_id, tool_name)
-      SELECT session_id, 0, run_id, role, message_id, input_id, request_id,
-          first_chunk_index, end_chunk_index, call_id, tool_name
-      FROM (
-          SELECT r.ordinal AS run_order, 0 AS entry_order, r.session_id, r.run_id, 0 AS role,
-              r.input_id AS message_id, r.input_id, q.request_id, 0 AS first_chunk_index,
-              NULL AS end_chunk_index, NULL AS call_id, NULL AS tool_name
-          FROM execution_runs r JOIN execution_requests q ON q.run_id = r.run_id
-          WHERE r.session_id = '{session:D}' AND r.input_id LIKE '{inputPrefix}%'
-          UNION ALL
-          SELECT r.ordinal, 1, r.session_id, r.run_id, 1, q.response_id, NULL, q.request_id, 0, 1, NULL, NULL
-          FROM execution_runs r JOIN execution_requests q ON q.run_id = r.run_id
-          WHERE r.session_id = '{session:D}' AND r.input_id LIKE '{inputPrefix}%'
-          UNION ALL
-          SELECT r.ordinal, 2, r.session_id, r.run_id, 2, '{toolEntryPrefix}' || substr(r.input_id, 25),
-              NULL, q.request_id, 0, NULL, t.call_id, t.name
-          FROM execution_runs r JOIN execution_requests q ON q.run_id = r.run_id
-          JOIN execution_tools t ON t.request_id = q.request_id
-          WHERE r.session_id = '{session:D}' AND r.input_id LIKE '{inputPrefix}%'
-      ) ORDER BY run_order, entry_order;
-      COMMIT;
-      """);
   }
 
   private static string Prefix() => Guid.NewGuid().ToString("D")[..24];

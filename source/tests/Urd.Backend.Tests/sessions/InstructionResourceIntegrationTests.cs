@@ -18,10 +18,10 @@ public sealed class InstructionResourceIntegrationTests(ITestOutputHelper output
   [Theory]
   [InlineData(true)]
   [InlineData(false)]
-  public async Task FirstChatPreparesLargeInstructionCatalog(bool overflowSelector) {
-    const int count = 1900;
+  public async Task FirstChatPreparesInstructionCatalog(bool overflowSelector) {
+    const int count = 6;
     const int outlierIndex = 0;
-    const int outlierPaddingBytes = 256 * 1024;
+    const int outlierPaddingBytes = 4096;
     const string launch = "Apply the project instructions.";
     string selectedPath = "";
     string outlierPath = "";
@@ -45,7 +45,7 @@ public sealed class InstructionResourceIntegrationTests(ITestOutputHelper output
       expected.Add(path, content);
     }
 
-    selectedPath = Path.Combine(project, "part-0950", "AGENTS.md");
+    selectedPath = Path.Combine(project, "part-0003", "AGENTS.md");
     outlierPath = Path.Combine(project, $"part-{outlierIndex:D4}", "AGENTS.md");
     outlierBytes = Encoding.UTF8.GetByteCount(expected[outlierPath]);
     Assert.True(outlierBytes > expected.Where(pair => pair.Key != outlierPath)
@@ -116,7 +116,7 @@ public sealed class InstructionResourceIntegrationTests(ITestOutputHelper output
         case "pruning.tools":
           return TextUpdates(["{\"keptIds\":[]}"], token);
         case "title":
-          return TextUpdates(["Large catalog"], token);
+          return TextUpdates(["Instruction catalog"], token);
         case "conversation":
           main = request;
           return TextUpdates(["done"], token);

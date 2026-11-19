@@ -53,6 +53,14 @@ checkpoints; they are not evidence that every old scenario remains in the curren
 suite. New regressions should replace a weak scenario or extend an existing
 behavioral owner where possible, while respecting the hard budget.
 
+## Routine test runtime
+
+The routine suite no longer seeds a 100,000-entry transcript solely to report lookup
+latency: it had no latency assertion, while smaller tests cover history and position
+behavior and indexed query plans. This removes routine evidence at that scale. The
+instruction-catalog integration fixture uses a small catalog while retaining normal
+selection and scripted overflow paths; it is not a large-catalog stress test.
+
 ## Browser-test removal
 
 On 2026-11-11 the owner chose to remove automated browser tests entirely, rather than

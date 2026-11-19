@@ -26,13 +26,21 @@ internal static class Program {
       options = ServerOptions.Parse(args);
     } catch (ArgumentException failure) {
       await Console.Error.WriteLineAsync(failure.Message);
-      await Console.Error.WriteLineAsync("Usage: Urd.Server --data-root <absolute directory> --port <0..65535> [--git-bash <absolute executable>] [--no-tray]");
+      await Console.Error.WriteLineAsync("Usage: Urd.Server --data-root <absolute directory> --port <0..65535> [--git-bash <absolute executable>] [--launcher-pipe <name>] [--no-tray]");
       return 2;
     }
 
     using var stopping = new CancellationTokenSource();
     IDisposable? tray = null;
+    StreamWriter? launchLog = null;
+    TextWriter originalError = Console.Error;
     try {
+      if (options.LauncherPipe is not null) {
+        Directory.CreateDirectory(options.DataRoot);
+        launchLog = new StreamWriter(new FileStream(Path.Combine(options.DataRoot, "server.log"),
+            FileMode.Append, FileAccess.Write, FileShare.ReadWrite)) { AutoFlush = true };
+        Console.SetError(launchLog);
+      }
       await RunServerAsync(options, origin => {
         Console.Out.WriteLine(JsonSerializer.Serialize(new {
           @event = "urd-ready",
@@ -47,6 +55,10 @@ internal static class Program {
       return 1;
     } finally {
       tray?.Dispose();
+      if (launchLog is not null) {
+        Console.SetError(originalError);
+        await launchLog.DisposeAsync();
+      }
     }
   }
 
@@ -73,6 +85,7 @@ internal static class Program {
     SessionEventHub? eventHub = null;
     MessageMarkdownService? markdown = null;
     WebApplication? app = null;
+    LauncherPipe? launcherPipe = null;
     Uri? servedOrigin = null;
     ExceptionDispatchInfo? runFailure = null;
     try {
@@ -110,8 +123,15 @@ internal static class Program {
           .Features.Get<IServerAddressesFeature>() ?? throw new InvalidOperationException("The server has no bound address.");
       var origin = new Uri(addresses.Addresses.Single());
       Volatile.Write(ref servedOrigin, origin);
+      if (options.LauncherPipe is not null)
+        launcherPipe = new LauncherPipe(options.LauncherPipe, origin);
       onReady(origin);
-      await shutdownRequested.Task;
+      if (launcherPipe is null)
+        await shutdownRequested.Task;
+      else {
+        Task completed = await Task.WhenAny(shutdownRequested.Task, launcherPipe.Completion);
+        await completed;
+      }
     } catch (OperationCanceledException) when (stopping.IsCancellationRequested ||
         app?.Lifetime.ApplicationStopping.IsCancellationRequested == true) {
       // Stopping during startup still requires draining any partially started host below.
@@ -125,6 +145,7 @@ internal static class Program {
         providers?.ShutdownAsync() ?? Task.CompletedTask,
         prices?.DisposeAsync().AsTask() ?? Task.CompletedTask,
         markdown?.DisposeAsync().AsTask() ?? Task.CompletedTask,
+        launcherPipe?.DisposeAsync().AsTask() ?? Task.CompletedTask,
         app?.StopAsync(CancellationToken.None) ?? Task.CompletedTask);
     try {
       await drained;

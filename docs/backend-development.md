@@ -601,6 +601,6 @@ ignored. NuGet uses its standard package cache. The instruction-resource catalog
 rebuildable sidecar at `<DataRoot>/urd.sqlite.instructions.sqlite` (plus SQLite sidecars),
 separate from the durable `<DataRoot>/urd.sqlite` session database. Tests own disposable
 temporary SQLite directories; they must not open personal sessions, credentials or copy
-`data/`. Build/test never resets application data. No clean, package or activation workflow
-is implemented by this slice. During coordinated agent work, restore/build/test
+`data/`. Build/test never resets application data. See the [portable Windows trial](first-windows-release-plan.md#run-the-portable-trial)
+for packaging and staged-build activation. During coordinated agent work, restore/build/test
 must acquire, start and release the exact exclusive resource `urd:dotnet`.

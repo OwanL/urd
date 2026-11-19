@@ -30,6 +30,7 @@ requirements from delivered behavior. Reopening does not replay work.
 ## Start here
 
 - [Documentation index](docs/README.md): current guides, decisions and evidence.
+- [Private Windows trial](docs/first-windows-release-plan.md#run-the-portable-trial): run, customize, or package a portable copy.
 - [Backend development](docs/backend-development.md) and [local server](docs/server-development.md):
   pinned SDK, builds, data ownership and run commands.
 - [Browser development](docs/browser-development.md): UI toolchain, builds and local verification.

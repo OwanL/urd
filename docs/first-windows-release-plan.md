@@ -1,11 +1,12 @@
 # First Windows release plan
 
-**UX agreed; implementation deferred.** After the current Urd work lands, qualify the real
+**Private Windows trial.** Once the concurrent work is integrated, qualify the real
 Windows distributable on the owner's machines, not a developer checkout or the earlier
 [source-packaging fixture](repo-foundations.md#evidence--conventional-pattern-and-bounded-trial).
 The trial is private and should exercise the intended release workflows. It does not authorize
-publishing, installing a candidate now or using live data for qualification. The browser ships first; VS Code follows. Desktop, LAN/Tailscale,
-automatic updates and macOS/Linux feature parity are outside the first Windows milestone.
+publishing, installing into a live profile or using live data for qualification. The browser ships
+first; VS Code follows. Desktop, LAN/Tailscale, automatic updates and macOS/Linux feature parity
+are outside the first Windows milestone.
 
 ## Agreed user flows
 
@@ -40,9 +41,23 @@ Keep the same logical layout across platforms: runnable app, directly editable s
 copy-local persistent data kept outside generated and packaged inputs. The runtime and launcher
 can differ by OS and CPU; a Windows `.exe` is not a cross-platform distribution format. ZIP is
 for the portable Windows trial, not a decision about the only public package. Installer tooling,
-exact paths/names, Git provisioning (test a private PortableGit fallback), and how clients find
-and open the selected copy still need implementation review. **Open in VS Code** is an agreed UX,
+the public setup and update flow, and how future clients find and open a selected copy remain open.
+Qualify the trial's PortableGit fallback on a clean machine. **Open in VS Code** is an agreed UX,
 not a requirement to build or ship the editor client in the first Windows trial.
+
+## Run the portable trial
+
+1. From an integrated source copy on Windows x64, run `Package.cmd`. It puts a ZIP in `builds/`.
+2. Extract the ZIP somewhere writable and double-click `Start.exe`. Data belongs to that folder
+   under `data/`. Repeat launches reopen that copy. Check `data/server.log` if startup fails.
+3. To try changes, edit the extracted `source/` and run `Build.cmd`. Stop that copy from the
+   tray, then run `Run Staged Build.cmd` to switch to the staged build. `Start.exe` reopens it
+   on subsequent launches. `Package.cmd` builds a new ZIP from a fresh capture of the edits.
+
+The launcher prefers installed Git for Windows; otherwise it attempts to provision pinned
+PortableGit in the per-user cache. Build and Package also get missing pinned build tools there.
+The initial trial is not a supported public release; clean-machine dependency setup and
+performance still need qualification.
 
 ## 1. Take a candidate after active work lands
 

@@ -8,8 +8,10 @@ internal sealed record ServerOptions {
   public int Port { get; }
   public string? GitBashPath { get; }
   public bool ShowTray { get; }
+  public string? LauncherPipe { get; }
 
-  public ServerOptions(string dataRoot, int port, string? gitBashPath = null, bool showTray = false) {
+  public ServerOptions(string dataRoot, int port, string? gitBashPath = null, bool showTray = false,
+      string? launcherPipe = null) {
     if (string.IsNullOrWhiteSpace(dataRoot) || !Path.IsPathFullyQualified(dataRoot))
       throw new ArgumentException("Data root must be a nonempty, fully qualified path.", nameof(dataRoot));
     if (port is < 0 or > 65535)
@@ -19,10 +21,15 @@ internal sealed record ServerOptions {
         (string.IsNullOrWhiteSpace(gitBashPath) || !Path.IsPathFullyQualified(gitBashPath)))
       throw new ArgumentException("Git Bash requires a fully qualified executable path.", nameof(gitBashPath));
 
+    if (launcherPipe is not null && (launcherPipe.Length is < 1 or > 80 ||
+        launcherPipe.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not '-' and not '_')))
+      throw new ArgumentException("Launcher pipe name must contain 1 to 80 ASCII letters, digits, hyphens or underscores.", nameof(launcherPipe));
+
     DataRoot = Path.GetFullPath(dataRoot);
     Port = port;
     GitBashPath = gitBashPath is null ? null : Path.GetFullPath(gitBashPath);
     ShowTray = showTray;
+    LauncherPipe = launcherPipe;
   }
 
   public static ServerOptions Parse(string[] args) {
@@ -31,6 +38,7 @@ internal sealed record ServerOptions {
     int? port = null;
     string? gitBashPath = null;
     bool? showTray = null;
+    string? launcherPipe = null;
 
     int index = 0;
     while (index < args.Length) {
@@ -58,6 +66,11 @@ internal sealed record ServerOptions {
             throw new ArgumentException("Duplicate --git-bash option.", nameof(args));
           gitBashPath = ReadValue(args, index);
           break;
+        case "--launcher-pipe":
+          if (launcherPipe is not null)
+            throw new ArgumentException("Duplicate --launcher-pipe option.", nameof(args));
+          launcherPipe = ReadValue(args, index);
+          break;
         default:
           throw new ArgumentException($"Unknown option '{option}'.", nameof(args));
       }
@@ -68,7 +81,7 @@ internal sealed record ServerOptions {
       throw new ArgumentException("Missing required --data-root option.", nameof(args));
     if (port is null)
       throw new ArgumentException("Missing required --port option.", nameof(args));
-    return new ServerOptions(dataRoot, port.Value, gitBashPath, showTray ?? OperatingSystem.IsWindows());
+    return new ServerOptions(dataRoot, port.Value, gitBashPath, showTray ?? OperatingSystem.IsWindows(), launcherPipe);
   }
 
   private static string ReadValue(string[] args, int index) {

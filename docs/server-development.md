@@ -61,8 +61,8 @@ absolute Git for Windows Bash executable, independently of the working-directory
 otherwise Urd locates Git Bash. Shells receive a startup snapshot of the server environment
 and run non-login `bash -c`.
 
-There is no bootstrap, wrapper script or automatic browser launch in this slice.
-To include the browser, first run `npm run build` in `source/ui/`; the Server build
+The direct development command does not open a browser. The [portable Windows trial](first-windows-release-plan.md#run-the-portable-trial) has a separate `Start.exe` launcher.
+To include the browser in a development build, first run `npm run build` in `source/ui/`; the Server build
 stages that bundle into `wwwroot`. Backend-only builds need no npm step.
 
 After SQLite opens and Kestrel binds, stdout contains exactly one readiness record,

@@ -1,4 +1,4 @@
-import type { UsageBreakdown, UsagePoint, UsageRange, UsageTotals } from "./UsageTypes.ts";
+import type { UsageBreakdown, UsagePoint, UsageRange, UsageTotals } from "./Usage.ts";
 
 export interface UsageRangeBounds {
   from: string;

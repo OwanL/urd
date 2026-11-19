@@ -1,4 +1,4 @@
-import { requestEmpty, requestJson } from "../http/requestJson.ts";
+import { requestEmpty, requestJson } from "../http/Requests.ts";
 import type { CustomProviderSettings, ProviderConnection } from "./ProviderConnection.ts";
 import type { ProviderCredentialStatus, ProviderDisconnectResult } from "./ProviderCredentials.ts";
 import type { ProviderSignIn } from "./ProviderSignIn.ts";

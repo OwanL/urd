@@ -1,13 +1,43 @@
-import type { TargetedKeyboardEvent } from "preact";
+import type { ComponentChildren, TargetedKeyboardEvent } from "preact";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Icon } from "../../controls/Icon.tsx";
 import { IconButton } from "../../controls/IconButton.tsx";
 import { Popover } from "../../controls/Popover.tsx";
 import { composerSubmissionState } from "./ComposerSubmission.ts";
-import type { ComposerProps } from "./ComposerTypes.ts";
 import { ModelPicker } from "./ModelPicker.tsx";
+import type { ModelPickerOption } from "./ModelPicker.tsx";
 import "./composer.css";
 import { ReasoningPicker } from "./ReasoningPicker.tsx";
+
+interface ComposerProps {
+  text: string;
+  onTextChange: (text: string) => void;
+  models: readonly ModelPickerOption[];
+  modelKey: string | null;
+  modelLabel: string;
+  onModelChange: (key: string) => void;
+  hasProviders: boolean | null;
+  loadingModels: boolean;
+  refreshingModels: boolean;
+  modelsError: string | null;
+  onRetryModels: () => void;
+  onSetUpProvider: () => void;
+  reasoningEffort: string | null;
+  reasoningOptions: readonly string[];
+  onReasoningChange: (effort: string | null) => void;
+  selectionLocked: boolean;
+  configurationPending: boolean;
+  canSend: boolean;
+  canContinue: boolean;
+  continuationAvailable: boolean;
+  working: boolean;
+  stopping: boolean;
+  onSend: () => void;
+  onContinue: () => void;
+  onStop: () => void;
+  subagentProviders?: ComponentChildren;
+  indicators?: ComponentChildren;
+}
 
 function resizeInput(input: HTMLTextAreaElement) {
   input.style.height = "0px";

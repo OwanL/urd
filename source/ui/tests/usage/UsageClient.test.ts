@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { UsageSummary } from "../../usage/UsageTypes.ts";
+import type { UsageSummary } from "../../usage/Usage.ts";
 import { UsageClient } from "../../usage/UsageClient.ts";
 import { startHttpServer } from "../support/HttpTestServer.ts";
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { RequestError } from "../../http/RequestError.ts";
-import { requestJson } from "../../http/requestJson.ts";
+import { requestJson } from "../../http/Requests.ts";
 import { startHttpServer } from "../support/HttpTestServer.ts";
 
 void test("uses browser fetch options and serializes only POST bodies", async (t) => {

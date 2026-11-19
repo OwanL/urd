@@ -3,7 +3,25 @@ import { useEffect, useId, useMemo, useRef, useState } from "preact/hooks";
 import { Icon } from "../../controls/Icon.tsx";
 import { Popover, scrollOptionIntoView } from "../../controls/Popover.tsx";
 import { Tooltip } from "../../controls/Tooltip.tsx";
-import type { ComposerModel, ModelPickerProps } from "./ComposerTypes.ts";
+
+export interface ModelPickerOption {
+  key: string;
+  modelLabel: string;
+  providerLabel: string;
+}
+
+interface ModelPickerProps {
+  models: readonly ModelPickerOption[];
+  modelKey: string | null;
+  modelLabel: string;
+  ariaLabel?: string;
+  onModelChange: (key: string) => void;
+  loadingModels?: boolean;
+  refreshingModels?: boolean;
+  modelsError?: string | null;
+  onRetryModels?: () => void;
+  disabled: boolean;
+}
 
 export function ModelPicker({
   models,
@@ -29,7 +47,7 @@ export function ModelPicker({
   const groups = useMemo(() => {
     if (!expanded) return [];
     const term = query.trim().toLocaleLowerCase();
-    const result = new Map<string, ComposerModel[]>();
+    const result = new Map<string, ModelPickerOption[]>();
     for (const model of models) {
       if (!`${model.modelLabel} ${model.providerLabel}`.toLocaleLowerCase().includes(term))
         continue;

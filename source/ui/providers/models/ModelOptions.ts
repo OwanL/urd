@@ -22,7 +22,7 @@ export interface ModelCatalogRead {
 }
 
 // Cached catalog reads and discovery share option mapping and revision protection.
-export class WorkspaceModels {
+export class ModelOptions {
   private revision = 0;
   private readonly client: Pick<
     ProviderClient,

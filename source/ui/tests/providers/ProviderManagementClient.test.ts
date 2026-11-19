@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { RequestError } from "../../http/RequestError.ts";
-import { requestJson } from "../../http/requestJson.ts";
+import { requestJson } from "../../http/Requests.ts";
 import { ProviderClient } from "../../providers/ProviderClient.ts";
 import type {
   CustomProviderSettings,

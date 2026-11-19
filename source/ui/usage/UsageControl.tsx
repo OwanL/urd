@@ -1,5 +1,5 @@
 import { useMemo } from "preact/hooks";
-import type { UsageRange } from "./UsageTypes.ts";
+import type { UsageRange } from "./Usage.ts";
 import { UsageClient } from "./UsageClient.ts";
 import { UsageDetails } from "./UsageDetails.tsx";
 import { HoverPopover } from "../controls/HoverPopover.tsx";

@@ -1,6 +1,6 @@
 import { RequestError } from "../http/RequestError.ts";
-import { requestEmpty } from "../http/requestJson.ts";
-import { requestJson } from "../http/requestJson.ts";
+import { requestEmpty } from "../http/Requests.ts";
+import { requestJson } from "../http/Requests.ts";
 import type {
   SubagentProviderConnectionIds,
   SubagentProviders,

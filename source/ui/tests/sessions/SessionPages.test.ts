@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { enumerateSessionPages } from "../../sessions/enumerateSessionPages.ts";
+import { enumerateSessionPages } from "../../sessions/SessionPages.ts";
 import type { SessionIdPage } from "../../sessions/SessionIdPage.ts";
 
 void test("session page enumeration preserves cursors and stops after the final page", async () => {

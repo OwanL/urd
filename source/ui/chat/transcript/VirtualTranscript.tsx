@@ -24,7 +24,7 @@ import {
   transcriptNavigationProfileVersion,
 } from "./navigation/useTranscriptNavigation.ts";
 import type { TranscriptDisplay } from "./TranscriptDisplay.ts";
-import type { RenderPreparation } from "./Transcript.tsx";
+import type { RenderPrepass } from "./Transcript.tsx";
 import { EditableMessage } from "../message-editing/EditableMessage.tsx";
 import { CompactionMarker } from "./CompactionMarker.tsx";
 import { ToolRow } from "./tool-calls/ToolRow.tsx";
@@ -36,8 +36,8 @@ import {
 } from "./tool-calls/AgentExchange.tsx";
 import { toolCallLabel } from "./tool-calls/ToolRowPresentation.ts";
 import { TranscriptPositionReader } from "./reading/TranscriptPositionReader.ts";
-import { boundaryResponseStatus } from "../preparation/PreparationRows.tsx";
-import type { ResponseStatusContext } from "../preparation/PreparationRows.tsx";
+import { boundaryResponseStatus } from "../prepass/PrepassRows.tsx";
+import type { ResponseStatusContext } from "../prepass/PrepassRows.tsx";
 import "./transcript.css";
 
 const layoutProfile = { version: 1 as const, pixelsPerWeight: 0.1 };
@@ -47,7 +47,7 @@ const seekDebounceMs = 75;
 
 interface VirtualTranscriptProps {
   children?: ComponentChildren;
-  renderPreparation?: RenderPreparation | undefined;
+  renderPrepass?: RenderPrepass | undefined;
   client: SessionClient;
   display: TranscriptDisplay;
   streamId: string | null;
@@ -323,7 +323,7 @@ function VirtualEntry({
 
 export function VirtualTranscript({
   children,
-  renderPreparation,
+  renderPrepass,
   client,
   display,
   streamId,
@@ -1243,7 +1243,7 @@ export function VirtualTranscript({
             class="transcript-tail"
             style={{ top: `${topPadding + estimatedHeight}px` }}
           >
-            {renderPreparation?.(rows.map(({ descriptor }) => descriptor))}
+            {renderPrepass?.(rows.map(({ descriptor }) => descriptor))}
             {children}
           </div>
           {!positionWindow && !error && <p class="history-note">Loading messages…</p>}

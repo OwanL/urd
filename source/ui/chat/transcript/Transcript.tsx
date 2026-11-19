@@ -14,8 +14,8 @@ import {
 } from "./tool-calls/AgentExchange.tsx";
 import { toolCallLabel } from "./tool-calls/ToolRowPresentation.ts";
 import { TranscriptContentReader } from "./reading/TranscriptContentReader.ts";
-import { boundaryResponseStatus } from "../preparation/PreparationRows.tsx";
-import type { ResponseStatusContext } from "../preparation/PreparationRows.tsx";
+import { boundaryResponseStatus } from "../prepass/PrepassRows.tsx";
+import type { ResponseStatusContext } from "../prepass/PrepassRows.tsx";
 import { isTextEntry } from "../../sessions/transcript/Messages.ts";
 import type { TranscriptNavigationState } from "./navigation/TranscriptNavigationStorage.ts";
 import { VirtualTranscript } from "./VirtualTranscript.tsx";
@@ -239,13 +239,11 @@ export interface ReadingPosition {
   anchor: { key: string; top: number } | null;
 }
 
-export type RenderPreparation = (
-  entries: readonly TranscriptEntryDescriptor[],
-) => ComponentChildren;
+export type RenderPrepass = (entries: readonly TranscriptEntryDescriptor[]) => ComponentChildren;
 
 export interface TranscriptProps {
   children?: ComponentChildren;
-  renderPreparation?: RenderPreparation | undefined;
+  renderPrepass?: RenderPrepass | undefined;
   emptyState?: ComponentChildren;
   client: SessionClient;
   history: TranscriptHistoryPage | null;
@@ -276,7 +274,7 @@ export function Transcript(props: TranscriptProps) {
         >
           <div class="empty-transcript">
             {props.emptyState}
-            {props.renderPreparation?.([])}
+            {props.renderPrepass?.([])}
             {props.children}
           </div>
         </div>
@@ -296,7 +294,7 @@ export function Transcript(props: TranscriptProps) {
         onChooseModels={props.onChooseModels}
         navigation={props.transcriptPosition}
         onNavigationChange={props.onTranscriptPositionChange ?? ignoreNavigationChange}
-        renderPreparation={props.renderPreparation}
+        renderPrepass={props.renderPrepass}
       >
         {props.children}
       </VirtualTranscript>
@@ -308,7 +306,7 @@ function ignoreNavigationChange(_position: TranscriptNavigationState): void {}
 
 function PlainTranscript({
   children,
-  renderPreparation,
+  renderPrepass,
   display,
   streamId = null,
   client,
@@ -405,7 +403,7 @@ function PlainTranscript({
     } else if (anchor.current) {
       keepAnchorInPlace(node);
     }
-  }, [keepAnchorInPlace, shown, renderPreparation, children, selecting, visible, documentHidden]);
+  }, [keepAnchorInPlace, shown, renderPrepass, children, selecting, visible, documentHidden]);
 
   function rememberPosition() {
     const node = scroll.current;
@@ -536,7 +534,7 @@ function PlainTranscript({
                 </div>
               );
             })}
-            {renderPreparation?.(visibleHistory?.entries ?? [])}
+            {renderPrepass?.(visibleHistory?.entries ?? [])}
             {children}
           </ToolRowInteractionsProvider>
         </div>

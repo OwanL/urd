@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { UsageBreakdown, UsagePoint, UsageTotals } from "../../usage/UsageTypes.ts";
+import type { UsageBreakdown, UsagePoint, UsageTotals } from "../../usage/Usage.ts";
 import {
   cumulativeUsageHistory,
   formatCostUsd,

@@ -1,5 +1,5 @@
 import { useMemo, useRef } from "preact/hooks";
-import type { ComposerModel } from "../chat/composer/ComposerTypes.ts";
+import type { ModelPickerOption } from "../chat/composer/ModelPicker.tsx";
 import { ModelPicker } from "../chat/composer/ModelPicker.tsx";
 import { IconButton } from "../controls/IconButton.tsx";
 import {
@@ -23,7 +23,7 @@ export function ModelBucketSetting({
   save,
 }: {
   name: string;
-  models: readonly ComposerModel[];
+  models: readonly ModelPickerOption[];
   members: readonly ConfiguredModel[];
   label(model: ConfiguredModel): string;
   modelForKey(key: string): ConfiguredModel | null;

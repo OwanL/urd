@@ -13,13 +13,13 @@ import { missingModelBuckets } from "../preferences/ModelBucketSelection.ts";
 import { preferenceSaveBlocks } from "../preferences/usePreferences.ts";
 import type { PreferencesState } from "../preferences/usePreferences.ts";
 import type { ProviderClient } from "../providers/ProviderClient.ts";
-import { deriveConversationState } from "./ConversationState.ts";
-import type { ConversationExecutionStatus } from "./ConversationState.ts";
+import { deriveChatStatus } from "./ChatStatus.ts";
+import type { ChatExecutionStatus } from "./ChatStatus.ts";
 import { Transcript } from "./transcript/Transcript.tsx";
 import { SessionWorkingDirectory } from "./working-directory/SessionWorkingDirectory.tsx";
-import { PendingResponseStatus } from "./preparation/PreparationRows.tsx";
-import type { ResponseStatusContext } from "./preparation/PreparationRows.tsx";
-import { unanchoredPreparation, uniqueModelNames } from "./preparation/PrepassValues.ts";
+import { PendingResponseStatus } from "./prepass/PrepassRows.tsx";
+import type { ResponseStatusContext } from "./prepass/PrepassRows.tsx";
+import { unanchoredPrepass, uniqueModelNames } from "./prepass/PrepassValues.ts";
 import type { ReadingPosition } from "./transcript/Transcript.tsx";
 import type { TranscriptDisplay } from "./transcript/TranscriptDisplay.ts";
 import type { TranscriptNavigationState } from "./transcript/navigation/TranscriptNavigationStorage.ts";
@@ -30,11 +30,11 @@ import type {
 } from "../workspace/WorkspaceCommands.ts";
 import type { ChatState } from "../workspace/WorkspaceState.ts";
 import { useSessionSnapshot } from "../sessions/useSessionSnapshot.ts";
-import type { WorkspaceModelState } from "../providers/models/useWorkspaceModels.ts";
-import "./conversation.css";
+import type { ModelOptionsState } from "../providers/models/useModelOptions.ts";
+import "./chat.css";
 
 const efforts = ["none", "low", "medium", "high", "extraHigh"];
-const executionLabels: Record<Exclude<ConversationExecutionStatus, null>, string> = {
+const executionLabels: Record<Exclude<ChatExecutionStatus, null>, string> = {
   stopping: "Stopping…",
   running: "Running…",
   accepted: "Accepted; awaiting session update.",
@@ -175,7 +175,7 @@ function PendingInputBubble({
   );
 }
 
-interface ConversationProps {
+interface ChatProps {
   client: SessionClient;
   providerClient: ProviderClient;
   sessionId: string;
@@ -188,7 +188,7 @@ interface ConversationProps {
   stop: WorkspaceStopState | undefined;
   checking: boolean;
   checkingContinuation: boolean;
-  models: WorkspaceModelState;
+  models: ModelOptionsState;
   preferences: PreferencesState;
   connected: boolean;
   unavailable: boolean;
@@ -209,7 +209,7 @@ interface ConversationProps {
 }
 
 // Normal startup retains three recent chats plus focused or selected views.
-export function Conversation({
+export function Chat({
   client,
   providerClient,
   sessionId,
@@ -240,7 +240,7 @@ export function Conversation({
   onPositionChange,
   transcriptPosition,
   onTranscriptPositionChange,
-}: ConversationProps) {
+}: ChatProps) {
   const ready = connected && !unavailable;
   const savingSubagentProviders = commands.status.savingSubagentProviders.has(sessionId);
   const executionSettingsSaving =
@@ -307,7 +307,7 @@ export function Conversation({
       pendingExecutionId !== removal.executionId ||
       !pendingInputs.some((input) => input.submissionId === removal.submissionId),
   );
-  const state = deriveConversationState(
+  const state = deriveChatStatus(
     chat,
     snapshot,
     stop,
@@ -429,7 +429,7 @@ export function Conversation({
           transcriptPosition={transcriptPosition}
           onTranscriptPositionChange={onTranscriptPositionChange}
           onChooseModels={onChooseModels}
-          renderPreparation={
+          renderPrepass={
             preparingInputs.length > 0 || pendingResponse
               ? (entries) => (
                   <>
@@ -442,7 +442,7 @@ export function Conversation({
                     {snapshot && pendingResponse && (
                       <PendingResponseStatus
                         header={pendingResponse.header}
-                        preparation={unanchoredPreparation(
+                        preparation={unanchoredPrepass(
                           pendingResponse.preparation,
                           entries,
                           snapshot.historyRevision,

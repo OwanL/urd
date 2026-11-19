@@ -4,7 +4,7 @@ import { moveTab } from "./tabs/TabOrder.ts";
 import { newChat } from "./WorkspaceState.ts";
 import type { SessionIdPage } from "../sessions/SessionIdPage.ts";
 import type { PersistedWorkspace } from "./usePersistedWorkspace.ts";
-import { enumerateSessionPages } from "../sessions/enumerateSessionPages.ts";
+import { enumerateSessionPages } from "../sessions/SessionPages.ts";
 
 const idPattern = /^[\da-f]{8}(-[\da-f]{4}){3}-[\da-f]{12}$/i;
 

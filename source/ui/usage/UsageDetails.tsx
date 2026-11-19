@@ -1,5 +1,5 @@
 import { useId, useMemo, useRef, useState } from "preact/hooks";
-import type { UsageRange, UsageSummary } from "./UsageTypes.ts";
+import type { UsageRange, UsageSummary } from "./Usage.ts";
 import { UsageClient } from "./UsageClient.ts";
 import { UsageComposition } from "./UsageComposition.tsx";
 import { UsageHistory } from "./UsageHistory.tsx";

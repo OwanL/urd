@@ -6,7 +6,7 @@ import type { TranscriptDisplay } from "../chat/transcript/TranscriptDisplay.ts"
 import { MarkdownClient } from "../markdown-rendering/MarkdownClient.ts";
 
 // Normal startup and isolated previews share the same bounded application composition.
-export function mountMarkdownWorkspace(
+export function mountWorkspace(
   root: HTMLElement,
   limits: Pick<TranscriptDisplay, "retainedPieces" | "retainedTabs">,
 ) {

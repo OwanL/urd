@@ -14,12 +14,12 @@ import { WorkspacePersistence } from "./WorkspacePersistence.ts";
 import { emptyWorkspaceCommandState, WorkspaceCommands } from "./WorkspaceCommands.ts";
 import type { WorkspaceCommandState } from "./WorkspaceCommands.ts";
 import { ChatTabs } from "./tabs/ChatTabs.tsx";
-import { Conversation } from "../chat/Conversation.tsx";
+import { Chat } from "../chat/Chat.tsx";
 import type { ReadingPosition } from "../chat/transcript/Transcript.tsx";
 import type { TranscriptDisplay } from "../chat/transcript/TranscriptDisplay.ts";
 import type { TranscriptNavigationState } from "../chat/transcript/navigation/TranscriptNavigationStorage.ts";
 import { usePersistedWorkspace } from "./usePersistedWorkspace.ts";
-import { useWorkspaceModels } from "../providers/models/useWorkspaceModels.ts";
+import { useModelOptions } from "../providers/models/useModelOptions.ts";
 import { useWorkspaceNavigation } from "./useWorkspaceNavigation.ts";
 import { useSessionEvents } from "./useSessionEvents.ts";
 import { useWorkspaceRetention } from "./useWorkspaceRetention.ts";
@@ -39,7 +39,7 @@ export interface WorkspaceProps {
 export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) {
   const [persistence] = useState(() => new WorkspacePersistence(() => sessionStorage, storageKey));
   const workspace = usePersistedWorkspace(persistence);
-  const models = useWorkspaceModels(providers);
+  const models = useModelOptions(providers);
   const preferences = usePreferences(preferencesClient);
   const creatingPreferencePending = preferenceSaveBlocks(preferences.pendingFor, "create");
   const [commandError, setCommandError] = useState<string | null>(null);
@@ -230,7 +230,7 @@ export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) 
       )}
       {shown.length ? (
         shown.map((id) => (
-          <Conversation
+          <Chat
             key={id}
             client={sessions}
             providerClient={providers}

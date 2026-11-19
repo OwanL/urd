@@ -15,10 +15,10 @@ import {
   effortLabel,
   formatClockTime,
   modelDisplayName,
-  orderedPreparation,
+  orderedPrepass,
   prepassRowModel,
-  preparationOutcome,
-  preparationUsedSessionModel,
+  prepassOutcome,
+  prepassUsedSessionModel,
 } from "./PrepassValues.ts";
 import type { PrepassRowModel } from "./PrepassValues.ts";
 import "./response-status.css";
@@ -107,7 +107,7 @@ export function ResponseHeader({
   );
 }
 
-export function PreparationRows({
+export function PrepassRows({
   preparation,
   context,
   historyRevision,
@@ -116,8 +116,8 @@ export function PreparationRows({
   context: ResponseStatusContext;
   historyRevision: number;
 }) {
-  const rows = orderedPreparation(preparation);
-  const outcome = preparationOutcome(preparation);
+  const rows = orderedPrepass(preparation);
+  const outcome = prepassOutcome(preparation);
   const listId = useId();
   const groupRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
@@ -141,7 +141,7 @@ export function PreparationRows({
   const open = outcome === null || expanded || pointerHold || focusHold;
   // Do not shift inspected rows (and their open tooltip) by inserting the summary above them.
   const toggleVisible = outcome !== null && (expanded || (!pointerHold && !focusHold));
-  const usedSessionModel = preparationUsedSessionModel(preparation);
+  const usedSessionModel = prepassUsedSessionModel(preparation);
   const leftGroup = (
     event: TargetedPointerEvent<HTMLDivElement> | TargetedFocusEvent<HTMLDivElement>,
   ) => {
@@ -206,7 +206,7 @@ export function PreparationRows({
       <div class="response-status-list" id={listId}>
         {open
           ? rows.map((summary) => (
-              <PreparationRow
+              <PrepassRow
                 key={`${summary.boundaryId}/${summary.category}`}
                 summary={summary}
                 context={context}
@@ -219,7 +219,7 @@ export function PreparationRows({
   );
 }
 
-function PreparationRow({
+function PrepassRow({
   summary,
   context,
   historyRevision,
@@ -348,7 +348,7 @@ export function boundaryResponseStatus(
         </div>
       ) : null,
       after: preparation?.length ? (
-        <PreparationRows
+        <PrepassRows
           preparation={preparation}
           context={context}
           historyRevision={historyRevision}
@@ -361,7 +361,7 @@ export function boundaryResponseStatus(
       <div class="response-status">
         {response ? <ResponseHeader response={response} modelNames={context.modelNames} /> : null}
         {preparation?.length ? (
-          <PreparationRows
+          <PrepassRows
             preparation={preparation}
             context={context}
             historyRevision={historyRevision}
@@ -388,7 +388,7 @@ export function PendingResponseStatus({
     <div class="response-status">
       <ResponseHeader response={header} modelNames={context.modelNames} />
       {preparation.length > 0 && (
-        <PreparationRows
+        <PrepassRows
           preparation={preparation}
           context={context}
           historyRevision={historyRevision}

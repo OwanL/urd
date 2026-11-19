@@ -184,7 +184,7 @@ are shared.
 | Folder | Owns |
 | --- | --- |
 | `workspace/` | Application shell, persisted workspace state, commands and navigation; `tabs/` holds the tab strip. |
-| `chat/` | One chat's view: `composer/`, `working-directory/`, `message-editing/`, `preparation/` and `transcript/` (`reading/`, `viewport/`, `navigation/`, `tool-calls/`). |
+| `chat/` | One chat's view: `composer/`, `working-directory/`, `message-editing/`, `prepass/` and `transcript/` (`reading/`, `viewport/`, `navigation/`, `tool-calls/`). |
 | `sessions/` | Session HTTP client, event stream and their hooks; `inputs/` and `transcript/` hold contract types. |
 | `markdown-rendering/` | Virtualized Markdown pipeline, with `windowing/` and `images/`. |
 | `providers/`, `preferences/`, `usage/` | Their clients, contract types and feature UI; `settings/` composes the settings pages. |
@@ -201,11 +201,11 @@ It does not implement storage recovery, navigation or catalog request lifecycles
 | --- | --- |
 | `usePersistedWorkspace` | Owns the current workspace and synchronous updates, draft/root persistence, storage failures and explicit recovery. Its stable command access reads the latest state; successful-load identity changes only on read recovery, not ordinary edits. |
 | `useWorkspaceNavigation` | Discovers the initial workspace after a successful read, applies deep links, opens/closes/reorders tabs and synchronizes the URL. It calls the existing Create command; it never stops backend work. |
-| `useWorkspaceModels` | Owns cached catalog loading, missing-catalog discovery on startup, rediscovery after provider changes and explicit error retry at workspace lifetime, using `WorkspaceModels` for request publication ordering. |
+| `useModelOptions` | Owns cached catalog loading, missing-catalog discovery on startup, rediscovery after provider changes and explicit error retry at workspace lifetime, using `ModelOptions` for request publication ordering. |
 | `useSessionEvents` | Owns the page-lifetime event stream, saved-ID discovery, open/watched registrations and per-tab status/change notices. |
 | `WorkspaceCommands` | Owns Create, Send/Continue journals and retries, receipt reconciliation, pending-input removal and Stop across conversation switches. Create still journals before dispatch and opens the acknowledged session against current state. |
-| `Conversation` | Normal startup retains three recent chats, including the active chat; focused or selected views stay mounted beyond that limit, and other chats unmount. It composes snapshot observation, transcript, status and composer. Its snapshot hook owns cancellable reads, not command lifetime. |
-| `ConversationState` | Derives selection, Send eligibility and execution status from existing facts; it stores no additional state. |
+| `Chat` | Normal startup retains three recent chats, including the active chat; focused or selected views stay mounted beyond that limit, and other chats unmount. It composes snapshot observation, transcript, status and composer. Its snapshot hook owns cancellable reads, not command lifetime. |
+| `ChatStatus` | Derives selection, Send eligibility and execution status from existing facts; it stores no additional state. |
 | `ChatTabs` | Owns tab interaction, focus restoration and active-tab scrolling. |
 
 The workspace retains reading positions outside the keyed conversation view and
@@ -361,7 +361,7 @@ account requests were made for these checks; screenshots stay in an owned temp f
 - `source/ui/sessions/SessionClient.ts` maps to the
   [session HTTP contract](server-development.md#session-http-contract).
   Construction does no I/O; callers own selection, polling and reconciliation.
-- Both clients share `http/requestJson.ts`: the browser marker, no caching, omitted
+- Both clients share `http/Requests.ts`: the browser marker, no caching, omitted
   cookies, rejected redirects and status-preserving `RequestError`. Provider reads
   use saved connections/catalogs. Startup discovers missing catalogs and provider changes
   rediscover them; Retry repeats failed discovery. No timer or picker-opening refresh runs.

@@ -4,10 +4,10 @@ import { submissionTextError } from "../workspace/WorkspaceState.ts";
 import type { ChatState } from "../workspace/WorkspaceState.ts";
 import type { WorkspaceStopState } from "../workspace/WorkspaceCommands.ts";
 
-export type ConversationExecutionStatus = "stopping" | "running" | "accepted" | "compacting" | null;
-export type ConversationSettlementStatus = "failed" | "cancelled" | null;
+export type ChatExecutionStatus = "stopping" | "running" | "accepted" | "compacting" | null;
+export type ChatSettlementStatus = "failed" | "cancelled" | null;
 
-export interface ConversationState {
+export interface ChatStatus {
   active: boolean;
   stopId: string | undefined;
   selectionLocked: boolean;
@@ -19,20 +19,20 @@ export interface ConversationState {
   canResendNotSent: boolean;
   admissionFenced: boolean;
   unsettledWhileFenced: boolean;
-  executionStatus: ConversationExecutionStatus;
+  executionStatus: ChatExecutionStatus;
   showStopRequested: boolean;
-  settlementStatus: ConversationSettlementStatus;
+  settlementStatus: ChatSettlementStatus;
   pendingStatus: "sending" | "uncertain" | null;
 }
 
-export function deriveConversationState(
+export function deriveChatStatus(
   chat: ChatState,
   snapshot: SessionSnapshot | null,
   stop: WorkspaceStopState | undefined,
   ready: boolean,
   canPersist: boolean,
   pendingCommand = false,
-): ConversationState {
+): ChatStatus {
   const active = Boolean(snapshot?.unsettledExecutionId && !snapshot.admissionFenced);
   const compacting = Boolean(active && snapshot?.isCompacting);
   const stopId = stop?.pending ? stop.executionId : undefined;
@@ -90,7 +90,7 @@ export function deriveConversationState(
   );
   const admissionFenced = Boolean(snapshot?.admissionFenced);
   const unsettledWhileFenced = Boolean(snapshot?.unsettledExecutionId && admissionFenced);
-  const executionStatus: ConversationExecutionStatus = active
+  const executionStatus: ChatExecutionStatus = active
     ? snapshot?.stopRequested || stopId
       ? "stopping"
       : compacting
@@ -100,7 +100,7 @@ export function deriveConversationState(
       ? "accepted"
       : null;
   const showStopRequested = !active && Boolean(snapshot?.stopRequested);
-  let settlementStatus: ConversationSettlementStatus = null;
+  let settlementStatus: ChatSettlementStatus = null;
   if (!active && !chat.knownExecutionId && !stopId && !snapshot?.stopRequested) {
     if (snapshot?.lastSettlement?.outcome === "failed") settlementStatus = "failed";
     else if (snapshot?.lastSettlement?.outcome === "cancelled") settlementStatus = "cancelled";

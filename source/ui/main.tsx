@@ -1,6 +1,6 @@
 import "./base.css";
-import { mountMarkdownWorkspace } from "./workspace/MarkdownWorkspace.tsx";
+import { mountWorkspace } from "./workspace/WorkspaceMount.tsx";
 
 const root = document.getElementById("app");
 if (!root) throw new Error("Missing application root.");
-mountMarkdownWorkspace(root, { retainedPieces: 256, retainedTabs: 3 });
+mountWorkspace(root, { retainedPieces: 256, retainedTabs: 3 });

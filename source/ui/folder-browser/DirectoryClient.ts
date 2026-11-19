@@ -1,4 +1,4 @@
-import { requestJson } from "../http/requestJson.ts";
+import { requestJson } from "../http/Requests.ts";
 
 export interface DirectoryEntry {
   readonly name: string;

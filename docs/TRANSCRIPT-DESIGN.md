@@ -15,7 +15,7 @@ indices/lease overhead, 32 pending keys, 64 leases and a 16 KiB small-message th
 Explicit overrides remain supported. These initial local limits reuse the exercised
 workload; transient parsing is separate, and these are not resident-memory guarantees.
 
-The actual Workspace/Conversation composition now uses bounded message windows,
+The actual Workspace/Chat composition now uses bounded message windows,
 indexed full-history navigation, source anchors, selected-span retention and persisted
 reading intent. The batch reader, exact-entry Core facade and page-owned HTTP adapter
 retain scoped leases: disconnect/shutdown reclaim generations, including late opens.

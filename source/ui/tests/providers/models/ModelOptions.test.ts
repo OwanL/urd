@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { WorkspaceModels } from "../../../providers/models/WorkspaceModels.ts";
-import { replaceProviderOptions } from "../../../providers/models/useWorkspaceModels.ts";
+import { ModelOptions } from "../../../providers/models/ModelOptions.ts";
+import { replaceProviderOptions } from "../../../providers/models/useModelOptions.ts";
 import type { ProviderConnection } from "../../../providers/ProviderConnection.ts";
 import type { ProviderModelCatalog } from "../../../providers/ProviderModels.ts";
 import type { ModelSettings } from "../../../providers/ModelSettings.ts";
@@ -40,7 +40,7 @@ function deferred<T>() {
 
 void test("cached reads publish options and discover only providers without a refreshed catalog", async () => {
   const discoveryIds: string[] = [];
-  const models = new WorkspaceModels({
+  const models = new ModelOptions({
     list: async () => [firstConnection, secondConnection],
     getModels: async (connectionId) =>
       catalog(
@@ -100,7 +100,7 @@ void test("cached reads publish options and discover only providers without a re
 });
 
 void test("cached read failures preserve successful providers and mark failed providers for discovery", async () => {
-  const models = new WorkspaceModels({
+  const models = new ModelOptions({
     list: async () => [firstConnection, secondConnection],
     getModels: async (connectionId) => {
       if (connectionId === secondConnection.id) throw new Error("cached read failed");
@@ -124,7 +124,7 @@ void test("cached read failures preserve successful providers and mark failed pr
 });
 
 void test("discovery failures do not discard options from successful providers", async () => {
-  const models = new WorkspaceModels({
+  const models = new ModelOptions({
     list: async () => [firstConnection, secondConnection],
     getModels: async () => catalog(firstConnection.id, "cached", "Cached model"),
     getModelSettings: async () => [],
@@ -146,7 +146,7 @@ void test("discovery failures do not discard options from successful providers",
 
 void test("empty provider lists are known and do not attempt discovery", async () => {
   let discoveries = 0;
-  const models = new WorkspaceModels({
+  const models = new ModelOptions({
     list: async () => [],
     getModels: async () => {
       throw new Error("unexpected cache read");
@@ -170,7 +170,7 @@ void test("empty provider lists are known and do not attempt discovery", async (
 
 void test("provider changes can rediscover every provider", async () => {
   const discoveryIds: string[] = [];
-  const models = new WorkspaceModels({
+  const models = new ModelOptions({
     list: async () => [firstConnection, secondConnection],
     getModels: async (connectionId) => catalog(connectionId, "cached", "Cached", "refreshed"),
     getModelSettings: async () => [],
@@ -192,7 +192,7 @@ void test("provider changes prevent an older manual refresh from publishing over
   const discovery = deferred<ProviderModelCatalog>();
   const discoveryStarted = deferred<void>();
   let listCalls = 0;
-  const models = new WorkspaceModels({
+  const models = new ModelOptions({
     list: async () => [listCalls++ === 0 ? firstConnection : currentConnection],
     getModels: async () => catalog(currentConnection.id, "cached", "Cached model"),
     getModelSettings: async () => [],
@@ -234,7 +234,7 @@ void test("configured metadata is matched by connection and model without infere
     }),
   ]);
   let records = settings;
-  const models = new WorkspaceModels({
+  const models = new ModelOptions({
     list: async () => [connection],
     getModels: async () => ({
       connectionId: connection.id,

@@ -1,5 +1,5 @@
-import { requestJson } from "../http/requestJson.ts";
-import type { GlobalUsageQuery, UsageQuery, UsageSummary } from "./UsageTypes.ts";
+import { requestJson } from "../http/Requests.ts";
+import type { GlobalUsageQuery, UsageQuery, UsageSummary } from "./Usage.ts";
 
 export class UsageClient {
   private readonly origin: string;

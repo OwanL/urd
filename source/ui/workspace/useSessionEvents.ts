@@ -3,7 +3,7 @@ import type { SessionClient } from "../sessions/SessionClient.ts";
 import { SessionEvents } from "../sessions/SessionEvents.ts";
 import type { WorkspaceCommandAccess } from "./WorkspaceCommands.ts";
 import { applySessionTitle, newChat } from "./WorkspaceState.ts";
-import { enumerateSessionPages } from "../sessions/enumerateSessionPages.ts";
+import { enumerateSessionPages } from "../sessions/SessionPages.ts";
 import {
   emptySessionActivity,
   recordSessionStatus,

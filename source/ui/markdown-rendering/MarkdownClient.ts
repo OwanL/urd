@@ -1,5 +1,5 @@
 import { RequestError } from "../http/RequestError.ts";
-import { requestBlob, requestEmpty, requestJson } from "../http/requestJson.ts";
+import { requestBlob, requestEmpty, requestJson } from "../http/Requests.ts";
 import type {
   MessageContentCursor,
   TranscriptEntryRef,

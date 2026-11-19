@@ -6,15 +6,15 @@ import {
   formatElapsedMilliseconds,
   formatPrepassElapsed,
   modelDisplayName,
-  orderedPreparation,
-  preparationOutcome,
-  preparationUsedSessionModel,
+  orderedPrepass,
+  prepassOutcome,
+  prepassUsedSessionModel,
   prepassCostLabel,
   prepassRowModel,
   prepassRowMood,
-  unanchoredPreparation,
+  unanchoredPrepass,
   uniqueModelNames,
-} from "../../../chat/preparation/PrepassValues.ts";
+} from "../../../chat/prepass/PrepassValues.ts";
 import { initialBoundaryId } from "../../../sessions/transcript/Prepass.ts";
 import type { PrepassSummary } from "../../../sessions/transcript/Prepass.ts";
 import type { TranscriptEntryDescriptor } from "../../../sessions/transcript/Messages.ts";
@@ -48,16 +48,16 @@ void test("after compaction, the loaded marker owns its running preparation rows
   };
   const pending = [skills, tools, initialSkills];
 
-  assert.deepEqual(unanchoredPreparation(pending, [marker], 1), [tools, initialSkills]);
-  assert.deepEqual(unanchoredPreparation([skills], [marker], 1), []);
-  assert.deepEqual(unanchoredPreparation(pending, [], 1), pending);
-  assert.deepEqual(unanchoredPreparation(pending, [{ ...marker, preparation: [] }], 1), pending);
-  assert.deepEqual(unanchoredPreparation(pending, [marker], 2), pending);
+  assert.deepEqual(unanchoredPrepass(pending, [marker], 1), [tools, initialSkills]);
+  assert.deepEqual(unanchoredPrepass([skills], [marker], 1), []);
+  assert.deepEqual(unanchoredPrepass(pending, [], 1), pending);
+  assert.deepEqual(unanchoredPrepass(pending, [{ ...marker, preparation: [] }], 1), pending);
+  assert.deepEqual(unanchoredPrepass(pending, [marker], 2), pending);
 });
 
 void test("preparation rows keep category order and unknown categories", () => {
   assert.deepEqual(
-    orderedPreparation([
+    orderedPrepass([
       summary({ category: "instructions" }),
       summary({ category: "title", state: "running" }),
       summary({ category: "skills" }),
@@ -65,20 +65,20 @@ void test("preparation rows keep category order and unknown categories", () => {
     ]).map((row) => row.category),
     ["tools", "skills", "instructions", "title"],
   );
-  assert.deepEqual(orderedPreparation(undefined), []);
-  assert.deepEqual(orderedPreparation(null), []);
-  assert.deepEqual(orderedPreparation([]), []);
+  assert.deepEqual(orderedPrepass(undefined), []);
+  assert.deepEqual(orderedPrepass(null), []);
+  assert.deepEqual(orderedPrepass([]), []);
 });
 
 void test("preparation collapses only after every category settles", () => {
   const ready = ["tools", "skills", "instructions", "title"].map((category) =>
     summary({ category }),
   );
-  assert.equal(preparationOutcome(ready), "Complete");
-  assert.equal(preparationOutcome([]), null);
+  assert.equal(prepassOutcome(ready), "Complete");
+  assert.equal(prepassOutcome([]), null);
   for (const state of ["running", "pending", "unknown"]) {
     assert.equal(
-      preparationOutcome([...ready.slice(0, 3), summary({ category: "title", state })]),
+      prepassOutcome([...ready.slice(0, 3), summary({ category: "title", state })]),
       null,
       state,
     );
@@ -88,7 +88,7 @@ void test("preparation collapses only after every category settles", () => {
 void test("settled preparation issues remain explicit in the collapsed summary", () => {
   for (const state of ["fallback", "failed", "cancelled", "interrupted"]) {
     assert.equal(
-      preparationOutcome([summary({}), summary({ category: "skills", state })]),
+      prepassOutcome([summary({}), summary({ category: "skills", state })]),
       "Finished with issues",
       state,
     );
@@ -99,7 +99,7 @@ void test("instruction errors remain warnings even when running or completed", (
   for (const state of ["running", "completed"]) {
     const row = summary({ category: "instructions", state, error: "Instructions omitted" });
     assert.equal(prepassRowMood(row), "warned");
-    assert.equal(preparationOutcome([row]), state === "running" ? null : "Finished with issues");
+    assert.equal(prepassOutcome([row]), state === "running" ? null : "Finished with issues");
   }
   assert.equal(prepassRowMood(summary({ category: "instructions", error: null })), "settled");
 });
@@ -256,16 +256,16 @@ void test("reasoning effort passes through verbatim or stays hidden", () => {
 
 void test("the chat-model fallback warns only on the initial boundary", () => {
   assert.equal(
-    preparationUsedSessionModel([
+    prepassUsedSessionModel([
       summary({ boundaryId: initialBoundaryId, usedSessionModel: true }),
       summary({ boundaryId: initialBoundaryId, category: "skills" }),
     ]),
     true,
   );
   // Compaction boundaries never warn, even when a summary used the chat model.
-  assert.equal(preparationUsedSessionModel([summary({ usedSessionModel: true })]), false);
-  assert.equal(preparationUsedSessionModel([summary({ boundaryId: initialBoundaryId })]), false);
-  assert.equal(preparationUsedSessionModel([]), false);
-  assert.equal(preparationUsedSessionModel(null), false);
-  assert.equal(preparationUsedSessionModel(undefined), false);
+  assert.equal(prepassUsedSessionModel([summary({ usedSessionModel: true })]), false);
+  assert.equal(prepassUsedSessionModel([summary({ boundaryId: initialBoundaryId })]), false);
+  assert.equal(prepassUsedSessionModel([]), false);
+  assert.equal(prepassUsedSessionModel(null), false);
+  assert.equal(prepassUsedSessionModel(undefined), false);
 });

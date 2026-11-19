@@ -406,7 +406,7 @@ plugin hierarchy are needed.
   conversation/request scopes and `StartingContextStorage` with selected contexts at
   allowed compaction boundaries. Do not make the builder a second persistence owner.
 - Extend `UserPreferences`, `PreferenceManager`, `PreferencesStorage` and their existing
-  routes; reuse settings and `ModelPicker`. A small `PruningRows.tsx` under `source/ui/chat/preparation/`
+  routes; reuse settings and `ModelPicker`. A small `PruningRows.tsx` under `source/ui/chat/prepass/`
   renders recorded category status. Detailed UI remains deferred.
 
 **Revised after owner feedback:** shared discovery is a resource-level responsibility,

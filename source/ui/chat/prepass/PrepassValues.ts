@@ -20,7 +20,7 @@ const labels: Record<string, string> = {
   title: "Title",
 };
 
-export function unanchoredPreparation(
+export function unanchoredPrepass(
   pending: readonly PrepassSummary[],
   entries: readonly TranscriptEntryDescriptor[],
   historyRevision: number,
@@ -42,7 +42,7 @@ export function unanchoredPreparation(
 }
 
 // Preparation rows keep their established category order; unknown categories stay truthful.
-export function orderedPreparation(
+export function orderedPrepass(
   preparation: readonly PrepassSummary[] | null | undefined,
 ): PrepassSummary[] {
   if (!preparation?.length) return [];
@@ -57,7 +57,7 @@ export function orderedPreparation(
 }
 
 // Unknown states stay expanded rather than being mistaken for completed work.
-export function preparationOutcome(
+export function prepassOutcome(
   preparation: readonly PrepassSummary[],
 ): "Complete" | "Finished with issues" | null {
   const terminal = ["completed", "fallback", "cancelled", "interrupted", "failed"];
@@ -126,7 +126,7 @@ function summarizeState(state: string): string {
 
 // The chat-model fallback only warrants a warning on the initial boundary; compaction
 // boundaries carry their own history and never re-run the first-message preparation.
-export function preparationUsedSessionModel(
+export function prepassUsedSessionModel(
   preparation: readonly PrepassSummary[] | null | undefined,
 ): boolean {
   return (

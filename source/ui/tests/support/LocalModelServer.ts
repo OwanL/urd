@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { ServerResponse } from "node:http";
-import { requestJson } from "../../http/requestJson.ts";
+import { requestJson } from "../../http/Requests.ts";
 import { ProviderClient } from "../../providers/ProviderClient.ts";
 import type { ProviderConnection } from "../../providers/ProviderConnection.ts";
 import { startHttpServer } from "./HttpTestServer.ts";

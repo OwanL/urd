@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { WorkspaceModels } from "../providers/models/WorkspaceModels.ts";
+import { ModelOptions } from "../providers/models/ModelOptions.ts";
 import { ModelPicker } from "../chat/composer/ModelPicker.tsx";
-import type { ComposerModel } from "../chat/composer/ComposerTypes.ts";
-import type { ModelOption } from "../providers/models/WorkspaceModels.ts";
+import type { ModelPickerOption } from "../chat/composer/ModelPicker.tsx";
+import type { ModelOption } from "../providers/models/ModelOptions.ts";
 import type { PreferencesState } from "../preferences/usePreferences.ts";
 import { describeBucket, modelKey } from "../preferences/ModelBucketSelection.ts";
 import { ModelBucketSetting } from "./ModelBucketSetting.tsx";
@@ -48,7 +48,7 @@ export function ModelPreferencesSettings({
   view: "buckets" | "purposes";
   active: boolean;
 }) {
-  const reader = useMemo(() => new WorkspaceModels(client), [client]);
+  const reader = useMemo(() => new ModelOptions(client), [client]);
   const [catalog, setCatalog] = useState<CachedModels>({
     options: [],
     providers: [],
@@ -94,7 +94,7 @@ export function ModelPreferencesSettings({
     };
   }, [active, readCachedModels]);
 
-  const models: readonly ComposerModel[] = useMemo(
+  const models: readonly ModelPickerOption[] = useMemo(
     () =>
       catalog.options.map(({ key, modelLabel, providerLabel }) => ({
         key,
@@ -127,7 +127,7 @@ export function ModelPreferencesSettings({
       return { connectionId: option.selection.connection.id, modelId: option.selection.modelId };
     return unavailable && modelKey(unavailable) === key ? unavailable : null;
   };
-  const pickerModels = (saved: ConfiguredModel | null): readonly ComposerModel[] => {
+  const pickerModels = (saved: ConfiguredModel | null): readonly ModelPickerOption[] => {
     if (!saved || modelByKey.has(modelKey(saved))) return models;
     const provider = catalog.providers.find(({ id }) => id === saved.connectionId);
     return [
@@ -249,7 +249,7 @@ function AuxiliaryModelChoice({
   readCachedModels(): void;
   configuredModel(key: string, unavailable?: ConfiguredModel | null): ConfiguredModel | null;
   configuredModelLabel(model: ConfiguredModel | null): string;
-  pickerModels(model: ConfiguredModel | null): readonly ComposerModel[];
+  pickerModels(model: ConfiguredModel | null): readonly ModelPickerOption[];
   busy: boolean;
 }) {
   const saved = state.preferences?.modelChoices[purpose] ?? null;

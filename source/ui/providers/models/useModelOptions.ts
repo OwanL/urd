@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from "preact/hooks";
 import type { ProviderClient } from "../ProviderClient.ts";
 import type { ProviderConnection } from "../ProviderConnection.ts";
-import { WorkspaceModels } from "./WorkspaceModels.ts";
-import type { ModelOption } from "./WorkspaceModels.ts";
+import { ModelOptions } from "./ModelOptions.ts";
+import type { ModelOption } from "./ModelOptions.ts";
 
-export interface WorkspaceModelState {
+export interface ModelOptionsState {
   options: ModelOption[];
   hasProviders: boolean | null;
   loading: boolean;
@@ -19,8 +19,8 @@ function description(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
 }
 
-export function useWorkspaceModels(client: ProviderClient): WorkspaceModelState {
-  const [catalog] = useState(() => new WorkspaceModels(client));
+export function useModelOptions(client: ProviderClient): ModelOptionsState {
+  const [catalog] = useState(() => new ModelOptions(client));
   const [options, setOptions] = useState<ModelOption[]>([]);
   const [hasProviders, setHasProviders] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);

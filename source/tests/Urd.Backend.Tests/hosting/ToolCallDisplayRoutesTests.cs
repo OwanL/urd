@@ -73,6 +73,7 @@ public sealed class ToolCallDisplayRoutesTests {
       Assert.Equal("{\"path\":\"file.txt\"}", transcript.GetProperty("input").GetString());
       Assert.Equal(65536, transcript.GetProperty("output").GetString()!.Length);
       Assert.True(transcript.GetProperty("truncated").GetBoolean());
+      Assert.True(transcript.GetProperty("outputTokens").GetInt64() > 0);
     }
 
     using (HttpResponseMessage full = await RequestAsync(server.Client, HttpMethod.Get,

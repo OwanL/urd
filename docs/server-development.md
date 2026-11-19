@@ -147,7 +147,8 @@ of an already accepted operation still return its retained receipt.
 History and descriptor-carrying position windows attach `toolLabels`; full arguments,
 results and storage excerpts are never included. Tool inspection requires explicit `returned`
 and `full` booleans. Previews (`full=false`) cap each field at 65,536 characters and report
-truncation; Copy requests full text. Image references render without reading image bytes.
+truncation; Copy requests full text. `inputTokens`/`outputTokens` estimate each full field
+with o200k, scaled from its first 65,536 characters. Image references render without reading image bytes.
 
 GET `/api/files/directories` lists immediate subfolders for an optional absolute `path`;
 omitting it lists Windows drives (or the filesystem root elsewhere). An optional `filter`
@@ -320,8 +321,8 @@ successful no-tool response. Already-claimed requests are unchanged. The HTTP la
 busy policy or steering-specific routes and does not turn a durable refusal into an HTTP error.
 History entries include tool names and execution status. Inspect arguments/results on demand
 at `/api/sessions/{sessionId}/tool-calls/{requestId}/{callId}` with explicit `returned` and
-`full` flags. Previews are bounded to 65,536 characters per field at the storage read,
-without loading inspection-only details, and report truncation. `projectionFinal` means
+`full` flags. Previews retain at most 65,536 characters per field at the storage read and only
+measure the remaining model-facing text, without loading inspection-only details, and report truncation. `projectionFinal` means
 the model-facing image projection is fixed for this history revision. Copy can reuse a
 complete preview only when that flag is true and the tool payload has finished.
 

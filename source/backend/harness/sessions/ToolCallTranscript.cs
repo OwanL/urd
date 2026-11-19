@@ -1,3 +1,5 @@
 namespace Urd.Core.Sessions;
 
-public sealed record ToolCallTranscript(string Input, string? Output, bool Truncated, bool ProjectionFinal);
+// Token counts estimate each full model-facing field, even when the text is a truncated preview.
+public sealed record ToolCallTranscript(string Input, string? Output, bool Truncated, bool ProjectionFinal,
+    long? InputTokens, long? OutputTokens);

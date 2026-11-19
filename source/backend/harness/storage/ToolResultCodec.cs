@@ -31,11 +31,12 @@ internal sealed class ToolResultCodec(ToolImageStore images) {
   internal object ReadModelResult(string value) => ProjectModelResult(value, loadImages: true).Content;
 
   internal string ReadModelResultText(
-      TextReader reader, int? characterLimit, bool supportsImages, out bool truncated) {
+      TextReader reader, int? characterLimit, bool supportsImages, out long length) {
     if (characterLimit is { } limit)
-      return ToolTranscriptPreview.ReadResult(reader, limit, supportsImages, string.Empty, out truncated);
-    truncated = false;
-    return ProjectModelResult(reader.ReadToEnd(), loadImages: false, supportsImages: supportsImages).Text;
+      return ToolTranscriptPreview.ReadResult(reader, limit, supportsImages, string.Empty, out length);
+    string text = ProjectModelResult(reader.ReadToEnd(), loadImages: false, supportsImages: supportsImages).Text;
+    length = text.Length;
+    return text;
   }
 
   internal static string BackgroundStarted(Guid requestId, string callId) =>
@@ -52,12 +53,13 @@ internal sealed class ToolResultCodec(ToolImageStore images) {
   }
 
   internal string ReadModelCompletionText(Guid requestId, string callId, string name, ExecutionOutcome outcome,
-      TextReader reader, int? characterLimit, bool supportsImages, out bool truncated) {
+      TextReader reader, int? characterLimit, bool supportsImages, out long length) {
     string prefix = CompletionEnvelope(requestId, callId, name, outcome);
     if (characterLimit is { } limit)
-      return ToolTranscriptPreview.ReadResult(reader, limit, supportsImages, prefix, out truncated);
-    truncated = false;
-    return prefix + ProjectModelResult(reader.ReadToEnd(), loadImages: false, supportsImages: supportsImages).Text;
+      return ToolTranscriptPreview.ReadResult(reader, limit, supportsImages, prefix, out length);
+    string text = prefix + ProjectModelResult(reader.ReadToEnd(), loadImages: false, supportsImages: supportsImages).Text;
+    length = text.Length;
+    return text;
   }
 
   internal string Error(string message) => Write(new ToolOutput(message, [], IsError: true));

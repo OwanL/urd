@@ -39,10 +39,18 @@
 }
 
 .tool-inspection-section h3 {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
   margin: 0 0 3px;
   color: var(--text-secondary);
   font-size: 11px;
   font-weight: 500;
+}
+
+.tool-inspection-tokens {
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
 }
 
 .tool-inspection-section pre {

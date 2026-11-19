@@ -19,6 +19,7 @@ public sealed class ToolCallTranscriptTests {
     Assert.Equal("{\"path\":\"file.txt\"}", direct.Input);
     Assert.Equal("direct output\n[image: image/png]", direct.Output);
     Assert.False(direct.Truncated);
+    Assert.True(direct.InputTokens > 0 && direct.OutputTokens > 0);
 
     ToolCallTranscript background = Assert.IsType<ToolCallTranscript>(await fixture.Session.Transcript.ReadToolCallTranscriptAsync(
         0, calls.ReturnedRequest, "returned", returned: false));
@@ -34,6 +35,7 @@ public sealed class ToolCallTranscriptTests {
     ToolCallTranscript running = Assert.IsType<ToolCallTranscript>(await fixture.Session.Transcript.ReadToolCallTranscriptAsync(
         0, calls.RunningRequest, "running", returned: false));
     Assert.Null(running.Output);
+    Assert.Null(running.OutputTokens);
     Assert.Null(await fixture.Session.Transcript.ReadToolCallTranscriptAsync(
         0, Guid.NewGuid(), "missing", returned: false));
 
@@ -69,6 +71,9 @@ public sealed class ToolCallTranscriptTests {
       Assert.Equal(arguments[..64], preview.Input);
       Assert.Equal(text[..Math.Min(text.Length, 64)], preview.Output);
       Assert.True(preview.Truncated);
+      // Counts describe the full payload, not the retained preview.
+      Assert.InRange(preview.InputTokens!.Value, arguments.Length / 16, arguments.Length);
+      Assert.InRange(preview.OutputTokens!.Value, text.Length / 16, text.Length);
       Assert.True(allocated < 512 * 1024, $"A 64-character preview allocated {allocated:N0} bytes.");
     }
   }
@@ -94,6 +99,8 @@ public sealed class ToolCallTranscriptTests {
           Assert.Equal(ScalarPrefix(full.Input, limit), preview.Input);
           Assert.Equal(ScalarPrefix(full.Output, limit), preview.Output);
           Assert.Equal(full.Input.Length > limit || full.Output?.Length > limit, preview.Truncated);
+          if (!preview.Truncated)
+            Assert.Equal((full.InputTokens, full.OutputTokens), (preview.InputTokens, preview.OutputTokens));
         }
       }
     }

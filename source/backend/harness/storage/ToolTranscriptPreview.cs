@@ -5,67 +5,70 @@ using Urd.Core.Providers;
 
 namespace Urd.Core.Storage;
 
-// Reads the codec's text/images prefix, never its inspection-only details or an entire large JSON string.
+// Retains a bounded prefix of the codec's text/images and only measures the rest; never reads
+// inspection-only details. Length is the full model-facing text's length.
 internal sealed class ToolTranscriptPreview(int characterLimit) {
   private readonly StringBuilder text = new();
   private char firstOmitted;
+  private long length;
 
-  internal bool Truncated { get; private set; }
+  private bool Truncated => length > characterLimit;
 
   internal string Value {
     get {
-      int length = text.Length;
-      if (Truncated && length > 0 && char.IsHighSurrogate(text[length - 1]) && char.IsLowSurrogate(firstOmitted))
-        length--;
-      return text.ToString(0, length);
+      int retained = text.Length;
+      if (Truncated && retained > 0 && char.IsHighSurrogate(text[retained - 1]) && char.IsLowSurrogate(firstOmitted))
+        retained--;
+      return text.ToString(0, retained);
     }
   }
 
-  internal static string ReadText(TextReader reader, int? characterLimit, out bool truncated) {
+  internal static string ReadText(TextReader reader, int? characterLimit, out long length) {
     if (characterLimit is not { } limit) {
-      truncated = false;
-      return reader.ReadToEnd();
+      string value = reader.ReadToEnd();
+      length = value.Length;
+      return value;
     }
     var preview = new ToolTranscriptPreview(limit);
     while (!preview.Truncated && reader.Read() is >= 0 and var character)
       preview.Append((char)character);
-    truncated = preview.Truncated;
+    length = preview.length + SkipToEnd(reader);
     return preview.Value;
   }
 
   internal static string ReadResult(TextReader reader, int characterLimit, bool supportsImages,
-      string prefix, out bool truncated) {
+      string prefix, out long length) {
     var preview = new ToolTranscriptPreview(characterLimit);
     preview.Append(prefix);
-    if (!preview.Truncated)
-      preview.ReadResult(reader, supportsImages);
-    truncated = preview.Truncated;
+    preview.ReadResult(reader, supportsImages);
+    length = preview.length;
     return preview.Value;
   }
 
+  private static long SkipToEnd(TextReader reader) {
+    Span<char> buffer = stackalloc char[4096];
+    long skipped = 0;
+    for (int read; (read = reader.Read(buffer)) > 0;)
+      skipped += read;
+    return skipped;
+  }
+
   private void Append(char character) {
-    if (text.Length < characterLimit) {
+    if (length++ < characterLimit)
       text.Append(character);
-      return;
-    }
-    firstOmitted = character;
-    Truncated = true;
+    else if (length == characterLimit + 1L)
+      firstOmitted = character;
   }
 
   private void Append(string value) {
-    foreach (char character in value) {
-      if (Truncated)
-        break;
+    foreach (char character in value)
       Append(character);
-    }
   }
 
   private void ReadResult(TextReader reader, bool supportsImages) {
-    int resultStart = text.Length;
+    long resultStart = length;
     Expect(reader, "{\"text\":");
     ReadString(reader);
-    if (Truncated)
-      return;
     Expect(reader, ",\"images\":[");
     if (Next(reader) == ']')
       return;
@@ -73,22 +76,18 @@ internal sealed class ToolTranscriptPreview(int characterLimit) {
       Append(LlmMessageProjection.AppendImageOmissionNotice(string.Empty));
       return;
     }
-    while (!Truncated) {
+    while (true) {
       // ToolImageStore writes a fixed-length SHA-256 hash, then the model-facing media type.
       Expect(reader, "{\"hash\":\"");
       for (int index = 0; index < 64; index++)
         if (reader.Read() < 0)
           throw new JsonException("Stored tool image reference is incomplete.");
       Expect(reader, "\",\"mediaType\":");
-      if (text.Length > resultStart)
+      if (length > resultStart)
         Append('\n');
       Append("[image: ");
-      if (Truncated)
-        return;
       ReadString(reader);
       Append("]");
-      if (Truncated)
-        return;
       Expect(reader, ",\"byteLength\":");
       while (Next(reader) is >= '0' and <= '9')
         reader.Read();
@@ -101,7 +100,7 @@ internal sealed class ToolTranscriptPreview(int characterLimit) {
 
   private void ReadString(TextReader reader) {
     Expect(reader, "\"");
-    while (!Truncated) {
+    while (true) {
       int character = reader.Read();
       if (character == '"')
         return;

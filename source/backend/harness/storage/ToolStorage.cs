@@ -2,6 +2,7 @@ using Microsoft.Data.Sqlite;
 using Urd.Core.Execution;
 using Urd.Core.Sessions;
 using Urd.Core.Tools;
+using Urd.Core.Usage;
 
 namespace Urd.Core.Storage;
 
@@ -72,7 +73,7 @@ internal sealed class ToolStorage(Database database, ToolResultCodec results) {
     // Do not SELECT the payloads: even a bounded managed read would materialize SQLite's full TEXT values.
     using var inputBlob = new SqliteBlob(transaction.Connection!, "execution_tools", "arguments_json", rowId, readOnly: true);
     using var inputReader = new StreamReader(inputBlob);
-    string input = ToolTranscriptPreview.ReadText(inputReader, characterLimit, out bool inputTruncated);
+    string input = ToolTranscriptPreview.ReadText(inputReader, characterLimit, out long inputLength);
     bool background = reader.Bool("background");
     bool started = reader.Bool("started");
     bool hasResult = reader.Bool("has_result");
@@ -80,12 +81,12 @@ internal sealed class ToolStorage(Database database, ToolResultCodec results) {
     string name = reader.String("name");
     bool returnedPublished = reader.Bool("returned_published");
     string? output = null;
-    bool outputTruncated = false;
+    long outputLength = 0;
     bool projectionFinal = false;
     if (!returned && background && started) {
       projectionFinal = true;
       using var startedReader = new StringReader(ToolResultCodec.BackgroundStarted(requestId, callId));
-      output = ToolTranscriptPreview.ReadText(startedReader, characterLimit, out outputTruncated);
+      output = ToolTranscriptPreview.ReadText(startedReader, characterLimit, out outputLength);
     } else if (hasResult && (!returned || (background && returnedPublished && outcome is not null))) {
       using var resultBlob = new SqliteBlob(transaction.Connection!, "execution_tools", "result_json", rowId, readOnly: true);
       using var resultReader = new StreamReader(resultBlob);
@@ -93,12 +94,14 @@ internal sealed class ToolStorage(Database database, ToolResultCodec results) {
       projectionFinal = reader.NullableString(returned ? "completion_selection_json" : "result_selection_json") is not null;
       output = returned
           ? results.ReadModelCompletionText(requestId, callId, name, outcome!.Value, resultReader, characterLimit,
-              ReadReceivingModelSupportsImages(reader, "completion_selection_json"), out outputTruncated)
+              ReadReceivingModelSupportsImages(reader, "completion_selection_json"), out outputLength)
           : results.ReadModelResultText(resultReader, characterLimit,
-              ReadReceivingModelSupportsImages(reader, "result_selection_json"), out outputTruncated);
+              ReadReceivingModelSupportsImages(reader, "result_selection_json"), out outputLength);
     }
 
-    return new ToolCallTranscript(input, output, inputTruncated || outputTruncated, projectionFinal);
+    bool truncated = inputLength > input.Length || outputLength > (output?.Length ?? 0);
+    return new ToolCallTranscript(input, output, truncated, projectionFinal,
+        O200kTokens.Estimate(input, inputLength), output is null ? null : O200kTokens.Estimate(output, outputLength));
   });
 
   private static bool ReadReceivingModelSupportsImages(SqliteDataReader reader, string selectionColumn) {

@@ -4,7 +4,7 @@ import { Tooltip } from "../components/Tooltip.tsx";
 import { UsageControl } from "../usage/UsageControl.tsx";
 import type { SessionContextUsage, SessionWorkingTime } from "../sessions/SessionSnapshot.ts";
 import {
-  formatContextTokens,
+  formatTokenCount,
   formatWorkingTime,
   workingMilliseconds,
 } from "./SessionIndicatorValues.ts";
@@ -51,7 +51,7 @@ export function SessionIndicators({
     return () => clearInterval(timer);
   }, [active, startedAt, fenced]);
 
-  const contextLabel = `${formatContextTokens(contextUsage?.usedTokens)}/${formatContextTokens(contextWindow)}`;
+  const contextLabel = `${formatTokenCount(contextUsage?.usedTokens)}/${formatTokenCount(contextWindow)}`;
   const compactDisabled = !canCompact || compacting;
   const compactStatus = compacting ? "Compacting…" : compactionMessage;
   const ratio = contextUsage && contextWindow ? contextUsage.usedTokens / contextWindow : 0;

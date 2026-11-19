@@ -8,6 +8,7 @@ import {
   reusableToolCallPreview,
   toolCallClipboardText,
 } from "./ToolCallInspection.ts";
+import { formatTokenCount } from "./SessionIndicatorValues.ts";
 import "./tool-row-interactions.css";
 
 interface InspectionTarget {
@@ -519,11 +520,17 @@ export function ToolRowInteractionsProvider({
                 </p>
               )}
               <div class="tool-inspection-section">
-                <h3>Input</h3>
+                <h3>
+                  Input
+                  <TokenCount tokens={previewTokens(shownPreview, "input")} />
+                </h3>
                 <pre>{previewText(shownPreview, "input")}</pre>
               </div>
               <div class="tool-inspection-section">
-                <h3>Output</h3>
+                <h3>
+                  Output
+                  <TokenCount tokens={previewTokens(shownPreview, "output")} />
+                </h3>
                 <pre>{previewText(shownPreview, "output")}</pre>
               </div>
               {shownPreview?.state === "ready" && shownPreview.transcript.truncated && (
@@ -576,4 +583,14 @@ function previewText(preview: Preview | null, part: "input" | "output"): string 
   if (preview.state !== "ready") return "—";
   if (part === "input") return formatToolInput(preview.transcript.input);
   return preview.transcript.output ?? "Running…";
+}
+
+function previewTokens(preview: Preview | null, part: "input" | "output"): number | null {
+  if (preview?.state !== "ready") return null;
+  return part === "input" ? preview.transcript.inputTokens : preview.transcript.outputTokens;
+}
+
+function TokenCount({ tokens }: { tokens: number | null }) {
+  if (tokens === null) return null;
+  return <span class="tool-inspection-tokens">~{formatTokenCount(tokens)} tokens</span>;
 }

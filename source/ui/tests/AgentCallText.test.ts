@@ -4,7 +4,14 @@ import { agentAskTexts, agentAnswerText } from "../chat/AgentCallText.ts";
 import type { ToolCallTranscript } from "../sessions/Messages.ts";
 
 function transcript(input: string, output: string | null): ToolCallTranscript {
-  return { input, output, truncated: false, projectionFinal: true };
+  return {
+    input,
+    output,
+    truncated: false,
+    projectionFinal: true,
+    inputTokens: 1,
+    outputTokens: 1,
+  };
 }
 
 void test("ask calls read the prompt argument and the output answer", () => {

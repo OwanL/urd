@@ -1,17 +1,17 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  formatContextTokens,
+  formatTokenCount,
   formatWorkingTime,
   workingMilliseconds,
 } from "../chat/SessionIndicatorValues.ts";
 
 void test("context stays compact and distinguishes unknown from zero", () => {
-  assert.equal(formatContextTokens(null), "?");
-  assert.equal(formatContextTokens(0), "0");
-  assert.equal(formatContextTokens(999), "999");
-  assert.equal(formatContextTokens(123_456), "123.5k");
-  assert.equal(formatContextTokens(200_000), "200k");
+  assert.equal(formatTokenCount(null), "?");
+  assert.equal(formatTokenCount(0), "0");
+  assert.equal(formatTokenCount(999), "999");
+  assert.equal(formatTokenCount(123_456), "123.5k");
+  assert.equal(formatTokenCount(200_000), "200k");
 });
 
 void test("working time adds only the active interval and settles without ticking", () => {

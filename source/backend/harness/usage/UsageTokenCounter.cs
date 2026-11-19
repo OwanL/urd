@@ -13,7 +13,6 @@ public sealed class UsageTokenCounter {
     "gpt-5.2", "gpt-5.1", "gpt-5", "gpt-5-mini", "gpt-5-nano",
     "gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini", "o3"
   };
-  private static readonly Lazy<TiktokenTokenizer?> O200kTokenizer = new(CreateTokenizer);
   private readonly TiktokenTokenizer? tokenizer;
   private readonly object outputGate = new();
   private readonly StringBuilder output = new();
@@ -24,7 +23,7 @@ public sealed class UsageTokenCounter {
 
   public UsageTokenCounter(string model) {
     ArgumentNullException.ThrowIfNull(model);
-    if (O200kModels.Contains(model)) tokenizer = O200kTokenizer.Value;
+    if (O200kModels.Contains(model)) tokenizer = O200kTokens.Instance;
   }
 
   public long? CountInput(IReadOnlyList<ChatMessage> messages, ChatOptions options) {
@@ -192,18 +191,5 @@ public sealed class UsageTokenCounter {
     if (value < 0 || total > long.MaxValue - value) return false;
     total += value;
     return true;
-  }
-
-  private static TiktokenTokenizer? CreateTokenizer() {
-    try {
-      // Text BPE only; provider framing, cache decisions and hidden reasoning remain provisional.
-      return TiktokenTokenizer.CreateForModel("gpt-4o");
-    } catch (ArgumentException) {
-      return null;
-    } catch (InvalidOperationException) {
-      return null;
-    } catch (NotSupportedException) {
-      return null;
-    }
   }
 }

@@ -147,12 +147,8 @@ export function useTranscriptViewport({
       pendingRestoreRef.current = snapshot.anchor;
   }
 
-  const onReadsSuspended = useCallback(() => {
-    void captureVisibleRef
-      .current()
-      .catch(() => {})
-      .finally(() => flushNavigationRef.current());
-  }, []);
+  // Scrolling already recorded the reading position, so suspension only persists it.
+  const onReadsSuspended = useCallback(() => flushNavigationRef.current(), []);
   // Install page lifecycle listeners before the effects that start position reads.
   const readLifecycle = useRef<Pick<
     ReturnType<typeof usePositionWindow>,

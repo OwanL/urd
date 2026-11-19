@@ -28,6 +28,7 @@ internal sealed class SessionExecution : IDisposable {
   private Task? titleWork;
   private int titleFinished;
   private Guid? automaticBoundary;
+  private RequestContextEstimate? contextEstimate;
   private readonly CancellationTokenSource stop = new();
   private Task? stopCallbacks;
   private readonly ManualCompactionRequest? manualCompactionRequest;
@@ -58,6 +59,8 @@ internal sealed class SessionExecution : IDisposable {
   internal bool IsStopping => stop.IsCancellationRequested;
   internal bool IsManualCompaction => manualCompactionRequest is not null;
   internal bool IsCompacting { get; set; }
+  internal RequestContextEstimate? ContextEstimate => Volatile.Read(ref contextEstimate);
+  internal void RetireContextEstimate() => Volatile.Write(ref contextEstimate, null);
   internal bool HasPendingTools => toolExecution.HasRunningBackgroundTools;
   internal bool HasPendingAuxiliary => titleWork is not null && Volatile.Read(ref titleFinished) == 0;
   internal Task JoinOwnedWorkAsync() => Task.WhenAll(toolExecution.JoinBackgroundToolsAsync(),
@@ -87,6 +90,7 @@ internal sealed class SessionExecution : IDisposable {
     bool canCompactAndRetry = result.Failure == ProviderFailure.ContextWindowExceeded
         && !result.OutputObserved && !IsStopping;
     if (canCompactAndRetry && await recorder.CanRetryOverflowAsync(request.RequestId)) {
+      RetireContextEstimate();
       try {
         LlmRequest? reducedRequest = await CompactHistoryAsync(request.RequestId, CompactionReason.Overflow);
         if (reducedRequest is null)
@@ -366,9 +370,15 @@ internal sealed class SessionExecution : IDisposable {
       return (CreateRequestResult(request.RequestId, failure), []);
     }
 
+    await using RequestContextEstimate? estimate = RequestContextEstimate.SupportsModel(selection.ModelId)
+        ? new(recorder.PublishContextEstimateAsync) : null;
+    if (estimate is not null) {
+      Volatile.Write(ref contextEstimate, estimate);
+      options.AdditionalProperties[RequestContextEstimate.PropertyName] = estimate;
+    }
     LlmResponseRunner.Result response = await LlmResponseRunner.RunAsync(client, messages, options,
         request.RequestId, SaveChunkAsync,
-        (callId, name) => RecordToolCallAsync(request.RequestId, callId, name), stop.Token);
+        (callId, name) => RecordToolCallAsync(request.RequestId, callId, name), stop.Token, contextEstimate: estimate);
     LlmRequestResult result = CreateRequestResult(request.RequestId, response.Failure);
     return (result with {
       ToolCalls = result.Outcome == ExecutionOutcome.Completed ? response.ToolCalls : null,

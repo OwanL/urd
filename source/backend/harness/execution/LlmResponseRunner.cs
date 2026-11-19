@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using Urd.Core.Context;
 using Urd.Core.Providers;
 using Urd.Core.Usage;
 
@@ -17,7 +18,8 @@ internal static class LlmResponseRunner {
       IReadOnlyList<ChatMessage> messages, ChatOptions options, Guid requestId,
       Func<LlmResponseChunk, Task> saveChunkAsync,
       Func<string, string?, Task> recordToolCallAsync,
-      CancellationToken cancellation, Func<LlmResponseChunk, Task>? saveReasoningAsync = null) {
+      CancellationToken cancellation, Func<LlmResponseChunk, Task>? saveReasoningAsync = null,
+      RequestContextEstimate? contextEstimate = null) {
     using var requestStop = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
     var writer = new LlmResponseWriter(requestId, saveChunkAsync, recordToolCallAsync);
     // Reasoning preview reuses the same bounded writer; its text runs are never tool-call
@@ -26,7 +28,7 @@ internal static class LlmResponseRunner {
         : new(requestId, saveReasoningAsync, (_, _) => Task.CompletedTask);
     var response = new LlmResponseAccumulator(writer, reasoningWriter);
     (Exception? failure, bool outputObserved) = await StreamAsync(
-        borrowedClient, messages, options, requestStop, writer, reasoningWriter, response, cancellation);
+        borrowedClient, messages, options, requestStop, writer, reasoningWriter, response, contextEstimate, cancellation);
     if (failure is ProviderOperationException && !cancellation.IsCancellationRequested) {
       try {
         await writer.FlushAsync();
@@ -41,7 +43,7 @@ internal static class LlmResponseRunner {
   private static async Task<(Exception? Failure, bool OutputObserved)> StreamAsync(IChatClient borrowedClient,
       IReadOnlyList<ChatMessage> messages, ChatOptions options, CancellationTokenSource requestStop,
       LlmResponseWriter writer, LlmResponseWriter? reasoningWriter, LlmResponseAccumulator response,
-      CancellationToken cancellation) {
+      RequestContextEstimate? contextEstimate, CancellationToken cancellation) {
     IAsyncEnumerator<ChatResponseUpdate>? updates = null;
     Task<bool>? pendingRead = null;
     Exception? failure = null;
@@ -52,11 +54,13 @@ internal static class LlmResponseRunner {
           .GetAsyncEnumerator(requestStop.Token);
 
       while (await WaitForUpdateAndFlushAsync(writer, reasoningWriter,
-          pendingRead ??= updates.MoveNextAsync().AsTask(), cancellation)) {
+          pendingRead ??= updates.MoveNextAsync().AsTask(), contextEstimate, cancellation)) {
         pendingRead = null;
         cancellation.ThrowIfCancellationRequested();
         outputObserved |= updates.Current.Contents.Any(content => content is not UsageContent);
         await response.AddUpdateAsync(updates.Current);
+        if (contextEstimate is not null)
+          await contextEstimate.ObserveAsync(updates.Current);
       }
 
       pendingRead = null;
@@ -71,29 +75,30 @@ internal static class LlmResponseRunner {
   }
 
   private static async Task<bool> WaitForUpdateAndFlushAsync(LlmResponseWriter writer,
-      LlmResponseWriter? reasoningWriter, Task<bool> pendingRead, CancellationToken cancellation) {
-    Task? flushDelay = EarliestFlushDelay(writer, reasoningWriter);
-    if (flushDelay is not null &&
-        (flushDelay.IsCompleted || await Task.WhenAny(pendingRead, flushDelay) == flushDelay)) {
+      LlmResponseWriter? reasoningWriter, Task<bool> pendingRead, RequestContextEstimate? contextEstimate,
+      CancellationToken cancellation) {
+    while (true) {
+      Task? outputDelay = Earliest(writer.FlushDelay, reasoningWriter?.FlushDelay);
+      Task? contextDelay = contextEstimate?.FlushDelay;
+      Task? delay = Earliest(outputDelay, contextDelay);
+      if (delay is null || (!delay.IsCompleted && await Task.WhenAny(pendingRead, delay) == pendingRead))
+        return await pendingRead;
+
       cancellation.ThrowIfCancellationRequested();
       // Flushing clears the deadline; only another update can start a new one.
-      await writer.FlushAsync();
-      if (reasoningWriter is not null)
-        await reasoningWriter.FlushAsync();
+      if (outputDelay?.IsCompleted == true) {
+        await writer.FlushAsync();
+        if (reasoningWriter is not null) await reasoningWriter.FlushAsync();
+      }
+      if (contextDelay?.IsCompleted == true)
+        await contextEstimate!.FlushAsync();
     }
-
-    return await pendingRead;
   }
 
-  // Either writer's oldest unsaved text may mature while the provider idles.
-  private static Task? EarliestFlushDelay(LlmResponseWriter writer, LlmResponseWriter? reasoningWriter) {
-    Task? main = writer.FlushDelay;
-    Task? reasoning = reasoningWriter?.FlushDelay;
-    if (main is null || reasoning is null)
-      return main ?? reasoning;
-    if (reasoning.IsCompleted)
-      return reasoning;
-    return main.IsCompleted ? main : Task.WhenAny(main, reasoning);
+  private static Task? Earliest(Task? first, Task? second) {
+    if (first is null || second is null) return first ?? second;
+    if (second.IsCompleted) return second;
+    return first.IsCompleted ? first : Task.WhenAny(first, second);
   }
 
   // Attempts every step even when an earlier one fails. A cleanup failure leaves the

@@ -90,7 +90,16 @@ internal sealed class SessionExecutionRecorder(SessionBase session, UrdStore sto
 
   internal Task<bool> CompleteRequestAsync(LlmRequestResult outcome) =>
     RecordChangeAsync(() => store.LlmResponses.CompleteRequest(Identity, outcome),
-      allowStopping: outcome.Outcome != ExecutionOutcome.Completed, afterSave: imageImports.CloseResponse);
+      allowStopping: outcome.Outcome != ExecutionOutcome.Completed, afterSave: () => {
+        session.CurrentExecution!.RetireContextEstimate();
+        imageImports.CloseResponse();
+      });
+
+  internal async Task PublishContextEstimateAsync(RequestContextEstimate estimate, CancellationToken cancellation) {
+    using var _ = await sessionLock.AcquireAsync(cancellation);
+    if (session.CanRecordExecution(Identity) && ReferenceEquals(session.CurrentExecution!.ContextEstimate, estimate))
+      session.PublishChange();
+  }
 
   internal Task JoinImageImportsAsync() => imageImports.JoinAsync();
 

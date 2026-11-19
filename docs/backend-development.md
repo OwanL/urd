@@ -134,6 +134,23 @@ only; earlier failures, completed replies and paired tool results remain. The sa
 survives later requests and reopening without changing the visible transcript or invoking
 historical tool calls. Ordinary sends and compaction do not create omission decisions.
 
+## Context meter
+
+The session snapshot reports `measured`, `estimated`, or `lastMeasured` context usage.
+A conversation send can estimate the projected prompt for a recognized text model (including
+Sol 6.2) and add observable output in batches, including Responses tool-argument deltas.
+Prompt counting runs alongside inference, outside the session lock. It samples large text
+and bounds structured JSON work. Images and unsupported representations can leave the
+last measurement in place. Encrypted reasoning and provider framing are not known counts.
+
+Estimates are in-memory, scoped to one send attempt, and do not affect provider usage,
+accounting or compaction. Session notices keep the browser up to date without polling or
+saving per-chunk estimates. A terminal provider count replaces the estimate once committed.
+A bounded lookup can hold a prior count while the next send prepares or after a Stop with
+no usage; measurements from before a history edit, compaction, or an incompatible model
+are not substituted. The browser marks estimates with `~`. Live accuracy against real
+provider usage is not established by synthetic stream tests.
+
 ## History compaction
 
 Model settings and frozen selections carry an optional positive `ContextWindow`; unknown limits

@@ -10,6 +10,7 @@ internal sealed class ScriptedOpenAIHandler(string response, string contentType 
   internal List<ScriptedOpenAIRequest> Requests { get; } = [];
   internal bool HoldAtEnd { get; init; }
   internal bool FailAtEnd { get; init; }
+  internal (int Offset, Task Release)? ReadGate { get; init; }
   internal int StreamDisposals => Volatile.Read(ref streamDisposals);
   internal TaskCompletionSource ReachedEnd { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -32,6 +33,10 @@ internal sealed class ScriptedOpenAIHandler(string response, string contentType 
         ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
 
     public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) {
+      if (owner.ReadGate is { } gate) {
+        if (Position == gate.Offset) await gate.Release.WaitAsync(cancellationToken);
+        else if (Position < gate.Offset) buffer = buffer[..Math.Min(buffer.Length, gate.Offset - (int)Position)];
+      }
       int count = await base.ReadAsync(buffer, cancellationToken);
       if (count != 0) return count;
       owner.ReachedEnd.TrySetResult();

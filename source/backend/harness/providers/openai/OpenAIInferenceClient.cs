@@ -6,6 +6,7 @@ using Microsoft.Extensions.AI;
 using OpenAI;
 using OpenAI.Chat;
 using OpenAI.Responses;
+using Urd.Core.Context;
 using ChatMessage = Microsoft.Extensions.AI.ChatMessage;
 
 #pragma warning disable OPENAI001, MEAI001 // Pinned official native streaming adapters.
@@ -25,15 +26,20 @@ internal sealed class OpenAIInferenceClient(HttpClient httpClient, TimeSpan? rea
     IReadOnlyList<ChatMessage> history;
     ChatOptions wireOptions;
     LlmProviderScope scope;
+    RequestContextEstimate? estimate;
     try {
       cancellationToken.ThrowIfCancellationRequested();
+      estimate = TakeContextEstimate(ref options);
       wireOptions = ProviderModelOptions.Prepare(state.Connection, options);
       scope = new(state.Connection.Id, state.Generation, state.Connection.Api, options.ModelId!);
-      history = LlmMessageProjection.Prepare(messages, scope);
+      IReadOnlyList<ChatMessage>? input = estimate is null ? null : messages as IReadOnlyList<ChatMessage> ?? messages.ToArray();
+      history = LlmMessageProjection.Prepare(input ?? messages, scope);
       // ChatGPT's Responses endpoint rejects system messages, including saved starting context.
       if (state.Connection.Route == ProviderRoute.ChatGpt)
         history = history.Select(ForChatGpt).ToArray();
       client = CreateClient(state, options.ModelId!, progress);
+      if (estimate is not null && input is not null)
+        estimate.Prepare(ContextEstimateInput(history, input, scope), options);
     } catch (Exception error) when (CanClassify(error, cancellationToken)) {
       throw ProviderOperationException.FromProviderError(error, contextWindow: true, credentials: state.Credentials);
     }
@@ -64,11 +70,17 @@ internal sealed class OpenAIInferenceClient(HttpClient httpClient, TimeSpan? rea
             };
           }
 
+          BinaryData? toolArgumentDelta = estimate is not null && nativeUpdate.RawRepresentation is StreamingResponseFunctionCallArgumentsDeltaUpdate arguments
+              ? arguments.Delta : null;
           ChatResponseUpdate? update;
           try {
             update = guard.Accept(nativeUpdate);
           } catch (Exception error) when (CanClassify(error, cancellationToken)) {
             throw ProviderOperationException.FromProviderError(error, contextWindow: true, credentials: state.Credentials);
+          }
+          if (toolArgumentDelta is not null) {
+            update ??= new(); // No visible output or tool execution yet.
+            (update.AdditionalProperties ??= [])[RequestContextEstimate.ToolArgumentDeltaProperty] = toolArgumentDelta;
           }
           if (update is not null) yield return update;
         }
@@ -91,6 +103,25 @@ internal sealed class OpenAIInferenceClient(HttpClient httpClient, TimeSpan? rea
       yield return final;
     }
   }
+
+  private static RequestContextEstimate? TakeContextEstimate(ref ChatOptions options) {
+    if (options.AdditionalProperties?.TryGetValue(RequestContextEstimate.PropertyName, out object? value) != true
+        || value is not RequestContextEstimate estimate)
+      return null;
+
+    options = options.Clone();
+    options.AdditionalProperties = new(options.AdditionalProperties!);
+    options.AdditionalProperties.Remove(RequestContextEstimate.PropertyName);
+    return estimate;
+  }
+
+  // Native Responses replay holds SDK objects. For those items, count the already decoded visible
+  // content, not the opaque wire envelope or encrypted reasoning. Projection still owns the send.
+  private static IEnumerable<ChatMessage> ContextEstimateInput(IReadOnlyList<ChatMessage> prepared,
+      IReadOnlyList<ChatMessage> original, LlmProviderScope scope) => scope.Api == LlmApi.OpenAIResponses
+      ? prepared.Select((message, index) => original[index].RawRepresentation is LlmProviderResponse response
+          && response.Scope == scope ? original[index] : message)
+      : prepared;
 
   private static ChatMessage ForChatGpt(ChatMessage message) {
     if (message.Role != ChatRole.System)

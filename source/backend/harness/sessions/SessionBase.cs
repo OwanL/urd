@@ -132,6 +132,9 @@ public abstract class SessionBase {
         && CurrentExecution is { IsStopping: false } && snapshot.UnsettledExecutionId == CurrentExecution.ExecutionId;
     return snapshot with {
       IsCompacting = CurrentExecution?.IsCompacting == true,
+      ContextUsage = !snapshot.AdmissionFenced && !snapshot.StopRequested
+          && CurrentExecution is { IsCompacting: false, ContextEstimate.UsedTokens: long liveTokens }
+          ? new(liveTokens, SessionContextUsageSource.Estimated) : snapshot.ContextUsage,
       WorkingDirectory = WorkingDirectory,
       CanChangeWorkingDirectory = CanChangeWorkingDirectory(snapshot),
       CanContinue = snapshot.CanContinue && locallyIdle,

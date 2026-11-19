@@ -1,4 +1,5 @@
 using Urd.Core.Sessions;
+using Urd.Core.Context;
 using Urd.Core.Concurrency;
 
 namespace Urd.Core.Execution;
@@ -15,6 +16,8 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock sess
   internal Guid ExecutionId => Identity.ExecutionId;
   internal bool IsStopping => execution.IsStopping;
   internal bool IsCompacting => execution.IsCompacting;
+  internal RequestContextEstimate? ContextEstimate => execution.ContextEstimate;
+  internal void RetireContextEstimate() => execution.RetireContextEstimate();
   internal void SetCompacting(bool value) => execution.IsCompacting = value;
   internal bool IsWaitingForBackgroundTools { get; private set; }
   internal Task<SessionExecutionResult> Settlement => settlement.Task;

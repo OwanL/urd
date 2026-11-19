@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Threading.Channels;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.AI;
 using SkiaSharp;
@@ -178,6 +179,95 @@ public sealed class ProviderSessionExecutionTests {
     TranscriptHistoryPage reopenedHistory = await reopened.Session.Transcript.ReadHistoryAsync(
         new(TranscriptHistoryMode.Latest, 0));
     Assert.Equal(settlement, Assert.Single(reopenedHistory.Settlements));
+  }
+
+  [Fact]
+  public async Task ContextMeterEstimatesAcrossAResponsesToolLoopAndThenUsesReportedCounts() {
+    const string model = "gpt-6.2-sol";
+    using var database = new TemporaryDatabase();
+    using var timeout = new CancellationTokenSource(TestTimeout);
+    TaskCompletionSource firstBody = Signal(), firstUsage = Signal(), toolStarted = Signal(), toolResult = Signal(), secondBody = Signal();
+    const string firstDelta = "prefix ";
+    string text = string.Concat(Enumerable.Repeat("some visible output ", 512));
+    string arguments = JsonSerializer.Serialize(new { key = string.Concat(Enumerable.Repeat("tool argument ", 650)) });
+    JsonObject call = JsonNode.Parse(ProviderModelStreams.Call)!.AsObject();
+    call["arguments"] = arguments;
+    string initialStream = ProviderModelStreams.Responses(
+        [ProviderModelStreams.Message.Replace("hello", firstDelta + text), ProviderModelStreams.Reasoning, call.ToJsonString()],
+        text: text, usage: new { input_tokens = 100, output_tokens = 90 }, model: model,
+        firstDelta: firstDelta, toolArgumentDelta: arguments);
+    int beforeUsage = initialStream.IndexOf("event: response.completed", StringComparison.Ordinal);
+    using var first = new ScriptedOpenAIHandler(initialStream) {
+      ReadGate = (System.Text.Encoding.UTF8.GetByteCount(initialStream.AsSpan(0, beforeUsage)), firstUsage.Task)
+    };
+    using var second = new ScriptedOpenAIHandler(ProviderModelStreams.Responses(
+        usage: new { input_tokens = 20_000, output_tokens = 17 }, model: model)
+        .Replace("msg_fixture", "msg_next").Replace("resp_fixture", "resp_next"));
+    using var firstTransport = new HttpMessageInvoker(first, disposeHandler: false);
+    using var secondTransport = new HttpMessageInvoker(second, disposeHandler: false);
+    int requests = 0;
+    var modelHandler = new ControlledProviderHandler(async (request, cancellation) => {
+      switch (Interlocked.Increment(ref requests)) {
+        case 1:
+          await firstBody.Task.WaitAsync(cancellation);
+          return await firstTransport.SendAsync(request, cancellation);
+        case 2:
+          await secondBody.Task.WaitAsync(cancellation);
+          return await secondTransport.SendAsync(request, cancellation);
+        case 3:
+          await Task.Delay(Timeout.InfiniteTimeSpan, cancellation);
+          break;
+      }
+      throw new InvalidOperationException("Unexpected provider request.");
+    });
+    var lookup = new TestAgentTool("lookup", async (_, _, cancellation) => {
+      toolStarted.TrySetResult();
+      await toolResult.Task.WaitAsync(cancellation);
+      return new(string.Concat(Enumerable.Repeat("lookup result text ", 4096)), []);
+    });
+    await using var fixture = new ManagedSession(database, modelHandler);
+    await fixture.OpenAsync(LlmApi.OpenAIResponses, new ToolCatalog([lookup]));
+    var selection = new LlmSelection(fixture.Connection, model, null, ModelFamily.OpenAI, false, 500_000);
+    var changes = Channel.CreateBounded<bool>(1);
+    using var watcher = await fixture.Session.SubscribeAsync(change => {
+      if (change.Status is null) changes.Writer.TryWrite(true);
+    }, watched: true, timeout.Token);
+    UserMessageReceipt receipt = await fixture.Session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, "go", selection));
+    long prompt = await WaitForEstimateAsync(above: 0);
+    firstBody.SetResult();
+    // The stream is held without any more deltas. The last batch must still flush, including tool JSON.
+    long streamed = await WaitForEstimateAsync(prompt + 2_500);
+    Assert.InRange(streamed - prompt, 2_500, 3_300);
+    firstUsage.SetResult();
+    await toolStarted.Task.WaitAsync(timeout.Token);
+    Assert.Equal(new SessionContextUsage(190, SessionContextUsageSource.Measured),
+        (await fixture.Session.ReadSnapshotAsync(timeout.Token)).ContextUsage);
+    toolResult.SetResult();
+    long nextPrompt = await WaitForEstimateAsync(streamed + 5_000);
+    Assert.InRange(nextPrompt - streamed, 9_000, 16_000);
+    secondBody.SetResult();
+    Assert.Equal(ExecutionOutcome.Completed, (await fixture.Session.WaitForExecutionFinishAsync(receipt.ExecutionId!.Value)
+        .WaitAsync(timeout.Token)).Outcome);
+    Assert.Equal(new SessionContextUsage(20_017, SessionContextUsageSource.Measured),
+        (await fixture.Session.ReadSnapshotAsync(timeout.Token)).ContextUsage);
+
+    var next = await fixture.Session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, "one more", selection));
+    Guid stopped = Assert.IsType<Guid>(next.ExecutionId);
+    _ = await WaitForEstimateAsync(above: 0);
+    await fixture.Session.RequestStopAsync(stopped).WaitAsync(timeout.Token);
+    Assert.Equal(ExecutionOutcome.Cancelled, (await fixture.Session.WaitForExecutionFinishAsync(stopped)
+        .WaitAsync(timeout.Token)).Outcome);
+    Assert.Equal(new SessionContextUsage(20_017, SessionContextUsageSource.LastMeasured),
+        (await fixture.Session.ReadSnapshotAsync(timeout.Token)).ContextUsage);
+
+    async Task<long> WaitForEstimateAsync(long above) {
+      while (true) {
+        SessionSnapshot snapshot = await fixture.Session.ReadSnapshotAsync(timeout.Token);
+        if (snapshot.ContextUsage is { Source: SessionContextUsageSource.Estimated } usage && usage.UsedTokens > above)
+          return usage.UsedTokens;
+        await changes.Reader.ReadAsync(timeout.Token);
+      }
+    }
   }
 
   [Fact]

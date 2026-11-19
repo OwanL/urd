@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Compaction;
+using Urd.Core.Context;
 using Urd.Core.Execution;
 using Urd.Core.Preferences;
 using Urd.Core.Providers;
@@ -407,7 +408,8 @@ public sealed class AutomaticCompactionTests {
     });
     var session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid(), Path.GetDirectoryName(database.Path)), store, _ => client,
         new ToolCatalog([tool]));
-    UserMessageReceipt receipt = await AcceptAsync(session, new string('u', 100_000), TestLlmSelection.Default);
+    UserMessageReceipt receipt = await AcceptAsync(session, new string('u', 100_000),
+        TestLlmSelection.Default with { ModelId = "gpt-6.2-sol" });
 
     Assert.Equal(ExecutionOutcome.Completed,
         (await session.WaitForExecutionFinishAsync(Assert.IsType<Guid>(receipt.ExecutionId)).WaitAsync(TestTimeout)).Outcome);
@@ -419,6 +421,10 @@ public sealed class AutomaticCompactionTests {
     Guid compactionId = store.Compactions.ReadContext(session.Id, revision).PreviousCompaction!.Id;
     Assert.Equal(CompactionReason.Overflow, (await session.ReadCompactionAsync(compactionId, revision))?.Reason);
     Assert.Equal(2, StoredExecutions.ReadRequests(database).Count);
+    // Overflow retries the stored request without carrying its live estimate forward.
+    object? BeforeOrAfterRetry(int index) => client.Options[index]!.AdditionalProperties![RequestContextEstimate.PropertyName];
+    Assert.NotSame(Assert.IsType<RequestContextEstimate>(BeforeOrAfterRetry(1)),
+        Assert.IsType<RequestContextEstimate>(BeforeOrAfterRetry(3)));
     Assert.Contains(client.Requests[3], message => message.Contents.OfType<TextContent>()
         .Any(content => content.Text.Contains("[HISTORY SUMMARY:")));
     Assert.Contains(client.Requests[3], message => message.Role == ChatRole.Tool &&

@@ -23,8 +23,10 @@ public sealed class UsageTokenCounter {
 
   public UsageTokenCounter(string model) {
     ArgumentNullException.ThrowIfNull(model);
-    if (O200kModels.Contains(model)) tokenizer = O200kTokens.Instance;
+    if (UsesO200k(model)) tokenizer = O200kTokens.Instance;
   }
+
+  internal static bool UsesO200k(string model) => O200kModels.Contains(model);
 
   public long? CountInput(IReadOnlyList<ChatMessage> messages, ChatOptions options) {
     ArgumentNullException.ThrowIfNull(messages);

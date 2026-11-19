@@ -9,7 +9,8 @@ internal static class ProviderModelStreams {
   internal const string Call = """{"type":"function_call","id":"fc_fixture","status":"completed","call_id":"call_fixture","name":"lookup","arguments":"{\"key\":\"abc\"}"}""";
 
   internal static string Responses(string[]? items = null, string? terminal = "response.completed", string text = "hello",
-      bool itemDone = true, string? terminalItems = null, object? usage = null, string model = "fixture-model") {
+      bool itemDone = true, string? terminalItems = null, object? usage = null, string model = "fixture-model",
+      string? firstDelta = null, string? toolArgumentDelta = null) {
     items ??= [Message];
     JsonElement[] output = items.Select(item => JsonSerializer.Deserialize<JsonElement>(item)).ToArray();
     object Envelope(string status, object nativeOutput) => new {
@@ -20,8 +21,13 @@ internal static class ProviderModelStreams {
     };
     int sequence = 0;
     string stream = Event("response.created", new { type = "response.created", sequence_number = sequence++, response = Envelope("in_progress", Array.Empty<object>()) });
-    if (text.Length > 0) stream += Event("response.output_text.delta", new {
-      type = "response.output_text.delta", sequence_number = sequence++, item_id = "msg_fixture", output_index = 0, content_index = 0, delta = text
+    string Delta(string value) => Event("response.output_text.delta", new {
+      type = "response.output_text.delta", sequence_number = sequence++, item_id = "msg_fixture", output_index = 0, content_index = 0, delta = value
+    });
+    if (firstDelta is not null) stream += Delta(firstDelta);
+    if (text.Length > 0) stream += Delta(text);
+    if (toolArgumentDelta is not null) stream += Event("response.function_call_arguments.delta", new {
+      type = "response.function_call_arguments.delta", sequence_number = sequence++, item_id = "fc_fixture", output_index = 2, delta = toolArgumentDelta
     });
     if (itemDone) {
       for (int index = 0; index < output.Length; index++) stream += Event("response.output_item.done", new {

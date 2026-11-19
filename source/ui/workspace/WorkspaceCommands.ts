@@ -1,3 +1,5 @@
+import { CompactionCommands } from "./CompactionCommands.ts";
+import { SubmissionCommands } from "./SubmissionCommands.ts";
 import { RequestError } from "../http/RequestError.ts";
 import type {
   ChatCompactionState,
@@ -12,20 +14,8 @@ import type {
   SubagentProviderConnectionIds,
   SubagentProviders,
 } from "../providers/subagents/SubagentProviderSelection.ts";
-import type {
-  ContinuationReceipt,
-  ContinuationSubmission,
-} from "../sessions/inputs/Continuation.ts";
-import type { CompactionReceipt } from "../sessions/inputs/Compaction.ts";
-import {
-  applyContinuationReceipt,
-  applyReceipt,
-  beginContinuation,
-  beginSubmission,
-  executionSettled,
-  newChat,
-  submissionTextError,
-} from "../chat/ChatState.ts";
+import type { ContinuationReceipt } from "../sessions/inputs/Continuation.ts";
+import { executionSettled, newChat } from "../chat/ChatState.ts";
 
 import type { WorkspaceState } from "./WorkspaceState.ts";
 import type { SessionClient } from "../sessions/SessionClient.ts";
@@ -96,6 +86,8 @@ export function pendingInputRemovalKey(
 
 // Coordinates durable workspace commands without retrying uncertain dispatches.
 export class WorkspaceCommands {
+  private readonly submissions: SubmissionCommands;
+  private readonly compactions: CompactionCommands;
   private readonly client: WorkspaceCommandClient;
   private readonly access: WorkspaceCommandAccess;
   private readonly changed: (state: WorkspaceCommandState) => void;
@@ -110,7 +102,6 @@ export class WorkspaceCommands {
   private readonly continuationReceiptReads = new Map<string, AbortController>();
   private readonly pendingInputRemovals = new Set<string>();
   private readonly stoppingRequests = new Set<string>();
-  private readonly compactionReads = new Map<string, boolean>();
 
   constructor(
     client: WorkspaceCommandClient,
@@ -126,6 +117,40 @@ export class WorkspaceCommands {
     this.reportError = reportError;
     this.refreshSnapshot = refreshSnapshot;
     this.preferenceSaveBlocks = preferenceSaveBlocks;
+    this.compactions = new CompactionCommands(client, {
+      get: (id) => this.state.compactions[id],
+      set: (id, state) => this.setCompaction(id, state),
+      refreshSnapshot,
+    });
+    this.submissions = new SubmissionCommands(client, access, {
+      executionSettingsSaving: (id) => this.executionSettingsSaving(id),
+      isCompacting: (id) => this.isCompacting(id),
+      isStopping: (id) => !!this.state.stopping[id],
+      hasPendingInputRemoval: (id) => this.hasPendingInputRemoval(id),
+      isChecking: (id) => this.checks.has(id),
+      isCheckingContinuation: (id) => this.continuationChecks.has(id),
+      beginReceiptRead: (id, controller) => {
+        if (controller) this.receiptReads.set(id, controller);
+        this.checks.add(id);
+        this.setChecking(id, true);
+      },
+      endReceiptRead: (id) => {
+        this.checks.delete(id);
+        this.receiptReads.delete(id);
+        this.setChecking(id, false);
+      },
+      beginContinuationReceiptRead: (id, controller) => {
+        if (controller) this.continuationReceiptReads.set(id, controller);
+        this.continuationChecks.add(id);
+        this.setCheckingContinuation(id, true);
+      },
+      endContinuationReceiptRead: (id) => {
+        this.continuationChecks.delete(id);
+        this.continuationReceiptReads.delete(id);
+        this.setCheckingContinuation(id, false);
+      },
+      refreshSnapshot,
+    });
   }
 
   get status(): WorkspaceCommandState {
@@ -206,107 +231,30 @@ export class WorkspaceCommands {
     }
   }
 
-  async send(
-    id: string,
-    snapshot: SessionSnapshot,
-    active: boolean,
-    canSend: boolean,
-  ): Promise<void> {
-    if (
-      !canSend ||
-      !this.access.canPersist() ||
-      this.isCompacting(id) ||
-      this.executionSettingsSaving(id)
-    )
-      return;
-    const latest = this.access.read().chats[id];
-    const selection = active
-      ? snapshot.latestLlmSelection
-      : (latest?.selection ?? snapshot.latestLlmSelection);
-    if (
-      !latest ||
-      latest.pending ||
-      latest.pendingContinuation ||
-      latest.messageEdit ||
-      !selection ||
-      !latest.draft.trim() ||
-      submissionTextError(latest.draft)
-    )
-      return;
-
-    const original: UserMessageSubmission = {
-      submissionId: crypto.randomUUID(),
-      expectedHistoryRevision: snapshot.historyRevision,
-      text: latest.draft,
-      llmSelection: selection,
-    };
-    const persisted = this.access.updateChat(id, (previous) => ({
-      ...beginSubmission(previous, original),
-    }));
-    if (!persisted) {
-      this.access.updateChat(id, (previous) =>
-        previous.pending
-          ? {
-              ...previous,
-              pending: { ...previous.pending, status: "uncertain" },
-              error: "Send was not dispatched because the journal could not be saved.",
-            }
-          : previous,
-      );
-      return;
-    }
-    await this.retryOriginalSubmission(id);
+  send(id: string, snapshot: SessionSnapshot, active: boolean, canSend: boolean): Promise<void> {
+    return this.submissions.send(id, snapshot, active, canSend);
   }
-
-  async continueSession(
+  continueSession(id: string, snapshot: SessionSnapshot, canContinue: boolean): Promise<void> {
+    return this.submissions.continueSession(id, snapshot, canContinue);
+  }
+  resendNotSent(
     id: string,
     snapshot: SessionSnapshot,
-    canContinue: boolean,
-  ): Promise<void> {
-    const latest = this.access.read().chats[id];
-    const selection = latest?.selection ?? snapshot.latestLlmSelection;
-    const expectedLastExecutionId = snapshot.lastSettlement?.executionId;
-    if (
-      !canContinue ||
-      this.executionSettingsSaving(id) ||
-      !this.access.canPersist() ||
-      snapshot.sessionId !== id ||
-      snapshot.canContinue !== true ||
-      snapshot.unsettledExecutionId !== null ||
-      snapshot.admissionFenced ||
-      snapshot.stopRequested ||
-      !expectedLastExecutionId ||
-      !latest ||
-      !selection ||
-      latest.pending ||
-      latest.pendingContinuation ||
-      latest.messageEdit ||
-      latest.knownExecutionId ||
-      this.state.stopping[id] ||
-      this.hasPendingInputRemoval(id) ||
-      this.isCompacting(id)
-    )
-      return;
-
-    const original: ContinuationSubmission = {
-      operationId: crypto.randomUUID(),
-      expectedHistoryRevision: snapshot.historyRevision,
-      expectedLastExecutionId,
-      llmSelection: structuredClone(selection),
-    };
-    if (!this.access.updateChat(id, (previous) => beginContinuation(previous, original))) {
-      this.access.updateChat(id, (previous) =>
-        previous.pendingContinuation
-          ? {
-              ...previous,
-              pendingContinuation: { ...previous.pendingContinuation, status: "uncertain" },
-              error: "Continue was not dispatched because its journal could not be saved.",
-            }
-          : previous,
-      );
-      return;
-    }
-    await this.retryOriginalContinuation(id);
+    source: UserMessageSubmission,
+  ): Promise<NotSentResendResult | null> {
+    return this.submissions.resendNotSent(id, snapshot, source);
+  }
+  checkReceipt(id: string): Promise<UserMessageReceipt | null> {
+    return this.submissions.checkReceipt(id);
+  }
+  checkContinuationReceipt(id: string): Promise<ContinuationReceipt | null> {
+    return this.submissions.checkContinuationReceipt(id);
+  }
+  retryOriginalContinuation(id: string): Promise<ContinuationReceipt | null> {
+    return this.submissions.retryOriginalContinuation(id);
+  }
+  retryOriginalSubmission(id: string): Promise<UserMessageReceipt | null> {
+    return this.submissions.retryOriginalSubmission(id);
   }
 
   async compact(id: string, snapshot: SessionSnapshot, canCompact: boolean): Promise<void> {
@@ -334,25 +282,7 @@ export class WorkspaceCommands {
     )
       return;
 
-    const operationId = crypto.randomUUID();
-    this.setCompaction(id, { phase: "starting", operationId });
-    try {
-      const receipt = await this.client.startCompaction(id, {
-        operationId,
-        expectedHistoryRevision: snapshot.historyRevision,
-        llmSelection: selection,
-      });
-      this.applyCompactionReceipt(id, operationId, receipt);
-    } catch (cause) {
-      if (cause instanceof RequestError && cause.status === 409)
-        this.setCompaction(id, {
-          phase: "settled",
-          message: "Session changed. Compaction not started.",
-        });
-      else this.setCompaction(id, { phase: "observing", operationId });
-    } finally {
-      this.refreshSnapshot();
-    }
+    await this.compactions.start(id, snapshot, selection);
   }
 
   private isCompacting(id: string): boolean {
@@ -360,117 +290,8 @@ export class WorkspaceCommands {
     return phase === "starting" || phase === "observing";
   }
 
-  private async checkCompaction(id: string, operationId: string): Promise<void> {
-    if (this.compactionReads.has(operationId)) {
-      this.compactionReads.set(operationId, true);
-      return;
-    }
-    this.compactionReads.set(operationId, false);
-    try {
-      const receipt = await this.client.getCompactionOperation(id, operationId);
-      if (!this.observesCompaction(id, operationId)) return;
-      if (receipt) this.applyCompactionReceipt(id, operationId, receipt);
-      else this.setCompaction(id, { phase: "settled", message: "Compaction was not confirmed." });
-    } catch {
-      if (this.observesCompaction(id, operationId))
-        this.setCompaction(id, {
-          phase: "uncertain",
-          operationId,
-          message: "Compaction outcome unavailable.",
-        });
-    } finally {
-      const queued = this.compactionReads.get(operationId);
-      this.compactionReads.delete(operationId);
-      if (queued && this.observesCompaction(id, operationId))
-        void this.checkCompaction(id, operationId);
-    }
-  }
-
-  private observesCompaction(id: string, operationId: string): boolean {
-    const operation = this.state.compactions[id];
-    return (
-      (operation?.phase === "observing" || operation?.phase === "uncertain") &&
-      operation.operationId === operationId
-    );
-  }
-
-  private applyCompactionReceipt(
-    id: string,
-    operationId: string,
-    receipt: CompactionReceipt,
-  ): void {
-    if (receipt.executionId !== operationId) throw new Error("Unexpected compaction receipt.");
-    if (receipt.outcome === null) {
-      this.setCompaction(id, { phase: "observing", operationId });
-      return;
-    }
-    const message =
-      receipt.outcome === "completed"
-        ? (receipt.error ?? "History compacted.")
-        : receipt.outcome === "cancelled"
-          ? "Compaction stopped."
-          : (receipt.error ?? "Compaction failed. Previous context kept.");
-    this.setCompaction(id, { phase: "settled", message });
-  }
-
   private setCompaction(id: string, compaction: WorkspaceCompactionState): void {
     this.publish({ compactions: { ...this.state.compactions, [id]: compaction } });
-  }
-
-  async resendNotSent(
-    id: string,
-    snapshot: SessionSnapshot,
-    source: UserMessageSubmission,
-  ): Promise<NotSentResendResult | null> {
-    const latest = this.access.read().chats[id];
-    if (
-      snapshot.sessionId !== id ||
-      this.executionSettingsSaving(id) ||
-      this.isCompacting(id) ||
-      !latest ||
-      latest.pending ||
-      latest.pendingContinuation ||
-      latest.messageEdit ||
-      !this.access.canPersist()
-    )
-      return null;
-
-    const submission: UserMessageSubmission = {
-      submissionId: crypto.randomUUID(),
-      expectedHistoryRevision: snapshot.historyRevision,
-      text: source.text,
-      llmSelection: source.llmSelection,
-    };
-    if (
-      !this.access.updateChat(id, (previous) =>
-        previous.pending ? previous : beginSubmission(previous, submission, true),
-      )
-    ) {
-      this.access.updateChat(id, (previous) =>
-        previous.pending
-          ? {
-              ...previous,
-              pending: { ...previous.pending, status: "uncertain" },
-              error: "Resend was not dispatched because the journal could not be saved.",
-            }
-          : previous,
-      );
-      return null;
-    }
-    const receipt = await this.retryOriginalSubmission(id);
-    return { submissionId: submission.submissionId, receipt };
-  }
-
-  checkReceipt(id: string): Promise<UserMessageReceipt | null> {
-    return this.reconcile(id, false);
-  }
-
-  checkContinuationReceipt(id: string): Promise<ContinuationReceipt | null> {
-    return this.reconcileContinuation(id, false);
-  }
-
-  retryOriginalContinuation(id: string): Promise<ContinuationReceipt | null> {
-    return this.reconcileContinuation(id, true);
   }
 
   async removePendingInput(
@@ -545,169 +366,6 @@ export class WorkspaceCommands {
     this.setPendingInputRemoval(key, null);
   }
 
-  retryOriginalSubmission(id: string): Promise<UserMessageReceipt | null> {
-    return this.reconcile(id, true);
-  }
-
-  private async reconcileContinuation(
-    id: string,
-    retry: boolean,
-  ): Promise<ContinuationReceipt | null> {
-    const original = this.access.read().chats[id]?.pendingContinuation?.original;
-    if (
-      !original ||
-      this.continuationChecks.has(id) ||
-      (retry && (!this.access.canPersist() || this.executionSettingsSaving(id))) ||
-      (!retry && document.hidden)
-    )
-      return null;
-
-    const controller = retry ? null : new AbortController();
-    if (controller) this.continuationReceiptReads.set(id, controller);
-    this.continuationChecks.add(id);
-    this.setCheckingContinuation(id, true);
-    try {
-      if (
-        retry &&
-        !this.access.updateChat(id, (previous) =>
-          previous.pendingContinuation?.original.operationId === original.operationId
-            ? {
-                ...previous,
-                pendingContinuation: { ...previous.pendingContinuation, status: "sending" },
-                error: null,
-              }
-            : previous,
-        )
-      )
-        throw new Error("The original Continue could not be journaled; it was not dispatched.");
-      const receipt = retry
-        ? await this.client.continueSession(id, original)
-        : await this.client.getContinuationReceipt(id, original.operationId, controller?.signal);
-      if (receipt === null) throw new Error("No receipt found. Continue remains uncertain.");
-      this.resolveContinuation(id, original, receipt);
-      return receipt;
-    } catch (cause) {
-      if (controller?.signal.aborted) return null;
-      if (retry && cause instanceof RequestError && cause.status === 409)
-        return await this.resolveContinuationConflict(id, original, cause);
-      this.markContinuationUncertain(id, original, description(cause));
-      return null;
-    } finally {
-      this.continuationChecks.delete(id);
-      this.continuationReceiptReads.delete(id);
-      this.setCheckingContinuation(id, false);
-      this.refreshSnapshot();
-    }
-  }
-
-  private async resolveContinuationConflict(
-    id: string,
-    original: ContinuationSubmission,
-    conflict: RequestError,
-  ): Promise<ContinuationReceipt | null> {
-    try {
-      const receipt = await this.client.getContinuationReceipt(id, original.operationId);
-      if (receipt) {
-        this.resolveContinuation(id, original, receipt);
-        return receipt;
-      }
-      this.access.updateChat(id, (previous) =>
-        previous.pendingContinuation?.original.operationId === original.operationId
-          ? {
-              ...previous,
-              pendingContinuation: null,
-              error: `Continue was rejected: ${requestErrorDescription(conflict)}`,
-            }
-          : previous,
-      );
-    } catch (cause) {
-      this.markContinuationUncertain(
-        id,
-        original,
-        `Continue outcome is uncertain: ${description(cause)}`,
-      );
-    }
-    return null;
-  }
-
-  private resolveContinuation(
-    id: string,
-    original: ContinuationSubmission,
-    receipt: ContinuationReceipt,
-  ): void {
-    this.access.updateChat(id, (previous) =>
-      previous.pendingContinuation?.original.operationId === original.operationId
-        ? applyContinuationReceipt(previous, id, receipt)
-        : previous,
-    );
-  }
-
-  private markContinuationUncertain(
-    id: string,
-    original: ContinuationSubmission,
-    error: string,
-  ): void {
-    this.access.updateChat(id, (previous) =>
-      previous.pendingContinuation?.original.operationId === original.operationId
-        ? {
-            ...previous,
-            pendingContinuation: { ...previous.pendingContinuation, status: "uncertain" },
-            error,
-          }
-        : previous,
-    );
-  }
-
-  private async reconcile(id: string, retry: boolean): Promise<UserMessageReceipt | null> {
-    const original = this.access.read().chats[id]?.pending?.original;
-    if (
-      !original ||
-      this.checks.has(id) ||
-      (retry && (!this.access.canPersist() || this.executionSettingsSaving(id))) ||
-      (!retry && document.hidden)
-    )
-      return null;
-
-    const controller = retry ? null : new AbortController();
-    if (controller) this.receiptReads.set(id, controller);
-    this.checks.add(id);
-    this.setChecking(id, true);
-    try {
-      if (
-        retry &&
-        !this.access.updateChat(id, (previous) =>
-          previous.pending
-            ? { ...previous, pending: { ...previous.pending, status: "sending" }, error: null }
-            : previous,
-        )
-      )
-        throw new Error("The original Send could not be journaled; it was not dispatched.");
-      const receipt = retry
-        ? await this.client.submitMessage(id, original)
-        : await this.client.getMessageReceipt(id, original.submissionId, controller?.signal);
-      if (receipt === null) throw new Error("No receipt found. Send remains uncertain.");
-      this.access.updateChat(id, (previous) => applyReceipt(previous, id, receipt));
-      return receipt;
-    } catch (cause) {
-      if (controller?.signal.aborted) return null;
-      this.access.updateChat(id, (previous) =>
-        previous.pending
-          ? {
-              ...previous,
-              pending: { ...previous.pending, status: "uncertain" },
-              error: description(cause),
-            }
-          : previous,
-      );
-      return null;
-    } finally {
-      this.checks.delete(id);
-      this.receiptReads.delete(id);
-      this.setChecking(id, false);
-      this.refreshSnapshot();
-    }
-  }
-
   async stop(id: string, snapshot: SessionSnapshot, stopId: string | undefined): Promise<void> {
     const executionId = snapshot.unsettledExecutionId;
     if (!id || !executionId || stopId) return;
@@ -741,7 +399,7 @@ export class WorkspaceCommands {
       (compaction?.phase === "observing" || compaction?.phase === "uncertain") &&
       snapshot.unsettledExecutionId !== compaction.operationId
     )
-      void this.checkCompaction(snapshot.sessionId, compaction.operationId);
+      void this.compactions.check(snapshot.sessionId, compaction.operationId);
 
     const saved = this.access.read().chats[snapshot.sessionId];
     if (

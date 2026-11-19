@@ -128,12 +128,28 @@ void test("title rows use their own progress wording", () => {
   );
 });
 
-void test("fallback rows read as failed selection that kept every candidate", () => {
+void test("fallback rows report retained resources without claiming unprotected resources", () => {
+  assert.equal(
+    prepassRowModel(summary({ category: "skills", state: "fallback" })).value,
+    "Failed · protected only",
+  );
+  assert.equal(
+    prepassRowModel(summary({ category: "instructions", state: "fallback" })).value,
+    "Failed · protected only",
+  );
   assert.equal(prepassRowModel(summary({ state: "fallback" })).value, "Failed · kept all");
   assert.equal(prepassRowMood(summary({ state: "fallback" })), "warned");
   assert.equal(
-    prepassRowModel(summary({ state: "fallback", candidateCount: 4, resultCount: 2 })).value,
-    "Failed · kept 2/4",
+    prepassRowModel(
+      summary({ category: "skills", state: "fallback", candidateCount: 4, resultCount: 2 }),
+    ).value,
+    "Failed · retained 2/4",
+  );
+  assert.equal(
+    prepassRowModel(
+      summary({ category: "instructions", state: "fallback", candidateCount: 4, resultCount: 4 }),
+    ).value,
+    "Failed · retained 4/4",
   );
   assert.equal(prepassRowModel(summary({ state: "cancelled" })).value, "Cancelled");
   assert.equal(prepassRowModel(summary({ state: "interrupted" })).value, "Interrupted");

@@ -642,6 +642,11 @@ part of this implementation plan.
 
 ## Selection failure
 
+**Current owner direction (2026-11-19):** on ordinary failure, retain only protected
+skills and instructions; retain all tools. Instruction overflow still retries with
+largest files omitted first, but any later failure also retains only protected instructions.
+This supersedes the earlier keep-all and overflow-fallback decisions below.
+
 **Owner decision (2026-11-15):** if a category's pruner fails or times out, keep all
 available entries in that category for the preparation and continue with successful
 selections from the other categories. Surface the failure rather than reporting

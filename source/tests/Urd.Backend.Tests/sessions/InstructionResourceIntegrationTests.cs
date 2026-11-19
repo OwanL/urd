@@ -67,6 +67,9 @@ public sealed class InstructionResourceIntegrationTests(ITestOutputHelper output
       var expectedRetry = expected.Where(pair => pair.Key != outlierPath).ToDictionary(pair => pair.Key, pair => pair.Value,
           StringComparer.Ordinal);
       Assert.Equal(expectedRetry.OrderBy(pair => pair.Key), retryCandidates.OrderBy(pair => pair.Key));
+      var firstEntries = ReadCandidateEntries(selectors[0]);
+      var retryEntries = ReadCandidateEntries(selectors[1]);
+      Assert.All(retryEntries, pair => Assert.Equal(firstEntries[pair.Key].Id, pair.Value.Id));
       Assert.True(firstBytes > threshold);
       Assert.True(retryBytes <= threshold);
       Assert.True(firstBytes - retryBytes >= outlierBytes);
@@ -107,7 +110,7 @@ public sealed class InstructionResourceIntegrationTests(ITestOutputHelper output
               throw new ProviderOperationException(ProviderFailure.ContextWindowExceeded);
             return TextUpdates([JsonSerializer.Serialize(new { keptIds = candidateIds })], token);
           }
-          return TextUpdates([JsonSerializer.Serialize(new { keptIds = new[] { selectedPath } })], token);
+          return TextUpdates([JsonSerializer.Serialize(new { keptIds = new[] { ReadCandidateEntries(request)[selectedPath].Id } })], token);
         }
         case "pruning.skills":
         case "pruning.tools":
@@ -124,16 +127,22 @@ public sealed class InstructionResourceIntegrationTests(ITestOutputHelper output
   }
 
   private static string[] ReadCandidateIds(ScriptedRequest request) =>
-      ReadCandidates(request).Keys.ToArray();
+      ReadCandidateEntries(request).Values.Select(value => value.Id).ToArray();
 
-  private static Dictionary<string, string> ReadCandidates(ScriptedRequest request) {
+  private static Dictionary<string, string> ReadCandidates(ScriptedRequest request) =>
+      ReadCandidateEntries(request).ToDictionary(pair => pair.Key, pair => pair.Value.Content, StringComparer.Ordinal);
+
+  private static Dictionary<string, (string Id, string Content)> ReadCandidateEntries(ScriptedRequest request) {
     const string marker = "Candidates:\n";
     string prompt = request.LastUserText.ReplaceLineEndings("\n");
     int start = prompt.LastIndexOf(marker, StringComparison.Ordinal);
     Assert.True(start >= 0);
     using JsonDocument candidates = JsonDocument.Parse(prompt[(start + marker.Length)..]);
-    return candidates.RootElement.EnumerateArray().ToDictionary(entry => entry.GetProperty("Id").GetString()!,
-        entry => entry.GetProperty("Content").GetString()!, StringComparer.Ordinal);
+    return candidates.RootElement.EnumerateArray().SelectMany(group =>
+        group.GetProperty("Files").EnumerateArray().Select(file => (
+            Path: Path.Combine(group.GetProperty("Directory").GetString()!, file.GetProperty("File").GetString()!),
+            Id: file.GetProperty("Id").GetString()!, Content: file.GetProperty("Content").GetString()!)))
+        .ToDictionary(entry => entry.Path, entry => (entry.Id, entry.Content), StringComparer.Ordinal);
   }
 
   [Fact]

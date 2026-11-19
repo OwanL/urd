@@ -21,7 +21,7 @@ public sealed class StartingResourcePrunerTests {
     DiscoveredSkill first = Skill("first", "First skill.");
     DiscoveredSkill second = Skill("second", "Second skill.");
     DiscoveredSkill protectedSkill = Skill("protected-secret", "Must not be disclosed.");
-    string answer = JsonSerializer.Serialize(new { keptIds = new[] { second.Identity } });
+    string answer = JsonSerializer.Serialize(new { keptIds = new[] { "s2" } });
     var statuses = new ConcurrentQueue<StartingResourcePruningStatus>();
     var client = new ScriptedChatClient(token => TextUpdates([answer], token));
     await using RunningParent parent = await StartParentAsync();
@@ -45,9 +45,14 @@ public sealed class StartingResourcePrunerTests {
     Assert.Equal(1, resolutions);
     Assert.Contains(taskInput, client.LastRequest[^1].Text, StringComparison.Ordinal);
     Assert.Contains("runs in Urd", client.LastRequest[0].Text, StringComparison.Ordinal);
-    Assert.Contains("file path", client.LastRequest[0].Text, StringComparison.Ordinal);
     using JsonDocument skillCandidates = ParseCandidates(client.LastRequest);
-    Assert.Equal(second.Path, Assert.Single(skillCandidates.RootElement[1].GetProperty("Paths").EnumerateArray()).GetString());
+    JsonElement group = Assert.Single(skillCandidates.RootElement.EnumerateArray());
+    Assert.Equal(Path.GetDirectoryName(second.Path), group.GetProperty("Directory").GetString());
+    JsonElement[] files = group.GetProperty("Files").EnumerateArray().ToArray();
+    Assert.Equal(new[] { "s1", "s2" }, files.Select(file => file.GetProperty("Id").GetString()));
+    Assert.Equal(Path.GetFileName(second.Path), files[1].GetProperty("File").GetString());
+    Assert.Equal(second.Name, files[1].GetProperty("Name").GetString());
+    Assert.Equal(second.Description, files[1].GetProperty("Description").GetString());
     Assert.DoesNotContain(protectedSkill.Name, client.LastRequest[^1].Text, StringComparison.Ordinal);
     Assert.Equal(new[] { ("skills", "running", 3, 3), ("skills", "completed", 3, 2) },
         statuses.Select(status => (status.Category, status.State, status.Total, status.Retained)));
@@ -57,12 +62,12 @@ public sealed class StartingResourcePrunerTests {
   }
 
   [Fact]
-  public async Task RepeatedSkillMetadataIsSentOnceWithoutMergingSelectablePaths() {
+  public async Task RepeatedSkillMetadataRetainsDistinctSelectableFiles() {
     const string sharedDescription = "Repeated skill metadata across several installations.";
     DiscoveredSkill first = Skill("first", sharedDescription) with { Name = "shared" };
     DiscoveredSkill second = Skill("second", sharedDescription) with { Name = "shared" };
     DiscoveredSkill different = Skill("different", "Different guidance.") with { Name = "shared" };
-    string answer = JsonSerializer.Serialize(new { keptIds = new[] { second.Path, different.Path } });
+    string answer = JsonSerializer.Serialize(new { keptIds = new[] { "s3", "s2" } });
     var client = new ScriptedChatClient(token => TextUpdates([answer], token));
     await using RunningParent parent = await StartParentAsync();
     var runner = new ConversationRunner(parent.Fixture.Session.Recorder, _ => client, [], parent.Fixture.Session.WorkingDirectory);
@@ -72,17 +77,21 @@ public sealed class StartingResourcePrunerTests {
 
     Assert.False(result.IsFallback);
     Assert.Equal(new[] { different, second }, result.Retained);
-    string payload = client.LastRequest[^1].Text;
-    Assert.Equal(2, payload.Split(sharedDescription, StringSplitOptions.None).Length);
-    foreach (DiscoveredSkill skill in new[] { first, second, different })
-      Assert.Equal(2, payload.Split(JsonSerializer.Serialize(skill.Path), StringSplitOptions.None).Length);
+    using JsonDocument candidates = ParseCandidates(client.LastRequest);
+    JsonElement group = Assert.Single(candidates.RootElement.EnumerateArray());
+    Assert.Equal(Path.GetDirectoryName(first.Path), group.GetProperty("Directory").GetString());
+    JsonElement[] files = group.GetProperty("Files").EnumerateArray().ToArray();
+    Assert.Equal(new[] { "s1", "s2", "s3" }, files.Select(file => file.GetProperty("Id").GetString()));
+    Assert.Equal(new[] { first, different, second }.Select(skill => Path.GetFileName(skill.Path)),
+        files.Select(file => file.GetProperty("File").GetString()));
+    Assert.Equal(new[] { first, different, second }.Select(skill => skill.Description),
+        files.Select(file => file.GetProperty("Description").GetString()));
   }
 
   [Fact]
-  public async Task UnknownDuplicateAndMalformedResponsesFallBackWithoutRetrying() {
+  public async Task UnknownAndDuplicateIdsAreIgnoredAndMalformedResponsesFallBackWithoutRetrying() {
     DiscoveredSkill candidate = Skill("candidate", "Candidate.");
-    string duplicate = JsonSerializer.Serialize(new { keptIds = new[] { candidate.Identity, candidate.Identity } });
-    string[] answers = ["{\"keptIds\":[\"unknown\"]}", duplicate, "not json"];
+    string[] answers = ["{\"keptIds\":[\"unknown\"]}", "{\"keptIds\":[\"unknown\",\"s1\",\"s1\"]}", "not json"];
     int response = -1;
     var client = new ScriptedChatClient(token => TextUpdates([answers[Interlocked.Increment(ref response)]], token));
     await using RunningParent parent = await StartParentAsync();
@@ -92,9 +101,15 @@ public sealed class StartingResourcePrunerTests {
     for (int index = 0; index < answers.Length; index++) {
       StartingResourcePruningResult<DiscoveredSkill> result =
           await pruner.PruneAsync([candidate], 0, CancellationToken.None).WaitAsync(TestTimeout);
-      Assert.True(result.IsFallback);
-      Assert.Same(candidate, Assert.Single(result.Retained));
-      Assert.False(string.IsNullOrWhiteSpace(result.Error));
+      Assert.Equal(index == 2, result.IsFallback);
+      if (index == 1)
+        Assert.Same(candidate, Assert.Single(result.Retained));
+      else
+        Assert.Empty(result.Retained);
+      if (index == 2)
+        Assert.False(string.IsNullOrWhiteSpace(result.Error));
+      else
+        Assert.Null(result.Error);
     }
 
     Assert.Equal(answers.Length, client.Calls);
@@ -213,7 +228,7 @@ public sealed class StartingResourcePrunerTests {
     var client = new ScriptedChatClient(token => {
       if (Interlocked.Increment(ref attempt) <= 2)
         throw new ProviderOperationException(ProviderFailure.ContextWindowExceeded);
-      return TextUpdates([JsonSerializer.Serialize(new { keptIds = new[] { documents[4].Identity, documents[3].Identity } })], token);
+      return TextUpdates([JsonSerializer.Serialize(new { keptIds = new[] { "i5", "i4" } })], token);
     });
     await using RunningParent parent = await StartParentAsync();
     var runner = new ConversationRunner(parent.Fixture.Session.Recorder, _ => client, [], parent.Fixture.Session.WorkingDirectory);
@@ -228,12 +243,15 @@ public sealed class StartingResourcePrunerTests {
     Assert.Equal(3, client.Calls);
     Assert.Contains("runs in Urd", client.Requests[0][0].Text, StringComparison.Ordinal);
     using JsonDocument instructionCandidates = ParseCandidates(client.Requests[0]);
-    Assert.Equal(documents[0].Path, instructionCandidates.RootElement[0].GetProperty("Source").GetString());
-    Assert.Equal(documents[0].Scope, instructionCandidates.RootElement[0].GetProperty("Scope").GetString());
-    Assert.Equal(documents.Select(document => document.Identity), CandidateIds(client.Requests[0]));
-    Assert.Equal(new[] { documents[0].Identity, documents[2].Identity, documents[3].Identity, documents[4].Identity },
-        CandidateIds(client.Requests[1]));
-    Assert.Equal(new[] { documents[3].Identity, documents[4].Identity }, CandidateIds(client.Requests[2]));
+    JsonElement group = Assert.Single(instructionCandidates.RootElement.EnumerateArray());
+    Assert.Equal(Path.GetDirectoryName(documents[0].Path), group.GetProperty("Directory").GetString());
+    JsonElement[] files = group.GetProperty("Files").EnumerateArray().ToArray();
+    Assert.Equal(Path.GetFileName(documents[0].Path), files[0].GetProperty("File").GetString());
+    Assert.Equal(documents[0].Text, files[0].GetProperty("Content").GetString());
+    Assert.Equal(documents[0].Scope, files[0].GetProperty("Scope").GetString());
+    Assert.Equal(new[] { "i1", "i2", "i3", "i4", "i5" }, CandidateIds(client.Requests[0]));
+    Assert.Equal(new[] { "i1", "i3", "i4", "i5" }, CandidateIds(client.Requests[1]));
+    Assert.Equal(new[] { "i4", "i5" }, CandidateIds(client.Requests[2]));
     Assert.Contains("Skipped 1 instruction file", statuses.ElementAt(1).Error, StringComparison.Ordinal);
     Assert.Contains("Skipped 3 instruction files", statuses.Last().Error, StringComparison.Ordinal);
     Assert.Equal(new[] { ("running", 7, 7), ("running", 7, 6), ("running", 7, 4), ("completed", 7, 4) },
@@ -256,14 +274,14 @@ public sealed class StartingResourcePrunerTests {
     Assert.NotNull(result.Error);
     Assert.Empty(result.Retained);
     Assert.Equal(3, client.Calls);
-    Assert.Equal(new[] { documents[0].Identity }, CandidateIds(client.Requests[2]));
+    Assert.Equal(new[] { "i1" }, CandidateIds(client.Requests[2]));
     Assert.Contains("Skipped 3 instruction files", result.Error, StringComparison.Ordinal);
     Assert.Equal(new[] { ("running", 4, 4), ("running", 4, 3), ("running", 4, 2), ("fallback", 4, 1) },
         statuses.Select(status => (status.State, status.Total, status.Retained)));
   }
 
   [Fact]
-  public async Task UnrelatedFailureAfterInstructionOverflowKeepsOnlyRemainingCandidates() {
+  public async Task UnrelatedFailureAfterInstructionOverflowKeepsOnlyProtected() {
     DiscoveredInstructionDocument[] documents = [Instruction("small", "1"), Instruction("large", "12345")];
     int attempt = 0;
     var client = new ScriptedChatClient(_ => throw new ProviderOperationException(
@@ -278,13 +296,13 @@ public sealed class StartingResourcePrunerTests {
     Assert.True(result.IsFallback);
     Assert.Contains("Skipped 1 instruction file", result.Error, StringComparison.Ordinal);
     Assert.Contains("ProviderUnavailable", result.Error, StringComparison.Ordinal);
-    Assert.Same(documents[0], Assert.Single(result.Retained));
+    Assert.Empty(result.Retained);
     Assert.Equal(2, client.Calls);
-    Assert.Equal(new[] { documents[0].Identity }, CandidateIds(client.Requests[1]));
+    Assert.Equal(new[] { "i1" }, CandidateIds(client.Requests[1]));
   }
 
   [Fact]
-  public async Task SkillContextOverflowDoesNotRetryOrExcludeCandidates() {
+  public async Task SkillContextOverflowDoesNotRetryAndExcludesCandidates() {
     DiscoveredSkill[] skills = [Skill("first-overflow", "First"), Skill("second-overflow", "Second")];
     var client = new ScriptedChatClient(_ => throw new ProviderOperationException(ProviderFailure.ContextWindowExceeded));
     await using RunningParent parent = await StartParentAsync();
@@ -295,13 +313,30 @@ public sealed class StartingResourcePrunerTests {
         await pruner.PruneAsync(skills, protectedCount: 1, CancellationToken.None).WaitAsync(TestTimeout);
 
     Assert.True(result.IsFallback);
-    Assert.Equal(skills, result.Retained);
+    Assert.Empty(result.Retained);
     Assert.Equal(1, client.Calls);
+  }
+
+  [Fact]
+  public async Task ToolFailureRetainsAllCandidates() {
+    AIFunctionDeclaration tool = AIFunctionFactory.CreateDeclaration("candidate-tool", "Tool description",
+        JsonSerializer.SerializeToElement(new { type = "object" }));
+    var client = new ScriptedChatClient(_ => throw new ProviderOperationException(ProviderFailure.ProviderUnavailable));
+    await using RunningParent parent = await StartParentAsync();
+    var runner = new ConversationRunner(parent.Fixture.Session.Recorder, _ => client, [], parent.Fixture.Session.WorkingDirectory);
+    var pruner = CreatePruner(runner, _ => Task.CompletedTask);
+
+    var result = await pruner.PruneAsync([tool], 1, CancellationToken.None).WaitAsync(TestTimeout);
+
+    Assert.True(result.IsFallback);
+    Assert.Same(tool, Assert.Single(result.Retained));
+    Assert.Contains("Retained all unprotected tools", result.Error, StringComparison.Ordinal);
   }
 
   private static string[] CandidateIds(IReadOnlyList<ChatMessage> request) {
     using JsonDocument json = ParseCandidates(request);
-    return json.RootElement.EnumerateArray().Select(candidate => candidate.GetProperty("Id").GetString()!).ToArray();
+    return json.RootElement.EnumerateArray().SelectMany(group => group.GetProperty("Files").EnumerateArray())
+        .Select(candidate => candidate.GetProperty("Id").GetString()!).ToArray();
   }
 
   private static JsonDocument ParseCandidates(IReadOnlyList<ChatMessage> request) {

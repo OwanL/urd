@@ -78,11 +78,12 @@ function prepassRowValue(summary: PrepassSummary): string {
     case "pending":
       return "Pending";
     case "fallback":
-      return summary.candidateCount !== null &&
-        summary.resultCount !== null &&
-        summary.resultCount < summary.candidateCount
-        ? `Failed · kept ${summary.resultCount}/${summary.candidateCount}`
-        : "Failed · kept all";
+      if (summary.candidateCount !== null && summary.resultCount !== null)
+        return `Failed · retained ${summary.resultCount}/${summary.candidateCount}`;
+      if (summary.category === "tools") return "Failed · kept all";
+      if (summary.category === "skills" || summary.category === "instructions")
+        return "Failed · protected only";
+      return "Failed";
     case "cancelled":
       return "Cancelled";
     case "interrupted":

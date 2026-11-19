@@ -51,8 +51,8 @@ internal sealed class PrepassTolerantChatClient(IChatClient inner, bool disposeI
     int start = prompt.LastIndexOf(marker, StringComparison.Ordinal);
     using JsonDocument candidates = JsonDocument.Parse(prompt[(start + marker.Length)..]);
     string[] ids = candidates.RootElement.EnumerateArray().SelectMany(candidate => {
-      if (candidate.TryGetProperty("Paths", out JsonElement paths))
-        return paths.EnumerateArray().Select(path => path.GetString()!);
+      if (candidate.TryGetProperty("Files", out JsonElement files))
+        return files.EnumerateArray().Select(file => file.GetProperty("Id").GetString()!);
       JsonElement value = candidate.TryGetProperty("Id", out JsonElement id) ? id : candidate.GetProperty("id");
       return new[] { value.GetString()! };
     }).ToArray();

@@ -24,7 +24,7 @@ public sealed class StartingContextPreparationTests {
       string rootDocument = Write(project, "AGENTS.md", "Root rule.\n");
       string nestedDocument = Write(project, Path.Combine("nested", "AGENTS.md"), "Nested rule.\nFull nested content.\n");
 
-      string answer = JsonSerializer.Serialize(new { keptIds = new[] { rootDocument, nestedDocument } });
+      string answer = JsonSerializer.Serialize(new { keptIds = new[] { "i1", "i2" } });
       var auxiliary = new ScriptedChatClient(token => TextUpdates([answer], token));
       await using RunningParent parent = await StartParentAsync();
       var runner = new ConversationRunner(parent.Fixture.Session.Recorder, _ => auxiliary, [], project);
@@ -89,8 +89,8 @@ public sealed class StartingContextPreparationTests {
       string projectSkill = Write(project, "skills/project/SKILL.md", "---\nname: shared\ndescription: Project skill.\n---\n");
       string packagedSkill = Write(packaged, "shared/SKILL.md", "---\nname: shared\ndescription: Packaged skill.\n---\n");
       string[] kept = new[] {
-        keepProject && !protectProject ? projectSkill : null,
-        keepPackaged && !protectPackaged ? packagedSkill : null
+        keepProject && !protectProject ? "s1" : null,
+        keepPackaged && !protectPackaged ? (protectProject ? "s1" : "s2") : null
       }.OfType<string>().ToArray();
       string answer = JsonSerializer.Serialize(new { keptIds = kept });
       var auxiliary = new ScriptedChatClient(token => TextUpdates([answer], token));

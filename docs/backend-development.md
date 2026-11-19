@@ -79,12 +79,13 @@ has not been established for every platform.
 At a fresh session's first prompt, and the first request after successful compaction,
 `StartingContextBuilder.PrepareAsync` runs three independent, parallel selections over
 unprotected tools, skills and instruction documents. `StartingResourcePruner` validates
-kept IDs and retains the original resources in source order. Ordinary category failure
-keeps all its candidates and records fallback; successful siblings still apply. The
-approved exception is confirmed instruction-context overflow: retry instruction selection
-with the largest unprotected files omitted first (by UTF-8 body size) and surface a
-cumulative warning. A later failure keeps the remaining files, not the omitted ones.
-Tools and skills retain their existing fallback. Stop cancels and joins preparation instead of falling back. Core tool
+kept IDs and retains the original resources in source order. File candidates are grouped by
+directory with short model-facing IDs; unknown and duplicate returned IDs are ignored.
+On ordinary category failure, skills and instructions retain only protected resources,
+while tools retain all candidates; successful siblings still apply. Confirmed
+instruction-context overflow retries instruction selection with the largest unprotected files
+omitted first (by UTF-8 body size) and surfaces a cumulative warning. Stop cancels and
+joins preparation instead of falling back. Core tool
 protections are defaults, not mandatory; running background tools gain runtime protection
 after compaction.
 

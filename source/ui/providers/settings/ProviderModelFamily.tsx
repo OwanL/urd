@@ -1,6 +1,6 @@
 import { useId, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { Icon } from "../../components/Icon.tsx";
-import { Popover } from "../../components/Popover.tsx";
+import { Icon } from "../../controls/Icon.tsx";
+import { Popover } from "../../controls/Popover.tsx";
 import type { ModelFamily } from "../ModelSettings.ts";
 
 const families: Readonly<Record<ModelFamily, string>> = {

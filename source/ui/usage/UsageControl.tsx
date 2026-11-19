@@ -2,7 +2,7 @@ import { useMemo } from "preact/hooks";
 import type { UsageRange } from "./UsageTypes.ts";
 import { UsageClient } from "./UsageClient.ts";
 import { UsageDetails } from "./UsageDetails.tsx";
-import { HoverPopover } from "../components/HoverPopover.tsx";
+import { HoverPopover } from "../controls/HoverPopover.tsx";
 import { formatUsageCost } from "./UsageValues.ts";
 import { useUsageSummary } from "./useUsageSummary.ts";
 import "./usage.css";

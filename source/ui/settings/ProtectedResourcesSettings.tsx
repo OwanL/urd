@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
-import { Tooltip } from "../components/Tooltip.tsx";
+import { Tooltip } from "../controls/Tooltip.tsx";
 import { RequestError } from "../http/RequestError.ts";
 import type { PreferencesState } from "../preferences/usePreferences.ts";
 import type {

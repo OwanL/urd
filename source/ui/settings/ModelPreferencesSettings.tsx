@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { WorkspaceModels } from "../app/WorkspaceModels.ts";
-import { ModelPicker } from "../chat/ModelPicker.tsx";
-import type { ComposerModel } from "../chat/ComposerTypes.ts";
-import type { ModelOption } from "../app/WorkspaceModels.ts";
+import { WorkspaceModels } from "../providers/models/WorkspaceModels.ts";
+import { ModelPicker } from "../chat/composer/ModelPicker.tsx";
+import type { ComposerModel } from "../chat/composer/ComposerTypes.ts";
+import type { ModelOption } from "../providers/models/WorkspaceModels.ts";
 import type { PreferencesState } from "../preferences/usePreferences.ts";
 import { describeBucket, modelKey } from "../preferences/ModelBucketSelection.ts";
 import { ModelBucketSetting } from "./ModelBucketSetting.tsx";

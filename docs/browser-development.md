@@ -142,7 +142,7 @@ retry. If cleanup alone fails after a successful save, the saved state remains u
 and cleanup can be retried. Storage access failures stay fail-closed until retry succeeds.
 Browser state is separate from the backend database: incompatible or malformed saved
 workspace/draft shapes are discarded, not migrated. The current shape in
-[`WorkspaceState.ts`](../source/ui/app/WorkspaceState.ts) preserves explicit model metadata
+[`WorkspaceState.ts`](../source/ui/workspace/WorkspaceState.ts) preserves explicit model metadata
 alongside placeholder/generated title provenance, so a generated backend title is not
 mistaken for an unnamed tab. Incompatible earlier state is discarded.
 The palette uses neutral black/charcoal surfaces and grey controls; semantic error
@@ -174,9 +174,27 @@ captures standard PNG, JPEG and WebP files while the reply streams and keeps a
 copy for history; missing or unsupported files leave an alt-text fallback.
 This does not apply to external URLs, user messages, or tool-output text.
 
+## Source layout
+
+`source/ui/` is organised by feature, mirroring the backend's vocabulary. Each folder owns
+its components, state, hooks and styles. Dependencies should point downward
+(`workspace` → `chat` → `chat/transcript` → `markdown-rendering`); `controls/` and `http/`
+are shared.
+
+| Folder | Owns |
+| --- | --- |
+| `workspace/` | Application shell, persisted workspace state, commands and navigation; `tabs/` holds the tab strip. |
+| `chat/` | One chat's view: `composer/`, `working-directory/`, `message-editing/`, `preparation/` and `transcript/` (`reading/`, `viewport/`, `navigation/`, `tool-calls/`). |
+| `sessions/` | Session HTTP client, event stream and their hooks; `inputs/` and `transcript/` hold contract types. |
+| `markdown-rendering/` | Virtualized Markdown pipeline, with `windowing/` and `images/`. |
+| `providers/`, `preferences/`, `usage/` | Their clients, contract types and feature UI; `settings/` composes the settings pages. |
+| `controls/`, `folder-browser/`, `http/` | Shared popover/icon controls, folder browsing and request helpers. |
+
+`tests/` mirrors this tree; shared fixtures and servers live in `tests/support/`.
+
 ## Workspace composition
 
-`app/Workspace.tsx` connects the behavioral owners and renders the workspace shell.
+`workspace/Workspace.tsx` connects the behavioral owners and renders the workspace shell.
 It does not implement storage recovery, navigation or catalog request lifecycles.
 
 | Owner | Responsibility and lifetime |
@@ -263,7 +281,7 @@ refreshes only that fixture's catalog. It exercises the real managed provider, S
 execution and SQLite path, not a production fake-client flag. Automated browser tests are
 not retained. For manual inspection, run `npm run dev:browser:host` and open its printed
 Urd origin. This starts a development host, not tests.
-Playwright remains a dependency only for the separate manual `TranscriptBaseline.ts`
+Playwright remains a dependency only for the separate manual `tests/support/TranscriptBaseline.ts`
 diagnostic, not routine verification. Its raw-SQL seed still requires schema 16, while
 [the schema owner](../source/backend/harness/storage/DatabaseSchema.cs) is at version 29
 (as checked 2026-11-17), so it aborts before the workload. Requalify its seed SQL and

@@ -1,7 +1,7 @@
 import { createElement, type ComponentChildren, type VNode } from "preact";
 import { useId } from "preact/hooks";
-import type { MarkdownImageResource } from "./MarkdownImageWindow.ts";
-import { MarkdownInlineImage, markdownImageFallback } from "./MarkdownInlineImage.tsx";
+import type { MarkdownImageResource } from "./images/MarkdownImageWindow.ts";
+import { MarkdownInlineImage, markdownImageFallback } from "./images/MarkdownInlineImage.tsx";
 import type {
   AssembledMarkdownContext,
   MarkdownRenderSnapshot,
@@ -15,7 +15,7 @@ import {
   markdownTableColumns,
   requireMarkdownWindowUnits,
   type MarkdownWindowGeometry,
-} from "./MarkdownWindowGeometry.ts";
+} from "./windowing/MarkdownWindowGeometry.ts";
 import "./markdown-renderer.css";
 
 type Entry = { at: number; order: number; node: VNode };

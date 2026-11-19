@@ -1,5 +1,5 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { Icon } from "../../components/Icon.tsx";
+import { Icon } from "../../controls/Icon.tsx";
 import type { ProviderConnection, ProviderRoute } from "../ProviderConnection.ts";
 import { ConnectionForm } from "./ConnectionForm.tsx";
 import { ProviderBucketSuggestions } from "./ProviderBucketSuggestions.tsx";

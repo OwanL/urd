@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { RequestError } from "../http/RequestError.ts";
-import type { SubagentProviderConnectionIds } from "../providers/SubagentProviderSelection.ts";
+import type { SubagentProviderConnectionIds } from "../providers/subagents/SubagentProviderSelection.ts";
 import type {
   AuxiliaryModelPurpose,
   ConfiguredModel,

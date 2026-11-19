@@ -4,7 +4,7 @@ import type {
   MessageContentCursor,
   TranscriptEntryRef,
   TranscriptTextFacts,
-} from "../sessions/Messages.ts";
+} from "../sessions/transcript/Messages.ts";
 import type {
   MarkdownContextPage,
   MarkdownContextDescriptorPage,
@@ -23,7 +23,7 @@ import type {
   MarkdownValueKind,
 } from "./MarkdownRenderModel.ts";
 import { isMarkdownImageKey } from "./MarkdownRenderModel.ts";
-import { copyMarkdownManifest } from "./MarkdownWindowAssembler.ts";
+import { copyMarkdownManifest } from "./windowing/MarkdownWindowAssembler.ts";
 
 const elementKinds = [
   "document",

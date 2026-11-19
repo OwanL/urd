@@ -1,7 +1,7 @@
 import { useMemo, useRef } from "preact/hooks";
-import type { ComposerModel } from "../chat/ComposerTypes.ts";
-import { ModelPicker } from "../chat/ModelPicker.tsx";
-import { IconButton } from "../components/IconButton.tsx";
+import type { ComposerModel } from "../chat/composer/ComposerTypes.ts";
+import { ModelPicker } from "../chat/composer/ModelPicker.tsx";
+import { IconButton } from "../controls/IconButton.tsx";
 import {
   addBucketModel,
   describeBucket,

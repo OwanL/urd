@@ -1,8 +1,8 @@
 import { render } from "preact";
-import type { MessageContentCursor } from "../sessions/Messages.ts";
+import type { MessageContentCursor } from "../sessions/transcript/Messages.ts";
 import type { MarkdownClientRequest, MarkdownOwnedTextGeneration } from "./MarkdownClient.ts";
-import { MarkdownGenerationHandoff } from "./MarkdownGenerationHandoff.ts";
-import { MarkdownImageWindow } from "./MarkdownImageWindow.ts";
+import { MarkdownGenerationHandoff } from "./windowing/MarkdownGenerationHandoff.ts";
+import { MarkdownImageWindow } from "./images/MarkdownImageWindow.ts";
 import { MarkdownRenderer } from "./MarkdownRenderer.tsx";
 import type {
   MarkdownImageLoader,
@@ -12,9 +12,12 @@ import type {
   MarkdownTrimRequest,
 } from "./MarkdownRenderModel.ts";
 import { MarkdownSelectionPins } from "./MarkdownSelectionPins.ts";
-import { MarkdownWindowAssembler } from "./MarkdownWindowAssembler.ts";
-import { MarkdownWindowGeometry } from "./MarkdownWindowGeometry.ts";
-import type { MarkdownWindowAnchor, MarkdownWindowSeekTarget } from "./MarkdownWindowGeometry.ts";
+import { MarkdownWindowAssembler } from "./windowing/MarkdownWindowAssembler.ts";
+import { MarkdownWindowGeometry } from "./windowing/MarkdownWindowGeometry.ts";
+import type {
+  MarkdownWindowAnchor,
+  MarkdownWindowSeekTarget,
+} from "./windowing/MarkdownWindowGeometry.ts";
 
 export type MarkdownTextRequest = MarkdownClientRequest;
 export type MarkdownSavedSourcePosition = {

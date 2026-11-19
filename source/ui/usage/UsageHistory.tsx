@@ -1,6 +1,6 @@
 import type { Chart } from "chart.js";
 import { useEffect, useId, useMemo, useRef, useState } from "preact/hooks";
-import { Popover } from "../components/Popover.tsx";
+import { Popover } from "../controls/Popover.tsx";
 import { UsagePointDetails } from "./UsageProviders.tsx";
 import type { CumulativeUsagePoint } from "./UsageValues.ts";
 import { formatUsageCost, formatUsageTime, usageColors, usageProviders } from "./UsageValues.ts";

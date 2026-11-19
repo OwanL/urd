@@ -149,14 +149,14 @@ Distinguish throughout:
 The following bullets describe the source spot-check at `6519de9` on 2026-11-08,
 not current behavior; they are retained as dated design evidence.
 
-- `source/ui/app/Transcript.tsx` displays escaped text. IntersectionObserver gates
+- `source/ui/chat/transcript/Transcript.tsx` displays escaped text. IntersectionObserver gates
   content reads, with up to four pages per read. Already fetched bodies remain in
   row state; visibility gating is not a bounded source cache or DOM virtualization.
   Selection pauses updates; ResizeObserver anchors a message row. Row-top anchoring
   alone cannot protect reading inside a large message that reflows above the reader.
 - Workspace mounts the active transcript keyed by session and retains reading
   positions. Preserve draft/admission behavior while changing transcript ownership.
-- `source/ui/sessions/Messages.ts` and backend `core/sessions/Messages.cs` expose
+- `source/ui/sessions/transcript/Messages.ts` and backend `core/sessions/Messages.cs` expose
   user/assistant text only, with identity, history revision, cursors and lifecycle
   facts. No public content-part, tool-inspection, attachment or reasoning projection.
 - `SnapshotReader.cs`: at most 60 recent messages and 256-UTF-16-unit previews.
@@ -730,7 +730,7 @@ speculative API, schema or class design is implied.
    parse.
 2. **Navigation/read contracts and pure viewport model** — Own contracts in this
    design; backend read ownership in `core/sessions/` and `core/storage/`; the pure
-   viewport/anchor model in `source/ui/sessions/`. Define whole-conversation position,
+   viewport/anchor model in `source/ui/chat/transcript/viewport/`. Define whole-conversation position,
    approximate prompt markers, source anchors, follow intent, reflow correction and
    revision fallback without coupling identity to pixels. Gate: model tests cover
    distant jumps, append/revision changes and height corrections while preserving the
@@ -747,15 +747,15 @@ speculative API, schema or class design is implied.
    actual write/contention behavior before selecting persistent structure.
 4. **Display integration** — Own source/read integration in `core/storage/`, with
    the backend semantic-derivation owner selected after the probes within `core/`;
-   own display/viewport integration in `source/ui/app/Transcript.tsx` and
-   `source/ui/sessions/`. Gate: Markdown text, code and tables render correctly;
+   own display/viewport integration in `source/ui/chat/transcript/Transcript.tsx` and
+   `source/ui/chat/transcript/viewport/`. Gate: Markdown text, code and tables render correctly;
    both entry and intra-message virtualization work, including very large code/table
    content; source-to-rendered anchors and whole-item source reads remain correct;
    byte/piece reads remain bounded. Streaming never flashes raw Markdown. Preserve
    native selection with temporary selected-span retention, keyboard/focus and
    accessibility, and keep input/scrolling/execution responsive.
 5. **Bounded shared cache and durable return** — Own browser content/derived-resource
-   lifetimes and local navigation state in `source/ui/sessions/` and the existing
+   lifetimes and local navigation state in `source/ui/chat/transcript/navigation/` and the existing
    transcript/workspace owners. Gate: share useful derived work across views without
    retaining one full transcript per tab; evicted sessions restore the saved source
    anchor and following intent after tab return and browser reload; selection pins only

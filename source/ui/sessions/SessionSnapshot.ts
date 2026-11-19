@@ -1,6 +1,6 @@
 import type { LlmSelection } from "../providers/LlmSelection.ts";
 import type { SessionExecutionResult } from "./SessionExecutionResult.ts";
-import type { PendingResponse } from "./Prepass.ts";
+import type { PendingResponse } from "./transcript/Prepass.ts";
 
 // Bounded committed session facts combined with current admission and Stop state.
 export interface PendingInputPreview {

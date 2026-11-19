@@ -1,6 +1,6 @@
 import type { RefObject } from "preact";
 import { useId, useState } from "preact/hooks";
-import { FolderPicker } from "../components/FolderPicker.tsx";
+import { FolderPicker } from "../folder-browser/FolderPicker.tsx";
 import {
   compactionTriggerInput,
   parseCompactionTriggerInput,

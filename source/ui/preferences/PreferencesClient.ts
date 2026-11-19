@@ -1,5 +1,5 @@
 import { requestJson } from "../http/requestJson.ts";
-import type { SubagentProviderConnectionIds } from "../providers/SubagentProviderSelection.ts";
+import type { SubagentProviderConnectionIds } from "../providers/subagents/SubagentProviderSelection.ts";
 
 export type AuxiliaryModelPurpose = "tools" | "skills" | "instructions" | "title";
 export type ProtectedResourceCategory = "tools" | "skills" | "instructions";

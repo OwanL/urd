@@ -4,7 +4,7 @@ import { requestJson } from "../http/requestJson.ts";
 import type {
   SubagentProviderConnectionIds,
   SubagentProviders,
-} from "../providers/SubagentProviderSelection.ts";
+} from "../providers/subagents/SubagentProviderSelection.ts";
 import type {
   MessageContentCursor,
   MessageContentPage,
@@ -17,19 +17,19 @@ import type {
   TranscriptPositionWindow,
   TranscriptPromptPage,
   TranscriptPromptPageQuery,
-} from "./Messages.ts";
+} from "./transcript/Messages.ts";
 import type {
   CompactionReceipt,
   ManualCompactionRequest,
   CompactionSummary,
-} from "./Compaction.ts";
-import type { PrepassDetails, PrepassDetailsQuery } from "./Prepass.ts";
-import type { ContinuationReceipt, ContinuationSubmission } from "./Continuation.ts";
-import type { MessageEditReceipt, MessageEditSubmission } from "./MessageEdit.ts";
+} from "./inputs/Compaction.ts";
+import type { PrepassDetails, PrepassDetailsQuery } from "./transcript/Prepass.ts";
+import type { ContinuationReceipt, ContinuationSubmission } from "./inputs/Continuation.ts";
+import type { MessageEditReceipt, MessageEditSubmission } from "./inputs/MessageEdit.ts";
 import type { SessionIdPage } from "./SessionIdPage.ts";
 import type { SessionSnapshot } from "./SessionSnapshot.ts";
-import type { StopReceipt } from "./Stop.ts";
-import type { UserMessageReceipt, UserMessageSubmission } from "./UserMessageSubmission.ts";
+import type { StopReceipt } from "./inputs/Stop.ts";
+import type { UserMessageReceipt, UserMessageSubmission } from "./inputs/UserMessageSubmission.ts";
 
 // Typed bounded HTTP reads and commands. Page events and receipt reconciliation stay with callers.
 export class SessionClient {

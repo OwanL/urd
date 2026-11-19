@@ -1,4 +1,4 @@
-import { Icon } from "../../components/Icon.tsx";
+import { Icon } from "../../controls/Icon.tsx";
 import type { ProviderConnection, ProviderRoute } from "../ProviderConnection.ts";
 import type { ProviderSettingsState } from "./useProviderSettings.ts";
 import {

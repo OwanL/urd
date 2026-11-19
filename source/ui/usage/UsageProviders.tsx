@@ -1,4 +1,4 @@
-import { HoverPopover } from "../components/HoverPopover.tsx";
+import { HoverPopover } from "../controls/HoverPopover.tsx";
 import type { UsagePoint } from "./UsageTypes.ts";
 import type { UsageProvider } from "./UsageValues.ts";
 import { formatUsageCost, formatUsageTime, usageColors, usageProviders } from "./UsageValues.ts";

@@ -1,16 +1,17 @@
 import type { TargetedKeyboardEvent } from "preact";
 import type { RefObject } from "preact";
 import { useEffect, useId, useRef, useState } from "preact/hooks";
-import { Icon } from "../components/Icon.tsx";
-import { IconButton } from "../components/IconButton.tsx";
-import { Popover } from "../components/Popover.tsx";
+import { Icon } from "../controls/Icon.tsx";
+import { IconButton } from "../controls/IconButton.tsx";
+import { Popover } from "../controls/Popover.tsx";
 import {
   compactionTriggerInput,
   reconcileCompactionTriggerDraft,
 } from "../preferences/CompactionTriggerInput.ts";
 import type { PreferencesState } from "../preferences/usePreferences.ts";
 import type { ProviderClient } from "../providers/ProviderClient.ts";
-import { ProviderSettings, useProviderSettings } from "../providers/settings/index.ts";
+import { ProviderSettings } from "../providers/settings/ProviderSettings.tsx";
+import { useProviderSettings } from "../providers/settings/useProviderSettings.ts";
 import { GeneralSettings } from "./GeneralSettings.tsx";
 import { DefaultSubagentProviders } from "./DefaultSubagentProviders.tsx";
 import { ModelPreferencesSettings } from "./ModelPreferencesSettings.tsx";

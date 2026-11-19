@@ -1,8 +1,8 @@
 import { useState } from "preact/hooks";
 import type { PreferencesState } from "../preferences/usePreferences.ts";
 import type { ProviderSettingsState } from "../providers/settings/useProviderSettings.ts";
-import { SubagentProviderFields } from "../providers/SubagentProviderFields.tsx";
-import type { SubagentProviders } from "../providers/SubagentProviderSelection.ts";
+import { SubagentProviderFields } from "../providers/subagents/SubagentProviderFields.tsx";
+import type { SubagentProviders } from "../providers/subagents/SubagentProviderSelection.ts";
 
 const preference = "subagentProviderConnectionIds";
 

@@ -10,7 +10,7 @@
   "scripts": {
     "build": "vite build",
     "build:watch": "vite build --watch",
-    "dev:browser:host": "node tests/BrowserFixture.ts",
+    "dev:browser:host": "node tests/support/BrowserFixture.ts",
     "check": "oxfmt --check . && oxlint --type-aware --deny-warnings . && tsc --noEmit",
     "format": "oxfmt --write .",
     "format:check": "oxfmt --check .",
@@ -18,8 +18,8 @@
     "lint:fast": "oxlint --deny-warnings .",
     "typecheck": "tsc --noEmit",
     "typecheck:watch": "tsc --noEmit --watch",
-    "test": "node --test \"tests/**/*.test.ts\" \"sessions/*.test.ts\"",
-    "test:integration": "node --test tests/SessionClient.integration.ts tests/AgentCommunication.integration.ts"
+    "test": "node --test \"tests/**/*.test.ts\"",
+    "test:integration": "node --test tests/sessions/SessionClient.integration.ts tests/sessions/AgentCommunication.integration.ts"
   },
   "devDependencies": {
     "@types/node": "24.19.2",

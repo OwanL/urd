@@ -33,9 +33,10 @@ internal static class PortableGit {
       string downloadPath = Path.Combine(temporaryPath, "PortableGit.7z.exe");
       DownloadAndVerify(downloadPath);
 
-      string extractedPath = Path.Combine(temporaryPath, "extracted");
-      Directory.CreateDirectory(extractedPath);
-      Extract(downloadPath, extractedPath);
+      // The SFX defaults to PortableGit beside its executable. Its custom path argument
+      // can silently select the wrong destination when the cache path contains spaces.
+      string extractedPath = Path.Combine(temporaryPath, "PortableGit");
+      Extract(downloadPath);
       string extractedBashPath = Path.Combine(extractedPath, "bin", "bash.exe");
       if (!File.Exists(extractedBashPath))
         throw new InvalidDataException("Portable Git extraction did not produce bin/bash.exe.");
@@ -72,7 +73,7 @@ internal static class PortableGit {
       throw new InvalidDataException("The downloaded portable Git archive failed SHA-256 verification.");
   }
 
-  private static void Extract(string downloadPath, string destinationPath) {
+  private static void Extract(string downloadPath) {
     var start = new ProcessStartInfo(downloadPath) {
       UseShellExecute = false,
       CreateNoWindow = true,
@@ -81,7 +82,6 @@ internal static class PortableGit {
     };
     start.ArgumentList.Add("-y");
     start.ArgumentList.Add("-gm2");
-    start.ArgumentList.Add("-InstallPath=" + destinationPath.Replace("\\", "\\\\", StringComparison.Ordinal));
 
     using Process process = Process.Start(start) ?? throw new InvalidOperationException("Could not start portable Git extraction.");
     if (!process.WaitForExit(TimeSpan.FromMinutes(10))) {

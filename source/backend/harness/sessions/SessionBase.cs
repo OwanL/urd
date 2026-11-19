@@ -18,6 +18,8 @@ public abstract class SessionBase {
   private readonly PreferenceManager preferences;
   private readonly ModelSelector? modelSelector;
   private readonly QuestionDelivery questions;
+  private readonly SessionInputs inputs;
+  private readonly ManualCompaction manualCompaction;
   private readonly ChatProcesses? processes;
   private readonly ActiveExecution activeExecution;
   private readonly AsyncLock sessionLock = new();
@@ -43,6 +45,8 @@ public abstract class SessionBase {
     this.store = store;
     this.preferences = preferences ?? new PreferenceManager(store);
     this.modelSelector = modelSelector;
+    inputs = new SessionInputs(this, store, sessionLock);
+    manualCompaction = new ManualCompaction(this, store, sessionLock);
     questions = new QuestionDelivery(this, store, sessionLock, (subagents as SessionManager)?.Questions);
     activeExecution = new ActiveExecution(this, store, sessionLock, createChatClient,
         tools ?? new ToolCatalog([]), pending ?? new PendingToolCalls(), subagents);
@@ -59,7 +63,8 @@ public abstract class SessionBase {
 
   internal long HistoryRevision { get; private set; }
 
-  private bool IsAcceptingWork => acceptingUserMessages && editTask is null;
+  // Caller holds the session lock.
+  internal bool IsAcceptingWork => acceptingUserMessages && editTask is null;
   // Caller holds the session lock.
   internal bool CanStartWork => IsAcceptingWork && !needsAttention;
 
@@ -84,34 +89,9 @@ public abstract class SessionBase {
       modelSelector?.HasSubagentProvidersAsync(ReadSubagentProviders(), cancellation)
       ?? Task.FromResult(false);
 
-  public async Task<CompactionReceipt?> CompactAsync(ManualCompactionRequest submission) {
-    ArgumentNullException.ThrowIfNull(submission);
-    if (submission.OperationId == Guid.Empty || submission.ExpectedHistoryRevision < 0
-        || submission.LlmSelection is null || submission.Focus?.Length > 8192)
-      throw new ArgumentException("Compaction requires an operation ID, revision, selection and bounded focus.", nameof(submission));
-    submission.LlmSelection.Validate();
-    TaskCompletionSource? executionStart = null;
-    CompactionReceipt? receipt;
-    using (await sessionLock.AcquireAsync()) {
-      var admission = WriteToStore(() => store.Compactions.Start(Id, submission,
-          CanStartWork && execution is null && submission.ExpectedHistoryRevision == HistoryRevision));
-      if (admission is null)
-        return null;
-      receipt = admission.Value.Receipt;
-      if (admission.Value.New) {
-        executionStart = StartExecutionAfterUnlock(submission.OperationId, submission.LlmSelection, submission);
-        PublishChange();
-      }
-    }
-    executionStart?.SetResult();
-    return receipt;
-  }
-
-  public Task<CompactionReceipt?> ReadCompactionReceiptAsync(Guid operationId, CancellationToken cancellation = default) =>
-      ReadUnderLockAsync(() => store.Compactions.ReadReceipt(Id, operationId), cancellation);
-
-  public Task<CompactionSummary?> ReadCompactionAsync(Guid id, long revision, CancellationToken cancellation = default) =>
-      ReadUnderLockAsync(() => store.Compactions.Read(Id, revision, id), cancellation);
+  public Task<CompactionReceipt?> CompactAsync(ManualCompactionRequest submission) => manualCompaction.CompactAsync(submission);
+  public Task<CompactionReceipt?> ReadCompactionReceiptAsync(Guid operationId, CancellationToken cancellation = default) => manualCompaction.ReadCompactionReceiptAsync(operationId, cancellation);
+  public Task<CompactionSummary?> ReadCompactionAsync(Guid id, long revision, CancellationToken cancellation = default) => manualCompaction.ReadCompactionAsync(id, revision, cancellation);
 
   internal async Task SetCompactingAsync(Guid executionId, bool compacting) {
     using var _ = await sessionLock.AcquireAsync();
@@ -125,40 +105,10 @@ public abstract class SessionBase {
   internal Task KillProcessesAsync() => OperatingSystem.IsWindows() && processes is not null
       ? processes.KillAllAsync() : Task.CompletedTask;
 
-  public Task<UserMessageReceipt?> ReadUserMessageReceiptAsync(Guid submissionId, CancellationToken cancellation = default) =>
-      ReadUnderLockAsync(() => store.UserMessages.ReadReceipt(Id, submissionId), cancellation);
-
-  public async Task<ContinuationReceipt?> ReadContinuationReceiptAsync(Guid operationId,
-      CancellationToken cancellation = default) {
-    if (operationId == Guid.Empty)
-      throw new ArgumentException("An operation ID is required.", nameof(operationId));
-    return await ReadUnderLockAsync(() => store.Continuations.ReadReceipt(Id, operationId), cancellation);
-  }
-
-  public Task<NotSentPage> ReadNotSentInputsAsync(string? cursor = null, CancellationToken cancellation = default) =>
-      ReadUnderLockAsync(() => store.NotSentInputs.Read(Id, cursor), cancellation);
-
-  public async Task<bool> RemovePendingInputAsync(Guid executionId, Guid submissionId) {
-    if (executionId == Guid.Empty || submissionId == Guid.Empty)
-      throw new ArgumentException("Execution and submission identities are required.");
-
-    using var _ = await sessionLock.AcquireAsync();
-    if (!CanStartWork || execution is not { } current
-        || current.Identity.ExecutionId != executionId || current.Identity.HistoryRevision != HistoryRevision
-        || current.IsStopping)
-      return false;
-
-    SessionSnapshot snapshot = ReadCurrentSnapshot();
-    if (snapshot.AdmissionFenced || snapshot.StopRequested || snapshot.UnsettledExecutionId != executionId)
-      return false;
-
-    bool removed = WriteToStore(() => store.Executions.RemovePendingInput(current.Identity, submissionId));
-    if (removed) {
-      current.Wake();
-      PublishChange();
-    }
-    return removed;
-  }
+  public Task<UserMessageReceipt?> ReadUserMessageReceiptAsync(Guid submissionId, CancellationToken cancellation = default) => inputs.ReadUserMessageReceiptAsync(submissionId, cancellation);
+  public Task<ContinuationReceipt?> ReadContinuationReceiptAsync(Guid operationId, CancellationToken cancellation = default) => inputs.ReadContinuationReceiptAsync(operationId, cancellation);
+  public Task<NotSentPage> ReadNotSentInputsAsync(string? cursor = null, CancellationToken cancellation = default) => inputs.ReadNotSentInputsAsync(cursor, cancellation);
+  public Task<bool> RemovePendingInputAsync(Guid executionId, Guid submissionId) => inputs.RemovePendingInputAsync(executionId, submissionId);
 
   public async Task<SessionSnapshot> ReadSnapshotAsync(CancellationToken cancellation = default) {
     using var _ = await sessionLock.AcquireAsync(cancellation);
@@ -210,83 +160,9 @@ public abstract class SessionBase {
         status.CurrentStatus(stored, IsAcceptingWork, needsAttention, execution), stored.Title);
   }
 
-  private protected async Task<ContinuationReceipt?> AdmitContinuationAsync(ContinuationSubmission submission) {
-    ArgumentNullException.ThrowIfNull(submission);
-    TaskCompletionSource? executionStart = null;
-    ContinuationReceipt? receipt;
-    using (await sessionLock.AcquireAsync()) {
-      var admission = WriteToStore(() => store.Continuations.Start(Id, HistoryRevision, submission,
-          CanStartWork && execution is null));
-      if (admission is null)
-        return null;
-
-      receipt = admission.Value.Receipt;
-      if (admission.Value.New) {
-        executionStart = StartExecutionAfterUnlock(receipt.ExecutionId, submission.LlmSelection!);
-        PublishChange();
-      }
-    }
-
-    executionStart?.SetResult();
-    return receipt;
-  }
-
-  private protected async Task<UserMessageReceipt> AdmitUserMessageAsync(UserMessageSubmission submission) {
-    // A new execution starts only after the lock is released.
-    TaskCompletionSource? executionStart = null;
-    UserMessageReceipt receipt;
-    using (await sessionLock.AcquireAsync()) {
-      (receipt, bool newlyAccepted) = WriteToStore(
-          () => store.UserMessages.Submit(Id, HistoryRevision, submission, IsAcceptingWork, Guid.NewGuid(), execution?.ExecutionId));
-      if (receipt.Acceptance == MessageAcceptance.Accepted)
-        hasAcceptedInput = true;
-
-      // Steering joins the owned execution; neither it nor a retained receipt starts another driver.
-      if (newlyAccepted) {
-        if (execution is null)
-          executionStart = StartExecutionAfterUnlock(receipt.ExecutionId!.Value, receipt.Submission.LlmSelection!);
-        execution!.Wake();
-        PublishChange();
-      }
-    }
-
-    executionStart?.SetResult();
-    return receipt;
-  }
-
-  // Admits a bounded assignment into its first execution in one lock hold, so every input shares
-  // the first request. Refusals throw: a bounded child owns no retries and no resumptions.
-  private protected async Task<Guid> AdmitAssignmentAsync(IReadOnlyList<UserMessageSubmission> submissions, Guid parentSessionId) {
-    if (submissions.Count == 0)
-      throw new ArgumentException("An assignment requires at least one input.", nameof(submissions));
-
-    TaskCompletionSource? executionStart = null;
-    Guid executionId;
-    using (await sessionLock.AcquireAsync()) {
-      UserMessageReceipt lead = WriteToStore(() => store.UserMessages.Submit(
-          Id, HistoryRevision, submissions[0], IsAcceptingWork, Guid.NewGuid(),
-          provenance: submissions.Count == 1 ? InputProvenance.AgentAssignment : InputProvenance.InheritedContext,
-          senderSessionId: parentSessionId)).Receipt;
-      if (lead.Acceptance != MessageAcceptance.Accepted)
-        throw new InvalidOperationException($"The assignment was refused ({lead.RefusalReason}).");
-
-      executionId = lead.ExecutionId!.Value;
-      foreach (UserMessageSubmission steered in submissions.Skip(1)) {
-        UserMessageReceipt receipt = WriteToStore(() => store.UserMessages.Submit(
-            Id, HistoryRevision, steered, IsAcceptingWork, Guid.NewGuid(), executionId,
-            provenance: InputProvenance.AgentAssignment, senderSessionId: parentSessionId)).Receipt;
-        if (receipt.Acceptance != MessageAcceptance.Accepted)
-          throw new InvalidOperationException($"The assignment was refused ({receipt.RefusalReason}).");
-      }
-
-      hasAcceptedInput = true;
-      executionStart = StartExecutionAfterUnlock(executionId, submissions[0].LlmSelection!);
-      PublishChange();
-    }
-
-    executionStart?.SetResult();
-    return executionId;
-  }
+  private protected Task<ContinuationReceipt?> AdmitContinuationAsync(ContinuationSubmission submission) => inputs.AdmitContinuationAsync(submission);
+  private protected Task<UserMessageReceipt> AdmitUserMessageAsync(UserMessageSubmission submission) => inputs.AdmitUserMessageAsync(submission);
+  private protected Task<Guid> AdmitAssignmentAsync(IReadOnlyList<UserMessageSubmission> submissions, Guid parentSessionId) => inputs.AdmitAssignmentAsync(submissions, parentSessionId);
 
   public Task<MessageEditReceipt?> ReadMessageEditReceiptAsync(Guid operationId, CancellationToken cancellation = default) =>
       ReadUnderLockAsync(() => store.MessageEdits.ReadReceipt(Id, operationId), cancellation);
@@ -486,13 +362,13 @@ public abstract class SessionBase {
 
   private bool IsCurrentExecution(Guid executionId) => activeExecution.IsCurrent(executionId);
 
-  private async Task<T> ReadUnderLockAsync<T>(Func<T> read, CancellationToken cancellation = default) {
+  internal async Task<T> ReadUnderLockAsync<T>(Func<T> read, CancellationToken cancellation = default) {
     using var _ = await sessionLock.AcquireAsync(cancellation);
     return read();
   }
 
   // Caller holds the session lock.
-  private SessionSnapshot ReadCurrentSnapshot() =>
+  internal SessionSnapshot ReadCurrentSnapshot() =>
       status.WithLiveState(store.Snapshots.ReadPersisted(Id), IsAcceptingWork, execution);
 
   // Caller holds the session lock.

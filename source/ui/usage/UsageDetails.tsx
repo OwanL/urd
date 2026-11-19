@@ -5,14 +5,8 @@ import { UsageComposition } from "./UsageComposition.tsx";
 import { UsageHistory } from "./UsageHistory.tsx";
 import { UsageProviderBreakdown, UsageProviders } from "./UsageProviders.tsx";
 import { useUsageSummary } from "./useUsageSummary.ts";
-import {
-  cumulativeUsageHistory,
-  formatUsageCost,
-  formatUsageCount,
-  usageColors,
-  usageProviders,
-  usageSources,
-} from "./UsageValues.ts";
+import { cumulativeUsageHistory, usageProviders, usageSources } from "./UsageAggregation.ts";
+import { formatUsageCost, formatUsageCount, usageColors } from "./UsagePresentation.ts";
 
 const costScopes = [
   { value: "session", label: "Session" },

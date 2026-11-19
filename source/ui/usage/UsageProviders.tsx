@@ -1,7 +1,8 @@
 import { HoverPopover } from "../controls/HoverPopover.tsx";
 import type { UsagePoint } from "./Usage.ts";
-import type { UsageProvider } from "./UsageValues.ts";
-import { formatUsageCost, formatUsageTime, usageColors, usageProviders } from "./UsageValues.ts";
+import type { UsageProvider } from "./UsageAggregation.ts";
+import { usageProviders } from "./UsageAggregation.ts";
+import { formatUsageCost, formatUsageTime, usageColors } from "./UsagePresentation.ts";
 
 export function UsageProviders({
   providers,

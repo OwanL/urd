@@ -1,7 +1,7 @@
 import type { Chart } from "chart.js";
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { UsageItem } from "./UsageValues.ts";
-import { formatUsageCost, usageColors } from "./UsageValues.ts";
+import type { UsageItem } from "./UsageAggregation.ts";
+import { formatUsageCost, usageColors } from "./UsagePresentation.ts";
 
 export function UsageComposition({ items, label }: { items: UsageItem[]; label: string }) {
   const canvas = useRef<HTMLCanvasElement>(null);

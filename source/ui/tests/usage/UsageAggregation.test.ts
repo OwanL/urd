@@ -3,13 +3,10 @@ import test from "node:test";
 import type { UsageBreakdown, UsagePoint, UsageTotals } from "../../usage/Usage.ts";
 import {
   cumulativeUsageHistory,
-  formatCostUsd,
-  formatUsageCost,
   usageRange,
-  usageColors,
   usageProviders,
   usageSources,
-} from "../../usage/UsageValues.ts";
+} from "../../usage/UsageAggregation.ts";
 
 const totals = (overrides: Partial<UsageTotals> = {}): UsageTotals => ({
   costUsd: 0,
@@ -32,24 +29,6 @@ const breakdown = (
   purpose,
   totals: totals(usageTotals),
   ...(isOther === undefined ? {} : { isOther }),
-});
-
-void test("USD formatting uses two decimals and distinguishes sub-cent costs from zero", () => {
-  assert.equal(formatCostUsd(0), "$0.00");
-  assert.equal(formatCostUsd(1.2), "$1.20");
-  assert.equal(formatCostUsd(0.126), "$0.13");
-  assert.equal(formatCostUsd(0.01), "$0.01");
-  assert.equal(formatCostUsd(0.005), "<$0.01");
-  assert.equal(formatCostUsd(0.0000001), "<$0.01");
-  assert.equal(formatCostUsd(-0.005), "−<$0.01");
-  assert.equal(formatCostUsd(null), "—");
-  assert.equal(formatUsageCost(totals({ requests: 2, unknownRequests: 2 })), "Unknown");
-  assert.equal(formatUsageCost(totals()), "$0.00");
-  assert.equal(
-    formatUsageCost(totals({ costUsd: 0.005, unknownRequests: 2 })),
-    "<$0.01 + 2 unknown",
-  );
-  assert.equal(formatUsageCost(totals({ costUsd: 0.005, estimatedRequests: 1 })), "~<$0.01");
 });
 
 void test("history accumulates returned interval costs and counts chronologically", () => {
@@ -249,15 +228,6 @@ void test("usage providers and sources aggregate costs, counts, labels and purpo
     }),
   );
   assert.equal(new Set(sources.map(({ key }) => key)).size, sources.length);
-});
-
-void test("usage colors are deterministic, order-independent and distinct for small sets", () => {
-  const keys = ["provider-a", "source-conversation", "source-other", "provider-b"];
-  const colors = usageColors(keys);
-  assert.deepEqual(usageColors([...keys].reverse()), colors);
-  assert.equal(new Set(Object.values(colors)).size, keys.length);
-  assert.equal(usageColors([keys[0]!])[keys[0]!], colors[keys[0]!]);
-  assert.equal(Object.hasOwn(usageColors(["__proto__"]), "__proto__"), true);
 });
 
 void test("usage ranges cover rolling 24 and 168 hours across calendar and DST boundaries", () => {

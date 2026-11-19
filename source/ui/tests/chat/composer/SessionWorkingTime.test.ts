@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { formatTokenCount } from "../../../chat/TokenCountFormatting.ts";
 import {
-  formatTokenCount,
   formatWorkingTime,
   workingMilliseconds,
-} from "../../../chat/composer/SessionIndicatorValues.ts";
+} from "../../../chat/composer/SessionWorkingTime.ts";
 
 void test("context stays compact and distinguishes unknown from zero", () => {
   assert.equal(formatTokenCount(null), "?");

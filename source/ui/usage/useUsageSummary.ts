@@ -1,7 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
 import { UsageClient } from "./UsageClient.ts";
 import type { UsageRange, UsageSummary } from "./Usage.ts";
-import { usageRange } from "./UsageValues.ts";
+import { usageRange } from "./UsageAggregation.ts";
 
 export interface UsageSummaryState {
   summary: UsageSummary | null;

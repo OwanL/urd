@@ -8,7 +8,7 @@ import {
   reusableToolCallPreview,
   toolCallClipboardText,
 } from "./ToolCallInspection.ts";
-import { formatTokenCount } from "../../composer/SessionIndicatorValues.ts";
+import { formatTokenCount } from "../../TokenCountFormatting.ts";
 import "./tool-row-interactions.css";
 
 interface InspectionTarget {

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { PrepassDetails, PrepassResource } from "../../sessions/transcript/Prepass.ts";
 import type { SessionClient } from "../../sessions/SessionClient.ts";
-import { formatPrepassElapsed, modelDisplayName, prepassCostLabel } from "./PrepassValues.ts";
+import { formatPrepassElapsed, prepassCostLabel } from "./PrepassFormatting.ts";
+import { modelDisplayName } from "./PrepassPresentation.ts";
 import "./prepass-details.css";
 
 // Read-only preparation detail surface. It mounts only while its tooltip is open: the

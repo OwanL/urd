@@ -3,11 +3,8 @@ import { HoverPopover } from "../../controls/HoverPopover.tsx";
 import { Tooltip } from "../../controls/Tooltip.tsx";
 import { UsageControl } from "../../usage/UsageControl.tsx";
 import type { SessionContextUsage, SessionWorkingTime } from "../../sessions/SessionSnapshot.ts";
-import {
-  formatTokenCount,
-  formatWorkingTime,
-  workingMilliseconds,
-} from "./SessionIndicatorValues.ts";
+import { formatTokenCount } from "../TokenCountFormatting.ts";
+import { formatWorkingTime, workingMilliseconds } from "./SessionWorkingTime.ts";
 
 interface SessionIndicatorsProps {
   contextUsage: SessionContextUsage | null;

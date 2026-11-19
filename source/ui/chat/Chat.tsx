@@ -19,7 +19,7 @@ import { Transcript } from "./transcript/Transcript.tsx";
 import { SessionWorkingDirectory } from "./working-directory/SessionWorkingDirectory.tsx";
 import { PendingResponseStatus } from "./prepass/PrepassRows.tsx";
 import type { ResponseStatusContext } from "./prepass/PrepassRows.tsx";
-import { unanchoredPrepass, uniqueModelNames } from "./prepass/PrepassValues.ts";
+import { unanchoredPrepass, uniqueModelNames } from "./prepass/PrepassPresentation.ts";
 import type { ReadingPosition } from "./transcript/Transcript.tsx";
 import type { TranscriptDisplay } from "./transcript/TranscriptDisplay.ts";
 import type { TranscriptNavigationState } from "./transcript/navigation/TranscriptNavigationStorage.ts";

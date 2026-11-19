@@ -13,14 +13,14 @@ import { Icon } from "../../controls/Icon.tsx";
 import { PrepassDetailsView } from "./PrepassDetails.tsx";
 import {
   effortLabel,
-  formatClockTime,
   modelDisplayName,
   orderedPrepass,
   prepassRowModel,
   prepassOutcome,
   prepassUsedSessionModel,
-} from "./PrepassValues.ts";
-import type { PrepassRowModel } from "./PrepassValues.ts";
+} from "./PrepassPresentation.ts";
+import { formatClockTime } from "./PrepassFormatting.ts";
+import type { PrepassRowModel } from "./PrepassPresentation.ts";
 import "./response-status.css";
 
 // Shared facts every preparation detail read needs within one conversation.

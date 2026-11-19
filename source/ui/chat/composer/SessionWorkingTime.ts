@@ -1,11 +1,5 @@
 import type { SessionWorkingTime } from "../../sessions/SessionSnapshot.ts";
 
-export function formatTokenCount(tokens: number | null | undefined): string {
-  if (tokens === null || tokens === undefined || !Number.isFinite(tokens) || tokens < 0) return "?";
-  if (tokens < 1_000) return String(Math.floor(tokens));
-  return `${Number((tokens / 1_000).toFixed(1))}k`;
-}
-
 export function workingMilliseconds(time: SessionWorkingTime, now: number): number {
   const started = time.startedAt ? Date.parse(time.startedAt) : NaN;
   return time.completedMilliseconds + (Number.isFinite(started) ? Math.max(0, now - started) : 0);

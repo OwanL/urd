@@ -2,8 +2,9 @@ import type { Chart } from "chart.js";
 import { useEffect, useId, useMemo, useRef, useState } from "preact/hooks";
 import { Popover } from "../controls/Popover.tsx";
 import { UsagePointDetails } from "./UsageProviders.tsx";
-import type { CumulativeUsagePoint } from "./UsageValues.ts";
-import { formatUsageCost, formatUsageTime, usageColors, usageProviders } from "./UsageValues.ts";
+import type { CumulativeUsagePoint } from "./UsageAggregation.ts";
+import { usageProviders } from "./UsageAggregation.ts";
+import { formatUsageCost, formatUsageTime, usageColors } from "./UsagePresentation.ts";
 
 type CostPoint = { x: number; y: number | null };
 

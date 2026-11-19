@@ -140,7 +140,9 @@ unknown/cache/reasoning quantities, failed native responses, provider model test
 direct unattributed/title/background requests without a session, pricing arithmetic
 and bounded HTTP responses. Catalog tests use fixture HTTP responses to check
 canonical matching, reference-rate selection, persistent refresh, shutdown and
-settlement without modifying historical quotes. Browser checks cover client mappings and display
+settlement without modifying historical quotes. The HTTP/SDK pricing flow also
+checks exact ledger totals at the long-context boundary and verifies that a
+mock refresh changes new quotes, but not settled ones, across a restart. Browser checks cover client mappings and display
 calculations. Separate one-off desktop/mobile diagnostics checked hover focus retention, pointer entry and deliberate keyboard activation against an isolated
 host with synthetic ledger data. These are not a browser regression suite or evidence
 of live-provider accuracy. See [test scope](testing.md) for the verification policy.

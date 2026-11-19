@@ -1,10 +1,10 @@
-using System.Net;
 using Microsoft.Extensions.AI;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Providers;
 using Urd.Core.Storage;
 using Urd.Core.Usage;
 using Xunit;
+using static Urd.Backend.Tests.Support.ModelsDevFeed;
 using static Urd.Backend.Tests.Support.TestAsync;
 
 namespace Urd.Backend.Tests.Usage;
@@ -68,11 +68,11 @@ public sealed class ModelPriceCatalogTests {
     var clock = new ManualClock();
     var entered = Signal();
     var release = Signal();
-    using var handler = new PriceHandler(async (call, token) => {
+    using var handler = new ModelsDevFeed(async (call, token) => {
       if (call > 1) return "{\"openai\":{\"models\":{}}}";
       entered.TrySetResult();
       await release.Task.WaitAsync(token);
-      return Feed;
+      return ChatCatalog;
     });
     await using (var catalog = new ModelPriceCatalog(path, handler, clock)) {
       Assert.Null(catalog.FindRates(Ollama, "fixture-chat"));
@@ -94,7 +94,7 @@ public sealed class ModelPriceCatalogTests {
       Assert.Equal(rate, catalog.FindRates(Ollama, "fixture-chat"));
     }
 
-    using var offline = new PriceHandler(static (_, _) => throw new InvalidOperationException("Unexpected catalog network call."));
+    using var offline = new ModelsDevFeed(static (_, _) => throw new InvalidOperationException("Unexpected catalog network call."));
     await using var reopened = new ModelPriceCatalog(path, offline, clock);
     Assert.Equal(3m, reopened.FindRates(Ollama, "fixture-chat")?.Input);
     Assert.Equal(0, offline.Calls);
@@ -106,11 +106,11 @@ public sealed class ModelPriceCatalogTests {
     string path = Path.ChangeExtension(profile.Path, ".prices.json");
     var entered = Signal();
     var exited = Signal();
-    using var handler = new PriceHandler(async (_, token) => {
+    using var handler = new ModelsDevFeed(async (_, token) => {
       entered.TrySetResult();
       try {
         await Task.Delay(Timeout.InfiniteTimeSpan, token);
-        return Feed;
+        return ChatCatalog;
       } finally {
         exited.TrySetResult();
       }
@@ -128,9 +128,9 @@ public sealed class ModelPriceCatalogTests {
     using var database = new TemporaryDatabase("urd-usage-price-settlement");
     using UrdStore store = UrdStore.Open(database.Path);
     var release = Signal();
-    using var handler = new PriceHandler(async (_, token) => {
+    using var handler = new ModelsDevFeed(async (_, token) => {
       await release.Task.WaitAsync(token);
-      return Feed;
+      return ChatCatalog;
     });
     await using var catalog = new ModelPriceCatalog(Path.ChangeExtension(database.Path, ".prices.json"), handler, new ManualClock());
     Guid session = Guid.NewGuid();
@@ -175,39 +175,4 @@ public sealed class ModelPriceCatalogTests {
     public override DateTimeOffset GetUtcNow() => Now;
   }
 
-  private sealed class PriceHandler(Func<int, CancellationToken, Task<string>> respond) : HttpMessageHandler {
-    private int calls;
-    internal int Calls => Volatile.Read(ref calls);
-
-    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) {
-      Assert.Equal(HttpMethod.Get, request.Method);
-      Assert.Equal(ModelsDevPriceSource.Feed, request.RequestUri);
-      Assert.Null(request.Headers.Authorization);
-      string body = await respond(Interlocked.Increment(ref calls), cancellationToken);
-      return new(HttpStatusCode.OK) { Content = new StringContent(body) };
-    }
-  }
-
-  private const string Feed = """
-    {
-      "openai":{"models":{
-        "gpt-6.2-sol":{"id":"gpt-6.2-sol","canonical_id":"openai/gpt-6.2-sol","type":"chat","name":"GPT-6.2 Sol",
-          "cost":{"text":{"input":{"price":7},"output":{"price":14}}}}
-      }},
-      "github-copilot":{"models":{
-        "gpt-6.2-sol":{"id":"gpt-6.2-sol","canonical_id":"openai/gpt-6.2-sol","type":"chat","name":"GPT-6.2 Sol",
-          "cost":{"text":{"input":{"price":8},"output":{"price":16}}}}
-      }},
-      "ollama-cloud":{"models":{
-        "fixture-chat":{"id":"fixture-chat","canonical_id":"fixture/chat-model","type":"chat","name":"Fixture Chat",
-          "cost":{"text":{"input":{"price":0.1},"output":{"price":0.2}},"multipliers":[{"when":{"utc_hours":{"gte":"18:00"}},"factor":2}]}},
-        "fixed-chat":{"id":"fixed-chat","canonical_id":"fixture/fixed-chat","type":"chat","name":"Fixed Chat",
-          "cost":{"text":{"input":{"price":1},"output":{"price":2}}}}
-      }},
-      "openrouter":{"models":{
-        "fixture/chat-model":{"id":"fixture/chat-model","canonical_id":"fixture/chat-model","type":"chat","name":"Fixture Chat",
-          "cost":{"text":{"input":{"price":3},"output":{"price":5}}}}
-      }}
-    }
-    """;
 }

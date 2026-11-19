@@ -9,11 +9,11 @@ internal static class ProviderModelStreams {
   internal const string Call = """{"type":"function_call","id":"fc_fixture","status":"completed","call_id":"call_fixture","name":"lookup","arguments":"{\"key\":\"abc\"}"}""";
 
   internal static string Responses(string[]? items = null, string? terminal = "response.completed", string text = "hello",
-      bool itemDone = true, string? terminalItems = null, object? usage = null) {
+      bool itemDone = true, string? terminalItems = null, object? usage = null, string model = "fixture-model") {
     items ??= [Message];
     JsonElement[] output = items.Select(item => JsonSerializer.Deserialize<JsonElement>(item)).ToArray();
     object Envelope(string status, object nativeOutput) => new {
-      id = "resp_fixture", @object = "response", created_at = 1700000000, model = "fixture-model", status,
+      id = "resp_fixture", @object = "response", created_at = 1700000000, model, status,
       store = false, output = nativeOutput, usage,
       error = status == "failed" ? new { code = "server_error", message = "synthetic-private" } : null,
       incomplete_details = status == "incomplete" ? new { reason = "max_output_tokens" } : null
@@ -35,10 +35,13 @@ internal static class ProviderModelStreams {
     return stream;
   }
 
-  internal static string ChatText(string text) => "data: " + JsonSerializer.Serialize(new {
-    id = "chatcmpl_fixture", @object = "chat.completion.chunk", created = 1700000000, model = "fixture-model",
-    choices = new[] { new { index = 0, delta = new { role = "assistant", content = text }, finish_reason = "stop" } }
-  }) + "\n\ndata: [DONE]\n\n";
+  internal static string ChatText(string text, string model = "fixture-model", object? usage = null) {
+    string Chunk(object choices, object? observation = null) => "data: " + JsonSerializer.Serialize(new {
+      id = "chatcmpl_fixture", @object = "chat.completion.chunk", created = 1700000000, model, choices, usage = observation
+    }) + "\n\n";
+    var stop = new { index = 0, delta = new { role = "assistant", content = text }, finish_reason = "stop" };
+    return Chunk(new[] { stop }) + (usage is null ? "" : Chunk(Array.Empty<object>(), usage)) + "data: [DONE]\n\n";
+  }
 
   internal static string ChatCalls(string finish = "tool_calls", bool reasoning = false,
       string arguments = "{\"key\":\"abc\"}", string name = "lookup") {

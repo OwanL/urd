@@ -20,10 +20,12 @@ internal sealed class RunningServer : IAsyncDisposable {
       Func<MessageMarkdownService>? createMarkdown = null, CancellationToken cancellationToken = default) {
     stopping = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
     Client = new HttpClient(new SocketsHttpHandler { UseProxy = false }) { Timeout = TestTimeout };
+    Func<IChatClient>? clientFactory = createProviders is not null && createClient is null ? null :
+        () => PrepassTolerantChatClient.WrapIfNeeded(createClient?.Invoke() ?? new FakeChatClient());
     run = Program.RunServerAsync(options, origin => {
       onReady?.Invoke(origin);
       ready.TrySetResult(origin);
-    }, () => PrepassTolerantChatClient.WrapIfNeeded(createClient?.Invoke() ?? new FakeChatClient()), stopping.Token, createProviders, createMarkdown);
+    }, clientFactory, stopping.Token, createProviders, createMarkdown);
   }
 
   internal static ServerOptions OptionsFor(TemporaryDatabase database) => new(Path.GetDirectoryName(database.Path)!, 0);

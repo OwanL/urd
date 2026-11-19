@@ -17,7 +17,7 @@ public abstract class SessionBase {
   private readonly UrdStore store;
   private readonly PreferenceManager preferences;
   private readonly ModelSelector? modelSelector;
-  private readonly AgentQuestions? agentQuestions;
+  private readonly QuestionDelivery questions;
   private readonly ChatProcesses? processes;
   private readonly ActiveExecution activeExecution;
   private readonly AsyncLock sessionLock = new();
@@ -43,7 +43,7 @@ public abstract class SessionBase {
     this.store = store;
     this.preferences = preferences ?? new PreferenceManager(store);
     this.modelSelector = modelSelector;
-    agentQuestions = (subagents as SessionManager)?.Questions;
+    questions = new QuestionDelivery(this, store, sessionLock, (subagents as SessionManager)?.Questions);
     activeExecution = new ActiveExecution(this, store, sessionLock, createChatClient,
         tools ?? new ToolCatalog([]), pending ?? new PendingToolCalls(), subagents);
     this.processes = processes;
@@ -60,7 +60,14 @@ public abstract class SessionBase {
   internal long HistoryRevision { get; private set; }
 
   private bool IsAcceptingWork => acceptingUserMessages && editTask is null;
-  private bool CanStartWork => IsAcceptingWork && !needsAttention;
+  // Caller holds the session lock.
+  internal bool CanStartWork => IsAcceptingWork && !needsAttention;
+
+  // Caller holds the session lock.
+  internal SessionExecutionDriver? CurrentExecution => execution;
+
+  // Caller holds the session lock.
+  internal void MarkAcceptedInput() => hasAcceptedInput = true;
 
   // Restores the delivered starting view; opening a session alone never composes it.
   internal StartingContext? ReadStartingContext() => store.StartingContexts.Read(Id);
@@ -425,97 +432,19 @@ public abstract class SessionBase {
     return await pendingSettlement.WaitAsync(cancellation);
   }
 
-  internal async Task<AgentQuestionResult> QueueQuestionAsync(HarnessToolContext caller, string prompt,
-      bool wake, CancellationToken cancellation) {
-    TaskCompletionSource? executionStart = null;
-    Task<AgentQuestionResult> waiting;
-    using (await sessionLock.AcquireAsync(cancellation)) {
-      if (!CanStartWork)
-        return new(null, "The recipient agent is not accepting work.");
+  internal Task<AgentQuestionResult> QueueQuestionAsync(HarnessToolContext caller, string prompt,
+      bool wake, CancellationToken cancellation) => questions.QueueQuestionAsync(caller, prompt, wake, cancellation);
 
-      AgentQuestions broker = agentQuestions!;
-      var source = new AgentWaitSource(caller.SessionId, caller.ExecutionId, caller.Background || !wake);
-      waiting = broker.Enqueue(Id, source, caller.RequestId, caller.CallId, prompt, wake, cancellation, out Guid questionId);
-      if (wake && !waiting.IsCompleted) {
-        if (execution is { IsStopping: false } active)
-          active.Wake();
-        else if (execution is null) {
-          try {
-            executionStart = StartQuestionRun(broker);
-          } catch (Exception failure) {
-            broker.Fail(Id, questionId, failure.Message);
-          }
-        }
-      }
-    }
+  // Caller holds the session lock.
+  internal LlmRequest? CreateNextRequest(ExecutionIdentity identity) => questions.CreateNextRequest(identity);
 
-    executionStart?.SetResult();
-    return await waiting;
-  }
+  internal (bool Presented, ChatMessage? Reminder) ReadQuestionForRequest(LlmRequest request) =>
+      questions.ReadQuestionForRequest(request);
 
-  // Caller holds the lock. The waking ask can bring an earlier non-waking head along, never skip it.
-  private TaskCompletionSource? StartQuestionRun(AgentQuestions broker) {
-    LlmSelection selection = store.Executions.ReadLatestSelection(Id)
-        ?? throw new InvalidOperationException("The recipient agent has no saved model selection.");
-    Guid requestId = Guid.NewGuid();
-    if (broker.Present(Id, requestId) is not { } question)
-      return null;
-
-    if (!question.Wakes) {
-      broker.Withdraw(Id, question, requestId);
-      return null;
-    }
-
-    var run = new ExecutionIdentity(Id, Guid.NewGuid(), HistoryRevision);
-    LlmRequest firstRequest;
-    try {
-      firstRequest = WriteToStore(() => store.Executions.StartQuestionRun(run, requestId, question, selection));
-    } catch {
-      broker.Withdraw(Id, question, requestId);
-      throw;
-    }
-    hasAcceptedInput = true;
-    TaskCompletionSource executionStart = StartExecutionAfterUnlock(run.ExecutionId, selection, firstRequest: firstRequest);
-    PublishChange();
-    return executionStart;
-  }
-
-  // Caller holds the session lock; the driver publishes after updating its waiting state.
-  internal LlmRequest? CreateNextRequest(ExecutionIdentity identity) {
-    if (!CanRecordExecution(identity))
-      return null;
-
-    Guid requestId = Guid.NewGuid();
-    QuestionPresentation? question = agentQuestions?.Present(Id, requestId);
-    LlmRequest? next = null;
-    try {
-      next = store.Executions.CreateNextRequest(identity, requestId, question);
-      return next;
-    } finally {
-      if (next is null && question is not null)
-        agentQuestions!.Withdraw(Id, question, requestId);
-    }
-  }
-
-  // Project a live, request-bound question after context preparation. Neither the reminder nor
-  // the temporary answer-tool offer belongs in saved history or the starting-context cache.
-  internal (bool Presented, ChatMessage? Reminder) ReadQuestionForRequest(LlmRequest request) {
-    if (agentQuestions?.ReadPresented(Id, request.RequestId) is not { } question)
-      return (false, null);
-    if (request.Context is not { PreviousCompaction: not null } history
-        || history.Messages.Any(message => message.AgentQuestionId == question.QuestionId))
-      return (true, null);
-
-    string? title = store.Sessions.ReadAgentTitle(question.SenderId).Title;
-    return (true, new(ChatRole.User, "[CURRENT QUESTION REMINDER]\n" + AgentQuestionContext.Describe(title, question.Prompt)));
-  }
-
-  // The driver calls these under the session lock at the actual wait/wake transitions.
-  internal void ParkBackgroundWait(Guid executionId) => agentQuestions?.Park(Id, executionId);
-  internal void UnparkBackgroundWait(Guid executionId) => agentQuestions?.Unpark(Id, executionId);
-
-  // Caller holds the session lock. Abort releases question waiters before joining owned work.
-  internal void FailPresentedQuestion() => agentQuestions?.FailPresented(Id);
+  // Caller holds the session lock.
+  internal void ParkBackgroundWait(Guid executionId) => questions.ParkBackgroundWait(executionId);
+  internal void UnparkBackgroundWait(Guid executionId) => questions.UnparkBackgroundWait(executionId);
+  internal void FailPresentedQuestion() => questions.FailPresentedQuestion();
 
   // Caller holds the session lock. Results may finish during Stop, but no new work may start.
   internal bool CanRecordExecution(Guid executionId, bool allowStopping = false) =>
@@ -533,8 +462,8 @@ public abstract class SessionBase {
       execution!.ReportToolOutcome(failure);
   }
 
-  // Caller holds the lock. The driver starts only after admission releases it.
-  private TaskCompletionSource StartExecutionAfterUnlock(Guid executionId, LlmSelection selection,
+  // Caller holds the session lock. The driver starts only after admission releases it.
+  internal TaskCompletionSource StartExecutionAfterUnlock(Guid executionId, LlmSelection selection,
       ManualCompactionRequest? compaction = null, LlmRequest? firstRequest = null) =>
       activeExecution.Register(executionId, selection, compaction, firstRequest);
 
@@ -546,34 +475,13 @@ public abstract class SessionBase {
     SessionExecutionResult saved = store.Executions.TryFinish(Id, execution.ExecutionId, outcome)
         ?? throw new InvalidOperationException("The current execution could not be settled.");
 
-    if (Kind == SessionKind.Subagent)
-      agentQuestions?.CloseRecipient(Id);
-    else
-      FailPresentedQuestion();
+    questions.FinishExecution();
     execution.Release();
     activeExecution.Clear();
     status.Settled(saved);
     PublishChange();
-    wakeStart = saved.Outcome == ExecutionOutcome.Completed ? StartPendingQuestionRun() : null;
+    wakeStart = saved.Outcome == ExecutionOutcome.Completed ? questions.StartPendingQuestionRun() : null;
     return saved;
-  }
-
-  // Caller holds the session lock. A settlement that ends without presenting the queue head, such
-  // as a manual compaction, must not leave the recipient idle with an authorized waking ask
-  // pending: run it now, FIFO, or settle it with a clear failure instead of hanging the asker.
-  private TaskCompletionSource? StartPendingQuestionRun() {
-    if (!CanStartWork || agentQuestions is null)
-      return null;
-    QueuedQuestion[] waking = [.. agentQuestions.Queued(Id).Where(question => question.Wake)];
-    if (waking.Length == 0)
-      return null;
-    try {
-      return StartQuestionRun(agentQuestions);
-    } catch (Exception failure) {
-      foreach (QueuedQuestion question in waking)
-        agentQuestions.Fail(Id, question.QuestionId, failure.Message);
-      return null;
-    }
   }
 
   private bool IsCurrentExecution(Guid executionId) => activeExecution.IsCurrent(executionId);

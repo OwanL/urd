@@ -8,5 +8,10 @@
   "endOfLine": "lf",
   "sortImports": false,
   "sortPackageJson": false,
-  "ignorePatterns": ["package-lock.json", "dist/"]
+  "ignorePatterns": [
+    "package-lock.json",
+    "dist/",
+    "tests/**/*.browser.ts",
+    "tests/support/browser/"
+  ]
 }

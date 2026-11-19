@@ -1,7 +1,7 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "plugins": ["typescript", "react", "jsx-a11y"],
-  "ignorePatterns": ["dist/"],
+  "ignorePatterns": ["dist/", "tests/**/*.browser.ts", "tests/support/browser/"],
   "categories": {
     "correctness": "off"
   },

@@ -81,12 +81,10 @@ checks the current catalog once without waiting for refresh. Settled quotes, inc
 unknown ones, are not recomputed. A wider catalog does not imply support for new
 provider routes or new tokenizers.
 
-To regenerate the starter snapshot, save the [public feed][models-feed] in a temporary
-location. From the repository root, run `node build/model-price-seed.mjs <saved-feed.json>
-<UTC-capture-date>` (date format `YYYY-MM-DD`) and write its UTF-8 output to
-`source/backend/harness/usage/model-price-seed.json`. Review the rate diff and run the
-usage tests. The seed covers OpenAI, Copilot and Ollama Cloud plus the reference rows
-needed for them; on-demand refresh considers the wider feed.
+The build embeds the checked-in `source/backend/harness/usage/model-price-seed.json`;
+it does not generate the seed or fetch prices. The seed covers OpenAI, Copilot and Ollama
+Cloud plus their reference rows. Runtime refresh considers the wider feed and updates only
+the profile cache, not the bundled seed.
 
 [models-feed]: https://models.dev/experimental/v2.0/api.json?type=chat
 

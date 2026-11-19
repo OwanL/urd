@@ -1,11 +1,12 @@
+import "../../controls/selector.css";
 import type { ComponentChildren, TargetedKeyboardEvent } from "preact";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Icon } from "../../controls/Icon.tsx";
 import { IconButton } from "../../controls/IconButton.tsx";
 import { Popover } from "../../controls/Popover.tsx";
 import { composerSubmissionState } from "./ComposerSubmission.ts";
-import { ModelPicker } from "./ModelPicker.tsx";
-import type { ModelPickerOption } from "./ModelPicker.tsx";
+import { ModelPicker } from "../../providers/models/ModelPicker.tsx";
+import type { ModelPickerOption } from "../../providers/models/ModelPicker.tsx";
 import "./composer.css";
 import { ReasoningPicker } from "./ReasoningPicker.tsx";
 
@@ -195,7 +196,7 @@ export function Composer({
         <div class="composer-selections" ref={selections}>
           {hasProviders === false ? (
             <button
-              class="composer-selector composer-model-add-provider"
+              class="selector composer-add-provider"
               type="button"
               disabled={locked}
               onClick={onSetUpProvider}

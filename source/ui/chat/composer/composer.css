@@ -202,34 +202,6 @@
 .composer-overflow-popover .composer-accounting .usage-control {
   font-size: 12px;
 }
-.composer-selector {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  min-height: 30px;
-  min-width: 0;
-  padding: 4px 7px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 12px;
-  text-align: left;
-}
-.composer-selector > .icon {
-  flex: none;
-  width: 12px;
-  height: 12px;
-  opacity: 0.8;
-}
-.composer-selector:hover:not(:disabled),
-.composer-selector[aria-expanded="true"] {
-  color: var(--text-primary);
-  background: var(--surface-hover);
-}
-.composer-selector:focus-visible {
-  outline-offset: -1px;
-}
 .composer .composer-send {
   background: var(--surface-hover);
   border-color: #3e3e3e;
@@ -257,25 +229,8 @@
   height: 14px;
   fill: currentColor;
 }
-.composer-model-add-provider {
+.composer-add-provider {
   flex: none;
-}
-.composer-model {
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: 20rem;
-}
-.composer-model > .tooltip-anchor {
-  display: flex;
-}
-.composer-model-trigger {
-  width: 100%;
-}
-.composer-model-label {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .composer-reasoning {
   flex: none;
@@ -289,59 +244,6 @@
 .composer-reasoning > .tooltip-anchor {
   max-width: 100%;
 }
-.composer-model-popover {
-  display: flex;
-  flex-direction: column;
-  width: min(27rem, calc(100vw - 16px));
-  padding: 6px;
-  overflow: hidden;
-}
-.composer-model-search-row {
-  display: flex;
-  align-items: center;
-  flex: none;
-  gap: 7px;
-  padding: 0 9px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 6px;
-  background: var(--surface-input);
-  color: var(--text-secondary);
-}
-.composer-model-search-row:focus-within {
-  border-color: #707070;
-}
-.composer-model-search {
-  width: 100%;
-  min-width: 0;
-  padding: 8px 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  color: var(--text-primary);
-  font-size: 12px;
-}
-.popover .composer-model-search:focus-visible {
-  outline: 0;
-}
-.composer-model-search::placeholder {
-  color: var(--text-secondary);
-  opacity: 1;
-}
-.composer-model-options {
-  position: relative;
-  min-height: 0;
-  max-height: 19rem;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-subtle) transparent;
-}
-.composer-model-provider {
-  padding: 10px 8px 5px;
-  color: var(--text-secondary);
-  font-size: 11px;
-}
-.composer-model-option,
 .composer-reasoning-option {
   display: flex;
   align-items: center;
@@ -357,62 +259,12 @@
   text-align: left;
   cursor: pointer;
 }
-.composer-model-option .composer-model-label {
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-.composer-model-option.is-active,
 .composer-reasoning-option:hover:not(:disabled),
 .composer-reasoning-option.is-active {
   background: var(--surface-hover);
 }
-.composer-model-option[aria-selected="true"],
 .composer-reasoning-option[aria-selected="true"] {
   color: var(--accent);
-}
-.composer-model-footer {
-  display: flex;
-  flex: none;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 4px;
-  margin-top: 6px;
-  padding-top: 5px;
-  border-top: 1px solid var(--border-subtle);
-}
-.composer-model-retry {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-height: 32px;
-  padding: 5px 8px;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 12px;
-  text-align: left;
-}
-.composer-model-retry:hover:not(:disabled) {
-  color: var(--text-primary);
-  background: var(--surface-hover);
-}
-.composer-model-retry:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-.composer-model-error {
-  max-height: 6rem;
-  padding: 0 8px;
-  overflow-y: auto;
-  color: var(--danger);
-  font-size: 12px;
-}
-.composer-model-empty {
-  padding: 16px 8px;
-  color: var(--text-secondary);
-  font-size: 12px;
 }
 .composer-reasoning-popover {
   width: 168px;
@@ -430,13 +282,8 @@
   .composer-selections {
     gap: 0;
   }
-  .composer-selector {
-    padding-inline: 5px;
-  }
 }
 @media (pointer: coarse) {
-  .composer-selector,
-  .composer-model-option,
   .composer-reasoning-option {
     min-height: 38px;
   }
@@ -444,12 +291,5 @@
 @media (forced-colors: active) {
   .composer:focus-within {
     outline: 1px solid Highlight;
-  }
-  .composer-model-search:focus-visible {
-    outline: 2px solid Highlight;
-  }
-  .composer-model-option.is-active {
-    outline: 1px solid Highlight;
-    outline-offset: -1px;
   }
 }

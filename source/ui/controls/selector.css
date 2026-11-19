@@ -1,0 +1,38 @@
+.selector {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 30px;
+  min-width: 0;
+  padding: 4px 7px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-align: left;
+}
+.selector > .icon {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  opacity: 0.8;
+}
+.selector:hover:not(:disabled),
+.selector[aria-expanded="true"] {
+  color: var(--text-primary);
+  background: var(--surface-hover);
+}
+.selector:focus-visible {
+  outline-offset: -1px;
+}
+@media (max-width: 480px) {
+  .selector {
+    padding-inline: 5px;
+  }
+}
+@media (pointer: coarse) {
+  .selector {
+    min-height: 38px;
+  }
+}

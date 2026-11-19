@@ -1,6 +1,6 @@
 import { useMemo, useRef } from "preact/hooks";
-import type { ModelPickerOption } from "../chat/composer/ModelPicker.tsx";
-import { ModelPicker } from "../chat/composer/ModelPicker.tsx";
+import type { ModelPickerOption } from "../providers/models/ModelPicker.tsx";
+import { ModelPicker } from "../providers/models/ModelPicker.tsx";
 import { IconButton } from "../controls/IconButton.tsx";
 import {
   addBucketModel,

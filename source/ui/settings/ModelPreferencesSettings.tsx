@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { ModelOptions } from "../providers/models/ModelOptions.ts";
-import { ModelPicker } from "../chat/composer/ModelPicker.tsx";
-import type { ModelPickerOption } from "../chat/composer/ModelPicker.tsx";
+import { ModelPicker } from "../providers/models/ModelPicker.tsx";
+import type { ModelPickerOption } from "../providers/models/ModelPicker.tsx";
 import type { ModelOption } from "../providers/models/ModelOptions.ts";
 import type { PreferencesState } from "../preferences/usePreferences.ts";
 import { describeBucket, modelKey } from "../preferences/ModelBucketSelection.ts";

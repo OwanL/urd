@@ -177,9 +177,11 @@ This does not apply to external URLs, user messages, or tool-output text.
 ## Source layout
 
 `source/ui/` is organised by feature, mirroring the backend's vocabulary. Each folder owns
-its components, state, hooks and styles. Dependencies should point downward
-(`workspace` → `chat` → `chat/transcript` → `markdown-rendering`); `controls/` and `http/`
-are shared.
+its components, state, hooks and styles. A folder depends on what it composes, never on its
+callers: only `main.tsx` imports `workspace/`, only `workspace/` imports `chat/`, and the
+shared features (`sessions/`, `providers/`, `preferences/`, `usage/`, `markdown-rendering/`,
+`controls/`, `http/`) import neither. Subfolders of `chat/` may use each other; the transcript
+renders editable messages and prepass rows inline.
 
 | Folder | Owns |
 | --- | --- |

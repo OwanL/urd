@@ -217,11 +217,11 @@
 .preference-model-name {
   color: var(--text-primary);
 }
-.preference-model-row .composer-model {
+.preference-model-row .model-picker {
   width: 100%;
   max-width: none;
 }
-.preference-model-row .composer-model-trigger {
+.preference-model-row .model-picker-trigger {
   min-width: 0;
   min-height: 32px;
   padding: 5px 8px;
@@ -261,7 +261,7 @@
 .model-bucket-heading h4 {
   color: var(--text-primary);
 }
-.model-bucket-heading .composer-model {
+.model-bucket-heading .model-picker {
   flex: none;
   margin-left: auto;
 }

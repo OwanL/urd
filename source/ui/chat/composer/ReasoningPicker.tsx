@@ -1,3 +1,4 @@
+import "../../controls/selector.css";
 import type { TargetedKeyboardEvent } from "preact";
 import { useId, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Icon } from "../../controls/Icon.tsx";
@@ -100,7 +101,7 @@ export function ReasoningPicker({
       <Tooltip content="Reasoning effort" disabled={expanded}>
         <button
           ref={trigger}
-          class="composer-selector composer-reasoning-trigger"
+          class="selector composer-reasoning-trigger"
           type="button"
           disabled={disabled}
           aria-label={`Reasoning effort: ${effortLabel(effort)}`}

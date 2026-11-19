@@ -3,6 +3,8 @@ import { useEffect, useId, useMemo, useRef, useState } from "preact/hooks";
 import { Icon } from "../../controls/Icon.tsx";
 import { Popover, scrollOptionIntoView } from "../../controls/Popover.tsx";
 import { Tooltip } from "../../controls/Tooltip.tsx";
+import "../../controls/selector.css";
+import "./model-picker.css";
 
 export interface ModelPickerOption {
   key: string;
@@ -110,10 +112,10 @@ export function ModelPicker({
   }, [expanded, activeModel?.key]);
 
   return (
-    <div class="composer-model">
+    <div class="model-picker">
       <Tooltip content={modelLabel} disabled={expanded}>
         <button
-          class="composer-selector composer-model-trigger"
+          class="selector model-picker-trigger"
           type="button"
           ref={trigger}
           disabled={disabled}
@@ -129,7 +131,7 @@ export function ModelPicker({
             }
           }}
         >
-          <span class="composer-model-label">{modelLabel}</span>
+          <span class="model-picker-label">{modelLabel}</span>
           <Icon name="chevron" />
         </button>
       </Tooltip>
@@ -139,14 +141,14 @@ export function ModelPicker({
           initialFocus={search}
           onClose={() => setOpen(false)}
           placement="above"
-          class="composer-model-popover"
+          class="model-picker-popover"
           id={`${id}-popover`}
           label="Choose model"
         >
-          <div class="composer-model-search-row">
+          <div class="model-picker-search-row">
             <Icon name="search" />
             <input
-              class="composer-model-search"
+              class="model-picker-search"
               ref={search}
               type="search"
               placeholder="Search models"
@@ -165,15 +167,10 @@ export function ModelPicker({
               onKeyDown={navigate}
             />
           </div>
-          <div
-            class="composer-model-options"
-            id={`${id}-options`}
-            role="listbox"
-            aria-label="Models"
-          >
+          <div class="model-picker-options" id={`${id}-options`} role="listbox" aria-label="Models">
             {groups.map(([provider, group]) => (
               <div role="group" aria-label={provider} key={provider}>
-                <div class="composer-model-provider" aria-hidden="true">
+                <div class="model-picker-provider" aria-hidden="true">
                   {provider}
                 </div>
                 {group.map((model) => {
@@ -183,7 +180,7 @@ export function ModelPicker({
                     <div
                       key={model.key}
                       id={`${id}-option-${index}`}
-                      class={`composer-model-option${active ? " is-active" : ""}`}
+                      class={`model-picker-option${active ? " is-active" : ""}`}
                       role="option"
                       aria-selected={model.key === modelKey}
                       tabIndex={-1}
@@ -192,7 +189,7 @@ export function ModelPicker({
                       onPointerDown={(event) => event.preventDefault()}
                       onClick={() => choose(model.key)}
                     >
-                      <span class="composer-model-label">{model.modelLabel}</span>
+                      <span class="model-picker-label">{model.modelLabel}</span>
                       {model.key === modelKey && <Icon name="check" />}
                     </div>
                   );
@@ -201,7 +198,7 @@ export function ModelPicker({
             ))}
           </div>
           {!options.length && (!modelsError || query.trim()) && (
-            <div class="composer-model-empty">
+            <div class="model-picker-empty">
               <span role="status">
                 {query.trim()
                   ? "No models match your search"
@@ -212,13 +209,13 @@ export function ModelPicker({
             </div>
           )}
           {modelsError && (
-            <div class="composer-model-footer">
-              <div class="composer-model-error" role="status">
+            <div class="model-picker-footer">
+              <div class="model-picker-error" role="status">
                 {modelsError}
               </div>
               {onRetryModels && (
                 <button
-                  class="composer-model-retry"
+                  class="model-picker-retry"
                   type="button"
                   aria-label="Retry loading models"
                   disabled={refreshingModels}

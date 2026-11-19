@@ -198,6 +198,7 @@ export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) 
         onTabChange={setSettingsTab}
         onClose={() => setSettingsOpen(false)}
         onChanged={models.providersChanged}
+        onProviderReady={models.providerReady}
       />
       <div
         class={`connection-feedback ${disconnected ? "is-disconnected" : ""}`}

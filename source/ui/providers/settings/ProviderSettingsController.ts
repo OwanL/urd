@@ -1,5 +1,5 @@
 import { RequestError } from "../../http/RequestError.ts";
-import type { ProviderClient } from "../ProviderClient.ts";
+import type { BucketSuggestions, ProviderClient } from "../ProviderClient.ts";
 import type {
   CustomProviderSettings,
   ProviderConnection,
@@ -17,6 +17,8 @@ export type ProviderSettingsClient = Pick<
   | "getModels"
   | "getModelSettings"
   | "getSignIn"
+  | "getBucketSuggestions"
+  | "confirmBucketSuggestions"
   | "createChatGpt"
   | "createOpenAI"
   | "createCustom"
@@ -80,6 +82,21 @@ export interface Confirmation {
   readonly settings?: CustomProviderSettings;
 }
 
+export type BucketSetup =
+  | { readonly phase: "loading" }
+  | { readonly phase: "offered"; readonly proposal: BucketSuggestions }
+  | { readonly phase: "saving"; readonly proposal: BucketSuggestions }
+  | { readonly phase: "finished"; readonly message: string; readonly error?: boolean };
+
+interface SetupContext {
+  readonly connection: ProviderConnection;
+  readonly view: number;
+}
+
+interface BucketSetupRequest extends SetupContext {
+  readonly abort: AbortController;
+}
+
 export interface ProviderSettingsSnapshot {
   readonly connections: readonly ProviderConnection[];
   readonly selectedId: string | null;
@@ -99,6 +116,7 @@ export interface ProviderSettingsSnapshot {
   readonly add: AddDraft;
   readonly apiKey: string;
   readonly confirmation: Confirmation | null;
+  readonly bucketSetup: BucketSetup | null;
 }
 
 export function providerHostname(endpoint: string): string {
@@ -140,6 +158,17 @@ export function matchesConnection(connection: ProviderConnection, search: string
   const query = search.trim().toLocaleLowerCase();
   return [connection.name, connection.route, connection.endpoint].some((value) =>
     value.toLocaleLowerCase().includes(query),
+  );
+}
+
+function sameConnection(first: ProviderConnection, second: ProviderConnection): boolean {
+  return (
+    first.id === second.id &&
+    first.name === second.name &&
+    first.route === second.route &&
+    first.endpoint === second.endpoint &&
+    first.api === second.api &&
+    first.authentication === second.authentication
   );
 }
 
@@ -185,8 +214,13 @@ export class ProviderSettingsController {
     },
     apiKey: "",
     confirmation: null,
+    bucketSetup: null,
   };
 
+  private setupVisible = false;
+  private setupView = 0;
+  private bucketRequest: BucketSetupRequest | null = null;
+  private readonly setupSignIns = new Map<string, SetupContext>();
   private uncertainModelConnectionId: string | null = null;
   private active = false;
   private visible = false;
@@ -195,10 +229,19 @@ export class ProviderSettingsController {
   private readonly listeners = new Set<() => void>();
   private readonly client: ProviderSettingsClient;
   private readonly changed: () => void;
+  private readonly onReady: ((connectionId: string) => Promise<boolean> | undefined) | undefined;
+  private readonly refreshPreferences: (() => Promise<void>) | undefined;
 
-  constructor(client: ProviderSettingsClient, changed: () => void) {
+  constructor(
+    client: ProviderSettingsClient,
+    changed: () => void,
+    onReady?: (connectionId: string) => Promise<boolean> | undefined,
+    refreshPreferences?: () => Promise<void>,
+  ) {
     this.client = client;
     this.changed = changed;
+    this.onReady = onReady;
+    this.refreshPreferences = refreshPreferences;
   }
 
   get snapshot(): ProviderSettingsSnapshot {
@@ -210,10 +253,13 @@ export class ProviderSettingsController {
     return () => this.listeners.delete(listener);
   }
 
-  setActivity(active: boolean, visible: boolean): void {
+  setActivity(active: boolean, visible: boolean, providersTab = active): void {
     const wasReadable = this.canRead;
+    const wasSetupVisible = this.setupVisible;
     this.active = active;
     this.visible = visible;
+    this.setupVisible = active && providersTab;
+    if (wasSetupVisible && !this.setupVisible) this.leaveSetupView();
     if (!active) this.patch({ apiKey: "", confirmation: null });
     if (!this.canRead) this.stopReads();
     else if (!wasReadable) void this.read();
@@ -229,6 +275,10 @@ export class ProviderSettingsController {
 
   private patch(update: Partial<ProviderSettingsSnapshot>): void {
     this.currentSnapshot = { ...this.currentSnapshot, ...update };
+    if (this.bucketRequest && !this.isCurrentSetup(this.bucketRequest)) {
+      this.clearBucketRequest();
+      this.currentSnapshot = { ...this.currentSnapshot, bucketSetup: null };
+    }
     for (const listener of this.listeners) listener();
   }
 
@@ -241,11 +291,111 @@ export class ProviderSettingsController {
   }
 
   select(id: string | null): void {
+    this.leaveSetupView();
     this.patch({ selectedId: id, apiKey: "", confirmation: null });
     if (this.canRead) {
       this.stopReads();
       void this.read();
     }
+  }
+
+  private leaveSetupView(): void {
+    this.setupView++;
+    this.skipBucketSuggestions();
+  }
+
+  private isCurrentSetup({ connection, view }: SetupContext): boolean {
+    if (!this.setupVisible || view !== this.setupView || this.snapshot.selectedId !== connection.id)
+      return false;
+    const saved = this.snapshot.connections.find(({ id }) => id === connection.id);
+    if (!saved || !sameConnection(saved, connection)) return false;
+    const status = this.snapshot.credentials[connection.id];
+    if (status?.isDisconnecting) return false;
+    return (
+      connection.authentication === "none" || credentialState(connection, status) === "connected"
+    );
+  }
+
+  private clearBucketRequest(): void {
+    this.bucketRequest?.abort.abort();
+    this.bucketRequest = null;
+  }
+
+  skipBucketSuggestions(): void {
+    this.clearBucketRequest();
+    if (this.snapshot.bucketSetup) this.patch({ bucketSetup: null });
+  }
+
+  private notifyProviderReady(context: SetupContext): boolean {
+    const ready = this.onReady?.(context.connection.id);
+    if (!ready) return false;
+    void this.offerBucketsAfterRefresh(context, ready);
+    return true;
+  }
+
+  private async offerBucketsAfterRefresh(
+    context: SetupContext,
+    ready: Promise<boolean>,
+  ): Promise<void> {
+    const request = { ...context, abort: new AbortController() };
+    if (this.isCurrentSetup(context)) {
+      this.clearBucketRequest();
+      this.bucketRequest = request;
+      this.patch({ bucketSetup: { phase: "loading" } });
+    }
+    const current = () => this.bucketRequest === request;
+    try {
+      const refreshed = await ready;
+      if (!current()) return;
+      if (!refreshed) {
+        this.skipBucketSuggestions();
+        return;
+      }
+      const proposal = await this.client.getBucketSuggestions(
+        context.connection.id,
+        request.abort.signal,
+      );
+      if (!current()) return;
+      if (sameConnection(proposal.connection, context.connection) && proposal.assignments.length)
+        this.patch({ bucketSetup: { phase: "offered", proposal } });
+      else this.skipBucketSuggestions();
+    } catch {
+      if (current())
+        this.patch({
+          bucketSetup: {
+            phase: "finished",
+            message: "Could not load bucket suggestions.",
+            error: true,
+          },
+        });
+    }
+  }
+
+  async confirmBucketSuggestions(): Promise<void> {
+    const request = this.bucketRequest;
+    const setup = this.snapshot.bucketSetup;
+    if (!request || setup?.phase !== "offered" || !this.canMutate || this.snapshot.confirmation)
+      return;
+    this.patch({ bucketSetup: { phase: "saving", proposal: setup.proposal } });
+    try {
+      await this.client.confirmBucketSuggestions(setup.proposal);
+    } catch (error) {
+      if (this.bucketRequest === request)
+        this.patch({
+          bucketSetup: {
+            phase: "finished",
+            message:
+              error instanceof RequestError && error.status === 409
+                ? "Suggestions changed. Review your assignments in Model buckets."
+                : "Could not confirm the save. Check your assignments in Model buckets.",
+            error: true,
+          },
+        });
+      return;
+    }
+    await this.refreshPreferences?.();
+    if (this.bucketRequest === request)
+      this.patch({ bucketSetup: { phase: "finished", message: "Model buckets saved." } });
   }
 
   editAdd(update: Partial<AddDraft>): void {
@@ -452,28 +602,42 @@ export class ProviderSettingsController {
     try {
       next = await this.client.getSignIn(previous.id, abort.signal);
       if (!current()) return;
-      this.storeSignIn(next);
+      if (signInPending(next)) this.storeSignIn(next);
       this.clearError(key);
     } catch (error) {
       if (!current()) return;
       if (error instanceof RequestError && error.status === 404) {
         const signIns = { ...this.snapshot.signIns };
         delete signIns[previous.connectionId];
+        this.setupSignIns.delete(previous.id);
         this.patch({ signIns });
         this.setError(key, "This sign-in is no longer available. Start sign-in again.");
       } else this.setError(key, readFailure(error));
       return;
     }
     if (signInPending(next)) return;
-    if (signInPending(previous)) this.changed();
+    const context = this.setupSignIns.get(previous.id);
+    let credentials: ProviderCredentialStatus | undefined;
     try {
-      const status = await this.client.getCredentials(next.connectionId, abort.signal);
+      credentials = await this.client.getCredentials(next.connectionId, abort.signal);
       if (!current()) return;
-      this.storeCredentials(status);
+      this.storeCredentials(credentials);
       this.clearError(`credentials:${next.connectionId}`);
     } catch (error) {
-      if (current()) this.setError(`credentials:${next.connectionId}`, readFailure(error));
+      if (!current()) return;
+      this.setError(`credentials:${next.connectionId}`, readFailure(error));
     }
+    this.storeSignIn(next);
+    this.setupSignIns.delete(previous.id);
+    if (
+      context &&
+      next.status === "completed" &&
+      credentials &&
+      credentialState(context.connection, credentials) === "connected" &&
+      this.notifyProviderReady(context)
+    )
+      return;
+    this.changed();
   }
 
   private schedulePoll(): void {
@@ -492,12 +656,16 @@ export class ProviderSettingsController {
     operation: ProviderSettingsOperation,
     run: () => Promise<T>,
     apply: (value: T) => ProviderDisconnectResult | void,
-    modelConnectionId: string | null = null,
+    options?: {
+      modelConnectionId?: string;
+      afterSuccess?: (value: T) => boolean;
+    },
   ): Promise<void> {
     if (!this.canMutate) return;
     this.stopReads();
     this.patch({ pending: operation, notice: null, apiKey: "", confirmation: null });
     let changed = false;
+    let afterSuccess: (() => boolean) | undefined;
     try {
       const result = await run();
       const disconnect = apply(result);
@@ -509,10 +677,11 @@ export class ProviderSettingsController {
         },
       });
       changed = true;
+      afterSuccess = () => options?.afterSuccess?.(result) ?? false;
     } catch (error) {
       const rejected =
         error instanceof RequestError && [400, 404, 409, 415, 422].includes(error.status);
-      if (!rejected) this.uncertainModelConnectionId = modelConnectionId;
+      if (!rejected) this.uncertainModelConnectionId = options?.modelConnectionId ?? null;
       this.patch(
         rejected
           ? {
@@ -536,7 +705,7 @@ export class ProviderSettingsController {
     } finally {
       this.patch({ pending: null });
     }
-    if (changed) this.changed();
+    if (changed && !afterSuccess?.()) this.changed();
     if (changed && this.canRead) await this.read();
     else this.schedulePoll();
   }
@@ -552,6 +721,7 @@ export class ProviderSettingsController {
   }
 
   async create(): Promise<void> {
+    const view = this.setupView;
     const { route, ...draft } = this.snapshot.add;
     const settings = {
       ...draft,
@@ -570,6 +740,10 @@ export class ProviderSettingsController {
           ...(this.snapshot.selectedId === null ? { selectedId: connection.id } : {}),
           add: { ...this.snapshot.add, name: "" },
         });
+      },
+      {
+        afterSuccess: (connection) =>
+          connection.authentication === "none" && this.notifyProviderReady({ connection, view }),
       },
     );
   }
@@ -602,6 +776,7 @@ export class ProviderSettingsController {
     const confirmation = this.snapshot.confirmation;
     if (!confirmation || !this.canMutate) return;
     const { connection, kind, settings } = confirmation;
+    if (this.bucketRequest?.connection.id === connection.id) this.skipBucketSuggestions();
     if (kind === "binding" && settings) {
       await this.command(
         "changeBinding",
@@ -649,6 +824,9 @@ export class ProviderSettingsController {
   }
 
   private forgetStatus(id: string): void {
+    if (this.bucketRequest?.connection.id === id) this.skipBucketSuggestions();
+    const signIn = this.snapshot.signIns[id];
+    if (signIn) this.setupSignIns.delete(signIn.id);
     const credentials = { ...this.snapshot.credentials };
     const catalogs = { ...this.snapshot.catalogs };
     const signIns = { ...this.snapshot.signIns };
@@ -658,17 +836,27 @@ export class ProviderSettingsController {
     this.patch({ credentials, catalogs, signIns });
   }
 
-  async replaceApiKey(connection: ProviderConnection): Promise<void> {
+  async replaceApiKey(connection: ProviderConnection, setup = false): Promise<void> {
+    const view = this.setupView;
+    const initialKey = setup && !this.snapshot.credentials[connection.id]?.hasCredentials;
     const key = this.snapshot.apiKey;
     if (!key) return;
     await this.command(
       "replaceApiKey",
       () => this.client.setApiKey(connection, key),
       (status) => this.storeCredentials(status),
+      {
+        afterSuccess: (status) =>
+          initialKey &&
+          credentialState(connection, status) === "connected" &&
+          this.notifyProviderReady({ connection, view }),
+      },
     );
   }
 
-  async beginSignIn(connection: ProviderConnection): Promise<void> {
+  async beginSignIn(connection: ProviderConnection, setup = false): Promise<void> {
+    const view = this.setupView;
+    const initialSignIn = setup && !this.snapshot.credentials[connection.id]?.hasCredentials;
     if (
       Object.values(this.snapshot.signIns).some(
         (item) => item.connectionId === connection.id && signInPending(item),
@@ -679,6 +867,13 @@ export class ProviderSettingsController {
       "beginSignIn",
       () => this.client.beginSignIn(connection.id),
       (signIn) => this.storeSignIn(signIn),
+      {
+        afterSuccess: (signIn) => {
+          if (!initialSignIn || !signInPending(signIn)) return false;
+          this.setupSignIns.set(signIn.id, { connection, view });
+          return true; // Discovery waits for successful authentication.
+        },
+      },
     );
   }
 
@@ -686,7 +881,10 @@ export class ProviderSettingsController {
     await this.command(
       "cancelSignIn",
       () => this.client.cancelSignIn(signIn.id),
-      (updated) => this.storeSignIn(updated),
+      (updated) => {
+        this.setupSignIns.delete(signIn.id);
+        this.storeSignIn(updated);
+      },
     );
   }
 
@@ -710,7 +908,7 @@ export class ProviderSettingsController {
           },
         });
       },
-      settings.connectionId,
+      { modelConnectionId: settings.connectionId },
     );
   }
 

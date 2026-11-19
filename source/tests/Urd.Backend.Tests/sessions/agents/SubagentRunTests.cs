@@ -368,7 +368,7 @@ public sealed class SubagentRunTests {
           (await parent.WaitForExecutionFinishAsync(secondExecution).WaitAsync(TestTimeout)).Outcome);
       ScriptedRequest child = await childRequest.Task.WaitAsync(TestTimeout);
       Assert.Equal("gpt-5.10-terra", child.Options!.ModelId);
-      Assert.Equal(ExecutionOutcome.Completed, Assert.Single(StoredTools.Read(fixture.Database), call => call.CallId == "auto").Outcome);
+      Assert.Equal(ExecutionOutcome.Completed, Assert.Single(StoredTools.Read(fixture.Database), call => call.CallId == "assigned").Outcome);
     } finally {
       release.TrySetResult();
       await parent.StopExecutionAsync().WaitAsync(TestTimeout);
@@ -384,7 +384,7 @@ public sealed class SubagentRunTests {
         return TextUpdates([ChildReport], token);
       }
       if (request.LastUserText == "Try again")
-        return HasResult(request, "auto") ? Complete(token) : ToolBatch(token, Delegate("auto", AssignmentTask, bucket: "medium"));
+        return HasResult(request, "assigned") ? Complete(token) : ToolBatch(token, Delegate("assigned", AssignmentTask, bucket: "medium"));
       if (HasResult(request, "stale")) {
         deniedRequest.TrySetResult(request);
         return Complete(token);
@@ -964,8 +964,9 @@ public sealed class SubagentRunTests {
           new("subagent-fixture", LlmApi.OpenAIResponses, new Uri("https://fixture.invalid/v1"),
               AuthenticationMethod.None)).WaitAsync(TestTimeout);
       await fixture.providers.RefreshModelCatalogAsync(connection.Id).WaitAsync(TestTimeout);
-      new PreferenceManager(fixture.store).SetBucketModels(ModelBucket.Small,
-          [new(connection.Id, "subagent-fixture")]);
+      var preferences = new PreferenceManager(fixture.store);
+      preferences.SetBucketModels(ModelBucket.Small, [new(connection.Id, "subagent-fixture")]);
+      preferences.SetBucketModels(ModelBucket.Medium, [new(connection.Id, "gpt-5.10-terra")]);
       return fixture;
     }
 

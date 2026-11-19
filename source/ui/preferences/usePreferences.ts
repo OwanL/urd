@@ -55,20 +55,24 @@ export function usePreferences(client: PreferencesClient): PreferencesState {
   } | null>(null);
   const version = useRef(0);
   const saving = useRef<PreferenceKey | null>(null);
+  const refreshAfterSave = useRef(false);
   const saveBlocks = useCallback(
     (command: "create" | "execute") => preferenceSaveBlocks(saving.current, command),
     [],
   );
 
   const refresh = useCallback(async () => {
-    if (saving.current) return;
+    if (saving.current) {
+      refreshAfterSave.current = true;
+      return;
+    }
     const current = ++version.current;
     setLoading(true);
     try {
       const result = await client.get();
       if (current !== version.current) return;
       setPreferences(result);
-      setFailure(null);
+      setFailure((currentFailure) => (currentFailure?.preference ? currentFailure : null));
     } catch (cause) {
       if (current === version.current)
         setFailure({
@@ -102,6 +106,10 @@ export function usePreferences(client: PreferencesClient): PreferencesState {
       } finally {
         saving.current = null;
         setPendingFor(null);
+        if (refreshAfterSave.current) {
+          refreshAfterSave.current = false;
+          void refresh();
+        }
         requestAnimationFrame(() => {
           if (
             focused?.isConnected &&
@@ -114,7 +122,7 @@ export function usePreferences(client: PreferencesClient): PreferencesState {
         });
       }
     },
-    [],
+    [refresh],
   );
 
   const saveWorkingDirectory = useCallback(

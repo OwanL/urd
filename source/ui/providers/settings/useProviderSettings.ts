@@ -7,18 +7,28 @@ export function useProviderSettings(
   client: ProviderClient,
   active: boolean,
   onChanged: () => void,
+  providersTab: boolean,
+  onProviderReady: ((connectionId: string) => Promise<boolean>) | undefined,
+  refreshPreferences: () => Promise<void>,
 ) {
-  const onChangedRef = useRef(onChanged);
-  onChangedRef.current = onChanged;
+  const callbacks = useRef({ onChanged, onProviderReady, refreshPreferences });
+  callbacks.current = { onChanged, onProviderReady, refreshPreferences };
   const controller = useMemo(
-    () => new ProviderSettingsController(client, () => onChangedRef.current()),
+    () =>
+      new ProviderSettingsController(
+        client,
+        () => callbacks.current.onChanged(),
+        (id) => callbacks.current.onProviderReady?.(id),
+        () => callbacks.current.refreshPreferences(),
+      ),
     [client],
   );
   const [, render] = useState(0);
 
   useLayoutEffect(() => controller.subscribe(() => render((version) => version + 1)), [controller]);
   useLayoutEffect(() => {
-    const update = () => controller.setActivity(active, document.visibilityState === "visible");
+    const update = () =>
+      controller.setActivity(active, document.visibilityState === "visible", providersTab);
     const focus = () => {
       if (active) void controller.read();
     };
@@ -30,7 +40,7 @@ export function useProviderSettings(
       window.removeEventListener("focus", focus);
       controller.setActivity(false, false);
     };
-  }, [controller, active]);
+  }, [controller, active, providersTab]);
 
   return { ...controller.snapshot, active, actions: controller };
 }

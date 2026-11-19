@@ -308,15 +308,24 @@ connections, and an empty list turns delegation off. Changing the scope gates
 new work and does not cancel children already admitted. The main chat model and
 primary-chat prepass are selected separately.
 
-**Creation-time routing:** A bucket may contain several explicit provider/model
-pairs. On each allowed connection, use its usable explicit models for this tier;
-if none are available, derive one candidate from its cached catalog: the highest
-numeric version of Luna (`small`), Terra (`medium`) or Sol (`large`). Choose
-randomly from the resulting models, with high reasoning. This does not persist a
-mapping, use a different tier, request access to another connection, or fall back
-to the parent's chat model. Switching inside the enabled pool does not require
-per-call approval, including for metered connections. In-run retries and
-failover are a separate policy and are not introduced by this selection.
+**Runtime routing:** Prepass uses only saved exact provider/model overrides or
+saved bucket mappings. Delegation considers only saved provider/model choices for
+the requested tier that are currently available and permitted by the primary
+session's current provider scope, then chooses randomly among those eligible
+choices. Delegation uses high reasoning. Neither path derives a runtime substitute
+from a catalog, switches tiers, widens scope or falls back to the primary chat model.
+Stale or unavailable saved choices remain unavailable. Prepass skips the call with a
+warning when no saved choice resolves. In-run retries and failover are separate policies and are not
+introduced by selection.
+
+**Setup suggestions:** After provider setup, the Providers tab previews cached
+catalog suggestions for empty buckets. For each tier, a
+suggestion uses the highest numeric version of Luna (`small`), Terra (`medium`) or
+Sol (`large`) in that catalog, retaining its exact eligible model ID. Preview does not
+save or alter a mapping; only explicit consent applies the exact previewed assignments.
+A stale preview is rejected without mutation. Catalog refreshes and later provider changes
+never fill or replace saved choices implicitly. Suggestions are setup assistance,
+not runtime routing; see [provider management](provider-management.md#bucket-suggestions).
 
 ### Bounded subagents; independent agent-created sessions not selected
 

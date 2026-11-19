@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.AI;
 using Urd.Core.Concurrency;
+using Urd.Core.Preferences;
 using Urd.Core.Storage;
 using Urd.Core.Usage;
 
@@ -184,6 +185,40 @@ public sealed class ProviderManager : IDisposable {
     ObjectDisposedException.ThrowIf(disposed, this);
     return storage.Get(connectionId).Catalog ?? new(connectionId, null, []);
   }
+
+  public async Task<BucketSuggestions> GetBucketSuggestionsAsync(Guid connectionId, PreferenceManager preferences,
+      CancellationToken cancellationToken = default) {
+    using var held = await gate.AcquireAsync(cancellationToken);
+    ObjectDisposedException.ThrowIf(disposed, this);
+    ProviderState state = storage.Get(connectionId);
+    ProviderModelCatalog catalog = SuggestionCatalog(state);
+    return new(state.Connection, preferences.SuggestBuckets(catalog));
+  }
+
+  public async Task<bool> ConfirmBucketSuggestionsAsync(Guid connectionId, BucketSuggestions proposal,
+      PreferenceManager preferences, CancellationToken cancellationToken = default) {
+    ArgumentNullException.ThrowIfNull(proposal);
+    if (proposal.Connection is null || proposal.Connection.Id != connectionId || proposal.Assignments is null
+        || proposal.Assignments.Any(item => item is null || !Enum.IsDefined(item.Bucket)
+            || !ModelChoice.IsValidModelId(item.ModelId))
+        || proposal.Assignments.Select(item => item.Bucket).Distinct().Count() != proposal.Assignments.Count)
+      throw new ArgumentException("Invalid bucket suggestions.", nameof(proposal));
+    using var held = await gate.AcquireAsync(cancellationToken);
+    ThrowIfStopping();
+    ProviderState state;
+    try {
+      state = storage.Get(connectionId);
+    } catch (KeyNotFoundException) {
+      return false;
+    }
+    if (state.Connection != proposal.Connection)
+      return false;
+    return preferences.ConfirmBuckets(state.Connection, SuggestionCatalog(state), proposal.Assignments);
+  }
+
+  private ProviderModelCatalog SuggestionCatalog(ProviderState state) =>
+      CanUseWithoutSignIn(state, DateTimeOffset.UtcNow.AddMinutes(1)) && state.Catalog is not null
+          ? state.Catalog : new(state.Connection.Id, null, []);
 
   internal async Task<bool> HasSelectedProvidersAsync(IReadOnlyList<Guid>? connectionIds,
       CancellationToken cancellationToken) {

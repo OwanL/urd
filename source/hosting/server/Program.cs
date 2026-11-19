@@ -188,7 +188,7 @@ internal static class Program {
     app.MapEvents(manager, eventHub);
     if (markdown is not null)
       app.MapMarkdown(manager, eventHub, markdown);
-    app.MapProviders(providers);
+    app.MapProviders(providers, preferences);
     app.MapPreferences(preferences, manager);
     app.MapUsage(store);
     return app;

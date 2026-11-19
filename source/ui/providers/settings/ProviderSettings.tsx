@@ -2,6 +2,7 @@ import { useCallback, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Icon } from "../../components/Icon.tsx";
 import type { ProviderConnection, ProviderRoute } from "../ProviderConnection.ts";
 import { ConnectionForm } from "./ConnectionForm.tsx";
+import { ProviderBucketSuggestions } from "./ProviderBucketSuggestions.tsx";
 import { ProviderChooser } from "./ProviderChooser.tsx";
 import { ProviderConnectionDetail } from "./ProviderConnectionDetail.tsx";
 import { ProviderSettingsFeedback } from "./ProviderSettingsFeedback.tsx";
@@ -101,7 +102,13 @@ export function ProviderSettings({ state, search }: ProviderSettingsProps) {
   );
   const visible = complete.filter((item) => matchesConnection(item, search));
   const setup = connection && providerSetupState(connection, state.credentials[connection.id]);
-  const canEdit = state.pending === null && !state.uncertain && state.confirmation === null;
+  const bucketSetup = presentation.setup ? state.bucketSetup : null;
+  const reviewingBuckets = bucketSetup !== null && bucketSetup.phase !== "finished";
+  const canEdit =
+    state.pending === null &&
+    !state.uncertain &&
+    state.confirmation === null &&
+    bucketSetup?.phase !== "saving";
   const canNavigate = state.confirmation === null;
   const overview = () => {
     actions.select(null);
@@ -202,13 +209,30 @@ export function ProviderSettings({ state, search }: ProviderSettingsProps) {
           )}
           {screen === "detail" && connection && (
             <>
-              <ProviderConnectionDetail
-                key={connection.id}
-                state={state}
-                connection={connection}
-                disabled={!canEdit}
-              />
-              {presentation.setup && setup === "complete" && (
+              {bucketSetup && (
+                <ProviderBucketSuggestions
+                  setup={bucketSetup}
+                  disabled={!canEdit}
+                  onSkip={() => {
+                    actions.skipBucketSuggestions();
+                    heading.current?.focus();
+                  }}
+                  onConfirm={() => {
+                    heading.current?.focus();
+                    void actions.confirmBucketSuggestions();
+                  }}
+                />
+              )}
+              {!reviewingBuckets && (
+                <ProviderConnectionDetail
+                  key={connection.id}
+                  state={state}
+                  connection={connection}
+                  disabled={!canEdit}
+                  inSetup={!!presentation.setup}
+                />
+              )}
+              {presentation.setup && setup === "complete" && !reviewingBuckets && (
                 <div class="provider-settings-actions">
                   <button type="button" disabled={!canNavigate} onClick={overview}>
                     Done

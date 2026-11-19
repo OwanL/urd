@@ -5,16 +5,18 @@ export function ProviderApiKeyForm({
   state,
   connection,
   disabled,
+  inSetup = false,
 }: {
   state: ProviderSettingsState;
   connection: ProviderConnection;
   disabled: boolean;
+  inSetup?: boolean;
 }) {
   return (
     <form
       onSubmit={(event) => {
         event.preventDefault();
-        void state.actions.replaceApiKey(connection);
+        void state.actions.replaceApiKey(connection, inSetup);
       }}
     >
       <fieldset disabled={disabled}>

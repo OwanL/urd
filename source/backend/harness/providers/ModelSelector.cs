@@ -2,7 +2,7 @@ using Urd.Core.Preferences;
 
 namespace Urd.Core.Providers;
 
-// Resolves explicit auxiliary choices and adds catalog-derived candidates for subagents only.
+// Resolves auxiliary choices and saved bucket assignments.
 public sealed class ModelSelector {
   private readonly ProviderManager providers;
 
@@ -44,31 +44,30 @@ public sealed class ModelSelector {
       CancellationToken cancellationToken = default) => providers.HasSelectedProvidersAsync(connectionIds, cancellationToken);
 
   private async Task<LlmSelection> ResolveBucketAsync(ModelBucket bucket, UserPreferences preferences,
-      IReadOnlyList<Guid>? connectionIds, bool useFallback, CancellationToken cancellationToken) {
+      IReadOnlyList<Guid>? connectionIds, bool subagent, CancellationToken cancellationToken) {
     ArgumentNullException.ThrowIfNull(preferences);
     IReadOnlyList<ConfiguredModel> assignments = preferences.ModelChoices.ModelsFor(bucket);
-    if (!useFallback && assignments.Count == 0)
-      throw new AuxiliaryModelUnavailableException($"No model is configured for the {BucketName(bucket)} bucket.");
+    if (assignments.Count == 0)
+      throw new AuxiliaryModelUnavailableException(subagent
+          ? $"No model is configured for the {BucketName(bucket)} bucket. Assign a model in Settings → Model buckets."
+          : $"No model is configured for the {BucketName(bucket)} bucket.");
 
     ILookup<Guid, string> modelsByConnection = assignments.ToLookup(model => model.ConnectionId, model => model.ModelId);
-    IReadOnlyList<Guid>? requestedConnections = useFallback ? connectionIds : modelsByConnection
+    IReadOnlyList<Guid> requestedConnections = modelsByConnection
         .Select(group => group.Key).Where(id => connectionIds?.Contains(id) != false).ToArray();
     var catalogs = await providers.ListAvailableModelCatalogsAsync(requestedConnections, cancellationToken);
     var candidates = new List<(ProviderConnection Connection, ProviderModel Model)>();
     foreach (var (connection, catalog) in catalogs) {
-      int previousCount = candidates.Count;
       foreach (string modelId in modelsByConnection[connection.Id]) {
         if (FindModel(catalog, modelId) is { } model)
           candidates.Add((connection, model));
       }
-      if (useFallback && candidates.Count == previousCount && SubagentModelFallback.FindLatest(bucket, catalog) is { } fallback)
-        candidates.Add((connection, fallback));
     }
 
     if (candidates.Count == 0) {
       string name = BucketName(bucket);
-      throw new AuxiliaryModelUnavailableException(useFallback
-          ? $"No enabled provider has a configured or automatic {name} model. Connect an enabled provider, refresh its catalog, or assign a model in Settings → Model buckets."
+      throw new AuxiliaryModelUnavailableException(subagent
+          ? $"No assigned {name} model is available from an enabled provider. Check Settings → Model buckets and refresh the provider catalog."
           : $"No model is available for the {name} bucket.");
     }
 

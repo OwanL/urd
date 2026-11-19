@@ -178,6 +178,19 @@
   column-gap: 12px;
 }
 
+.empty-chat-buckets {
+  grid-column: 1 / -1;
+  margin: 8px 0 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.empty-chat-buckets button {
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .chat-working-directory {
   display: grid;
   grid-column: 1 / -1;

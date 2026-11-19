@@ -22,7 +22,10 @@ internal sealed class PreferencesStorage(Database database) {
   internal UserPreferences Update(Func<UserPreferences, UserPreferences> update) {
     ArgumentNullException.ThrowIfNull(update);
     lock (gate) {
-      UserPreferences updated = update(ReadLocked());
+      UserPreferences current = ReadLocked();
+      UserPreferences updated = update(current);
+      if (ReferenceEquals(current, updated))
+        return Copy(current);
       database.Write(transaction => {
         database.Execute(transaction, """
           INSERT INTO preferences (singleton, working_directory, compaction_trigger_token_count,

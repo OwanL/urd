@@ -4,6 +4,12 @@ import type { ProviderCredentialStatus, ProviderDisconnectResult } from "./Provi
 import type { ProviderSignIn } from "./ProviderSignIn.ts";
 import type { ProviderModelCatalog } from "./ProviderModels.ts";
 import type { ModelSettings } from "./ModelSettings.ts";
+import type { ModelBucket } from "../preferences/PreferencesClient.ts";
+
+export interface BucketSuggestions {
+  readonly connection: ProviderConnection;
+  readonly assignments: readonly { readonly bucket: ModelBucket; readonly modelId: string }[];
+}
 
 // Offline reads never trigger discovery; only explicit refresh fetches a new catalog.
 export class ProviderClient {
@@ -100,6 +106,23 @@ export class ProviderClient {
 
   refreshModels(connectionId: string): Promise<ProviderModelCatalog> {
     return requestJson(this.url(`/${encodeURIComponent(connectionId)}/models/refresh`), "POST", {});
+  }
+
+  getBucketSuggestions(connectionId: string, signal?: AbortSignal): Promise<BucketSuggestions> {
+    return requestJson(
+      this.url(`/${encodeURIComponent(connectionId)}/bucket-suggestions`),
+      "GET",
+      undefined,
+      signal,
+    );
+  }
+
+  confirmBucketSuggestions(proposal: BucketSuggestions): Promise<void> {
+    return requestEmpty(
+      this.url(`/${encodeURIComponent(proposal.connection.id)}/bucket-suggestions`),
+      "POST",
+      proposal,
+    );
   }
 
   getModelSettings(connectionId: string, signal?: AbortSignal): Promise<readonly ModelSettings[]> {

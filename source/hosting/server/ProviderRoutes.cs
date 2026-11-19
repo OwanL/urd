@@ -2,13 +2,14 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Http.Extensions;
 using Microsoft.AspNetCore.Http.Features;
 using Urd.Core.Providers;
+using Urd.Core.Preferences;
 using static Urd.Server.HttpRouteHelpers;
 
 namespace Urd.Server;
 
 // Exposes provider management without starting work on offline reads or returning credentials.
 internal static class ProviderRoutes {
-  internal static void MapProviders(this IEndpointRouteBuilder app, ProviderManager providers) {
+  internal static void MapProviders(this IEndpointRouteBuilder app, ProviderManager providers, PreferenceManager preferences) {
     RouteGroupBuilder routes = app.MapGroup("/api/providers");
     routes.AddEndpointFilter<JsonRequestFilter>();
     routes.AddEndpointFilter(HandleRequestAsync);
@@ -54,6 +55,13 @@ internal static class ProviderRoutes {
     routes.MapPost("/{connectionId:guid}/disconnect", async (HttpContext http, Guid connectionId) => {
       await HttpJson.RequireEmptyAsync(http.Request, http.RequestAborted);
       return Results.Ok(await providers.DisconnectAsync(connectionId));
+    });
+    routes.MapGet("/{connectionId:guid}/bucket-suggestions", async (HttpContext http, Guid connectionId) =>
+        Results.Ok(await providers.GetBucketSuggestionsAsync(connectionId, preferences, http.RequestAborted)));
+    routes.MapPost("/{connectionId:guid}/bucket-suggestions", async (HttpContext http, Guid connectionId) => {
+      BucketSuggestions proposal = await ReadAsync<BucketSuggestions>(http);
+      return await providers.ConfirmBucketSuggestionsAsync(connectionId, proposal, preferences, http.RequestAborted)
+          ? Results.NoContent() : Results.Conflict();
     });
     routes.MapGet("/{connectionId:guid}/models", async (HttpContext http, Guid connectionId) =>
         Results.Ok(await providers.GetModelCatalogAsync(connectionId, http.RequestAborted)));

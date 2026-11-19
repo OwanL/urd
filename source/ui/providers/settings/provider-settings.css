@@ -250,6 +250,29 @@
   border-top: 1px solid var(--border-subtle);
 }
 
+.provider-settings-bucket-list {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+}
+
+.provider-settings-bucket-list > div {
+  display: grid;
+  grid-template-columns: 4em minmax(0, 1fr);
+  gap: 8px;
+}
+
+.provider-settings-bucket-list dt {
+  color: var(--text-secondary);
+  text-transform: capitalize;
+}
+
+.provider-settings-bucket-list dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 .provider-settings .provider-settings-group.provider-settings-actions {
   display: flex;
 }

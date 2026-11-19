@@ -11,6 +11,7 @@ export interface WorkspaceModelState {
   refreshing: boolean;
   error: string | null;
   providersChanged(): void;
+  providerReady(connectionId: string): Promise<boolean>;
   retry(): Promise<void>;
 }
 
@@ -26,11 +27,11 @@ export function useWorkspaceModels(client: ProviderClient): WorkspaceModelState 
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  const retry = useCallback(async () => {
+  const refresh = useCallback(async () => {
     setRefreshing(true);
     setError(null);
     const result = await catalog.refresh();
-    if (!catalog.isCurrent(result.revision)) return;
+    if (!catalog.isCurrent(result.revision)) return [];
     setHasProviders(result.hasProviders);
     if (result.options !== null && result.providers !== null) {
       setOptions((current) =>
@@ -45,13 +46,21 @@ export function useWorkspaceModels(client: ProviderClient): WorkspaceModelState 
     setError(result.error === null ? null : description(result.error));
     setLoading(false);
     setRefreshing(false);
+    return result.successfulProviderIds;
   }, [catalog]);
 
   const providersChanged = useCallback(() => {
     setHasProviders(null);
     setLoading(true);
-    void retry();
-  }, [retry]);
+    void refresh();
+  }, [refresh]);
+  const providerReady = useCallback(
+    async (connectionId: string) => (await refresh()).includes(connectionId),
+    [refresh],
+  );
+  const retry = useCallback(async () => {
+    await refresh();
+  }, [refresh]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -106,7 +115,16 @@ export function useWorkspaceModels(client: ProviderClient): WorkspaceModelState 
     };
   }, [catalog]);
 
-  return { options, hasProviders, loading, refreshing, error, providersChanged, retry };
+  return {
+    options,
+    hasProviders,
+    loading,
+    refreshing,
+    error,
+    providersChanged,
+    providerReady,
+    retry,
+  };
 }
 
 export function replaceProviderOptions(

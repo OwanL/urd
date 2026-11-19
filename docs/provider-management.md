@@ -75,6 +75,8 @@ Paths below start with `/api/providers`:
 | POST `/{id}/disconnect` | `{}` → `{connectionId, localCredentialsCleared, remoteRevocationConfirmed}` |
 | GET `/{id}/models` | Last successful catalog, including `refreshedAt`, or an empty unsampled catalog |
 | POST `/{id}/models/refresh` | `{}` → fetched and saved catalog |
+| GET `/{id}/bucket-suggestions` | `{connection, assignments:[{bucket,modelId}]}` from cached eligible catalog data |
+| POST `/{id}/bucket-suggestions` | Same exact payload → 204; 409 if stale, without mutation |
 | GET `/{id}/model-settings` | Saved per-model family/image-support records; no network request |
 | POST `/{id}/model-settings` | `{connectionId, modelId, family, supportsImages}` → saved record |
 | POST `/{id}/model-tests` | `{modelId}` → response preview and available usage |
@@ -84,6 +86,19 @@ A connection is `{id, name, route, api, endpoint, authentication}`. Custom `api`
 Endpoints are HTTP(S) base URLs without credentials, query or fragment. Prefix paths
 are retained and the trailing slash is normalized. API-key input includes the complete
 connection view read by the caller: a stale binding is rejected, while a rename is safe.
+
+## Bucket suggestions
+
+Suggestions appear after successful setup in Settings → Providers. GET reads the selected
+provider's cached eligible catalog; it makes no network request and returns the
+connection binding with exact model IDs for eligible tiers that are still empty.
+For each tier it uses the highest numeric version of Luna (`small`), Terra (`medium`)
+or Sol (`large`) represented in that catalog, preserving the exact eligible model ID.
+The UI previews these assignments; only explicit user consent submits the exact
+returned `connection` and `assignments` payload to POST. A stale payload returns 409
+and changes nothing. Catalog refreshes, provider changes, chat startup and runtime
+selection never apply or replace bucket choices implicitly. Suggestions are not a
+runtime fallback.
 
 ## ChatGPT-first flow
 

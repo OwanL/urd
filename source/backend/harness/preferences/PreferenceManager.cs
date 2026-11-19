@@ -1,3 +1,4 @@
+using Urd.Core.Providers;
 using Urd.Core.Storage;
 
 namespace Urd.Core.Preferences;
@@ -60,6 +61,33 @@ public sealed class PreferenceManager {
       ModelChoices = preferences.ModelChoices.WithBucketModels(bucket, savedModels)
     });
   }
+
+  internal BucketAssignment[] SuggestBuckets(ProviderModelCatalog catalog) =>
+      Suggestions(store.Preferences.Read().ModelChoices, catalog);
+
+  internal bool ConfirmBuckets(ProviderConnection connection, ProviderModelCatalog catalog,
+      IReadOnlyList<BucketAssignment> assignments) {
+    bool confirmed = false;
+    store.Preferences.Update(preferences => {
+      BucketAssignment[] current = Suggestions(preferences.ModelChoices, catalog);
+      if (!current.SequenceEqual(assignments))
+        return preferences;
+      confirmed = true;
+      if (assignments.Count == 0)
+        return preferences;
+      AuxiliaryModelPreferences choices = preferences.ModelChoices;
+      foreach (BucketAssignment assignment in assignments)
+        choices = choices.WithBucketModels(assignment.Bucket, [new(connection.Id, assignment.ModelId)]);
+      return preferences with { ModelChoices = choices };
+    });
+    return confirmed;
+  }
+
+  private static BucketAssignment[] Suggestions(AuxiliaryModelPreferences choices, ProviderModelCatalog catalog) =>
+      Enum.GetValues<ModelBucket>().Where(bucket => choices.ModelsFor(bucket).Count == 0)
+          .Select(bucket => (Bucket: bucket, Model: BucketModelSuggestion.FindLatest(bucket, catalog)))
+          .Where(item => item.Model is not null)
+          .Select(item => new BucketAssignment(item.Bucket, item.Model!.Id)).ToArray();
 
   public void SetSubagentProviders(IReadOnlyList<Guid>? connectionIds) {
     Guid[]? savedIds = NormalizeSubagentProviders(connectionIds);

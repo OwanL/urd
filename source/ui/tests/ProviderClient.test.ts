@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { RequestError } from "../http/RequestError.ts";
 import { ProviderClient } from "../providers/ProviderClient.ts";
+import type { BucketSuggestions } from "../providers/ProviderClient.ts";
 import type { ProviderConnection } from "../providers/ProviderConnection.ts";
 import type { ProviderModelCatalog } from "../providers/ProviderModels.ts";
 import type { ModelSettings } from "../providers/ModelSettings.ts";
@@ -48,6 +49,13 @@ const modelSettings: ModelSettings = {
   supportsImages: true,
   contextWindow: null,
 };
+const bucketSuggestions: BucketSuggestions = {
+  connection: connections[0]!,
+  assignments: [
+    { bucket: "small", modelId: "provider/model 雪" },
+    { bucket: "large", modelId: "provider/large-model" },
+  ],
+};
 
 const mappings = [
   {
@@ -86,6 +94,13 @@ const mappings = [
     body: modelSettings,
     response: modelSettings,
   },
+  {
+    name: "read bucket suggestions",
+    call: (client: ProviderClient) => client.getBucketSuggestions(connectionId),
+    method: "GET",
+    path: `/api/providers/${connectionId}/bucket-suggestions`,
+    response: bucketSuggestions,
+  },
 ];
 
 for (const mapping of mappings) {
@@ -118,6 +133,33 @@ for (const mapping of mappings) {
   });
 }
 
+void test("confirm exact bucket suggestions proposal", { timeout: 5_000 }, async (t) => {
+  const server = await startHttpServer((_request, response) => {
+    response.writeHead(204);
+    response.end();
+  });
+  t.after(() => server.close());
+
+  const proposal: BucketSuggestions = {
+    ...bucketSuggestions,
+    connection: { ...bucketSuggestions.connection, id: "opaque /?#%雪" },
+  };
+  await new ProviderClient(server.origin).confirmBucketSuggestions(proposal);
+
+  assert.equal(server.requests.length, 1);
+  const request = server.requests[0];
+  assert.ok(request);
+  assert.equal(request.method, "POST");
+  assert.equal(
+    request.url,
+    `/api/providers/${encodeURIComponent(proposal.connection.id)}/bucket-suggestions`,
+  );
+  assert.equal(request.body, JSON.stringify(proposal));
+  assert.equal(request.headers["x-urd-client"], "browser");
+  assert.equal(request.headers.accept, "application/json");
+  assert.equal(request.headers["content-type"], "application/json");
+});
+
 void test("construction does no I/O", (t) => {
   const fetchMock = t.mock.method(globalThis, "fetch", async () => new Response("null"));
   new ProviderClient(new URL("https://server.example"));
@@ -137,6 +179,7 @@ void test("connection IDs remain a single encoded path segment", { timeout: 5_00
   await client.refreshModels(id);
   await client.getModelSettings(id);
   await client.saveModelSettings({ ...modelSettings, connectionId: id });
+  await client.getBucketSuggestions(id);
   assert.deepEqual(
     server.requests.map((request) => request.url),
     [
@@ -144,6 +187,7 @@ void test("connection IDs remain a single encoded path segment", { timeout: 5_00
       `/api/providers/${encodeURIComponent(id)}/models/refresh`,
       `/api/providers/${encodeURIComponent(id)}/model-settings`,
       `/api/providers/${encodeURIComponent(id)}/model-settings`,
+      `/api/providers/${encodeURIComponent(id)}/bucket-suggestions`,
     ],
   );
 });
@@ -160,6 +204,10 @@ const reads: {
   {
     name: "model settings",
     call: (client, signal) => client.getModelSettings(connectionId, signal),
+  },
+  {
+    name: "bucket suggestions",
+    call: (client, signal) => client.getBucketSuggestions(connectionId, signal),
   },
 ];
 for (const read of reads) {

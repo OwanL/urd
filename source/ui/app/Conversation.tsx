@@ -9,6 +9,7 @@ import { IconButton } from "../components/IconButton.tsx";
 import { sameContextModel, type LlmSelection } from "../providers/LlmSelection.ts";
 import type { SessionClient } from "../sessions/SessionClient.ts";
 import type { PendingInputPreview, SessionSnapshot } from "../sessions/SessionSnapshot.ts";
+import { missingModelBuckets } from "../preferences/ModelBucketSelection.ts";
 import { preferenceSaveBlocks } from "../preferences/usePreferences.ts";
 import type { PreferencesState } from "../preferences/usePreferences.ts";
 import type { ProviderClient } from "../providers/ProviderClient.ts";
@@ -339,6 +340,14 @@ export function Conversation({
     !pendingInputRemoval &&
     !compactionPending,
   );
+  const missingBuckets =
+    showWorkingDirectory &&
+    models.hasProviders &&
+    !preferences.loading &&
+    !preferences.error &&
+    preferences.preferences
+      ? missingModelBuckets(preferences.preferences.modelChoices)
+      : [];
   const selection = state.selection;
   const modelKey = selection ? `${selection.connection.id}/${selection.modelId}` : null;
   const error = readError || chat.error || stop?.error;
@@ -435,6 +444,14 @@ export function Conversation({
                   onSnapshot={acceptSnapshot}
                   onRefresh={onRefresh}
                 />
+                {missingBuckets.length > 0 && (
+                  <p class="empty-chat-buckets">
+                    Unassigned model buckets: {missingBuckets.join(", ")}.{" "}
+                    <button type="button" onClick={onChooseModels}>
+                      Choose models
+                    </button>
+                  </p>
+                )}
                 <UsageOverview active={active && visible} refreshKey={refresh} />
               </div>
             ) : null

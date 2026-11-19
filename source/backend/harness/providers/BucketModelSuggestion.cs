@@ -2,7 +2,7 @@ using Urd.Core.Preferences;
 
 namespace Urd.Core.Providers;
 
-internal static class SubagentModelFallback {
+internal static class BucketModelSuggestion {
   internal static ProviderModel? FindLatest(ModelBucket bucket, ProviderModelCatalog catalog) {
     string suffix = bucket switch {
       ModelBucket.Small => "-luna",

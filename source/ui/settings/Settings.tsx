@@ -30,6 +30,7 @@ interface SettingsProps {
   onTabChange: (tab: SettingsTab) => void;
   onClose: (returnFocus: boolean) => void;
   onChanged: () => void;
+  onProviderReady?: (connectionId: string) => Promise<boolean>;
 }
 
 // Keep this owner mounted; closing the surface stops reads, not accepted commands.
@@ -42,8 +43,16 @@ export function Settings({
   onTabChange,
   onClose,
   onChanged,
+  onProviderReady,
 }: SettingsProps) {
-  const state = useProviderSettings(client, open, onChanged);
+  const state = useProviderSettings(
+    client,
+    open,
+    onChanged,
+    tab === "providers",
+    onProviderReady,
+    preferences.refresh,
+  );
   const [search, setSearch] = useState("");
   const savedCompactionTriggerTokenCount =
     preferences.preferences?.compactionTriggerTokenCount ?? null;

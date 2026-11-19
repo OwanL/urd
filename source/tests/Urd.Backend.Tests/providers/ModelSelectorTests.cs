@@ -51,24 +51,37 @@ public sealed class ModelSelectorTests {
   }
 
   [Theory]
-  [InlineData("small", "gpt-6.01-luna")]
-  [InlineData("medium", "gpt-6.11-terra")]
-  [InlineData("large", "gpt-7-sol")]
-  public async Task SubagentDerivesOnlyExactTierModelsUsingNumericDottedVersions(string bucket, string expected) {
+  [InlineData("small", ModelBucket.Small)]
+  [InlineData("medium", ModelBucket.Medium)]
+  [InlineData("large", ModelBucket.Large)]
+  public async Task SubagentUsesOnlyAvailableAssignmentsInItsBucketAndProviderScope(string bucket, ModelBucket tier) {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
-    var manager = CreateManager(store, "gpt-luna", "gpt--luna", "gpt-6-luna", "gpt-6.1-luna", "gpt-6.01-luna", "gpt-8.-luna",
-        "gpt-8..1-luna", "gpt-9.1-luna-preview", "gpt-6.2-terra", "gpt-6.11-terra", "gpt-9x-terra",
-        "gpt-7-sol", "gpt-6.99.1-sol", "gpt-99-astra", "model-99-sol", "GPT-99-sol", "gpt-99-SOL");
+    var manager = CreateManager(store, "assigned", "gpt-99-luna", "gpt-99-terra", "gpt-99-sol");
     try {
-      ProviderConnection connection = await AddConnectionAsync(manager, "automatic");
+      ProviderConnection allowed = await AddConnectionAsync(manager, "allowed");
+      ProviderConnection excluded = await AddConnectionAsync(manager, "excluded");
       var selector = new ModelSelector(manager);
-      var preferences = new UserPreferences(null, null);
+      var preferences = new PreferenceManager(store);
+      preferences.SetBucketModels(tier == ModelBucket.Small ? ModelBucket.Medium : ModelBucket.Small,
+          [new(allowed.Id, "assigned")]);
 
-      LlmSelection selection = await selector.ResolveSubagentAsync(bucket, preferences, null).WaitAsync(TestTimeout);
+      var empty = await Assert.ThrowsAsync<AuxiliaryModelUnavailableException>(() =>
+          selector.ResolveSubagentAsync(bucket, preferences.Read(), [allowed.Id]).WaitAsync(TestTimeout));
+      Assert.Contains("Settings → Model buckets", empty.Message);
 
-      Assert.Equal(connection, selection.Connection);
-      Assert.Equal(expected, selection.ModelId);
+      preferences.SetBucketModels(tier, [new(allowed.Id, "stale"), new(excluded.Id, "assigned")]);
+      var stale = await Assert.ThrowsAsync<AuxiliaryModelUnavailableException>(() =>
+          selector.ResolveSubagentAsync(bucket, preferences.Read(), [allowed.Id]).WaitAsync(TestTimeout));
+      Assert.Contains("Settings → Model buckets", stale.Message);
+
+      preferences.SetBucketModels(tier, [new(allowed.Id, "stale"), new(allowed.Id, "assigned"), new(excluded.Id, "assigned")]);
+      LlmSelection selection = await selector.ResolveSubagentAsync(bucket, preferences.Read(), [allowed.Id]).WaitAsync(TestTimeout);
+      Assert.Equal(allowed, selection.Connection);
+      Assert.Equal("assigned", selection.ModelId);
+
+      await Assert.ThrowsAsync<AuxiliaryModelUnavailableException>(() =>
+          selector.ResolveSubagentAsync(bucket, preferences.Read(), []).WaitAsync(TestTimeout));
     } finally {
       await CloseAsync(manager);
     }

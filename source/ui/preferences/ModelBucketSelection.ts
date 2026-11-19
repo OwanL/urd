@@ -1,4 +1,8 @@
-import type { ConfiguredModel } from "./PreferencesClient.ts";
+import type {
+  AuxiliaryModelPreferences,
+  ConfiguredModel,
+  ModelBucket,
+} from "./PreferencesClient.ts";
 
 export function modelKey(model: ConfiguredModel): string {
   return `${model.connectionId}/${model.modelId}`;
@@ -21,5 +25,12 @@ export function removeBucketModel(
 }
 
 export function describeBucket(models: readonly ConfiguredModel[]): string {
-  return models.length ? `${models.length} ${models.length === 1 ? "model" : "models"}` : "Auto";
+  return models.length ? `${models.length} ${models.length === 1 ? "model" : "models"}` : "Empty";
+}
+
+export function missingModelBuckets(
+  choices: Pick<AuxiliaryModelPreferences, ModelBucket>,
+): ModelBucket[] {
+  const buckets: ModelBucket[] = ["small", "medium", "large"];
+  return buckets.filter((bucket) => choices[bucket].length === 0);
 }

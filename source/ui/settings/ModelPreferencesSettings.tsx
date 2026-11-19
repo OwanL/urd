@@ -163,8 +163,7 @@ export function ModelPreferencesSettings({
       {view === "buckets" && (
         <>
           <p class="model-bucket-explanation">
-            Urd picks an eligible model at random. For subagents, Auto uses the provider’s catalog
-            when no bucket entry applies.
+            Urd picks an available saved model at random. Empty buckets are unavailable.
           </p>
           {!state.loaded ? (
             <div class="general-settings-feedback">

@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Providers;
+using Urd.Core.Preferences;
 using Xunit;
 using static Urd.Backend.Tests.Support.HttpTest;
 
@@ -88,6 +89,51 @@ public sealed class ProviderRoutesTests {
     Assert.Empty(StoredSessions.Read(database));
     Assert.Empty(StoredSubmissions.Read(database));
     Assert.Empty(StoredExecutions.Read(database));
+  }
+
+  [Fact]
+  public async Task BucketSuggestionsRequireExplicitUnchangedConfirmation() {
+    using var database = new TemporaryDatabase();
+    var handler = new ScriptedOpenAIHandler("""
+        {"object":"list","data":[
+          {"id":"gpt-9-luna","object":"model","created":1700000000,"owned_by":"fixture"},
+          {"id":"gpt-10-luna","object":"model","created":1700000000,"owned_by":"fixture"},
+          {"id":"gpt-2.10-terra","object":"model","created":1700000000,"owned_by":"fixture"},
+          {"id":"gpt-2.9-terra","object":"model","created":1700000000,"owned_by":"fixture"},
+          {"id":"unrelated-sol","object":"model","created":1700000000,"owned_by":"fixture"}]}
+        """, "application/json");
+    await using var server = new RunningServer(RunningServer.OptionsFor(database),
+        createProviders: (store, callbackUri) => new ProviderManager(store, callbackUri, handler));
+    await server.WaitForReadyAsync();
+    ProviderConnection connection = await PostAsync<ProviderConnection>(server.Client, "/api/providers/custom",
+        new CustomProviderSettings("Fixture", LlmApi.OpenAIResponses, new Uri("https://fixture.invalid/v1/"),
+            AuthenticationMethod.None), HttpStatusCode.Created);
+    string path = PathFor(connection, "/bucket-suggestions");
+    Assert.Empty((await GetAsync<BucketSuggestions>(server.Client, path)).Assignments);
+    Assert.Empty(handler.Requests);
+    await PostAsync<ProviderModelCatalog>(server.Client, PathFor(connection, "/models/refresh"));
+    BucketSuggestions proposal = await GetAsync<BucketSuggestions>(server.Client, path);
+    Assert.Equal(new[] { new BucketAssignment(ModelBucket.Small, "gpt-10-luna"),
+        new BucketAssignment(ModelBucket.Medium, "gpt-2.10-terra") }, proposal.Assignments);
+    UserPreferences before = await GetAsync<UserPreferences>(server.Client, "/api/preferences");
+    Assert.Empty(before.ModelChoices.Small);
+    Assert.Empty(before.ModelChoices.Medium);
+    Assert.Single(handler.Requests);
+
+    await PostAsync<UserPreferences>(server.Client, "/api/preferences/model-bucket",
+        new { bucket = ModelBucket.Small, models = new[] { new ConfiguredModel(connection.Id, "manual") } });
+    using var rejected = await SendAsync(server.Client, HttpMethod.Post, path, proposal, HttpStatusCode.Conflict);
+    UserPreferences stale = await GetAsync<UserPreferences>(server.Client, "/api/preferences");
+    Assert.Equal("manual", Assert.Single(stale.ModelChoices.Small).ModelId);
+    Assert.Empty(stale.ModelChoices.Medium);
+    BucketSuggestions revised = await GetAsync<BucketSuggestions>(server.Client, path);
+    Assert.Equal(ModelBucket.Medium, Assert.Single(revised.Assignments).Bucket);
+    using var confirmed = await SendAsync(server.Client, HttpMethod.Post, path, revised, HttpStatusCode.NoContent);
+    UserPreferences saved = await GetAsync<UserPreferences>(server.Client, "/api/preferences");
+    Assert.Equal("manual", Assert.Single(saved.ModelChoices.Small).ModelId);
+    Assert.Equal("gpt-2.10-terra", Assert.Single(saved.ModelChoices.Medium).ModelId);
+    using var replay = await SendAsync(server.Client, HttpMethod.Post, path, revised, HttpStatusCode.Conflict);
+    using var malformed = await SendAsync(server.Client, HttpMethod.Post, path, new { connection }, HttpStatusCode.BadRequest);
   }
 
   private static string PathFor(ProviderConnection connection, string suffix = "") => $"/api/providers/{connection.Id:D}{suffix}";

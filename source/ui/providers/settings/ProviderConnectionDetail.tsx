@@ -11,10 +11,12 @@ export function ProviderConnectionDetail({
   state,
   connection,
   disabled,
+  inSetup,
 }: {
   state: ProviderSettingsState;
   connection: ProviderConnection;
   disabled: boolean;
+  inSetup: boolean;
 }) {
   const { actions } = state;
   const [advanced, setAdvanced] = useState(false);
@@ -57,7 +59,12 @@ export function ProviderConnectionDetail({
             </details>
           </div>
         ) : (
-          <ProviderApiKeyForm state={state} connection={connection} disabled={disabled} />
+          <ProviderApiKeyForm
+            state={state}
+            connection={connection}
+            disabled={disabled}
+            inSetup={inSetup}
+          />
         ))}
       {connection.route === "chatGpt" && credential && (
         <div class="provider-settings-auth">
@@ -108,7 +115,7 @@ export function ProviderConnectionDetail({
                 type="button"
                 disabled={disabled}
                 onClick={() => {
-                  void actions.beginSignIn(connection);
+                  void actions.beginSignIn(connection, inSetup);
                 }}
               >
                 Sign in

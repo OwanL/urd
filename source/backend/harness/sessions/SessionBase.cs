@@ -20,6 +20,7 @@ public abstract class SessionBase {
   private readonly QuestionDelivery questions;
   private readonly SessionInputs inputs;
   private readonly ManualCompaction manualCompaction;
+  private readonly MessageEditing messageEditing;
   private readonly ChatProcesses? processes;
   private readonly ActiveExecution activeExecution;
   private readonly AsyncLock sessionLock = new();
@@ -29,8 +30,6 @@ public abstract class SessionBase {
   private bool needsAttention;
   private bool? hasAcceptedInput;
   private SessionExecutionDriver? execution => activeExecution.Current;
-  private Task<MessageEditReceipt>? editTask;
-  private MessageEditSubmission? editSubmission;
 
   private protected SessionBase(SessionRecord record, SessionKind kind, UrdStore store, Func<ProviderConnection, IChatClient> createChatClient,
       ToolCatalog? tools = null, ChatProcesses? processes = null, PendingToolCalls? pending = null,
@@ -50,6 +49,7 @@ public abstract class SessionBase {
     questions = new QuestionDelivery(this, store, sessionLock, (subagents as SessionManager)?.Questions);
     activeExecution = new ActiveExecution(this, store, sessionLock, createChatClient,
         tools ?? new ToolCatalog([]), pending ?? new PendingToolCalls(), subagents);
+    messageEditing = new MessageEditing(this, store, sessionLock, activeExecution);
     this.processes = processes;
   }
 
@@ -64,9 +64,25 @@ public abstract class SessionBase {
   internal long HistoryRevision { get; private set; }
 
   // Caller holds the session lock.
-  internal bool IsAcceptingWork => acceptingUserMessages && editTask is null;
+  internal bool IsAcceptingWork => acceptingUserMessages && !messageEditing.IsEditing;
   // Caller holds the session lock.
   internal bool CanStartWork => IsAcceptingWork && !needsAttention;
+  // Caller holds the session lock.
+  internal bool CanAcceptEdits => acceptingUserMessages && !needsAttention;
+
+  // Caller holds the session lock.
+  internal void ReplaceHistoryRevision(long revision) {
+    HistoryRevision = revision;
+    status.Replaced(revision);
+  }
+
+  // Caller holds the session lock.
+  internal void FenceUserMessages() {
+    if (acceptingUserMessages) {
+      acceptingUserMessages = false;
+      PublishChange();
+    }
+  }
 
   // Caller holds the session lock.
   internal SessionExecutionDriver? CurrentExecution => execution;
@@ -164,149 +180,12 @@ public abstract class SessionBase {
   private protected Task<UserMessageReceipt> AdmitUserMessageAsync(UserMessageSubmission submission) => inputs.AdmitUserMessageAsync(submission);
   private protected Task<Guid> AdmitAssignmentAsync(IReadOnlyList<UserMessageSubmission> submissions, Guid parentSessionId) => inputs.AdmitAssignmentAsync(submissions, parentSessionId);
 
-  public Task<MessageEditReceipt?> ReadMessageEditReceiptAsync(Guid operationId, CancellationToken cancellation = default) =>
-      ReadUnderLockAsync(() => store.MessageEdits.ReadReceipt(Id, operationId), cancellation);
-
-  private protected async Task<MessageEditReceipt> ReplaceUserMessageAsync(MessageEditSubmission submission) {
-    MessageEditStorage.Validate(submission);
-    Task<MessageEditReceipt> work;
-    TaskCompletionSource? released = null;
-    using (await sessionLock.AcquireAsync()) {
-      MessageEditReceipt? receipt = store.MessageEdits.ReadReceiptOrValidate(Id, submission);
-      if (receipt is not null)
-        return receipt;
-      if (editTask is not null) {
-        if (editSubmission != submission)
-          throw new UserMessageConflictException(submission.OperationId);
-        work = editTask;
-      } else {
-        if (!acceptingUserMessages || needsAttention)
-          throw new UserMessageConflictException(submission.OperationId);
-        released = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        editSubmission = submission;
-        work = editTask = ReplaceAfterStopAsync(submission, released.Task);
-        PublishChange();
-      }
-    }
-    released?.SetResult();
-    return await work;
-  }
-
-  private async Task<MessageEditReceipt> ReplaceAfterStopAsync(MessageEditSubmission submission, Task admitted) {
-    await admitted;
-    TaskCompletionSource? executionStart = null;
-    try {
-      await StopActiveExecutionAsync();
-      using var _ = await sessionLock.AcquireAsync();
-      if (!acceptingUserMessages || needsAttention)
-        throw new UserMessageConflictException(submission.OperationId);
-      MessageEditReceipt receipt = WriteToStore(() => store.MessageEdits.Replace(Id, submission));
-      HistoryRevision = receipt.HistoryRevision;
-      status.Replaced(HistoryRevision);
-      executionStart = StartExecutionAfterUnlock(receipt.ExecutionId, submission.LlmSelection);
-      return receipt;
-    } finally {
-      using (await sessionLock.AcquireAsync()) {
-        editTask = null;
-        editSubmission = null;
-        PublishChange();
-      }
-      executionStart?.SetResult();
-    }
-  }
-
-  internal async Task StopAcceptingUserMessagesAsync() {
-    using var _ = await sessionLock.AcquireAsync();
-    if (acceptingUserMessages) {
-      acceptingUserMessages = false;
-      PublishChange();
-    }
-  }
-
-  // Called after all manager-owned sessions have fenced user messages. A failed Stop write
-  // must not prevent local cancellation or let shutdown skip waiting for owned work.
-  internal async Task StopExecutionAsync() {
-    Task? pendingEdit;
-    using (await sessionLock.AcquireAsync())
-      pendingEdit = editTask;
-    await Task.WhenAll(StopActiveExecutionAsync(), JoinEditAsync(pendingEdit));
-  }
-
-  private static async Task JoinEditAsync(Task? pendingEdit) {
-    if (pendingEdit is null)
-      return;
-    try {
-      await pendingEdit;
-    } catch (UserMessageConflictException) {
-      // Shutdown fenced an admitted edit before replacement; no history was changed.
-    }
-  }
-
-  private async Task StopActiveExecutionAsync() {
-    Task pendingExecution;
-    Task pendingSettlement;
-    Task stopCallbacks = Task.CompletedTask;
-    Exception? stopFailure = null;
-    using (await sessionLock.AcquireAsync()) {
-      pendingExecution = activeExecution.RetainedTask ?? Task.CompletedTask;
-      pendingSettlement = execution?.Settlement ?? Task.CompletedTask;
-      if (execution is not null) {
-        try {
-          StopReceipt stop = WriteToStore(
-              () => store.Executions.RequestStop(Id, execution.ExecutionId, ownsExecution: true));
-          if (stop.Status == StopStatus.Requested)
-            PublishChange();
-        } catch (Exception failure) {
-          stopFailure = failure;
-        }
-
-        stopCallbacks = execution.StopAsync();
-      }
-    }
-
-    Task stopSaved = stopFailure is null ? Task.CompletedTask : Task.FromException(stopFailure);
-    Task drained = Task.WhenAll(stopSaved, stopCallbacks, pendingExecution, pendingSettlement);
-    try {
-      await drained;
-    } catch (Exception failure) {
-      throw new AggregateException($"Session '{Id}' could not shut down.", drained.Exception ?? failure);
-    }
-  }
-
-  public async Task<StopReceipt> RequestStopAsync(Guid executionId) {
-    if (executionId == Guid.Empty)
-      throw new ArgumentException("An execution ID is required.", nameof(executionId));
-
-    using (await sessionLock.AcquireAsync()) {
-      bool ownsExecution = IsCurrentExecution(executionId);
-      // Signal even if the Stop write fails. The driver owns joining the retained
-      // callback task before settlement; this acknowledgement never means cleanup finished.
-      if (ownsExecution)
-        _ = execution!.StopAsync();
-
-      StopReceipt receipt = WriteToStore(() => store.Executions.RequestStop(Id, executionId, ownsExecution));
-      if (receipt.Status == StopStatus.Requested)
-        PublishChange();
-      return receipt;
-    }
-  }
-
-  internal async Task<SessionExecutionResult> WaitForExecutionFinishAsync(Guid executionId, CancellationToken cancellation = default) {
-    Task pendingExecution;
-    Task<SessionExecutionResult> pendingSettlement;
-    using (await sessionLock.AcquireAsync(cancellation)) {
-      if (!IsCurrentExecution(executionId)) {
-        return store.Executions.ReadSettlement(Id, executionId)
-            ?? throw new InvalidOperationException($"Execution '{executionId}' has no known settlement in this session.");
-      }
-
-      pendingExecution = activeExecution.RetainedTask!;
-      pendingSettlement = execution!.Settlement;
-    }
-
-    await pendingExecution.WaitAsync(cancellation);
-    return await pendingSettlement.WaitAsync(cancellation);
-  }
+  public Task<MessageEditReceipt?> ReadMessageEditReceiptAsync(Guid operationId, CancellationToken cancellation = default) => messageEditing.ReadMessageEditReceiptAsync(operationId, cancellation);
+  private protected Task<MessageEditReceipt> ReplaceUserMessageAsync(MessageEditSubmission submission) => messageEditing.ReplaceUserMessageAsync(submission);
+  internal Task StopAcceptingUserMessagesAsync() => messageEditing.StopAcceptingUserMessagesAsync();
+  internal Task StopExecutionAsync() => messageEditing.StopExecutionAsync();
+  public Task<StopReceipt> RequestStopAsync(Guid executionId) => activeExecution.RequestStopAsync(executionId);
+  internal Task<SessionExecutionResult> WaitForExecutionFinishAsync(Guid executionId, CancellationToken cancellation = default) => activeExecution.WaitForExecutionFinishAsync(executionId, cancellation);
 
   internal Task<AgentQuestionResult> QueueQuestionAsync(HarnessToolContext caller, string prompt,
       bool wake, CancellationToken cancellation) => questions.QueueQuestionAsync(caller, prompt, wake, cancellation);

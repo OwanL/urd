@@ -9,7 +9,7 @@ using Urd.Core.Tools;
 
 namespace Urd.Core.Sessions;
 
-// Owns the current driver and retains its task until shutdown has joined its tail.
+// Owns the current driver and its registration, stop and completion lifetime.
 internal sealed class ActiveExecution(SessionBase session, UrdStore store, AsyncLock sessionLock,
     Func<ProviderConnection, IChatClient> createChatClient, ToolCatalog tools, PendingToolCalls pending,
     ISubagentRunner? subagents) {
@@ -36,4 +36,70 @@ internal sealed class ActiveExecution(SessionBase session, UrdStore store, Async
 
   // Caller holds the session lock; retain the task after settlement for shutdown.
   internal void Clear() => Current = null;
+
+  internal async Task StopActiveExecutionAsync() {
+    Task pendingExecution;
+    Task pendingSettlement;
+    Task stopCallbacks = Task.CompletedTask;
+    Exception? stopFailure = null;
+    using (await sessionLock.AcquireAsync()) {
+      pendingExecution = RetainedTask ?? Task.CompletedTask;
+      pendingSettlement = Current?.Settlement ?? Task.CompletedTask;
+      if (Current is not null) {
+        try {
+          StopReceipt stop = session.WriteToStore(
+              () => store.Executions.RequestStop(session.Id, Current.ExecutionId, ownsExecution: true));
+          if (stop.Status == StopStatus.Requested)
+            session.PublishChange();
+        } catch (Exception failure) {
+          stopFailure = failure;
+        }
+
+        stopCallbacks = Current.StopAsync();
+      }
+    }
+
+    Task stopSaved = stopFailure is null ? Task.CompletedTask : Task.FromException(stopFailure);
+    Task drained = Task.WhenAll(stopSaved, stopCallbacks, pendingExecution, pendingSettlement);
+    try {
+      await drained;
+    } catch (Exception failure) {
+      throw new AggregateException($"Session '{session.Id}' could not shut down.", drained.Exception ?? failure);
+    }
+  }
+
+  internal async Task<StopReceipt> RequestStopAsync(Guid executionId) {
+    if (executionId == Guid.Empty)
+      throw new ArgumentException("An execution ID is required.", nameof(executionId));
+
+    using (await sessionLock.AcquireAsync()) {
+      bool ownsExecution = IsCurrent(executionId);
+      // Signal even if the Stop write fails. The driver owns joining the retained
+      // callback task before settlement; this acknowledgement never means cleanup finished.
+      if (ownsExecution)
+        _ = Current!.StopAsync();
+
+      StopReceipt receipt = session.WriteToStore(() => store.Executions.RequestStop(session.Id, executionId, ownsExecution));
+      if (receipt.Status == StopStatus.Requested)
+        session.PublishChange();
+      return receipt;
+    }
+  }
+
+  internal async Task<SessionExecutionResult> WaitForExecutionFinishAsync(Guid executionId, CancellationToken cancellation = default) {
+    Task pendingExecution;
+    Task<SessionExecutionResult> pendingSettlement;
+    using (await sessionLock.AcquireAsync(cancellation)) {
+      if (!IsCurrent(executionId)) {
+        return store.Executions.ReadSettlement(session.Id, executionId)
+            ?? throw new InvalidOperationException($"Execution '{executionId}' has no known settlement in this session.");
+      }
+
+      pendingExecution = RetainedTask!;
+      pendingSettlement = Current!.Settlement;
+    }
+
+    await pendingExecution.WaitAsync(cancellation);
+    return await pendingSettlement.WaitAsync(cancellation);
+  }
 }

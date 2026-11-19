@@ -1,5 +1,6 @@
 using Microsoft.Extensions.AI;
 using Urd.Core.Context;
+using Urd.Core.Compaction;
 using Urd.Core.Concurrency;
 using Urd.Core.MarkdownRendering;
 using Urd.Core.Sessions;
@@ -21,6 +22,45 @@ internal sealed class SessionExecutionRecorder(SessionBase session, UrdStore sto
   internal HarnessToolContext CreateHarnessToolContext(string callId, bool background) =>
       new(Identity.SessionId, Identity.ExecutionId, callId,
           new ToolSessionServices(store.Sessions, subagents, (IAgentQuestions?)subagents)) { Background = background };
+
+  internal async Task<ModelHistory> ReadModelHistoryAsync(Guid? requestId) {
+    using var _ = await sessionLock.AcquireAsync();
+    if (!session.CanRecordExecution(Identity.ExecutionId))
+      throw new OperationCanceledException("The execution no longer accepts compaction.");
+    return store.Compactions.ReadContext(session.Id, session.HistoryRevision,
+        requestId is null ? null : Identity.ExecutionId, requestId);
+  }
+
+  internal async Task<IReadOnlyList<BackgroundToolCallInput>> ReadCompactionBackgroundCallsAsync(
+      HistoryMessageLocation firstRetained) {
+    using var _ = await sessionLock.AcquireAsync();
+    if (!session.CanRecordExecution(Identity.ExecutionId))
+      throw new OperationCanceledException("The execution no longer accepts compaction.");
+    return store.Compactions.ReadBackgroundToolCalls(session.Id, session.HistoryRevision, firstRetained);
+  }
+
+  internal async Task<bool> SaveCompactionAsync(HistoryCompactionPlan plan, GeneratedCompactionSummary result) {
+    using var _ = await sessionLock.AcquireAsync();
+    if (!session.CanRecordExecution(Identity.ExecutionId))
+      return false;
+    bool saved = session.WriteToStore(() => store.Compactions.Save(
+        session.Id, Identity.ExecutionId, session.HistoryRevision, plan, result));
+    if (saved)
+      session.PublishChange();
+    return saved;
+  }
+
+  internal async Task RecordCompactionErrorAsync(string? error) {
+    using var _ = await sessionLock.AcquireAsync();
+    if (session.CanRecordExecution(Identity.ExecutionId, allowStopping: true))
+      session.WriteToStore(() => store.Compactions.RecordError(session.Id, Identity.ExecutionId, error));
+  }
+
+  internal async Task<bool> CanRetryOverflowAsync(Guid requestId) {
+    using var _ = await sessionLock.AcquireAsync();
+    return session.CanRecordExecution(Identity.ExecutionId)
+        && store.Executions.CanRetryOverflow(session.Id, Identity.ExecutionId, requestId);
+  }
 
   internal Task<bool> StartRequestAsync(Guid requestId, StartingContext startingContext) =>
     RecordChangeAsync(() => session.WriteToStore(() => store.Executions.StartRequest(Identity, requestId, startingContext)));

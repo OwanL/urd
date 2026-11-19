@@ -17,22 +17,16 @@ public abstract class SessionBase {
   private readonly UrdStore store;
   private readonly PreferenceManager preferences;
   private readonly ModelSelector? modelSelector;
-  private readonly ISubagentRunner? subagents;
   private readonly AgentQuestions? agentQuestions;
-  private readonly Func<ProviderConnection, IChatClient> createChatClient;
-  private readonly ToolCatalog tools;
-  private readonly StartingContextBuilder startingContextBuilder;
   private readonly ChatProcesses? processes;
-  private readonly PendingToolCalls pending;
+  private readonly ActiveExecution activeExecution;
   private readonly AsyncLock sessionLock = new();
   private readonly SessionNotifications notifications;
   private readonly SessionStatus status;
   private bool acceptingUserMessages = true;
   private bool needsAttention;
   private bool? hasAcceptedInput;
-  private SessionExecutionDriver? execution;
-  // Retain the driver's task after settlement clears the active execution, so shutdown joins its tail.
-  private Task? executionTask;
+  private SessionExecutionDriver? execution => activeExecution.Current;
   private Task<MessageEditReceipt>? editTask;
   private MessageEditSubmission? editSubmission;
 
@@ -49,13 +43,10 @@ public abstract class SessionBase {
     this.store = store;
     this.preferences = preferences ?? new PreferenceManager(store);
     this.modelSelector = modelSelector;
-    this.subagents = subagents;
     agentQuestions = (subagents as SessionManager)?.Questions;
-    this.createChatClient = createChatClient;
-    this.tools = tools ?? new ToolCatalog([]);
-    startingContextBuilder = new(this.tools, instructionDiscovery: store.InstructionDiscovery);
+    activeExecution = new ActiveExecution(this, store, sessionLock, createChatClient,
+        tools ?? new ToolCatalog([]), pending ?? new PendingToolCalls(), subagents);
     this.processes = processes;
-    this.pending = pending ?? new PendingToolCalls();
   }
 
   public Guid Id { get; }
@@ -115,31 +106,6 @@ public abstract class SessionBase {
   public Task<CompactionSummary?> ReadCompactionAsync(Guid id, long revision, CancellationToken cancellation = default) =>
       ReadUnderLockAsync(() => store.Compactions.Read(Id, revision, id), cancellation);
 
-  internal async Task<ModelHistory> ReadModelHistoryAsync(Guid executionId, Guid? requestId) {
-    using var _ = await sessionLock.AcquireAsync();
-    if (!CanRecordExecution(executionId))
-      throw new OperationCanceledException("The execution no longer accepts compaction.");
-    return store.Compactions.ReadContext(Id, HistoryRevision, requestId is null ? null : executionId, requestId);
-  }
-
-  internal async Task<IReadOnlyList<BackgroundToolCallInput>> ReadCompactionBackgroundCallsAsync(
-      Guid executionId, HistoryMessageLocation firstRetained) {
-    using var _ = await sessionLock.AcquireAsync();
-    if (!CanRecordExecution(executionId))
-      throw new OperationCanceledException("The execution no longer accepts compaction.");
-    return store.Compactions.ReadBackgroundToolCalls(Id, HistoryRevision, firstRetained);
-  }
-
-  internal async Task<bool> SaveCompactionAsync(Guid executionId, HistoryCompactionPlan plan, GeneratedCompactionSummary result) {
-    using var _ = await sessionLock.AcquireAsync();
-    if (!CanRecordExecution(executionId))
-      return false;
-    bool saved = WriteToStore(() => store.Compactions.Save(Id, executionId, HistoryRevision, plan, result));
-    if (saved)
-      PublishChange();
-    return saved;
-  }
-
   internal async Task SetCompactingAsync(Guid executionId, bool compacting) {
     using var _ = await sessionLock.AcquireAsync();
     if (IsCurrentExecution(executionId)) {
@@ -147,15 +113,6 @@ public abstract class SessionBase {
       PublishChange();
     }
   }
-
-  internal async Task RecordCompactionErrorAsync(Guid executionId, string? error) {
-    using var _ = await sessionLock.AcquireAsync();
-    if (CanRecordExecution(executionId, allowStopping: true))
-      WriteToStore(() => store.Compactions.RecordError(Id, executionId, error));
-  }
-
-  internal Task<bool> CanRetryOverflowAsync(Guid executionId, Guid requestId) =>
-      ReadUnderLockAsync(() => CanRecordExecution(executionId) && store.Executions.CanRetryOverflow(Id, executionId, requestId));
 
   // Manager shutdown joins executions before terminating deliberately retained processes.
   internal Task KillProcessesAsync() => OperatingSystem.IsWindows() && processes is not null
@@ -408,7 +365,7 @@ public abstract class SessionBase {
     Task stopCallbacks = Task.CompletedTask;
     Exception? stopFailure = null;
     using (await sessionLock.AcquireAsync()) {
-      pendingExecution = executionTask ?? Task.CompletedTask;
+      pendingExecution = activeExecution.RetainedTask ?? Task.CompletedTask;
       pendingSettlement = execution?.Settlement ?? Task.CompletedTask;
       if (execution is not null) {
         try {
@@ -460,7 +417,7 @@ public abstract class SessionBase {
             ?? throw new InvalidOperationException($"Execution '{executionId}' has no known settlement in this session.");
       }
 
-      pendingExecution = executionTask!;
+      pendingExecution = activeExecution.RetainedTask!;
       pendingSettlement = execution!.Settlement;
     }
 
@@ -578,16 +535,8 @@ public abstract class SessionBase {
 
   // Caller holds the lock. The driver starts only after admission releases it.
   private TaskCompletionSource StartExecutionAfterUnlock(Guid executionId, LlmSelection selection,
-      ManualCompactionRequest? compaction = null, LlmRequest? firstRequest = null) {
-    var executionStart = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-    var identity = new ExecutionIdentity(SessionId: Id, ExecutionId: executionId, HistoryRevision: HistoryRevision);
-    var recorder = new SessionExecutionRecorder(this, store, sessionLock, identity, subagents);
-    var work = new SessionExecution(recorder, this, createChatClient, selection,
-        startingContextBuilder, tools.Tools, pending, compaction);
-    execution = new SessionExecutionDriver(this, sessionLock, work);
-    executionTask = execution.RunAsync(executionStart.Task, firstRequest);
-    return executionStart;
-  }
+      ManualCompactionRequest? compaction = null, LlmRequest? firstRequest = null) =>
+      activeExecution.Register(executionId, selection, compaction, firstRequest);
 
   // Caller holds the session lock. Save before releasing resources and publishing; only then may
   // the driver complete its settlement task. An ordinary settlement also admits a queued waking
@@ -602,7 +551,7 @@ public abstract class SessionBase {
     else
       FailPresentedQuestion();
     execution.Release();
-    this.execution = null;
+    activeExecution.Clear();
     status.Settled(saved);
     PublishChange();
     wakeStart = saved.Outcome == ExecutionOutcome.Completed ? StartPendingQuestionRun() : null;
@@ -627,7 +576,7 @@ public abstract class SessionBase {
     }
   }
 
-  private bool IsCurrentExecution(Guid executionId) => execution?.ExecutionId == executionId;
+  private bool IsCurrentExecution(Guid executionId) => activeExecution.IsCurrent(executionId);
 
   private async Task<T> ReadUnderLockAsync<T>(Func<T> read, CancellationToken cancellation = default) {
     using var _ = await sessionLock.AcquireAsync(cancellation);

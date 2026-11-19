@@ -467,12 +467,23 @@ export function Chat({
                   onRefresh={onRefresh}
                 />
                 {missingBuckets.length > 0 && (
-                  <p class="empty-chat-buckets">
-                    Unassigned model buckets: {missingBuckets.join(", ")}.{" "}
-                    <button type="button" onClick={onChooseModels}>
-                      Choose models
-                    </button>
-                  </p>
+                  <div class="empty-chat-buckets">
+                    <span>Unassigned buckets</span>
+                    <div class="empty-chat-buckets-value">
+                      <ul class="empty-chat-buckets-list" role="list">
+                        {missingBuckets.map((bucket) => (
+                          <li key={bucket}>{bucket}</li>
+                        ))}
+                      </ul>
+                      <button
+                        class="empty-chat-buckets-action"
+                        type="button"
+                        onClick={onChooseModels}
+                      >
+                        Choose models
+                      </button>
+                    </div>
+                  </div>
                 )}
                 <UsageOverview active={active && visible} refreshKey={refresh} />
               </div>

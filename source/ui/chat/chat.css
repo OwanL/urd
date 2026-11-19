@@ -179,16 +179,39 @@
 }
 
 .empty-chat-buckets {
+  display: grid;
   grid-column: 1 / -1;
-  margin: 8px 0 0;
+  grid-template-columns: subgrid;
+  align-items: baseline;
+  margin-top: 4px;
   color: var(--text-secondary);
-  font-size: 13px;
 }
 
-.empty-chat-buckets button {
-  color: var(--text-primary);
-  text-decoration: underline;
-  text-underline-offset: 2px;
+.empty-chat-buckets-value,
+.empty-chat-buckets-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.empty-chat-buckets-value {
+  gap: 2px 8px;
+}
+
+.empty-chat-buckets-list {
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.empty-chat-buckets-list li {
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--surface-input);
+  font-size: 12px;
+  text-transform: capitalize;
 }
 
 .chat-working-directory {
@@ -221,7 +244,8 @@
   white-space: nowrap;
 }
 
-.chat-working-directory-edit {
+.chat-working-directory-edit,
+.empty-chat-buckets-action {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -236,7 +260,14 @@
   font: inherit;
 }
 
-.chat-working-directory-edit:hover:not([aria-disabled="true"]) {
+.empty-chat-buckets-action {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  white-space: nowrap;
+}
+
+.chat-working-directory-edit:hover:not([aria-disabled="true"]),
+.empty-chat-buckets-action:hover {
   background: var(--surface-input);
 }
 
@@ -245,7 +276,8 @@
   cursor: default;
 }
 
-.chat-working-directory-edit:focus-visible {
+.chat-working-directory-edit:focus-visible,
+.empty-chat-buckets-action:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }

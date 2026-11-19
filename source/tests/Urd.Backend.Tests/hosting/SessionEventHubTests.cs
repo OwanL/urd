@@ -160,7 +160,7 @@ public sealed class SessionEventHubTests {
     using var hub = new SessionEventHub(sessions);
     Assert.True(hub.TryCreate(out SessionEventPage page));
     using (page) {
-      sessions.OnBrowserProgress(WebBrowserInstall.DownloadStarted);
+      sessions.BrowserProgress.Report(WebBrowserInstall.DownloadStarted);
       SessionSseEvent download = Assert.IsType<SessionSseEvent>(
           (await page.ReadNextAsync(CancellationToken.None).WaitAsync(TestTimeout)).Event);
       Assert.Equal("browser-provisioning", download.Name);
@@ -176,7 +176,7 @@ public sealed class SessionEventHubTests {
         Assert.Equal("downloading", ReadString(replay.Data, "state"));
       }
 
-      sessions.OnBrowserProgress(WebBrowserInstall.DownloadFinished);
+      sessions.BrowserProgress.Report(WebBrowserInstall.DownloadFinished);
       SessionSseEvent ready = Assert.IsType<SessionSseEvent>(
           (await page.ReadNextAsync(CancellationToken.None).WaitAsync(TestTimeout)).Event);
       Assert.Equal("browser-provisioning", ready.Name);

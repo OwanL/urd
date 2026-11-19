@@ -8,7 +8,8 @@ import type {
   TranscriptTextFacts,
 } from "../../sessions/transcript/Messages.ts";
 import type { MessageEditing } from "./MessageEditing.ts";
-import { submissionTextError } from "../../workspace/WorkspaceState.ts";
+import { submissionTextError } from "../../chat/ChatState.ts";
+
 import "./message-editing.css";
 
 export interface MessageEditingContextValue {

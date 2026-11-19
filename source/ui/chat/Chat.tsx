@@ -23,12 +23,8 @@ import { unanchoredPrepass, uniqueModelNames } from "./prepass/PrepassPresentati
 import type { ReadingPosition } from "./transcript/Transcript.tsx";
 import type { TranscriptDisplay } from "./transcript/TranscriptDisplay.ts";
 import type { TranscriptNavigationState } from "./transcript/navigation/TranscriptNavigationStorage.ts";
-import type {
-  PendingInputRemovalState,
-  WorkspaceCommands,
-  WorkspaceStopState,
-} from "../workspace/WorkspaceCommands.ts";
-import type { ChatState } from "../workspace/WorkspaceState.ts";
+import type { PendingInputRemovalState, ChatCommands, ChatStopState } from "./ChatCommands.ts";
+import type { ChatState } from "./ChatState.ts";
 import { useSessionSnapshot } from "../sessions/useSessionSnapshot.ts";
 import type { ModelOptionsState } from "../providers/models/useModelOptions.ts";
 import "./chat.css";
@@ -183,9 +179,9 @@ interface ChatProps {
   transcript?: TranscriptDisplay | undefined;
   streamId?: string | null;
   chat: ChatState;
-  commands: WorkspaceCommands;
+  commands: ChatCommands;
   messageEditing: MessageEditing;
-  stop: WorkspaceStopState | undefined;
+  stop: ChatStopState | undefined;
   checking: boolean;
   checkingContinuation: boolean;
   models: ModelOptionsState;

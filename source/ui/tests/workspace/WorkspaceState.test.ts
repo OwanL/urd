@@ -3,16 +3,18 @@ import test from "node:test";
 import {
   applyContinuationReceipt,
   applyReceipt,
-  applySessionTitle,
   beginContinuation,
   beginSubmission,
-  decodeWorkspace,
   editDraft,
-  emptyWorkspace,
-  encodeWorkspace,
   executionSettled,
   newChat,
   submissionTextError,
+} from "../../chat/ChatState.ts";
+import {
+  applySessionTitle,
+  decodeWorkspace,
+  emptyWorkspace,
+  encodeWorkspace,
 } from "../../workspace/WorkspaceState.ts";
 import type { WorkspaceState } from "../../workspace/WorkspaceState.ts";
 import type { LlmSelection } from "../../providers/LlmSelection.ts";

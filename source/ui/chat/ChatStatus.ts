@@ -1,8 +1,8 @@
 import type { LlmSelection } from "../providers/LlmSelection.ts";
 import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
-import { submissionTextError } from "../workspace/WorkspaceState.ts";
-import type { ChatState } from "../workspace/WorkspaceState.ts";
-import type { WorkspaceStopState } from "../workspace/WorkspaceCommands.ts";
+import { submissionTextError } from "./ChatState.ts";
+import type { ChatState } from "./ChatState.ts";
+import type { ChatStopState } from "./ChatCommands.ts";
 
 export type ChatExecutionStatus = "stopping" | "running" | "accepted" | "compacting" | null;
 export type ChatSettlementStatus = "failed" | "cancelled" | null;
@@ -28,7 +28,7 @@ export interface ChatStatus {
 export function deriveChatStatus(
   chat: ChatState,
   snapshot: SessionSnapshot | null,
-  stop: WorkspaceStopState | undefined,
+  stop: ChatStopState | undefined,
   ready: boolean,
   canPersist: boolean,
   pendingCommand = false,

@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { deriveChatStatus } from "../../chat/ChatStatus.ts";
 import { composerSubmissionState } from "../../chat/composer/ComposerSubmission.ts";
-import type { WorkspaceStopState } from "../../workspace/WorkspaceCommands.ts";
-import { newChat } from "../../workspace/WorkspaceState.ts";
-import type { ChatState } from "../../workspace/WorkspaceState.ts";
+import type { ChatStopState } from "../../chat/ChatCommands.ts";
+import { newChat } from "../../chat/ChatState.ts";
+
+import type { ChatState } from "../../chat/ChatState.ts";
 import type { LlmSelection } from "../../providers/LlmSelection.ts";
 import type { SessionSnapshot } from "../../sessions/SessionSnapshot.ts";
 import type { UserMessageSubmission } from "../../sessions/inputs/UserMessageSubmission.ts";
@@ -252,7 +253,7 @@ void test("compaction blocks steering while ordinary active executions remain st
 });
 
 void test("stopping and explicit stop state take priority over settlement facts", () => {
-  const stop: WorkspaceStopState = { executionId, pending: true, error: null };
+  const stop: ChatStopState = { executionId, pending: true, error: null };
   const stopping = deriveChatStatus(
     chat,
     snapshot({

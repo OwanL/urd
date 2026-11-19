@@ -1,5 +1,14 @@
 import { RequestError } from "../http/RequestError.ts";
 import type {
+  ChatCompactionState,
+  ChatStopState,
+  PendingInputRemovalState,
+} from "../chat/ChatCommands.ts";
+import type { MessageEditingAccess } from "../chat/message-editing/MessageEditingAccess.ts";
+import type { ChatState } from "../chat/ChatState.ts";
+export type { PendingInputRemovalState } from "../chat/ChatCommands.ts";
+export type { ChatStopState as WorkspaceStopState } from "../chat/ChatCommands.ts";
+import type {
   SubagentProviderConnectionIds,
   SubagentProviders,
 } from "../providers/subagents/SubagentProviderSelection.ts";
@@ -16,8 +25,9 @@ import {
   executionSettled,
   newChat,
   submissionTextError,
-} from "./WorkspaceState.ts";
-import type { ChatState, WorkspaceState } from "./WorkspaceState.ts";
+} from "../chat/ChatState.ts";
+
+import type { WorkspaceState } from "./WorkspaceState.ts";
 import type { SessionClient } from "../sessions/SessionClient.ts";
 import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
 import type {
@@ -25,23 +35,8 @@ import type {
   UserMessageSubmission,
 } from "../sessions/inputs/UserMessageSubmission.ts";
 
-export interface WorkspaceStopState {
-  readonly executionId: string;
-  readonly pending: boolean;
-  readonly error: string | null;
-}
-
-export interface PendingInputRemovalState {
-  readonly sessionId: string;
-  readonly executionId: string;
-  readonly submissionId: string;
-  readonly status: "removing" | "checking" | "uncertain";
-}
-
-type WorkspaceCompactionState =
-  | { readonly phase: "starting" | "observing"; readonly operationId: string }
-  | { readonly phase: "uncertain"; readonly operationId: string; readonly message: string }
-  | { readonly phase: "settled"; readonly message: string };
+type WorkspaceStopState = ChatStopState;
+type WorkspaceCompactionState = ChatCompactionState;
 
 export interface WorkspaceCommandState {
   readonly creating: boolean;
@@ -59,11 +54,10 @@ export interface NotSentResendResult {
   readonly receipt: UserMessageReceipt | null;
 }
 
-export interface WorkspaceCommandAccess {
+export interface WorkspaceCommandAccess extends MessageEditingAccess {
   read(): WorkspaceState;
   save(state: WorkspaceState): boolean;
   updateChat(id: string, update: (previous: ChatState) => ChatState): boolean;
-  canPersist(): boolean;
 }
 
 export const emptyWorkspaceCommandState: WorkspaceCommandState = {

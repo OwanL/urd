@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { MessageEditing } from "../../../chat/message-editing/MessageEditing.ts";
+import { newChat } from "../../../chat/ChatState.ts";
 import {
   decodeWorkspace,
   emptyWorkspace,
   encodeWorkspace,
-  newChat,
 } from "../../../workspace/WorkspaceState.ts";
-import type { WorkspaceCommandAccess } from "../../../workspace/WorkspaceCommands.ts";
+import type { MessageEditingAccess } from "../../../chat/message-editing/MessageEditingAccess.ts";
 import type { LlmSelection } from "../../../providers/LlmSelection.ts";
 import type { MessageEditSubmission } from "../../../sessions/inputs/MessageEdit.ts";
 import type {
@@ -61,16 +61,14 @@ function fixture() {
   state.chats.session = { ...newChat(selection), draft: "untouched composer draft" };
   let saved = encodeWorkspace(state);
   let writable = true;
-  const access: WorkspaceCommandAccess = {
+  const access: MessageEditingAccess = {
     read: () => state,
-    save: (next) => {
-      state = next;
+    updateChat: (id, update) => {
+      state = { ...state, chats: { ...state.chats, [id]: update(state.chats[id]!) } };
       if (!writable) return false;
       saved = encodeWorkspace(state);
       return true;
     },
-    updateChat: (id, update) =>
-      access.save({ ...state, chats: { ...state.chats, [id]: update(state.chats[id]!) } }),
     canPersist: () => true,
   };
   const client: Pick<SessionClient, "getMessageContent" | "editMessage" | "getMessageEditReceipt"> =

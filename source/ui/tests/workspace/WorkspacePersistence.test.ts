@@ -1,13 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { WorkspacePersistence } from "../../workspace/WorkspacePersistence.ts";
-import {
-  beginSubmission,
-  editDraft,
-  emptyWorkspace,
-  newChat,
-} from "../../workspace/WorkspaceState.ts";
-import type { ChatState } from "../../workspace/WorkspaceState.ts";
+import { beginSubmission, editDraft, newChat } from "../../chat/ChatState.ts";
+import { emptyWorkspace } from "../../workspace/WorkspaceState.ts";
+import type { ChatState } from "../../chat/ChatState.ts";
 
 class MemoryStorage implements Storage {
   readonly values = new Map<string, string>();

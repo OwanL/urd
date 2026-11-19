@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import type { SessionClient } from "../sessions/SessionClient.ts";
 import { moveTab } from "./tabs/TabOrder.ts";
-import { newChat } from "./WorkspaceState.ts";
+import { newChat } from "../chat/ChatState.ts";
+
 import type { SessionIdPage } from "../sessions/SessionIdPage.ts";
 import type { PersistedWorkspace } from "./usePersistedWorkspace.ts";
 import { enumerateSessionPages } from "../sessions/SessionPages.ts";

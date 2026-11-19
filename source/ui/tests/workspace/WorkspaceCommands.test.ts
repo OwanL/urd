@@ -6,12 +6,11 @@ import type {
   WorkspaceCommandAccess,
   WorkspaceCommandState,
 } from "../../workspace/WorkspaceCommands.ts";
+import { editDraft, newChat } from "../../chat/ChatState.ts";
 import {
   decodeWorkspace,
-  editDraft,
   emptyWorkspace,
   encodeWorkspace,
-  newChat,
 } from "../../workspace/WorkspaceState.ts";
 import type { WorkspaceState } from "../../workspace/WorkspaceState.ts";
 import type { LlmSelection } from "../../providers/LlmSelection.ts";

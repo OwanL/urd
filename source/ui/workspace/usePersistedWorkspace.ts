@@ -1,7 +1,9 @@
 import { useCallback, useMemo, useRef, useState } from "preact/hooks";
 import type { LlmSelection } from "../providers/LlmSelection.ts";
-import { editDraft as updateDraft } from "./WorkspaceState.ts";
-import type { ChatState, WorkspaceState } from "./WorkspaceState.ts";
+import { editDraft as updateDraft } from "../chat/ChatState.ts";
+
+import type { ChatState } from "../chat/ChatState.ts";
+import type { WorkspaceState } from "./WorkspaceState.ts";
 import type { WorkspaceCommandAccess } from "./WorkspaceCommands.ts";
 import type { WorkspacePersistence } from "./WorkspacePersistence.ts";
 

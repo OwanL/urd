@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { SessionClient } from "../sessions/SessionClient.ts";
 import { SessionEvents } from "../sessions/SessionEvents.ts";
 import type { WorkspaceCommandAccess } from "./WorkspaceCommands.ts";
-import { applySessionTitle, newChat } from "./WorkspaceState.ts";
+import { newChat } from "../chat/ChatState.ts";
+import { applySessionTitle } from "./WorkspaceState.ts";
 import { enumerateSessionPages } from "../sessions/SessionPages.ts";
 import {
   emptySessionActivity,

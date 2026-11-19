@@ -9,8 +9,8 @@ import type {
   TranscriptTextFacts,
 } from "../../sessions/transcript/Messages.ts";
 import type { SessionClient } from "../../sessions/SessionClient.ts";
-import type { WorkspaceCommandAccess } from "../../workspace/WorkspaceCommands.ts";
-import { submissionTextError } from "../../workspace/WorkspaceState.ts";
+import type { MessageEditingAccess } from "./MessageEditingAccess.ts";
+import { submissionTextError } from "../ChatState.ts";
 
 // Owns inline drafts and the exact Save journal independently of transcript row lifetimes.
 export class MessageEditing {
@@ -21,12 +21,12 @@ export class MessageEditing {
     SessionClient,
     "getMessageContent" | "editMessage" | "getMessageEditReceipt"
   >;
-  private readonly access: WorkspaceCommandAccess;
+  private readonly access: MessageEditingAccess;
   private readonly refresh: () => void;
 
   constructor(
     client: Pick<SessionClient, "getMessageContent" | "editMessage" | "getMessageEditReceipt">,
-    access: WorkspaceCommandAccess,
+    access: MessageEditingAccess,
     refresh: () => void,
   ) {
     this.client = client;

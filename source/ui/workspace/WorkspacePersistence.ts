@@ -1,5 +1,6 @@
 import { decodeWorkspace, emptyWorkspace, encodeWorkspace } from "./WorkspaceState.ts";
-import type { ChatState, WorkspaceState } from "./WorkspaceState.ts";
+import type { ChatState } from "../chat/ChatState.ts";
+import type { WorkspaceState } from "./WorkspaceState.ts";
 
 export interface WorkspaceLoad {
   state: WorkspaceState;

@@ -145,7 +145,7 @@ public sealed class StartingContextPreparationTests {
   }
 
   private static InstructionResourceCatalog Catalog(string root, string[] paths) =>
-      new(Path.Combine(root, "catalog.db"), (_, _) => Task.FromResult(paths), (_, _, _) => null);
+      new(Path.Combine(root, "catalog.db"), (_, _, _) => Task.FromResult(paths), (_, _, _) => null);
 
   private static async Task<RunningParent> StartParentAsync() {
     var mainWaiting = Signal();

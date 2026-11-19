@@ -63,7 +63,8 @@ internal sealed class FdResourceScanner {
     return result.ToString();
   }
 
-  public async Task<string[]> FindPathsAsync(string directory, CancellationToken cancellation) {
+  // matched receives each absolute path as fd reports it, before the scan completes.
+  public async Task<string[]> FindPathsAsync(string directory, CancellationToken cancellation, Action<string>? matched = null) {
     cancellation.ThrowIfCancellationRequested();
     var root = Path.GetFullPath(directory);
     if (!Directory.Exists(root))
@@ -86,11 +87,11 @@ internal sealed class FdResourceScanner {
 
     var paths = new List<string>();
     foreach (var scan in scans)
-      paths.AddRange(await ScanAsync(scan, cancellation));
+      paths.AddRange(await ScanAsync(scan, cancellation, matched));
     return paths.Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal).ToArray();
   }
 
-  internal async Task<string[]> ScanAsync(ResourceMountPolicy.Scan scan, CancellationToken cancellation) {
+  internal async Task<string[]> ScanAsync(ResourceMountPolicy.Scan scan, CancellationToken cancellation, Action<string>? matched = null) {
     var platform = OperatingSystem.IsWindows() ? "win" : "linux";
     if (OperatingSystem.IsMacOS())
       platform = "osx";
@@ -142,8 +143,10 @@ internal sealed class FdResourceScanner {
       while ((count = await process.StandardOutput.ReadAsync(buffer.AsMemory(), CancellationToken.None)) != 0) {
         for (var i = 0; i < count; i++) {
           if (buffer[i] == '\0') {
-            paths.Add(Path.GetFullPath(pending.ToString()));
+            string path = Path.GetFullPath(pending.ToString());
+            paths.Add(path);
             pending.Clear();
+            matched?.Invoke(path);
           } else {
             pending.Append(buffer[i]);
           }

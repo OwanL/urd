@@ -94,11 +94,15 @@ catalogued separately. Other harnesses' files, including `CLAUDE.md`, `GEMINI.md
 
 The catalog indexes paths only; it does not cache instruction text or skill frontmatter.
 The backend's shared derived SQLite index is `<DataRoot>/urd.sqlite.instructions.sqlite`
-(the session database is `<DataRoot>/urd.sqlite`). It survives backend restarts, but a
-requested tree is rescanned on restart before it is considered current. The catalog watches
+(the session database is `<DataRoot>/urd.sqlite`). It survives backend restarts: last-known
+rows are served immediately while a single-flight reconcile scan runs in the background, and
+cold roots serve a partial scan as it progresses. The catalog watches
 active roots and reconciles file/directory create, delete and rename notifications. If a
-watcher cannot be established or loses coverage, requests use a fresh scan rather than
-trusting stale rows. A caller cancelling its wait does not cancel a scan shared with other
+watcher cannot be established or loses coverage, last-known rows keep being served while a
+reconciliation scan runs; roots whose watcher is unavailable settle after one reconciliation.
+Requests return paths with an index state (`DiscoveredInstructionResources.Index`):
+complete, refreshing or partial, plus the number of files matched so far. A caller cancelling
+its wait does not cancel a scan shared with other
 callers. Cache schema/integrity problems rebuild this derived index when it is identified as
 Urd's catalog. A nonempty foreign file is left untouched and causes an error; a fresh
 empty SQLite file can be initialized as the derived cache.

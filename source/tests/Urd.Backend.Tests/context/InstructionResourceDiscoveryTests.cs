@@ -113,7 +113,7 @@ public sealed class InstructionResourceDiscoveryTests : IDisposable {
     WriteTo(outside, "AGENTS.md", "Outside instructions");
     WriteTo(outside, "SKILL.md", Skill("outside", "Outside skill."));
     await using var catalog = new InstructionResourceCatalog(Path.Combine(root, "catalog.sqlite"),
-        (_, _) => Task.FromResult(new[] { instruction, skill }), (_, _, _) => new Watch());
+        (_, _, _) => Task.FromResult(new[] { instruction, skill }), (_, _, _) => new Watch());
     var discovery = new InstructionResourceDiscovery(catalog, Packaged);
     DiscoveredInstructionResources initial = await discovery.FindAsync(Project, CancellationToken.None);
     Assert.Single(initial.Instructions);
@@ -157,7 +157,7 @@ public sealed class InstructionResourceDiscoveryTests : IDisposable {
     CreateDirectoryLink(link, outside);
     string[] paths = [removedInstruction, removedSkill, Path.Combine(link, "AGENTS.md"), Path.Combine(link, "SKILL.md")];
     await using var catalog = new InstructionResourceCatalog(Path.Combine(root, "catalog.sqlite"),
-        (_, _) => Task.FromResult(paths), (_, _, _) => new Watch());
+        (_, _, _) => Task.FromResult(paths), (_, _, _) => new Watch());
     var discovery = new InstructionResourceDiscovery(catalog, Packaged);
     DiscoveredInstructionResources initial = await discovery.FindAsync(Project, CancellationToken.None);
     Assert.Equal("Removed", Assert.Single(initial.Instructions).Text);
@@ -202,7 +202,7 @@ public sealed class InstructionResourceDiscoveryTests : IDisposable {
   }
 
   private InstructionResourceCatalog CreateCatalog() => new(Path.Combine(root, "catalog.sqlite"),
-      (directory, _) => Task.FromResult(Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
+      (directory, _, _) => Task.FromResult(Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
           .Where(FdResourceScanner.IsResourcePath).ToArray()), (_, _, _) => null);
 
   private void CreateDirectoryLink(string link, string target) {

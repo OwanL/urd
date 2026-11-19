@@ -28,7 +28,7 @@ public sealed class InstructionResourceCatalogTests : IDisposable {
     var release = Signal();
     int scans = 0;
     var watch = new ManualWatch();
-    await using var catalog = new InstructionResourceCatalog(Database, async (directory, cancellation) => {
+    await using var catalog = new InstructionResourceCatalog(Database, async (directory, _, cancellation) => {
       Interlocked.Increment(ref scans);
       if (directory == Project) {
         entered.TrySetResult();
@@ -38,18 +38,19 @@ public sealed class InstructionResourceCatalogTests : IDisposable {
     }, watch.Open);
 
     using var cancelWaiter = new CancellationTokenSource();
-    Task<IReadOnlyList<string>> canceled = catalog.FindPathsAsync(Project, cancelWaiter.Token);
+    Task<InstructionResourceCatalogResult> canceled = catalog.FindPathsAsync(Project, cancelWaiter.Token);
     await entered.Task.WaitAsync(deadline);
-    Task<IReadOnlyList<string>> broad = catalog.FindPathsAsync(Project, CancellationToken.None);
-    Task<IReadOnlyList<string>> narrow = catalog.FindPathsAsync(area, CancellationToken.None);
+    Task<InstructionResourceCatalogResult> broad = catalog.FindPathsAsync(Project, CancellationToken.None);
+    Task<InstructionResourceCatalogResult> narrow = catalog.FindPathsAsync(area, CancellationToken.None);
     await cancelWaiter.CancelAsync();
     await Assert.ThrowsAnyAsync<OperationCanceledException>(() => canceled);
     Assert.False(broad.IsCompleted);
-    Assert.Equal([child], await narrow.WaitAsync(deadline));
+    Assert.Equal([child], (await narrow.WaitAsync(deadline)).Paths);
     release.SetResult();
 
-    Assert.Equal(new[] { child, sibling, parent }.Order(StringComparer.OrdinalIgnoreCase), await broad.WaitAsync(deadline));
-    Assert.Equal([child], await catalog.FindPathsAsync(area + Path.DirectorySeparatorChar, CancellationToken.None));
+    Assert.Equal(new[] { child, sibling, parent }.Order(StringComparer.OrdinalIgnoreCase),
+        (await broad.WaitAsync(deadline)).Paths);
+    Assert.Equal([child], (await catalog.FindPathsAsync(area + Path.DirectorySeparatorChar, CancellationToken.None)).Paths);
     Assert.Equal(2, scans);
   }
 
@@ -60,14 +61,14 @@ public sealed class InstructionResourceCatalogTests : IDisposable {
     var entered = Signal();
     var release = Signal();
     Action<string, string?>? broadChanged = null;
-    await using var catalog = new InstructionResourceCatalog(Database, async (directory, cancellation) => {
+    await using var catalog = new InstructionResourceCatalog(Database, async (directory, _, cancellation) => {
       string[] snapshot = Fresh(directory);
       if (directory == Project) {
         entered.SetResult();
         await release.Task.WaitAsync(cancellation);
       }
       return snapshot;
-    }, (directory, changed, _) => {
+    }, (directory, changed, lost) => {
       if (directory == Project)
         broadChanged = changed;
       return new ManualWatch();
@@ -79,10 +80,12 @@ public sealed class InstructionResourceCatalogTests : IDisposable {
     string replacement = Write("area/SKILL.md");
     broadChanged!(stale, null);
     broadChanged(replacement, null);
-    Assert.Equal([replacement], await catalog.FindPathsAsync(area, CancellationToken.None).WaitAsync(deadline));
+    Assert.Equal([replacement],
+        (await catalog.FindPathsAsync(area, CancellationToken.None).WaitAsync(deadline)).Paths);
     release.SetResult();
-    Assert.Equal([replacement], await broad.WaitAsync(deadline));
-    Assert.Equal([replacement], await catalog.FindPathsAsync(area, CancellationToken.None).WaitAsync(deadline));
+    Assert.Equal([replacement], (await broad.WaitAsync(deadline)).Paths);
+    Assert.Equal([replacement],
+        (await catalog.FindPathsAsync(area, CancellationToken.None).WaitAsync(deadline)).Paths);
   }
 
   [Fact]
@@ -92,13 +95,13 @@ public sealed class InstructionResourceCatalogTests : IDisposable {
     var narrowStarted = Signal();
     var narrowStopped = Signal();
     var watch = new ManualWatch();
-    await using var catalog = new InstructionResourceCatalog(Database, async (directory, cancellation) => {
+    await using var catalog = new InstructionResourceCatalog(Database, async (directory, _, cancellation) => {
       if (directory == area) {
-        narrowStarted.SetResult();
+        narrowStarted.TrySetResult();
         try {
           await Task.Delay(Timeout.InfiniteTimeSpan, cancellation);
         } finally {
-          narrowStopped.SetResult();
+          narrowStopped.TrySetResult();
         }
       }
       return Fresh(directory);
@@ -108,9 +111,38 @@ public sealed class InstructionResourceCatalogTests : IDisposable {
     await narrowStarted.Task.WaitAsync(deadline);
     File.Delete(child);
     string replacement = Write("area/SKILL.md");
-    Assert.Equal([replacement], await catalog.FindPathsAsync(Project, CancellationToken.None).WaitAsync(deadline));
-    Assert.Equal([replacement], await narrow.WaitAsync(deadline));
+    Assert.Equal([replacement],
+        (await catalog.FindPathsAsync(Project, CancellationToken.None).WaitAsync(deadline)).Paths);
+    Assert.Equal([replacement], (await narrow.WaitAsync(deadline)).Paths);
     await narrowStopped.Task.WaitAsync(deadline);
+  }
+
+  [Fact]
+  public async Task ColdScansServePartialMatchesAndCompleteLater() {
+    string first = Write("AGENTS.md");
+    string second = Write("SKILL.md");
+    var release = Signal();
+    var watch = new ManualWatch();
+    await using var catalog = new InstructionResourceCatalog(Database, async (directory, matched, cancellation) => {
+      string[] paths = Fresh(directory);
+      matched(paths[0]);
+      if (directory == Project)
+        await release.Task.WaitAsync(cancellation);
+      foreach (string path in paths.Skip(1))
+        matched(path);
+      return paths;
+    }, watch.Open);
+
+    InstructionResourceCatalogResult partial = await catalog
+        .FindPathsAsync(Project, CancellationToken.None).WaitAsync(deadline);
+    Assert.Equal([first], partial.Paths);
+    Assert.Equal(InstructionResourceIndexPhase.Partial, partial.State.Phase);
+    Assert.Equal(1, partial.State.MatchedFiles);
+
+    release.SetResult();
+    InstructionResourceCatalogResult complete = await MatchesIndexAsync(catalog, [first, second]);
+    Assert.Equal(InstructionResourceIndexPhase.Complete, complete.State.Phase);
+    Assert.Equal(2, complete.State.MatchedFiles);
   }
 
   [Fact]
@@ -120,12 +152,12 @@ public sealed class InstructionResourceCatalogTests : IDisposable {
     string moved = Path.Combine(Project, "moved");
     WriteAt(staging, "recipes/SKILL.md");
     var scans = new System.Collections.Concurrent.ConcurrentQueue<string>();
-    await using var catalog = new InstructionResourceCatalog(Database, (directory, _) => {
+    await using var catalog = new InstructionResourceCatalog(Database, (directory, _, _) => {
       scans.Enqueue(directory);
       return Task.FromResult(Fresh(directory));
     });
 
-    Assert.Equal([initial], await catalog.FindPathsAsync(Project, CancellationToken.None).WaitAsync(deadline));
+    Assert.Equal([initial], (await catalog.FindPathsAsync(Project, CancellationToken.None).WaitAsync(deadline)).Paths);
     string added = Write("APPEND_SYSTEM.md");
     await MatchesDiskAsync(catalog);
     string renamed = Path.Combine(Project, "AGENT-INSTRUCTIONS.md");
@@ -147,13 +179,13 @@ public sealed class InstructionResourceCatalogTests : IDisposable {
   }
 
   [Fact]
-  public async Task EventsDuringScanAndLostCoverageAreReconciledBeforePublication() {
+  public async Task EventsDuringScanReconcileAndLostCoverageServesLastKnownRows() {
     string stale = Write("AGENTS.md");
     var entered = Signal();
     var release = Signal();
     int scans = 0;
     var watch = new ManualWatch();
-    await using var catalog = new InstructionResourceCatalog(Database, async (directory, cancellation) => {
+    await using var catalog = new InstructionResourceCatalog(Database, async (directory, _, cancellation) => {
       string[] snapshot = Fresh(directory);
       if (Interlocked.Increment(ref scans) == 1) {
         entered.SetResult();
@@ -170,25 +202,29 @@ public sealed class InstructionResourceCatalogTests : IDisposable {
     watch.Changed(stale);
     watch.Changed(newPath);
     release.SetResult();
-    Assert.Equal([newPath], await initial.WaitAsync(deadline));
+    Assert.Equal([newPath], (await initial.WaitAsync(deadline)).Paths);
     Assert.Equal(1, scans);
 
     File.Delete(newPath);
     string missed = Write("APPEND-SYSTEM.md");
     watch.Lost();
-    Task<IReadOnlyList<string>>[] readers = Enumerable.Range(0, 10)
-        .Select(_ => catalog.FindPathsAsync(Project, CancellationToken.None)).ToArray();
-    Assert.All(await Task.WhenAll(readers).WaitAsync(deadline), paths => Assert.Equal([missed], paths));
+    InstructionResourceCatalogResult lastKnown = await catalog
+        .FindPathsAsync(Project, CancellationToken.None).WaitAsync(deadline);
+    Assert.Equal([newPath], lastKnown.Paths);
+    Assert.Equal(InstructionResourceIndexPhase.Refreshing, lastKnown.State.Phase);
+
+    InstructionResourceCatalogResult reconciled = await MatchesIndexAsync(catalog, [missed]);
+    Assert.Equal(InstructionResourceIndexPhase.Complete, reconciled.State.Phase);
     Assert.Equal(2, scans);
   }
 
   [Fact]
-  public async Task NotificationFloodRecoversOnceAndUnavailableWatcherIsNotWarm() {
+  public async Task NotificationFloodRecoversOnceAndUnavailableWatcherServesReconciledRows() {
     var entered = Signal();
     var release = Signal();
     int scans = 0;
     var watch = new ManualWatch();
-    await using (var catalog = new InstructionResourceCatalog(Database, async (directory, cancellation) => {
+    await using (var catalog = new InstructionResourceCatalog(Database, async (directory, _, cancellation) => {
       string[] snapshot = Fresh(directory);
       if (Interlocked.Increment(ref scans) == 1) {
         entered.SetResult();
@@ -202,15 +238,16 @@ public sealed class InstructionResourceCatalogTests : IDisposable {
       for (int i = 0; i < 5000; i++)
         watch.Changed(Path.Combine(Project, $"change-{i}"));
       release.SetResult();
-      Assert.Equal([path], await initial.WaitAsync(deadline));
+      Assert.Equal([path], (await initial.WaitAsync(deadline)).Paths);
       Assert.Equal(2, scans);
     }
 
     await using var fallback = new InstructionResourceCatalog(Database,
-        (directory, _) => Task.FromResult(Fresh(directory)), (_, _, _) => null);
-    Assert.Single(await fallback.FindPathsAsync(Project, CancellationToken.None).WaitAsync(deadline));
-    Write("APPEND_SYSTEM.md");
-    Assert.Equal(Fresh(Project), await fallback.FindPathsAsync(Project, CancellationToken.None).WaitAsync(deadline));
+        (directory, _, _) => Task.FromResult(Fresh(directory)), (_, _, _) => null);
+    string added = Write("APPEND_SYSTEM.md");
+    InstructionResourceCatalogResult reconciled = await MatchesIndexAsync(fallback, Fresh(Project));
+    Assert.Equal(InstructionResourceIndexPhase.Complete, reconciled.State.Phase);
+    Assert.Contains(added, reconciled.Paths);
   }
 
   [Fact]
@@ -219,23 +256,23 @@ public sealed class InstructionResourceCatalogTests : IDisposable {
     string area = Path.GetDirectoryName(tracked)!;
     int scans = 0;
     var watch = new ManualWatch();
-    await using var catalog = new InstructionResourceCatalog(Database, (directory, _) => {
+    await using var catalog = new InstructionResourceCatalog(Database, (directory, _, _) => {
       Interlocked.Increment(ref scans);
       return Task.FromResult(Fresh(directory));
     }, watch.Open);
-    Assert.Equal([tracked], await catalog.FindPathsAsync(Project, CancellationToken.None).WaitAsync(deadline));
+    Assert.Equal([tracked], (await catalog.FindPathsAsync(Project, CancellationToken.None).WaitAsync(deadline)).Paths);
 
     for (int i = 0; i < 5000; i++)
       watch.Changed(Path.Combine(Project, $"unrelated-{i}.tmp"));
-    Assert.Equal([tracked], await catalog.FindPathsAsync(Project, CancellationToken.None).WaitAsync(deadline));
+    Assert.Equal([tracked], (await MatchesIndexAsync(catalog, [tracked])).Paths);
     Assert.Equal(1, scans);
 
     Directory.Delete(area, recursive: true);
     watch.Changed(area);
-    Assert.Empty(await catalog.FindPathsAsync(Project, CancellationToken.None).WaitAsync(deadline));
+    Assert.Empty((await MatchesIndexAsync(catalog, [])).Paths);
     string added = Write("new/sub/SKILL.md");
     watch.Changed(Path.Combine(Project, "new"));
-    Assert.Equal([added], await catalog.FindPathsAsync(Project, CancellationToken.None).WaitAsync(deadline));
+    Assert.Equal([added], (await MatchesIndexAsync(catalog, [added])).Paths);
   }
 
   [Fact]
@@ -245,29 +282,34 @@ public sealed class InstructionResourceCatalogTests : IDisposable {
     Write("obj/AGENTS.md");
     int scans = 0;
     var watch = new ManualWatch();
-    await using var catalog = new InstructionResourceCatalog(Database, (directory, cancellation) => {
+    await using var catalog = new InstructionResourceCatalog(Database, (directory, _, cancellation) => {
       Interlocked.Increment(ref scans);
       return new FdResourceScanner().FindPathsAsync(directory, cancellation);
     }, watch.Open);
 
-    Assert.Equal([kept], await catalog.FindPathsAsync(Project, CancellationToken.None).WaitAsync(deadline));
+    Assert.Equal([kept], (await catalog.FindPathsAsync(Project, CancellationToken.None).WaitAsync(deadline)).Paths);
     Assert.Equal(1, scans);
     // Changes under junk directories are pruned before the pending-event limit.
     for (int i = 0; i < 5000; i++)
       watch.Changed(Path.Combine(Project, "node_modules", $"change-{i}"));
     watch.Changed(Path.Combine(Project, "obj", "edit.tmp"));
-    Assert.Equal([kept], await catalog.FindPathsAsync(Project, CancellationToken.None).WaitAsync(deadline));
+    Assert.Equal([kept], (await MatchesIndexAsync(catalog, [kept])).Paths);
     Assert.Equal(1, scans);
   }
 
   [Fact]
-  public async Task RestartKeepsTheDatabaseAndReconcilesOnlyChangedRows() {
+  public async Task RestartServesPersistedRowsAndReconcilesOnlyChangedOnes() {
     string kept = Write("AGENTS.md");
     string removed = Write("SKILL.md");
-    Task<string[]> Scan(string directory, CancellationToken _) => Task.FromResult(Fresh(directory));
+    Task<string[]> Scan(string directory, Action<string> _, CancellationToken cancellation) =>
+        Task.FromResult(Fresh(directory));
     var watch = new ManualWatch();
-    await using (var first = new InstructionResourceCatalog(Database, Scan, watch.Open))
-      Assert.Equal([kept, removed], await first.FindPathsAsync(Project, CancellationToken.None).WaitAsync(deadline));
+    await using (var first = new InstructionResourceCatalog(Database, Scan, watch.Open)) {
+      InstructionResourceCatalogResult initial = await first.FindPathsAsync(Project, CancellationToken.None)
+          .WaitAsync(deadline);
+      Assert.Equal([kept, removed], initial.Paths);
+      Assert.Equal(InstructionResourceIndexPhase.Complete, initial.State.Phase);
+    }
 
     // A sentinel in the same database records writes to existing rows and detects wholesale replacement.
     var options = new SqliteConnectionStringBuilder { DataSource = Database, Pooling = false };
@@ -284,8 +326,16 @@ public sealed class InstructionResourceCatalogTests : IDisposable {
     }
     File.Delete(removed);
     string added = Write("APPEND_SYSTEM.md");
-    await using (var second = new InstructionResourceCatalog(Database, Scan, watch.Open))
-      Assert.Equal([kept, added], await second.FindPathsAsync(Project, CancellationToken.None).WaitAsync(deadline));
+    await using (var second = new InstructionResourceCatalog(Database, Scan, watch.Open)) {
+      // Persisted rows are served immediately after the restart while the reconcile is running.
+      InstructionResourceCatalogResult served = await second.FindPathsAsync(Project, CancellationToken.None)
+          .WaitAsync(deadline);
+      Assert.Equal([kept, removed], served.Paths);
+      Assert.Equal(InstructionResourceIndexPhase.Refreshing, served.State.Phase);
+
+      InstructionResourceCatalogResult reconciled = await MatchesIndexAsync(second, [kept, added]);
+      Assert.Equal(InstructionResourceIndexPhase.Complete, reconciled.State.Phase);
+    }
     using var reopened = new SqliteConnection(options.ToString());
     await reopened.OpenAsync();
     using var read = reopened.CreateCommand();
@@ -302,23 +352,24 @@ public sealed class InstructionResourceCatalogTests : IDisposable {
   public async Task UnwatchedParentDoesNotPreventNestedCoverage() {
     string child = Write("area/AGENTS.md");
     string area = Path.GetDirectoryName(child)!;
-    var scans = new List<string>();
+    var scans = new System.Collections.Concurrent.ConcurrentQueue<string>();
     var watch = new ManualWatch();
-    await using var catalog = new InstructionResourceCatalog(Database, (directory, _) => {
-      scans.Add(directory);
+    await using var catalog = new InstructionResourceCatalog(Database, (directory, _, _) => {
+      scans.Enqueue(directory);
       return Task.FromResult(Fresh(directory));
     }, (directory, changed, lost) => directory == Project ? null : watch.Open(directory, changed, lost));
 
-    Assert.Equal([child], await catalog.FindPathsAsync(Project, CancellationToken.None).WaitAsync(deadline));
-    Assert.Equal([child], await catalog.FindPathsAsync(area, CancellationToken.None).WaitAsync(deadline));
-    Assert.Equal([child], await catalog.FindPathsAsync(area, CancellationToken.None).WaitAsync(deadline));
-    Assert.Equal([Project, area], scans);
+    Assert.Equal([child], (await catalog.FindPathsAsync(Project, CancellationToken.None).WaitAsync(deadline)).Paths);
+    Assert.Equal([child], (await catalog.FindPathsAsync(area, CancellationToken.None).WaitAsync(deadline)).Paths);
+    Assert.Equal([child], (await SettledAsync(catalog, area)).Paths);
+    Assert.Equal([Project, area], scans.ToList());
   }
 
   [Fact]
   public async Task RebuildsOwnedIncompatibleSchemaButDoesNotEraseForeignFiles() {
     string resource = Write("AGENTS.md");
-    Task<string[]> Scan(string directory, CancellationToken _) => Task.FromResult(Fresh(directory));
+    Task<string[]> Scan(string directory, Action<string> _, CancellationToken cancellation) =>
+        Task.FromResult(Fresh(directory));
     var watch = new ManualWatch();
     await File.WriteAllTextAsync(Database, "Not an index.");
     await using (var foreign = new InstructionResourceCatalog(Database, Scan, watch.Open))
@@ -326,8 +377,12 @@ public sealed class InstructionResourceCatalogTests : IDisposable {
     Assert.Equal("Not an index.", await File.ReadAllTextAsync(Database));
     File.Delete(Database);
 
-    await using (var first = new InstructionResourceCatalog(Database, Scan, watch.Open))
-      Assert.Equal([resource], await first.FindPathsAsync(Project, CancellationToken.None).WaitAsync(deadline));
+    await using (var first = new InstructionResourceCatalog(Database, Scan, watch.Open)) {
+      InstructionResourceCatalogResult initial = await first.FindPathsAsync(Project, CancellationToken.None)
+          .WaitAsync(deadline);
+      Assert.Equal([resource], initial.Paths);
+      Assert.Equal(InstructionResourceIndexPhase.Complete, initial.State.Phase);
+    }
     var options = new SqliteConnectionStringBuilder { DataSource = Database, Pooling = false };
     using (var connection = new SqliteConnection(options.ToString())) {
       await connection.OpenAsync();
@@ -336,7 +391,7 @@ public sealed class InstructionResourceCatalogTests : IDisposable {
       await command.ExecuteNonQueryAsync();
     }
     await using var reopened = new InstructionResourceCatalog(Database, Scan, watch.Open);
-    Assert.Equal([resource], await reopened.FindPathsAsync(Project, CancellationToken.None).WaitAsync(deadline));
+    Assert.Equal([resource], (await reopened.FindPathsAsync(Project, CancellationToken.None).WaitAsync(deadline)).Paths);
   }
 
   [Fact]
@@ -346,11 +401,11 @@ public sealed class InstructionResourceCatalogTests : IDisposable {
     string link = Path.Combine(Project, "link");
     int scans = 0;
     var watch = new ManualWatch();
-    await using var catalog = new InstructionResourceCatalog(Database, (directory, _) => {
+    await using var catalog = new InstructionResourceCatalog(Database, (directory, _, _) => {
       Interlocked.Increment(ref scans);
       return Task.FromResult(Fresh(directory));
     }, watch.Open);
-    Assert.Empty(await catalog.FindPathsAsync(Project, CancellationToken.None).WaitAsync(deadline));
+    Assert.Empty((await catalog.FindPathsAsync(Project, CancellationToken.None).WaitAsync(deadline)).Paths);
     try {
       Directory.CreateSymbolicLink(link, outside);
     } catch (IOException) when (OperatingSystem.IsWindows()) {
@@ -358,8 +413,8 @@ public sealed class InstructionResourceCatalogTests : IDisposable {
     }
     watch.Changed(link);
     watch.Changed(Path.Combine(link, "sub", "AGENTS.md"));
-    Assert.Empty(await catalog.FindPathsAsync(Project, CancellationToken.None).WaitAsync(deadline));
-    Assert.Empty(await catalog.FindPathsAsync(Path.Combine(link, "sub"), CancellationToken.None));
+    Assert.Empty((await MatchesIndexAsync(catalog, [])).Paths);
+    Assert.Empty((await catalog.FindPathsAsync(Path.Combine(link, "sub"), CancellationToken.None)).Paths);
     Assert.Equal(1, scans);
   }
 
@@ -369,7 +424,7 @@ public sealed class InstructionResourceCatalogTests : IDisposable {
     var canceled = Signal();
     var release = Signal();
     var watch = new ManualWatch();
-    await using var catalog = new InstructionResourceCatalog(Database, async (_, cancellation) => {
+    await using var catalog = new InstructionResourceCatalog(Database, async (_, _, cancellation) => {
       entered.SetResult();
       try {
         await Task.Delay(Timeout.InfiniteTimeSpan, cancellation);
@@ -392,13 +447,31 @@ public sealed class InstructionResourceCatalogTests : IDisposable {
     Assert.False(File.Exists(Database));
   }
 
-  private async Task MatchesDiskAsync(InstructionResourceCatalog catalog) {
-    string[] expected = Fresh(Project);
+  private async Task<InstructionResourceCatalogResult> MatchesDiskAsync(InstructionResourceCatalog catalog) =>
+      await MatchesIndexAsync(catalog, Fresh(Project));
+
+  // A background reconcile may still be running when a request returns; a settled answer is
+  // observed by waiting for its Complete phase with a bounded deadline.
+  private static async Task<InstructionResourceCatalogResult> SettledAsync(
+      InstructionResourceCatalog catalog, string directory) {
     using var cancellation = new CancellationTokenSource(deadline);
     while (true) {
-      var paths = await catalog.FindPathsAsync(Project, cancellation.Token);
-      if (expected.SequenceEqual(paths))
-        return;
+      InstructionResourceCatalogResult result = await catalog.FindPathsAsync(directory, cancellation.Token);
+      if (result.State.Phase == InstructionResourceIndexPhase.Complete)
+        return result;
+      await Task.Delay(25, cancellation.Token);
+    }
+  }
+
+  // Stale rows are served while reconciliation runs in the background, so a settled answer
+  // is observed by waiting for it with a bounded deadline.
+  private async Task<InstructionResourceCatalogResult> MatchesIndexAsync(
+      InstructionResourceCatalog catalog, string[] expected) {
+    using var cancellation = new CancellationTokenSource(deadline);
+    while (true) {
+      InstructionResourceCatalogResult result = await catalog.FindPathsAsync(Project, cancellation.Token);
+      if (expected.SequenceEqual(result.Paths))
+        return result;
       await Task.Delay(25, cancellation.Token);
     }
   }

@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Execution;
+using Urd.Core.Context;
 using Urd.Core.Preferences;
 using Urd.Core.Providers;
 using Urd.Core.Sessions;
@@ -50,6 +51,9 @@ public sealed class InstructionResourceIntegrationTests(ITestOutputHelper output
     outlierBytes = Encoding.UTF8.GetByteCount(expected[outlierPath]);
     Assert.True(outlierBytes > expected.Where(pair => pair.Key != outlierPath)
         .Max(pair => Encoding.UTF8.GetByteCount(pair.Value)));
+    // A cold catalog may serve an in-progress scan's partial matches; the session's working
+    // directory is preparation's own root, so wait until its index has the full tree.
+    await CatalogIndexSettledAsync(fixture.Store.InstructionDiscovery, fixture.Session.WorkingDirectory!, count);
     Guid execution = await fixture.StartExecutionAsync(launch);
     SessionExecutionResult result = await fixture.Session.WaitForExecutionFinishAsync(execution).WaitAsync(TimeSpan.FromMinutes(2));
     Assert.Equal(ExecutionOutcome.Completed, result.Outcome);
@@ -123,6 +127,16 @@ public sealed class InstructionResourceIntegrationTests(ITestOutputHelper output
         default:
           throw new InvalidOperationException($"Unexpected mock request purpose '{request.Purpose}'.");
       }
+    }
+  }
+
+  private static async Task CatalogIndexSettledAsync(InstructionResourceDiscovery discovery, string directory, int count) {
+    using var settle = new CancellationTokenSource(TestTimeout);
+    while (true) {
+      var (_, instructions) = await discovery.FindMetadataAsync(directory, settle.Token);
+      if (instructions.Count >= count)
+        return;
+      await Task.Delay(25, settle.Token);
     }
   }
 

@@ -40,29 +40,47 @@ scans before junk-directory pruning. A cache recognized as Urd's catalog is
 rebuilt if its schema or integrity is incompatible. Nonempty foreign files are not deleted
 and opening them fails; a fresh empty SQLite file can be initialized as the derived cache.
 
-The index file remains across backend restarts, but cached rows alone do not prove freshness.
-A requested tree is scanned and reconciled with disk after restart before it is treated as
-current. During a process lifetime, roots with working watchers can serve cached paths;
-file and directory create/delete/rename events update matching rows. Moving a populated
+The index file remains across backend restarts, but cached rows alone do not prove freshness, so
+they are served as last-known rows: a restart or an unwatched root serves its persisted rows
+immediately and starts one single-flight background reconciliation (shared with startup warming
+via `UrdStore.WarmInstructionResources`); a cold root with no persisted rows starts the
+single-flight scan and serves the matches it has produced so far without waiting for completion.
+Missing or deleted last-known rows are harmless: opening a missing resource is already treated
+as an unavailable resource, and a session's starting context is fixed once built, so late files
+reach later sessions or compaction boundaries. During a process lifetime, a settled root is
+served from the index; file and directory create/delete/rename events update matching rows.
+Moving a populated
 directory triggers a scan of its destination subtree. Text and skill metadata are read later
 by discovery, so editing a file does not require rescanning paths and takes effect at the
 next preparation boundary.
 
+Each request returns the served paths with an index state so callers can report progress:
+`InstructionResourceIndexPhase.Complete` (a settled snapshot), `Refreshing` (last-known rows
+are being reconciled in the background) or `Partial` (a cold scan has not published its full
+snapshot), plus the number of files currently matched for the tree. Discovery exposes this
+as `DiscoveredInstructionResources.Index`; the catalog returns an
+`InstructionResourceCatalogResult(Paths, State)` and `FindMetadataAsync` keeps its
+path-only shape for the settings picker.
+
 Production startup requests best-effort warming of the saved default working directory
-when one exists. Warming failures are ignored; a later consumer retries and observes a
-scan failure if it persists. Other working directories scan on demand. Concurrent callers
+when one exists. Warming failures are ignored; a cold consumer retries and observes a
+scan failure if it persists, while a consumer with last-known rows keeps serving them. Other
+working directories scan on demand. Concurrent callers
 can share covered scans. Cancelling a caller cancels only its wait, not shared scan work.
 Watchers and scanner processes are owned by the catalog and drained on backend shutdown.
 
 ### Fresh-scan fallback
 
 A watcher is used only when coverage can be established safely. If it is unavailable (for
-example, recursive watching cannot safely cover a tree with nested mounts), each request
-performs a fresh scan instead of trusting persisted rows. Watcher errors, notification
-overflow or lost coverage trigger a reconciliation scan before results are returned. A
-failed or cancelled scan is not published as a ready partial result; scan/index errors reach
-the requesting operation. A warm cache read is never used to claim that changes made while
-Urd was stopped have been observed.
+example, recursive watching cannot safely cover a tree with nested mounts), the root reconciles
+once behind its first request and then serves that reconciled snapshot as complete; changes
+made while coverage is unavailable are observed by a later restart or reconciliation. Watcher
+errors, notification overflow or lost coverage keep serving the last-known rows while a
+reconciliation scan runs in the background. A failed or cancelled scan is never published as
+a complete result: cold roots with nothing to serve keep reporting a partial result and retry
+on later requests, and a cold request that waits for a scan's first matches observes that
+failure. Index errors surface when a request first reads persisted rows. A warm cache read is
+never used to claim that changes made while Urd was stopped have been observed.
 
 The derived cache location uses SQLite sidecars as needed. Rebuilding the catalog does not
 remove or rewrite the session database. The catalog itself does not delete project files or
@@ -92,7 +110,8 @@ every live filesystem. Do not infer all-platform acceptance from the asset table
 Retained tests exercise hidden/ignored matching, junk-directory pruning and the temp-directory
 root exception, mount-plan parsing and fail-closed malformed
 mount data; catalog tests cover shared/overlapping roots, watcher updates, directory moves,
-restart reconciliation, lost coverage, unavailable watchers, cancellation, cache rebuild and
+restart reconciliation serves last-known rows while reconciling, cold scan results stay
+partial until they publish, lost coverage, unavailable watchers, cancellation, cache rebuild and
 protection against scanning through links. These cases establish the tested behavior only;
 they are not an exhaustive OS matrix or a proof of discovery completeness on arbitrary
 filesystems. The current implementation and tests do not establish pruning quality or a

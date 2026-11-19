@@ -24,7 +24,7 @@ internal sealed class InstructionResourceDiscovery {
   internal async Task<DiscoveredInstructionResources> FindAsync(
       string workingDirectory,
       CancellationToken cancellation) {
-    var (skills, paths) = await FindMetadataAsync(workingDirectory, cancellation);
+    var (skills, paths, index) = await FindResourcesAsync(workingDirectory, cancellation);
     var instructions = new List<DiscoveredInstructionDocument>();
     foreach (string path in paths) {
       cancellation.ThrowIfCancellationRequested();
@@ -41,16 +41,25 @@ internal sealed class InstructionResourceDiscovery {
     }
     cancellation.ThrowIfCancellationRequested();
     return new(skills, Array.AsReadOnly(instructions.OrderBy(instruction => instruction.Order)
-        .ThenBy(instruction => instruction.Path, StringComparer.Ordinal).ToArray()));
+        .ThenBy(instruction => instruction.Path, StringComparer.Ordinal).ToArray()), index);
   }
 
   // The settings picker needs paths and skill frontmatter, not instruction bodies.
   internal async Task<(IReadOnlyList<DiscoveredSkill> Skills, IReadOnlyList<string> Instructions)> FindMetadataAsync(
       string workingDirectory,
       CancellationToken cancellation) {
+    var (skills, instructions, _) = await FindResourcesAsync(workingDirectory, cancellation);
+    return (skills, instructions);
+  }
+
+  internal async Task<(IReadOnlyList<DiscoveredSkill> Skills, IReadOnlyList<string> Instructions,
+      InstructionResourceIndexState Index)> FindResourcesAsync(
+      string workingDirectory,
+      CancellationToken cancellation) {
     cancellation.ThrowIfCancellationRequested();
     workingDirectory = Path.GetFullPath(workingDirectory);
-    IReadOnlyList<string> paths = await catalog.FindPathsAsync(workingDirectory, cancellation);
+    InstructionResourceCatalogResult served = await catalog.FindPathsAsync(workingDirectory, cancellation);
+    IReadOnlyList<string> paths = served.Paths;
     var skills = new List<DiscoveredSkill>();
     var instructions = new List<string>();
     foreach (string path in paths.Select(Path.GetFullPath).Distinct(pathComparer).Order(StringComparer.Ordinal)) {
@@ -74,7 +83,7 @@ internal sealed class InstructionResourceDiscovery {
     skills.AddRange(PackagedSkills(cancellation));
     cancellation.ThrowIfCancellationRequested();
     return (Array.AsReadOnly(skills.DistinctBy(skill => skill.Identity, pathComparer).ToArray()),
-        Array.AsReadOnly(instructions.ToArray()));
+        Array.AsReadOnly(instructions.ToArray()), served.State);
   }
 
   internal bool IsPackagedSkill(DiscoveredSkill skill) => IsWithinDirectory(skill.Path, packagedDirectory);

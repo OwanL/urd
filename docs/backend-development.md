@@ -68,9 +68,11 @@ precedence and protection identities. Ordinary documentation and other harnesses
 configuration are not instruction candidates. Document candidates include full text; skills
 remain name/description/path references with on-demand bodies. A shared, path-only SQLite
 catalog is stored beside the session database at `<DataRoot>/urd.sqlite.instructions.sqlite`;
-it is retained across restarts but requested trees are rescanned before being trusted after a
-restart. Active roots are watched and reconciled incrementally. If watching is unavailable or
-coverage is lost, requests fall back to a fresh scan; a caller cancelling its wait does not
+it is retained across restarts and serves last-known paths immediately while a single-flight
+reconcile scan runs in the background. Active roots are watched and reconciled incrementally.
+If watching is unavailable or coverage is lost, last-known rows keep being served while
+reconciliation runs; roots whose watcher is unavailable settle after one reconciliation. A
+caller cancelling its wait does not
 cancel shared scan work. The bundled scanner is fd v10.3.0, resolved from the backend layout,
 not `PATH`. Unknown/remote mount traversal fails closed. Checked-in scanner binaries cover
 Windows, macOS and Linux x64/arm64 targets; published-layout and end-to-end verification

@@ -1,13 +1,14 @@
 namespace Urd.Core.Context;
 
-// Only roots covered by a live watcher in this process may satisfy a request from cached rows.
+// Roots are served from last-known rows while background scans reconcile them; a request only
+// waits when a cold root has no persisted rows and its in-flight scan has matched nothing yet.
 internal sealed class InstructionResourceCatalog : IAsyncDisposable {
   private const int maxPendingPaths = 4096;
   private static readonly StringComparer pathNames = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
   private static readonly StringComparison pathComparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
   private readonly string databasePath;
-  private readonly Func<string, CancellationToken, Task<string[]>> scan;
+  private readonly Func<string, Action<string>, CancellationToken, Task<string[]>> scan;
   private readonly Func<string, Action<string, string?>, Action, IDisposable?> watch;
   private readonly object gate = new();
   private readonly Dictionary<string, Root> roots = new(pathNames);
@@ -16,51 +17,57 @@ internal sealed class InstructionResourceCatalog : IAsyncDisposable {
   private Task? shutdown;
 
   internal InstructionResourceCatalog(string databasePath, FdResourceScanner scanner)
-      : this(databasePath, scanner.FindPathsAsync) { }
+      : this(databasePath, (directory, matched, cancellation) => scanner.FindPathsAsync(directory, cancellation, matched)) { }
 
-  internal InstructionResourceCatalog(string databasePath, Func<string, CancellationToken, Task<string[]>> scan,
+  internal InstructionResourceCatalog(string databasePath, Func<string, Action<string>, CancellationToken, Task<string[]>> scan,
       Func<string, Action<string, string?>, Action, IDisposable?>? watch = null) {
     this.databasePath = Path.GetFullPath(databasePath);
     this.scan = scan;
     this.watch = watch ?? InstructionResourceCatalogWatch.TryOpen;
   }
 
-  internal async Task<IReadOnlyList<string>> FindPathsAsync(string directory, CancellationToken cancellation) {
+  internal async Task<InstructionResourceCatalogResult> FindPathsAsync(string directory, CancellationToken cancellation) {
     directory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory));
-    Root? completed = null;
     while (true) {
       cancellation.ThrowIfCancellationRequested();
       Root root;
       Task work;
+      Task firstBatch;
       lock (gate) {
         ObjectDisposedException.ThrowIf(shutdown is not null, this);
         if (InstructionResourceCatalogWatch.Entry(directory) != FileAttributes.Directory)
-          return [];
+          return new([], new(InstructionResourceIndexPhase.Complete, 0));
 
-        root = CoveringRoot(directory, completed) ?? AddRoot(directory);
-        if (root.Ready && !root.Lost && root.Pending.Count == 0 &&
-            (root.Watch is not null && root.Work is null || root.Watch is null && root == completed))
-          return index!.Read(directory);
+        root = CoveringRoot(directory) ?? AddRoot(directory);
+        if (root.Ready && !root.Lost && root.Work is null && root.Pending.Count == 0) {
+          string[] indexed = Index().Read(directory);
+          return new(indexed, new(InstructionResourceIndexPhase.Complete, indexed.Length));
+        }
 
-        if (root.Work is null && root.Watch is null)
-          RetireDescendants(root.Path);
-        work = root.Work ?? Start(root, debounce: false);
+        // Last-known rows and the matches an in-flight scan has already produced are served
+        // without waiting; a cold root joins the scan until it publishes its first matches.
+        (string[] served, bool staleRows) = CoveringPaths(root, directory);
+        if (served.Length > 0) {
+          if (root.Work is null)
+            StartReconcile(root);
+          return new(served, new(staleRows ? InstructionResourceIndexPhase.Refreshing : InstructionResourceIndexPhase.Partial, served.Length));
+        }
+        work = root.Work is null ? StartReconcile(root) : root.Work;
+        firstBatch = root.FirstBatch!.Task;
       }
 
       // A caller cancels only its wait, not a scan another cwd may be sharing.
-      Task finished = await Task.WhenAny(work, root.Retired.Task).WaitAsync(cancellation);
-      if (finished != work || root.Retired.Task.IsCompleted)
-        continue;
-      await work;
-      completed = root;
+      Task finished = await Task.WhenAny(work, firstBatch, root.Retired.Task).WaitAsync(cancellation);
+      if (finished == work && !root.Retired.Task.IsCompleted && !work.IsCompletedSuccessfully)
+        await work; // A cold caller waits for the scan, so its failure or cancellation is observable.
     }
   }
 
-  private Root? CoveringRoot(string directory, Root? completed) {
+  private Root? CoveringRoot(string directory) {
     for (string? path = directory; path is not null; path = Path.GetDirectoryName(path)) {
       // A nested cwd can establish its own watcher when the broader root has no live coverage.
       if (roots.TryGetValue(path, out Root? root) &&
-          (pathNames.Equals(path, directory) || root == completed || root.Ready && root.Watch is not null))
+          (pathNames.Equals(path, directory) || root.Ready && root.Watch is not null))
         return root;
     }
     return null;
@@ -80,7 +87,15 @@ internal sealed class InstructionResourceCatalog : IAsyncDisposable {
     }
   }
 
+  private Task StartReconcile(Root root) {
+    if (root.Watch is null)
+      RetireDescendants(root.Path);
+    return Start(root, debounce: false);
+  }
+
   private Task Start(Root root, bool debounce) {
+    root.Buffer.Clear();
+    root.FirstBatch = new(TaskCreationOptions.RunContinuationsAsynchronously);
     Task work = Task.Run(() => UpdateAsync(root, debounce));
     root.Work = work;
     Track(work);
@@ -111,11 +126,13 @@ internal sealed class InstructionResourceCatalog : IAsyncDisposable {
       while (true) {
         cancellation.ThrowIfCancellationRequested();
         if (reconcile) {
-          // Recovery is coalesced. A watcher which keeps failing drops back to fresh scans on demand.
+          // Recovery is coalesced. A watcher which keeps failing leaves the root to settle
+          // on its last reconcile instead of rescanning for every request.
           ResetWatch(root, tryWatching: attempts++ < 2);
           try {
-            baseline = new(await ScanAsync(root.Path, cancellation), pathNames);
+            baseline = new(await ScanAsync(root.Path, path => BufferMatch(root, path), cancellation), pathNames);
             lock (gate) {
+              root.Buffer.Clear();
               if (!root.Lost && !root.Retired.Task.IsCompleted) {
                 RefreshTracked(root, baseline);
                 root.SnapshotKnown = true;
@@ -123,6 +140,7 @@ internal sealed class InstructionResourceCatalog : IAsyncDisposable {
             }
           } catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) {
             lock (gate) {
+              root.Buffer.Clear();
               if (root.Lost)
                 continue;
             }
@@ -200,11 +218,14 @@ internal sealed class InstructionResourceCatalog : IAsyncDisposable {
     }
   }
 
-  private async Task<string[]> ScanAsync(string directory, CancellationToken cancellation) {
+  private async Task<string[]> ScanAsync(string directory, Action<string>? matched, CancellationToken cancellation) {
     if (InstructionResourceCatalogWatch.Entry(directory) != FileAttributes.Directory)
       return [];
     try {
-      string[] paths = await scan(directory, cancellation);
+      string[] paths = await scan(directory, path => {
+        if (IsBelow(path, directory) && FdResourceScanner.IsResourcePath(path))
+          matched?.Invoke(path);
+      }, cancellation);
       cancellation.ThrowIfCancellationRequested();
       return paths.Where(path => IsBelow(path, directory) && FdResourceScanner.IsResourcePath(path))
           .Distinct(pathNames).ToArray();
@@ -212,6 +233,23 @@ internal sealed class InstructionResourceCatalog : IAsyncDisposable {
       // A notified directory may have moved again before fd starts. The new path has its own event.
       return [];
     }
+  }
+
+  // A cold scan publishes each match as fd reports it, so early callers serve partial results.
+  private void BufferMatch(Root root, string path) {
+    lock (gate) {
+      if (root.Retired.Task.IsCompleted)
+        return;
+      if (root.Buffer.Add(path))
+        root.FirstBatch?.TrySetResult();
+    }
+  }
+
+  private (string[] Paths, bool StaleRows) CoveringPaths(Root root, string directory) {
+    string[] rows = index is not null || File.Exists(databasePath) ? Index().Read(directory) : [];
+    var paths = new HashSet<string>(rows, pathNames);
+    paths.UnionWith(root.Buffer.Where(path => IsBelow(path, directory)));
+    return (paths.Order(pathNames).ToArray(), rows.Length > 0);
   }
 
   private async Task<List<InstructionResourcePathUpdate>> ReadUpdatesAsync(string directory, string[] pending,
@@ -225,7 +263,7 @@ internal sealed class InstructionResourceCatalog : IAsyncDisposable {
 
       FileAttributes? entry = InstructionResourceCatalogWatch.Entry(path);
       string[] paths = entry switch {
-        FileAttributes.Directory => await ScanAsync(path, cancellation),
+        FileAttributes.Directory => await ScanAsync(path, null, cancellation),
         FileAttributes.Normal when FdResourceScanner.IsResourcePath(path) => [path],
         _ => [],
       };
@@ -380,6 +418,9 @@ internal sealed class InstructionResourceCatalog : IAsyncDisposable {
     internal TaskCompletionSource Retired { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     internal HashSet<string> Pending { get; } = new(pathNames);
     internal HashSet<string> Tracked { get; } = new(pathNames);
+    // Matches buffered by the in-flight reconcile scan before its snapshot publishes.
+    internal HashSet<string> Buffer { get; } = new(pathNames);
+    internal TaskCompletionSource? FirstBatch;
     internal IDisposable? Watch;
     internal Task? Work;
     internal long Generation;

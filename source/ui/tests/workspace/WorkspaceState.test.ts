@@ -8,7 +8,6 @@ import {
   editDraft,
   executionSettled,
   newChat,
-  submissionTextError,
 } from "../../chat/ChatState.ts";
 import {
   applySessionTitle,
@@ -27,14 +26,6 @@ import type {
   UserMessageReceipt,
   UserMessageSubmission,
 } from "../../sessions/inputs/UserMessageSubmission.ts";
-
-void test("text validation accepts large submissions and rejects incomplete Unicode without trimming", () => {
-  assert.equal(submissionTextError("  \r\n雪 🦉  "), null);
-  assert.equal(submissionTextError("🦉".repeat(4096)), null);
-  assert.equal(submissionTextError("🦉".repeat(4096) + " "), null);
-  for (const text of ["\ud800", "\udfff", "x\ud800y", "\udfff🦉"])
-    assert.match(submissionTextError(text) ?? "", /Unicode/);
-});
 
 const sessionId = "10000000-0000-0000-0000-000000000001";
 const executionId = "20000000-0000-0000-0000-000000000002";

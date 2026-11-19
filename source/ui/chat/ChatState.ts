@@ -49,12 +49,6 @@ const refusalErrors: Record<MessageRefusalReason, string> = {
   selectionLocked: "The model selection is locked for this execution.",
 };
 
-// Reject malformed UTF-16 without trimming or replacing input.
-export function submissionTextError(text: string): string | null {
-  if (/[\uD800-\uDFFF]/u.test(text)) return "Message contains an incomplete Unicode character.";
-  return null;
-}
-
 // A read begun after this receipt can prove settlement even after another client
 // pushes the execution out of the recent window. Earlier idle reads cannot.
 export function executionSettled(

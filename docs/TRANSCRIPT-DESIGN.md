@@ -149,14 +149,14 @@ Distinguish throughout:
 The following bullets describe the source spot-check at `6519de9` on 2026-11-08,
 not current behavior; they are retained as dated design evidence.
 
-- `source/ui/chat/transcript/Transcript.tsx` displays escaped text. IntersectionObserver gates
+- `source/ui/app/Transcript.tsx` displays escaped text. IntersectionObserver gates
   content reads, with up to four pages per read. Already fetched bodies remain in
   row state; visibility gating is not a bounded source cache or DOM virtualization.
   Selection pauses updates; ResizeObserver anchors a message row. Row-top anchoring
   alone cannot protect reading inside a large message that reflows above the reader.
 - Workspace mounts the active transcript keyed by session and retains reading
   positions. Preserve draft/admission behavior while changing transcript ownership.
-- `source/ui/sessions/transcript/Messages.ts` and backend `core/sessions/Messages.cs` expose
+- `source/ui/sessions/Messages.ts` and backend `core/sessions/Messages.cs` expose
   user/assistant text only, with identity, history revision, cursors and lifecycle
   facts. No public content-part, tool-inspection, attachment or reasoning projection.
 - `SnapshotReader.cs`: at most 60 recent messages and 256-UTF-16-unit previews.

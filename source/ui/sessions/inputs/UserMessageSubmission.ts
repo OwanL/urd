@@ -22,3 +22,9 @@ export type MessageAcceptance = "accepted" | "refused";
 
 // The saved reason a submission was refused.
 export type MessageRefusalReason = "staleRevision" | "capacity" | "stopping" | "selectionLocked";
+
+// Reject malformed UTF-16 without trimming or replacing input.
+export function submissionTextError(text: string): string | null {
+  if (/[\uD800-\uDFFF]/u.test(text)) return "Message contains an incomplete Unicode character.";
+  return null;
+}

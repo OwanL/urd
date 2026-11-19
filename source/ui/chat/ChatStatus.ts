@@ -1,6 +1,6 @@
 import type { LlmSelection } from "../providers/LlmSelection.ts";
 import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
-import { submissionTextError } from "./ChatState.ts";
+import { submissionTextError } from "../sessions/inputs/UserMessageSubmission.ts";
 import type { ChatState } from "./ChatState.ts";
 import type { ChatStopState } from "./ChatCommands.ts";
 

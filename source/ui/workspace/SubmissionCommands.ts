@@ -4,8 +4,8 @@ import {
   applyReceipt,
   beginContinuation,
   beginSubmission,
-  submissionTextError,
 } from "../chat/ChatState.ts";
+import { submissionTextError } from "../sessions/inputs/UserMessageSubmission.ts";
 import type { SessionClient } from "../sessions/SessionClient.ts";
 import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
 import type {

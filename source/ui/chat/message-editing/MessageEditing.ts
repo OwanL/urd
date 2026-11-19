@@ -10,7 +10,7 @@ import type {
 } from "../../sessions/transcript/Messages.ts";
 import type { SessionClient } from "../../sessions/SessionClient.ts";
 import type { MessageEditingAccess } from "./MessageEditingAccess.ts";
-import { submissionTextError } from "../ChatState.ts";
+import { submissionTextError } from "../../sessions/inputs/UserMessageSubmission.ts";
 
 // Owns inline drafts and the exact Save journal independently of transcript row lifetimes.
 export class MessageEditing {

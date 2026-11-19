@@ -160,7 +160,7 @@ public sealed class UsageCaptureTests {
       Assert.Null(final.Problem);
       Assert.Equal<long?>(20, final.Tokens!.InputTokens);
       Assert.Equal<long?>(0, final.Tokens.OutputTokens); // A reported zero is known, not missing.
-      UsageRates rates = Assert.IsType<UsageRates>(UsagePricing.FindRates(connection, selection.ModelId));
+      UsageRates rates = Assert.IsType<UsageRates>(final.Rates);
       long expectedNanoDollars = Assert.IsType<long>(UsagePricing.NanoDollars(rates, final.Tokens));
       Assert.Equal<decimal?>(expectedNanoDollars / 1_000_000_000m, final.CostUsd);
       Assert.Equal<long?>(0, final.Tokens.ReasoningTokens);

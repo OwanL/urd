@@ -54,6 +54,14 @@ export class ServerProcess {
         {
           stdio: "pipe",
           windowsHide: true,
+          // Keep the fixture provider reachable without contacting the public pricing feed.
+          env: {
+            ...process.env,
+            https_proxy: "http://127.0.0.1:0",
+            HTTPS_PROXY: "http://127.0.0.1:0",
+            no_proxy: "127.0.0.1,localhost",
+            NO_PROXY: "127.0.0.1,localhost",
+          },
         },
       );
     } catch (error) {

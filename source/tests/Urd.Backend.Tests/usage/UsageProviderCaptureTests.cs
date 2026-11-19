@@ -32,7 +32,7 @@ public sealed class UsageProviderCaptureTests {
       Assert.Equal<long?>(18, captured.Tokens!.InputTokens);
       Assert.Equal<long?>(2, captured.Tokens.OutputTokens);
       Assert.Equal<long?>(5, captured.Tokens.CachedInputTokens);
-      Assert.Null(captured.CostUsd); // Custom routes are deliberately unpriced.
+      Assert.Null(captured.CostUsd); // The fixture model has no verified reference rate.
       Assert.False(captured.IsEstimate);
     } finally {
       await CloseAsync(manager);
@@ -83,7 +83,7 @@ public sealed class UsageProviderCaptureTests {
 
   [Fact]
   public async Task ModelDiagnosticCapturesTerminalNativeUsage() {
-    string wire = IncompleteStream();
+    string wire = IncompleteStream().Replace("fixture-model", "GPT-6.2-Sol", StringComparison.Ordinal);
     using var database = new TemporaryDatabase("urd-provider-test-usage");
     using UrdStore store = UrdStore.Open(database.Path);
     using var handler = new ScriptedOpenAIHandler(wire);
@@ -94,7 +94,9 @@ public sealed class UsageProviderCaptureTests {
 
       UsageRequest captured = Assert.Single(Recent(store));
       Assert.Equal("provider test", captured.Purpose);
-      Assert.Equal("fixture-model", captured.Model);
+      Assert.Equal("GPT-6.2-Sol", captured.Model);
+      Assert.Equal("openai/gpt-6.2-sol", captured.Rates?.Model);
+      Assert.Equal(0.0000465m, captured.CostUsd);
       Assert.Equal<long?>(18, captured.Tokens!.InputTokens);
       Assert.Equal<long?>(2, captured.Tokens.OutputTokens);
       Assert.Equal<long?>(5, captured.Tokens.CachedInputTokens);

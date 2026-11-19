@@ -49,17 +49,47 @@ path already compacts or removes request records.
 
 ## Pricing and uncertainty
 
-Rates are a checked-in capture of the official OpenAI pricing page on 2026-11-14,
-at standard processing rates for exact supported model IDs and the official OpenAI
-endpoint. The supported ChatGPT route uses those API-equivalent rates too. Custom
-routes and unverified models remain unpriced; no model-prefix guessing or
-subscription-price conversion is performed. A provider-resolved model can therefore make a request unpriced.
+The reference catalog attaches one text rate card to a canonical model ID, not
+one rate per serving provider. It prefers a maker's Standard listing, then a
+paid OpenRouter listing for the same base model, then a single Standard listing
+from Mistral, then a single unambiguous Standard listing from Copilot or Ollama Cloud. Free listings and rates that
+require peak/off-peak or unsupported text pricing rules are not used. Subscription,
+regional and optional service-tier adjustments are not applied.
+
+Model IDs and aliases are matched locally. Verified OpenAI/ChatGPT, Copilot,
+Ollama Cloud and OpenRouter endpoints get their own ID namespace. A canonical ID
+or a unique full name can also resolve without a provider namespace. Case, spaces
+and ordinary hyphens are ignored for normalized matching; version separators and
+variant names are retained. Short forms such as `6.2sol` require an explicit scoped
+alias. Collisions stay unknown; no nearest-name or model-prefix guessing.
+
+The embedded starter snapshot works offline. A miss or a snapshot at least 24 hours
+old can trigger one shared background GET of the public [Models.dev v2 chat feed][models-feed],
+limited to one attempt per 15 minutes after completion. No connection details,
+credentials or prompt data are sent. The v2 feed is experimental, but it exposes
+exact cache-write durations and context operators that the stable feed loses. An invalid
+feed, download or cache write leaves the last good snapshot in use. Recovery loads a
+validated `model-prices.json` from the profile or falls back to the embedded snapshot.
+The cache is replaceable and independent of the usage database. Host shutdown cancels
+and joins any refresh before releasing its profile lease.
 
 Input, cached input, exclusive 30-minute/12-hour cache-write buckets and output
-are priced separately, including applicable long-context rates. Audio and other
-unsupported pricing dimensions are not silently priced as ordinary text. Invalid
-or missing quantities remain unknown. Historical request quotes are stored with
-the request and are not recomputed when the catalog changes.
+are priced separately, including a supported long-context breakpoint. Other cache
+TTLs, audio and unknown pricing dimensions are not silently priced as ordinary text.
+Invalid or missing quantities remain unknown. An attempt keeps its quote unless the
+provider reports a different model ID. If it is still unpriced at settlement, it
+checks the current catalog once without waiting for refresh. Settled quotes, including
+unknown ones, are not recomputed. A wider catalog does not imply support for new
+provider routes or new tokenizers.
+
+To regenerate the starter snapshot, save the [public feed][models-feed] in a temporary
+location. From the repository root, run `node build/model-price-seed.mjs <saved-feed.json>
+<UTC-capture-date>` (date format `YYYY-MM-DD`) and write its UTF-8 output to
+`source/backend/harness/usage/model-price-seed.json`. Review the rate diff and run the
+usage tests. The seed covers OpenAI, Copilot and Ollama Cloud plus the reference rows
+needed for them; on-demand refresh considers the wider feed.
+
+[models-feed]: https://models.dev/experimental/v2.0/api.json?type=chat
 
 Live estimates use local o200k text BPE with approximate message/tool framing.
 Missing cache decisions are provisionally quoted as uncached input, but their
@@ -108,7 +138,9 @@ Focused tests cover final replacement without double counting, retries and
 compaction, Stop, interrupted recovery, retained accounting after history edits,
 unknown/cache/reasoning quantities, failed native responses, provider model tests,
 direct unattributed/title/background requests without a session, pricing arithmetic
-and bounded HTTP responses. Browser checks cover client mappings and display
+and bounded HTTP responses. Catalog tests use fixture HTTP responses to check
+canonical matching, reference-rate selection, persistent refresh, shutdown and
+settlement without modifying historical quotes. Browser checks cover client mappings and display
 calculations. Separate one-off desktop/mobile diagnostics checked hover focus retention, pointer entry and deliberate keyboard activation against an isolated
 host with synthetic ledger data. These are not a browser regression suite or evidence
 of live-provider accuracy. See [test scope](testing.md) for the verification policy.

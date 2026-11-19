@@ -9,6 +9,7 @@ namespace Urd.Core.Usage;
 internal sealed class UsageObservation {
   private readonly UsageStorage storage;
   private readonly ProviderConnection connection;
+  private readonly ModelPriceCatalog? prices;
   private readonly UsageTokenCounter counter;
   private readonly long? estimatedInput;
   private readonly Stopwatch checkpoint = Stopwatch.StartNew();
@@ -17,9 +18,10 @@ internal sealed class UsageObservation {
   private bool finished, responseObserved;
 
   internal UsageObservation(UsageStorage storage, ProviderConnection connection, string model,
-      UsageContext context, IReadOnlyList<ChatMessage> messages, ChatOptions options) {
+      UsageContext context, IReadOnlyList<ChatMessage> messages, ChatOptions options, ModelPriceCatalog? prices = null) {
     this.storage = storage;
     this.connection = connection;
+    this.prices = prices;
     ArgumentException.ThrowIfNullOrWhiteSpace(model);
     ArgumentNullException.ThrowIfNull(context);
     ArgumentException.ThrowIfNullOrWhiteSpace(context.Purpose);
@@ -27,7 +29,7 @@ internal sealed class UsageObservation {
     estimatedInput = counter.CountInput(messages, options);
     DateTimeOffset now = DateTimeOffset.UtcNow;
     request = new(Guid.NewGuid(), context.SessionId, connection.Name, model, context.Purpose, now, null,
-        null, true, "Live usage is provisional.", null, UsagePricing.FindRates(connection, model),
+        null, true, "Live usage is provisional.", null, FindRates(model),
         connection.Id, context.ExecutionId);
     request = Snapshot(final: false);
     storage.Begin(request);
@@ -38,7 +40,7 @@ internal sealed class UsageObservation {
     if (!string.IsNullOrWhiteSpace(update.ModelId) && update.ModelId != request.Model)
       request = request with {
         Model = update.ModelId,
-        Rates = UsagePricing.FindRates(connection, update.ModelId)
+        Rates = FindRates(update.ModelId)
       };
     responseObserved |= update.FinishReason is not null
         || update.Contents.Any(content => content is TextContent or TextReasoningContent or FunctionCallContent);
@@ -55,10 +57,16 @@ internal sealed class UsageObservation {
 
   internal void Finish() {
     if (finished) return;
+    if (request.Rates is null && prices is not null)
+      request = request with { Rates = prices.FindRates(connection, request.Model, allowRefresh: false) };
     request = Snapshot(final: true) with { FinishedAt = DateTimeOffset.UtcNow };
     storage.Update(request);
     finished = true;
   }
+
+  private UsageRates? FindRates(string model) => prices is null
+      ? ModelPriceCatalog.Bundled.FindRates(connection, model)
+      : prices.FindRates(connection, model);
 
   private UsageRequest Snapshot(bool final) {
     var tokens = new UsageTokens(reported?.InputTokenCount ?? estimatedInput,
@@ -86,9 +94,9 @@ internal sealed class UsageObservation {
   }
 
   private string? ExplainProblem(bool final, bool hasCompleteReportedUsage, bool hasUnsupportedPricingTokens, long? nanoDollars) {
-    if (request.Rates is null) return "No verified API rate for this provider/model.";
+    if (request.Rates is null) return "No verified API-equivalent rate for this model.";
     if (hasUnsupportedPricingTokens) return "Usage includes unsupported pricing dimensions.";
-    if (nanoDollars is null) return "Usage quantities are incomplete or invalid.";
+    if (nanoDollars is null) return "Usage quantities or applicable rates are incomplete or invalid.";
     if (hasCompleteReportedUsage) return null;
     return final ? "Provider did not report complete final usage."
         : "Live estimate; cache, framing and hidden output usage are not yet confirmed.";

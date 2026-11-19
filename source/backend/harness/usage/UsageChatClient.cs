@@ -6,7 +6,7 @@ namespace Urd.Core.Usage;
 
 // A borrowed view: usage belongs to each invocation, not to this client or its disposal.
 internal sealed class UsageChatClient(IChatClient inner, UsageStorage storage, ProviderConnection connection,
-    bool disposeInner = false) : IChatClient {
+    bool disposeInner = false, ModelPriceCatalog? prices = null) : IChatClient {
   public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
       CancellationToken cancellationToken = default) =>
       GetStreamingResponseAsync(messages, options, cancellationToken).ToChatResponseAsync(cancellationToken);
@@ -24,7 +24,7 @@ internal sealed class UsageChatClient(IChatClient inner, UsageStorage storage, P
     }
     UsageContext context = ReadContext(requestOptions);
     string model = requestOptions.ModelId ?? throw new ArgumentException("A model ID is required.");
-    var observation = new UsageObservation(storage, connection, model, context, history, requestOptions);
+    var observation = new UsageObservation(storage, connection, model, context, history, requestOptions, prices);
     try {
       return (inner.GetStreamingResponseAsync(history, requestOptions, cancellationToken).GetAsyncEnumerator(token), observation);
     } catch {

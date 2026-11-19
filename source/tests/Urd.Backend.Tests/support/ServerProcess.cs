@@ -28,6 +28,11 @@ internal sealed class ServerProcess : IAsyncDisposable {
     if (environment is not null)
       foreach ((string key, string value) in environment)
         start.Environment[key] = value;
+    // The loopback provider remains reachable; public pricing traffic never leaves this fixture.
+    foreach (string name in new[] { "https_proxy", "HTTPS_PROXY" })
+      start.Environment[name] = "http://127.0.0.1:0";
+    foreach (string name in new[] { "no_proxy", "NO_PROXY" })
+      start.Environment[name] = "127.0.0.1,localhost";
     process = Process.Start(start) ?? throw new InvalidOperationException("Could not start the test server process.");
     errors = process.StandardError.ReadToEndAsync();
   }

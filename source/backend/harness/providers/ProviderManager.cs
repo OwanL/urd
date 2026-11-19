@@ -11,6 +11,7 @@ public sealed class ProviderManager : IDisposable {
   private static readonly Uri OpenAIEndpoint = new("https://api.openai.com/v1/");
   private readonly ProviderStorage storage;
   private readonly UsageStorage usage;
+  private readonly ModelPriceCatalog? prices;
   private readonly ModelSettingsStorage modelSettings;
   private readonly AsyncLock gate = new();
   private readonly HttpMessageHandler handler;
@@ -25,21 +26,23 @@ public sealed class ProviderManager : IDisposable {
   private Task? shutdown;
   private bool stopping, disposed;
 
-  public ProviderManager(UrdStore store, Func<Uri> callbackUri)
-      : this(store, callbackUri, new SocketsHttpHandler { AllowAutoRedirect = false }) { }
+  public ProviderManager(UrdStore store, Func<Uri> callbackUri, ModelPriceCatalog? prices = null)
+      : this(store, callbackUri, new SocketsHttpHandler { AllowAutoRedirect = false }, prices: prices) { }
 
   // The manager owns this handler; test transports cannot fall back to real network access.
-  internal ProviderManager(UrdStore store, Func<Uri> callbackUri, HttpMessageHandler handler, Uri? issuer = null) {
+  internal ProviderManager(UrdStore store, Func<Uri> callbackUri, HttpMessageHandler handler, Uri? issuer = null,
+      ModelPriceCatalog? prices = null) {
     ArgumentNullException.ThrowIfNull(store);
     ArgumentNullException.ThrowIfNull(callbackUri);
     ArgumentNullException.ThrowIfNull(handler);
     storage = store.Providers;
     usage = store.Usage;
+    this.prices = prices;
     modelSettings = store.ModelSettings;
     this.handler = handler;
     client = new(handler, disposeHandler: false) { Timeout = Timeout.InfiniteTimeSpan };
     authentication = new(handler, issuer);
-    modelProbe = new(client, store.Usage);
+    modelProbe = new(client, usage, prices);
     requests = new(gate, storage, new(client), GetCredentialsAsync, ThrowIfStopping, EnsureAvailable, RequireCurrentGrant);
     signIns = new(storage, authentication, gate, callbackUri, id => requests.Cancel(id));
   }
@@ -50,7 +53,8 @@ public sealed class ProviderManager : IDisposable {
     if (expectedBinding.Id == Guid.Empty)
       throw new ArgumentException("A saved provider connection is required.", nameof(expectedBinding));
     ObjectDisposedException.ThrowIf(disposed, this);
-    return new UsageChatClient(new ProviderChatClient(requests, expectedBinding), usage, expectedBinding, disposeInner: true);
+    return new UsageChatClient(new ProviderChatClient(requests, expectedBinding), usage, expectedBinding,
+        disposeInner: true, prices: prices);
   }
 
   public async Task<IReadOnlyList<ProviderConnection>> ListAsync(CancellationToken cancellationToken = default) {

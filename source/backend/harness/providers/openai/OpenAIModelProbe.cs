@@ -14,7 +14,7 @@ using Urd.Core.Usage;
 namespace Urd.Core.Providers;
 
 // One-request diagnostics through the official SDK. The caller owns the HTTP client and deadline.
-internal sealed class OpenAIModelProbe(HttpClient httpClient, UsageStorage? usageStorage = null) {
+internal sealed class OpenAIModelProbe(HttpClient httpClient, UsageStorage? usageStorage = null, ModelPriceCatalog? prices = null) {
   private const string TestPrompt = "Reply with one short greeting.";
   private const int PreviewLimit = 4096;
 
@@ -51,7 +51,7 @@ internal sealed class OpenAIModelProbe(HttpClient httpClient, UsageStorage? usag
     UsageObservation? observation = usageStorage is null ? null : new(usageStorage,
         connection, modelId, new(null, null, "provider test"),
         [new Microsoft.Extensions.AI.ChatMessage(Microsoft.Extensions.AI.ChatRole.User, TestPrompt)],
-        new Microsoft.Extensions.AI.ChatOptions { ModelId = modelId });
+        new Microsoft.Extensions.AI.ChatOptions { ModelId = modelId }, prices);
     try {
       ct.ThrowIfCancellationRequested();
       return connection.Api switch {

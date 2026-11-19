@@ -14,6 +14,7 @@ using Urd.Core.Preferences;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
 using Urd.Core.Tools;
+using Urd.Core.Usage;
 
 namespace Urd.Server;
 
@@ -68,6 +69,7 @@ internal static class Program {
     IChatClient? client = null;
     SessionManager? manager = null;
     ProviderManager? providers = null;
+    ModelPriceCatalog? prices = null;
     SessionEventHub? eventHub = null;
     MessageMarkdownService? markdown = null;
     WebApplication? app = null;
@@ -80,7 +82,9 @@ internal static class Program {
         client = createClient() ?? throw new InvalidOperationException("The client factory returned no client.");
       Uri CallbackUri() => new(Volatile.Read(ref servedOrigin)
           ?? throw new InvalidOperationException("The server is not ready."), "/auth/callback");
-      providers = createProviders?.Invoke(store, CallbackUri) ?? new ProviderManager(store, CallbackUri);
+      if (createClient is null && createProviders is null)
+        prices = ModelPriceCatalog.Open(options.DataRoot);
+      providers = createProviders?.Invoke(store, CallbackUri) ?? new ProviderManager(store, CallbackUri, prices);
       var preferences = new PreferenceManager(store);
       if (warmInstructions && preferences.Read().WorkingDirectory is { } defaultDirectory)
         store.WarmInstructionResources(defaultDirectory);
@@ -119,6 +123,7 @@ internal static class Program {
     eventHub?.Dispose();
     Task drained = Task.WhenAll(manager?.ShutdownSessionsAsync(CancellationToken.None) ?? Task.CompletedTask,
         providers?.ShutdownAsync() ?? Task.CompletedTask,
+        prices?.DisposeAsync().AsTask() ?? Task.CompletedTask,
         markdown?.DisposeAsync().AsTask() ?? Task.CompletedTask,
         app?.StopAsync(CancellationToken.None) ?? Task.CompletedTask);
     try {

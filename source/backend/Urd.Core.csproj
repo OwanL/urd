@@ -22,6 +22,9 @@
     <InternalsVisibleTo Include="Urd.Backend.Tests" />
   </ItemGroup>
   <ItemGroup>
+    <EmbeddedResource Include="harness/usage/model-price-seed.json" LogicalName="Urd.ModelPriceSeed.json" />
+    <None Update="harness/usage/models-dev-LICENSE.txt" Link="licenses/models-dev-LICENSE.txt"
+          CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <!-- Packaged skills are files the model reads, so they are copied beside the server. -->
     <None Remove="harness/context/skills/**" />
     <None Include="harness/context/skills/**" Link="skills/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />

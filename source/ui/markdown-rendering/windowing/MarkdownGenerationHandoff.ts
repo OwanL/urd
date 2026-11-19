@@ -6,7 +6,8 @@ import type {
   MarkdownRenderSnapshot,
   MarkdownTrimRequest,
 } from "../MarkdownRenderModel.ts";
-import { copyMarkdownManifest, MarkdownWindowAssembler } from "./MarkdownWindowAssembler.ts";
+import { MarkdownWindowAssembler } from "./MarkdownWindowAssembler.ts";
+import { copyMarkdownManifest } from "./MarkdownPageValidation.ts";
 import type { MarkdownWindowAnchor, MarkdownWindowSeekTarget } from "./MarkdownWindowGeometry.ts";
 
 export interface MarkdownHandoffView {

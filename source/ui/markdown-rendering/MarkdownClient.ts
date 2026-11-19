@@ -23,7 +23,7 @@ import type {
   MarkdownValueKind,
 } from "./MarkdownRenderModel.ts";
 import { isMarkdownImageKey } from "./MarkdownRenderModel.ts";
-import { copyMarkdownManifest } from "./windowing/MarkdownWindowAssembler.ts";
+import { copyMarkdownManifest } from "./windowing/MarkdownPageValidation.ts";
 
 const elementKinds = [
   "document",

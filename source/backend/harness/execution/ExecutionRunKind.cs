@@ -1,4 +1,4 @@
-namespace Urd.Core.Sessions;
+namespace Urd.Core.Execution;
 
 // Distinguishes executions started by user input, compaction or continuation.
 internal enum ExecutionRunKind {

@@ -208,7 +208,12 @@ shared storage.
   the original decision; neither lookup nor retained acceptance starts work. Refusal fences delayed originals.
   Changed-submission reuse throws `UserMessageConflictException` with its `SubmissionId`, so HTTP can distinguish
   conflicts from shutdown or uncertain failure without parsing exception messages.
-- `SessionBase` owns identity, admission and execution lifetime under its guard. `SessionTranscript`,
+- `SessionBase` owns identity, admission and execution lifetime under its guard. It coordinates composed
+  flow owners that share that guard: `SessionInputs`, `MessageEditing` and `ManualCompaction`
+  (`sessions/inputs/`), `QuestionDelivery` (`sessions/agents/`) and `ActiveExecution`, which owns the
+  current driver, its stop drain and finish wait. Each atomic admission or settlement transition still
+  completes in one guard hold. `SessionManager` composes `SessionRegistry` (live handles and the shutdown
+  fence), `SubagentRuns` and `AgentRecipients`. `SessionTranscript`,
   exposed as `session.Transcript`, owns history/content, positioning and bounded raw-source reads.
   Markdown source assembly belongs to `MessageMarkdownSourceReader`, outside the harness.
   Each execution captures one immutable `ExecutionIdentity` (session, execution, history revision)
@@ -336,14 +341,14 @@ discovery, not activity tracking or a complete summary API.
 
 ## Read contract and incremental review order
 
-1. [SessionState.cs](../source/backend/harness/sessions/SessionState.cs) and
-   [Messages.cs](../source/backend/harness/sessions/Messages.cs) — detached records; shared
+1. [SessionState.cs](../source/backend/harness/sessions/state/SessionState.cs) and
+   [Messages.cs](../source/backend/harness/sessions/transcript/Messages.cs) — detached records; shared
    `SessionExecutionResult`/`ExecutionOutcome` in [SessionExecutionResult.cs](../source/backend/harness/execution/SessionExecutionResult.cs)
    are public, not duplicated. `ExecutionOutcome` describes an LLM request attempt, a tool invocation
    or a whole session execution; a successful request/tool does not imply settled execution.
 2. [SessionBase.cs](../source/backend/harness/sessions/SessionBase.cs) — receipt/not-sent reads and live
-   snapshots; [SessionStatus.cs](../source/backend/harness/sessions/SessionStatus.cs) projects snapshot/status
-   facts. [SessionTranscript.cs](../source/backend/harness/sessions/SessionTranscript.cs) owns history,
+   snapshots; [SessionStatus.cs](../source/backend/harness/sessions/state/SessionStatus.cs) projects snapshot/status
+   facts. [SessionTranscript.cs](../source/backend/harness/sessions/transcript/SessionTranscript.cs) owns history,
    content and transcript positioning. Content-extent capture and revalidation use the existing
    session guard; bounded segment reads release the database lock before decoding. The separate
    Markdown source reader owns assembly outside both guards, then revalidates before publication.
@@ -385,8 +390,8 @@ share a file per concept. Read them alongside their owners.
    identity used to create/load handles and the detached `SessionIdPage` discovery page.
 2. [SessionBase.cs](../source/backend/harness/sessions/SessionBase.cs) and
    [PrimarySession.cs](../source/backend/harness/sessions/PrimarySession.cs) — admission/driver ownership;
-   [UserMessageSubmission.cs](../source/backend/harness/sessions/UserMessageSubmission.cs) holds the submission, receipt and enums;
-   [Stop.cs](../source/backend/harness/sessions/Stop.cs) holds the public Stop receipt/status;
+   [UserMessageSubmission.cs](../source/backend/harness/sessions/inputs/UserMessageSubmission.cs) holds the submission, receipt and enums;
+   [Stop.cs](../source/backend/harness/sessions/inputs/Stop.cs) holds the public Stop receipt/status;
    [AsyncLock.cs](../source/backend/concurrency/AsyncLock.cs) wraps `SemaphoreSlim` for shared async
    mutual exclusion. Its single-owner lease releases on disposal; it is not a synchronous `Lock`.
 3. [SessionExecutionDriver.cs](../source/backend/harness/execution/SessionExecutionDriver.cs) — request
@@ -424,7 +429,7 @@ share a file per concept. Read them alongside their owners.
    [TemporaryDatabase.cs](../source/tests/Urd.Backend.Tests/support/TemporaryDatabase.cs) supplies isolated test data.
    `support/` also holds the scripted LLM client, response scripts and execution fixture;
    test folders mirror the source folders.
-7. [SteeringFlowTests.cs](../source/tests/Urd.Backend.Tests/sessions/SteeringFlowTests.cs),
+7. [SteeringFlowTests.cs](../source/tests/Urd.Backend.Tests/sessions/inputs/SteeringFlowTests.cs),
    [ToolExecutionTests.cs](../source/tests/Urd.Backend.Tests/execution/ToolExecutionTests.cs) and
    [ToolStorageTests.cs](../source/tests/Urd.Backend.Tests/storage/tools/ToolStorageTests.cs) — representative
    safe-boundary steering, cleanup before effects, invalid batches and durable claim/result failure.

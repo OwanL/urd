@@ -47,30 +47,87 @@ public sealed class DatabaseSchemaTests {
   }
 
   [Fact]
-  public void OldDatabaseIsRejectedWithManualResetInstructions() {
+  public void ConsecutiveMigrationsUpgradeTheDatabase() {
+    using var database = new TemporaryDatabase();
+    database.Execute("CREATE TABLE migration_data (value TEXT NOT NULL); INSERT INTO migration_data VALUES ('before'); PRAGMA user_version = 36;");
+    using var connection = OpenConnection(database);
+
+    DatabaseMigrations.Upgrade(connection, 38, new Dictionary<int, string> {
+      [36] = "ALTER TABLE migration_data ADD COLUMN migration_36 INTEGER NOT NULL DEFAULT 1;",
+      [37] = "CREATE TABLE migration_marker (value TEXT NOT NULL); INSERT INTO migration_marker VALUES ('complete');"
+    });
+
+    Assert.Equal(38L, database.Scalar("PRAGMA user_version;")); // raw-sql: migration version is the subject under test
+    Assert.Equal(1L, database.Scalar("SELECT migration_36 FROM migration_data;")); // raw-sql: migration result is the subject under test
+    Assert.Equal("complete", database.Scalar("SELECT value FROM migration_marker;")); // raw-sql: migration result is the subject under test
+  }
+
+  [Fact]
+  public void FailedMigrationRollsBackSchemaDataAndVersion() {
+    using var database = new TemporaryDatabase();
+    database.Execute("CREATE TABLE migration_data (value TEXT NOT NULL); INSERT INTO migration_data VALUES ('before'); PRAGMA user_version = 36;");
+    using var connection = OpenConnection(database);
+
+    Assert.Throws<SqliteException>(() => DatabaseMigrations.Upgrade(connection, 38, new Dictionary<int, string> {
+      [36] = "ALTER TABLE migration_data ADD COLUMN migrated TEXT; CREATE TABLE migration_marker (value TEXT NOT NULL); UPDATE migration_data SET value = 'changed';",
+      [37] = "INSERT INTO missing_migration_table VALUES ('fail');"
+    }));
+
+    Assert.Equal(36L, database.Scalar("PRAGMA user_version;")); // raw-sql: failed migration must roll back the version
+    Assert.Equal("before", database.Scalar("SELECT value FROM migration_data;")); // raw-sql: failed migration must preserve data
+    Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM pragma_table_info('migration_data') WHERE name = 'migrated';")); // raw-sql: failed migration must roll back schema
+    Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM sqlite_schema WHERE type = 'table' AND name = 'migration_marker';")); // raw-sql: failed migration must roll back schema
+  }
+
+  [Fact]
+  public void MissingMigrationFailsBeforeChangingDatabase() {
+    using var database = new TemporaryDatabase();
+    database.Execute("CREATE TABLE migration_data (value TEXT NOT NULL); INSERT INTO migration_data VALUES ('before'); PRAGMA user_version = 36;");
+    using var connection = OpenConnection(database);
+
+    Assert.Throws<InvalidOperationException>(() => DatabaseMigrations.Upgrade(connection, 38,
+        new Dictionary<int, string> { [36] = "UPDATE migration_data SET value = 'changed';" }));
+
+    Assert.Equal(36L, database.Scalar("PRAGMA user_version;")); // raw-sql: missing migration must preserve version
+    Assert.Equal("before", database.Scalar("SELECT value FROM migration_data;")); // raw-sql: missing migration must not partially apply earlier steps
+  }
+
+  [Fact]
+  public void OldDatabaseIsRejectedWithMatchingVersionGuidanceAndPreserved() {
     using var database = new TemporaryDatabase();
     database.Execute("PRAGMA user_version = 35;");
 
     NotSupportedException error = Assert.Throws<NotSupportedException>(() => UrdStore.Open(database.Path));
 
-    Assert.Contains("stop Urd", error.Message, StringComparison.OrdinalIgnoreCase);
-    Assert.Contains("delete", error.Message, StringComparison.OrdinalIgnoreCase);
-    Assert.Contains("urd.sqlite", error.Message, StringComparison.OrdinalIgnoreCase);
-    Assert.Contains("-wal", error.Message, StringComparison.OrdinalIgnoreCase);
-    Assert.Contains("-shm", error.Message, StringComparison.OrdinalIgnoreCase);
-    Assert.Contains("restart", error.Message, StringComparison.OrdinalIgnoreCase);
+    Assert.Contains("Urd build that created it", error.Message, StringComparison.OrdinalIgnoreCase);
+    Assert.Contains("different data folder", error.Message, StringComparison.OrdinalIgnoreCase);
+    Assert.DoesNotContain("delete", error.Message, StringComparison.OrdinalIgnoreCase);
     Assert.True(File.Exists(database.Path));
-    Assert.Equal(35L, database.Scalar("PRAGMA user_version;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
+    Assert.Equal(35L, database.Scalar("PRAGMA user_version;")); // raw-sql: rejection must preserve the old database version
   }
 
   [Fact]
-  public void NonemptyUnversionedDatabaseIsNotClaimedAsCurrent() {
+  public void NewerDatabaseIsRejectedWithoutDowngrade() {
+    using var database = new TemporaryDatabase();
+    database.Execute("CREATE TABLE retained (value TEXT NOT NULL); INSERT INTO retained VALUES ('preserved'); PRAGMA user_version = 37;");
+
+    NotSupportedException error = Assert.Throws<NotSupportedException>(() => UrdStore.Open(database.Path));
+
+    Assert.Contains("newer Urd build", error.Message, StringComparison.OrdinalIgnoreCase);
+    Assert.DoesNotContain("delete", error.Message, StringComparison.OrdinalIgnoreCase);
+    Assert.Equal(37L, database.Scalar("PRAGMA user_version;")); // raw-sql: newer schema must not be downgraded
+    Assert.Equal("preserved", database.Scalar("SELECT value FROM retained;")); // raw-sql: rejection must preserve newer database contents
+  }
+
+  [Fact]
+  public void NonemptyUnversionedDatabaseAdvisesAnotherDataFolderAndPreservesContents() {
     using var database = new TemporaryDatabase();
     database.Execute("CREATE TABLE unrelated (value TEXT); INSERT INTO unrelated VALUES ('retained');");
 
     NotSupportedException error = Assert.Throws<NotSupportedException>(() => UrdStore.Open(database.Path));
 
-    Assert.Contains("stop Urd", error.Message, StringComparison.OrdinalIgnoreCase);
+    Assert.Contains("different data folder", error.Message, StringComparison.OrdinalIgnoreCase);
+    Assert.DoesNotContain("delete", error.Message, StringComparison.OrdinalIgnoreCase);
     Assert.Equal(0L, database.Scalar("PRAGMA user_version;")); // raw-sql: rejection must leave the unversioned database untouched
     Assert.Equal("retained", database.Scalar("SELECT value FROM unrelated;")); // raw-sql: rejection must preserve unrelated contents
   }
@@ -135,5 +192,14 @@ public sealed class DatabaseSchemaTests {
           call_id, tool_name)
       VALUES ('{session:D}', 0, '{run:D}', 2, '{Guid.NewGuid():D}', '{request:D}', NULL, 'missing-call-id');
       """));
+  }
+
+  private static SqliteConnection OpenConnection(TemporaryDatabase database) {
+    var connection = new SqliteConnection(new SqliteConnectionStringBuilder {
+      DataSource = database.Path,
+      Pooling = false
+    }.ToString());
+    connection.Open();
+    return connection;
   }
 }

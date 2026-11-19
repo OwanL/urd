@@ -24,9 +24,11 @@ credential behavior.
 A fresh/version-0 database creates all current tables and indexes in one transaction;
 version 36 reopens normally. The current build rejects other versions and does not
 remove or reset databases. Schema 36 is the [durable-data baseline](../AGENTS.md): the
-next schema change must provide an automatic startup migration, including in development
-builds. There is no migration step to run yet. Schemas below 36 are not supported for
-upgrade, and newer databases must not be downgraded.
+next schema change must register its SQL step in `DatabaseSchema` and bump the version,
+including for development builds. On startup, `DatabaseMigrations` applies all required
+steps and records the new version in one SQLite transaction. Steps must not manage their
+own transactions, change the version, or modify sidecar files. There is no step to run
+at version 36 today. Unsupported databases are refused without a reset or downgrade.
 
 Requests have only known not-attempted (1)
 or attempted (2) provenance; transcript user entries require request links and receipts
@@ -356,7 +358,7 @@ history and content have separate bounded reads. An ID proves neither usability 
 Listing cannot associate a returned ID with a lost create acknowledgement or justify automatic
 create retry.
 
-`SessionListingStorageTests` covers atomic creation, schema upgrade/rollback, preserved evidence,
+`SessionListingStorageTests` covers atomic creation, preserved evidence,
 paging across inserts/reopen/deleted boundaries and ordinal nonreuse. Session and HTTP coverage
 checks no handle hydration/replay, cancellation, gates and storage failures. These qualify ID
 discovery, not activity tracking or a complete summary API.

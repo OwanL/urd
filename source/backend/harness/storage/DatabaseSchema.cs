@@ -2,9 +2,11 @@ using Microsoft.Data.Sqlite;
 
 namespace Urd.Core.Storage;
 
-// Creates the current pre-release schema; incompatible databases require a manual reset.
+// Creates or upgrades the durable schema before storage is opened to callers.
 internal static class DatabaseSchema {
   private const int SchemaVersion = 36;
+  // Each entry upgrades its source version to the next one. Schema 36 is the baseline.
+  private static readonly Dictionary<int, string> migrations = new();
 
   internal static void Initialize(SqliteConnection connection) {
     using SqliteCommand command = connection.CreateCommand();
@@ -14,10 +16,10 @@ internal static class DatabaseSchema {
     long version = (long)command.ExecuteScalar()!;
     if (version == 0)
       CreateCurrentSchema(connection);
-    else if (version != SchemaVersion)
-      throw new NotSupportedException(
-          $"Session database schema version {version} is not supported (expected {SchemaVersion}). "
-          + "To reset: stop Urd, delete urd.sqlite and its urd.sqlite-wal/urd.sqlite-shm files, then restart Urd.");
+    else if (version < DatabaseMigrations.FirstSupportedVersion || version > SchemaVersion)
+      throw DatabaseMigrations.UnsupportedVersion(version, SchemaVersion);
+    else if (version < SchemaVersion)
+      DatabaseMigrations.Upgrade(connection, SchemaVersion, migrations);
 
     command.CommandText = "PRAGMA journal_mode = WAL;";
     if (!string.Equals(command.ExecuteScalar() as string, "wal", StringComparison.OrdinalIgnoreCase))
@@ -35,7 +37,7 @@ internal static class DatabaseSchema {
     if ((long)command.ExecuteScalar()! != 0)
       throw new NotSupportedException(
           "An unversioned, nonempty database cannot be initialized as a session store. "
-          + "To reset: stop Urd, delete urd.sqlite and its urd.sqlite-wal/urd.sqlite-shm files, then restart Urd.");
+          + "Use a different data folder to start fresh.");
 
     command.CommandText = currentSchema;
     command.ExecuteNonQuery();

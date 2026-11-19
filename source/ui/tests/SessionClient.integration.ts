@@ -165,7 +165,7 @@ void test(
     assert.deepEqual(settled.lastSettlement, { executionId, outcome: "completed", error: null });
     assert.deepEqual(settled.pendingInputs, []);
     assert.deepEqual(settled.latestLlmSelection, submission.llmSelection);
-    assert.deepEqual(settled.contextUsage, { usedTokens: 12_756, isEstimate: false });
+    assert.deepEqual(settled.contextUsage, { usedTokens: 12_756, source: "measured" });
     assert.ok(settled.workingTime);
     assert.equal(settled.workingTime.startedAt, null);
     assert.equal(settled.workingTime.hasUnknownDuration, false);

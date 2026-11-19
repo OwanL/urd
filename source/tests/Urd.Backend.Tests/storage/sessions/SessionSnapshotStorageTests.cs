@@ -134,7 +134,7 @@ public sealed class SessionSnapshotStorageTests {
       InputTokenCount = 14, OutputTokenCount = 4, TotalTokenCount = 999
     });
 
-    Assert.Equal(new SessionContextUsage(18, IsEstimate: false), store.Snapshots.ReadPersisted(session).ContextUsage);
+    Assert.Equal(new SessionContextUsage(18, SessionContextUsageSource.Measured), store.Snapshots.ReadPersisted(session).ContextUsage);
 
     string[] plan = database.ExplainQueryPlan(SnapshotReader.ContextUsageSql, ("$session", session), ("$revision", 0L));
     Assert.Contains(plan, step => step.Contains("execution_runs_history_order", StringComparison.Ordinal));
@@ -143,15 +143,25 @@ public sealed class SessionSnapshotStorageTests {
     Assert.DoesNotContain(plan, step => step.Contains("TEMP B-TREE", StringComparison.Ordinal));
   }
 
-  [Fact]
-  public void MissingLatestAttemptUsageDoesNotFallBackToEarlierUsage() {
+  [Theory]
+  [InlineData(false)]
+  [InlineData(true)]
+  public void RunningAndStoppedRequestsKeepOnlyCompatibleMeasurements(bool switchModel) {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     RecordAttempt(store, session, new UsageDetails { InputTokenCount = 10, OutputTokenCount = 2 });
-    RecordAttempt(store, session, usage: null);
+    LlmSelection selection = switchModel ? TestLlmSelection.Default with { ModelId = "other" } : TestLlmSelection.Default;
+    SessionContextUsage? expected = switchModel ? null : new(12, SessionContextUsageSource.LastMeasured);
+    Guid execution = Admit(store, session, selection);
+    var identity = new ExecutionIdentity(session, execution, 0);
+    LlmRequest request = store.Executions.CreateNextRequest(identity)!;
+    Assert.True(store.Executions.StartRequest(identity, request.RequestId));
+    Assert.Equal(expected, store.Snapshots.ReadPersisted(session).ContextUsage);
 
-    Assert.Null(store.Snapshots.ReadPersisted(session).ContextUsage);
+    Assert.True(store.LlmResponses.CompleteRequest(identity, new(request.RequestId, ExecutionOutcome.Cancelled)));
+    Assert.NotNull(store.Executions.TryFinish(session, execution, ExecutionOutcome.Cancelled));
+    Assert.Equal(expected, store.Snapshots.ReadPersisted(session).ContextUsage);
   }
 
   [Theory]
@@ -171,8 +181,10 @@ public sealed class SessionSnapshotStorageTests {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
-    RecordAttempt(store, session, new UsageDetails { InputTokenCount = 10, OutputTokenCount = 2 });
-    database.ForceHistoryRevision(1);
+    (Guid execution, _) = RecordAttempt(store, session, new UsageDetails { InputTokenCount = 10, OutputTokenCount = 2 });
+    Guid input = Guid.Parse((string)database.Scalar($"SELECT input_id FROM execution_runs WHERE run_id = '{execution:D}';")!);
+    store.MessageEdits.Replace(session, new(Guid.NewGuid(), new(execution, input, MessageRole.User, 0),
+        "replacement", TestLlmSelection.Default));
 
     Assert.Null(store.Snapshots.ReadPersisted(session).ContextUsage);
   }
@@ -186,11 +198,12 @@ public sealed class SessionSnapshotStorageTests {
         new UsageDetails { InputTokenCount = 100, OutputTokenCount = 20 });
     AddCompaction(database, session, execution, request, tokensBefore: 1000, tokensAfter: 400);
 
-    Assert.Equal(new SessionContextUsage(400, IsEstimate: true), store.Snapshots.ReadPersisted(session).ContextUsage);
+    Assert.Equal(new SessionContextUsage(400, SessionContextUsageSource.Estimated), store.Snapshots.ReadPersisted(session).ContextUsage);
     RecordAttempt(store, session, new UsageDetails { InputTokenCount = 22, OutputTokenCount = 3 });
-    Assert.Equal(new SessionContextUsage(25, IsEstimate: false), store.Snapshots.ReadPersisted(session).ContextUsage);
+    Assert.Equal(new SessionContextUsage(25, SessionContextUsageSource.Measured), store.Snapshots.ReadPersisted(session).ContextUsage);
     RecordAttempt(store, session, usage: null);
-    Assert.Null(store.Snapshots.ReadPersisted(session).ContextUsage);
+    Assert.Equal(new SessionContextUsage(25, SessionContextUsageSource.LastMeasured),
+        store.Snapshots.ReadPersisted(session).ContextUsage);
   }
 
   private static (Guid Execution, Guid Request) RecordAttempt(UrdStore store, Guid session, UsageDetails? usage) {
@@ -220,10 +233,10 @@ public sealed class SessionSnapshotStorageTests {
       """);
   }
 
-  private static Guid Admit(UrdStore store, Guid session) {
+  private static Guid Admit(UrdStore store, Guid session, LlmSelection? selection = null) {
     Guid execution = Guid.NewGuid();
     store.UserMessages.Submit(session, 0,
-        new(Guid.NewGuid(), 0, "failure", TestLlmSelection.Default), accepting: true,
+        new(Guid.NewGuid(), 0, "failure", selection ?? TestLlmSelection.Default), accepting: true,
         proposedExecutionId: execution);
     return execution;
   }

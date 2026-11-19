@@ -21,7 +21,9 @@ public sealed record SessionSnapshot(
 public sealed record StartingResourcePruningStatus(
     string Category, string State, int Total, int Retained, string? Error = null);
 
-public sealed record SessionContextUsage(long UsedTokens, bool IsEstimate);
+public sealed record SessionContextUsage(long UsedTokens, SessionContextUsageSource Source);
+
+public enum SessionContextUsageSource { Measured, Estimated, LastMeasured }
 
 public sealed record SessionWorkingTime(
     long CompletedMilliseconds, DateTimeOffset? StartedAt, bool HasUnknownDuration = false);

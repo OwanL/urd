@@ -51,7 +51,14 @@ export function SessionIndicators({
     return () => clearInterval(timer);
   }, [active, startedAt, fenced]);
 
-  const contextLabel = `${formatTokenCount(contextUsage?.usedTokens)}/${formatTokenCount(contextWindow)}`;
+  const source = contextUsage?.source;
+  const contextLabel = `${source === "estimated" ? "~" : ""}${formatTokenCount(contextUsage?.usedTokens)}/${formatTokenCount(contextWindow)}`;
+  const contextDetail =
+    source === "estimated"
+      ? "Estimated usage"
+      : source === "lastMeasured"
+        ? "Last measured usage"
+        : null;
   const compactDisabled = !canCompact || compacting;
   const compactStatus = compacting ? "Compacting…" : compactionMessage;
   const ratio = contextUsage && contextWindow ? contextUsage.usedTokens / contextWindow : 0;
@@ -82,11 +89,12 @@ export function SessionIndicators({
           Context
         </span>
         <HoverPopover
-          label={`Context window: ${contextLabel}${contextUsage?.isEstimate ? ", estimated" : ""}`}
+          label={`Context window: ${contextLabel}${contextDetail ? `, ${contextDetail.toLowerCase()}` : ""}`}
           surfaceLabel="Context window details"
           class={`session-indicator ${ratio >= 0.85 ? "is-critical" : ratio >= 0.7 ? "is-warning" : ""}`}
           content={
             <div class="session-compaction-details">
+              {contextDetail && <span class="tooltip-detail">{contextDetail}</span>}
               <button
                 type="button"
                 class="session-compaction-action"

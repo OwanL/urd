@@ -53,9 +53,16 @@ internal sealed class SnapshotReader {
     ORDER BY CASE category WHEN 'tools' THEN 0 WHEN 'skills' THEN 1 ELSE 2 END LIMIT 3;
     """;
 
-  internal const string ContextUsageSql = """
+  // History editing rebases even superseded request rows; their measurements did not change with it.
+  private const string ContextRevisionFloorSql = """
+    CASE WHEN $revision = 0 THEN 0 ELSE COALESCE((
+        SELECT r.ordinal FROM message_edits e JOIN execution_runs r ON r.run_id = e.run_id
+        WHERE e.session_id = $session AND e.history_revision = $revision LIMIT 1), 0) END
+    """;
+
+  internal const string ContextUsageSql = $"""
     SELECT c.compaction_id AS latest_compaction_id, c.tokens_after,
-        q.compaction_id AS request_compaction_id, q.usage_json
+        q.compaction_id AS request_compaction_id, q.run_id, q.usage_json
     FROM (SELECT 1) root
     LEFT JOIN (
         SELECT compaction_id, tokens_after FROM session_compactions
@@ -63,16 +70,28 @@ internal sealed class SnapshotReader {
         ORDER BY ordinal DESC LIMIT 1
     ) c ON 1 = 1
     LEFT JOIN (
-        SELECT q.compaction_id, q.usage_json FROM execution_requests q
+        SELECT q.compaction_id, q.run_id, q.usage_json FROM execution_requests q
         WHERE q.run_id = (
             SELECT r.run_id FROM execution_runs r
-            WHERE r.session_id = $session AND r.history_revision = $revision
+            WHERE r.session_id = $session AND r.history_revision = $revision AND r.ordinal >= ({ContextRevisionFloorSql})
                 AND EXISTS (SELECT 1 FROM execution_requests attempted
                     WHERE attempted.run_id = r.run_id AND attempted.attempt = 2)
             ORDER BY r.ordinal DESC LIMIT 1
         ) AND q.attempt = 2
         ORDER BY q.request_index DESC LIMIT 1
     ) q ON 1 = 1;
+    """;
+
+  // Bound the fallback even when a compatible provider has never supplied usage.
+  private const string RecentContextUsageSql = $"""
+    SELECT r.run_id, q.usage_json
+    FROM (SELECT run_id, ordinal FROM execution_runs WHERE session_id = $session AND history_revision = $revision
+        AND ordinal >= ({ContextRevisionFloorSql}) ORDER BY ordinal DESC LIMIT 16) r
+    JOIN execution_requests q ON q.request_id IN (
+        SELECT request_id FROM execution_requests WHERE run_id = r.run_id AND attempt = 2
+        ORDER BY request_index DESC LIMIT 16)
+    WHERE q.compaction_id IS $boundary AND q.usage_json IS NOT NULL
+    ORDER BY r.ordinal DESC, q.request_index DESC;
     """;
 
   internal static readonly string SnapshotSettlementSql = $"""
@@ -129,8 +148,8 @@ internal sealed class SnapshotReader {
     (Guid? unsettledExecution, bool stopRequested, DateTimeOffset? startedAt) =
         ReadUnsettledExecution(transaction, sessionId);
     SessionExecutionResult? lastSettlement = ReadLastSettlement(transaction, sessionId);
-    LlmSelection? latestSelection = ReadLatestSelection(
-        transaction, sessionId, unsettledExecution ?? lastSettlement?.ExecutionId);
+    Guid? latestExecution = unsettledExecution ?? lastSettlement?.ExecutionId;
+    LlmSelection? latestSelection = ReadLatestSelection(transaction, sessionId, latestExecution);
     string? firstUserPreview = ReadFirstUserPreview(transaction, sessionId, historyRevision);
     PendingInputPreview[] pendingInputs = ReadPendingInputs(transaction, sessionId);
     PendingResponse? pendingResponse = ReadPendingResponse(transaction, sessionId, historyRevision,
@@ -140,7 +159,7 @@ internal sealed class SnapshotReader {
     return new(sessionId, historyRevision, AdmissionFenced: true, CanChangeWorkingDirectory: false,
         unsettledExecution, stopRequested, lastSettlement, firstUserPreview, pendingInputs, latestSelection,
         WorkingTime: ReadWorkingTime(transaction, sessionId, startedAt),
-        ContextUsage: ReadContextUsage(transaction, sessionId, historyRevision),
+        ContextUsage: ReadContextUsage(transaction, sessionId, historyRevision, latestExecution, latestSelection),
         CanContinue: ReadCanContinue(transaction, sessionId, historyRevision),
         Title: database.Scalar<string?>(transaction, PrepassTitleSql, ("$session", sessionId)),
         Pruning: ReadPruningStatuses(transaction, sessionId), PendingResponse: pendingResponse);
@@ -186,32 +205,52 @@ internal sealed class SnapshotReader {
       database.Scalar<bool>(transaction, CanContinueSql,
           ("$session", sessionId), ("$revision", historyRevision));
 
-  private SessionContextUsage? ReadContextUsage(SqliteTransaction transaction, Guid sessionId, long historyRevision) {
-    using SqliteCommand read = database.Command(transaction, ContextUsageSql,
-        ("$session", sessionId), ("$revision", historyRevision));
+  private SessionContextUsage? ReadContextUsage(SqliteTransaction transaction, Guid sessionId, long historyRevision,
+      Guid? latestExecution, LlmSelection? selection) {
+    var latest = database.QuerySingleOrDefault(transaction, ContextUsageSql, row => (
+        Boundary: row.NullableGuid("latest_compaction_id"), CompactedTokens: row.NullableLong("tokens_after"),
+        RequestBoundary: row.NullableGuid("request_compaction_id"), Run: row.NullableGuid("run_id"),
+        Tokens: ReadReportedTokens(row.NullableString("usage_json"))), ("$session", sessionId), ("$revision", historyRevision));
+    SessionContextUsage? compacted = latest.CompactedTokens is long estimate
+        ? new(estimate, SessionContextUsageSource.Estimated) : null;
+    if (latest.Run is not Guid latestRun || latest.Boundary != latest.RequestBoundary || selection is null)
+      return compacted;
+
+    if (latest.Tokens is long measured) {
+      if (latestRun == latestExecution)
+        return new(measured, SessionContextUsageSource.Measured);
+      return CanReuse(latestRun) ? new(measured, SessionContextUsageSource.LastMeasured) : compacted;
+    }
+
+    (Guid Run, long? Tokens) compatible = RecentMeasurement(transaction, sessionId, historyRevision, latest.Boundary);
+    return compatible.Tokens is long earlier && CanReuse(compatible.Run)
+        ? new(earlier, SessionContextUsageSource.LastMeasured) : compacted;
+
+    bool CanReuse(Guid run) => run == latestExecution || (ReadLatestSelection(transaction, sessionId, run) is { } earlierSelection
+        && earlierSelection.ModelId == selection.ModelId && ProviderManager.SameBinding(earlierSelection.Connection, selection.Connection));
+  }
+
+  private (Guid Run, long? Tokens) RecentMeasurement(SqliteTransaction transaction, Guid sessionId, long revision, Guid? boundary) {
+    using SqliteCommand read = database.Command(transaction, RecentContextUsageSql,
+        ("$session", sessionId), ("$revision", revision), ("$boundary", boundary));
     using SqliteDataReader reader = read.ExecuteReader();
-    if (!reader.Read())
-      throw new InvalidOperationException("The context usage query did not return its single result row.");
+    while (reader.Read()) {
+      if (ReadReportedTokens(reader.NullableString("usage_json")) is long tokens)
+        return (reader.Guid("run_id"), tokens);
+    }
+    return default;
+  }
 
-    Guid? latestCompaction = reader.NullableGuid("latest_compaction_id");
-    long? compactionTokensAfter = reader.NullableLong("tokens_after");
-    Guid? requestCompaction = reader.NullableGuid("request_compaction_id");
-    string? usageJson = reader.NullableString("usage_json");
-    if (latestCompaction != requestCompaction)
-      return compactionTokensAfter is { } tokens ? new(tokens, IsEstimate: true) : null;
-    if (usageJson is null)
-      return null;
+  private static long? ReadReportedTokens(string? json) {
+    if (json is null) return null;
 
-    UsageDetails? usage;
     try {
-      usage = JsonSerializer.Deserialize<UsageDetails>(usageJson);
+      UsageDetails? usage = JsonSerializer.Deserialize<UsageDetails>(json);
+      return usage?.InputTokenCount is >= 0 && usage.OutputTokenCount is >= 0
+          ? ContextTokenBudget.AddSaturating(usage.InputTokenCount.Value, usage.OutputTokenCount.Value) : null;
     } catch (JsonException) {
       return null;
     }
-    if (usage?.InputTokenCount is not >= 0 || usage.OutputTokenCount is not >= 0)
-      return null;
-
-    return new(ContextTokenBudget.AddSaturating(usage.InputTokenCount.Value, usage.OutputTokenCount.Value), IsEstimate: false);
   }
 
   private SessionWorkingTime ReadWorkingTime(SqliteTransaction transaction, Guid sessionId, DateTimeOffset? startedAt) =>

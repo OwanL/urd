@@ -6,7 +6,7 @@ import { SubagentProviderControl } from "../chat/SubagentProviderControl.tsx";
 import { SessionIndicators } from "../chat/SessionIndicators.tsx";
 import { UsageOverview } from "../usage/UsageOverview.tsx";
 import { IconButton } from "../components/IconButton.tsx";
-import type { LlmSelection } from "../providers/LlmSelection.ts";
+import { sameContextModel, type LlmSelection } from "../providers/LlmSelection.ts";
 import type { SessionClient } from "../sessions/SessionClient.ts";
 import type { PendingInputPreview, SessionSnapshot } from "../sessions/SessionSnapshot.ts";
 import { preferenceSaveBlocks } from "../preferences/usePreferences.ts";
@@ -628,7 +628,11 @@ export function Conversation({
         }
         indicators={
           <SessionIndicators
-            contextUsage={snapshot?.contextUsage ?? null}
+            contextUsage={
+              sameContextModel(selection, snapshot?.latestLlmSelection ?? null)
+                ? (snapshot?.contextUsage ?? null)
+                : null
+            }
             contextWindow={selection?.contextWindow ?? null}
             canCompact={canCompact}
             compacting={compactionPending || (state.active && snapshot?.isCompacting === true)}

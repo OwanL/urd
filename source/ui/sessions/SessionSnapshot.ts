@@ -19,7 +19,7 @@ export interface SessionWorkingTime {
 
 export interface SessionContextUsage {
   readonly usedTokens: number;
-  readonly isEstimate: boolean;
+  readonly source: "measured" | "estimated" | "lastMeasured";
 }
 
 export interface SessionPruningStatus {

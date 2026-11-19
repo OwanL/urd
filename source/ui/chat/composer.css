@@ -125,6 +125,9 @@
 .composer-subagent-trigger {
   position: relative;
 }
+.composer-subagent-trigger:not(:hover, :focus-visible, [aria-expanded="true"]) {
+  color: color-mix(in srgb, var(--text-secondary) 80%, var(--surface-input));
+}
 .composer-subagent-trigger[data-save-error="true"]::after {
   content: "!";
   position: absolute;

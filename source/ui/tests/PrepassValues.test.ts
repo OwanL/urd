@@ -12,10 +12,12 @@ import {
   prepassCostLabel,
   prepassRowModel,
   prepassRowMood,
+  unanchoredPreparation,
   uniqueModelNames,
 } from "../app/PrepassValues.ts";
 import { initialBoundaryId } from "../sessions/Prepass.ts";
 import type { PrepassSummary } from "../sessions/Prepass.ts";
+import type { TranscriptEntryDescriptor } from "../sessions/Messages.ts";
 
 function summary(overrides: Partial<PrepassSummary>): PrepassSummary {
   return {
@@ -27,6 +29,31 @@ function summary(overrides: Partial<PrepassSummary>): PrepassSummary {
     ...overrides,
   };
 }
+
+void test("after compaction, the loaded marker owns its running preparation rows", () => {
+  const skills = summary({ category: "skills", state: "running" });
+  const tools = summary({});
+  const initialSkills = summary({ boundaryId: initialBoundaryId, category: "skills" });
+  const marker: TranscriptEntryDescriptor = {
+    entry: {
+      executionId: "compact",
+      entryId: skills.boundaryId,
+      kind: "compaction",
+      historyRevision: 1,
+    },
+    createdAt: null,
+    text: null,
+    tool: null,
+    preparation: [{ ...skills }],
+  };
+  const pending = [skills, tools, initialSkills];
+
+  assert.deepEqual(unanchoredPreparation(pending, [marker], 1), [tools, initialSkills]);
+  assert.deepEqual(unanchoredPreparation([skills], [marker], 1), []);
+  assert.deepEqual(unanchoredPreparation(pending, [], 1), pending);
+  assert.deepEqual(unanchoredPreparation(pending, [{ ...marker, preparation: [] }], 1), pending);
+  assert.deepEqual(unanchoredPreparation(pending, [marker], 2), pending);
+});
 
 void test("preparation rows keep category order and unknown categories", () => {
   assert.deepEqual(

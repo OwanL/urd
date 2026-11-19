@@ -1,5 +1,6 @@
 import { initialBoundaryId } from "../sessions/Prepass.ts";
 import type { PrepassSummary } from "../sessions/Prepass.ts";
+import type { TranscriptEntryDescriptor } from "../sessions/Messages.ts";
 import { formatCostUsd } from "../usage/UsageValues.ts";
 
 const categoryOrder = ["tools", "skills", "instructions", "title"] as const;
@@ -18,6 +19,27 @@ const labels: Record<string, string> = {
   instructions: "Instructions",
   title: "Title",
 };
+
+export function unanchoredPreparation(
+  pending: readonly PrepassSummary[],
+  entries: readonly TranscriptEntryDescriptor[],
+  historyRevision: number,
+): readonly PrepassSummary[] {
+  // A marker in the displayed window owns its preparation; otherwise keep the live feedback.
+  return pending.filter(
+    (row) =>
+      !entries.some(
+        ({ entry, preparation }) =>
+          entry.kind === "compaction" &&
+          entry.historyRevision === historyRevision &&
+          entry.entryId === row.boundaryId &&
+          preparation?.some(
+            (anchored) =>
+              anchored.boundaryId === row.boundaryId && anchored.category === row.category,
+          ),
+      ),
+  );
+}
 
 // Preparation rows keep their established category order; unknown categories stay truthful.
 export function orderedPreparation(

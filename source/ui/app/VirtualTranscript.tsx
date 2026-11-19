@@ -24,6 +24,7 @@ import {
   transcriptNavigationProfileVersion,
 } from "./useTranscriptNavigation.ts";
 import type { TranscriptDisplay } from "./TranscriptDisplay.ts";
+import type { RenderPreparation } from "./Transcript.tsx";
 import { EditableMessage } from "./EditableMessage.tsx";
 import { CompactionMarker } from "./CompactionMarker.tsx";
 import { ToolRow } from "../chat/ToolRow.tsx";
@@ -46,6 +47,7 @@ const seekDebounceMs = 75;
 
 interface VirtualTranscriptProps {
   children?: ComponentChildren;
+  renderPreparation?: RenderPreparation | undefined;
   client: SessionClient;
   display: TranscriptDisplay;
   streamId: string | null;
@@ -321,6 +323,7 @@ function VirtualEntry({
 
 export function VirtualTranscript({
   children,
+  renderPreparation,
   client,
   display,
   streamId,
@@ -1240,6 +1243,7 @@ export function VirtualTranscript({
             class="transcript-tail"
             style={{ top: `${topPadding + estimatedHeight}px` }}
           >
+            {renderPreparation?.(rows.map(({ descriptor }) => descriptor))}
             {children}
           </div>
           {!positionWindow && !error && <p class="history-note">Loading messages…</p>}

@@ -19,7 +19,7 @@ import { Transcript } from "./Transcript.tsx";
 import { SessionWorkingDirectory } from "./SessionWorkingDirectory.tsx";
 import { PendingResponseStatus } from "./PreparationRows.tsx";
 import type { ResponseStatusContext } from "./PreparationRows.tsx";
-import { uniqueModelNames } from "./PrepassValues.ts";
+import { unanchoredPreparation, uniqueModelNames } from "./PrepassValues.ts";
 import type { ReadingPosition } from "./Transcript.tsx";
 import type { TranscriptDisplay } from "./TranscriptDisplay.ts";
 import type { TranscriptNavigationState } from "../sessions/TranscriptNavigationStorage.ts";
@@ -429,6 +429,32 @@ export function Conversation({
           transcriptPosition={transcriptPosition}
           onTranscriptPositionChange={onTranscriptPositionChange}
           onChooseModels={onChooseModels}
+          renderPreparation={
+            preparingInputs.length > 0 || pendingResponse
+              ? (entries) => (
+                  <>
+                    {preparingInputs.length > 0 && (
+                      <section class="chat-pending-inputs" aria-label="Preparing inputs">
+                        <div class="chat-pending-inputs-label">Preparing…</div>
+                        {preparingInputs.map(renderPendingInput)}
+                      </section>
+                    )}
+                    {snapshot && pendingResponse && (
+                      <PendingResponseStatus
+                        header={pendingResponse.header}
+                        preparation={unanchoredPreparation(
+                          pendingResponse.preparation,
+                          entries,
+                          snapshot.historyRevision,
+                        )}
+                        context={statusContext}
+                        historyRevision={snapshot.historyRevision}
+                      />
+                    )}
+                  </>
+                )
+              : undefined
+          }
           emptyState={
             unavailable ? (
               <p>Session unavailable on this server.</p>
@@ -457,20 +483,6 @@ export function Conversation({
             ) : null
           }
         >
-          {preparingInputs.length > 0 && (
-            <section class="chat-pending-inputs" aria-label="Preparing inputs">
-              <div class="chat-pending-inputs-label">Preparing…</div>
-              {preparingInputs.map(renderPendingInput)}
-            </section>
-          )}
-          {pendingResponse && (
-            <PendingResponseStatus
-              header={pendingResponse.header}
-              preparation={pendingResponse.preparation}
-              context={statusContext}
-              historyRevision={snapshot?.historyRevision ?? 0}
-            />
-          )}
           {(queuedInputs.length > 0 || unlistedInputRemovals.length > 0) && (
             <section class="chat-pending-inputs" aria-label="Queued inputs">
               <div class="chat-pending-inputs-label">

@@ -21,6 +21,7 @@ import type { TranscriptNavigationState } from "../sessions/TranscriptNavigation
 import { VirtualTranscript } from "./VirtualTranscript.tsx";
 import type {
   MessageContentCursor,
+  TranscriptEntryDescriptor,
   TranscriptEntryRef,
   TranscriptHistoryPage,
   TranscriptTextFacts,
@@ -238,8 +239,13 @@ export interface ReadingPosition {
   anchor: { key: string; top: number } | null;
 }
 
+export type RenderPreparation = (
+  entries: readonly TranscriptEntryDescriptor[],
+) => ComponentChildren;
+
 export interface TranscriptProps {
   children?: ComponentChildren;
+  renderPreparation?: RenderPreparation | undefined;
   emptyState?: ComponentChildren;
   client: SessionClient;
   history: TranscriptHistoryPage | null;
@@ -270,6 +276,7 @@ export function Transcript(props: TranscriptProps) {
         >
           <div class="empty-transcript">
             {props.emptyState}
+            {props.renderPreparation?.([])}
             {props.children}
           </div>
         </div>
@@ -289,6 +296,7 @@ export function Transcript(props: TranscriptProps) {
         onChooseModels={props.onChooseModels}
         navigation={props.transcriptPosition}
         onNavigationChange={props.onTranscriptPositionChange ?? ignoreNavigationChange}
+        renderPreparation={props.renderPreparation}
       >
         {props.children}
       </VirtualTranscript>
@@ -300,6 +308,7 @@ function ignoreNavigationChange(_position: TranscriptNavigationState): void {}
 
 function PlainTranscript({
   children,
+  renderPreparation,
   display,
   streamId = null,
   client,
@@ -396,7 +405,7 @@ function PlainTranscript({
     } else if (anchor.current) {
       keepAnchorInPlace(node);
     }
-  }, [keepAnchorInPlace, shown, children, selecting, visible, documentHidden]);
+  }, [keepAnchorInPlace, shown, renderPreparation, children, selecting, visible, documentHidden]);
 
   function rememberPosition() {
     const node = scroll.current;
@@ -527,6 +536,7 @@ function PlainTranscript({
                 </div>
               );
             })}
+            {renderPreparation?.(visibleHistory?.entries ?? [])}
             {children}
           </ToolRowInteractionsProvider>
         </div>

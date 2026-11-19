@@ -313,8 +313,10 @@ truly idle, including after background tools and cleanup finish, and a model is 
 leaves composer drafts unchanged and does not automatically repeat a no-op or failure. The
 browser control has no focus-instructions field; the HTTP operation still accepts optional focus.
 Successful manual or automatic compaction adds a quiet **History compacted** entry; its summary
-and token counts load on demand. No-op and failure feedback is shown without adding a history
-boundary. There is no not-sent input inspector in the workspace.
+and token counts load on demand. While a response is preparing, any preparation rows already
+shown under that marker are omitted from the transcript tail, which keeps the pending response
+header. No-op and failure feedback is shown without adding a history boundary. There is no
+not-sent input inspector in the workspace.
 
 ## Shared UI controls
 

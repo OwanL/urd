@@ -9,9 +9,16 @@ import type {
   MarkdownPieceInterval,
   MarkdownRenderCursor,
   MarkdownRenderSnapshot,
-  MarkdownTrimRequest,
 } from "./MarkdownRenderModel.ts";
 import { MarkdownSelectionPins } from "./MarkdownSelectionPins.ts";
+import {
+  alignWindow,
+  expandToUnits,
+  initialFrom,
+  normalizeIntervals,
+  refreshRange,
+  sameIntervals,
+} from "./windowing/MarkdownWindowAlignment.ts";
 import { MarkdownWindowAssembler } from "./windowing/MarkdownWindowAssembler.ts";
 import { MarkdownWindowGeometry } from "./windowing/MarkdownWindowGeometry.ts";
 import type {
@@ -248,11 +255,12 @@ export class MarkdownMessageView {
               signal.throwIfAborted();
               await window.append(signal);
             }
-            const aligned = await this.alignWindow(
+            const aligned = await alignWindow(
               window,
               window.snapshot,
               { from, next },
               retained,
+              this.retainedPieceCount,
               signal,
             );
             const snapshot = await window.trim(
@@ -422,7 +430,14 @@ export class MarkdownMessageView {
         signal.throwIfAborted();
         await window.append(signal);
       }
-      const aligned = await this.alignWindow(window, window.snapshot, { from, next }, [], signal);
+      const aligned = await alignWindow(
+        window,
+        window.snapshot,
+        { from, next },
+        [],
+        this.retainedPieceCount,
+        signal,
+      );
       const snapshot = await window.trim(
         { generation: manifest.generation, active: aligned.active },
         signal,
@@ -552,7 +567,7 @@ export class MarkdownMessageView {
     retain: readonly MarkdownPieceInterval[],
     signal: AbortSignal,
   ): Promise<MarkdownRenderSnapshot> {
-    const aligned = await this.alignWindow(
+    const aligned = await alignWindow(
       {
         get snapshot() {
           return handoff.snapshot;
@@ -563,70 +578,15 @@ export class MarkdownMessageView {
       snapshot,
       active,
       retain,
+      this.retainedPieceCount,
       signal,
     );
-    const request: MarkdownTrimRequest = {
+    const request = {
       generation: aligned.snapshot.generation,
       active: aligned.active,
       retain: aligned.retain,
     };
     return handoff.trim(request, signal);
-  }
-
-  private async alignWindow(
-    window: Pick<MarkdownWindowAssembler, "snapshot" | "append" | "prepend">,
-    initial: MarkdownRenderSnapshot,
-    active: MarkdownPieceInterval,
-    retain: readonly MarkdownPieceInterval[],
-    signal: AbortSignal,
-  ): Promise<{
-    snapshot: MarkdownRenderSnapshot;
-    active: MarkdownPieceInterval;
-    retain: readonly MarkdownPieceInterval[];
-  }> {
-    let snapshot = initial;
-    let activeRange = active;
-    let retainedRanges = normalizeIntervals(retain);
-    for (let attempt = 0; attempt < 8; attempt++) {
-      signal.throwIfAborted();
-      const expandedActive = expandToUnits(snapshot, activeRange, false);
-      const expandedRetain = normalizeIntervals(
-        retainedRanges.map((range) => expandToUnits(snapshot, range, true)),
-      );
-      if (expandedActive.next - expandedActive.from > this.retainedPieceCount * 3)
-        throw new Error(
-          "A complete Markdown code line or table row exceeds the active window bound.",
-        );
-      activeRange = expandedActive;
-      retainedRanges = expandedRetain;
-
-      while (snapshot.from > activeRange.from) {
-        signal.throwIfAborted();
-        snapshot = await window.prepend(signal);
-      }
-      while (snapshot.next < activeRange.next) {
-        signal.throwIfAborted();
-        snapshot = await window.append(signal);
-      }
-      for (const range of retainedRanges)
-        for (let id = range.from; id < range.next; id++)
-          if (!snapshot.pieces.has(id))
-            throw new Error("A Markdown selection pin is outside the loaded window.");
-
-      const checkedActive = expandToUnits(snapshot, activeRange, false);
-      const checkedRetain = normalizeIntervals(
-        retainedRanges.map((range) => expandToUnits(snapshot, range, true)),
-      );
-      if (
-        checkedActive.from === activeRange.from &&
-        checkedActive.next === activeRange.next &&
-        sameIntervals(checkedRetain, retainedRanges)
-      )
-        return { snapshot, active: activeRange, retain: retainedRanges };
-      activeRange = checkedActive;
-      retainedRanges = checkedRetain;
-    }
-    throw new Error("Markdown window did not align to complete code lines and table rows.");
   }
 
   private currentPins(): readonly MarkdownPieceInterval[] {
@@ -848,11 +808,6 @@ function sameSeekTarget(
   );
 }
 
-function initialFrom(index: number, pieceCount: number, retainedPieceCount: number): number {
-  const start = Math.max(0, index - Math.floor(retainedPieceCount / 2));
-  return Math.min(start, Math.max(0, pieceCount - retainedPieceCount));
-}
-
 function validateCursor(
   cursor: MarkdownRenderCursor,
   pieceCount: number,
@@ -866,87 +821,6 @@ function validateCursor(
     (pieceCount === 0 ? cursor.index !== 0 : cursor.index >= pieceCount)
   )
     throw new Error("Markdown source cursor does not match its render generation.");
-}
-
-function expandToUnits(
-  snapshot: MarkdownRenderSnapshot,
-  range: MarkdownPieceInterval,
-  includeHeader: boolean,
-): MarkdownPieceInterval {
-  let from = range.from;
-  let next = range.next;
-  for (const { context } of snapshot.contexts.values()) {
-    if (
-      (context.kind !== "codeLine" && context.kind !== "row") ||
-      (!includeHeader && context.header) ||
-      context.pieceCount === 0
-    )
-      continue;
-    const unitNext = context.firstPiece + context.pieceCount;
-    if (context.firstPiece < next && unitNext > from) {
-      from = Math.min(from, context.firstPiece);
-      next = Math.max(next, unitNext);
-    }
-  }
-  return { from, next };
-}
-
-function normalizeIntervals(intervals: readonly MarkdownPieceInterval[]): MarkdownPieceInterval[] {
-  const sorted = [...intervals]
-    .filter(
-      ({ from, next }) => Number.isSafeInteger(from) && Number.isSafeInteger(next) && next > from,
-    )
-    .sort((left, right) => left.from - right.from);
-  const result: MarkdownPieceInterval[] = [];
-  for (const interval of sorted) {
-    const last = result.at(-1);
-    if (!last || interval.from > last.next) result.push({ ...interval });
-    else result[result.length - 1] = { from: last.from, next: Math.max(last.next, interval.next) };
-  }
-  return result;
-}
-
-function sameIntervals(
-  left: readonly MarkdownPieceInterval[],
-  right: readonly MarkdownPieceInterval[],
-): boolean {
-  return (
-    left.length === right.length &&
-    left.every(
-      (range, index) => range.from === right[index]?.from && range.next === right[index]?.next,
-    )
-  );
-}
-
-function refreshRange(
-  loaded: MarkdownRenderSnapshot,
-  direction: Direction,
-  visible: ViewRange,
-  retainedPieceCount: number,
-): MarkdownPieceInterval {
-  if (direction === "forward") {
-    let from = Math.max(loaded.from, loaded.next - retainedPieceCount);
-    if (visible && visible.from >= loaded.from && visible.from < loaded.next)
-      from = Math.min(from, visible.from);
-    let next = Math.min(loaded.next, from + retainedPieceCount);
-    if (visible && visible.next > next) {
-      next = visible.next;
-      from = Math.max(loaded.from, next - retainedPieceCount);
-    }
-    return { from, next };
-  }
-
-  let from = loaded.from;
-  let next = Math.min(loaded.next, from + retainedPieceCount);
-  if (visible && visible.next > next) {
-    next = visible.next;
-    from = Math.max(loaded.from, next - retainedPieceCount);
-  }
-  if (visible && visible.from < from) {
-    from = visible.from;
-    next = Math.min(loaded.next, from + retainedPieceCount);
-  }
-  return { from, next };
 }
 
 function linkedController(signal: AbortSignal): { controller: AbortController; dispose(): void } {

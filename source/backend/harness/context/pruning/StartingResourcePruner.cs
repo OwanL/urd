@@ -31,12 +31,14 @@ internal sealed class StartingResourcePruner(
   private readonly Func<StartingResourcePruningStatus, IReadOnlyList<PrepassResource>, IReadOnlyList<string>?, Task>? saveProgress = saveProgress;
 
   internal Task<StartingResourcePruningResult<DiscoveredInstructionDocument>> PruneAsync(
-      IReadOnlyList<DiscoveredInstructionDocument> candidates, int protectedCount, CancellationToken cancellation) =>
+      IReadOnlyList<DiscoveredInstructionDocument> candidates, int protectedCount,
+      CancellationToken cancellation, string? indexWarning = null) =>
       PruneAsync(candidates, protectedCount, AuxiliaryModelPurpose.Instructions, "instructions",
           $"""
           Select the project instruction documents that are relevant to the task. Preserve applicable rules and avoid redundant documents.
           {FileGuidanceScope}
           """,
+          indexWarning,
           document => document.Identity,
           documents => documents.GroupBy(item => System.IO.Path.GetDirectoryName(item.Item.Path) ?? "")
               .Select(group => new DirectoryCandidates(group.Key, group.Select(item => (object)new InstructionCandidate(
@@ -45,7 +47,8 @@ internal sealed class StartingResourcePruner(
           document => Encoding.UTF8.GetByteCount(document.Text), cancellation);
 
   internal Task<StartingResourcePruningResult<DiscoveredSkill>> PruneAsync(
-      IReadOnlyList<DiscoveredSkill> candidates, int protectedCount, CancellationToken cancellation) =>
+      IReadOnlyList<DiscoveredSkill> candidates, int protectedCount, CancellationToken cancellation,
+      string? indexWarning = null) =>
       PruneAsync(candidates, protectedCount, AuxiliaryModelPurpose.Skills, "skills",
           $"""
           Select the specialized skills that are relevant to the task. Keep a skill when its instructions may materially help.
@@ -53,6 +56,7 @@ internal sealed class StartingResourcePruner(
           Choose by name, description and path when sufficient; inspect a file only when it could change what you keep.
           {FileGuidanceScope}
           """,
+          indexWarning,
           skill => skill.Identity,
           skills => skills.GroupBy(item => System.IO.Path.GetDirectoryName(item.Item.Path) ?? "")
               .Select(group => new DirectoryCandidates(group.Key, group.Select(item => (object)new SkillCandidate(
@@ -63,7 +67,7 @@ internal sealed class StartingResourcePruner(
   internal Task<StartingResourcePruningResult<AIFunctionDeclaration>> PruneAsync(
       IReadOnlyList<AIFunctionDeclaration> candidates, int protectedCount, CancellationToken cancellation) =>
       PruneAsync(candidates, protectedCount, AuxiliaryModelPurpose.Tools, "tools",
-          "Select the tools that are useful for completing the task. Keep a tool when it enables a relevant action.",
+          "Select the tools that are useful for completing the task. Keep a tool when it enables a relevant action.", null,
           tool => tool.Name,
           tools => tools.Select(item => new ToolCandidate(item.Id, "tool", item.Item.Name, item.Item.Description, item.Item.JsonSchema)).ToArray(),
           tool => new(tool.Name, tool.Name),
@@ -75,6 +79,7 @@ internal sealed class StartingResourcePruner(
       AuxiliaryModelPurpose purpose,
       string category,
       string categoryBrief,
+      string? indexWarning,
       Func<T, string> getIdentity,
       Func<IEnumerable<(T Item, string Id)>, object[]> createMetadata,
       Func<T, PrepassResource> createResource,
@@ -97,17 +102,17 @@ internal sealed class StartingResourcePruner(
     }).ToArray();
     PrepassResource[] resources = candidates.Select(createResource).ToArray();
     int total = checked(candidates.Count + protectedCount);
-    var running = new StartingResourcePruningStatus(category, "running", total, total);
+    var running = new StartingResourcePruningStatus(category, "running", total, total, indexWarning);
     try {
       cancellation.ThrowIfCancellationRequested();
       await SaveStatusAsync(running, resources, null);
     } catch (OperationCanceledException) when (cancellation.IsCancellationRequested) {
-      await SaveCancelledStatusAsync(category, total, protectedCount, resources);
+      await SaveCancelledStatusAsync(category, total, protectedCount, resources, indexWarning);
       throw;
     }
 
     string[] selectedIds;
-    string? warning = null;
+    string? warning = indexWarning;
     var excluded = new bool[candidates.Count];
     try {
       cancellation.ThrowIfCancellationRequested();
@@ -139,7 +144,8 @@ internal sealed class StartingResourcePruner(
             foreach (int index in largestFirst.Skip(excludedCount).Take(dropCount))
               excluded[index] = true;
             excludedCount += dropCount;
-            warning = SkippedWarning(excludedCount);
+            string skipped = SkippedWarning(excludedCount);
+            warning = warning is null ? skipped : $"{warning} {skipped}";
             if (excludedCount == candidates.Count)
               throw new InvalidDataException("Instruction pruning exceeded the context window with one candidate remaining; all unprotected candidates were excluded.", failure);
             nextDropCount = nextDropCount > int.MaxValue / 2 ? int.MaxValue : nextDropCount * 2;

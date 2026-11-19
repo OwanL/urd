@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Reflection;
 using Microsoft.Extensions.AI;
 using Urd.Core.Preferences;
@@ -79,6 +80,8 @@ internal sealed class StartingContextBuilder {
         .Where(document => !protectedInstructions.Contains(CanonicalPath(document.Identity)))
         .ToArray();
 
+    string? indexWarning = IndexWarning(input.WorkingDirectory, resources.Index);
+
     int protectedToolCount = allTools.Length - toolCandidates.Length;
     int protectedSkillCount = resources.Skills.Count - skillCandidates.Length;
     int protectedInstructionCount = resources.Instructions.Count - instructionCandidates.Length;
@@ -88,9 +91,9 @@ internal sealed class StartingContextBuilder {
     Task<StartingResourcePruningResult<AIFunctionDeclaration>> toolPruning =
         pruner.PruneAsync(toolCandidates, protectedToolCount, cancellation);
     Task<StartingResourcePruningResult<DiscoveredSkill>> skillPruning =
-        pruner.PruneAsync(skillCandidates, protectedSkillCount, cancellation);
+        pruner.PruneAsync(skillCandidates, protectedSkillCount, cancellation, indexWarning);
     Task<StartingResourcePruningResult<DiscoveredInstructionDocument>> instructionPruning =
-        pruner.PruneAsync(instructionCandidates, protectedInstructionCount, cancellation);
+        pruner.PruneAsync(instructionCandidates, protectedInstructionCount, cancellation, indexWarning);
     await Task.WhenAll(toolPruning, skillPruning, instructionPruning);
 
     cancellation.ThrowIfCancellationRequested();
@@ -163,6 +166,19 @@ internal sealed class StartingContextBuilder {
   }
 
   private static string CanonicalPath(string path) => Path.GetFullPath(path);
+
+  // A non-complete index serves paths that may be missing or stale; the pruning statuses say so plainly.
+  private static string? IndexWarning(string? workingDirectory, InstructionResourceIndexState index) {
+    if (workingDirectory is null)
+      return null;
+    return index.Phase switch {
+      InstructionResourceIndexPhase.Refreshing =>
+          $"Index of {workingDirectory} is being refreshed; results may be stale.",
+      InstructionResourceIndexPhase.Partial =>
+          $"Index of {workingDirectory} incomplete: {index.MatchedFiles.ToString("N0", CultureInfo.InvariantCulture)} files found so far.",
+      _ => null,
+    };
+  }
 
 #pragma warning disable S3011 // Discover and construct only parameterless guidance in Urd Core, never external plugin types.
   private static Type[] DiscoverGuidanceTypes() =>

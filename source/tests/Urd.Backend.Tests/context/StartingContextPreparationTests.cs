@@ -134,6 +134,56 @@ public sealed class StartingContextPreparationTests {
     }
   }
 
+  [Fact]
+  public async Task PreparationWarnsWhenSkillAndInstructionCandidatesComeFromAPartialIndex() {
+    string root = Path.Combine(Path.GetTempPath(), $"urd-context-{Guid.NewGuid():N}");
+    string project = Path.Combine(root, "project");
+    string packaged = Path.Combine(root, "packaged");
+    Directory.CreateDirectory(project);
+    try {
+      string document = Write(project, "AGENTS.md", "Root rule.\n");
+      string skill = Write(project, "skills/local/SKILL.md", "---\nname: local\ndescription: Local skill.\n---\n");
+      string answer = JsonSerializer.Serialize(new { keptIds = new[] { "s1", "i1" } });
+      var auxiliary = new ScriptedChatClient(token => TextUpdates([answer], token));
+      await using RunningParent parent = await StartParentAsync();
+      var runner = new ConversationRunner(parent.Fixture.Session.Recorder, _ => auxiliary, [], project);
+      var statuses = new ConcurrentQueue<StartingResourcePruningStatus>();
+      var pruner = new StartingResourcePruner(runner, (_, _) => Task.FromResult(TestLlmSelection.DefaultResolution), status => {
+        statuses.Enqueue(status);
+        return Task.CompletedTask;
+      }, "Use the resources.");
+      // The cold scan publishes its first matches but never settles, so the builder receives a partial index.
+      await using var catalog = new InstructionResourceCatalog(
+          Path.Combine(root, "catalog.db"),
+          (_, matched, cancellation) => {
+            matched(document);
+            matched(skill);
+            return new TaskCompletionSource<string[]>().Task.WaitAsync(cancellation);
+          });
+      var builder = new StartingContextBuilder(new ToolCatalog([]),
+          instructionDiscovery: new InstructionResourceDiscovery(catalog, packaged));
+      var preferences = new UserPreferences(project, null) {
+        ProtectedResources = new() { Tools = [], Skills = [], Instructions = [] }
+      };
+
+      StartingContext context = await builder.PrepareAsync(
+          new(SessionKind.Primary, ModelFamily.Other, project, null), Guid.NewGuid(), "Use the resources.",
+          preferences, new HashSet<string>(StringComparer.Ordinal), pruner, CancellationToken.None)
+          .WaitAsync(TestTimeout);
+
+      string text = string.Join("\n", context.Instructions.Select(message => message.Text));
+      Assert.Contains("Root rule.", text, StringComparison.Ordinal);
+      Assert.Contains("Local skill.", text, StringComparison.Ordinal);
+      string expected = $"Index of {project} incomplete: 2 files found so far.";
+      Assert.Contains(statuses, status => status.Category == "tools" && status.State == "completed" && status.Error is null);
+      Assert.Contains(statuses, status => status.Category == "skills" && status.State == "completed" && status.Error == expected);
+      Assert.Contains(statuses, status => status.Category == "instructions" && status.State == "completed" && status.Error == expected);
+    } finally {
+      if (Directory.Exists(root))
+        Directory.Delete(root, recursive: true);
+    }
+  }
+
   private static TestAgentTool TestTool(string name) =>
       new TestAgentTool(name, (_, _, _) => Task.FromResult(new ToolOutput("unused", [])));
 

@@ -333,6 +333,56 @@ public sealed class StartingResourcePrunerTests {
     Assert.Contains("Retained all unprotected tools", result.Error, StringComparison.Ordinal);
   }
 
+  [Fact]
+  public async Task IncompleteIndexWarningComposesWithSkippedFilesOnInstructions() {
+    const string indexWarning = "Index of C:\\ incomplete: 1,240 files found so far.";
+    DiscoveredInstructionDocument[] documents = [Instruction("large", "12345"), Instruction("small", "1")];
+    int attempt = 0;
+    var client = new ScriptedChatClient(token => {
+      if (Interlocked.Increment(ref attempt) == 1)
+        throw new ProviderOperationException(ProviderFailure.ContextWindowExceeded);
+      return TextUpdates([JsonSerializer.Serialize(new { keptIds = new[] { "i2" } })], token);
+    });
+    await using RunningParent parent = await StartParentAsync();
+    var runner = new ConversationRunner(parent.Fixture.Session.Recorder, _ => client, [], parent.Fixture.Session.WorkingDirectory);
+    var statuses = new ConcurrentQueue<StartingResourcePruningStatus>();
+    var pruner = CreatePruner(runner, status => { statuses.Enqueue(status); return Task.CompletedTask; });
+
+    StartingResourcePruningResult<DiscoveredInstructionDocument> result =
+        await pruner.PruneAsync(documents, 0, CancellationToken.None, indexWarning).WaitAsync(TestTimeout);
+
+    Assert.False(result.IsFallback);
+    Assert.Equal(new[] { documents[1] }, result.Retained);
+    const string combined =
+        "Index of C:\\ incomplete: 1,240 files found so far. Skipped 1 instruction file because the context limit was exceeded.";
+    Assert.Equal(new[] {
+      (State: "running", Error: (string?)indexWarning),
+      (State: "running", Error: (string?)combined),
+      (State: "completed", Error: (string?)combined),
+    }, statuses.Select(status => (status.State, status.Error)).ToArray());
+  }
+
+  [Fact]
+  public async Task RefreshingIndexWarningTravelsWithSkillStatuses() {
+    const string indexWarning = "Index of C:\\ is being refreshed; results may be stale.";
+    DiscoveredSkill first = Skill("first", "First skill.");
+    DiscoveredSkill second = Skill("second", "Second skill.");
+    string answer = JsonSerializer.Serialize(new { keptIds = new[] { "s1" } });
+    var client = new ScriptedChatClient(token => TextUpdates([answer], token));
+    await using RunningParent parent = await StartParentAsync();
+    var runner = new ConversationRunner(parent.Fixture.Session.Recorder, _ => client, [], parent.Fixture.Session.WorkingDirectory);
+    var statuses = new ConcurrentQueue<StartingResourcePruningStatus>();
+    var pruner = CreatePruner(runner, status => { statuses.Enqueue(status); return Task.CompletedTask; });
+
+    StartingResourcePruningResult<DiscoveredSkill> result =
+        await pruner.PruneAsync([first, second], 0, CancellationToken.None, indexWarning).WaitAsync(TestTimeout);
+
+    Assert.False(result.IsFallback);
+    Assert.Same(first, Assert.Single(result.Retained));
+    Assert.Equal(new[] { (State: "running", Error: (string?)indexWarning), (State: "completed", Error: (string?)indexWarning) },
+        statuses.Select(status => (status.State, status.Error)).ToArray());
+  }
+
   private static string[] CandidateIds(IReadOnlyList<ChatMessage> request) {
     using JsonDocument json = ParseCandidates(request);
     return json.RootElement.EnumerateArray().SelectMany(group => group.GetProperty("Files").EnumerateArray())

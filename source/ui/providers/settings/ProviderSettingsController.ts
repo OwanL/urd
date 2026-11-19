@@ -1,92 +1,17 @@
 import { RequestError } from "../../http/RequestError.ts";
-import type { BucketSuggestions, ProviderClient } from "../ProviderClient.ts";
-import type {
-  CustomProviderSettings,
-  ProviderConnection,
-  ProviderRoute,
-} from "../ProviderConnection.ts";
+import type { ProviderConnection } from "../ProviderConnection.ts";
 import type { ProviderCredentialStatus, ProviderDisconnectResult } from "../ProviderCredentials.ts";
 import type { ProviderModelCatalog } from "../ProviderModels.ts";
 import type { ModelSettings } from "../ModelSettings.ts";
 import type { ProviderSignIn } from "../ProviderSignIn.ts";
-
-export type ProviderSettingsClient = Pick<
-  ProviderClient,
-  | "list"
-  | "getCredentials"
-  | "getModels"
-  | "getModelSettings"
-  | "getSignIn"
-  | "getBucketSuggestions"
-  | "confirmBucketSuggestions"
-  | "createChatGpt"
-  | "createOpenAI"
-  | "createCustom"
-  | "updateCustom"
-  | "remove"
-  | "setApiKey"
-  | "beginSignIn"
-  | "cancelSignIn"
-  | "disconnect"
-  | "refreshModels"
-  | "saveModelSettings"
->;
-
-export type ConnectionDraft = CustomProviderSettings;
-
-export interface AddDraft extends ConnectionDraft {
-  readonly route: ProviderRoute;
-}
-
-export type ProviderSettingsOperation =
-  | "add"
-  | "save"
-  | "changeBinding"
-  | "remove"
-  | "disconnect"
-  | "replaceApiKey"
-  | "beginSignIn"
-  | "cancelSignIn"
-  | "refreshModels"
-  | "saveModelSettings";
-
-export type ProviderSettingsNotice =
-  | {
-      readonly operation: ProviderSettingsOperation;
-      readonly outcome: "succeeded";
-      readonly disconnect: ProviderDisconnectResult | null;
-    }
-  | {
-      readonly operation: ProviderSettingsOperation;
-      readonly outcome: "rejected";
-      readonly httpStatus?: number;
-    }
-  | {
-      readonly operation: ProviderSettingsOperation;
-      readonly outcome: "uncertain";
-      readonly httpStatus?: number;
-    };
-
-export type ProviderCredentialState =
-  | "unknown"
-  | "disconnecting"
-  | "noAuthentication"
-  | "noCredentials"
-  | "signInRequired"
-  | "planAccessMissing"
-  | "connected";
-
-export interface Confirmation {
-  readonly kind: "binding" | "disconnect" | "remove";
-  readonly connection: ProviderConnection;
-  readonly settings?: CustomProviderSettings;
-}
-
-export type BucketSetup =
-  | { readonly phase: "loading" }
-  | { readonly phase: "offered"; readonly proposal: BucketSuggestions }
-  | { readonly phase: "saving"; readonly proposal: BucketSuggestions }
-  | { readonly phase: "finished"; readonly message: string; readonly error?: boolean };
+import { credentialState, providerHostname, signInPending } from "./ProviderConnectionStatus.ts";
+import type {
+  AddDraft,
+  ConnectionDraft,
+  ProviderSettingsClient,
+  ProviderSettingsOperation,
+  ProviderSettingsSnapshot,
+} from "./ProviderSettingsTypes.ts";
 
 interface SetupContext {
   readonly connection: ProviderConnection;
@@ -95,70 +20,6 @@ interface SetupContext {
 
 interface BucketSetupRequest extends SetupContext {
   readonly abort: AbortController;
-}
-
-export interface ProviderSettingsSnapshot {
-  readonly connections: readonly ProviderConnection[];
-  readonly selectedId: string | null;
-  readonly loaded: boolean;
-  readonly reading: boolean;
-  readonly pending: ProviderSettingsOperation | null;
-  readonly notice: ProviderSettingsNotice | null;
-  readonly uncertain: boolean;
-  readonly connectionsReloadedAfterUncertainty: boolean;
-  readonly errors: Readonly<Record<string, string>>;
-  readonly credentials: Readonly<Record<string, ProviderCredentialStatus>>;
-  readonly catalogs: Readonly<Record<string, ProviderModelCatalog>>;
-  readonly modelSettings: Readonly<Record<string, readonly ModelSettings[]>>;
-  readonly modelDrafts: Readonly<Record<string, readonly ModelSettings[]>>;
-  readonly signIns: Readonly<Record<string, ProviderSignIn>>;
-  readonly drafts: Readonly<Record<string, ConnectionDraft>>;
-  readonly add: AddDraft;
-  readonly apiKey: string;
-  readonly confirmation: Confirmation | null;
-  readonly bucketSetup: BucketSetup | null;
-}
-
-export function providerHostname(endpoint: string): string {
-  try {
-    return new URL(endpoint).hostname;
-  } catch {
-    return "";
-  }
-}
-
-export function signInPending(signIn: ProviderSignIn): boolean {
-  return signIn.status === "pending" || signIn.status === "completing";
-}
-
-export function credentialState(
-  connection: ProviderConnection,
-  status: ProviderCredentialStatus | undefined,
-): ProviderCredentialState {
-  if (!status) return "unknown";
-  if (status.isDisconnecting) return "disconnecting";
-  if (connection.authentication === "none") return "noAuthentication";
-  if (!status.hasCredentials) return "noCredentials";
-  if (status.requiresSignIn) return "signInRequired";
-  if (status.planAccessGranted === false) return "planAccessMissing";
-  return "connected";
-}
-
-// Setup is credential presence, not current validity, plan access or catalog discovery.
-export function providerSetupState(
-  connection: ProviderConnection,
-  status: ProviderCredentialStatus | undefined,
-): "complete" | "incomplete" | "unknown" {
-  if (connection.authentication === "none") return "complete";
-  if (!status) return "unknown";
-  return status.hasCredentials ? "complete" : "incomplete";
-}
-
-export function matchesConnection(connection: ProviderConnection, search: string): boolean {
-  const query = search.trim().toLocaleLowerCase();
-  return [connection.name, connection.route, connection.endpoint].some((value) =>
-    value.toLocaleLowerCase().includes(query),
-  );
 }
 
 function sameConnection(first: ProviderConnection, second: ProviderConnection): boolean {

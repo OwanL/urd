@@ -1,10 +1,10 @@
 import type { ProviderConnection } from "../ProviderConnection.ts";
-import { credentialState, providerHostname, signInPending } from "./ProviderSettingsController.ts";
+import { credentialState, providerHostname, signInPending } from "./ProviderConnectionStatus.ts";
 import type {
   ProviderCredentialState,
   ProviderSettingsNotice,
   ProviderSettingsOperation,
-} from "./ProviderSettingsController.ts";
+} from "./ProviderSettingsTypes.ts";
 import type { ProviderSettingsState } from "./useProviderSettings.ts";
 
 export const providerNames = {

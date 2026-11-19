@@ -8,7 +8,7 @@ import { ProviderConnectionDetail } from "./ProviderConnectionDetail.tsx";
 import { ProviderSettingsFeedback } from "./ProviderSettingsFeedback.tsx";
 import { ProviderSettingsOverview } from "./ProviderSettingsOverview.tsx";
 import { connectionStatus, connectionTitle } from "./ProviderSettingsPresentation.ts";
-import { matchesConnection, providerSetupState } from "./ProviderSettingsController.ts";
+import { matchesConnection, providerSetupState } from "./ProviderConnectionStatus.ts";
 import type { ProviderSettingsState } from "./useProviderSettings.ts";
 import "./provider-settings.css";
 

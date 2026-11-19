@@ -1,6 +1,6 @@
 import { useState } from "preact/hooks";
 import type { ProviderConnection } from "../ProviderConnection.ts";
-import { signInPending } from "./ProviderSettingsController.ts";
+import { signInPending } from "./ProviderConnectionStatus.ts";
 import { ProviderApiKeyForm } from "./ProviderApiKeyForm.tsx";
 import { ProviderModelCatalog } from "./ProviderModelCatalog.tsx";
 import { ProviderConnectionConfirmation } from "./ProviderConnectionConfirmation.tsx";

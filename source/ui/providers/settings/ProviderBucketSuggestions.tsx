@@ -1,4 +1,4 @@
-import type { BucketSetup } from "./ProviderSettingsController.ts";
+import type { BucketSetup } from "./ProviderSettingsTypes.ts";
 
 export function ProviderBucketSuggestions({
   setup,

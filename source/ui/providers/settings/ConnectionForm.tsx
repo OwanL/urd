@@ -1,6 +1,6 @@
 import { useId } from "preact/hooks";
 import type { ProviderConnection } from "../ProviderConnection.ts";
-import type { ConnectionDraft } from "./ProviderSettingsController.ts";
+import type { ConnectionDraft } from "./ProviderSettingsTypes.ts";
 import type { ProviderSettingsState } from "./useProviderSettings.ts";
 import { providerNames } from "./ProviderSettingsPresentation.ts";
 

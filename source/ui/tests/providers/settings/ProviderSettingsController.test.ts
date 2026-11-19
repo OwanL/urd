@@ -11,9 +11,9 @@ import {
   matchesConnection,
   providerHostname,
   providerSetupState,
-  ProviderSettingsController,
-} from "../../../providers/settings/ProviderSettingsController.ts";
-import type { ProviderSettingsClient } from "../../../providers/settings/ProviderSettingsController.ts";
+} from "../../../providers/settings/ProviderConnectionStatus.ts";
+import { ProviderSettingsController } from "../../../providers/settings/ProviderSettingsController.ts";
+import type { ProviderSettingsClient } from "../../../providers/settings/ProviderSettingsTypes.ts";
 
 const connection: ProviderConnection = {
   id: "one",

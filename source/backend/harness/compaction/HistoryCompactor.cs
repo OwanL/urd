@@ -25,7 +25,7 @@ internal static class HistoryCompactor {
       return null;
 
     int retainedHistoryTokenLimit = ContextTokenBudget.RetainedHistoryLimit(trigger);
-    int? firstRetainedMessageIndex = HistoryCompactionBoundary.FindFirstRetainedMessageIndex(history, retainedHistoryTokenLimit, reason);
+    int? firstRetainedMessageIndex = HistoryCompactionBoundary.FindFirstRetainedMessageIndex(history, retainedHistoryTokenLimit);
     return firstRetainedMessageIndex is { } index ? new(history, index, estimatedContextTokens, reason, focus) : null;
   }
 
@@ -53,7 +53,7 @@ internal static class HistoryCompactor {
     string summary = ReadCompletedSummary(response);
     long estimatedContextTokensAfter = EstimateCompactedContext(plan, plan.AppendBackgroundToolCalls(summary));
     if (estimatedContextTokensAfter >= plan.EstimatedContextTokensBefore)
-      throw new InvalidDataException("The compaction summary would not reduce the estimated context.");
+      throw new CompactionSummaryException("The summary would not reduce the estimated context.");
 
     cancellationToken.ThrowIfCancellationRequested();
     return new(summary, estimatedContextTokensAfter);
@@ -66,14 +66,19 @@ internal static class HistoryCompactor {
   }
 
   private static string ReadCompletedSummary(ChatResponse response) {
-    if (response.FinishReason != ChatFinishReason.Stop || response.Messages.Any(message =>
-        message.Contents.Any(content => content is FunctionCallContent)))
-      throw new InvalidDataException("The compaction summary did not finish successfully.");
+    if (response.Messages.Any(message => message.Contents.Any(content => content is FunctionCallContent)))
+      throw new CompactionSummaryException("The model tried to call a tool instead of summarizing.");
+    if (response.FinishReason == ChatFinishReason.Length)
+      throw new CompactionSummaryException("The summary reached its output limit. Try a different model.");
+    if (response.FinishReason != ChatFinishReason.Stop)
+      throw new CompactionSummaryException("The model did not complete the summary.");
 
     string summary = string.Concat(response.Messages.Where(message => message.Role == ChatRole.Assistant)
         .SelectMany(message => message.Contents.OfType<TextContent>().Select(content => content.Text))).Trim();
-    if (summary.Length == 0 || summary.Length > MaxSummaryCharacters)
-      throw new InvalidDataException("The compaction summary was empty or exceeded its size limit.");
+    if (summary.Length == 0)
+      throw new CompactionSummaryException("The model returned an empty summary.");
+    if (summary.Length > MaxSummaryCharacters)
+      throw new CompactionSummaryException("The summary exceeded Urd's size limit.");
     return summary;
   }
 

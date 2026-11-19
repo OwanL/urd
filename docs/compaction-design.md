@@ -60,8 +60,8 @@ A configured positive count triggers above that count, capped at the same window
 it also enables automatic compaction when the model window is unknown. Without either a count or a
 known window, only manual/overflow compaction is available. The retention budget is the smaller of
 20,000 tokens and half the effective trigger; without any trigger it remains 20,000. The summary is
-separate from this retention budget. If no safe split fits the budget, manual compaction and
-provider-overflow recovery can keep the latest turn intact and still summarize older history.
+separate from this retention budget. If no safe split fits the budget, compaction can keep
+an over-budget latest turn intact and still summarize older history, including on an automatic trigger.
 Saved preferences apply to the next check in existing sessions; an already prepared compaction
 plan does not change midway.
 Edit summarization instructions in `CompactionPrompt`; its renderer keeps native payloads/reasoning
@@ -82,7 +82,10 @@ appendix, since the harness supplies a fresh list after the generated text.
 Threshold preparation runs before each model request. A classified `context_length_exceeded`
 may cause one compact-and-retry, only when the rejected exchange produced no output or calls.
 Previously executed tools are not retried. Generic HTTP failures and message text do not trigger
-this recovery. Reported usage anchors the next threshold check; later history is estimated
+this recovery. If there is no safe cut, the overflow error explains why retry was skipped. A failed
+summary is not a rejected chat request and does not trigger another compaction. Failure feedback
+retains local summary-validation details and the provider's bounded, redacted error when available.
+Reported usage anchors the next threshold check; later history is estimated
 with a four-characters-per-token fallback, not a tokenizer guarantee.
 
 The manual compaction HTTP operation accepts optional focus instructions; the browser's

@@ -184,7 +184,7 @@ public sealed class ManualCompactionTests {
     using var database = new TemporaryDatabase();
     int summaryCalls = 0;
     using var client = new ScriptedChatClient(Complete, _ => Interlocked.Increment(ref summaryCalls) == 2
-        ? Task.FromException<ChatResponse>(new InvalidOperationException("scripted summary failure"))
+        ? Task.FromException<ChatResponse>(new ProviderOperationException(ProviderFailure.ProviderUnavailable, "summary service timed out"))
         : Task.FromResult(SummaryResponse()));
     using UrdStore store = UrdStore.Open(database.Path);
     PrimarySession session = CreateSession(store, client);
@@ -203,6 +203,8 @@ public sealed class ManualCompactionTests {
     Assert.Equal(ExecutionOutcome.Failed,
         (await session.WaitForExecutionFinishAsync(failed.ExecutionId).WaitAsync(TestTimeout)).Outcome);
 
+    CompactionReceipt final = Assert.IsType<CompactionReceipt>(await session.ReadCompactionReceiptAsync(failed.ExecutionId));
+    Assert.Contains("summary service timed out", final.Error, StringComparison.Ordinal);
     ModelHistory after = store.Compactions.ReadContext(session.Id, revision);
     Assert.Equal(before.PreviousCompaction!.Id, after.PreviousCompaction!.Id);
     Assert.Equal(before.Messages.Select(Position), after.Messages.Select(Position));

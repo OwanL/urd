@@ -87,6 +87,65 @@ public sealed class AutomaticCompactionTests {
   }
 
   [Fact]
+  public async Task ThresholdCompactsOlderHistoryWhenCurrentTurnExceedsTheRetentionTarget() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    using var client = new ScriptedChatClient(Complete, _ => Task.FromResult(SummaryResponse()));
+    var session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid()), store, _ => client);
+    await SubmitAsync(session, new string('o', 3_000), TestLlmSelection.Default);
+    string current = new('n', 2_500);
+    await SubmitAsync(session, current, TestLlmSelection.Default with { ContextWindow = 1_000 });
+
+    Assert.Equal(3, client.Requests.Count);
+    Assert.Contains(Summary, RequestText(client.Requests[^1]));
+    Assert.Contains(client.Requests[^1], message => message.Role == ChatRole.User && message.Text == current);
+    Assert.DoesNotContain(new string('o', 128), RequestText(client.Requests[^1]), StringComparison.Ordinal);
+    Assert.NotNull(store.Compactions.ReadContext(session.Id, 0).PreviousCompaction);
+  }
+
+  [Theory]
+  [InlineData(false, true, "The summary reached its output limit")]
+  [InlineData(false, false, "The summarization request exceeded the model's context window")]
+  [InlineData(true, false, "The summarization request exceeded the model's context window")]
+  public async Task SummaryFailureReportsItsCauseWithoutSavingOrRetrying(bool afterOverflow, bool outputLimit, string expectedDetail) {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    using var client = CreateClient((call, token) => call == 1 ? Complete(token)
+        : Fail(ProviderFailure.ContextWindowExceeded, false, token), _ => outputLimit
+        ? Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, Summary)) { FinishReason = ChatFinishReason.Length })
+        : Task.FromException<ChatResponse>(new ProviderOperationException(ProviderFailure.ContextWindowExceeded)));
+    var session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid()), store, _ => client);
+    await SubmitAsync(session, new string('o', 5_000), TestLlmSelection.Default);
+    LlmSelection selection = TestLlmSelection.Default with { ContextWindow = afterOverflow ? null : 1_000 };
+    UserMessageReceipt receipt = await AcceptAsync(session, "current turn", selection);
+    Assert.Equal(ExecutionOutcome.Failed,
+        (await session.WaitForExecutionFinishAsync(Assert.IsType<Guid>(receipt.ExecutionId)).WaitAsync(TestTimeout)).Outcome);
+
+    string error = Assert.IsType<string>((await session.ReadSnapshotAsync()).LastSettlement?.Error);
+    Assert.StartsWith("History compaction failed:", error);
+    Assert.Contains(expectedDetail, error, StringComparison.Ordinal);
+    Assert.Equal(afterOverflow ? 3 : 2, client.Requests.Count);
+    Assert.Null(store.Compactions.ReadContext(session.Id, 0).PreviousCompaction);
+    Assert.DoesNotContain((await session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, 0))).Entries,
+        entry => entry.Entry.Kind == TranscriptEntryKind.Compaction);
+  }
+
+  [Fact]
+  public async Task OverflowWithNoSafeCutExplainsWhyItWasNotRetried() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    using var client = new ScriptedChatClient(token => Fail(ProviderFailure.ContextWindowExceeded, false, token));
+    var session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid()), store, _ => client);
+    UserMessageReceipt receipt = await AcceptAsync(session, "only turn", TestLlmSelection.Default);
+    Assert.Equal(ExecutionOutcome.Failed,
+        (await session.WaitForExecutionFinishAsync(Assert.IsType<Guid>(receipt.ExecutionId)).WaitAsync(TestTimeout)).Outcome);
+
+    Assert.Contains("No older history can be compacted", (await session.ReadSnapshotAsync()).LastSettlement?.Error,
+        StringComparison.Ordinal);
+    Assert.Single(client.Requests);
+  }
+
+  [Fact]
   public async Task CompactionRetainsStoredBackgroundInputAcrossSnapshotsAndDeliversRacingCompletionOnce() {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);

@@ -31,6 +31,8 @@ internal sealed class SessionExecution : IDisposable {
   private readonly CancellationTokenSource stop = new();
   private Task? stopCallbacks;
   private readonly ManualCompactionRequest? manualCompactionRequest;
+  private const string NoCompactionCut = "No older history can be compacted without dropping recent context.";
+  private const string UnexpectedCompactionError = "History compaction failed unexpectedly. Previous context kept.";
 
   internal SessionExecution(SessionExecutionRecorder recorder, SessionBase session,
       Func<ProviderConnection, IChatClient> createChatClient, LlmSelection selection,
@@ -84,10 +86,12 @@ internal sealed class SessionExecution : IDisposable {
     // Retry only the rejected model exchange, never a tool or any observed partial output.
     bool canCompactAndRetry = result.Failure == ProviderFailure.ContextWindowExceeded
         && !result.OutputObserved && !IsStopping;
-    if (canCompactAndRetry && await session.CanRetryOverflowAsync(ExecutionId, request.RequestId)) {
+    if (canCompactAndRetry && await recorder.CanRetryOverflowAsync(request.RequestId)) {
       try {
         LlmRequest? reducedRequest = await CompactHistoryAsync(request.RequestId, CompactionReason.Overflow);
-        if (reducedRequest is not null)
+        if (reducedRequest is null)
+          result = result with { Error = $"{NoCompactionCut} Shorten the input or use a larger-context model. ({result.Error})" };
+        else
           (result, offeredTools) = await SendLlmRequestAsync(reducedRequest, allowAutomaticCompaction: false);
       } catch (Exception failure) {
         result = CreateRequestResult(request.RequestId, failure);
@@ -106,15 +110,15 @@ internal sealed class SessionExecution : IDisposable {
   internal async Task<ExecutionOutcome> RunCompactionAsync() {
     try {
       if (await CompactHistoryAsync(null, CompactionReason.Manual, manualCompactionRequest!.Focus) is null)
-        await session.RecordCompactionErrorAsync(ExecutionId, "No older history can be compacted without dropping recent context.");
+        await recorder.RecordCompactionErrorAsync(NoCompactionCut);
       return IsStopping ? ExecutionOutcome.Cancelled : ExecutionOutcome.Completed;
     } catch (OperationCanceledException) when (IsStopping) {
       return ExecutionOutcome.Cancelled;
     } catch (CompactionSaveException) {
       throw;
     } catch (Exception failure) {
-      await session.RecordCompactionErrorAsync(ExecutionId, failure is ProviderOperationException provider
-          ? provider.Failure.ToString() : "History compaction failed; the previous context is unchanged.");
+      await recorder.RecordCompactionErrorAsync(failure is CompactionFailureException
+          ? failure.Message : UnexpectedCompactionError);
       return ExecutionOutcome.Failed;
     }
   }
@@ -131,13 +135,13 @@ internal sealed class SessionExecution : IDisposable {
       stop.Token.ThrowIfCancellationRequested();
       bool saved;
       try {
-        saved = await session.SaveCompactionAsync(ExecutionId, plan, result);
+        saved = await recorder.SaveCompactionAsync(plan, result);
       } catch (Exception failure) {
         throw new CompactionSaveException(failure);
       }
       if (!saved)
         throw new OperationCanceledException("The compaction boundary was rejected.");
-      ModelHistory compactedHistory = await session.ReadModelHistoryAsync(ExecutionId, requestId);
+      ModelHistory compactedHistory = await recorder.ReadModelHistoryAsync(requestId);
       if (reason != CompactionReason.Manual)
         automaticBoundary = compactedHistory.PreviousCompaction?.Id;
       return new(requestId ?? Guid.Empty, compactedHistory.ReadMessages(), compactedHistory);
@@ -153,25 +157,32 @@ internal sealed class SessionExecution : IDisposable {
     if (reason == CompactionReason.Threshold && selection.ContextWindow is null
         && preferences.CompactionTriggerTokenCount is null)
       return null;
-    ModelHistory history = currentHistory ?? await session.ReadModelHistoryAsync(ExecutionId, requestId);
+    ModelHistory history = currentHistory ?? await recorder.ReadModelHistoryAsync(requestId);
     StartingContext currentContext = startingContext ?? session.ReadStartingContext()
         ?? startingContextBuilder.Create(ContextInput(), stop.Token);
     HistoryCompactionPlan? plan = HistoryCompactor.CreatePlan(history, selection, currentContext, reason, focus,
         preferences.CompactionTriggerTokenCount);
     return plan is null ? null : plan with {
-      BackgroundToolCalls = await session.ReadCompactionBackgroundCallsAsync(ExecutionId, plan.FirstRetainedMessage.Location)
+      BackgroundToolCalls = await recorder.ReadCompactionBackgroundCallsAsync(plan.FirstRetainedMessage.Location)
     };
   }
 
   private async Task<GeneratedCompactionSummary> GenerateHistorySummaryAsync(HistoryCompactionPlan plan) {
-    chatClient ??= createChatClient(selection.Connection);
     try {
+      chatClient ??= createChatClient(selection.Connection);
       return await HistoryCompactor.GenerateSummaryAsync(chatClient, selection, plan, stop.Token,
           new UsageContext(session.Id, ExecutionId, "compaction"));
     } catch (OperationCanceledException) when (IsStopping) {
       throw;
     } catch (Exception failure) {
-      throw new InvalidOperationException("History compaction failed; the previous context is unchanged.", failure);
+      string error = failure switch {
+        ProviderOperationException { Failure: ProviderFailure.ContextWindowExceeded } =>
+            $"History compaction failed: The summarization request exceeded the model's context window. Try a larger-context model. ({failure.Message})",
+        ProviderOperationException or CompactionSummaryException => $"History compaction failed: {failure.Message}",
+        _ => UnexpectedCompactionError
+      };
+      // A failed summary is not a rejection of the conversation request and must not trigger overflow recovery.
+      throw new CompactionFailureException(error, failure);
     }
   }
 
@@ -413,6 +424,8 @@ internal sealed class SessionExecution : IDisposable {
 #pragma warning disable S3871 // Private driver signals, not public exception contracts.
   // The session no longer accepts output from this execution.
   private sealed class OutputRejectedException : Exception;
+
+  private sealed class CompactionFailureException(string message, Exception inner) : Exception(message, inner);
 
   private sealed class CompactionSaveException(Exception inner) : Exception("Saving history compaction failed.", inner);
 

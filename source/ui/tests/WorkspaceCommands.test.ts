@@ -478,6 +478,39 @@ void test("compaction ignores duplicate starts while the first start is pending"
   });
 });
 
+void test("manual compaction displays a failed receipt error when provided", async () => {
+  const workspace = fixture();
+  const coordinator = commands(workspace.access, {
+    ...emptyClient(),
+    startCompaction: async (_id, submission) => ({
+      ...compactionReceipt(submission.operationId, "failed"),
+      error: "Compaction failed: provider unavailable.",
+    }),
+  });
+
+  await coordinator.compact(sessionId, snapshot(), true);
+
+  assert.deepEqual(coordinator.status.compactions[sessionId], {
+    phase: "settled",
+    message: "Compaction failed: provider unavailable.",
+  });
+});
+
+void test("manual compaction keeps the fallback for a failed receipt without an error", async () => {
+  const workspace = fixture();
+  const coordinator = commands(workspace.access, {
+    ...emptyClient(),
+    startCompaction: async (_id, submission) => compactionReceipt(submission.operationId, "failed"),
+  });
+
+  await coordinator.compact(sessionId, snapshot(), true);
+
+  assert.deepEqual(coordinator.status.compactions[sessionId], {
+    phase: "settled",
+    message: "Compaction failed. Previous context kept.",
+  });
+});
+
 void test("a snapshot reads the addressed compaction receipt and reports an unconfirmed no-op", async () => {
   const workspace = fixture();
   const settled = deferred<void>();

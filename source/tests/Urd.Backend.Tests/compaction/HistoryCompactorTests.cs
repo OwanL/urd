@@ -132,10 +132,8 @@ public sealed class HistoryCompactorTests {
     Assert.False(location.IsAfter(sameOrderDifferentId));
   }
 
-  [Theory]
-  [InlineData(CompactionReason.Manual)]
-  [InlineData(CompactionReason.Overflow)]
-  public void ManualAndOverflowCanKeepAnOverBudgetLatestTurn(CompactionReason reason) {
+  [Fact]
+  public void ManualAndOverflowCanKeepAnOverBudgetLatestTurn() {
     var context = new ModelHistory([
       Entry(0, 0, true, ChatRole.User, "older"),
       Entry(1, 0, true, ChatRole.User, new string('o', 2_500)),
@@ -143,11 +141,8 @@ public sealed class HistoryCompactorTests {
     ]);
     LlmSelection selection = TestLlmSelection.Default with { ContextWindow = 1_000 };
 
-    Assert.Null(HistoryCompactor.CreatePlan(context, selection, emptyStartingContext, CompactionReason.Threshold));
-    HistoryCompactionPlan? plan = HistoryCompactor.CreatePlan(context, selection, emptyStartingContext, reason);
-
-    Assert.Equal(2, plan?.FirstRetainedMessageIndex);
-    Assert.Equal(new string('n', 2_500), plan?.FirstRetainedMessage.Message.Contents.OfType<TextContent>().Single().Text);
+    Assert.Equal(2, HistoryCompactor.CreatePlan(context, selection, emptyStartingContext, CompactionReason.Manual)?.FirstRetainedMessageIndex);
+    Assert.Equal(2, HistoryCompactor.CreatePlan(context, selection, emptyStartingContext, CompactionReason.Overflow)?.FirstRetainedMessageIndex);
   }
 
   [Fact]
@@ -209,11 +204,9 @@ public sealed class HistoryCompactorTests {
     ]);
     HistoryCompactionPlan plan = HistoryCompactor.CreatePlan(history, TestLlmSelection.Default, emptyStartingContext, CompactionReason.Manual)!;
 
-    await Assert.ThrowsAsync<InvalidDataException>(() => HistoryCompactor.GenerateSummaryAsync(
+    await Assert.ThrowsAsync<CompactionSummaryException>(() => HistoryCompactor.GenerateSummaryAsync(
         CreateClient(new string('s', 4_000)), TestLlmSelection.Default, plan, default));
-    await Assert.ThrowsAsync<InvalidDataException>(() => HistoryCompactor.GenerateSummaryAsync(
-        CreateClient("summary", finishReason: ChatFinishReason.Length), TestLlmSelection.Default, plan, default));
-    await Assert.ThrowsAsync<InvalidDataException>(() => HistoryCompactor.GenerateSummaryAsync(
+    await Assert.ThrowsAsync<CompactionSummaryException>(() => HistoryCompactor.GenerateSummaryAsync(
         CreateClient("summary", includeToolCall: true), TestLlmSelection.Default, plan, default));
   }
 

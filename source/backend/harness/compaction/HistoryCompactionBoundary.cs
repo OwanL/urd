@@ -3,16 +3,12 @@ namespace Urd.Core.Compaction;
 // Chooses the first message to keep verbatim; earlier messages will be summarized.
 // Null means no suitable split. Index zero is excluded so compaction always removes some history.
 internal static class HistoryCompactionBoundary {
-  internal static int? FindFirstRetainedMessageIndex(ModelHistory history, int retainedHistoryTokenLimit,
-      CompactionReason reason) {
-    int? boundaryWithinBudget = FindBoundaryWithinTokenBudget(history.Messages, retainedHistoryTokenLimit,
-        minimumIndex: 1, previousBoundary: history.PreviousCompaction?.FirstRetainedMessageLocation);
-    if (boundaryWithinBudget is not null || reason == CompactionReason.Threshold)
-      return boundaryWithinBudget;
-
-    // Manual and overflow compaction may exceed the budget to preserve the latest turn.
-    return FindBoundaryPreservingLatestUserTurn(history);
-  }
+  // The retention target is soft. If no safe cut fits it, preserve the latest turn
+  // intact and still make room by summarizing older history.
+  internal static int? FindFirstRetainedMessageIndex(ModelHistory history, int retainedHistoryTokenLimit) =>
+      FindBoundaryWithinTokenBudget(history.Messages, retainedHistoryTokenLimit,
+          minimumIndex: 1, previousBoundary: history.PreviousCompaction?.FirstRetainedMessageLocation)
+      ?? FindBoundaryPreservingLatestUserTurn(history);
 
   // A copy may keep all available history, including the first message of an existing suffix.
   internal static int? FindRecentSuffix(IReadOnlyList<HistoryMessage> messages, int retainedHistoryTokenLimit) =>

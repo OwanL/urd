@@ -412,7 +412,7 @@ export class WorkspaceCommands {
         ? (receipt.error ?? "History compacted.")
         : receipt.outcome === "cancelled"
           ? "Compaction stopped."
-          : "Compaction failed. Previous context kept.";
+          : (receipt.error ?? "Compaction failed. Previous context kept.");
     this.setCompaction(id, { phase: "settled", message });
   }
 

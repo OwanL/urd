@@ -153,7 +153,10 @@ public sealed class InstructionResourceIntegrationTests(ITestOutputHelper output
     string instruction = Path.Combine(directory, "AGENTS.md");
     await File.WriteAllTextAsync(instruction, "Integration instruction marker");
     using UrdStore store = UrdStore.Open(database.Path);
-    new PreferenceManager(store).SetWorkingDirectory(directory);
+    var preferences = new PreferenceManager(store);
+    preferences.SetWorkingDirectory(directory);
+    // Without a model selector pruning cannot run, so only protected instructions reach the session.
+    preferences.SetProtectedItems(ProtectedResourceCategory.Instructions, [instruction]);
     store.WarmInstructionResources(directory);
     using var client = new ScriptedChatClient(Complete);
     await using var manager = new SessionManager(store, _ => client);

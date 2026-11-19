@@ -29,7 +29,7 @@ public sealed class StartingPrepassTests {
   private const string FailingPruningMessage = "scripted skills pruning failure";
 
   [Fact]
-  public async Task CategoriesPruneConcurrentlyWhileProviderFailureKeepsAllAndProtectedToolsStayOutOfModelInput() {
+  public async Task CategoriesPruneConcurrentlyWhileProviderFailureRetainsOnlyProtectedSkillsAndProtectedToolsStayOutOfModelInput() {
     var skillsStarted = Signal();
     var mainWaiting = Signal();
     var mainRelease = Signal();
@@ -80,12 +80,13 @@ public sealed class StartingPrepassTests {
     Assert.Equal(ExecutionOutcome.Completed,
         (await fixture.Session.WaitForExecutionFinishAsync(execution).WaitAsync(TestTimeout)).Outcome);
 
-    // The provider failure keeps all of its candidates; the successful category pruned,
+    // The failed skills category retains only protected resources; the successful category pruned,
     // and both outcomes were persisted for the execution's boundary.
     Assert.Equal(PublishedTitle, fixture.Store.Snapshots.ReadPersisted(fixture.Session.Id).Title);
     Assert.Equal(new[] {
       new StartingResourcePruningStatus("tools", "completed", 5, 4, null),
-      new StartingResourcePruningStatus("skills", "fallback", 1, 1, FailingPruningMessage),
+      new StartingResourcePruningStatus("skills", "fallback", 1, 0,
+          $"{FailingPruningMessage}. Retained only protected resources."),
       new StartingResourcePruningStatus("instructions", "completed", 0, 0, null)
     }, fixture.Store.Snapshots.ReadPersisted(fixture.Session.Id).Pruning);
     string[] toolCandidates = ReadCandidateIds("tools");
@@ -97,7 +98,7 @@ public sealed class StartingPrepassTests {
     Assert.Equal("completed", ReadDetailState("tools"));
     string skillIdentity = Assert.Single(ReadCandidateIds("skills"));
     Assert.EndsWith(Path.Combine("diagnose", "SKILL.md"), skillIdentity, StringComparison.Ordinal);
-    Assert.Equal([skillIdentity], ReadResultIds("skills"));
+    Assert.Equal([], ReadResultIds("skills"));
     Assert.Equal("fallback", ReadDetailState("skills"));
     Assert.Equal([], ReadCandidateIds("instructions"));
     Assert.Equal([], ReadResultIds("instructions"));
@@ -107,7 +108,7 @@ public sealed class StartingPrepassTests {
         $"SELECT used_session_model FROM session_prepass_details WHERE run_id = '{execution:D}' AND category = '{category}';"))); // raw-sql: the configured auxiliary path never records the session-model stand-in
     StartingContext context = Assert.IsType<StartingContext>(fixture.Store.StartingContexts.Read(fixture.Session.Id));
     Assert.Equal(new[] { "read", "bash", "lookup", "vault" }, context.Tools.Select(tool => tool.Name));
-    Assert.Contains("diagnose", string.Join('\n', context.Instructions.Select(message => message.Text)), StringComparison.Ordinal);
+    Assert.DoesNotContain("diagnose", string.Join('\n', context.Instructions.Select(message => message.Text)), StringComparison.Ordinal);
 
     string[] ReadCandidateIds(string category) => ReadJsonArray(category, "candidates_json");
     string[] ReadResultIds(string category) => ReadJsonArray(category, "results_json");

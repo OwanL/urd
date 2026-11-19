@@ -165,7 +165,8 @@ internal sealed class StartingResourcePruner(
       T[] remaining = candidates.Where((_, index) => keepCandidates && !excluded[index]).ToArray();
       string[] remainingIds = identities.Where((_, index) => keepCandidates && !excluded[index]).ToArray();
       string retainedMessage = keepCandidates ? "Retained all unprotected tools and protected resources." : "Retained only protected resources.";
-      string error = warning is null ? $"{failure.Message} {retainedMessage}" : $"{warning} {failure.Message} {retainedMessage}";
+      string failureMessage = failure.Message.EndsWith('.') ? failure.Message : $"{failure.Message}.";
+      string error = warning is null ? $"{failureMessage} {retainedMessage}" : $"{warning} {failureMessage} {retainedMessage}";
       await SaveStatusAsync(new(category, "fallback", total, checked(remaining.Length + protectedCount), error),
           resources, remainingIds);
       return new(Array.AsReadOnly(remaining), IsFallback: true, Error: error);
@@ -201,15 +202,9 @@ internal sealed class StartingResourcePruner(
     if (root.ValueKind != JsonValueKind.Object)
       throw InvalidResult();
 
-    JsonElement keptIds = default;
-    int keptIdProperties = 0;
-    foreach (JsonProperty property in root.EnumerateObject()) {
-      if (property.NameEquals("keptIds")) {
-        keptIdProperties++;
-        keptIds = property.Value;
-      }
-    }
-    if (keptIdProperties != 1 || keptIds.ValueKind != JsonValueKind.Array)
+    JsonElement[] keptIdProperties = root.EnumerateObject()
+        .Where(property => property.NameEquals("keptIds")).Select(property => property.Value).ToArray();
+    if (keptIdProperties is not [{ ValueKind: JsonValueKind.Array } keptIds])
       throw InvalidResult();
 
     var available = new HashSet<string>(candidateIds, StringComparer.Ordinal);

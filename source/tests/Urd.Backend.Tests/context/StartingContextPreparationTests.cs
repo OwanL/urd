@@ -88,9 +88,10 @@ public sealed class StartingContextPreparationTests {
     try {
       string projectSkill = Write(project, "skills/project/SKILL.md", "---\nname: shared\ndescription: Project skill.\n---\n");
       string packagedSkill = Write(packaged, "shared/SKILL.md", "---\nname: shared\ndescription: Packaged skill.\n---\n");
+      string packagedId = protectProject ? "s1" : "s2";
       string[] kept = new[] {
         keepProject && !protectProject ? "s1" : null,
-        keepPackaged && !protectPackaged ? (protectProject ? "s1" : "s2") : null
+        keepPackaged && !protectPackaged ? packagedId : null
       }.OfType<string>().ToArray();
       string answer = JsonSerializer.Serialize(new { keptIds = kept });
       var auxiliary = new ScriptedChatClient(token => TextUpdates([answer], token));

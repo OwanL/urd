@@ -286,7 +286,7 @@ uncooperative fake tools, immutable receipts, stale/wrong-session Stop isolation
 orphans, lost acknowledgements, rollback, local cancellation after failed saves, and safe-boundary
 continuation. Those are historical results, not current suite totals or coverage claims.
 No real-process or subagent termination qualification is implied. Review
-`sessions/SessionStopTests.cs`, `storage/StopStorageTests.cs` and
+`sessions/SessionStopTests.cs`, `storage/execution/StopStorageTests.cs` and
 `hosting/SessionStopRoutesTests.cs` under `source/tests/Urd.Backend.Tests/` for retained
 representative cases. Full bounded-descendant ownership/join requirements remain in
 [architecture](ARCHITECTURE.md) and [session design](session-design.md). Functions must honor
@@ -347,15 +347,15 @@ discovery, not activity tracking or a complete summary API.
    content and transcript positioning. Content-extent capture and revalidation use the existing
    session guard; bounded segment reads release the database lock before decoding. The separate
    Markdown source reader owns assembly outside both guards, then revalidates before publication.
-3. [SnapshotReader.cs](../source/backend/harness/storage/SnapshotReader.cs),
-   [TranscriptHistoryReader.cs](../source/backend/harness/storage/TranscriptHistoryReader.cs) and
-   [MessageContentReader.cs](../source/backend/harness/storage/MessageContentReader.cs) — separate
+3. [SnapshotReader.cs](../source/backend/harness/storage/sessions/SnapshotReader.cs),
+   [TranscriptHistoryReader.cs](../source/backend/harness/storage/transcript/TranscriptHistoryReader.cs) and
+   [MessageContentReader.cs](../source/backend/harness/storage/messages/MessageContentReader.cs) — separate
    bounded reads in short transactions. [DatabaseSchema.cs](../source/backend/harness/storage/DatabaseSchema.cs)
    owns current schema creation and version refusal; before the supported public data baseline,
    changes replace the schema rather than adding migrations. Do not rely on historical migration
    checkpoints as current compatibility behavior.
-4. [MessageContentTests.cs](../source/tests/Urd.Backend.Tests/storage/MessageContentTests.cs) and
-   [SessionSnapshotStorageTests.cs](../source/tests/Urd.Backend.Tests/storage/SessionSnapshotStorageTests.cs).
+4. [MessageContentTests.cs](../source/tests/Urd.Backend.Tests/storage/messages/MessageContentTests.cs) and
+   [SessionSnapshotStorageTests.cs](../source/tests/Urd.Backend.Tests/storage/sessions/SessionSnapshotStorageTests.cs).
 
 Snapshots are slim committed facts: identity/revision and admission/Stop/settlement state,
 latest selection, a short first-user preview, and up to eight pending-input previews. They do not
@@ -406,27 +406,27 @@ share a file per concept. Read them alongside their owners.
 4. [UrdStore.cs](../source/backend/harness/storage/UrdStore.cs) — opens the database and exposes
    focused parts: [Database.cs](../source/backend/harness/storage/Database.cs) (connection, lock,
    transactions), [DatabaseSchema.cs](../source/backend/harness/storage/DatabaseSchema.cs) (current schema creation),
-   [SessionStorage.cs](../source/backend/harness/storage/SessionStorage.cs),
-   [UserMessageStorage.cs](../source/backend/harness/storage/UserMessageStorage.cs) (receipts),
-   [SessionExecutionStorage.cs](../source/backend/harness/storage/SessionExecutionStorage.cs) and
-   [LlmResponseStorage.cs](../source/backend/harness/storage/LlmResponseStorage.cs) — atomic execution/request/response and delivery facts;
+   [SessionStorage.cs](../source/backend/harness/storage/sessions/SessionStorage.cs),
+   [UserMessageStorage.cs](../source/backend/harness/storage/messages/UserMessageStorage.cs) (receipts),
+   [SessionExecutionStorage.cs](../source/backend/harness/storage/execution/SessionExecutionStorage.cs) and
+   [LlmResponseStorage.cs](../source/backend/harness/storage/execution/LlmResponseStorage.cs) — atomic execution/request/response and delivery facts;
    these are exposed internally as `UserMessages`, `Executions` and `LlmResponses`.
-   [ToolStorage.cs](../source/backend/harness/storage/ToolStorage.cs) — dispatch claims and retained results;
-   [LlmContextReader.cs](../source/backend/harness/storage/LlmContextReader.cs) — claimed submissions and
+   [ToolStorage.cs](../source/backend/harness/storage/tools/ToolStorage.cs) — dispatch claims and retained results;
+   [LlmContextReader.cs](../source/backend/harness/storage/execution/LlmContextReader.cs) — claimed submissions and
    ordered assistant/tool context, distinct from the public transcript metadata/content projection.
 5. [SessionConcurrencyTests.cs](../source/tests/Urd.Backend.Tests/sessions/SessionConcurrencyTests.cs),
    [SessionShutdownTests.cs](../source/tests/Urd.Backend.Tests/sessions/SessionShutdownTests.cs),
    [LlmResponseWriterTests.cs](../source/tests/Urd.Backend.Tests/execution/LlmResponseWriterTests.cs) and
    [SessionExecutionTests.cs](../source/tests/Urd.Backend.Tests/execution/SessionExecutionTests.cs) — whole Core flow,
    concurrent retries, cancelled waiters and lifecycle failures.
-6. [ExecutionStorageTests.cs](../source/tests/Urd.Backend.Tests/storage/ExecutionStorageTests.cs) and
+6. [ExecutionStorageTests.cs](../source/tests/Urd.Backend.Tests/storage/execution/ExecutionStorageTests.cs) and
    [SessionIdentityTests.cs](../source/tests/Urd.Backend.Tests/sessions/SessionIdentityTests.cs) — storage/registry invariants;
    [TemporaryDatabase.cs](../source/tests/Urd.Backend.Tests/support/TemporaryDatabase.cs) supplies isolated test data.
    `support/` also holds the scripted LLM client, response scripts and execution fixture;
    test folders mirror the source folders.
 7. [SteeringFlowTests.cs](../source/tests/Urd.Backend.Tests/sessions/SteeringFlowTests.cs),
    [ToolExecutionTests.cs](../source/tests/Urd.Backend.Tests/execution/ToolExecutionTests.cs) and
-   [ToolStorageTests.cs](../source/tests/Urd.Backend.Tests/storage/ToolStorageTests.cs) — representative
+   [ToolStorageTests.cs](../source/tests/Urd.Backend.Tests/storage/tools/ToolStorageTests.cs) — representative
    safe-boundary steering, cleanup before effects, invalid batches and durable claim/result failure.
    See [test scope](testing.md) for current coverage owners and deliberate reductions.
    `support/StoredDeliveries.cs` and `support/StoredTools.cs` supply the corresponding durable evidence.

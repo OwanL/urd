@@ -230,7 +230,7 @@ arrays reloaded as JSON text. One structured-JSON control happened to match. Tha
 fixture exercised an old generic-message serialization path, not current Urd result
 storage, so its drift is not itself a current production-path failure.
 
-The current [`ToolResultCodec`](../source/backend/harness/storage/ToolResultCodec.cs)
+The current [`ToolResultCodec`](../source/backend/harness/storage/tools/ToolResultCodec.cs)
 persists a `ToolOutput` envelope and reprojects text/images. The actual
 [`ProviderSessionExecutionTests`](../source/tests/Urd.Backend.Tests/execution/ProviderSessionExecutionTests.cs)
 exercise plain text and PNG output through Responses and Chat Completions request

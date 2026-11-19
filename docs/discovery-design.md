@@ -191,7 +191,7 @@ Already-sent results must retain their model-visible representation across
 continuation and reopen; generic JSON equivalence is insufficient. A retired
 synthetic `ChatMessage` JSON fixture found quoted/escaped string drift (including
 JSON-looking text) and typed text/image content reloaded as JSON text. That fixture
-was not the current production path: [`ToolResultCodec`](../source/backend/harness/storage/ToolResultCodec.cs)
+was not the current production path: [`ToolResultCodec`](../source/backend/harness/storage/tools/ToolResultCodec.cs)
 and [`ProviderSessionExecutionTests`](../source/tests/Urd.Backend.Tests/execution/ProviderSessionExecutionTests.cs)
 now cover basic text/PNG replay across reopen, but not embedded quotes, newlines or
 JSON-looking strings. Those edges remain unqualified; see

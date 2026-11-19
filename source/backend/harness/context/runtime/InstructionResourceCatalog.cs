@@ -28,6 +28,7 @@ internal sealed class InstructionResourceCatalog : IAsyncDisposable {
 
   internal async Task<InstructionResourceCatalogResult> FindPathsAsync(string directory, CancellationToken cancellation) {
     directory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory));
+    Root? completed = null;
     while (true) {
       cancellation.ThrowIfCancellationRequested();
       Root root;
@@ -39,7 +40,9 @@ internal sealed class InstructionResourceCatalog : IAsyncDisposable {
           return new([], new(InstructionResourceIndexPhase.Complete, 0));
 
         root = CoveringRoot(directory) ?? AddRoot(directory);
-        if (root.Ready && !root.Lost && root.Work is null && root.Pending.Count == 0) {
+        // This caller may use the scan it just awaited; later requests need live watcher coverage.
+        if (root.Ready && !root.Lost && (root.Watch is not null || root == completed) &&
+            root.Work is null && root.Pending.Count == 0) {
           string[] indexed = Index().Read(directory);
           return new(indexed, new(InstructionResourceIndexPhase.Complete, indexed.Length));
         }
@@ -58,8 +61,11 @@ internal sealed class InstructionResourceCatalog : IAsyncDisposable {
 
       // A caller cancels only its wait, not a scan another cwd may be sharing.
       Task finished = await Task.WhenAny(work, firstBatch, root.Retired.Task).WaitAsync(cancellation);
-      if (finished == work && !root.Retired.Task.IsCompleted && !work.IsCompletedSuccessfully)
-        await work; // A cold caller waits for the scan, so its failure or cancellation is observable.
+      if (finished == work && !root.Retired.Task.IsCompleted) {
+        if (!work.IsCompletedSuccessfully)
+          await work; // A cold caller waits for the scan, so its failure or cancellation is observable.
+        completed = root;
+      }
     }
   }
 

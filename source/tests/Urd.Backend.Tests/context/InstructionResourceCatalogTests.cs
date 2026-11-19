@@ -219,11 +219,12 @@ public sealed class InstructionResourceCatalogTests : IDisposable {
   }
 
   [Fact]
-  public async Task NotificationFloodRecoversOnceAndUnavailableWatcherServesReconciledRows() {
+  public async Task NotificationFloodRecoversOnceAndUnavailableWatcherReconcilesOnLaterRequests() {
     var entered = Signal();
     var release = Signal();
     int scans = 0;
     var watch = new ManualWatch();
+    string path = Write("SKILL.md");
     await using (var catalog = new InstructionResourceCatalog(Database, async (directory, _, cancellation) => {
       string[] snapshot = Fresh(directory);
       if (Interlocked.Increment(ref scans) == 1) {
@@ -234,7 +235,6 @@ public sealed class InstructionResourceCatalogTests : IDisposable {
     }, watch.Open)) {
       var initial = catalog.FindPathsAsync(Project, CancellationToken.None);
       await entered.Task.WaitAsync(deadline);
-      string path = Write("SKILL.md");
       for (int i = 0; i < 5000; i++)
         watch.Changed(Path.Combine(Project, $"change-{i}"));
       release.SetResult();
@@ -242,11 +242,38 @@ public sealed class InstructionResourceCatalogTests : IDisposable {
       Assert.Equal(2, scans);
     }
 
-    await using var fallback = new InstructionResourceCatalog(Database,
-        (directory, _, _) => Task.FromResult(Fresh(directory)), (_, _, _) => null);
+    var fallbackEntered = Signal();
+    var fallbackRelease = Signal();
+    var nextReconcile = Signal();
+    int fallbackScans = 0;
+    await using var fallback = new InstructionResourceCatalog(Database, async (directory, _, cancellation) => {
+      int attempt = Interlocked.Increment(ref fallbackScans);
+      if (attempt == 1) {
+        fallbackEntered.SetResult();
+        await fallbackRelease.Task.WaitAsync(cancellation);
+      } else if (attempt == 2) {
+        nextReconcile.SetResult();
+      }
+      return Fresh(directory);
+    }, (_, _, _) => null);
     string added = Write("APPEND_SYSTEM.md");
+
+    InstructionResourceCatalogResult stale = await fallback.FindPathsAsync(Project, CancellationToken.None)
+        .WaitAsync(deadline);
+    Assert.Equal([path], stale.Paths);
+    Assert.Equal(InstructionResourceIndexPhase.Refreshing, stale.State.Phase);
+    await fallbackEntered.Task.WaitAsync(deadline);
+    InstructionResourceCatalogResult shared = await fallback.FindPathsAsync(Project, CancellationToken.None)
+        .WaitAsync(deadline);
+    Assert.Equal([path], shared.Paths);
+    Assert.Equal(InstructionResourceIndexPhase.Refreshing, shared.State.Phase);
+    Assert.Equal(1, fallbackScans);
+
+    fallbackRelease.SetResult();
     InstructionResourceCatalogResult reconciled = await MatchesIndexAsync(fallback, Fresh(Project));
-    Assert.Equal(InstructionResourceIndexPhase.Complete, reconciled.State.Phase);
+    Assert.Equal(InstructionResourceIndexPhase.Refreshing, reconciled.State.Phase);
+    await nextReconcile.Task.WaitAsync(deadline);
+    Assert.Equal(2, fallbackScans);
     Assert.Contains(added, reconciled.Paths);
   }
 

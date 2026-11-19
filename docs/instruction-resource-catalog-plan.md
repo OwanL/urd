@@ -72,15 +72,15 @@ Watchers and scanner processes are owned by the catalog and drained on backend s
 ### Fresh-scan fallback
 
 A watcher is used only when coverage can be established safely. If it is unavailable (for
-example, recursive watching cannot safely cover a tree with nested mounts), the root reconciles
-once behind its first request and then serves that reconciled snapshot as complete; changes
-made while coverage is unavailable are observed by a later restart or reconciliation. Watcher
-errors, notification overflow or lost coverage keep serving the last-known rows while a
-reconciliation scan runs in the background. A failed or cancelled scan is never published as
-a complete result: cold roots with nothing to serve keep reporting a partial result and retry
-on later requests, and a cold request that waits for a scan's first matches observes that
-failure. Index errors surface when a request first reads persisted rows. A warm cache read is
-never used to claim that changes made while Urd was stopped have been observed.
+example, recursive watching cannot safely cover a tree with nested mounts), requests serve
+last-known rows as Refreshing while a single-flight background reconciliation runs. A cold
+request performs its initial scan; later requests reconcile changes made while coverage was
+unavailable. Watcher errors, notification overflow or lost coverage keep serving the last-known
+rows while a reconciliation scan runs in the background. A failed or cancelled scan is never
+published as a complete result: cold roots with nothing to serve keep reporting a partial
+result and retry on later requests, and a cold request that waits for a scan's first matches
+observes that failure. Index errors surface when a request first reads persisted rows. A warm
+cache read is never used to claim that changes made while Urd was stopped have been observed.
 
 The derived cache location uses SQLite sidecars as needed. Rebuilding the catalog does not
 remove or rewrite the session database. The catalog itself does not delete project files or

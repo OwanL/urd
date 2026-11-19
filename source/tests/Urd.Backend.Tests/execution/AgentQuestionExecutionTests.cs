@@ -18,6 +18,7 @@ using static Urd.Backend.Tests.Support.TestAsync;
 namespace Urd.Backend.Tests.Execution;
 
 public sealed class AgentQuestionExecutionTests {
+  private const string AuxiliaryModel = "question-test";
   private const string Reminder = "[CURRENT QUESTION REMINDER]\n";
   private static readonly string compactedPrompt = "  exact question 🧭\r\n" + new string('?', 100_000) + "\n  ";
 
@@ -558,10 +559,11 @@ public sealed class AgentQuestionExecutionTests {
 
     private QuestionFixture(Func<CancellationToken, Task<ChatResponse>>? summarize) {
       store = UrdStore.Open(database.Path);
-      // A selector with no configured bucket falls back to the session model; without one,
-      // prepass model resolution fails and pruning keeps every candidate.
       if (summarize is not null)
-        providers = new ProviderManager(store, () => new Uri("http://localhost:54321/api/providers/callback"));
+        providers = new ProviderManager(store, () => new Uri("http://localhost:54321/api/providers/callback"),
+            new ScriptedOpenAIHandler("""
+              {"object":"list","data":[{"id":"question-test","object":"model","created":1700000000,"owned_by":"fixture","context_window":32000}]}
+              """, "application/json"));
       tools = [probe];
       Client = summarize is null ? new ScriptedChatClient(RespondToConversation) : new ScriptedChatClient(
           (request, cancellation) => request.Purpose switch {
@@ -597,6 +599,7 @@ public sealed class AgentQuestionExecutionTests {
     internal static async Task<QuestionFixture> OpenAsync(Func<CancellationToken, Task<ChatResponse>>? summarize = null) {
       var fixture = new QuestionFixture(summarize);
       try {
+        await fixture.ConfigureAuxiliaryModelAsync();
         fixture.Sender = await fixture.Manager.CreatePrimaryAsync();
         fixture.Respond(Probe("sender"), Complete);
         Guid senderRun = await StartAsync(fixture.Sender, "sender boot");
@@ -618,6 +621,15 @@ public sealed class AgentQuestionExecutionTests {
         await fixture.DisposeAsync();
         throw;
       }
+    }
+
+    private async Task ConfigureAuxiliaryModelAsync() {
+      if (providers is null)
+        return;
+      ProviderConnection connection = await providers.AddCustomAsync(new("question-test", LlmApi.OpenAIResponses,
+          new Uri("https://fixture.invalid/v1"), AuthenticationMethod.None)).WaitAsync(TestTimeout);
+      await providers.RefreshModelCatalogAsync(connection.Id).WaitAsync(TestTimeout);
+      new PreferenceManager(store).SetBucketModels(ModelBucket.Small, [new(connection.Id, AuxiliaryModel)]);
     }
 
     internal (TaskCompletionSource Entered, TaskCompletionSource Release) HoldProbeCleanup() {

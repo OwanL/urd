@@ -16,6 +16,8 @@ using static Urd.Backend.Tests.Support.TestAsync;
 namespace Urd.Backend.Tests.Sessions;
 
 public sealed class InstructionResourceIntegrationTests(ITestOutputHelper output) {
+  private const string AuxiliaryModel = "instruction-resource-test-auxiliary";
+
   [Theory]
   [InlineData(true)]
   [InlineData(false)]
@@ -30,9 +32,14 @@ public sealed class InstructionResourceIntegrationTests(ITestOutputHelper output
     int? selectorThreshold = null;
     var selectors = new List<ScriptedRequest>();
     ScriptedRequest? main = null;
-    await using var fixture = new ExecutionFixture(new ScriptedChatClient(Route), [],
-        store => new(store, () => throw new InvalidOperationException("No callback expected."),
-            new ScriptedOpenAIHandler("{}", "application/json")));
+    ProviderManager providers = null!;
+    await using var fixture = new ExecutionFixture(new ScriptedChatClient(Route), [], store => providers = new(store,
+        () => throw new InvalidOperationException("No callback expected."),
+        new ScriptedOpenAIHandler(ModelCatalog(AuxiliaryModel), "application/json")));
+    ProviderConnection connection = await providers.AddCustomAsync(new("instruction-test-auxiliary", LlmApi.OpenAIResponses,
+        new Uri("https://fixture.invalid/v1"), AuthenticationMethod.None)).WaitAsync(TestTimeout);
+    await providers.RefreshModelCatalogAsync(connection.Id).WaitAsync(TestTimeout);
+    new PreferenceManager(fixture.Store).SetBucketModels(ModelBucket.Small, [new(connection.Id, AuxiliaryModel)]);
     string project = Path.Combine(fixture.Session.WorkingDirectory!, "project");
     var expected = new Dictionary<string, string>(StringComparer.Ordinal);
     for (int index = 0; index < count; index++) {
@@ -129,6 +136,11 @@ public sealed class InstructionResourceIntegrationTests(ITestOutputHelper output
       }
     }
   }
+
+  private static string ModelCatalog(string modelId) => JsonSerializer.Serialize(new {
+    @object = "list",
+    data = new[] { new { id = modelId, @object = "model", created = 1_700_000_000, owned_by = "fixture", context_window = 32_000 } }
+  });
 
   private static async Task CatalogIndexSettledAsync(InstructionResourceDiscovery discovery, string directory, int count) {
     using var settle = new CancellationTokenSource(TestTimeout);

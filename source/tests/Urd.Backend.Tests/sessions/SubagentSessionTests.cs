@@ -1,7 +1,9 @@
+using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Context;
 using Urd.Core.Execution;
+using Urd.Core.Preferences;
 using Urd.Core.Providers;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
@@ -15,6 +17,7 @@ namespace Urd.Backend.Tests.Sessions;
 // A bounded child's first request carries the inherited context and then its task, runs the
 // subagent prepass kinds, and titles itself from the task alone.
 public sealed class SubagentSessionTests {
+  private const string AuxiliaryModel = "subagent-title-auxiliary";
   private const string ChildTitle = "bounded orbit";
   private const string AssignmentTask = "orbit compass mission";
   private const string ParentContextBlock = """
@@ -33,8 +36,12 @@ public sealed class SubagentSessionTests {
 
     var database = new TemporaryDatabase();
     var store = UrdStore.Open(database.Path);
-    // An unconfigured bucket resolver makes the title prepass run with the child's own chat model.
-    var providers = new ProviderManager(store, () => new Uri("http://localhost:54321/api/providers/callback"));
+    var providers = new ProviderManager(store, () => new Uri("http://localhost:54321/api/providers/callback"),
+        new ScriptedOpenAIHandler(Catalog(AuxiliaryModel), "application/json"));
+    ProviderConnection auxiliaryConnection = await providers.AddCustomAsync(new("subagent-title-auxiliary",
+        LlmApi.OpenAIResponses, new Uri("https://fixture.invalid/v1"), AuthenticationMethod.None)).WaitAsync(TestTimeout);
+    await providers.RefreshModelCatalogAsync(auxiliaryConnection.Id).WaitAsync(TestTimeout);
+    new PreferenceManager(store).SetBucketModels(ModelBucket.Small, [new(auxiliaryConnection.Id, AuxiliaryModel)]);
     var tool = new TestAgentTool("unused", (_, _, _) => Task.FromResult(new ToolOutput("unused", [])));
     Guid parentId = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     var session = new SubagentSession(store.Sessions.CreateSubagent(Guid.NewGuid(),
@@ -92,4 +99,9 @@ public sealed class SubagentSessionTests {
       }
     }
   }
+
+  private static string Catalog(string modelId) => JsonSerializer.Serialize(new {
+    @object = "list",
+    data = new[] { new { id = modelId, @object = "model", created = 1_700_000_000, owned_by = "fixture", context_window = 32_000 } }
+  });
 }

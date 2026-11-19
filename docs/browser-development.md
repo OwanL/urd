@@ -40,12 +40,12 @@ default directory; built-in instructions always remain. Response headers freeze 
 (`medium` shown as a bare label) and start time. Boundary-anchored preparation rows cover tools,
 skills, instructions and title, with truthful running/completed/fallback/cancelled/interrupted
 outcomes. Rows stay visible while preparation runs, then collapse beneath the response header.
-Fallback rows read as a warning ("Failed · kept all") because selection failed and every
-candidate was retained. When a first-message preparation had no prepass model configured and fell
-back to the chat's own model (summaries carry `usedSessionModel`), a quiet line under the
-disclosure says so and offers a Choose models action that opens Settings on the model-buckets tab;
-compaction preparations never show it. The disclosure flags settled issues and restores the rows on demand; rows being inspected stay
-open until pointer and keyboard focus leave. Read-only tooltips load detail and resource pages
+All four purposes default to Small and resolve through the configured bucket mapping or an
+exact provider/model override. If neither resolves, skip the call with a warning, never use chat;
+selection failures retain only protected skills/instructions and all tools. Missing or failed
+title generation uses the first-prompt fallback when it yields a title. The disclosure flags
+settled issues and restores the rows on demand; rows being inspected stay open until pointer
+and keyboard focus leave. Read-only tooltips load detail and resource pages
 on demand, including model, elapsed
 time, cost (unknown or estimated where applicable), and bounded provider-emitted reasoning and
 output previews; reasoning is never inferred. Open tabs receive backend title metadata via

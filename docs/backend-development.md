@@ -100,17 +100,17 @@ Primary execution is integrated; tested subagent composition adds no delegation 
 
 A separate first-message-only `TitleGenerator` runs alongside pruning and may outlive
 main responses without blocking their requests/output. It validates 1–25 Unicode scalar
-values, including spaces, permits one correction and otherwise leaves the placeholder.
-The guarded title claim prevents retries on later messages/reopen; title metadata is
-published independently. Its work remains owned/joined before execution settlement.
+values, including spaces, and permits one correction. The guarded title claim
+prevents retries on later messages/reopen; title metadata is published independently.
+Its work remains owned/joined before execution settlement.
 
-`ModelSelector` resolves configured small/medium/large buckets or exact provider/model
-overrides through existing preferences. Each auxiliary operation defaults to `small`; there is no
-model-ID quality guessing. Configure that bucket in Settings → Model buckets. When a purpose has no
-configured choice, or the configured provider/model is unavailable, prepass runs on the run's own
-chat selection unchanged, including its reasoning effort, and each preparation summary reports
-`usedSessionModel` so the browser can show the stand-in. The instruction context-limit retry
-above does not change how the auxiliary model is selected.
+`ModelSelector` resolves each purpose through its configured bucket mapping or an exact
+provider/model override. All prepass purposes default to Small. Configure mappings in
+Settings → Model buckets and purpose choices in Settings → Prepass. If no model resolves,
+skip the call with a warning; never use chat. Selection failures retain only protected
+skills and instructions, but retain all tools. For an unavailable or failed title, use the
+first prompt normalized and truncated to 25 characters; keep the placeholder if no text
+remains. The instruction context-limit retry above does not change selection.
 Auxiliary conversations use isolated durable histories and
 only the supplied `read`/`bash` exploration capability set. See the [pruning plan](pruning-plan.md)
 for the fresh/manual/automatic input contract and evidence limits.

@@ -281,16 +281,10 @@ internal sealed class SessionExecution : IDisposable {
   private string TitlePrompt(string[] prompts) =>
       session.Kind == SessionKind.Subagent ? prompts[^1] : prompts[0];
 
-  // An unset or unresolvable purpose choice runs on the run's own chat selection, recorded so the
-  // UI can flag it; provider call failures after resolution keep their existing fallback behavior.
+  // Missing or unavailable choices use the caller's non-model fallback, never the chat model.
   private async Task<AuxiliaryModelResolution> ResolvePrepassModelAsync(AuxiliaryModelPurpose purpose,
-      UserPreferences captured, CancellationToken cancellation) {
-    try {
-      return new AuxiliaryModelResolution(await session.ResolveAuxiliaryModelAsync(purpose, captured, cancellation), false);
-    } catch (AuxiliaryModelUnavailableException) {
-      return new AuxiliaryModelResolution(selection, true);
-    }
-  }
+      UserPreferences captured, CancellationToken cancellation) =>
+      new(await session.ResolveAuxiliaryModelAsync(purpose, captured, cancellation), false);
 
   // Title work never blocks or changes the execution. A failed or cancelled generation publishes
   // the first prompt as the final title, so the session is addressable once the execution settles.

@@ -58,12 +58,11 @@ retry with the largest unprotected files omitted first (by UTF-8 body size)
 and surface a cumulative warning. Protected documents remain excluded. This does not
 select full skill-body loading or change the other categories' input contracts.
 
-**Model selection decision:** each category uses the configured `small` model bucket
-by default. In Settings, users can override that default with a specific provider/model
-for each category, including a local-inference model. Store these choices in user
-preferences. An override affects that category, not the shared `small` bucket itself.
-This auxiliary-operation setting does not add an exact-model override to agent-created
-session APIs.
+**Model selection decision:** all four purposes default to Small; resolve the selected
+bucket through its configured mapping or an explicit exact provider/model override. If
+unavailable, skip with a warning and never substitute chat; use the title's first-prompt
+fallback when it yields a title. See [Selection failure](#selection-failure) for category fallbacks.
+This auxiliary setting does not add exact-model overrides to agent-created session APIs.
 
 The implementation must be modular, extendable and share common execution rather than
 duplicate pruning loops for the three categories. Separate conversations do not imply
@@ -95,9 +94,6 @@ a pending generation attempt. See [agent communication](agent-communication-desi
 
 - Supply title-generation instructions and the user prompt.
 - Permit optional `read`/`bash` exploration, independently of the pruning conversations.
-- Default to the configured `small` bucket, with its own specific provider/model override
-  in user preferences, including local models. An override affects title generation,
-  not the shared bucket or the three pruning settings.
 - **Title length decision:** generated titles have a strict maximum of **25 characters,
   including spaces**. Enforce the limit in application validation rather than relying
   solely on prompt wording. Duplicate suffixes are included in the 25-character maximum.
@@ -525,7 +521,8 @@ reasoning effort, and the preparation summaries report `usedSessionModel` for th
 No silent main-model inheritance is introduced: the stand-in is recorded, not hidden. A title
 attempt that still fails keeps the placeholder (current implementation; superseded by the
 settled fallback in
-[agent communication](agent-communication-design.md#addressing)).
+[agent communication](agent-communication-design.md#addressing)). The chat and placeholder
+fallback notes are historical.
 
 Earlier proposal examples in this document preserve design history, not a frozen API
 or statements that these mechanisms remain unimplemented. Concrete discovery rules live
@@ -610,13 +607,7 @@ the existing host and databases were untouched. This is not live-model quality e
   agent-facing filename scope and other-harness exclusions as discovery changes; neither ingest
   arbitrary Markdown nor silently limit the feature to two filenames. Do not invent new
   user configuration locations without review.
-- Inspect the retained bucket policy when implementing the common resolver; do not guess
-  model quality from IDs or widen enabled providers. When a purpose choice is unresolvable,
-  that category runs on the run's chat selection with the stand-in recorded in its summary;
-  a title attempt that still fails uses the first-prompt fallback (see
-  [agent communication](agent-communication-design.md#addressing)). Exact configured
-  resolution mechanics belong to that implementation checkpoint rather than four different
-  selection implementations.
+- Use one resolver; do not guess model quality, widen providers or use the superseded chat stand-in.
 - Specify title counting once for server validation and tests. Preserve the approved strict
   25-character maximum, one corrective response and first-prompt failure fallback; duplicate
   suffixes must also fit within 25 characters. Do not add manual naming features.

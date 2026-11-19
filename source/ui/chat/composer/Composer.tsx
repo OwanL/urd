@@ -1,5 +1,5 @@
 import "../../controls/selector.css";
-import type { ComponentChildren, TargetedKeyboardEvent } from "preact";
+import type { ComponentChildren, RefObject, TargetedKeyboardEvent } from "preact";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Icon } from "../../controls/Icon.tsx";
 import { IconButton } from "../../controls/IconButton.tsx";
@@ -11,6 +11,7 @@ import "./composer.css";
 import { ReasoningPicker } from "./ReasoningPicker.tsx";
 
 interface ComposerProps {
+  input: RefObject<HTMLTextAreaElement | null>;
   text: string;
   onTextChange: (text: string) => void;
   models: readonly ModelPickerOption[];
@@ -46,6 +47,7 @@ function resizeInput(input: HTMLTextAreaElement) {
 }
 
 export function Composer({
+  input,
   text,
   onTextChange,
   models,
@@ -74,7 +76,6 @@ export function Composer({
   subagentProviders,
   indicators,
 }: ComposerProps) {
-  const input = useRef<HTMLTextAreaElement>(null);
   const controls = useRef<HTMLDivElement>(null);
   const selections = useRef<HTMLDivElement>(null);
   const actions = useRef<HTMLDivElement>(null);
@@ -97,7 +98,7 @@ export function Composer({
     const textarea = input.current;
     if (!textarea) return;
     resizeInput(textarea);
-  }, [text]);
+  }, [input, text]);
 
   useEffect(() => {
     const textarea = input.current;
@@ -110,12 +111,13 @@ export function Composer({
     });
     observer.observe(textarea);
     return () => observer.disconnect();
-  }, []);
+  }, [input]);
 
   useLayoutEffect(() => {
     const row = controls.current;
     const pinned = selections.current;
     const buttons = actions.current;
+    const textarea = input.current;
     if (!row || !pinned || !buttons) return;
     function layout() {
       if (!row!.clientWidth) return;
@@ -143,7 +145,7 @@ export function Composer({
           document.getElementById(control.getAttribute("aria-controls")!)?.contains(focused),
         )
       )
-        input.current?.focus({ preventScroll: true });
+        textarea?.focus({ preventScroll: true });
       setOverflowOpen(false);
       setInlineAccounting(next);
     }
@@ -152,7 +154,15 @@ export function Composer({
       if (element) observer.observe(element);
     layout();
     return () => observer.disconnect();
-  }, [inlineAccounting, overflowOpen, modelLabel, reasoningEffort, hasProviders, overflowId]);
+  }, [
+    inlineAccounting,
+    overflowOpen,
+    modelLabel,
+    reasoningEffort,
+    hasProviders,
+    overflowId,
+    input,
+  ]);
 
   function send(event: TargetedKeyboardEvent<HTMLTextAreaElement>) {
     if (

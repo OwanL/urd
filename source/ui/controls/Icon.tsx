@@ -21,7 +21,8 @@ export type IconName =
   | "background"
   | "subagents"
   | "return"
-  | "ask";
+  | "ask"
+  | "warning";
 
 const paths: Record<IconName, string> = {
   send: "m22 2-7 20-4-9-9-4 20-7ZM22 2 11 13",
@@ -53,6 +54,8 @@ const paths: Record<IconName, string> = {
     "M16.125 14.25c2.625.15 4.125 1.65 4.5 4.5",
   return: "M9 10 4 15l5 5M20 4v7a4 4 0 0 1-4 4H4",
   ask: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z",
+  warning:
+    "M10.3 4.9 2.5 18a2 2 0 0 0 1.7 3h15.6a2 2 0 0 0 1.7-3L13.7 4.9a2 2 0 0 0-3.4 0ZM12 9v4m0 4h.01",
 };
 
 export function Icon({ name }: { name: IconName }) {

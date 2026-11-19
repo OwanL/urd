@@ -8,7 +8,7 @@ import { UsageOverview } from "../usage/UsageOverview.tsx";
 import { sameContextModel, type LlmSelection } from "../providers/LlmSelection.ts";
 import type { SessionClient } from "../sessions/SessionClient.ts";
 import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
-import { missingModelBuckets } from "../preferences/ModelBucketSelection.ts";
+import { ModelBucketSetup } from "./ModelBucketSetup.tsx";
 import { preferenceSaveBlocks } from "../preferences/usePreferences.ts";
 import type { PreferencesState } from "../preferences/usePreferences.ts";
 import type { ProviderClient } from "../providers/ProviderClient.ts";
@@ -134,6 +134,7 @@ export function Chat({
   const [workingDirectoryLocked, setWorkingDirectoryLocked] = useState(false);
   const [workingDirectoryNotice, setWorkingDirectoryNotice] = useState<string | null>(null);
   const workingDirectoryGate = useRef(false);
+  const composerInput = useRef<HTMLTextAreaElement>(null);
   const updateWorkingDirectoryGate = useCallback((locked: boolean, message: string | null) => {
     workingDirectoryGate.current = locked;
     setWorkingDirectoryLocked(locked);
@@ -191,14 +192,6 @@ export function Chat({
     !pendingInputRemoval &&
     !compactionPending,
   );
-  const missingBuckets =
-    showWorkingDirectory &&
-    models.hasProviders &&
-    !preferences.loading &&
-    !preferences.error &&
-    preferences.preferences
-      ? missingModelBuckets(preferences.preferences.modelChoices)
-      : [];
   const selection = state.selection;
   const modelKey = selection ? `${selection.connection.id}/${selection.modelId}` : null;
   const error = readError || chat.error || stop?.error;
@@ -289,26 +282,18 @@ export function Chat({
                   onSnapshot={acceptSnapshot}
                   onRefresh={onRefresh}
                 />
-                {missingBuckets.length > 0 && (
-                  <div class="empty-chat-buckets">
-                    <span>Unassigned buckets</span>
-                    <div class="empty-chat-buckets-value">
-                      <ul class="empty-chat-buckets-list" role="list">
-                        {missingBuckets.map((bucket) => (
-                          <li key={bucket}>{bucket}</li>
-                        ))}
-                      </ul>
-                      <button
-                        class="empty-chat-buckets-action"
-                        type="button"
-                        onClick={onChooseModels}
-                      >
-                        Choose models
-                      </button>
-                    </div>
-                  </div>
-                )}
                 <UsageOverview active={active && visible} refreshKey={refresh} />
+                {showWorkingDirectory && models.hasProviders && (
+                  <ModelBucketSetup
+                    preferences={preferences}
+                    models={models}
+                    disabled={!ready}
+                    onCompleteFocus={() => {
+                      if (composerInput.current?.getClientRects().length)
+                        composerInput.current.focus({ preventScroll: true });
+                    }}
+                  />
+                )}
               </div>
             ) : null
           }
@@ -449,6 +434,7 @@ export function Chat({
           />
         )}
       <Composer
+        input={composerInput}
         subagentProviders={
           active && (
             <SubagentProviderControl

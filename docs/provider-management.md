@@ -28,7 +28,8 @@ wire records and database shapes are unchanged. Shared async locking lives in
 [`DatabaseSchema.cs`](../source/backend/harness/storage/DatabaseSchema.cs) owns the current schema
 and supported version. Provider connections, host identity, model settings, native context,
 frozen selections and transcript/request facts share that schema; there is no second database
-or lease. Incompatible pre-release databases require an explicit reset, not migration.
+or lease. Schema 36 is the baseline for future database upgrades; no migration is needed
+at that version today.
 `ProviderManager` borrows the store, owns its HTTP transport, and drains requests,
 sign-ins and refresh/revocation work before disposal. The host joins this drain with
 its existing HTTP/session shutdown barrier.

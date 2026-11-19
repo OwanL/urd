@@ -191,8 +191,8 @@ receipts have a refusal reason and null execution ID. Stop receipts and
 `MessageRef` (including nested content cursors) uses `executionId`.
 The vocabulary cleanup preserved saved IDs, revisions, SQL identifiers and decisions.
 The current schema stores frozen selection, transcript metadata, request usage, known
-send-attempt provenance and not-sent tracking. Incompatible pre-release schemas must be
-reset, not migrated; [backend development](backend-development.md) identifies the version.
+send-attempt provenance and not-sent tracking. See [backend development](backend-development.md)
+for current version handling and the schema 36 baseline.
 Session routes retain
 their local admission gates, status mapping, no-store and read-cancellation rules. Historical
 wire checks covered the renamed receipt, Stop, snapshot and cursor fields and rejected legacy
@@ -235,9 +235,9 @@ compact command identities/hashes and usage remain. Removed Send receipts return
 than exposing deleted text or allowing an old Send to recreate it. History replacement does
 not undo external tool effects. There is no branch archive or undo.
 
-The current schema is **31**, including the compaction-trigger preference. Existing schemas require explicit database
-recreation under the pre-release policy. Never reset an active profile as part of verification
-or automatically activate this build against one.
+See [backend development](backend-development.md) for the current schema and the schema 36
+upgrade baseline. Never reset or automatically activate a build against an active profile
+as part of verification.
 
 ### Frozen LLM selection
 

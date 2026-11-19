@@ -4,8 +4,7 @@
 Windows distributable on the owner's machines, not a developer checkout or the earlier
 [source-packaging fixture](repo-foundations.md#evidence--conventional-pattern-and-bounded-trial).
 The trial is private and should exercise the intended release workflows. It does not authorize
-publishing, installing a candidate now, using live data for qualification or changing the
-supported data policy. The browser ships first; VS Code follows. Desktop, LAN/Tailscale,
+publishing, installing a candidate now or using live data for qualification. The browser ships first; VS Code follows. Desktop, LAN/Tailscale,
 automatic updates and macOS/Linux feature parity are outside the first Windows milestone.
 
 ## Agreed user flows
@@ -31,7 +30,7 @@ automatic updates and macOS/Linux feature parity are outside the first Windows m
   (for example, double-click `Build.cmd`), which gets missing pinned build tools and stages the
   result without replacing the running build. Explicitly run the staged build (for example,
   `Run Staged Build.cmd`). The custom copy starts with its own data; later rebuilds preserve
-  that copy's data, subject to the pre-release schema policy.
+  that copy's data, subject to the supported schema range.
 - **Share:** run **Package** (for example, `Package.cmd`) to produce a shareable download with
   the runnable app, the exact source it was built from, and the build recipe. No Git workflow,
   hosted build, official signing key or upload is required. The recipient uses the same start
@@ -102,10 +101,10 @@ results before claiming low overhead; do not silently change a target to make th
 - Run the [local verification suite](testing.md#verification) for the candidate and retain a short
   release record: revision, artifact/checksum, supported target, prerequisites, build-and-customize
   result, performance results and known limitations. Recheck affected gates on a rebuilt candidate.
-- Before a **supported** public release, the owner explicitly establishes the durable-data
-  baseline and reviews the upgrade/data-retention promise. Until then follow the pre-release
-  reset policy in [AGENTS.md](../AGENTS.md); don't add pre-release migrations or imply that
-  existing dev data is supported. Keep live data out of qualification.
+- [Schema 36 is the durable-data baseline](../AGENTS.md), including for development builds.
+  Qualify upgrades from schema 36 once a newer schema exists, including failed-upgrade recovery.
+  Before publishing, separately verify install, uninstall and reinstall preserve the copy's
+  chats, attachments, settings and sign-ins on the same machine. Use isolated data.
 - Review distribution channel, first-run Windows warnings/signing expectations and the evidence
   with the owner. Publishing the artifact is a separate decision, not a result of passing tests.
 - Keep the portability door honest with a follow-up macOS smoke check: build, start without

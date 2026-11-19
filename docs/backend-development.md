@@ -21,11 +21,14 @@ settings are available in the browser workspace, and production sessions borrow 
 `ProviderManager`. See [provider management](provider-management.md) for connection and
 credential behavior.
 
-Before the supported public data baseline, schema changes replace the schema rather than
-migrating it. A fresh/version-0 database creates all current tables and indexes in one
-transaction; version 36 reopens normally. Other versions fail with reset instructions:
-stop Urd, delete `urd.sqlite`, `urd.sqlite-wal` and `urd.sqlite-shm`, then restart.
-Urd never deletes these files automatically. Requests have only known not-attempted (1)
+A fresh/version-0 database creates all current tables and indexes in one transaction;
+version 36 reopens normally. The current build rejects other versions and does not
+remove or reset databases. Schema 36 is the [durable-data baseline](../AGENTS.md): the
+next schema change must provide an automatic startup migration, including in development
+builds. There is no migration step to run yet. Schemas below 36 are not supported for
+upgrade, and newer databases must not be downgraded.
+
+Requests have only known not-attempted (1)
 or attempted (2) provenance; transcript user entries require request links and receipts
 require their original model selection. Empty sessions still have no selection.
 Storage uses `response_id`/`response_final` and request-global chunk indexes.
@@ -358,9 +361,9 @@ discovery, not activity tracking or a complete summary API.
    [TranscriptHistoryReader.cs](../source/backend/harness/storage/transcript/TranscriptHistoryReader.cs) and
    [MessageContentReader.cs](../source/backend/harness/storage/messages/MessageContentReader.cs) — separate
    bounded reads in short transactions. [DatabaseSchema.cs](../source/backend/harness/storage/DatabaseSchema.cs)
-   owns current schema creation and version refusal; before the supported public data baseline,
-   changes replace the schema rather than adding migrations. Do not rely on historical migration
-   checkpoints as current compatibility behavior.
+   owns current schema creation and version refusal. Subsequent schema changes add startup
+   migrations from the supported baseline onward. Historical migration checkpoints do not
+   establish support for schemas below 36.
 4. [MessageContentTests.cs](../source/tests/Urd.Backend.Tests/storage/messages/MessageContentTests.cs) and
    [SessionSnapshotStorageTests.cs](../source/tests/Urd.Backend.Tests/storage/sessions/SessionSnapshotStorageTests.cs).
 

@@ -18,7 +18,7 @@ in maintenance cost and must not be used to evade the budget.
 | Boundary | Representative guarantees |
 | --- | --- |
 | Storage | Admission/receipt atomicity, durable output ordering, Stop retirement rollback, tool claim/result failure, provider/native-context rollback, Unicode content paging, indexed recent history and keyset listing. |
-| Schema | Fresh current-schema creation, reopen, refusal of incompatible versions with manual reset instructions, current constraints and large payload retention. No pre-release migrations. |
+| Schema | Fresh creation, reopen, refusal of unsupported versions, current constraints and large payload retention. With the first migration, add automatic upgrade and failure-recovery coverage on populated test data from the schema 36 baseline onward. |
 | Sessions | Concurrent exact retries, canonical handles, initiating selection, safe-boundary steering, stale Stop isolation, held cleanup/callbacks, failed Stop writes and multi-session shutdown. Starting-context composition and exact instruction/tool restoration across loops and reopening, without duplicate user input or stale-definition execution. |
 | Execution | Positive completion evidence, buffered Unicode output/deadline flush, write-failure fencing, parallel/background tool ownership, waiting, Stop/failure drain and explicit no-replay recovery. Real SDK loops exercise both provider APIs, direct/background image results, native context persistence and reopen. |
 | Providers | Issued identity/state/account binding, private context scope, uncertain refresh persistence/recovery, credential mutation and cancellation drain, representative rejected native output and secret-safe errors. |

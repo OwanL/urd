@@ -97,10 +97,9 @@ Manual compaction is a separate, addressable execution: Stop cancels and joins i
 and reopening never replays it. Busy Send cannot steer into manual compaction. Successful manual
 or automatic compaction appears as a **History compacted** transcript entry with an inspectable
 summary. No-op and failure feedback do not add a boundary; failure, cancellation and stale
-boundaries do not replace the previous summary. The pre-release schema policy requires a fresh
-disposable database or an explicit owner-approved reset of incompatible data; no automatic
-migration or deletion is performed. See [backend development](backend-development.md) for the
-current schema.
+boundaries do not replace the previous summary. Use an isolated database for verification.
+See [backend development](backend-development.md) for current schema handling and the schema 36
+upgrade baseline.
 
 ## Verification
 

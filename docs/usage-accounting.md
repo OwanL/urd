@@ -33,9 +33,8 @@ inventing final usage. Checkpoints are throttled to 250 ms; a crash can lose pro
 since the last checkpoint. Provider-reported usage lost in a disconnected stream
 cannot be recovered automatically.
 
-The pre-release schema policy applies: older databases are refused, not migrated.
-Do not run a newer-schema build against an active older-schema profile or delete
-that profile to make verification pass. Use an isolated temporary profile.
+Usage records follow the [durable-data policy](../AGENTS.md): future upgrades must preserve
+them from schema 36 onward. Use isolated profiles for verification, never an active user profile.
 
 ## Closed-session retention
 

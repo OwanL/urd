@@ -595,10 +595,9 @@ the existing host and databases were untouched. This is not live-model quality e
 - Persist the title-attempt claim before its provider contact, linked to the first-message
   boundary. Reopen/restart must neither regenerate nor replay a naming tool. Record a
   successful title through the guarded session snapshot/change path, not browser-only state.
-- Follow the pre-release policy: replace the current database schema and bump its version
-  when the shapes change; no migrations/legacy readers. Version/discard incompatible
-  browser state if its shape changes. Never reset the user's database or profile as a
-  verification shortcut; use owned temporary data.
+- Follow the [durable-data policy](../AGENTS.md) for database schema changes. Version/discard
+  incompatible browser state. Never reset the user's database or profile as a verification
+  shortcut; use owned temporary data.
 
 **Bounded engineering choices, not another behavior questionnaire:**
 

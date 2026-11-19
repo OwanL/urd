@@ -2,9 +2,9 @@
 
 - Keep verification local. Do not add CI workflows or CI-only tooling unless the owner explicitly requests it.
 
-Before the first supported public release, schema changes replace the current schema, bump its version and require local database recreation. Do not add migrations, legacy readers or compatibility aliases. Mismatched databases fail with clear reset instructions. This policy ends only when the owner explicitly establishes a supported durable-data baseline; migration support starts from that baseline.
+Schema 36 is the durable-data baseline for Urd, including development builds. Every later durable database schema change must bump the version and include a migration from the previous supported version. Apply needed migrations automatically on startup before using the data. Keep the prior data recoverable if an upgrade fails; never fall back to a reset. Do not add migrations for schemas below 36 or attempt to downgrade a newer database. Verify upgrades and failure recovery with owned test profiles, not live data.
 
-Apply the same no-migration policy to browser-persisted state: version its shape and discard incompatible saved state rather than migrating it.
+Browser-persisted UI state is separate: version its shape and discard incompatible saved state rather than migrating it.
 
 # style guide
 

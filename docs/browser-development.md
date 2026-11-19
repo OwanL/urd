@@ -136,8 +136,8 @@ newer draft overlay is retained. Command journals synchronously save the complet
 workspace before dispatch. Failed reads/writes block commands and offer an explicit
 retry. If cleanup alone fails after a successful save, the saved state remains usable
 and cleanup can be retried. Storage access failures stay fail-closed until retry succeeds.
-Before the supported public data baseline, incompatible or malformed saved workspace/draft
-shapes are discarded, not migrated. The current shape in
+Browser state is separate from the backend database: incompatible or malformed saved
+workspace/draft shapes are discarded, not migrated. The current shape in
 [`WorkspaceState.ts`](../source/ui/app/WorkspaceState.ts) preserves explicit model metadata
 alongside placeholder/generated title provenance, so a generated backend title is not
 mistaken for an unnamed tab. Incompatible earlier state is discarded.

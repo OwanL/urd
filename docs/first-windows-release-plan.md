@@ -8,6 +8,9 @@ publishing, installing into a live profile or using live data for qualification.
 first; VS Code follows. Desktop, LAN/Tailscale, automatic updates and macOS/Linux feature parity
 are outside the first Windows milestone.
 
+The [private trial handoff](private-windows-trial-handoff.md) records the retained candidate,
+verification to date, and how to resume on another machine.
+
 ## Agreed user flows
 
 - **Start on Windows:** for a portable download, download the Windows ZIP, choose **Extract All…**,

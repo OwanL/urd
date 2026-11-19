@@ -1,0 +1,32 @@
+# Private Windows trial handoff
+
+**Paused 2026-11-20.** Keep the portable ZIP for the private Windows x64 trial. Resume on a clean Windows 11 x64 machine; the local VM is optional. This is not a public release or a decision about the public installer. The [release plan](first-windows-release-plan.md) still owns the wider qualification and publishing gates.
+
+## Candidate
+
+- Source: `4e46aab1dded6f14f4f4c1cf59dab8a4cb061052` (`4e46aab`), including the PortableGit extraction fix. Use this exact candidate to test packaging without pulling in unrelated later edits. A newer release candidate needs the affected checks repeated.
+- Local ZIP (relative to the repo): `builds/private-windows-trial/4e46aab/Urd-win-x64-20261120-120924-b274418d.zip` (174,025,421 bytes). It is Git-ignored and has not been published or uploaded.
+- SHA-256: `545086BBD6A930A0EA148539159A9392BCEE30FEC9B47B3188AE0835BEC3B3EF`. Use `Get-FileHash -Algorithm SHA256` on both sides of a transfer. If the retained ZIP is gone, extract a `git archive` of the exact commit into a fresh writable directory and run `Package.cmd` there. Record a new checksum; builds need not be byte-for-byte reproducible. Do not package the shared working tree.
+
+## What was verified
+
+| Check | Evidence |
+| --- | --- |
+| Package and launch | A ZIP from `2c1f3b3` ran on the Windows developer host from a path containing spaces, served `/health` (204) and `/` (200), and reused the same origin on repeat launch. The later `4e46aab` ZIP was built successfully from a clean commit snapshot. |
+| Customize and share | On the host, a visible edit built from the extracted copy without changing the running app. Explicit staged activation served the edit and preserved copy-local data. The new ZIP contained the edit in both source and built UI, omitted the data canary, and started with fresh data. |
+| PortableGit fallback | A direct probe reproduced a success exit without Bash at the requested space-containing extraction path. `4e46aab` uses the pinned SFX's default directory beside the download. The fixed helper downloaded and verified PortableGit `2.56.1.windows.1`, extracted it to an empty disposable cache containing spaces, then ran Git Bash and `git --version`. This was a helper probe on the host, not a complete no-Git launch. |
+| Missing build tools | With a disposable cache and .NET/Node/npm absent from the test process's `PATH`, a cold host run populated the pinned SDK and Node/npm (10.0.404, 24.16.0, 11.13.0); a follow-up using that cache completed a staged build. This did not remove the host's installed tools or establish clean-guest timings. |
+| Regression tests | 753 backend tests passed on the earlier packaging snapshot; this is not a full-suite claim for `4e46aab`. |
+
+## Resume on another machine
+
+1. Use a clean Windows 11 x64 machine or guest with a **standard user**, a writable folder, no installed Git for Windows, no .NET or Node tools, no existing `%LOCALAPPDATA%\Urd` cache, and network access for the official tool downloads and package feeds. Transfer only the ZIP over an approved private channel such as `scp` over an already configured SSH connection, then verify the hash. Do not copy worktrees, credentials, or personal profiles. Use a synthetic profile and a local provider stub if exercising chat and tools.
+2. In an interactive desktop session, use Explorer's **Extract All** to a path with spaces and double-click `Start.exe` without flags. Record any reputation or other Windows warnings as observed; if the transfer did not mark the ZIP as an internet download, report that limitation rather than treating the absence of a warning as evidence. Do not change Windows security settings for the trial. Confirm first launch provisions PortableGit in the user cache, starts one loopback server and opens the default browser. Note first-launch duration and capture `data/server.log` on failures when present.
+3. Confirm a second launch reopens the same copy without a second server. Close the browser and use the tray to reopen it; then use **Stop Urd**, confirm that the backend exits, and restart. Record browser and tray results separately from backend checks. Repeat installed-Git reuse on an environment that already has Git for Windows.
+4. Edit the extracted `source/ui/index.html` title, run `Build.cmd` and confirm it obtains the missing build tools without changing the running app. Stop that copy, run `Run Staged Build.cmd`, and check that `Start.exe` reopens the edit and copy-local data remains. Run `Package.cmd`, extract the resulting ZIP separately, and check that the edit is in both served UI and editable source and that the new copy has no old data. Record Windows version, account type, exact ZIP hash, timings, pass/fail and any gaps.
+
+**SSH is good for transfer and headless checks, not the desktop gate.** From PowerShell 5.1 on the target, `& '.\Start.exe' --no-open --no-tray` in the extracted folder reports the loopback origin. Use that URL on the target for `/health` and `/`, repeat launch and compare the origin and PID, and check the per-user cache. Use a separate fresh profile or a VM checkpoint for the desktop first-run test if the headless pass warmed the cache. An interactive login (local, RDP or the guest console) is required for Explorer warnings, automatic browser opening, and tray Open/Stop. Stop only the test copy; do not expose Urd on the LAN for this test.
+
+## Local VM fallback
+
+`Urd-Clean-Windows-Trial` was created as a separate Gen 2 Hyper-V VM with Secure Boot, vTPM, a new dynamic disk and Windows 11 Enterprise Evaluation applied offline. Hyper-V refused the first boot because it could not allocate 4 GB of RAM (`0x800705AA`). The VM was left off; there is no completed OOBE or baseline checkpoint. The existing Reveal VM was not changed. If resuming locally, do not rerun provisioning against the existing disk: start only the Urd VM after freeing memory, finish Windows setup, and take a clean checkpoint before copying in Urd. The VM disk and local provisioning records remain under `%LOCALAPPDATA%\Temp\urd-hyperv-trial-4e46aab`; the local helper credential and VM disk must not be transferred to the remote machine. Treat that temp folder as in-use Hyper-V storage until the VM is explicitly moved or retired.

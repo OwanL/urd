@@ -109,9 +109,12 @@ work and scheduled follow-ups can continue without a visible UI, consuming usage
 changing files. Closing a session is a separate final action, not the current tab-hide action.
 
 Users need a clear way to find and stop a running backend. On Windows, the server shows a
-basic tray icon (address, Open, Stop); a separate background app and startup-at-login policy
-are not selected. Do not
-turn background operation into a generic process-management platform.
+basic tray icon (address, Open, Stop). Once the VS Code client is available, **Open in VS Code**
+from the tray opens the same chats in the sidebar, adding the extension if needed. A user who
+already has Urd must not have to visit the Marketplace or install another copy of Urd. The
+[Windows release plan](first-windows-release-plan.md#agreed-user-flows) records the concrete flows.
+A separate background app and startup-at-login policy are not selected. Do not turn background
+operation into a generic process-management platform.
 
 ## Start fresh; preserve Urd's own data
 

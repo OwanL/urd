@@ -1,14 +1,49 @@
 # First Windows release plan
 
-**Planning only.** Let the current Urd work settle before starting release implementation or
-qualification. This plan does not authorize publishing, installing a candidate, running against
-live data, or changing the project's supported data policy.
-
-The goal is one browser-first, same-machine Windows release that people can run, inspect, edit
-and rebuild. Qualify the actual Urd distributable, not a developer checkout or the earlier
+**UX agreed; implementation deferred.** After the current Urd work lands, qualify the real
+Windows distributable on the owner's machines, not a developer checkout or the earlier
 [source-packaging fixture](repo-foundations.md#evidence--conventional-pattern-and-bounded-trial).
-Follow [product direction](product-direction.md); no desktop/editor host, LAN/Tailscale, updater,
-extension system or macOS/Linux feature parity is needed for this release.
+The trial is private and should exercise the intended release workflows. It does not authorize
+publishing, installing a candidate now, using live data for qualification or changing the
+supported data policy. The browser ships first; VS Code follows. Desktop, LAN/Tailscale,
+automatic updates and macOS/Linux feature parity are outside the first Windows milestone.
+
+## Agreed user flows
+
+- **Start on Windows:** for a portable download, download the Windows ZIP, choose **Extract All…**,
+  then double-click `Start.exe` in the extracted folder. If installed via a Windows installer,
+  open **Urd** from the Start menu. Either opens the default browser automatically. Starting the
+  same copy again opens it instead of starting a second backend. Bundle the .NET runtime so no
+  separate .NET install is needed. Reuse Git for Windows if present and handle missing Git as
+  part of setup without a separate trip to a download page. Ordinary launch does not fetch
+  build tools or the browser automation dependency.
+- **Return or stop:** use the tray's **Open Urd** to get back to the same chats or **Stop Urd**
+  to stop the backend. Closing the browser or VS Code leaves work running.
+- **Open an existing Windows copy in VS Code (follow-up):** tray → **Open in VS Code**. On first
+  use, add the Urd sidebar if needed and open it to this copy's chats. After that, the same menu
+  item just opens the sidebar. No Marketplace visit and no second Urd install, including when
+  Urd was installed through a Windows installer. From the sidebar, reuse the selected copy or
+  start it if stopped; if there are multiple copies, let the user choose and remember the
+  choice. If Urd itself is missing, the sidebar's **Set up Urd** should get the same standalone
+  app. Do not bundle a second backend with the extension or use setup to silently upgrade Urd.
+- **Edit and try:** start from a fresh copy in a writable folder such as `My Urd` (extract the
+  portable download again). Open its included `source/` directly in an editor. Run **Build**
+  (for example, double-click `Build.cmd`), which gets missing pinned build tools and stages the
+  result without replacing the running build. Explicitly run the staged build (for example,
+  `Run Staged Build.cmd`). The custom copy starts with its own data; later rebuilds preserve
+  that copy's data, subject to the pre-release schema policy.
+- **Share:** run **Package** (for example, `Package.cmd`) to produce a shareable download with
+  the runnable app, the exact source it was built from, and the build recipe. No Git workflow,
+  hosted build, official signing key or upload is required. The recipient uses the same start
+  flow. Never include chats, settings, sign-ins or caches.
+
+Keep the same logical layout across platforms: runnable app, directly editable source, and
+copy-local persistent data kept outside generated and packaged inputs. The runtime and launcher
+can differ by OS and CPU; a Windows `.exe` is not a cross-platform distribution format. ZIP is
+for the portable Windows trial, not a decision about the only public package. Installer tooling,
+exact paths/names, Git provisioning (test a private PortableGit fallback), and how clients find
+and open the selected copy still need implementation review. **Open in VS Code** is an agreed UX,
+not a requirement to build or ship the editor client in the first Windows trial.
 
 ## 1. Take a candidate after active work lands
 
@@ -18,10 +53,9 @@ extension system or macOS/Linux feature parity is needed for this release.
   gaps block release and which are deferred (for example, Snooze, after-run queue and broader
   recovery). Recheck the subagent cleanup path that untracks a child after unconfirmed process
   cleanup; verify that Stop and shutdown account for owned work even when cleanup fails.
-- Propose one initial Windows target (Windows 11 x64 is a starting point) and document runtime,
-  Git for Windows and other prerequisites, including any optional tool downloads. Decide the
-  launcher, package format, runtime bundling and data location together. Start by evaluating a
-  portable archive and small scripts, not an installer or bootstrap platform by default.
+- Propose one initial Windows target (Windows 11 x64 is a starting point). Try the portable
+  package with the runtime bundled. Document prerequisites and optional downloads. Verify
+  how missing Git is provisioned on a standard account before choosing the delivery method.
 
 ## 2. Build the actual source-carrying package
 
@@ -32,15 +66,17 @@ extension system or macOS/Linux feature parity is needed for this release.
 - Keep application data, credentials, logs, previous packages and build/cache outputs out of
   the source payload. Keep persisted data outside generated outputs and package inputs. A new
   custom copy starts with separate data; a clean/rebuild of the same copy preserves its data.
-- On a clean Windows environment with only documented prerequisites, launch the package from
-  a writable folder (including a path with spaces) and confirm readiness, browser access, tray
-  Open/Stop and clean restart. Use isolated data and a fake provider for the session/tool flow,
-  including a browser close/reopen while work continues. Separately authorized live checks, if
-  needed, are not part of routine qualification.
-- From the included source alone, make a visible edit, rebuild and repackage. Extract the custom
-  package, verify that the behavior and source match, and rebuild it without the original checkout.
-  Confirm that cleaning/rebuilding kept the first copy's existing data and that neither package
-  contains it. No offline build or bit-for-bit rebuild promise is implied.
+- On a clean Windows machine without .NET, Git or build tools, launch the package from a writable
+  folder with spaces. Confirm first-run Git setup, automatic browser opening, repeat launch into
+  the same copy, tray Open/Stop and clean restart. Repeat on a machine with Git already installed
+  and check that it is reused. Use isolated data and a local provider stub for the session/tool
+  flow, including a browser close/reopen while work continues. Separately authorized live checks,
+  if needed, are not part of routine qualification.
+- From a fresh custom copy, make a visible edit. Confirm Build does not replace the running app,
+  then run the staged build explicitly. Package it, extract it on another machine, verify that
+  behavior and source match, and rebuild it without the original checkout. Confirm that the
+  original copy is unchanged, that a rebuild preserves the custom copy's data, and that the
+  redistributed copy starts without that data. No offline or bit-for-bit rebuild is promised.
 
 ## 3. Measure that same candidate locally
 

@@ -4,6 +4,7 @@
 /source/ui/node_modules/
 /.tools/
 /builds/
+/artifacts/
 /data/
 .env
 .env.*

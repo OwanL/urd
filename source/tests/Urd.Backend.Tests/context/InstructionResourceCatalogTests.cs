@@ -239,6 +239,28 @@ public sealed class InstructionResourceCatalogTests : IDisposable {
   }
 
   [Fact]
+  public async Task JunkDirectoryNotificationsDoNotUpdateOrOverflowCoverage() {
+    string kept = Write("AGENTS.md");
+    Write("node_modules/dependency/SKILL.md");
+    Write("obj/AGENTS.md");
+    int scans = 0;
+    var watch = new ManualWatch();
+    await using var catalog = new InstructionResourceCatalog(Database, (directory, cancellation) => {
+      Interlocked.Increment(ref scans);
+      return new FdResourceScanner().FindPathsAsync(directory, cancellation);
+    }, watch.Open);
+
+    Assert.Equal([kept], await catalog.FindPathsAsync(Project, CancellationToken.None).WaitAsync(deadline));
+    Assert.Equal(1, scans);
+    // Changes under junk directories are pruned before the pending-event limit.
+    for (int i = 0; i < 5000; i++)
+      watch.Changed(Path.Combine(Project, "node_modules", $"change-{i}"));
+    watch.Changed(Path.Combine(Project, "obj", "edit.tmp"));
+    Assert.Equal([kept], await catalog.FindPathsAsync(Project, CancellationToken.None).WaitAsync(deadline));
+    Assert.Equal(1, scans);
+  }
+
+  [Fact]
   public async Task RestartKeepsTheDatabaseAndReconcilesOnlyChangedRows() {
     string kept = Write("AGENTS.md");
     string removed = Write("SKILL.md");

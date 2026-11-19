@@ -59,6 +59,59 @@ public sealed class FdResourceScannerTests {
   }
 
   [Fact]
+  public async Task PrunesJunkDirectoriesBelowTheRootButNotTheRootItself() {
+    var root = Path.Combine(Path.GetTempPath(), $"urd-fd-junk-{Guid.NewGuid():N}");
+    try {
+      string inside = Path.Combine(root, "bin", "workspace");
+      foreach (string directory in new[] {
+        Path.Combine(root, "obj"),
+        Path.Combine(root, "objx"),
+        Path.Combine(root, "node_modules", "dependency"),
+        inside,
+        Path.Combine(inside, "node_modules")
+      }) {
+        Directory.CreateDirectory(directory);
+      }
+      await File.WriteAllTextAsync(Path.Combine(root, "obj", "SKILL.md"), "");
+      await File.WriteAllTextAsync(Path.Combine(root, "objx", "AGENTS.md"), "");
+      await File.WriteAllTextAsync(Path.Combine(root, "node_modules", "dependency", "AGENTS.md"), "");
+      await File.WriteAllTextAsync(Path.Combine(inside, "AGENTS.md"), "");
+      await File.WriteAllTextAsync(Path.Combine(inside, "node_modules", "SKILL.md"), "");
+
+      var paths = await new FdResourceScanner().FindPathsAsync(inside, CancellationToken.None);
+      Assert.Equal([Path.Combine(inside, "AGENTS.md")], paths);
+    } finally {
+      Directory.Delete(root, recursive: true);
+    }
+  }
+
+  [Fact]
+  public void PrunesTheTempDirectoryOnlyBelowTheScanRoot() {
+    string temp = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.GetTempPath()));
+    string parent = Path.GetDirectoryName(temp)!;
+    var junk = new[] { "$recycle.bin", "node_modules", "bin", "obj" };
+
+    var above = FdResourceScanner.ExclusionGlobs(parent);
+    Assert.Equal(5, above.Count);
+    Assert.All(junk, name => Assert.Contains(name, above));
+    Assert.Contains(Path.GetFileName(temp), above);
+    Assert.True(FdResourceScanner.IsExcluded(Path.Combine(temp, "urd", "SKILL.md"), parent));
+    Assert.True(FdResourceScanner.IsExcluded(temp, parent));
+
+    foreach (string root in new[] { temp, Path.Combine(temp, "workspace") }) {
+      var globs = FdResourceScanner.ExclusionGlobs(root);
+      Assert.Equal(4, globs.Count);
+      Assert.All(globs, glob => Assert.NotEqual(Path.GetFileName(temp), glob));
+      Assert.False(FdResourceScanner.IsExcluded(Path.Combine(temp, "workspace", "SKILL.md"), Path.Combine(temp, "workspace")));
+    }
+
+    Assert.All(junk, name => Assert.True(
+        FdResourceScanner.IsExcluded(Path.Combine(parent, name, "sub", "SKILL.md"), parent)));
+    Assert.All(junk, name => Assert.False(
+        FdResourceScanner.IsExcluded(Path.Combine(parent, name, "AGENTS.md"), Path.Combine(parent, name))));
+  }
+
+  [Fact]
   public void PlansLocalMountsAndPrunesVirtualAndRemoteMounts() {
     const string mounts = """
         1 0 8:1 / / rw - ext4 /dev/root rw

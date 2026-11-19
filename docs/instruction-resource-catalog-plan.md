@@ -18,7 +18,11 @@ entry, unless that packaged entry is protected.
 
 The bundled scanner searches filenames only. It does not follow symbolic links or junctions;
 project files are opened and checked against the actual opened path before their contents are
-read. On Linux and macOS, mount-aware traversal excludes virtual and remote filesystems, and
+read. Junk directories are pruned below the working directory: `$Recycle.Bin`, `node_modules`,
+`bin`, `obj` and the OS temp directory. Their file and directory events neither update the index
+nor count toward the pending-event overflow limit. A working directory at or inside one of these
+directories is still scanned. On Linux and macOS, mount-aware traversal excludes virtual and remote
+filesystems, and
 unknown or ambiguous filesystem types fail closed. Windows rejects network roots and unsafe
 reparse-point roots. Checked-in binaries cover Windows, macOS and Linux x64/arm64 (Linux musl
 uses the corresponding Linux asset). Asset presence and source branches are not end-to-end
@@ -30,8 +34,9 @@ There is one catalog per backend `UrdStore`, shared by session preparation and t
 resource picker. It stores matching paths, not instruction text or skill frontmatter. The
 actual cache path is the session database path plus `.instructions.sqlite`; for the normal
 server database this is `<DataRoot>/urd.sqlite.instructions.sqlite`, beside but separate
-from `<DataRoot>/urd.sqlite`. The catalog cache has its own versioned schema (currently 1)
-and is rebuildable without resetting session data. A cache recognized as Urd's catalog is
+from `<DataRoot>/urd.sqlite`. The catalog cache has its own versioned schema (currently 2)
+and is rebuildable without resetting session data. Schema 2 discards rows saved by earlier
+scans before junk-directory pruning. A cache recognized as Urd's catalog is
 rebuilt if its schema or integrity is incompatible. Nonempty foreign files are not deleted
 and opening them fails; a fresh empty SQLite file can be initialized as the derived cache.
 
@@ -84,7 +89,8 @@ every live filesystem. Do not infer all-platform acceptance from the asset table
 
 ## Retained test coverage and evidence limits
 
-Retained tests exercise hidden/ignored matching, mount-plan parsing and fail-closed malformed
+Retained tests exercise hidden/ignored matching, junk-directory pruning and the temp-directory
+root exception, mount-plan parsing and fail-closed malformed
 mount data; catalog tests cover shared/overlapping roots, watcher updates, directory moves,
 restart reconciliation, lost coverage, unavailable watchers, cancellation, cache rebuild and
 protection against scanning through links. These cases establish the tested behavior only;

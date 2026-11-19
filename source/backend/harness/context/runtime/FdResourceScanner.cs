@@ -13,7 +13,45 @@ internal sealed class FdResourceScanner {
     "INSTRUCTIONS_FOR_AGENTS.md", "INSTRUCTIONS-FOR-AGENTS.md", "SKILL.md"
   };
 
+  // Junk directories below the working directory would otherwise dominate filename scans and
+  // watcher pending-event limits: the recycle bin, package stores, build outputs and disposable
+  // OS temp artifacts. A scan root at or inside one of these directories is still scanned.
+  private static readonly string[] junkDirectories = ["$recycle.bin", "node_modules", "bin", "obj"];
+  private static readonly string tempDirectory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.GetTempPath()));
+  private static readonly StringComparison nameComparison = OperatingSystem.IsWindows()
+      ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
   public static bool IsResourcePath(string path) => ResourceNames.Contains(Path.GetFileName(path));
+
+  // fd prunes unanchored globs against every entry name below the scan root; a glob containing
+  // a separator is anchored to the scan root, so a nested copy of the same path stays visible.
+  internal static IReadOnlyList<string> ExclusionGlobs(string scanRoot) {
+    string root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(scanRoot));
+    var globs = new List<string>(junkDirectories.Length + 1);
+    globs.AddRange(junkDirectories);
+    if (IsBelow(tempDirectory, root))
+      globs.Add(EscapeGlob(tempDirectory[root.Length..].TrimStart(Path.DirectorySeparatorChar).Replace('\\', '/')));
+    return globs;
+  }
+
+  // True when a scan-root event lies below a directory pruned by ExclusionGlobs.
+  internal static bool IsExcluded(string path, string scanRoot) {
+    string root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(scanRoot));
+    string? tempAncestor = IsBelow(tempDirectory, root) ? tempDirectory : null;
+    for (string? ancestor = path; ancestor is not null && !string.Equals(ancestor, root, nameComparison);
+        ancestor = Path.GetDirectoryName(ancestor)) {
+      if (junkDirectories.Contains(Path.GetFileName(ancestor), StringComparer.OrdinalIgnoreCase))
+        return true;
+      if (tempAncestor is not null &&
+          (string.Equals(ancestor, tempAncestor, nameComparison) || IsBelow(ancestor, tempAncestor)))
+        return true;
+    }
+    return false;
+  }
+
+  private static bool IsBelow(string path, string directory) => path.Length > directory.Length &&
+      path.StartsWith(directory, nameComparison) &&
+      (Path.EndsInDirectorySeparator(directory) || path[directory.Length] == Path.DirectorySeparatorChar);
 
   private static string EscapeGlob(string path) {
     var result = new StringBuilder(path.Length);
@@ -78,6 +116,10 @@ internal sealed class FdResourceScanner {
       start.ArgumentList.Add("--exclude");
       // A leading slash anchors fd's glob to the scan root on every OS.
       start.ArgumentList.Add('/' + EscapeGlob(excluded));
+    }
+    foreach (string exclusion in ExclusionGlobs(scan.Root)) {
+      start.ArgumentList.Add("--exclude");
+      start.ArgumentList.Add(exclusion);
     }
     foreach (string argument in new[] { "--", Pattern, scan.Root })
       start.ArgumentList.Add(argument);

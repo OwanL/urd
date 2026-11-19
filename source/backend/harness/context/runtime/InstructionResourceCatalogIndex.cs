@@ -6,7 +6,7 @@ namespace Urd.Core.Context;
 // This is a derived cache, not part of the session store. The catalog serializes all access.
 internal sealed class InstructionResourceCatalogIndex : IDisposable {
   private const int applicationId = 0x55524449; // URDI
-  private const int version = 1;
+  private const int version = 2;
   private readonly SqliteConnection connection;
 
   private InstructionResourceCatalogIndex(SqliteConnection connection) => this.connection = connection;
@@ -37,7 +37,7 @@ internal sealed class InstructionResourceCatalogIndex : IDisposable {
           CREATE TABLE resource_paths(path TEXT PRIMARY KEY COLLATE path_identity) WITHOUT ROWID;
           CREATE TABLE scanned_roots(path TEXT PRIMARY KEY COLLATE path_identity) WITHOUT ROWID;
           PRAGMA application_id = 0x55524449;
-          PRAGMA user_version = 1;
+          PRAGMA user_version = 2;
           """;
         command.ExecuteNonQuery();
         transaction.Commit();

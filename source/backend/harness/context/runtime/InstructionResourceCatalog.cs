@@ -298,7 +298,9 @@ internal sealed class InstructionResourceCatalog : IAsyncDisposable {
   }
 
   private void QueuePath(Root root, string path) {
-    if (!IsBelow(path, root.Path) || IsIndexFile(path))
+    // Junk directories below the root are pruned by the scanner too, so their notifications
+    // neither update the index nor count toward the pending-event overflow limit.
+    if (!IsBelow(path, root.Path) || IsIndexFile(path) || FdResourceScanner.IsExcluded(path, root.Path))
       return;
     if (!FdResourceScanner.IsResourcePath(path) && !root.Tracked.Contains(path)) {
       // One non-following check distinguishes a new directory from an ordinary file.

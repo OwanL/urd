@@ -52,6 +52,22 @@ public sealed class ToolCallLabelsTests {
     Assert.Equal(Path.GetFullPath(Path.Combine(workingDirectory, "src/edit.cs")), edit.Path);
   }
 
+  [Theory]
+  [InlineData("read", "skill.MD", "diagnose", ToolCallIcon.Skill)]
+  [InlineData("read", "SKILL.md.bak", "SKILL.md.bak", ToolCallIcon.Read)]
+  [InlineData("edit", "SKILL.md", "SKILL.md", ToolCallIcon.Edit)]
+  [InlineData("write", "SKILL.md", "SKILL.md", ToolCallIcon.Write)]
+  public void OnlySkillReadsShowTheSkillDirectory(string tool, string file, string title, ToolCallIcon icon) {
+    string directory = Path.Combine(Path.GetTempPath(), "skills", "diagnose");
+    ToolCallLabel label = ToolCallLabels.Create(tool, JsonSerializer.Serialize(new { path = file, limit = 3 }), directory);
+
+    Assert.Equal(title, label.Title);
+    Assert.Equal(icon, label.Icon);
+    Assert.Equal(Path.Combine(directory, file), label.Path);
+    if (tool == "read")
+      Assert.Equal("lines 1–3", label.Detail);
+  }
+
   [Fact]
   public void PathsMayBeAbsoluteOrWindowsDriveSlashPathsWithoutFilesystemResolution() {
     string workingDirectory = Path.Combine(Path.GetTempPath(), "urd-label-work");

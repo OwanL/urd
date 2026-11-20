@@ -33,6 +33,7 @@ function subscribeToToolRowClock(update: (now: number) => void): () => void {
 const iconNames: Record<ToolCallLabel["icon"], IconName> = {
   terminal: "terminal",
   read: "file-read",
+  skill: "book-open",
   write: "file-write",
   edit: "edit",
   listPending: "list",
@@ -45,6 +46,7 @@ const iconNames: Record<ToolCallLabel["icon"], IconName> = {
 const iconLabels: Record<ToolCallLabel["icon"], string> = {
   terminal: "Terminal",
   read: "Read file",
+  skill: "Load skill",
   write: "Write file",
   edit: "Edit file",
   listPending: "List pending calls",

@@ -90,6 +90,7 @@ export interface ToolCallLabel {
     | "edit"
     | "listPending"
     | "cancelPending"
+    | "skill"
     | "askAgent"
     | "answerAgent"
     | "generic";

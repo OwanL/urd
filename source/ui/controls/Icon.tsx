@@ -13,6 +13,7 @@ export type IconName =
   | "arrow-down"
   | "terminal"
   | "file-read"
+  | "book-open"
   | "file-write"
   | "edit"
   | "list"
@@ -40,6 +41,7 @@ const paths: Record<IconName, string> = {
   "arrow-down": "M12 4v16m-7-7 7 7 7-7",
   terminal: "m4 17 6-6-6-6M12 19h8",
   "file-read": "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8ZM14 2v6h6M8 13h8M8 17h6",
+  "book-open": "M12 6Q8 3 2 4v15q6-1 10 2 4-3 10-2V4q-6-1-10 2Zm0 0v15",
   "file-write":
     "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8ZM14 2v6h6M12 18v-6M9 15h6",
   edit: "M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z",

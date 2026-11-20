@@ -64,7 +64,6 @@ export class MarkdownMessageView {
     this.retainedPieceCount = retainedPieceCount;
     this.callbacks = callbacks;
     this.surface = new MarkdownWindowSurface(host, scrollport, {
-      snapshot: () => this.handoff?.snapshot,
       pinsChanged: () => {
         if (!this.paused && !this.disposed) {
           this.handoff?.resume();
@@ -272,20 +271,27 @@ export class MarkdownMessageView {
       signal.throwIfAborted();
       if (this.disposed || this.paused || this.pendingRequest !== pending) return "cancelled";
 
-      this.activeGeneration = source;
-      this.handoff = new MarkdownGenerationHandoff(source, window, {
-        capture: () => this.surface.capture(),
-        pinned: () => this.activeSourceCaptures > 0 || this.surface.selectionBlocked,
-        publish: (nextSnapshot, anchor) => {
-          this.activeGeneration = this.generations.find(nextSnapshot.generation);
-          this.publicationVersion++;
-          this.publishSnapshot(nextSnapshot, anchor);
+      const handoff = new MarkdownGenerationHandoff(
+        source,
+        window,
+        {
+          capture: () => this.surface.capture(),
+          pinned: () => this.activeSourceCaptures > 0 || this.surface.selectionBlocked,
+          publish: (nextSnapshot, anchor) =>
+            this.publishSnapshot(
+              nextSnapshot,
+              anchor,
+              this.generations.find(nextSnapshot.generation),
+            ),
         },
-      });
+        this.retainedPieceCount,
+      );
       this.publishSnapshot(
         window.snapshot,
         pending.saved ? anchorNearCursor(window.snapshot, location, pending.saved.offset) : null,
+        source,
       );
+      this.handoff = handoff;
       source = null;
       return "published";
     } catch (error) {
@@ -332,11 +338,18 @@ export class MarkdownMessageView {
   private publishSnapshot(
     snapshot: MarkdownRenderSnapshot,
     anchor: MarkdownWindowAnchor | null,
+    generation = this.activeGeneration,
   ): void {
-    this.sourceMappings.prune(this.activeGeneration, snapshot);
-    this.surface.publish(snapshot, anchor, this.activeGeneration?.imageLoader ?? null);
+    this.surface.publish(snapshot, anchor, generation?.imageLoader ?? null);
+    this.activeGeneration = generation;
+    this.sourceMappings.prune(generation, snapshot);
     this.publicationVersion++;
-    this.callbacks.changed();
+    try {
+      this.callbacks.changed();
+    } catch (error) {
+      // A failed notification cannot roll back a successfully published surface.
+      queueMicrotask(() => this.callbacks.error(error));
+    }
   }
 
   private async reclaimPins(): Promise<void> {

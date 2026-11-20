@@ -19,9 +19,10 @@ export async function alignWindow(
   let retainedRanges = normalizeIntervals(retain);
   for (let attempt = 0; attempt < 8; attempt++) {
     signal.throwIfAborted();
-    const expandedActive = expandToUnits(snapshot, activeRange, false);
+    // A window can start inside a header without a body row to hydrate it as support.
+    const expandedActive = expandToUnits(snapshot, activeRange);
     const expandedRetain = normalizeIntervals(
-      retainedRanges.map((range) => expandToUnits(snapshot, range, true)),
+      retainedRanges.map((range) => expandToUnits(snapshot, range)),
     );
     if (expandedActive.next - expandedActive.from > retainedPieceCount * 3)
       throw new Error(
@@ -43,9 +44,9 @@ export async function alignWindow(
         if (!snapshot.pieces.has(id))
           throw new Error("A Markdown selection pin is outside the loaded window.");
 
-    const checkedActive = expandToUnits(snapshot, activeRange, false);
+    const checkedActive = expandToUnits(snapshot, activeRange);
     const checkedRetain = normalizeIntervals(
-      retainedRanges.map((range) => expandToUnits(snapshot, range, true)),
+      retainedRanges.map((range) => expandToUnits(snapshot, range)),
     );
     if (
       checkedActive.from === activeRange.from &&
@@ -67,16 +68,11 @@ export function initialFrom(index: number, pieceCount: number, retainedPieceCoun
 export function expandToUnits(
   snapshot: MarkdownRenderSnapshot,
   range: MarkdownPieceInterval,
-  includeHeader: boolean,
 ): MarkdownPieceInterval {
   let from = range.from;
   let next = range.next;
   for (const { context } of snapshot.contexts.values()) {
-    if (
-      (context.kind !== "codeLine" && context.kind !== "row") ||
-      (!includeHeader && context.header) ||
-      context.pieceCount === 0
-    )
+    if ((context.kind !== "codeLine" && context.kind !== "row") || context.pieceCount === 0)
       continue;
     const unitNext = context.firstPiece + context.pieceCount;
     if (context.firstPiece < next && unitNext > from) {

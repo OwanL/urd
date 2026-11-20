@@ -9,12 +9,13 @@ import type {
 import { MarkdownWindowAssembler } from "./MarkdownWindowAssembler.ts";
 import { copyMarkdownManifest } from "./MarkdownPageValidation.ts";
 import type { MarkdownWindowAnchor, MarkdownWindowSeekTarget } from "./MarkdownWindowGeometry.ts";
+import { alignAndTrimWindow } from "./MarkdownWindowPreparation.ts";
 
 export interface MarkdownHandoffView {
   capture(): MarkdownWindowAnchor | null;
   pinned(): boolean;
-  // Synchronous, non-throwing commit: render, measure/re-render, then restore anchor.
-  // Only after this returns does the owner release the previous source.
+  // Synchronous commit: render, measure/re-render, then restore the anchor.
+  // A throw rejects publication; only a successful return transfers the active lease.
   publish(snapshot: MarkdownRenderSnapshot, anchor: MarkdownWindowAnchor | null): void;
 }
 type Outcome = "published" | "cancelled";
@@ -32,6 +33,7 @@ export class MarkdownGenerationHandoff {
   private active: MarkdownOwnedGeneration;
   private window: MarkdownWindowAssembler;
   private readonly view: MarkdownHandoffView;
+  private readonly retainedPieceCount: number;
   private candidate: Candidate | null = null;
   private reading: AbortController | null = null;
   private readonly activeOperations = new Map<AbortController, Promise<unknown>>();
@@ -46,13 +48,17 @@ export class MarkdownGenerationHandoff {
     initial: MarkdownOwnedGeneration,
     initialWindow: MarkdownWindowAssembler,
     view: MarkdownHandoffView,
+    retainedPieceCount: number,
   ) {
+    if (!Number.isSafeInteger(retainedPieceCount) || retainedPieceCount < 1)
+      throw new RangeError("Markdown retained-piece count must be a positive integer.");
     const manifest = copyMarkdownManifest(initial.manifest);
     if (manifest.generation !== initialWindow.snapshot.generation)
       throw new Error("Markdown initial generation mismatch.");
     this.active = initial;
     this.window = initialWindow;
     this.view = view;
+    this.retainedPieceCount = retainedPieceCount;
   }
 
   get snapshot(): MarkdownRenderSnapshot {
@@ -296,35 +302,13 @@ export class MarkdownGenerationHandoff {
         (manifest.pieceCount === 0 ? cursor.index !== 0 : cursor.index >= manifest.pieceCount)
       )
         throw new Error("Invalid Markdown located generation or cursor.");
-      const count = Math.max(1, prior.next - prior.from);
+      const count = Math.max(1, Math.min(this.retainedPieceCount, prior.next - prior.from));
       const relative = Math.max(0, Math.min(count - 1, oldPiece - prior.from));
       const from = Math.max(0, cursor.index - relative);
       const next = Math.min(manifest.pieceCount, from + count);
       const window = new MarkdownWindowAssembler(source, manifest, from);
       while (window.snapshot.next < next) await window.append(signal);
-      await window.trim({ generation: manifest.generation, active: { from, next } }, signal);
-      // Geometry may only render complete code lines/table rows. Expand only edge units;
-      // reject an unbounded changed unit rather than silently loading a whole document.
-      let first = from;
-      let last = next;
-      for (const { context } of window.snapshot.contexts.values())
-        if (
-          (context.kind === "codeLine" || context.kind === "row") &&
-          !context.header &&
-          context.firstPiece < next &&
-          context.firstPiece + context.pieceCount > from
-        ) {
-          first = Math.min(first, context.firstPiece);
-          last = Math.max(last, context.firstPiece + context.pieceCount);
-        }
-      if (last - first > count * 3)
-        throw new Error("Markdown replacement unit exceeds its bounded window.");
-      while (window.snapshot.from > first) await window.prepend(signal);
-      while (window.snapshot.next < last) await window.append(signal);
-      await window.trim(
-        { generation: manifest.generation, active: { from: first, next: last } },
-        signal,
-      );
+      await alignAndTrimWindow(window, { from, next }, [], this.retainedPieceCount, signal);
       signal.throwIfAborted();
       if (this.candidate !== candidate || this.disposed) return;
       if (this.view.pinned()) return;
@@ -352,11 +336,21 @@ export class MarkdownGenerationHandoff {
       signal.throwIfAborted();
       if (this.candidate !== candidate || this.disposed || this.view.pinned()) return;
       const previous = this.active;
+      const previousWindow = this.window;
       this.active = source;
       this.window = window;
+      // Reentrant requests must queue behind this synchronous commit, not cancel it.
       this.candidate = null;
       candidate.detach();
-      this.view.publish(window.snapshot, replacement);
+      try {
+        this.view.publish(window.snapshot, replacement);
+      } catch (error) {
+        this.active = previous;
+        this.window = previousWindow;
+        if (!this.disposed) this.activeWindowOpen = true;
+        candidate.reject(error);
+        return;
+      }
       source = null;
       candidate.resolve("published");
       await this.disposeOwned(previous);

@@ -16,7 +16,6 @@ import {
 } from "./windowing/MarkdownWindowGeometry.ts";
 
 type SurfaceCallbacks = {
-  snapshot(): MarkdownRenderSnapshot | undefined;
   pinsChanged(): void;
   imagesChanged(): void;
 };
@@ -31,6 +30,10 @@ export class MarkdownWindowSurface {
   private readonly images: MarkdownImageWindow;
   private root: HTMLElement | null = null;
   private pins: MarkdownSelectionPins | null = null;
+  private published: {
+    snapshot: MarkdownRenderSnapshot;
+    imageLoader: MarkdownImageLoader | null;
+  } | null = null;
   private lastScrollTop: number | null = null;
 
   constructor(host: HTMLElement, scrollport: HTMLElement, callbacks: SurfaceCallbacks) {
@@ -141,6 +144,36 @@ export class MarkdownWindowSurface {
     anchor: MarkdownWindowAnchor | null,
     imageLoader: MarkdownImageLoader | null,
   ): void {
+    const previous = this.published;
+    const top = this.scrollport.scrollTop;
+    try {
+      this.renderSnapshot(snapshot, anchor, imageLoader);
+    } catch (error) {
+      // Rendering or measurement may already have changed the DOM. Rebuild the last
+      // good surface while its lease is still owned, before rejecting the replacement.
+      this.unmount();
+      if (previous) {
+        try {
+          this.renderSnapshot(previous.snapshot, null, previous.imageLoader);
+          this.scrollport.scrollTop = top;
+          this.lastScrollTop = this.scrollport.scrollTop;
+        } catch (restoreError) {
+          this.unmount();
+          throw new AggregateError(
+            [error, restoreError],
+            "Markdown publication and restoration failed.",
+          );
+        }
+      }
+      throw error;
+    }
+  }
+
+  private renderSnapshot(
+    snapshot: MarkdownRenderSnapshot,
+    anchor: MarkdownWindowAnchor | null,
+    imageLoader: MarkdownImageLoader | null,
+  ): void {
     if (this.root?.dataset.markdownGeneration !== snapshot.generation) this.clearPins();
     const width = this.host.getBoundingClientRect().width;
     this.geometry.configure(snapshot.generation, width > 0 ? width : 1, "message");
@@ -159,10 +192,11 @@ export class MarkdownWindowSurface {
     if (this.root && this.geometry.measure(this.root, this.scrollport)) renderWindow();
     if (this.root) this.geometry.restore(this.root, anchor, this.scrollport);
     this.lastScrollTop = this.scrollport.scrollTop;
+    this.published = { snapshot, imageLoader };
     if (this.root && !this.pins) {
       this.pins = new MarkdownSelectionPins(
         this.root,
-        () => this.callbacks.snapshot() ?? snapshot,
+        () => this.published!.snapshot,
         this.callbacks.pinsChanged,
       );
     }
@@ -174,6 +208,8 @@ export class MarkdownWindowSurface {
 
   unmount(): void {
     this.clearPins();
+    this.images.dispose();
+    this.published = null;
     this.root = null;
     render(null, this.host);
   }

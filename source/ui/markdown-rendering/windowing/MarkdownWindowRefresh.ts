@@ -39,7 +39,7 @@ export async function refreshMarkdownWindow(
     (!("index" in seek) || (seek.index >= 0 && seek.index < pieceCount))
   ) {
     const currentRetained = () =>
-      normalizeIntervals(viewport.retainedPins().map((pin) => expandToUnits(prior, pin, true)));
+      normalizeIntervals(viewport.retainedPins().map((pin) => expandToUnits(prior, pin)));
     const retained = currentRetained();
     const seekStillCurrent = viewport.watchSeek(prior, seek);
     return await handoff.seek(

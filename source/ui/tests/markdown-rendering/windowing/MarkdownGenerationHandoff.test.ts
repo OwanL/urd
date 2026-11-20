@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { MarkdownGenerationHandoff } from "../../../markdown-rendering/windowing/MarkdownGenerationHandoff.ts";
+import {
+  MarkdownGenerationHandoff,
+  type MarkdownHandoffView,
+} from "../../../markdown-rendering/windowing/MarkdownGenerationHandoff.ts";
 import { MarkdownWindowAssembler } from "../../../markdown-rendering/windowing/MarkdownWindowAssembler.ts";
 import type { MarkdownWindowAnchor } from "../../../markdown-rendering/windowing/MarkdownWindowGeometry.ts";
 import type { MarkdownOwnedGeneration } from "../../../markdown-rendering/MarkdownRenderModel.ts";
 import { createMarkdownPiece, SyntheticMarkdownPageSource } from "../MarkdownRenderFixture.ts";
 import type { MarkdownRenderFixtureOptions } from "../MarkdownRenderFixture.ts";
+import { tableSource } from "./MarkdownWindowFixtures.ts";
 
 const signal = () => new AbortController().signal;
 const deferred = <T>() => {
@@ -123,17 +127,26 @@ async function setup(
   initial = source("old"),
   anchorValue: MarkdownWindowAnchor | null = null,
   pinned = () => false,
+  options: { retainedPieceCount?: number; publish?: MarkdownHandoffView["publish"] } = {},
 ) {
   const initialWindow = new MarkdownWindowAssembler(initial, initial.manifest);
   await initialWindow.append(signal());
   const published: [string, MarkdownWindowAnchor | null][] = [];
   return {
     published,
-    handoff: new MarkdownGenerationHandoff(initial, initialWindow, {
-      capture: () => anchorValue,
-      pinned,
-      publish: (next, restored) => published.push([next.generation, restored]),
-    }),
+    handoff: new MarkdownGenerationHandoff(
+      initial,
+      initialWindow,
+      {
+        capture: () => anchorValue,
+        pinned,
+        publish: (next, restored) => {
+          options.publish?.(next, restored);
+          published.push([next.generation, restored]);
+        },
+      },
+      options.retainedPieceCount ?? 256,
+    ),
   };
 }
 
@@ -359,6 +372,45 @@ void test("keeps the old window until ready, restores its anchor, and releases i
   assert.equal(old.disposals, 1);
 });
 
+void test("replacement completes a header even when it loads no table body", async () => {
+  const old = source("old");
+  const next = tableSource({ generation: "next", piecePageSize: 1 });
+  const { handoff } = await setup(old, anchor("old", "0", "0", 17));
+
+  assert.equal(await handoff.request({ open: async () => next }), "published");
+  assert.deepEqual(handoff.snapshot.displayRanges, [{ from: 0, next: 2 }]);
+  assert.deepEqual([...handoff.snapshot.pieces.keys()], [0, 1]);
+  assert.deepEqual(handoff.snapshot.supportRanges, []);
+  assert.deepEqual([old.disposals, next.disposals], [1, 0]);
+  await handoff.dispose();
+  assert.equal(next.disposals, 1);
+});
+
+void test("replacement uses the configured bound and keeps distant headers as support", async () => {
+  const old = source("old", [2]);
+  const next = tableSource({ generation: "next", piecePageSize: 1 });
+  const { handoff } = await setup(old, null, undefined, { retainedPieceCount: 2 });
+
+  assert.equal(await handoff.request({ open: async () => next }), "published");
+  assert.deepEqual(handoff.snapshot.displayRanges, [{ from: 2, next: 6 }]);
+  assert.deepEqual(handoff.snapshot.supportRanges, [{ from: 0, next: 2 }]);
+  await handoff.dispose();
+});
+
+void test("a previously expanded window does not increase the replacement bound", async () => {
+  const old = source("old", [0, 1, 2, 3, 4, 5]);
+  const next = sourceWithChild("next");
+  const { handoff, published } = await setup(old, null, undefined, { retainedPieceCount: 2 });
+  const prior = handoff.snapshot;
+
+  await assert.rejects(handoff.request({ open: async () => next }), /exceeds.*bound/);
+  assert.equal(handoff.snapshot, prior);
+  assert.deepEqual(published, []);
+  assert.deepEqual([old.disposals, next.disposals], [0, 1]);
+  await handoff.dispose();
+  assert.equal(old.disposals, 1);
+});
+
 void test("publishes a same-generation reconnect and releases the old lease once", async () => {
   const old = source("same"),
     { handoff, published } = await setup(old),
@@ -510,3 +562,45 @@ void test("dispose aborts and drains an owned read, releasing generations once",
   await disposal;
   assert.deepEqual([old.disposals, candidate.disposals, published.length], [1, 1, 0]);
 });
+
+void test(
+  "failed publication settles, retains the old lease, and allows continued updates",
+  { timeout: 1_000 },
+  async () => {
+    const old = source("old", [0, 1, 2], 1);
+    const failed = source("failed");
+    const next = source("next");
+    const failure = new Error("publication failed");
+    const rejectedRelease = gateDispose(failed);
+    const { handoff, published } = await setup(old, null, undefined, {
+      publish: (snapshot) => {
+        if (snapshot.generation === "failed") throw failure;
+      },
+    });
+    const prior = handoff.snapshot;
+    const rejection = assert.rejects(
+      handoff.request({ open: async () => failed }),
+      (error) => error === failure,
+    );
+    await rejectedRelease.started;
+    await rejection;
+    assert.equal(handoff.snapshot, prior);
+    assert.deepEqual([old.disposals, failed.disposals], [0, 0]);
+    assert.equal((await handoff.append(signal())).next, 2);
+
+    let opened = false;
+    const replacement = handoff.request({
+      open: async () => {
+        opened = true;
+        return next;
+      },
+    });
+    assert.equal(opened, false, "The failed lease must drain before another open");
+    rejectedRelease.release();
+    assert.equal(await replacement, "published");
+    assert.deepEqual(published, [["next", null]]);
+    assert.deepEqual([old.disposals, failed.disposals, next.disposals], [1, 1, 0]);
+    await handoff.dispose();
+    assert.deepEqual([old.disposals, failed.disposals, next.disposals], [1, 1, 1]);
+  },
+);

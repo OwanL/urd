@@ -8,66 +8,27 @@ import type {
 import type {
   MarkdownContextPage,
   MarkdownContextDescriptorPage,
-  MarkdownElementKind,
   MarkdownGenerationRequest,
   MarkdownImageLoader,
   MarkdownOwnedGeneration,
   MarkdownPiecePage,
-  MarkdownRenderContext,
   MarkdownRenderCursor,
   MarkdownRenderManifest,
-  MarkdownSourceMapping,
-  MarkdownTextKind,
-  MarkdownTextPiece,
-  MarkdownValueFragment,
-  MarkdownValueKind,
 } from "./MarkdownRenderModel.ts";
 import { isMarkdownImageKey } from "./MarkdownRenderModel.ts";
-import { copyMarkdownManifest } from "./windowing/MarkdownPageValidation.ts";
+import {
+  normalizeContextDescriptorPage,
+  normalizeContextPage,
+  normalizePiecePage,
+} from "./MarkdownPageNormalization.ts";
+import {
+  copyCursor,
+  copyMessageCursor,
+  copyOpenResponse,
+  isIndex,
+} from "./MarkdownResponseValidation.ts";
 
-const elementKinds = [
-  "document",
-  "paragraph",
-  "heading",
-  "quote",
-  "list",
-  "item",
-  "code",
-  "codeLine",
-  "table",
-  "row",
-  "cell",
-  "emphasis",
-  "strong",
-  "inlineCode",
-  "link",
-  "thematicBreak",
-  "image",
-] as const satisfies readonly MarkdownElementKind[];
-const textKinds = [
-  "text",
-  "literal",
-  "code",
-  "softBreak",
-  "hardBreak",
-  "thematicBreak",
-] as const satisfies readonly MarkdownTextKind[];
-const sourceMappings = [
-  "exact",
-  "containing",
-  "container",
-] as const satisfies readonly MarkdownSourceMapping[];
-const valueKinds = [
-  "destination",
-  "title",
-  "language",
-  "fenceInfo",
-  "orderedStart",
-  "imageKey",
-] as const satisfies readonly MarkdownValueKind[];
 const imageMediaTypes = ["image/png", "image/jpeg", "image/webp"];
-const alignments = ["none", "left", "center", "right"] as const;
-const guidPattern = /^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/iu;
 
 // Source facts are exposed for the later transcript integration; the renderer uses the paged API.
 export interface MarkdownOwnedTextGeneration extends MarkdownOwnedGeneration {
@@ -322,177 +283,4 @@ function releaseLease(base: URL): Promise<void> {
       throw error;
     },
   );
-}
-
-function copyOpenResponse(value: unknown): {
-  readonly manifest: MarkdownRenderManifest;
-  readonly source: TranscriptTextFacts;
-} {
-  if (!isRecord(value)) throw new TypeError("Server returned an invalid Markdown open response.");
-  const manifest = copyMarkdownManifest(value.manifest as MarkdownRenderManifest);
-  if (!guidPattern.test(manifest.generation))
-    throw new TypeError("Server returned an invalid Markdown generation identity.");
-  return { manifest, source: copyTextFacts(value.source) };
-}
-
-function copyTextFacts(value: unknown): TranscriptTextFacts {
-  if (
-    !isRecord(value) ||
-    typeof value.isClosed !== "boolean" ||
-    typeof value.finalOutputCommitted !== "boolean"
-  )
-    throw new TypeError("Server returned invalid Markdown source facts.");
-  const from = copyMessageCursor(value.from);
-  const availableThrough = copyMessageCursor(value.availableThrough);
-  if (
-    from.message.executionId !== availableThrough.message.executionId ||
-    from.message.messageId !== availableThrough.message.messageId ||
-    from.message.historyRevision !== availableThrough.message.historyRevision ||
-    from.message.role !== availableThrough.message.role ||
-    compareCursor(availableThrough, from) < 0
-  )
-    throw new TypeError("Server returned inconsistent Markdown source cursors.");
-  return Object.freeze({
-    from,
-    availableThrough,
-    isClosed: value.isClosed,
-    finalOutputCommitted: value.finalOutputCommitted,
-  });
-}
-
-function copyMessageCursor(value: unknown): MessageContentCursor {
-  if (!isRecord(value) || !isRecord(value.message))
-    throw new TypeError("Server returned an invalid Markdown source cursor.");
-  const message = value.message;
-  if (
-    typeof message.executionId !== "string" ||
-    !guidPattern.test(message.executionId) ||
-    typeof message.messageId !== "string" ||
-    !guidPattern.test(message.messageId) ||
-    (message.role !== "user" && message.role !== "assistant") ||
-    !isIndex(message.historyRevision) ||
-    !isIndex(value.segmentIndex) ||
-    !isIndex(value.utf8Offset)
-  )
-    throw new TypeError("Server returned an invalid Markdown source cursor.");
-  return Object.freeze({
-    message: Object.freeze({
-      executionId: message.executionId,
-      messageId: message.messageId,
-      role: message.role,
-      historyRevision: message.historyRevision,
-    }),
-    segmentIndex: value.segmentIndex,
-    utf8Offset: value.utf8Offset,
-  });
-}
-
-function compareCursor(left: MessageContentCursor, right: MessageContentCursor): number {
-  return left.segmentIndex - right.segmentIndex || left.utf8Offset - right.utf8Offset;
-}
-
-function copyCursor(
-  value: unknown,
-  manifest: MarkdownRenderManifest,
-  maximum: number,
-  name: string,
-  allowEnd = false,
-): MarkdownRenderCursor {
-  if (
-    !isRecord(value) ||
-    value.generation !== manifest.generation ||
-    !isIndex(value.index) ||
-    value.index > maximum ||
-    (manifest.pieceCount === 0 && value.index !== 0) ||
-    (!allowEnd && manifest.pieceCount > 0 && value.index === manifest.pieceCount)
-  )
-    throw new TypeError(`Server returned an invalid Markdown ${name}.`);
-  return { generation: manifest.generation, index: value.index };
-}
-
-function normalizePiecePage(value: unknown, manifest: MarkdownRenderManifest): MarkdownPiecePage {
-  if (!isRecord(value) || !Array.isArray(value.pieces))
-    throw new TypeError("Server returned an invalid Markdown piece page.");
-  requireGeneration(value.generation, manifest);
-  return {
-    ...value,
-    pieces: value.pieces.map((piece) => normalizeTextPiece(piece)),
-  } as unknown as MarkdownPiecePage;
-}
-
-function normalizeContextPage(
-  value: unknown,
-  manifest: MarkdownRenderManifest,
-): MarkdownContextPage {
-  if (!isRecord(value) || !Array.isArray(value.values))
-    throw new TypeError("Server returned an invalid Markdown context page.");
-  requireGeneration(value.generation, manifest);
-  return {
-    ...value,
-    context: normalizeContext(value.context),
-    values: value.values.map((fragment) => normalizeValue(fragment)),
-  } as unknown as MarkdownContextPage;
-}
-
-function normalizeContextDescriptorPage(
-  value: unknown,
-  manifest: MarkdownRenderManifest,
-): MarkdownContextDescriptorPage {
-  if (!isRecord(value) || !Array.isArray(value.contexts))
-    throw new TypeError("Server returned an invalid Markdown context descriptor page.");
-  requireGeneration(value.generation, manifest);
-  return {
-    ...value,
-    contexts: value.contexts.map((context) => normalizeContext(context)),
-  } as unknown as MarkdownContextDescriptorPage;
-}
-
-function normalizeTextPiece(value: unknown): MarkdownTextPiece {
-  if (!isRecord(value)) throw new TypeError("Server returned an invalid Markdown text piece.");
-  return {
-    ...value,
-    kind: enumAt(value.kind, textKinds, "text kind"),
-    mapping: enumAt(value.mapping, sourceMappings, "source mapping"),
-  } as unknown as MarkdownTextPiece;
-}
-
-function normalizeContext(value: unknown): MarkdownRenderContext {
-  if (!isRecord(value)) throw new TypeError("Server returned an invalid Markdown render context.");
-  return {
-    ...value,
-    kind: enumAt(value.kind, elementKinds, "context kind"),
-    alignment: enumAt(value.alignment, alignments, "table alignment"),
-  } as unknown as MarkdownRenderContext;
-}
-
-function normalizeValue(value: unknown): MarkdownValueFragment {
-  if (!isRecord(value)) throw new TypeError("Server returned an invalid Markdown value fragment.");
-  return {
-    ...value,
-    kind: enumAt(value.kind, valueKinds, "value kind"),
-  } as unknown as MarkdownValueFragment;
-}
-
-function requireGeneration(value: unknown, manifest: MarkdownRenderManifest): void {
-  if (value !== manifest.generation)
-    throw new Error("Markdown render generation changed; restart from the source anchor.");
-}
-
-function enumAt<T extends string>(value: unknown, values: readonly T[], name: string): T {
-  if (
-    typeof value !== "number" ||
-    !Number.isSafeInteger(value) ||
-    value < 0 ||
-    value >= values.length
-  )
-    throw new TypeError(`Server returned an unknown Markdown ${name} index.`);
-  return values[value]!;
-}
-
-function isIndex(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }

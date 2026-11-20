@@ -10,6 +10,12 @@ browser-side provider SDK. Provider credentials remain in the backend. Live sess
 changes arrive through a bounded server-sent event stream; the browser then reads slim
 snapshot/history metadata and loads message text on demand.
 
+For a new profile, the browser checks setup status before mounting the workspace. Setup connects a
+provider, then lets the user accept suggested model-bucket assignments or configure all three buckets
+manually, and requires an explicit default working directory. These are saved profile settings;
+refresh resumes at the first unmet step. After completion, the setup gate stays closed while the
+workspace and Settings remain available for later provider, bucket and directory recovery.
+
 The workspace has closable, reorderable local tabs, transcript, model and reasoning
 selectors, Send, Stop and integrated [provider settings](provider-management.md#browser-settings).
 Tabs take the header's remaining width beside New chat and Workspace options. Each tab fits within
@@ -28,8 +34,8 @@ The model picker loads cached catalogs immediately, discovers missing catalogs o
 rediscovers after provider changes, without polling or a routine refresh action. With no providers,
 the model and reasoning selectors are replaced by an Add provider action that opens Settings →
 Providers; search, loading, empty and failure states stay distinct.
-Settings → General holds the default working directory, selected through a folder browser,
-and an explicitly saved compaction-trigger token count. Blank/Automatic restores the default;
+Setup and Settings → General set the default working directory through a folder browser. General also
+holds an explicitly saved compaction-trigger token count. Blank/Automatic restores the default;
 positive whole counts override the trigger subject to model headroom. The shared `usePreferences`
 hook owns reads and saves; changing the trigger takes effect at the next compaction check, while
 working-directory changes still apply only to new chats. Settings → Model buckets assigns the

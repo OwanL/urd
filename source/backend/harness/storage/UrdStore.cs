@@ -2,6 +2,8 @@ using Microsoft.Data.Sqlite;
 using Urd.Core.Usage;
 using Urd.Core.Context;
 using Urd.Core.MarkdownRendering;
+using Urd.Core.Preferences;
+using Urd.Core.Providers;
 
 namespace Urd.Core.Storage;
 
@@ -95,6 +97,41 @@ public sealed class UrdStore : IDisposable {
     Usage.RecoverInterrupted();
     Executions.RecoverInterruptedExecutions();
     MarkdownImageFiles.RemoveUnreferencedFiles();
+  }
+
+  public bool IsSetupComplete() => database.Read(transaction =>
+      database.Scalar<long>(transaction, "SELECT EXISTS(SELECT 1 FROM setup_completion WHERE singleton = 1);") != 0);
+
+  public SetupStatus ReadSetupStatus() => Preferences.WithCurrent(preferences =>
+      database.Read(transaction => ReadSetupStatus(transaction, preferences)));
+
+  // An incomplete result leaves setup untouched; completion remains valid once recorded.
+  public SetupStatus CompleteSetup() => Preferences.WithCurrent(preferences => database.Write(transaction => {
+    SetupStatus status = ReadSetupStatus(transaction, preferences);
+    if (status.Completed || !status.HasProvider || !status.HasModelBuckets || !status.HasWorkingDirectory)
+      return status;
+    database.Execute(transaction, "INSERT INTO setup_completion (singleton) VALUES (1) ON CONFLICT DO NOTHING;");
+    return status with { Completed = true };
+  }));
+
+  private SetupStatus ReadSetupStatus(SqliteTransaction transaction, UserPreferences preferences) {
+    bool completed = database.Scalar<long>(transaction,
+        "SELECT EXISTS(SELECT 1 FROM setup_completion WHERE singleton = 1);") != 0;
+    AuxiliaryModelPreferences models = preferences.ModelChoices;
+    DateTimeOffset freshAfter = DateTimeOffset.UtcNow.AddMinutes(1);
+    var available = Providers.ListWithCatalog(transaction)
+        .Where(state => state.Catalog is { Models.Count: > 0 }
+            && ProviderManager.CanUsePersistedState(state, freshAfter))
+        .ToDictionary(state => state.Connection.Id,
+            state => state.Catalog!.Models.Select(model => model.Id).ToHashSet(StringComparer.Ordinal));
+    bool hasProvider = available.Count > 0;
+    bool HasAssignment(IReadOnlyList<ConfiguredModel> assignments) => assignments.Any(model =>
+        available.TryGetValue(model.ConnectionId, out var ids) && ids.Contains(model.ModelId));
+    bool hasBuckets = HasAssignment(models.Small) && HasAssignment(models.Medium) && HasAssignment(models.Large);
+    string? directory = preferences.WorkingDirectory;
+    bool hasDirectory = !string.IsNullOrWhiteSpace(directory) && Path.IsPathFullyQualified(directory)
+        && Directory.Exists(directory);
+    return new(completed, hasProvider, hasBuckets, hasDirectory);
   }
 
   public UsageSummary ReadUsage(Guid? sessionId = null, DateTimeOffset? from = null,

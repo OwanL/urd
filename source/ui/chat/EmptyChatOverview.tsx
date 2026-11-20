@@ -1,9 +1,7 @@
 import type { SessionClient } from "../sessions/SessionClient.ts";
 import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
 import type { PreferencesState } from "../preferences/usePreferences.ts";
-import type { ModelOptionsState } from "../providers/models/useModelOptions.ts";
 import { UsageOverview } from "../usage/UsageOverview.tsx";
-import { ModelBucketSetup } from "./ModelBucketSetup.tsx";
 import { SessionWorkingDirectory } from "./working-directory/SessionWorkingDirectory.tsx";
 
 interface EmptyChatOverviewProps {
@@ -18,9 +16,6 @@ interface EmptyChatOverviewProps {
   active: boolean;
   visible: boolean;
   refresh: number;
-  showWorkingDirectory: boolean;
-  models: ModelOptionsState;
-  onCompleteFocus(): void;
 }
 
 export function EmptyChatOverview({
@@ -35,9 +30,6 @@ export function EmptyChatOverview({
   active,
   visible,
   refresh,
-  showWorkingDirectory,
-  models,
-  onCompleteFocus,
 }: EmptyChatOverviewProps) {
   return (
     <div class="empty-chat-overview">
@@ -52,14 +44,6 @@ export function EmptyChatOverview({
         onRefresh={onRefresh}
       />
       <UsageOverview active={active && visible} refreshKey={refresh} />
-      {showWorkingDirectory && models.hasProviders && (
-        <ModelBucketSetup
-          preferences={preferences}
-          models={models}
-          disabled={!ready}
-          onCompleteFocus={onCompleteFocus}
-        />
-      )}
     </div>
   );
 }

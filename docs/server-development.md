@@ -24,9 +24,14 @@ accepted. Port `0` lets the OS select an available port; an explicit port must b
 `1..65535`. Unknown, duplicate or malformed options fail before opening data.
 On Windows, file/shell tools and pending-call controls are enabled by default and require
 Git for Windows. Other platforms retain tool-free startup; explicitly requesting tools is
-unsupported. New sessions use the saved working-directory preference; when unset, new
-sessions use the process working drive's root (for example `C:\`), not the launch folder or
-data root. Set it in Settings → General, or with `POST /api/preferences/working-directory` using
+unsupported. A new profile's browser setup runs before the workspace mounts and requires a
+provider, assignments for all three model buckets (accept suggestions or configure them manually),
+and an explicit default working directory. It saves the same default edited in Settings → General;
+that preference applies only to new sessions and does not edit a current chat. Completed profiles
+retain Settings for later provider, bucket or default-directory changes. Existing profiles whose
+preference is unset keep the legacy fallback: new sessions use the process working drive's root
+(for example `C:\`), not the launch folder or data root. Set the default in Settings → General, or
+with `POST /api/preferences/working-directory` using
 `{ "workingDirectory": "C:\\dev\\repos\\your-project" }`; `GET /api/preferences` reads the
 effective path, including the root fallback. Posting `null` resets the default to that root.
 The path must be an existing absolute directory. Working-directory preference changes apply only to new sessions.
@@ -105,6 +110,21 @@ hidden-icons overflow, unless it has been hidden in Settings → Personalization
 - Built HTML/static assets pass the same gate, without the private API marker. HTML uses
   `no-store`; hashed `/assets` files are immutable. Missing assets and unknown API paths
   remain 404, not an HTML fallback.
+
+## Profile setup HTTP contract
+
+The browser checks setup before mounting the workspace for a new profile. `GET /api/setup` returns
+`{required, providerConfigured, bucketsConfigured, workingDirectoryConfigured}`. The browser saves
+provider, bucket and directory settings through their existing APIs, then posts `{}` to
+`POST /api/setup/complete`; it returns the same status when complete and 400 while a requirement is
+missing. Refresh reads persisted status and resumes at the first unmet step. Completion is a
+profile-level marker: it does not remove Settings or make later configuration recovery require setup
+again. Schema 36 profiles migrate already complete; see [backend development](backend-development.md)
+for the schema 37 migration.
+
+These routes use the existing loopback, Host/Origin and browser-marker API gate and no-store policy.
+They add no authentication or provider sign-in behavior; setup status/completion themselves make no
+provider calls.
 
 ## Session HTTP contract
 
@@ -192,7 +212,7 @@ receipts have a refusal reason and null execution ID. Stop receipts and
 The vocabulary cleanup preserved saved IDs, revisions, SQL identifiers and decisions.
 The current schema stores frozen selection, transcript metadata, request usage, known
 send-attempt provenance and not-sent tracking. See [backend development](backend-development.md)
-for current version handling and the schema 36 baseline.
+for current schema 37 handling and the schema 36 upgrade baseline.
 Session routes retain
 their local admission gates, status mapping, no-store and read-cancellation rules. Historical
 wire checks covered the renamed receipt, Stop, snapshot and cursor fields and rejected legacy
@@ -235,7 +255,7 @@ compact command identities/hashes and usage remain. Removed Send receipts return
 than exposing deleted text or allowing an old Send to recreate it. History replacement does
 not undo external tool effects. There is no branch archive or undo.
 
-See [backend development](backend-development.md) for the current schema and the schema 36
+See [backend development](backend-development.md) for the current schema 37 and schema 36
 upgrade baseline. Never reset or automatically activate a build against an active profile
 as part of verification.
 

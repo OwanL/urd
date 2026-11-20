@@ -274,12 +274,6 @@ export function Chat({
                 active={active}
                 visible={visible}
                 refresh={refresh}
-                showWorkingDirectory={showWorkingDirectory}
-                models={models}
-                onCompleteFocus={() => {
-                  if (composerInput.current?.getClientRects().length)
-                    composerInput.current.focus({ preventScroll: true });
-                }}
               />
             ) : null
           }

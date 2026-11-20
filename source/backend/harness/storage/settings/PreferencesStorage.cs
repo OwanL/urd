@@ -19,6 +19,12 @@ internal sealed class PreferencesStorage(Database database) {
       return Copy(ReadLocked());
   }
 
+  // Keep validation and its storage transaction serialized with preference updates.
+  internal T WithCurrent<T>(Func<UserPreferences, T> operation) {
+    lock (gate)
+      return operation(ReadLocked());
+  }
+
   internal UserPreferences Update(Func<UserPreferences, UserPreferences> update) {
     ArgumentNullException.ThrowIfNull(update);
     lock (gate) {

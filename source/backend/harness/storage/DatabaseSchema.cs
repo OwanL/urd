@@ -4,9 +4,16 @@ namespace Urd.Core.Storage;
 
 // Creates or upgrades the durable schema before storage is opened to callers.
 internal static class DatabaseSchema {
-  private const int SchemaVersion = 36;
+  private const int SchemaVersion = 37;
   // Each entry upgrades its source version to the next one. Schema 36 is the baseline.
-  private static readonly Dictionary<int, string> migrations = new();
+  private static readonly Dictionary<int, string> migrations = new() {
+    [36] = """
+        CREATE TABLE setup_completion (
+            singleton INTEGER PRIMARY KEY CHECK (singleton = 1)
+        ) STRICT;
+        INSERT INTO setup_completion (singleton) VALUES (1);
+        """
+  };
 
   internal static void Initialize(SqliteConnection connection) {
     using SqliteCommand command = connection.CreateCommand();
@@ -471,6 +478,9 @@ internal static class DatabaseSchema {
       CREATE TABLE provider_host (
           singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
           host_id TEXT NOT NULL
+      ) STRICT;
+      CREATE TABLE setup_completion (
+          singleton INTEGER PRIMARY KEY CHECK (singleton = 1)
       ) STRICT;
       CREATE TABLE preferences (
           singleton INTEGER PRIMARY KEY CHECK (singleton = 1),

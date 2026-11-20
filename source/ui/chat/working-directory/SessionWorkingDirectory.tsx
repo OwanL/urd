@@ -33,26 +33,17 @@ export function SessionWorkingDirectory({
   const [changeState, setChangeState] = useState<ChangeState>("idle");
   const [failure, setFailure] = useState<string | null>(null);
   const [savedDirectory, setSavedDirectory] = useState<string | null>(null);
-  const [changingDefault, setChangingDefault] = useState(false);
 
   useEffect(() => setDirectory(workingDirectory), [workingDirectory]);
 
-  async function save(nextDirectory: string, updateDefault = false) {
+  async function save(nextDirectory: string) {
     if (disabled || preferences.pending || operationInProgress.current || changeState !== "idle")
       return false;
     operationInProgress.current = true;
-    setChangingDefault(updateDefault);
     setChangeState("saving");
     setFailure(null);
     setSavedDirectory(null);
     onGateChange(true, "Saving working directory…");
-
-    if (updateDefault && !(await preferences.saveWorkingDirectory(nextDirectory))) {
-      setChangeState("idle");
-      operationInProgress.current = false;
-      onGateChange(false, null);
-      return false;
-    }
 
     let confirmedDirectory: string;
     try {
@@ -134,8 +125,6 @@ export function SessionWorkingDirectory({
     }
   }
 
-  const defaultDirectory = preferences.preferences?.workingDirectory ?? null;
-  const defaultDirectoryError = preferences.errorFor("workingDirectory");
   const changeFeedback =
     failure || changeState === "uncertain" || changeState === "reconciling" ? (
       <>
@@ -151,34 +140,6 @@ export function SessionWorkingDirectory({
   return (
     <div class="chat-working-directory">
       <WorkingDirectoryRow
-        label="Default working directory"
-        title="Default working directory"
-        directory={
-          preferences.loaded ? defaultDirectory : defaultDirectoryError ? "unavailable" : "loading…"
-        }
-        disabled={disabled || !preferences.loaded || changeState !== "idle"}
-        busy={preferences.pending || changeState !== "idle"}
-        onSave={(path) => save(path, true)}
-        onDraftChange={preferences.clearError}
-        feedback={
-          (defaultDirectoryError || (changingDefault && changeFeedback)) && (
-            <>
-              {defaultDirectoryError && (
-                <>
-                  <p role="alert">{defaultDirectoryError}</p>
-                  {!preferences.loaded && (
-                    <button type="button" onClick={() => void preferences.refresh()}>
-                      Retry
-                    </button>
-                  )}
-                </>
-              )}
-              {changingDefault && changeFeedback}
-            </>
-          )
-        }
-      />
-      <WorkingDirectoryRow
         label="Current working directory"
         title="Current working directory"
         directory={directory}
@@ -188,7 +149,7 @@ export function SessionWorkingDirectory({
         onDraftChange={() => {
           if (changeState === "idle") setFailure(null);
         }}
-        feedback={!changingDefault && changeFeedback}
+        feedback={changeFeedback}
       />
     </div>
   );

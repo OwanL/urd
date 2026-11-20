@@ -11,12 +11,12 @@ public sealed class DatabaseSchemaTests {
   public void FreshDatabaseCreatesAndReopensCurrentSchema() {
     using var database = new TemporaryDatabase();
     using (UrdStore store = UrdStore.Open(database.Path)) {
-      Assert.Equal(36L, database.Scalar("PRAGMA user_version;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
+      Assert.Equal(37L, database.Scalar("PRAGMA user_version;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
       store.Sessions.CreatePrimary(Guid.NewGuid());
     }
 
     using UrdStore reopened = UrdStore.Open(database.Path);
-    Assert.Equal(36L, database.Scalar("PRAGMA user_version;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
+    Assert.Equal(37L, database.Scalar("PRAGMA user_version;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
     Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM sessions;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
     Assert.Equal(1L, database.Scalar("SELECT \"notnull\" FROM pragma_table_info('execution_runs') WHERE name = 'created_at';")); // raw-sql: current schema creation, rejection or constraint is the subject under test
     Assert.Contains("strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
@@ -25,6 +25,36 @@ public sealed class DatabaseSchemaTests {
     Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM sqlite_schema WHERE type = 'table' AND name = 'session_prepass_details';")); // raw-sql: current schema creation, rejection or constraint is the subject under test
     Assert.Equal("INTEGER", database.Scalar("SELECT type FROM pragma_table_info('session_prepass_details') WHERE name = 'used_session_model';")); // raw-sql: current schema creation, rejection or constraint is the subject under test
     Assert.Equal(1L, database.Scalar("SELECT \"notnull\" FROM pragma_table_info('session_prepass_details') WHERE name = 'used_session_model';")); // raw-sql: current schema creation, rejection or constraint is the subject under test
+  }
+
+  [Fact]
+  public void Schema36UpgradeMarksSetupCompleteAndPreservesData() {
+    using var database = new TemporaryDatabase();
+    Guid session = Guid.NewGuid();
+    using (UrdStore store = UrdStore.Open(database.Path))
+      store.Sessions.CreatePrimary(session);
+    // Schema 37 only adds setup_completion, so removing it recreates the populated v36 schema.
+    database.Execute("DROP TABLE setup_completion; PRAGMA user_version = 36;"); // raw-sql: recreate the schema 36 baseline
+
+    using UrdStore upgraded = UrdStore.Open(database.Path);
+    Assert.True(upgraded.IsSetupComplete());
+    Assert.Equal(37L, database.Scalar("PRAGMA user_version;")); // raw-sql: upgraded version
+    Assert.Equal(1L, database.Scalar($"SELECT COUNT(*) FROM sessions WHERE session_id = '{session:D}';")); // raw-sql: existing data survives
+  }
+
+  [Fact]
+  public void FailedSchema36UpgradePreservesDataAndVersion() {
+    using var database = new TemporaryDatabase();
+    Guid session = Guid.NewGuid();
+    using (UrdStore store = UrdStore.Open(database.Path))
+      store.Sessions.CreatePrimary(session);
+    // Introduce a conflicting object into the otherwise populated v36 baseline.
+    database.Execute("DROP TABLE setup_completion; CREATE VIEW setup_completion AS SELECT 'preserved' AS value; PRAGMA user_version = 36;");
+
+    Assert.Throws<SqliteException>(() => UrdStore.Open(database.Path));
+    Assert.Equal(36L, database.Scalar("PRAGMA user_version;")); // raw-sql: failed upgrade retains version
+    Assert.Equal("preserved", database.Scalar("SELECT value FROM setup_completion;")); // raw-sql: failed upgrade retains data
+    Assert.Equal(1L, database.Scalar($"SELECT COUNT(*) FROM sessions WHERE session_id = '{session:D}';")); // raw-sql: existing session survives
   }
 
   [Fact]
@@ -109,13 +139,13 @@ public sealed class DatabaseSchemaTests {
   [Fact]
   public void NewerDatabaseIsRejectedWithoutDowngrade() {
     using var database = new TemporaryDatabase();
-    database.Execute("CREATE TABLE retained (value TEXT NOT NULL); INSERT INTO retained VALUES ('preserved'); PRAGMA user_version = 37;");
+    database.Execute("CREATE TABLE retained (value TEXT NOT NULL); INSERT INTO retained VALUES ('preserved'); PRAGMA user_version = 38;");
 
     NotSupportedException error = Assert.Throws<NotSupportedException>(() => UrdStore.Open(database.Path));
 
     Assert.Contains("newer Urd build", error.Message, StringComparison.OrdinalIgnoreCase);
     Assert.DoesNotContain("delete", error.Message, StringComparison.OrdinalIgnoreCase);
-    Assert.Equal(37L, database.Scalar("PRAGMA user_version;")); // raw-sql: newer schema must not be downgraded
+    Assert.Equal(38L, database.Scalar("PRAGMA user_version;")); // raw-sql: newer schema must not be downgraded
     Assert.Equal("preserved", database.Scalar("SELECT value FROM retained;")); // raw-sql: rejection must preserve newer database contents
   }
 

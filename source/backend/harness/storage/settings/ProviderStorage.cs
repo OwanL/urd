@@ -17,6 +17,9 @@ internal sealed class ProviderStorage(Database database) {
 
   internal ProviderState Get(Guid id) => database.Read(transaction => Require(transaction, id));
 
+  internal IReadOnlyList<ProviderState> ListWithCatalog(SqliteTransaction transaction) => database.Query(transaction,
+      $"SELECT {Columns} FROM provider_connections WHERE catalog_json IS NOT NULL;", ReadState);
+
   internal ProviderState Add(ProviderConnection connection) {
     if (connection.Id == Guid.Empty)
       throw new ArgumentException("Connection ID cannot be empty.", nameof(connection));
@@ -165,9 +168,12 @@ internal sealed class ProviderStorage(Database database) {
 
   private ProviderState? Read(SqliteTransaction transaction, Guid id) => database.QuerySingleOrDefault(transaction,
       $"SELECT {Columns} FROM provider_connections WHERE connection_id = $id;",
-      row => new ProviderState(ReadConnection(row), row.Long("generation"), row.Long("credential_version"),
-          ReadJson<ProviderRegistration>(row, "registration_json"), ReadJson<ProviderCredentials>(row, "credentials_json"),
-          row.Bool("disconnecting"), ReadJson<ProviderModelCatalog>(row, "catalog_json")), ("$id", id));
+      ReadState, ("$id", id));
+
+  private static ProviderState ReadState(SqliteDataReader row) => new(ReadConnection(row),
+      row.Long("generation"), row.Long("credential_version"),
+      ReadJson<ProviderRegistration>(row, "registration_json"), ReadJson<ProviderCredentials>(row, "credentials_json"),
+      row.Bool("disconnecting"), ReadJson<ProviderModelCatalog>(row, "catalog_json"));
 
   private void Save(SqliteTransaction transaction, ProviderState state) => database.Execute(transaction, """
       UPDATE provider_connections SET name = $name, api = $api, endpoint = $endpoint,

@@ -9,7 +9,7 @@ saved-primary-ID discovery, durable Send decisions, safe-boundary steering, addr
 Stop, bounded snapshot/history/content reads, known-not-sent discovery and graceful
 shutdown. The browser workspace is implemented and served as static assets by the Server.
 
-`UrdStore` owns the shared database, currently schema 36. It records whether a request
+`UrdStore` owns the shared database, currently schema 37. It records whether a request
 started sending and pages inputs known not to have been sent, so users can retrieve
 and explicitly resend them. Snapshots stay slim; transcript metadata and
 content use separate bounded reads, and reported usage is persisted per request. Session snapshots
@@ -21,14 +21,17 @@ settings are available in the browser workspace, and production sessions borrow 
 `ProviderManager`. See [provider management](provider-management.md) for connection and
 credential behavior.
 
-A fresh/version-0 database creates all current tables and indexes in one transaction;
-version 36 reopens normally. The current build rejects other versions and does not
-remove or reset databases. Schema 36 is the [durable-data baseline](../AGENTS.md): the
-next schema change must register its SQL step in `DatabaseSchema` and bump the version,
-including for development builds. On startup, `DatabaseMigrations` applies all required
-steps and records the new version in one SQLite transaction. Steps must not manage their
-own transactions, change the version, or modify sidecar files. There is no step to run
-at version 36 today. Unsupported databases are refused without a reset or downgrade.
+A fresh/version-0 database creates all current tables and indexes in one transaction and starts
+with setup incomplete. Schema 36 is the [durable-data baseline](../AGENTS.md) and upgrades to
+schema 37 by creating the setup-completion table and inserting its completion marker in the same
+transaction as the version change;
+existing profiles therefore bypass first-run setup. Schema 37 reopens normally. The current build
+rejects unsupported versions and does not remove or reset databases. Every later durable schema
+change must register its SQL step in `DatabaseSchema` and bump the version, including for development
+builds. On startup, `DatabaseMigrations` applies required steps and records the new version in one
+SQLite transaction. Steps must not manage their own transactions, change the version, or modify
+sidecar files. A failed upgrade leaves the prior schema and data recoverable. Unsupported databases
+are refused without a reset or downgrade.
 
 Requests have only known not-attempted (1)
 or attempted (2) provenance; transcript user entries require request links and receipts

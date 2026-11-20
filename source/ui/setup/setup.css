@@ -1,0 +1,133 @@
+.setup-shell {
+  height: 100%;
+  overflow: auto;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  place-items: center;
+  padding: 24px 20px;
+  background: radial-gradient(ellipse at 50% 0%, #191919, #080808 65%);
+}
+
+.setup-card {
+  width: min(760px, 100%);
+  max-height: min(850px, 100%);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #303030;
+  border-radius: 12px;
+  background: #111;
+  box-shadow: 0 24px 80px #0009;
+}
+
+.setup-header {
+  flex: none;
+  display: flex;
+  justify-content: space-between;
+  padding: 20px 28px;
+  border-bottom: 1px solid #292929;
+  color: #888;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+}
+
+.setup-brand {
+  color: #e7e7e7;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+}
+.setup-progress {
+  flex: none;
+  display: flex;
+  gap: 26px;
+  padding: 22px 28px 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.setup-progress span {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.setup-progress b {
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+.setup-progress .current,
+.setup-progress .current b {
+  color: #eee;
+}
+.setup-progress .done {
+  color: #aaa;
+}
+.setup-content {
+  padding: 22px 28px 28px;
+  overflow: auto;
+  min-height: 0;
+}
+
+.setup-bucket-suggestions {
+  margin-bottom: 14px;
+}
+
+.setup-content h1 {
+  margin: 0 0 20px;
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+}
+.setup-content h1:focus-visible {
+  outline: 2px solid var(--text-secondary);
+  outline-offset: 4px;
+}
+.setup-directory {
+  display: grid;
+  justify-items: start;
+  gap: 14px;
+}
+.setup-directory p {
+  color: var(--text-secondary);
+  margin: 0;
+}
+.setup-directory code {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  color: #ddd;
+}
+.setup-actions {
+  flex: none;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  border-top: 1px solid #292929;
+  padding: 18px 28px;
+}
+.setup-actions button,
+.setup-directory > button,
+.setup-card > button {
+  border: 1px solid #414141;
+  border-radius: 6px;
+  background: #202020;
+  padding: 7px 14px;
+}
+.setup-actions button.setup-primary {
+  background: #e0e0e0;
+  color: #111;
+  border-color: #e0e0e0;
+  font-weight: 600;
+}
+.setup-error {
+  color: var(--danger);
+  margin: 0 28px 16px;
+}
+@media (max-width: 550px) {
+  .setup-shell {
+    padding: 12px;
+  }
+  .setup-card {
+    max-height: 100%;
+  }
+  .setup-progress {
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+}

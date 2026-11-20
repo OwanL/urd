@@ -99,7 +99,7 @@ internal static class Program {
         prices = ModelPriceCatalog.Open(options.DataRoot);
       providers = createProviders?.Invoke(store, CallbackUri) ?? new ProviderManager(store, CallbackUri, prices);
       var preferences = new PreferenceManager(store);
-      if (warmInstructions && preferences.Read().WorkingDirectory is { } defaultDirectory)
+      if (warmInstructions && store.IsSetupComplete() && preferences.Read().WorkingDirectory is { } defaultDirectory)
         store.WarmInstructionResources(defaultDirectory);
       AgentToolSettings? tools = OperatingSystem.IsWindows() || options.GitBashPath is not null
           ? new AgentToolSettings(options.GitBashPath,
@@ -211,6 +211,7 @@ internal static class Program {
       app.MapMarkdown(manager, eventHub, markdown);
     app.MapProviders(providers, preferences);
     app.MapPreferences(preferences, manager);
+    app.MapSetup(store);
     app.MapUsage(store);
     return app;
   }

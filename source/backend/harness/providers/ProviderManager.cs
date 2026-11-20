@@ -430,8 +430,11 @@ public sealed class ProviderManager : IDisposable {
         .Select(connection => storage.Get(connection.Id)).Where(state => CanUseWithoutSignIn(state, freshAfter));
   }
 
-  private bool CanUseWithoutSignIn(ProviderState state, DateTimeOffset freshAfter) {
-    if (state.Disconnecting || RequiresSignIn(state))
+  private bool CanUseWithoutSignIn(ProviderState state, DateTimeOffset freshAfter) =>
+      !RequiresSignIn(state) && CanUsePersistedState(state, freshAfter);
+
+  internal static bool CanUsePersistedState(ProviderState state, DateTimeOffset freshAfter) {
+    if (state.Disconnecting)
       return false;
     if (state.Connection.Authentication == AuthenticationMethod.None)
       return true;

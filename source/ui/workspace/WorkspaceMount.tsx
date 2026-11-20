@@ -4,8 +4,8 @@ import { Workspace } from "./Workspace.tsx";
 import { RichMessageBody } from "../chat/transcript/RichMessageBody.tsx";
 import type { TranscriptDisplay } from "../chat/transcript/TranscriptDisplay.ts";
 import { MarkdownClient } from "../markdown-rendering/MarkdownClient.ts";
+import { SetupGate } from "../setup/SetupGate.tsx";
 
-// Normal startup and isolated previews share the same bounded application composition.
 export function mountWorkspace(
   root: HTMLElement,
   limits: Pick<TranscriptDisplay, "retainedPieces" | "retainedTabs">,
@@ -37,7 +37,11 @@ export function mountWorkspace(
         reportError = null;
       };
     }, []);
-    return <Workspace transcript={display} transcriptError={error} />;
+    return (
+      <SetupGate>
+        <Workspace transcript={display} transcriptError={error} />
+      </SetupGate>
+    );
   }
   render(<Application />, root);
   return {

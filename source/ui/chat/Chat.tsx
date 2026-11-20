@@ -47,6 +47,7 @@ interface ChatProps {
   preferences: PreferencesState;
   connected: boolean;
   unavailable: boolean;
+  closing: boolean;
   sessionStatus: string | undefined;
   canPersist: boolean;
   refresh: number;
@@ -82,6 +83,7 @@ export function Chat({
   preferences,
   connected,
   unavailable,
+  closing,
   sessionStatus,
   canPersist,
   refresh,
@@ -97,7 +99,7 @@ export function Chat({
   transcriptPosition,
   onTranscriptPositionChange,
 }: ChatProps) {
-  const ready = connected && !unavailable;
+  const ready = connected && !unavailable && !closing;
   const savingSubagentProviders = commands.status.savingSubagentProviders.has(sessionId);
   const executionSettingsSaving =
     savingSubagentProviders || preferenceSaveBlocks(preferences.pendingFor, "execute");

@@ -28,6 +28,22 @@ export function applySessionTitle(
   };
 }
 
+export function removeWorkspaceSessions(
+  state: WorkspaceState,
+  removed: ReadonlySet<string>,
+): WorkspaceState {
+  if (![...removed].some((id) => Object.hasOwn(state.chats, id))) return state;
+  const chats = { ...state.chats };
+  for (const id of removed) delete chats[id];
+  const tabs = state.tabs.filter((id) => !removed.has(id));
+  let activeId = state.activeId;
+  if (activeId && removed.has(activeId)) {
+    const index = state.tabs.indexOf(activeId);
+    activeId = state.tabs.slice(index + 1).find((id) => !removed.has(id)) ?? tabs.at(-1) ?? null;
+  }
+  return { ...state, chats, tabs, activeId };
+}
+
 export function decodeWorkspace(raw: string): WorkspaceState {
   const state: unknown = JSON.parse(raw);
   if (!isWorkspace(state)) throw new TypeError("Invalid saved workspace.");

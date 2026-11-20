@@ -19,7 +19,8 @@ and starts a new response. Editing does not undo tool effects. Schema 36 is the 
 version supported for automatic upgrades in future builds. Older experimental schemas are
 not supported; see [backend development](docs/backend-development.md).
 History metadata, not-sent inputs and one shared event stream support transcript updates.
-Closing a tab hides it; it does not stop work or close its backend session.
+Closing an idle chat from its tab permanently deletes its conversation and tool history.
+Closing the browser or quitting Urd does not delete open chats.
 
 Windows file/shell tools, browser navigation through older history and on-demand tool-body
 inspection are available. Host startup records interrupted executions without replay; broader

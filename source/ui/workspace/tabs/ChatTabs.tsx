@@ -1,5 +1,5 @@
 import type { RefObject } from "preact";
-import { useLayoutEffect, useState } from "preact/hooks";
+import { useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Icon } from "../../controls/Icon.tsx";
 import { IconButton } from "../../controls/IconButton.tsx";
 import { Tooltip } from "../../controls/Tooltip.tsx";
@@ -26,12 +26,14 @@ export interface ChatTabsProps {
     title: string;
     status?: string | undefined;
     knownStatus?: string | undefined;
+    closeAvailable: boolean;
+    closing: boolean;
   }[];
   activeId: string | null;
   unread: ReadonlySet<string>;
   emptyFocusTarget: RefObject<HTMLButtonElement | null>;
   onOpen(id: string): void;
-  onClose(id: string): void;
+  onClose(id: string): Promise<void>;
   onReorder(id: string, beforeId: string | null): void;
 }
 
@@ -45,6 +47,14 @@ export function ChatTabs({
   onReorder,
 }: ChatTabsProps) {
   const [announcement, setAnnouncement] = useState("");
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const confirmation = useRef<HTMLDialogElement>(null);
+  const confirming = tabs.find((tab) => tab.id === confirmingId);
+  useLayoutEffect(() => {
+    const dialog = confirmation.current;
+    if (confirming && dialog && !dialog.open) dialog.showModal();
+    if (!confirming && confirmingId !== null) setConfirmingId(null);
+  }, [confirming, confirmingId]);
   const drag = useTabDrag(tabs, (id, beforeId) => {
     reorder(id, beforeId);
     focusTab(id);
@@ -57,19 +67,18 @@ export function ChatTabs({
       tab?.closest(".chat-tab")?.scrollIntoView({ block: "nearest", inline: "nearest" });
     });
   }
-  function closeTab(id: string) {
-    const tab = tabs.find((item) => item.id === id);
-    if (
-      isBusySessionStatus(tab?.status) ||
-      (tab?.status === "updates-paused" && isBusySessionStatus(tab.knownStatus))
-    )
-      return;
-    onClose(id);
+  async function closeTab(id: string) {
+    confirmation.current?.close();
+    setConfirmingId(null);
+    const closingTab = document.getElementById(`tab-${id}`);
+    closingTab?.focus({ preventScroll: true });
+    await onClose(id);
     requestAnimationFrame(() => {
+      if (closingTab?.isConnected || document.activeElement !== document.body) return;
       const selected = drag.strip.current?.querySelector<HTMLButtonElement>(
         '[role="tab"][aria-selected="true"]',
       );
-      (selected ?? emptyFocusTarget.current)?.focus();
+      (selected ?? emptyFocusTarget.current)?.focus({ preventScroll: true });
     });
   }
   const activeTitle = tabs.find((tab) => tab.id === activeId)?.title;
@@ -102,7 +111,7 @@ export function ChatTabs({
     onReorder(id, beforeId);
   }
 
-  return (
+  const tabStrip = (
     <div
       ref={drag.strip}
       class="chat-tabs"
@@ -141,18 +150,20 @@ export function ChatTabs({
         focusTab(id);
       }}
     >
-      {tabs.map(({ id, title, status, knownStatus }) => {
+      {tabs.map(({ id, title, status, knownStatus, closeAvailable, closing }) => {
         const busy = isBusySessionStatus(status);
         const pausedBusy = status === "updates-paused" && isBusySessionStatus(knownStatus);
         const completed = unread.has(id) && id !== activeId && status === "idle";
         const lastKnownLabel = knownStatus ? (statusLabels[knownStatus] ?? knownStatus) : null;
-        const statusLabel = completed
-          ? "Completed"
-          : status === "updates-paused" && lastKnownLabel
-            ? `Updates paused; last observed ${lastKnownLabel}`
-            : status
-              ? (statusLabels[status] ?? status)
-              : null;
+        const statusLabel = closing
+          ? "Closing…"
+          : completed
+            ? "Completed"
+            : status === "updates-paused" && lastKnownLabel
+              ? `Updates paused; last observed ${lastKnownLabel}`
+              : status
+                ? (statusLabels[status] ?? status)
+                : null;
         const indicatorStatus =
           status === "updates-paused" &&
           ["failed", "fenced", "needs-attention"].includes(knownStatus ?? "")
@@ -195,18 +206,21 @@ export function ChatTabs({
                 role="tab"
                 aria-label={`${title}${statusLabel ? `, ${statusLabel}` : ""}`}
                 aria-selected={id === activeId}
+                aria-busy={closing}
                 aria-controls="chat-view"
                 aria-keyshortcuts={
-                  "Alt+Shift+ArrowLeft Alt+Shift+ArrowRight" // gitleaks:allow -- public keyboard shortcuts, not a credential
+                  closeAvailable
+                    ? "Alt+Shift+ArrowLeft Alt+Shift+ArrowRight Delete"
+                    : "Alt+Shift+ArrowLeft Alt+Shift+ArrowRight" // gitleaks:allow -- public keyboard shortcuts, not a credential
                 }
                 tabIndex={id === activeId ? 0 : -1}
                 onPointerDown={(event) => drag.start(event, id)}
                 onDragStart={(event) => event.preventDefault()}
                 onClick={() => onOpen(id)}
                 onKeyDown={(event) => {
-                  if (event.key === "Delete" && !drag.draggedId) {
+                  if (event.key === "Delete" && !event.repeat && !drag.draggedId) {
                     event.preventDefault();
-                    closeTab(id);
+                    if (closeAvailable) setConfirmingId(id);
                   }
                 }}
               >
@@ -261,14 +275,21 @@ export function ChatTabs({
                   <IconButton
                     icon="close"
                     class="close-tab"
-                    label={`Close ${title}`}
+                    label={closing ? "Closing chat…" : `Close ${title}`}
+                    disabled={!closeAvailable}
                     hint={
-                      <>
-                        Close tab <kbd>Delete</kbd>
-                      </>
+                      closing ? (
+                        "Closing chat…"
+                      ) : closeAvailable ? (
+                        <>
+                          Close chat <kbd>Delete</kbd>
+                        </>
+                      ) : (
+                        "Close unavailable"
+                      )
                     }
                     placement="below"
-                    onClick={() => closeTab(id)}
+                    onClick={() => setConfirmingId(id)}
                   />
                 </>
               )}
@@ -280,5 +301,37 @@ export function ChatTabs({
         {announcement}
       </span>
     </div>
+  );
+
+  return (
+    <>
+      {tabStrip}
+      {confirming && (
+        <dialog
+          ref={confirmation}
+          class="close-chat-dialog"
+          aria-labelledby="close-chat-title"
+          aria-describedby="close-chat-description"
+          onClose={() => setConfirmingId(null)}
+        >
+          <h2 id="close-chat-title">Close “{confirming.title}”?</h2>
+          <p id="close-chat-description">
+            This permanently deletes the conversation and its draft. It can’t be reopened.
+          </p>
+          <div class="close-chat-actions">
+            <button type="button" autoFocus onClick={() => confirmation.current?.close()}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={!confirming.closeAvailable}
+              onClick={() => void closeTab(confirming.id)}
+            >
+              Close permanently
+            </button>
+          </div>
+        </dialog>
+      )}
+    </>
   );
 }

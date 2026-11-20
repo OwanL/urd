@@ -107,7 +107,7 @@ machine, not whichever device displays the UI.
 Desktop/editor clients should attach to an existing backend or start one when absent.
 Closing a client leaves the backend running; stopping the backend is explicit. Authorized
 work and scheduled follow-ups can continue without a visible UI, consuming usage and
-changing files. Closing a session is a separate final action, not the current tab-hide action.
+changing files. Explicitly closing an idle session from its tab is final; closing the browser is not.
 
 Users need a clear way to find and stop a running backend. On Windows, the server shows a
 basic tray icon (address, Open, Stop). Once the VS Code client is available, **Open in VS Code**

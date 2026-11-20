@@ -21,6 +21,15 @@ const localStorageLike: TranscriptNavigationStorageLike = {
   },
 };
 
+const closedSessions = new Set<string>();
+const storage = new TranscriptNavigationStorage(localStorageLike);
+
+export function forgetTranscriptNavigation(sessionId: string): void {
+  closedSessions.add(sessionId);
+  const result = storage.clear(sessionId);
+  if (result.error !== null) throw new Error(result.error);
+}
+
 export interface TranscriptNavigationStore {
   load(width: number): NavigationStorageResult<{
     state: TranscriptNavigationState | null;
@@ -37,13 +46,13 @@ export function useTranscriptNavigation(
   onSuspend: () => void,
   onResume: () => void,
 ): TranscriptNavigationStore {
-  const [storage] = useState(() => new TranscriptNavigationStorage(localStorageLike));
   const [writer] = useState(
     () =>
       new DebouncedTranscriptNavigationWriter(
         storage,
         (callback) => window.setTimeout(callback, 160),
         (handle) => window.clearTimeout(handle as number),
+        (id) => !closedSessions.has(id),
       ),
   );
   const callbacks = useRef({ onChange, onSuspend, onResume });
@@ -53,6 +62,8 @@ export function useTranscriptNavigation(
 
   const load = useCallback(
     (width: number) => {
+      if (closedSessions.has(sessionId))
+        return { value: { state: null, pixelReuse: false }, error: null };
       if (loaded.current) {
         const state = initialState.current ?? null;
         return {
@@ -85,11 +96,12 @@ export function useTranscriptNavigation(
       initialState.current = result.value.state ?? undefined;
       return result;
     },
-    [sessionId, storage],
+    [sessionId],
   );
 
   const save = useCallback(
     (state: TranscriptNavigationState) => {
+      if (closedSessions.has(sessionId)) return;
       initialState.current = state;
       loaded.current = true;
       callbacks.current.onChange(state);
@@ -104,7 +116,7 @@ export function useTranscriptNavigation(
     const suspend = () => {
       if (suspended) return;
       suspended = true;
-      writer.flush();
+      flush();
       callbacks.current.onSuspend();
     };
     const resume = () => {
@@ -124,14 +136,14 @@ export function useTranscriptNavigation(
     document.addEventListener("freeze", freeze as EventListener);
     document.addEventListener("resume", thaw as EventListener);
     return () => {
-      writer.flush();
+      flush();
       window.removeEventListener("pagehide", suspend);
       window.removeEventListener("pageshow", resume);
       document.removeEventListener("visibilitychange", visibilityChanged);
       document.removeEventListener("freeze", freeze as EventListener);
       document.removeEventListener("resume", thaw as EventListener);
     };
-  }, [writer]);
+  }, [flush]);
 
   return useMemo(() => ({ load, save, flush }), [flush, load, save]);
 }

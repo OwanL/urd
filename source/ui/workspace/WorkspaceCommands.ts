@@ -36,6 +36,8 @@ type WorkspaceCompactionState = ChatCompactionState;
 
 export interface WorkspaceCommandState {
   readonly creating: boolean;
+  readonly closing: ReadonlySet<string>;
+  readonly closeError: { readonly sessionId: string; readonly message: string } | null;
   readonly savingSubagentProviders: ReadonlySet<string>;
   readonly subagentProviderError: { readonly sessionId: string; readonly message: string } | null;
   readonly compactions: Readonly<Record<string, WorkspaceCompactionState>>;
@@ -62,6 +64,8 @@ export interface WorkspaceCommandAccess extends MessageEditingAccess {
 
 export const emptyWorkspaceCommandState: WorkspaceCommandState = {
   creating: false,
+  closing: new Set(),
+  closeError: null,
   savingSubagentProviders: new Set(),
   subagentProviderError: null,
   compactions: {},
@@ -74,6 +78,7 @@ export const emptyWorkspaceCommandState: WorkspaceCommandState = {
 type WorkspaceCommandClient = Pick<
   SessionClient,
   | "create"
+  | "closeSession"
   | "submitMessage"
   | "getMessageReceipt"
   | "getSnapshot"
@@ -186,7 +191,7 @@ export class WorkspaceCommands {
     id: string,
     connectionIds: SubagentProviderConnectionIds,
   ): Promise<SubagentProviders | null> {
-    if (this.state.savingSubagentProviders.has(id)) return null;
+    if (this.state.closing.has(id) || this.state.savingSubagentProviders.has(id)) return null;
     this.publish({
       savingSubagentProviders: new Set([...this.state.savingSubagentProviders, id]),
       subagentProviderError:
@@ -215,7 +220,7 @@ export class WorkspaceCommands {
     return this.state.savingSubagentProviders.has(id) || this.preferenceSaveBlocks("execute");
   }
 
-  async create(): Promise<void> {
+  async create(isClosed: (id: string) => boolean = () => false): Promise<void> {
     if (!this.access.canPersist() || this.createPending || this.preferenceSaveBlocks("create"))
       return;
     if (!this.access.save(this.access.read())) return;
@@ -225,6 +230,7 @@ export class WorkspaceCommands {
     this.reportError(null);
     try {
       const id = await this.client.create();
+      if (isClosed(id)) return;
       const state = this.access.read();
       this.access.save({
         ...state,
@@ -240,6 +246,71 @@ export class WorkspaceCommands {
     }
   }
 
+  canClose(id: string, status: string | undefined): boolean {
+    const workspace = this.access.read();
+    const chat = workspace.chats[id];
+    const compaction = this.state.compactions[id];
+    return Boolean(
+      (status === "idle" || status === "failed") &&
+      workspace.tabs.includes(id) &&
+      chat &&
+      this.access.canPersist() &&
+      !chat.pending &&
+      !chat.pendingContinuation &&
+      !chat.messageEdit &&
+      !chat.knownExecutionId &&
+      !this.state.closing.has(id) &&
+      !this.state.stopping[id] &&
+      !this.state.savingSubagentProviders.has(id) &&
+      (!compaction || compaction.phase === "settled") &&
+      !this.hasPendingInputRemoval(id),
+    );
+  }
+
+  async close(id: string, status: string | undefined, forget: (id: string) => void): Promise<void> {
+    if (!this.canClose(id, status)) return;
+    this.publish({ closing: new Set([...this.state.closing, id]), closeError: null });
+    try {
+      await this.client.closeSession(id);
+      forget(id);
+    } catch (cause) {
+      if (!this.access.read().chats[id]) return;
+      if (cause instanceof RequestError && cause.status === 409) {
+        this.reportCloseError(id, "Chat is busy. Wait for its work to finish before closing it.");
+        this.refreshSnapshot();
+      } else {
+        // Even a 404 can mean the server lacks the close route. Check the session
+        // itself before discarding its draft; never resend a destructive request.
+        const observed = await this.checkAfterClose(id);
+        if (observed === "missing") forget(id);
+        else if (this.access.read().chats[id])
+          this.reportCloseError(
+            id,
+            observed === "open"
+              ? "Closure could not be confirmed. The chat was still open when checked."
+              : "Closure could not be confirmed. Check the chat before trying again.",
+          );
+      }
+    } finally {
+      const closing = new Set(this.state.closing);
+      closing.delete(id);
+      this.publish({ closing });
+    }
+  }
+
+  private reportCloseError(sessionId: string, message: string): void {
+    this.publish({ closeError: { sessionId, message } });
+  }
+
+  private async checkAfterClose(id: string): Promise<"open" | "missing" | "unknown"> {
+    try {
+      const snapshot = await this.client.getSnapshot(id, AbortSignal.timeout(5_000));
+      return snapshot.sessionId === id ? "open" : "unknown";
+    } catch (cause) {
+      return cause instanceof RequestError && cause.status === 404 ? "missing" : "unknown";
+    }
+  }
+
   send(
     id: string,
     snapshot: SessionSnapshot,
@@ -247,6 +318,7 @@ export class WorkspaceCommands {
     canSend: boolean,
     defaultSelection: LlmSelection | null = null,
   ): Promise<void> {
+    if (this.state.closing.has(id)) return Promise.resolve();
     return this.submissions.send(id, snapshot, active, canSend, defaultSelection);
   }
   continueSession(
@@ -255,6 +327,7 @@ export class WorkspaceCommands {
     canContinue: boolean,
     defaultSelection: LlmSelection | null = null,
   ): Promise<void> {
+    if (this.state.closing.has(id)) return Promise.resolve();
     return this.submissions.continueSession(id, snapshot, canContinue, defaultSelection);
   }
   resendNotSent(
@@ -262,6 +335,7 @@ export class WorkspaceCommands {
     snapshot: SessionSnapshot,
     source: UserMessageSubmission,
   ): Promise<NotSentResendResult | null> {
+    if (this.state.closing.has(id)) return Promise.resolve(null);
     return this.submissions.resendNotSent(id, snapshot, source);
   }
   checkReceipt(id: string): Promise<UserMessageReceipt | null> {
@@ -287,6 +361,7 @@ export class WorkspaceCommands {
     const selection = idleChatSelection(chat, snapshot, defaultSelection);
     if (
       !canCompact ||
+      this.state.closing.has(id) ||
       this.executionSettingsSaving(id) ||
       snapshot.sessionId !== id ||
       snapshot.canCompact !== true ||
@@ -325,6 +400,7 @@ export class WorkspaceCommands {
     submissionId: string,
     canRemove: boolean,
   ): Promise<void> {
+    if (this.state.closing.has(id)) return Promise.resolve();
     return this.removals.remove(id, executionId, submissionId, canRemove);
   }
 
@@ -334,7 +410,7 @@ export class WorkspaceCommands {
 
   async stop(id: string, snapshot: SessionSnapshot, stopId: string | undefined): Promise<void> {
     const executionId = snapshot.unsettledExecutionId;
-    if (!id || !executionId || stopId) return;
+    if (!id || !executionId || stopId || this.state.closing.has(id)) return;
     const requestKey = `${id}/${executionId}`;
     if (this.stoppingRequests.has(requestKey)) return;
     this.stoppingRequests.add(requestKey);

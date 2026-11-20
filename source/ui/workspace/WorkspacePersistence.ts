@@ -17,10 +17,16 @@ interface SavedDraft {
 export class WorkspacePersistence {
   private readonly storage: () => Storage;
   private readonly key: string;
+  private readonly clearTranscriptNavigation: (id: string) => void;
 
-  constructor(storage: () => Storage, key: string) {
+  constructor(
+    storage: () => Storage,
+    key: string,
+    clearTranscriptNavigation: (id: string) => void = () => {},
+  ) {
     this.storage = storage;
     this.key = key;
+    this.clearTranscriptNavigation = clearTranscriptNavigation;
   }
 
   load(): WorkspaceLoad {
@@ -61,7 +67,10 @@ export class WorkspacePersistence {
     }
   }
 
-  save(state: WorkspaceState): { cleanupError: string | null } {
+  save(
+    state: WorkspaceState,
+    removedSessions: ReadonlySet<string> = new Set(),
+  ): { cleanupError: string | null } {
     const storage = this.storage();
     storage.setItem(this.key, encodeWorkspace(state));
     let cleanupError: string | null = null;
@@ -71,6 +80,19 @@ export class WorkspacePersistence {
         if (saved === null) continue;
         const draft = decodeDraft(saved);
         if (draft.draftVersion <= chat.draftVersion) storage.removeItem(this.draftKey(id));
+      } catch (cause) {
+        cleanupError = description(cause);
+      }
+    }
+    for (const id of removedSessions) {
+      if (Object.hasOwn(state.chats, id)) continue;
+      try {
+        storage.removeItem(this.draftKey(id));
+      } catch (cause) {
+        cleanupError = description(cause);
+      }
+      try {
+        this.clearTranscriptNavigation(id);
       } catch (cause) {
         cleanupError = description(cause);
       }

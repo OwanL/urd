@@ -31,8 +31,13 @@ export async function requestBlob(
   return response.blob();
 }
 
-export async function requestEmpty(url: URL, method: "POST", body: unknown): Promise<void> {
-  const response = await request(url, method, body);
+export async function requestEmpty(
+  url: URL,
+  method: "POST",
+  body: unknown,
+  signal?: AbortSignal,
+): Promise<void> {
+  const response = await request(url, method, body, signal);
   if (response.status === 204) return;
   await response.body?.cancel();
   throw new TypeError("Server did not return an empty acknowledgement (HTTP 204).");

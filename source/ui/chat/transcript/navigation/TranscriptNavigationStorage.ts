@@ -117,15 +117,18 @@ export class DebouncedTranscriptNavigationWriter {
   private readonly storage: TranscriptNavigationStorage;
   private readonly schedule: NavigationScheduler;
   private readonly cancelScheduled: NavigationCancellation;
+  private readonly canSave: (sessionId: string) => boolean;
 
   constructor(
     storage: TranscriptNavigationStorage,
     schedule: NavigationScheduler,
     cancelScheduled: NavigationCancellation,
+    canSave: (sessionId: string) => boolean = () => true,
   ) {
     this.storage = storage;
     this.schedule = schedule;
     this.cancelScheduled = cancelScheduled;
+    this.canSave = canSave;
   }
 
   scheduleWrite(sessionId: string, state: TranscriptNavigationState): void {
@@ -142,7 +145,7 @@ export class DebouncedTranscriptNavigationWriter {
     this.pending = null;
     const latest = this.latest;
     this.latest = null;
-    return latest === null
+    return latest === null || !this.canSave(latest.sessionId)
       ? { value: undefined, error: null }
       : this.storage.save(latest.sessionId, latest.state);
   }

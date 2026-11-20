@@ -18,6 +18,7 @@ import { Chat } from "../chat/Chat.tsx";
 import type { ReadingPosition } from "../chat/transcript/Transcript.tsx";
 import type { TranscriptDisplay } from "../chat/transcript/TranscriptDisplay.ts";
 import type { TranscriptNavigationState } from "../chat/transcript/navigation/TranscriptNavigationStorage.ts";
+import { forgetTranscriptNavigation } from "../chat/transcript/navigation/useTranscriptNavigation.ts";
 import { usePersistedWorkspace } from "./usePersistedWorkspace.ts";
 import { useModelOptions } from "../providers/models/useModelOptions.ts";
 import { defaultModelSelection } from "./DefaultModelSelection.ts";
@@ -31,6 +32,7 @@ const sessions = new SessionClient(new URL(window.location.href));
 const providers = new ProviderClient(new URL(window.location.href));
 const preferencesClient = new PreferencesClient(new URL(window.location.href));
 const storageKey = "urd.workspace.v1";
+const noTabs: readonly string[] = [];
 const storageRetryLabels = { read: "Retry read", write: "Retry save", cleanup: "Retry cleanup" };
 
 export interface WorkspaceProps {
@@ -45,8 +47,11 @@ export function Workspace({
   transcriptError,
   setup = "complete",
 }: WorkspaceProps = {}) {
-  const [persistence] = useState(() => new WorkspacePersistence(() => sessionStorage, storageKey));
+  const [persistence] = useState(
+    () => new WorkspacePersistence(() => sessionStorage, storageKey, forgetTranscriptNavigation),
+  );
   const workspace = usePersistedWorkspace(persistence);
+  const { isClosed } = workspace;
   const models = useModelOptions(providers);
   const preferences = usePreferences(preferencesClient);
   const creatingPreferencePending = preferenceSaveBlocks(preferences.pendingFor, "create");
@@ -70,10 +75,7 @@ export function Workspace({
   const [messageEditing] = useState(
     () => new MessageEditing(sessions, workspace.access, refreshSnapshot),
   );
-  useEffect(() => {
-    if (workspace.loaded) return messageEditing.watchPendingReceipts();
-  }, [messageEditing, workspace.loaded]);
-  const create = useCallback(() => commands.create(), [commands]);
+  const create = useCallback(() => commands.create(isClosed), [commands, isClosed]);
   const setupComplete = setup === "complete";
   const previousSetup = useRef(setup);
   const { providersChanged } = models;
@@ -93,8 +95,14 @@ export function Workspace({
 
   // Receipt reconciliation and reading positions belong to the workspace, not a mounted chat.
   useEffect(() => {
-    if (workspace.loaded) return commands.watchPendingReceipts();
-  }, [commands, workspace.loaded]);
+    if (!navigation.ready) return;
+    const stopEditWatch = messageEditing.watchPendingReceipts();
+    const stopCommandWatch = commands.watchPendingReceipts();
+    return () => {
+      stopEditWatch();
+      stopCommandWatch();
+    };
+  }, [commands, messageEditing, navigation.ready]);
   const readingPositions = useRef(new Map<string, ReadingPosition>());
   const transcriptPositions = useRef(new Map<string, TranscriptNavigationState>());
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -107,7 +115,9 @@ export function Workspace({
   const settingsAnchor = useRef<HTMLButtonElement>(null);
   const [optionsOpen, setOptionsOpen] = useState(false);
   const newChatButton = useRef<HTMLButtonElement>(null);
-  const { activeId, chats, tabs, lastSelection } = workspace.state;
+  const { lastSelection, chats } = workspace.state;
+  const tabs = navigation.ready ? workspace.state.tabs : noTabs;
+  const activeId = navigation.ready ? workspace.state.activeId : null;
   const discoveringModels = models.loading || models.refreshing;
   const defaultSelection = useMemo(
     () =>
@@ -131,16 +141,29 @@ export function Workspace({
     sessions,
     workspace.access,
     navigation.discovered,
+    navigation.forget,
+    isClosed,
     navigation.ready,
     tabs,
     activeId,
   );
   const shown = useWorkspaceRetention(activeId, tabs, transcript?.retainedTabs ?? null);
+  useEffect(() => {
+    for (const id of readingPositions.current.keys())
+      if (isClosed(id)) readingPositions.current.delete(id);
+    for (const id of transcriptPositions.current.keys())
+      if (isClosed(id)) transcriptPositions.current.delete(id);
+  }, [tabs, isClosed]);
   const canPersist = workspace.access.canPersist();
   const connected = navigation.ready && events.connected;
   const disconnected = navigation.error !== null || events.connectionState === "disconnected";
+  const closeError = commandState.closeError;
   const error =
-    commandError || navigation.error || (events.connected ? events.error : null) || transcriptError;
+    (closeError && chats[closeError.sessionId] ? closeError.message : null) ||
+    commandError ||
+    navigation.error ||
+    (events.connected ? events.error : null) ||
+    transcriptError;
 
   return (
     <main class="workspace">
@@ -151,11 +174,17 @@ export function Workspace({
             title: chats[id]?.title ?? "Chat",
             status: events.statuses[id],
             knownStatus: events.knownStatuses[id],
+            closeAvailable: connected && commands.canClose(id, events.statuses[id]),
+            closing: commandState.closing.has(id),
           }))}
           activeId={activeId}
           unread={events.unread}
           onOpen={navigation.open}
-          onClose={navigation.close}
+          onClose={(id) =>
+            commands.close(id, connected ? events.statuses[id] : undefined, (closedId) =>
+              navigation.forget([closedId]),
+            )
+          }
           onReorder={navigation.reorder}
           emptyFocusTarget={newChatButton}
         />
@@ -293,6 +322,7 @@ export function Workspace({
             preferences={preferences}
             connected={connected}
             unavailable={events.knownStatuses[id] === "unavailable"}
+            closing={commandState.closing.has(id)}
             sessionStatus={events.statuses[id]}
             canPersist={canPersist}
             notice={id === activeId ? events.notice : null}
@@ -305,11 +335,11 @@ export function Workspace({
             selectModel={workspace.selectModel}
             position={readingPositions.current.get(id)}
             onPositionChange={(position) => {
-              readingPositions.current.set(id, position);
+              if (!isClosed(id)) readingPositions.current.set(id, position);
             }}
             transcriptPosition={transcriptPositions.current.get(id)}
             onTranscriptPositionChange={(position) => {
-              transcriptPositions.current.set(id, position);
+              if (!isClosed(id)) transcriptPositions.current.set(id, position);
             }}
           />
         ))

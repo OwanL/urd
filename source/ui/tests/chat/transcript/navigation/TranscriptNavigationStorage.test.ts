@@ -108,6 +108,23 @@ void test("latest debounced write wins and flush persists immediately", () => {
   assert.equal(callbacks.length, 2);
 });
 
+void test("a queued write cannot restore the navigation record after closure", () => {
+  const storage = new TranscriptNavigationStorage(new MemoryStorage());
+  const closed = new Set<string>();
+  const writer = new DebouncedTranscriptNavigationWriter(
+    storage,
+    (callback) => callback,
+    () => {},
+    (id) => !closed.has(id),
+  );
+  storage.save("s", sample);
+  writer.scheduleWrite("s", { ...sample, positionVersion: 9 });
+  closed.add("s");
+  storage.clear("s");
+  writer.flush();
+  assert.equal(storage.load("s").value.state, null);
+});
+
 void test("discards malformed and incompatible records", () => {
   const memory = new MemoryStorage();
   const storage = new TranscriptNavigationStorage(memory);

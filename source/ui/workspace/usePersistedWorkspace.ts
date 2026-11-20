@@ -3,7 +3,7 @@ import type { LlmSelection } from "../providers/LlmSelection.ts";
 import { editDraft as updateDraft } from "../chat/ChatState.ts";
 
 import type { ChatState } from "../chat/ChatState.ts";
-import type { WorkspaceState } from "./WorkspaceState.ts";
+import { removeWorkspaceSessions, type WorkspaceState } from "./WorkspaceState.ts";
 import type { WorkspaceCommandAccess } from "./WorkspaceCommands.ts";
 import type { WorkspacePersistence } from "./WorkspacePersistence.ts";
 
@@ -19,6 +19,8 @@ export interface PersistedWorkspace {
   loaded: { first: boolean } | null;
   storageIssue: WorkspaceStorageIssue | null;
   access: WorkspaceCommandAccess;
+  forgetSessions(ids: ReadonlySet<string>): void;
+  isClosed(id: string): boolean;
   editDraft(id: string, text: string): boolean;
   selectModel(id: string, selection: LlmSelection): boolean;
   retryStorage(): void;
@@ -33,6 +35,9 @@ export function usePersistedWorkspace(persistence: WorkspacePersistence): Persis
   const [initial] = useState(() => persistence.load());
   const [state, setState] = useState(initial.state);
   const current = useRef(initial.state);
+  const pendingCleanup = useRef(new Set<string>());
+  const closed = useRef(new Set<string>());
+  const isClosed = useCallback((id: string) => closed.current.has(id), []);
   const storageProblem = useRef<StorageIssueKind | null>(initial.error ? "read" : null);
   const [loaded, setLoaded] = useState<{ first: boolean } | null>(() =>
     initial.error ? null : { first: initial.first },
@@ -46,13 +51,22 @@ export function usePersistedWorkspace(persistence: WorkspacePersistence): Persis
       storageProblem.current = "cleanup";
       setStorageIssue({
         kind: "cleanup",
-        message: `Workspace was saved, but old draft data could not be cleared: ${error}`,
+        message: `Workspace was saved, but old chat data could not be cleared: ${error}`,
       });
     } else if (storageProblem.current === "write" || storageProblem.current === "cleanup") {
       storageProblem.current = null;
       setStorageIssue(null);
     }
   }, []);
+
+  const saveWorkspace = useCallback(
+    (next: WorkspaceState) => {
+      const { cleanupError } = persistence.save(next, pendingCleanup.current);
+      if (!cleanupError) pendingCleanup.current.clear();
+      reportCleanup(cleanupError);
+    },
+    [persistence, reportCleanup],
+  );
 
   const save = useCallback(
     (next: WorkspaceState, draftId?: string): boolean => {
@@ -65,7 +79,7 @@ export function usePersistedWorkspace(persistence: WorkspacePersistence): Persis
           const chat = next.chats[draftId];
           if (!chat) throw new Error("Draft chat is unavailable.");
           persistence.saveDraft(draftId, chat);
-        } else reportCleanup(persistence.save(next).cleanupError);
+        } else saveWorkspace(next);
         return true;
       } catch (cause) {
         storageProblem.current = "write";
@@ -76,7 +90,18 @@ export function usePersistedWorkspace(persistence: WorkspacePersistence): Persis
         return false;
       }
     },
-    [persistence, reportCleanup],
+    [persistence, saveWorkspace],
+  );
+
+  const forgetSessions = useCallback(
+    (ids: ReadonlySet<string>) => {
+      for (const id of ids) {
+        closed.current.add(id);
+        pendingCleanup.current.add(id);
+      }
+      save(removeWorkspaceSessions(current.current, ids));
+    },
+    [save],
   );
 
   const updateChat = useCallback(
@@ -140,7 +165,7 @@ export function usePersistedWorkspace(persistence: WorkspacePersistence): Persis
     }
     if (storageProblem.current !== "write" && storageProblem.current !== "cleanup") return;
     try {
-      reportCleanup(persistence.save(current.current).cleanupError);
+      saveWorkspace(current.current);
     } catch (cause) {
       storageProblem.current = "write";
       setStorageIssue({
@@ -148,7 +173,17 @@ export function usePersistedWorkspace(persistence: WorkspacePersistence): Persis
         message: `Workspace could not be saved: ${description(cause)}`,
       });
     }
-  }, [persistence, reportCleanup]);
+  }, [persistence, saveWorkspace]);
 
-  return { state, loaded, storageIssue, access, editDraft, selectModel, retryStorage };
+  return {
+    state,
+    loaded,
+    storageIssue,
+    access,
+    forgetSessions,
+    isClosed,
+    editDraft,
+    selectModel,
+    retryStorage,
+  };
 }

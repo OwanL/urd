@@ -117,6 +117,7 @@ export function commands(
   client: Pick<
     SessionClient,
     | "create"
+    | "closeSession"
     | "submitMessage"
     | "getMessageReceipt"
     | "continueSession"
@@ -184,6 +185,7 @@ export function emptyClient(
 ): Pick<
   SessionClient,
   | "create"
+  | "closeSession"
   | "submitMessage"
   | "getMessageReceipt"
   | "continueSession"
@@ -197,6 +199,9 @@ export function emptyClient(
 > {
   return {
     create: async () => sessionId,
+    closeSession: async () => {
+      throw new Error("Unexpected close");
+    },
     submitMessage,
     getMessageReceipt: async () => null,
     continueSession: async (_id, submission) => continuationReceipt(submission),

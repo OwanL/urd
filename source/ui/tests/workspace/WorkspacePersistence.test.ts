@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { WorkspacePersistence } from "../../workspace/WorkspacePersistence.ts";
 import { beginSubmission, editDraft, newChat } from "../../chat/ChatState.ts";
-import { emptyWorkspace } from "../../workspace/WorkspaceState.ts";
+import { emptyWorkspace, removeWorkspaceSessions } from "../../workspace/WorkspaceState.ts";
 import type { ChatState } from "../../chat/ChatState.ts";
 
 class MemoryStorage implements Storage {
@@ -130,6 +130,37 @@ void test("cleanup failure keeps the durable workspace usable and can be retried
   storage.removeItem = removeItem;
   assert.deepEqual(saved.save(state), { cleanupError: null });
   assert.equal(storage.getItem(`${key}.draft.${sessionId}`), null);
+});
+
+void test("confirmed closure clears the removed chat's draft overlay and transcript navigation only", () => {
+  const storage = new MemoryStorage();
+  const cleared: string[] = [];
+  const saved = new WorkspacePersistence(
+    () => storage,
+    key,
+    (id) => cleared.push(id),
+  );
+  const otherId = "10000000-0000-0000-0000-000000000002";
+  const state = {
+    ...emptyWorkspace(),
+    tabs: [sessionId, otherId],
+    activeId: sessionId,
+    chats: { [sessionId]: chat(), [otherId]: chat() },
+  };
+  saved.save(state);
+  saved.saveDraft(sessionId, chat("removed draft"));
+  saved.saveDraft(otherId, chat("newer draft"));
+  const removed = new Set([sessionId]);
+
+  assert.deepEqual(saved.save(removeWorkspaceSessions(state, removed), removed), {
+    cleanupError: null,
+  });
+  assert.equal(storage.getItem(`${key}.draft.${sessionId}`), null);
+  assert.deepEqual(cleared, [sessionId]);
+  const restored = saved.load().state;
+  assert.equal(restored.activeId, otherId);
+  assert.equal(restored.chats[sessionId], undefined);
+  assert.equal(restored.chats[otherId]?.draft, "newer draft");
 });
 
 void test("old saved workspaces and their draft overlays are discarded", () => {

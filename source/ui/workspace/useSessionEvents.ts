@@ -21,6 +21,8 @@ export function useSessionEvents(
   client: SessionClient,
   access: WorkspaceCommandAccess,
   discovered: Set<string>,
+  forget: (ids: Iterable<string>) => void,
+  isClosed: (id: string) => boolean,
   ready: boolean,
   open: readonly string[],
   active: string | null,
@@ -52,10 +54,10 @@ export function useSessionEvents(
     let streamConnected = false;
     let discovery: AbortController | null = null;
     function add(session: string) {
-      if (disposed || discovered.has(session)) return;
+      if (disposed || isClosed(session) || discovered.has(session)) return;
       discovered.add(session);
       const state = access.read();
-      // A closed tab remains known and is not reopened by reconnection discovery.
+      // Discovery never replaces an existing record or draft.
       if (state.chats[session]) return;
       access.save({
         ...state,
@@ -64,11 +66,20 @@ export function useSessionEvents(
       });
     }
     async function discover(signal: AbortSignal) {
+      const savedIds = Object.keys(access.read().chats);
+      const listed = new Set<string>();
       try {
         for await (const page of enumerateSessionPages(client, signal)) {
           if (signal.aborted || disposed) return;
-          for (const session of page.sessionIds) add(session);
+          for (const session of page.sessionIds) {
+            listed.add(session);
+            add(session);
+          }
         }
+        if (signal.aborted || disposed) return;
+        // Only absence from a complete read is authoritative. A chat added while paging
+        // may not be in this read, so compare only records that predate the read.
+        forget(savedIds.filter((id) => !listed.has(id)));
       } catch (cause) {
         if (!signal.aborted && !disposed)
           setError(cause instanceof Error ? cause.message : "Session discovery failed.");
@@ -86,9 +97,15 @@ export function useSessionEvents(
         void discover(discovery.signal);
       },
       change(session, notice) {
+        if (isClosed(session)) return;
         setNotices((previous) => ({ ...previous, [session]: notice }));
       },
       status(session, status, title) {
+        if (status === "unavailable") {
+          forget([session]);
+          return;
+        }
+        if (isClosed(session)) return;
         setActivity((previous) =>
           recordSessionStatus(previous, session, status, desired.current.active),
         );
@@ -156,7 +173,7 @@ export function useSessionEvents(
       window.removeEventListener("pageshow", activate);
       window.removeEventListener("focus", activate);
     };
-  }, [client, access, discovered, ready]);
+  }, [client, access, discovered, forget, isClosed, ready]);
 
   useEffect(() => {
     if (watched !== active) {

@@ -57,6 +57,15 @@ export class SessionClient {
     return id;
   }
 
+  closeSession(sessionId: string): Promise<void> {
+    return requestEmpty(
+      this.url(`/${encodeURIComponent(sessionId)}/close`),
+      "POST",
+      {},
+      AbortSignal.timeout(15_000),
+    );
+  }
+
   getSnapshot(sessionId: string, signal?: AbortSignal): Promise<SessionSnapshot> {
     return requestJson(
       this.url(`/${encodeURIComponent(sessionId)}/snapshot`),

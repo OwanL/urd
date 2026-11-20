@@ -181,6 +181,50 @@
   white-space: nowrap;
 }
 
+.close-chat-dialog {
+  width: min(380px, calc(100vw - 24px));
+  padding: 16px;
+  color: var(--text-primary);
+  background: var(--surface-popover);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  box-shadow: 0 16px 48px #000a;
+  overflow-wrap: anywhere;
+}
+
+.close-chat-dialog::backdrop {
+  background: rgb(0 0 0 / 55%);
+}
+
+.close-chat-dialog h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.close-chat-dialog p {
+  margin: 8px 0 16px;
+  color: var(--text-secondary);
+}
+
+.close-chat-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.close-chat-actions button {
+  min-height: 34px;
+  padding: 4px 10px;
+  background: var(--surface-hover);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+}
+
+.close-chat-actions button:last-child:not(:disabled) {
+  color: var(--danger);
+}
+
 @keyframes tab-activity-pulse {
   50% {
     opacity: 0.55;

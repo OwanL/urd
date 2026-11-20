@@ -100,8 +100,8 @@ and reasoning pickers, Stop and Send/Continue visible on one row at every width.
 when idle. More options holds session details; these never crowd or wrap the toolbar.
 Snooze remains unavailable. The UI displays a bounded, navigable transcript with compact tool
 rows, on-demand input/output inspection and Markdown rendering. The history API supports
-anchored pages. Closing a tab hides the view; it does not stop work, close a backend session
-or delete history. Components and effects stay with their feature; hooks are
+anchored pages. Closing an idle chat from its tab permanently deletes its backend session;
+closing the browser does not. Components and effects stay with their feature; hooks are
 extracted for actual responsibilities, not a state framework.
 
 Click a user message, or focus its Edit message action, to edit inline. Enter/Save stops
@@ -144,11 +144,10 @@ wait for the live connection; drafts remain editable. Intentional background sus
 reported as a connection failure. Initial discovery failure offers an explicit connection retry;
 uncertain commands are never replayed by reconnecting.
 
-Closing a chat tab only hides it. Its record, draft and uncertain Send journal stay in
-this browser tab's `sessionStorage` until the browser tab ends; records are not
-automatically pruned because there is no chat-delete action and removing a pending
-journal could lose an unresolved command. Ordinary draft edits write only that chat's
-draft record. A full workspace save folds in and then removes stale draft records; a
+Closing a chat requires explicit confirmation. On confirmed closure the workspace removes
+its tab, draft and chat record. A failed or unconfirmed close is not treated as success.
+The workspace keeps open chats' local state in this browser tab's `sessionStorage`.
+Ordinary draft edits write only that chat's draft record. A full workspace save folds in and then removes stale draft records; a
 newer draft overlay is retained. Command journals synchronously save the complete
 workspace before dispatch. Failed reads/writes block commands and offer an explicit
 retry. If cleanup alone fails after a successful save, the saved state remains usable
@@ -215,7 +214,7 @@ It does not implement storage recovery, navigation or catalog request lifecycles
 | Owner | Responsibility and lifetime |
 | --- | --- |
 | `usePersistedWorkspace` | Owns the current workspace and synchronous updates, draft/root persistence, storage failures and explicit recovery. Its stable command access reads the latest state; successful-load identity changes only on read recovery, not ordinary edits. |
-| `useWorkspaceNavigation` | Discovers the initial workspace after a successful read, applies deep links, opens/closes/reorders tabs and synchronizes the URL. It calls the existing Create command; it never stops backend work. |
+| `useWorkspaceNavigation` | Discovers the initial workspace after a successful read, applies deep links, opens/closes/reorders tabs and synchronizes the URL. It calls the Create command and coordinates permanent closure of idle chats. |
 | `useModelOptions` | Owns cached catalog loading, missing-catalog discovery on startup, rediscovery after provider changes and explicit error retry at workspace lifetime, using `ModelOptions` for request publication ordering. |
 | `useSessionEvents` | Owns the page-lifetime event stream, saved-ID discovery, open/watched registrations and per-tab status/change notices. |
 | `WorkspaceCommands` | Owns Create, Send/Continue journals and retries, receipt reconciliation, pending-input removal and Stop across conversation switches. Create still journals before dispatch and opens the acknowledged session against current state. |

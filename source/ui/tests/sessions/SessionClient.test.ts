@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { SessionClient } from "../../sessions/SessionClient.ts";
+import { RequestError } from "../../http/RequestError.ts";
 import { startHttpServer } from "../support/HttpTestServer.ts";
 import { testSessionMappings, type MappingCase } from "./SessionClientMapping.ts";
 import { sessionId, snapshot, page, notSentPage } from "./SessionClientFixtures.ts";
@@ -75,6 +76,33 @@ const mappings: MappingCase[] = [
 ];
 
 testSessionMappings(mappings);
+
+void test("close posts the encoded session ID and requires 204", { timeout: 5_000 }, async (t) => {
+  const statuses = [204, 404, 409, 200];
+  const server = await startHttpServer((_request, response) => {
+    response.writeHead(statuses.shift()!);
+    response.end();
+  });
+  t.after(() => server.close());
+  const client = new SessionClient(server.origin);
+
+  assert.equal(await client.closeSession("session/id"), undefined);
+  await assert.rejects(
+    client.closeSession("session/id"),
+    (cause) => cause instanceof RequestError && cause.status === 404,
+  );
+  await assert.rejects(
+    client.closeSession("session/id"),
+    (cause) => cause instanceof RequestError && cause.status === 409,
+  );
+  await assert.rejects(client.closeSession("session/id"), /HTTP 204/);
+  assert.equal(server.requests.length, 4);
+  for (const request of server.requests) {
+    assert.equal(request.method, "POST");
+    assert.equal(request.url, "/api/sessions/session%2Fid/close");
+    assert.equal(request.body, "{}");
+  }
+});
 
 void test("construction does no I/O", (t) => {
   const fetchMock = t.mock.method(globalThis, "fetch", async () => new Response("null"));

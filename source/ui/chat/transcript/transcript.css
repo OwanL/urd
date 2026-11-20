@@ -103,6 +103,7 @@
   border: 1px solid var(--border-subtle);
   border-radius: 50%;
   background: var(--surface-popover);
+  box-shadow: 0 2px 6px #0006;
   color: var(--text-primary);
 }
 

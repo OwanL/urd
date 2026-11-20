@@ -1,3 +1,7 @@
+import { SessionEventTimers, StreamTimeoutError } from "./SessionEventTimers.ts";
+import { postSessionEventRegistration } from "./SessionEventRegistration.ts";
+import { EventStreamParser, type SessionEventMessage } from "./EventStreamParser.ts";
+
 export interface SessionEventCallbacks {
   connected(boot: string, streamId: string): void;
   change(session: string, notice: string): void;
@@ -12,11 +16,6 @@ export interface SessionEventCallbacks {
 export type BrowserProvisioningStage = "downloading" | "ready" | "failed";
 const provisioningStages = new Set<BrowserProvisioningStage>(["downloading", "ready", "failed"]);
 
-interface SessionEventMessage {
-  readonly event: string;
-  readonly data: string;
-}
-
 interface RegistrationHandshake {
   readonly generation: number;
   readonly streamId: string;
@@ -27,8 +26,6 @@ interface RegistrationHandshake {
   acknowledged: boolean;
 }
 
-const maxFrameLength = 64 * 1024;
-const heartbeatTimeout = 90_000;
 const registrationTimeout = 15_000;
 const initialRetryDelay = 250;
 const maxRetryDelay = 5_000;
@@ -43,8 +40,7 @@ export class SessionEvents {
   private streamController: AbortController | null = null;
   private activeReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   private updateController: AbortController | null = null;
-  private retryTimer: ReturnType<typeof setTimeout> | null = null;
-  private watchdogTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly timers = new SessionEventTimers();
   private streamId: string | null = null;
   private connected = false;
   private connectionNumber = 0;
@@ -79,8 +75,8 @@ export class SessionEvents {
     this.generation++;
     this.lifecycle?.abort();
     this.lifecycle = null;
-    this.clearRetryTimer();
-    this.clearWatchdogTimer();
+    this.timers.clearRetryTimer();
+    this.timers.clearWatchdogTimer();
     this.updateController?.abort();
     this.updateController = null;
     this.updateWorker = null;
@@ -128,7 +124,7 @@ export class SessionEvents {
       if (!aborted || failure instanceof StreamTimeoutError)
         this.reportError(errorMessage(failure));
 
-      await this.waitToRetry(retryDelay, lifecycleSignal);
+      await this.timers.waitToRetry(retryDelay, lifecycleSignal);
       retryDelay = Math.min(retryDelay * 2, maxRetryDelay);
     }
   }
@@ -159,7 +155,7 @@ export class SessionEvents {
 
     try {
       while (this.isCurrent(generation)) {
-        const next = await this.readWithWatchdog(reader, controller);
+        const next = await this.timers.readWithWatchdog(reader, controller);
         if (next.done) break;
         const text = decoder.decode(next.value, { stream: true });
         parser.push(text);
@@ -302,24 +298,13 @@ export class SessionEvents {
         );
 
         try {
-          const response = await fetch(
-            new URL(`/api/events/${encodeURIComponent(streamId)}`, this.origin),
-            {
-              method: "POST",
-              headers: {
-                "X-Urd-Client": "browser",
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({ open, watched }),
-              cache: "no-store",
-              credentials: "omit",
-              redirect: "error",
-              signal: controller.signal,
-            },
+          await postSessionEventRegistration(
+            this.origin,
+            streamId,
+            open,
+            watched,
+            controller.signal,
           );
-          controller.signal.throwIfAborted();
-          if (response.status !== 204)
-            throw new Error(`Session event registration failed (HTTP ${response.status}).`);
         } catch (error) {
           if (this.isCurrent(generation) && this.updateController === controller) {
             this.reportError(errorMessage(error));
@@ -387,7 +372,7 @@ export class SessionEvents {
     this.streamId = null;
     this.updatePending = false;
     this.registration = null;
-    this.clearWatchdogTimer();
+    this.timers.clearWatchdogTimer();
     if (this.updateController !== null) {
       this.updateController.abort();
       this.updateController = null;
@@ -403,59 +388,6 @@ export class SessionEvents {
       this.connected = false;
       this.call(() => this.callbacks.disconnected());
     }
-  }
-
-  private readWithWatchdog(
-    reader: ReadableStreamDefaultReader<Uint8Array>,
-    controller: AbortController,
-  ): Promise<ReadableStreamReadResult<Uint8Array>> {
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        if (this.watchdogTimer === timer) this.watchdogTimer = null;
-        controller.abort();
-        reject(new StreamTimeoutError());
-      }, heartbeatTimeout);
-      this.watchdogTimer = timer;
-
-      reader.read().then(
-        (result) => {
-          if (this.watchdogTimer === timer) this.watchdogTimer = null;
-          clearTimeout(timer);
-          resolve(result);
-        },
-        (error: unknown) => {
-          if (this.watchdogTimer === timer) this.watchdogTimer = null;
-          clearTimeout(timer);
-          reject(error);
-        },
-      );
-    });
-  }
-
-  private waitToRetry(delay: number, signal: AbortSignal): Promise<void> {
-    if (signal.aborted) return Promise.resolve();
-
-    return new Promise((resolve) => {
-      const finish = () => {
-        this.clearRetryTimer();
-        signal.removeEventListener("abort", finish);
-        resolve();
-      };
-      this.retryTimer = setTimeout(finish, delay);
-      signal.addEventListener("abort", finish, { once: true });
-    });
-  }
-
-  private clearRetryTimer(): void {
-    if (this.retryTimer === null) return;
-    clearTimeout(this.retryTimer);
-    this.retryTimer = null;
-  }
-
-  private clearWatchdogTimer(): void {
-    if (this.watchdogTimer === null) return;
-    clearTimeout(this.watchdogTimer);
-    this.watchdogTimer = null;
   }
 
   private isCurrent(generation: number): boolean {
@@ -476,79 +408,6 @@ export class SessionEvents {
     } catch {
       // Consumer callbacks must not interrupt transport parsing or cleanup.
     }
-  }
-}
-
-class EventStreamParser {
-  private readonly dispatch: (message: SessionEventMessage) => void;
-  private lineParts: string[] = [];
-  private lineLength = 0;
-  private frameLength = 0;
-  private eventName = "";
-  private dataLines: string[] = [];
-  private firstLine = true;
-
-  constructor(dispatch: (message: SessionEventMessage) => void) {
-    this.dispatch = dispatch;
-  }
-
-  push(text: string): void {
-    let start = 0;
-    while (start < text.length) {
-      const newline = text.indexOf("\n", start);
-      const end = newline === -1 ? text.length : newline;
-      const piece = text.slice(start, end);
-      const nextLength =
-        this.frameLength + this.lineLength + piece.length + (newline === -1 ? 0 : 1);
-      if (nextLength > maxFrameLength) throw new Error("Session event frame exceeded 64 KB.");
-
-      this.lineParts.push(piece);
-      this.lineLength += piece.length;
-      if (newline === -1) return;
-
-      const rawLength = this.lineLength;
-      let line = this.lineParts.join("");
-      this.lineParts = [];
-      this.lineLength = 0;
-      if (line.endsWith("\r")) line = line.slice(0, -1);
-      this.frameLength += rawLength + 1;
-      if (line.length === 0) {
-        this.finishFrame();
-      } else {
-        this.readLine(line);
-      }
-      start = newline + 1;
-    }
-  }
-
-  private readLine(line: string): void {
-    if (this.firstLine && line.startsWith("\uFEFF")) line = line.slice(1);
-    this.firstLine = false;
-    if (line.startsWith(":")) return;
-
-    const colon = line.indexOf(":");
-    const field = colon === -1 ? line : line.slice(0, colon);
-    let value = colon === -1 ? "" : line.slice(colon + 1);
-    if (value.startsWith(" ")) value = value.slice(1);
-    if (field === "event") this.eventName = value;
-    if (field === "data") this.dataLines.push(value);
-  }
-
-  private finishFrame(): void {
-    const event = this.eventName || "message";
-    const data = this.dataLines.join("\n");
-    const hasData = this.dataLines.length > 0;
-    this.eventName = "";
-    this.dataLines = [];
-    this.frameLength = 0;
-    if (hasData) this.dispatch({ event, data });
-  }
-}
-
-class StreamTimeoutError extends Error {
-  constructor() {
-    super("Session event stream timed out without a heartbeat.");
-    this.name = "StreamTimeoutError";
   }
 }
 

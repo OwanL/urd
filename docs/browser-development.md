@@ -10,11 +10,12 @@ browser-side provider SDK. Provider credentials remain in the backend. Live sess
 changes arrive through a bounded server-sent event stream; the browser then reads slim
 snapshot/history metadata and loads message text on demand.
 
-For a new profile, the browser checks setup status before mounting the workspace. Setup connects a
-provider, then lets the user accept suggested model-bucket assignments or configure all three buckets
-manually, and requires an explicit default working directory. These are saved profile settings;
-refresh resumes at the first unmet step. After completion, the setup gate stays closed while the
-workspace and Settings remain available for later provider, bucket and directory recovery.
+For a new profile, a setup dialog opens over the inert workspace, which does not open or create
+chats until setup completes. Its three pages connect a provider, assign the three model buckets
+(suggested or manual) and choose an explicit default working directory. These are saved profile
+settings; refresh resumes at the first unmet page. The dialog cannot be dismissed early. After
+completion it stays closed while the workspace and Settings remain available for later provider,
+bucket and directory recovery.
 
 The workspace has closable, reorderable local tabs, transcript, model and reasoning
 selectors, Send, Stop and integrated [provider settings](provider-management.md#browser-settings).

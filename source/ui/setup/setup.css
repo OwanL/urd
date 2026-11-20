@@ -1,133 +1,106 @@
-.setup-shell {
-  height: 100%;
-  overflow: auto;
-  display: grid;
-  grid-template-rows: minmax(0, 1fr);
-  place-items: center;
-  padding: 24px 20px;
-  background: radial-gradient(ellipse at 50% 0%, #191919, #080808 65%);
-}
-
-.setup-card {
-  width: min(760px, 100%);
-  max-height: min(850px, 100%);
+.setup-dialog {
   display: flex;
   flex-direction: column;
-  border: 1px solid #303030;
-  border-radius: 12px;
-  background: #111;
-  box-shadow: 0 24px 80px #0009;
+  width: min(620px, calc(100vw - 24px));
+  max-width: none;
+  min-height: min(360px, calc(100vh - 24px));
+  max-height: calc(100vh - 24px - min(12vh, 96px));
+  /* A fixed top edge keeps the title still as pages change height. */
+  margin: max(12px, min(12vh, 96px)) auto auto;
+  padding: 0;
+  color: var(--text-primary);
+  background: var(--surface-popover);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  box-shadow: 0 16px 48px #000a;
+}
+
+.setup-dialog::backdrop {
+  background: rgb(0 0 0 / 55%);
+  backdrop-filter: blur(3px);
 }
 
 .setup-header {
   flex: none;
   display: flex;
+  align-items: baseline;
   justify-content: space-between;
-  padding: 20px 28px;
-  border-bottom: 1px solid #292929;
-  color: #888;
-  font-size: 11px;
-  letter-spacing: 0.12em;
+  gap: 12px;
+  padding: 16px 20px 12px;
 }
 
-.setup-brand {
-  color: #e7e7e7;
-  font-weight: 700;
-  letter-spacing: 0.2em;
+.setup-header h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
 }
-.setup-progress {
-  flex: none;
-  display: flex;
-  gap: 26px;
-  padding: 22px 28px 0;
+
+.setup-header h2:focus-visible {
+  outline: none;
+}
+
+.setup-header span {
   color: var(--text-secondary);
   font-size: 12px;
 }
-.setup-progress span {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-.setup-progress b {
-  color: var(--text-secondary);
-  font-size: 10px;
-}
-.setup-progress .current,
-.setup-progress .current b {
-  color: #eee;
-}
-.setup-progress .done {
-  color: #aaa;
-}
+
 .setup-content {
-  padding: 22px 28px 28px;
-  overflow: auto;
+  flex: 1;
   min-height: 0;
+  overflow: auto;
+  padding: 0 20px 16px;
 }
 
 .setup-bucket-suggestions {
   margin-bottom: 14px;
 }
 
-.setup-content h1 {
-  margin: 0 0 20px;
-  font-size: 24px;
-  font-weight: 600;
-  letter-spacing: -0.03em;
-}
-.setup-content h1:focus-visible {
-  outline: 2px solid var(--text-secondary);
-  outline-offset: 4px;
-}
 .setup-directory {
   display: grid;
   justify-items: start;
-  gap: 14px;
+  gap: 12px;
 }
+
 .setup-directory p {
-  color: var(--text-secondary);
   margin: 0;
+  color: var(--text-secondary);
 }
+
 .setup-directory code {
   max-width: 100%;
   overflow-wrap: anywhere;
-  color: #ddd;
 }
+
+.setup-directory > button {
+  margin-top: 4px;
+}
+
+.setup-error {
+  margin: 0;
+  padding: 0 20px 12px;
+  color: var(--danger);
+}
+
 .setup-actions {
   flex: none;
   display: flex;
   justify-content: flex-end;
-  gap: 10px;
-  border-top: 1px solid #292929;
-  padding: 18px 28px;
+  gap: 8px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border-subtle);
 }
+
 .setup-actions button,
-.setup-directory > button,
-.setup-card > button {
-  border: 1px solid #414141;
+.setup-directory > button {
+  min-width: 72px;
+  padding: 5px 12px;
+  background: var(--surface-hover);
+  border: 1px solid var(--border-subtle);
   border-radius: 6px;
-  background: #202020;
-  padding: 7px 14px;
 }
-.setup-actions button.setup-primary {
-  background: #e0e0e0;
+
+.setup-actions button.setup-primary:not(:disabled) {
   color: #111;
-  border-color: #e0e0e0;
-  font-weight: 600;
-}
-.setup-error {
-  color: var(--danger);
-  margin: 0 28px 16px;
-}
-@media (max-width: 550px) {
-  .setup-shell {
-    padding: 12px;
-  }
-  .setup-card {
-    max-height: 100%;
-  }
-  .setup-progress {
-    gap: 12px;
-    flex-wrap: wrap;
-  }
+  background: var(--text-primary);
+  border-color: var(--text-primary);
 }

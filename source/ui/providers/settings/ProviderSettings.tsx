@@ -23,7 +23,11 @@ interface Presentation {
 // Settings unmounts its content when closed. Keep navigation with its command owner.
 const presentations = new WeakMap<ProviderSettingsState["actions"], Presentation>();
 
-export function ProviderSettings({ state, search }: ProviderSettingsProps) {
+export function ProviderSettings({
+  state,
+  search,
+  initialScreen = "overview",
+}: ProviderSettingsProps) {
   const { actions } = state;
   const heading = useRef<HTMLHeadingElement>(null);
   const surface = useRef<HTMLElement>(null);
@@ -33,7 +37,7 @@ export function ProviderSettings({ state, search }: ProviderSettingsProps) {
   const [presentation, setPresentation] = useState<Presentation>(
     () =>
       presentations.get(actions) ?? {
-        screen: "overview",
+        screen: initialScreen,
         connectionId: null,
         creating: null,
         returnId: null,
@@ -152,7 +156,7 @@ export function ProviderSettings({ state, search }: ProviderSettingsProps) {
       aria-label="Providers"
       aria-busy={state.reading}
     >
-      {screen !== "overview" && (
+      {screen !== "overview" && (screen !== "chooser" || state.connections.length > 0) && (
         <button
           type="button"
           class="provider-settings-back"
@@ -252,4 +256,5 @@ export function ProviderSettings({ state, search }: ProviderSettingsProps) {
 interface ProviderSettingsProps {
   state: ProviderSettingsState;
   search: string;
+  initialScreen?: "overview" | "chooser";
 }

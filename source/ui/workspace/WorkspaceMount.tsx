@@ -4,7 +4,8 @@ import { Workspace } from "./Workspace.tsx";
 import { RichMessageBody } from "../chat/transcript/RichMessageBody.tsx";
 import type { TranscriptDisplay } from "../chat/transcript/TranscriptDisplay.ts";
 import { MarkdownClient } from "../markdown-rendering/MarkdownClient.ts";
-import { SetupGate } from "../setup/SetupGate.tsx";
+import { SetupDialog } from "../setup/SetupDialog.tsx";
+import type { SetupState } from "../setup/SetupDialog.tsx";
 
 export function mountWorkspace(
   root: HTMLElement,
@@ -31,6 +32,7 @@ export function mountWorkspace(
   };
   function Application() {
     const [error, setError] = useState<string | null>(null);
+    const [setup, setSetup] = useState<SetupState>("checking");
     useEffect(() => {
       reportError = setError;
       return () => {
@@ -38,9 +40,10 @@ export function mountWorkspace(
       };
     }, []);
     return (
-      <SetupGate>
-        <Workspace transcript={display} transcriptError={error} />
-      </SetupGate>
+      <>
+        <Workspace transcript={display} transcriptError={error} setup={setup} />
+        <SetupDialog state={setup} onStateChange={setSetup} />
+      </>
     );
   }
   render(<Application />, root);

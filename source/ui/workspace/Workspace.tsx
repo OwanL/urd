@@ -23,6 +23,7 @@ import { useModelOptions } from "../providers/models/useModelOptions.ts";
 import { useWorkspaceNavigation } from "./useWorkspaceNavigation.ts";
 import { useSessionEvents } from "./useSessionEvents.ts";
 import { useWorkspaceRetention } from "./useWorkspaceRetention.ts";
+import type { SetupState } from "../setup/SetupDialog.tsx";
 import "./workspace.css";
 
 const sessions = new SessionClient(new URL(window.location.href));
@@ -34,9 +35,15 @@ const storageRetryLabels = { read: "Retry read", write: "Retry save", cleanup: "
 export interface WorkspaceProps {
   transcript?: TranscriptDisplay;
   transcriptError?: string | null;
+  // The first chat waits for setup so it starts with the chosen defaults.
+  setup?: SetupState;
 }
 
-export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) {
+export function Workspace({
+  transcript,
+  transcriptError,
+  setup = "complete",
+}: WorkspaceProps = {}) {
   const [persistence] = useState(() => new WorkspacePersistence(() => sessionStorage, storageKey));
   const workspace = usePersistedWorkspace(persistence);
   const models = useModelOptions(providers);
@@ -66,7 +73,22 @@ export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) 
     if (workspace.loaded) return messageEditing.watchPendingReceipts();
   }, [messageEditing, workspace.loaded]);
   const create = useCallback(() => commands.create(), [commands]);
-  const navigation = useWorkspaceNavigation(sessions, workspace, create);
+  const setupComplete = setup === "complete";
+  const previousSetup = useRef(setup);
+  const { providersChanged } = models;
+  const { refresh: refreshPreferences } = preferences;
+  useEffect(() => {
+    if (previousSetup.current === "required" && setupComplete) {
+      providersChanged();
+      void refreshPreferences();
+    }
+    previousSetup.current = setup;
+  }, [setup, setupComplete, providersChanged, refreshPreferences]);
+  const navigation = useWorkspaceNavigation(
+    sessions,
+    { ...workspace, loaded: setupComplete ? workspace.loaded : null },
+    create,
+  );
 
   // Receipt reconciliation and reading positions belong to the workspace, not a mounted chat.
   useEffect(() => {
@@ -203,7 +225,9 @@ export function Workspace({ transcript, transcriptError }: WorkspaceProps = {}) 
       <div
         class={`connection-feedback ${disconnected ? "is-disconnected" : ""}`}
         role="status"
-        hidden={connected || events.connectionState === "paused"}
+        hidden={
+          connected || events.connectionState === "paused" || (!setupComplete && !disconnected)
+        }
       >
         <span>
           {disconnected ? "Disconnected from" : "Connecting to"} {window.location.origin}.

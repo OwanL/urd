@@ -89,7 +89,9 @@ connection view read by the caller: a stale binding is rejected, while a rename 
 
 ## Bucket suggestions
 
-Suggestions appear after successful setup in Settings → Providers. GET reads the selected
+First-run setup previews suggestions on its model step. After onboarding, only adding a new
+provider can offer suggestions, inline in Settings → Providers. Opening Model buckets or
+reconnecting an existing provider does not start the flow. GET reads the selected
 provider's cached eligible catalog; it makes no network request and returns the
 connection binding with exact model IDs for eligible tiers that are still empty.
 For each tier it uses the highest numeric version of Luna (`small`), Terra (`medium`)

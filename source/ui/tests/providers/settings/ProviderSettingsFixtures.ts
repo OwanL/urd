@@ -76,6 +76,7 @@ export function setup(
   overrides: Partial<ProviderSettingsClient> = {},
   ready?: (connectionId: string) => Promise<boolean>,
   refreshPreferences?: () => Promise<void>,
+  offerProviderBuckets = true,
 ) {
   let notifications = 0;
   const client: ProviderSettingsClient = { ...defaultClient, ...overrides };
@@ -86,6 +87,7 @@ export function setup(
     },
     ready,
     refreshPreferences,
+    offerProviderBuckets,
   );
   return { client, state, notifications: () => notifications };
 }

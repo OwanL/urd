@@ -15,7 +15,6 @@ import { useProviderSettings } from "../providers/settings/useProviderSettings.t
 import { GeneralSettings } from "./GeneralSettings.tsx";
 import { DefaultSubagentProviders } from "./DefaultSubagentProviders.tsx";
 import { ModelPreferencesSettings } from "./ModelPreferencesSettings.tsx";
-import { ModelBucketsPanel } from "./ModelBucketsPanel.tsx";
 import { ProtectedResourcesSettings } from "./ProtectedResourcesSettings.tsx";
 import "./settings.css";
 
@@ -231,7 +230,12 @@ export function Settings({
         hidden={tab !== "model-buckets"}
       >
         <div class="general-settings">
-          <ModelBucketsPanel client={client} state={preferences} active={tab === "model-buckets"} />
+          <ModelPreferencesSettings
+            client={client}
+            state={preferences}
+            view="buckets"
+            active={tab === "model-buckets"}
+          />
         </div>
         {tab === "model-buckets" && (
           <DefaultSubagentProviders providers={state} state={preferences} />

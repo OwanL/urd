@@ -24,7 +24,7 @@ export function connectionCommands(
   publish: (update: Partial<ConnectionState> & { confirmation?: Confirmation }) => void,
   forgetStatus: (id: string) => void,
 ) {
-  async function create(ready: (connection: ProviderConnection) => boolean): Promise<void> {
+  async function create(created: (connection: ProviderConnection) => boolean): Promise<void> {
     const { route, ...draft } = snapshot().add;
     const settings = {
       ...draft,
@@ -45,7 +45,7 @@ export function connectionCommands(
           add: { ...add, name: "" },
         });
       },
-      { afterSuccess: (connection) => connection.authentication === "none" && ready(connection) },
+      { afterSuccess: created },
     );
   }
 

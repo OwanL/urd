@@ -62,6 +62,7 @@ export class ProviderSettingsController {
 
   private setupVisible = false;
   private setupView = 0;
+  private newConnectionId: string | null = null;
   private bucketRequest: BucketSetupRequest | null = null;
   private readonly setupSignIns = new Map<string, SetupContext>();
   private uncertainModelConnectionId: string | null = null;
@@ -74,6 +75,7 @@ export class ProviderSettingsController {
   private readonly changed: () => void;
   private readonly onReady: ((connectionId: string) => Promise<boolean> | undefined) | undefined;
   private readonly refreshPreferences: (() => Promise<void>) | undefined;
+  private readonly offerProviderBuckets: boolean;
   private readonly connectionCommands: ReturnType<typeof connectionCommands>;
   private readonly credentialCommands: ReturnType<typeof credentialCommands>;
   private readonly modelCommands: ReturnType<typeof modelCommands>;
@@ -83,11 +85,13 @@ export class ProviderSettingsController {
     changed: () => void,
     onReady?: (connectionId: string) => Promise<boolean> | undefined,
     refreshPreferences?: () => Promise<void>,
+    offerProviderBuckets = true,
   ) {
     this.client = client;
     this.changed = changed;
     this.onReady = onReady;
     this.refreshPreferences = refreshPreferences;
+    this.offerProviderBuckets = offerProviderBuckets;
     const snapshot = () => this.snapshot;
     const publish = (update: Partial<ProviderSettingsSnapshot>) => this.patch(update);
     this.connectionCommands = connectionCommands(client, this.command, snapshot, publish, (id) =>
@@ -146,6 +150,7 @@ export class ProviderSettingsController {
 
   private leaveSetupView(): void {
     this.setupView++;
+    this.newConnectionId = null;
     this.skipBucketSuggestions();
   }
 
@@ -166,10 +171,13 @@ export class ProviderSettingsController {
     if (this.snapshot.bucketSetup) this.patch({ bucketSetup: null });
   }
 
-  private notifyProviderReady(context: SetupContext): boolean {
+  private notifyProviderReady(context: SetupContext, newlyCreated = false): boolean {
+    const offer = newlyCreated || this.newConnectionId === context.connection.id;
+    if (offer) this.newConnectionId = null;
     const ready = this.onReady?.(context.connection.id);
     if (!ready) return false;
-    void this.startBucketSuggestions(context, ready);
+    if (offer && this.offerProviderBuckets) void this.startBucketSuggestions(context, ready);
+    else void ready.catch(() => {});
     return true;
   }
 
@@ -214,6 +222,7 @@ export class ProviderSettingsController {
   edit(id: string, update: Partial<ConnectionDraft>): void {
     const draft = this.snapshot.drafts[id];
     if (!draft || this.snapshot.confirmation) return;
+    if (this.newConnectionId === id) this.newConnectionId = null;
     this.patch({ drafts: { ...this.snapshot.drafts, [id]: { ...draft, ...update } } });
   }
 
@@ -334,9 +343,18 @@ export class ProviderSettingsController {
 
   create(): Promise<void> {
     const view = this.setupView;
-    return this.connectionCommands.create((connection) =>
-      this.notifyProviderReady({ connection, view }),
-    );
+    return this.connectionCommands.create((connection) => {
+      if (connection.authentication === "none")
+        return this.notifyProviderReady({ connection, view }, true);
+      if (
+        this.offerProviderBuckets &&
+        this.setupVisible &&
+        this.setupView === view &&
+        this.snapshot.selectedId === connection.id
+      )
+        this.newConnectionId = connection.id;
+      return false;
+    });
   }
 
   save(connection: ProviderConnection): Promise<void> {
@@ -356,6 +374,7 @@ export class ProviderSettingsController {
   }
 
   private forgetStatus(id: string): void {
+    if (this.newConnectionId === id) this.newConnectionId = null;
     if (this.bucketRequest?.connection.id === id) this.skipBucketSuggestions();
     const signIn = this.snapshot.signIns[id];
     if (signIn) this.setupSignIns.delete(signIn.id);
@@ -379,6 +398,7 @@ export class ProviderSettingsController {
   }
 
   cancelSignIn(signIn: ProviderSignIn): Promise<void> {
+    if (this.newConnectionId === signIn.connectionId) this.newConnectionId = null;
     return this.credentialCommands.cancelSignIn(signIn, (id) => this.setupSignIns.delete(id));
   }
 

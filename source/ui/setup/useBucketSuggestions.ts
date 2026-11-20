@@ -6,6 +6,7 @@ import {
 } from "../providers/settings/ProviderBucketSetup.ts";
 import type { BucketSetup } from "../providers/settings/ProviderSettingsTypes.ts";
 
+const loading: BucketSetup = { phase: "loading" };
 const unavailable: BucketSetup = {
   phase: "finished",
   message: "Could not load suggested models.",
@@ -18,18 +19,18 @@ export function useBucketSuggestions(
   refreshPreferences: () => Promise<void> | undefined,
   enabled: boolean,
 ) {
-  const [setup, setSetup] = useState<BucketSetup | null>(null);
+  const [setup, setSetup] = useState<BucketSetup | null>(loading);
   const [attempt, setAttempt] = useState(0);
   const request = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (!enabled) {
-      setSetup(null);
+      setSetup(loading);
       return;
     }
     const abort = new AbortController();
     request.current = abort;
-    setSetup({ phase: "loading" });
+    setSetup(loading);
     void (async () => {
       let partial: BucketSetup | null = null;
       let failed = false;

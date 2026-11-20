@@ -25,10 +25,15 @@ for (const decision of ["skip", "confirm", "conflict"] as const) {
     const ready = deferred<boolean>();
     const acknowledgement = deferred<void>();
     let status = credential;
+    let created = false;
     const calls: string[] = [];
     const { state, notifications } = setup(
       {
-        list: async () => [keyConnection],
+        list: async () => (created ? [keyConnection] : []),
+        createOpenAI: async () => {
+          created = true;
+          return keyConnection;
+        },
         getCredentials: async () => status,
         setApiKey: async () => (status = connected),
         getBucketSuggestions: async (id) => {
@@ -52,11 +57,13 @@ for (const decision of ["skip", "confirm", "conflict"] as const) {
     t.after(() => state.setActivity(false, false));
     state.setActivity(true, true);
     await flush();
+    state.editAdd({ route: "openAI" });
+    await state.create();
     state.setApiKey("synthetic-key");
     await state.replaceApiKey(keyConnection, true);
     assert.deepEqual(calls, ["ready:one"]);
     assert.equal(state.snapshot.bucketSetup?.phase, "loading");
-    assert.equal(notifications(), 0);
+    assert.equal(notifications(), 1);
 
     ready.resolve(true);
     await flush();
@@ -140,9 +147,14 @@ for (const invalidation of [
     const start = deferred<AbortSignal | undefined>();
     let saved: ProviderConnection = keyConnection;
     let status = credential;
+    let created = false;
     const { state } = setup(
       {
-        list: async () => [saved],
+        list: async () => (created ? [saved] : []),
+        createOpenAI: async () => {
+          created = true;
+          return keyConnection;
+        },
         getCredentials: async () => status,
         setApiKey: async () => (status = connected),
         getBucketSuggestions: (_id, signal) => {
@@ -155,6 +167,8 @@ for (const invalidation of [
     t.after(() => state.setActivity(false, false));
     state.setActivity(true, true);
     await flush();
+    state.editAdd({ route: "openAI" });
+    await state.create();
     state.setApiKey("initial");
     await state.replaceApiKey(keyConnection, true);
     const signal = await start.promise;
@@ -208,13 +222,84 @@ void test("a no-auth custom provider is ready after creation; empty suggestions 
   assert.equal(state.snapshot.bucketSetup, null);
 });
 
+void test("reconnecting an existing provider refreshes its catalog without offering buckets", async (t) => {
+  let status = credential;
+  let reads = 0;
+  let refreshed = 0;
+  const { state } = setup(
+    {
+      list: async () => [keyConnection],
+      getCredentials: async () => status,
+      setApiKey: async () => (status = connected),
+      getBucketSuggestions: async () => {
+        reads++;
+        return suggestions;
+      },
+    },
+    async () => {
+      refreshed++;
+      return true;
+    },
+  );
+  t.after(() => state.setActivity(false, false));
+  state.setActivity(true, true);
+  await flush();
+  state.setApiKey("key");
+  await state.replaceApiKey(keyConnection, true);
+  await flush();
+  assert.equal(refreshed, 1);
+  assert.equal(reads, 0);
+  assert.equal(state.snapshot.bucketSetup, null);
+});
+
+void test("provider-step offers can be disabled without suppressing catalog refresh", async (t) => {
+  const custom = { ...connection, route: "custom", authentication: "none" } as const;
+  let created = false;
+  let refreshed = 0;
+  let reads = 0;
+  const { state } = setup(
+    {
+      list: async () => (created ? [custom] : []),
+      createCustom: async () => {
+        created = true;
+        return custom;
+      },
+      getBucketSuggestions: async () => {
+        reads++;
+        return { connection: custom, assignments: [] };
+      },
+    },
+    async () => {
+      refreshed++;
+      return true;
+    },
+    undefined,
+    false,
+  );
+  t.after(() => state.setActivity(false, false));
+  state.setActivity(true, true);
+  await flush();
+  state.editAdd({ route: "custom", authentication: "none" });
+  await state.create();
+  await flush();
+  assert.equal(refreshed, 1);
+  assert.equal(reads, 0);
+  assert.equal(state.snapshot.bucketSetup, null);
+});
+
 void test("first OAuth sign-in offers buckets after confirmed credentials, not when it begins", async (t) => {
   let status = credential;
   let signIn = pending;
+  let created = false;
   const calls: string[] = [];
   const proposal = { ...suggestions, connection };
   const { state, notifications } = setup(
     {
+      list: async () => (created ? [connection] : []),
+      createChatGpt: async () => {
+        created = true;
+        return connection;
+      },
       beginSignIn: async () => signIn,
       getSignIn: async () => signIn,
       getCredentials: async () => status,
@@ -231,6 +316,7 @@ void test("first OAuth sign-in offers buckets after confirmed credentials, not w
   t.after(() => state.setActivity(false, false));
   state.setActivity(true, true);
   await flush();
+  await state.create();
   await state.beginSignIn(connection, true);
   assert.deepEqual(calls, []);
   signIn = { ...pending, status: "completed", authorizationUrl: null };
@@ -238,5 +324,5 @@ void test("first OAuth sign-in offers buckets after confirmed credentials, not w
   await state.read();
   assert.deepEqual(calls, ["ready:one", "get:one"]);
   assert.deepEqual(state.snapshot.bucketSetup, { phase: "offered", proposal });
-  assert.equal(notifications(), 0);
+  assert.equal(notifications(), 1);
 });

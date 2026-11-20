@@ -15,7 +15,7 @@ import { ProviderClient } from "../providers/ProviderClient.ts";
 import { useModelOptions } from "../providers/models/useModelOptions.ts";
 import { ProviderSettings } from "../providers/settings/ProviderSettings.tsx";
 import { useProviderSettings } from "../providers/settings/useProviderSettings.ts";
-import { ModelBucketsPanel } from "../settings/ModelBucketsPanel.tsx";
+import { SetupModels } from "./SetupModels.tsx";
 import { WorkingDirectorySetting } from "../settings/WorkingDirectorySetting.tsx";
 import "../settings/settings.css";
 import "./setup.css";
@@ -129,6 +129,7 @@ function Setup({ status, onComplete }: { status: SetupStatus; onComplete(): void
     !status.providerConfigured ? 0 : !status.bucketsConfigured ? 1 : 2,
   );
   const [validated, setValidated] = useState(status);
+  const [editModels, setEditModels] = useState(status.bucketsConfigured);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const folderButton = useRef<HTMLButtonElement>(null);
@@ -140,9 +141,10 @@ function Setup({ status, onComplete }: { status: SetupStatus; onComplete(): void
     providerClient,
     true,
     models.providersChanged,
-    true,
+    step === 0,
     models.providerReady,
     preferences.refresh,
+    false, // The model step owns the offer during onboarding.
   );
   // The server validates each step again; this only avoids offering an action that must fail.
   const canContinue = [
@@ -212,12 +214,20 @@ function Setup({ status, onComplete }: { status: SetupStatus; onComplete(): void
       <div class="setup-content">
         {step === 0 && (
           <ProviderSettings
-            state={{ ...providers, bucketSetup: null }}
+            state={providers}
             search=""
             initialScreen={validated.providerConfigured ? "overview" : "chooser"}
           />
         )}
-        {step === 1 && <ModelBucketsPanel client={providerClient} state={preferences} active />}
+        {step === 1 && (
+          <SetupModels
+            client={providerClient}
+            state={preferences}
+            catalogLoading={models.loading || models.refreshing}
+            editing={editModels}
+            onEdit={() => setEditModels(true)}
+          />
+        )}
         {step === 2 && (
           <div class="general-settings">
             <WorkingDirectorySetting

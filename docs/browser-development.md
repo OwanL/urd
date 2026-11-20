@@ -13,8 +13,9 @@ snapshot/history metadata and loads message text on demand.
 For a new profile, a setup dialog opens over the inert workspace, which does not open or create
 chats until setup completes. Its three pages connect a provider, assign the three model buckets
 and choose an explicit default working directory, reusing the Settings provider, Model buckets and
-working-directory controls. These are saved profile
-settings; refresh resumes at the first unmet page. The dialog cannot be dismissed early. After
+working-directory controls. The model step previews suggested assignments when available;
+accept them or choose your own, then review the buckets before continuing. With no suggestions,
+it opens the editor directly. Changes are saved as you go; refresh resumes at the first unmet page. The dialog cannot be dismissed early. After
 completion it stays closed while the workspace and Settings remain available for later provider,
 bucket and directory recovery.
 
@@ -41,11 +42,10 @@ holds an explicitly saved compaction-trigger token count. Blank/Automatic restor
 positive whole counts override the trigger subject to model headroom. The shared `usePreferences`
 hook owns reads and saves; changing the trigger takes effect at the next compaction check, while
 working-directory changes still apply only to new chats. Settings → Model buckets assigns the
-shared small/medium/large model mappings. When a bucket is empty as it opens, it first offers the
-saved providers' suggested models or Choose my own, which shows the detailed assignments. After successful setup, Settings → Providers previews
-that provider's latest exact tier model IDs for empty buckets. Preview never saves; only confirmation
+shared small/medium/large model mappings directly, even when a bucket is empty. Only adding a
+new provider in Settings → Providers can offer another preview, limited to its models for empty buckets. Preview never saves; only confirmation
 applies those exact assignments, and later catalog/provider changes do not rewrite them. An empty
-chat with bucket setup missing shows a subtle warning linking to Model buckets. Settings → Prepass
+chat with bucket setup missing shows a warning with inline assignment controls. Settings → Prepass
 configures independent tool/skill/instruction/title model choices and protected-resource lists.
 Missing models/resources remain visibly unavailable rather than rebinding. Protection pickers
 discover resources for the default directory; built-in instructions always remain. Response headers

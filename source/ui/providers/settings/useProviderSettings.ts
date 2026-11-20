@@ -10,6 +10,7 @@ export function useProviderSettings(
   providersTab: boolean,
   onProviderReady: ((connectionId: string) => Promise<boolean>) | undefined,
   refreshPreferences: () => Promise<void>,
+  offerProviderBuckets = true,
 ) {
   const callbacks = useRef({ onChanged, onProviderReady, refreshPreferences });
   callbacks.current = { onChanged, onProviderReady, refreshPreferences };
@@ -20,8 +21,9 @@ export function useProviderSettings(
         () => callbacks.current.onChanged(),
         (id) => callbacks.current.onProviderReady?.(id),
         () => callbacks.current.refreshPreferences(),
+        offerProviderBuckets,
       ),
-    [client],
+    [client, offerProviderBuckets],
   );
   const [, render] = useState(0);
 

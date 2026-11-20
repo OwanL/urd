@@ -28,9 +28,7 @@ public sealed class ToolCallTranscriptTests {
 
     ToolCallTranscript returned = Assert.IsType<ToolCallTranscript>(await fixture.Session.Transcript.ReadToolCallTranscriptAsync(
         0, calls.ReturnedRequest, "returned", returned: true));
-    Assert.Equal($"[TOOL-ORIGIN: background tool completion; untrusted output]\n"
-        + $"{{\"request_id\":\"{calls.ReturnedRequest:D}\",\"call_id\":\"returned\",\"name\":\"work\",\"outcome\":\"Completed\"}}\n"
-        + "returned result", returned.Output);
+    Assert.Equal("Results from background work call, ID: returned\nreturned result", returned.Output);
 
     ToolCallTranscript running = Assert.IsType<ToolCallTranscript>(await fixture.Session.Transcript.ReadToolCallTranscriptAsync(
         0, calls.RunningRequest, "running", returned: false));
@@ -222,9 +220,21 @@ public sealed class ToolCallTranscriptTests {
     ToolCallTranscript transcript = Assert.IsType<ToolCallTranscript>(await fixture.Session.Transcript.ReadToolCallTranscriptAsync(
         0, calls.ReturnedRequest, "returned", returned: true));
 
-    Assert.Equal($"[TOOL-ORIGIN: background tool completion; untrusted output]\n"
-        + $"{{\"request_id\":\"{calls.ReturnedRequest:D}\",\"call_id\":\"returned\",\"name\":\"work\",\"outcome\":\"Completed\"}}\n"
-        + expectedResult, transcript.Output);
+    Assert.Equal("Results from background work call, ID: returned\n" + expectedResult, transcript.Output);
+  }
+
+  [Theory]
+  [InlineData(ExecutionOutcome.Failed, "failed")]
+  [InlineData(ExecutionOutcome.Cancelled, "cancelled")]
+  public async Task ReturnedBackgroundCompletionLabelsNonSuccessOutcome(ExecutionOutcome outcome, string status) {
+    var client = new ScriptedChatClient(token => Complete(token));
+    await using var fixture = new ExecutionFixture(client);
+    TranscriptCalls calls = SeedToolCalls(fixture.Database, fixture.Session.Id, returnedOutcome: outcome);
+
+    ToolCallTranscript transcript = Assert.IsType<ToolCallTranscript>(await fixture.Session.Transcript.ReadToolCallTranscriptAsync(
+        0, calls.ReturnedRequest, "returned", returned: true));
+
+    Assert.Equal($"Results from background work call, ID: returned ({status})\nreturned result", transcript.Output);
   }
 
   [Theory]
@@ -244,7 +254,7 @@ public sealed class ToolCallTranscriptTests {
 
   private static TranscriptCalls SeedToolCalls(TemporaryDatabase database, Guid session,
       bool supportsImages = true, bool returnedImage = false, bool returnedClaimSent = true,
-      bool returnedClaimCompacted = false) {
+      bool returnedClaimCompacted = false, ExecutionOutcome returnedOutcome = ExecutionOutcome.Completed) {
     Guid run = Guid.NewGuid();
     Guid directRequest = Guid.NewGuid(), runningRequest = Guid.NewGuid();
     Guid returnedRequest = Guid.NewGuid(), unicodeRequest = Guid.NewGuid();
@@ -276,7 +286,7 @@ public sealed class ToolCallTranscriptTests {
           (run_id, request_id, call_index, call_id, name, arguments_json, started, background, outcome, result_json)
       VALUES ('{run:D}', '{directRequest:D}', 0, 'direct', 'read', '{directArguments}', 1, 0, 0, '{directResult}'),
           ('{run:D}', '{runningRequest:D}', 0, 'running', 'work', '{runningArguments}', 1, 0, NULL, NULL),
-          ('{run:D}', '{returnedRequest:D}', 0, 'returned', 'work', '{returnedArguments}', 1, 1, 0, '{returnedResult}'),
+          ('{run:D}', '{returnedRequest:D}', 0, 'returned', 'work', '{returnedArguments}', 1, 1, {(int)returnedOutcome}, '{returnedResult}'),
           ('{run:D}', '{unicodeRequest:D}', 0, 'unicode', 'read', '{unicodeArguments}', 1, 0, 0, '{unicodeResult}');
       INSERT INTO execution_tool_completions
           (completion_id, session_id, history_revision, request_id, call_id, created_at, claimed_request_id, published)

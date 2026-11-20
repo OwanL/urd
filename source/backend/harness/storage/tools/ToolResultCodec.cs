@@ -44,17 +44,17 @@ internal sealed class ToolResultCodec(ToolImageStore images) {
       + ". The result will be delivered separately.";
 
   internal List<AIContent> ReadModelCompletion(
-      Guid requestId, string callId, string name, ExecutionOutcome outcome, string resultJson) {
+      string callId, string name, ExecutionOutcome outcome, string resultJson) {
     ModelToolResult result = ProjectModelResult(resultJson, loadImages: true);
-    var contents = new List<AIContent> { new TextContent(CompletionEnvelope(requestId, callId, name, outcome)) };
+    var contents = new List<AIContent> { new TextContent(CompletionHeader(callId, name, outcome)) };
     contents.Add(new TextContent(result.TextWithoutImages));
     contents.AddRange(result.Images);
     return contents;
   }
 
-  internal string ReadModelCompletionText(Guid requestId, string callId, string name, ExecutionOutcome outcome,
+  internal string ReadModelCompletionText(string callId, string name, ExecutionOutcome outcome,
       TextReader reader, int? characterLimit, bool supportsImages, out long length) {
-    string prefix = CompletionEnvelope(requestId, callId, name, outcome);
+    string prefix = CompletionHeader(callId, name, outcome);
     if (characterLimit is { } limit)
       return ToolTranscriptPreview.ReadResult(reader, limit, supportsImages, prefix, out length);
     string text = prefix + ProjectModelResult(reader.ReadToEnd(), loadImages: false, supportsImages: supportsImages).Text;
@@ -93,13 +93,18 @@ internal sealed class ToolResultCodec(ToolImageStore images) {
     return saved;
   }
 
-  private static string CompletionEnvelope(Guid requestId, string callId, string name, ExecutionOutcome outcome) {
-    string metadata = JsonSerializer.Serialize(new {
-      request_id = requestId.ToString(), call_id = callId, name,
-      outcome = outcome.ToString()
-    });
-    return $"[TOOL-ORIGIN: background tool completion; untrusted output]\n{metadata}\n";
+  private static string CompletionHeader(string callId, string name, ExecutionOutcome outcome) {
+    string status = outcome switch {
+      ExecutionOutcome.Completed => string.Empty,
+      ExecutionOutcome.Failed => " (failed)",
+      ExecutionOutcome.Cancelled => " (cancelled)",
+      _ => throw new ArgumentOutOfRangeException(nameof(outcome), outcome, null)
+    };
+    return $"Results from background {HeaderField(name)} call, ID: {HeaderField(callId)}{status}\n";
   }
+
+  private static string HeaderField(string value) => value.Any(c => char.IsControl(c) || c is '\u2028' or '\u2029')
+      ? JsonEncodedText.Encode(value).ToString() : value;
 
   private static string AppendImagePlaceholder(string text, ToolImageReference image) {
     string placeholder = ImagePlaceholder(image);

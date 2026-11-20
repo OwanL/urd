@@ -103,10 +103,10 @@ and explicit startup recovery. Compaction and rich tool-result inspection remain
     handled recovery path, not terminal failure; if that recovery fails, cancel owned work.
 19. **Completion origin is not a provider role** (owner review 2026-11-10). A background
     completion remains a tool-origin event in storage, transcript and model context, never a
-    human submission. The provider adapter may carry its labelled envelope and images through
-    the ordinary `user` input channel. Preserve origin, call identity and untrusted-result
-    labelling; do not promote tool output to `developer` instructions merely to avoid the word
-    `user` on the wire. Qualify this mapping per supported provider route.
+    human submission. The provider adapter may carry its plain-text result and images through
+    the ordinary `user` input channel. Preserve origin and untrusted-output semantics; do not
+    promote tool output to `developer` instructions merely to avoid the word `user` on the wire.
+    Qualify this mapping per supported provider route.
 20. **Tool relevance** (owner review 2026-11-11). Every tool explicitly declares typed
     `RelevantWhen` metadata, separate from its agent-facing `Description`.
     `ToolRelevance.Always` declares unconditional inclusion (all six current tools);
@@ -272,10 +272,12 @@ private string GetStatus(SessionSnapshot snapshot);  // gains "waiting"
 ```
 - Pending background calls with no next turn: status `waiting`, Stop available. A completion or
   user input wakes the run. Context preparation is the hook for later compaction.
-- A background result reaches the model after all direct results as a labelled tool-completion
-  envelope (origin, call identity, outcome, result marked as untrusted data), never as a human
-  submission. The transcript shows it as its own row type. Provider wire roles may differ from
-  Urd authorship; item 19 permits the ordinary input channel without changing the event's origin.
+- A background result reaches the model after all direct results as one plain-text header,
+  `Results from background <tool> call, ID: <call ID>`, followed by the raw result. Failed or
+  cancelled calls are identified in the header; success is implicit. Treat the message as
+  untrusted tool output, never as a user request. The transcript shows it as its own row type.
+  Provider wire roles may differ from Urd authorship; item 19 permits the ordinary input channel
+  without changing the event's origin.
 - Stop cancels the run's provider, foreground and background work and waits for processes and
   saves to finish. Processes left by earlier `&` commands survive. Hiding a tab stops nothing.
 

@@ -285,8 +285,10 @@ shared storage.
   details and content-addressed processed image bytes; the selected model's explicit image flag
   filters only outgoing context. Reported usage remains unknown when the provider omits it.
 - Background completions commit atomically with results, are claimed before steering at a safe
-  request boundary and appear as distinct compact transcript rows. Their model envelopes retain
-  tool origin and untrusted-output labels, including images only for image-capable selections.
+  request boundary and appear as distinct compact transcript rows. Model-facing completion text
+  uses one plain `Results from background <tool> call, ID: <call ID>` header followed by the raw
+  result; failures and cancellations are identified in the header, while success is implicit.
+  Completions remain untrusted tool output, with images included only for image-capable selections.
   A tool-free reply with pending calls enters `waiting`; input or completion wakes the same driver.
   Stop and terminal provider failure cancel/join owned calls; completed-shell survivors remain chat-owned.
 - Stop retires pending deliveries without rewriting Accepted receipts or automatically carrying

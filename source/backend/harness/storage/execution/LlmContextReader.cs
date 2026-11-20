@@ -212,9 +212,9 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
   private ChatMessage ReadToolCompletion(ContextRow row, bool forDelegation) {
     Guid origin = row.OriginRequestId!.Value;
     if (!forDelegation)
-      return new(ChatRole.User, toolResults.ReadModelCompletion(origin, row.CallId!, row.Name!, row.Outcome!.Value, row.Json!));
+      return new(ChatRole.User, toolResults.ReadModelCompletion(row.CallId!, row.Name!, row.Outcome!.Value, row.Json!));
     using var result = new StringReader(row.Json!);
-    string text = toolResults.ReadModelCompletionText(origin, row.CallId!, row.Name!, row.Outcome!.Value,
+    string text = toolResults.ReadModelCompletionText(row.CallId!, row.Name!, row.Outcome!.Value,
         result, null, supportsImages: false, out _);
     return SubagentContext.DescribeCompletion(text, origin, row.CallId!, row.Name!);
   }

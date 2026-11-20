@@ -425,7 +425,7 @@ public sealed class SubagentRunTests {
       Assert.Equal(ExecutionOutcome.Completed, Assert.Single(StoredTools.Read(fixture.Database),
           call => call.CallId == "background-child").Outcome);
       Assert.Contains(client.Requests.SelectMany(messages => messages), message =>
-          message.Text.Contains("[TOOL-ORIGIN: background tool completion", StringComparison.Ordinal)
+          message.Text.StartsWith("Results from background subagent call, ID: background-child\n", StringComparison.Ordinal)
           && message.Text.Contains(ChildReport, StringComparison.Ordinal));
     } finally {
       childRelease.TrySetResult();
@@ -443,7 +443,8 @@ public sealed class SubagentRunTests {
             parentContinued.TrySetResult();
             return Complete(token);
           }
-          if (request.Messages.Any(message => message.Text.Contains("[TOOL-ORIGIN: background tool completion", StringComparison.Ordinal)))
+          if (request.Messages.Any(message => message.Text.StartsWith(
+              "Results from background subagent call, ID: background-child\n", StringComparison.Ordinal)))
             return Complete(token);
           return ToolBatch(token, Delegate("background-child", AssignmentTask, background: true));
         case { } pruning when pruning.StartsWith("pruning.", StringComparison.Ordinal):

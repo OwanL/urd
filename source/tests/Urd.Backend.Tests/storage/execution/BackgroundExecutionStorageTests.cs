@@ -53,8 +53,8 @@ public sealed class BackgroundExecutionStorageTests {
     Assert.Equal(256, position.Weight);
     Assert.Equal("part done", next.Messages[^3].Text);
     Assert.True(IsCompletion(next.Messages[^2]));
-    using JsonDocument metadata = JsonDocument.Parse(next.Messages[^2].Contents.OfType<TextContent>().First().Text.Split('\n')[1]);
-    Assert.Equal(callId, metadata.RootElement.GetProperty("call_id").GetString());
+    Assert.Equal($"Results from background fake call, ID: {JsonEncodedText.Encode(callId)}\n",
+        next.Messages[^2].Contents.OfType<TextContent>().First().Text);
     Assert.Equal("steering", next.Messages[^1].Text);
     Assert.DoesNotContain(Read(database, session, execution, streaming.RequestId), IsCompletion);
     Assert.True(store.Executions.StartRequest(identity, next.RequestId));
@@ -272,14 +272,14 @@ public sealed class BackgroundExecutionStorageTests {
     ChatMessage saved = Assert.Single(next.Messages.Where(IsCompletion),
         message => message.Text.EndsWith("actual saved result", StringComparison.Ordinal));
     Assert.Same(saved, next.Messages.First(IsCompletion)); // Saved completion predates the recovery event, despite call order.
-    using JsonDocument metadata = JsonDocument.Parse(saved.Contents.OfType<TextContent>().First().Text.Split('\n')[1]);
-    Assert.Equal("saved", metadata.RootElement.GetProperty("call_id").GetString());
+    Assert.Equal("Results from background fake call, ID: saved\n",
+        saved.Contents.OfType<TextContent>().First().Text);
     Assert.Equal("continue deliberately", next.Messages[^1].Text);
     Assert.Equal(identities, Completions(reopened, session).Select(entry => entry.Entry));
   }
 
   private static bool IsCompletion(ChatMessage message) =>
-      message.Role == ChatRole.User && message.Text.StartsWith("[TOOL-ORIGIN: background tool completion;", StringComparison.Ordinal);
+      message.Role == ChatRole.User && message.Text.StartsWith("Results from background ", StringComparison.Ordinal);
 
   private static TranscriptEntryDescriptor[] Completions(UrdStore store, Guid session) =>
       store.History.Read(session, new(TranscriptHistoryMode.Latest, 0)).Entries

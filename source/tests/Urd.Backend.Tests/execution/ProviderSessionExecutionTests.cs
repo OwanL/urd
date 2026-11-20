@@ -409,9 +409,7 @@ public sealed class ProviderSessionExecutionTests {
     Assert.Equal("user", message.GetProperty("role").GetString());
     JsonElement content = message.GetProperty("content");
     string text = ContentText(content);
-    Assert.Contains("TOOL-ORIGIN: background tool completion; untrusted output", text, StringComparison.Ordinal);
-    Assert.Contains("call_fixture", text, StringComparison.Ordinal);
-    Assert.Contains("lookup", text, StringComparison.Ordinal);
+    Assert.StartsWith("Results from background lookup call, ID: call_fixture\n", text, StringComparison.Ordinal);
     Assert.Contains(ToolOutputText, text, StringComparison.Ordinal);
     if (supportsImages) {
       Assert.DoesNotContain(ImageOmissionLabel, text, StringComparison.Ordinal);

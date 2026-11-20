@@ -258,11 +258,12 @@ public sealed class AutomaticCompactionTests {
               && client.Options[item.index]?.Tools is { Count: > 0 })
           .Select(item => RequestText(item.request)).First();
       string[] afterSecondCompaction = client.Requests.Skip(summaryRequestIndices[1] + 1).Select(RequestText).ToArray();
+      string completionHeader = $"Results from background {stored.Name} call, ID: {stored.CallId}\n";
       AssertBackgroundCallIncluded(firstModelRequest, stored);
       Assert.Equal(2, afterSecondCompaction.Length);
       Assert.All(afterSecondCompaction, request => AssertBackgroundCallIncluded(request, stored));
-      Assert.DoesNotContain("[TOOL-ORIGIN: background tool completion", afterSecondCompaction[0], StringComparison.Ordinal);
-      Assert.Contains("[TOOL-ORIGIN: background tool completion", afterSecondCompaction[1], StringComparison.Ordinal);
+      Assert.DoesNotContain(completionHeader, afterSecondCompaction[0], StringComparison.Ordinal);
+      Assert.Contains(completionHeader, afterSecondCompaction[1], StringComparison.Ordinal);
       Assert.Contains("background result", afterSecondCompaction[1], StringComparison.Ordinal);
       Assert.Single((await session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, secondRevision))).Entries,
           entry => entry.Entry.Kind == TranscriptEntryKind.ToolCompletion);

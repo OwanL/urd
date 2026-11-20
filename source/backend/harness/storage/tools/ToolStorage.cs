@@ -93,7 +93,7 @@ internal sealed class ToolStorage(Database database, ToolResultCodec results) {
       // Until a receiver is saved, image placeholders can still become the model's omission notice.
       projectionFinal = reader.NullableString(returned ? "completion_selection_json" : "result_selection_json") is not null;
       output = returned
-          ? results.ReadModelCompletionText(requestId, callId, name, outcome!.Value, resultReader, characterLimit,
+          ? results.ReadModelCompletionText(callId, name, outcome!.Value, resultReader, characterLimit,
               ReadReceivingModelSupportsImages(reader, "completion_selection_json"), out outputLength)
           : results.ReadModelResultText(resultReader, characterLimit,
               ReadReceivingModelSupportsImages(reader, "result_selection_json"), out outputLength);

@@ -76,8 +76,10 @@ public sealed class BackgroundToolExecutionTests {
       Assert.Equal(placeholder, Assert.IsType<string>(Assert.Single(client.LastRequest.SelectMany(message => message.Contents)
           .OfType<FunctionResultContent>()).Result));
       ChatMessage completion = Assert.Single(client.LastRequest,
-          message => message.Text.Contains("[TOOL-ORIGIN: background tool completion", StringComparison.Ordinal));
+          message => message.Text.StartsWith("Results from background work call, ID: background\n", StringComparison.Ordinal));
       Assert.Equal(ChatRole.User, completion.Role);
+      Assert.Equal("Results from background work call, ID: background\n",
+          completion.Contents.OfType<TextContent>().First().Text);
       Assert.Contains("background result", completion.Text, StringComparison.Ordinal);
       Assert.Single((await fixture.Session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, 0))).Entries,
           entry => entry.Entry.Kind == TranscriptEntryKind.ToolCompletion);

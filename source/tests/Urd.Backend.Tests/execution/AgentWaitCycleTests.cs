@@ -232,8 +232,10 @@ public sealed class AgentWaitCycleTests {
   private static bool HasResult(ScriptedRequest request, string callId) => Results(request).Any(result => result.CallId == callId);
   private static bool HasAnyResult(ScriptedRequest request) => Results(request).Any();
   private static bool HasBackgroundResult(ScriptedRequest request, string callId) => request.Messages.Any(message =>
-      message.Text.Contains("[TOOL-ORIGIN: background tool completion", StringComparison.Ordinal)
-      && message.Text.Contains(callId, StringComparison.Ordinal));
+      message.Text.StartsWith("Results from background ", StringComparison.Ordinal)
+      && (message.Text.Contains($" call, ID: {callId}\n", StringComparison.Ordinal)
+          || message.Text.Contains($" call, ID: {callId} (failed)\n", StringComparison.Ordinal)
+          || message.Text.Contains($" call, ID: {callId} (cancelled)\n", StringComparison.Ordinal)));
 
   private static async Task WaitUntilAsync(Func<bool> ready) {
     using var timeout = new CancellationTokenSource(TestTimeout);

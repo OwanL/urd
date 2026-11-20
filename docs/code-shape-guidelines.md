@@ -116,10 +116,10 @@ coordinator checks integration before presenting the resulting code/API shape to
 owner. Do not expose unreviewed drafts as ready for approval or ask the owner to audit
 these guidelines. Implementation also needs tests and independent code review.
 
-Do not specify every private helper in advance or invent classes for UI hooks/scripts.
-The initial Core/Server/browser foundation is implemented; use the
-[application plan](application-plan.md#initial-implementation-owner-design-review-first)
-for the continuing review boundary, not obsolete class drafts.
+The initial Core/Server/browser foundation is implemented. Use scoped owner review for
+meaningful changes to public contracts, responsibilities, lifetimes, concurrency and
+persistence boundaries. Do not specify every private helper in advance or invent classes
+for UI hooks or scripts.
 
 Approval is scoped. After the initial base is accepted, agents should extend its
 conventions and tests; ask again for meaningful boundary/behavior changes, not routine

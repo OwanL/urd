@@ -58,6 +58,12 @@ retry with the largest unprotected files omitted first (by UTF-8 body size)
 and surface a cumulative warning. Protected documents remain excluded. This does not
 select full skill-body loading or change the other categories' input contracts.
 
+A historical Windows test with a scripted provider rejected the first selection request for
+1,900 files (1,226,256 UTF-8 bytes of file bodies). The retry omitted the largest file;
+1,899 files reached the main chat, with a persisted warning. This exercises the recovery path,
+not a provider token limit or a guarantee that the main chat will fit. See
+`git show 774461f:docs/instruction-resource-catalog-plan.md` for the original record.
+
 **Model selection decision:** all four purposes default to Small; resolve the selected
 bucket through its configured mapping or an explicit exact provider/model override. If
 unavailable, skip with a warning and never substitute chat; use the title's first-prompt
@@ -192,9 +198,8 @@ precedence, rather than being injected into unrelated projects.
 from matching files in the working directory and descendants, without requiring Git. No
 ancestor or sibling project guidance is included; Urd's packaged skills remain available.
 This supersedes the earlier Git-only discovery decision, not the pruning triggers or
-protection contract. The [context guide](../source/backend/harness/context/README.md)
-owns recognition and current behavior; the [instruction-resource catalog record](instruction-resource-catalog-plan.md)
-describes the path-only cache, scanner and fallback behavior.
+protection contract. The [context guide](../source/backend/harness/context/README.md#project-instruction-documents)
+owns filename recognition, the path-only catalog, and scanner and watcher behavior.
 
 **Document scope decision:** include agent-facing Markdown instruction resources,
 including `AGENTS.md` and append-system resources. Exclude files specific to other
@@ -689,6 +694,5 @@ this does not select name-based versus source-pinned protection.
 
 The [classification evidence](pruning-classification-results.md) informs this choice;
 it does not prove the complete three-category design is superior or qualify instruction
-pruning with live exploration. Earlier [replay findings](pruning-replay-results.md)
-remain dated evidence, not the current plan. No further evaluation or implementation
-is authorized by this document alone.
+pruning with live exploration. No further evaluation or implementation is authorized by
+this document alone.

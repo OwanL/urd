@@ -1,17 +1,21 @@
 # Documentation
 
-Guides describe implemented behavior. Decisions distinguish agreed requirements from proposals.
-Evidence records describe only their dated test/research scope; old test totals are not the
-current suite size. Completed plans, closed audits and superseded research live in Git history,
-not a separate archive. Their remaining constraints belong to the current documents below.
+Keep a document here if it explains current behavior, records a decision that still governs
+work, or helps resume unfinished work. Keep dated evidence only where an active decision or
+qualification gate needs it. Fold surviving constraints into the guide that owns them; let
+superseded research and plans live in Git history, not an archive directory.
 
 ## Current guides
 
-- [Backend development](backend-development.md): SDK, Core contracts, builds and checks.
+- [Backend development](backend-development.md): SDK, Core contracts,
+  [history compaction](backend-development.md#history-compaction), builds and checks.
 - [Local server](server-development.md): launch, data ownership, HTTP and event APIs.
 - [Browser development](browser-development.md): UI toolchain, behavior and verification.
 - [Provider management](provider-management.md): connections, credentials and browser settings.
 - [Usage accounting](usage-accounting.md): API-equivalent cost, durable records and live-estimate limits.
+- [System guidance and resource discovery](../source/backend/harness/context/README.md):
+  instruction and skill scope, path catalog and scanner.
+- [Web access](web-access-plan.md): search and read tools, limits and remaining qualification.
 - [Test scope](testing.md) and [code shape](code-shape-guidelines.md): local verification,
   size budget and review conventions.
 
@@ -19,24 +23,23 @@ not a separate archive. Their remaining constraints belong to the current docume
 
 - [Product direction](product-direction.md): purpose, constraints and their rationale.
 - [Architecture](ARCHITECTURE.md): agreed boundaries, storage choice and open decisions.
-- [Application structure](application-plan.md): current/planned owners and scoped review.
 - [Sessions](session-design.md), [execution](execution-design.md) and
   [discovery](discovery-design.md): lifetime, model/tool calls, adapter limits and capability exposure.
-- [Instruction-resource catalog plan](instruction-resource-catalog-plan.md): cwd-scoped discovery, bundled filename scan and incremental updates.
 - [Prepass plan](pruning-plan.md): parallel pruning and title generation, protection/model
   settings, implemented milestones and their verification limits.
 - [Agent communication](agent-communication-design.md): bounded delegation, request/reply,
-  ownership and cycle handling; active design, not implementation approval.
+  ownership and cycle handling; backend behavior and deferred UI work.
 - [Agent tools](agent-tools-design.md): tool set, parallel/background calls, approved class shapes.
-- [Web access plan](web-access-plan.md): merged search, browser-first reading and local acceptance criteria.
-- [Compaction](compaction-design.md): implemented history compaction and its limits.
 - [Browser](BROWSER-DESIGN.md): shared UI, local access and remaining host/closure choices.
 - [Transcript](TRANSCRIPT-DESIGN.md): approved requirements, delivered foundation and remaining
   staged work. Stage 2 is active; historical checkpoints are not overall acceptance.
-- [Source distribution](repo-foundations.md): matching source, custom-copy data and setup boundaries,
-  with a dated round-trip trial; packaging and activation remain unfinished.
-- [First Windows release plan](first-windows-release-plan.md): candidate selection, source packaging,
-  local performance qualification and pre-publication review after active work settles.
+
+## Windows release
+
+- [First Windows release plan](first-windows-release-plan.md): portable build and packaging,
+  clean-machine and release gates.
+- [Private Windows trial handoff](private-windows-trial-handoff.md): retained candidate, evidence
+  and resume steps.
 
 ## Evidence
 
@@ -47,13 +50,11 @@ Experimental source is [archived outside the checkout](product-direction.md#expe
   [full classification CSV](pruning-classification-summary.csv): asymmetric error costs,
   accuracy and latency across all replay blocks; conservative parallel selection is
   the low-latency candidate, not a proven low-risk winner over keep-all.
-- [Initial pruning replay](pruning-replay-results.md): earlier whole-guidance selection
-  and bounded recovery evidence; no startup winner or production loading policy.
 - [Agent-tool qualification](agent-tools-qualification.md): scoped Windows process, adapter and
   live acceptance checkpoints; not universal tool/provider qualification.
 - [Provider qualification](provider-qualification.md): offline and separately authorized live route/model checks.
-- [MCP library](mcp-library-research.md) and [SDK qualification](mcp-qualification.md): selected library,
-  protocol boundaries and remaining integration gates.
+- [MCP SDK qualification](mcp-qualification.md): bounded protocol evidence and remaining
+  integration gates.
 - [Parser qualification](TRANSCRIPT-PARSER-EVIDENCE.md) and
   [position lookup](TRANSCRIPT-POSITION-EVIDENCE.md): transcript feasibility and unclosed gates.
 

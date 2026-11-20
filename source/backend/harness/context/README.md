@@ -92,31 +92,37 @@ untracked files are eligible. Discovery recognizes these filenames case-insensit
 catalogued separately. Other harnesses' files, including `CLAUDE.md`, `GEMINI.md`, Copilot
 `*.instructions.md`/`copilot-*` and their configuration directories, are excluded.
 
-The catalog indexes paths only; it does not cache instruction text or skill frontmatter.
-The backend's shared derived SQLite index is `<DataRoot>/urd.sqlite.instructions.sqlite`
+One catalog per `UrdStore` serves session preparation and the Settings resource picker.
+It indexes paths only; it does not cache instruction text or skill frontmatter.
+The backend's derived SQLite index is `<DataRoot>/urd.sqlite.instructions.sqlite`
 (the session database is `<DataRoot>/urd.sqlite`). It survives backend restarts: last-known
 rows are served immediately while a single-flight reconcile scan runs in the background, and
-cold roots serve a partial scan as it progresses. The catalog watches
-active roots and reconciles file/directory create, delete and rename notifications. If a
-watcher cannot be established or loses coverage, last-known rows keep being served while a
-reconciliation scan runs; roots whose watcher is unavailable settle after one reconciliation.
+cold roots wait for a scan to produce its first matches or finish, then serve partial results
+while it runs. Startup warms the saved default working directory on a best-effort basis;
+other roots scan on demand. The catalog watches active roots for file and directory creation,
+deletion and renames, including moves of populated directories. Missing or lost watcher
+coverage triggers reconciliation; last-known rows can still be served but are not proof of
+freshness. A cold caller still waiting for its first matches or scan completion observes a
+scan failure; a caller that already received partial results may not see that failure.
 Requests return paths with an index state (`DiscoveredInstructionResources.Index`):
 complete, refreshing or partial, plus the number of files matched so far. A caller cancelling
-its wait does not cancel a scan shared with other
-callers. Cache schema/integrity problems rebuild this derived index when it is identified as
-Urd's catalog. A nonempty foreign file is left untouched and causes an error; a fresh
+its wait does not cancel a scan shared with others. The catalog drains its watchers and
+scans on backend shutdown. Schema or integrity problems trigger a rebuild only when the index is
+identified as Urd's catalog. A nonempty foreign file is left untouched and causes an error; a fresh
 empty SQLite file can be initialized as the derived cache.
 
 The scanner is bundled `fd` v10.3.0, resolved beside the backend under
 `fd/<platform>-<architecture>/`; it is not looked up on `PATH`. It searches exact eligible
 basenames, including hidden and ignored files, emits NUL-delimited paths and does not follow
-links. Mount-aware scans fail closed for
-unknown/remote filesystems and avoid virtual OS trees. Unsafe or out-of-scope roots return
-no project candidates; unsupported-platform, scanner and index failures are surfaced rather
-than treated as successful empty scans. Packaged skills remain available independently of the
+links. `$Recycle.Bin`, `node_modules`, `bin`, `obj` and the OS temp directory are excluded below
+the scan root and from watcher work. An explicit root at or inside an otherwise excluded
+directory is still scanned. Mount-aware POSIX scans reject unknown or remote filesystems and
+skip virtual OS trees. Project files are checked against the actual opened path before reading.
+Unsafe or out-of-scope roots return no project candidates; unsupported-platform, scanner and
+index failures are surfaced rather than treated as successful empty scans. Packaged skills remain available independently of the
 working directory. Checked-in scanner binaries cover Windows, macOS and Linux x64/arm64
-targets; this document does not claim published-layout or end-to-end verification on every
-target.
+targets; asset presence is not published-layout or end-to-end qualification on every target.
+See [fd packaging](../../../vendor/fd/README.md) for the asset manifest and notices.
 
 Documents carry full text and explicit directory scope when loaded for preparation. All
 discovered documents are selection candidates; retained documents render shallower scopes

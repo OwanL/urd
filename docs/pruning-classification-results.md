@@ -24,7 +24,10 @@ pruning. It does rule out calling any tested design a proven low-risk winner.
 
 ## What was run
 
-**480 additional preparations**, beyond the [first 306](pruning-replay-results.md):
+**480 additional preparations**, beyond the first 306 (`git show 774461f:docs/pruning-replay-results.md`).
+The original whole-guidance bundles omitted required guidance in 7–11 of 36 comparison
+runs per bundle. These were rubric failures, not demonstrated task failures. No bundle
+advanced to confirmation, so that block did not establish a comparative startup advantage.
 
 | Block | Tasks × repeats | Strategies | Preparations |
 | --- | --- | --- | ---: |

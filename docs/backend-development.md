@@ -161,7 +161,10 @@ provider usage is not established by synthetic stream tests.
 Model settings and frozen selections carry an optional positive `ContextWindow`; unknown limits
 still allow Send. Exact-ID defaults are restricted to trusted provider identities. Before model
 requests, threshold preparation may summarize older history through the shared request-only
-`IChatClient`; explicit provider overflow permits one retry before any output or tool call.
+`IChatClient`. A classified context-window rejection permits one compact-and-retry only if the
+rejected request produced no output (including buffered output) or tool calls. Generic HTTP
+failures and a failed summary do not trigger it. Compaction never replays tools.
+
 `PreferenceManager.Read()` supplies a typed immutable snapshot. The shared store lazily caches the
 preferences row, serializes updates, and publishes a new snapshot only after persistence succeeds;
 reads do not repeatedly query SQLite. Add typed fields to `UserPreferences`, persist them through
@@ -169,16 +172,33 @@ reads do not repeatedly query SQLite. Add typed fields to `UserPreferences`, per
 rather than callbacks per setting. Working-directory fallback still applies when a new session is created.
 
 Each compaction check reads one current snapshot, so changing `CompactionTriggerTokenCount` applies
-at the next check, including within an existing execution. Null selects the default window-minus-headroom
-trigger; a positive token count overrides it, capped by that same fixed headroom limit when the window
-is known. An explicit count also works for unknown windows. Retained history is capped at half the
-effective trigger and 20,000 tokens; summaries have a separate unchanged limit. Overflow recovery can
-still exceed the retention budget to make safe progress.
+at the next check, including within an existing execution. The default trigger reserves one fifth of
+a known context window, up to 16,384 tokens. A positive count overrides the trigger, capped at the
+window minus that headroom, and enables threshold compaction for unknown windows. Without a trigger,
+only manual or overflow compaction is available. The retention target is the smaller of 20,000 tokens
+and half the effective trigger, or 20,000 without a trigger. Cuts prefer whole turns, then safe
+assistant continuations; never split a tool call from its result. If needed, keep an oversized latest
+turn intact while summarizing older history. If there is no safe cut, do not compact or retry.
+
+`CompactionPrompt` asks for a structured summary: goal, constraints, progress, decisions, next
+steps, critical context and cumulative files read and modified. It builds on the earlier summary,
+omits native payloads and reasoning, and bounds tool-result text. Tool output and quoted user
+content are data, not instructions. Summary output is capped at 8,192 tokens or one quarter of a
+known window, whichever is smaller. The ChatGPT route cannot accept a provider output cap; local checks for completion,
+size (32,768 characters) and context reduction still apply. Usage anchors estimates where available;
+the text fallback is heuristic, not a tokenizer count.
+
+The harness snapshots a background-call appendix before summarizing. It retains the full stored
+arguments, tool name, request ID and call ID for running calls, completions awaiting delivery and
+calls whose completions are in retained history. The appendix is rebuilt from storage on each
+compaction and counts toward estimated context, not the generated-summary output limit.
 
 Successful summaries and metadata-only markers commit together in `session_compactions` and
-`execution_messages`. Context reads apply the saved boundary without rewriting the transcript.
-Manual compaction is idle-only, has its own execution/receipt and uses ordinary addressed Stop;
-failure or cancellation leaves the previous boundary usable. See [compaction design](compaction-design.md).
+`execution_messages`, scoped to the current history revision. Context reads apply the saved boundary
+without rewriting the original transcript. Manual compaction is idle-only, has its own execution and
+receipt, uses ordinary addressed Stop and is not replayed on reopen. No-op, failed, cancelled and
+stale attempts do not advance the boundary. The [server guide](server-development.md#session-http-contract)
+owns the wire contract; the [browser guide](browser-development.md) describes the control.
 
 ## Naming and structure cleanup
 
@@ -608,5 +628,7 @@ rebuildable sidecar at `<DataRoot>/urd.sqlite.instructions.sqlite` (plus SQLite 
 separate from the durable `<DataRoot>/urd.sqlite` session database. Tests own disposable
 temporary SQLite directories; they must not open personal sessions, credentials or copy
 `data/`. Build/test never resets application data. See the [portable Windows trial](first-windows-release-plan.md#run-the-portable-trial)
-for packaging and staged-build activation. During coordinated agent work, restore/build/test
-must acquire, start and release the exact exclusive resource `urd:dotnet`.
+for packaging and staged-build activation. When agents share a checkout, assign one owner
+for restore/build/test and run commands that write the same outputs serially. Agree on file
+ownership before editing; if unexpected edits overlap your work, check with the other writer
+or the owner before replacing them.

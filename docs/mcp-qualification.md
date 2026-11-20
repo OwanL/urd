@@ -3,8 +3,9 @@
 **2026-11-04 — bounded experiment, not a production implementation.** The owner
 already selected `ModelContextProtocol.Core`; this does not reopen that choice,
 lock its version, or select a `ToolExecutor` API/state design. Requirements:
-[MCP research](mcp-library-research.md), [current-authority dispatch](discovery-design.md)
-and [session lifetimes](session-design.md).
+[MCP client decision](ARCHITECTURE.md#mcp-client-library-and-revisiting-library-choices),
+[current-authority dispatch](discovery-design.md) and [session lifetimes](session-design.md).
+Original SDK and protocol research is in `git show 774461f:docs/mcp-library-research.md`.
 
 ## Scope and evidence
 

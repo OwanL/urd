@@ -136,13 +136,13 @@ No concrete class layout is approved by this decision.
 
 **Structure and naming:** classes and state ownership should determine files, not the
 other way around. The owner rejected project-first and vague `systems/` layouts because
-they hid actual responsibilities. The accepted [application plan](application-plan.md)
-is a revisable component-led starting point, not a hierarchy of new managers or one
-project per concern. It separates authored `guidance/` from `guidance-loading/`, uses
-`execution` for the narrow model/tool loop, and distinguishes request/reply communication
-from any separately selected assignment or wakeup responsibilities. Shared provider/MCP
-lifetimes and backend usage capture do not become execution-owned just because they
-support agents.
+they hid actual responsibilities. Organize by component, without creating empty modules,
+new managers or one project per concern. Keep authored guidance separate from its loading
+code and user/project instructions. Execution owns the narrow model/tool loop; request/reply
+communication is distinct from assignments and wakeups. Shared provider/MCP lifetimes and
+backend usage capture do not become execution-owned just because they support agents.
+Domain owners validate settings; a shared database does not imply a generic persistence
+framework or change who owns a transaction.
 
 Flat docs, optional pending `docs/scratch/`, `scripts/` for automation and no in-repository
 experiments are accepted. The [experiment archive](product-direction.md#experimental-source-archive)
@@ -163,7 +163,7 @@ retains proposed wider APIs; its scoped decisions and the selected Core-without-
 Server → Core boundary are not approval of every future class. Routine changes follow the
 established implementation; new meaningful responsibilities and public contracts still
 need scoped review. Exact tool pins are recorded in the development guides. Execution
-topology, desktop host, wider provider coverage and packaging remain open.
+topology, desktop host, wider provider coverage and public distribution remain open.
 
 ### ASP.NET Core hosting and HTTP
 
@@ -179,19 +179,19 @@ access on macOS remains intended scope. No macOS runtime test has been performed
 
 The current Server uses Minimal APIs and a page-level server-sent event stream;
 [server development](server-development.md) records the implemented local contract.
-Remote access policy, packaging and process topology remain open. Agent work retains
+Remote access policy, public packaging and process topology remain open. Agent work retains
 its own lifetime rather than being cancelled by an HTTP request or client disconnect.
 
 ### MCP client library and revisiting library choices
 
 **Decision (2026-11-04):** Use the official C# MCP SDK's
 `ModelContextProtocol.Core` for MCP client protocol and transport mechanics.
-[The research](mcp-library-research.md) found no evidence-based blocker; qualify
-required servers and transports during implementation. Its MEAI abstractions
-dependency does not select an LLM/tool loop or LLM exposure policy; the
-separate `IChatClient` decision is recorded below.
-Urd retains connection lifetime, credentials, permissions and discovery/exposure
-responsibilities. The inspected package version is not a locked dependency version.
+Qualify required servers and transports during implementation. Its MEAI abstractions
+dependency does not select an LLM/tool loop or LLM exposure policy; the separate
+`IChatClient` decision is recorded below. Urd retains connection lifetime, credentials,
+permissions and discovery/exposure. Choose the stdio environment explicitly; default
+inheritance can expose model/provider credentials. Verify list-change subscriptions if live
+updates are selected. The inspected package version is not a locked dependency version.
 [Bounded SDK qualification](mcp-qualification.md) exercises real Core 2.3.1 with
 fake stdio peers: explicit 2025 handshake, result/error fidelity, current-authority
 checks and local cancellation/disposal. Default 2026 negotiation/fallback,
@@ -240,8 +240,9 @@ Real SQLite/agents, rich rendering, network access and host reuse remain unquali
 SDK and package pins, CSS and client ownership live in [browser development](browser-development.md)
 and the source. The early proposed client-state split was not approved as a whole;
 implemented feature owners are not permission for a generic state framework.
-[Source setup and packaging](repo-foundations.md) still need qualification. Desktop
-host, remote transport and later host integration remain open.
+The [portable Windows workflow](first-windows-release-plan.md#run-the-portable-trial)
+is implemented; clean-machine qualification and public delivery remain open, as do the
+desktop host, remote transport and later host integration.
 
 ### Operating-system rollout: Windows, then macOS, then Linux
 
@@ -603,18 +604,17 @@ generic prompt/resource framework.
 **Owner direction (2026-11-15):** include instruction-document loading and pruning,
 including `AGENTS.md` and append-system resources, in the context-preparation design
 alongside tools and skills. Compare designs using real Pie task/file/catalog replays
-before fixing class structure; see the [dated pruning replay evidence](pruning-replay-results.md).
-Project instruction-file discovery now follows the same recursive Git-backed approach
-as skills; the [pruning plan](pruning-plan.md#project-resource-discovery) owns that direction.
+before fixing class structure; see the [dated pruning evidence](pruning-classification-results.md).
+Project instructions and skills are discovered under the working directory, without
+requiring Git; see the [discovery rules](pruning-plan.md#project-resource-discovery).
 Agent-facing Markdown instructions are in scope, including `AGENTS.md` and append-system
 resources; other harnesses' files, such as `CLAUDE.md` and Copilot instructions, are excluded.
 The implemented recognition rules, precedence and protection identities are documented
 in the [context README](../source/backend/harness/context/README.md), with acceptance
 coverage in `InstructionResourceDiscoveryTests`. The subsequent protection and
 category-selection direction is recorded below. Skills are listed by name,
-description and path when a chat starts: Git-tracked `SKILL.md` files under the working
-directory, then Urd's packaged
-skills; bodies are read on demand. Existing protected-capability and prefix-stability constraints
+description and path when a chat starts, from project `SKILL.md` files and Urd's packaged
+skills. Bodies are read on demand. Existing protected-capability and prefix-stability constraints
 below still apply. The implemented builder persists exact boundary-scoped snapshots;
 ordinary requests and reopen reuse them, while the first request after successful
 compaction prepares a new selection. See [backend development](backend-development.md#starting-context)
@@ -839,10 +839,10 @@ The backend language is settled above. Low harness CPU/memory cost, installation
 library reuse and maintenance remain requirements. Source-bundled customisation
 must work on users' own machines; prebuilt-release convenience does not establish
 that the source-build workflow is acceptable. The accepted
-[source-distribution direction](repo-foundations.md#owner-outcome) requires matching
-editable source and build instructions with distributable builds, including modified
-source in custom packages. It does not require repackaging every compile or select
-physical packaging, SDK/cache bundling, tooling or activation mechanics.
+[source-distribution direction](product-direction.md#bundle-source-with-published-builds)
+requires matching editable source and build instructions with distributable builds,
+including modified source in custom packages. It does not require repackaging every compile
+or settle public packaging, SDK/cache bundling or activation for future installed releases.
 
 Earlier language shortlists are superseded; no language stereotype establishes
 resource superiority. Tiny Go/C# feasibility probes did not measure product

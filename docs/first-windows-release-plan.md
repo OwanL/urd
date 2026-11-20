@@ -1,8 +1,8 @@
 # First Windows release plan
 
-**Private Windows trial.** Once the concurrent work is integrated, qualify the real
-Windows distributable on the owner's machines, not a developer checkout or the earlier
-[source-packaging fixture](repo-foundations.md#evidence--conventional-pattern-and-bounded-trial).
+**Private Windows trial.** Qualify an integrated Windows distributable on the owner's
+machines. Developer checkout and isolated packaging-probe results do not establish that
+the distributable works on a clean machine.
 The trial is private and should exercise the intended release workflows. It does not authorize
 publishing, installing into a live profile or using live data for qualification. The browser ships
 first; VS Code follows. Desktop, LAN/Tailscale, automatic updates and macOS/Linux feature parity

@@ -7,7 +7,8 @@ Related: [execution](execution-design.md), [sessions](session-design.md), [disco
 [Qualification evidence](agent-tools-qualification.md) records the bounded process and adapter
 probes and their remaining integration limits. The 2026-11-11 checkpoints qualify generic
 parallel tools, explicit model metadata, persisted images, background delivery/waiting, Stop
-and explicit startup recovery. Compaction and rich tool-result inspection remain pending.
+and explicit startup recovery. [History compaction](backend-development.md#history-compaction)
+was implemented separately; see the [browser guide](browser-development.md) for current inspection behavior.
 
 ## Agreed
 

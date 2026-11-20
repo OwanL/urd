@@ -36,8 +36,7 @@ requirements from delivered behavior. Reopening does not replay work.
 - [Browser development](docs/browser-development.md): UI toolchain, builds and local verification.
 - [Provider management](docs/provider-management.md): supported connections, settings and qualification.
 - [Product direction](docs/product-direction.md): constraints and reasons behind the rebuild.
-- [Architecture](docs/ARCHITECTURE.md) and [application plan](docs/application-plan.md):
-  decisions, responsibilities and remaining design work.
+- [Architecture](docs/ARCHITECTURE.md): decisions, responsibilities and remaining design work.
 
 Build the UI before the Server when staging browser assets. Verification stays local;
 see [test scope](docs/testing.md). Do not use a user's live profile or provider account

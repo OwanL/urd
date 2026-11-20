@@ -261,41 +261,11 @@ API, **not** a published SDK, interfaces for every class, additional processes o
 frozen methods. Both projects can evolve together. One project remains simpler
 plumbing, but is not the selected starting point.
 
-**Historical coarse source mapping:** the later [application plan](application-plan.md)
-now owns the rough layout, and [experimental source has been archived](product-direction.md#experimental-source-archive).
-The earlier sketch below did not approve every filename, frontend structure or
-test-project arrangement:
-
-```text
-src/Urd.Core/
-  Sessions/                   SessionBase, PrimarySession, SessionExecution,
-                              SessionManager — implemented behaviour, not stubs
-  Storage/                    UrdStore and required durable facts
-src/Urd.Server/               host entry/composition and actual HTTP handling
-src/Urd.Web/                  shared TypeScript/Preact UI; UI-specific test source
-                              (internal organization/tooling still open)
-tests/Urd.Backend.Tests/      proposed shared backend behaviour/SQLite-flow tests
-experiments/                  existing research harness, unchanged
-```
-
-For the known first primary-session flow, add only files with actual behaviour.
-`SubagentSession`, title/compaction/pruning and provider/tool collaborators enter
-when their feature needs code; do not pre-create empty future folders/classes.
-This does not remove retained capabilities. Nor does splitting production code
-require a test project per assembly or a frontend copy of the C# class hierarchy.
-
-Within Core, sessions coordinate execution and guarded store writes; execution
-uses `IChatClient`/actual tool execution, never unrestricted history mutation.
-Read-only history queries can use the store without starting an execution.
-Server wires dependencies; session/storage code does not consume HTTP or UI state.
-Transport, endpoint style, CSS, frontend state and build tools remain open.
-
-That structure decision did not authorize moving existing research/user files or the
-harness; the later owner-authorized experimental archive is recorded above. Step 3 must scope
-SDK/build/package/formatting policy and commands deliberately: new root settings
-must not silently change experimental pins or behaviour. Conventions, tooling,
-package pins and detailed file/test placement await that review. This decision
-authorizes **no scaffold, source generation, build or installation**.
+Within Core, sessions coordinate execution and guarded store writes. Execution uses
+`IChatClient` and actual tool execution, not unrestricted history mutation. History reads
+do not start execution. Server wires dependencies; session and storage code do not consume
+HTTP or UI state. The [backend](backend-development.md) and [browser](browser-development.md)
+guides describe the implemented layout.
 
 ## 6. Acceptance sequence and remaining gates
 
@@ -345,7 +315,7 @@ disposable fixtures authorizes production implementation.
 
 **2026-11-05 process update:** the owner wants the first class structures, important
 members and method signatures proposed for review before implementation; see the
-[initial design gate](application-plan.md#initial-implementation-owner-design-review-first).
+[code-shape guide](code-shape-guidelines.md#initial-review-format).
 This supersedes treating all initial API details as delegated implementation work.
 After the relevant structure is accepted, routine helpers, local names, lock primitives
 and batching details can follow evidence without a method-by-method questionnaire.

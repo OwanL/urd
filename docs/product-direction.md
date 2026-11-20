@@ -57,19 +57,20 @@ choose an archive/embedding format or promise bundled SDKs and dependency caches
 Customization must work on the user's machine without a required hosted build service.
 Acquire missing project-declared build tools automatically where practical; small scripts
 are welcome. This does not authorize replacing unrelated machine programs or updating Urd.
-Offline and zero-prerequisite builds are not promised. Current tool pins and commands live
-in the development guides, not in historical tooling comparisons.
+Offline and zero-prerequisite builds are not promised. Choose tools for project needs;
+what happens to be installed on a developer machine establishes local feasibility, not
+what Urd should use. Current tool pins and commands live in the development guides.
 
 Keep each customized copy together in a user-chosen writable folder, with separate persistent
 data by default. Data stays outside generated outputs and source/distribution inputs, survives
-clean/rebuild and is not reset by rebuilding the same copy. Exact installed-release locations,
-credential portability, package format and activation remain open.
+clean/rebuild and is not reset by rebuilding the same copy. The ZIP layout and explicit
+staged activation are implemented for the [private Windows trial](first-windows-release-plan.md#run-the-portable-trial).
+Installed-release locations, credential portability and public package and update flows remain open.
 
 Editing source, building and reloading is an acceptable normal workflow. Simple hot reload
 is useful, but does not justify an elaborate reload system. Users own their edits and upgrades:
 Git, forks and upstream contribution are optional. Urd need not merge arbitrary modifications.
 No automatic updater is being designed; agent-guided upgrade notifications remain a proposal.
-[Source/build evidence](repo-foundations.md) records the accepted boundaries and bounded trial.
 
 ## Deliver the browser client first
 
@@ -132,8 +133,8 @@ changes are not incidental refactoring.
 
 Keep authored guidance, user/project instructions and personal settings separate. Do not
 copy maintainer configuration or live data into defaults. Source access is the escape hatch
-for deep customization, not a reason for a new override platform. [Code-shape guidance](code-shape-guidelines.md)
-and the [application plan](application-plan.md) define the review workflow.
+for deep customization, not a reason for a new override platform. The
+[code-shape guide](code-shape-guidelines.md#initial-review-format) defines the review workflow.
 
 ## Experimental source archive
 

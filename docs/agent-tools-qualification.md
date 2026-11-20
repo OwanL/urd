@@ -224,10 +224,9 @@ was found. These boundaries still apply:
   historical model-facing result, not a separate raw process-output archive. Tool images
   load on demand; compact rows must not eagerly decode them. Preserve managed-reference
   lifetimes rather than adopting the probe's image-BLOB schema as a product decision.
-- [Compaction sequencing](compaction-design.md): foreground tools, then background delivery
-  and recovery, then compaction. Tool-row presentation and compaction remain normal-use gates;
-  passing these two probes does not justify self-hosting early.
+- [History compaction](backend-development.md#history-compaction) builds on foreground tools,
+  background delivery and recovery. These tool probes do not qualify compaction or transcript
+  presentation.
 
 The integrated checkpoints above cover the selected tool storage/context, Stop, recovery and
-shutdown boundaries. The transcript's approved large-payload work and compaction remain
-separate delivery obligations, not reasons to redesign the approved tools or class shapes.
+shutdown boundaries. They do not qualify overall normal use or the transcript's large-payload work.

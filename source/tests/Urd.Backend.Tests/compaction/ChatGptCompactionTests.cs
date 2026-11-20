@@ -51,7 +51,7 @@ public sealed class ChatGptCompactionTests {
   }
 
   // Full manual compaction over ChatGPT: real sign-in grant and chat client stack, scripted wires.
-  // The selection has no context window and no trigger preference, so only manual compaction runs.
+  // The scripted turns are below the default threshold, so only manual compaction runs.
   private sealed class ChatGptFixture : IAsyncDisposable {
     private readonly TemporaryDatabase database = new();
     private readonly FakeOpenAIIdentity identity = new();

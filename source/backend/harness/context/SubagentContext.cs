@@ -28,7 +28,7 @@ internal static class SubagentContext {
 
   internal static string? BuildRecent(IReadOnlyList<HistoryMessage> messages,
       int? parentContextWindow, int? compactionTriggerTokenCount) {
-    int? trigger = ContextTokenBudget.CompactionTrigger(parentContextWindow, compactionTriggerTokenCount);
+    int trigger = ContextTokenBudget.CompactionTrigger(parentContextWindow, compactionTriggerTokenCount);
     int? first = HistoryCompactionBoundary.FindRecentSuffix(messages, ContextTokenBudget.RetainedHistoryLimit(trigger));
     return first is { } index ? Build(messages.Skip(index).SelectMany(Describe)) : null;
   }

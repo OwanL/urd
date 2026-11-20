@@ -158,9 +158,6 @@ internal sealed class SessionExecution : IDisposable {
       string? focus, ModelHistory? currentHistory) {
     stop.Token.ThrowIfCancellationRequested();
     UserPreferences preferences = session.ReadPreferences();
-    if (reason == CompactionReason.Threshold && selection.ContextWindow is null
-        && preferences.CompactionTriggerTokenCount is null)
-      return null;
     ModelHistory history = currentHistory ?? await recorder.ReadModelHistoryAsync(requestId);
     StartingContext currentContext = startingContext ?? session.ReadStartingContext()
         ?? startingContextBuilder.Create(ContextInput(), stop.Token);

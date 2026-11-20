@@ -20,7 +20,7 @@ internal static class HistoryCompactor {
     if (history.Messages.Count < 2) return null;
 
     long estimatedContextTokens = EstimateFullContext(history, startingContext);
-    int? trigger = ContextTokenBudget.CompactionTrigger(selection.ContextWindow, compactionTriggerTokenCount);
+    int trigger = ContextTokenBudget.CompactionTrigger(selection.ContextWindow, compactionTriggerTokenCount);
     if (reason == CompactionReason.Threshold && !ExceedsCompactionTrigger(history, trigger, estimatedContextTokens))
       return null;
 
@@ -59,10 +59,9 @@ internal static class HistoryCompactor {
     return new(summary, estimatedContextTokensAfter);
   }
 
-  private static bool ExceedsCompactionTrigger(ModelHistory history, int? trigger, long estimatedContextTokens) {
-    if (trigger is null) return false;
+  private static bool ExceedsCompactionTrigger(ModelHistory history, int trigger, long estimatedContextTokens) {
     long contextTokens = history.UsageBasedContextTokens is > 0 ? history.UsageBasedContextTokens.Value : estimatedContextTokens;
-    return contextTokens > trigger.Value;
+    return contextTokens > trigger;
   }
 
   private static string ReadCompletedSummary(ChatResponse response) {

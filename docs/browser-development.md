@@ -42,9 +42,9 @@ server's saved runs. The picker resolves these against the current provider cata
 is available, it selects the first available model after discovery. With no catalog models it
 stays empty. An explicit chat choice or the chat's own execution model takes precedence.
 Setup and Settings → General set the default working directory through a folder browser. General also
-holds an explicitly saved compaction-trigger token count. Blank/Automatic restores the default;
-positive whole counts override the trigger subject to model headroom. The shared `usePreferences`
-hook owns reads and saves; changing the trigger takes effect at the next compaction check, while
+holds an explicitly saved compaction-trigger token count. Blank/Automatic restores 150,000 tokens;
+both default and explicit counts are capped to leave headroom in a known model window.
+The shared `usePreferences` hook owns reads and saves. The trigger changes at the next check, while
 working-directory changes still apply only to new chats. Settings → Model buckets assigns the
 shared small/medium/large model mappings directly, even when a bucket is empty. Only adding a
 new provider in Settings → Providers can offer another preview, limited to its models for empty buckets. Preview never saves; only confirmation

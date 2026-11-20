@@ -34,7 +34,7 @@ public sealed class HistoryCompactorTests {
   }
 
   [Fact]
-  public void ThresholdUsesObservedTokensAndUnknownWindowsSkipAutomaticCompaction() {
+  public void ThresholdUsesObservedTokensRatherThanEstimatedHistory() {
     var context = new ModelHistory([
       Entry(1, 0, true, ChatRole.User, "old"),
       Entry(1, 1, false, ChatRole.Assistant, "answer"),
@@ -45,17 +45,17 @@ public sealed class HistoryCompactorTests {
     HistoryCompactionPlan? plan = HistoryCompactor.CreatePlan(context, selection, emptyStartingContext, CompactionReason.Threshold);
 
     Assert.Equal(2, plan?.FirstRetainedMessageIndex);
-    Assert.Null(HistoryCompactor.CreatePlan(context, selection with { ContextWindow = null }, emptyStartingContext, CompactionReason.Threshold));
   }
 
   [Theory]
-  [InlineData(null, null, 900, null)]
+  [InlineData(null, null, 150_000, null)]
+  [InlineData(null, null, 150_001, 1)]
   [InlineData(null, 200, 200, null)]
   [InlineData(null, 200, 201, 1)]
   [InlineData(1_000, 200, 201, 1)]
   [InlineData(1_000, 100, 101, 2)]
   [InlineData(1_000, 5_000, 801, 1)]
-  public void ConfiguredTriggerRespectsHeadroomAndLimitsRetainedHistory(int? contextWindow, int? trigger,
+  public void TriggerRespectsHeadroomAndLimitsRetainedHistory(int? contextWindow, int? trigger,
       long observedTokens, int? expectedStart) {
     var history = new ModelHistory([
       Entry(1, 0, true, ChatRole.User, new string('o', 2_000)),
@@ -71,7 +71,7 @@ public sealed class HistoryCompactorTests {
     if (plan is null) return;
     long retainedTokens = ContextTokenBudget.EstimateMessages(history.Messages.Skip(plan.FirstRetainedMessageIndex)
         .Select(message => message.Message));
-    int effectiveTrigger = ContextTokenBudget.CompactionTrigger(contextWindow, trigger)!.Value;
+    int effectiveTrigger = ContextTokenBudget.CompactionTrigger(contextWindow, trigger);
     Assert.True(retainedTokens <= effectiveTrigger / 2);
   }
 

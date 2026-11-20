@@ -58,8 +58,9 @@ public sealed class ContextTokenBudgetTests {
     Assert.Equal(65_540, ContextTokenBudget.CompactionTrigger(81_924));
     Assert.Equal(65_541, ContextTokenBudget.CompactionTrigger(81_925));
     Assert.Equal(83_616, ContextTokenBudget.CompactionTrigger(100_000));
-    Assert.Equal(int.MaxValue - 16_384, ContextTokenBudget.CompactionTrigger(int.MaxValue));
-    Assert.Null(ContextTokenBudget.CompactionTrigger(null));
+    Assert.Equal(150_000, ContextTokenBudget.CompactionTrigger(int.MaxValue));
+    Assert.Equal(150_000, ContextTokenBudget.CompactionTrigger(null));
+    Assert.Equal(200_000, ContextTokenBudget.CompactionTrigger(400_000, 200_000));
     Assert.Equal(10_000, ContextTokenBudget.CompactionTrigger(null, 10_000));
     Assert.Equal(10_000, ContextTokenBudget.CompactionTrigger(100_000, 10_000));
     Assert.Equal(83_616, ContextTokenBudget.CompactionTrigger(100_000, int.MaxValue));
@@ -70,7 +71,6 @@ public sealed class ContextTokenBudgetTests {
     Assert.Equal(0, ContextTokenBudget.RetainedHistoryLimit(1));
     Assert.Equal(500, ContextTokenBudget.RetainedHistoryLimit(1_001));
     Assert.Equal(20_000, ContextTokenBudget.RetainedHistoryLimit(100_000));
-    Assert.Equal(20_000, ContextTokenBudget.RetainedHistoryLimit(null));
 
     Assert.Equal(1, ContextTokenBudget.SummaryOutputLimit(1));
     Assert.Equal(250, ContextTokenBudget.SummaryOutputLimit(1_000));

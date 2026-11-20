@@ -172,11 +172,11 @@ reads do not repeatedly query SQLite. Add typed fields to `UserPreferences`, per
 rather than callbacks per setting. Working-directory fallback still applies when a new session is created.
 
 Each compaction check reads one current snapshot, so changing `CompactionTriggerTokenCount` applies
-at the next check, including within an existing execution. The default trigger reserves one fifth of
-a known context window, up to 16,384 tokens. A positive count overrides the trigger, capped at the
-window minus that headroom, and enables threshold compaction for unknown windows. Without a trigger,
-only manual or overflow compaction is available. The retention target is the smaller of 20,000 tokens
-and half the effective trigger, or 20,000 without a trigger. Cuts prefer whole turns, then safe
+at the next check, including within an existing execution. The default trigger is 150,000 tokens,
+including for models with unknown limits. An explicit count replaces that default. For known windows,
+the effective trigger is capped at the window minus one fifth of its size (up to 16,384 tokens of
+headroom). Compaction is considered when usage exceeds the effective trigger. The retention target
+is the smaller of 20,000 tokens and half the effective trigger. Cuts prefer whole turns, then safe
 assistant continuations; never split a tool call from its result. If needed, keep an oversized latest
 turn intact while summarizing older history. If there is no safe cut, do not compact or retry.
 

@@ -40,10 +40,10 @@ The path must be an existing absolute directory. Working-directory preference ch
 `POST /api/preferences/compaction-trigger` accepts `{ "compactionTriggerTokenCount": 40000 }`
 or an explicit null for Automatic, and returns the full preferences snapshot. Missing values,
 non-integers and counts outside 1–2,147,483,647 return 400 without saving. This preference applies
-at the next compaction check in existing sessions. The effective count is capped by fixed model
-headroom; retained history is capped at half that count and 20,000 tokens, excluding the summary.
-An explicit count works for unknown model windows too; Automatic without a known window does
-not trigger compaction. See [history compaction](backend-development.md#history-compaction).
+at the next compaction check in existing sessions. Automatic defaults to 150,000 tokens, including
+for unknown model windows. Known windows cap the effective count to leave model headroom. Retained
+history is capped at half the effective count and 20,000 tokens, excluding the summary.
+See [history compaction](backend-development.md#history-compaction).
 
 Settings → Model buckets sets the models for each tier and the delegation provider defaults
 for **new** chats. `POST /api/preferences/model-bucket` replaces one tier's array using

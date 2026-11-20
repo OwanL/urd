@@ -45,7 +45,7 @@ public sealed class AutomaticCompactionTests {
         new ToolCatalog([tool]));
     await SubmitAsync(session, new string('o', 100_000), TestLlmSelection.Default);
     await SubmitAsync(session, "tool turn", TestLlmSelection.Default);
-    Assert.Equal(0, summaryCalls); // Unknown windows disable automatic compaction.
+    Assert.Equal(0, summaryCalls); // Still below the default trigger.
 
     var compacting = Signal();
     using IDisposable subscription = await session.SubscribeAsync(change => {
@@ -87,15 +87,19 @@ public sealed class AutomaticCompactionTests {
         entry => entry.Entry.Kind == TranscriptEntryKind.Compaction);
   }
 
-  [Fact]
-  public async Task ThresholdCompactsOlderHistoryWhenCurrentTurnExceedsTheRetentionTarget() {
+  [Theory]
+  [InlineData(1_000, 2_500)]
+  [InlineData(400_000, 610_000)]
+  [InlineData(null, 610_000)]
+  public async Task DefaultThresholdCompactsOlderHistoryWhenCurrentTurnExceedsTheRetentionTarget(
+      int? contextWindow, int currentTurnCharacters) {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     using var client = new ScriptedChatClient(Complete, _ => Task.FromResult(SummaryResponse()));
     var session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid()), store, _ => client);
     await SubmitAsync(session, new string('o', 3_000), TestLlmSelection.Default);
-    string current = new('n', 2_500);
-    await SubmitAsync(session, current, TestLlmSelection.Default with { ContextWindow = 1_000 });
+    string current = new('n', currentTurnCharacters);
+    await SubmitAsync(session, current, TestLlmSelection.Default with { ContextWindow = contextWindow });
 
     Assert.Equal(3, client.Requests.Count);
     Assert.Contains(Summary, RequestText(client.Requests[^1]));

@@ -186,6 +186,7 @@ its own lifetime rather than being cancelled by an HTTP request or client discon
 
 **Decision (2026-11-04):** Use the official C# MCP SDK's
 `ModelContextProtocol.Core` for MCP client protocol and transport mechanics.
+See the [MCP library research](mcp-library-research.md) for the original comparison.
 Qualify required servers and transports during implementation. Its MEAI abstractions
 dependency does not select an LLM/tool loop or LLM exposure policy; the separate
 `IChatClient` decision is recorded below. Urd retains connection lifetime, credentials,

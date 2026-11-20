@@ -53,8 +53,8 @@ Experimental source is [archived outside the checkout](product-direction.md#expe
 - [Agent-tool qualification](agent-tools-qualification.md): scoped Windows process, adapter and
   live acceptance checkpoints; not universal tool/provider qualification.
 - [Provider qualification](provider-qualification.md): offline and separately authorized live route/model checks.
-- [MCP SDK qualification](mcp-qualification.md): bounded protocol evidence and remaining
-  integration gates.
+- [MCP library research](mcp-library-research.md) and [SDK qualification](mcp-qualification.md):
+  library choice, bounded protocol evidence and remaining integration gates.
 - [Parser qualification](TRANSCRIPT-PARSER-EVIDENCE.md) and
   [position lookup](TRANSCRIPT-POSITION-EVIDENCE.md): transcript feasibility and unclosed gates.
 

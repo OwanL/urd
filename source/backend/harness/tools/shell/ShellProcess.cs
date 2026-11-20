@@ -106,6 +106,16 @@ internal sealed class ShellProcess : IAsyncDisposable {
     }
   }
 
+  internal static void DrainAvailableOutput(Stream stream, int available, byte[] buffer, Action<ReadOnlyMemory<byte>> receiveOutput) {
+    while (available > 0) {
+      int read = stream.Read(buffer, 0, Math.Min(buffer.Length, available));
+      if (read == 0)
+        return; // The pipe can close after the peek. Only the process handle establishes shell exit.
+      receiveOutput(buffer.AsMemory(0, read));
+      available -= read;
+    }
+  }
+
   private async Task<int?> ReadUntilShellExitAsync(SafeFileHandle process, SafeFileHandle output,
       Action<ReadOnlyMemory<byte>> receiveOutput) {
     using (process)
@@ -117,17 +127,7 @@ internal sealed class ShellProcess : IAsyncDisposable {
         do {
           exitCode = WindowsShell.ExitCode(process);
           // Drain only this snapshot. A child continually writing cannot postpone shell completion.
-          int available = WindowsShell.AvailableOutput(output);
-          while (available > 0) {
-#pragma warning disable S6966 // Synchronous inherited pipe; PeekNamedPipe bounds this nonblocking read.
-            int read = stream.Read(buffer, 0, Math.Min(buffer.Length, available));
-#pragma warning restore S6966
-            if (read == 0)
-              throw new EndOfStreamException("Shell output closed while buffered bytes were being read.");
-            // The callback must consume this reused buffer synchronously.
-            receiveOutput(buffer.AsMemory(0, read));
-            available -= read;
-          }
+          DrainAvailableOutput(stream, WindowsShell.AvailableOutput(output), buffer, receiveOutput);
           if (exitCode is null)
             await Task.Delay(10).ConfigureAwait(false);
         } while (exitCode is null);

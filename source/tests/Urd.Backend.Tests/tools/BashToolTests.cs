@@ -41,6 +41,41 @@ public sealed class BashToolTests {
     }
   }
 
+  [Fact]
+  public void OutputClosingAfterThePeekPreservesBytesAlreadyRead() {
+    using var pipe = new MemoryStream("abc"u8.ToArray());
+    using var received = new MemoryStream();
+    ShellProcess.DrainAvailableOutput(pipe, available: 5, new byte[2], bytes => received.Write(bytes.Span));
+    Assert.Equal("abc"u8.ToArray(), received.ToArray());
+  }
+
+  [Fact]
+  public async Task LivelyOutputTimesOutWithoutPreventingTheNextCommandOrChatCleanup() {
+    if (!OperatingSystem.IsWindows())
+      return;
+    string directory = Directory.CreateTempSubdirectory("urd-bash-timeout-").FullName;
+    try {
+      var bash = new GitBash();
+      await using var processes = new ChatProcesses(bash);
+      var tool = new BashTool(processes, bash, ShellEnvironment());
+      ToolOutput timedOut = await tool.RunAsync(
+          Arguments("while :; do printf 'alive\\n'; sleep 0.05; done", timeout: 1),
+          Context(directory), CancellationToken.None).WaitAsync(Deadline);
+      Assert.True(timedOut.IsError);
+      Assert.Contains("alive", timedOut.Text, StringComparison.Ordinal);
+      Assert.Contains("Command timed out", timedOut.Text, StringComparison.Ordinal);
+      Assert.True(timedOut.Details!.Value.GetProperty("timedOut").GetBoolean());
+
+      ToolOutput next = await tool.RunAsync(Arguments("printf 'next command'"),
+          Context(directory), CancellationToken.None).WaitAsync(Deadline);
+      Assert.False(next.IsError);
+      Assert.Equal("next command", next.Text);
+      await processes.KillAllAsync().WaitAsync(Deadline);
+    } finally {
+      Directory.Delete(directory, recursive: true);
+    }
+  }
+
   [Theory]
   [InlineData(false)]
   [InlineData(true)]

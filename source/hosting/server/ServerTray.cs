@@ -20,8 +20,10 @@ internal sealed class ServerTray : IDisposable {
     using Stream iconStream = typeof(ServerTray).Assembly.GetManifestResourceStream("Urd.Server.urd.ico")
         ?? throw new InvalidOperationException("The tray icon resource is missing.");
     icon = new Icon(iconStream, IconUtilities.GetRequiredCustomIconSize(largeIcon: false));
-    // One server owns a data root, so the root gives each icon a stable identity across restarts and ports.
-    trayIcon = new TrayIcon($"Urd {dataRoot}") { Icon = icon.Handle, ToolTip = $"Urd\n{address}" };
+    // Explorer binds an icon GUID to the executable that registered it, even after that process exits.
+    string host = Environment.ProcessPath ?? AppContext.BaseDirectory;
+    string name = $"Urd {host}|{Path.TrimEndingDirectorySeparator(dataRoot)}".ToUpperInvariant();
+    trayIcon = new TrayIcon(name) { Icon = icon.Handle, ToolTip = $"Urd\n{address}" };
     var stop = new PopupMenuItem { Text = "Stop Urd" };
     stop.Click += (_, _) => {
       stop.Text = "Stopping…";

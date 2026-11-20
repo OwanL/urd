@@ -42,8 +42,14 @@ internal static class FileEdits {
       int start = snapshot.IndexOf(oldText, StringComparison.Ordinal);
       if (start < 0)
         throw new ArgumentException("oldText was not found in the original file. No changes were written.");
-      if (snapshot.IndexOf(oldText, start + 1, StringComparison.Ordinal) >= 0)
-        throw new ArgumentException("oldText matches more than once in the original file. Include more context. No changes were written.");
+      int second = snapshot.IndexOf(oldText, start + 1, StringComparison.Ordinal);
+      if (second >= 0) {
+        int firstLine = 1 + snapshot.AsSpan(0, start).Count('\n');
+        int secondLine = firstLine + snapshot.AsSpan(start, second - start).Count('\n');
+        string location = firstLine == secondLine ? $"both on line {firstLine}" : $"lines {firstLine} and {secondLine}";
+        string prefix = edits.GetArrayLength() > 1 ? $"Edit {replacements.Count + 1}: " : string.Empty;
+        throw new ArgumentException($"{prefix}oldText matches more than once (first matches: {location}). Include more surrounding text. No changes were written.");
+      }
       int end = start + oldText.Length;
       int originalStart = positions[start];
       int originalEnd = positions[end];

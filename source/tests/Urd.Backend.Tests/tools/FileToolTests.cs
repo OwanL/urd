@@ -32,6 +32,22 @@ public sealed class FileToolTests : IDisposable {
     Assert.Equal("allowed", await File.ReadAllTextAsync(Path.Combine(directory, "outside.txt")));
   }
 
+  [Theory]
+  [InlineData(false, "")]
+  [InlineData(true, "Edit 2: ")]
+  public async Task AmbiguousEditReportsFirstTwoMatchingLines(bool batch, string prefix) {
+    string path = Path.Combine(directory, "ambiguous.txt");
+    byte[] original = Encoding.UTF8.GetBytes("header\r\ntarget\r\nmiddle\r\ntarget\r\ntarget\r\n");
+    await File.WriteAllBytesAsync(path, original);
+    var ambiguous = new { oldText = "target", newText = "replacement" };
+    var edits = batch ? new[] { new { oldText = "header", newText = "changed" }, ambiguous } : [ambiguous];
+    var result = await Run(new EditTool(files), new { path, edits });
+    Assert.True(result.IsError, result.Text);
+    Assert.Equal($"edit failed: {prefix}oldText matches more than once (first matches: lines 2 and 4). "
+        + "Include more surrounding text. No changes were written.", result.Text);
+    Assert.Equal(original, await File.ReadAllBytesAsync(path));
+  }
+
   [Fact]
   public async Task InvalidEditBatchesAndInvalidUtf8LeaveOriginalBytesUntouched() {
     string path = Path.Combine(directory, "invalid.txt");

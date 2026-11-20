@@ -131,6 +131,108 @@ public sealed class ProviderSessionExecutionTests {
         };
   }
 
+  [Fact]
+  public async Task ChatGptNamespacedToolLoopReplaysStableInputAndSettingsAfterReopening() {
+    using var database = new TemporaryDatabase();
+    using var identity = new FakeOpenAIIdentity();
+    string call = ProviderModelStreams.Call.Replace("\"name\":\"lookup\"", "\"namespace\":\"urd\",\"name\":\"lookup\"");
+    string reasoning = ProviderModelStreams.Reasoning.Replace("\"summary\":[]", "\"summary\":[{\"type\":\"summary_text\",\"text\":\"thought\"}]");
+    using var first = new ScriptedOpenAIHandler(ProviderModelStreams.Responses([ProviderModelStreams.Message, reasoning, call]));
+    using var done = new ScriptedOpenAIHandler(ProviderModelStreams.Responses(
+        [ProviderModelStreams.Message.Replace("hello", "done").Replace("msg_fixture", "msg_done")], text: "done"));
+    using var transport = new ChatGptLoopTransport(identity, first, done);
+    using var store = UrdStore.Open(database.Path);
+    using var manager = new ProviderManager(store, () => FakeOpenAIIdentity.Callback, transport, FakeOpenAIIdentity.Issuer);
+    PrimarySession? session = null;
+    IChatClient? client = null;
+    try {
+      ProviderConnection connection = await manager.AddChatGptAsync("Synthetic ChatGPT");
+      ProviderSignIn signIn = await manager.BeginSignInAsync(connection.Id);
+      Assert.Equal(ProviderSignInStatus.Pending, signIn.Status);
+      Uri callback = new(await identity.AuthorizeAsync(signIn.AuthorizationUrl!));
+      await manager.CompleteSignInAsync(FakeOpenAIIdentity.Parse(callback.Query)["state"], callback.AbsoluteUri).WaitAsync(TestTimeout);
+      IChatClient activeClient = manager.CreateChatClient(connection);
+      client = activeClient;
+      int effects = 0;
+      var lookup = new TestAgentTool("lookup", (arguments, context, cancellation) => {
+        Assert.Equal("abc", arguments.GetProperty("key").GetString());
+        Interlocked.Increment(ref effects);
+        return Task.FromResult(new ToolOutput(ToolOutputText, []));
+      });
+      var tools = new ToolCatalog([lookup]);
+      SessionRecord record = store.Sessions.CreatePrimary(Guid.NewGuid(), Path.GetDirectoryName(database.Path)!);
+      var selection = new LlmSelection(connection, "fixture-model", null, ModelFamily.Other, false);
+      session = new(record, store, _ => activeClient, tools);
+      await Send(session, "go", selection);
+      await session.StopAcceptingUserMessagesAsync();
+      await session.StopExecutionAsync().WaitAsync(TestTimeout);
+      session = new(Assert.IsType<SessionRecord>(store.Sessions.Read(record.Id)), store, _ => activeClient, tools);
+      await Send(session, "followup", selection);
+      Assert.Equal(1, effects);
+      Assert.Equal(3, transport.Requests.Count);
+      JsonObject[] requests = transport.Requests.Select(request => JsonNode.Parse(request.Body)!.AsObject()).ToArray();
+      Assert.All(transport.Requests, request => Assert.Equal("/v1/responses", request.Uri.AbsolutePath));
+      JsonArray[] inputs = requests.Select(request => request["input"]!.AsArray()).ToArray();
+      Assert.All(requests, request => {
+        Assert.Null(request["instructions"]);
+        Assert.Equal("fixture-model", (string?)request["model"]);
+        Assert.True((bool)request["stream"]!);
+        Assert.False((bool)request["store"]!);
+        JsonObject ns = Assert.Single(request["tools"]!.AsArray())!.AsObject();
+        Assert.Equal("namespace", (string?)ns["type"]);
+        Assert.Equal("urd", (string?)ns["name"]);
+        Assert.Equal("lookup", (string?)Assert.Single(ns["tools"]!.AsArray())!["name"]);
+      });
+      Assert.Equal("developer", (string?)inputs[0][0]!["role"]);
+      Assert.Contains(inputs[0], item => (string?)item!["role"] == "developer" &&
+          WireText(JsonSerializer.SerializeToElement(item["content"])).Contains("# Default working guidance", StringComparison.Ordinal));
+      Assert.Equal("go", WireText(JsonSerializer.SerializeToElement(inputs[0][^1]!["content"])));
+      for (int i = 1; i < inputs.Length; i++) {
+        JsonObject baseline = (JsonObject)requests[0].DeepClone();
+        JsonObject current = (JsonObject)requests[i].DeepClone();
+        baseline.Remove("input");
+        current.Remove("input");
+        Assert.True(JsonNode.DeepEquals(baseline, current));
+        for (int j = 0; j < inputs[i - 1].Count; j++)
+          Assert.True(JsonNode.DeepEquals(inputs[i - 1][j], inputs[i][j]));
+      }
+      JsonNode reasoningInput = inputs[1][^3]!;
+      JsonNode callInput = inputs[1][^2]!;
+      JsonNode resultInput = inputs[1][^1]!;
+      Assert.Equal("reasoning", (string?)reasoningInput["type"]);
+      Assert.Equal("private-reasoning", (string?)reasoningInput["encrypted_content"]);
+      Assert.Equal("thought", (string?)reasoningInput["summary"]![0]!["text"]);
+      Assert.Equal("function_call", (string?)callInput["type"]);
+      Assert.Equal("urd", (string?)callInput["namespace"]);
+      Assert.Equal("call_fixture", (string?)callInput["call_id"]);
+      Assert.Equal("abc", (string?)JsonNode.Parse((string)callInput["arguments"]!)!["key"]);
+      Assert.Equal("function_call_output", (string?)resultInput["type"]);
+      Assert.Equal("call_fixture", (string?)resultInput["call_id"]);
+      Assert.Contains(ToolOutputText, resultInput["output"]!.ToJsonString(), StringComparison.Ordinal);
+      Assert.Equal("followup", WireText(JsonSerializer.SerializeToElement(inputs[2][^1]!["content"])));
+    } finally {
+      try {
+        if (session is not null) {
+          await session.StopAcceptingUserMessagesAsync();
+          await session.StopExecutionAsync().WaitAsync(TestTimeout);
+        }
+      } finally {
+        try {
+          await manager.ShutdownAsync().WaitAsync(TestTimeout);
+        } finally {
+          client?.Dispose();
+        }
+      }
+    }
+
+    async Task Send(PrimarySession target, string text, LlmSelection selection) {
+      UserMessageReceipt receipt = await target.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, text, selection));
+      Assert.Equal(MessageAcceptance.Accepted, receipt.Acceptance);
+      Assert.Equal(ExecutionOutcome.Completed,
+          (await target.WaitForExecutionFinishAsync(Assert.IsType<Guid>(receipt.ExecutionId)).WaitAsync(TestTimeout)).Outcome);
+    }
+  }
+
   [Theory]
   [InlineData(LlmApi.OpenAIResponses)]
   [InlineData(LlmApi.OpenAIChatCompletions)]
@@ -550,6 +652,35 @@ public sealed class ProviderSessionExecutionTests {
     while (reader.Read())
       responses.Add(Guid.Parse(reader.GetString(0)), JsonSerializer.Deserialize<LlmProviderResponse>(reader.GetString(1))!);
     return responses;
+  }
+
+  // Own the routing invokers, but borrow handlers; the test's using declarations own those handlers.
+  private sealed class ChatGptLoopTransport(FakeOpenAIIdentity identity, ScriptedOpenAIHandler first,
+      ScriptedOpenAIHandler done) : HttpMessageHandler {
+    private readonly HttpMessageInvoker auth = new(identity, false);
+    private readonly HttpMessageInvoker initial = new(first, false);
+    private readonly HttpMessageInvoker subsequent = new(done, false);
+    internal List<ScriptedOpenAIRequest> Requests { get; } = [];
+
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) {
+      Uri uri = request.RequestUri!;
+      if (uri.GetLeftPart(UriPartial.Authority) == FakeOpenAIIdentity.Issuer.GetLeftPart(UriPartial.Authority))
+        return await auth.SendAsync(request, cancellationToken);
+      Assert.Equal("https://api.openai.com", uri.GetLeftPart(UriPartial.Authority));
+      Assert.Equal("/v1/responses", uri.AbsolutePath);
+      string body = await request.Content!.ReadAsStringAsync(cancellationToken);
+      Requests.Add(new(request.Method, uri, request.Headers.Authorization?.ToString(), body));
+      return await (Requests.Count == 1 ? initial : subsequent).SendAsync(request, cancellationToken);
+    }
+
+    protected override void Dispose(bool disposing) {
+      if (disposing) {
+        auth.Dispose();
+        initial.Dispose();
+        subsequent.Dispose();
+      }
+      base.Dispose(disposing);
+    }
   }
 
   // Own the real bridge and execution together so even assertion failures join work before SQLite closes.

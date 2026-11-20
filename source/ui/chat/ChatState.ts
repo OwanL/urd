@@ -62,6 +62,14 @@ export function executionSettled(
   );
 }
 
+export function idleChatSelection(
+  chat: ChatState | undefined,
+  snapshot: SessionSnapshot | null,
+  defaultSelection: LlmSelection | null,
+): LlmSelection | null {
+  return chat?.selection ?? snapshot?.latestLlmSelection ?? defaultSelection;
+}
+
 export function newChat(selection: LlmSelection | null): ChatState {
   return {
     draft: "",

@@ -15,6 +15,31 @@ import {
   withVisibleDocument,
 } from "./WorkspaceCommandsFixture.ts";
 
+void test("Send freezes the inherited model and remembers it for subsequent empty chats", async () => {
+  const { access, read, durable } = fixture();
+  access.updateChat(sessionId, (chat) => ({ ...chat, selection: null }));
+  const fallback = { ...selection, modelId: "restored-model" };
+  let sends = 0;
+  const client = emptyClient(async (_id, original) => {
+    sends++;
+    assert.deepEqual(original.llmSelection, fallback);
+    assert.deepEqual(durable().chats[sessionId]?.pending?.original.llmSelection, fallback);
+    return receipt(original);
+  });
+
+  await commands(access, client).send(
+    sessionId,
+    snapshot({ latestLlmSelection: null }),
+    false,
+    true,
+    fallback,
+  );
+
+  assert.equal(sends, 1);
+  assert.deepEqual(read().lastSelection, fallback);
+  assert.equal(read().chats[sessionId]?.selection, null);
+});
+
 void test("a failed synchronous Send journal stays unsaved and dispatches nothing", async () => {
   const workspace = fixture();
   workspace.setWritable(false);

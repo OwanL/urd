@@ -36,7 +36,11 @@ available workspace width.
 The model picker loads cached catalogs immediately, discovers missing catalogs on startup and
 rediscovers after provider changes, without polling or a routine refresh action. With no providers,
 the model and reasoning selectors are replaced by an Add provider action that opens Settings →
-Providers; search, loading, empty and failure states stay distinct.
+Providers; search, loading, empty and failure states stay distinct. An otherwise unselected
+chat uses the workspace's last chosen or sent model, then the latest human chat model from the
+server's saved runs. The picker resolves these against the current provider catalog; if neither
+is available, it selects the first available model after discovery. With no catalog models it
+stays empty. An explicit chat choice or the chat's own execution model takes precedence.
 Setup and Settings → General set the default working directory through a folder browser. General also
 holds an explicitly saved compaction-trigger token count. Blank/Automatic restores the default;
 positive whole counts override the trigger subject to model headroom. The shared `usePreferences`

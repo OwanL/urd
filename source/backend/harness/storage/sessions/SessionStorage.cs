@@ -2,6 +2,8 @@ using System.Globalization;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Urd.Core.Context;
+using Urd.Core.Execution;
+using Urd.Core.Providers;
 using Urd.Core.Sessions;
 
 namespace Urd.Core.Storage;
@@ -42,6 +44,7 @@ internal sealed class SessionStorage(Database database) {
       throw new ArgumentException("Session cursor must be a positive Int64 decimal string.", nameof(cursor));
 
     return database.RunLocked(() => {
+      LlmSelection? latestSelection = cursor is null ? ReadLatestHumanSelection() : null;
       using SqliteCommand command = cursor is null
           ? database.Command(null, """
               SELECT c.session_id, c.ordinal FROM session_creation c JOIN sessions s ON s.session_id = c.session_id
@@ -60,9 +63,22 @@ internal sealed class SessionStorage(Database database) {
       }
 
       string? nextCursor = reader.Read() ? lastOrdinal.ToString(CultureInfo.InvariantCulture) : null;
-      return new SessionIdPage(ids, nextCursor);
+      return new SessionIdPage(ids, nextCursor, latestSelection);
     });
   }
+
+  private LlmSelection? ReadLatestHumanSelection() => LlmSelectionJson.Read(database.Scalar<string?>(null, """
+      SELECT COALESCE(r.llm_selection_json, d.llm_selection_json)
+      FROM execution_runs r JOIN sessions s ON s.session_id = r.session_id
+      LEFT JOIN input_decisions d ON d.session_id = r.session_id AND d.input_id = r.input_id
+      WHERE s.kind = $primary
+          AND (r.kind = $continuation OR (r.kind = $userInput AND EXISTS (
+              SELECT 1 FROM execution_inputs i
+              WHERE i.session_id = r.session_id AND i.run_id = r.run_id AND i.input_id = r.input_id
+                  AND i.provenance = $human)))
+      ORDER BY r.ordinal DESC LIMIT 1;
+      """, ("$primary", (int)SessionKind.Primary), ("$continuation", (int)ExecutionRunKind.Continuation),
+      ("$userInput", (int)ExecutionRunKind.UserInput), ("$human", (int)InputProvenance.Human)));
 
   internal SessionRecord? Read(Guid sessionId) => database.RunLocked(() => database.QuerySingleOrDefault(null,
       "SELECT session_id, history_revision, working_directory, kind, parent_session_id, owning_call_id FROM sessions WHERE session_id = $id;",

@@ -20,7 +20,8 @@ import type {
   SubagentProviders,
 } from "../providers/subagents/SubagentProviderSelection.ts";
 import type { ContinuationReceipt } from "../sessions/inputs/Continuation.ts";
-import { executionSettled, newChat } from "../chat/ChatState.ts";
+import { executionSettled, idleChatSelection, newChat } from "../chat/ChatState.ts";
+import type { LlmSelection } from "../providers/LlmSelection.ts";
 
 import type { WorkspaceState } from "./WorkspaceState.ts";
 import type { SessionClient } from "../sessions/SessionClient.ts";
@@ -52,7 +53,11 @@ export interface NotSentResendResult {
 export interface WorkspaceCommandAccess extends MessageEditingAccess {
   read(): WorkspaceState;
   save(state: WorkspaceState): boolean;
-  updateChat(id: string, update: (previous: ChatState) => ChatState): boolean;
+  updateChat(
+    id: string,
+    update: (previous: ChatState) => ChatState,
+    lastSelection?: LlmSelection,
+  ): boolean;
 }
 
 export const emptyWorkspaceCommandState: WorkspaceCommandState = {
@@ -225,7 +230,7 @@ export class WorkspaceCommands {
         ...state,
         activeId: id,
         tabs: state.tabs.includes(id) ? state.tabs : [...state.tabs, id],
-        chats: { ...state.chats, [id]: state.chats[id] ?? newChat(state.lastSelection) },
+        chats: { ...state.chats, [id]: state.chats[id] ?? newChat(null) },
       });
     } catch (cause) {
       this.reportError(`Chat creation is uncertain: ${description(cause)}`);
@@ -235,11 +240,22 @@ export class WorkspaceCommands {
     }
   }
 
-  send(id: string, snapshot: SessionSnapshot, active: boolean, canSend: boolean): Promise<void> {
-    return this.submissions.send(id, snapshot, active, canSend);
+  send(
+    id: string,
+    snapshot: SessionSnapshot,
+    active: boolean,
+    canSend: boolean,
+    defaultSelection: LlmSelection | null = null,
+  ): Promise<void> {
+    return this.submissions.send(id, snapshot, active, canSend, defaultSelection);
   }
-  continueSession(id: string, snapshot: SessionSnapshot, canContinue: boolean): Promise<void> {
-    return this.submissions.continueSession(id, snapshot, canContinue);
+  continueSession(
+    id: string,
+    snapshot: SessionSnapshot,
+    canContinue: boolean,
+    defaultSelection: LlmSelection | null = null,
+  ): Promise<void> {
+    return this.submissions.continueSession(id, snapshot, canContinue, defaultSelection);
   }
   resendNotSent(
     id: string,
@@ -261,9 +277,14 @@ export class WorkspaceCommands {
     return this.submissions.retryOriginalSubmission(id);
   }
 
-  async compact(id: string, snapshot: SessionSnapshot, canCompact: boolean): Promise<void> {
+  async compact(
+    id: string,
+    snapshot: SessionSnapshot,
+    canCompact: boolean,
+    defaultSelection: LlmSelection | null = null,
+  ): Promise<void> {
     const chat = this.access.read().chats[id];
-    const selection = chat?.selection ?? snapshot.latestLlmSelection;
+    const selection = idleChatSelection(chat, snapshot, defaultSelection);
     if (
       !canCompact ||
       this.executionSettingsSaving(id) ||

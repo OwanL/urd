@@ -338,7 +338,7 @@ intermediate feature descriptions no longer describe the current suite. See
 ## Saved-primary-ID discovery
 
 `SessionManager.ListPrimaryIdsAsync(string? cursor = null, CancellationToken cancellationToken = default)`
-returns `SessionIdPage(IReadOnlyList<Guid> SessionIds, string? NextCursor)`: at most 60 IDs,
+returns `SessionIdPage`: at most 60 IDs,
 newest-created first, including empty chats and retained unsettled chats. It takes the existing
 manager guard, rejects shutdown and reads storage without creating/caching handles, reading
 history, starting execution or changing persisted state. Cancellation can abandon the guard
@@ -357,8 +357,9 @@ returned/tracked only after commit. Ordinals are not reused after deletion; gaps
 The cascade does not add a public delete/close operation; `SessionRecord` is unchanged.
 
 GET `/api/sessions?cursor=...` exposes the page through the existing local gates/no-store/no-body
-GET rule; see [Server](server-development.md). The API returns IDs only: it adds no summaries,
-titles or last-used tracking. The browser uses IDs to reconcile saved chats, while transcript
+GET rule; see [Server](server-development.md). The first page also looks up one saved selection
+by global run ordinal, from a human-initiated primary run or explicit Continue. It does not open
+sessions or write a model preference. The browser uses IDs to reconcile saved chats; transcript
 history and content have separate bounded reads. An ID proves neither usability nor stopped work.
 Listing cannot associate a returned ID with a lost create acknowledgement or justify automatic
 create retry.

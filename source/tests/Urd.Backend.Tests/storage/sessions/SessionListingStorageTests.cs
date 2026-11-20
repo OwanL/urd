@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Context;
 using Urd.Core.Sessions;
@@ -77,6 +78,69 @@ public sealed class SessionListingStorageTests {
     SessionIdPage second = reopened.Sessions.ListPrimaryIds(first.NextCursor);
     Assert.Equal(primaryIds.Reverse().Skip(60), second.SessionIds);
     Assert.Null(second.NextCursor);
+  }
+
+  [Fact]
+  public void FirstPageBootstrapsLatestHumanRunOrContinuationAcrossPrimarySessions() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    Guid older = Guid.NewGuid(), newer = Guid.NewGuid(), child = Guid.NewGuid();
+    store.Sessions.CreatePrimary(older);
+    store.Sessions.CreatePrimary(newer);
+    store.Sessions.CreateSubagent(child, older, "spawn");
+    for (int i = 0; i < 60; i++)
+      store.Sessions.CreatePrimary(Guid.NewGuid());
+
+    var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+    JsonElement Page(string? cursor) => JsonSerializer.SerializeToElement(store.Sessions.ListPrimaryIds(cursor), options);
+    Assert.False(Page(null).TryGetProperty("latestLlmSelection", out _));
+
+    var human = TestLlmSelection.Default with { ModelId = "human" };
+    var continuation = human with { ModelId = "continuation" };
+    var ignored = human with { ModelId = "ignored" };
+    void Run(Guid session, int kind, int provenance, string selection, bool humanFollowup = false) {
+      Guid run = Guid.NewGuid(), input = Guid.NewGuid();
+      string json = LlmSelectionJson.Write(human with { ModelId = selection })!.Replace("'", "''");
+      string inputId = kind == 0 ? $"'{input:D}'" : "NULL";
+      string sender = provenance == 0 ? "NULL" : $"'{session:D}'";
+      string continuationFields = kind == 2 ? $"0, '{Guid.NewGuid():D}'" : "NULL, NULL";
+      string Decision(Guid id) => $"""
+          INSERT INTO input_decisions (session_id, input_id, expected_history_revision,
+              original_text_utf8, decision, run_id, llm_selection_json)
+          VALUES ('{session:D}', '{id:D}', 0, X'61', 1, '{run:D}', '{json}');
+          """;
+      string Input(Guid id, int source, string from) => $"""
+          INSERT INTO execution_inputs (session_id, input_id, run_id, provenance, sender_session_id)
+          VALUES ('{session:D}', '{id:D}', '{run:D}', {source}, {from});
+          """;
+      Guid followup = Guid.NewGuid();
+      database.Execute($"""
+          {(kind == 0 ? Decision(input) : "")}
+          INSERT INTO execution_runs (session_id, run_id, history_revision, input_id, kind, llm_selection_json,
+              continuation_expected_history_revision, continuation_expected_last_execution_id, outcome)
+          VALUES ('{session:D}', '{run:D}', 0, {inputId}, {kind}, {(kind == 0 ? "NULL" : $"'{json}'")},
+              {continuationFields}, 0);
+          {(kind == 0 ? Input(input, provenance, sender) : "")}
+          {(humanFollowup ? Decision(followup) + Input(followup, 0, "NULL") : "")}
+          """);
+    }
+    void AssertSelection(string expected) => Assert.Equal(expected,
+        Page(null).GetProperty("latestLlmSelection").GetProperty("modelId").GetString());
+
+    Run(newer, 0, 0, human.ModelId);
+    AssertSelection(human.ModelId);
+    Run(older, 2, 0, continuation.ModelId);
+    AssertSelection(continuation.ModelId);
+    Run(child, 0, 0, ignored.ModelId);
+    Run(newer, 0, 1, ignored.ModelId, humanFollowup: true);
+    Run(newer, 0, 2, ignored.ModelId);
+    Run(newer, 0, 3, ignored.ModelId);
+    Run(newer, 1, 0, ignored.ModelId);
+    AssertSelection(continuation.ModelId);
+    string cursor = Page(null).GetProperty("nextCursor").GetString()!;
+    Assert.False(Page(cursor).TryGetProperty("latestLlmSelection", out _));
+    Run(older, 0, 0, human.ModelId);
+    AssertSelection(human.ModelId);
   }
 
   private static void AssertSession(SessionRecord record, Guid id, SessionKind kind, Guid? parent, string? call, string? directory) {

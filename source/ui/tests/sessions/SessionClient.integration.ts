@@ -165,6 +165,10 @@ void test(
     assert.deepEqual(settled.lastSettlement, { executionId, outcome: "completed", error: null });
     assert.deepEqual(settled.pendingInputs, []);
     assert.deepEqual(settled.latestLlmSelection, submission.llmSelection);
+    assert.deepEqual(
+      (await request(client.list(undefined, signal))).latestLlmSelection,
+      submission.llmSelection,
+    );
     assert.deepEqual(settled.contextUsage, { usedTokens: 12_756, source: "measured" });
     assert.ok(settled.workingTime);
     assert.equal(settled.workingTime.startedAt, null);
@@ -270,6 +274,10 @@ void test(
     );
     assert.equal(revised.entries.length, 2);
     assert.equal(revised.entries[0]!.entry.entryId, edit.operationId);
+    assert.deepEqual(
+      (await request(client.list(undefined, signal))).latestLlmSelection,
+      edit.llmSelection,
+    );
 
     assert.equal(edited.canContinue, true);
     const continuation = {

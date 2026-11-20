@@ -196,10 +196,10 @@ void test(
     );
     assert.equal(childUsers.length, 1);
     assert.equal(text(childUsers[0]!), task);
-    assert.deepEqual(await f.client.list(undefined, f.signal), {
-      sessionIds: [id],
-      nextCursor: null,
-    });
+    const listing = await f.client.list(undefined, f.signal);
+    assert.deepEqual(listing.sessionIds, [id]);
+    assert.equal(listing.nextCursor, null);
+    assert.equal(listing.latestLlmSelection?.connection.id, f.firstConnection.id);
     assert.equal(f.first.calls.length, 2);
     assertToolResult(f.first.calls[1]!.request, "subagent", "call-subagent", report);
     await f.transcript(id, "call-subagent", "subagent", args, report);

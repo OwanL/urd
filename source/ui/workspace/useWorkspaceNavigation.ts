@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
+import type { LlmSelection } from "../providers/LlmSelection.ts";
 import type { SessionClient } from "../sessions/SessionClient.ts";
 import { moveTab } from "./tabs/TabOrder.ts";
 import { newChat } from "../chat/ChatState.ts";
@@ -16,6 +17,7 @@ export function useWorkspaceNavigation(
   create: () => Promise<void>,
 ) {
   const [ready, setReady] = useState(false);
+  const [lastUsedSelection, setLastUsedSelection] = useState<LlmSelection | null>(null);
   const discovered = useRef(new Set<string>());
   const [error, setError] = useState<string | null>(null);
   const open = useCallback(
@@ -72,6 +74,7 @@ export function useWorkspaceNavigation(
           for (const id of page.sessionIds) discovered.current.add(id);
         }
         if (controller.signal.aborted || !initialPage) return;
+        setLastUsedSelection(initialPage.latestLlmSelection ?? null);
         const hash = window.location.hash.slice(1);
         if (idPattern.test(hash)) open(hash);
         else if (loaded!.first) {
@@ -112,5 +115,5 @@ export function useWorkspaceNavigation(
     return () => window.removeEventListener("hashchange", hashChanged);
   }, [open]);
 
-  return { ready, error, open, close, reorder, discovered: discovered.current };
+  return { ready, error, open, close, reorder, discovered: discovered.current, lastUsedSelection };
 }

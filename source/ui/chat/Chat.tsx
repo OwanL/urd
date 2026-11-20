@@ -37,6 +37,7 @@ interface ChatProps {
   transcript?: TranscriptDisplay | undefined;
   streamId?: string | null;
   chat: ChatState;
+  defaultSelection: LlmSelection | null;
   commands: ChatCommands;
   messageEditing: MessageEditing;
   stop: ChatStopState | undefined;
@@ -71,6 +72,7 @@ export function Chat({
   transcript,
   streamId = null,
   chat,
+  defaultSelection,
   commands,
   messageEditing,
   stop,
@@ -157,6 +159,7 @@ export function Chat({
     ready,
     canPersist,
     pendingInputRemoval || compactionPending,
+    defaultSelection,
   );
   const canCompact = Boolean(
     active &&
@@ -358,7 +361,7 @@ export function Chat({
             onCheckCompaction={compaction?.phase === "uncertain" && ready ? onRefresh : undefined}
             onCompact={() => {
               if (!workingDirectoryGate.current && snapshot)
-                void commands.compact(sessionId, snapshot, canCompact);
+                void commands.compact(sessionId, snapshot, canCompact, defaultSelection);
             }}
             workingTime={snapshot?.workingTime ?? null}
             active={active && visible && notice !== null}
@@ -400,11 +403,11 @@ export function Chat({
         stopping={state.executionStatus === "stopping"}
         onSend={() => {
           if (!workingDirectoryGate.current && snapshot)
-            void commands.send(sessionId, snapshot, state.active, state.canSend);
+            void commands.send(sessionId, snapshot, state.active, state.canSend, defaultSelection);
         }}
         onContinue={() => {
           if (!workingDirectoryGate.current && snapshot)
-            void commands.continueSession(sessionId, snapshot, state.canContinue);
+            void commands.continueSession(sessionId, snapshot, state.canContinue, defaultSelection);
         }}
         onStop={() => {
           if (snapshot && state.active) void commands.stop(sessionId, snapshot, state.stopId);

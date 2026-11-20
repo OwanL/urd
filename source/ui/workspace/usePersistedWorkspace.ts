@@ -80,11 +80,20 @@ export function usePersistedWorkspace(persistence: WorkspacePersistence): Persis
   );
 
   const updateChat = useCallback(
-    (id: string, update: (previous: ChatState) => ChatState, draftOnly = false): boolean => {
+    (
+      id: string,
+      update: (previous: ChatState) => ChatState,
+      draftOnly = false,
+      lastSelection = current.current.lastSelection,
+    ): boolean => {
       const previous = current.current.chats[id];
       if (!previous) return false;
       return save(
-        { ...current.current, chats: { ...current.current.chats, [id]: update(previous) } },
+        {
+          ...current.current,
+          lastSelection,
+          chats: { ...current.current.chats, [id]: update(previous) },
+        },
         draftOnly ? id : undefined,
       );
     },
@@ -99,7 +108,7 @@ export function usePersistedWorkspace(persistence: WorkspacePersistence): Persis
     () => ({
       read,
       save: (next) => save(next),
-      updateChat: (id, update) => updateChat(id, update),
+      updateChat: (id, update, lastSelection) => updateChat(id, update, false, lastSelection),
       canPersist,
     }),
     [canPersist, read, save, updateChat],
@@ -110,17 +119,9 @@ export function usePersistedWorkspace(persistence: WorkspacePersistence): Persis
     [updateChat],
   );
   const selectModel = useCallback(
-    (id: string, selection: LlmSelection) => {
-      const workspace = current.current;
-      const chat = workspace.chats[id];
-      if (!chat) return false;
-      return save({
-        ...workspace,
-        lastSelection: selection,
-        chats: { ...workspace.chats, [id]: { ...chat, selection } },
-      });
-    },
-    [save],
+    (id: string, selection: LlmSelection) =>
+      updateChat(id, (chat) => ({ ...chat, selection }), false, selection),
+    [updateChat],
   );
 
   const retryStorage = useCallback(() => {

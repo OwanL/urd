@@ -2,6 +2,7 @@ import type {
   SubagentProviderConnectionIds,
   SubagentProviders,
 } from "../providers/subagents/SubagentProviderSelection.ts";
+import type { LlmSelection } from "../providers/LlmSelection.ts";
 import type { ContinuationReceipt } from "../sessions/inputs/Continuation.ts";
 import type { UserMessageReceipt } from "../sessions/inputs/UserMessageSubmission.ts";
 import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
@@ -53,9 +54,25 @@ export interface ChatCommands {
     id: string,
     connectionIds: SubagentProviderConnectionIds,
   ): Promise<SubagentProviders | null>;
-  compact(id: string, snapshot: SessionSnapshot, canCompact: boolean): Promise<void>;
-  send(id: string, snapshot: SessionSnapshot, active: boolean, canSend: boolean): Promise<void>;
-  continueSession(id: string, snapshot: SessionSnapshot, canContinue: boolean): Promise<void>;
+  compact(
+    id: string,
+    snapshot: SessionSnapshot,
+    canCompact: boolean,
+    defaultSelection: LlmSelection | null,
+  ): Promise<void>;
+  send(
+    id: string,
+    snapshot: SessionSnapshot,
+    active: boolean,
+    canSend: boolean,
+    defaultSelection: LlmSelection | null,
+  ): Promise<void>;
+  continueSession(
+    id: string,
+    snapshot: SessionSnapshot,
+    canContinue: boolean,
+    defaultSelection: LlmSelection | null,
+  ): Promise<void>;
   stop(id: string, snapshot: SessionSnapshot, stopId: string | undefined): Promise<void>;
   checkReceipt(id: string): Promise<UserMessageReceipt | null>;
   retryOriginalSubmission(id: string): Promise<UserMessageReceipt | null>;

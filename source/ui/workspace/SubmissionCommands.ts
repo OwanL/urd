@@ -4,7 +4,9 @@ import {
   applyReceipt,
   beginContinuation,
   beginSubmission,
+  idleChatSelection,
 } from "../chat/ChatState.ts";
+import type { LlmSelection } from "../providers/LlmSelection.ts";
 import { submissionTextError } from "../sessions/inputs/UserMessageSubmission.ts";
 import type { SessionClient } from "../sessions/SessionClient.ts";
 import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
@@ -57,6 +59,7 @@ export class SubmissionCommands {
     snapshot: SessionSnapshot,
     active: boolean,
     canSend: boolean,
+    defaultSelection: LlmSelection | null,
   ): Promise<void> {
     if (
       !canSend ||
@@ -68,7 +71,7 @@ export class SubmissionCommands {
     const latest = this.access.read().chats[id];
     const selection = active
       ? snapshot.latestLlmSelection
-      : (latest?.selection ?? snapshot.latestLlmSelection);
+      : idleChatSelection(latest, snapshot, defaultSelection);
     if (
       !latest ||
       latest.pending ||
@@ -86,9 +89,11 @@ export class SubmissionCommands {
       text: latest.draft,
       llmSelection: selection,
     };
-    const persisted = this.access.updateChat(id, (previous) => ({
-      ...beginSubmission(previous, original),
-    }));
+    const persisted = this.access.updateChat(
+      id,
+      (previous) => beginSubmission(previous, original),
+      active ? undefined : selection,
+    );
     if (!persisted) {
       this.access.updateChat(id, (previous) =>
         previous.pending
@@ -108,9 +113,10 @@ export class SubmissionCommands {
     id: string,
     snapshot: SessionSnapshot,
     canContinue: boolean,
+    defaultSelection: LlmSelection | null,
   ): Promise<void> {
     const latest = this.access.read().chats[id];
-    const selection = latest?.selection ?? snapshot.latestLlmSelection;
+    const selection = idleChatSelection(latest, snapshot, defaultSelection);
     const expectedLastExecutionId = snapshot.lastSettlement?.executionId;
     if (
       !canContinue ||
@@ -140,7 +146,9 @@ export class SubmissionCommands {
       expectedLastExecutionId,
       llmSelection: structuredClone(selection),
     };
-    if (!this.access.updateChat(id, (previous) => beginContinuation(previous, original))) {
+    if (
+      !this.access.updateChat(id, (previous) => beginContinuation(previous, original), selection)
+    ) {
       this.access.updateChat(id, (previous) =>
         previous.pendingContinuation
           ? {

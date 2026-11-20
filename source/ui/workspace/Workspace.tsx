@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { IconButton } from "../controls/IconButton.tsx";
 import { Icon } from "../controls/Icon.tsx";
 import { Popover } from "../controls/Popover.tsx";
@@ -20,6 +20,7 @@ import type { TranscriptDisplay } from "../chat/transcript/TranscriptDisplay.ts"
 import type { TranscriptNavigationState } from "../chat/transcript/navigation/TranscriptNavigationStorage.ts";
 import { usePersistedWorkspace } from "./usePersistedWorkspace.ts";
 import { useModelOptions } from "../providers/models/useModelOptions.ts";
+import { defaultModelSelection } from "./DefaultModelSelection.ts";
 import { useWorkspaceNavigation } from "./useWorkspaceNavigation.ts";
 import { useSessionEvents } from "./useSessionEvents.ts";
 import { useWorkspaceRetention } from "./useWorkspaceRetention.ts";
@@ -106,7 +107,26 @@ export function Workspace({
   const settingsAnchor = useRef<HTMLButtonElement>(null);
   const [optionsOpen, setOptionsOpen] = useState(false);
   const newChatButton = useRef<HTMLButtonElement>(null);
-  const { activeId, chats, tabs } = workspace.state;
+  const { activeId, chats, tabs, lastSelection } = workspace.state;
+  const discoveringModels = models.loading || models.refreshing;
+  const defaultSelection = useMemo(
+    () =>
+      navigation.ready
+        ? defaultModelSelection(
+            models.options,
+            lastSelection,
+            navigation.lastUsedSelection,
+            discoveringModels,
+          )
+        : null,
+    [
+      discoveringModels,
+      lastSelection,
+      models.options,
+      navigation.lastUsedSelection,
+      navigation.ready,
+    ],
+  );
   const events = useSessionEvents(
     sessions,
     workspace.access,
@@ -260,6 +280,7 @@ export function Workspace({
             providerClient={providers}
             sessionId={id}
             chat={chats[id]!}
+            defaultSelection={defaultSelection}
             active={id === activeId}
             transcript={transcript}
             streamId={events.streamId}

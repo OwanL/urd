@@ -98,10 +98,14 @@ export function fixture(): {
     access: {
       read: () => state,
       save: persist,
-      updateChat: (id, update) => {
+      updateChat: (id, update, lastSelection) => {
         const previous = state.chats[id];
         if (!previous) return false;
-        return persist({ ...state, chats: { ...state.chats, [id]: update(previous) } });
+        return persist({
+          ...state,
+          lastSelection: lastSelection ?? state.lastSelection,
+          chats: { ...state.chats, [id]: update(previous) },
+        });
       },
       canPersist: () => true,
     },

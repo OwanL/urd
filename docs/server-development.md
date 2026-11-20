@@ -131,7 +131,7 @@ provider calls.
 | Method and path | Request / successful response |
 | --- | --- |
 | POST `/api/sessions` | Empty JSON object `{}` → 201 `{sessionId}`; Location names its snapshot |
-| GET `/api/sessions?cursor=...` | Optional opaque string cursor → 200 `SessionIdPage` (`sessionIds`, `nextCursor`) |
+| GET `/api/sessions?cursor=...` | Optional opaque string cursor → 200 `SessionIdPage` (`sessionIds`, `nextCursor`, optional first-page `latestLlmSelection`) |
 | POST `/api/sessions/{sessionId}/message-submissions` | `UserMessageSubmission` → 200 `UserMessageReceipt`, Accepted **or** Refused |
 | GET `/api/sessions/{sessionId}/message-submissions/{submissionId}` | 200 receipt or literal JSON `null`; 409 if an edit removed the input |
 | POST `/api/sessions/{sessionId}/message-edits` | `MessageEditSubmission` → 200 `MessageEditReceipt` after Stop/settlement and committed replacement |
@@ -300,8 +300,10 @@ loopback/Host/Origin/client-marker/no-store gate and no-body GET rule apply; shu
 failures remain 503. Core's schema-5 ordering metadata and atomic create are described in
 [backend development](backend-development.md#saved-primary-id-discovery).
 Legacy rows use a fixed descending binary-ID fallback, not recovered creation chronology.
-The listing adds no last-used tracking or automatic recovery. Transcript history has a separate
-bounded API; the browser navigates the bounded transcript and loads visible content on demand.
+The first page includes `latestLlmSelection` if there is a saved human-initiated primary run or
+explicit Continue. It is ordered by run creation, not session creation, and omits compaction and
+agent-initiated runs. This reads existing run data; it adds no mutable preference or recovery.
+Transcript history has a separate bounded API; the browser loads visible content on demand.
 
 POST requires JSON. Encoded bodies are limited to 128 KiB, including chunked requests;
 Core no longer applies the old separate 16 KiB submission-text cap. Missing required submission members,

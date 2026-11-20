@@ -124,6 +124,57 @@ void test("send and resend share execution gates but retain distinct input requi
   assert.equal(noSnapshot.canResendNotSent, false);
 });
 
+void test("only an unselected idle chat inherits the workspace model", () => {
+  const fallback = { ...selection, modelId: "remembered-model" };
+  const empty = { ...chat, selection: null };
+  const unmatched = snapshot({ latestLlmSelection: null });
+  const status = deriveChatStatus(empty, unmatched, undefined, true, true, false, fallback);
+  assert.equal(status.selection, fallback);
+  assert.equal(status.canSend, true);
+  assert.equal(
+    deriveChatStatus(chat, unmatched, undefined, true, true, false, fallback).selection,
+    selection,
+  );
+  assert.equal(
+    deriveChatStatus(empty, snapshot(), undefined, true, true, false, fallback).selection,
+    latestSelection,
+  );
+  assert.equal(
+    deriveChatStatus(
+      empty,
+      { ...unmatched, unsettledExecutionId: executionId },
+      undefined,
+      true,
+      true,
+      false,
+      fallback,
+    ).selection,
+    null,
+  );
+});
+
+void test("a locked picker shows the journaled selection even if a snapshot shows another model", () => {
+  const changed = snapshot({ unsettledExecutionId: otherExecutionId });
+  const editing = { ...pendingChat("uncertain"), selection: null };
+  const send = deriveChatStatus(editing, changed, undefined, true, true);
+  assert.equal(send.selectionLocked, true);
+  assert.equal(send.selection, selection);
+
+  const continuation: ContinuationSubmission = {
+    operationId: "60000000-0000-0000-0000-000000000006",
+    expectedHistoryRevision: changed.historyRevision,
+    expectedLastExecutionId: executionId,
+    llmSelection: selection,
+  };
+  const started = {
+    ...newChat(null),
+    pendingContinuation: { original: continuation, status: "uncertain" as const },
+  };
+  const continued = deriveChatStatus(started, changed, undefined, true, true);
+  assert.equal(continued.selectionLocked, true);
+  assert.equal(continued.selection, selection);
+});
+
 void test("Continue eligibility requires the core capability, idle session and no local command", () => {
   const settled = snapshot({
     canContinue: true,

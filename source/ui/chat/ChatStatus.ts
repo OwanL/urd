@@ -1,7 +1,7 @@
 import type { LlmSelection } from "../providers/LlmSelection.ts";
 import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
 import { submissionTextError } from "../sessions/inputs/UserMessageSubmission.ts";
-import type { ChatState } from "./ChatState.ts";
+import { idleChatSelection, type ChatState } from "./ChatState.ts";
 import type { ChatStopState } from "./ChatCommands.ts";
 
 export type ChatExecutionStatus = "stopping" | "running" | "accepted" | "compacting" | null;
@@ -32,6 +32,7 @@ export function deriveChatStatus(
   ready: boolean,
   canPersist: boolean,
   pendingCommand = false,
+  defaultSelection: LlmSelection | null = null,
 ): ChatStatus {
   const active = Boolean(snapshot?.unsettledExecutionId && !snapshot.admissionFenced);
   const compacting = Boolean(active && snapshot?.isCompacting);
@@ -47,9 +48,12 @@ export function deriveChatStatus(
     snapshot?.admissionFenced ||
     chat.knownExecutionId,
   );
-  const selection = active
-    ? (snapshot?.latestLlmSelection ?? null)
-    : (chat.selection ?? snapshot?.latestLlmSelection ?? null);
+  const selection =
+    chat.pending?.original.llmSelection ??
+    chat.pendingContinuation?.original.llmSelection ??
+    (active
+      ? (snapshot?.latestLlmSelection ?? null)
+      : idleChatSelection(chat, snapshot, defaultSelection));
   const textError = submissionTextError(chat.draft);
   const canResendNotSent = Boolean(
     snapshot &&

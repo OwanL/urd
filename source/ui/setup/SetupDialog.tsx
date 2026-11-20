@@ -14,6 +14,7 @@ import { usePreferences } from "../preferences/usePreferences.ts";
 import { ProviderClient } from "../providers/ProviderClient.ts";
 import { useModelOptions } from "../providers/models/useModelOptions.ts";
 import { ProviderSettings } from "../providers/settings/ProviderSettings.tsx";
+import { credentialState, signInPending } from "../providers/settings/ProviderConnectionStatus.ts";
 import { useProviderSettings } from "../providers/settings/useProviderSettings.ts";
 import { SetupModels } from "./SetupModels.tsx";
 import { WorkingDirectorySetting } from "../settings/WorkingDirectorySetting.tsx";
@@ -146,9 +147,27 @@ function Setup({ status, onComplete }: { status: SetupStatus; onComplete(): void
     preferences.refresh,
     false, // The model step owns the offer during onboarding.
   );
+  const readyProvider = providers.connections.some((connection) => {
+    const signIn = providers.signIns[connection.id];
+    if (signIn && signInPending(signIn)) return false;
+    const credential = credentialState(connection, providers.credentials[connection.id]);
+    if (credential === "disconnecting" || providers.errors[`credentials:${connection.id}`])
+      return false;
+    if (connection.authentication !== "none" && credential !== "connected") return false;
+    return (
+      !!providers.catalogs[connection.id]?.models.length ||
+      models.options.some(({ selection }) => selection.connection.id === connection.id)
+    );
+  });
+  const providerReadFailed =
+    !!providers.errors.connections ||
+    providers.connections.some(
+      (connection) =>
+        connection.authentication !== "none" && !!providers.errors[`credentials:${connection.id}`],
+    );
   // The server validates each step again; this only avoids offering an action that must fail.
   const canContinue = [
-    providers.connections.length > 0,
+    readyProvider && !providers.uncertain && !providers.errors.connections,
     buckets.every((bucket) => preferences.preferences?.modelChoices[bucket].length),
     validated.workingDirectoryConfigured,
   ][step];
@@ -163,13 +182,9 @@ function Setup({ status, onComplete }: { status: SetupStatus; onComplete(): void
         onComplete();
         return;
       }
-      if (step === 0 && !current.providerConfigured) {
-        setError("Add a provider to continue.");
-        return;
-      }
-      if (step > 0 && !current.providerConfigured) {
+      if (!current.providerConfigured) {
         setStep(0);
-        setError("Add a provider to continue.");
+        setError("Connect a provider and load its models to continue.");
         return;
       }
       if (step === 1 && !current.bucketsConfigured) {
@@ -217,7 +232,17 @@ function Setup({ status, onComplete }: { status: SetupStatus; onComplete(): void
             state={providers}
             search=""
             initialScreen={validated.providerConfigured ? "overview" : "chooser"}
+            onboarding
           />
+        )}
+        {step === 0 && providerReadFailed && !canContinue && (
+          <button
+            type="button"
+            disabled={providers.reading}
+            onClick={() => void providers.actions.read()}
+          >
+            Retry provider status
+          </button>
         )}
         {step === 1 && (
           <SetupModels

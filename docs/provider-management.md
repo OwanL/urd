@@ -222,10 +222,13 @@ clear required credentials return the connection to unfinished setup; no records
 by this presentation rule. Unknown credential reads are reported rather than treated as
 unfinished or silently omitted without explanation.
 
-Add opens a chooser that distinguishes account sign-in, API key and custom/local servers.
+Add asks how to connect. **Sign in with ChatGPT** starts browser sign-in for Codex access
+through a ChatGPT plan. **Use an OpenAI API key** uses separate API billing. **Custom endpoint**
+is for a local or other compatible server URL. The same chooser is used during onboarding.
 Its **Finish setup** section resumes saved configurations that still need credentials;
 **Check setup** keeps failed/unknown reads reachable. Successful authentication offers **Done**
-to return to the main list. Selecting a set-up provider opens its connection view; Back
+to return to the main list in Settings. In onboarding, **Next** becomes available when a usable
+provider has models instead. Selecting a set-up provider opens its connection view; Back
 returns to the list and search can
 return directly to matching providers without stealing typing focus. Connected providers do
 not show setup forms. Configuration, model refresh and removal live under **Advanced**.

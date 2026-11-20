@@ -1,11 +1,25 @@
 import { Icon } from "../../controls/Icon.tsx";
 import type { ProviderConnection, ProviderRoute } from "../ProviderConnection.ts";
 import type { ProviderSettingsState } from "./useProviderSettings.ts";
-import {
-  connectionStatus,
-  connectionTitle,
-  providerNames,
-} from "./ProviderSettingsPresentation.ts";
+import { connectionStatus, connectionTitle } from "./ProviderSettingsPresentation.ts";
+
+const choices = [
+  {
+    route: "chatGpt",
+    label: "Sign in with ChatGPT",
+    hint: "Use the Codex access included in your ChatGPT plan.",
+  },
+  {
+    route: "openAI",
+    label: "Use an OpenAI API key",
+    hint: "Pay for API usage separately from your ChatGPT plan.",
+  },
+  {
+    route: "custom",
+    label: "Custom endpoint",
+    hint: "Connect a local server or another OpenAI-compatible URL.",
+  },
+] as const;
 
 export function ProviderChooser({
   state,
@@ -27,21 +41,17 @@ export function ProviderChooser({
   return (
     <>
       <ul class="provider-settings-connections" aria-label="Choose a provider">
-        {(Object.keys(providerNames) as ProviderRoute[]).map((route) => (
+        {choices.map(({ route, label, hint }) => (
           <li key={route}>
             <button
               type="button"
-              class="provider-settings-connection"
+              class="provider-settings-connection provider-choice"
               disabled={!canEdit}
               onClick={() => onChoose(route)}
             >
-              <strong>{providerNames[route]}</strong>
-              <span class="provider-settings-secondary">
-                {route === "chatGpt"
-                  ? "Account sign-in"
-                  : route === "openAI"
-                    ? "API key"
-                    : "Local or compatible server"}
+              <span class="provider-choice-copy">
+                <strong>{label}</strong>
+                <span class="provider-settings-secondary">{hint}</span>
               </span>
               <Icon name="chevron" />
             </button>

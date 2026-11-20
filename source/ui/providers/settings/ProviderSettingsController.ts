@@ -62,6 +62,7 @@ export class ProviderSettingsController {
 
   private setupVisible = false;
   private setupView = 0;
+  private signInIntent = 0;
   private newConnectionId: string | null = null;
   private bucketRequest: BucketSetupRequest | null = null;
   private readonly setupSignIns = new Map<string, SetupContext>();
@@ -113,6 +114,7 @@ export class ProviderSettingsController {
   setActivity(active: boolean, visible: boolean, providersTab = active): void {
     const wasReadable = this.canRead;
     const wasSetupVisible = this.setupVisible;
+    if (this.visible && !visible) this.signInIntent++;
     this.active = active;
     this.visible = visible;
     this.setupVisible = active && providersTab;
@@ -222,6 +224,7 @@ export class ProviderSettingsController {
   edit(id: string, update: Partial<ConnectionDraft>): void {
     const draft = this.snapshot.drafts[id];
     if (!draft || this.snapshot.confirmation) return;
+    if (this.snapshot.selectedId === id) this.signInIntent++;
     if (this.newConnectionId === id) this.newConnectionId = null;
     this.patch({ drafts: { ...this.snapshot.drafts, [id]: { ...draft, ...update } } });
   }
@@ -342,6 +345,49 @@ export class ProviderSettingsController {
   };
 
   create(): Promise<void> {
+    return this.createConnection();
+  }
+
+  async createAndSignIn(): Promise<void> {
+    if (
+      !this.canMutate ||
+      !this.setupVisible ||
+      !this.visible ||
+      this.snapshot.selectedId !== null ||
+      this.snapshot.add.route !== "chatGpt"
+    )
+      return;
+    const existingIds = new Set(this.snapshot.connections.map(({ id }) => id));
+    const intent = this.signInIntent;
+    let signIn: Promise<void> | undefined;
+    await this.createConnection((connection, view) => {
+      const saved = this.snapshot.connections.find(({ id }) => id === connection.id);
+      if (
+        existingIds.has(connection.id) ||
+        connection.route !== "chatGpt" ||
+        connection.authentication !== "oAuth" ||
+        !this.canMutate ||
+        !this.setupVisible ||
+        !this.visible ||
+        this.setupView !== view ||
+        this.signInIntent !== intent ||
+        this.snapshot.selectedId !== connection.id ||
+        !saved ||
+        saved.name !== connection.name ||
+        saved.route !== connection.route ||
+        saved.api !== connection.api ||
+        saved.endpoint !== connection.endpoint ||
+        saved.authentication !== connection.authentication
+      )
+        return;
+      signIn = this.beginSignIn(connection, true);
+    });
+    await signIn;
+  }
+
+  private createConnection(
+    created?: (connection: ProviderConnection, view: number) => void,
+  ): Promise<void> {
     const view = this.setupView;
     return this.connectionCommands.create((connection) => {
       if (connection.authentication === "none")
@@ -353,6 +399,7 @@ export class ProviderSettingsController {
         this.snapshot.selectedId === connection.id
       )
         this.newConnectionId = connection.id;
+      created?.(connection, view);
       return false;
     });
   }

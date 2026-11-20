@@ -133,6 +133,19 @@
   transform: rotate(-90deg);
 }
 
+.provider-settings .provider-choice {
+  grid-template-columns: minmax(0, 1fr) 16px;
+}
+
+.provider-settings .provider-choice > .icon {
+  grid-column: 2;
+}
+
+.provider-choice-copy {
+  display: grid;
+  gap: 2px;
+}
+
 .provider-settings .provider-settings-back {
   display: inline-flex;
   align-items: center;

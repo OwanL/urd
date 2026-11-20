@@ -70,6 +70,110 @@ void test("lost acknowledgement auto-reads but still requires explicit permissio
   state.setActivity(false, false);
 });
 
+void test("explicit ChatGPT creation starts one sign-in and retains its authorization link", async () => {
+  let starts = 0;
+  let created = false;
+  const { state } = setup({
+    list: async () => (created ? [connection] : []),
+    createChatGpt: async () => {
+      created = true;
+      return connection;
+    },
+    beginSignIn: async (id) => {
+      starts++;
+      assert.equal(id, connection.id);
+      return pending;
+    },
+  });
+  state.setActivity(true, true);
+  await flush();
+  state.select(null);
+  await state.createAndSignIn();
+  assert.equal(starts, 1);
+  assert.equal(state.snapshot.signIns.one?.authorizationUrl, pending.authorizationUrl);
+  state.setActivity(false, false);
+});
+
+void test("ordinary creation does not start sign-in", async () => {
+  let starts = 0;
+  const { state } = setup({
+    list: async () => [],
+    createChatGpt: async () => connection,
+    beginSignIn: async () => {
+      starts++;
+      return pending;
+    },
+  });
+  state.setActivity(true, true);
+  await flush();
+  state.select(null);
+  await state.create();
+  assert.equal(starts, 0);
+  state.setActivity(false, false);
+});
+
+void test("explicit creation never starts sign-in after leaving, changing selection, or uncertainty", async () => {
+  for (const exit of ["close", "back", "hidden", "uncertain"] as const) {
+    const result = deferred<ProviderConnection>();
+    let starts = 0;
+    const { state } = setup({
+      list: async () => [],
+      createChatGpt: () => result.promise,
+      beginSignIn: async () => {
+        starts++;
+        return pending;
+      },
+    });
+    state.setActivity(true, true);
+    await flush();
+    state.select(null);
+    const creating = state.createAndSignIn();
+    if (exit === "close") {
+      state.setActivity(false, false);
+      state.setActivity(true, true);
+    }
+    if (exit === "back") {
+      state.select("other");
+      state.select(null);
+    }
+    if (exit === "hidden") {
+      state.setActivity(true, false);
+      state.setActivity(true, true);
+    }
+    if (exit === "uncertain") result.reject(new TypeError("response lost"));
+    else result.resolve(connection);
+    await creating;
+    assert.equal(starts, 0, exit);
+    state.setActivity(false, false);
+  }
+});
+
+void test("explicit creation ignores other routes and existing connection ids", async () => {
+  let creates = 0;
+  let starts = 0;
+  const { state } = setup({
+    createChatGpt: async () => {
+      creates++;
+      return connection;
+    },
+    beginSignIn: async () => {
+      starts++;
+      return pending;
+    },
+  });
+  state.setActivity(true, true);
+  await flush();
+  state.select(null);
+  state.editAdd({ route: "openAI" });
+  await state.createAndSignIn();
+  assert.equal(creates, 0);
+  state.editAdd({ route: "chatGpt" });
+  await state.createAndSignIn();
+  assert.equal(creates, 1);
+  assert.equal(starts, 0);
+  state.setActivity(false, false);
+});
+
 void test("an HTTP conflict is reported as a rejected command", async () => {
   const { state } = setup({
     refreshModels: async () => {

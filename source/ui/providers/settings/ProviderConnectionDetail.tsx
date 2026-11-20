@@ -25,12 +25,13 @@ export function ProviderConnectionDetail({
   const signIn = state.signIns[connection.id];
   const pendingSignIn = !!signIn && signInPending(signIn);
   const hasCredentials = !!credential?.hasCredentials;
-  const connected = hasCredentials && !credential?.requiresSignIn;
+  const missingPlanAccess = credential?.planAccessGranted === false;
+  const connected = hasCredentials && !credential?.requiresSignIn && !missingPlanAccess;
   const showDisconnect = hasCredentials || !!credential?.isDisconnecting;
   const catalog = state.catalogs[connection.id];
   const needsModels =
     catalog &&
-    !catalog.refreshedAt &&
+    !catalog.models.length &&
     !credential?.isDisconnecting &&
     credential?.planAccessGranted !== false &&
     (connected || connection.authentication === "none");
@@ -88,6 +89,11 @@ export function ProviderConnectionDetail({
           {state.errors[`signIn:${connection.id}`] && (
             <p class="provider-settings-error">{state.errors[`signIn:${connection.id}`]}</p>
           )}
+          {missingPlanAccess && !pendingSignIn && (
+            <p>
+              This sign-in did not grant Codex access. Sign in with a ChatGPT account that has it.
+            </p>
+          )}
           {pendingSignIn ? (
             <div class="provider-settings-actions">
               {signIn.status === "pending" && authorizationLink(signIn.authorizationUrl) && (
@@ -119,7 +125,7 @@ export function ProviderConnectionDetail({
                   void actions.beginSignIn(connection, inSetup);
                 }}
               >
-                Sign in
+                Sign in with ChatGPT
               </button>
             )
           )}

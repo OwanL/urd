@@ -27,6 +27,7 @@ export function ProviderSettings({
   state,
   search,
   initialScreen = "overview",
+  onboarding = false,
 }: ProviderSettingsProps) {
   const { actions } = state;
   const heading = useRef<HTMLHeadingElement>(null);
@@ -133,15 +134,15 @@ export function ProviderSettings({
     });
   };
   const backToChooser = screen === "custom" || (screen === "detail" && setup !== "complete");
-  const create = () => {
+  const create = (signIn = false) => {
     if (!canEdit) return;
     show({ ...presentation, creating: new Set(state.connections.map(({ id }) => id)) });
     actions.select(null);
-    void actions.create();
+    void (signIn ? actions.createAndSignIn() : actions.create());
   };
   const choose = (route: ProviderRoute) => {
     actions.editAdd({ route });
-    if (route !== "custom") create();
+    if (route !== "custom") create(route === "chatGpt");
     else {
       actions.select(null);
       show({ screen: "custom", connectionId: null, creating: null, returnId: null });
@@ -186,7 +187,7 @@ export function ProviderSettings({
           <header class="provider-settings-panel-heading">
             <h3 ref={heading} tabIndex={-1}>
               {screen === "chooser"
-                ? "Add provider"
+                ? "How do you want to connect?"
                 : screen === "custom"
                   ? "Custom provider"
                   : connection
@@ -236,7 +237,7 @@ export function ProviderSettings({
                   inSetup={!!presentation.setup}
                 />
               )}
-              {presentation.setup && setup === "complete" && !reviewingBuckets && (
+              {!onboarding && presentation.setup && setup === "complete" && !reviewingBuckets && (
                 <div class="provider-settings-actions">
                   <button type="button" disabled={!canNavigate} onClick={overview}>
                     Done
@@ -257,4 +258,5 @@ interface ProviderSettingsProps {
   state: ProviderSettingsState;
   search: string;
   initialScreen?: "overview" | "chooser";
+  onboarding?: boolean;
 }

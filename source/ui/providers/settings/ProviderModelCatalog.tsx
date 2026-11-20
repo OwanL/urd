@@ -1,3 +1,4 @@
+import "./provider-model-catalog.css";
 import { useState } from "preact/hooks";
 import type { ProviderConnection } from "../ProviderConnection.ts";
 import type { ProviderSettingsState } from "./useProviderSettings.ts";

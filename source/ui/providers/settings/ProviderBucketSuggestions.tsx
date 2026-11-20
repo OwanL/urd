@@ -1,3 +1,4 @@
+import "./provider-bucket-suggestions.css";
 import type { BucketSetup } from "./ProviderSettingsTypes.ts";
 
 export function ProviderBucketSuggestions({

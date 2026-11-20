@@ -1,0 +1,103 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import {
+  credentialState,
+  matchesConnection,
+  providerHostname,
+  providerSetupState,
+} from "../../../providers/settings/ProviderConnectionStatus.ts";
+import { connection, credential, emptyCatalog, flush, setup } from "./ProviderSettingsFixtures.ts";
+
+void test("setup membership uses saved credentials, not current provider health", () => {
+  const apiKeyConnection = { ...connection, authentication: "apiKey" } as const;
+  assert.equal(
+    providerSetupState({ ...connection, authentication: "none" }, undefined),
+    "complete",
+  );
+  assert.equal(providerSetupState(apiKeyConnection, undefined), "unknown");
+  assert.equal(providerSetupState(apiKeyConnection, credential), "incomplete");
+  assert.equal(
+    providerSetupState(apiKeyConnection, {
+      ...credential,
+      hasCredentials: true,
+      requiresSignIn: false,
+      expiresAt: "2000-01-01T00:00:00Z",
+      planAccessGranted: false,
+      isDisconnecting: true,
+    }),
+    "complete",
+  );
+});
+
+void test("names come from endpoint hostnames only when creating or saving", async () => {
+  assert.equal(
+    providerHostname("https://user:secret@API.Example:443/v1/?key=value"),
+    "api.example",
+  );
+  assert.equal(providerHostname("http://localhost:1234/v1/"), "localhost");
+  assert.equal(providerHostname("not a URL"), "");
+  const custom = { ...connection, route: "custom", authentication: "apiKey" } as const;
+  const names: string[] = [];
+  const { state } = setup({
+    list: async () => [custom],
+    createChatGpt: async (name) => {
+      names.push(name);
+      return connection;
+    },
+    createOpenAI: async (name) => {
+      names.push(name);
+      return connection;
+    },
+    createCustom: async (settings) => {
+      names.push(settings.name);
+      return { ...custom, ...settings };
+    },
+    updateCustom: async (_id, settings) => {
+      names.push(settings.name);
+      return { ...custom, ...settings };
+    },
+  });
+  state.setActivity(true, true);
+  await flush();
+  assert.equal(state.snapshot.connections[0]?.name, "Work");
+  state.editAdd({ name: "Ignored", endpoint: "https://custom.example:1234/v1/" });
+  await state.create();
+  state.editAdd({ route: "openAI" });
+  await state.create();
+  state.editAdd({ route: "custom", name: "Ignored again" });
+  await state.create();
+  assert.equal(state.snapshot.connections[0]?.name, "Work");
+  await state.save(custom);
+  assert.deepEqual(names, [
+    "api.openai.com",
+    "api.openai.com",
+    "custom.example",
+    "provider.example",
+  ]);
+  state.setActivity(false, false);
+});
+
+void test("model discovery is explicit and credential summaries distinguish missing from connected", async () => {
+  let refreshes = 0;
+  const { state } = setup({
+    refreshModels: async () => {
+      refreshes++;
+      return emptyCatalog;
+    },
+  });
+  state.setActivity(true, true);
+  await flush();
+  assert.equal(refreshes, 0);
+  await state.refreshModels(connection);
+  assert.equal(refreshes, 1);
+  assert.equal(credentialState(connection, undefined), "unknown");
+  assert.equal(credentialState(connection, credential), "noCredentials");
+  assert.equal(
+    credentialState(connection, { ...credential, hasCredentials: true, requiresSignIn: false }),
+    "connected",
+  );
+  assert.equal(matchesConnection(connection, "CHATGPT"), true);
+  assert.equal(matchesConnection(connection, "provider.example"), true);
+  assert.equal(matchesConnection(connection, "secret"), false);
+  state.setActivity(false, false);
+});

@@ -1,3 +1,4 @@
+import "./provider-settings-feedback.css";
 import type { ProviderSettingsState } from "./useProviderSettings.ts";
 import { noticeText, operationLabels } from "./ProviderSettingsPresentation.ts";
 

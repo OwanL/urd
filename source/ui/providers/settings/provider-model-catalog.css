@@ -1,0 +1,39 @@
+.provider-settings .provider-settings-models {
+  display: grid;
+  gap: 8px;
+  max-height: 240px;
+  overflow: auto;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.provider-settings .provider-settings-models li {
+  display: grid;
+  overflow-wrap: anywhere;
+}
+
+.provider-settings .provider-settings-models code {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.provider-settings .provider-settings-model-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 10px;
+}
+
+.provider-settings .provider-settings-model-controls label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+}
+
+.provider-settings input[type="checkbox"] {
+  margin: 0;
+  accent-color: var(--accent);
+}

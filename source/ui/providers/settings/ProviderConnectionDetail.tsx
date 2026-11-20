@@ -1,3 +1,4 @@
+import "./provider-connection-detail.css";
 import { useState } from "preact/hooks";
 import type { ProviderConnection } from "../ProviderConnection.ts";
 import { signInPending } from "./ProviderConnectionStatus.ts";

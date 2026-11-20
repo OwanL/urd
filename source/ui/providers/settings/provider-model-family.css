@@ -1,0 +1,23 @@
+.provider-settings .provider-model-family {
+  display: grid;
+  gap: 4px;
+  padding: 6px;
+}
+
+.provider-settings .provider-model-family button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  text-align: left;
+}
+
+.provider-settings .provider-model-family .icon {
+  width: 14px;
+  height: 14px;
+}
+
+.provider-settings .provider-model-family button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--surface-hover);
+}

@@ -1,0 +1,29 @@
+.provider-settings .provider-settings-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.provider-settings .provider-settings-choices legend {
+  padding: 0 0 6px;
+}
+
+.provider-settings .provider-settings-choices label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 2px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+}
+
+.provider-settings .provider-settings-choices label:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--surface-hover);
+}
+
+.provider-settings input[type="radio"] {
+  margin: 0;
+  accent-color: var(--accent);
+}

@@ -1,3 +1,4 @@
+import "./provider-settings.css";
 import { useCallback, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Icon } from "../../controls/Icon.tsx";
 import type { ProviderConnection, ProviderRoute } from "../ProviderConnection.ts";
@@ -10,7 +11,6 @@ import { ProviderSettingsOverview } from "./ProviderSettingsOverview.tsx";
 import { connectionStatus, connectionTitle } from "./ProviderSettingsPresentation.ts";
 import { matchesConnection, providerSetupState } from "./ProviderConnectionStatus.ts";
 import type { ProviderSettingsState } from "./useProviderSettings.ts";
-import "./provider-settings.css";
 
 interface Presentation {
   screen: "overview" | "chooser" | "custom" | "detail";

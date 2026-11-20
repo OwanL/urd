@@ -57,22 +57,6 @@
   font-size: 15px;
 }
 
-.provider-settings .provider-settings-overview-heading {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.provider-settings .provider-settings-add {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  border-color: transparent;
-  color: var(--text-secondary);
-}
-
 .provider-settings :where(fieldset) {
   display: grid;
   gap: 10px;
@@ -212,65 +196,12 @@
   min-width: 0;
 }
 
-.provider-settings .provider-settings-choices {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.provider-settings .provider-settings-choices legend {
-  padding: 0 0 6px;
-}
-
-.provider-settings .provider-settings-choices label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 34px;
-  padding: 2px 8px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 5px;
-}
-
-.provider-settings .provider-settings-choices label:has(input:checked) {
-  border-color: var(--accent);
-  background: var(--surface-hover);
-}
-
-.provider-settings input[type="radio"] {
-  margin: 0;
-  accent-color: var(--accent);
-}
-
 .provider-settings .provider-settings-group {
   display: grid;
   gap: 8px;
   min-width: 0;
   padding-top: 12px;
   border-top: 1px solid var(--border-subtle);
-}
-
-.provider-settings-bucket-list {
-  display: grid;
-  gap: 6px;
-  min-width: 0;
-  margin: 0;
-}
-
-.provider-settings-bucket-list > div {
-  display: grid;
-  grid-template-columns: 4em minmax(0, 1fr);
-  gap: 8px;
-}
-
-.provider-settings-bucket-list dt {
-  color: var(--text-secondary);
-  text-transform: capitalize;
-}
-
-.provider-settings-bucket-list dd {
-  margin: 0;
-  overflow-wrap: anywhere;
 }
 
 .provider-settings .provider-settings-group.provider-settings-actions {
@@ -284,17 +215,8 @@
   min-width: 0;
 }
 
-.provider-settings .provider-settings-feedback:empty {
-  display: none;
-}
-
 .provider-settings .provider-settings-action {
   color: var(--accent);
-}
-
-.provider-settings .provider-settings-advanced {
-  padding-top: 10px;
-  border-top: 1px solid var(--border-subtle);
 }
 
 .provider-settings .provider-settings-primary {
@@ -320,70 +242,6 @@
   border: 1px solid var(--border-subtle);
   border-left: 3px solid var(--danger);
   border-radius: 5px;
-}
-
-.provider-settings .provider-settings-models {
-  display: grid;
-  gap: 8px;
-  max-height: 240px;
-  overflow: auto;
-  margin: 8px 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.provider-settings .provider-settings-models li {
-  display: grid;
-  overflow-wrap: anywhere;
-}
-
-.provider-settings .provider-settings-models code {
-  color: var(--text-secondary);
-  font-size: 12px;
-}
-
-.provider-settings .provider-settings-model-controls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin: 6px 0 10px;
-}
-
-.provider-settings .provider-settings-model-controls label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 34px;
-}
-
-.provider-settings input[type="checkbox"] {
-  margin: 0;
-  accent-color: var(--accent);
-}
-
-.provider-settings .provider-model-family {
-  display: grid;
-  gap: 4px;
-  padding: 6px;
-}
-
-.provider-settings .provider-model-family button {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  text-align: left;
-}
-
-.provider-settings .provider-model-family .icon {
-  width: 14px;
-  height: 14px;
-}
-
-.provider-settings .provider-model-family button[aria-pressed="true"] {
-  border-color: var(--accent);
-  background: var(--surface-hover);
 }
 
 .provider-settings summary {

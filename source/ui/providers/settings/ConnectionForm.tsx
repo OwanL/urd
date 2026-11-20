@@ -1,3 +1,4 @@
+import "./connection-form.css";
 import { useId } from "preact/hooks";
 import type { ProviderConnection } from "../ProviderConnection.ts";
 import type { ConnectionDraft } from "./ProviderSettingsTypes.ts";

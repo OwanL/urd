@@ -47,10 +47,13 @@ export function ToolInspection({
       )}
       <div class="tool-inspection-section">
         <h3>
-          Input
+          {active.returned ? "Original call input" : "Input"}
           <TokenCount tokens={previewTokens(shownPreview, "input")} />
         </h3>
         <pre>{previewText(shownPreview, "input")}</pre>
+        {active.returned && (
+          <p class="tool-inspection-note">Shown for reference; not resent to the model.</p>
+        )}
       </div>
       <div class="tool-inspection-section">
         <h3>

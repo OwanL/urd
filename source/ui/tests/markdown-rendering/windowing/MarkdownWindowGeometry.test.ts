@@ -6,6 +6,7 @@ import {
   MarkdownWindowGeometry,
   markdownTableColumns,
   requireMarkdownWindowUnits,
+  visibleMarkdownGapDirection,
 } from "../../../markdown-rendering/windowing/MarkdownWindowGeometry.ts";
 import type { MarkdownRenderSnapshot } from "../../../markdown-rendering/MarkdownRenderModel.ts";
 import { MarkdownWindowAssembler } from "../../../markdown-rendering/windowing/MarkdownWindowAssembler.ts";
@@ -90,7 +91,7 @@ void test("seek targets map root and ordinary gaps directly to piece IDs", () =>
   }
 });
 
-void test("seek targets map code and table unit gaps through shell piece ranges", () => {
+void test("code and table gaps use child positions for seeks and piece ranges for edge reads", () => {
   const geometry = new MarkdownWindowGeometry();
   geometry.configure("g", 800, "default");
   const scrollport = {
@@ -129,12 +130,14 @@ void test("seek targets map code and table unit gaps through shell piece ranges"
     ]),
     pieces: new Map(),
   } satisfies MarkdownRenderSnapshot;
-  const rootFor = (kind: "code" | "table", from: number, next: number) => {
+  const rootFor = (kind: "code" | "table", from: number, next: number, nextContext?: number) => {
     const shell = { dataset: { context: kind === "code" ? "7" : "8" } };
     const gap = {
       dataset: { markdownGap: kind, gapFrom: String(from), gapNext: String(next) },
       getBoundingClientRect: () => ({ top: 150, right: 800, bottom: 250, left: 0, height: 100 }),
       closest: () => shell,
+      nextElementSibling:
+        nextContext === undefined ? null : { dataset: { context: String(nextContext) } },
     };
     return {
       dataset: { markdownGeneration: "g" },
@@ -155,6 +158,27 @@ void test("seek targets map code and table unit gaps through shell piece ranges"
     childIndex: 6,
     offset: 100,
   });
+  // When the gap is only at the edge, read toward missing rows even without any scroll input.
+  const edge = {
+    getBoundingClientRect: () => ({ top: 50, bottom: 175, left: 0, right: 800 }),
+  } as unknown as HTMLElement;
+  const trailing = rootFor("table", 7, 11);
+  const partial = { ...snapshot, from: 0, next: 60 };
+  assert.equal(geometry.seekTarget(trailing, edge, partial), null);
+  assert.equal(visibleMarkdownGapDirection(trailing, edge, partial, 0), "forward");
+  const nextLine = createMarkdownContext(10, {
+    kind: "codeLine",
+    parent: 7,
+    firstPiece: 140,
+    position: 4,
+  });
+  const middle = {
+    ...snapshot,
+    from: 140,
+    next: 160,
+    contexts: new Map(snapshot.contexts).set(10, { context: nextLine, values: {} }),
+  };
+  assert.equal(visibleMarkdownGapDirection(rootFor("code", 0, 4, 10), edge, middle, 1), "backward");
   assert.equal(
     geometry.seekTarget(rootFor("code", 4, 6), scrollport, { ...snapshot, generation: "stale" }),
     null,

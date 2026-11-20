@@ -10,6 +10,7 @@ import { MarkdownSelectionPins } from "./MarkdownSelectionPins.ts";
 import { normalizeIntervals } from "./windowing/MarkdownWindowAlignment.ts";
 import {
   MarkdownWindowGeometry,
+  visibleMarkdownGapDirection,
   type MarkdownWindowAnchor,
   type MarkdownWindowSeekTarget,
 } from "./windowing/MarkdownWindowGeometry.ts";
@@ -126,28 +127,10 @@ export class MarkdownWindowSurface {
     const top = this.scrollport.scrollTop;
     const movement = this.lastScrollTop === null ? 0 : top - this.lastScrollTop;
     this.lastScrollTop = top;
-    const visibleRootGaps = this.root
-      ? [...this.root.querySelectorAll<HTMLElement>('[data-markdown-gap="root"]')].filter((gap) => {
-          const rect = gap.getBoundingClientRect();
-          const port = this.scrollport.getBoundingClientRect();
-          return rect.bottom > port.top && rect.top < port.bottom;
-        })
-      : [];
-    if (movement !== 0) {
-      const preferred = movement > 0 ? "forward" : "backward";
-      if (
-        visibleRootGaps.some((gap) =>
-          preferred === "forward"
-            ? Number(gap.dataset.gapFrom) >= snapshot.next
-            : Number(gap.dataset.gapNext) <= snapshot.from,
-        )
-      )
-        return preferred;
+    if (this.root) {
+      const direction = visibleMarkdownGapDirection(this.root, this.scrollport, snapshot, movement);
+      if (direction) return direction;
     }
-    const after = visibleRootGaps.find((gap) => Number(gap.dataset.gapFrom) >= snapshot.next);
-    if (after) return "forward";
-    const before = visibleRootGaps.find((gap) => Number(gap.dataset.gapNext) <= snapshot.from);
-    if (before) return "backward";
     if (movement !== 0) return movement > 0 ? "forward" : "backward";
     if (visible && visible.from - snapshot.from <= snapshot.next - visible.next) return "backward";
     return "forward";

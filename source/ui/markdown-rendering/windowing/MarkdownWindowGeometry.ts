@@ -130,6 +130,46 @@ export function markdownTableColumns(
   return weights.map((weight) => (weight / total) * 100);
 }
 
+export function visibleMarkdownGapDirection(
+  root: HTMLElement,
+  scrollport: HTMLElement,
+  snapshot: MarkdownRenderSnapshot,
+  movement: number,
+): "forward" | "backward" | null {
+  const port = scrollport.getBoundingClientRect();
+  let before = false;
+  let after = false;
+  for (const gap of root.querySelectorAll<HTMLElement>("[data-markdown-gap]")) {
+    const rect = gap.getBoundingClientRect();
+    if (
+      rect.bottom <= port.top ||
+      rect.top >= port.bottom ||
+      rect.right <= port.left ||
+      rect.left >= port.right
+    )
+      continue;
+    const end = gapEndPiece(gap, snapshot);
+    if (end === undefined) continue;
+    before ||= end <= snapshot.from;
+    after ||= end > snapshot.next;
+    if (before && after) break;
+  }
+  if (before && (!after || movement < 0)) return "backward";
+  return after ? "forward" : null;
+}
+
+function gapEndPiece(gap: HTMLElement, snapshot: MarkdownRenderSnapshot): number | undefined {
+  const kind = gap.dataset.markdownGap;
+  if (kind !== "code" && kind !== "table") return Number(gap.dataset.gapNext);
+  // Table and code gaps count children, not pieces. Their end is the next row/line's
+  // first piece, or the end of the enclosing table/code block for a trailing gap.
+  const next = gap.nextElementSibling as HTMLElement | null;
+  if (next) return snapshot.contexts.get(Number(next.dataset.context))?.context.firstPiece;
+  const shell = gap.closest<HTMLElement>(`[data-kind="${kind}"]`);
+  const context = snapshot.contexts.get(Number(shell?.dataset.context))?.context;
+  return context && context.firstPiece + context.pieceCount;
+}
+
 export class MarkdownWindowGeometry {
   private generation = "";
   private width = 0;

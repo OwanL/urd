@@ -11,6 +11,7 @@ internal sealed class MessageMarkdownScheduler : IAsyncDisposable {
   readonly MessageMarkdownCache cache;
   Func<MessageMarkdownSource, MarkdownRenderIndex>? parse;
   readonly LinkedList<Work> pending = [];
+  readonly HashSet<MessageMarkdownLease> leases = [];
   readonly CancellationTokenSource shutdown = new();
   readonly TaskCompletionSource stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
   Task shutdownCallbacks = Task.CompletedTask;
@@ -94,8 +95,7 @@ internal sealed class MessageMarkdownScheduler : IAsyncDisposable {
     return result;
   }
 
-  // Valid leases remain readable through invalidation and shutdown. Shutdown drains
-  // work, not consumer-owned views; their accounting ends only on explicit release.
+  // A captured view survives a history revision or shutdown, but not final session closure.
   internal MarkdownPiecePage Read(MessageMarkdownLease lease, MarkdownRenderCursor cursor, MarkdownPageLimits? limits = null) {
     lock (gate) return MarkdownPageReader.Read(cache.Get(lease.Get(this)), cursor, limits);
   }
@@ -139,14 +139,16 @@ internal sealed class MessageMarkdownScheduler : IAsyncDisposable {
       if (lease.Entry is not { } entry) return;
       lease.Get(this);
       lease.Clear();
+      leases.Remove(lease);
       cache.Release(entry);
     }
   }
 
-  // The future history/deletion owner must fence changed sessions before serving.
-  internal void Invalidate(Guid sessionId) {
+  internal void Invalidate(Guid sessionId, bool revokeLeases = false) {
     lock (gate) {
       ThrowIfDisposed();
+      if (revokeLeases)
+        foreach (var lease in leases.Where(lease => lease.Key.SessionId == sessionId).ToArray()) Release(lease);
       cache.Invalidate(sessionId);
       foreach (var work in active.OfType<Work>().Where(work => work.Key.SessionId == sessionId)) {
         work.Invalidated = true;
@@ -214,7 +216,9 @@ internal sealed class MessageMarkdownScheduler : IAsyncDisposable {
 
   MessageMarkdownLease Lease(MessageMarkdownCache.Entry entry) {
     entry.Pins++;
-    return new(this, entry);
+    var lease = new MessageMarkdownLease(this, entry);
+    leases.Add(lease);
+    return lease;
   }
 
   Work? TakeNext(int lane) {

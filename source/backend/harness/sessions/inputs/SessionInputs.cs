@@ -46,6 +46,7 @@ internal sealed class SessionInputs(SessionBase session, UrdStore store, AsyncLo
     TaskCompletionSource? executionStart = null;
     ContinuationReceipt? receipt;
     using (await sessionLock.AcquireAsync()) {
+      session.ThrowIfClosed();
       var admission = session.WriteToStore(() => store.Continuations.Start(session.Id, session.HistoryRevision, submission,
           session.CanStartWork && session.CurrentExecution is null));
       if (admission is null)
@@ -67,6 +68,7 @@ internal sealed class SessionInputs(SessionBase session, UrdStore store, AsyncLo
     TaskCompletionSource? executionStart = null;
     UserMessageReceipt receipt;
     using (await sessionLock.AcquireAsync()) {
+      session.ThrowIfClosed();
       (receipt, bool newlyAccepted) = session.WriteToStore(
           () => store.UserMessages.Submit(session.Id, session.HistoryRevision, submission, session.IsAcceptingWork, Guid.NewGuid(), session.CurrentExecution?.ExecutionId));
       if (receipt.Acceptance == MessageAcceptance.Accepted)

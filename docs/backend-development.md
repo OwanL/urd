@@ -9,7 +9,7 @@ saved-primary-ID discovery, durable Send decisions, safe-boundary steering, addr
 Stop, bounded snapshot/history/content reads, known-not-sent discovery and graceful
 shutdown. The browser workspace is implemented and served as static assets by the Server.
 
-`UrdStore` owns the shared database, currently schema 37. It records whether a request
+`UrdStore` owns the shared database, currently schema 38. It records whether a request
 started sending and pages inputs known not to have been sent, so users can retrieve
 and explicitly resend them. Snapshots stay slim; transcript metadata and
 content use separate bounded reads, and reported usage is persisted per request. Session snapshots
@@ -25,7 +25,9 @@ A fresh/version-0 database creates all current tables and indexes in one transac
 with setup incomplete. Schema 36 is the [durable-data baseline](../AGENTS.md) and upgrades to
 schema 37 by creating the setup-completion table and inserting its completion marker in the same
 transaction as the version change;
-existing profiles therefore bypass first-run setup. Schema 37 reopens normally. The current build
+existing profiles therefore bypass first-run setup. Schema 38 adds closed-session usage summaries
+and keeps sender attribution in a recipient's history without requiring the sender session to exist.
+The upgrade does not close any existing sessions. The current build
 rejects unsupported versions and does not remove or reset databases. Every later durable schema
 change must register its SQL step in `DatabaseSchema` and bump the version, including for development
 builds. On startup, `DatabaseMigrations` applies required steps and records the new version in one
@@ -374,7 +376,7 @@ snapshot; refresh the first page to discover new chats. No total count or config
 `session_creation` stores an AUTOINCREMENT ordinal and unique session-ID foreign key
 with cascading metadata cleanup. Identity and ordering metadata insert atomically in the existing create transaction; handles are
 returned/tracked only after commit. Ordinals are not reused after deletion; gaps are harmless.
-The cascade does not add a public delete/close operation; `SessionRecord` is unchanged.
+Final session closure removes the corresponding listing entry in the same transaction as its history.
 
 GET `/api/sessions?cursor=...` exposes the page through the existing local gates/no-store/no-body
 GET rule; see [Server](server-development.md). The first page also looks up one saved selection

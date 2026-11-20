@@ -140,6 +140,23 @@ public sealed class MarkdownRoutesTests {
   }
 
   [Fact]
+  public async Task ClosingSessionRevokesHistoryAlreadyOpenOnAnotherPage() {
+    using var database = new TemporaryDatabase();
+    (Guid sessionId, TranscriptEntryRef entry) = Seed(database);
+    await using var server = new RunningServer(RunningServer.OptionsFor(database));
+    await server.WaitForReadyAsync();
+    using var stream = await OpenStreamAsync(server.Client);
+    Guid streamId = await ReadStreamIdAsync(stream);
+    string path = $"/api/events/{streamId}/markdown/{Guid.NewGuid()}";
+    JsonElement lease = await PostJsonAsync(server.Client, path, JsonSerializer.Serialize(new { sessionId, entry }, inputJson));
+    Guid generation = lease.GetProperty("manifest").GetProperty("generation").GetGuid();
+    string pieces = $"{path}/pieces?generation={generation}&index=0";
+    await AssertStatusAsync(server.Client, HttpMethod.Get, pieces, HttpStatusCode.OK);
+    await AssertStatusAsync(server.Client, HttpMethod.Post, $"/api/sessions/{sessionId}/close", HttpStatusCode.NoContent, "{}");
+    await AssertStatusAsync(server.Client, HttpMethod.Get, pieces, HttpStatusCode.Gone);
+  }
+
+  [Fact]
   public async Task ManagedImageBytesArePrivateAndScopedToTheOwningMessage() {
     using var database = new TemporaryDatabase();
     byte[] png = Convert.FromBase64String(

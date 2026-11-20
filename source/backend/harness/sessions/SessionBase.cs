@@ -26,6 +26,7 @@ public abstract class SessionBase {
   private readonly SessionNotifications notifications;
   private readonly SessionStatus status;
   private bool acceptingUserMessages = true;
+  private volatile bool closed;
   private bool needsAttention;
   private bool? hasAcceptedInput;
 
@@ -56,6 +57,7 @@ public abstract class SessionBase {
   public string? WorkingDirectory { get; private set; }
 
   internal SessionKind Kind { get; }
+  internal bool IsClosed => closed;
   internal QuestionDelivery Questions { get; }
   internal SessionExecutionRecorder Recorder => CurrentExecution?.Recorder
       ?? throw new InvalidOperationException("The session has no active execution recorder.");
@@ -63,11 +65,40 @@ public abstract class SessionBase {
   internal long HistoryRevision { get; private set; }
 
   // Caller holds the session lock.
-  internal bool IsAcceptingWork => acceptingUserMessages && !messageEditing.IsEditing;
+  internal bool IsAcceptingWork => !closed && acceptingUserMessages && !messageEditing.IsEditing;
   // Caller holds the session lock.
   internal bool CanStartWork => IsAcceptingWork && !needsAttention;
   // Caller holds the session lock.
-  internal bool CanAcceptEdits => acceptingUserMessages && !needsAttention;
+  internal bool CanAcceptEdits => !closed && acceptingUserMessages && !needsAttention;
+
+  internal void ThrowIfClosed() {
+    if (closed)
+      throw new KeyNotFoundException($"Session '{Id}' does not exist.");
+  }
+
+  private protected async Task<SessionCloseStatus> DeleteIfIdleAsync(Action ensureManagerOpen, CancellationToken cancellation) {
+    using var _ = await sessionLock.AcquireAsync(cancellation);
+    ensureManagerOpen();
+    cancellation.ThrowIfCancellationRequested();
+    if (closed)
+      return SessionCloseStatus.NotFound;
+    if (!CanStartWork || CurrentExecution is not null)
+      return SessionCloseStatus.Busy;
+
+    SessionSnapshot snapshot = ReadCurrentSnapshot();
+    if (snapshot.UnsettledExecutionId is not null || snapshot.AdmissionFenced || snapshot.StopRequested)
+      return SessionCloseStatus.Busy;
+
+    // The session gate serializes deletion with admission, edit, and settlement. Don't tear down
+    // live resources on a failed delete: the saved session would otherwise be left unusable.
+    if (!store.DeletePrimarySession(Id, CancellationToken.None))
+      return SessionCloseStatus.NotFound;
+
+    closed = true;
+    Questions.ForgetRecipient();
+    notifications.Close();
+    return SessionCloseStatus.Closed;
+  }
 
   // Caller holds the session lock.
   internal void ReplaceHistoryRevision(long revision) {
@@ -77,7 +108,7 @@ public abstract class SessionBase {
 
   // Caller holds the session lock.
   private void FenceUserMessages() {
-    if (acceptingUserMessages) {
+    if (!closed && acceptingUserMessages) {
       acceptingUserMessages = false;
       PublishChange();
     }
@@ -155,6 +186,7 @@ public abstract class SessionBase {
   public async Task<string?> TryChangeWorkingDirectoryAsync(string path) {
     string normalized = PreferenceManager.NormalizeWorkingDirectory(path);
     using (await sessionLock.AcquireAsync()) {
+      ThrowIfClosed();
       SessionSnapshot snapshot = ReadCurrentSnapshot();
       if (!CanChangeWorkingDirectory(snapshot))
         return null;
@@ -170,6 +202,8 @@ public abstract class SessionBase {
       CancellationToken cancellation = default) {
     ArgumentNullException.ThrowIfNull(observer);
     using var _ = await sessionLock.AcquireAsync(cancellation);
+    if (closed)
+      return notifications.SubscribeClosed(observer);
     SessionSnapshot stored = store.Snapshots.ReadPersisted(Id);
     status.Update(stored, CurrentExecution);
     return notifications.Subscribe(observer, watched,

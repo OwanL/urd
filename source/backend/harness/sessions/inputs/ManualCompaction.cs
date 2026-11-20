@@ -16,6 +16,7 @@ internal sealed class ManualCompaction(SessionBase session, UrdStore store, Asyn
     TaskCompletionSource? executionStart = null;
     CompactionReceipt? receipt;
     using (await sessionLock.AcquireAsync()) {
+      session.ThrowIfClosed();
       var admission = session.WriteToStore(() => store.Compactions.Start(session.Id, submission,
           session.CanStartWork && session.CurrentExecution is null && submission.ExpectedHistoryRevision == session.HistoryRevision));
       if (admission is null)

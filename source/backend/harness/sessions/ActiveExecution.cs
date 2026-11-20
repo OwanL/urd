@@ -73,6 +73,7 @@ internal sealed class ActiveExecution(SessionBase session, UrdStore store, Async
       throw new ArgumentException("An execution ID is required.", nameof(executionId));
 
     using (await sessionLock.AcquireAsync()) {
+      session.ThrowIfClosed();
       bool ownsExecution = IsCurrent(executionId);
       // Signal even if the Stop write fails. The driver owns joining the retained
       // callback task before settlement; this acknowledgement never means cleanup finished.

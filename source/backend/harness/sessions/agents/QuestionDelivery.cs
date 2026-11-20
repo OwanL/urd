@@ -120,6 +120,9 @@ internal sealed class QuestionDelivery(SessionBase session, UrdStore store, Asyn
     }
   }
 
+  // The session gate permanently fences new asks before this releases existing waiters.
+  internal void ForgetRecipient() => agentQuestions?.ForgetRecipient(session.Id);
+
   // Caller holds the session lock.
   internal void FinishExecution() {
     if (session.Kind == SessionKind.Subagent)

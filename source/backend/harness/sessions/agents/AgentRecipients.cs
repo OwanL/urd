@@ -11,9 +11,15 @@ internal sealed class AgentRecipients(UrdStore store, AgentQuestions questions, 
     foreach (SessionBase session in handles) {
       string? status = null;
       using IDisposable subscription = await session.SubscribeAsync(change => status ??= change.Status, watched: false, cancellation);
-      SessionSnapshot snapshot = await session.ReadSnapshotAsync(cancellation);
+      SessionSnapshot snapshot;
+      try {
+        snapshot = await session.ReadSnapshotAsync(cancellation);
+      } catch (KeyNotFoundException) when (session.IsClosed) {
+        continue;
+      }
       (string? title, bool generating) = store.Sessions.ReadAgentTitle(session.Id);
-      SessionRecord record = store.Sessions.Read(session.Id)!;
+      if (store.Sessions.Read(session.Id) is not { } record)
+        continue;
       string state = status switch {
         "waiting" => "waiting for background task",
         "running" or "compacting" => "active",
@@ -56,10 +62,12 @@ internal sealed class AgentRecipients(UrdStore store, AgentQuestions questions, 
 
   private async Task<(Guid? RecipientId, string? Error)> ResolveTitleAsync(string recipient, CancellationToken cancellation) {
     SessionBase[] handles = await registry.SnapshotAsync(cancellation);
-    List<(Guid Id, string? Title, bool Generating)> titled = [.. handles.Select(session => {
+    var titled = new List<(Guid Id, string? Title, bool Generating)>();
+    foreach (SessionBase session in handles) {
       (string? title, bool generating) = store.Sessions.ReadAgentTitle(session.Id);
-      return (session.Id, title, generating);
-    })];
+      if (!session.IsClosed)
+        titled.Add((session.Id, title, generating));
+    }
 
     RecipientLookup lookup = AgentAddresses.Match(AgentTitles.ForListing(titled), recipient);
     if (lookup.SessionId is { } matched)

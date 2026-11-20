@@ -39,5 +39,7 @@ public sealed class MessageMarkdownService : IAsyncDisposable {
 
   public void Invalidate(Guid sessionId) => scheduler.Invalidate(sessionId);
 
+  public void CloseSession(Guid sessionId) => scheduler.Invalidate(sessionId, revokeLeases: true);
+
   public ValueTask DisposeAsync() => scheduler.DisposeAsync();
 }

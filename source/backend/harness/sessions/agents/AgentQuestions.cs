@@ -256,14 +256,25 @@ internal sealed class AgentQuestions {
 
   // Closes one recipient's mailbox: further asks fail immediately and every remaining record
   // fails as unanswered. Completions are signalled after the lock releases.
-  internal void CloseRecipient(Guid recipientId) {
+  internal void CloseRecipient(Guid recipientId) => CloseRecipient(recipientId, forget: false);
+
+  // Closed primaries have no future admission path, so they don't need mailbox tombstones.
+  internal void ForgetRecipient(Guid recipientId) => CloseRecipient(recipientId, forget: true);
+
+  private void CloseRecipient(Guid recipientId, bool forget) {
     Question[] unsettled;
     lock (stateLock) {
       if (closed)
         return;
       delegations.Remove(recipientId);
-      Mailbox mailbox = GetOrCreate(recipientId);
-      mailbox.Closed = true;
+      Mailbox? mailbox;
+      if (forget) {
+        if (!mailboxes.Remove(recipientId, out mailbox))
+          return;
+      } else {
+        mailbox = GetOrCreate(recipientId);
+        mailbox.Closed = true;
+      }
       unsettled = [.. mailbox.Questions];
       foreach (Question question in unsettled)
         question.Settled = true;

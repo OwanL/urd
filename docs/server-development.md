@@ -131,6 +131,7 @@ provider calls.
 | Method and path | Request / successful response |
 | --- | --- |
 | POST `/api/sessions` | Empty JSON object `{}` → 201 `{sessionId}`; Location names its snapshot |
+| POST `/api/sessions/{sessionId}/close` | Empty JSON object `{}` → 204 after permanent closure; 404 if absent, 409 if busy. Does not stop an active execution. |
 | GET `/api/sessions?cursor=...` | Optional opaque string cursor → 200 `SessionIdPage` (`sessionIds`, `nextCursor`, optional first-page `latestLlmSelection`) |
 | POST `/api/sessions/{sessionId}/message-submissions` | `UserMessageSubmission` → 200 `UserMessageReceipt`, Accepted **or** Refused |
 | GET `/api/sessions/{sessionId}/message-submissions/{submissionId}` | 200 receipt or literal JSON `null`; 409 if an edit removed the input |
@@ -212,7 +213,7 @@ receipts have a refusal reason and null execution ID. Stop receipts and
 The vocabulary cleanup preserved saved IDs, revisions, SQL identifiers and decisions.
 The current schema stores frozen selection, transcript metadata, request usage, known
 send-attempt provenance and not-sent tracking. See [backend development](backend-development.md)
-for current schema 37 handling and the schema 36 upgrade baseline.
+for the current schema and the schema 36 upgrade baseline.
 Session routes retain
 their local admission gates, status mapping, no-store and read-cancellation rules. Historical
 wire checks covered the renamed receipt, Stop, snapshot and cursor fields and rejected legacy
@@ -255,7 +256,7 @@ compact command identities/hashes and usage remain. Removed Send receipts return
 than exposing deleted text or allowing an old Send to recreate it. History replacement does
 not undo external tool effects. There is no branch archive or undo.
 
-See [backend development](backend-development.md) for the current schema 37 and schema 36
+See [backend development](backend-development.md) for the current schema and schema 36
 upgrade baseline. Never reset or automatically activate a build against an active profile
 as part of verification.
 

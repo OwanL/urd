@@ -16,6 +16,9 @@ public sealed class PrimarySession : SessionBase {
           modelSelector, subagents) {
   }
 
+  internal Task<SessionCloseStatus> CloseIfIdleAsync(Action ensureManagerOpen, CancellationToken cancellation) =>
+      DeleteIfIdleAsync(ensureManagerOpen, cancellation);
+
   // Returns a saved acceptance/refusal, without waiting for the LLM answer.
   public Task<UserMessageReceipt> SubmitUserMessageAsync(UserMessageSubmission submission) => AdmitUserMessageAsync(submission);
 

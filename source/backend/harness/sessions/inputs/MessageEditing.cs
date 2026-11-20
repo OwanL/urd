@@ -32,6 +32,7 @@ internal sealed class MessageEditing(SessionBase session, UrdStore store, AsyncL
     Task<MessageEditReceipt> work;
     TaskCompletionSource? released = null;
     using (await sessionLock.AcquireAsync()) {
+      session.ThrowIfClosed();
       MessageEditReceipt? receipt = store.MessageEdits.ReadReceiptOrValidate(session.Id, submission);
       if (receipt is not null)
         return receipt;

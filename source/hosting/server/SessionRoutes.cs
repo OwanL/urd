@@ -17,6 +17,7 @@ internal static class SessionRoutes {
     routes.AddEndpointFilter(HandleRequestAsync);
     routes.MapGet("", (Delegate)((HttpContext http) => ListAsync(http, sessions)));
     routes.MapPost("", (Delegate)((HttpContext http) => CreateAsync(http, sessions)));
+    routes.MapPost("/{sessionId}/close", (HttpContext http, Guid sessionId) => CloseAsync(http, sessions, sessionId));
     routes.MapPost("/{sessionId}/message-submissions", (HttpContext http, Guid sessionId) =>
         SubmitAsync(http, sessions, sessionId));
     routes.MapGet("/{sessionId}/message-submissions/{submissionId}", (HttpContext http, Guid sessionId, Guid submissionId) =>
@@ -119,6 +120,20 @@ internal static class SessionRoutes {
     }
 
     return Results.Created($"/api/sessions/{session.Id:D}/snapshot", new { sessionId = session.Id });
+  }
+
+  private static async Task<IResult> CloseAsync(HttpContext http, SessionManager sessions, Guid sessionId) {
+    if (sessionId == Guid.Empty)
+      return Results.BadRequest();
+    await HttpJson.RequireEmptyAsync(http.Request, http.RequestAborted);
+
+    SessionCloseStatus closed = await sessions.ClosePrimaryAsync(sessionId, http.RequestAborted);
+    return closed switch {
+      SessionCloseStatus.Closed => Results.NoContent(),
+      SessionCloseStatus.Busy => Results.Conflict(),
+      SessionCloseStatus.NotFound => Results.NotFound(),
+      _ => throw new InvalidOperationException("Unknown session close status.")
+    };
   }
 
   private static async Task<IResult> SubmitAsync(HttpContext http, SessionManager sessions, Guid sessionId) {

@@ -23,6 +23,22 @@ internal sealed class SessionNotifications(Guid sessionId) {
     return subscription;
   }
 
+  internal IDisposable SubscribeClosed(Action<SessionChange> observer) {
+    var subscription = new SessionObserver(observer, watched: false, () => { });
+    subscription.Notify(new SessionChange(sessionId, version, "unavailable"));
+    subscription.Dispose();
+    return subscription;
+  }
+
+  internal void Close() {
+    version = checked(version + 1);
+    var unavailable = new SessionChange(sessionId, version, "unavailable");
+    foreach (SessionObserver observer in observers.Values) {
+      observer.Notify(unavailable);
+      observer.Dispose();
+    }
+  }
+
   internal void Publish(string status, string? publishedTitle) {
     version = checked(version + 1);
     if (observers.IsEmpty)

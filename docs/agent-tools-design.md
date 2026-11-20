@@ -321,8 +321,8 @@ public SessionManager(UrdStore store, Func<ProviderConnection, IChatClient> crea
 - Core builds the shared file queue and each chat's catalog, pending list, processes and tools.
   No settings means no tools. Each chat saves its working folder at creation (v1: the server's
   configured folder; per-chat choice later).
-- Shutdown kills chat processes. Final close does not exist yet; when built it kills the chat's
-  processes. Until then `&` processes live until Urd exits.
+- Final session closure kills that chat's remaining processes, including shell descendants left
+  by completed calls. Backend shutdown cleans up processes for all remaining chats.
 
 **Implementation notes from review.** `FileMutationQueue` keys paths by canonical identity
 (existing ancestor for new files, Windows case-insensitive, `/c/...` equals `C:\...`). Before

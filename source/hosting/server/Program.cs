@@ -113,6 +113,7 @@ internal static class Program {
       markdown = createMarkdown?.Invoke() ?? new MessageMarkdownService(new(
           Entries: 64, RetainedBytes: 384L * 1024 * 1024,
           PendingKeys: 32, Leases: 64, SmallMessageUtf8Bytes: 16 * 1024));
+      manager.SessionClosed += markdown.CloseSession;
       app = CreateApplication(options, manager, providers, eventHub, markdown, preferences, store,
           () => Volatile.Read(ref servedOrigin));
       var shutdownRequested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

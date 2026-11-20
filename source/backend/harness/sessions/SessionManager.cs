@@ -33,6 +33,7 @@ public sealed class SessionManager : IAsyncDisposable, ISubagentRunner, IAgentQu
   public Guid BootId { get; } = Guid.NewGuid();
 
   public event Action<Guid>? SessionCreated;
+  public event Action<Guid>? SessionClosed;
 
   // Notices are host-wide, ephemeral facts about the shared browser's first-use install.
 #pragma warning disable S3264 // BrowserSetupProgress invokes the subscribed callbacks.
@@ -79,21 +80,47 @@ public sealed class SessionManager : IAsyncDisposable, ISubagentRunner, IAgentQu
       SessionRecord record = store.Sessions.CreatePrimary(Guid.NewGuid(), workingDirectory, defaults.SubagentProviderConnectionIds);
       return registry.TrackPrimary(CreateSession(record));
     });
-    NotifySessionCreated(session.Id);
+    Notify(SessionCreated, session.Id);
     return session;
   }
 
-  public Task<PrimarySession> GetPrimaryAsync(Guid sessionId) => registry.RunOpenAsync(() => {
+  public Task<PrimarySession> GetPrimaryAsync(Guid sessionId) => registry.RunOpenAsync(() =>
+      FindPrimary(sessionId, rejectChild: true)
+          ?? throw new KeyNotFoundException($"Session '{sessionId}' does not exist."));
+
+  // Cancellation applies only before close is admitted; then Core owns deletion and cleanup.
+  public async Task<SessionCloseStatus> ClosePrimaryAsync(Guid sessionId, CancellationToken cancellation = default) {
+    if (sessionId == Guid.Empty)
+      throw new ArgumentException("Session ID cannot be empty.", nameof(sessionId));
+
+    PrimarySession? session = await registry.RunOpenAsync(() => FindPrimary(sessionId, rejectChild: false), cancellation);
+    if (session is null)
+      return SessionCloseStatus.NotFound;
+
+    SessionCloseStatus result = await session.CloseIfIdleAsync(registry.ThrowIfShuttingDown, cancellation);
+    if (result == SessionCloseStatus.Closed) {
+      Notify(SessionClosed, session.Id);
+      // Keep ownership until process cleanup succeeds, so racing shutdown can join it too.
+      await session.KillProcessesAsync();
+      await registry.UntrackPrimaryAsync(sessionId);
+    }
+    return result;
+  }
+
+  // Caller holds the registry lock. A closed handle can still be retained for process cleanup.
+  private PrimarySession? FindPrimary(Guid sessionId, bool rejectChild) {
     if (registry.FindPrimary(sessionId) is { } cached)
-      return cached;
-    if (registry.HasChild(sessionId))
+      return cached.IsClosed ? null : cached;
+
+    SessionRecord? record = store.Sessions.Read(sessionId);
+    if (record is null)
+      return null;
+    if (record.Kind == SessionKind.Primary)
+      return registry.TrackPrimary(CreateSession(record));
+    if (rejectChild)
       throw new InvalidOperationException($"Session '{sessionId}' is a subagent session, not a primary session.");
-    SessionRecord record = store.Sessions.Read(sessionId)
-        ?? throw new KeyNotFoundException($"Session '{sessionId}' does not exist.");
-    if (record.Kind != SessionKind.Primary)
-      throw new InvalidOperationException($"Session '{sessionId}' is a subagent session, not a primary session.");
-    return registry.TrackPrimary(CreateSession(record));
-  });
+    return null;
+  }
 
   public async Task<IReadOnlyList<Guid>?> SetSubagentProvidersAsync(Guid sessionId, IReadOnlyList<Guid>? connectionIds,
       CancellationToken cancellation = default) {
@@ -204,9 +231,8 @@ public sealed class SessionManager : IAsyncDisposable, ISubagentRunner, IAgentQu
   internal Task<bool> IsSubagentLiveAsync(Guid sessionId) => registry.IsChildAsync(sessionId);
   internal AgentQuestions Questions => agentQuestions;
 
-  // Subscribers should enqueue the notice without blocking; creation is already durable here.
-  private void NotifySessionCreated(Guid sessionId) {
-    Action<Guid>? callbacks = SessionCreated;
+  // The lifecycle transition is durable before subscribers see it.
+  private static void Notify(Action<Guid>? callbacks, Guid sessionId) {
     if (callbacks is null)
       return;
 
@@ -214,7 +240,7 @@ public sealed class SessionManager : IAsyncDisposable, ISubagentRunner, IAgentQu
       try {
         ((Action<Guid>)callback)(sessionId);
       } catch (Exception) {
-        // Session creation is already durable; subscriber failures do not undo it.
+        // Subscriber failures cannot undo an already committed change.
       }
     }
   }

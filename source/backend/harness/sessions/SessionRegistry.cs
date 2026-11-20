@@ -7,7 +7,7 @@ internal sealed class SessionRegistry {
   private readonly AsyncLock sessionsLock = new();
   private readonly Dictionary<Guid, PrimarySession> sessions = new();
   private readonly Dictionary<Guid, SubagentSession> children = new();
-  private TaskCompletionSource? shutdown;
+  private volatile TaskCompletionSource? shutdown;
 
   internal async Task<T> RunOpenAsync<T>(Func<T> work, CancellationToken cancellation = default) {
     using var held = await sessionsLock.AcquireAsync(cancellation);
@@ -16,12 +16,16 @@ internal sealed class SessionRegistry {
   }
 
   internal PrimarySession? FindPrimary(Guid id) => sessions.GetValueOrDefault(id);
-  internal bool HasChild(Guid id) => children.ContainsKey(id);
   internal PrimarySession TrackPrimary(PrimarySession session) {
     sessions.Add(session.Id, session);
     return session;
   }
   internal void TrackChild(SubagentSession child) => children.Add(child.Id, child);
+
+  internal async Task UntrackPrimaryAsync(Guid id) {
+    using var held = await sessionsLock.AcquireAsync();
+    sessions.Remove(id);
+  }
 
   internal async Task UntrackChildAsync(Guid id) {
     using var held = await sessionsLock.AcquireAsync();
@@ -35,35 +39,35 @@ internal sealed class SessionRegistry {
 
   internal async Task<SessionBase[]> SnapshotAsync(CancellationToken cancellation = default) {
     using var held = await sessionsLock.AcquireAsync(cancellation);
-    return [.. sessions.Values, .. children.Values];
+    return [.. sessions.Values.Where(session => !session.IsClosed), .. children.Values];
   }
 
   internal async Task<HashSet<Guid>> LiveIdsAsync(CancellationToken cancellation = default) {
     using var held = await sessionsLock.AcquireAsync(cancellation);
-    return [.. sessions.Keys, .. children.Keys];
+    return [.. sessions.Values.Where(session => !session.IsClosed).Select(session => session.Id), .. children.Keys];
   }
 
   internal async Task<bool> IsLiveAsync(Guid id, CancellationToken cancellation = default) {
     using var held = await sessionsLock.AcquireAsync(cancellation);
-    return sessions.ContainsKey(id) || children.ContainsKey(id);
+    return sessions.GetValueOrDefault(id) is { IsClosed: false } || children.ContainsKey(id);
   }
 
   internal Task<SessionBase?> FindOpenAsync(Guid id, CancellationToken cancellation = default) =>
-      RunOpenAsync<SessionBase?>(() => sessions.TryGetValue(id, out PrimarySession? primary)
+      RunOpenAsync<SessionBase?>(() => sessions.GetValueOrDefault(id) is { IsClosed: false } primary
           ? primary : children.GetValueOrDefault(id), cancellation);
 
   internal async Task<(TaskCompletionSource Shutdown, SessionBase[]? Handles)> BeginShutdownAsync(AgentQuestions questions) {
     using var held = await sessionsLock.AcquireAsync(CancellationToken.None);
     SessionBase[]? handles = null;
     if (shutdown is null) {
+      shutdown = new(TaskCreationOptions.RunContinuationsAsynchronously);
       questions.CloseAll();
       handles = [.. sessions.Values, .. children.Values];
-      shutdown = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
     return (shutdown, handles);
   }
 
-  private void ThrowIfShuttingDown() {
+  internal void ThrowIfShuttingDown() {
     if (shutdown is not null)
       throw new InvalidOperationException("Session shutdown has started for this manager.");
   }

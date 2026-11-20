@@ -65,6 +65,41 @@ public sealed class BackgroundExecutionStorageTests {
     Assert.Single(Completions(store, session));
   }
 
+  [Fact]
+  public void CompletionBatchFollowsDeliveryBoundaryRatherThanOriginatingOrRecipientCalls() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    var (session, execution, origin) = Start(store);
+    var identity = new ExecutionIdentity(session, execution, 0);
+    CompleteReply(store, identity, origin, "older-one", "older-two", "later");
+    foreach (string call in new[] { "older-one", "older-two", "later" })
+      Assert.True(store.Tools.TryStart(identity, origin, call, background: true));
+
+    LlmRequest foregroundRequest = store.Executions.CreateNextRequest(identity)!;
+    Assert.True(store.Executions.StartRequest(identity, foregroundRequest.RequestId));
+    CompleteReply(store, identity, foregroundRequest.RequestId, "foreground");
+    Assert.True(store.Tools.TryStart(identity, foregroundRequest.RequestId, "foreground"));
+    Assert.True(store.Tools.Complete(identity, foregroundRequest.RequestId, Result("foreground", "foreground result")));
+    Assert.True(store.Tools.Complete(identity, origin, Result("older-one", "first result")));
+    Assert.True(store.Tools.Complete(identity, origin, Result("older-two", "second result")));
+
+    LlmRequest recipient = store.Executions.CreateNextRequest(identity)!;
+    Assert.Equal(2, recipient.Messages.Count(IsCompletion));
+    Assert.True(store.Executions.StartRequest(identity, recipient.RequestId));
+    CompleteReply(store, identity, recipient.RequestId, "recipient-call");
+    Assert.True(store.Tools.TryStart(identity, recipient.RequestId, "recipient-call"));
+    Assert.True(store.Tools.Complete(identity, recipient.RequestId, Result("recipient-call", "recipient result")));
+    Assert.True(store.Tools.Complete(identity, origin, Result("later", "later result")));
+    LlmRequest next = store.Executions.CreateNextRequest(identity)!;
+    Assert.Single(next.Messages.Where(IsCompletion), message => message.Text.EndsWith("later result", StringComparison.Ordinal));
+
+    var batches = store.History.Read(session, new(TranscriptHistoryMode.Latest, 0)).Entries
+        .Where(entry => entry.Tool is not null && (entry.Tool.RequestId != origin || entry.Entry.Kind == TranscriptEntryKind.ToolCompletion))
+        .Select(entry => (entry.Tool!.CallId, entry.Tool.BatchedWithPrevious, entry.Tool.BatchedWithNext));
+    Assert.Equal([("foreground", false, true), ("older-one", true, true), ("older-two", true, false),
+        ("recipient-call", false, true), ("later", true, false)], batches);
+  }
+
   [Theory]
   [InlineData(false, false)]
   [InlineData(true, false)]
@@ -90,13 +125,16 @@ public sealed class BackgroundExecutionStorageTests {
     }
     object? owner = database.Scalar("SELECT claimed_request_id FROM execution_tool_completions;"); // raw-sql: No reader exposes recipient ownership; settlement must atomically release only never-attempted claims.
     Assert.Equal(attempted ? recipient.RequestId.ToString("D") : null, owner as string);
+    Assert.Equal(attempted, Assert.Single(Completions(store, session)).Tool!.BatchedWithPrevious);
     Guid nextExecution = Guid.NewGuid();
     var nextIdentity = new ExecutionIdentity(session, nextExecution, 0);
     store.UserMessages.Submit(session, 0,
         new(Guid.NewGuid(), 0, "deliberate continuation", TestLlmSelection.Default), true, nextExecution);
     LlmRequest next = store.Executions.CreateNextRequest(nextIdentity)!;
     Assert.Equal((attempted ? recipient.RequestId : next.RequestId).ToString("D"), database.Scalar("SELECT claimed_request_id FROM execution_tool_completions;")); // raw-sql: A new execution must reclaim the original event only when its earlier recipient was never attempted.
-    Assert.Equal(completionIdentity, Assert.Single(Completions(store, session)).Entry);
+    TranscriptEntryDescriptor reclaimed = Assert.Single(Completions(store, session));
+    Assert.Equal(completionIdentity, reclaimed.Entry);
+    Assert.Equal(attempted, reclaimed.Tool!.BatchedWithPrevious);
     Assert.Single(next.Messages, IsCompletion);
     Assert.Equal("deliberate continuation", next.Messages[^1].Text);
   }

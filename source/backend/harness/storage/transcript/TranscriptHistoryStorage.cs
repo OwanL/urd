@@ -44,12 +44,8 @@ internal sealed class TranscriptHistoryStorage(
         t.started, CASE WHEN t.call_id IS NOT NULL THEN t.interrupted ELSE 0 END AS interrupted,
         t.outcome AS tool_outcome, t.started_at, t.ended_at,
         CASE WHEN t.call_id IS NOT NULL THEN t.background ELSE 0 END AS background,
-        CASE WHEN m.role = 2 AND t.call_id IS NOT NULL AND previous.role = 2
-            AND previous.request_id = m.request_id AND previous_tool.call_id IS NOT NULL THEN 1 ELSE 0 END
-            AS batched_with_previous,
-        CASE WHEN m.role = 2 AND t.call_id IS NOT NULL AND next.role = 2
-            AND next.request_id = m.request_id AND next_tool.call_id IS NOT NULL THEN 1 ELSE 0 END
-            AS batched_with_next,
+        {{SameBatch("previous", "previous_tool", "m", "t")}} AS batched_with_previous,
+        {{SameBatch("m", "t", "next", "next_tool")}} AS batched_with_next,
         CASE WHEN t.call_id IS NOT NULL THEN t.arguments_excerpt ELSE NULL END AS arguments_excerpt,
         c.reason AS compaction_reason, c.tokens_before, c.tokens_after,
         i.input_id AS question_input_id, sender_title.title AS sender_title,
@@ -88,6 +84,25 @@ internal sealed class TranscriptHistoryStorage(
     LEFT JOIN session_prepass_title sender_title ON sender_title.session_id = i.sender_session_id
     ORDER BY m.ordinal {{(ascending ? "ASC" : "DESC")}};
     """;
+
+  // A call batch is visible before its next request exists. Extend its guide only to returns
+  // claimed by that next request, never to calls emitted by the recipient itself.
+  private static string SameBatch(string left, string leftTool, string right, string rightTool) => $$"""
+      CASE
+        WHEN {{leftTool}}.call_id IS NULL OR {{rightTool}}.call_id IS NULL THEN 0
+        WHEN {{left}}.role = 2 AND {{right}}.role = 2 THEN {{left}}.request_id = {{right}}.request_id
+        WHEN {{left}}.role = 2 AND {{right}}.role = 3 THEN EXISTS (
+            SELECT 1 FROM execution_tool_completions c
+            JOIN execution_requests recipient ON recipient.request_id = c.claimed_request_id
+            JOIN execution_requests origin ON origin.request_id = {{left}}.request_id
+            WHERE c.completion_id = {{right}}.message_id AND recipient.run_id = origin.run_id
+                AND recipient.request_index = origin.request_index + 1)
+        WHEN {{left}}.role = 3 AND {{right}}.role = 3 THEN EXISTS (
+            SELECT 1 FROM execution_tool_completions a JOIN execution_tool_completions b
+                ON b.claimed_request_id = a.claimed_request_id
+            WHERE a.completion_id = {{left}}.message_id AND b.completion_id = {{right}}.message_id)
+        ELSE 0 END
+      """;
 
   internal static TranscriptHistoryStorage Open(Database database, PrepassDetailsReader prepassDetails,
       SqliteTransaction transaction, Guid sessionId, long expectedRevision) {

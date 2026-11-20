@@ -161,8 +161,10 @@ was implemented separately; see the [browser guide](browser-development.md) for 
         working folder (sharing the tools' Windows path normalisation), without disk
         access; Reveal checks existence only when invoked.
       - Tool descriptors gain `background`, `batchedWithPrevious` and `batchedWithNext`.
-        The batch facts are derived on read (the adjacent transcript entry is a tool call
-        from the same response), not stored, so text between calls breaks the guide.
+        The guide connects adjacent authorized calls from one response and any adjacent
+        background returns claimed by its next request. Returns claimed together share
+        the guide even if their calls originated in different responses. Intervening text,
+        unclaimed returns and calls emitted by the receiving request break the guide.
       - Responses that carry descriptors (history pages and position windows) carry
         `toolLabels` keyed by `requestId/callId`; the browser stores each label with its
         descriptor.

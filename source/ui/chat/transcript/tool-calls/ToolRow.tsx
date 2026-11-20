@@ -1,15 +1,12 @@
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { Ref } from "preact";
 import type { TranscriptToolFacts, ToolCallLabel } from "../../../sessions/transcript/Messages.ts";
-import { Icon } from "../../../controls/Icon.tsx";
+import { Icon, type IconName } from "../../../controls/Icon.tsx";
 import { useToolRowInteractions } from "./ToolRowInteractions.tsx";
-import type { IconName } from "../../../controls/Icon.tsx";
 import {
   formatElapsedTime,
-  isToolCallFailed,
-  isToolCallRunning,
   toolElapsedMilliseconds,
-  toolRowTimeLabel,
+  toolRowStatus,
+  type ToolRowStatus,
 } from "./ToolRowPresentation.ts";
 import "./tool-row.css";
 
@@ -57,44 +54,16 @@ const iconLabels: Record<ToolCallLabel["icon"], string> = {
   generic: "Tool",
 };
 
-function ToolRowIcon({
-  name,
-  label,
-  running,
-  failed,
-  anchor,
-  expanded,
-  onClick,
-  onPointerEnter,
-  onPointerLeave,
-}: {
-  name: IconName;
-  label: string;
-  running: boolean;
-  failed: boolean;
-  anchor: Ref<HTMLButtonElement>;
-  expanded: boolean;
-  onClick: () => void;
-  onPointerEnter: (pointerType: string) => void;
-  onPointerLeave: () => void;
-}) {
-  return (
-    <button
-      ref={anchor}
-      type="button"
-      class={`tool-row-icon${running ? " is-running" : ""}${failed ? " is-failed" : ""}`}
-      aria-label={`Inspect tool call: ${failed ? "Failed: " : ""}${label}`}
-      aria-haspopup="dialog"
-      aria-expanded={expanded}
-      data-tool-icon={name}
-      onPointerEnter={(event) => onPointerEnter(event.pointerType)}
-      onPointerLeave={onPointerLeave}
-      onClick={onClick}
-    >
-      <Icon name={name} />
-    </button>
-  );
-}
+const statusLabels: Record<ToolRowStatus, string> = {
+  completed: "Completed",
+  failed: "Failed",
+  cancelled: "Cancelled",
+  interrupted: "Interrupted",
+  unknown: "Unknown",
+  "not-run": "Not run",
+  pending: "Pending",
+  running: "Running",
+};
 
 export function ToolRow({
   tool,
@@ -111,12 +80,12 @@ export function ToolRow({
 }) {
   const row = useRef<HTMLDivElement>(null);
   const icon = useRef<HTMLButtonElement>(null);
-  const titleNode = useRef<HTMLSpanElement>(null);
+  const titleNode = useRef<HTMLButtonElement>(null);
   const interactions = useToolRowInteractions();
-  const [intersecting, setIntersecting] = useState(false);
   const [now, setNow] = useState(() => Date.now());
-  const running = isToolCallRunning(tool, completion);
-  const failed = isToolCallFailed(tool);
+  const status = toolRowStatus(tool, completion);
+  const running = status === "running";
+  const failed = status === "failed";
   const payloadFinished = tool.isClosed && tool.outcome !== null;
   const iconName = completion ? "return" : label ? iconNames[label.icon] : "tool";
   const iconLabel = completion
@@ -129,13 +98,14 @@ export function ToolRow({
   const isMono = label?.icon === "terminal" || label?.icon === "generic";
   const measuredElapsed = toolElapsedMilliseconds(tool, now, completion);
   const timeText = measuredElapsed === null ? null : formatElapsedTime(measuredElapsed);
-  const timeLabel = toolRowTimeLabel(tool, timeText, completion);
+  const showBackground = tool.background && !completion;
+  const path = label?.path;
+  const titleClass = `tool-row-title${isMono ? " tool-row-mono" : ""}`;
   const batchedWithPrevious = tool.batchedWithPrevious;
   const batchedWithNext = tool.batchedWithNext;
   const rowClass = [
-    "tool-row",
+    "tool-row is-call-row",
     batchedWithPrevious || batchedWithNext ? "is-batched" : "",
-    completion ? "is-completion" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -153,25 +123,41 @@ export function ToolRow({
   }, [sourceUnmounted]);
 
   useEffect(() => {
+    const source = titleNode.current;
+    if (!source || !path) return;
+    return () => sourceUnmounted(source);
+  }, [path, sourceUnmounted]);
+
+  useEffect(() => {
     const node = row.current;
-    if (!node || !root) return;
-    if (typeof IntersectionObserver === "undefined") {
-      setIntersecting(true);
-      return;
+    if (!running || paused || !node || !root) return;
+    function startClock() {
+      setNow(Date.now());
+      return subscribeToToolRowClock(setNow);
     }
+    if (typeof IntersectionObserver === "undefined") return startClock();
+
+    let watching = true;
+    let stopClock: (() => void) | undefined;
     const observer = new IntersectionObserver(
-      ([intersection]) => setIntersecting(intersection?.isIntersecting ?? false),
+      ([intersection]) => {
+        if (!watching) return;
+        if (intersection?.isIntersecting) {
+          stopClock ??= startClock();
+        } else {
+          stopClock?.();
+          stopClock = undefined;
+        }
+      },
       { root },
     );
     observer.observe(node);
-    return () => observer.disconnect();
-  }, [root]);
-
-  useEffect(() => {
-    if (!running || paused || !intersecting) return;
-    setNow(Date.now());
-    return subscribeToToolRowClock(setNow);
-  }, [intersecting, paused, running]);
+    return () => {
+      watching = false;
+      observer.disconnect();
+      stopClock?.();
+    };
+  }, [paused, root, running]);
 
   return (
     <div
@@ -182,90 +168,104 @@ export function ToolRow({
       data-tool-request-id={tool.requestId}
       data-tool-call-id={tool.callId}
       data-tool-outcome={tool.outcome ?? ""}
+      data-tool-status={status}
       data-tool-background={tool.background}
       data-batched-with-previous={batchedWithPrevious}
       data-batched-with-next={batchedWithNext}
     >
-      <ToolRowIcon
-        name={iconName}
-        label={iconLabel}
-        running={running}
-        failed={failed}
-        anchor={icon}
-        expanded={icon.current ? interactions.isOpen(icon.current, "inspection") : false}
-        onClick={() => {
-          const source = icon.current;
-          if (source)
-            interactions.openInspection(
-              source,
-              tool.requestId,
-              tool.callId,
-              completion,
-              iconLabel,
-              payloadFinished,
-              true,
-            );
+      <button
+        ref={icon}
+        type="button"
+        class={`tool-row-icon${failed ? " is-failed" : ""}`}
+        aria-label={`Inspect ${iconLabel === title ? title : `${iconLabel}: ${title}`}, ${statusLabels[status]}`}
+        aria-haspopup="dialog"
+        aria-expanded={icon.current ? interactions.isOpen(icon.current, "inspection") : false}
+        data-tool-icon={iconName}
+        onClick={(event) => {
+          interactions.openInspection(
+            event.currentTarget,
+            tool.requestId,
+            tool.callId,
+            completion,
+            iconLabel,
+            payloadFinished,
+            true,
+          );
         }}
-        onPointerEnter={(pointerType) => {
-          const source = icon.current;
-          if (source && pointerType !== "touch")
-            interactions.scheduleInspection(
-              source,
-              tool.requestId,
-              tool.callId,
-              completion,
-              iconLabel,
-              payloadFinished,
-            );
+        onPointerEnter={(event) => {
+          if (event.pointerType === "touch") return;
+          interactions.scheduleInspection(
+            event.currentTarget,
+            tool.requestId,
+            tool.callId,
+            completion,
+            iconLabel,
+            payloadFinished,
+          );
         }}
-        onPointerLeave={() => {
-          const source = icon.current;
-          if (source) interactions.leaveSource(source);
-        }}
-      />
-      <span
-        ref={titleNode}
-        class={`tool-row-title${isMono ? " tool-row-mono" : ""}${completion ? " is-muted" : ""}`}
-        title={label?.path ?? undefined}
-        tabIndex={label?.path ? 0 : undefined}
-        aria-haspopup={label?.path ? "menu" : undefined}
-        aria-expanded={
-          label?.path && titleNode.current
-            ? interactions.isOpen(titleNode.current, "menu")
-            : undefined
-        }
-        data-tool-title=""
-        data-tool-path={label?.path ?? undefined}
-        onContextMenu={(event) => {
-          if (!label?.path) return;
-          event.preventDefault();
-          interactions.openFileMenu(event.currentTarget, label.path);
-        }}
-        onKeyDown={(event) => {
-          if (!label?.path) return;
-          if (event.key !== "ContextMenu" && !(event.key === "F10" && event.shiftKey)) return;
-          event.preventDefault();
-          interactions.openFileMenu(event.currentTarget, label.path);
-        }}
+        onPointerLeave={(event) => interactions.leaveSource(event.currentTarget)}
       >
-        {title}
-      </span>
-      {detail !== null && (
-        <span class={`tool-row-detail${isMono ? " tool-row-mono" : ""}`}>{detail}</span>
-      )}
-      {(timeText !== null || (tool.background && !completion)) && (
-        <span class={`tool-row-time${running ? " is-live" : ""}`}>
-          {tool.background && !completion && (
+        <Icon name={iconName} />
+      </button>
+      <div class="tool-row-content">
+        {path ? (
+          <button
+            ref={titleNode}
+            class={titleClass}
+            type="button"
+            title={path}
+            aria-label={`File actions: ${title}`}
+            aria-haspopup="menu"
+            aria-expanded={
+              titleNode.current ? interactions.isOpen(titleNode.current, "menu") : false
+            }
+            data-tool-title=""
+            data-tool-path={path}
+            onClick={(event) => interactions.openFileMenu(event.currentTarget, path)}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              interactions.openFileMenu(event.currentTarget, path);
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== "ContextMenu" && !(event.key === "F10" && event.shiftKey)) return;
+              event.preventDefault();
+              interactions.openFileMenu(event.currentTarget, path);
+            }}
+          >
+            {title}
+          </button>
+        ) : (
+          <span class={titleClass} data-tool-title="">
+            {title}
+          </span>
+        )}
+        {detail !== null && (
+          <span class={`tool-row-detail${isMono ? " tool-row-mono" : ""}`} title={detail}>
+            {detail}
+          </span>
+        )}
+      </div>
+      {(status !== "completed" || showBackground || timeText !== null) && (
+        <span class="tool-row-trailing">
+          {status !== "completed" && (
+            <span class={`tool-row-status${failed ? " is-failed" : ""}`}>
+              {statusLabels[status]}
+            </span>
+          )}
+          {showBackground && (
             <span
               class="tool-row-background"
               role="img"
-              aria-label={timeLabel ?? "Background call"}
+              aria-label="Background call"
+              title="Background call"
             >
               <Icon name="background" />
             </span>
           )}
           {timeText !== null && (
-            <span aria-hidden={tool.background && !completion}>{timeText}</span>
+            <span class="tool-row-time" title={`Duration: ${timeText}`}>
+              {timeText}
+            </span>
           )}
         </span>
       )}

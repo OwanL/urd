@@ -17,13 +17,24 @@ export function isToolCallFailed(
   return tool.outcome === "failed" && tool.started && !tool.interrupted;
 }
 
-export function isToolCallRunning(tool: TranscriptToolFacts, completion: boolean): boolean {
-  return (
-    !completion &&
-    tool.started &&
-    tool.outcome === null &&
-    !Number.isFinite(Date.parse(tool.endedAt ?? ""))
-  );
+export type ToolRowStatus =
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "interrupted"
+  | "unknown"
+  | "not-run"
+  | "pending"
+  | "running";
+
+export function toolRowStatus(tool: TranscriptToolFacts, completion: boolean): ToolRowStatus {
+  if (tool.interrupted) return tool.started ? "interrupted" : "not-run";
+  if (tool.outcome !== null) return tool.outcome;
+  if (tool.isClosed && !tool.started && !completion) return "not-run";
+  if (tool.isClosed || Number.isFinite(Date.parse(tool.endedAt ?? "")) || completion)
+    return "unknown";
+  if (!tool.started) return "pending";
+  return "running";
 }
 
 export function toolElapsedMilliseconds(
@@ -33,24 +44,23 @@ export function toolElapsedMilliseconds(
 ): number | null {
   const startedAt = Date.parse(tool.startedAt ?? "");
   if (!Number.isFinite(startedAt)) return null;
-  if (isToolCallRunning(tool, completion)) return Math.max(0, now - startedAt);
+  if (toolRowStatus(tool, completion) === "running") return Math.max(0, now - startedAt);
   const endedAt = Date.parse(tool.endedAt ?? "");
   return Number.isFinite(endedAt) ? Math.max(0, endedAt - startedAt) : null;
-}
-
-export function toolRowTimeLabel(
-  tool: Pick<TranscriptToolFacts, "background">,
-  elapsed: string | null,
-  completion: boolean,
-): string | null {
-  if (!tool.background || completion) return null;
-  return elapsed === null ? "Background call" : `Background call, elapsed ${elapsed}`;
 }
 
 export function formatElapsedTime(milliseconds: number): string | null {
   if (!Number.isFinite(milliseconds) || milliseconds < 5_000) return null;
   const seconds = Math.floor(milliseconds / 1_000);
   const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
   const remainingSeconds = seconds % 60;
+  const remainingMinutes = minutes % 60;
+  const remainingHours = hours % 24;
+  if (hours >= 24) {
+    const days = Math.floor(hours / 24);
+    return remainingHours === 0 ? `${days}d` : `${days}d ${remainingHours}h`;
+  }
+  if (hours > 0) return remainingMinutes === 0 ? `${hours}h` : `${hours}h ${remainingMinutes}m`;
   return minutes === 0 ? `${seconds}s` : `${minutes}m ${remainingSeconds}s`;
 }

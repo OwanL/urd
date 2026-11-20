@@ -7,10 +7,9 @@ import type {
 import {
   formatElapsedTime,
   isToolCallFailed,
-  isToolCallRunning,
   toolCallLabel,
   toolElapsedMilliseconds,
-  toolRowTimeLabel,
+  toolRowStatus,
 } from "../../../../chat/transcript/tool-calls/ToolRowPresentation.ts";
 
 const tool: TranscriptToolFacts = {
@@ -38,6 +37,9 @@ void test("formats elapsed time at the five-second threshold in whole units", ()
   assert.equal(formatElapsedTime(4_999), null);
   assert.equal(formatElapsedTime(5_999), "5s");
   assert.equal(formatElapsedTime(133_999), "2m 13s");
+  assert.equal(formatElapsedTime(3_723_000), "1h 2m");
+  assert.equal(formatElapsedTime(86_400_000), "1d");
+  assert.equal(formatElapsedTime(93_600_000), "1d 2h");
   assert.equal(formatElapsedTime(Number.NaN), null);
 });
 
@@ -51,20 +53,40 @@ void test("marks only started, non-interrupted tool errors as failures", () => {
   );
 });
 
-void test("runs live elapsed time until an end timestamp freezes it", () => {
-  assert.equal(isToolCallRunning(tool, false), true);
+void test("classifies tool lifecycle with interruption and outcome precedence", () => {
+  assert.equal(toolRowStatus(tool, false), "running");
+  assert.equal(toolRowStatus({ ...tool, started: false }, false), "pending");
+  assert.equal(
+    toolRowStatus({ ...tool, interrupted: true, outcome: "completed" }, false),
+    "interrupted",
+  );
+  assert.equal(
+    toolRowStatus({ ...tool, started: false, interrupted: true, outcome: "failed" }, false),
+    "not-run",
+  );
+  assert.equal(toolRowStatus({ ...tool, outcome: "completed" }, false), "completed");
+  assert.equal(toolRowStatus({ ...tool, outcome: "failed" }, false), "failed");
+  assert.equal(toolRowStatus({ ...tool, outcome: "cancelled" }, false), "cancelled");
+  assert.equal(toolRowStatus({ ...tool, started: false, isClosed: true }, false), "not-run");
+  assert.equal(toolRowStatus({ ...tool, started: false, isClosed: true }, true), "unknown");
+  assert.equal(toolRowStatus({ ...tool, isClosed: true }, false), "unknown");
+  assert.equal(toolRowStatus({ ...tool, endedAt: "1970-01-01T00:00:06.000Z" }, false), "unknown");
+  assert.equal(toolRowStatus(tool, true), "unknown");
+});
+
+void test("elapsed time follows lifecycle and freezes at the end timestamp", () => {
   assert.equal(toolElapsedMilliseconds(tool, 7_000, false), 7_000);
 
   const ended = { ...tool, endedAt: "1970-01-01T00:00:06.000Z" };
-  assert.equal(isToolCallRunning(ended, false), false);
   assert.equal(toolElapsedMilliseconds(ended, 10_000, false), 6_000);
-});
-
-void test("keeps background status accessible with and without elapsed time", () => {
-  assert.equal(toolRowTimeLabel({ background: true }, null, false), "Background call");
-  assert.equal(toolRowTimeLabel({ background: true }, "7s", false), "Background call, elapsed 7s");
-  assert.equal(toolRowTimeLabel({ background: true }, "2m 13s", true), null);
-  assert.equal(toolRowTimeLabel({ background: false }, "7s", false), null);
+  assert.equal(
+    toolElapsedMilliseconds({ ...tool, interrupted: true, endedAt: ended.endedAt }, 10_000, false),
+    6_000,
+  );
+  assert.equal(toolElapsedMilliseconds({ ...tool, interrupted: true }, 10_000, false), null);
+  assert.equal(toolElapsedMilliseconds({ ...tool, isClosed: true }, 10_000, false), null);
+  assert.equal(toolElapsedMilliseconds(ended, 10_000, true), 6_000);
+  assert.equal(toolElapsedMilliseconds(tool, 10_000, true), null);
 });
 
 void test("looks up call labels by request and call id", () => {

@@ -9,21 +9,14 @@ import {
   useState,
 } from "preact/hooks";
 import { requestJson } from "../http/Requests.ts";
-import { FolderPicker } from "../folder-browser/FolderPicker.tsx";
 import { PreferencesClient } from "../preferences/PreferencesClient.ts";
 import { usePreferences } from "../preferences/usePreferences.ts";
 import { ProviderClient } from "../providers/ProviderClient.ts";
 import { useModelOptions } from "../providers/models/useModelOptions.ts";
 import { ProviderSettings } from "../providers/settings/ProviderSettings.tsx";
-import { ProviderBucketSuggestions } from "../providers/settings/ProviderBucketSuggestions.tsx";
 import { useProviderSettings } from "../providers/settings/useProviderSettings.ts";
-import {
-  offerBucketsAfterRefresh,
-  saveBucketSuggestions,
-} from "../providers/settings/ProviderBucketSetup.ts";
-import type { BucketSetup } from "../providers/settings/ProviderSettingsTypes.ts";
-import type { ProviderConnection } from "../providers/ProviderConnection.ts";
-import { ModelPreferencesSettings } from "../settings/ModelPreferencesSettings.tsx";
+import { ModelBucketsPanel } from "../settings/ModelBucketsPanel.tsx";
+import { WorkingDirectorySetting } from "../settings/WorkingDirectorySetting.tsx";
 import "../settings/settings.css";
 import "./setup.css";
 
@@ -137,13 +130,7 @@ function Setup({ status, onComplete }: { status: SetupStatus; onComplete(): void
   );
   const [validated, setValidated] = useState(status);
   const [busy, setBusy] = useState(false);
-  const [resumedSuggestion, setResumedSuggestion] = useState<BucketSetup | null>(null);
-  const skippedCandidates = useRef<string | null>(null);
-  const suggestionRequest = useRef<AbortController | null>(null);
-  const bucketOperation = useRef(false);
-  const [suggestionRetry, setSuggestionRetry] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [picker, setPicker] = useState(false);
   const folderButton = useRef<HTMLButtonElement>(null);
   const providerClient = useMemo(() => new ProviderClient(new URL(window.location.href)), []);
   const preferenceClient = useMemo(() => new PreferencesClient(new URL(window.location.href)), []);
@@ -157,71 +144,6 @@ function Setup({ status, onComplete }: { status: SetupStatus; onComplete(): void
     models.providerReady,
     preferences.refresh,
   );
-  useEffect(() => () => suggestionRequest.current?.abort(), []);
-  const candidateKey = JSON.stringify(models.options.map(({ selection }) => selection));
-  const candidates = useMemo(() => {
-    const selections = JSON.parse(candidateKey) as { connection: ProviderConnection }[];
-    return [...new Map(selections.map(({ connection }) => [connection.id, connection])).values()];
-  }, [candidateKey]);
-  useEffect(() => {
-    if (step === 1 && providers.bucketSetup) providers.actions.skipBucketSuggestions();
-  }, [step, providers.bucketSetup, providers.actions]);
-  useEffect(() => {
-    if (step !== 1 || validated.bucketsConfigured || models.loading || models.refreshing) {
-      setResumedSuggestion(null);
-      return;
-    }
-    if (!candidates.length || skippedCandidates.current === candidateKey) {
-      setResumedSuggestion(null);
-      return;
-    }
-    const abort = new AbortController();
-    suggestionRequest.current = abort;
-    setResumedSuggestion({ phase: "loading" });
-    void (async () => {
-      let partial: BucketSetup | null = null;
-      let failed = false;
-      for (const connection of candidates) {
-        let result: BucketSetup | null = null;
-        await offerBucketsAfterRefresh(
-          connection,
-          Promise.resolve(true),
-          () => providerClient.getBucketSuggestions(connection.id, abort.signal),
-          () => !abort.signal.aborted,
-          (setup) => {
-            result = setup;
-          },
-        );
-        if (abort.signal.aborted) return;
-        const setup = result as BucketSetup | null;
-        if (setup?.phase === "offered") {
-          if (setup.proposal.assignments.length === 3) {
-            setResumedSuggestion(setup);
-            return;
-          }
-          partial ??= setup;
-        } else if (setup?.phase === "finished" && setup.error) failed = true;
-      }
-      setResumedSuggestion(
-        partial ??
-          (failed
-            ? { phase: "finished", message: "Could not load bucket suggestions.", error: true }
-            : null),
-      );
-    })();
-    return () => abort.abort();
-  }, [
-    step,
-    validated.bucketsConfigured,
-    models.loading,
-    models.refreshing,
-    candidates,
-    candidateKey,
-    providerClient,
-    suggestionRetry,
-  ]);
-  const suggestion = resumedSuggestion;
-  const savingSuggestion = suggestion?.phase === "saving";
   // The server validates each step again; this only avoids offering an action that must fail.
   const canContinue = [
     providers.connections.length > 0,
@@ -229,7 +151,7 @@ function Setup({ status, onComplete }: { status: SetupStatus; onComplete(): void
     validated.workingDirectoryConfigured,
   ][step];
   const next = async () => {
-    if (busy || savingSuggestion) return;
+    if (busy) return;
     setBusy(true);
     setError(null);
     try {
@@ -295,121 +217,22 @@ function Setup({ status, onComplete }: { status: SetupStatus; onComplete(): void
             initialScreen={validated.providerConfigured ? "overview" : "chooser"}
           />
         )}
-        {step === 1 && (
-          <>
-            {suggestion && (
-              <div class="provider-settings setup-bucket-suggestions">
-                <ProviderBucketSuggestions
-                  setup={suggestion}
-                  disabled={
-                    providers.pending !== null ||
-                    providers.uncertain ||
-                    preferences.pending ||
-                    !preferences.loaded
-                  }
-                  onSkip={() => {
-                    skippedCandidates.current = candidateKey;
-                    suggestionRequest.current?.abort();
-                    setResumedSuggestion(null);
-                  }}
-                  onConfirm={() => {
-                    if (
-                      bucketOperation.current ||
-                      preferences.pending ||
-                      !preferences.loaded ||
-                      providers.pending !== null ||
-                      providers.uncertain ||
-                      resumedSuggestion?.phase !== "offered"
-                    )
-                      return;
-                    bucketOperation.current = true;
-                    const proposal = resumedSuggestion.proposal;
-                    const request = suggestionRequest.current;
-                    setResumedSuggestion({ phase: "saving", proposal });
-                    void saveBucketSuggestions(
-                      () => providerClient.confirmBucketSuggestions(proposal),
-                      preferences.refresh,
-                      (setup) => {
-                        if (request && !request.signal.aborted) setResumedSuggestion(setup);
-                      },
-                    ).finally(() => {
-                      bucketOperation.current = false;
-                    });
-                  }}
-                />
-                {suggestion.phase === "finished" && suggestion.error && (
-                  <div class="provider-settings-actions">
-                    <button type="button" onClick={() => setSuggestionRetry((value) => value + 1)}>
-                      Retry suggestions
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-            <ModelPreferencesSettings
-              client={providerClient}
-              state={{
-                ...preferences,
-                pending: preferences.pending || savingSuggestion,
-                saveBucketModels: async (bucket, models) => {
-                  if (bucketOperation.current) return false;
-                  bucketOperation.current = true;
-                  try {
-                    return await preferences.saveBucketModels(bucket, models);
-                  } finally {
-                    bucketOperation.current = false;
-                  }
-                },
-              }}
-              view="buckets"
-              active
-            />
-          </>
-        )}
+        {step === 1 && <ModelBucketsPanel client={providerClient} state={preferences} active />}
         {step === 2 && (
-          <div class="setup-directory">
-            <p>New chats start in this folder.</p>
-            {validated.workingDirectoryConfigured && preferences.preferences?.workingDirectory ? (
-              <code>{preferences.preferences.workingDirectory}</code>
-            ) : (
-              <p>No folder selected.</p>
-            )}
-            <button
-              ref={folderButton}
-              type="button"
-              onClick={() => setPicker(true)}
-              disabled={!preferences.loaded || preferences.pending}
-            >
-              Choose folder
-            </button>
-            {preferences.error && (
-              <div role="alert">
-                {preferences.error}{" "}
-                {!preferences.loaded && (
-                  <button type="button" onClick={() => void preferences.refresh()}>
-                    Retry
-                  </button>
-                )}
-              </div>
-            )}
-            {picker && (
-              <FolderPicker
-                anchor={folderButton}
-                initialPath={preferences.preferences?.workingDirectory ?? null}
-                busy={preferences.pending}
-                feedback={preferences.errorFor("workingDirectory")}
-                onChoose={async (path) => {
-                  const saved = await preferences.saveWorkingDirectory(path);
-                  if (saved)
-                    setValidated((current) => ({ ...current, workingDirectoryConfigured: true }));
-                  return saved;
-                }}
-                onClose={(focus) => {
-                  setPicker(false);
-                  if (focus) folderButton.current?.focus();
-                }}
-              />
-            )}
+          <div class="general-settings">
+            <WorkingDirectorySetting
+              state={preferences}
+              buttonRef={folderButton}
+              emptyLabel="Not chosen"
+              resettable={false}
+              chosen={validated.workingDirectoryConfigured}
+              onChoose={async (path) => {
+                const saved = await preferences.saveWorkingDirectory(path);
+                if (saved)
+                  setValidated((current) => ({ ...current, workingDirectoryConfigured: true }));
+                return saved;
+              }}
+            />
           </div>
         )}
       </div>
@@ -422,7 +245,7 @@ function Setup({ status, onComplete }: { status: SetupStatus; onComplete(): void
         {step > 0 && (
           <button
             type="button"
-            disabled={busy || savingSuggestion}
+            disabled={busy}
             onClick={() => {
               setError(null);
               setStep(step - 1);
@@ -434,13 +257,7 @@ function Setup({ status, onComplete }: { status: SetupStatus; onComplete(): void
         <button
           class="setup-primary"
           type="button"
-          disabled={
-            !canContinue ||
-            busy ||
-            preferences.pending ||
-            providers.pending !== null ||
-            savingSuggestion
-          }
+          disabled={!canContinue || busy || preferences.pending || providers.pending !== null}
           onClick={() => void next()}
         >
           {busy ? "Checking…" : step === 2 ? "Finish" : "Next"}

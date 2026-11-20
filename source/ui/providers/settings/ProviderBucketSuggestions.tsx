@@ -6,8 +6,14 @@ export function ProviderBucketSuggestions({
   disabled,
   onSkip,
   onConfirm,
+  title = "Suggested model buckets",
+  confirmLabel = "Use suggested buckets",
+  skipLabel = "Skip",
 }: {
   setup: BucketSetup;
+  title?: string;
+  confirmLabel?: string;
+  skipLabel?: string;
   disabled: boolean;
   onSkip: () => void;
   onConfirm: () => void;
@@ -20,8 +26,8 @@ export function ProviderBucketSuggestions({
     );
 
   return (
-    <section class="provider-settings-group" aria-label="Suggested model buckets">
-      <h4>Suggested model buckets</h4>
+    <section class="provider-settings-group" aria-label={title}>
+      <h4>{title}</h4>
       {setup.phase === "loading" ? (
         <p role="status" class="provider-settings-secondary">
           Checking for suggestions…
@@ -49,11 +55,11 @@ export function ProviderBucketSuggestions({
             disabled={disabled || setup.phase === "saving"}
             onClick={onConfirm}
           >
-            {setup.phase === "saving" ? "Saving…" : "Use suggested buckets"}
+            {setup.phase === "saving" ? "Saving…" : confirmLabel}
           </button>
         )}
         <button type="button" disabled={setup.phase === "saving"} onClick={onSkip}>
-          Skip
+          {skipLabel}
         </button>
       </div>
     </section>

@@ -179,6 +179,9 @@
 .general-settings-feedback [role="alert"] {
   color: var(--danger);
 }
+.model-bucket-suggestions {
+  margin-bottom: 14px;
+}
 .preference-model-settings,
 .preference-protected-settings {
   display: grid;

@@ -1,11 +1,11 @@
 import type { RefObject } from "preact";
 import { useId, useState } from "preact/hooks";
-import { FolderPicker } from "../folder-browser/FolderPicker.tsx";
 import {
   compactionTriggerInput,
   parseCompactionTriggerInput,
 } from "../preferences/CompactionTriggerInput.ts";
 import type { PreferencesState } from "../preferences/usePreferences.ts";
+import { WorkingDirectorySetting } from "./WorkingDirectorySetting.tsx";
 
 interface GeneralSettingsProps {
   state: PreferencesState;
@@ -22,12 +22,12 @@ export function GeneralSettings({
   onCompactionTriggerDraftChange,
   onCompactionTriggerSaved,
 }: GeneralSettingsProps) {
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const workingDirectory = state.preferences?.workingDirectory ?? null;
-  const workingDirectoryError = state.errorFor("workingDirectory");
   const compactionTriggerTokenCount = state.preferences?.compactionTriggerTokenCount ?? null;
-  const generalError =
-    state.errorFor("workingDirectory") ?? state.errorFor("compactionTriggerTokenCount");
+  // Load failures apply to every preference; the working directory field already reports them.
+  const triggerError =
+    state.errorFor("compactionTriggerTokenCount") === state.errorFor("workingDirectory")
+      ? null
+      : state.errorFor("compactionTriggerTokenCount");
   const [triggerValidation, setTriggerValidation] = useState<string | null>(null);
   const [triggerSaving, setTriggerSaving] = useState(false);
   const [triggerSaved, setTriggerSaved] = useState(false);
@@ -65,31 +65,7 @@ export function GeneralSettings({
       aria-label="General"
       aria-busy={state.loading || state.pending || triggerSaving}
     >
-      <div class="general-settings-field">
-        <span>Working directory</span>
-        <code class="general-settings-path">{workingDirectory ?? "…"}</code>
-        <p class="general-settings-description">Used for new chats.</p>
-      </div>
-      <div class="general-settings-actions">
-        <button
-          ref={buttonRef}
-          type="button"
-          disabled={state.pending}
-          onClick={() => {
-            state.clearError();
-            setPickerOpen(true);
-          }}
-        >
-          Edit…
-        </button>
-        <button
-          type="button"
-          disabled={state.pending || !state.loaded || workingDirectory === null}
-          onClick={() => void state.saveWorkingDirectory(null)}
-        >
-          Reset to root
-        </button>
-      </div>
+      <WorkingDirectorySetting state={state} buttonRef={buttonRef} />
       <div class="general-settings-field compaction-trigger-setting" aria-busy={triggerSaving}>
         <label htmlFor={`${triggerId}-input`}>Compaction trigger (tokens)</label>
         <div class="compaction-trigger-control">
@@ -138,35 +114,9 @@ export function GeneralSettings({
           )}
           {triggerSaving && <p role="status">Saving…</p>}
           {triggerSaved && !triggerSaving && <p role="status">Saved.</p>}
+          {triggerError && <p role="alert">{triggerError}</p>}
         </div>
       </div>
-      {!pickerOpen && (
-        <div class="general-settings-feedback" aria-live="polite" aria-atomic="true">
-          {state.pendingFor === "workingDirectory" && <p>Saving…</p>}
-          {!state.pending && state.loading && <p>Loading…</p>}
-          {generalError && <p role="alert">{generalError}</p>}
-          {generalError && !state.loaded && (
-            <button type="button" onClick={() => void state.refresh()}>
-              Retry
-            </button>
-          )}
-        </div>
-      )}
-      {pickerOpen && (
-        <FolderPicker
-          anchor={buttonRef}
-          title="Default working directory"
-          initialPath={workingDirectory}
-          busy={state.pending}
-          feedback={workingDirectoryError && <p role="alert">{workingDirectoryError}</p>}
-          onChoose={state.saveWorkingDirectory}
-          onDraftChange={state.clearError}
-          onClose={(returnFocus) => {
-            setPickerOpen(false);
-            if (returnFocus) buttonRef.current?.focus({ preventScroll: true });
-          }}
-        />
-      )}
     </section>
   );
 }

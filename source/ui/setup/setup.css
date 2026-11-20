@@ -51,30 +51,6 @@
   padding: 0 20px 16px;
 }
 
-.setup-bucket-suggestions {
-  margin-bottom: 14px;
-}
-
-.setup-directory {
-  display: grid;
-  justify-items: start;
-  gap: 12px;
-}
-
-.setup-directory p {
-  margin: 0;
-  color: var(--text-secondary);
-}
-
-.setup-directory code {
-  max-width: 100%;
-  overflow-wrap: anywhere;
-}
-
-.setup-directory > button {
-  margin-top: 4px;
-}
-
 .setup-error {
   margin: 0;
   padding: 0 20px 12px;
@@ -90,8 +66,7 @@
   border-top: 1px solid var(--border-subtle);
 }
 
-.setup-actions button,
-.setup-directory > button {
+.setup-actions button {
   min-width: 72px;
   padding: 5px 12px;
   background: var(--surface-hover);

@@ -4,19 +4,17 @@ import type { MessageEditing } from "./message-editing/MessageEditing.ts";
 import { Composer } from "./composer/Composer.tsx";
 import { SubagentProviderControl } from "./composer/SubagentProviderControl.tsx";
 import { SessionIndicators } from "./composer/SessionIndicators.tsx";
-import { UsageOverview } from "../usage/UsageOverview.tsx";
 import { sameContextModel, type LlmSelection } from "../providers/LlmSelection.ts";
 import type { SessionClient } from "../sessions/SessionClient.ts";
 import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
-import { ModelBucketSetup } from "./ModelBucketSetup.tsx";
 import { preferenceSaveBlocks } from "../preferences/usePreferences.ts";
 import type { PreferencesState } from "../preferences/usePreferences.ts";
 import type { ProviderClient } from "../providers/ProviderClient.ts";
 import { PendingInputQueue } from "./PendingInputQueue.tsx";
 import { deriveChatStatus } from "./ChatStatus.ts";
-import type { ChatExecutionStatus } from "./ChatStatus.ts";
+import { ChatStatusDisplay } from "./ChatStatusDisplay.tsx";
+import { EmptyChatOverview } from "./EmptyChatOverview.tsx";
 import { Transcript } from "./transcript/Transcript.tsx";
-import { SessionWorkingDirectory } from "./working-directory/SessionWorkingDirectory.tsx";
 import { PendingResponseStatus } from "./prepass/PrepassRows.tsx";
 import type { ResponseStatusContext } from "./prepass/PrepassRows.tsx";
 import { unanchoredPrepass, uniqueModelNames } from "./prepass/PrepassPresentation.ts";
@@ -30,13 +28,6 @@ import type { ModelOptionsState } from "../providers/models/useModelOptions.ts";
 import "./chat.css";
 
 const efforts = ["none", "low", "medium", "high", "extraHigh"];
-const executionLabels: Record<Exclude<ChatExecutionStatus, null>, string> = {
-  stopping: "Stopping…",
-  running: "Running…",
-  accepted: "Accepted; awaiting session update.",
-  compacting: "Compacting…",
-};
-const settlementLabels = { failed: "Execution failed.", cancelled: "Cancelled." };
 
 interface ChatProps {
   client: SessionClient;
@@ -271,30 +262,25 @@ export function Chat({
             unavailable ? (
               <p>Session unavailable on this server.</p>
             ) : (showWorkingDirectory || workingDirectoryLocked) && snapshot ? (
-              <div class="empty-chat-overview">
-                <SessionWorkingDirectory
-                  client={client}
-                  sessionId={sessionId}
-                  workingDirectory={snapshot.workingDirectory}
-                  preferences={preferences}
-                  disabled={!ready}
-                  onGateChange={updateWorkingDirectoryGate}
-                  onSnapshot={acceptSnapshot}
-                  onRefresh={onRefresh}
-                />
-                <UsageOverview active={active && visible} refreshKey={refresh} />
-                {showWorkingDirectory && models.hasProviders && (
-                  <ModelBucketSetup
-                    preferences={preferences}
-                    models={models}
-                    disabled={!ready}
-                    onCompleteFocus={() => {
-                      if (composerInput.current?.getClientRects().length)
-                        composerInput.current.focus({ preventScroll: true });
-                    }}
-                  />
-                )}
-              </div>
+              <EmptyChatOverview
+                client={client}
+                sessionId={sessionId}
+                snapshot={snapshot}
+                preferences={preferences}
+                ready={ready}
+                onGateChange={updateWorkingDirectoryGate}
+                onSnapshot={acceptSnapshot}
+                onRefresh={onRefresh}
+                active={active}
+                visible={visible}
+                refresh={refresh}
+                showWorkingDirectory={showWorkingDirectory}
+                models={models}
+                onCompleteFocus={() => {
+                  if (composerInput.current?.getClientRects().length)
+                    composerInput.current.focus({ preventScroll: true });
+                }}
+              />
             ) : null
           }
         >
@@ -306,121 +292,33 @@ export function Chat({
             commands={commands}
             ready={ready}
           />
-          <div class="chat-status" aria-live="polite">
-            {error && <span class="inline-error">{error} </span>}
-            {workingDirectoryNotice && !showWorkingDirectory && (
-              <span class={workingDirectoryLocked ? "inline-error" : undefined}>
-                {workingDirectoryNotice}
-              </span>
-            )}
-            {readError && <button onClick={onRefresh}>Refresh</button>}
-            {provisioning && <span>{provisioning} </span>}
-            {state.admissionFenced && <span>Session admission is fenced. </span>}
-            {state.unsettledWhileFenced && <span>Unsettled execution. </span>}
-            {state.executionStatus && (
-              <span
-                class={
-                  state.executionStatus === "running" ? "chat-running-announcement" : undefined
-                }
-              >
-                {executionLabels[state.executionStatus]}{" "}
-              </span>
-            )}
-            {state.showStopRequested && <span>Stop requested. </span>}
-            {state.settlementStatus && (
-              <span class={state.settlementStatus === "failed" ? "inline-error" : undefined}>
-                {state.settlementStatus === "failed"
-                  ? snapshot?.lastSettlement?.error || settlementLabels.failed
-                  : settlementLabels.cancelled}{" "}
-              </span>
-            )}
-            {state.pendingStatus && (
-              <span>
-                {state.pendingStatus === "sending"
-                  ? "Sending…"
-                  : checking
-                    ? "Checking receipt…"
-                    : "Send uncertain."}{" "}
-                {state.pendingStatus === "uncertain" && (
-                  <>
-                    <button
-                      disabled={checking}
-                      onClick={() => {
-                        void commands.checkReceipt(sessionId);
-                      }}
-                    >
-                      Check receipt
-                    </button>
-                    <button
-                      disabled={!canPersist || checking || executionSettingsSaving}
-                      onClick={() => {
-                        void commands.retryOriginalSubmission(sessionId);
-                      }}
-                    >
-                      Retry original
-                    </button>
-                  </>
-                )}
-              </span>
-            )}
-            {chat.pendingContinuation && (
-              <span>
-                {chat.pendingContinuation.status === "sending"
-                  ? "Continuing… "
-                  : checkingContinuation
-                    ? "Checking Continue receipt… "
-                    : "Continue uncertain. "}
-                {chat.pendingContinuation.status === "uncertain" && (
-                  <>
-                    <button
-                      disabled={checkingContinuation}
-                      onClick={() => {
-                        void commands.checkContinuationReceipt(sessionId);
-                      }}
-                    >
-                      Check receipt
-                    </button>
-                    <button
-                      disabled={!canPersist || checkingContinuation || executionSettingsSaving}
-                      onClick={() => {
-                        void commands.retryOriginalContinuation(sessionId);
-                      }}
-                    >
-                      Retry original
-                    </button>
-                  </>
-                )}
-              </span>
-            )}
-            {chat.messageEdit?.submission && (
-              <span>
-                {chat.messageEdit.status === "saving" ? "Saving edit… " : "Save uncertain. "}
-                {chat.messageEdit.status === "uncertain" && (
-                  <>
-                    {chat.messageEdit.error && (
-                      <span class="inline-error">{chat.messageEdit.error} </span>
-                    )}
-                    <button
-                      onClick={() => {
-                        void messageEditing.reconcile(sessionId);
-                      }}
-                    >
-                      Check receipt
-                    </button>
-                    <button
-                      disabled={!canPersist}
-                      onClick={() => {
-                        void messageEditing.reconcile(sessionId, true);
-                      }}
-                    >
-                      Retry save
-                    </button>
-                  </>
-                )}
-              </span>
-            )}
-            {state.textError && <span class="inline-error">{state.textError}</span>}
-          </div>
+          <ChatStatusDisplay
+            error={error}
+            workingDirectoryNotice={workingDirectoryNotice}
+            showWorkingDirectory={showWorkingDirectory}
+            workingDirectoryLocked={workingDirectoryLocked}
+            readError={readError}
+            onRefresh={onRefresh}
+            provisioning={provisioning}
+            state={state}
+            settlementError={snapshot?.lastSettlement?.error}
+            continuationStatus={chat.pendingContinuation?.status ?? null}
+            editStatus={
+              chat.messageEdit?.submission
+                ? { status: chat.messageEdit.status, error: chat.messageEdit.error }
+                : null
+            }
+            checking={checking}
+            checkingContinuation={checkingContinuation}
+            canPersist={canPersist}
+            executionSettingsSaving={executionSettingsSaving}
+            onCheckReceipt={() => void commands.checkReceipt(sessionId)}
+            onRetrySubmission={() => void commands.retryOriginalSubmission(sessionId)}
+            onCheckContinuation={() => void commands.checkContinuationReceipt(sessionId)}
+            onRetryContinuation={() => void commands.retryOriginalContinuation(sessionId)}
+            onCheckEdit={() => void messageEditing.reconcile(sessionId)}
+            onRetryEdit={() => void messageEditing.reconcile(sessionId, true)}
+          />
         </Transcript>
       </MessageEditingContext.Provider>
       {chat.messageEdit &&

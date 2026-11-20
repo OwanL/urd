@@ -1,4 +1,9 @@
 import { CompactionCommands } from "./CompactionCommands.ts";
+import {
+  PendingInputRemovalCommands,
+  pendingInputRemovalKey,
+} from "./PendingInputRemovalCommands.ts";
+export { pendingInputRemovalKey } from "./PendingInputRemovalCommands.ts";
 import { SubmissionCommands } from "./SubmissionCommands.ts";
 import { RequestError } from "../http/RequestError.ts";
 import type {
@@ -76,18 +81,11 @@ type WorkspaceCommandClient = Pick<
   | "stopExecution"
 >;
 
-export function pendingInputRemovalKey(
-  sessionId: string,
-  executionId: string,
-  submissionId: string,
-): string {
-  return JSON.stringify([sessionId, executionId, submissionId]);
-}
-
 // Coordinates durable workspace commands without retrying uncertain dispatches.
 export class WorkspaceCommands {
   private readonly submissions: SubmissionCommands;
   private readonly compactions: CompactionCommands;
+  private readonly removals: PendingInputRemovalCommands;
   private readonly client: WorkspaceCommandClient;
   private readonly access: WorkspaceCommandAccess;
   private readonly changed: (state: WorkspaceCommandState) => void;
@@ -100,7 +98,6 @@ export class WorkspaceCommands {
   private readonly receiptReads = new Map<string, AbortController>();
   private readonly continuationChecks = new Set<string>();
   private readonly continuationReceiptReads = new Map<string, AbortController>();
-  private readonly pendingInputRemovals = new Set<string>();
   private readonly stoppingRequests = new Set<string>();
 
   constructor(
@@ -117,6 +114,13 @@ export class WorkspaceCommands {
     this.reportError = reportError;
     this.refreshSnapshot = refreshSnapshot;
     this.preferenceSaveBlocks = preferenceSaveBlocks;
+    this.removals = new PendingInputRemovalCommands(client, {
+      get: (key) => this.state.pendingInputRemovals[key],
+      set: (key, state) => this.setPendingInputRemoval(key, state),
+      knownExecutionId: (id) => this.access.read().chats[id]?.knownExecutionId ?? null,
+      observeSnapshot: (snapshot, knownWhenRead) => this.observeSnapshot(snapshot, knownWhenRead),
+      refreshSnapshot,
+    });
     this.compactions = new CompactionCommands(client, {
       get: (id) => this.state.compactions[id],
       set: (id, state) => this.setCompaction(id, state),
@@ -294,76 +298,17 @@ export class WorkspaceCommands {
     this.publish({ compactions: { ...this.state.compactions, [id]: compaction } });
   }
 
-  async removePendingInput(
+  removePendingInput(
     id: string,
     executionId: string,
     submissionId: string,
     canRemove: boolean,
   ): Promise<void> {
-    if (!canRemove || !id || !executionId || !submissionId) return;
-    const key = pendingInputRemovalKey(id, executionId, submissionId);
-    if (this.pendingInputRemovals.has(key) || this.state.pendingInputRemovals[key]) return;
-    this.pendingInputRemovals.add(key);
-    this.setPendingInputRemoval(key, {
-      sessionId: id,
-      executionId,
-      submissionId,
-      status: "removing",
-    });
-    try {
-      await this.client.removePendingInput(id, executionId, submissionId);
-    } catch {
-      // Reconcile the latest snapshot before offering another removal attempt.
-    }
-    this.setPendingInputRemoval(key, {
-      sessionId: id,
-      executionId,
-      submissionId,
-      status: "uncertain",
-    });
-    try {
-      await this.readPendingInputSnapshot(id, key);
-    } catch {
-      // Keep the action disabled until a later snapshot read resolves its state.
-    } finally {
-      this.pendingInputRemovals.delete(key);
-      this.refreshSnapshot();
-    }
+    return this.removals.remove(id, executionId, submissionId, canRemove);
   }
 
-  async checkPendingInputRemoval(
-    id: string,
-    executionId: string,
-    submissionId: string,
-  ): Promise<void> {
-    const key = pendingInputRemovalKey(id, executionId, submissionId);
-    const current = this.state.pendingInputRemovals[key];
-    if (current?.status !== "uncertain" || this.pendingInputRemovals.has(key)) return;
-    this.pendingInputRemovals.add(key);
-    this.setPendingInputRemoval(key, { ...current, status: "checking" });
-    try {
-      await this.readPendingInputSnapshot(id, key);
-    } catch {
-      this.setPendingInputRemoval(key, { ...current, status: "uncertain" });
-    } finally {
-      this.pendingInputRemovals.delete(key);
-      this.refreshSnapshot();
-    }
-  }
-
-  private async readPendingInputSnapshot(id: string, key: string): Promise<void> {
-    const knownWhenRead = this.access.read().chats[id]?.knownExecutionId ?? null;
-    const snapshot = await this.client.getSnapshot(id);
-    if (
-      snapshot.sessionId !== id ||
-      !Number.isSafeInteger(snapshot.historyRevision) ||
-      typeof snapshot.canChangeWorkingDirectory !== "boolean"
-    )
-      throw new TypeError("Invalid session snapshot after pending-input removal.");
-    this.observeSnapshot(snapshot, knownWhenRead);
-    // The view's snapshot owner refreshes after this read; publishing it here
-    // could overwrite a newer view or a receipt accepted while the GET was in flight.
-    this.setPendingInputRemoval(key, null);
+  checkPendingInputRemoval(id: string, executionId: string, submissionId: string): Promise<void> {
+    return this.removals.check(id, executionId, submissionId);
   }
 
   async stop(id: string, snapshot: SessionSnapshot, stopId: string | undefined): Promise<void> {

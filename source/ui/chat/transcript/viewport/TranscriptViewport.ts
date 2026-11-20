@@ -1,4 +1,16 @@
 import type { TranscriptEntryRef } from "../../../sessions/transcript/Messages.ts";
+import { TranscriptMeasurements } from "./TranscriptMeasurements.ts";
+import {
+  basePrefixHeight,
+  copyAndValidateGeometry,
+  copyAnchor,
+  isValidAnchor,
+  locateAtFraction,
+  sameEntry,
+  validAnchor,
+  validateMeasurement,
+  validateRank,
+} from "./TranscriptViewportGeometry.ts";
 
 export interface TranscriptSourceCursor {
   readonly segmentIndex: number;
@@ -75,25 +87,13 @@ export interface WeightedPositionLookup {
   readonly estimatedHeight: number;
 }
 
-interface HeightCorrection {
-  readonly rank: number;
-  readonly afterSourceCursor: TranscriptSourceCursor | null;
-  readonly correction: number;
-}
-
-interface GeometryPoint {
-  readonly rank: number;
-  readonly height: number;
-  readonly position: WeightedEntryPosition | null;
-}
-
 export class TranscriptViewport {
   private geometry: TranscriptViewportGeometry;
   private followsLatest = true;
   private anchor: TranscriptViewportAnchor | null = null;
   private width: number | null = null;
   private generation = 0;
-  private readonly measurements = new Map<string, HeightCorrection>();
+  private readonly measurements = new TranscriptMeasurements();
 
   constructor(geometry: TranscriptViewportGeometry) {
     this.geometry = copyAndValidateGeometry(geometry);
@@ -225,7 +225,7 @@ export class TranscriptViewport {
     if (!Number.isFinite(width) || width <= 0) throw new TypeError("Width must be positive.");
     if (width === this.width) return this.updateResult(0);
 
-    const removedCorrection = this.correctionBeforeAnchor(this.anchor);
+    const removedCorrection = this.measurements.beforeAnchor(this.anchor);
     this.width = width;
     this.measurements.clear();
     this.generation++;
@@ -234,7 +234,7 @@ export class TranscriptViewport {
 
   // Use after source/layout changes that make otherwise same-width measurements stale.
   invalidateMeasurements(): TranscriptViewportUpdate {
-    const removedCorrection = this.correctionBeforeAnchor(this.anchor);
+    const removedCorrection = this.measurements.beforeAnchor(this.anchor);
     this.measurements.clear();
     this.generation++;
     return this.updateResult(-removedCorrection);
@@ -250,22 +250,7 @@ export class TranscriptViewport {
     )
       return this.measurementResult(false, 0, 0);
 
-    const key = measurementKey(measurement.rank, measurement.afterSourceCursor);
-    const previous = this.measurements.get(key)?.correction ?? 0;
-    const correction = measurement.measuredHeight - measurement.estimatedHeight;
-    const change = correction - previous;
-    this.measurements.set(key, {
-      rank: measurement.rank,
-      afterSourceCursor: copyCursor(measurement.afterSourceCursor),
-      correction,
-    });
-
-    const scrollAdjustment = this.correctionPrecedesAnchor(
-      measurement.rank,
-      measurement.afterSourceCursor,
-    )
-      ? change
-      : 0;
+    const { correction, scrollAdjustment } = this.measurements.record(measurement, this.anchor);
     return this.measurementResult(true, correction, scrollAdjustment);
   }
 
@@ -275,13 +260,7 @@ export class TranscriptViewport {
     validateRank(toRankExclusive, this.geometry.entryCount, true);
     if (toRankExclusive < fromRank) throw new TypeError("Invalid measurement eviction range.");
 
-    let removedBeforeAnchor = 0;
-    for (const [key, measurement] of this.measurements) {
-      if (measurement.rank < fromRank || measurement.rank >= toRankExclusive) continue;
-      if (this.correctionPrecedesAnchor(measurement.rank, measurement.afterSourceCursor))
-        removedBeforeAnchor += measurement.correction;
-      this.measurements.delete(key);
-    }
+    const removedBeforeAnchor = this.measurements.evict(fromRank, toRankExclusive, this.anchor);
 
     if (toRankExclusive > fromRank) this.generation++;
     return this.updateResult(-removedBeforeAnchor);
@@ -289,7 +268,7 @@ export class TranscriptViewport {
 
   estimatedPrefixHeight(rank: number): number {
     validateRank(rank, this.geometry.entryCount, true);
-    return basePrefixHeight(this.geometry, rank) + this.correctionBeforeRank(rank);
+    return basePrefixHeight(this.geometry, rank) + this.measurements.beforeRank(rank);
   }
 
   positionFractionAtPixel(pixel: number): number {
@@ -299,105 +278,24 @@ export class TranscriptViewport {
     if (pixel >= totalHeight) return 1;
     const clamped = Math.max(0, Math.min(totalHeight, pixel));
     const location = this.locateAtFraction(clamped / totalHeight);
-    const sourceHeight = clamped - this.correctionBeforeRank(location.rankHint);
+    const sourceHeight = clamped - this.measurements.beforeRank(location.rankHint);
     return Math.max(0, Math.min(1, sourceHeight / this.geometry.estimatedTotalHeight));
   }
 
   locateAtFraction(fraction: number): WeightedPositionLookup {
     if (!Number.isFinite(fraction)) throw new TypeError("Position fraction must be finite.");
-    const clampedFraction = Math.min(1, Math.max(0, fraction));
-    const totalHeight = this.correctedTotalHeight();
-    const position = clampedFraction * totalHeight;
-    const points = this.correctedGeometryPoints();
-
-    if (this.geometry.entryCount === 0)
-      return {
-        estimatedRank: 0,
-        rankHint: 0,
-        around: null,
-        heightAfterAround: position,
-        estimatedHeight: totalHeight,
-      };
-
-    let lower = points[0]!;
-    let upper = points[points.length - 1]!;
-    for (let index = 1; index < points.length; index++) {
-      const point = points[index]!;
-      if (point.height < position) {
-        lower = point;
-        continue;
-      }
-      upper = point;
-      break;
-    }
-
-    const heightSpan = upper.height - lower.height;
-    const rankSpan = upper.rank - lower.rank;
-    const ratio = heightSpan <= 0 ? 0 : (position - lower.height) / heightSpan;
-    const estimatedRank = Math.min(
-      this.geometry.entryCount,
-      Math.max(0, lower.rank + ratio * rankSpan),
+    return locateAtFraction(this.geometry, fraction, this.correctedTotalHeight(), (rank) =>
+      this.measurements.beforeRank(rank),
     );
-    const rankHint = Math.min(this.geometry.entryCount - 1, Math.floor(estimatedRank));
-    const around = lower.position ?? upper.position;
-    return {
-      estimatedRank,
-      rankHint,
-      around: around === null ? null : copyEntry(around.entry),
-      heightAfterAround:
-        around === null ? position : position - this.estimatedPrefixHeight(around.rank),
-      estimatedHeight: totalHeight,
-    };
   }
 
   private correctedTotalHeight(): number {
-    let correction = 0;
-    for (const measurement of this.measurements.values()) correction += measurement.correction;
-    return Math.max(0, this.geometry.estimatedTotalHeight + correction);
-  }
-
-  private correctionBeforeRank(rank: number): number {
-    let correction = 0;
-    for (const measurement of this.measurements.values())
-      if (measurement.rank < rank) correction += measurement.correction;
-    return correction;
-  }
-
-  private correctionBeforeAnchor(anchor: TranscriptViewportAnchor | null): number {
-    if (anchor === null) return 0;
-
-    let correction = 0;
-    for (const measurement of this.measurements.values())
-      if (this.correctionPrecedesAnchor(measurement.rank, measurement.afterSourceCursor, anchor))
-        correction += measurement.correction;
-    return correction;
-  }
-
-  private correctionPrecedesAnchor(
-    rank: number,
-    afterSourceCursor: TranscriptSourceCursor | null,
-    anchor = this.anchor,
-  ): boolean {
-    if (anchor === null) return false;
-    if (rank < anchor.rank) return true;
-    if (rank > anchor.rank || afterSourceCursor === null || anchor.sourceCursor === null)
-      return false;
-    return compareCursor(afterSourceCursor, anchor.sourceCursor) <= 0;
+    return Math.max(0, this.geometry.estimatedTotalHeight + this.measurements.total());
   }
 
   private matchesKnownEntry(entry: TranscriptEntryRef, rank: number): boolean {
     const position = this.geometry.weightedPositions.find((item) => item.rank === rank);
     return position === undefined || sameEntry(position.entry, entry);
-  }
-
-  private correctedGeometryPoints(): GeometryPoint[] {
-    const points = baseGeometryPoints(this.geometry);
-    let previousHeight = 0;
-    return points.map((point) => {
-      const height = Math.max(previousHeight, point.height + this.correctionBeforeRank(point.rank));
-      previousHeight = height;
-      return { ...point, height };
-    });
   }
 
   private updateResult(scrollAdjustment: number): TranscriptViewportUpdate {
@@ -417,159 +315,4 @@ export class TranscriptViewport {
   ): TranscriptMeasurementResult {
     return { accepted, correction, scrollAdjustment, generation: this.generation };
   }
-}
-
-function basePrefixHeight(geometry: TranscriptViewportGeometry, rank: number): number {
-  const points = baseGeometryPoints(geometry);
-  for (let index = 1; index < points.length; index++) {
-    const upper = points[index]!;
-    if (upper.rank < rank) continue;
-    const lower = points[index - 1]!;
-    const span = upper.rank - lower.rank;
-    if (span <= 0) return upper.height;
-    const ratio = (rank - lower.rank) / span;
-    return lower.height + ratio * (upper.height - lower.height);
-  }
-  return geometry.estimatedTotalHeight;
-}
-
-function baseGeometryPoints(geometry: TranscriptViewportGeometry): GeometryPoint[] {
-  const { entryCount, estimatedTotalHeight, weightedPositions } = geometry;
-  if (entryCount === 0) return [{ rank: 0, height: 0, position: null }];
-
-  const points: GeometryPoint[] = [
-    { rank: 0, height: 0, position: null },
-    ...weightedPositions.map((position) => ({
-      rank: position.rank,
-      height: position.estimatedTop,
-      position,
-    })),
-    { rank: entryCount, height: estimatedTotalHeight, position: null },
-  ];
-  points.sort((left, right) => left.rank - right.rank);
-  return points;
-}
-
-function copyAndValidateGeometry(geometry: TranscriptViewportGeometry): TranscriptViewportGeometry {
-  if (
-    !Number.isSafeInteger(geometry.historyRevision) ||
-    geometry.historyRevision < 0 ||
-    !Number.isSafeInteger(geometry.positionVersion) ||
-    geometry.positionVersion < 0 ||
-    !Number.isSafeInteger(geometry.entryCount) ||
-    geometry.entryCount < 0 ||
-    !Number.isFinite(geometry.estimatedTotalHeight) ||
-    geometry.estimatedTotalHeight < 0 ||
-    (geometry.entryCount === 0 && geometry.estimatedTotalHeight !== 0)
-  )
-    throw new TypeError("Invalid transcript geometry.");
-
-  let previousRank = -1;
-  let previousTop = -1;
-  const weightedPositions = geometry.weightedPositions.map((position) => {
-    if (
-      !Number.isSafeInteger(position.rank) ||
-      position.rank < 0 ||
-      position.rank >= geometry.entryCount ||
-      position.rank <= previousRank ||
-      !Number.isFinite(position.estimatedTop) ||
-      position.estimatedTop < previousTop ||
-      position.estimatedTop > geometry.estimatedTotalHeight ||
-      (position.rank === 0 && position.estimatedTop !== 0) ||
-      position.entry.historyRevision !== geometry.historyRevision
-    )
-      throw new TypeError("Invalid weighted transcript position.");
-    previousRank = position.rank;
-    previousTop = position.estimatedTop;
-    return { ...position, entry: copyEntry(position.entry) };
-  });
-
-  return { ...geometry, weightedPositions };
-}
-
-function validAnchor(
-  anchor: TranscriptViewportAnchor | null,
-  geometry: TranscriptViewportGeometry,
-): TranscriptViewportAnchor | null {
-  if (anchor === null) return null;
-  if (!isValidAnchor(anchor, geometry))
-    throw new TypeError("Fallback anchor does not belong to the new history revision.");
-  return copyAnchor(anchor);
-}
-
-function isValidAnchor(
-  anchor: TranscriptViewportAnchor,
-  geometry: TranscriptViewportGeometry,
-): boolean {
-  const weightedPosition = geometry.weightedPositions.find(
-    (position) => position.rank === anchor.rank,
-  );
-  return (
-    anchor.entry.historyRevision === geometry.historyRevision &&
-    Number.isSafeInteger(anchor.rank) &&
-    anchor.rank >= 0 &&
-    anchor.rank < geometry.entryCount &&
-    (weightedPosition === undefined || sameEntry(weightedPosition.entry, anchor.entry)) &&
-    Number.isFinite(anchor.viewportOffset) &&
-    (anchor.sourceCursor === null || isValidCursor(anchor.sourceCursor))
-  );
-}
-
-function validateMeasurement(measurement: TranscriptMeasurement): void {
-  validateRank(measurement.rank, Number.MAX_SAFE_INTEGER, false);
-  if (
-    !Number.isSafeInteger(measurement.generation) ||
-    measurement.generation < 0 ||
-    !Number.isFinite(measurement.estimatedHeight) ||
-    measurement.estimatedHeight < 0 ||
-    !Number.isFinite(measurement.measuredHeight) ||
-    measurement.measuredHeight < 0 ||
-    (measurement.afterSourceCursor !== null && !isValidCursor(measurement.afterSourceCursor))
-  )
-    throw new TypeError("Invalid transcript measurement.");
-}
-
-function validateRank(rank: number, maximum: number, allowEnd: boolean): void {
-  if (!Number.isSafeInteger(rank) || rank < 0 || (allowEnd ? rank > maximum : rank >= maximum))
-    throw new TypeError("Transcript rank is out of range.");
-}
-
-function isValidCursor(cursor: TranscriptSourceCursor): boolean {
-  return (
-    Number.isSafeInteger(cursor.segmentIndex) &&
-    cursor.segmentIndex >= 0 &&
-    Number.isSafeInteger(cursor.utf8Offset) &&
-    cursor.utf8Offset >= 0
-  );
-}
-
-function compareCursor(left: TranscriptSourceCursor, right: TranscriptSourceCursor): number {
-  return left.segmentIndex - right.segmentIndex || left.utf8Offset - right.utf8Offset;
-}
-
-function measurementKey(rank: number, cursor: TranscriptSourceCursor | null): string {
-  return cursor === null ? `${rank}:end` : `${rank}:${cursor.segmentIndex}:${cursor.utf8Offset}`;
-}
-
-function copyCursor(cursor: TranscriptSourceCursor | null): TranscriptSourceCursor | null {
-  return cursor === null ? null : { ...cursor };
-}
-
-function copyEntry(entry: TranscriptEntryRef): TranscriptEntryRef {
-  return { ...entry };
-}
-
-function copyAnchor(anchor: TranscriptViewportAnchor | null): TranscriptViewportAnchor | null {
-  return anchor === null
-    ? null
-    : { ...anchor, entry: copyEntry(anchor.entry), sourceCursor: copyCursor(anchor.sourceCursor) };
-}
-
-function sameEntry(left: TranscriptEntryRef, right: TranscriptEntryRef): boolean {
-  return (
-    left.executionId === right.executionId &&
-    left.entryId === right.entryId &&
-    left.kind === right.kind &&
-    left.historyRevision === right.historyRevision
-  );
 }

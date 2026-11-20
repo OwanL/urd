@@ -47,6 +47,14 @@ export function windowCoversFraction(window: TranscriptPositionWindow, fraction:
   return !before && !after;
 }
 
+export function visibleEntryElements(root: HTMLElement): HTMLElement[] {
+  const bounds = root.getBoundingClientRect();
+  return [...root.querySelectorAll<HTMLElement>("[data-transcript-entry]")].filter((row) => {
+    const rect = row.getBoundingClientRect();
+    return rect.bottom > bounds.top && rect.top < bounds.bottom;
+  });
+}
+
 export function visibleRows(
   rows: readonly PositionedRow[],
   viewport: TranscriptViewport,

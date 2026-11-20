@@ -91,10 +91,13 @@
   text-underline-offset: 3px;
 }
 
+.tooltip-anchor:has(> .jump-latest) {
+  position: absolute;
+  bottom: 12px;
+  left: 20px;
+}
+
 .jump-latest {
-  align-self: flex-end;
-  flex: none;
-  margin: 4px 20px 12px;
   width: 34px;
   height: 34px;
   border: 1px solid var(--border-subtle);

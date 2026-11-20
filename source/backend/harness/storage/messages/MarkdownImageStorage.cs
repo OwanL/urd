@@ -16,24 +16,36 @@ internal sealed class MarkdownImageStorage(Database database, string directory) 
 
   internal void SaveImage(ExecutionIdentity execution, Guid responseId, MarkdownImageTarget target,
       string? workingDirectory) {
-    ToolImageReference reference;
+    DataContent? image;
     try {
-      if (Capture(target.Destination, workingDirectory) is not { } image)
-        return;
-      reference = files.Save(image);
+      image = Capture(target.Destination, workingDirectory);
     } catch (Exception failure) when (UnavailableFile(failure)) {
       return;
     }
+    if (image is null)
+      return;
 
-    database.Write(transaction => database.Execute(transaction, $"""
-      INSERT INTO markdown_images (message_ordinal, image_key, file_hash, media_type, byte_length)
-      SELECT m.ordinal, $key, $hash, $media, $length
-      FROM execution_messages m JOIN sessions s ON s.session_id = m.session_id
-      WHERE m.session_id = $session AND m.run_id = $run AND m.message_id = $message
-          AND m.role = {(int)TranscriptEntryKind.Text} AND m.history_revision = $revision AND s.history_revision = $revision
-      ON CONFLICT DO NOTHING;
-      """, ExecutionSql.Parameters(execution, ("$message", responseId), ("$key", target.Key),
-        ("$hash", reference.Hash), ("$media", reference.MediaType), ("$length", reference.ByteLength))));
+    database.Write(transaction => {
+      long? ordinal = database.Scalar<long?>(transaction, $"""
+        SELECT m.ordinal FROM execution_messages m JOIN sessions s ON s.session_id = m.session_id
+        WHERE m.session_id = $session AND m.run_id = $run AND m.message_id = $message
+            AND m.role = {(int)TranscriptEntryKind.Text} AND m.history_revision = $revision AND s.history_revision = $revision;
+        """, ExecutionSql.Parameters(execution, ("$message", responseId)));
+      if (ordinal is null)
+        return 0;
+
+      ToolImageReference reference;
+      try {
+        reference = files.Save(image);
+      } catch (Exception failure) when (UnavailableFile(failure)) {
+        return 0;
+      }
+      return database.Execute(transaction, """
+        INSERT INTO markdown_images (message_ordinal, image_key, file_hash, media_type, byte_length)
+        VALUES ($ordinal, $key, $hash, $media, $length) ON CONFLICT DO NOTHING;
+        """, ("$ordinal", ordinal), ("$key", target.Key), ("$hash", reference.Hash),
+          ("$media", reference.MediaType), ("$length", reference.ByteLength));
+    });
   }
 
   internal DataContent? Read(Guid sessionId, MessageRef message, string key) {
@@ -51,34 +63,6 @@ internal sealed class MarkdownImageStorage(Database database, string directory) 
       return reference is null ? null : files.Read(reference);
     } catch (Exception failure) when (UnavailableFile(failure)) {
       return null;
-    }
-  }
-
-  // Only called while the host exclusively owns the data directory, before any readers or imports.
-  internal void RemoveUnreferencedFiles() {
-    try {
-      if (!Directory.Exists(directory) || File.GetAttributes(directory).HasFlag(FileAttributes.ReparsePoint))
-        return;
-      foreach (string path in Directory.EnumerateFiles(directory))
-        RemoveIfUnreferenced(path);
-    } catch (Exception failure) when (UnavailableFile(failure)) {
-      // Best effort. An orphan is not part of the readable transcript.
-    }
-  }
-
-  private void RemoveIfUnreferenced(string path) {
-    string name = Path.GetFileName(path);
-    bool published = MarkdownImageTarget.IsKey(name);
-    bool interrupted = name.Length == 102 && name[0] == '.' && name[65] == '.'
-        && name.EndsWith(".tmp", StringComparison.Ordinal) && MarkdownImageTarget.IsKey(name[1..65])
-        && Guid.TryParseExact(name[66..98], "N", out _);
-    if (!interrupted && (!published || database.Read(transaction => database.Scalar<bool>(transaction,
-        "SELECT EXISTS (SELECT 1 FROM markdown_images WHERE file_hash = $hash);", ("$hash", name)))))
-      return;
-    try {
-      File.Delete(path);
-    } catch (Exception failure) when (UnavailableFile(failure)) {
-      // A later exclusive startup can retry a locked file.
     }
   }
 

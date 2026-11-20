@@ -4,7 +4,88 @@ namespace Urd.Core.Storage;
 
 // Creates or upgrades the durable schema before storage is opened to callers.
 internal static class DatabaseSchema {
-  private const int SchemaVersion = 37;
+  private const int SchemaVersion = 38;
+
+  private const string ClosedUsageSchema = """
+      CREATE TABLE closed_session_usage (
+          session_id TEXT PRIMARY KEY NOT NULL,
+          first_started_at TEXT NOT NULL,
+          last_started_at TEXT NOT NULL,
+          last_finished_at TEXT,
+          cost_nano_usd INTEGER NOT NULL CHECK (cost_nano_usd >= 0),
+          requests INTEGER NOT NULL CHECK (requests > 0),
+          estimated_requests INTEGER NOT NULL,
+          unknown_requests INTEGER NOT NULL,
+          errors INTEGER NOT NULL,
+          input_tokens INTEGER,
+          output_tokens INTEGER,
+          reasoning_tokens INTEGER,
+          total_tokens INTEGER
+      ) STRICT;
+      -- Global totals retain start-time attribution, but not request or session identities.
+      CREATE TABLE closed_usage_totals (
+          started_at TEXT NOT NULL,
+          provider TEXT NOT NULL,
+          model TEXT NOT NULL,
+          purpose TEXT NOT NULL,
+          cost_nano_usd INTEGER NOT NULL CHECK (cost_nano_usd >= 0),
+          requests INTEGER NOT NULL CHECK (requests > 0),
+          estimated_requests INTEGER NOT NULL,
+          unknown_requests INTEGER NOT NULL,
+          PRIMARY KEY (started_at, provider, model, purpose)
+      ) STRICT, WITHOUT ROWID;
+      CREATE VIEW open_usage_totals AS
+      SELECT session_id, started_at, provider, model, purpose, COALESCE(cost_nano_usd, 0) AS cost_nano_usd,
+          1 AS requests, is_estimate AS estimated_requests,
+          CASE WHEN cost_nano_usd IS NULL OR problem IS NOT NULL THEN 1 ELSE 0 END AS unknown_requests,
+          CASE WHEN finished_at IS NULL THEN 1 ELSE 0 END AS active_requests
+      FROM usage_requests;
+      CREATE VIEW global_usage_totals AS
+      SELECT started_at, provider, model, purpose, cost_nano_usd, requests, estimated_requests, unknown_requests,
+          active_requests FROM open_usage_totals
+      UNION ALL
+      SELECT started_at, provider, model, purpose, cost_nano_usd, requests, estimated_requests, unknown_requests,
+          0 FROM closed_usage_totals;
+      """;
+
+  private const string ExecutionInputsTable = """
+      CREATE TABLE execution_inputs (
+          ordinal INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id TEXT NOT NULL REFERENCES sessions(session_id),
+          input_id TEXT NOT NULL,
+          run_id TEXT NOT NULL REFERENCES execution_runs(run_id),
+          request_id TEXT REFERENCES execution_requests(request_id),
+          outcome INTEGER CHECK (outcome IN (0, 1, 2)),
+          not_sent INTEGER NOT NULL DEFAULT 0 CHECK (not_sent IN (0, 1)),
+          provenance INTEGER NOT NULL DEFAULT 0 CHECK (provenance IN (0, 1, 2, 3)), -- human, agent question, inherited context, assignment
+          -- Attribution belongs to the recipient's history, even after the sender closes.
+          sender_session_id TEXT,
+          UNIQUE (session_id, input_id),
+          FOREIGN KEY (session_id, input_id) REFERENCES input_decisions(session_id, input_id),
+          CHECK ((provenance = 0 AND sender_session_id IS NULL)
+              OR (provenance IN (1, 2, 3) AND sender_session_id IS NOT NULL))
+      ) STRICT;
+      """;
+
+  private const string ExecutionInputsIndexes = """
+      CREATE INDEX pending_execution_inputs ON execution_inputs(run_id, ordinal) WHERE request_id IS NULL AND outcome IS NULL;
+      CREATE INDEX nonterminal_execution_inputs ON execution_inputs(run_id) WHERE outcome IS NULL;
+      CREATE INDEX execution_inputs_request_order ON execution_inputs(request_id, ordinal) WHERE request_id IS NOT NULL;
+      CREATE INDEX execution_inputs_not_sent_order ON execution_inputs(session_id, ordinal) WHERE not_sent = 1;
+      CREATE TRIGGER execution_inputs_known_sender BEFORE INSERT ON execution_inputs
+      WHEN NEW.sender_session_id IS NOT NULL BEGIN
+          SELECT RAISE(ABORT, 'Unknown sender session')
+          WHERE NOT EXISTS (SELECT 1 FROM sessions WHERE session_id = NEW.sender_session_id);
+      END;
+      CREATE TRIGGER execution_inputs_known_sender_update BEFORE UPDATE OF sender_session_id ON execution_inputs
+      WHEN NEW.sender_session_id IS NOT NULL AND NEW.sender_session_id IS NOT OLD.sender_session_id BEGIN
+          SELECT RAISE(ABORT, 'Unknown sender session')
+          WHERE NOT EXISTS (SELECT 1 FROM sessions WHERE session_id = NEW.sender_session_id);
+      END;
+      """;
+
+  private const string SessionTreeIndex = "CREATE INDEX sessions_children ON sessions(parent_session_id);";
+
   // Each entry upgrades its source version to the next one. Schema 36 is the baseline.
   private static readonly Dictionary<int, string> migrations = new() {
     [36] = """
@@ -12,6 +93,17 @@ internal static class DatabaseSchema {
             singleton INTEGER PRIMARY KEY CHECK (singleton = 1)
         ) STRICT;
         INSERT INTO setup_completion (singleton) VALUES (1);
+        """,
+    [37] = $$"""
+        ALTER TABLE execution_inputs RENAME TO previous_execution_inputs;
+        {{ExecutionInputsTable}}
+        INSERT INTO execution_inputs SELECT * FROM previous_execution_inputs;
+        DELETE FROM sqlite_sequence WHERE name = 'execution_inputs';
+        UPDATE sqlite_sequence SET name = 'execution_inputs' WHERE name = 'previous_execution_inputs';
+        DROP TABLE previous_execution_inputs;
+        {{ExecutionInputsIndexes}}
+        {{SessionTreeIndex}}
+        {{ClosedUsageSchema}}
         """
   };
 
@@ -68,6 +160,7 @@ internal static class DatabaseSchema {
       ) STRICT;
       CREATE INDEX usage_requests_session_time ON usage_requests(session_id, started_at);
       CREATE INDEX usage_requests_time ON usage_requests(started_at);
+      {{ClosedUsageSchema}}
       CREATE TABLE sessions (
           session_id TEXT NOT NULL PRIMARY KEY,
           history_revision INTEGER NOT NULL CHECK (history_revision >= 0),
@@ -83,6 +176,7 @@ internal static class DatabaseSchema {
               OR (kind = 1 AND parent_session_id IS NOT NULL AND parent_session_id <> session_id
                   AND owning_call_id IS NOT NULL AND length(owning_call_id) > 0))
       ) STRICT;
+      {{SessionTreeIndex}}
       CREATE TABLE session_starting_context (
           session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
           boundary_id TEXT NOT NULL,
@@ -219,21 +313,8 @@ internal static class DatabaseSchema {
           is_final INTEGER NOT NULL CHECK (is_final IN (0, 1)),
           PRIMARY KEY (request_id, chunk_index)
       ) STRICT;
-      CREATE TABLE execution_inputs (
-          ordinal INTEGER PRIMARY KEY AUTOINCREMENT,
-          session_id TEXT NOT NULL REFERENCES sessions(session_id),
-          input_id TEXT NOT NULL,
-          run_id TEXT NOT NULL REFERENCES execution_runs(run_id),
-          request_id TEXT REFERENCES execution_requests(request_id),
-          outcome INTEGER CHECK (outcome IN (0, 1, 2)),
-          not_sent INTEGER NOT NULL DEFAULT 0 CHECK (not_sent IN (0, 1)),
-          provenance INTEGER NOT NULL DEFAULT 0 CHECK (provenance IN (0, 1, 2, 3)), -- human, agent question, inherited context, assignment
-          sender_session_id TEXT REFERENCES sessions(session_id),
-          UNIQUE (session_id, input_id),
-          FOREIGN KEY (session_id, input_id) REFERENCES input_decisions(session_id, input_id),
-          CHECK ((provenance = 0 AND sender_session_id IS NULL)
-              OR (provenance IN (1, 2, 3) AND sender_session_id IS NOT NULL))
-      ) STRICT;
+      {{ExecutionInputsTable}}
+      {{ExecutionInputsIndexes}}
       CREATE TABLE execution_messages (
           ordinal INTEGER PRIMARY KEY AUTOINCREMENT,
           session_id TEXT NOT NULL REFERENCES sessions(session_id),
@@ -498,10 +579,6 @@ internal static class DatabaseSchema {
       CREATE INDEX execution_runs_terminal_order ON execution_runs(session_id, ordinal DESC) WHERE outcome IS NOT NULL;
       CREATE UNIQUE INDEX one_active_execution ON execution_runs(session_id) WHERE outcome IS NULL;
       CREATE UNIQUE INDEX one_unfinished_request ON execution_requests(run_id) WHERE outcome IS NULL;
-      CREATE INDEX pending_execution_inputs ON execution_inputs(run_id, ordinal) WHERE request_id IS NULL AND outcome IS NULL;
-      CREATE INDEX nonterminal_execution_inputs ON execution_inputs(run_id) WHERE outcome IS NULL;
-      CREATE INDEX execution_inputs_request_order ON execution_inputs(request_id, ordinal) WHERE request_id IS NOT NULL;
-      CREATE INDEX execution_inputs_not_sent_order ON execution_inputs(session_id, ordinal) WHERE not_sent = 1;
       CREATE INDEX execution_messages_history_order ON execution_messages(session_id, history_revision, ordinal DESC);
       CREATE INDEX execution_messages_request_order ON execution_messages(request_id, role, first_chunk_index);
       PRAGMA user_version = {{SchemaVersion}};

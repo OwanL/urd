@@ -214,7 +214,6 @@ internal sealed class AuxiliaryConversationStorage(Database database, ToolResult
     ArgumentNullException.ThrowIfNull(result);
     if (!Enum.IsDefined(result.Outcome))
       throw new ArgumentOutOfRangeException(nameof(result));
-    string json = toolResults.Write(result.Output);
     string? error = result.Output.IsError ? result.Output.Text[..Math.Min(result.Output.Text.Length, 1024)] : null;
 
     return database.Write(transaction => {
@@ -232,6 +231,7 @@ internal sealed class AuxiliaryConversationStorage(Database database, ToolResult
       if (!canSave)
         return false;
 
+      string json = toolResults.Write(result.Output);
       return database.Execute(transaction, """
         UPDATE auxiliary_tools SET outcome = $outcome, result_json = $result, error = $error, ended_at = $ended
         WHERE conversation_id = $conversation AND request_id = $request AND call_id = $call

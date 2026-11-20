@@ -11,12 +11,12 @@ public sealed class DatabaseSchemaTests {
   public void FreshDatabaseCreatesAndReopensCurrentSchema() {
     using var database = new TemporaryDatabase();
     using (UrdStore store = UrdStore.Open(database.Path)) {
-      Assert.Equal(37L, database.Scalar("PRAGMA user_version;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
+      Assert.Equal(38L, database.Scalar("PRAGMA user_version;")); // raw-sql: fresh open must initialize the current schema version
       store.Sessions.CreatePrimary(Guid.NewGuid());
     }
 
     using UrdStore reopened = UrdStore.Open(database.Path);
-    Assert.Equal(37L, database.Scalar("PRAGMA user_version;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
+    Assert.Equal(38L, database.Scalar("PRAGMA user_version;")); // raw-sql: reopening must retain the current schema version
     Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM sessions;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
     Assert.Equal(1L, database.Scalar("SELECT \"notnull\" FROM pragma_table_info('execution_runs') WHERE name = 'created_at';")); // raw-sql: current schema creation, rejection or constraint is the subject under test
     Assert.Contains("strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
@@ -33,12 +33,12 @@ public sealed class DatabaseSchemaTests {
     Guid session = Guid.NewGuid();
     using (UrdStore store = UrdStore.Open(database.Path))
       store.Sessions.CreatePrimary(session);
-    // Schema 37 only adds setup_completion, so removing it recreates the populated v36 schema.
+    RecreateSchema37(database);
     database.Execute("DROP TABLE setup_completion; PRAGMA user_version = 36;"); // raw-sql: recreate the schema 36 baseline
 
     using UrdStore upgraded = UrdStore.Open(database.Path);
     Assert.True(upgraded.IsSetupComplete());
-    Assert.Equal(37L, database.Scalar("PRAGMA user_version;")); // raw-sql: upgraded version
+    Assert.Equal(38L, database.Scalar("PRAGMA user_version;")); // raw-sql: successful schema-38 migration must advance the version
     Assert.Equal(1L, database.Scalar($"SELECT COUNT(*) FROM sessions WHERE session_id = '{session:D}';")); // raw-sql: existing data survives
   }
 
@@ -48,6 +48,7 @@ public sealed class DatabaseSchemaTests {
     Guid session = Guid.NewGuid();
     using (UrdStore store = UrdStore.Open(database.Path))
       store.Sessions.CreatePrimary(session);
+    RecreateSchema37(database);
     // Introduce a conflicting object into the otherwise populated v36 baseline.
     database.Execute("DROP TABLE setup_completion; CREATE VIEW setup_completion AS SELECT 'preserved' AS value; PRAGMA user_version = 36;");
 
@@ -55,6 +56,36 @@ public sealed class DatabaseSchemaTests {
     Assert.Equal(36L, database.Scalar("PRAGMA user_version;")); // raw-sql: failed upgrade retains version
     Assert.Equal("preserved", database.Scalar("SELECT value FROM setup_completion;")); // raw-sql: failed upgrade retains data
     Assert.Equal(1L, database.Scalar($"SELECT COUNT(*) FROM sessions WHERE session_id = '{session:D}';")); // raw-sql: existing session survives
+  }
+
+  [Fact]
+  public void Schema37UpgradePreservesSenderAttributionAndInputOrdinalHighWater() {
+    using var database = new TemporaryDatabase();
+    Guid sender = Guid.NewGuid(), recipient = Guid.NewGuid(), input = Guid.NewGuid(), run = Guid.NewGuid();
+    using (UrdStore store = UrdStore.Open(database.Path)) {
+      store.Sessions.CreatePrimary(sender);
+      store.Sessions.CreatePrimary(recipient);
+      Assert.True(store.UserMessages.Submit(recipient, 0, new(input, 0, "retained question", TestLlmSelection.Default),
+          true, run, provenance: InputProvenance.AgentQuestion, senderSessionId: sender).NewlyAccepted);
+    }
+    RecreateSchema37(database);
+    database.Execute("""
+      UPDATE sqlite_sequence SET seq = 99 WHERE name = 'execution_inputs';
+      CREATE VIEW closed_session_usage AS SELECT 'conflict' AS value;
+      """);
+    Assert.Throws<SqliteException>(() => UrdStore.Open(database.Path));
+    Assert.Equal(37L, database.Scalar("PRAGMA user_version;")); // raw-sql: failed upgrade must retain the schema version
+    Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM pragma_foreign_key_list('execution_inputs') WHERE \"from\" = 'sender_session_id';")); // raw-sql: rollback must restore the old sender foreign key
+    Assert.Equal(99L, database.Scalar("SELECT seq FROM sqlite_sequence WHERE name = 'execution_inputs';")); // raw-sql: rollback must preserve the input ordinal high-water mark
+    database.Execute("DROP VIEW closed_session_usage;");
+
+    using UrdStore upgraded = UrdStore.Open(database.Path);
+    Assert.Equal(38L, database.Scalar("PRAGMA user_version;")); // raw-sql: successful retry must advance the schema version
+    Assert.False(upgraded.IsSetupComplete());
+    Assert.True(upgraded.DeletePrimarySession(sender));
+    Assert.Equal(sender.ToString("D"), database.Scalar($"SELECT sender_session_id FROM execution_inputs WHERE input_id = '{input:D}';")); // raw-sql: sender attribution must survive deletion across the migrated foreign key
+    Assert.Equal(99L, database.Scalar("SELECT seq FROM sqlite_sequence WHERE name = 'execution_inputs';")); // raw-sql: migration must preserve the input ordinal high-water mark
+    Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM pragma_foreign_key_check;")); // raw-sql: rebuilt tables must satisfy all foreign keys
   }
 
   [Fact]
@@ -139,13 +170,13 @@ public sealed class DatabaseSchemaTests {
   [Fact]
   public void NewerDatabaseIsRejectedWithoutDowngrade() {
     using var database = new TemporaryDatabase();
-    database.Execute("CREATE TABLE retained (value TEXT NOT NULL); INSERT INTO retained VALUES ('preserved'); PRAGMA user_version = 38;");
+    database.Execute("CREATE TABLE retained (value TEXT NOT NULL); INSERT INTO retained VALUES ('preserved'); PRAGMA user_version = 39;");
 
     NotSupportedException error = Assert.Throws<NotSupportedException>(() => UrdStore.Open(database.Path));
 
     Assert.Contains("newer Urd build", error.Message, StringComparison.OrdinalIgnoreCase);
     Assert.DoesNotContain("delete", error.Message, StringComparison.OrdinalIgnoreCase);
-    Assert.Equal(38L, database.Scalar("PRAGMA user_version;")); // raw-sql: newer schema must not be downgraded
+    Assert.Equal(39L, database.Scalar("PRAGMA user_version;")); // raw-sql: newer schema must not be downgraded
     Assert.Equal("preserved", database.Scalar("SELECT value FROM retained;")); // raw-sql: rejection must preserve newer database contents
   }
 
@@ -222,6 +253,27 @@ public sealed class DatabaseSchemaTests {
           call_id, tool_name)
       VALUES ('{session:D}', 0, '{run:D}', 2, '{Guid.NewGuid():D}', '{request:D}', NULL, 'missing-call-id');
       """));
+  }
+
+  // Reverse the isolated v38 changes to exercise the previous shape with normal seeded data.
+  private static void RecreateSchema37(TemporaryDatabase database) {
+    string inputs = Assert.IsType<string>(database.Scalar("SELECT sql FROM sqlite_schema WHERE name = 'execution_inputs';")); // raw-sql: reconstruct the previous schema for the migration fixture
+    var indexes = database.ReadRows("SELECT sql FROM sqlite_schema WHERE type = 'index' AND tbl_name = 'execution_inputs' AND sql IS NOT NULL;",
+        row => row.GetString(0));
+    database.Execute($"""
+      PRAGMA foreign_keys = ON;
+      ALTER TABLE execution_inputs RENAME TO newer_inputs;
+      {inputs.Replace("sender_session_id TEXT,", "sender_session_id TEXT REFERENCES sessions(session_id),", StringComparison.Ordinal)};
+      INSERT INTO execution_inputs SELECT * FROM newer_inputs;
+      DROP TABLE newer_inputs;
+      {string.Join(";\n", indexes)};
+      DROP INDEX sessions_children;
+      DROP VIEW global_usage_totals;
+      DROP VIEW open_usage_totals;
+      DROP TABLE closed_usage_totals;
+      DROP TABLE closed_session_usage;
+      PRAGMA user_version = 37;
+      """);
   }
 
   private static SqliteConnection OpenConnection(TemporaryDatabase database) {

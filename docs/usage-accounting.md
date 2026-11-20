@@ -40,11 +40,11 @@ them from schema 36 onward. Use isolated profiles for verification, never an act
 
 The detailed ledger supports accounting while a session is open and remains
 independent of transcript edits. Final closure has a separate retention boundary:
-keep only a compact usage summary (for example, tokens, estimated cost, time and
-errors), not the session's per-request ledger as a closed-session analytics archive
-or its conversation/tool payloads. Exact summary fields and cleanup timing remain
-open. This is the agreed retention requirement, not a claim that the current close
-path already compacts or removes request records.
+the delete transaction replaces the closed chat and its helpers' detailed request records
+with a compact session summary (times, token counts, cost and error counts). Global totals
+retain start time, provider, model, purpose and numeric amounts, but no session, execution
+or request identity. Closing a chat therefore neither erases costs from their original
+reporting windows nor leaves a readable conversation or per-session request archive.
 
 ## Pricing and uncertainty
 

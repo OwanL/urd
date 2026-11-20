@@ -97,12 +97,16 @@ internal sealed class UsageStorage(Database database) {
     ValidateRange(sessionId, from, to);
     (string where, (string Name, object? Value)[] parameters) = BuildFilter(sessionId, from, to);
     return database.Read(transaction => {
-      UsageTotals totals = ReadTotals(transaction, where, parameters);
+      if (sessionId is Guid id && ReadClosedTotals(transaction, id, from, to) is { } closed)
+        return new UsageSummary(closed, [], [], []);
+
+      string source = sessionId is null ? "global_usage_totals" : "open_usage_totals";
+      UsageTotals totals = ReadTotals(transaction, source, where, parameters);
       if (!detail)
         return new UsageSummary(totals, [], [], []);
 
-      IReadOnlyList<UsageBreakdown> breakdown = ReadBreakdown(transaction, where, parameters);
-      IReadOnlyList<UsagePoint> history = ReadHistory(transaction, where, parameters, breakdown);
+      IReadOnlyList<UsageBreakdown> breakdown = ReadBreakdown(transaction, source, where, parameters);
+      IReadOnlyList<UsagePoint> history = ReadHistory(transaction, source, where, parameters, breakdown);
       IReadOnlyList<UsageRequest> recent = ReadRecent(transaction, where, parameters);
       return new UsageSummary(totals, breakdown, history, recent);
     });
@@ -194,27 +198,34 @@ internal sealed class UsageStorage(Database database) {
     return (conditions.Count == 0 ? string.Empty : "WHERE " + string.Join(" AND ", conditions), [.. parameters]);
   }
 
-  private UsageTotals ReadTotals(SqliteTransaction transaction, string where,
+  // Closed sessions retain lifetime totals, not data from which partial ranges could be reconstructed.
+  private UsageTotals? ReadClosedTotals(SqliteTransaction transaction, Guid sessionId, DateTimeOffset? from,
+      DateTimeOffset? to) => database.QuerySingleOrDefault(transaction, """
+      SELECT cost_nano_usd, requests, estimated_requests, unknown_requests, 0 AS active_requests
+      FROM closed_session_usage WHERE session_id = $session
+          AND ($from IS NULL OR (first_started_at >= $from AND last_started_at <= $to));
+      """, ReadTotals, ("$session", sessionId), ("$from", from is { } start ? Timestamp(start) : null),
+      ("$to", to is { } end ? Timestamp(end) : null));
+
+  private UsageTotals ReadTotals(SqliteTransaction transaction, string source, string where,
       (string Name, object? Value)[] parameters) => database.QuerySingleOrDefault(transaction, $"""
-      SELECT COALESCE(SUM(cost_nano_usd), 0) AS cost_nano_usd, COUNT(*) AS requests,
-          COALESCE(SUM(is_estimate), 0) AS estimated_requests,
-          COALESCE(SUM(CASE WHEN cost_nano_usd IS NULL OR problem IS NOT NULL THEN 1 ELSE 0 END), 0) AS unknown_requests,
-          COALESCE(SUM(CASE WHEN finished_at IS NULL THEN 1 ELSE 0 END), 0) AS active_requests
-      FROM usage_requests {where};
+      SELECT COALESCE(SUM(cost_nano_usd), 0) AS cost_nano_usd, COALESCE(SUM(requests), 0) AS requests,
+          COALESCE(SUM(estimated_requests), 0) AS estimated_requests,
+          COALESCE(SUM(unknown_requests), 0) AS unknown_requests,
+          COALESCE(SUM(active_requests), 0) AS active_requests
+      FROM {source} {where};
       """, ReadTotals, parameters)!;
 
   private static UsageTotals ReadTotals(SqliteDataReader row) => new(ToDollars(row.Long("cost_nano_usd")),
       row.Long("requests"), row.Long("estimated_requests"), row.Long("unknown_requests"), row.Long("active_requests"));
 
-  private List<UsageBreakdown> ReadBreakdown(SqliteTransaction transaction, string where,
+  private List<UsageBreakdown> ReadBreakdown(SqliteTransaction transaction, string source, string where,
       (string Name, object? Value)[] parameters) => database.Query(transaction, $"""
       WITH usage_groups AS (
-        SELECT provider, model, purpose, COALESCE(SUM(cost_nano_usd), 0) AS cost_nano_usd,
-            COUNT(*) AS requests, COALESCE(SUM(is_estimate), 0) AS estimated_requests,
-            COALESCE(SUM(CASE WHEN cost_nano_usd IS NULL OR problem IS NOT NULL THEN 1 ELSE 0 END), 0)
-                AS unknown_requests,
-            COALESCE(SUM(CASE WHEN finished_at IS NULL THEN 1 ELSE 0 END), 0) AS active_requests
-        FROM usage_requests {where}
+        SELECT provider, model, purpose, SUM(cost_nano_usd) AS cost_nano_usd, SUM(requests) AS requests,
+            SUM(estimated_requests) AS estimated_requests, SUM(unknown_requests) AS unknown_requests,
+            SUM(active_requests) AS active_requests
+        FROM {source} {where}
         GROUP BY provider, model, purpose
       ), ranked AS (
         SELECT *, ROW_NUMBER() OVER (ORDER BY cost_nano_usd DESC, requests DESC,
@@ -238,11 +249,11 @@ internal sealed class UsageStorage(Database database) {
           ReadTotals(row), row.Bool("is_other")), [.. parameters, ("$maximumBreakdown", MaximumBreakdown),
           ("$retainedBreakdown", MaximumBreakdown - 1)]);
 
-  private List<UsagePoint> ReadHistory(SqliteTransaction transaction, string where,
+  private List<UsagePoint> ReadHistory(SqliteTransaction transaction, string source, string where,
       (string Name, object? Value)[] parameters, IReadOnlyList<UsageBreakdown> breakdown) {
     (long count, DateTimeOffset? observedStart, DateTimeOffset? observedEnd) = database.QuerySingleOrDefault(transaction, $"""
-      SELECT COUNT(*) AS requests, MIN(started_at) AS started_at, MAX(started_at) AS ended_at
-      FROM usage_requests {where};
+      SELECT COALESCE(SUM(requests), 0) AS requests, MIN(started_at) AS started_at, MAX(started_at) AS ended_at
+      FROM {source} {where};
       """, row => (row.Long("requests"), row.NullableTimestamp("started_at"), row.NullableTimestamp("ended_at")), parameters);
     if (count == 0)
       return [];
@@ -266,17 +277,15 @@ internal sealed class UsageStorage(Database database) {
     Dictionary<int, (DateTimeOffset At, UsageTotals[] Totals)> buckets = [];
     using (SqliteCommand read = database.Command(transaction, $"""
       WITH filtered AS (
-        SELECT provider, model, purpose, started_at, cost_nano_usd, is_estimate, problem, finished_at,
-            {bucket} AS bucket
-        FROM usage_requests {where}
+        SELECT provider, model, purpose, started_at, cost_nano_usd, requests, estimated_requests, unknown_requests,
+            active_requests, {bucket} AS bucket
+        FROM {source} {where}
       ), bucket_times AS (
         SELECT bucket, MAX(started_at) AS latest_started_at FROM filtered GROUP BY bucket
       ), usage_groups AS (
-        SELECT provider, model, purpose, COALESCE(SUM(cost_nano_usd), 0) AS cost_nano_usd,
-            COUNT(*) AS requests, COALESCE(SUM(is_estimate), 0) AS estimated_requests,
-            COALESCE(SUM(CASE WHEN cost_nano_usd IS NULL OR problem IS NOT NULL THEN 1 ELSE 0 END), 0)
-                AS unknown_requests,
-            COALESCE(SUM(CASE WHEN finished_at IS NULL THEN 1 ELSE 0 END), 0) AS active_requests
+        SELECT provider, model, purpose, SUM(cost_nano_usd) AS cost_nano_usd, SUM(requests) AS requests,
+            SUM(estimated_requests) AS estimated_requests, SUM(unknown_requests) AS unknown_requests,
+            SUM(active_requests) AS active_requests
         FROM filtered GROUP BY provider, model, purpose
       ), ranked AS (
         SELECT *, ROW_NUMBER() OVER (ORDER BY cost_nano_usd DESC, requests DESC,
@@ -294,11 +303,9 @@ internal sealed class UsageStorage(Database database) {
         FROM ranked
       )
       SELECT filtered.bucket, bucket_times.latest_started_at, mapped.provider, mapped.model, mapped.purpose,
-          mapped.is_other, COALESCE(SUM(filtered.cost_nano_usd), 0) AS cost_nano_usd, COUNT(*) AS requests,
-          COALESCE(SUM(filtered.is_estimate), 0) AS estimated_requests,
-          COALESCE(SUM(CASE WHEN filtered.cost_nano_usd IS NULL OR filtered.problem IS NOT NULL
-              THEN 1 ELSE 0 END), 0) AS unknown_requests,
-          COALESCE(SUM(CASE WHEN filtered.finished_at IS NULL THEN 1 ELSE 0 END), 0) AS active_requests
+          mapped.is_other, SUM(filtered.cost_nano_usd) AS cost_nano_usd, SUM(filtered.requests) AS requests,
+          SUM(filtered.estimated_requests) AS estimated_requests, SUM(filtered.unknown_requests) AS unknown_requests,
+          SUM(filtered.active_requests) AS active_requests
       FROM filtered JOIN bucket_times USING (bucket) JOIN mapped
           ON mapped.source_provider = filtered.provider AND mapped.source_model = filtered.model
               AND mapped.source_purpose = filtered.purpose

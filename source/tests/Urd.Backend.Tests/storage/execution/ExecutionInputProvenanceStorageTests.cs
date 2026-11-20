@@ -17,24 +17,15 @@ public sealed class ExecutionInputProvenanceStorageTests {
       Assert.True(store.UserMessages.Submit(session, 0,
           new(human, 0, "human", TestLlmSelection.Default), true, run).NewlyAccepted);
       Assert.True(store.UserMessages.Submit(session, 0,
-          new(question, 0, "question", TestLlmSelection.Default), true, run, run).NewlyAccepted);
-
-      // raw-sql: no agent-question writer exists yet; replace the seeded input with an explicit question row.
-      database.Execute($"""
-        PRAGMA foreign_keys = ON;
-        BEGIN;
-        DELETE FROM execution_inputs WHERE input_id = '{question:D}';
-        INSERT INTO execution_inputs (session_id, input_id, run_id, provenance, sender_session_id)
-        VALUES ('{session:D}', '{question:D}', '{run:D}', 1, '{sender:D}');
-        COMMIT;
-        """);
+          new(question, 0, "question", TestLlmSelection.Default), true, run, run,
+          provenance: InputProvenance.AgentQuestion, senderSessionId: sender).NewlyAccepted);
     }
 
     using UrdStore reopened = UrdStore.Open(database.Path);
     AssertProvenance(database, human, 0, null);
     AssertProvenance(database, question, 1, sender);
 
-    // raw-sql: exercise CHECK, NOT NULL and foreign-key constraints independently of application validation.
+    // raw-sql: exercise CHECK, NOT NULL and sender admission independently of application validation.
     Assert.Equal(275, Assert.Throws<SqliteException>(() => database.Execute($"""
       UPDATE execution_inputs SET sender_session_id = '{sender:D}' WHERE input_id = '{human:D}';
       """)).SqliteExtendedErrorCode);
@@ -47,8 +38,7 @@ public sealed class ExecutionInputProvenanceStorageTests {
     Assert.Equal(1299, Assert.Throws<SqliteException>(() => database.Execute($"""
       UPDATE execution_inputs SET provenance = NULL WHERE input_id = '{question:D}';
       """)).SqliteExtendedErrorCode);
-    Assert.Equal(787, Assert.Throws<SqliteException>(() => database.Execute($"""
-      PRAGMA foreign_keys = ON;
+    Assert.Equal(1811, Assert.Throws<SqliteException>(() => database.Execute($"""
       UPDATE execution_inputs SET sender_session_id = '{Guid.NewGuid():D}' WHERE input_id = '{question:D}';
       """)).SqliteExtendedErrorCode);
     AssertProvenance(database, human, 0, null);

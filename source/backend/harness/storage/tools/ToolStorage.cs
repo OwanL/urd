@@ -130,12 +130,11 @@ internal sealed class ToolStorage(Database database, ToolResultCodec results) {
   internal bool Complete(ExecutionIdentity execution, Guid requestId, LlmToolResult result) {
     if (!Enum.IsDefined(result.Outcome))
       throw new ArgumentOutOfRangeException(nameof(result));
-    // Publish immutable image bytes before committing their references. Failed or uncertain
-    // commits retain those assets; deleting them could break another call's saved result.
-    string json = results.Write(result.Output);
     string? error = result.Output.IsError ? result.Output.Text[..Math.Min(result.Output.Text.Length, 1024)] : null;
 
     return database.Write(transaction => {
+      // Publish bytes before their references, under the same gate as file reclamation.
+      var json = new Lazy<string>(() => results.Write(result.Output));
       var decision = database.QuerySingleOrDefault<(bool Background, bool? Saved)?>(transaction, """
         SELECT t.started, t.outcome, t.result_json, t.error, r.outcome AS run_outcome, q.outcome AS request_outcome,
             EXISTS (SELECT 1 FROM execution_requests later
@@ -148,8 +147,8 @@ internal sealed class ToolStorage(Database database, ToolResultCodec results) {
           if (!row.Bool("started"))
             return (false, false);
           if (row.NullableInt("outcome") is { } outcome)
-            return (false, outcome == (int)result.Outcome && row.NullableString("result_json") == json
-                && row.NullableString("error") == error);
+            return (false, outcome == (int)result.Outcome && row.NullableString("error") == error
+                && row.NullableString("result_json") == json.Value);
           bool background = row.Bool("background");
           // Stop permits result saves until settlement. Only background calls may outlive a request.
           if (row.NullableInt("run_outcome") is not null || row.NullableInt("request_outcome") != (int)ExecutionOutcome.Completed
@@ -168,7 +167,7 @@ internal sealed class ToolStorage(Database database, ToolResultCodec results) {
         WHERE request_id = $request AND call_id = $call;
         """,
           ("$request", requestId), ("$call", result.CallId), ("$outcome", (int)result.Outcome),
-          ("$result", json), ("$error", error), ("$ended", ended)) != 1)
+          ("$result", json.Value), ("$error", error), ("$ended", ended)) != 1)
         return false;
 
       if (allowed.Background)

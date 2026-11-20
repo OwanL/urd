@@ -10,6 +10,8 @@ namespace Urd.Core.Storage;
 // Opens the shared database and exposes its focused storage operations.
 public sealed class UrdStore : IDisposable {
   private readonly Database database;
+  private readonly SessionImageCleanup sessionImages;
+  private readonly SessionClosureStorage sessionClosure;
   private readonly InstructionResourceCatalog instructionCatalog;
   private readonly CancellationTokenSource instructionWarmStop = new();
   private Task? instructionWarm;
@@ -19,7 +21,11 @@ public sealed class UrdStore : IDisposable {
     database = new(connection);
     instructionCatalog = new(databasePath + ".instructions.sqlite", new FdResourceScanner());
     InstructionDiscovery = new(instructionCatalog, InstructionResourceDiscovery.PackagedDirectory);
-    var toolResults = new ToolResultCodec(new ToolImageStore(databasePath + ".tool-images"));
+    string toolImagesPath = databasePath + ".tool-images";
+    string markdownImagesPath = databasePath + ".markdown-images";
+    sessionImages = new(database, toolImagesPath, markdownImagesPath);
+    sessionClosure = new(database, sessionImages);
+    var toolResults = new ToolResultCodec(new ToolImageStore(toolImagesPath));
     Sessions = new(database);
     StartingContexts = new(database);
     Prepass = new(database);
@@ -28,7 +34,7 @@ public sealed class UrdStore : IDisposable {
     Continuations = new(database, toolResults);
     MessageEdits = new(database, UserMessages);
     LlmResponses = new(database);
-    MarkdownImageFiles = new(database, databasePath + ".markdown-images");
+    MarkdownImageFiles = new(database, markdownImagesPath);
     MarkdownImageImports = new(MarkdownImageFiles);
     AuxiliaryConversations = new(database, toolResults);
     Executions = new(database, toolResults, AuxiliaryConversations, UserMessages);
@@ -96,8 +102,12 @@ public sealed class UrdStore : IDisposable {
   public void RecoverInterruptedExecutions() {
     Usage.RecoverInterrupted();
     Executions.RecoverInterruptedExecutions();
-    MarkdownImageFiles.RemoveUnreferencedFiles();
+    sessionImages.RemoveUnreferencedFiles();
   }
+
+  // The manager must have fenced new work and awaited settlement of the owned execution tree.
+  internal bool DeletePrimarySession(Guid sessionId, CancellationToken cancellationToken = default) =>
+      sessionClosure.DeletePrimary(sessionId, cancellationToken);
 
   public bool IsSetupComplete() => database.Read(transaction =>
       database.Scalar<long>(transaction, "SELECT EXISTS(SELECT 1 FROM setup_completion WHERE singleton = 1);") != 0);

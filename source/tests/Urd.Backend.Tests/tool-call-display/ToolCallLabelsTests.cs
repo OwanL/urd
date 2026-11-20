@@ -63,9 +63,9 @@ public sealed class ToolCallLabelsTests {
 
     Assert.Equal(title, label.Title);
     Assert.Equal(icon, label.Icon);
-    Assert.Equal(Path.Combine(directory, file), label.Path);
+    Assert.Equal(icon == ToolCallIcon.Skill ? null : Path.Combine(directory, file), label.Path);
     if (tool == "read")
-      Assert.Equal("lines 1–3", label.Detail);
+      Assert.Equal(icon == ToolCallIcon.Skill ? null : "lines 1–3", label.Detail);
   }
 
   [Fact]

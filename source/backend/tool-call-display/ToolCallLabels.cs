@@ -16,7 +16,7 @@ public static class ToolCallLabels {
         (string title, string? path) = FileToolLabeler.GetFileLabel(arguments, toolName, workingDirectory);
         if (toolName == "read" && title.Equals("SKILL.md", StringComparison.OrdinalIgnoreCase) &&
             Path.GetFileName(Path.GetDirectoryName(path)) is { Length: > 0 } skillDirectory)
-          return CreateLabel(ToolCallIcon.Skill, skillDirectory, FileToolLabeler.ReadDetail(arguments), path);
+          return CreateLabel(ToolCallIcon.Skill, skillDirectory, null, null);
 
         ToolCallIcon icon = toolName switch {
           "read" => ToolCallIcon.Read,

@@ -2,50 +2,19 @@ import { createContext, type ComponentChildren } from "preact";
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { Popover } from "../../../controls/Popover.tsx";
 import type { SessionClient } from "../../../sessions/SessionClient.ts";
-import type { ToolCallTranscript } from "../../../sessions/transcript/Messages.ts";
-import {
-  formatToolInput,
-  reusableToolCallPreview,
-  toolCallClipboardText,
-} from "./ToolCallInspection.ts";
-import { formatTokenCount } from "../../TokenCountFormatting.ts";
+import { reusableToolCallPreview, toolCallClipboardText } from "./ToolCallInspection.ts";
+import type {
+  ActiveTarget,
+  CopyState,
+  InspectionTarget,
+  MenuTarget,
+  Preview,
+} from "./ToolRowInteractionTypes.ts";
+import { ToolFileMenu } from "./ToolFileMenu.tsx";
+import { ToolInspection } from "./ToolInspection.tsx";
+import { useToolPreview } from "./useToolPreview.ts";
+import { useToolAnchorVisibility } from "./useToolAnchorVisibility.ts";
 import "./tool-row-interactions.css";
-
-interface InspectionTarget {
-  readonly kind: "inspection";
-  readonly id: number;
-  readonly anchor: HTMLElement;
-  readonly requestId: string;
-  readonly callId: string;
-  readonly returned: boolean;
-  readonly historyRevision: number;
-  readonly payloadFinished: boolean;
-  readonly label: string;
-  readonly pinned: boolean;
-}
-
-interface MenuTarget {
-  readonly kind: "menu";
-  readonly id: number;
-  readonly anchor: HTMLElement;
-  readonly path: string;
-}
-
-type ActiveTarget = InspectionTarget | MenuTarget;
-interface PreviewIdentity {
-  readonly id: number;
-  readonly requestId: string;
-  readonly callId: string;
-  readonly historyRevision: number;
-  readonly payloadFinished: boolean;
-}
-
-type Preview =
-  | (PreviewIdentity & { readonly state: "loading" })
-  | (PreviewIdentity & { readonly state: "ready"; readonly transcript: ToolCallTranscript })
-  | (PreviewIdentity & { readonly state: "missing" })
-  | (PreviewIdentity & { readonly state: "error" });
-type CopyState = "idle" | "copying" | "copied" | "error";
 
 interface ToolRowInteractionContext {
   readonly openInspection: (
@@ -289,85 +258,9 @@ export function ToolRowInteractionsProvider({
     if (activeHistoryRevision !== null && activeHistoryRevision !== historyRevision) dismiss(false);
   }, [activeHistoryRevision, dismiss, historyRevision]);
 
-  useEffect(() => {
-    const target = activeRef.current;
-    if (!target || target.kind !== "inspection") return;
-    const controller = new AbortController();
-    const identity: PreviewIdentity = {
-      id: target.id,
-      requestId: target.requestId,
-      callId: target.callId,
-      historyRevision: target.historyRevision,
-      payloadFinished: target.payloadFinished,
-    };
-    setPreview((current) =>
-      current?.id === target.id && current.state === "ready"
-        ? current
-        : { ...identity, state: "loading" },
-    );
-    void client
-      .readToolCallTranscript(
-        sessionId,
-        target.requestId,
-        target.callId,
-        {
-          expectedHistoryRevision: target.historyRevision,
-          returned: target.returned,
-          full: false,
-        },
-        controller.signal,
-      )
-      .then((transcript) => {
-        if (controller.signal.aborted || activeRef.current?.id !== target.id) return;
-        setPreview(
-          transcript
-            ? { ...identity, state: "ready", transcript }
-            : { ...identity, state: "missing" },
-        );
-      })
-      .catch(() => {
-        if (!controller.signal.aborted && activeRef.current?.id === target.id)
-          setPreview({ ...identity, state: "error" });
-      });
-    return () => controller.abort();
-  }, [active?.id, client, previewVersion, sessionId]);
+  useToolPreview(active, activeRef, client, sessionId, previewVersion, setPreview);
 
-  const activeId = active?.id;
-  useEffect(() => {
-    const currentTarget = activeRef.current;
-    if (!currentTarget || currentTarget.id !== activeId) return;
-    const targetId = currentTarget.id;
-    const anchor = currentTarget.anchor;
-    function outsideRoot() {
-      if (activeRef.current?.id !== targetId || !anchor.isConnected) {
-        dismiss(false);
-        return;
-      }
-      if (!root) return;
-      const bounds = root.getBoundingClientRect();
-      const rect = anchor.getBoundingClientRect();
-      if (rect.bottom <= bounds.top || rect.top >= bounds.bottom) dismiss(false);
-    }
-    const observer =
-      typeof IntersectionObserver === "undefined"
-        ? null
-        : new IntersectionObserver(
-            ([entry]) => {
-              if (entry && !entry.isIntersecting) dismiss(false);
-            },
-            { root },
-          );
-    observer?.observe(anchor);
-    root?.addEventListener("scroll", outsideRoot, { passive: true });
-    window.addEventListener("scroll", outsideRoot, true);
-    window.addEventListener("resize", outsideRoot);
-    return () => {
-      observer?.disconnect();
-      root?.removeEventListener("scroll", outsideRoot);
-      window.removeEventListener("scroll", outsideRoot, true);
-      window.removeEventListener("resize", outsideRoot);
-    };
-  }, [activeId, dismiss, root]);
+  useToolAnchorVisibility(active, activeRef, root, dismiss);
 
   async function copyFullTranscript(target: InspectionTarget) {
     if (copyController.current) return;
@@ -447,22 +340,6 @@ export function ToolRowInteractionsProvider({
     }
   }
 
-  function moveMenuFocus(event: KeyboardEvent) {
-    const items = [firstMenuItem.current, secondMenuItem.current].filter(
-      (item): item is HTMLButtonElement => item !== null,
-    );
-    if (items.length === 0) return;
-    const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault();
-      const offset = event.key === "ArrowDown" ? 1 : -1;
-      items[(currentIndex + offset + items.length) % items.length]?.focus();
-    } else if (event.key === "Home" || event.key === "End") {
-      event.preventDefault();
-      items[event.key === "Home" ? 0 : items.length - 1]?.focus();
-    }
-  }
-
   const shownPreview = active?.kind === "inspection" && preview?.id === active.id ? preview : null;
   const shownMenuMessage =
     active?.kind === "menu" && menuMessage?.id === active.id ? menuMessage.text : null;
@@ -485,89 +362,25 @@ export function ToolRowInteractionsProvider({
           }}
         >
           {active.kind === "inspection" ? (
-            <div
-              class="tool-inspection"
+            <ToolInspection
+              active={active}
+              shownPreview={shownPreview}
+              copyState={copyState}
               onPointerEnter={() => {
                 clearTimeout(closeTimer.current);
                 closeTimer.current = undefined;
               }}
               onPointerLeave={() => leaveSource(active.anchor)}
-            >
-              <div class="tool-inspection-header">
-                <span>{active.label}</span>
-                <button
-                  type="button"
-                  class="tool-overlay-action"
-                  aria-label="Copy full tool input and output"
-                  aria-disabled={copyState === "copying"}
-                  onClick={() => void copyFullTranscript(active)}
-                >
-                  {copyState === "copying"
-                    ? "Copying…"
-                    : copyState === "copied"
-                      ? "Copied"
-                      : copyState === "error"
-                        ? "Copy failed"
-                        : "Copy"}
-                </button>
-              </div>
-              {shownPreview?.state === "missing" && (
-                <p class="tool-inspection-message">Tool call is no longer available.</p>
-              )}
-              {shownPreview?.state === "error" && (
-                <p class="tool-inspection-message" role="status">
-                  Could not load tool call.
-                </p>
-              )}
-              <div class="tool-inspection-section">
-                <h3>
-                  Input
-                  <TokenCount tokens={previewTokens(shownPreview, "input")} />
-                </h3>
-                <pre>{previewText(shownPreview, "input")}</pre>
-              </div>
-              <div class="tool-inspection-section">
-                <h3>
-                  Output
-                  <TokenCount tokens={previewTokens(shownPreview, "output")} />
-                </h3>
-                <pre>{previewText(shownPreview, "output")}</pre>
-              </div>
-              {shownPreview?.state === "ready" && shownPreview.transcript.truncated && (
-                <p class="tool-inspection-note">
-                  Preview truncated. Copy fetches the full payload.
-                </p>
-              )}
-              <span class="tool-inspection-feedback" aria-live="polite">
-                {copyState === "error" ? "Could not copy tool call." : ""}
-              </span>
-            </div>
+              onCopy={() => void copyFullTranscript(active)}
+            />
           ) : (
-            <div class="tool-file-menu-items" onKeyDown={moveMenuFocus}>
-              <button
-                ref={firstMenuItem}
-                type="button"
-                role="menuitem"
-                class="tool-file-menu-item"
-                onClick={() => void copyPath(active)}
-              >
-                Copy path
-              </button>
-              <button
-                ref={secondMenuItem}
-                type="button"
-                role="menuitem"
-                class="tool-file-menu-item"
-                onClick={() => void revealPath(active)}
-              >
-                Reveal in Explorer
-              </button>
-              {shownMenuMessage && (
-                <p class="tool-file-menu-error" role="status">
-                  {shownMenuMessage}
-                </p>
-              )}
-            </div>
+            <ToolFileMenu
+              firstMenuItem={firstMenuItem}
+              secondMenuItem={secondMenuItem}
+              shownMenuMessage={shownMenuMessage}
+              onCopy={() => void copyPath(active)}
+              onReveal={() => void revealPath(active)}
+            />
           )}
         </Popover>
       )}
@@ -576,21 +389,4 @@ export function ToolRowInteractionsProvider({
       </span>
     </ToolRowInteractionContext.Provider>
   );
-}
-
-function previewText(preview: Preview | null, part: "input" | "output"): string {
-  if (!preview || preview.state === "loading") return "Loading…";
-  if (preview.state !== "ready") return "—";
-  if (part === "input") return formatToolInput(preview.transcript.input);
-  return preview.transcript.output ?? "Running…";
-}
-
-function previewTokens(preview: Preview | null, part: "input" | "output"): number | null {
-  if (preview?.state !== "ready") return null;
-  return part === "input" ? preview.transcript.inputTokens : preview.transcript.outputTokens;
-}
-
-function TokenCount({ tokens }: { tokens: number | null }) {
-  if (tokens === null) return null;
-  return <span class="tool-inspection-tokens">~{formatTokenCount(tokens)} tokens</span>;
 }

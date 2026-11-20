@@ -1,5 +1,6 @@
 import type { RefObject } from "preact";
 import { useLayoutEffect, useState } from "preact/hooks";
+import { Icon } from "../../controls/Icon.tsx";
 import { IconButton } from "../../controls/IconButton.tsx";
 import { Tooltip } from "../../controls/Tooltip.tsx";
 import { isBusySessionStatus } from "../SessionActivity.ts";
@@ -233,7 +234,7 @@ export function ChatTabs({
                   }
                 >
                   <span class="tab-activity-slot" role="img" aria-label={statusLabel ?? status}>
-                    <span class="tab-activity-dot is-busy" />
+                    <span class="tab-activity-dot" />
                   </span>
                 </Tooltip>
               ) : pausedBusy ? null : (
@@ -253,7 +254,7 @@ export function ChatTabs({
                         role="img"
                         aria-label="Completed"
                       >
-                        <span class="tab-activity-dot" />
+                        <Icon name="check" />
                       </span>
                     </Tooltip>
                   )}

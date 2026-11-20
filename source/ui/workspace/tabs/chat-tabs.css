@@ -120,10 +120,6 @@
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--text-secondary);
-}
-
-.tab-activity-dot.is-busy {
   background: var(--accent);
   animation: tab-activity-pulse 1.6s ease-in-out infinite;
 }
@@ -212,7 +208,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .chat-tabs.is-reordering .chat-tab,
-  .tab-activity-dot.is-busy,
+  .tab-activity-dot,
   .chat-tab.has-unread .tab-completion-marker,
   .chat-tab.has-unread .close-tab {
     animation: none;

@@ -21,6 +21,7 @@ internal sealed class SessionExecution : IDisposable {
   private readonly StartingContextBuilder startingContextBuilder;
   private StartingContext? startingContext;
   private IChatClient? chatClient;
+  private readonly ChatGptSocketRun? socketRun;
   private readonly SessionToolExecution toolExecution;
   private readonly AIFunctionDeclaration? answerAgentDeclaration;
   private readonly PendingToolCalls pending;
@@ -43,6 +44,7 @@ internal sealed class SessionExecution : IDisposable {
     this.session = session;
     this.createChatClient = createChatClient;
     this.selection = selection;
+    socketRun = selection.Connection.Route == ProviderRoute.ChatGpt ? new ChatGptSocketRun() : null;
     this.startingContextBuilder = startingContextBuilder;
     pending = pendingToolCalls ?? new PendingToolCalls();
     toolExecution = new SessionToolExecution(session, recorder, tools ?? [], pending, selection.SupportsImages, stop.Token);
@@ -80,7 +82,12 @@ internal sealed class SessionExecution : IDisposable {
 
   // Called by the session only after every request and StopCallbacks have finished
   // and the execution's result has been saved.
-  public void Dispose() => stop.Dispose();
+  public void Dispose() {
+    CloseSocket();
+    stop.Dispose();
+  }
+
+  internal void CloseSocket() => socketRun?.Dispose();
 
   // Called sequentially outside the session lock. Foreground calls join here;
   // registered background calls remain owned until the session drains them.
@@ -360,6 +367,8 @@ internal sealed class SessionExecution : IDisposable {
           [OpenAIInferenceClient.SessionIdProperty] = session.Id
         }
       };
+      if (socketRun is not null)
+        options.AdditionalProperties[ChatGptSocketRun.PropertyName] = socketRun;
       List<ChatMessage> input = [.. context.Instructions, .. request.Messages];
       if (reminder is not null)
         input.Add(reminder);

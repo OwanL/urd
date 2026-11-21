@@ -172,7 +172,24 @@ WebSocket completion was faster in 7/9 pairs. Mean paired saving was 0.85 s;
 (0.84–0.92 s per socket here). The continuation frame was 284 bytes versus
 74–196 kB of HTTP JSON, before any transport encoding. This measures the combined
 transport and continuation path, not proof that upload alone caused the difference.
-Retest real tool loops including reconnection before making WebSockets the default.
+
+#### Run-scoped continuation (ChatGPT only)
+
+A main conversation run now tries one authenticated Responses WebSocket. The SDK
+still builds the full request from durable history. On the same socket, Urd sends
+only appended input if the prior request configuration, input and completed output
+match the rebuilt prefix. Otherwise it sends full input without a previous ID.
+Reopen starts from durable history, not a socket handle. Auxiliary calls and other
+routes stay on HTTP. Handshake failure before inference selects HTTP for the run;
+an uncertain send or interrupted stream is never automatically replayed over HTTP.
+
+Offline managed-session tests exercise a namespaced tool loop, reopening with a
+fresh socket, partial streams, cancellation and stale completions without tool
+replay. A live two-turn `gpt-6-luna` check through the .NET adapter used one
+handshake and no HTTP requests: the first turn sent full input; the second sent
+the confirmed response ID and only the new user message. Both answers completed
+and matched the expected text. The plan endpoint's ID-less `codex.response.metadata`
+preamble is not completion evidence. This check did not simulate a live disconnect.
 
 ### Local Ollama: compatible Chat Completions
 

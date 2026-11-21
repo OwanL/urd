@@ -1,4 +1,6 @@
+using System.Net.WebSockets;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading.Channels;
@@ -260,6 +262,119 @@ public sealed class ProviderSessionExecutionTests {
       Assert.Equal(MessageAcceptance.Accepted, receipt.Acceptance);
       Assert.Equal(ExecutionOutcome.Completed,
           (await target.WaitForExecutionFinishAsync(Assert.IsType<Guid>(receipt.ExecutionId)).WaitAsync(TestTimeout)).Outcome);
+    }
+  }
+
+  [Theory]
+  [InlineData(false)]
+  [InlineData(true)]
+  public async Task ChatGptNamespacedToolLoopUsesSocketContinuation(bool failBeforeCompletion) {
+    using var database = new TemporaryDatabase();
+    using var identity = new FakeOpenAIIdentity();
+    string call = ProviderModelStreams.Call.Replace("\"name\":\"lookup\"", "\"namespace\":\"urd\",\"name\":\"lookup\"");
+    string reasoning = ProviderModelStreams.Reasoning.Replace("\"summary\":[]", "\"summary\":[{\"type\":\"summary_text\",\"text\":\"thought\"}]");
+    string firstStream = ReorderCompletedOutput(ProviderModelStreams.Responses([ProviderModelStreams.Message, reasoning, call],
+        terminal: failBeforeCompletion ? null : "response.completed"));
+    string doneStream = ProviderModelStreams.Responses(
+        [ProviderModelStreams.Message.Replace("hello", "done").Replace("msg_fixture", "msg_done")], text: "done")
+        .Replace("resp_fixture", "resp_done");
+    string followupStream = doneStream.Replace("resp_done", "resp_followup").Replace("msg_done", "msg_followup");
+    using var first = new ScriptedOpenAIHandler(firstStream);
+    using var done = new ScriptedOpenAIHandler(doneStream);
+    using var transport = new ChatGptLoopTransport(identity, first, done);
+    using var store = UrdStore.Open(database.Path);
+    var sockets = new List<LoopSocket>();
+    var handshakes = new List<(string Token, Guid Session)>();
+    Task<WebSocket> Connect(string token, Guid sessionId, CancellationToken cancellation) {
+      cancellation.ThrowIfCancellationRequested();
+      handshakes.Add((token, sessionId));
+      string[] streams = [followupStream];
+      if (sockets.Count == 0)
+        streams = failBeforeCompletion ? [firstStream] : [firstStream, doneStream];
+      var socket = new LoopSocket(streams);
+      sockets.Add(socket);
+      return Task.FromResult<WebSocket>(socket);
+    }
+    using var manager = new ProviderManager(store, () => FakeOpenAIIdentity.Callback, transport, FakeOpenAIIdentity.Issuer,
+        connectSocket: Connect);
+    PrimarySession? session = null;
+    IChatClient? client = null;
+    LlmSelection selection = null!;
+    try {
+      ProviderConnection connection = await manager.AddChatGptAsync("Synthetic ChatGPT");
+      ProviderSignIn signIn = await manager.BeginSignInAsync(connection.Id);
+      Uri callback = new(await identity.AuthorizeAsync(signIn.AuthorizationUrl!));
+      await manager.CompleteSignInAsync(FakeOpenAIIdentity.Parse(callback.Query)["state"], callback.AbsoluteUri).WaitAsync(TestTimeout);
+      client = manager.CreateChatClient(connection);
+      int effects = 0;
+      var tools = new ToolCatalog([new TestAgentTool("lookup", (arguments, _, _) => {
+        Assert.Equal("abc", arguments.GetProperty("key").GetString());
+        Interlocked.Increment(ref effects);
+        return Task.FromResult(new ToolOutput(ToolOutputText, []));
+      })]);
+      SessionRecord record = store.Sessions.CreatePrimary(Guid.NewGuid(), Path.GetDirectoryName(database.Path)!);
+      selection = new LlmSelection(connection, "fixture-model", null, ModelFamily.Other, false);
+      session = new(record, store, _ => client, tools);
+      SessionExecutionResult result = await Send(session, "go");
+      Assert.Single(sockets);
+      Assert.Equal(("synthetic-access-1", record.Id), Assert.Single(handshakes));
+      Assert.Empty(transport.Requests);
+      if (failBeforeCompletion) {
+        Assert.Equal(ExecutionOutcome.Failed, result.Outcome);
+        Assert.Equal(0, effects);
+        Assert.Empty(StoredTools.Read(database));
+        Assert.Empty(ReadProviderResponses(database));
+        Assert.Single(sockets[0].Requests);
+        Assert.True(sockets[0].Disposed);
+        return;
+      }
+      Assert.Equal(ExecutionOutcome.Completed, result.Outcome);
+      Assert.Equal(1, effects);
+      Assert.Equal(2, sockets[0].Requests.Count);
+      JsonObject initial = sockets[0].Requests[0];
+      JsonObject next = sockets[0].Requests[1];
+      Assert.Equal("response.create", (string?)initial["type"]);
+      Assert.Equal("response.create", (string?)next["type"]);
+      Assert.Null(initial["previous_response_id"]);
+      JsonObject initialSettings = (JsonObject)initial.DeepClone();
+      JsonObject nextSettings = (JsonObject)next.DeepClone();
+      initialSettings.Remove("input");
+      nextSettings.Remove("input");
+      nextSettings.Remove("previous_response_id");
+      Assert.True(JsonNode.DeepEquals(initialSettings, nextSettings));
+      Assert.Equal("go", WireText(JsonSerializer.SerializeToElement(initial["input"]!.AsArray()[^1]!["content"])));
+      Assert.True((string?)next["previous_response_id"] == "resp_fixture",
+          "Expected socket continuation with previous_response_id=resp_fixture; SDK tool-loop request was sent as full input instead: " + next.ToJsonString());
+      JsonNode output = Assert.Single(next["input"]!.AsArray())!;
+      Assert.Equal("function_call_output", (string?)output["type"]);
+      Assert.Equal("call_fixture", (string?)output["call_id"]);
+      Assert.Contains(ToolOutputText, output["output"]!.ToJsonString(), StringComparison.Ordinal);
+      await session.StopAcceptingUserMessagesAsync();
+      await session.StopExecutionAsync().WaitAsync(TestTimeout);
+      Assert.True(sockets[0].Disposed);
+      session = new(Assert.IsType<SessionRecord>(store.Sessions.Read(record.Id)), store, _ => client, tools);
+      Assert.Equal(ExecutionOutcome.Completed, (await Send(session, "followup")).Outcome);
+      Assert.Equal(2, sockets.Count);
+      Assert.Equal(("synthetic-access-1", record.Id), handshakes[1]);
+      JsonObject reopened = Assert.Single(sockets[1].Requests);
+      Assert.Null(reopened["previous_response_id"]);
+      Assert.Equal("followup", WireText(JsonSerializer.SerializeToElement(reopened["input"]!.AsArray()[^1]!["content"])));
+      Assert.Contains(reopened["input"]!.AsArray(), item => (string?)item!["type"] == "function_call_output");
+      Assert.Equal(1, effects);
+      Assert.Empty(transport.Requests);
+    } finally {
+      if (session is not null) {
+        await session.StopAcceptingUserMessagesAsync();
+        await session.StopExecutionAsync().WaitAsync(TestTimeout);
+      }
+      await manager.ShutdownAsync().WaitAsync(TestTimeout);
+      client?.Dispose();
+    }
+
+    async Task<SessionExecutionResult> Send(PrimarySession target, string text) {
+      UserMessageReceipt receipt = await target.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, text, selection));
+      Assert.Equal(MessageAcceptance.Accepted, receipt.Acceptance);
+      return await target.WaitForExecutionFinishAsync(Assert.IsType<Guid>(receipt.ExecutionId)).WaitAsync(TestTimeout);
     }
   }
 
@@ -688,6 +803,66 @@ public sealed class ProviderSessionExecutionTests {
     while (reader.Read())
       responses.Add(Guid.Parse(reader.GetString(0)), JsonSerializer.Deserialize<LlmProviderResponse>(reader.GetString(1))!);
     return responses;
+  }
+
+  // Preserve native values but vary property ordering in the server's completed output.
+  private static string ReorderCompletedOutput(string stream) {
+    return string.Join("\n\n", stream.Split("\n\n", StringSplitOptions.RemoveEmptyEntries).Select(@event => {
+      string[] lines = @event.Split('\n');
+      if (lines[0] != "event: response.completed")
+        return @event;
+      JsonObject completed = JsonNode.Parse(lines[1][6..])!.AsObject();
+      JsonArray output = completed["response"]!["output"]!.AsArray();
+      for (int i = 0; i < output.Count; i++) {
+        JsonObject item = output[i]!.AsObject();
+        var reordered = new JsonObject();
+        foreach (var property in item.Reverse())
+          reordered.Add(property.Key, property.Value?.DeepClone());
+        output[i] = reordered;
+      }
+      return lines[0] + "\ndata: " + completed.ToJsonString();
+    })) + "\n\n";
+  }
+
+  private sealed class LoopSocket : WebSocket {
+    private readonly Queue<byte[]> frames;
+    private int offset;
+    internal List<JsonObject> Requests { get; } = [];
+    internal bool Disposed { get; private set; }
+
+    internal LoopSocket(string[] streams) {
+      frames = new(streams.SelectMany(stream => stream.Split("\n\n", StringSplitOptions.RemoveEmptyEntries))
+          .Select(@event => @event.Split('\n').Single(line => line.StartsWith("data: ", StringComparison.Ordinal))[6..])
+          .Select(json => Encoding.UTF8.GetBytes(json)));
+    }
+
+    public override WebSocketCloseStatus? CloseStatus => null;
+    public override string? CloseStatusDescription => null;
+    public override WebSocketState State => Disposed ? WebSocketState.Closed : WebSocketState.Open;
+    public override string? SubProtocol => null;
+    public override void Abort() => Dispose();
+    public override void Dispose() => Disposed = true;
+    public override Task CloseAsync(WebSocketCloseStatus closeStatus, string? statusDescription, CancellationToken cancellationToken) => throw new NotSupportedException();
+    public override Task CloseOutputAsync(WebSocketCloseStatus closeStatus, string? statusDescription, CancellationToken cancellationToken) => throw new NotSupportedException();
+    public override Task SendAsync(ArraySegment<byte> buffer, WebSocketMessageType messageType, bool endOfMessage, CancellationToken cancellationToken) {
+      cancellationToken.ThrowIfCancellationRequested();
+      Assert.Equal(WebSocketMessageType.Text, messageType);
+      Assert.True(endOfMessage);
+      Requests.Add(JsonNode.Parse(buffer.AsSpan())!.AsObject());
+      return Task.CompletedTask;
+    }
+    public override Task<WebSocketReceiveResult> ReceiveAsync(ArraySegment<byte> buffer, CancellationToken cancellationToken) {
+      cancellationToken.ThrowIfCancellationRequested();
+      if (frames.Count == 0)
+        throw new WebSocketException("Synthetic interrupted response");
+      byte[] frame = frames.Peek();
+      int count = Math.Min(buffer.Count, frame.Length - offset);
+      frame.AsSpan(offset, count).CopyTo(buffer.AsSpan());
+      offset += count;
+      bool end = offset == frame.Length;
+      if (end) { frames.Dequeue(); offset = 0; }
+      return Task.FromResult(new WebSocketReceiveResult(count, WebSocketMessageType.Text, end));
+    }
   }
 
   // Own the routing invokers, but borrow handlers; the test's using declarations own those handlers.

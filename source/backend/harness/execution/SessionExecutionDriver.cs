@@ -90,6 +90,11 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock sess
       } catch (Exception cleanupFailure) {
         failure = new AggregateException(failure, drained.Exception ?? cleanupFailure);
       }
+      try {
+        execution.CloseSocket();
+      } catch (Exception cleanupFailure) {
+        failure = new AggregateException(failure, cleanupFailure);
+      }
       using (await sessionLock.AcquireAsync()) {
         settlement.TrySetException(failure);
         _ = settlement.Task.Exception; // Observed even if nobody is waiting yet.

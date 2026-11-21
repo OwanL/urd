@@ -21,6 +21,7 @@ interface SessionIndicatorsProps {
   compactionUnavailableReason: string | null;
   onCheckCompaction: (() => void) | undefined;
   onCompact(): void;
+  onCancelCompaction?: (() => void) | undefined;
 }
 
 export function SessionIndicators({
@@ -39,6 +40,7 @@ export function SessionIndicators({
   compactionUnavailableReason,
   onCheckCompaction,
   onCompact,
+  onCancelCompaction,
 }: SessionIndicatorsProps) {
   const [now, setNow] = useState(Date.now);
   const startedAt = workingTime?.startedAt;
@@ -57,7 +59,8 @@ export function SessionIndicators({
       : source === "lastMeasured"
         ? "Last measured usage"
         : null;
-  const compactDisabled = !canCompact;
+  const cancelAvailable = compactionStatus === "queued" && onCancelCompaction !== undefined;
+  const compactDisabled = compactionStatus !== null || !canCompact;
   const compactStatus =
     compactionStatus === "running"
       ? "Compacting…"
@@ -67,7 +70,8 @@ export function SessionIndicators({
           ? "Requesting…"
           : null;
   const compactAction = compactStatus ?? (onCheckCompaction ? "Check compaction" : "Compact");
-  const actionAvailable = canCompact || onCheckCompaction !== undefined;
+  const actionAvailable =
+    compactionStatus === null && (canCompact || onCheckCompaction !== undefined);
   const contextAccessibleLabel = `Context window: ${contextLabel}${contextDetail ? `, ${contextDetail.toLowerCase()}` : ""}`;
   const ratio = contextUsage && contextWindow ? contextUsage.usedTokens / contextWindow : 0;
   const incomplete = workingTime?.hasUnknownDuration || (fenced && Boolean(startedAt));
@@ -98,6 +102,7 @@ export function SessionIndicators({
         </span>
         <Tooltip
           dismissOnClick={false}
+          disabled={compactionStatus === "queued"}
           content={
             <div class="session-context-details">
               <span>Context window</span>
@@ -116,11 +121,13 @@ export function SessionIndicators({
         >
           <button
             type="button"
-            class={`session-indicator session-context-indicator ${compactionStatus ? "has-compaction-status" : actionAvailable ? "has-compaction-action" : ""} ${ratio >= 0.85 ? "is-critical" : ratio >= 0.7 ? "is-warning" : ""}`}
-            aria-label={`${contextAccessibleLabel}. ${compactStatus === "Queued" ? "Compaction queued" : actionAvailable || compactStatus ? compactAction : "Compaction unavailable"}`}
-            aria-disabled={compactDisabled && !onCheckCompaction}
+            class={`session-indicator session-context-indicator ${compactionStatus ? "has-compaction-status" : actionAvailable ? "has-compaction-action" : ""} ${cancelAvailable ? "can-cancel-compaction" : ""} ${ratio >= 0.85 ? "is-critical" : ratio >= 0.7 ? "is-warning" : ""}`}
+            aria-label={`${contextAccessibleLabel}. ${cancelAvailable ? "Compaction queued. Cancel compaction" : compactStatus === "Queued" ? "Compaction queued" : actionAvailable || compactStatus ? compactAction : "Compaction unavailable"}`}
+            aria-disabled={!cancelAvailable && compactDisabled && !actionAvailable}
             onClick={() => {
-              if (onCheckCompaction) onCheckCompaction();
+              if (cancelAvailable) onCancelCompaction();
+              else if (compactionStatus !== null) return;
+              else if (onCheckCompaction) onCheckCompaction();
               else if (!compactDisabled) onCompact();
             }}
           >
@@ -130,6 +137,11 @@ export function SessionIndicators({
             <span class="session-context-action" aria-hidden="true">
               {compactAction}
             </span>
+            {cancelAvailable && (
+              <span class="session-context-cancel" aria-hidden="true">
+                Cancel
+              </span>
+            )}
           </button>
         </Tooltip>
       </div>

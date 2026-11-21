@@ -372,6 +372,11 @@ export function Chat({
             compactionMessage={compaction && "message" in compaction ? compaction.message : null}
             compactionUnavailableReason={snapshot?.compactionUnavailableReason ?? null}
             onCheckCompaction={compaction?.phase === "uncertain" && ready ? onRefresh : undefined}
+            onCancelCompaction={
+              ready && snapshot && !(compaction?.phase === "observing" && compaction.cancelling)
+                ? () => void commands.cancelCompaction(sessionId, snapshot)
+                : undefined
+            }
             onCompact={() => {
               if (!workingDirectoryGate.current && snapshot)
                 void commands.compact(sessionId, snapshot, canCompact, defaultSelection);

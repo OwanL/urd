@@ -3,7 +3,7 @@ import { RequestError } from "./RequestError.ts";
 // Browser transport only: callers own cancellation of reads and explicit command retries.
 export async function requestJson<T>(
   url: URL,
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "DELETE",
   body?: unknown,
   signal?: AbortSignal,
 ): Promise<T> {
@@ -45,7 +45,7 @@ export async function requestEmpty(
 
 async function request(
   url: URL,
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "DELETE",
   body?: unknown,
   signal?: AbortSignal,
   accept = "application/json",
@@ -61,7 +61,7 @@ async function request(
     credentials: "omit",
     redirect: "error",
   };
-  if (method === "POST") {
+  if (method !== "GET") {
     headers["Content-Type"] = "application/json";
     options.body = JSON.stringify(body);
   }

@@ -25,16 +25,34 @@ export interface PendingInputRemovalState {
 // Status of a compaction shown by the chat.
 export type ChatCompactionState =
   | { readonly phase: "starting"; readonly operationId: string }
-  | { readonly phase: "observing"; readonly operationId: string; readonly queued: boolean }
+  | {
+      readonly phase: "observing";
+      readonly operationId: string;
+      readonly queued: boolean;
+      readonly cancelling?: boolean;
+    }
   | { readonly phase: "uncertain"; readonly operationId: string; readonly message: string }
-  | { readonly phase: "settled"; readonly message: string };
+  | { readonly phase: "settled"; readonly message: string; readonly cancelledOperationId?: string };
 
 export function compactionStatus(
   snapshot: SessionSnapshot | null | undefined,
   compaction: ChatCompactionState | undefined,
 ): "running" | "queued" | "requesting" | null {
   if (snapshot?.manualCompactionId) return "running";
-  if (snapshot?.queuedCompactionId || (compaction?.phase === "observing" && compaction.queued))
+  if (
+    compaction?.phase === "observing" &&
+    !compaction.queued &&
+    snapshot?.queuedCompactionId === compaction.operationId
+  )
+    return "running";
+  if (
+    (snapshot?.queuedCompactionId &&
+      !(
+        compaction?.phase === "settled" &&
+        compaction.cancelledOperationId === snapshot.queuedCompactionId
+      )) ||
+    (compaction?.phase === "observing" && compaction.queued)
+  )
     return "queued";
   if (compaction?.phase === "observing") return "running";
   return compaction?.phase === "starting" ? "requesting" : null;
@@ -72,6 +90,7 @@ export interface ChatCommands {
     canCompact: boolean,
     defaultSelection: LlmSelection | null,
   ): Promise<void>;
+  cancelCompaction(id: string, snapshot: SessionSnapshot): Promise<void>;
   send(
     id: string,
     snapshot: SessionSnapshot,

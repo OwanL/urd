@@ -123,6 +123,7 @@ export function commands(
     | "continueSession"
     | "getContinuationReceipt"
     | "startCompaction"
+    | "cancelCompaction"
     | "setSubagentProviders"
     | "getCompactionOperation"
     | "removePendingInput"
@@ -191,6 +192,7 @@ export function emptyClient(
   | "continueSession"
   | "getContinuationReceipt"
   | "startCompaction"
+  | "cancelCompaction"
   | "setSubagentProviders"
   | "getCompactionOperation"
   | "removePendingInput"
@@ -208,6 +210,9 @@ export function emptyClient(
     getContinuationReceipt: async () => null,
     startCompaction: async () => {
       throw new Error("Unexpected compaction");
+    },
+    cancelCompaction: async () => {
+      throw new Error("Unexpected cancellation");
     },
     setSubagentProviders: async (_id, connectionIds) => ({ connectionIds }),
     getCompactionOperation: async () => null,

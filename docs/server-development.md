@@ -143,6 +143,7 @@ provider calls.
 | POST `/api/sessions/{sessionId}/executions/{executionId}/pending-inputs/{submissionId}/remove` | Empty JSON object `{}` → 200 boolean; false if already claimed, retired or unavailable |
 | POST `/api/sessions/{sessionId}/compactions` | `ManualCompactionRequest` → 200 `CompactionReceipt`; 409 when admission is unavailable |
 | GET `/api/sessions/{sessionId}/compactions/operations/{operationId}` | 200 receipt or literal JSON `null` |
+| DELETE `/api/sessions/{sessionId}/compactions/operations/{operationId}` | Empty body or `{}` → 200 cancelled receipt; 409 when not queued or already started |
 | GET `/api/sessions/{sessionId}/compactions/{compactionId}` | `expectedHistoryRevision` → 200 `CompactionSummary`, or 404 |
 | GET `/api/sessions/{sessionId}/snapshot` | 200 slim `SessionSnapshot` |
 | GET `/api/sessions/{sessionId}/user-questions` | 200 pending `ask_user` calls from this primary session and its descendants |

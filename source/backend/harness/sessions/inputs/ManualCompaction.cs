@@ -8,7 +8,7 @@ namespace Urd.Core.Sessions;
 // Admits manual compaction and reads its receipts. All queue access holds the session lock.
 internal sealed class ManualCompaction(SessionBase session, UrdStore store, AsyncLock sessionLock) {
   private ManualCompactionRequest? queued;
-  private (ManualCompactionRequest Request, CompactionReceipt Receipt)? discarded;
+  private (ManualCompactionRequest Request, CompactionReceipt Receipt, bool CancelledByUser)? discarded;
 
   internal Guid? QueuedId => queued?.OperationId;
 
@@ -64,11 +64,25 @@ internal sealed class ManualCompaction(SessionBase session, UrdStore store, Asyn
         return store.Compactions.ReadReceipt(session.Id, operationId);
       }, cancellation);
 
-  internal void Invalidate(string reason) {
+  internal async Task<CompactionReceipt?> CancelQueuedAsync(Guid operationId) {
+    if (operationId == Guid.Empty)
+      throw new ArgumentException("Compaction requires an operation ID.", nameof(operationId));
+    using var _ = await sessionLock.AcquireAsync();
+    session.ThrowIfClosed();
+    if (queued?.OperationId == operationId) {
+      Invalidate("Queued compaction cancelled by user.", cancelledByUser: true);
+      session.PublishChange();
+      return discarded!.Value.Receipt;
+    }
+    return discarded is { CancelledByUser: true } prior && prior.Request.OperationId == operationId
+        ? prior.Receipt : null;
+  }
+
+  internal void Invalidate(string reason, bool cancelledByUser = false) {
     if (queued is not { } request)
       return;
     // Keep the latest invalidation readable even though it never acquired a durable run.
-    discarded = (request, new(request.OperationId, ExecutionOutcome.Cancelled, reason));
+    discarded = (request, new(request.OperationId, ExecutionOutcome.Cancelled, reason), cancelledByUser);
     queued = null;
   }
 

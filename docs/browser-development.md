@@ -356,7 +356,8 @@ position when feedback changes. The Context control reveals **Compact** on hover
 focus and starts compaction directly; its descriptive tooltip retains context details and feedback,
 also reachable from More when context indicators overflow. When the server permits it, a request
 made during work queues until execution and cleanup finish. The control shows queued and running
-states from the session snapshot; an acknowledged queue does not block steering. It leaves composer
+states from the session snapshot; an acknowledged queue does not block steering. Hover or focus
+**Queued** to reveal **Cancel**. After compaction starts, use **Stop** instead. The control leaves composer
 drafts unchanged and does not automatically repeat a no-op or failure. The
 browser control has no focus-instructions field; the HTTP operation still accepts optional focus.
 Successful manual or automatic compaction adds a quiet **History compacted** entry; its summary

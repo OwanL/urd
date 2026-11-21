@@ -86,6 +86,7 @@ type WorkspaceCommandClient = Pick<
   | "continueSession"
   | "getContinuationReceipt"
   | "startCompaction"
+  | "cancelCompaction"
   | "getCompactionOperation"
   | "removePendingInput"
   | "stopExecution"
@@ -382,6 +383,20 @@ export class WorkspaceCommands {
     await this.compactions.start(id, snapshot, selection);
   }
 
+  cancelCompaction(id: string, snapshot: SessionSnapshot): Promise<void> {
+    if (snapshot.sessionId !== id || snapshot.manualCompactionId) return Promise.resolve();
+    const current = this.state.compactions[id];
+    const operationId =
+      snapshot.queuedCompactionId ??
+      (current?.phase === "observing" && current.queued ? current.operationId : null);
+    if (
+      !operationId ||
+      (current?.phase === "settled" && current.cancelledOperationId === operationId)
+    )
+      return Promise.resolve();
+    return this.compactions.cancel(id, operationId);
+  }
+
   private isCompacting(id: string): boolean {
     const operation = this.state.compactions[id];
     return (
@@ -437,7 +452,11 @@ export class WorkspaceCommands {
   observeSnapshot(snapshot: SessionSnapshot, knownWhenRead: string | null): void {
     const compaction = this.state.compactions[snapshot.sessionId];
     const observedId = snapshot.manualCompactionId ?? snapshot.queuedCompactionId;
-    if (observedId && (!compaction || compaction.phase === "settled")) {
+    if (
+      observedId &&
+      (!compaction ||
+        (compaction.phase === "settled" && compaction.cancelledOperationId !== observedId))
+    ) {
       this.setCompaction(snapshot.sessionId, {
         phase: "observing",
         operationId: observedId,

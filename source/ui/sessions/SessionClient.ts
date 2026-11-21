@@ -426,6 +426,12 @@ export class SessionClient {
     );
   }
 
+  cancelCompaction(sessionId: string, operationId: string): Promise<CompactionReceipt> {
+    const path =
+      `/${encodeURIComponent(sessionId)}/compactions/operations/` + encodeURIComponent(operationId);
+    return requestJson(this.url(path), "DELETE", {});
+  }
+
   getCompactionOperation(
     sessionId: string,
     operationId: string,

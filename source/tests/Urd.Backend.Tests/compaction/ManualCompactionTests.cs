@@ -193,6 +193,100 @@ public sealed class ManualCompactionTests {
   }
 
   [Fact]
+  public async Task CancelQueuedCompactionIsIdempotentAndDoesNotRunAfterBusyExecution() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    var entered = Signal();
+    var release = Signal();
+    int calls = 0;
+    int summaries = 0;
+    using var client = new ScriptedChatClient(token => Interlocked.Increment(ref calls) == 2
+        ? Paused(entered, release, token) : Complete(token), _ => {
+      Interlocked.Increment(ref summaries);
+      return Task.FromResult(SummaryResponse());
+    });
+    PrimarySession session = CreateSession(store, client);
+    await SubmitTurnAsync(session, new string('x', 100_000));
+    UserMessageReceipt busy = await session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, "busy turn", TestLlmSelection.Default));
+    try {
+      await entered.Task.WaitAsync(TestTimeout);
+      var request = new ManualCompactionRequest(Guid.NewGuid(), 0, Selection);
+      Assert.True(Assert.IsType<CompactionReceipt>(await session.CompactAsync(request)).Queued);
+
+      Assert.Null(await session.CancelQueuedCompactionAsync(Guid.NewGuid()));
+      Assert.Equal(request.OperationId, (await session.ReadSnapshotAsync()).QueuedCompactionId);
+      Assert.True(Assert.IsType<CompactionReceipt>(await session.ReadCompactionReceiptAsync(request.OperationId)).Queued);
+
+      CompactionReceipt cancelled = Assert.IsType<CompactionReceipt>(await session.CancelQueuedCompactionAsync(request.OperationId));
+      Assert.Equal(request.OperationId, cancelled.ExecutionId);
+      Assert.False(cancelled.Queued);
+      Assert.Equal(ExecutionOutcome.Cancelled, cancelled.Outcome);
+      Assert.Null((await session.ReadSnapshotAsync()).QueuedCompactionId);
+      Assert.Equal(cancelled, await session.CancelQueuedCompactionAsync(request.OperationId));
+      Assert.Equal(cancelled, await session.ReadCompactionReceiptAsync(request.OperationId));
+      Assert.Equal(cancelled, await session.CompactAsync(request));
+      Assert.False(string.IsNullOrWhiteSpace(cancelled.Error));
+
+      var next = new ManualCompactionRequest(Guid.NewGuid(), 0, Selection);
+      Assert.True(Assert.IsType<CompactionReceipt>(await session.CompactAsync(next)).Queued);
+      Assert.Equal(cancelled, await session.CancelQueuedCompactionAsync(request.OperationId));
+      Assert.Equal(next.OperationId, (await session.ReadSnapshotAsync()).QueuedCompactionId);
+      Assert.NotNull(await session.CancelQueuedCompactionAsync(next.OperationId));
+      Assert.Null(await session.CancelQueuedCompactionAsync(request.OperationId));
+
+      release.TrySetResult();
+      Assert.Equal(ExecutionOutcome.Completed,
+          (await session.WaitForExecutionFinishAsync(Assert.IsType<Guid>(busy.ExecutionId)).WaitAsync(TestTimeout)).Outcome);
+      Assert.Equal(0, summaries);
+      Assert.DoesNotContain(StoredExecutions.Read(database), run => run.ExecutionId == request.OperationId);
+      Assert.Null(store.Compactions.ReadContext(session.Id, 0).PreviousCompaction);
+    } finally {
+      release.TrySetResult();
+    }
+  }
+
+  [Fact]
+  public async Task CancelQueuedCompactionDoesNotCancelStartedWork() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    var busyEntered = Signal();
+    var busyRelease = Signal();
+    var entered = Signal();
+    var release = Signal();
+    int calls = 0;
+    using var client = new ScriptedChatClient(token => Interlocked.Increment(ref calls) == 3
+        ? Paused(busyEntered, busyRelease, token) : Complete(token), async cancellation => {
+      entered.TrySetResult();
+      await release.Task.WaitAsync(cancellation);
+      return SummaryResponse();
+    });
+    PrimarySession session = CreateSession(store, client);
+    await SubmitTurnAsync(session, new string('x', 100_000));
+    await SubmitTurnAsync(session, "latest turn");
+    UserMessageReceipt busy = await session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, "busy turn", TestLlmSelection.Default));
+    try {
+      await busyEntered.Task.WaitAsync(TestTimeout);
+      var request = new ManualCompactionRequest(Guid.NewGuid(), 0, Selection);
+      CompactionReceipt accepted = Assert.IsType<CompactionReceipt>(await session.CompactAsync(request));
+      Assert.True(accepted.Queued);
+      busyRelease.TrySetResult();
+      await session.WaitForExecutionFinishAsync(Assert.IsType<Guid>(busy.ExecutionId)).WaitAsync(TestTimeout);
+      await entered.Task.WaitAsync(TestTimeout);
+      Assert.Null(await session.CancelQueuedCompactionAsync(request.OperationId));
+      Assert.Equal(request.OperationId, (await session.ReadSnapshotAsync()).ManualCompactionId);
+      release.TrySetResult();
+      Assert.Equal(ExecutionOutcome.Completed,
+          (await session.WaitForExecutionFinishAsync(accepted.ExecutionId).WaitAsync(TestTimeout)).Outcome);
+      Assert.Equal(ExecutionOutcome.Completed,
+          Assert.IsType<CompactionReceipt>(await session.ReadCompactionReceiptAsync(request.OperationId)).Outcome);
+      Assert.NotNull(store.Compactions.ReadContext(session.Id, 0).PreviousCompaction);
+    } finally {
+      busyRelease.TrySetResult();
+      release.TrySetResult();
+    }
+  }
+
+  [Fact]
   public async Task HistoryEditCancelsQueuedCompactionWithAReadableReceipt() {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);

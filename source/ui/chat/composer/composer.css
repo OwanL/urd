@@ -98,10 +98,12 @@
   display: inline-grid;
 }
 .session-context-value,
-.session-context-action {
+.session-context-action,
+.session-context-cancel {
   grid-area: 1 / 1;
 }
-.session-context-action {
+.session-context-action,
+.session-context-cancel {
   visibility: hidden;
 }
 .session-context-indicator.has-compaction-action:hover .session-context-value,
@@ -112,6 +114,14 @@
 .session-context-indicator.has-compaction-action:hover .session-context-action,
 .session-context-indicator.has-compaction-action:focus-visible .session-context-action,
 .session-context-indicator.has-compaction-status .session-context-action {
+  visibility: visible;
+}
+.session-context-indicator.can-cancel-compaction:hover .session-context-action,
+.session-context-indicator.can-cancel-compaction:focus-visible .session-context-action {
+  visibility: hidden;
+}
+.session-context-indicator.can-cancel-compaction:hover .session-context-cancel,
+.session-context-indicator.can-cancel-compaction:focus-visible .session-context-cancel {
   visibility: visible;
 }
 .session-context-indicator[aria-disabled="true"] {

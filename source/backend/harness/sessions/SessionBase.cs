@@ -140,6 +140,7 @@ public abstract class SessionBase {
       ?? Task.FromResult(false);
 
   public Task<CompactionReceipt?> CompactAsync(ManualCompactionRequest submission) => manualCompaction.CompactAsync(submission);
+  public Task<CompactionReceipt?> CancelQueuedCompactionAsync(Guid operationId) => manualCompaction.CancelQueuedAsync(operationId);
   public Task<CompactionReceipt?> ReadCompactionReceiptAsync(Guid operationId, CancellationToken cancellation = default) =>
       manualCompaction.ReadReceiptAsync(operationId, cancellation);
   public Task<CompactionSummary?> ReadCompactionAsync(Guid id, long revision, CancellationToken cancellation = default) =>

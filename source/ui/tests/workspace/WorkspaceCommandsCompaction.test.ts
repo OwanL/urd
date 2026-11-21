@@ -14,6 +14,78 @@ import {
   deferred,
 } from "./WorkspaceCommandsFixture.ts";
 
+void test("cancelling a snapshot queue is deduplicated and ignores stale snapshots", async () => {
+  const workspace = fixture();
+  const pending = deferred<CompactionReceipt>();
+  let cancellations = 0;
+  const coordinator = commands(workspace.access, {
+    ...emptyClient(),
+    cancelCompaction: async (_id, operationId) => {
+      cancellations++;
+      assert.equal(operationId, firstExecutionId);
+      return pending.promise;
+    },
+  });
+  const queued = snapshot({ queuedCompactionId: firstExecutionId });
+  const first = coordinator.cancelCompaction(sessionId, queued);
+  await coordinator.cancelCompaction(sessionId, queued);
+  assert.equal(cancellations, 1);
+  pending.resolve(compactionReceipt(firstExecutionId, "cancelled"));
+  await first;
+  coordinator.observeSnapshot(queued, null);
+  assert.equal(compactionStatus(queued, coordinator.status.compactions[sessionId]), null);
+  await coordinator.cancelCompaction(sessionId, queued);
+  assert.equal(cancellations, 1);
+});
+
+void test("an older receipt read cannot overwrite successful cancellation", async () => {
+  const workspace = fixture();
+  const read = deferred<CompactionReceipt>();
+  const coordinator = commands(workspace.access, {
+    ...emptyClient(),
+    getCompactionOperation: async () => read.promise,
+    cancelCompaction: async (_id, operationId) => compactionReceipt(operationId, "cancelled"),
+  });
+  const queued = snapshot({ queuedCompactionId: firstExecutionId });
+  coordinator.observeSnapshot(queued, null);
+  coordinator.observeSnapshot(snapshot(), null);
+  await coordinator.cancelCompaction(sessionId, queued);
+  read.resolve({ ...compactionReceipt(firstExecutionId, null), queued: true });
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(compactionStatus(queued, coordinator.status.compactions[sessionId]), null);
+});
+
+void test("failed cancellation reconciles a queued receipt and permits retry", async () => {
+  const workspace = fixture();
+  let cancellations = 0;
+  const reconciled = deferred<void>();
+  const coordinator = commands(
+    workspace.access,
+    {
+      ...emptyClient(),
+      cancelCompaction: async () => {
+        cancellations++;
+        throw new Error("offline");
+      },
+      getCompactionOperation: async (_id, operationId) => ({
+        ...compactionReceipt(operationId, null),
+        queued: true,
+      }),
+    },
+    (state) => {
+      const operation = state.compactions[sessionId];
+      if (operation?.phase === "observing" && operation.queued && !operation.cancelling)
+        reconciled.resolve();
+    },
+  );
+  const queued = snapshot({ queuedCompactionId: firstExecutionId });
+  await coordinator.cancelCompaction(sessionId, queued);
+  await reconciled.promise;
+  await coordinator.cancelCompaction(sessionId, queued);
+  assert.equal(cancellations, 2);
+});
+
 void test("compaction can be queued during an execution when the server permits it", async () => {
   const workspace = fixture();
   let starts = 0;

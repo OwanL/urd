@@ -41,6 +41,8 @@ internal static class SessionRoutes {
     routes.MapPost("/{sessionId}/executions/{executionId}/stop", (HttpContext http, Guid sessionId, Guid executionId) =>
         StopAsync(http, sessions, sessionId, executionId));
     routes.MapPost("/{sessionId}/compactions", (HttpContext http, Guid sessionId) => CompactAsync(http, sessions, sessionId));
+    routes.MapDelete("/{sessionId}/compactions/operations/{operationId}", (HttpContext http, Guid sessionId, Guid operationId) =>
+        CancelQueuedCompactionAsync(http, sessions, sessionId, operationId));
     routes.MapGet("/{sessionId}/compactions/operations/{operationId}", (HttpContext http, Guid sessionId, Guid operationId) =>
         WithSessionAsync(http, sessions, sessionId, async session => {
           CompactionReceipt? receipt = await session.ReadCompactionReceiptAsync(operationId, http.RequestAborted);
@@ -206,6 +208,17 @@ internal static class SessionRoutes {
       return Results.BadRequest();
     return await WithSessionAsync(http, sessions, sessionId, async session => {
       CompactionReceipt? receipt = await session.CompactAsync(submission);
+      return receipt is null ? Results.Conflict() : Results.Ok(receipt);
+    });
+  }
+
+  private static async Task<IResult> CancelQueuedCompactionAsync(
+      HttpContext http, SessionManager sessions, Guid sessionId, Guid operationId) {
+    if (operationId == Guid.Empty)
+      return Results.BadRequest();
+    await HttpJson.RequireEmptyAsync(http.Request, http.RequestAborted);
+    return await WithSessionAsync(http, sessions, sessionId, async session => {
+      CompactionReceipt? receipt = await session.CancelQueuedCompactionAsync(operationId);
       return receipt is null ? Results.Conflict() : Results.Ok(receipt);
     });
   }

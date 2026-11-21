@@ -1,5 +1,5 @@
 using Urd.Core.Sessions;
-using static Urd.Server.SessionRoutes;
+using static Urd.Server.SessionTranscriptRoutes;
 
 namespace Urd.Server;
 
@@ -26,8 +26,8 @@ internal static class SessionPrepassRoutes {
     long historyRevision = query.HistoryRevision!.Value;
     int candidateOffset = query.CandidateOffset ?? 0;
     int resultOffset = query.ResultOffset ?? 0;
-    return WithSessionAsync(http, sessions, sessionId, async session => {
-      PrepassDetails? details = await session.ReadPrepassDetailsAsync(boundaryId, category,
+    return WithTranscriptAsync(http, sessions, sessionId, async (transcript, _) => {
+      PrepassDetails? details = await transcript.ReadPrepassDetailsAsync(boundaryId, category,
           historyRevision, candidateOffset, resultOffset, http.RequestAborted);
       return details is null ? Results.NotFound() : Results.Ok(details);
     });

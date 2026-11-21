@@ -12,29 +12,33 @@ namespace Urd.Core.Storage;
 internal sealed class SessionStorage(Database database) {
   internal SessionRecord CreatePrimary(Guid sessionId, string? workingDirectory = null,
       IReadOnlyList<Guid>? subagentProviders = null) =>
-      Create(sessionId, workingDirectory, SessionKind.Primary, null, null, subagentProviders);
+      Create(sessionId, workingDirectory, SessionKind.Primary, null, null, null, subagentProviders);
 
-  internal SessionRecord CreateSubagent(Guid sessionId, Guid parentSessionId, string owningCallId, string? workingDirectory = null) {
+  internal SessionRecord CreateSubagent(Guid sessionId, Guid parentSessionId, string owningCallId,
+      string? workingDirectory = null, Guid? owningRequestId = null) {
     if (parentSessionId == Guid.Empty || parentSessionId == sessionId)
       throw new ArgumentException("Parent session ID must identify a different session.", nameof(parentSessionId));
+    if (owningRequestId == Guid.Empty)
+      throw new ArgumentException("Owning request ID cannot be empty.", nameof(owningRequestId));
     ArgumentException.ThrowIfNullOrWhiteSpace(owningCallId);
-    return Create(sessionId, workingDirectory, SessionKind.Subagent, parentSessionId, owningCallId, null);
+    return Create(sessionId, workingDirectory, SessionKind.Subagent, parentSessionId, owningCallId, owningRequestId, null);
   }
 
   private SessionRecord Create(Guid sessionId, string? workingDirectory, SessionKind kind, Guid? parentSessionId,
-      string? owningCallId, IReadOnlyList<Guid>? subagentProviders) {
+      string? owningCallId, Guid? owningRequestId, IReadOnlyList<Guid>? subagentProviders) {
     if (sessionId == Guid.Empty)
       throw new ArgumentException("Session ID cannot be empty.", nameof(sessionId));
 
     return database.Write(transaction => database.QuerySingleOrDefault(transaction, """
         INSERT INTO sessions (session_id, history_revision, working_directory, kind, parent_session_id,
-            owning_call_id, subagent_providers_json)
-        VALUES ($id, 0, $directory, $kind, $parent, $call, $providers);
+            owning_call_id, owning_request_id, subagent_providers_json)
+        VALUES ($id, 0, $directory, $kind, $parent, $call, $request, $providers);
         INSERT INTO session_creation (session_id) VALUES ($id);
-        SELECT session_id, history_revision, working_directory, kind, parent_session_id, owning_call_id
+        SELECT session_id, history_revision, working_directory, kind, parent_session_id, owning_call_id, owning_request_id
         FROM sessions WHERE session_id = $id;
         """, ReadRecord, ("$id", sessionId), ("$directory", workingDirectory), ("$kind", (int)kind),
-        ("$parent", parentSessionId), ("$call", owningCallId), ("$providers", SerializeProviders(subagentProviders)))!);
+        ("$parent", parentSessionId), ("$call", owningCallId), ("$request", owningRequestId),
+        ("$providers", SerializeProviders(subagentProviders)))!);
   }
 
   internal SessionIdPage ListPrimaryIds(string? cursor) {
@@ -81,8 +85,10 @@ internal sealed class SessionStorage(Database database) {
       ("$userInput", (int)ExecutionRunKind.UserInput), ("$human", (int)InputProvenance.Human)));
 
   internal SessionRecord? Read(Guid sessionId) => database.RunLocked(() => database.QuerySingleOrDefault(null,
-      "SELECT session_id, history_revision, working_directory, kind, parent_session_id, owning_call_id FROM sessions WHERE session_id = $id;",
-      ReadRecord, ("$id", sessionId)));
+      """
+      SELECT session_id, history_revision, working_directory, kind, parent_session_id, owning_call_id, owning_request_id
+      FROM sessions WHERE session_id = $id;
+      """, ReadRecord, ("$id", sessionId)));
 
   // All descendants consult the primary's current policy, not a stale copy taken at delegation.
   internal Guid[]? ReadSubagentProviders(Guid sessionId) => database.RunLocked(() => {
@@ -117,6 +123,57 @@ internal sealed class SessionStorage(Database database) {
         WHERE s.session_id = $id;
         """, row => (row.NullableString("title"), row.Bool("generating")), ("$id", sessionId)));
 
+  internal SubagentView? ReadSubagentView(Guid sessionId, bool live) => database.RunLocked(() =>
+      database.QuerySingleOrDefault(null, """
+        SELECT s.history_revision, s.parent_session_id, t.title
+        FROM sessions s LEFT JOIN session_prepass_title t ON t.session_id = s.session_id
+        WHERE s.session_id = $id AND s.kind = $kind;
+        """, row => new SubagentView(row.Long("history_revision"), live,
+            row.NullableString("title") ?? "Subagent", row.Guid("parent_session_id")),
+        ("$id", sessionId), ("$kind", (int)SessionKind.Subagent)));
+
+  internal IReadOnlyList<SubagentDiscovery> ReadSubagentDiscoveries(IReadOnlyList<Guid> childIds) => childIds.Count == 0
+      ? [] : database.RunLocked(() => database.Query(null, """
+        SELECT s.session_id, s.parent_session_id, t.title
+        FROM json_each($ids) ids CROSS JOIN sessions s ON s.session_id = ids.value
+        LEFT JOIN session_prepass_title t ON t.session_id = s.session_id
+        ORDER BY ids.key;
+        """, ReadDiscovery, ("$ids", JsonSerializer.Serialize(childIds))));
+
+  internal SubagentDiscovery? FindSubagentByCall(Guid parentId, Guid requestId, string callId) => database.Read(transaction => {
+    var exact = database.QuerySingleOrDefault(transaction, """
+        SELECT s.session_id, s.parent_session_id, t.title
+        FROM sessions s LEFT JOIN session_prepass_title t ON t.session_id = s.session_id
+        WHERE s.parent_session_id = $parent AND s.owning_call_id = $call AND s.owning_request_id = $request;
+        """, ReadDiscovery, ("$parent", parentId), ("$call", callId), ("$request", requestId));
+    if (exact is not null)
+      return exact;
+
+    // A legacy link needs one possible child and one started delegation in unedited history.
+    // An edit can erase the competing call while leaving its child record behind.
+    var children = database.Query(transaction, """
+        SELECT s.session_id, s.parent_session_id, s.owning_request_id, t.title
+        FROM sessions p JOIN sessions s ON s.parent_session_id = p.session_id
+        LEFT JOIN session_prepass_title t ON t.session_id = s.session_id
+        WHERE p.session_id = $parent AND p.history_revision = 0 AND s.owning_call_id = $call
+        LIMIT 2;
+        """, row => (Child: ReadDiscovery(row), RequestId: row.NullableGuid("owning_request_id")),
+        ("$parent", parentId), ("$call", callId));
+    if (children.Count != 1 || children[0].RequestId is not null)
+      return null;
+
+    List<Guid> requests = database.Query(transaction, """
+        SELECT t.request_id FROM execution_tools t JOIN execution_runs r ON r.run_id = t.run_id
+        WHERE r.session_id = $parent AND r.history_revision = 0
+            AND t.call_id = $call AND t.name = 'subagent' AND t.started = 1
+        LIMIT 2;
+        """, row => row.Guid("request_id"), ("$parent", parentId), ("$call", callId));
+    return requests.Count == 1 && requests[0] == requestId ? children[0].Child : null;
+  });
+
+  private static SubagentDiscovery ReadDiscovery(SqliteDataReader row) =>
+      new(row.Guid("session_id"), row.Guid("parent_session_id"), row.NullableString("title") ?? "Subagent");
+
   internal bool HasAcceptedInput(Guid sessionId) => database.RunLocked(() => database.Scalar<bool>(null, """
       SELECT EXISTS(SELECT 1 FROM input_decisions WHERE session_id = $session AND decision = 1);
       """, ("$session", sessionId)));
@@ -139,5 +196,6 @@ internal sealed class SessionStorage(Database database) {
 
   private static SessionRecord ReadRecord(SqliteDataReader row)
       => new(row.Guid("session_id"), row.Long("history_revision"), row.NullableString("working_directory"),
-          (SessionKind)row.Int("kind"), row.NullableGuid("parent_session_id"), row.NullableString("owning_call_id"));
+          (SessionKind)row.Int("kind"), row.NullableGuid("parent_session_id"), row.NullableString("owning_call_id"),
+          row.NullableGuid("owning_request_id"));
 }

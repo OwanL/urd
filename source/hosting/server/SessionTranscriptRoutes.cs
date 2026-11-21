@@ -1,7 +1,7 @@
+using Urd.Core.Compaction;
 using Urd.Core.Execution;
 using Urd.Core.Sessions;
 using Urd.Core.ToolCallDisplay;
-using static Urd.Server.SessionRoutes;
 
 namespace Urd.Server;
 
@@ -33,6 +33,32 @@ internal static class SessionTranscriptRoutes {
             ReadMarkdownImageAsync(http, sessions, sessionId, executionId, messageId, key, historyRevision));
     routes.MapGet("/{sessionId}/content", (HttpContext http, Guid sessionId, [AsParameters] ContentQuery query) =>
         ReadContentAsync(http, sessions, sessionId, query));
+    routes.MapGet("/{sessionId}/compactions/{compactionId}", (HttpContext http, Guid sessionId,
+        Guid compactionId, long expectedHistoryRevision) =>
+        WithTranscriptAsync(http, sessions, sessionId, async (transcript, _) => {
+          CompactionSummary? summary = await transcript.ReadCompactionAsync(compactionId,
+              expectedHistoryRevision, http.RequestAborted);
+          return summary is null ? Results.NotFound() : Results.Ok(summary);
+        }));
+    routes.MapGet("/{sessionId}/subagent-view", (HttpContext http, Guid sessionId) =>
+        ReadSubagentViewAsync(http, sessions, sessionId));
+  }
+
+  private static async Task<IResult> ReadSubagentViewAsync(HttpContext http, SessionManager sessions, Guid sessionId) {
+    if (sessionId == Guid.Empty)
+      return Results.BadRequest();
+
+    SubagentView? view = await sessions.ReadSubagentViewAsync(sessionId, http.RequestAborted);
+    return view is null ? Results.NotFound() : Results.Ok(view);
+  }
+
+  internal static async Task<IResult> WithTranscriptAsync(HttpContext http, SessionManager sessions, Guid sessionId,
+      Func<SessionTranscript, string?, Task<IResult>> read) {
+    if (sessionId == Guid.Empty)
+      return Results.BadRequest();
+
+    var (transcript, workingDirectory) = await sessions.GetTranscriptAsync(sessionId, http.RequestAborted);
+    return await read(transcript, workingDirectory);
   }
 
   private static Task<IResult> ReadHistoryAsync(
@@ -62,9 +88,9 @@ internal static class SessionTranscriptRoutes {
     TranscriptEntryRef? anchor = hasAnyAnchor
         ? new(query.ExecutionId!.Value, query.EntryId!.Value, kind!.Value, query.ExpectedHistoryRevision) : null;
     var history = new TranscriptHistoryQuery(mode.Value, query.ExpectedHistoryRevision, anchor);
-    return WithSessionAsync(http, sessions, sessionId, async session => {
-      TranscriptHistoryPage page = await session.Transcript.ReadHistoryAsync(history, http.RequestAborted);
-      return Results.Ok(ToHistoryPage(session, page));
+    return WithTranscriptAsync(http, sessions, sessionId, async (transcript, workingDirectory) => {
+      TranscriptHistoryPage page = await transcript.ReadHistoryAsync(history, http.RequestAborted);
+      return Results.Ok(ToHistoryPage(workingDirectory, page));
     });
   }
 
@@ -74,8 +100,8 @@ internal static class SessionTranscriptRoutes {
         || query.ExpectedHistoryRevision < 0 || query.Returned is null || query.Full is null)
       return Task.FromResult<IResult>(Results.BadRequest());
 
-    return WithSessionAsync(http, sessions, sessionId, async session => {
-      ToolCallTranscript? transcript = await session.Transcript.ReadToolCallTranscriptAsync(
+    return WithTranscriptAsync(http, sessions, sessionId, async (reader, _) => {
+      ToolCallTranscript? transcript = await reader.ReadToolCallTranscriptAsync(
           query.ExpectedHistoryRevision, requestId, callId, query.Returned.Value,
           query.Full.Value ? null : MaxToolCallTranscriptCharacters, http.RequestAborted);
       return transcript is null ? Results.NotFound() : Results.Ok(transcript);
@@ -87,8 +113,8 @@ internal static class SessionTranscriptRoutes {
     if (query.ExpectedHistoryRevision < 0)
       return Task.FromResult<IResult>(Results.BadRequest());
 
-    return WithSessionAsync(http, sessions, sessionId, async session => {
-      TranscriptPositionState state = await session.Transcript.ReadPositionSummaryAsync(
+    return WithTranscriptAsync(http, sessions, sessionId, async (transcript, _) => {
+      TranscriptPositionState state = await transcript.ReadPositionSummaryAsync(
           query.ExpectedHistoryRevision, http.RequestAborted);
       return Results.Ok(ToPositionSummary(state));
     });
@@ -100,10 +126,10 @@ internal static class SessionTranscriptRoutes {
         || !double.IsFinite(fraction) || fraction is < 0 or > 1)
       return Task.FromResult<IResult>(Results.BadRequest());
 
-    return WithSessionAsync(http, sessions, sessionId, async session => {
-      TranscriptPositionWindow window = await session.Transcript.LocatePositionAsync(
+    return WithTranscriptAsync(http, sessions, sessionId, async (transcript, workingDirectory) => {
+      TranscriptPositionWindow window = await transcript.LocatePositionAsync(
           query.ExpectedHistoryRevision, fraction, http.RequestAborted);
-      return Results.Ok(ToPositionWindow(session, window));
+      return Results.Ok(ToPositionWindow(workingDirectory, window));
     });
   }
 
@@ -113,10 +139,10 @@ internal static class SessionTranscriptRoutes {
         || !Enum.TryParse(query.Kind, ignoreCase: true, out TranscriptEntryKind kind) || !Enum.IsDefined(kind))
       return Task.FromResult<IResult>(Results.BadRequest());
     var entry = new TranscriptEntryRef(executionId, entryId, kind, query.ExpectedHistoryRevision);
-    return WithSessionAsync(http, sessions, sessionId, async session => {
-      TranscriptPositionWindow window = await session.Transcript.ReadEntryPositionAsync(
+    return WithTranscriptAsync(http, sessions, sessionId, async (transcript, workingDirectory) => {
+      TranscriptPositionWindow window = await transcript.ReadEntryPositionAsync(
           query.ExpectedHistoryRevision, entry, http.RequestAborted);
-      return Results.Ok(ToPositionWindow(session, window));
+      return Results.Ok(ToPositionWindow(workingDirectory, window));
     });
   }
 
@@ -129,8 +155,8 @@ internal static class SessionTranscriptRoutes {
         || query.AfterRank is < 0 || limit is < 1 or > MaxPromptPageSize)
       return Task.FromResult<IResult>(Results.BadRequest());
 
-    return WithSessionAsync(http, sessions, sessionId, async session => {
-      TranscriptPromptPage page = await session.Transcript.ReadPromptPageAsync(
+    return WithTranscriptAsync(http, sessions, sessionId, async (transcript, _) => {
+      TranscriptPromptPage page = await transcript.ReadPromptPageAsync(
           query.ExpectedHistoryRevision, query.AfterRank, limit, http.RequestAborted);
       return Results.Ok(new PromptPageDto(ToPositionSummary(page.State),
           page.Prompts.Select(ToPosition).ToArray(), page.NextAfterRank));
@@ -143,10 +169,10 @@ internal static class SessionTranscriptRoutes {
       return Task.FromResult<IResult>(Results.BadRequest());
     var prompt = new TranscriptEntryRef(executionId, entryId, TranscriptEntryKind.User, query.ExpectedHistoryRevision);
 
-    return WithSessionAsync(http, sessions, sessionId, async session => {
-      TranscriptPositionWindow window = await session.Transcript.ActivatePromptAsync(
+    return WithTranscriptAsync(http, sessions, sessionId, async (transcript, workingDirectory) => {
+      TranscriptPositionWindow window = await transcript.ActivatePromptAsync(
           query.ExpectedHistoryRevision, prompt, http.RequestAborted);
-      return Results.Ok(ToPositionWindow(session, window));
+      return Results.Ok(ToPositionWindow(workingDirectory, window));
     });
   }
 
@@ -157,27 +183,23 @@ internal static class SessionTranscriptRoutes {
       position.Entry.ExecutionId, position.Entry.EntryId, position.Entry.Kind,
       position.Entry.HistoryRevision, position.Rank, position.Weight, position.PrefixWeight);
 
-  private static HistoryPageDto ToHistoryPage(PrimarySession session, TranscriptHistoryPage page) => new(
-      page.SessionId, page.HistoryRevision, page.Entries, CreateToolLabels(session, page.Entries),
+  private static HistoryPageDto ToHistoryPage(string? workingDirectory, TranscriptHistoryPage page) => new(
+      page.SessionId, page.HistoryRevision, page.Entries, ToolCallLabelSet.CreateLookup(page.Entries, workingDirectory),
       page.HasBefore, page.HasAfter, page.Settlements);
 
-  private static PositionWindowDto ToPositionWindow(PrimarySession session, TranscriptPositionWindow window) => new(
+  private static PositionWindowDto ToPositionWindow(string? workingDirectory, TranscriptPositionWindow window) => new(
       ToPositionSummary(window.State), window.Target is null ? null : ToPosition(window.Target),
       window.Entries.Select(entry => new PositionedEntryDto(entry.Descriptor, ToPosition(entry.Position))).ToArray(),
-      CreateToolLabels(session, window.Entries.Select(entry => entry.Descriptor)),
+      ToolCallLabelSet.CreateLookup(window.Entries.Select(entry => entry.Descriptor), workingDirectory),
       window.HasBefore, window.HasAfter, window.Settlements);
-
-  private static IReadOnlyDictionary<string, ToolCallLabel> CreateToolLabels(
-      PrimarySession session, IEnumerable<TranscriptEntryDescriptor> descriptors) =>
-      ToolCallLabelSet.CreateLookup(descriptors, session.WorkingDirectory);
 
   private static Task<IResult> ReadMarkdownImageAsync(HttpContext http, SessionManager sessions, Guid sessionId,
       Guid executionId, Guid messageId, string key, long historyRevision) {
     if (executionId == Guid.Empty || messageId == Guid.Empty || historyRevision < 0)
       return Task.FromResult<IResult>(Results.BadRequest());
     var message = new MessageRef(executionId, messageId, MessageRole.Assistant, historyRevision);
-    return WithSessionAsync(http, sessions, sessionId, async session => {
-      var image = await session.Transcript.ReadMarkdownImageAsync(message, key, http.RequestAborted);
+    return WithTranscriptAsync(http, sessions, sessionId, async (transcript, _) => {
+      var image = await transcript.ReadMarkdownImageAsync(message, key, http.RequestAborted);
       return image is null ? Results.NotFound() : Results.Bytes(image.Data, image.MediaType);
     });
   }
@@ -195,8 +217,8 @@ internal static class SessionTranscriptRoutes {
 
     var message = new MessageRef(query.ExecutionId, query.MessageId, role.Value, query.HistoryRevision);
     var cursor = new MessageContentCursor(message, query.SegmentIndex, query.Utf8Offset);
-    return WithSessionAsync(http, sessions, sessionId, async session =>
-        Results.Ok(await session.Transcript.ReadContentAsync(cursor, http.RequestAborted)));
+    return WithTranscriptAsync(http, sessions, sessionId, async (transcript, _) =>
+        Results.Ok(await transcript.ReadContentAsync(cursor, http.RequestAborted)));
   }
 
   private sealed record HistoryQuery(

@@ -20,7 +20,21 @@ internal sealed class SessionRegistry {
     sessions.Add(session.Id, session);
     return session;
   }
+  // Caller holds the registry lock.
+  internal SubagentSession? FindChild(Guid id) => children.GetValueOrDefault(id);
   internal void TrackChild(SubagentSession child) => children.Add(child.Id, child);
+
+  // Caller holds the registry lock. Do not follow branches through an unregistered parent.
+  internal IReadOnlyList<Guid> LiveDescendantIds(Guid primaryId) {
+    if (children.Count == 0)
+      return [];
+
+    var byParent = children.Values.ToLookup(child => child.ParentSessionId, child => child.Id);
+    List<Guid> descendants = [.. byParent[primaryId]];
+    for (int i = 0; i < descendants.Count; i++)
+      descendants.AddRange(byParent[descendants[i]]);
+    return descendants;
+  }
 
   internal async Task UntrackPrimaryAsync(Guid id) {
     using var held = await sessionsLock.AcquireAsync();

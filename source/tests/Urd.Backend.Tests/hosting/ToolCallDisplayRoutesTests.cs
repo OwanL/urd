@@ -93,6 +93,76 @@ public sealed class ToolCallDisplayRoutesTests {
   }
 
   [Fact]
+  public async Task RetainedChildReadsStayPrivateAndRejectPrimaryOperations() {
+    using var database = new TemporaryDatabase();
+    Guid parentId = Guid.NewGuid();
+    SeedToolCall(database, out Guid childId, out Guid runId, out Guid requestId, out string callId,
+        out _, out Guid promptId, out _, out _, parentId);
+    Guid compactionId = Guid.NewGuid();
+    database.Execute($"""
+      INSERT INTO session_prepass_title (session_id, run_id, title)
+      VALUES ('{childId:D}', '{runId:D}', 'Retained child');
+      INSERT INTO session_prepass_details (session_id, run_id, boundary_id, category, state, started_at, finished_at)
+      VALUES ('{childId:D}', '{runId:D}', '{Guid.Empty:D}', 'title', 'completed',
+          '2026-11-12T00:00:00+00:00', '2026-11-12T00:00:01+00:00');
+      INSERT INTO session_compactions (compaction_id, session_id, history_revision, run_id, first_kept_request_id,
+          first_kept_message_index, first_kept_run_ordinal, first_kept_request_index, reason,
+          tokens_before, tokens_after, created_at, summary)
+      SELECT '{compactionId:D}', session_id, history_revision, run_id, '{requestId:D}', 0, ordinal, 0, 0,
+          100, 10, '2026-11-12T00:00:01+00:00', 'Child summary'
+      FROM execution_runs WHERE run_id = '{runId:D}';
+      """);
+    await using var server = new RunningServer(RunningServer.OptionsFor(database));
+    await server.WaitForReadyAsync();
+    string child = $"/api/sessions/{childId:D}";
+    string parent = $"/api/sessions/{parentId:D}";
+
+    string[] reads = [
+      "/subagent-view", "/history?mode=latest&expectedHistoryRevision=0", "/positions?expectedHistoryRevision=0",
+      $"/content?executionId={runId:D}&messageId={promptId:D}&role=user&historyRevision=0&segmentIndex=0&utf8Offset=0",
+      $"/tool-calls/{requestId:D}/{callId}?expectedHistoryRevision=0&returned=true&full=false",
+      $"/prepass/{Guid.Empty:D}/title?historyRevision=0", $"/compactions/{compactionId:D}?expectedHistoryRevision=0"
+    ];
+    using (HttpResponseMessage metadata = await RequestAsync(server.Client, HttpMethod.Get, child + reads[0])) {
+      Assert.Equal(HttpStatusCode.OK, metadata.StatusCode);
+      AssertPrivateResponse(metadata);
+      using JsonDocument body = JsonDocument.Parse(await metadata.Content.ReadAsStringAsync());
+      Assert.Equal(0, body.RootElement.GetProperty("historyRevision").GetInt64());
+      Assert.False(body.RootElement.GetProperty("live").GetBoolean());
+      Assert.Equal("Retained child", body.RootElement.GetProperty("title").GetString());
+      Assert.Equal(parentId, body.RootElement.GetProperty("parentId").GetGuid());
+    }
+
+    foreach (string suffix in reads.Skip(1)) {
+      using HttpResponseMessage response = await RequestAsync(server.Client, HttpMethod.Get, child + suffix);
+      Assert.True(response.StatusCode == HttpStatusCode.OK, $"{suffix}: {response.StatusCode}");
+      AssertPrivateResponse(response);
+    }
+    using (HttpResponseMessage unmarked = await RequestAsync(server.Client, HttpMethod.Get, child + reads[0], marker: false))
+      Assert.Equal(HttpStatusCode.Forbidden, unmarked.StatusCode);
+    using (HttpResponseMessage primaryView = await RequestAsync(server.Client, HttpMethod.Get, parent + reads[0]))
+      Assert.Equal(HttpStatusCode.NotFound, primaryView.StatusCode);
+    using (HttpResponseMessage stale = await RequestAsync(server.Client, HttpMethod.Get,
+        child + "/history?mode=latest&expectedHistoryRevision=1"))
+      Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+    using (HttpResponseMessage snapshot = await RequestAsync(server.Client, HttpMethod.Get, child + "/snapshot"))
+      Assert.Equal(HttpStatusCode.NotFound, snapshot.StatusCode);
+    using (HttpResponseMessage mutation = await RequestAsync(server.Client, HttpMethod.Post,
+        child + "/working-directory", JsonBody(JsonSerializer.Serialize(new { workingDirectory = Path.GetTempPath() }))))
+      Assert.Equal(HttpStatusCode.NotFound, mutation.StatusCode);
+    using (HttpResponseMessage closeChild = await RequestAsync(server.Client, HttpMethod.Post, child + "/close", JsonBody("{}")))
+      Assert.Equal(HttpStatusCode.NotFound, closeChild.StatusCode);
+    using (HttpResponseMessage closeParent = await RequestAsync(server.Client, HttpMethod.Post, parent + "/close", JsonBody("{}")))
+      Assert.Equal(HttpStatusCode.NoContent, closeParent.StatusCode);
+
+    foreach (string suffix in reads) {
+      using HttpResponseMessage response = await RequestAsync(server.Client, HttpMethod.Get, child + suffix);
+      Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+      AssertPrivateResponse(response);
+    }
+  }
+
+  [Fact]
   public async Task RevealRejectsRelativeAndMissingPathsWithoutLaunchingExplorer() {
     using var database = new TemporaryDatabase();
     await using var server = new RunningServer(RunningServer.OptionsFor(database));
@@ -132,7 +202,7 @@ public sealed class ToolCallDisplayRoutesTests {
 
   private static void SeedToolCall(TemporaryDatabase database, out Guid sessionId, out Guid runId,
       out Guid requestId, out string callId, out Guid startEntryId, out Guid promptEntryId,
-      out Guid completionEntryId, out int outputLength) {
+      out Guid completionEntryId, out int outputLength, Guid? parentId = null) {
     sessionId = Guid.NewGuid();
     runId = Guid.NewGuid();
     requestId = Guid.NewGuid();
@@ -149,8 +219,14 @@ public sealed class ToolCallDisplayRoutesTests {
     string result = JsonSerializer.Serialize(new {
       text = new string('x', resultTextLength), images = Array.Empty<object>(), details = (string?)null, isError = false
     });
-    using (UrdStore store = UrdStore.Open(database.Path))
-      store.Sessions.CreatePrimary(sessionId, workingDirectory);
+    using (UrdStore store = UrdStore.Open(database.Path)) {
+      if (parentId is { } parent) {
+        store.Sessions.CreatePrimary(parent, workingDirectory);
+        store.Sessions.CreateSubagent(sessionId, parent, "owning-call", workingDirectory);
+      } else {
+        store.Sessions.CreatePrimary(sessionId, workingDirectory);
+      }
+    }
 
     database.Execute($"""
       INSERT INTO execution_runs (session_id, run_id, history_revision, kind, llm_selection_json, outcome)
@@ -160,6 +236,8 @@ public sealed class ToolCallDisplayRoutesTests {
       INSERT INTO input_decisions
           (session_id, input_id, expected_history_revision, original_text_utf8, decision, run_id, llm_selection_json)
       VALUES ('{sessionId:D}', '{promptEntryId:D}', 0, X'70', 1, '{runId:D}', {Sql(selection)});
+      INSERT INTO execution_inputs (session_id, input_id, run_id, request_id)
+      VALUES ('{sessionId:D}', '{promptEntryId:D}', '{runId:D}', '{requestId:D}');
       INSERT INTO execution_messages
           (session_id, history_revision, run_id, role, message_id, input_id, request_id)
       VALUES ('{sessionId:D}', 0, '{runId:D}', 0, '{promptEntryId:D}', '{promptEntryId:D}', '{requestId:D}');

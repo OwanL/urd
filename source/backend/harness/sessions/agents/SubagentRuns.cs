@@ -56,7 +56,7 @@ internal sealed class SubagentRuns(
     LlmSelection selection = await modelSelector.ResolveSubagentAsync(request.Bucket, captured,
         store.Sessions.ReadSubagentProviders(parent.Id), cancellation);
     string? contextBlock = ReadParentContext(parent, caller, request, captured.CompactionTriggerTokenCount);
-    return new(parent.Id, caller.CallId, parent.WorkingDirectory, request.Task, contextBlock, selection);
+    return new(parent.Id, caller.RequestId, caller.CallId, parent.WorkingDirectory, request.Task, contextBlock, selection);
   }
 
   private string? ReadParentContext(SessionRecord parent, HarnessToolContext caller, SubagentRunRequest request,
@@ -81,7 +81,7 @@ internal sealed class SubagentRuns(
         throw new AuxiliaryModelUnavailableException("This session no longer allows the selected subagent provider.");
       // Install ownership before publishing the handle or starting the assignment.
       var child = createChild(store.Sessions.CreateSubagent(Guid.NewGuid(),
-          assignment.ParentSessionId, assignment.OwningCallId, assignment.WorkingDirectory));
+          assignment.ParentSessionId, assignment.OwningCallId, assignment.WorkingDirectory, assignment.OwningRequestId));
       questions.TrackDelegation(child.Id, owner);
       // Children are deliberately absent from SessionCreated and the primary tab list.
       registry.TrackChild(child);
@@ -151,6 +151,6 @@ internal sealed class SubagentRuns(
   private const string CancelledReport = "The subagent task was cancelled.";
 
   // One prepared bounded child: ownership, inherited directory and its whole assignment.
-  private sealed record SubagentAssignment(Guid ParentSessionId, string OwningCallId, string? WorkingDirectory,
-      string Task, string? ContextBlock, LlmSelection Selection);
+  private sealed record SubagentAssignment(Guid ParentSessionId, Guid OwningRequestId, string OwningCallId,
+      string? WorkingDirectory, string Task, string? ContextBlock, LlmSelection Selection);
 }

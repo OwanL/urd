@@ -12,7 +12,7 @@ namespace Urd.Core.Sessions;
 // Creates, discovers and opens sessions, keeping one live instance per opened session ID.
 // Bounded subagent children are created here too: they are registered under the shutdown fence
 // and unregistered again once their owning run settles and their disposable resources are gone.
-public sealed class SessionManager : IAsyncDisposable, ISubagentRunner, IAgentQuestions {
+public sealed partial class SessionManager : IAsyncDisposable, ISubagentRunner, IAgentQuestions {
   public ValueTask DisposeAsync() => new(ShutdownSessionsAsync());
   private readonly UrdStore store;
   private readonly Func<ProviderConnection, IChatClient> createChatClient;

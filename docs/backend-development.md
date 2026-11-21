@@ -9,7 +9,7 @@ saved-primary-ID discovery, durable Send decisions, safe-boundary steering, addr
 Stop, bounded snapshot/history/content reads, known-not-sent discovery and graceful
 shutdown. The browser workspace is implemented and served as static assets by the Server.
 
-`UrdStore` owns the shared database, currently schema 38. It records whether a request
+`UrdStore` owns the shared database, currently schema 39. It records whether a request
 started sending and pages inputs known not to have been sent, so users can retrieve
 and explicitly resend them. Snapshots stay slim; transcript metadata and
 content use separate bounded reads, and reported usage is persisted per request. Session snapshots
@@ -27,7 +27,14 @@ schema 37 by creating the setup-completion table and inserting its completion ma
 transaction as the version change;
 existing profiles therefore bypass first-run setup. Schema 38 adds closed-session usage summaries
 and keeps sender attribution in a recipient's history without requiring the sender session to exist.
-The upgrade does not close any existing sessions. The current build
+Schema 39 adds nullable `sessions.owning_request_id` for exact subagent-request attribution. It has no
+foreign key because request/transcript identity is independent of transcript retention. Existing
+sessions keep a null request identity; migration does not infer or backfill one. The partial unique
+index enforces exact `(parent_session_id, owning_call_id, owning_request_id)` associations while
+allowing legacy null identities, and a narrow partial `execution_tools` index supports lookup of
+started `subagent` calls. Legacy lookup is allowed only when it identifies one candidate; ambiguous
+associations remain unresolved, and history edits must not trigger a later legacy resolution. These
+upgrades do not close existing sessions. The current build
 rejects unsupported versions and does not remove or reset databases. Every later durable schema
 change must register its SQL step in `DatabaseSchema` and bump the version, including for development
 builds. On startup, `DatabaseMigrations` applies required steps and records the new version in one

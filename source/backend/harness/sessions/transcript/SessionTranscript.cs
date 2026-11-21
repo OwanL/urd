@@ -1,17 +1,18 @@
 using Microsoft.Extensions.AI;
+using Urd.Core.Compaction;
 using Urd.Core.MarkdownRendering;
 using Urd.Core.Storage;
 using Urd.Core.Concurrency;
 
 namespace Urd.Core.Sessions;
 
-// Bounded transcript reads share the session lock without starting or stopping execution.
+// Bounded transcript reads share a live session's lock, or read storage directly for a finished child.
 public sealed class SessionTranscript {
   private readonly Guid sessionId;
   private readonly UrdStore store;
-  private readonly AsyncLock sessionLock;
+  private readonly AsyncLock? sessionLock;
 
-  internal SessionTranscript(Guid sessionId, UrdStore store, AsyncLock sessionLock) {
+  internal SessionTranscript(Guid sessionId, UrdStore store, AsyncLock? sessionLock = null) {
     this.sessionId = sessionId;
     this.store = store;
     this.sessionLock = sessionLock;
@@ -49,7 +50,8 @@ public sealed class SessionTranscript {
   internal async Task ValidateContentExtentAsync(
       MessageContentExtent extent, CancellationToken cancellation = default) {
     ValidateExtentSession(extent);
-    using var _ = await sessionLock.AcquireAsync(cancellation);
+    using AsyncLock.Lease? held = sessionLock is null ? null : await sessionLock.AcquireAsync(cancellation);
+    cancellation.ThrowIfCancellationRequested();
     store.Content.ValidateSourceExtent(extent);
   }
 
@@ -97,8 +99,17 @@ public sealed class SessionTranscript {
       long expectedHistoryRevision, TranscriptEntryRef entry, CancellationToken cancellation = default) =>
       ReadUnderLockAsync(() => store.Positions.LocateEntry(sessionId, expectedHistoryRevision, entry), cancellation);
 
+  public Task<CompactionSummary?> ReadCompactionAsync(Guid id, long revision, CancellationToken cancellation = default) =>
+      ReadUnderLockAsync(() => store.Compactions.Read(sessionId, revision, id), cancellation);
+
+  public Task<PrepassDetails?> ReadPrepassDetailsAsync(Guid boundaryId, string category,
+      long historyRevision, int candidateOffset = 0, int resultOffset = 0, CancellationToken cancellation = default) =>
+      ReadUnderLockAsync(() => store.PrepassDetails.Read(sessionId, historyRevision, boundaryId, category,
+          candidateOffset, resultOffset), cancellation);
+
   private async Task<T> ReadUnderLockAsync<T>(Func<T> read, CancellationToken cancellation) {
-    using var _ = await sessionLock.AcquireAsync(cancellation);
+    using AsyncLock.Lease? held = sessionLock is null ? null : await sessionLock.AcquireAsync(cancellation);
+    cancellation.ThrowIfCancellationRequested();
     return read();
   }
 }

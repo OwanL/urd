@@ -10,13 +10,14 @@ public sealed class DatabaseSchemaTests {
   [Fact]
   public void FreshDatabaseCreatesAndReopensCurrentSchema() {
     using var database = new TemporaryDatabase();
+    Guid primary = Guid.NewGuid();
     using (UrdStore store = UrdStore.Open(database.Path)) {
-      Assert.Equal(38L, database.Scalar("PRAGMA user_version;")); // raw-sql: fresh open must initialize the current schema version
-      store.Sessions.CreatePrimary(Guid.NewGuid());
+      Assert.Equal(39L, database.Scalar("PRAGMA user_version;")); // raw-sql: fresh open must initialize the current schema version
+      store.Sessions.CreatePrimary(primary);
     }
 
     using UrdStore reopened = UrdStore.Open(database.Path);
-    Assert.Equal(38L, database.Scalar("PRAGMA user_version;")); // raw-sql: reopening must retain the current schema version
+    Assert.Equal(39L, database.Scalar("PRAGMA user_version;")); // raw-sql: reopening must retain the current schema version
     Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM sessions;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
     Assert.Equal(1L, database.Scalar("SELECT \"notnull\" FROM pragma_table_info('execution_runs') WHERE name = 'created_at';")); // raw-sql: current schema creation, rejection or constraint is the subject under test
     Assert.Contains("strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
@@ -25,6 +26,25 @@ public sealed class DatabaseSchemaTests {
     Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM sqlite_schema WHERE type = 'table' AND name = 'session_prepass_details';")); // raw-sql: current schema creation, rejection or constraint is the subject under test
     Assert.Equal("INTEGER", database.Scalar("SELECT type FROM pragma_table_info('session_prepass_details') WHERE name = 'used_session_model';")); // raw-sql: current schema creation, rejection or constraint is the subject under test
     Assert.Equal(1L, database.Scalar("SELECT \"notnull\" FROM pragma_table_info('session_prepass_details') WHERE name = 'used_session_model';")); // raw-sql: current schema creation, rejection or constraint is the subject under test
+    Assert.Equal("TEXT", database.Scalar("SELECT type FROM pragma_table_info('sessions') WHERE name = 'owning_request_id';")); // raw-sql: current schema creation, rejection or constraint is the subject under test
+    Assert.Equal(0L, database.Scalar("SELECT \"notnull\" FROM pragma_table_info('sessions') WHERE name = 'owning_request_id';")); // raw-sql: current schema creation, rejection or constraint is the subject under test
+    Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM sqlite_schema WHERE type = 'index' AND name = 'sessions_owning_request' AND sql LIKE '%WHERE owning_call_id IS NOT NULL%';")); // raw-sql: current schema creation, rejection or constraint is the subject under test
+    Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM sqlite_schema WHERE type = 'index' AND name = 'execution_tools_subagent_started' AND sql LIKE '%WHERE name = ''subagent'' AND started = 1%';")); // raw-sql: current schema creation, rejection or constraint is the subject under test
+    Assert.Throws<SqliteException>(() => database.Execute($"UPDATE sessions SET owning_request_id = 'primary-request' WHERE session_id = '{primary:D}';")); // raw-sql: current schema must reject request identity on a primary session
+    Guid subagent = Guid.NewGuid();
+    database.Execute($"""
+      INSERT INTO sessions (session_id, history_revision, kind, parent_session_id, owning_call_id, owning_request_id)
+      VALUES ('{subagent:D}', 0, 1, '{primary:D}', 'fresh-call', 'fresh-request');
+      """); // raw-sql: current schema must allow a valid exact subagent association
+    Assert.Equal("fresh-request", database.Scalar($"SELECT owning_request_id FROM sessions WHERE session_id = '{subagent:D}';")); // raw-sql: current schema must retain the exact request identity
+    Assert.Throws<SqliteException>(() => database.Execute($"""
+      INSERT INTO sessions (session_id, history_revision, kind, parent_session_id, owning_call_id, owning_request_id)
+      VALUES ('{Guid.NewGuid():D}', 0, 1, '{primary:D}', 'fresh-call', 'fresh-request');
+      """)); // raw-sql: current schema must enforce exact association uniqueness
+    Assert.Throws<SqliteException>(() => database.Execute($"""
+      INSERT INTO sessions (session_id, history_revision, kind, parent_session_id, owning_call_id, owning_request_id)
+      VALUES ('{Guid.NewGuid():D}', 0, 1, '{primary:D}', 'empty-call', '');
+      """)); // raw-sql: current schema must reject an empty request identity
   }
 
   [Fact]
@@ -38,7 +58,7 @@ public sealed class DatabaseSchemaTests {
 
     using UrdStore upgraded = UrdStore.Open(database.Path);
     Assert.True(upgraded.IsSetupComplete());
-    Assert.Equal(38L, database.Scalar("PRAGMA user_version;")); // raw-sql: successful schema-38 migration must advance the version
+    Assert.Equal(39L, database.Scalar("PRAGMA user_version;")); // raw-sql: successful migrations must advance to the current version
     Assert.Equal(1L, database.Scalar($"SELECT COUNT(*) FROM sessions WHERE session_id = '{session:D}';")); // raw-sql: existing data survives
   }
 
@@ -80,12 +100,58 @@ public sealed class DatabaseSchemaTests {
     database.Execute("DROP VIEW closed_session_usage;");
 
     using UrdStore upgraded = UrdStore.Open(database.Path);
-    Assert.Equal(38L, database.Scalar("PRAGMA user_version;")); // raw-sql: successful retry must advance the schema version
+    Assert.Equal(39L, database.Scalar("PRAGMA user_version;")); // raw-sql: successful retry must advance the schema version
     Assert.False(upgraded.IsSetupComplete());
     Assert.True(upgraded.DeletePrimarySession(sender));
     Assert.Equal(sender.ToString("D"), database.Scalar($"SELECT sender_session_id FROM execution_inputs WHERE input_id = '{input:D}';")); // raw-sql: sender attribution must survive deletion across the migrated foreign key
     Assert.Equal(99L, database.Scalar("SELECT seq FROM sqlite_sequence WHERE name = 'execution_inputs';")); // raw-sql: migration must preserve the input ordinal high-water mark
     Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM pragma_foreign_key_check;")); // raw-sql: rebuilt tables must satisfy all foreign keys
+  }
+
+  [Fact]
+  public void Schema38UpgradeLeavesLegacyRequestIdentityNullAndConstrainsExactAssociations() {
+    using var database = new TemporaryDatabase();
+    Guid parent = Guid.NewGuid();
+    Guid legacyOne = Guid.NewGuid();
+    Guid legacyTwo = Guid.NewGuid();
+    using (UrdStore store = UrdStore.Open(database.Path))
+      store.Sessions.CreatePrimary(parent);
+
+    database.Execute($"""
+      INSERT INTO sessions (session_id, history_revision, kind, parent_session_id, owning_call_id)
+      VALUES ('{legacyOne:D}', 0, 1, '{parent:D}', 'shared-call'),
+             ('{legacyTwo:D}', 0, 1, '{parent:D}', 'shared-call');
+      """); // raw-sql: seed legacy subagent associations before migration
+    RecreateSchema38(database);
+
+    using UrdStore upgraded = UrdStore.Open(database.Path);
+    Assert.False(upgraded.IsSetupComplete());
+    Assert.Equal(39L, database.Scalar("PRAGMA user_version;")); // raw-sql: schema 38 upgrade must advance to the current schema
+    Assert.Equal(2L, database.Scalar($"SELECT COUNT(*) FROM sessions WHERE session_id IN ('{legacyOne:D}', '{legacyTwo:D}') AND owning_request_id IS NULL;")); // raw-sql: migration must not infer legacy request identities
+    Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM pragma_foreign_key_list('sessions') WHERE \"from\" = 'owning_request_id';")); // raw-sql: request identity must not depend on transcript/request retention
+    Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM sqlite_schema WHERE type = 'index' AND name = 'sessions_owning_request';")); // raw-sql: migration must create the exact-association index
+    Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM sqlite_schema WHERE type = 'index' AND name = 'execution_tools_subagent_started';")); // raw-sql: migration must create the legacy lookup index
+
+    Guid exactOne = Guid.NewGuid();
+    Guid exactTwo = Guid.NewGuid();
+    database.Execute($"""
+      INSERT INTO sessions (session_id, history_revision, kind, parent_session_id, owning_call_id, owning_request_id)
+      VALUES ('{exactOne:D}', 0, 1, '{parent:D}', 'shared-call', 'request-A'),
+             ('{exactTwo:D}', 0, 1, '{parent:D}', 'shared-call', 'request-B');
+      """); // raw-sql: exact request associations may share a parent and call when request identity differs
+    Assert.Throws<SqliteException>(() => database.Execute($"""
+      INSERT INTO sessions (session_id, history_revision, kind, parent_session_id, owning_call_id, owning_request_id)
+      VALUES ('{Guid.NewGuid():D}', 0, 1, '{parent:D}', 'shared-call', 'request-A');
+      """)); // raw-sql: exact parent/call/request association must be unique
+    Assert.Throws<SqliteException>(() => database.Execute($"""
+      INSERT INTO sessions (session_id, history_revision, kind, parent_session_id, owning_call_id, owning_request_id)
+      VALUES ('{Guid.NewGuid():D}', 0, 1, '{parent:D}', 'shared-call', '');
+      """)); // raw-sql: a supplied request identity must be nonempty
+    Assert.Throws<SqliteException>(() => database.Execute($"""
+      INSERT INTO sessions (session_id, history_revision, kind, owning_request_id)
+      VALUES ('{Guid.NewGuid():D}', 0, 0, 'request-primary');
+      """)); // raw-sql: primary sessions cannot have an owning request identity
+    Assert.Equal(2L, database.Scalar($"SELECT COUNT(*) FROM sessions WHERE session_id IN ('{exactOne:D}', '{exactTwo:D}') AND owning_request_id IS NOT NULL;")); // raw-sql: distinct exact request associations must persist
   }
 
   [Fact]
@@ -170,13 +236,13 @@ public sealed class DatabaseSchemaTests {
   [Fact]
   public void NewerDatabaseIsRejectedWithoutDowngrade() {
     using var database = new TemporaryDatabase();
-    database.Execute("CREATE TABLE retained (value TEXT NOT NULL); INSERT INTO retained VALUES ('preserved'); PRAGMA user_version = 39;");
+    database.Execute("CREATE TABLE retained (value TEXT NOT NULL); INSERT INTO retained VALUES ('preserved'); PRAGMA user_version = 40;");
 
     NotSupportedException error = Assert.Throws<NotSupportedException>(() => UrdStore.Open(database.Path));
 
     Assert.Contains("newer Urd build", error.Message, StringComparison.OrdinalIgnoreCase);
     Assert.DoesNotContain("delete", error.Message, StringComparison.OrdinalIgnoreCase);
-    Assert.Equal(39L, database.Scalar("PRAGMA user_version;")); // raw-sql: newer schema must not be downgraded
+    Assert.Equal(40L, database.Scalar("PRAGMA user_version;")); // raw-sql: newer schema must not be downgraded
     Assert.Equal("preserved", database.Scalar("SELECT value FROM retained;")); // raw-sql: rejection must preserve newer database contents
   }
 
@@ -255,8 +321,9 @@ public sealed class DatabaseSchemaTests {
       """));
   }
 
-  // Reverse the isolated v38 changes to exercise the previous shape with normal seeded data.
+  // Reverse newer schemas to exercise older shapes with normal seeded data.
   private static void RecreateSchema37(TemporaryDatabase database) {
+    RecreateSchema38(database);
     string inputs = Assert.IsType<string>(database.Scalar("SELECT sql FROM sqlite_schema WHERE name = 'execution_inputs';")); // raw-sql: reconstruct the previous schema for the migration fixture
     var indexes = database.ReadRows("SELECT sql FROM sqlite_schema WHERE type = 'index' AND tbl_name = 'execution_inputs' AND sql IS NOT NULL;",
         row => row.GetString(0));
@@ -274,6 +341,10 @@ public sealed class DatabaseSchemaTests {
       DROP TABLE closed_session_usage;
       PRAGMA user_version = 37;
       """);
+  }
+
+  private static void RecreateSchema38(TemporaryDatabase database) {
+    database.Execute("DROP INDEX sessions_owning_request; DROP INDEX execution_tools_subagent_started; ALTER TABLE sessions DROP COLUMN owning_request_id; PRAGMA user_version = 38;"); // raw-sql: reconstruct the schema 38 fixture
   }
 
   private static SqliteConnection OpenConnection(TemporaryDatabase database) {

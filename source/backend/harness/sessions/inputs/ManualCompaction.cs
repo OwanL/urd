@@ -5,7 +5,7 @@ using Urd.Core.Storage;
 
 namespace Urd.Core.Sessions;
 
-// Admits manual compaction and reads its receipts and summaries.
+// Admits manual compaction and reads its receipts.
 internal sealed class ManualCompaction(SessionBase session, UrdStore store, AsyncLock sessionLock) {
   internal async Task<CompactionReceipt?> CompactAsync(ManualCompactionRequest submission) {
     ArgumentNullException.ThrowIfNull(submission);
@@ -33,7 +33,4 @@ internal sealed class ManualCompaction(SessionBase session, UrdStore store, Asyn
 
   internal Task<CompactionReceipt?> ReadReceiptAsync(Guid operationId, CancellationToken cancellation = default) =>
       session.ReadUnderLockAsync(() => store.Compactions.ReadReceipt(session.Id, operationId), cancellation);
-
-  internal Task<CompactionSummary?> ReadSummaryAsync(Guid id, long revision, CancellationToken cancellation = default) =>
-      session.ReadUnderLockAsync(() => store.Compactions.Read(session.Id, revision, id), cancellation);
 }

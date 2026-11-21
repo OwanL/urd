@@ -4,7 +4,7 @@ namespace Urd.Core.Storage;
 
 // Creates or upgrades the durable schema before storage is opened to callers.
 internal static class DatabaseSchema {
-  private const int SchemaVersion = 38;
+  private const int SchemaVersion = 39;
 
   private const string ClosedUsageSchema = """
       CREATE TABLE closed_session_usage (
@@ -104,6 +104,16 @@ internal static class DatabaseSchema {
         {{ExecutionInputsIndexes}}
         {{SessionTreeIndex}}
         {{ClosedUsageSchema}}
+        """,
+    [38] = """
+        ALTER TABLE sessions ADD COLUMN owning_request_id TEXT
+            CHECK (owning_request_id IS NULL OR (kind = 1 AND length(owning_request_id) > 0));
+        CREATE UNIQUE INDEX sessions_owning_request
+            ON sessions(parent_session_id, owning_call_id, owning_request_id)
+            WHERE owning_call_id IS NOT NULL;
+        CREATE INDEX execution_tools_subagent_started
+            ON execution_tools(call_id, run_id)
+            WHERE name = 'subagent' AND started = 1;
         """
   };
 
@@ -168,6 +178,8 @@ internal static class DatabaseSchema {
           kind INTEGER NOT NULL DEFAULT 0 CHECK (kind IN (0, 1)), -- SessionKind: primary, subagent
           parent_session_id TEXT REFERENCES sessions(session_id),
           owning_call_id TEXT,
+          owning_request_id TEXT CHECK (
+              owning_request_id IS NULL OR (kind = 1 AND length(owning_request_id) > 0)),
           subagent_providers_json TEXT,
           completed_working_ms INTEGER NOT NULL DEFAULT 0 CHECK (completed_working_ms >= 0),
           working_time_incomplete INTEGER NOT NULL DEFAULT 0 CHECK (working_time_incomplete IN (0, 1)),
@@ -177,6 +189,9 @@ internal static class DatabaseSchema {
                   AND owning_call_id IS NOT NULL AND length(owning_call_id) > 0))
       ) STRICT;
       {{SessionTreeIndex}}
+      CREATE UNIQUE INDEX sessions_owning_request
+          ON sessions(parent_session_id, owning_call_id, owning_request_id)
+          WHERE owning_call_id IS NOT NULL;
       CREATE TABLE session_starting_context (
           session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
           boundary_id TEXT NOT NULL,
@@ -418,6 +433,9 @@ internal static class DatabaseSchema {
           UNIQUE (request_id, call_index),
           UNIQUE (run_id, call_id)
       ) STRICT;
+      CREATE INDEX execution_tools_subagent_started
+          ON execution_tools(call_id, run_id)
+          WHERE name = 'subagent' AND started = 1;
       CREATE TABLE execution_tool_completions (
           ordinal INTEGER PRIMARY KEY AUTOINCREMENT,
           completion_id TEXT NOT NULL UNIQUE,

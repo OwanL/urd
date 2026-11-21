@@ -46,11 +46,6 @@ internal static class SessionRoutes {
           CompactionReceipt? receipt = await session.ReadCompactionReceiptAsync(operationId, http.RequestAborted);
           return JsonNullOrOk(receipt);
         }));
-    routes.MapGet("/{sessionId}/compactions/{compactionId}", (HttpContext http, Guid sessionId, Guid compactionId, long expectedHistoryRevision) =>
-        WithSessionAsync(http, sessions, sessionId, async session => {
-          CompactionSummary? summary = await session.ReadCompactionAsync(compactionId, expectedHistoryRevision, http.RequestAborted);
-          return summary is null ? Results.NotFound() : Results.Ok(summary);
-        }));
     routes.MapGet("/{sessionId}/snapshot", (HttpContext http, Guid sessionId) =>
         WithSessionAsync(http, sessions, sessionId, async session =>
             Results.Ok(await session.ReadSnapshotAsync(http.RequestAborted))));
@@ -71,6 +66,7 @@ internal static class SessionRoutes {
         }));
     routes.MapSessionTranscriptRoutes(sessions);
     routes.MapSessionPrepassRoutes(sessions);
+    routes.MapSubagentRoutes(sessions);
     return routes;
   }
 
@@ -247,14 +243,8 @@ internal static class SessionRoutes {
     if (sessionId == Guid.Empty)
       return Results.BadRequest();
 
-    PrimarySession session;
-    try {
-      session = await sessions.GetPrimaryAsync(sessionId);
-    } catch (InvalidOperationException) when (IsApplicationStopping(http)) {
-      return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
-    }
-
-    return await operation(session);
+    PrimarySession? session = await sessions.FindPrimaryAsync(sessionId, http.RequestAborted);
+    return session is null ? Results.NotFound() : await operation(session);
   }
 
   private sealed record WorkingDirectoryRequest(string? WorkingDirectory);

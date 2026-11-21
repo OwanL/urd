@@ -139,7 +139,7 @@ public abstract class SessionBase {
   public Task<CompactionReceipt?> ReadCompactionReceiptAsync(Guid operationId, CancellationToken cancellation = default) =>
       manualCompaction.ReadReceiptAsync(operationId, cancellation);
   public Task<CompactionSummary?> ReadCompactionAsync(Guid id, long revision, CancellationToken cancellation = default) =>
-      manualCompaction.ReadSummaryAsync(id, revision, cancellation);
+      Transcript.ReadCompactionAsync(id, revision, cancellation);
 
   // Manager shutdown joins executions before terminating deliberately retained processes.
   internal Task KillProcessesAsync() => OperatingSystem.IsWindows() && processes is not null
@@ -176,12 +176,9 @@ public abstract class SessionBase {
     };
   }
 
-  public async Task<PrepassDetails?> ReadPrepassDetailsAsync(Guid boundaryId, string category,
-      long historyRevision, int candidateOffset = 0, int resultOffset = 0,
-      CancellationToken cancellation = default) {
-    using var _ = await sessionLock.AcquireAsync(cancellation);
-    return store.PrepassDetails.Read(Id, historyRevision, boundaryId, category, candidateOffset, resultOffset);
-  }
+  public Task<PrepassDetails?> ReadPrepassDetailsAsync(Guid boundaryId, string category,
+      long historyRevision, int candidateOffset = 0, int resultOffset = 0, CancellationToken cancellation = default) =>
+      Transcript.ReadPrepassDetailsAsync(boundaryId, category, historyRevision, candidateOffset, resultOffset, cancellation);
 
   public async Task<string?> TryChangeWorkingDirectoryAsync(string path) {
     string normalized = PreferenceManager.NormalizeWorkingDirectory(path);

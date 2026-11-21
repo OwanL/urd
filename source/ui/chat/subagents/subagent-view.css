@@ -1,0 +1,54 @@
+.subagent-view {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+}
+
+.subagent-breadcrumb {
+  display: flex;
+  flex: none;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.subagent-breadcrumb-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.subagent-breadcrumb button {
+  border: 0;
+  padding: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.subagent-breadcrumb button:hover {
+  color: var(--text-primary);
+  text-decoration: underline;
+}
+
+.subagent-breadcrumb button:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+.subagent-view-status {
+  flex: none;
+  margin: 4px 16px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}

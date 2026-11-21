@@ -1,9 +1,11 @@
 import type { RefObject } from "preact";
 import { useLayoutEffect, useState } from "preact/hooks";
+import type { SubagentLink } from "../../chat/subagents/SubagentNavigation.ts";
 import { Icon } from "../../controls/Icon.tsx";
 import { IconButton } from "../../controls/IconButton.tsx";
 import { Tooltip } from "../../controls/Tooltip.tsx";
 import { isBusySessionStatus } from "../SessionActivity.ts";
+import { SubagentMenu } from "./SubagentMenu.tsx";
 import { moveTab } from "./TabOrder.ts";
 import { useTabDrag } from "./useTabDrag.ts";
 import "./chat-tabs.css";
@@ -35,6 +37,8 @@ export interface ChatTabsProps {
   onOpen(id: string): void;
   onClose(id: string): Promise<void>;
   onReorder(id: string, beforeId: string | null): void;
+  loadSubagents?(rootId: string, signal: AbortSignal): Promise<readonly SubagentLink[]>;
+  onOpenSubagent?(rootId: string, path: readonly SubagentLink[]): void;
 }
 
 export function ChatTabs({
@@ -45,6 +49,8 @@ export function ChatTabs({
   onOpen,
   onClose,
   onReorder,
+  loadSubagents,
+  onOpenSubagent,
 }: ChatTabsProps) {
   const [announcement, setAnnouncement] = useState("");
   const drag = useTabDrag(tabs, (id, beforeId) => {
@@ -110,7 +116,7 @@ export function ChatTabs({
       onPointerDownCapture={drag.resetClick}
       onClickCapture={drag.suppressClick}
       onKeyDown={(event) => {
-        if (drag.draggedId) return;
+        if (drag.draggedId || !(event.target as HTMLElement).matches('[role="tab"]')) return;
         const focused = (event.target as HTMLElement).closest<HTMLElement>(".chat-tab")?.dataset
           .tabId;
         const index = tabs.findIndex((tab) => tab.id === (focused ?? activeId));
@@ -226,6 +232,16 @@ export function ChatTabs({
                 )}
               </button>
             </Tooltip>
+            {busy && loadSubagents && onOpenSubagent && (
+              <SubagentMenu
+                rootId={id}
+                title={title}
+                busy={busy}
+                dragging={drag.draggedId !== null}
+                load={loadSubagents}
+                onOpen={onOpenSubagent}
+              />
+            )}
             <div class="tab-end-slot">
               {busy ? (
                 <Tooltip

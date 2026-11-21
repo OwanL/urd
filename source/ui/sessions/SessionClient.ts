@@ -1,3 +1,4 @@
+import type { SubagentLink } from "../chat/subagents/SubagentNavigation.ts";
 import { RequestError } from "../http/RequestError.ts";
 import { requestEmpty } from "../http/Requests.ts";
 import { requestJson } from "../http/Requests.ts";
@@ -91,6 +92,42 @@ export class SessionClient {
       "POST",
       { answer },
     );
+  }
+
+  getLiveSubagents(rootId: string, signal: AbortSignal): Promise<readonly SubagentLink[]> {
+    return requestJson(
+      this.url(`/${encodeURIComponent(rootId)}/subagents/live`),
+      "GET",
+      undefined,
+      signal,
+    );
+  }
+
+  getSubagentView(
+    sessionId: string,
+    signal: AbortSignal,
+  ): Promise<{ historyRevision: number; live: boolean; title: string; parentId: string }> {
+    return requestJson(
+      this.url(`/${encodeURIComponent(sessionId)}/subagent-view`),
+      "GET",
+      undefined,
+      signal,
+    );
+  }
+
+  async getSubagentForCall(
+    parentId: string,
+    requestId: string,
+    callId: string,
+    signal?: AbortSignal,
+  ): Promise<SubagentLink | null> {
+    const path = `/${encodeURIComponent(parentId)}/subagents/by-call/${encodeURIComponent(requestId)}/${encodeURIComponent(callId)}`;
+    try {
+      return await requestJson(this.url(path), "GET", undefined, signal);
+    } catch (failure) {
+      if (failure instanceof RequestError && failure.status === 404) return null;
+      throw failure;
+    }
   }
 
   getSubagentProviders(sessionId: string, signal?: AbortSignal): Promise<SubagentProviders> {

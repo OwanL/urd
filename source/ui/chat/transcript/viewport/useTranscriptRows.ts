@@ -77,9 +77,9 @@ export function useTranscriptRows(
     scrollAdjustment,
     tailHeight,
   }: MountedRowsOptions): PositionedRow[] {
+    const windowRows = window ? positionedRows(window) : [];
     const allRows = new Map<string, PositionedRow>();
-    for (const row of window ? positionedRows(window) : [])
-      allRows.set(entryKey(row.descriptor.entry), row);
+    for (const row of windowRows) allRows.set(entryKey(row.descriptor.entry), row);
     for (const [key, row] of retainedRows.current) if (!allRows.has(key)) allRows.set(key, row);
     rowRecords.current = allRows;
 
@@ -103,7 +103,7 @@ export function useTranscriptRows(
           ? maximum
           : Math.max(0, Math.min(maximum, node.scrollTop + scrollAdjustment));
         visibleEntries = retainedViewportRows.current = visibleRows(
-          positionedRows(window),
+          windowRows,
           model,
           nextTop,
           node.clientHeight,

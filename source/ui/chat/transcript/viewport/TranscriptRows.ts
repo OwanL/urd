@@ -5,12 +5,17 @@ import type {
   ToolCallLabel,
 } from "../../../sessions/transcript/Messages.ts";
 import { toolCallLabel } from "../tool-calls/ToolRowPresentation.ts";
+import {
+  subagentPresentation,
+  type SubagentRowPresentation,
+} from "../tool-calls/SubagentPresentation.ts";
 import type { TranscriptViewport } from "./TranscriptViewport.ts";
 
 export interface PositionedRow {
   readonly descriptor: TranscriptEntryDescriptor;
   readonly rank: number;
   readonly toolLabel: ToolCallLabel | null;
+  readonly subagent: SubagentRowPresentation | undefined;
 }
 
 export function entryKey(entry: TranscriptEntryRef): string {
@@ -27,10 +32,16 @@ export function sameEntry(left: TranscriptEntryRef, right: TranscriptEntryRef): 
 }
 
 export function positionedRows(window: TranscriptPositionWindow): PositionedRow[] {
-  return window.entries.map(({ descriptor, position }) => ({
+  const ranked = window.entries.map(({ descriptor, position }) => ({
     descriptor,
     rank: position.rank,
+  }));
+  const subagents = subagentPresentation(ranked);
+  return ranked.map(({ descriptor, rank }) => ({
+    descriptor,
+    rank,
     toolLabel: descriptor.tool ? toolCallLabel(descriptor.tool, window.toolLabels) : null,
+    subagent: subagents.get(rank),
   }));
 }
 

@@ -162,6 +162,13 @@ colours remain distinct. Transcript text uses the Markdown renderer. Tool icons 
 inspection card by hover, click or keyboard; hover alone preserves composer focus. The card
 refreshes when a running call finishes. File rows offer Copy path and Reveal in Explorer.
 
+Subagent calls use dedicated rows showing the child title and report. Selecting a resolved child
+opens its read-only transcript within the primary tab, including after the child completes;
+breadcrumbs navigate back to the primary or an ancestor, and nested children open in turn. The
+tab's agent menu exposes live descendants by hover or its explicit control. Child views have no
+composer or message editing. Live child views refresh while visible; completed transcripts remain
+available through their parent call.
+
 `ask_user` keeps one pending question visible below the scrollable transcript and above the
 composer. When multiple questions are pending, use the arrows to switch between them. Suggested
 answers submit on click; custom answers are always available without touching the composer draft.

@@ -1,10 +1,10 @@
 # Delegation and agent communication — design decisions and backend status
 
-**2026-11-18 — backend implemented; UI deferred.** (2026-11-19: agent question presentation
-landed; see below.) This records the selected direction after
-comparing delegation, handoff, workflow and messaging models in other harnesses. The backend
-implements the model-facing tool surface and runtime behavior below. Dedicated UI presentation
-remains deferred. Existing [execution](execution-design.md), [agent tool](agent-tools-design.md)
+**2026-11-18 — backend implemented; UI was deferred.** Agent question presentation landed
+on 2026-11-19; dedicated subagent presentation has since landed as described below. This records
+the selected direction after comparing delegation, handoff, workflow and messaging models in other
+harnesses. The backend implements the model-facing tool surface and runtime behavior below.
+Existing [execution](execution-design.md), [agent tool](agent-tools-design.md)
 and [architecture](ARCHITECTURE.md) constraints still apply; reconcile their older delegation
 sketches against this implemented behavior.
 
@@ -120,7 +120,7 @@ The backend implements these runtime behaviors:
 
 The backend exposes the settled `subagent`, `list_agents`, `ask_agent` and `answer_agent` tools.
 There is no `ask_user` tool yet; user-mode context therefore contains human input only, not
-`ask_user` questions or answers. Dedicated UI presentation is deferred.
+`ask_user` questions or answers.
 
 ### `subagent`
 
@@ -147,9 +147,8 @@ There is no separate child tool list or nesting-depth limit; Stop owns the whole
 response), or an error if it failed or was stopped. Keep the guidance asking for that report
 simple; there is no structured result schema.
 
-**Presentation (2026-11-16, deferred):** a child appears as a normal tool call in the parent's
-transcript, and hovering a session tab lists its subagents. Dedicated UI is deferred to separate
-ideation.
+**Presentation:** the original 2026-11-16 plan deferred dedicated UI and used ordinary tool
+calls. The implemented presentation is described under Subagent presentation below.
 
 ### `ask_agent`
 
@@ -222,7 +221,7 @@ pending-title tool-resolution policy.
 ## Backend implementation status (2026-11-18)
 
 Backend milestones 1–6 below are implemented. The original change boundaries and acceptance
-evidence are retained to make the implemented scope explicit; UI presentation is deferred.
+evidence are retained to make the implemented scope explicit; UI presentation followed later.
 
 | Milestone | Change boundary | Acceptance evidence |
 | --- | --- | --- |
@@ -233,10 +232,14 @@ evidence are retained to make the implemented scope explicit; UI presentation is
 | 5. `ask_agent` / `answer_agent` | Resolve `recipient` once (exact final title or `parent` alias; ambiguity is an error) and pin the internal identity with the original arguments. Per-recipient in-memory question queue; present the current question through the existing insertion path with agent provenance; `wake: true` starts idle/waiting recipients like new input. The ask call waits on its question record; `answer_agent` completes that exact call, and failure or cancellation releases it. Reject asks to placeholders, disposed children and from any descendant of a foreground delegation to its waiting ancestors; detect blocking cycles, including a wait that turns an outstanding non-blocking ask into a cycle. Because restart fails all questions, the dependency graph can be in-memory. Fail questions when the recipient's execution ends unanswered, the child is disposed, or on restart. Re-present the current question after compaction. | Busy/idle/waiting recipients; queue ordering; one answer per question; each rejection and failure path; cycle detection; compaction; restart. |
 | 6. Guidance | Tool descriptions and simple subagent guidance asking for a final report, in `SubagentSessionGuidance`. | Starting-context composition tests for primary and subagent sessions. |
 
-UI presentation of subagents (dedicated tool-call display and tab hover list) is deferred.
+### Subagent presentation
 
-Until that UI work lands, a subagent appears only as an ordinary tool call (its arguments and
-final report); the child's own activity is not shown in the parent's transcript.
+Subagent calls have dedicated transcript rows with the child title and report. Selecting a
+resolved child opens its read-only transcript in the same tab; breadcrumbs return to the primary
+or an ancestor, and nested child rows can be opened in turn. Completed children remain accessible
+through their parent call. The tab's agent menu lists live descendants and opens their paths;
+it is available by hover or explicit control. The child transcript does not provide message
+editing or a composer.
 
 ### Agent question presentation (2026-11-19)
 

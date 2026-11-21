@@ -243,7 +243,35 @@ void test(
     assert.equal(listing.latestLlmSelection?.connection.id, f.firstConnection.id);
     assert.equal(f.first.calls.length, 2);
     assertToolResult(f.first.calls[1]!.request, "subagent", "call-subagent", report);
+    // The wire transcript still records the tool call; the UI resolves it to a child view.
     await f.transcript(id, "call-subagent", "subagent", args, report);
+    const history = await f.client.getHistory(
+      id,
+      { mode: "latest", expectedHistoryRevision: 0 },
+      f.signal,
+    );
+    const call = history.entries.find((entry) => entry.tool?.callId === "call-subagent");
+    assert.ok(call?.tool);
+    const child = await f.client.getSubagentForCall(
+      id,
+      call.tool.requestId,
+      call.tool.callId,
+      f.signal,
+    );
+    assert.ok(child);
+    assert.equal(child.parentId, id);
+    assert.ok(child.title);
+    const view = await f.client.getSubagentView(child.id, f.signal);
+    assert.equal(view.parentId, id);
+    assert.equal(view.title, child.title);
+    assert.equal(view.live, false);
+    const childHistory = await f.client.getHistory(
+      child.id,
+      { mode: "latest", expectedHistoryRevision: view.historyRevision },
+      f.signal,
+    );
+    assert.ok(childHistory.entries.length > 0);
+    assert.deepEqual(await f.client.getLiveSubagents(id, f.signal), []);
   },
 );
 

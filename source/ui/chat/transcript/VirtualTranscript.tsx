@@ -93,7 +93,7 @@ export function VirtualTranscript({
             historyRevision={historyRevision}
             root={root}
           >
-            {rows.map(({ key, descriptor, toolLabel, rank, top, saved }) => {
+            {rows.map(({ key, descriptor, toolLabel, subagent, rank, top, saved }) => {
               return (
                 <VirtualEntry
                   key={key}
@@ -103,6 +103,7 @@ export function VirtualTranscript({
                   sessionId={sessionId}
                   descriptor={descriptor}
                   toolLabel={toolLabel}
+                  subagent={subagent}
                   rank={rank}
                   top={top}
                   root={root}

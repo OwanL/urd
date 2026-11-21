@@ -12,6 +12,11 @@ import { emptyWorkspaceCommandState, WorkspaceCommands } from "./WorkspaceComman
 import type { WorkspaceCommandState } from "./WorkspaceCommands.ts";
 import { ChatTabs } from "./tabs/ChatTabs.tsx";
 import { Chat } from "../chat/Chat.tsx";
+import {
+  SubagentNavigationContext,
+  type SubagentLink,
+} from "../chat/subagents/SubagentNavigation.ts";
+import { SubagentView } from "../chat/subagents/SubagentView.tsx";
 import type { ReadingPosition } from "../chat/transcript/Transcript.tsx";
 import type { TranscriptDisplay } from "../chat/transcript/TranscriptDisplay.ts";
 import type { TranscriptNavigationState } from "../chat/transcript/navigation/TranscriptNavigationStorage.ts";
@@ -26,6 +31,8 @@ import type { SetupState } from "../setup/SetupDialog.tsx";
 import "./workspace.css";
 
 const sessions = new SessionClient(new URL(window.location.href));
+const loadSubagents = (rootId: string, signal: AbortSignal) =>
+  sessions.getLiveSubagents(rootId, signal);
 const providers = new ProviderClient(new URL(window.location.href));
 const preferencesClient = new PreferencesClient(new URL(window.location.href));
 const storageKey = "urd.workspace.v1";
@@ -143,6 +150,19 @@ export function Workspace({
     tabs,
     activeId,
   );
+  const [inspection, setInspection] = useState<{
+    rootId: string;
+    path: readonly SubagentLink[];
+  } | null>(null);
+  const inspected = inspection?.rootId === activeId ? inspection : null;
+  const inspect = (rootId: string, path: readonly SubagentLink[]) => {
+    if (isClosed(rootId)) return;
+    navigation.open(rootId);
+    setInspection(path.length ? { rootId, path } : null);
+  };
+  useEffect(() => {
+    if (inspection && !tabs.includes(inspection.rootId)) setInspection(null);
+  }, [inspection, tabs]);
   const shown = useWorkspaceRetention(activeId, tabs, transcript?.retainedTabs ?? null);
   useEffect(() => {
     for (const id of readingPositions.current.keys())
@@ -175,7 +195,9 @@ export function Workspace({
           }))}
           activeId={activeId}
           unread={events.unread}
-          onOpen={navigation.open}
+          onOpen={(id) => inspect(id, [])}
+          loadSubagents={loadSubagents}
+          onOpenSubagent={inspect}
           onClose={(id) =>
             commands.close(id, connected ? events.statuses[id] : undefined, (closedId) =>
               navigation.forget([closedId]),
@@ -266,51 +288,70 @@ export function Workspace({
           </button>
         </div>
       )}
-      {shown.length ? (
-        shown.map((id) => (
-          <Chat
-            key={id}
-            client={sessions}
-            providerClient={providers}
-            sessionId={id}
-            chat={chats[id]!}
-            defaultSelection={defaultSelection}
-            active={id === activeId}
-            transcript={transcript}
-            streamId={events.streamId}
-            commands={commands}
-            messageEditing={messageEditing}
-            stop={commandState.stopping[id]}
-            checking={commandState.checking[id] ?? false}
-            checkingContinuation={commandState.checkingContinuations[id] ?? false}
-            models={models}
-            preferences={preferences}
-            connected={connected}
-            unavailable={events.knownStatuses[id] === "unavailable"}
-            closing={commandState.closing.has(id)}
-            sessionStatus={events.statuses[id]}
-            canPersist={canPersist}
-            notice={id === activeId ? events.notice : null}
-            provisioning={id === activeId ? events.provisioning : null}
-            refresh={refresh}
-            onRefresh={refreshSnapshot}
-            onSetUpProvider={() => openSettings("providers")}
-            onChooseModels={() => openSettings("model-buckets")}
-            editDraft={workspace.editDraft}
-            selectModel={workspace.selectModel}
-            position={readingPositions.current.get(id)}
-            onPositionChange={(position) => {
-              if (!isClosed(id)) readingPositions.current.set(id, position);
-            }}
-            transcriptPosition={transcriptPositions.current.get(id)}
-            onTranscriptPositionChange={(position) => {
-              if (!isClosed(id)) transcriptPositions.current.set(id, position);
-            }}
-          />
-        ))
-      ) : (
-        <div class="empty-workspace" />
+      {inspected && (
+        <SubagentView
+          key={inspected.path.at(-1)!.id}
+          rootId={inspected.rootId}
+          rootTitle={chats[inspected.rootId]?.title || "Chat"}
+          path={inspected.path}
+          client={sessions}
+          display={transcript}
+          streamId={events.streamId}
+          connected={connected}
+          onNavigate={(path) => inspect(inspected.rootId, path)}
+        />
       )}
+      <SubagentNavigationContext.Provider
+        value={(child) => {
+          if (child.parentId === activeId) inspect(activeId, [child]);
+        }}
+      >
+        {shown.length ? (
+          shown.map((id) => (
+            <Chat
+              key={id}
+              client={sessions}
+              providerClient={providers}
+              sessionId={id}
+              chat={chats[id]!}
+              defaultSelection={defaultSelection}
+              active={id === activeId && !inspected}
+              transcript={transcript}
+              streamId={events.streamId}
+              commands={commands}
+              messageEditing={messageEditing}
+              stop={commandState.stopping[id]}
+              checking={commandState.checking[id] ?? false}
+              checkingContinuation={commandState.checkingContinuations[id] ?? false}
+              models={models}
+              preferences={preferences}
+              connected={connected}
+              unavailable={events.knownStatuses[id] === "unavailable"}
+              closing={commandState.closing.has(id)}
+              sessionStatus={events.statuses[id]}
+              canPersist={canPersist}
+              notice={id === activeId ? events.notice : null}
+              provisioning={id === activeId ? events.provisioning : null}
+              refresh={refresh}
+              onRefresh={refreshSnapshot}
+              onSetUpProvider={() => openSettings("providers")}
+              onChooseModels={() => openSettings("model-buckets")}
+              editDraft={workspace.editDraft}
+              selectModel={workspace.selectModel}
+              position={readingPositions.current.get(id)}
+              onPositionChange={(position) => {
+                if (!isClosed(id)) readingPositions.current.set(id, position);
+              }}
+              transcriptPosition={transcriptPositions.current.get(id)}
+              onTranscriptPositionChange={(position) => {
+                if (!isClosed(id)) transcriptPositions.current.set(id, position);
+              }}
+            />
+          ))
+        ) : (
+          <div class="empty-workspace" />
+        )}
+      </SubagentNavigationContext.Provider>
     </main>
   );
 }

@@ -14,6 +14,8 @@ import {
   isAgentExchange,
 } from "./tool-calls/AgentExchange.tsx";
 import { toolCallLabel } from "./tool-calls/ToolRowPresentation.ts";
+import { subagentPresentation } from "./tool-calls/SubagentPresentation.ts";
+import { SubagentRow } from "./tool-calls/SubagentRow.tsx";
 import { TranscriptContentReader } from "./reading/TranscriptContentReader.ts";
 import { boundaryResponseStatus } from "../prepass/PrepassRows.tsx";
 import type { ResponseStatusContext } from "../prepass/PrepassRows.tsx";
@@ -127,6 +129,13 @@ function PlainTranscript({
   const [selecting, setSelecting] = useState(false);
   const [shown, setShown] = useState(history);
   const visibleHistory = shown?.sessionId === sessionId ? shown : null;
+  const subagents = useMemo(
+    () =>
+      subagentPresentation(
+        visibleHistory?.entries.map((descriptor, rank) => ({ descriptor, rank })) ?? [],
+      ),
+    [visibleHistory],
+  );
   const statusContext: ResponseStatusContext = useMemo(
     () => ({ client, sessionId, modelNames: modelNames ?? new Map(), visible, onChooseModels }),
     [client, sessionId, modelNames, visible, onChooseModels],
@@ -239,7 +248,9 @@ function PlainTranscript({
             {visibleHistory?.hasBefore && (
               <p class="history-note">Earlier messages are not shown.</p>
             )}
-            {visibleHistory?.entries.map((descriptor) => {
+            {visibleHistory?.entries.map((descriptor, rank) => {
+              const subagent = subagents.get(rank);
+              if (subagent?.kind === "hidden") return null;
               const entry = descriptor.entry;
               const key = `${entry.executionId}/${entry.entryId}/${entry.kind}/${entry.historyRevision}`;
               const status = boundaryResponseStatus(
@@ -280,11 +291,13 @@ function PlainTranscript({
                   key={key}
                   data-message={key}
                   class={
-                    agentExchange
-                      ? "agent-exchange-entry"
-                      : descriptor.tool
-                        ? "transcript-tool-entry"
-                        : undefined
+                    subagent
+                      ? "transcript-subagent-entry"
+                      : agentExchange
+                        ? "agent-exchange-entry"
+                        : descriptor.tool
+                          ? "transcript-tool-entry"
+                          : undefined
                   }
                 >
                   {status.before}
@@ -306,6 +319,16 @@ function PlainTranscript({
                       entry={entry}
                       compaction={descriptor.compaction}
                     />
+                  ) : descriptor.tool && subagent ? (
+                    <SubagentRow
+                      client={client}
+                      sessionId={sessionId}
+                      historyRevision={entry.historyRevision}
+                      tool={descriptor.tool}
+                      presentation={subagent}
+                      root={root}
+                      paused={!visible || documentHidden}
+                    />
                   ) : descriptor.tool && label && agentExchange ? (
                     <AgentToolExchange
                       client={client}
@@ -319,7 +342,7 @@ function PlainTranscript({
                   ) : descriptor.tool ? (
                     <ToolRow
                       tool={descriptor.tool}
-                      label={toolCallLabel(descriptor.tool, visibleHistory?.toolLabels ?? {})}
+                      label={label}
                       completion={entry.kind === "toolCompletion"}
                       root={root}
                       paused={!visible || documentHidden}

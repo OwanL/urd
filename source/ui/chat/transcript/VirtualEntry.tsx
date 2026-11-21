@@ -4,10 +4,10 @@ import type {
   TranscriptEntryDescriptor,
   ToolCallLabel,
 } from "../../sessions/transcript/Messages.ts";
-import { isTextEntry } from "../../sessions/transcript/Messages.ts";
 import type { SessionClient } from "../../sessions/SessionClient.ts";
 import { entryKey } from "./viewport/TranscriptRows.ts";
 import { EditableMessage } from "../message-editing/EditableMessage.tsx";
+import { isTextEntry } from "../../sessions/transcript/Messages.ts";
 import { CompactionMarker } from "./CompactionMarker.tsx";
 import type { TranscriptDisplay } from "./TranscriptDisplay.ts";
 import {
@@ -16,6 +16,8 @@ import {
   isAgentExchange,
 } from "./tool-calls/AgentExchange.tsx";
 import { ToolRow } from "./tool-calls/ToolRow.tsx";
+import { SubagentRow } from "./tool-calls/SubagentRow.tsx";
+import type { SubagentRowPresentation } from "./tool-calls/SubagentPresentation.ts";
 import { boundaryResponseStatus } from "../prepass/PrepassRows.tsx";
 import type { ResponseStatusContext } from "../prepass/PrepassRows.tsx";
 
@@ -28,6 +30,7 @@ export function VirtualEntry({
   sessionId,
   descriptor,
   toolLabel,
+  subagent,
   rank,
   top,
   root,
@@ -45,6 +48,7 @@ export function VirtualEntry({
   sessionId: string;
   descriptor: TranscriptEntryDescriptor;
   toolLabel: ToolCallLabel | null;
+  subagent: SubagentRowPresentation | undefined;
   rank: number;
   top: number;
   root: HTMLElement | null;
@@ -103,7 +107,9 @@ export function VirtualEntry({
   const agentExchange = isAgentExchange(descriptor, toolLabel);
   const entryClass = [
     "transcript-entry",
-    descriptor.tool && !agentExchange ? "transcript-tool-entry" : "",
+    subagent?.kind === "hidden" ? "transcript-subagent-hidden" : "",
+    subagent && subagent.kind !== "hidden" ? "transcript-subagent-entry" : "",
+    descriptor.tool && !agentExchange && !subagent ? "transcript-tool-entry" : "",
     agentExchange ? "agent-exchange-entry" : "",
   ]
     .filter(Boolean)
@@ -142,6 +148,16 @@ export function VirtualEntry({
           sessionId={sessionId}
           entry={descriptor.entry}
           compaction={descriptor.compaction}
+        />
+      ) : subagent?.kind === "hidden" ? null : descriptor.tool && subagent ? (
+        <SubagentRow
+          client={client}
+          sessionId={sessionId}
+          historyRevision={descriptor.entry.historyRevision}
+          tool={descriptor.tool}
+          presentation={subagent}
+          root={root}
+          paused={paused}
         />
       ) : descriptor.tool && toolLabel && agentExchange ? (
         <AgentToolExchange

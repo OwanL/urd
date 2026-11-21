@@ -51,9 +51,11 @@ public static class RemoteMcpProbe {
         TransportMode = HttpTransportMode.AutoDetect
       }, http);
       await using var client = await McpClient.CreateAsync(transport, cancellationToken: cancellationToken);
+      string? name = client.ServerInfo?.Title ?? client.ServerInfo?.Name;
+      if (client.ServerCapabilities?.Tools is null)
+        return new(true, name, [], null);
       var tools = await client.ListToolsAsync(cancellationToken: cancellationToken);
-      return new(true, client.ServerInfo?.Title ?? client.ServerInfo?.Name,
-        tools.Select(tool => new RemoteMcpTool(tool.Name, tool.Title, tool.Description)).ToArray(), null);
+      return new(true, name, tools.Select(tool => new RemoteMcpTool(tool.Name, tool.Title, tool.Description)).ToArray(), null);
     } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
       throw;
     } catch (Exception) {

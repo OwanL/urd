@@ -38,6 +38,16 @@ public sealed class RemoteMcpProbeTests {
   }
 
   [Fact]
+  public async Task ConnectsWithoutListingToolsWhenTheServerDoesNotOfferThem() {
+    await using var peer = new McpPeer(offersTools: false);
+    using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+    var result = await RemoteMcpProbe.ProbeAsync(new RemoteMcpProbeOptions { Endpoint = peer.Endpoint }, deadline.Token);
+    Assert.True(result.Success, result.Error);
+    Assert.Empty(result.Tools);
+    Assert.DoesNotContain(peer.Requests, request => request.Method == "tools/list");
+  }
+
+  [Fact]
   public async Task InvalidEndpointDoesNotExposeCredentialsInError() {
     using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
     var result = await RemoteMcpProbe.ProbeAsync(new RemoteMcpProbeOptions {
@@ -77,9 +87,11 @@ public sealed class RemoteMcpProbeTests {
     private readonly HttpListener listener = new();
     private readonly Task serving;
     private readonly Uri? redirect;
+    private readonly bool offersTools;
 
-    public McpPeer(Uri? redirect = null) {
+    public McpPeer(Uri? redirect = null, bool offersTools = true) {
       this.redirect = redirect;
+      this.offersTools = offersTools;
       var socket = new TcpListener(IPAddress.Loopback, 0);
       socket.Start();
       int port = ((IPEndPoint)socket.LocalEndpoint).Port;
@@ -135,7 +147,7 @@ public sealed class RemoteMcpProbeTests {
         await context.Response.OutputStream.WriteAsync(body);
       } else {
         object result = method switch {
-          "initialize" => new { protocolVersion, capabilities = new { tools = new { } }, serverInfo = new { name = "test-server", title = "Test MCP server", version = "1.0" } },
+          "initialize" => new { protocolVersion, capabilities = offersTools ? (object)new { tools = new { } } : new { }, serverInfo = new { name = "test-server", title = "Test MCP server", version = "1.0" } },
           "tools/list" => new { tools = new[] { new { name = "lookup", title = "Look up", description = "Find an item", inputSchema = new { type = "object" } } } },
           _ => throw new InvalidOperationException($"Unexpected MCP method: {method}")
         };

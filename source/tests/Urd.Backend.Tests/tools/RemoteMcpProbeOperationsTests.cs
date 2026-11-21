@@ -104,6 +104,7 @@ public sealed class RemoteMcpProbeOperationsTests {
     private readonly Task serving;
     private readonly Func<string?, JsonElement, object?> respond;
     private readonly bool failCall;
+    private volatile bool stopping;
 
     public Peer(Func<string?, JsonElement, object?> respond, bool failCall = false) {
       this.respond = respond;
@@ -122,13 +123,13 @@ public sealed class RemoteMcpProbeOperationsTests {
     public ConcurrentQueue<Request> Requests { get; } = new();
 
     private async Task ServeAsync() {
-      while (listener.IsListening) {
+      while (!stopping) {
         HttpListenerContext context;
         try {
           context = await listener.GetContextAsync();
-        } catch (HttpListenerException) when (!listener.IsListening) {
+        } catch (HttpListenerException) when (stopping) {
           break;
-        } catch (ObjectDisposedException) when (!listener.IsListening) {
+        } catch (ObjectDisposedException) when (stopping) {
           break;
         }
         await RespondAsync(context);
@@ -178,6 +179,7 @@ public sealed class RemoteMcpProbeOperationsTests {
     }
 
     public async ValueTask DisposeAsync() {
+      stopping = true;
       listener.Stop();
       listener.Close();
       await serving;

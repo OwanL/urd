@@ -43,7 +43,12 @@ export class CompactionCommands {
           phase: "settled",
           message: "Session changed. Compaction not started.",
         });
-      else this.operations.set(id, { phase: "observing", operationId });
+      else
+        this.operations.set(id, {
+          phase: "uncertain",
+          operationId,
+          message: "Compaction acknowledgement uncertain.",
+        });
     } finally {
       this.operations.refreshSnapshot();
     }
@@ -89,14 +94,14 @@ export class CompactionCommands {
   ): void {
     if (receipt.executionId !== operationId) throw new Error("Unexpected compaction receipt.");
     if (receipt.outcome === null) {
-      this.operations.set(id, { phase: "observing", operationId });
+      this.operations.set(id, { phase: "observing", operationId, queued: receipt.queued === true });
       return;
     }
     const message =
       receipt.outcome === "completed"
         ? (receipt.error ?? "History compacted.")
         : receipt.outcome === "cancelled"
-          ? "Compaction stopped."
+          ? (receipt.error ?? "Compaction stopped.")
           : (receipt.error ?? "Compaction failed. Previous context kept.");
     this.operations.set(id, { phase: "settled", message });
   }

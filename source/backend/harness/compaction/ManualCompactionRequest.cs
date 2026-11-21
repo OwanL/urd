@@ -8,4 +8,4 @@ public sealed record ManualCompactionRequest(
     Guid OperationId, long ExpectedHistoryRevision, LlmSelection LlmSelection, string? Focus = null);
 
 // A null Outcome means the accepted execution has not settled, not that a summary was saved.
-public sealed record CompactionReceipt(Guid ExecutionId, ExecutionOutcome? Outcome, string? Error = null);
+public sealed record CompactionReceipt(Guid ExecutionId, ExecutionOutcome? Outcome, string? Error = null, bool Queued = false);

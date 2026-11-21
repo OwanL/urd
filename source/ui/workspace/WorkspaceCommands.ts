@@ -365,7 +365,6 @@ export class WorkspaceCommands {
       this.executionSettingsSaving(id) ||
       snapshot.sessionId !== id ||
       snapshot.canCompact !== true ||
-      snapshot.unsettledExecutionId !== null ||
       snapshot.admissionFenced ||
       snapshot.stopRequested ||
       !chat ||
@@ -374,11 +373,9 @@ export class WorkspaceCommands {
       chat.pending ||
       chat.pendingContinuation ||
       chat.messageEdit ||
-      chat.knownExecutionId ||
       this.state.stopping[id] ||
       this.hasPendingInputRemoval(id) ||
-      this.isCompacting(id) ||
-      this.state.compactions[id]?.phase === "uncertain"
+      (this.state.compactions[id] && this.state.compactions[id].phase !== "settled")
     )
       return;
 
@@ -386,8 +383,10 @@ export class WorkspaceCommands {
   }
 
   private isCompacting(id: string): boolean {
-    const phase = this.state.compactions[id]?.phase;
-    return phase === "starting" || phase === "observing";
+    const operation = this.state.compactions[id];
+    return (
+      operation?.phase === "starting" || (operation?.phase === "observing" && !operation.queued)
+    );
   }
 
   private setCompaction(id: string, compaction: WorkspaceCompactionState): void {
@@ -437,9 +436,19 @@ export class WorkspaceCommands {
 
   observeSnapshot(snapshot: SessionSnapshot, knownWhenRead: string | null): void {
     const compaction = this.state.compactions[snapshot.sessionId];
+    const observedId = snapshot.manualCompactionId ?? snapshot.queuedCompactionId;
+    if (observedId && (!compaction || compaction.phase === "settled")) {
+      this.setCompaction(snapshot.sessionId, {
+        phase: "observing",
+        operationId: observedId,
+        queued: observedId === snapshot.queuedCompactionId,
+      });
+    }
     if (
       (compaction?.phase === "observing" || compaction?.phase === "uncertain") &&
-      snapshot.unsettledExecutionId !== compaction.operationId
+      snapshot.unsettledExecutionId !== compaction.operationId &&
+      snapshot.queuedCompactionId !== compaction.operationId &&
+      snapshot.manualCompactionId !== compaction.operationId
     )
       void this.compactions.check(snapshot.sessionId, compaction.operationId);
 

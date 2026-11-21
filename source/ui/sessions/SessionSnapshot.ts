@@ -38,6 +38,9 @@ export interface SessionSnapshot {
   readonly admissionFenced: boolean;
   readonly canContinue: boolean;
   readonly canCompact?: boolean;
+  readonly queuedCompactionId?: string | null;
+  readonly manualCompactionId?: string | null;
+  readonly compactionUnavailableReason?: string | null;
   readonly unsettledExecutionId: string | null;
   readonly isCompacting?: boolean;
   readonly stopRequested: boolean;

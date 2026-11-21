@@ -16,7 +16,8 @@ public sealed record SessionSnapshot(
     LlmSelection? LatestLlmSelection = null, bool IsCompacting = false, SessionWorkingTime? WorkingTime = null,
     SessionContextUsage? ContextUsage = null, string? WorkingDirectory = null, bool CanContinue = false,
     string? Title = null, IReadOnlyList<StartingResourcePruningStatus>? Pruning = null,
-    PendingResponse? PendingResponse = null, bool CanCompact = false);
+    PendingResponse? PendingResponse = null, bool CanCompact = false, Guid? QueuedCompactionId = null,
+    string? CompactionUnavailableReason = null, Guid? ManualCompactionId = null);
 
 public sealed record StartingResourcePruningStatus(
     string Category, string State, int Total, int Retained, string? Error = null);

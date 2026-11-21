@@ -105,6 +105,7 @@ public abstract class SessionBase {
   // Caller holds the session lock.
   internal void ReplaceHistoryRevision(long revision) {
     HistoryRevision = revision;
+    manualCompaction.Invalidate("Queued compaction skipped because history changed.");
     status.Replaced(revision);
   }
 
@@ -112,6 +113,7 @@ public abstract class SessionBase {
   private void FenceUserMessages() {
     if (!closed && acceptingUserMessages) {
       acceptingUserMessages = false;
+      manualCompaction.Invalidate("Queued compaction cancelled because the session is shutting down.");
       PublishChange();
     }
   }
@@ -163,15 +165,19 @@ public abstract class SessionBase {
         && snapshot.UnsettledExecutionId is null && !snapshot.AdmissionFenced && !snapshot.StopRequested;
     bool canRemovePending = CanStartWork && !snapshot.AdmissionFenced && !snapshot.StopRequested
         && CurrentExecution is { IsStopping: false } && snapshot.UnsettledExecutionId == CurrentExecution.ExecutionId;
+    string? compactionReason = CompactionUnavailableReason(snapshot);
     return snapshot with {
       IsCompacting = CurrentExecution?.IsCompacting == true,
+      QueuedCompactionId = manualCompaction.QueuedId,
+      ManualCompactionId = CurrentExecution is { IsManualCompaction: true } manual ? manual.ExecutionId : null,
+      CompactionUnavailableReason = compactionReason,
       ContextUsage = !snapshot.AdmissionFenced && !snapshot.StopRequested
           && CurrentExecution is { IsCompacting: false, ContextEstimate.UsedTokens: long liveTokens }
           ? new(liveTokens, SessionContextUsageSource.Estimated) : snapshot.ContextUsage,
       WorkingDirectory = WorkingDirectory,
       CanChangeWorkingDirectory = CanChangeWorkingDirectory(snapshot),
       CanContinue = snapshot.CanContinue && locallyIdle,
-      CanCompact = locallyIdle,
+      CanCompact = compactionReason is null,
       PendingInputs = snapshot.PendingInputs.Select(input => input with {
         CanRemove = input.CanRemove && canRemovePending
       }).ToArray()
@@ -256,8 +262,8 @@ public abstract class SessionBase {
 
   // Caller holds the session lock. The driver starts only after admission releases it.
   internal TaskCompletionSource StartExecutionAfterUnlock(Guid executionId, LlmSelection selection,
-      ManualCompactionRequest? compaction = null, LlmRequest? firstRequest = null) =>
-      activeExecution.Register(executionId, selection, compaction, firstRequest);
+      ManualCompactionRequest? compaction = null, LlmRequest? firstRequest = null, string? compactionSkipReason = null) =>
+      activeExecution.Register(executionId, selection, compaction, firstRequest, compactionSkipReason);
 
   // Caller holds the session lock. Save before releasing resources and publishing; only then may
   // the driver complete its settlement task. An ordinary settlement also admits a queued waking
@@ -273,6 +279,8 @@ public abstract class SessionBase {
     status.Settled(saved);
     PublishChange();
     wakeStart = saved.Outcome == ExecutionOutcome.Completed ? Questions.StartPendingQuestionRun() : null;
+    // Stop cancels the current execution, not an independently accepted queued compaction.
+    wakeStart ??= manualCompaction.StartQueued();
     return saved;
   }
 
@@ -286,6 +294,30 @@ public abstract class SessionBase {
   // Caller holds the session lock.
   internal SessionSnapshot ReadCurrentSnapshot() =>
       status.WithLiveState(store.Snapshots.ReadPersisted(Id), IsAcceptingWork, CurrentExecution);
+
+  // Caller holds the session lock. LastMeasured describes an older context and cannot gate work.
+  internal string? CompactionHistoryReason(SessionSnapshot snapshot) {
+    if (snapshot.FirstUserPreview is null && !HasAcceptedInput())
+      return "There is no history to compact.";
+    SessionContextUsage? usage = CurrentExecution is { IsCompacting: false, ContextEstimate.UsedTokens: long tokens }
+        ? new(tokens, SessionContextUsageSource.Estimated) : snapshot.ContextUsage;
+    return usage is { Source: not SessionContextUsageSource.LastMeasured, UsedTokens: < 256 }
+        ? "Context usage is too low to compact." : null;
+  }
+
+  internal string? CompactionUnavailableReason(SessionSnapshot? snapshot = null) {
+    snapshot ??= ReadCurrentSnapshot();
+    if (!CanStartWork || snapshot.AdmissionFenced || snapshot.StopRequested || CurrentExecution?.IsStopping == true)
+      return "The session cannot accept compaction now.";
+    if (manualCompaction.QueuedId is not null || CurrentExecution?.IsManualCompaction == true)
+      return "Manual compaction is already pending or running.";
+    if (CurrentExecution is null && snapshot.UnsettledExecutionId is not null)
+      return "The session has unsettled work.";
+    return CompactionHistoryReason(snapshot);
+  }
+
+  // Caller holds the session lock.
+  internal TaskCompletionSource? StartQueuedCompaction() => manualCompaction.StartQueued();
 
   // Caller holds the session lock.
   private bool CanChangeWorkingDirectory(SessionSnapshot snapshot) =>
@@ -306,6 +338,7 @@ public abstract class SessionBase {
 
     needsAttention = true;
     acceptingUserMessages = false;
+    manualCompaction.Invalidate("Queued compaction cancelled because the session needs attention.");
     PublishChange();
   }
 

@@ -15,6 +15,7 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock sess
   internal Guid ExecutionId => Identity.ExecutionId;
   internal bool IsStopping => execution.IsStopping;
   internal bool IsCompacting => execution.IsCompacting;
+  internal bool IsManualCompaction => execution.IsManualCompaction;
   internal RequestContextEstimate? ContextEstimate => execution.ContextEstimate;
   internal void RetireContextEstimate() => execution.RetireContextEstimate();
   internal void SetCompacting(bool value) => execution.IsCompacting = value;

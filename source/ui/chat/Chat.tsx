@@ -21,6 +21,7 @@ import { unanchoredPrepass, uniqueModelNames } from "./prepass/PrepassPresentati
 import type { ReadingPosition } from "./transcript/Transcript.tsx";
 import type { TranscriptDisplay } from "./transcript/TranscriptDisplay.ts";
 import type { TranscriptNavigationState } from "./transcript/navigation/TranscriptNavigationStorage.ts";
+import { compactionStatus } from "./ChatCommands.ts";
 import type { ChatCommands, ChatStopState } from "./ChatCommands.ts";
 import type { ChatState } from "./ChatState.ts";
 import { useSessionSnapshot } from "../sessions/useSessionSnapshot.ts";
@@ -85,7 +86,6 @@ export function Chat({
   connected,
   unavailable,
   closing,
-  sessionStatus,
   canPersist,
   refresh,
   notice,
@@ -138,7 +138,9 @@ export function Chat({
   }, []);
   const pendingInputRemoval = commands.hasPendingInputRemoval(sessionId);
   const compaction = commands.status.compactions[sessionId];
-  const compactionPending = compaction?.phase === "starting" || compaction?.phase === "observing";
+  const compactionPending =
+    compaction?.phase === "starting" || (compaction?.phase === "observing" && !compaction.queued);
+  const currentCompactionStatus = compactionStatus(snapshot, compaction);
   const statusContext: ResponseStatusContext = useMemo(
     () => ({
       client,
@@ -170,12 +172,16 @@ export function Chat({
     ready &&
     notice !== null &&
     !readError &&
-    (sessionStatus === "idle" || sessionStatus === "failed") &&
     snapshot?.canCompact === true &&
-    compaction?.phase !== "uncertain" &&
+    (!compaction || compaction.phase === "settled") &&
     canPersist &&
     state.selection &&
-    !state.selectionLocked &&
+    !chat.pending &&
+    !chat.pendingContinuation &&
+    !chat.messageEdit &&
+    !pendingInputRemoval &&
+    !snapshot.admissionFenced &&
+    !snapshot.stopRequested &&
     !stop &&
     !workingDirectoryLocked &&
     !executionSettingsSaving,
@@ -362,8 +368,9 @@ export function Chat({
             }
             contextWindow={selection?.contextWindow ?? null}
             canCompact={canCompact}
-            compacting={compactionPending || (state.active && snapshot?.isCompacting === true)}
+            compactionStatus={currentCompactionStatus}
             compactionMessage={compaction && "message" in compaction ? compaction.message : null}
+            compactionUnavailableReason={snapshot?.compactionUnavailableReason ?? null}
             onCheckCompaction={compaction?.phase === "uncertain" && ready ? onRefresh : undefined}
             onCompact={() => {
               if (!workingDirectoryGate.current && snapshot)

@@ -20,12 +20,12 @@ internal sealed class ActiveExecution(SessionBase session, UrdStore store, Async
 
   // Caller holds the session lock; the start signal is released after admission unlocks.
   internal TaskCompletionSource Register(Guid executionId, LlmSelection selection,
-      ManualCompactionRequest? compaction = null, LlmRequest? firstRequest = null) {
+      ManualCompactionRequest? compaction = null, LlmRequest? firstRequest = null, string? compactionSkipReason = null) {
     var executionStart = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
     var identity = new ExecutionIdentity(session.Id, executionId, session.HistoryRevision);
     var recorder = new SessionExecutionRecorder(session, store, sessionLock, identity, subagents);
     var work = new SessionExecution(recorder, session, createChatClient, selection,
-        startingContextBuilder, tools.Tools, pending, compaction);
+        startingContextBuilder, tools.Tools, pending, compaction, compactionSkipReason);
     Current = new SessionExecutionDriver(session, sessionLock, work);
     RetainedTask = Current.RunAsync(executionStart.Task, firstRequest);
     return executionStart;

@@ -46,9 +46,6 @@ public sealed class BackgroundToolExecutionTests {
       Assert.Equal(2, client.Calls);
       SessionSnapshot snapshot = await fixture.Session.ReadSnapshotAsync();
       Assert.Equal(execution, snapshot.UnsettledExecutionId);
-      Assert.False(snapshot.CanCompact);
-      Assert.Null(await fixture.Session.CompactAsync(
-          new(Guid.NewGuid(), snapshot.HistoryRevision, TestLlmSelection.Default)));
       Assert.False(snapshot.AdmissionFenced);
       Assert.False(snapshot.StopRequested);
       UserMessageReceipt steering = await fixture.Session.SubmitUserMessageAsync(
@@ -67,7 +64,6 @@ public sealed class BackgroundToolExecutionTests {
       releaseProvider.TrySetResult();
       Assert.Equal(ExecutionOutcome.Completed,
           (await fixture.Session.WaitForExecutionFinishAsync(execution).WaitAsync(TestTimeout)).Outcome);
-      Assert.True((await fixture.Session.ReadSnapshotAsync()).CanCompact);
       Assert.Equal(4, client.Calls);
       Assert.Equal(frozen, inFlight.Select(message => message.Text));
       string placeholder = Assert.IsType<string>(Assert.Single(client.Requests[1].SelectMany(message => message.Contents)

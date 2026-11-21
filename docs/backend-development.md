@@ -209,9 +209,12 @@ compaction and counts toward estimated context, not the generated-summary output
 
 Successful summaries and metadata-only markers commit together in `session_compactions` and
 `execution_messages`, scoped to the current history revision. Context reads apply the saved boundary
-without rewriting the original transcript. Manual compaction is idle-only, has its own execution and
-receipt, uses ordinary addressed Stop and is not replayed on reopen. No-op, failed, cancelled and
-stale attempts do not advance the boundary. The [server guide](server-development.md#session-http-contract)
+without rewriting the original transcript. Manual compaction starts its own execution when idle;
+while an execution is active, the server can accept one in-memory queued request and starts it after
+execution cleanup and any waking question run. The queue is not replayed on reopen and is invalidated
+when the session is fenced or its history revision changes. Stop addresses the current execution and
+does not cancel an independently queued compaction. The server rechecks history when queued work
+starts; a no-op, failure, cancellation or stale attempt does not advance the boundary. The [server guide](server-development.md#session-http-contract)
 owns the wire contract; the [browser guide](browser-development.md) describes the control.
 
 ## Naming and structure cleanup

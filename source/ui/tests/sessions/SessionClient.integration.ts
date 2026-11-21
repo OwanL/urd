@@ -93,7 +93,10 @@ void test(
       workingDirectory: parse(process.cwd()).root,
       canChangeWorkingDirectory: true,
       canContinue: false,
-      canCompact: true,
+      canCompact: false,
+      queuedCompactionId: null,
+      manualCompactionId: null,
+      compactionUnavailableReason: "There is no history to compact.",
       admissionFenced: false,
       isCompacting: false,
       unsettledExecutionId: null,
@@ -150,7 +153,7 @@ void test(
     let settled = await request(client.getSnapshot(id, signal));
     while (settled.lastSettlement?.executionId !== executionId) {
       assert.equal(settled.unsettledExecutionId, executionId);
-      assert.equal(settled.canCompact, false);
+      assert.equal(settled.canCompact, true);
       assert.ok(performance.now() < deadline, "Execution did not settle before the deadline");
       await delay(Math.min(20, Math.max(1, deadline - performance.now())), undefined, { signal });
       settled = await request(client.getSnapshot(id, signal));

@@ -69,6 +69,7 @@ internal sealed class MessageEditing(SessionBase session, UrdStore store, AsyncL
       using (await sessionLock.AcquireAsync()) {
         editTask = null;
         editSubmission = null;
+        executionStart ??= session.StartQueuedCompaction();
         session.PublishChange();
       }
       executionStart?.SetResult();

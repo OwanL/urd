@@ -33,13 +33,14 @@ internal sealed class SessionExecution : IDisposable {
   private readonly CancellationTokenSource stop = new();
   private Task? stopCallbacks;
   private readonly ManualCompactionRequest? manualCompactionRequest;
+  private readonly string? compactionSkipReason;
   private const string NoCompactionCut = "No older history can be compacted without dropping recent context.";
   private const string UnexpectedCompactionError = "History compaction failed unexpectedly. Previous context kept.";
 
   internal SessionExecution(SessionExecutionRecorder recorder, SessionBase session,
       Func<ProviderConnection, IChatClient> createChatClient, LlmSelection selection,
       StartingContextBuilder startingContextBuilder, IReadOnlyList<AgentTool>? tools = null,
-      PendingToolCalls? pendingToolCalls = null, ManualCompactionRequest? compaction = null) {
+      PendingToolCalls? pendingToolCalls = null, ManualCompactionRequest? compaction = null, string? compactionSkipReason = null) {
     this.recorder = recorder;
     this.session = session;
     this.createChatClient = createChatClient;
@@ -52,6 +53,7 @@ internal sealed class SessionExecution : IDisposable {
       answerAgentDeclaration = AgentToolDeclaration.Create(answerTool);
     auxiliary = new(recorder, createChatClient, tools ?? [], session.WorkingDirectory);
     manualCompactionRequest = compaction;
+    this.compactionSkipReason = compactionSkipReason;
     IsCompacting = compaction is not null;
   }
 
@@ -120,7 +122,9 @@ internal sealed class SessionExecution : IDisposable {
 
   internal async Task<ExecutionOutcome> RunCompactionAsync() {
     try {
-      if (await CompactHistoryAsync(null, CompactionReason.Manual, manualCompactionRequest!.Focus) is null)
+      if (compactionSkipReason is not null)
+        await recorder.RecordCompactionErrorAsync(compactionSkipReason);
+      else if (await CompactHistoryAsync(null, CompactionReason.Manual, manualCompactionRequest!.Focus) is null)
         await recorder.RecordCompactionErrorAsync(NoCompactionCut);
       return IsStopping ? ExecutionOutcome.Cancelled : ExecutionOutcome.Completed;
     } catch (OperationCanceledException) when (IsStopping) {

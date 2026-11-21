@@ -133,6 +133,171 @@ public sealed class ManualCompactionTests {
     }
   }
 
+  [Fact]
+  public async Task BusyCompactionQueuesOnceAndWaitsForExecutionCleanup() {
+    using var database = new TemporaryDatabase();
+    var entered = Signal();
+    var release = Signal();
+    var cleanupEntered = Signal();
+    var cleanupRelease = Signal();
+    var summaryEntered = Signal();
+    var summaryRelease = Signal();
+    int calls = 0;
+    using var client = new ScriptedChatClient(token => Interlocked.Increment(ref calls) == 3
+        ? Paused(entered, release, token, cleanupEntered, cleanupRelease) : Complete(token), async cancellation => {
+      summaryEntered.TrySetResult();
+      await summaryRelease.Task.WaitAsync(cancellation);
+      return SummaryResponse();
+    });
+    using UrdStore store = UrdStore.Open(database.Path);
+    PrimarySession session = CreateSession(store, client);
+    await SubmitTurnAsync(session, "ancient-turn: " + new string('x', 100_000));
+    await SubmitTurnAsync(session, "latest-turn");
+    UserMessageReceipt busy = await session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, "working", TestLlmSelection.Default));
+    Guid execution = Assert.IsType<Guid>(busy.ExecutionId);
+    try {
+      await entered.Task.WaitAsync(TestTimeout);
+      SessionSnapshot snapshot = await session.ReadSnapshotAsync();
+      Assert.True(snapshot.CanCompact);
+      var request = new ManualCompactionRequest(Guid.NewGuid(), snapshot.HistoryRevision, Selection);
+      CompactionReceipt queued = Assert.IsType<CompactionReceipt>(await session.CompactAsync(request));
+      Assert.True(queued.Queued);
+      Assert.Equal(request.OperationId, queued.ExecutionId);
+      Assert.Equal(queued, await session.CompactAsync(request));
+      Assert.Equal(queued, await session.ReadCompactionReceiptAsync(request.OperationId));
+      Assert.Null(await session.CompactAsync(request with { OperationId = Guid.NewGuid() }));
+      await Assert.ThrowsAsync<UserMessageConflictException>(() => session.CompactAsync(request with { Focus = "different" }));
+      Assert.Equal(request.OperationId, (await session.ReadSnapshotAsync()).QueuedCompactionId);
+      Assert.Single(StoredExecutions.Read(database), run => run.Outcome is null);
+      release.TrySetResult();
+      await cleanupEntered.Task.WaitAsync(TestTimeout);
+      Assert.False(summaryEntered.Task.IsCompleted);
+      Assert.Equal(request.OperationId, (await session.ReadSnapshotAsync()).QueuedCompactionId);
+      cleanupRelease.TrySetResult();
+      await session.WaitForExecutionFinishAsync(execution).WaitAsync(TestTimeout);
+      await summaryEntered.Task.WaitAsync(TestTimeout);
+      SessionSnapshot running = await session.ReadSnapshotAsync();
+      Assert.Null(running.QueuedCompactionId);
+      Assert.Equal(request.OperationId, running.ManualCompactionId);
+      summaryRelease.TrySetResult();
+      Assert.Equal(ExecutionOutcome.Completed,
+          (await session.WaitForExecutionFinishAsync(request.OperationId).WaitAsync(TestTimeout)).Outcome);
+      CompactionReceipt settled = Assert.IsType<CompactionReceipt>(await session.ReadCompactionReceiptAsync(request.OperationId));
+      Assert.False(settled.Queued);
+      Assert.Equal(ExecutionOutcome.Completed, settled.Outcome);
+    } finally {
+      release.TrySetResult();
+      cleanupRelease.TrySetResult();
+      summaryRelease.TrySetResult();
+    }
+  }
+
+  [Fact]
+  public async Task HistoryEditCancelsQueuedCompactionWithAReadableReceipt() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    var entered = Signal();
+    var release = Signal();
+    int calls = 0;
+    using var client = new ScriptedChatClient(token => Interlocked.Increment(ref calls) == 2
+        ? Paused(entered, release, token) : Complete(token), _ => Task.FromResult(SummaryResponse()));
+    PrimarySession session = CreateSession(store, client);
+    await SubmitTurnAsync(session, new string('x', 8_000));
+    TranscriptHistoryPage page = await session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, 0));
+    MessageRef original = page.Entries.First(entry => entry.Entry.Kind == TranscriptEntryKind.User).Text!.From.Message;
+    await session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, "busy turn", TestLlmSelection.Default));
+    try {
+      await entered.Task.WaitAsync(TestTimeout);
+      var request = new ManualCompactionRequest(Guid.NewGuid(), 0, Selection);
+      Assert.True(Assert.IsType<CompactionReceipt>(await session.CompactAsync(request)).Queued);
+      MessageEditReceipt edited = await session.EditUserMessageAsync(
+          new(Guid.NewGuid(), original, "replacement", TestLlmSelection.Default)).WaitAsync(TestTimeout);
+      await session.WaitForExecutionFinishAsync(edited.ExecutionId).WaitAsync(TestTimeout);
+      Assert.Null((await session.ReadSnapshotAsync()).QueuedCompactionId);
+      CompactionReceipt discarded = Assert.IsType<CompactionReceipt>(await session.ReadCompactionReceiptAsync(request.OperationId));
+      Assert.Equal(ExecutionOutcome.Cancelled, discarded.Outcome);
+      Assert.Contains("history changed", discarded.Error);
+      Assert.Equal(discarded, await session.CompactAsync(request));
+      Assert.DoesNotContain(StoredExecutions.Read(database), run => run.ExecutionId == request.OperationId);
+    } finally {
+      release.TrySetResult();
+    }
+  }
+
+  [Fact]
+  public async Task EmptyHistoryCannotBeCompacted() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    using var client = new ScriptedChatClient(Complete, _ => Task.FromResult(SummaryResponse()));
+    PrimarySession session = CreateSession(store, client);
+    SessionSnapshot snapshot = await session.ReadSnapshotAsync();
+    Assert.False(snapshot.CanCompact);
+    Assert.False(string.IsNullOrWhiteSpace(snapshot.CompactionUnavailableReason));
+    Assert.Null(await session.CompactAsync(new(Guid.NewGuid(), snapshot.HistoryRevision, Selection)));
+    Assert.Equal(0, client.Calls);
+  }
+
+  [Fact]
+  public async Task MeasuredLowUsageCannotBeCompacted() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    using var client = new ScriptedChatClient(LowUsage, _ => Task.FromResult(SummaryResponse()));
+    PrimarySession session = CreateSession(store, client);
+    await SubmitTurnAsync(session, "short turn");
+    SessionSnapshot snapshot = await session.ReadSnapshotAsync();
+    Assert.Equal(SessionContextUsageSource.Measured, snapshot.ContextUsage?.Source);
+    Assert.False(snapshot.CanCompact);
+    Assert.Contains("low", snapshot.CompactionUnavailableReason!, StringComparison.OrdinalIgnoreCase);
+    Assert.Null(await session.CompactAsync(new(Guid.NewGuid(), snapshot.HistoryRevision, Selection)));
+  }
+
+  [Fact]
+  public async Task QueuedCompactionSkipsWhenSettledUsageIsLow() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    var entered = Signal();
+    var release = Signal();
+    int summaries = 0;
+    using var client = new ScriptedChatClient(PausedLowUsage, _ => {
+      Interlocked.Increment(ref summaries);
+      return Task.FromResult(SummaryResponse());
+    });
+    PrimarySession session = CreateSession(store, client);
+    UserMessageReceipt busy = await session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, "short turn", TestLlmSelection.Default));
+    try {
+      await entered.Task.WaitAsync(TestTimeout);
+      SessionSnapshot snapshot = await session.ReadSnapshotAsync();
+      var request = new ManualCompactionRequest(Guid.NewGuid(), snapshot.HistoryRevision, Selection);
+      Assert.True(Assert.IsType<CompactionReceipt>(await session.CompactAsync(request)).Queued);
+      release.TrySetResult();
+      await session.WaitForExecutionFinishAsync(Assert.IsType<Guid>(busy.ExecutionId)).WaitAsync(TestTimeout);
+      await session.WaitForExecutionFinishAsync(request.OperationId).WaitAsync(TestTimeout);
+      CompactionReceipt receipt = Assert.IsType<CompactionReceipt>(await session.ReadCompactionReceiptAsync(request.OperationId));
+      Assert.Equal(ExecutionOutcome.Completed, receipt.Outcome);
+      Assert.Contains("low", receipt.Error!, StringComparison.OrdinalIgnoreCase);
+      Assert.Equal(0, summaries);
+    } finally {
+      release.TrySetResult();
+    }
+
+    async IAsyncEnumerable<ChatResponseUpdate> PausedLowUsage(
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken token) {
+      entered.TrySetResult();
+      await release.Task.WaitAsync(token);
+      await foreach (ChatResponseUpdate update in LowUsage(token))
+        yield return update;
+    }
+  }
+
+  private static async IAsyncEnumerable<ChatResponseUpdate> LowUsage(
+      [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken token) {
+    await Task.Yield();
+    token.ThrowIfCancellationRequested();
+    yield return new() { Contents = [new TextContent("answer"), new UsageContent(new UsageDetails {
+      InputTokenCount = 12, OutputTokenCount = 3, TotalTokenCount = 15
+    })], FinishReason = ChatFinishReason.Stop };
+  }
+
   private static IAsyncEnumerable<ChatResponseUpdate> FailContinuation(CancellationToken token) {
     token.ThrowIfCancellationRequested();
     throw new ProviderOperationException(ProviderFailure.ProviderUnavailable);

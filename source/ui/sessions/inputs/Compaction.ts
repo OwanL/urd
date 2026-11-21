@@ -12,6 +12,7 @@ export interface CompactionReceipt {
   readonly executionId: string;
   readonly outcome: ExecutionOutcome | null;
   readonly error?: string | null;
+  readonly queued?: boolean;
 }
 
 export type CompactionReason = "manual" | "threshold" | "overflow";

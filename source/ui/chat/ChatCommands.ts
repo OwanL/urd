@@ -24,9 +24,21 @@ export interface PendingInputRemovalState {
 
 // Status of a compaction shown by the chat.
 export type ChatCompactionState =
-  | { readonly phase: "starting" | "observing"; readonly operationId: string }
+  | { readonly phase: "starting"; readonly operationId: string }
+  | { readonly phase: "observing"; readonly operationId: string; readonly queued: boolean }
   | { readonly phase: "uncertain"; readonly operationId: string; readonly message: string }
   | { readonly phase: "settled"; readonly message: string };
+
+export function compactionStatus(
+  snapshot: SessionSnapshot | null | undefined,
+  compaction: ChatCompactionState | undefined,
+): "running" | "queued" | "requesting" | null {
+  if (snapshot?.manualCompactionId) return "running";
+  if (snapshot?.queuedCompactionId || (compaction?.phase === "observing" && compaction.queued))
+    return "queued";
+  if (compaction?.phase === "observing") return "running";
+  return compaction?.phase === "starting" ? "requesting" : null;
+}
 
 // Commands and status consumed by the chat view.
 export interface ChatCommands {

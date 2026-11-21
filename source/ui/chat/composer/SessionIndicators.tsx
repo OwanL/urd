@@ -16,8 +16,9 @@ interface SessionIndicatorsProps {
   usageBusy: boolean;
   usageRefresh: number | string;
   canCompact: boolean;
-  compacting: boolean;
+  compactionStatus: "requesting" | "queued" | "running" | null;
   compactionMessage: string | null;
+  compactionUnavailableReason: string | null;
   onCheckCompaction: (() => void) | undefined;
   onCompact(): void;
 }
@@ -33,8 +34,9 @@ export function SessionIndicators({
   usageBusy,
   usageRefresh,
   canCompact,
-  compacting,
+  compactionStatus,
   compactionMessage,
+  compactionUnavailableReason,
   onCheckCompaction,
   onCompact,
 }: SessionIndicatorsProps) {
@@ -55,13 +57,17 @@ export function SessionIndicators({
       : source === "lastMeasured"
         ? "Last measured usage"
         : null;
-  const compactDisabled = !canCompact || compacting;
-  const compactAction = onCheckCompaction
-    ? "Check compaction"
-    : compacting
+  const compactDisabled = !canCompact;
+  const compactStatus =
+    compactionStatus === "running"
       ? "Compacting…"
-      : "Compact";
-  const compactStatus = compacting ? "Compacting…" : compactionMessage;
+      : compactionStatus === "queued"
+        ? "Queued"
+        : compactionStatus === "requesting"
+          ? "Requesting…"
+          : null;
+  const compactAction = compactStatus ?? (onCheckCompaction ? "Check compaction" : "Compact");
+  const actionAvailable = canCompact || onCheckCompaction !== undefined;
   const contextAccessibleLabel = `Context window: ${contextLabel}${contextDetail ? `, ${contextDetail.toLowerCase()}` : ""}`;
   const ratio = contextUsage && contextWindow ? contextUsage.usedTokens / contextWindow : 0;
   const incomplete = workingTime?.hasUnknownDuration || (fenced && Boolean(startedAt));
@@ -97,18 +103,21 @@ export function SessionIndicators({
               <span>Context window</span>
               <span class="tooltip-detail">{contextLabel}</span>
               {contextDetail && <span class="tooltip-detail">{contextDetail}</span>}
-              {compactStatus && (
-                <span class="tooltip-detail" role="status">
-                  {compactStatus}
-                </span>
-              )}
+              {compactStatus && <span class="tooltip-detail">{compactStatus}</span>}
+              {compactionMessage && <span class="tooltip-detail">{compactionMessage}</span>}
+              {!compactStatus &&
+                !actionAvailable &&
+                compactionUnavailableReason &&
+                compactionUnavailableReason !== compactionMessage && (
+                  <span class="tooltip-detail">{compactionUnavailableReason}</span>
+                )}
             </div>
           }
         >
           <button
             type="button"
-            class={`session-indicator session-context-indicator ${ratio >= 0.85 ? "is-critical" : ratio >= 0.7 ? "is-warning" : ""}`}
-            aria-label={`${contextAccessibleLabel}. ${compactAction}`}
+            class={`session-indicator session-context-indicator ${compactionStatus ? "has-compaction-status" : actionAvailable ? "has-compaction-action" : ""} ${ratio >= 0.85 ? "is-critical" : ratio >= 0.7 ? "is-warning" : ""}`}
+            aria-label={`${contextAccessibleLabel}. ${compactStatus === "Queued" ? "Compaction queued" : actionAvailable || compactStatus ? compactAction : "Compaction unavailable"}`}
             aria-disabled={compactDisabled && !onCheckCompaction}
             onClick={() => {
               if (onCheckCompaction) onCheckCompaction();

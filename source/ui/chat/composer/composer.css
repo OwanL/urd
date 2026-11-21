@@ -104,12 +104,14 @@
 .session-context-action {
   visibility: hidden;
 }
-.session-context-indicator:hover .session-context-value,
-.session-context-indicator:focus-visible .session-context-value {
+.session-context-indicator.has-compaction-action:hover .session-context-value,
+.session-context-indicator.has-compaction-action:focus-visible .session-context-value,
+.session-context-indicator.has-compaction-status .session-context-value {
   visibility: hidden;
 }
-.session-context-indicator:hover .session-context-action,
-.session-context-indicator:focus-visible .session-context-action {
+.session-context-indicator.has-compaction-action:hover .session-context-action,
+.session-context-indicator.has-compaction-action:focus-visible .session-context-action,
+.session-context-indicator.has-compaction-status .session-context-action {
   visibility: visible;
 }
 .session-context-indicator[aria-disabled="true"] {

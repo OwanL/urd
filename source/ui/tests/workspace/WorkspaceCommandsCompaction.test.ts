@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { CompactionReceipt } from "../../sessions/inputs/Compaction.ts";
+import { compactionStatus } from "../../chat/ChatCommands.ts";
 import {
   sessionId,
   firstExecutionId,
@@ -8,25 +9,161 @@ import {
   fixture,
   commands,
   compactionReceipt,
+  receipt,
   emptyClient,
   deferred,
 } from "./WorkspaceCommandsFixture.ts";
 
-void test("compaction requires an idle snapshot even when the command is enabled", async () => {
+void test("compaction can be queued during an execution when the server permits it", async () => {
   const workspace = fixture();
   let starts = 0;
   const coordinator = commands(workspace.access, {
     ...emptyClient(),
-    startCompaction: async () => {
+    startCompaction: async (_id, submission) => {
       starts++;
-      return compactionReceipt("unused");
+      return { ...compactionReceipt(submission.operationId, null), queued: true };
     },
   });
 
   await coordinator.compact(sessionId, snapshot({ unsettledExecutionId: firstExecutionId }), true);
 
-  assert.equal(starts, 0);
-  assert.equal(coordinator.status.compactions[sessionId], undefined);
+  assert.equal(starts, 1);
+  const operation = coordinator.status.compactions[sessionId];
+  assert.equal(operation?.phase, "observing");
+  if (operation?.phase !== "observing") return;
+  assert.equal(operation.queued, true);
+  assert.equal(
+    compactionStatus(snapshot({ unsettledExecutionId: firstExecutionId }), operation),
+    "queued",
+  );
+});
+
+void test("compaction status prioritizes manual running and queued work over automatic compaction", () => {
+  const queued = { phase: "observing", operationId: firstExecutionId, queued: true } as const;
+  assert.equal(compactionStatus(snapshot({ isCompacting: true }), queued), "queued");
+  assert.equal(
+    compactionStatus(
+      snapshot({ isCompacting: true, queuedCompactionId: firstExecutionId }),
+      undefined,
+    ),
+    "queued",
+  );
+  assert.equal(
+    compactionStatus(
+      snapshot({ isCompacting: true, manualCompactionId: firstExecutionId }),
+      queued,
+    ),
+    "running",
+  );
+  assert.equal(compactionStatus(snapshot({ isCompacting: true }), undefined), null);
+  assert.equal(compactionStatus(snapshot(), { ...queued, queued: false }), "running");
+});
+
+void test("acknowledged queued compaction allows steering but prevents duplicate compaction", async () => {
+  const workspace = fixture();
+  let starts = 0;
+  let sends = 0;
+  const coordinator = commands(workspace.access, {
+    ...emptyClient(async (_id, submission) => {
+      sends++;
+      return receipt(submission);
+    }),
+    startCompaction: async (_id, submission) => {
+      starts++;
+      return { ...compactionReceipt(submission.operationId, null), queued: true };
+    },
+  });
+  const active = snapshot({ unsettledExecutionId: firstExecutionId });
+  await coordinator.compact(sessionId, active, true);
+  await coordinator.compact(sessionId, active, true);
+  await coordinator.send(sessionId, active, true, true);
+  assert.equal(starts, 1);
+  assert.equal(sends, 1);
+});
+
+void test("queued compaction is not reconciled until it leaves the server queue", async () => {
+  const workspace = fixture();
+  let reads = 0;
+  const coordinator = commands(workspace.access, {
+    ...emptyClient(),
+    startCompaction: async (_id, submission) => ({
+      ...compactionReceipt(submission.operationId, null),
+      queued: true,
+    }),
+    getCompactionOperation: async () => {
+      reads++;
+      return null;
+    },
+  });
+  await coordinator.compact(sessionId, snapshot({ unsettledExecutionId: firstExecutionId }), true);
+  const operation = coordinator.status.compactions[sessionId];
+  assert.equal(operation?.phase, "observing");
+  if (operation?.phase !== "observing") return;
+
+  coordinator.observeSnapshot(
+    snapshot({
+      unsettledExecutionId: firstExecutionId,
+      queuedCompactionId: operation.operationId,
+    }),
+    null,
+  );
+  assert.equal(reads, 0);
+  assert.equal(coordinator.status.compactions[sessionId]?.phase, "observing");
+});
+
+for (const previousOperation of [false, true]) {
+  void test(`workspace tracks a server queue with ${previousOperation ? "a prior settled operation" : "no local operation"}`, async () => {
+    const workspace = fixture();
+    const settled = deferred<void>();
+    const message = "Queued compaction skipped because history changed.";
+    const coordinator = commands(
+      workspace.access,
+      {
+        ...emptyClient(),
+        startCompaction: async (_id, submission) => compactionReceipt(submission.operationId),
+        getCompactionOperation: async (_id, operationId) => ({
+          ...compactionReceipt(operationId, "cancelled"),
+          error: message,
+        }),
+      },
+      (state) => {
+        const operation = state.compactions[sessionId];
+        if (operation?.phase === "settled" && operation.message === message) settled.resolve();
+      },
+    );
+    if (previousOperation) await coordinator.compact(sessionId, snapshot(), true);
+    coordinator.observeSnapshot(snapshot({ queuedCompactionId: firstExecutionId }), null);
+    assert.equal(coordinator.status.compactions[sessionId]?.phase, "observing");
+    coordinator.observeSnapshot(snapshot(), null);
+    await settled.promise;
+    assert.deepEqual(coordinator.status.compactions[sessionId], { phase: "settled", message });
+  });
+}
+
+void test("a later compaction receipt updates queued state", async () => {
+  const workspace = fixture();
+  const checked = deferred<void>();
+  const coordinator = commands(
+    workspace.access,
+    {
+      ...emptyClient(),
+      startCompaction: async (_id, submission) => ({
+        ...compactionReceipt(submission.operationId, null),
+        queued: true,
+      }),
+      getCompactionOperation: async (_id, operationId) => compactionReceipt(operationId, null),
+    },
+    (state) => {
+      const operation = state.compactions[sessionId];
+      if (operation?.phase === "observing" && !operation.queued) checked.resolve();
+    },
+  );
+  await coordinator.compact(sessionId, snapshot(), true);
+  coordinator.observeSnapshot(snapshot(), null);
+  await checked.promise;
+  const operation = coordinator.status.compactions[sessionId];
+  assert.equal(operation?.phase, "observing");
+  if (operation?.phase === "observing") assert.equal(operation.queued, false);
 });
 
 void test("compaction ignores duplicate starts while the first start is pending", async () => {
@@ -91,9 +228,9 @@ void test("manual compaction keeps the fallback for a failed receipt without an 
   });
 });
 
-void test("a snapshot reads the addressed compaction receipt and reports an unconfirmed no-op", async () => {
+void test("a missing compaction receipt resolves to unconfirmed without losing the draft", async () => {
   const workspace = fixture();
-  const settled = deferred<void>();
+  const checked = deferred<void>();
   const receiptReads: string[] = [];
   const coordinator = commands(
     workspace.access,
@@ -108,16 +245,16 @@ void test("a snapshot reads the addressed compaction receipt and reports an unco
       },
     },
     (state) => {
-      if (state.compactions[sessionId]?.phase === "settled") settled.resolve();
+      if (state.compactions[sessionId]?.phase === "settled") checked.resolve();
     },
   );
 
   await coordinator.compact(sessionId, snapshot(), true);
   const operation = coordinator.status.compactions[sessionId];
-  assert.equal(operation?.phase, "observing");
-  if (operation?.phase !== "observing") return;
+  assert.equal(operation?.phase, "uncertain");
+  if (operation?.phase !== "uncertain") return;
   coordinator.observeSnapshot(snapshot(), null);
-  await settled.promise;
+  await checked.promise;
 
   assert.deepEqual(receiptReads, [operation.operationId]);
   assert.deepEqual(coordinator.status.compactions[sessionId], {
@@ -147,15 +284,15 @@ void test("a transient compaction receipt read recovers on the next snapshot", a
     },
     (state) => {
       const phase = state.compactions[sessionId]?.phase;
-      if (phase === "uncertain") uncertain.resolve();
+      if (phase === "uncertain" && receiptReads.length > 0) uncertain.resolve();
       if (phase === "settled") settled.resolve();
     },
   );
 
   await coordinator.compact(sessionId, snapshot(), true);
   const operation = coordinator.status.compactions[sessionId];
-  assert.equal(operation?.phase, "observing");
-  if (operation?.phase !== "observing") return;
+  assert.equal(operation?.phase, "uncertain");
+  if (operation?.phase !== "uncertain") return;
   coordinator.observeSnapshot(snapshot(), null);
   await uncertain.promise;
   coordinator.observeSnapshot(snapshot(), null);

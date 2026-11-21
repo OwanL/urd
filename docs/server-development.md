@@ -162,10 +162,14 @@ provider calls.
 [`SessionRoutes.cs`](../source/hosting/server/SessionRoutes.cs) owns the route inventory;
 [`SessionClient.ts`](../source/ui/sessions/SessionClient.ts) supplies the browser query shapes.
 
-Session snapshots include `canCompact`, a live hint that is true only while the session is
-locally idle, with no active execution, durable unsettled run, admission fence or Stop request.
-The compaction POST rechecks admission in Core and returns 409 when unavailable; exact retries
-of an already accepted operation still return its retained receipt.
+Session snapshots include `canCompact` and `compactionUnavailableReason` as live admission
+hints. An eligible active session can accept one queued manual compaction, exposed by
+`queuedCompactionId`; `manualCompactionId` identifies a running manual compaction. The POST
+rechecks admission in Core and returns 409 when unavailable. Exact retries return the queued or
+retained receipt, while reusing an operation ID with different input conflicts. A queued receipt
+has `queued: true` and its execution ID is the operation ID; it becomes a normal execution receipt
+when started. The queue is in memory and is lost on shutdown or revision replacement. Stopping the
+current execution does not cancel a separately queued compaction.
 
 For `ask_user`, pass `question`, optional `context`, and `answers` (up to six suggestions;
 an empty array allows a custom answer only). The existing `background: true` option lets the

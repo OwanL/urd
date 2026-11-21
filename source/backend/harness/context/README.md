@@ -14,7 +14,6 @@ does not select or remove built-in instructions.
 | `SubagentSessionGuidance.cs` | Subagents | 100 |
 | `WorkingDirectoryGuidance.cs` | Sessions with a working directory | 200 |
 | `SelectedSkillsGuidance.cs` | Sessions with a working directory and skills | 220 |
-| `AssignmentGuidance.cs` | Sessions with an assignment | 300 |
 
 File-tool usage belongs in the tool descriptions and parameter schemas. The
 selected-skills block passes names, descriptions, and paths to the agent so it
@@ -43,7 +42,7 @@ internal sealed class ExampleGuidance : StartingContextContribution {
 ```
 
 Omit `AppliesTo` to include a block in both primary and subagent sessions. `GetText` receives the session
-inputs, so guidance can include working-directory or assignment facts. Return null
+inputs, so guidance can include working-directory facts. Return null
 or whitespace to omit the block. Each included block becomes one system message.
 Guidance failures stop composition rather than silently dropping instructions.
 

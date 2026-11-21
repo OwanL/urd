@@ -43,7 +43,7 @@ public sealed class StartingContextPreparationTests {
       Guid boundary = Guid.NewGuid();
 
       StartingContext context = await builder.PrepareAsync(
-          new(SessionKind.Primary, ModelFamily.Other, project, null), boundary, "Apply the project guidance.",
+          new(SessionKind.Primary, ModelFamily.Other, project), boundary, "Apply the project guidance.",
           preferences, new HashSet<string>(["read"], StringComparer.Ordinal), pruner, CancellationToken.None)
           .WaitAsync(TestTimeout);
 
@@ -114,7 +114,7 @@ public sealed class StartingContextPreparationTests {
       };
 
       StartingContext context = await builder.PrepareAsync(
-          new(SessionKind.Primary, ModelFamily.Other, project, null), Guid.NewGuid(), "Use the skill.",
+          new(SessionKind.Primary, ModelFamily.Other, project), Guid.NewGuid(), "Use the skill.",
           preferences, new HashSet<string>(StringComparer.Ordinal), pruner, CancellationToken.None)
           .WaitAsync(TestTimeout);
 
@@ -167,7 +167,7 @@ public sealed class StartingContextPreparationTests {
       };
 
       StartingContext context = await builder.PrepareAsync(
-          new(SessionKind.Primary, ModelFamily.Other, project, null), Guid.NewGuid(), "Use the resources.",
+          new(SessionKind.Primary, ModelFamily.Other, project), Guid.NewGuid(), "Use the resources.",
           preferences, new HashSet<string>(StringComparer.Ordinal), pruner, CancellationToken.None)
           .WaitAsync(TestTimeout);
 

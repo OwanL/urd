@@ -224,7 +224,7 @@ public sealed class InstructionResourceDiscoveryTests : IDisposable {
     public void Dispose() { }
   }
 
-  private static StartingContextInput Input(string directory) => new(SessionKind.Primary, default, directory, null);
+  private static StartingContextInput Input(string directory) => new(SessionKind.Primary, default, directory);
 
   private string Write(string relativePath, string text) => WriteTo(Project, relativePath, text);
 

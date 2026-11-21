@@ -187,7 +187,7 @@ internal sealed class SessionExecution : IDisposable {
     }
   }
 
-  private StartingContextInput ContextInput() => new(session.Kind, selection.Family, session.WorkingDirectory, null);
+  private StartingContextInput ContextInput() => new(session.Kind, selection.Family, session.WorkingDirectory);
 
   private async Task PrepareStartingContextAsync(LlmRequest request) {
     Guid boundary = request.Context?.PreviousCompaction?.Id ?? Guid.Empty;

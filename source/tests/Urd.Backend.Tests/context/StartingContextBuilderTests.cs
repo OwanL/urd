@@ -9,14 +9,13 @@ namespace Urd.Backend.Tests.Context;
 
 public sealed class StartingContextBuilderTests {
   [Fact]
-  public void SessionKindAndAssignmentComposeWithSharedInstructions() {
-    const string assignment = "Inspect the specified behavior and report back.";
+  public void SessionKindComposesWithSharedInstructions() {
     var manager = CreateManager();
 
     StartingContext primary = manager.Create(
-        new(SessionKind.Primary, ModelFamily.OpenAI, null, assignment), default);
+        new(SessionKind.Primary, ModelFamily.OpenAI, null), default);
     StartingContext subagent = manager.Create(
-        new(SessionKind.Subagent, ModelFamily.OpenAI, null, assignment), default);
+        new(SessionKind.Subagent, ModelFamily.OpenAI, null), default);
     string primaryText = InstructionText(primary);
     string subagentText = InstructionText(subagent);
 
@@ -25,8 +24,6 @@ public sealed class StartingContextBuilderTests {
     Assert.Contains("user", primaryText, StringComparison.OrdinalIgnoreCase);
     Assert.Contains("final report", subagentText, StringComparison.OrdinalIgnoreCase);
     Assert.Contains("result", subagentText, StringComparison.OrdinalIgnoreCase);
-    Assert.Contains(assignment, primaryText, StringComparison.Ordinal);
-    Assert.Contains(assignment, subagentText, StringComparison.Ordinal);
     Assert.NotEqual(primaryText, subagentText);
     Assert.DoesNotContain(primary.Instructions, message => message.Role == ChatRole.User);
     Assert.DoesNotContain(subagent.Instructions, message => message.Role == ChatRole.User);
@@ -35,7 +32,7 @@ public sealed class StartingContextBuilderTests {
   [Fact]
   public void SessionGuidanceKeepsPrimaryWorkflowAndSubagentHandoffSeparate() {
     var manager = CreateManager();
-    var input = new StartingContextInput(SessionKind.Primary, ModelFamily.Other, null, null);
+    var input = new StartingContextInput(SessionKind.Primary, ModelFamily.Other, null);
 
     StartingContext primary = manager.Create(input, default);
     StartingContext subagent = manager.Create(input with { SessionKind = SessionKind.Subagent }, default);
@@ -58,7 +55,7 @@ public sealed class StartingContextBuilderTests {
     var manager = CreateManager();
     foreach (SessionKind kind in new[] { SessionKind.Primary, SessionKind.Subagent }) {
       StartingContext context = manager.Create(
-          new(kind, ModelFamily.Other, "C:\\workspace\\urd", null), default);
+          new(kind, ModelFamily.Other, "C:\\workspace\\urd"), default);
       string text = InstructionText(context);
 
       foreach (string unsupported in new[] { "ask_user", "session_resources", "session_changes", "request_capability", "invoke_tool", "Pie", "Pi runtime" })
@@ -70,13 +67,12 @@ public sealed class StartingContextBuilderTests {
   public void WorkingDirectoryIsIncludedOnlyWhenAvailable() {
     const string workingDirectory = "C:\\workspace\\urd";
     var manager = CreateManager();
-    var input = new StartingContextInput(SessionKind.Primary, ModelFamily.Other, null, null);
+    var input = new StartingContextInput(SessionKind.Primary, ModelFamily.Other, null);
 
     StartingContext withoutDirectory = manager.Create(input, default);
     StartingContext withDirectory = manager.Create(input with { WorkingDirectory = workingDirectory }, default);
 
     Assert.DoesNotContain("Working directory:", InstructionText(withoutDirectory), StringComparison.Ordinal);
-    Assert.DoesNotContain("Assignment context:", InstructionText(withoutDirectory), StringComparison.Ordinal);
     Assert.Contains(workingDirectory, InstructionText(withDirectory), StringComparison.Ordinal);
     Assert.DoesNotContain("Tool guidance:", InstructionText(withDirectory), StringComparison.Ordinal);
   }
@@ -86,7 +82,7 @@ public sealed class StartingContextBuilderTests {
     var manager = CreateManager(new TestTool("first"), new TestTool("second"));
 
     StartingContext context = manager.Create(
-        new(SessionKind.Primary, ModelFamily.Google, null, null), default);
+        new(SessionKind.Primary, ModelFamily.Google, null), default);
 
     Assert.Equal(new[] { "first", "second" }, context.Tools.Select(tool => tool.Name));
     JsonElement schema = context.Tools[0].JsonSchema;
@@ -102,7 +98,7 @@ public sealed class StartingContextBuilderTests {
     var manager = CreateManager(new TestTool("read"));
 
     StartingContext context = manager.Create(
-        new(SessionKind.Primary, ModelFamily.Other, null, null), default);
+        new(SessionKind.Primary, ModelFamily.Other, null), default);
 
     Assert.True(Assert.IsAssignableFrom<IList<ChatMessage>>(context.Instructions).IsReadOnly);
     Assert.True(Assert.IsAssignableFrom<IList<AIFunctionDeclaration>>(context.Tools).IsReadOnly);
@@ -115,17 +111,17 @@ public sealed class StartingContextBuilderTests {
         new TestGuidance(1000, _ => "after built-ins"));
 
     StartingContext context = manager.Create(
-        new(SessionKind.Primary, ModelFamily.Other, null, "assignment"), default);
+        new(SessionKind.Primary, ModelFamily.Other, "C:\\workspace\\urd"), default);
     string[] instructions = context.Instructions.Select(message => message.Text).ToArray();
 
     int beforeBuiltInsIndex = Array.IndexOf(instructions, "before built-ins");
-    int baseGuidanceIndex = Array.FindIndex(instructions, text => text.Contains("Urd", StringComparison.Ordinal));
-    int assignmentGuidanceIndex = Array.FindIndex(instructions,
-        text => text.Contains("Assignment context:", StringComparison.Ordinal));
+    int sharedGuidanceIndex = Array.FindIndex(instructions, text => text.Contains("Urd", StringComparison.Ordinal));
+    int directoryGuidanceIndex = Array.FindIndex(instructions,
+        text => text.StartsWith("Working directory:", StringComparison.Ordinal));
     int afterBuiltInsIndex = Array.IndexOf(instructions, "after built-ins");
 
-    Assert.True(beforeBuiltInsIndex >= 0 && beforeBuiltInsIndex < baseGuidanceIndex);
-    Assert.True(assignmentGuidanceIndex >= 0 && afterBuiltInsIndex > assignmentGuidanceIndex);
+    Assert.True(beforeBuiltInsIndex >= 0 && beforeBuiltInsIndex < sharedGuidanceIndex);
+    Assert.True(directoryGuidanceIndex >= 0 && afterBuiltInsIndex > directoryGuidanceIndex);
   }
 
   [Fact]
@@ -135,7 +131,7 @@ public sealed class StartingContextBuilderTests {
         new TestGuidance(50, _ => "second supplied"));
 
     StartingContext context = manager.Create(
-        new(SessionKind.Primary, ModelFamily.Other, null, null), default);
+        new(SessionKind.Primary, ModelFamily.Other, null), default);
 
     string[] instructions = context.Instructions.Select(message => message.Text).ToArray();
 
@@ -149,7 +145,7 @@ public sealed class StartingContextBuilderTests {
         -1,
         input => input.SessionKind.ToString(),
         SessionKind.Primary));
-    var primaryInput = new StartingContextInput(SessionKind.Primary, ModelFamily.Other, null, null);
+    var primaryInput = new StartingContextInput(SessionKind.Primary, ModelFamily.Other, null);
     var subagentInput = primaryInput with { SessionKind = SessionKind.Subagent };
 
     StartingContext primary = manager.Create(primaryInput, default);
@@ -167,7 +163,7 @@ public sealed class StartingContextBuilderTests {
         new TestGuidance(10, _ => "additional instruction"));
 
     StartingContext context = manager.Create(
-        new(SessionKind.Primary, ModelFamily.Other, null, null), default);
+        new(SessionKind.Primary, ModelFamily.Other, null), default);
 
     Assert.DoesNotContain(context.Instructions, message => string.IsNullOrWhiteSpace(message.Text));
     Assert.Contains(context.Instructions, message => message.Text == "additional instruction");
@@ -189,7 +185,7 @@ public sealed class StartingContextBuilderTests {
         }));
 
     Assert.ThrowsAny<OperationCanceledException>(() =>
-        manager.Create(new(SessionKind.Primary, ModelFamily.Other, null, null), source.Token));
+        manager.Create(new(SessionKind.Primary, ModelFamily.Other, null), source.Token));
 
     Assert.False(nextGuidanceEvaluated);
   }
@@ -200,7 +196,7 @@ public sealed class StartingContextBuilderTests {
     var manager = CreateManagerWithGuidance(new TestGuidance(-1, _ => throw expected));
 
     InvalidOperationException actual = Assert.Throws<InvalidOperationException>(() =>
-        manager.Create(new(SessionKind.Primary, ModelFamily.Other, null, null), default));
+        manager.Create(new(SessionKind.Primary, ModelFamily.Other, null), default));
 
     Assert.Same(expected, actual);
   }
@@ -212,7 +208,7 @@ public sealed class StartingContextBuilderTests {
     source.Cancel();
 
     OperationCanceledException exception = Assert.ThrowsAny<OperationCanceledException>(() =>
-        manager.Create(new(SessionKind.Primary, ModelFamily.Other, null, null), source.Token));
+        manager.Create(new(SessionKind.Primary, ModelFamily.Other, null), source.Token));
 
     Assert.Equal(source.Token, exception.CancellationToken);
   }

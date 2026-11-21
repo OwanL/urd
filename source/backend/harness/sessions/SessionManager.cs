@@ -183,7 +183,7 @@ public sealed partial class SessionManager : IAsyncDisposable, ISubagentRunner, 
     ChatProcesses? processes = null;
     (string directory, ToolCatalog catalog) = await registry.RunOpenAsync(() => {
       string directory = preferences.Read(fallbackWorkingDirectory).WorkingDirectory!;
-      ToolCatalog catalog = CreateToolCatalog(new PendingToolCalls(), true, out processes);
+      ToolCatalog catalog = CreateToolCatalog(new PendingToolCalls(), true, true, out processes);
       return (directory, catalog);
     }, cancellation);
     // Catalog construction starts no processes; still dispose its empty shell owner.
@@ -196,21 +196,23 @@ public sealed partial class SessionManager : IAsyncDisposable, ISubagentRunner, 
 
   private PrimarySession CreateSession(SessionRecord record) {
     var pending = new PendingToolCalls();
-    ToolCatalog catalog = CreateToolCatalog(pending, record.WorkingDirectory is not null, out ChatProcesses? processes);
+    ToolCatalog catalog = CreateToolCatalog(pending, record.WorkingDirectory is not null, true, out ChatProcesses? processes);
     return new PrimarySession(record, store, createChatClient, catalog, processes, pending, preferences, modelSelector, this);
   }
 
   private SubagentSession CreateChild(SessionRecord record) {
     var pending = new PendingToolCalls();
-    ToolCatalog catalog = CreateToolCatalog(pending, record.WorkingDirectory is not null, out ChatProcesses? processes);
+    ToolCatalog catalog = CreateToolCatalog(pending, record.WorkingDirectory is not null, false, out ChatProcesses? processes);
     return new SubagentSession(record, store, createChatClient, catalog, processes, pending, preferences, modelSelector, this);
   }
 
-  private ToolCatalog CreateToolCatalog(PendingToolCalls pending, bool processTools, out ChatProcesses? processes) {
+  private ToolCatalog CreateToolCatalog(PendingToolCalls pending, bool processTools, bool primary, out ChatProcesses? processes) {
     processes = null;
     AgentTool[] shared = [new WebSearchTool(browser), new WebReadTool(browser),
       new ListPendingCallsTool(pending), new CancelPendingCallsTool(pending), new SubagentTool(), new ListAgentsTool(),
       new AskAgentTool(), new AnswerAgentTool(), new AskUserTool(this)];
+    if (primary && playwright is { } automation)
+      shared = [.. shared, new PlaywrightTool(automation)];
     if (toolSettings is null || !processTools)
       return new([.. injectedTools, .. shared]);
     if (!OperatingSystem.IsWindows())

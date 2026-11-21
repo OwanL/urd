@@ -42,6 +42,77 @@ public sealed class PlaywrightProfileLoopbackTests {
     }
   }
 
+  [Fact]
+  [Trait("Category", "PlaywrightProfileLoopback")]
+  public async Task HandoffPreservesSyntheticSessionAcrossBrowserModes() {
+    if (!OperatingSystem.IsWindows() || Environment.GetEnvironmentVariable("URD_TEST_PLAYWRIGHT_HANDOFF") != "1")
+      return;
+
+    string executable = PinnedExecutable()
+      ?? throw new InvalidOperationException("The pinned Chromium and Playwright driver must already be installed for this local test.");
+    string root = Path.Combine(Path.GetTempPath(), $"urd-handoff-test-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(root);
+    try {
+      await using var fixture = new SessionFixture();
+      await using var denied = new SessionFixture();
+      await using var network = new PlaywrightNetwork(() => 0, allowPublic: false);
+      Assert.True(network.TryAllowNavigation(new Uri(fixture.Url)));
+      Assert.False(network.AllowsNavigation(new Uri(denied.Url)));
+      var launcher = new PlaywrightProfileLauncher(network.Address, executable, offscreen: true);
+      using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+      var profile = new PlaywrightProfile(root, launcher);
+      await using var lease = await profile.AcquireAsync(deadline.Token);
+
+      Assert.Equal("unauthenticated", await VisitAsync(lease, fixture.Url + "session", deadline.Token));
+      await lease.WithAutomationAsync(async (context, _) => {
+        await AssertDeniedAsync(context, denied.Url);
+        return true;
+      }, deadline.Token);
+      await SignInWithHandoffAsync(lease, fixture.Url, denied.Url, deadline.Token);
+      Assert.Equal("authenticated", await VisitAsync(lease, fixture.Url + "session", deadline.Token));
+      fixture.Revoke();
+      Assert.Equal("unauthenticated", await VisitAsync(lease, fixture.Url + "session", deadline.Token));
+      await SignInWithHandoffAsync(lease, fixture.Url, denied.Url, deadline.Token);
+      Assert.Equal("authenticated", await VisitAsync(lease, fixture.Url + "session", deadline.Token));
+      Assert.Equal(0, denied.RequestCount);
+    } finally {
+      Directory.Delete(root, recursive: true);
+    }
+  }
+
+  private static async Task SignInWithHandoffAsync(PlaywrightProfileLease lease, string url, string deniedUrl,
+      CancellationToken cancellation) {
+    var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var continuation = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    Task<bool> handoff = lease.HandoffAsync(continuation.Task, async (context, _) => {
+      await AssertDeniedAsync(context, deniedUrl);
+      IPage page = await context.NewPageAsync();
+      await page.GotoAsync(url + "login");
+      await page.Locator("#username").FillAsync("synthetic-user");
+      await page.Locator("#password").FillAsync("synthetic-password");
+      await page.Locator("#submit").ClickAsync();
+      await page.Locator("text=authenticated").WaitForAsync();
+      ready.TrySetResult();
+    }, cancellation);
+    // Observe preparation failures instead of waiting for the deadline when no ready signal is sent.
+    Task completed = await Task.WhenAny(ready.Task, handoff).WaitAsync(cancellation);
+    if (completed == handoff)
+      Assert.True(await handoff);
+    Assert.False(handoff.IsCompleted);
+    continuation.SetResult();
+    Assert.True(await handoff.WaitAsync(cancellation));
+  }
+
+  private static async Task AssertDeniedAsync(IBrowserContext context, string url) {
+    IPage page = await context.NewPageAsync();
+    try {
+      // Chromium reports a proxy denial as a failed navigation, not a rendered HTTP response.
+      await Assert.ThrowsAsync<PlaywrightException>(() => page.GotoAsync(url));
+    } finally {
+      await page.CloseAsync();
+    }
+  }
+
   private static string? PinnedExecutable() {
     string driver = Path.Combine(AppContext.BaseDirectory, ".playwright");
     string manifest = Path.Combine(driver, "package", "browsers.json");
@@ -93,6 +164,7 @@ public sealed class PlaywrightProfileLoopbackTests {
     private readonly HttpListener listener = new();
     private readonly Task serving;
     private int generation = 1;
+    private int requestCount;
 
     public SessionFixture() {
       var socket = new TcpListener(IPAddress.Loopback, 0);
@@ -106,6 +178,7 @@ public sealed class PlaywrightProfileLoopbackTests {
     }
 
     public string Url { get; }
+    public int RequestCount => Volatile.Read(ref requestCount);
     public void Revoke() => Interlocked.Increment(ref generation);
 
     private async Task ServeAsync() {
@@ -118,12 +191,19 @@ public sealed class PlaywrightProfileLoopbackTests {
         } catch (ObjectDisposedException) when (!listener.IsListening) {
           break;
         }
+        Interlocked.Increment(ref requestCount);
         string token = Volatile.Read(ref generation).ToString(System.Globalization.CultureInfo.InvariantCulture);
-        bool signIn = request.Request.Url?.AbsolutePath == "/sign-in";
+        string? path = request.Request.Url?.AbsolutePath;
+        bool signIn = path == "/sign-in" || (path == "/authenticate"
+            && request.Request.QueryString["username"] == "synthetic-user"
+            && request.Request.QueryString["password"] == "synthetic-password");
         if (signIn)
           request.Response.Headers.Add("Set-Cookie", $"session={token}; Path=/; Max-Age=3600; HttpOnly; SameSite=Strict");
         bool authenticated = signIn || request.Request.Cookies["session"]?.Value == token;
-        byte[] body = Encoding.UTF8.GetBytes(authenticated ? "authenticated" : "unauthenticated");
+        string content = authenticated ? "authenticated" : "unauthenticated";
+        if (path == "/login")
+          content = "<form action='/authenticate'><input id='username' name='username'><input id='password' name='password' type='password'><button id='submit'>Sign in</button></form>";
+        byte[] body = Encoding.UTF8.GetBytes(content);
         request.Response.ContentType = "text/html; charset=utf-8";
         request.Response.ContentLength64 = body.Length;
         await request.Response.OutputStream.WriteAsync(body);

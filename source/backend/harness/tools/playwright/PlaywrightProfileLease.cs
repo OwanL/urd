@@ -24,7 +24,11 @@ internal sealed class PlaywrightProfileLease(PlaywrightProfile owner, IPlaywrigh
   }
 
   // The caller signals Continue by completing continueSignal. Window closure never resumes automation.
-  public async Task<bool> HandoffAsync(Task continueSignal, CancellationToken cancellation) {
+  public Task<bool> HandoffAsync(Task continueSignal, CancellationToken cancellation) =>
+      HandoffAsync(continueSignal, static (_, _) => Task.CompletedTask, cancellation);
+
+  internal async Task<bool> HandoffAsync(Task continueSignal, Func<IBrowserContext, CancellationToken, Task> prepareWindow,
+      CancellationToken cancellation) {
     using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellation, lifetime.Token);
     await gate.WaitAsync(linked.Token);
     try {
@@ -33,6 +37,11 @@ internal sealed class PlaywrightProfileLease(PlaywrightProfile owner, IPlaywrigh
       try {
         await CloseAsync();
         browser = await LaunchAsync(false, linked.Token);
+        try {
+          await prepareWindow(browser.Context, linked.Token);
+        } catch (PlaywrightException) when (browser.Closed.IsCompleted) {
+          return false;
+        }
         Task completed = await Task.WhenAny(continueSignal, browser.Closed).WaitAsync(linked.Token);
         if (completed == browser.Closed)
           return false;

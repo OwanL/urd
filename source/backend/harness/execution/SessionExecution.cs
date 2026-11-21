@@ -67,7 +67,7 @@ internal sealed class SessionExecution : IDisposable {
   internal void RetireContextEstimate() => Volatile.Write(ref contextEstimate, null);
   internal bool HasPendingTools => toolExecution.HasRunningBackgroundTools;
   internal bool HasPendingAuxiliary => titleWork is not null && Volatile.Read(ref titleFinished) == 0;
-  internal Task JoinOwnedWorkAsync() => Task.WhenAll(toolExecution.JoinBackgroundToolsAsync(),
+  internal Task JoinOwnedWorkAsync() => Task.WhenAll(toolExecution.JoinAsync(),
       titleWork ?? Task.CompletedTask, recorder.JoinImageImportsAsync());
 
   // Completes once every callback registered on the stop token has finished.

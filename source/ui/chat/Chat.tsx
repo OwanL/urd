@@ -27,6 +27,7 @@ import type { ChatState } from "./ChatState.ts";
 import { useSessionSnapshot } from "../sessions/useSessionSnapshot.ts";
 import type { ModelOptionsState } from "../providers/models/useModelOptions.ts";
 import { UserQuestions } from "./ask-user/UserQuestions.tsx";
+import { BrowserSignInPrompt } from "./playwright/BrowserSignInPrompt.tsx";
 import "./chat.css";
 
 const efforts = ["none", "low", "medium", "high", "extraHigh"];
@@ -338,7 +339,10 @@ export function Chat({
           />
         )}
       {active && (
-        <UserQuestions client={client} sessionId={sessionId} connected={ready} notice={notice} />
+        <>
+          <UserQuestions client={client} sessionId={sessionId} connected={ready} notice={notice} />
+          <BrowserSignInPrompt key={sessionId} client={client} sessionId={sessionId} connected={ready} notice={notice} />
+        </>
       )}
       <Composer
         input={composerInput}

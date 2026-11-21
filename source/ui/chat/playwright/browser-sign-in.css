@@ -1,0 +1,58 @@
+.browser-sign-in {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin: 4px 12px 6px;
+  padding: 6px 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--surface-input);
+  font-size: 13px;
+}
+
+.browser-sign-in-details {
+  flex: 1 1 200px;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 10px;
+  overflow-wrap: anywhere;
+}
+
+.browser-sign-in-details span {
+  color: var(--text-secondary);
+}
+
+.browser-sign-in-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.browser-sign-in button {
+  min-height: 30px;
+  padding: 3px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  background: var(--surface-hover);
+}
+
+.browser-sign-in button:hover:not(:disabled) {
+  border-color: var(--text-secondary);
+  color: var(--text-primary);
+}
+
+.browser-sign-in-error {
+  flex-basis: 100%;
+  color: var(--danger);
+}
+
+@media (max-width: 480px) {
+  .browser-sign-in { margin-inline: 8px; }
+}
+
+@media (pointer: coarse) {
+  .browser-sign-in button { min-height: 40px; }
+}

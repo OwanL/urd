@@ -1,4 +1,5 @@
 import type { SubagentLink } from "../chat/subagents/SubagentNavigation.ts";
+import type { BrowserSignIn, BrowserSignInAction } from "../chat/playwright/BrowserSignIn.ts";
 import { RequestError } from "../http/RequestError.ts";
 import { requestEmpty } from "../http/Requests.ts";
 import { requestJson } from "../http/Requests.ts";
@@ -74,6 +75,23 @@ export class SessionClient {
       "GET",
       undefined,
       signal,
+    );
+  }
+
+  async getBrowserSignIn(sessionId: string, signal?: AbortSignal): Promise<{ handoff: BrowserSignIn | null }> {
+    try {
+      return await requestJson(this.url(`/${encodeURIComponent(sessionId)}/browser-sign-in`), "GET", undefined, signal);
+    } catch (failure) {
+      if (failure instanceof RequestError && failure.status === 404) return { handoff: null };
+      throw failure;
+    }
+  }
+
+  browserSignInAction(sessionId: string, id: string, action: BrowserSignInAction): Promise<void> {
+    return requestEmpty(
+      this.url(`/${encodeURIComponent(sessionId)}/browser-sign-in/${encodeURIComponent(id)}/${action}`),
+      "POST",
+      {},
     );
   }
 

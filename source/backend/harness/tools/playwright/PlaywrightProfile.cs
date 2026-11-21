@@ -6,7 +6,7 @@ namespace Urd.Core.Tools;
 #pragma warning disable CA1001 // Host-lived owner; the semaphore's wait handle is never allocated.
 internal sealed class PlaywrightProfile(string dataRoot, IPlaywrightProfileLauncher? launcher = null) {
   private readonly SemaphoreSlim ownership = new(1, 1);
-  private readonly IPlaywrightProfileLauncher launcher = launcher ?? new PlaywrightProfileLauncher();
+  private readonly IPlaywrightProfileLauncher? launcher = launcher;
   private readonly string profilePath = Path.Combine(Path.GetFullPath(dataRoot), "playwright-profile");
   private Exception? failure;
 
@@ -15,11 +15,20 @@ internal sealed class PlaywrightProfile(string dataRoot, IPlaywrightProfileLaunc
     try {
       if (failure is not null)
         throw new InvalidOperationException("The browser profile could not be safely released; ensure the browser has exited before retrying in a new host.", failure);
-      return new PlaywrightProfileLease(this, launcher, profilePath);
+      return new PlaywrightProfileLease(this, launcher ?? throw new InvalidOperationException("The browser launcher is not configured."), profilePath);
     } catch {
       ownership.Release();
       throw;
     }
+  }
+
+  internal async Task<PlaywrightProfileLease?> TryAcquireAsync(IPlaywrightProfileLauncher runLauncher, CancellationToken cancellation) {
+    if (!await ownership.WaitAsync(0, cancellation))
+      return null;
+    if (failure is null)
+      return new PlaywrightProfileLease(this, runLauncher, profilePath);
+    ownership.Release();
+    throw new InvalidOperationException("The browser profile could not be safely released.", failure);
   }
 
   internal void Release(Exception? error) {

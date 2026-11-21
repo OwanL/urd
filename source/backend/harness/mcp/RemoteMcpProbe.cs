@@ -1,9 +1,11 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Text;
 using System.Text.Json;
 using ModelContextProtocol.Authentication;
 using ModelContextProtocol.Client;
+using ModelContextProtocol.Protocol;
 
 namespace Urd.Core.Harness.Mcp;
 
@@ -23,44 +25,130 @@ public sealed record RemoteMcpProbeResult(bool Success, string? DisplayName, IRe
 public static class RemoteMcpProbe {
   public static async Task<RemoteMcpProbeResult> ProbeAsync(RemoteMcpProbeOptions options, CancellationToken cancellationToken = default) {
     try {
-      if (options is null || !SafeAddress(options.Endpoint))
-        return Failure();
-
-      var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-      switch (options.Authentication) {
-        case RemoteMcpAuthentication.Automatic:
-          break;
-        case RemoteMcpAuthentication.Bearer when !string.IsNullOrWhiteSpace(options.Secret):
-          headers.Add("Authorization", new AuthenticationHeaderValue("Bearer", options.Secret).ToString());
-          break;
-        case RemoteMcpAuthentication.CustomHeader when !string.IsNullOrWhiteSpace(options.HeaderName) && !string.IsNullOrEmpty(options.Secret):
-          headers.Add(options.HeaderName, options.Secret);
-          break;
-        default:
-          return Failure();
-      }
-
-      var oauth = options.Authentication == RemoteMcpAuthentication.Automatic ? CopyOAuth(options.Endpoint, options.OAuth) : null;
-      using var http = new HttpClient(new OriginGuard(options.Endpoint, options.HeaderName) {
-        InnerHandler = new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false }
-      });
-      await using var transport = new HttpClientTransport(new HttpClientTransportOptions {
-        Endpoint = options.Endpoint,
-        AdditionalHeaders = headers,
-        OAuth = oauth,
-        TransportMode = HttpTransportMode.AutoDetect
-      }, http);
-      await using var client = await McpClient.CreateAsync(transport, cancellationToken: cancellationToken);
-      string? name = client.ServerInfo?.Title ?? client.ServerInfo?.Name;
-      if (client.ServerCapabilities?.Tools is null)
-        return new(true, name, [], null);
-      var tools = await client.ListToolsAsync(cancellationToken: cancellationToken);
-      return new(true, name, tools.Select(tool => new RemoteMcpTool(tool.Name, tool.Title, tool.Description)).ToArray(), null);
+      return await WithClientAsync(options, null, async client => {
+        string? name = client.ServerInfo?.Title ?? client.ServerInfo?.Name;
+        var tools = await ListToolsAsync(client, cancellationToken);
+        return new RemoteMcpProbeResult(true, name, tools.Select(tool => new RemoteMcpTool(tool.Name, tool.Title, tool.Description)).ToArray(), null);
+      }, cancellationToken);
     } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
       throw;
     } catch (Exception) {
       return Failure();
     }
+  }
+
+  public static async Task<IReadOnlyList<RemoteMcpToolDefinition>> DiscoverToolsAsync(RemoteMcpProbeOptions options, CancellationToken cancellationToken) {
+    try {
+      return await WithClientAsync(options, null, client => ListToolsAsync(client, cancellationToken), cancellationToken);
+    } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
+      throw;
+    } catch (Exception) {
+      throw new InvalidOperationException("Unable to discover MCP tools.");
+    }
+  }
+
+  public static async Task<RemoteMcpToolResult> CallToolAsync(RemoteMcpProbeOptions options, string name, JsonElement arguments, CancellationToken cancellationToken) {
+    OriginGuard? guard = null;
+    try {
+      if (arguments.ValueKind != JsonValueKind.Object || string.IsNullOrWhiteSpace(name))
+        return new("Invalid MCP tool call.", true);
+      var values = arguments.EnumerateObject().ToDictionary(property => property.Name, property => property.Value.Clone());
+      return await WithClientAsync(options, created => guard = created, async client => {
+        var result = await client.CallToolAsync(new CallToolRequestParams { Name = name, Arguments = values }, cancellationToken);
+        var text = new StringBuilder();
+        bool truncated = false;
+        foreach (var block in result.Content) {
+          string value = block is TextContentBlock content ? content.Text : "[Unsupported non-text content]";
+          if (AppendOutput(text, value))
+            continue;
+          truncated = true;
+          break;
+        }
+        if (!truncated && result.StructuredContent is JsonElement structured)
+          AppendOutput(text, structured.GetRawText());
+        return new RemoteMcpToolResult(text.ToString(), result.IsError == true);
+      }, cancellationToken);
+    } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested && guard?.ToolDispatched != true) {
+      throw;
+    } catch (Exception) {
+      return guard?.ToolDispatched == true
+        ? new("MCP tool call failed; its outcome is unknown.", true)
+        : new("Unable to call the MCP tool.", true);
+    }
+  }
+
+  private const int MaxOutputLength = 32768;
+  private const int MaxToolCount = 500;
+  private const int MaxToolPages = 10;
+
+  private static bool AppendOutput(StringBuilder output, string? value) {
+    if (string.IsNullOrEmpty(value))
+      return true;
+    int separator = output.Length > 0 ? 1 : 0;
+    if (value.Length <= MaxOutputLength - output.Length - separator) {
+      if (separator != 0)
+        output.Append('\n');
+      output.Append(value);
+      return true;
+    }
+    const string marker = "[Output truncated]";
+    int contentLimit = MaxOutputLength - marker.Length;
+    if (output.Length > contentLimit)
+      output.Length = contentLimit;
+    if (output.Length < contentLimit && separator != 0)
+      output.Append('\n');
+    output.Append(value.AsSpan(0, Math.Min(value.Length, contentLimit - output.Length)));
+    output.Append(marker);
+    return false;
+  }
+
+  private static async Task<IReadOnlyList<RemoteMcpToolDefinition>> ListToolsAsync(McpClient client, CancellationToken cancellationToken) {
+    if (client.ServerCapabilities?.Tools is null)
+      return [];
+    var tools = new List<RemoteMcpToolDefinition>();
+    var cursors = new HashSet<string>(StringComparer.Ordinal);
+    string? cursor = null;
+    for (int page = 0; page < MaxToolPages; page++) {
+      var result = await client.ListToolsAsync(new ListToolsRequestParams { Cursor = cursor }, cancellationToken);
+      if (result.Tools.Count > MaxToolCount - tools.Count)
+        throw new InvalidOperationException("Too many MCP tools.");
+      tools.AddRange(result.Tools.Select(tool => new RemoteMcpToolDefinition(tool.Name, tool.Title, tool.Description, tool.InputSchema.Clone())));
+      cursor = result.NextCursor;
+      if (string.IsNullOrEmpty(cursor))
+        return tools;
+      if (!cursors.Add(cursor))
+        throw new InvalidOperationException("Repeated MCP cursor.");
+    }
+    throw new InvalidOperationException("Too many MCP tool pages.");
+  }
+
+  private static async Task<T> WithClientAsync<T>(RemoteMcpProbeOptions options, Action<OriginGuard>? onGuard, Func<McpClient, Task<T>> action, CancellationToken cancellationToken) {
+    if (options is null || !SafeAddress(options.Endpoint))
+      throw new ArgumentException("Invalid MCP endpoint.");
+    var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    switch (options.Authentication) {
+      case RemoteMcpAuthentication.Automatic:
+        break;
+      case RemoteMcpAuthentication.Bearer when !string.IsNullOrWhiteSpace(options.Secret):
+        headers.Add("Authorization", new AuthenticationHeaderValue("Bearer", options.Secret).ToString());
+        break;
+      case RemoteMcpAuthentication.CustomHeader when !string.IsNullOrWhiteSpace(options.HeaderName) && !string.IsNullOrEmpty(options.Secret):
+        headers.Add(options.HeaderName, options.Secret);
+        break;
+      default:
+        throw new ArgumentException("Invalid MCP authentication.");
+    }
+    var oauth = options.Authentication == RemoteMcpAuthentication.Automatic ? CopyOAuth(options.Endpoint, options.OAuth) : null;
+    var guard = new OriginGuard(options.Endpoint, options.HeaderName) {
+      InnerHandler = new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false }
+    };
+    onGuard?.Invoke(guard);
+    using var http = new HttpClient(guard);
+    await using var transport = new HttpClientTransport(new HttpClientTransportOptions {
+      Endpoint = options.Endpoint, AdditionalHeaders = headers, OAuth = oauth, TransportMode = HttpTransportMode.AutoDetect
+    }, http);
+    await using var client = await McpClient.CreateAsync(transport, cancellationToken: cancellationToken);
+    return await action(client);
   }
 
   public static bool TryParseEndpoint(string? value, [NotNullWhen(true)] out Uri? endpoint) {
@@ -111,6 +199,9 @@ public static class RemoteMcpProbe {
   }
 
   private sealed class OriginGuard(Uri endpoint, string? customHeader) : DelegatingHandler {
+    private int toolDispatched;
+    public bool ToolDispatched => Volatile.Read(ref toolDispatched) != 0;
+
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) {
       var address = request.RequestUri;
       if (!SafeOAuthAddress(endpoint, address))
@@ -127,6 +218,16 @@ public static class RemoteMcpProbe {
           if (json.RootElement.ValueKind != JsonValueKind.Object || json.RootElement.TryGetProperty("jsonrpc", out _))
             throw new HttpRequestException("Cross-origin MCP request is not allowed.");
         }
+      }
+      // Refuse any replay of a tool call, including an authentication-layer retry.
+      // Streamable HTTP may resume a response with GET, which is not a replay.
+      if (request.Method == HttpMethod.Post && request.Content?.Headers.ContentType?.MediaType == "application/json") {
+        var body = await request.Content.ReadAsByteArrayAsync(cancellationToken);
+        using var json = JsonDocument.Parse(body);
+        if (json.RootElement.ValueKind == JsonValueKind.Object &&
+            json.RootElement.TryGetProperty("method", out var method) && method.ValueKind == JsonValueKind.String &&
+            method.GetString() == "tools/call" && Interlocked.Exchange(ref toolDispatched, 1) != 0)
+          throw new HttpRequestException("MCP tool call replay refused.");
       }
       return await base.SendAsync(request, cancellationToken);
     }

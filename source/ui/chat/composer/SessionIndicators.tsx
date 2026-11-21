@@ -1,5 +1,4 @@
 import { useEffect, useState } from "preact/hooks";
-import { HoverPopover } from "../../controls/HoverPopover.tsx";
 import { Tooltip } from "../../controls/Tooltip.tsx";
 import { UsageControl } from "../../usage/UsageControl.tsx";
 import type { SessionContextUsage, SessionWorkingTime } from "../../sessions/SessionSnapshot.ts";
@@ -57,7 +56,13 @@ export function SessionIndicators({
         ? "Last measured usage"
         : null;
   const compactDisabled = !canCompact || compacting;
+  const compactAction = onCheckCompaction
+    ? "Check compaction"
+    : compacting
+      ? "Compacting…"
+      : "Compact now";
   const compactStatus = compacting ? "Compacting…" : compactionMessage;
+  const contextAccessibleLabel = `Context window: ${contextLabel}${contextDetail ? `, ${contextDetail.toLowerCase()}` : ""}`;
   const ratio = contextUsage && contextWindow ? contextUsage.usedTokens / contextWindow : 0;
   const incomplete = workingTime?.hasUnknownDuration || (fenced && Boolean(startedAt));
   const duration = workingTime
@@ -85,24 +90,13 @@ export function SessionIndicators({
         <span class="session-indicator-name" aria-hidden="true">
           Context
         </span>
-        <HoverPopover
-          label={`Context window: ${contextLabel}${contextDetail ? `, ${contextDetail.toLowerCase()}` : ""}`}
-          surfaceLabel="Context window details"
-          class={`session-indicator ${ratio >= 0.85 ? "is-critical" : ratio >= 0.7 ? "is-warning" : ""}`}
+        <Tooltip
+          dismissOnClick={false}
           content={
-            <div class="session-compaction-details">
+            <div class="session-context-details">
+              <span>Context window</span>
+              <span class="tooltip-detail">{contextLabel}</span>
               {contextDetail && <span class="tooltip-detail">{contextDetail}</span>}
-              <button
-                type="button"
-                class="session-compaction-action"
-                aria-disabled={compactDisabled && !onCheckCompaction}
-                onClick={() => {
-                  if (onCheckCompaction) onCheckCompaction();
-                  else if (!compactDisabled) onCompact();
-                }}
-              >
-                {onCheckCompaction ? "Check compaction" : "Compact now"}
-              </button>
               {compactStatus && (
                 <span class="tooltip-detail" role="status">
                   {compactStatus}
@@ -111,8 +105,24 @@ export function SessionIndicators({
             </div>
           }
         >
-          {contextLabel}
-        </HoverPopover>
+          <button
+            type="button"
+            class={`session-indicator session-context-indicator ${ratio >= 0.85 ? "is-critical" : ratio >= 0.7 ? "is-warning" : ""}`}
+            aria-label={`${contextAccessibleLabel}. ${compactAction}`}
+            aria-disabled={compactDisabled && !onCheckCompaction}
+            onClick={() => {
+              if (onCheckCompaction) onCheckCompaction();
+              else if (!compactDisabled) onCompact();
+            }}
+          >
+            <span class="session-context-value" aria-hidden="true">
+              {contextLabel}
+            </span>
+            <span class="session-context-action" aria-hidden="true">
+              {compactAction}
+            </span>
+          </button>
+        </Tooltip>
       </div>
       {duration !== null && (
         <div class="session-indicator-item">

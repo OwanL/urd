@@ -1,28 +1,22 @@
 .tab-subagents {
   display: flex;
-  flex: 0 0 22px;
+  flex: 0 0 auto;
 }
 
 .tab-subagents-button {
   display: grid;
   place-items: center;
-  width: 22px;
+  width: 28px;
   height: 28px;
   padding: 0;
   border: 0;
   border-radius: 4px;
   background: transparent;
   color: inherit;
-  opacity: 0;
 }
 
-.chat-tab:hover .tab-subagents-button,
-.chat-tab:focus-within .tab-subagents-button,
+.tab-subagents-button:hover,
 .tab-subagents-button[aria-expanded="true"] {
-  opacity: 1;
-}
-
-.tab-subagents-button:hover {
   background: var(--surface-hover);
 }
 
@@ -34,6 +28,13 @@
 .tab-subagents-popover {
   min-width: 160px;
   padding: 4px;
+}
+
+.tab-subagents-heading {
+  padding: 6px 10px;
+  color: var(--text-secondary);
+  font-size: 0.85em;
+  font-weight: 600;
 }
 
 .tab-subagent-entry {
@@ -48,6 +49,10 @@
   color: inherit;
   text-align: left;
   overflow-wrap: anywhere;
+}
+
+.tab-subagent-entry > span:last-child {
+  min-width: 0;
 }
 
 .tab-subagent-entry:hover,
@@ -71,7 +76,7 @@
 
 @media (pointer: coarse) {
   .tab-subagents-button {
-    opacity: 1;
+    min-width: 36px;
     min-height: 36px;
   }
 }

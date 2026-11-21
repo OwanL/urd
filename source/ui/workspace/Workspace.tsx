@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { IconButton } from "../controls/IconButton.tsx";
 import { Settings } from "../settings/Settings.tsx";
 import { ProviderClient } from "../providers/ProviderClient.ts";
@@ -155,11 +155,27 @@ export function Workspace({
     path: readonly SubagentLink[];
   } | null>(null);
   const inspected = inspection?.rootId === activeId ? inspection : null;
-  const inspect = (rootId: string, path: readonly SubagentLink[]) => {
+  const returnFocus = useRef<{ rootId: string; opener: HTMLButtonElement | null } | null>(null);
+  const inspect = (
+    rootId: string,
+    path: readonly SubagentLink[],
+    opener?: HTMLButtonElement | null,
+  ) => {
     if (isClosed(rootId)) return;
     navigation.open(rootId);
+    if (path.length && opener !== undefined) returnFocus.current = { rootId, opener };
     setInspection(path.length ? { rootId, path } : null);
   };
+  useLayoutEffect(() => {
+    if (inspection || !returnFocus.current) return;
+    const { rootId, opener } = returnFocus.current;
+    returnFocus.current = null;
+    if (rootId !== activeId || document.activeElement !== document.body) return;
+    const target = opener?.isConnected
+      ? opener
+      : document.getElementById("chat-view")?.querySelector<HTMLElement>(".transcript");
+    (target ?? document.getElementById(`tab-${rootId}`))?.focus({ preventScroll: true });
+  }, [inspection, activeId]);
   useEffect(() => {
     if (inspection && !tabs.includes(inspection.rootId)) setInspection(null);
   }, [inspection, tabs]);
@@ -302,8 +318,8 @@ export function Workspace({
         />
       )}
       <SubagentNavigationContext.Provider
-        value={(child) => {
-          if (child.parentId === activeId) inspect(activeId, [child]);
+        value={(child, opener) => {
+          if (child.parentId === activeId) inspect(activeId, [child], opener);
         }}
       >
         {shown.length ? (

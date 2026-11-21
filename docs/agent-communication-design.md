@@ -235,11 +235,10 @@ evidence are retained to make the implemented scope explicit; UI presentation fo
 ### Subagent presentation
 
 Subagent calls have dedicated transcript rows with the child title and report. Selecting a
-resolved child opens its read-only transcript in the same tab; breadcrumbs return to the primary
-or an ancestor, and nested child rows can be opened in turn. Completed children remain accessible
-through their parent call. The tab's agent menu lists live descendants and opens their paths;
-it is available by hover or explicit control. The child transcript does not provide message
-editing or a composer.
+resolved child opens its read-only transcript in the same tab. Back returns one level; breadcrumbs
+jump to an ancestor. Completed children remain accessible through their parent call. The busy tab's
+Live agents button opens a list of live descendants, including nested agents, and refreshes it while
+open. The child transcript does not provide message editing or a composer.
 
 ### Agent question presentation (2026-11-19)
 

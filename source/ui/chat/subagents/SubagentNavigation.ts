@@ -6,6 +6,6 @@ export interface SubagentLink {
   readonly title: string;
 }
 
-export const SubagentNavigationContext = createContext<((child: SubagentLink) => void) | null>(
-  null,
-);
+export const SubagentNavigationContext = createContext<
+  ((child: SubagentLink, opener: HTMLButtonElement) => void) | null
+>(null);

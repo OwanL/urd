@@ -38,7 +38,11 @@ export interface ChatTabsProps {
   onClose(id: string): Promise<void>;
   onReorder(id: string, beforeId: string | null): void;
   loadSubagents?(rootId: string, signal: AbortSignal): Promise<readonly SubagentLink[]>;
-  onOpenSubagent?(rootId: string, path: readonly SubagentLink[]): void;
+  onOpenSubagent?(
+    rootId: string,
+    path: readonly SubagentLink[],
+    opener: HTMLButtonElement | null,
+  ): void;
 }
 
 export function ChatTabs({
@@ -232,7 +236,7 @@ export function ChatTabs({
                 )}
               </button>
             </Tooltip>
-            {busy && loadSubagents && onOpenSubagent && (
+            {loadSubagents && onOpenSubagent && (
               <SubagentMenu
                 rootId={id}
                 title={title}

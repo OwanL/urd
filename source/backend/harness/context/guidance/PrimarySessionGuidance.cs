@@ -1,14 +1,10 @@
 namespace Urd.Core.Context;
 
-// Default working guidance for primary sessions.
-// Source: harness/agent-instructions/defaults/APPEND_SYSTEM.md
-internal sealed class DefaultWorkingGuidance : StartingContextContribution {
-  public override int Order => 10;
+// Instructions for sessions working directly with the user.
+internal static class PrimarySessionGuidance {
+  internal const string Text = """
+      Help the user directly and keep their request and goals central. Ask before materially expanding scope.
 
-  public override bool AppliesTo(StartingContextInput input) =>
-      input.SessionKind == SessionKind.Primary;
-
-  public override string? GetText(StartingContextInput input) => """
       # Default working guidance
 
       Explicit user preferences and applicable project guidance take precedence without removing unrelated defaults.

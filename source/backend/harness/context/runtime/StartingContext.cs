@@ -10,9 +10,7 @@ internal enum SessionKind { Primary, Subagent }
 internal sealed record StartingContextInput(
   SessionKind SessionKind,
   ModelFamily ModelFamily,
-  string? WorkingDirectory) {
-  public IReadOnlyList<DiscoveredSkill> SelectedSkills { get; init; } = [];
-}
+  string? WorkingDirectory);
 
 // Read-only instructions and tool declarations supplied when a model session starts.
 internal sealed record StartingContext(

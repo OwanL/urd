@@ -5,7 +5,7 @@ using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Urd.Core.Usage;
 
-namespace Urd.Core.Context;
+namespace Urd.Core.Execution;
 
 // One send attempt. Prompt accounting runs alongside the stream; output is counted in bounded batches.
 internal sealed class RequestContextEstimate(Func<RequestContextEstimate, CancellationToken, Task> publish) : IAsyncDisposable {

@@ -1,7 +1,7 @@
 namespace Urd.Core.Context;
 
 // A loaded project instruction document with a directory scope and canonical file identity.
-internal sealed class DiscoveredInstructionDocument : StartingContextContribution {
+internal sealed class DiscoveredInstructionDocument {
   internal DiscoveredInstructionDocument(string text, string path, string scope) {
     Text = text ?? throw new ArgumentNullException(nameof(text));
     Path = System.IO.Path.GetFullPath(path);
@@ -13,14 +13,13 @@ internal sealed class DiscoveredInstructionDocument : StartingContextContributio
   internal string Scope { get; }
   internal string Identity => Path;
 
-  public override int Order => Scope
+  internal int ScopeDepth => Scope
       .Split([System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries)
       .Length;
 
-  public override bool AppliesTo(StartingContextInput input) =>
-      input.WorkingDirectory is not null && IsWithin(input.WorkingDirectory, Scope);
+  internal bool AppliesTo(string directory) => IsWithin(directory, Scope);
 
-  public override string? GetText(StartingContextInput input) => $"""
+  internal string GetText() => $"""
       The following project instructions apply only to files under directory: {Scope}
       Source file: {Path}
 

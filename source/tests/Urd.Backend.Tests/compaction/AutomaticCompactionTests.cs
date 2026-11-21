@@ -2,7 +2,6 @@ using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Compaction;
-using Urd.Core.Context;
 using Urd.Core.Execution;
 using Urd.Core.Preferences;
 using Urd.Core.Providers;

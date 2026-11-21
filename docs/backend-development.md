@@ -64,12 +64,17 @@ test scope.
 
 ## Starting context
 
-Editable system guidance lives in [`harness/context/`](../source/backend/harness/context/README.md),
-one `StartingContextContribution` subclass per block. Each declares `Order`,
-`AppliesTo(input)` and `GetText(input)`. `StartingContextBuilder` discovers parameterless
-subclasses in Core's assembly and creates per-builder instances; no other assemblies
-are scanned. Ordering is ascending `Order`, then ordinal full type name, preserving
-supplied order for ties. Applicable built-in instructions always bypass pruning.
+Built-in guidance has exactly three fixed C# types under `context/guidance/`:
+`SharedAgentGuidance`, `PrimarySessionGuidance` and `SubagentSessionGuidance`.
+`StartingContextBuilder` emits shared guidance, the applicable role guidance, runtime
+directory context, selected skills, then scoped discovered documents, in that order.
+`SelectedSkillsContext` under `context/runtime/` renders selected skills. Composition is
+explicit: there is no `StartingContextContribution` abstraction, reflection-based
+discovery or configurable guidance registration. Built-in guidance bypasses pruning.
+The [context README](../source/backend/harness/context/README.md) owns resource
+recognition, scope, precedence and protection identities. This composition cleanup does
+not change pruning behavior or context-boundary snapshot activation. `RequestContextEstimate`
+is execution-owned under `execution/`, not part of context guidance.
 
 `InstructionResourceDiscovery` loads eligible agent-facing Markdown and skill metadata
 from the working directory and descendants, independently of Git, and adds packaged skills.

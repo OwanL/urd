@@ -3,18 +3,18 @@ using Xunit;
 
 namespace Urd.Backend.Tests.Context;
 
-public sealed class SelectedSkillsGuidanceTests {
+public sealed class SelectedSkillsContextTests {
   [Fact]
   public void FormatsOnlyTheSuppliedSelectedSkills() {
     var skills = new[] {
       new DiscoveredSkill("diagnose", "Inspect <state> & logs.", Path.GetFullPath("diagnose/SKILL.md")),
     };
 
-    string text = SelectedSkillsGuidance.Compose(skills)!;
+    string text = SelectedSkillsContext.Compose(skills)!;
 
     Assert.Contains("<name>diagnose</name>", text, StringComparison.Ordinal);
     Assert.Contains("<description>Inspect &lt;state&gt; &amp; logs.</description>", text, StringComparison.Ordinal);
     Assert.Contains($"<location>{System.Security.SecurityElement.Escape(skills[0].Path)}</location>", text, StringComparison.Ordinal);
-    Assert.Null(SelectedSkillsGuidance.Compose([]));
+    Assert.Null(SelectedSkillsContext.Compose([]));
   }
 }

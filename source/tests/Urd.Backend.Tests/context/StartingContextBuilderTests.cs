@@ -9,45 +9,33 @@ namespace Urd.Backend.Tests.Context;
 
 public sealed class StartingContextBuilderTests {
   [Fact]
-  public void SessionKindComposesWithSharedInstructions() {
+  public void SharedSessionAndDirectoryInstructionsUseFixedOrder() {
+    const string workingDirectory = "C:\\workspace\\urd";
     var manager = CreateManager();
 
     StartingContext primary = manager.Create(
-        new(SessionKind.Primary, ModelFamily.OpenAI, null), default);
+        new(SessionKind.Primary, ModelFamily.Other, workingDirectory), default);
     StartingContext subagent = manager.Create(
-        new(SessionKind.Subagent, ModelFamily.OpenAI, null), default);
-    string primaryText = InstructionText(primary);
-    string subagentText = InstructionText(subagent);
+        new(SessionKind.Subagent, ModelFamily.Other, null), default);
 
-    Assert.Contains("Urd", primaryText, StringComparison.Ordinal);
-    Assert.Contains("Urd", subagentText, StringComparison.Ordinal);
-    Assert.Contains("user", primaryText, StringComparison.OrdinalIgnoreCase);
-    Assert.Contains("final report", subagentText, StringComparison.OrdinalIgnoreCase);
-    Assert.Contains("result", subagentText, StringComparison.OrdinalIgnoreCase);
-    Assert.NotEqual(primaryText, subagentText);
-    Assert.DoesNotContain(primary.Instructions, message => message.Role == ChatRole.User);
-    Assert.DoesNotContain(subagent.Instructions, message => message.Role == ChatRole.User);
-  }
+    Assert.Equal(3, primary.Instructions.Count);
+    string shared = primary.Instructions[0].Text;
+    Assert.Contains("You are Urd", shared, StringComparison.Ordinal);
+    Assert.Contains("Read the full normative contract", shared, StringComparison.Ordinal);
+    Assert.Equal(shared, subagent.Instructions[0].Text);
 
-  [Fact]
-  public void SessionGuidanceKeepsPrimaryWorkflowAndSubagentHandoffSeparate() {
-    var manager = CreateManager();
-    var input = new StartingContextInput(SessionKind.Primary, ModelFamily.Other, null);
+    string primaryGuidance = primary.Instructions[1].Text;
+    Assert.Contains("Help the user directly", primaryGuidance, StringComparison.Ordinal);
+    Assert.Contains("# Default working guidance", primaryGuidance, StringComparison.Ordinal);
+    Assert.Contains("Ask before materially expanding scope.", primaryGuidance, StringComparison.Ordinal);
+    Assert.Equal($"Working directory: {workingDirectory}", primary.Instructions[2].Text);
 
-    StartingContext primary = manager.Create(input, default);
-    StartingContext subagent = manager.Create(input with { SessionKind = SessionKind.Subagent }, default);
-    string primaryText = InstructionText(primary);
-    string subagentText = InstructionText(subagent);
-
-    Assert.Contains("# Default working guidance", primaryText, StringComparison.Ordinal);
-    Assert.Contains("Ask before materially expanding scope.", primaryText, StringComparison.Ordinal);
-    Assert.DoesNotContain("# Working preferences", primaryText, StringComparison.Ordinal);
-    Assert.DoesNotContain("final report", primaryText, StringComparison.OrdinalIgnoreCase);
-    Assert.DoesNotContain("# Default working guidance", subagentText, StringComparison.Ordinal);
-    ChatMessage handoff = Assert.Single(subagent.Instructions,
-        message => message.Text.Contains("final report", StringComparison.OrdinalIgnoreCase));
-    Assert.Contains("Stay within its scope", handoff.Text, StringComparison.Ordinal);
-    Assert.Contains("Start with a plain-language outcome sentence", handoff.Text, StringComparison.Ordinal);
+    Assert.Equal(2, subagent.Instructions.Count);
+    string subagentGuidance = subagent.Instructions[1].Text;
+    Assert.Contains("Stay within its scope", subagentGuidance, StringComparison.Ordinal);
+    Assert.Contains("Start with a plain-language outcome sentence", subagentGuidance, StringComparison.Ordinal);
+    Assert.DoesNotContain(subagent.Instructions, message => message.Text.StartsWith("Working directory:", StringComparison.Ordinal));
+    Assert.All(primary.Instructions.Concat(subagent.Instructions), message => Assert.Equal(ChatRole.System, message.Role));
   }
 
   [Fact]
@@ -61,20 +49,6 @@ public sealed class StartingContextBuilderTests {
       foreach (string unsupported in new[] { "ask_user", "session_resources", "session_changes", "request_capability", "invoke_tool", "Pie", "Pi runtime" })
         Assert.DoesNotContain(unsupported, text, StringComparison.Ordinal);
     }
-  }
-
-  [Fact]
-  public void WorkingDirectoryIsIncludedOnlyWhenAvailable() {
-    const string workingDirectory = "C:\\workspace\\urd";
-    var manager = CreateManager();
-    var input = new StartingContextInput(SessionKind.Primary, ModelFamily.Other, null);
-
-    StartingContext withoutDirectory = manager.Create(input, default);
-    StartingContext withDirectory = manager.Create(input with { WorkingDirectory = workingDirectory }, default);
-
-    Assert.DoesNotContain("Working directory:", InstructionText(withoutDirectory), StringComparison.Ordinal);
-    Assert.Contains(workingDirectory, InstructionText(withDirectory), StringComparison.Ordinal);
-    Assert.DoesNotContain("Tool guidance:", InstructionText(withDirectory), StringComparison.Ordinal);
   }
 
   [Fact]
@@ -105,103 +79,6 @@ public sealed class StartingContextBuilderTests {
   }
 
   [Fact]
-  public void AdditionalGuidanceIsMergedBeforeAndAfterBuiltInGuidance() {
-    var manager = CreateManagerWithGuidance(
-        new TestGuidance(-1, _ => "before built-ins"),
-        new TestGuidance(1000, _ => "after built-ins"));
-
-    StartingContext context = manager.Create(
-        new(SessionKind.Primary, ModelFamily.Other, "C:\\workspace\\urd"), default);
-    string[] instructions = context.Instructions.Select(message => message.Text).ToArray();
-
-    int beforeBuiltInsIndex = Array.IndexOf(instructions, "before built-ins");
-    int sharedGuidanceIndex = Array.FindIndex(instructions, text => text.Contains("Urd", StringComparison.Ordinal));
-    int directoryGuidanceIndex = Array.FindIndex(instructions,
-        text => text.StartsWith("Working directory:", StringComparison.Ordinal));
-    int afterBuiltInsIndex = Array.IndexOf(instructions, "after built-ins");
-
-    Assert.True(beforeBuiltInsIndex >= 0 && beforeBuiltInsIndex < sharedGuidanceIndex);
-    Assert.True(directoryGuidanceIndex >= 0 && afterBuiltInsIndex > directoryGuidanceIndex);
-  }
-
-  [Fact]
-  public void EqualOrderGuidanceOfTheSameTypePreservesSuppliedOrder() {
-    var manager = CreateManagerWithGuidance(
-        new TestGuidance(50, _ => "first supplied"),
-        new TestGuidance(50, _ => "second supplied"));
-
-    StartingContext context = manager.Create(
-        new(SessionKind.Primary, ModelFamily.Other, null), default);
-
-    string[] instructions = context.Instructions.Select(message => message.Text).ToArray();
-
-    Assert.Equal(new[] { "first supplied", "second supplied" },
-        instructions.Where(text => text is "first supplied" or "second supplied"));
-  }
-
-  [Fact]
-  public void AdditionalGuidanceIsSessionScopedAndEvaluatedForEachSession() {
-    var manager = CreateManagerWithGuidance(new TestGuidance(
-        -1,
-        input => input.SessionKind.ToString(),
-        SessionKind.Primary));
-    var primaryInput = new StartingContextInput(SessionKind.Primary, ModelFamily.Other, null);
-    var subagentInput = primaryInput with { SessionKind = SessionKind.Subagent };
-
-    StartingContext primary = manager.Create(primaryInput, default);
-    StartingContext subagent = manager.Create(subagentInput, default);
-
-    Assert.Contains(primary.Instructions, message => message.Text == "Primary");
-    Assert.DoesNotContain(subagent.Instructions, message => message.Text == "Subagent");
-  }
-
-  [Fact]
-  public void NullAndWhitespaceAdditionalGuidanceIsOmittedAndAllInstructionsAreSystemMessages() {
-    var manager = CreateManagerWithGuidance(
-        new TestGuidance(-2, _ => null),
-        new TestGuidance(-1, _ => " \t "),
-        new TestGuidance(10, _ => "additional instruction"));
-
-    StartingContext context = manager.Create(
-        new(SessionKind.Primary, ModelFamily.Other, null), default);
-
-    Assert.DoesNotContain(context.Instructions, message => string.IsNullOrWhiteSpace(message.Text));
-    Assert.Contains(context.Instructions, message => message.Text == "additional instruction");
-    Assert.All(context.Instructions, message => Assert.Equal(ChatRole.System, message.Role));
-  }
-
-  [Fact]
-  public void CancellationFromGuidancePreventsEvaluatingTheNextGuidance() {
-    using var source = new CancellationTokenSource();
-    bool nextGuidanceEvaluated = false;
-    var manager = CreateManagerWithGuidance(
-        new TestGuidance(-2, _ => {
-          source.Cancel();
-          return "cancelling instruction";
-        }),
-        new TestGuidance(-1, _ => {
-          nextGuidanceEvaluated = true;
-          return "must not run";
-        }));
-
-    Assert.ThrowsAny<OperationCanceledException>(() =>
-        manager.Create(new(SessionKind.Primary, ModelFamily.Other, null), source.Token));
-
-    Assert.False(nextGuidanceEvaluated);
-  }
-
-  [Fact]
-  public void GuidanceExceptionsPropagate() {
-    var expected = new InvalidOperationException("guidance failed");
-    var manager = CreateManagerWithGuidance(new TestGuidance(-1, _ => throw expected));
-
-    InvalidOperationException actual = Assert.Throws<InvalidOperationException>(() =>
-        manager.Create(new(SessionKind.Primary, ModelFamily.Other, null), default));
-
-    Assert.Same(expected, actual);
-  }
-
-  [Fact]
   public void CancellationStopsCompositionBeforeReturningAContext() {
     var manager = CreateManager();
     using var source = new CancellationTokenSource();
@@ -213,23 +90,18 @@ public sealed class StartingContextBuilderTests {
     Assert.Equal(source.Token, exception.CancellationToken);
   }
 
-  private static StartingContextBuilder CreateManager(params AgentTool[] tools) => new(new ToolCatalog(tools));
+  [Fact]
+  public void UnsupportedSessionKindIsRejected() {
+    var manager = CreateManager();
 
-  private static StartingContextBuilder CreateManagerWithGuidance(params StartingContextContribution[] guidance) =>
-      new(new ToolCatalog([]), guidance);
+    Assert.Throws<ArgumentOutOfRangeException>(() =>
+        manager.Create(new((SessionKind)int.MaxValue, ModelFamily.Other, null), default));
+  }
+
+  private static StartingContextBuilder CreateManager(params AgentTool[] tools) => new(new ToolCatalog(tools));
 
   private static string InstructionText(StartingContext context) =>
       string.Join("\n", context.Instructions.Select(message => message.Text));
-
-  private sealed class TestGuidance(
-      int order,
-      Func<StartingContextInput, string?> getText,
-      SessionKind? sessionScope = null) : StartingContextContribution {
-    public override int Order => order;
-    public override bool AppliesTo(StartingContextInput input) =>
-        sessionScope is null || input.SessionKind == sessionScope;
-    public override string? GetText(StartingContextInput input) => getText(input);
-  }
 
   private sealed class TestTool(string name) : AgentTool {
     public override string Name => name;

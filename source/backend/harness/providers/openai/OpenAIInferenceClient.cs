@@ -6,7 +6,7 @@ using Microsoft.Extensions.AI;
 using OpenAI;
 using OpenAI.Chat;
 using OpenAI.Responses;
-using Urd.Core.Context;
+using Urd.Core.Execution;
 using ChatMessage = Microsoft.Extensions.AI.ChatMessage;
 
 #pragma warning disable OPENAI001, MEAI001 // Pinned official native streaming adapters.

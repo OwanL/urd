@@ -8,6 +8,17 @@ It does not
 approve production APIs, a class hierarchy, new experiments or implementation work.
 Existing [architecture constraints](ARCHITECTURE.md) still apply.
 
+**Accepted context cleanup (2026-11-21):** current composition uses exactly three fixed
+C# guidance files under `context/guidance/`: `SharedAgentGuidance`,
+`PrimarySessionGuidance` and `SubagentSessionGuidance`. `StartingContextBuilder` emits
+shared guidance, applicable role guidance, runtime directory context, selected skills,
+then scoped discovered documents. `SelectedSkillsContext` under `context/runtime/`
+renders selected skills. There is no `StartingContextContribution` abstraction,
+reflection-based discovery or configurable guidance registration. `RequestContextEstimate`
+belongs under `execution/`. This cleanup changes neither pruning behavior nor context
+snapshot preparation, activation or reuse; the [context README](../source/backend/harness/context/README.md)
+owns resource discovery details.
+
 ## Selected direction
 
 Run three category-specific pruning conversations in parallel:
@@ -268,20 +279,20 @@ shared investigation bundle.
 
 ## High-level structure proposal
 
-**Structure for owner review, not implementation approval.** Names selected in the
-naming table below are settled; other names, signatures, record fields and schema remain
-provisional.
-Paths are relative to `source/backend/harness/` unless stated otherwise.
+**Historical proposal (2026-11-16), superseded for context composition by the accepted
+cleanup above.** The remaining proposal records design history, not the current context
+API or permission to create speculative APIs. Paths are relative to
+`source/backend/harness/` unless stated otherwise.
 
-The owner accepted the shared discoverer/single typed pruner direction. This is the
-proposed concrete structure for that direction, not permission to create these files.
+The shared discoverer/single typed pruner direction was accepted; the concrete structure
+below was proposed at that time, not approved as the current context class model.
 
-### Naming decisions
+### Historical naming decisions
 
-| Concept | Owner-selected term |
+| Concept | Term selected in the historical proposal |
 | --- | --- |
 | Rule-bearing content, whether built-in or loaded from files | **Instructions**, rather than guidance or system prompts |
-| One identifiable, orderable contribution of text intended for the session's starting context | **`StartingContextContribution`**, replacing the existing `ContextGuidance` name |
+| One identifiable, orderable contribution of text intended for the session's starting context | **`StartingContextContribution`**, a proposal superseded by explicit composition; no such abstraction is in the current API |
 | Project-owned result types from shared instruction-resource discovery | **`Discovered` prefix** |
 | A loaded instruction document returned by resource discovery | **`DiscoveredInstructionDocument`** |
 | A skill's metadata returned by resource discovery | **`DiscoveredSkill`**, replacing the existing `Skill` name |
@@ -291,10 +302,10 @@ proposed concrete structure for that direction, not permission to create these f
 | A category pruning outcome, carrying retained original items, success/fallback status and diagnostics | **`StartingResourcePruningResult<T>`** |
 | The component coordinating discovery, protection, pruning and construction of starting context | **`StartingContextBuilder`**, replacing the existing `StartingContextManager` name |
 
-`StartingContextContribution` defines a contribution, whether its text is fixed or
-produced from supplied session data. Preparation may exclude, prune or process it
-before composition. Its identity is not tied to becoming one particular system-message
-format. This renames the existing abstraction; it does not add a wrapper or another layer.
+The proposal modeled fixed and data-dependent text as `StartingContextContribution`
+instances. That abstraction and its order/applicability/rendering contract are superseded:
+current composition uses the three fixed guidance files and the explicit order stated above,
+without reflection or configurable registration.
 
 `Discovered` identifies provenance, not a temporary processing state or an object that
 performs discovery. Retained resources keep these types after pruning. Instruction
@@ -313,31 +324,34 @@ discover resources, prune conversation history or assemble the final context. It
 identifies the resources' destination, not a once-per-session execution limit. The
 owning preparation still controls the agreed fresh-session/post-compaction triggers.
 
-Other concrete names remain under review. Remaining `Guidance` identifiers describe
-current code or earlier proposals, not additional settled names. These are design
-naming decisions, not permission to refactor source code.
+Other names in this table describe the historical proposal; they should not be read as
+claims about the current context API or as permission to refactor source code.
 
 ### Files and types
 
 ```text
 context/
-  SelectedSkillsGuidance.cs         change: format supplied skills; no discovery
+  guidance/
+    SharedAgentGuidance.cs           fixed shared guidance
+    PrimarySessionGuidance.cs        fixed primary-session guidance
+    SubagentSessionGuidance.cs       fixed subagent-session guidance
   runtime/
-    StartingContextBuilder.cs       rename/extend StartingContextManager: discover → protect → prune → compose
-    StartingContext.cs              change: carry selected resources into composition
-    StartingContextContribution.cs  rename existing ContextGuidance abstraction
-    InstructionResourceDiscovery.cs new: shared skill/instruction discovery and loading
-    DiscoveredInstructionResources.cs new: typed discovered collections; aggregate name proposed
-    DiscoveredInstructionDocument.cs new: loaded file-backed contribution
-    DiscoveredSkill.cs              rename existing Skill value
-    SkillFrontmatter.cs             keep existing parser
+    StartingContextBuilder.cs        explicitly composes guidance, runtime context, skills and scoped documents
+    SelectedSkillsContext.cs         formats supplied skills; no discovery
+    StartingContext.cs               carries the composed context
+    InstructionResourceDiscovery.cs  discovers skills and instruction documents
+    DiscoveredInstructionResources.cs typed discovered collections
+    DiscoveredInstructionDocument.cs loaded, scoped file-backed document
+    DiscoveredSkill.cs               skill metadata
+    SkillFrontmatter.cs              skill metadata parser
   pruning/
-    StartingResourcePruner.cs       new: three typed overloads, one selection core
-    PruningContext.cs               optional proposed packaging, not a required type
-    StartingResourcePruningResult.cs new: retained items and outcome/diagnostic
+    StartingResourcePruner.cs        three typed selections, one selection core
+    PruningContext.cs                optional proposed packaging, not a required type
+    StartingResourcePruningResult.cs retained items and outcome/diagnostic
 execution/
-  ConversationRunner.cs             proposed shared stream/tool-turn extraction
-  TitleGenerator.cs                 proposed title operation using the same mechanics
+  ConversationRunner.cs              proposed shared stream/tool-turn extraction
+  RequestContextEstimate.cs          request-scoped estimation
+  TitleGenerator.cs                  proposed title operation using the same mechanics
 ```
 
 `InstructionResourceDiscovery` absorbs discovery/loading from `SkillCatalog`; remove
@@ -346,14 +360,11 @@ Keep kind-specific parsing private to discovery and reuse `SkillFrontmatter`. Pr
 existing packaged-skill and project-override rules. Tools remain registered resources
 from `ToolCatalog`, not files found by the discoverer.
 
-The proposed `DiscoveredInstructionResources` aggregate contains
+The historical proposal's `DiscoveredInstructionResources` aggregate contains
 `IReadOnlyList<DiscoveredSkill>` and `IReadOnlyList<DiscoveredInstructionDocument>`.
-`DiscoveredInstructionDocument : StartingContextContribution` carries already-loaded
-text, source path and scope. It implements the existing ordering/applicability/rendering
-contract and requires file data in its constructor, so the parameterless contribution scan
-cannot create it accidentally. Neither its constructor nor `GetText` performs file I/O.
-This reuses the existing contribution extension point instead of introducing a
-second prompt hierarchy or an additional instruction-document/wrapper pair.
+Its proposed `DiscoveredInstructionDocument : StartingContextContribution` model is not
+current: documents remain scoped resources, while `StartingContextBuilder` explicitly
+composes them after fixed guidance, runtime directory context and selected skills.
 
 ### Proposed method surface
 
@@ -429,10 +440,11 @@ contains original retained items plus outcome/diagnostics; model-facing IDs stay
 internal selection detail. Do not silently equate a failed keep-all fallback with a
 successful decision to keep every item.
 
-`SelectedSkillsGuidance` formats the selected skill list instead of rediscovering everything.
-Settings and preparation use `InstructionResourceDiscovery`; the shared registered tool
-catalog remains the tool source. If shared execution or bucket resolution lands through another
-feature first, reuse it; these are responsibility boundaries, not competing implementations.
+`SelectedSkillsContext` under `context/runtime/` formats the selected skill list instead
+of rediscovering everything. Settings and preparation use `InstructionResourceDiscovery`;
+the shared registered tool catalog remains the tool source. If shared execution or bucket
+resolution lands through another feature first, reuse it; these are responsibility boundaries,
+not competing implementations.
 
 ### Proposed data flow
 
@@ -466,12 +478,11 @@ kept candidate IDs, not rewritten resources; the pruner validates/maps them back
 original typed resources. Invalid output is an ordinary selection failure.
 
 **Selected instruction boundary:** Urd's built-in instructions form fixed base context
-and bypass pruning, including the current built-in working defaults/preferences.
-Additional discovered instruction documents are candidates unless protected. In the
-proposed type layout, built-in `StartingContextContribution` implementations compose
-the base and `DiscoveredInstructionDocument` carries document candidates. The skill-list
-contribution remains a formatter receiving the selected skills; retaining that formatter
-does not retain every skill. The behavior is selected; the concrete API remains proposed.
+and bypass pruning, including built-in working defaults/preferences. Additional discovered
+instruction documents are candidates unless protected. Current composition emits shared
+guidance, applicable role guidance, runtime directory context, selected skills through
+`SelectedSkillsContext`, then scoped documents. The composition API is fixed as described
+above; this does not change which resources are candidates or how selection is persisted.
 
 ### Integration constraints the design must address
 
@@ -682,9 +693,9 @@ not replace those mechanisms.
   agent-facing Markdown scope, plus stored source identities. Other harnesses'
   instruction files remain excluded.
 - Title integration/validation details listed under [parallel title generation](#parallel-title-generation).
-- Remaining concrete classes/APIs and preference/boundary-context storage shape.
-  The reviewed sequence above guides subsequent slices; completed source owns
-  delivered APIs.
+- Remaining pruning-specific concrete classes/APIs and preference/boundary-context
+  storage details. The reviewed sequence above guides subsequent slices; delivered source
+  owns those APIs. Context composition itself is settled by the accepted cleanup above.
   `PruningContext` remains an optional packaging proposal, not a required shared
   investigation or a settled type/name.
 

@@ -48,7 +48,7 @@ public sealed class InstructionResourceDiscoveryTests : IDisposable {
     Assert.All(resources.Instructions, document => Assert.True(Path.IsPathFullyQualified(document.Scope)));
     Assert.Equal(
       [true, true, false, false, true],
-      resources.Instructions.Select(document => document.AppliesTo(Input(Path.Combine(Project, "area", "nested")))));
+      resources.Instructions.Select(document => document.AppliesTo(Path.Combine(Project, "area", "nested"))));
     Assert.DoesNotContain(resources.Instructions, document => document.Text.Contains("Ordinary Markdown", StringComparison.Ordinal));
     Assert.DoesNotContain(resources.Instructions, document => document.Path.Contains(".github", StringComparison.OrdinalIgnoreCase));
     Assert.DoesNotContain(resources.Instructions, document => document.Path.Contains(".cursor", StringComparison.OrdinalIgnoreCase));
@@ -223,8 +223,6 @@ public sealed class InstructionResourceDiscoveryTests : IDisposable {
   private sealed class Watch : IDisposable {
     public void Dispose() { }
   }
-
-  private static StartingContextInput Input(string directory) => new(SessionKind.Primary, default, directory);
 
   private string Write(string relativePath, string text) => WriteTo(Project, relativePath, text);
 

@@ -40,7 +40,7 @@ internal sealed class InstructionResourceDiscovery {
       }
     }
     cancellation.ThrowIfCancellationRequested();
-    return new(skills, Array.AsReadOnly(instructions.OrderBy(instruction => instruction.Order)
+    return new(skills, Array.AsReadOnly(instructions.OrderBy(instruction => instruction.ScopeDepth)
         .ThenBy(instruction => instruction.Path, StringComparer.Ordinal).ToArray()), index);
   }
 

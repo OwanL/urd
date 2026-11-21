@@ -1,59 +1,16 @@
-# System guidance
+# Starting context
 
-Edit the text returned by `GetText` in these files. Prompt wording belongs here,
-not in the context builder. These blocks apply to primary and subagent sessions,
-not to auxiliary calls such as pruning, title generation, or compaction. Pruning
-does not select or remove built-in instructions.
+Edit the prompt text in these three files under `guidance/`:
 
-| File | Applies to | Order |
-| --- | --- | --- |
-| `SharedAgentGuidance.cs` | Primary and subagent sessions | 0 |
-| `DefaultWorkingGuidance.cs` | Primary sessions | 10 |
-| `DocumentationGuidance.cs` | Primary and subagent sessions | 60 |
-| `PrimarySessionGuidance.cs` | Primary sessions | 100 |
-| `SubagentSessionGuidance.cs` | Subagents | 100 |
-| `WorkingDirectoryGuidance.cs` | Sessions with a working directory | 200 |
-| `SelectedSkillsGuidance.cs` | Sessions with a working directory and skills | 220 |
+- `SharedAgentGuidance.cs`: rules for both primary sessions and subagents.
+- `PrimarySessionGuidance.cs`: rules for sessions working directly with the user.
+- `SubagentSessionGuidance.cs`: rules for sessions completing delegated tasks.
 
-File-tool usage belongs in the tool descriptions and parameter schemas. The
-selected-skills block passes names, descriptions, and paths to the agent so it
-can load skill instructions on demand.
-
-## Add a block
-
-Add a concrete `StartingContextContribution` subclass with a parameterless constructor.
-`StartingContextBuilder` discovers it automatically in Urd Core's assembly; there is no registration
-list. Keep guidance constructors free of I/O or background work.
-
-```csharp
-namespace Urd.Core.Context;
-
-// Extra instructions for primary sessions.
-internal sealed class ExampleGuidance : StartingContextContribution {
-  public override int Order => 150;
-
-  public override bool AppliesTo(StartingContextInput input) =>
-      input.SessionKind == SessionKind.Primary;
-
-  public override string? GetText(StartingContextInput input) => """
-    Your instructions here.
-    """;
-}
-```
-
-Omit `AppliesTo` to include a block in both primary and subagent sessions. `GetText` receives the session
-inputs, so guidance can include working-directory facts. Return null
-or whitespace to omit the block. Each included block becomes one system message.
-Guidance failures stop composition rather than silently dropping instructions.
-
-Blocks sort by ascending `Order`, then ordinal full type name. Multiple instances
-of the same type and order retain their supplied order. Types are discovered once;
-instances are created per builder, not shared globally.
-
-`runtime/` contains the base type, input/output records, discovery and builder.
-The builder also accepts supplied contributions. Parameterized-only classes are not
-auto-created: `DiscoveredInstructionDocument` carries loaded text/path/scope, with no
-file I/O in its constructor or rendering. `SelectedSkillsGuidance` formats the supplied selection.
+`runtime/StartingContextBuilder.cs` emits shared guidance, exactly one role block,
+then the working directory, selected skills, and scoped project instructions when
+applicable. Each block is a system message. Auxiliary calls such as pruning, title
+generation, and compaction use their own prompts. Built-in agent guidance bypasses
+pruning. File-tool instructions live in the tool descriptions and parameter schemas.
 
 Sessions retain exact saved instruction/tool snapshots for each initial or successful
 compaction boundary. Ordinary requests, reopening and model/preference changes do not
@@ -118,7 +75,7 @@ does not grant tool authority.
 
 ## Skills
 
-`SelectedSkillsGuidance` formats selected skills by name, description and path, using Pi's wording;
+`SelectedSkillsContext` formats selected skills by name, description and path, using Pi's wording;
 the model reads a skill's file when a task matches. Project `SKILL.md` files are found under
 the working directory without Git. Project and packaged skills are both candidates, including
 same-name entries. When a project skill is selected, the packaged same-name entry is omitted;

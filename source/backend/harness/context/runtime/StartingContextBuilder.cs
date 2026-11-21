@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Reflection;
 using Microsoft.Extensions.AI;
 using Urd.Core.Preferences;
 using Urd.Core.Providers;
@@ -7,28 +6,17 @@ using Urd.Core.Tools;
 
 namespace Urd.Core.Context;
 
-// Composes the initial model instructions and available tools without loading external context.
+// Composes agent guidance, session context, and available tools.
 internal sealed class StartingContextBuilder {
-  private static readonly Type[] guidanceTypes = DiscoverGuidanceTypes();
   private static readonly StringComparer pathComparer = OperatingSystem.IsWindows()
       ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
 
   private readonly ToolCatalog toolCatalog;
-  private readonly IReadOnlyList<StartingContextContribution> guidance;
   private readonly InstructionResourceDiscovery? instructionDiscovery;
 
-  internal StartingContextBuilder(ToolCatalog toolCatalog,
-      IReadOnlyList<StartingContextContribution>? additionalGuidance = null,
-      InstructionResourceDiscovery? instructionDiscovery = null) {
-    ArgumentNullException.ThrowIfNull(toolCatalog);
-    this.toolCatalog = toolCatalog;
+  internal StartingContextBuilder(ToolCatalog toolCatalog, InstructionResourceDiscovery? instructionDiscovery = null) {
+    this.toolCatalog = toolCatalog ?? throw new ArgumentNullException(nameof(toolCatalog));
     this.instructionDiscovery = instructionDiscovery;
-    guidance = Array.AsReadOnly(guidanceTypes
-        .Select(CreateGuidance)
-        .Concat(additionalGuidance ?? [])
-        .OrderBy(item => item.Order)
-        .ThenBy(item => item.GetType().FullName, StringComparer.Ordinal)
-        .ToArray());
   }
 
   internal StartingContext Create(StartingContextInput input, CancellationToken cancellation) {
@@ -122,43 +110,38 @@ internal sealed class StartingContextBuilder {
     DiscoveredInstructionDocument[] selectedInstructions = resources.Instructions
         .Where(document => protectedInstructions.Contains(CanonicalPath(document.Identity))
             || retainedInstructionPaths.Contains(CanonicalPath(document.Identity)))
-        .OrderBy(document => document.Order)
+        .OrderBy(document => document.ScopeDepth)
         .ThenBy(document => document.Path, StringComparer.Ordinal)
         .ToArray();
 
-    StartingContextInput preparedInput = input with {
-      SelectedSkills = Array.AsReadOnly(selectedSkills)
-    };
-    StartingContext context = Compose(preparedInput, selectedTools, cancellation, selectedInstructions);
+    StartingContext context = Compose(input, selectedTools, cancellation, selectedSkills, selectedInstructions);
     cancellation.ThrowIfCancellationRequested();
     return context with { BoundaryId = boundaryId };
   }
 
-  private StartingContext Compose(
+  private static StartingContext Compose(
       StartingContextInput input,
       IReadOnlyList<AIFunctionDeclaration> tools,
       CancellationToken cancellation,
+      IReadOnlyList<DiscoveredSkill>? skills = null,
       IReadOnlyList<DiscoveredInstructionDocument>? documents = null) {
     cancellation.ThrowIfCancellationRequested();
-    if (input.SessionKind is not (SessionKind.Primary or SessionKind.Subagent))
-      throw new ArgumentOutOfRangeException(nameof(input), input.SessionKind, "Unsupported session kind.");
-
-    var instructions = new List<ChatMessage>();
-    foreach (StartingContextContribution item in guidance) {
-      cancellation.ThrowIfCancellationRequested();
-      if (!item.AppliesTo(input))
-        continue;
-
-      string? text = item.GetText(input);
-      if (!string.IsNullOrWhiteSpace(text))
-        instructions.Add(new(ChatRole.System, text));
-    }
-
+    string sessionGuidance = input.SessionKind switch {
+      SessionKind.Primary => PrimarySessionGuidance.Text,
+      SessionKind.Subagent => SubagentSessionGuidance.Text,
+      _ => throw new ArgumentOutOfRangeException(nameof(input), input.SessionKind, "Unsupported session kind.")
+    };
+    var instructions = new List<ChatMessage> {
+      new(ChatRole.System, SharedAgentGuidance.Text),
+      new(ChatRole.System, sessionGuidance)
+    };
+    if (input.WorkingDirectory is { } directory)
+      instructions.Add(new(ChatRole.System, $"Working directory: {directory}"));
+    if (skills is not null && SelectedSkillsContext.Compose(skills) is { } selectedSkills)
+      instructions.Add(new(ChatRole.System, selectedSkills));
     foreach (DiscoveredInstructionDocument document in documents ?? []) {
       cancellation.ThrowIfCancellationRequested();
-      string? text = document.GetText(input);
-      if (!string.IsNullOrWhiteSpace(text))
-        instructions.Add(new(ChatRole.System, text));
+      instructions.Add(new(ChatRole.System, document.GetText()));
     }
 
     cancellation.ThrowIfCancellationRequested();
@@ -179,24 +162,4 @@ internal sealed class StartingContextBuilder {
       _ => null,
     };
   }
-
-#pragma warning disable S3011 // Discover and construct only parameterless guidance in Urd Core, never external plugin types.
-  private static Type[] DiscoverGuidanceTypes() =>
-      typeof(StartingContextContribution).Assembly.GetTypes()
-          .Where(type =>
-              type.IsClass &&
-              !type.IsAbstract &&
-              !type.ContainsGenericParameters &&
-              type.IsSubclassOf(typeof(StartingContextContribution)) &&
-              type.GetConstructor(
-                  BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
-                  binder: null,
-                  Type.EmptyTypes,
-                  modifiers: null) is not null)
-          .OrderBy(type => type.FullName, StringComparer.Ordinal)
-          .ToArray();
-
-  private static StartingContextContribution CreateGuidance(Type type) =>
-      (StartingContextContribution)Activator.CreateInstance(type, nonPublic: true)!;
-#pragma warning restore S3011
 }

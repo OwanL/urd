@@ -1,5 +1,5 @@
 import { requestJson } from "../http/Requests.ts";
-import type { GlobalUsageQuery, UsageQuery, UsageSummary } from "./Usage.ts";
+import type { GlobalUsageQuery, PromptCacheSummary, UsageQuery, UsageSummary } from "./Usage.ts";
 
 export class UsageClient {
   private readonly origin: string;
@@ -11,9 +11,7 @@ export class UsageClient {
   getSummary(query: UsageQuery, signal?: AbortSignal): Promise<UsageSummary> {
     const url = new URL("/api/usage", this.origin);
     if ("sessionId" in query) {
-      if (!/^[\da-f]{8}(-[\da-f]{4}){3}-[\da-f]{12}$/i.test(query.sessionId))
-        throw new TypeError("Usage session identity must be a GUID.");
-      url.searchParams.set("sessionId", query.sessionId);
+      setSessionId(url, query.sessionId);
     } else {
       validateGlobalRange(query);
       url.searchParams.set("from", query.from);
@@ -22,6 +20,18 @@ export class UsageClient {
     if (query.detail === false) url.searchParams.set("detail", "false");
     return requestJson(url, "GET", undefined, signal);
   }
+
+  getPromptCache(sessionId: string, signal?: AbortSignal): Promise<PromptCacheSummary> {
+    const url = new URL("/api/usage/prompt-cache", this.origin);
+    setSessionId(url, sessionId);
+    return requestJson(url, "GET", undefined, signal);
+  }
+}
+
+function setSessionId(url: URL, sessionId: string): void {
+  if (!/^[\da-f]{8}(-[\da-f]{4}){3}-[\da-f]{12}$/i.test(sessionId))
+    throw new TypeError("Usage session identity must be a GUID.");
+  url.searchParams.set("sessionId", sessionId);
 }
 
 function validateGlobalRange(query: GlobalUsageQuery): void {

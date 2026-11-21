@@ -136,6 +136,28 @@
   align-items: stretch;
   font-size: 12px;
 }
+.prompt-cache-details {
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid var(--border-subtle);
+}
+.prompt-cache-rows {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+}
+.prompt-cache-row {
+  display: grid;
+  grid-template-columns: 4em minmax(0, 1fr);
+  column-gap: 6px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+.prompt-cache-row dd {
+  margin: 0;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
 .composer-subagent-providers,
 .composer-overflow {
   flex: none;

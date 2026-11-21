@@ -6,6 +6,21 @@ namespace Urd.Server;
 
 internal static class UsageRoutes {
   internal static void MapUsage(this IEndpointRouteBuilder app, UrdStore store) {
+    app.MapGet("/api/usage/prompt-cache", (HttpContext http) => {
+      if (http.Features.Get<IHttpRequestBodyDetectionFeature>()?.CanHaveBody == true)
+        return Results.BadRequest();
+      http.Response.Headers.CacheControl = "no-store";
+      if (!Guid.TryParse(http.Request.Query["sessionId"].ToString(), out Guid sessionId) || sessionId == Guid.Empty)
+        return Results.BadRequest();
+      try {
+        return Results.Ok(store.ReadPromptCache(sessionId));
+      } catch (ArgumentException) {
+        return Results.BadRequest();
+      } catch (Exception failure) when (IsStorageFailure(failure)) {
+        return HttpStorageFailure.Unavailable(http, failure);
+      }
+    });
+
     app.MapGet("/api/usage", (HttpContext http, Guid? sessionId, DateTimeOffset? from,
         DateTimeOffset? to, bool? detail) => {
       if (http.Features.Get<IHttpRequestBodyDetectionFeature>()?.CanHaveBody == true)

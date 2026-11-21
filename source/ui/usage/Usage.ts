@@ -68,6 +68,18 @@ export interface UsageSummary {
   recent: UsageRequest[];
 }
 
+export interface PromptCacheTotals {
+  inputTokens: number;
+  cachedInputTokens: number;
+  reportedRequests: number;
+  totalRequests: number;
+}
+
+export interface PromptCacheSummary {
+  lastTurn: PromptCacheTotals | null;
+  session: PromptCacheTotals;
+}
+
 export type UsageRange = "day" | "sevenDays";
 
 export interface SessionUsageQuery {

@@ -49,6 +49,30 @@ void test(
 );
 
 void test(
+  "prompt cache requests fetch only the specified session",
+  { timeout: 5_000 },
+  async (t) => {
+    const promptCache = {
+      lastTurn: null,
+      session: { inputTokens: 10, cachedInputTokens: 0, reportedRequests: 1, totalRequests: 1 },
+    };
+    const server = await startHttpServer((_request, response) => {
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify(promptCache));
+    });
+    t.after(() => server.close());
+
+    const client = new UsageClient(new URL("/ignored/path", server.origin));
+    assert.deepEqual(await client.getPromptCache(sessionId), promptCache);
+    const request = server.requests[0];
+    assert.ok(request);
+    assert.equal(request.method, "GET");
+    assert.equal(request.headers["x-urd-client"], "browser");
+    assert.equal(request.url, `/api/usage/prompt-cache?sessionId=${sessionId}`);
+  },
+);
+
+void test(
   "global usage requests map bounded ISO timestamps without the lightweight flag",
   { timeout: 5_000 },
   async (t) => {
@@ -78,6 +102,7 @@ void test("invalid session IDs and global ranges are rejected before transport",
   const fetchMock = t.mock.method(globalThis, "fetch", async () => new Response("{}"));
   const client = new UsageClient(new URL("https://server.example"));
   assert.throws(() => client.getSummary({ sessionId: "not-a-guid" }), TypeError);
+  assert.throws(() => client.getPromptCache("not-a-guid"), TypeError);
   assert.throws(
     () => client.getSummary({ from: "2026-11-15T00:00:00Z", to: "2026-11-14T00:00:00Z" }),
     TypeError,

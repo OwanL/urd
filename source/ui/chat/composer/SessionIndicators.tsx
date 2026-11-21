@@ -3,6 +3,7 @@ import { Tooltip } from "../../controls/Tooltip.tsx";
 import { UsageControl } from "../../usage/UsageControl.tsx";
 import type { SessionContextUsage, SessionWorkingTime } from "../../sessions/SessionSnapshot.ts";
 import { formatTokenCount } from "../TokenCountFormatting.ts";
+import { PromptCacheDetails } from "./PromptCacheDetails.tsx";
 import { formatWorkingTime, workingMilliseconds } from "./SessionWorkingTime.ts";
 
 interface SessionIndicatorsProps {
@@ -116,6 +117,13 @@ export function SessionIndicators({
                 compactionUnavailableReason !== compactionMessage && (
                   <span class="tooltip-detail">{compactionUnavailableReason}</span>
                 )}
+              {usageActive && (
+                <PromptCacheDetails
+                  key={sessionId}
+                  sessionId={sessionId}
+                  refreshKey={usageRefresh}
+                />
+              )}
             </div>
           }
         >

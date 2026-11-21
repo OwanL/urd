@@ -150,6 +150,8 @@ public sealed class UrdStore : IDisposable {
   public UsageSummary ReadUsage(Guid? sessionId = null, DateTimeOffset? from = null,
       DateTimeOffset? to = null, bool detail = true) => Usage.Read(sessionId, from, to, detail);
 
+  public PromptCacheSummary ReadPromptCache(Guid sessionId) => Usage.ReadPromptCache(sessionId);
+
   // Host startup opts in; ordinary stores and test fixtures never initiate a broad scan.
   public void WarmInstructionResources(string directory) {
     ArgumentException.ThrowIfNullOrWhiteSpace(directory);

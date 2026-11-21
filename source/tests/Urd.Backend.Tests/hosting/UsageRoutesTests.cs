@@ -94,6 +94,56 @@ public sealed class UsageRoutesTests {
     }
   }
 
+  [Fact]
+  public async Task ReadsPromptCacheForRequiredSession() {
+    using var database = new TemporaryDatabase();
+    Guid sessionId = Guid.NewGuid();
+    using (UrdStore store = UrdStore.Open(database.Path)) {
+      store.Usage.Begin(Request(sessionId, At(1)) with {
+        Purpose = "conversation",
+        ExecutionId = Guid.NewGuid(),
+        FinishedAt = At(1).AddSeconds(1),
+        Tokens = new UsageTokens(100, 10, 40)
+      });
+    }
+
+    await using var server = new RunningServer(RunningServer.OptionsFor(database));
+    await server.WaitForReadyAsync();
+
+    using (HttpResponseMessage response = await RequestAsync(server.Client, HttpMethod.Get,
+        $"/api/usage/prompt-cache?sessionId={sessionId}")) {
+      Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+      AssertPrivateResponse(response);
+      using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+      Assert.Equal(JsonValueKind.Null, body.RootElement.GetProperty("lastTurn").ValueKind);
+      JsonElement session = body.RootElement.GetProperty("session");
+      Assert.Equal(100, session.GetProperty("inputTokens").GetInt64());
+      Assert.Equal(40, session.GetProperty("cachedInputTokens").GetInt64());
+      Assert.Equal(1, session.GetProperty("reportedRequests").GetInt64());
+      Assert.Equal(1, session.GetProperty("totalRequests").GetInt64());
+    }
+
+    using (HttpResponseMessage response = await RequestAsync(server.Client, HttpMethod.Get,
+        $"/api/usage/prompt-cache?sessionId={Guid.NewGuid()}")) {
+      Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+      AssertPrivateResponse(response);
+      using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+      Assert.Equal(JsonValueKind.Null, body.RootElement.GetProperty("lastTurn").ValueKind);
+      Assert.Equal(0, body.RootElement.GetProperty("session").GetProperty("totalRequests").GetInt64());
+    }
+
+    string[] invalidQueries = [
+      "/api/usage/prompt-cache",
+      "/api/usage/prompt-cache?sessionId=",
+      "/api/usage/prompt-cache?sessionId=not-a-guid",
+      $"/api/usage/prompt-cache?sessionId={Guid.Empty}"
+    ];
+    foreach (string query in invalidQueries) {
+      using HttpResponseMessage response = await RequestAsync(server.Client, HttpMethod.Get, query);
+      Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+  }
+
   private static UsageRequest Request(Guid? session, DateTimeOffset started, string model = "model") =>
       new(Guid.NewGuid(), session, "provider", model, "chat", started, null, null, false, null,
           null, null, Guid.NewGuid());

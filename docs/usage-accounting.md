@@ -129,6 +129,28 @@ its timestamp is the last observed request in that occupied bucket. The chart tr
 empty time before and after activity. Totals cover the complete selected range. The route uses ordinary browser admission
 and private/no-store response rules.
 
+## Prompt-cache measurement
+
+The composer's Context window tooltip shows **Last turn** and **Session** cache
+percentages with uncached input counts. It reads on open, not with the cost chip's
+polling. Partial coverage lists the number of requests used for the calculation.
+
+`GET /api/usage/prompt-cache?sessionId=<guid>` reads the session's settled
+conversation requests, including tool-loop follow-ups and settled requests in active,
+failed or cancelled runs. It excludes active requests and auxiliary purposes such as
+compaction, pruning and title generation. `lastTurn` is the latest completed user-input
+or continuation run, selected independently of whether it reported cache usage; it is
+null if no such run exists. Session closure removes the detailed ledger.
+
+Each aggregate reports total eligible requests and the subset with a valid measured
+input/cached-input pair. Input must be positive and cached input must be between zero
+and input, inclusive. An explicit zero cached count is measured. Estimated records are
+excluded from the measured subset: the existing ledger cannot prove input provenance
+for partially reported requests. The token totals sum only measured pairs, so the
+weighted cache percentage is `100 * sum(cached input) / sum(input)`, not the average
+of request percentages. A zero denominator means unavailable, not a cache miss.
+Cached input tokens still occupy context; reuse does not make them free context space.
+
 ## Verification
 
 Focused tests cover final replacement without double counting, retries and

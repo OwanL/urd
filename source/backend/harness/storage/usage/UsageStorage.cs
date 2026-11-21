@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
+using Urd.Core.Execution;
 using Urd.Core.Usage;
 
 namespace Urd.Core.Storage;
@@ -110,6 +111,47 @@ internal sealed class UsageStorage(Database database) {
       IReadOnlyList<UsageRequest> recent = ReadRecent(transaction, where, parameters);
       return new UsageSummary(totals, breakdown, history, recent);
     });
+  }
+
+  internal PromptCacheSummary ReadPromptCache(Guid sessionId) {
+    if (sessionId == Guid.Empty)
+      throw new ArgumentException("Session identity cannot be empty.", nameof(sessionId));
+
+    return database.Read(transaction => database.QuerySingleOrDefault(transaction, """
+      WITH last_turn AS (
+        SELECT run_id FROM execution_runs
+        WHERE session_id = $session AND outcome = $completed AND kind IN ($user_input, $continuation)
+        ORDER BY ordinal DESC LIMIT 1
+      ), eligible AS (
+        SELECT json_extract(record_json, '$.executionId') = (SELECT run_id FROM last_turn) AS in_last_turn,
+            json_extract(record_json, '$.tokens.inputTokens') AS input_tokens,
+            json_extract(record_json, '$.tokens.cachedInputTokens') AS cached_tokens,
+            is_estimate
+        FROM usage_requests
+        WHERE session_id = $session AND purpose = 'conversation' AND finished_at IS NOT NULL
+      ), measured AS (
+        SELECT *, is_estimate = 0 AND typeof(input_tokens) = 'integer' AND input_tokens > 0
+            AND typeof(cached_tokens) = 'integer' AND cached_tokens >= 0 AND cached_tokens <= input_tokens AS valid
+        FROM eligible
+      )
+      SELECT EXISTS(SELECT 1 FROM last_turn) AS has_turn,
+          COALESCE(SUM(input_tokens) FILTER (WHERE valid), 0) AS session_input,
+          COALESCE(SUM(cached_tokens) FILTER (WHERE valid), 0) AS session_cached,
+          COUNT(*) FILTER (WHERE valid) AS session_reported,
+          COUNT(*) AS session_total,
+          COALESCE(SUM(input_tokens) FILTER (WHERE valid AND in_last_turn), 0) AS turn_input,
+          COALESCE(SUM(cached_tokens) FILTER (WHERE valid AND in_last_turn), 0) AS turn_cached,
+          COUNT(*) FILTER (WHERE valid AND in_last_turn) AS turn_reported,
+          COUNT(*) FILTER (WHERE in_last_turn) AS turn_total
+      FROM measured;
+      """, row => new PromptCacheSummary(
+          row.Bool("has_turn") ? new(row.Long("turn_input"), row.Long("turn_cached"),
+              row.Long("turn_reported"), row.Long("turn_total")) : null,
+          new(row.Long("session_input"), row.Long("session_cached"),
+              row.Long("session_reported"), row.Long("session_total"))),
+          ("$session", sessionId), ("$completed", (int)ExecutionOutcome.Completed),
+          ("$user_input", (int)ExecutionRunKind.UserInput), ("$continuation", (int)ExecutionRunKind.Continuation))
+        ?? throw new InvalidDataException("Prompt cache totals are missing."));
   }
 
   private static void Validate(UsageRequest request) {

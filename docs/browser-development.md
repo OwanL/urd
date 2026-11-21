@@ -42,7 +42,10 @@ server's saved runs. The picker resolves these against the current provider cata
 is available, it selects the first available model after discovery. With no catalog models it
 stays empty. An explicit chat choice or the chat's own execution model takes precedence.
 Setup and Settings → General set the default working directory through a folder browser. General also
-holds an explicitly saved compaction-trigger token count. Blank/Automatic restores 150,000 tokens;
+lets you turn LAN hosting on or off and copy its addresses. LAN hosting is off by default and remembers
+your choice across restarts. Only enable it on a trusted network: connected devices can use Urd
+without signing in. The tray and browser change the same setting. General also holds an explicitly
+saved compaction-trigger token count. Blank/Automatic restores 150,000 tokens;
 both default and explicit counts are capped to leave headroom in a known model window.
 The shared `usePreferences` hook owns reads and saves. The trigger changes at the next check, while
 working-directory changes still apply only to new chats. Settings → Model buckets assigns the

@@ -19,6 +19,9 @@ public sealed class PreferenceManager {
     return persisted.WorkingDirectory is not null ? persisted : persisted with { WorkingDirectory = workingDirectory };
   }
 
+  public void SetLanHostingEnabled(bool enabled) =>
+      store.Preferences.Update(preferences => preferences with { LanHostingEnabled = enabled });
+
   public void SetWorkingDirectory(string? path) {
     string? normalized = path is null ? null : NormalizeWorkingDirectory(path);
     store.Preferences.Update(preferences => preferences with { WorkingDirectory = normalized });

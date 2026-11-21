@@ -1,4 +1,5 @@
 import { RequestError } from "../http/RequestError.ts";
+import { newUuid } from "../Uuid.ts";
 import type { ChatCompactionState } from "../chat/ChatCommands.ts";
 import type { CompactionReceipt } from "../sessions/inputs/Compaction.ts";
 import type { SessionClient } from "../sessions/SessionClient.ts";
@@ -33,7 +34,7 @@ export class CompactionCommands {
     snapshot: SessionSnapshot,
     selection: NonNullable<SessionSnapshot["latestLlmSelection"]>,
   ): Promise<void> {
-    const operationId = crypto.randomUUID();
+    const operationId = newUuid();
     this.operations.set(id, { phase: "starting", operationId });
     try {
       const receipt = await this.client.startCompaction(id, {

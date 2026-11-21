@@ -35,20 +35,23 @@ internal sealed class PreferencesStorage(Database database) {
       database.Write(transaction => {
         database.Execute(transaction, """
           INSERT INTO preferences (singleton, working_directory, compaction_trigger_token_count,
-              model_choices_json, protected_resources_json, subagent_providers_json)
-          VALUES (1, $directory, $compactionTriggerTokenCount, $modelChoices, $protectedResources, $subagentProviders)
+              model_choices_json, protected_resources_json, subagent_providers_json, lan_hosting_enabled)
+          VALUES (1, $directory, $compactionTriggerTokenCount, $modelChoices, $protectedResources, $subagentProviders,
+              $lanHostingEnabled)
           ON CONFLICT(singleton) DO UPDATE SET
               working_directory = excluded.working_directory,
               compaction_trigger_token_count = excluded.compaction_trigger_token_count,
               model_choices_json = excluded.model_choices_json,
               protected_resources_json = excluded.protected_resources_json,
-              subagent_providers_json = excluded.subagent_providers_json;
+              subagent_providers_json = excluded.subagent_providers_json,
+              lan_hosting_enabled = excluded.lan_hosting_enabled;
           """, ("$directory", updated.WorkingDirectory),
             ("$compactionTriggerTokenCount", updated.CompactionTriggerTokenCount),
             ("$modelChoices", JsonSerializer.Serialize(updated.ModelChoices, JsonOptions)),
             ("$protectedResources", JsonSerializer.Serialize(updated.ProtectedResources, JsonOptions)),
             ("$subagentProviders", updated.SubagentProviderConnectionIds is null
-                ? null : JsonSerializer.Serialize(updated.SubagentProviderConnectionIds, JsonOptions)));
+                ? null : JsonSerializer.Serialize(updated.SubagentProviderConnectionIds, JsonOptions)),
+            ("$lanHostingEnabled", updated.LanHostingEnabled));
         return true;
       });
       cachedPreferences = updated;
@@ -62,10 +65,11 @@ internal sealed class PreferencesStorage(Database database) {
 
     UserPreferences persisted = database.Read(transaction => database.QuerySingleOrDefault(transaction, """
         SELECT working_directory, compaction_trigger_token_count, model_choices_json, protected_resources_json,
-            subagent_providers_json
+            subagent_providers_json, lan_hosting_enabled
         FROM preferences WHERE singleton = 1;
         """, row => new UserPreferences(row.NullableString("working_directory"),
             row.NullableInt("compaction_trigger_token_count")) {
+          LanHostingEnabled = row.Bool("lan_hosting_enabled"),
           ModelChoices = Deserialize<AuxiliaryModelPreferences>(row.NullableString("model_choices_json")) ?? new(),
           ProtectedResources = Deserialize<ProtectedResourcePreferences>(row.NullableString("protected_resources_json")) ?? new(),
           SubagentProviderConnectionIds = Deserialize<Guid[]>(row.NullableString("subagent_providers_json"))

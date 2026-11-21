@@ -14,9 +14,20 @@ namespace Urd.Server;
 internal sealed class ServerTray : IDisposable {
   private readonly Icon icon;
   private readonly TrayIcon trayIcon;
-  private readonly PopupMenu menu;
+  private readonly PopupMenu menu = new();
+  private readonly LanHosting lanHosting;
+  private readonly PopupMenuItem openItem;
+  private readonly PopupMenuItem lanHostingItem = new() { Text = "LAN hosting" };
+  private readonly PopupMenuItem stopItem;
+  private readonly List<PopupMenuItem> lanOriginItems = new();
+  private volatile bool stopRequested;
+  private volatile bool lanChangePending;
+  private volatile bool lanTargetEnabled;
+  private volatile string? lanFailure;
 
-  private ServerTray(string dataRoot, string address, Action requestStop) {
+  private ServerTray(string dataRoot, Uri origin, LanHosting lanHosting, Action requestStop) {
+    this.lanHosting = lanHosting;
+    string address = origin.GetLeftPart(UriPartial.Authority);
     using Stream iconStream = typeof(ServerTray).Assembly.GetManifestResourceStream("Urd.Server.urd.ico")
         ?? throw new InvalidOperationException("The tray icon resource is missing.");
     icon = new Icon(iconStream, IconUtilities.GetRequiredCustomIconSize(largeIcon: false));
@@ -24,13 +35,18 @@ internal sealed class ServerTray : IDisposable {
     string host = Environment.ProcessPath ?? AppContext.BaseDirectory;
     string name = $"Urd {host}|{Path.TrimEndingDirectorySeparator(dataRoot)}".ToUpperInvariant();
     trayIcon = new TrayIcon(name) { Icon = icon.Handle, ToolTip = $"Urd\n{address}" };
-    var stop = new PopupMenuItem { Text = "Stop Urd" };
-    stop.Click += (_, _) => {
-      stop.Text = "Stopping…";
-      stop.Enabled = false;
+    openItem = new PopupMenuItem($"Open {address}", (_, _) => Open(address));
+    lanHostingItem.Click += (_, _) => _ = ToggleLanHosting();
+    stopItem = new PopupMenuItem { Text = "Stop Urd" };
+    stopItem.Click += (_, _) => {
+      stopRequested = true;
+      stopItem.Text = "Stopping…";
+      stopItem.Enabled = false;
+      lanHostingItem.Enabled = false;
+      foreach (PopupMenuItem item in lanOriginItems)
+        item.Enabled = false;
       requestStop();
     };
-    menu = new PopupMenu { Items = { new PopupMenuItem($"Open {address}", (_, _) => Open(address)), new PopupMenuSeparator(), stop } };
     trayIcon.MessageWindow.MouseEventReceived += (_, args) => {
       if (args.MouseEvent is MouseEvent.IconLeftMouseUp or MouseEvent.IconRightMouseUp)
         ShowMenu(args.Point);
@@ -46,8 +62,8 @@ internal sealed class ServerTray : IDisposable {
   }
 
   // Disposing the result removes the icon.
-  public static IDisposable Show(string dataRoot, Uri origin, Action requestStop) {
-    var tray = new ServerTray(dataRoot, origin.GetLeftPart(UriPartial.Authority), requestStop);
+  public static IDisposable Show(string dataRoot, Uri origin, LanHosting lanHosting, Action requestStop) {
+    var tray = new ServerTray(dataRoot, origin, lanHosting, requestStop);
     new Thread(tray.Run) { IsBackground = true, Name = "Urd tray" }.Start();
     return tray;
   }
@@ -106,10 +122,77 @@ internal sealed class ServerTray : IDisposable {
   // Menu clicks run inside Show, so this also keeps a failed Open or Stop from escaping the tray thread.
   private void ShowMenu(Point point) {
     try {
+      RefreshMenu();
       WindowUtilities.SetForegroundWindow(trayIcon.WindowHandle);
       menu.Show(trayIcon.WindowHandle, point.X, point.Y);
     } catch (Exception failure) {
       Console.Error.WriteLine($"Tray menu failed: {failure.Message}");
+    }
+  }
+
+  private void RefreshMenu() {
+    bool enabled = lanHosting.Enabled;
+    IReadOnlyList<string> origins = lanHosting.Origins;
+    lanHostingItem.Checked = enabled;
+    lanHostingItem.Enabled = !stopRequested && !lanChangePending;
+    lanHostingItem.Text = "LAN hosting";
+    if (lanChangePending)
+      lanHostingItem.Text = lanTargetEnabled ? "Enabling LAN hosting…" : "Disabling LAN hosting…";
+
+    lanOriginItems.Clear();
+    menu.Items.Clear();
+    menu.Items.Add(openItem);
+    menu.Items.Add(new PopupMenuSeparator());
+    menu.Items.Add(lanHostingItem);
+    if (enabled) {
+      foreach (string origin in origins) {
+        var item = new PopupMenuItem($"Open {origin}", (_, _) => Open(origin)) { Enabled = !stopRequested };
+        lanOriginItems.Add(item);
+        menu.Items.Add(item);
+      }
+    }
+    if (lanFailure is not null)
+      menu.Items.Add(new PopupMenuItem { Text = lanFailure, Enabled = false });
+    menu.Items.Add(new PopupMenuSeparator());
+    menu.Items.Add(stopItem);
+  }
+
+  private async Task ToggleLanHosting() {
+    if (stopRequested || lanChangePending)
+      return;
+
+    try {
+      bool enable = !lanHosting.Enabled;
+      lanTargetEnabled = enable;
+      lanChangePending = true;
+      lanFailure = null;
+      lanHostingItem.Enabled = false;
+      lanHostingItem.Text = enable ? "Enabling LAN hosting…" : "Disabling LAN hosting…";
+      await lanHosting.SetEnabledAsync(enable);
+    } catch (Exception failure) {
+      ReportLanFailure(failure);
+    } finally {
+      lanChangePending = false;
+      lanHostingItem.Text = "LAN hosting";
+      if (stopRequested) {
+        lanHostingItem.Enabled = false;
+      } else {
+        lanHostingItem.Enabled = true;
+        try {
+          lanHostingItem.Checked = lanHosting.Enabled;
+        } catch (Exception failure) {
+          ReportLanFailure(failure);
+        }
+      }
+    }
+  }
+
+  private void ReportLanFailure(Exception failure) {
+    lanFailure = $"LAN hosting failed: {failure.Message}";
+    try {
+      Console.Error.WriteLine($"LAN hosting failed: {failure.Message}");
+    } catch {
+      // A closed launch log must not escape the tray callback.
     }
   }
 

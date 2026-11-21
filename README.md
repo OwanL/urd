@@ -12,8 +12,10 @@ Stop, bounded history/content reads and provider-reported token usage capture. A
 its connection, model and reasoning choice for that execution; retrying it keeps the original
 submission. Provider-specific context is saved separately from visible text.
 
-The same loopback ASP.NET Core host serves the Preact browser workspace and its HTTP APIs.
-The UI has local tabs, drafts, model/reasoning selection, Send/Stop and provider settings.
+The ASP.NET Core host serves the Preact browser workspace and its HTTP APIs. It listens on
+loopback by default; optional LAN hosting binds private IPv4 addresses separately, is off by
+default, and has no sign-in. Enable it only on a trusted network. The UI has local tabs, drafts,
+model/reasoning selection, Send/Stop and provider settings.
 User messages can be edited inline: Save stops current work, replaces the later conversation
 and starts a new response. Editing does not undo tool effects. Schema 36 is the first database
 version supported for automatic upgrades in future builds. Older experimental schemas are
@@ -48,8 +50,9 @@ for tests without separate authorization.
 Keep first-party code small, readable and responsive. Tests/helpers must not exceed
 application source size. Share backend work across clients; retain source-based customization
 rather than building an extension platform. Browser delivery comes first, then desktop/VS Code;
-OS rollout is Windows, macOS, Linux. Urd is single-user and local-first, with LAN/Tailscale
-access planned—not a shared hosting service. There is no Pie-data migration requirement.
+OS rollout is Windows, macOS, Linux. Urd is single-user and local-first, with optional LAN
+access and Tailscale planned; this is not shared hosting. There is no Pie-data migration
+requirement.
 
 Settled Pie behavior is a reference, not a mandatory parity checklist. Preserve useful
 capabilities; challenge complexity with evidence rather than silently cutting scope.

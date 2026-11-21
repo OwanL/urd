@@ -1,4 +1,5 @@
 import { RequestError } from "../http/RequestError.ts";
+import { newUuid } from "../Uuid.ts";
 import {
   applyContinuationReceipt,
   applyReceipt,
@@ -84,7 +85,7 @@ export class SubmissionCommands {
       return;
 
     const original: UserMessageSubmission = {
-      submissionId: crypto.randomUUID(),
+      submissionId: newUuid(),
       expectedHistoryRevision: snapshot.historyRevision,
       text: latest.draft,
       llmSelection: selection,
@@ -141,7 +142,7 @@ export class SubmissionCommands {
       return;
 
     const original: ContinuationSubmission = {
-      operationId: crypto.randomUUID(),
+      operationId: newUuid(),
       expectedHistoryRevision: snapshot.historyRevision,
       expectedLastExecutionId,
       llmSelection: structuredClone(selection),
@@ -182,7 +183,7 @@ export class SubmissionCommands {
       return null;
 
     const submission: UserMessageSubmission = {
-      submissionId: crypto.randomUUID(),
+      submissionId: newUuid(),
       expectedHistoryRevision: snapshot.historyRevision,
       text: source.text,
       llmSelection: source.llmSelection,

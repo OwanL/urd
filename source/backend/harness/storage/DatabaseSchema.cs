@@ -4,7 +4,7 @@ namespace Urd.Core.Storage;
 
 // Creates or upgrades the durable schema before storage is opened to callers.
 internal static class DatabaseSchema {
-  private const int SchemaVersion = 39;
+  private const int SchemaVersion = 40;
 
   private const string ClosedUsageSchema = """
       CREATE TABLE closed_session_usage (
@@ -114,6 +114,10 @@ internal static class DatabaseSchema {
         CREATE INDEX execution_tools_subagent_started
             ON execution_tools(call_id, run_id)
             WHERE name = 'subagent' AND started = 1;
+        """,
+    [39] = """
+        ALTER TABLE preferences ADD COLUMN lan_hosting_enabled INTEGER NOT NULL DEFAULT 0
+            CHECK (lan_hosting_enabled IN (0, 1));
         """
   };
 
@@ -589,7 +593,8 @@ internal static class DatabaseSchema {
               OR (compaction_trigger_token_count > 0 AND compaction_trigger_token_count <= 2147483647)),
           model_choices_json TEXT,
           subagent_providers_json TEXT,
-          protected_resources_json TEXT
+          protected_resources_json TEXT,
+          lan_hosting_enabled INTEGER NOT NULL DEFAULT 0 CHECK (lan_hosting_enabled IN (0, 1))
       ) STRICT;
       CREATE INDEX execution_runs_history_order ON execution_runs(session_id, history_revision, ordinal DESC);
       CREATE INDEX continuation_omitted_requests ON execution_runs(session_id, history_revision, continuation_omitted_request_id)

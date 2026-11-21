@@ -9,7 +9,7 @@ superseded research and plans live in Git history, not an archive directory.
 
 - [Backend development](backend-development.md): SDK, Core contracts,
   [history compaction](backend-development.md#history-compaction), builds and checks.
-- [Local server](server-development.md): launch, data ownership, HTTP and event APIs.
+- [Local server](server-development.md): launch, data ownership, HTTP/LAN access and event APIs.
 - [Browser development](browser-development.md): UI toolchain, behavior and verification.
 - [Provider management](provider-management.md): connections, credentials and browser settings.
 - [Usage accounting](usage-accounting.md): API-equivalent cost, durable records and live-estimate limits.

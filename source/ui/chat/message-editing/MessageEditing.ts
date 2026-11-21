@@ -1,4 +1,5 @@
 import { RequestError } from "../../http/RequestError.ts";
+import { newUuid } from "../../Uuid.ts";
 import type { LlmSelection } from "../../providers/LlmSelection.ts";
 import type {
   MessageEditReceipt,
@@ -134,7 +135,7 @@ export class MessageEditing {
     )
       return;
     const original: MessageEditSubmission = {
-      operationId: crypto.randomUUID(),
+      operationId: newUuid(),
       message: {
         executionId: edit.target.executionId,
         messageId: edit.target.entryId,

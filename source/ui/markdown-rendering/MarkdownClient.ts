@@ -1,4 +1,5 @@
 import { RequestError } from "../http/RequestError.ts";
+import { newUuid } from "../Uuid.ts";
 import { requestBlob, requestEmpty, requestJson } from "../http/Requests.ts";
 import type {
   MessageContentCursor,
@@ -76,7 +77,7 @@ export class MarkdownClient {
     entry: TranscriptEntryRef,
     signal: AbortSignal,
   ): Promise<MarkdownOwnedTextGeneration> {
-    const leaseId = crypto.randomUUID();
+    const leaseId = newUuid();
     const base = this.url(streamId, leaseId);
     try {
       signal.throwIfAborted();

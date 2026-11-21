@@ -10,6 +10,32 @@ namespace Urd.Backend.Tests.Preferences;
 
 public sealed class PreferencesTests {
   [Fact]
+  public void LanHostingPreferenceDefaultsToFalseAndPersistsIndependently() {
+    using var database = new TemporaryDatabase();
+    using (UrdStore store = UrdStore.Open(database.Path)) {
+      var preferences = new PreferenceManager(store);
+      Assert.False(preferences.Read().LanHostingEnabled);
+      preferences.SetCompactionTriggerTokenCount(4096);
+      preferences.SetLanHostingEnabled(true);
+      Assert.True(preferences.Read().LanHostingEnabled);
+    }
+
+    using (UrdStore store = UrdStore.Open(database.Path)) {
+      var preferences = new PreferenceManager(store);
+      Assert.True(preferences.Read().LanHostingEnabled);
+      Assert.Equal(4096, preferences.Read().CompactionTriggerTokenCount);
+      preferences.SetCompactionTriggerTokenCount(8192);
+      Assert.True(preferences.Read().LanHostingEnabled);
+      preferences.SetLanHostingEnabled(false);
+    }
+
+    using UrdStore reopened = UrdStore.Open(database.Path);
+    var saved = new PreferenceManager(reopened);
+    Assert.False(saved.Read().LanHostingEnabled);
+    Assert.Equal(8192, saved.Read().CompactionTriggerTokenCount);
+  }
+
+  [Fact]
   public void WorkingDirectoryIsValidatedNormalizedAndPersisted() {
     using var database = new TemporaryDatabase();
     string directory = Path.Combine(Path.GetDirectoryName(database.Path)!, "working-directory");

@@ -1,0 +1,100 @@
+.lan-hosting-setting {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+}
+.lan-hosting-heading,
+.lan-hosting-address {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.lan-hosting-heading {
+  flex-wrap: wrap;
+}
+.lan-hosting-title {
+  font-weight: 600;
+  white-space: nowrap;
+}
+.lan-hosting-setting p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.lan-hosting-setting .lan-hosting-error {
+  color: var(--danger);
+}
+.lan-hosting-setting button {
+  justify-self: start;
+  min-height: 34px;
+  padding: 6px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  color: var(--text-primary);
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+.lan-hosting-setting button:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+.lan-hosting-setting .lan-hosting-switch {
+  display: inline-flex;
+  align-items: center;
+  justify-self: end;
+  gap: 7px;
+  min-height: 34px;
+  margin-left: auto;
+  padding: 4px 9px 4px 6px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.lan-hosting-switch-track {
+  position: relative;
+  width: 32px;
+  height: 18px;
+  flex: none;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--surface-hover);
+  transition: background-color 140ms ease;
+}
+.lan-hosting-switch[aria-checked="true"] .lan-hosting-switch-track {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+.lan-hosting-switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+  transition:
+    transform 140ms ease,
+    background-color 140ms ease;
+}
+.lan-hosting-switch[aria-checked="true"] .lan-hosting-switch-thumb {
+  transform: translateX(14px);
+  background: var(--surface-input);
+}
+@media (prefers-reduced-motion: reduce) {
+  .lan-hosting-switch-track,
+  .lan-hosting-switch-thumb {
+    transition: none;
+  }
+}
+.lan-hosting-address code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font: inherit;
+}
+.lan-hosting-address span {
+  color: var(--text-secondary);
+  font-size: 12px;
+}

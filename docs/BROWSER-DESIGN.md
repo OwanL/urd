@@ -119,6 +119,11 @@ proxy identity policy, application credential or deployment was selected. LAN's
 access policy still needs its own scoped review; Pie's unauthenticated LAN mode
 was not automatically adopted.
 
+**Implementation update (2026-11-22):** Urd now has an opt-in LAN listener on private IPv4.
+It uses plain HTTP without sign-in and is intended only for trusted networks; automatic restore
+failures leave the server local. This implements a narrow LAN mode, not Tailscale identity or
+deployment. See [local server development](server-development.md#http-and-local-access).
+
 Provider login remains separate. In this same-machine milestone, the backend and
 provider-onboarding browser are on the same PC; credentials remain backend-local.
 There is no new Urd account and no approval of a provider route, credential store,

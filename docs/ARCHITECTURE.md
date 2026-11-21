@@ -178,9 +178,10 @@ selection blocker. Verify the actual supported Urd workflows on each OS; remote
 access on macOS remains intended scope. No macOS runtime test has been performed.
 
 The current Server uses Minimal APIs and a page-level server-sent event stream;
-[server development](server-development.md) records the implemented local contract.
-Remote access policy, public packaging and process topology remain open. Agent work retains
-its own lifetime rather than being cancelled by an HTTP request or client disconnect.
+[server development](server-development.md) records the implemented local and opt-in LAN
+contracts. LAN hosting uses private IPv4, plain HTTP without sign-in, and is intended only for
+trusted networks. Tailscale access, public packaging and process topology remain open. Agent work
+retains its own lifetime rather than being cancelled by an HTTP request or client disconnect.
 
 ### MCP client library and revisiting library choices
 
@@ -220,11 +221,12 @@ fake-LLM technical slice.
 
 **Local access direction:** keep Pie-like open-and-use access, with programs already
 running on the backend PC trusted. No Urd account, pairing or remembered-browser
-approval system. Use loopback and strict, transport-appropriate browser-request
-checks; this is local trust, not individual-client authentication or permission for
-arbitrary web origins. Exact request checks and transport remain engineering design;
-unauthenticated LAN or application trust in a future Tailscale/proxy setup is not
-selected. See [browser design](BROWSER-DESIGN.md).
+approval system. The Server listens on loopback by default and applies strict browser-request
+checks. Optional LAN hosting binds private IPv4 addresses using plain HTTP without sign-in; it
+is off by default and intended only for trusted networks. This is local trust, not individual-client
+authentication or permission for arbitrary web origins. Application trust in a future
+Tailscale/proxy setup is not selected. See [browser design](BROWSER-DESIGN.md) and
+[server development](server-development.md#http-and-local-access).
 
 ### TypeScript and Preact for the shared UI
 

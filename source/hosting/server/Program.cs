@@ -41,13 +41,13 @@ internal static class Program {
             FileMode.Append, FileAccess.Write, FileShare.ReadWrite)) { AutoFlush = true };
         Console.SetError(launchLog);
       }
-      await RunServerAsync(options, origin => {
+      await RunServerAsync(options, (origin, lanHosting) => {
         Console.Out.WriteLine(JsonSerializer.Serialize(new {
           @event = "urd-ready",
           origin = origin.GetLeftPart(UriPartial.Authority)
         }));
         if (options.ShowTray && OperatingSystem.IsWindowsVersionAtLeast(6, 1))
-          tray = ServerTray.Show(options.DataRoot, origin, stopping.Cancel);
+          tray = ServerTray.Show(options.DataRoot, origin, lanHosting, stopping.Cancel);
       }, stopping.Token, warmInstructions: true);
       return 0;
     } catch (Exception failure) {
@@ -64,11 +64,20 @@ internal static class Program {
 
   internal static Task RunServerAsync(ServerOptions options, Action<Uri> onReady, CancellationToken stopping,
       bool warmInstructions = false) =>
+      RunServerAsync(options, (origin, _) => onReady(origin), null, stopping, warmInstructions: warmInstructions);
+
+  internal static Task RunServerAsync(ServerOptions options, Action<Uri, LanHosting> onReady, CancellationToken stopping,
+      bool warmInstructions = false) =>
       RunServerAsync(options, onReady, null, stopping, warmInstructions: warmInstructions);
+
+  internal static Task RunServerAsync(ServerOptions options, Action<Uri> onReady, Func<IChatClient>? createClient,
+      CancellationToken stopping, Func<UrdStore, Func<Uri>, ProviderManager>? createProviders = null,
+      Func<MessageMarkdownService>? createMarkdown = null, bool warmInstructions = false) =>
+      RunServerAsync(options, (origin, _) => onReady(origin), createClient, stopping, createProviders, createMarkdown, warmInstructions);
 
   // Production borrows provider-managed clients. Tests may supply an owned client;
   // the run disposes it only after successful drain, never through a session.
-  internal static async Task RunServerAsync(ServerOptions options, Action<Uri> onReady, Func<IChatClient>? createClient,
+  internal static async Task RunServerAsync(ServerOptions options, Action<Uri, LanHosting> onReady, Func<IChatClient>? createClient,
       CancellationToken stopping, Func<UrdStore, Func<Uri>, ProviderManager>? createProviders = null,
       Func<MessageMarkdownService>? createMarkdown = null, bool warmInstructions = false) {
     ArgumentNullException.ThrowIfNull(options);
@@ -87,6 +96,7 @@ internal static class Program {
     SessionEventHub? eventHub = null;
     MessageMarkdownService? markdown = null;
     WebApplication? app = null;
+    LanHosting? lanHosting = null;
     LauncherPipe? launcherPipe = null;
     Uri? servedOrigin = null;
     ExceptionDispatchInfo? runFailure = null;
@@ -120,9 +130,11 @@ internal static class Program {
           Entries: 64, RetainedBytes: 384L * 1024 * 1024,
           PendingKeys: 32, Leases: 64, SmallMessageUtf8Bytes: 16 * 1024));
       manager.SessionClosed += markdown.CloseSession;
-      app = CreateApplication(options, manager, providers, eventHub, markdown, preferences, store,
-          () => Volatile.Read(ref servedOrigin));
+      var lanAccess = new LanAccess();
+      app = CreateApplication([IPAddress.Loopback], options.Port, manager, providers, eventHub, markdown, preferences, store,
+          () => Volatile.Read(ref servedOrigin), lanAccess);
       app.MapSessionBrowserSignInRoutes(manager, playwrightSupported);
+      app.MapLanHosting(() => lanHosting, () => Volatile.Read(ref servedOrigin));
       var shutdownRequested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
       using var lifetimeStop = app.Lifetime.ApplicationStopping.Register(() => shutdownRequested.TrySetResult());
       using var callerStop = stopping.Register(app.Lifetime.StopApplication);
@@ -130,10 +142,31 @@ internal static class Program {
       IServerAddressesFeature addresses = app.Services.GetRequiredService<IServer>()
           .Features.Get<IServerAddressesFeature>() ?? throw new InvalidOperationException("The server has no bound address.");
       var origin = new Uri(addresses.Addresses.Single());
+      lanHosting = new LanHosting(lanAccess, origin.Port, () => LanAccess.AvailableAddresses(), async available => {
+        IDisposable? browserPause = null;
+        WebApplication? lanApp = null;
+        try {
+          browserPause = manager.PausePlaywrightForLan();
+          lanApp = CreateApplication(available, origin.Port, manager, providers, eventHub, markdown,
+              preferences, store, () => Volatile.Read(ref servedOrigin), lanAccess);
+          await lanApp.StartAsync(stopping);
+          return new LanListener(lanApp, browserPause);
+        } catch {
+          try {
+            if (lanApp is not null)
+              await lanApp.DisposeAsync();
+          } finally {
+            browserPause?.Dispose();
+          }
+          throw;
+        }
+      }, preferences.SetLanHostingEnabled, preferences.Read().LanHostingEnabled);
+      if (preferences.Read().LanHostingEnabled)
+        await lanHosting.RestoreAsync();
       Volatile.Write(ref servedOrigin, origin);
       if (options.LauncherPipe is not null)
         launcherPipe = new LauncherPipe(options.LauncherPipe, origin);
-      onReady(origin);
+      onReady(origin, lanHosting);
       if (launcherPipe is null)
         await shutdownRequested.Task;
       else {
@@ -147,6 +180,14 @@ internal static class Program {
       runFailure = ExceptionDispatchInfo.Capture(failure);
     }
 
+    if (lanHosting is not null) {
+      try {
+        await lanHosting.DisposeAsync();
+      } catch (Exception failure) {
+        runFailure = ExceptionDispatchInfo.Capture(runFailure is null ? failure :
+            new AggregateException(runFailure.SourceException, failure));
+      }
+    }
     Volatile.Write(ref servedOrigin, null);
     eventHub?.Dispose();
     Task drained = Task.WhenAll(manager?.ShutdownSessionsAsync(CancellationToken.None) ?? Task.CompletedTask,
@@ -173,9 +214,9 @@ internal static class Program {
     runFailure?.Throw();
   }
 
-  private static WebApplication CreateApplication(ServerOptions options, SessionManager manager,
+  private static WebApplication CreateApplication(IReadOnlyList<IPAddress> addresses, int port, SessionManager manager,
       ProviderManager providers, SessionEventHub eventHub, MessageMarkdownService? markdown,
-      PreferenceManager preferences, UrdStore store, Func<Uri?> servedOrigin) {
+      PreferenceManager preferences, UrdStore store, Func<Uri?> servedOrigin, LanAccess lanAccess) {
     // No default appsettings/environment/URL providers: Kestrel configuration can otherwise add listeners.
     WebApplicationBuilder builder = WebApplication.CreateEmptyBuilder(new WebApplicationOptions {
       ApplicationName = typeof(Program).Assembly.GetName().Name,
@@ -183,7 +224,8 @@ internal static class Program {
       EnvironmentName = Environments.Production
     });
     builder.WebHost.UseKestrelCore().ConfigureKestrel(kestrel => {
-      kestrel.Listen(IPAddress.Loopback, options.Port, listener => listener.Protocols = HttpProtocols.Http1);
+      foreach (IPAddress address in addresses)
+        kestrel.Listen(address, port, listener => listener.Protocols = HttpProtocols.Http1);
       kestrel.Limits.MaxRequestBodySize = 128 * 1024;
     });
     builder.Host.UseConsoleLifetime(lifetime => lifetime.SuppressStatusMessages = true);
@@ -198,7 +240,7 @@ internal static class Program {
     builder.Logging.SetMinimumLevel(LogLevel.Warning);
     builder.Services.Configure<ConsoleLoggerOptions>(console => console.LogToStandardErrorThreshold = LogLevel.Trace);
     WebApplication app = builder.Build();
-    app.Use(next => new LocalBrowserGate(next, servedOrigin).InvokeAsync);
+    app.Use(next => new LocalBrowserGate(next, servedOrigin, lanAccess).InvokeAsync);
     if (Directory.Exists(Path.Combine(AppContext.BaseDirectory, "wwwroot"))) {
       app.UseDefaultFiles();
       app.UseStaticFiles(new StaticFileOptions {
@@ -222,5 +264,23 @@ internal static class Program {
     app.MapSetup(store);
     app.MapUsage(store);
     return app;
+  }
+
+  private sealed class LanListener(WebApplication app, IDisposable? browserPause) : IAsyncDisposable {
+    public async ValueTask DisposeAsync() {
+      using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+      try {
+        await app.StopAsync(timeout.Token);
+      } catch (OperationCanceledException) when (timeout.IsCancellationRequested) {
+        await Console.Error.WriteLineAsync("LAN hosting stop timed out; closing remaining connections.");
+      } finally {
+        try {
+          await app.DisposeAsync();
+        } finally {
+          // LAN admission is already closed before the listener is disposed.
+          browserPause?.Dispose();
+        }
+      }
+    }
   }
 }

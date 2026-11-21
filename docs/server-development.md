@@ -95,11 +95,13 @@ hidden-icons overflow, unless it has been hidden in Settings → Personalization
 - Public `GET /health` or `HEAD /health` returns **204**, without a body or private state.
   Health and API GET requests with a body are rejected with 400. Unknown paths receive
   404 after admission checks; unsupported methods receive 405.
-- The listener is explicitly IPv4 `127.0.0.1`. Default appsettings, environment and URL
+- The local listener is explicitly IPv4 `127.0.0.1`. Default appsettings, environment and URL
   configuration providers are not loaded; they cannot add listeners or change the data root.
-- Every request requires a loopback peer and Host `127.0.0.1` with the actual served port.
+- Local requests require a loopback peer and Host `127.0.0.1` with the actual served port.
+  Opt-in LAN hosting binds private IPv4 addresses separately. It accepts private IPv4 peers and
+  matching bound hosts. LAN access is plain HTTP without sign-in; use only on a trusted network.
   Omitting the port is valid only for HTTP's default port 80. Forwarded headers are ignored.
-- Origin may be absent. If supplied, it must be exactly the canonical served origin;
+- Origin may be absent. If supplied, it must exactly match the request's allowed origin;
   foreign, `null`, multiple and noncanonical origins receive 403. There are no CORS
   grants, credentials or cookies.
 - Every `/api` request also requires exactly one `X-Urd-Client: browser`, including reads
@@ -110,6 +112,13 @@ hidden-icons overflow, unless it has been hidden in Settings → Personalization
 - Built HTML/static assets pass the same gate, without the private API marker. HTML uses
   `no-store`; hashed `/assets` files are immutable. Missing assets and unknown API paths
   remain 404, not an HTML fallback.
+
+`GET /api/hosting/lan` returns the current listener state (`enabled`, `origins`), the saved
+choice (`remembered`), and a nullable `startupError`. `POST /api/hosting/lan` accepts
+`{ "enabled": true }` or `{ "enabled": false }` and returns the same status. These routes are
+available only on the loopback listener with the normal browser API marker and the local
+origin. Settings → General and the tray share the same listener control. If automatic restore
+fails, Urd remains local and reports the failure without clearing the saved choice.
 
 ## Profile setup HTTP contract
 

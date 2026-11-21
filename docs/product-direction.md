@@ -81,8 +81,10 @@ visual reference rather than copying its architecture or presentation code.
 Browser access order is same-machine, then LAN, then Tailscale. Local use should be open-and-use:
 trust programs already on the backend PC, without a Urd account, pairing or remembered-browser
 approval. Loopback and strict browser-request checks protect this boundary; they do not
-authenticate individual local programs or authorize arbitrary web origins. Remote trust
-and transport need separate design.
+authenticate individual local programs or authorize arbitrary web origins. Optional LAN access
+is now implemented as unauthenticated plain HTTP on private IPv4, disabled by default and intended
+only for trusted networks; see [local server](server-development.md#http-and-local-access).
+Tailscale identity and transport remain separate design and qualification work.
 
 Standalone desktop and VS Code clients remain planned; their relative order and desktop
 host remain open. Share ordinary UI components and backend behavior with small host-specific

@@ -22,7 +22,8 @@ internal sealed class RunningServer : IAsyncDisposable {
     Client = new HttpClient(new SocketsHttpHandler { UseProxy = false }) { Timeout = TestTimeout };
     Func<IChatClient>? clientFactory = createProviders is not null && createClient is null ? null :
         () => PrepassTolerantChatClient.WrapIfNeeded(createClient?.Invoke() ?? new FakeChatClient());
-    run = Program.RunServerAsync(options, origin => {
+    run = Program.RunServerAsync(options, (origin, lanHosting) => {
+      LanHosting = lanHosting;
       onReady?.Invoke(origin);
       ready.TrySetResult(origin);
     }, clientFactory, stopping.Token, createProviders, createMarkdown);
@@ -38,6 +39,7 @@ internal sealed class RunningServer : IAsyncDisposable {
     return OptionsFor(database);
   }
 
+  internal LanHosting? LanHosting { get; private set; }
   internal HttpClient Client { get; }
   internal bool IsReady => ready.Task.IsCompletedSuccessfully;
 

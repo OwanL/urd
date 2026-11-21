@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { RequestError } from "../../http/RequestError.ts";
 import type { SessionClient } from "../../sessions/SessionClient.ts";
 import type { UserQuestion } from "../../sessions/inputs/UserQuestion.ts";
+import { QuestionPrompt } from "./QuestionPrompt.tsx";
 import "./user-questions.css";
 
 // Keep drafts across chat and subagent navigation without persisting answers to browser storage.
@@ -35,6 +36,7 @@ export function UserQuestions({ client, sessionId, connected, notice }: UserQues
   const [sending, setSending] = useState(false);
   const [readFailed, setReadFailed] = useState(false);
   const [answerError, setAnswerError] = useState<string | null>(null);
+  const panel = useRef<HTMLElement>(null);
   const refresh = useRef<() => void>(() => {});
   const sendingGate = useRef(false);
   const revision = useRef(0);
@@ -80,13 +82,20 @@ export function UserQuestions({ client, sessionId, connected, notice }: UserQues
     if (connected) refresh.current();
   }, [connected, notice]);
 
-  const question = questions.find((item) => item.id === selected) ?? questions[0];
+  const selectedIndex = Math.max(
+    0,
+    questions.findIndex((item) => item.id === selected),
+  );
+  const question = questions[selectedIndex];
   const draftKey = question ? `${sessionId}:${question.id}` : "";
   const draft = drafts.get(draftKey) ?? "";
+  const move = (offset: number) =>
+    setSelected(questions[(selectedIndex + offset + questions.length) % questions.length]!.id);
 
   async function answer(value: string) {
     if (!question || !connected || sendingGate.current || !value.trim() || value.length > 8000)
       return;
+    const focusedInPanel = panel.current?.contains(document.activeElement);
     sendingGate.current = true;
     setSending(true);
     setAnswerError(null);
@@ -95,6 +104,11 @@ export function UserQuestions({ client, sessionId, connected, notice }: UserQues
       if (receipt?.answer !== value) throw new Error("Invalid answer receipt.");
       revision.current++;
       drafts.delete(draftKey);
+      if (questions.length > 1 && focusedInPanel) {
+        const active = document.activeElement;
+        if (active === document.body || panel.current?.contains(active))
+          panel.current?.focus({ preventScroll: true });
+      }
       setQuestions((current) => current.filter((item) => item.id !== question.id));
       setSelected(null);
       refresh.current();
@@ -113,80 +127,32 @@ export function UserQuestions({ client, sessionId, connected, notice }: UserQues
 
   if (!question && !readFailed && !answerError) return null;
   return (
-    <section class="user-questions" aria-label="Pending questions">
+    <section ref={panel} class="user-questions" aria-label="Pending questions" tabIndex={-1}>
       {question && (
-        <>
-          <div class="user-question-heading">
-            <span>{question.sourceTitle ?? "Assistant"}</span>
-            {questions.length > 1 && (
-              <span>
-                <button
-                  type="button"
-                  aria-label="Previous question"
-                  onClick={() =>
-                    setSelected(
-                      questions[
-                        (questions.indexOf(question) + questions.length - 1) % questions.length
-                      ]!.id,
-                    )
-                  }
-                >
-                  ‹
-                </button>
-                {questions.indexOf(question) + 1} / {questions.length}
-                <button
-                  type="button"
-                  aria-label="Next question"
-                  onClick={() =>
-                    setSelected(questions[(questions.indexOf(question) + 1) % questions.length]!.id)
-                  }
-                >
-                  ›
-                </button>
-              </span>
-            )}
-          </div>
-          <div class="user-question-text">{question.question}</div>
-          {question.context && <div class="user-question-context">{question.context}</div>}
-          {question.answers.length > 0 && (
-            <div class="user-question-options">
-              {question.answers.map((option, index) => (
-                <button
-                  key={index}
-                  type="button"
-                  disabled={!connected || sending}
-                  onClick={() => void answer(option)}
-                >
-                  {option}
-                </button>
-              ))}
+        <div class="user-question-current" aria-busy={sending}>
+          <QuestionPrompt
+            key={question.id}
+            question={question}
+            draft={draft}
+            disabled={!connected || sending}
+            onDraft={(text) => {
+              updateDraft(draftKey, text);
+              setDraftVersion((version) => version + 1);
+            }}
+            onAnswer={(text) => void answer(text)}
+          />
+          {questions.length > 1 && (
+            <div class="user-question-pages">
+              <button type="button" aria-label="Previous question" onClick={() => move(-1)}>
+                ‹
+              </button>
+              {selectedIndex + 1} / {questions.length}
+              <button type="button" aria-label="Next question" onClick={() => move(1)}>
+                ›
+              </button>
             </div>
           )}
-          <form
-            class="user-question-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void answer(draft);
-            }}
-          >
-            <textarea
-              aria-label="Custom answer"
-              placeholder="Custom answer"
-              rows={1}
-              maxLength={8000}
-              value={draft}
-              onInput={(event) => {
-                const value = event.currentTarget.value;
-                updateDraft(draftKey, value);
-                setDraftVersion((version) => version + 1);
-              }}
-            />
-            <button type="submit" disabled={!connected || sending || !draft.trim()}>
-              Submit answer
-            </button>
-          </form>
-          {sending && <div role="status">Submitting answer…</div>}
-        </>
+        </div>
       )}
       {readFailed && (
         <div class="user-question-feedback" role="alert">

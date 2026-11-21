@@ -89,15 +89,24 @@ export function ToolRow({
   const running = status === "running";
   const failed = status === "failed";
   const payloadFinished = tool.isClosed && tool.outcome !== null;
-  const iconName = completion ? "return" : label ? iconNames[label.icon] : "tool";
+  const isAskUser = tool.name === "ask_user";
+  const iconName = completion
+    ? "return"
+    : isAskUser
+      ? "ask"
+      : label
+        ? iconNames[label.icon]
+        : "tool";
   const iconLabel = completion
     ? "Returned tool output"
-    : label
-      ? iconLabels[label.icon]
-      : (tool.name ?? "Tool");
-  const title = label?.title ?? tool.name ?? "Tool";
-  const detail = label?.detail ?? null;
-  const isMono = label?.icon === "terminal" || label?.icon === "generic";
+    : isAskUser
+      ? "Question"
+      : label
+        ? iconLabels[label.icon]
+        : (tool.name ?? "Tool");
+  const title = isAskUser ? "Question" : (label?.title ?? tool.name ?? "Tool");
+  const detail = isAskUser ? null : (label?.detail ?? null);
+  const isMono = !isAskUser && (label?.icon === "terminal" || label?.icon === "generic");
   const measuredElapsed = toolElapsedMilliseconds(tool, now, completion);
   const timeText = measuredElapsed === null ? null : formatElapsedTime(measuredElapsed);
   const showBackground = tool.background && !completion;

@@ -25,6 +25,7 @@ import type { ChatCommands, ChatStopState } from "./ChatCommands.ts";
 import type { ChatState } from "./ChatState.ts";
 import { useSessionSnapshot } from "../sessions/useSessionSnapshot.ts";
 import type { ModelOptionsState } from "../providers/models/useModelOptions.ts";
+import { UserQuestions } from "./ask-user/UserQuestions.tsx";
 import "./chat.css";
 
 const efforts = ["none", "low", "medium", "high", "extraHigh"];
@@ -330,6 +331,9 @@ export function Chat({
             onCancel={() => messageEditing.cancel(sessionId)}
           />
         )}
+      {active && (
+        <UserQuestions client={client} sessionId={sessionId} connected={ready} notice={notice} />
+      )}
       <Composer
         input={composerInput}
         subagentProviders={

@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
+import { RequestError } from "../../http/RequestError.ts";
+import { requestJson } from "../../http/Requests.ts";
 import { PreferencesClient } from "../../preferences/PreferencesClient.ts";
 import { SessionClient } from "../../sessions/SessionClient.ts";
 import { ServerProcess } from "../support/ServerProcess.ts";
@@ -55,6 +57,25 @@ async function setup(t: TestContext) {
       await delay(20, undefined, { signal });
     }
   }
+  const questionUrl = (id: string, suffix = "") =>
+    new URL(`/api/sessions/${encodeURIComponent(id)}/user-questions${suffix}`, server.origin);
+  const questions = (id: string) =>
+    requestJson<UserQuestion[]>(questionUrl(id), "GET", undefined, signal);
+  const answer = (id: string, questionId: string, value: unknown) =>
+    requestJson<{ answer: string }>(
+      questionUrl(id, `/${encodeURIComponent(questionId)}/answer`),
+      "POST",
+      { answer: value },
+      signal,
+    );
+  const pending = async (id: string) => {
+    const items = await poll(
+      () => questions(id),
+      (value) => value.length > 0,
+    );
+    assert.equal(items.length, 1);
+    return items[0]!;
+  };
   const snapshot = (id: string) => client.getSnapshot(id, signal);
   const settle = async (id: string, executionId: string) => {
     const result = await poll(
@@ -124,6 +145,9 @@ async function setup(t: TestContext) {
     firstConnection,
     secondConnection,
     client,
+    questions,
+    answer,
+    pending,
     signal,
     poll,
     snapshot,
@@ -132,6 +156,23 @@ async function setup(t: TestContext) {
     submit,
     transcript,
   };
+}
+
+type UserQuestion = {
+  id: string;
+  question: string;
+  context: string | null;
+  answers: string[];
+  sourceTitle: string | null;
+  background: boolean;
+};
+
+async function rejectsStatus(work: Promise<unknown>, status: number) {
+  await assert.rejects(work, (error: unknown) => {
+    assert.ok(error instanceof RequestError);
+    assert.equal(error.status, status);
+    return true;
+  });
 }
 
 type WireMessage = {
@@ -306,5 +347,153 @@ void test(
     );
     assertToolResult(f.second.calls[2]!.request, "ask_agent", "call-ask", answer);
     await f.transcript(asker, "call-ask", "ask_agent", args, answer);
+  },
+);
+
+for (const answer of ["Choose café", '{\r\n  "answer": "Custom 東京 🧭"\r\n}']) {
+  void test(
+    `ask_user returns the verbatim ${answer.startsWith("Choose") ? "preset" : "custom"} answer`,
+    { timeout: 90_000 },
+    async (t) => {
+      const f = await setup(t);
+      const args = {
+        question: "Which option?",
+        context: "Context café",
+        answers: ["Choose café", "Other"],
+      };
+      f.first.enqueue({
+        text: "",
+        toolCall: { id: "call-user", name: "ask_user", arguments: args },
+      });
+      f.first.enqueue({ text: "Answered." });
+      const id = await f.create();
+      const execution = await f.submit(id, f.firstConnection, "Ask me.");
+      const question = await f.pending(id);
+      assert.deepEqual(question, {
+        id: question.id,
+        ...args,
+        sourceTitle: null,
+        background: false,
+      });
+      assert.ok(question.id);
+      await rejectsStatus(f.answer(id, question.id, "  \n "), 400);
+      await rejectsStatus(f.answer(id, question.id, 42), 400);
+      assert.equal((await f.questions(id)).length, 1);
+      assert.deepEqual(await f.answer(id, question.id, answer), { answer });
+      await rejectsStatus(f.answer(id, question.id, answer), 409);
+      await f.settle(id, execution);
+      assert.deepEqual(await f.questions(id), []);
+      assertToolResult(f.first.calls[1]!.request, "ask_user", "call-user", answer);
+      await f.transcript(id, "call-user", "ask_user", args, answer);
+    },
+  );
+}
+
+void test(
+  "background ask_user permits steering before its answer",
+  { timeout: 90_000 },
+  async (t) => {
+    const f = await setup(t);
+    const args = { question: "Background question?", answers: [], background: true };
+    f.first.enqueue({
+      text: "",
+      toolCall: { id: "call-background-user", name: "ask_user", arguments: args },
+    });
+    f.first.enqueue({ text: "Waiting for the answer." });
+    f.first.enqueue({ text: "Steering received." });
+    f.first.enqueue({ text: "Answer received." });
+    const id = await f.create();
+    const execution = await f.submit(id, f.firstConnection, "Ask in the background.");
+    const question = await f.pending(id);
+    assert.deepEqual(question, {
+      id: question.id,
+      question: args.question,
+      context: null,
+      answers: [],
+      sourceTitle: null,
+      background: true,
+    });
+    await f.poll(
+      async () => f.first.calls.length,
+      (count) => count >= 2,
+    );
+    await f.submit(id, f.firstConnection, "Steering before the answer.");
+    await f.poll(
+      async () => f.first.calls.length,
+      (count) => count >= 3,
+    );
+    assert.ok(
+      messages(f.first.calls[2]!.request).some((message) =>
+        text(message).includes("Steering before the answer."),
+      ),
+    );
+    assert.equal((await f.questions(id)).length, 1);
+    const answer = "Background answer";
+    assert.deepEqual(await f.answer(id, question.id, answer), { answer });
+    await f.settle(id, execution);
+    assert.ok(
+      f.first.calls
+        .slice(3)
+        .some(({ request }) => messages(request).some((message) => text(message).includes(answer))),
+    );
+  },
+);
+
+void test("a child ask_user is routed to its primary session", { timeout: 90_000 }, async (t) => {
+  const f = await setup(t);
+  f.first.enqueue({
+    text: "",
+    toolCall: {
+      id: "call-child",
+      name: "subagent",
+      arguments: { bucket: "small", context: "none", task: "Ask the user." },
+    },
+  });
+  f.first.enqueue({ text: "Child finished." });
+  f.second.enqueue({
+    text: "",
+    toolCall: {
+      id: "call-child-user",
+      name: "ask_user",
+      arguments: { question: "Child question?", answers: [] },
+    },
+  });
+  f.second.enqueue({ text: "Child report." });
+  const id = await f.create();
+  const execution = await f.submit(id, f.firstConnection, "Delegate a question.");
+  const question = await f.pending(id);
+  assert.equal(question.question, "Child question?");
+  assert.equal(question.context, null);
+  assert.deepEqual(question.answers, []);
+  assert.equal(question.background, false);
+  assert.ok(question.sourceTitle);
+  assert.deepEqual(await f.answer(id, question.id, "Child answer"), { answer: "Child answer" });
+  await f.settle(id, execution);
+  assertToolResult(f.second.calls[1]!.request, "ask_user", "call-child-user", "Child answer");
+  assert.deepEqual(await f.questions(id), []);
+});
+
+void test(
+  "Stop removes a pending user question and expires its answer",
+  { timeout: 90_000 },
+  async (t) => {
+    const f = await setup(t);
+    f.first.enqueue({
+      text: "",
+      toolCall: {
+        id: "call-stop-user",
+        name: "ask_user",
+        arguments: { question: "Stop?", answers: [] },
+      },
+    });
+    const id = await f.create();
+    const execution = await f.submit(id, f.firstConnection, "Ask and wait.");
+    const question = await f.pending(id);
+    await f.client.stopExecution(id, execution);
+    await f.poll(
+      () => f.questions(id),
+      (items) => items.length === 0,
+    );
+    await rejectsStatus(f.answer(id, question.id, "Too late"), 409);
   },
 );

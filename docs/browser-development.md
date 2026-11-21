@@ -162,6 +162,12 @@ colours remain distinct. Transcript text uses the Markdown renderer. Tool icons 
 inspection card by hover, click or keyboard; hover alone preserves composer focus. The card
 refreshes when a running call finishes. File rows offer Copy path and Reveal in Explorer.
 
+`ask_user` keeps one pending question visible below the scrollable transcript and above the
+composer. When multiple questions are pending, use the arrows to switch between them. Suggested
+answers submit on click; custom answers are always available without touching the composer draft.
+The primary chat also shows questions from its subagents. Reload and reconnect read pending
+questions from the running server; they do not resubmit an answer.
+
 ## Markdown rendering
 
 `source/ui/markdown-rendering/` contains a standalone virtualized Markdown pipeline:

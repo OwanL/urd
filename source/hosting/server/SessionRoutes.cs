@@ -66,6 +66,7 @@ internal static class SessionRoutes {
         }));
     routes.MapSessionTranscriptRoutes(sessions);
     routes.MapSessionPrepassRoutes(sessions);
+    routes.MapSessionUserQuestionRoutes(sessions);
     routes.MapSubagentRoutes(sessions);
     return routes;
   }

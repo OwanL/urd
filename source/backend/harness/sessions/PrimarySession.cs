@@ -8,7 +8,7 @@ using Urd.Core.Tools;
 namespace Urd.Core.Sessions;
 
 // The user-facing session: accepts typed user messages and sends them to the LLM.
-public sealed class PrimarySession : SessionBase {
+public sealed partial class PrimarySession : SessionBase {
   internal PrimarySession(SessionRecord record, UrdStore store, Func<ProviderConnection, IChatClient> createChatClient,
       ToolCatalog? tools = null, ChatProcesses? processes = null, PendingToolCalls? pending = null,
       PreferenceManager? preferences = null, ModelSelector? modelSelector = null, ISubagentRunner? subagents = null)

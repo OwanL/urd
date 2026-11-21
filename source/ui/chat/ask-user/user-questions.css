@@ -1,0 +1,83 @@
+.user-questions {
+  flex: none;
+  width: min(100% - 24px, 48rem);
+  max-height: min(45%, 24rem);
+  overflow: auto;
+  box-sizing: border-box;
+  margin: 8px auto;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--surface-input);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.user-question-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.user-question-text,
+.user-question-context {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin-top: 6px;
+}
+
+.user-question-text {
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.user-question-context {
+  color: var(--text-secondary);
+}
+
+.user-question-options,
+.user-question-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.user-question-form textarea {
+  flex: 1 1 12rem;
+  min-width: 0;
+  min-height: 34px;
+  padding: 5px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: #0a0a0a;
+  resize: vertical;
+}
+
+.user-questions button {
+  min-width: 28px;
+  min-height: 34px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--surface-hover);
+  overflow-wrap: anywhere;
+}
+
+.user-questions button:hover:not(:disabled) {
+  border-color: var(--text-secondary);
+}
+
+.user-question-form button {
+  align-self: flex-end;
+}
+
+.user-question-feedback {
+  margin-top: 8px;
+  color: var(--danger);
+}

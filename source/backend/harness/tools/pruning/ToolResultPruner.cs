@@ -6,7 +6,7 @@ namespace Urd.Core.Tools;
 // Produces the one result used for both persistence and model context.
 internal static class ToolResultPruner {
   internal static ToolOutput Prune(string name, JsonElement arguments, ToolOutput output) {
-    if (output.IsError || output.Images.Count != 0 || name is "read" or "request_capability" || HasSpill(name, output.Details))
+    if (output.IsError || output.Images.Count != 0 || name is "read" or "request_capability" or "ask_user" || HasSpill(name, output.Details))
       return output;
 
     try {

@@ -28,6 +28,7 @@ import type { ContinuationReceipt, ContinuationSubmission } from "./inputs/Conti
 import type { MessageEditReceipt, MessageEditSubmission } from "./inputs/MessageEdit.ts";
 import type { SessionIdPage } from "./SessionIdPage.ts";
 import type { SessionSnapshot } from "./SessionSnapshot.ts";
+import type { UserQuestion } from "./inputs/UserQuestion.ts";
 import type { StopReceipt } from "./inputs/Stop.ts";
 import type { UserMessageReceipt, UserMessageSubmission } from "./inputs/UserMessageSubmission.ts";
 
@@ -72,6 +73,23 @@ export class SessionClient {
       "GET",
       undefined,
       signal,
+    );
+  }
+
+  getUserQuestions(sessionId: string, signal?: AbortSignal): Promise<UserQuestion[]> {
+    return requestJson(
+      this.url(`/${encodeURIComponent(sessionId)}/user-questions`),
+      "GET",
+      undefined,
+      signal,
+    );
+  }
+
+  answerUserQuestion(sessionId: string, id: string, answer: string): Promise<{ answer: string }> {
+    return requestJson(
+      this.url(`/${encodeURIComponent(sessionId)}/user-questions/${encodeURIComponent(id)}/answer`),
+      "POST",
+      { answer },
     );
   }
 

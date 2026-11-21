@@ -145,6 +145,8 @@ provider calls.
 | GET `/api/sessions/{sessionId}/compactions/operations/{operationId}` | 200 receipt or literal JSON `null` |
 | GET `/api/sessions/{sessionId}/compactions/{compactionId}` | `expectedHistoryRevision` → 200 `CompactionSummary`, or 404 |
 | GET `/api/sessions/{sessionId}/snapshot` | 200 slim `SessionSnapshot` |
+| GET `/api/sessions/{sessionId}/user-questions` | 200 pending `ask_user` calls from this primary session and its descendants |
+| POST `/api/sessions/{sessionId}/user-questions/{questionId}/answer` | `{answer}` → 200 `{answer}`; 400 for invalid text, 409 if no longer pending |
 | GET `/api/sessions/{sessionId}/history` | Mode/revision and optional entry anchor → 200 bounded `TranscriptHistoryPage` with `toolLabels` |
 | GET `/api/sessions/{sessionId}/markdown-images/{executionId}/{messageId}/{key}` | `historyRevision` and an image key from the assistant Markdown projection → 200 managed raster bytes, or 404 if unavailable |
 | GET `/api/sessions/{sessionId}/prepass/{boundaryId}/{category}` | `historyRevision`, optional `candidateOffset` and `resultOffset` → 200 paged `PrepassDetails`, or 404 |
@@ -164,6 +166,12 @@ Session snapshots include `canCompact`, a live hint that is true only while the 
 locally idle, with no active execution, durable unsettled run, admission fence or Stop request.
 The compaction POST rechecks admission in Core and returns 409 when unavailable; exact retries
 of an already accepted operation still return its retained receipt.
+
+For `ask_user`, pass `question`, optional `context`, and `answers` (up to six suggestions;
+an empty array allows a custom answer only). The existing `background: true` option lets the
+caller continue while waiting. The tool result is exactly the submitted answer. Pending questions
+are live state, scoped to the primary session and announced through watched-session changes.
+Stopping the owning call removes the question; restarting the server does not restore it.
 
 History and descriptor-carrying position windows attach `toolLabels`; full arguments,
 results and storage excerpts are never included. Tool inspection requires explicit `returned`

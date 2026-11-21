@@ -208,7 +208,7 @@ public sealed partial class SessionManager : IAsyncDisposable, ISubagentRunner, 
     processes = null;
     AgentTool[] shared = [new WebSearchTool(browser), new WebReadTool(browser),
       new ListPendingCallsTool(pending), new CancelPendingCallsTool(pending), new SubagentTool(), new ListAgentsTool(),
-      new AskAgentTool(), new AnswerAgentTool()];
+      new AskAgentTool(), new AnswerAgentTool(), new AskUserTool(this)];
     if (toolSettings is null || !processTools)
       return new([.. injectedTools, .. shared]);
     if (!OperatingSystem.IsWindows())

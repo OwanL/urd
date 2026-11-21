@@ -210,7 +210,7 @@ public sealed partial class SessionManager : IAsyncDisposable, ISubagentRunner, 
     processes = null;
     AgentTool[] shared = [new WebSearchTool(browser), new WebReadTool(browser),
       new ListPendingCallsTool(pending), new CancelPendingCallsTool(pending), new SubagentTool(), new ListAgentsTool(),
-      new AskAgentTool(), new AnswerAgentTool(), new AskUserTool(this)];
+      new AskAgentTool(), new AnswerAgentTool(), new AskUserTool(this), .. (primary ? new AgentTool[] { new ProposeMcpConnectionTool() } : [])];
     if (primary && playwright is { } automation)
       shared = [.. shared, new PlaywrightTool(automation)];
     if (toolSettings is null || !processTools)

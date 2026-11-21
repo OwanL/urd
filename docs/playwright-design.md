@@ -1,6 +1,6 @@
 # Playwright browser automation
 
-Status: design. Local experiments verified the browser profile and autofill separately; the Urd tool and chat handoff are not implemented.
+Status: the internal profile lifecycle is implemented and locally tested. The model-facing tool, network boundary and chat handoff are not wired.
 
 ## One browser profile
 
@@ -18,7 +18,7 @@ The shared profile is shared account access, not a read-only grant. Make that cl
 
 ## First implementation slice
 
-1. Build the shared persistent-browser owner and mock-site tests. Verify restart, cancellation, and exclusive ownership before wiring it to a model. No database migration is needed for the single profile.
+1. The shared persistent-browser owner is covered by lifecycle unit tests and an opt-in, headless loopback test (`URD_TEST_PLAYWRIGHT_PROFILE=1` with the pinned browser already cached). These cover ownership, handoff cancellation, profile reopen and session revocation with a fake site. No database migration is needed for the single profile.
 2. Wire the tool and the in-chat sign-in controls. With a local fixture, sign in, continue the original task, use the login from a second chat, restart Urd and use it again, then revoke the fixture session and repeat the handoff. Verify that another chat cannot drive the browser during sign-in, and that cancel or window close leaves no stuck lease or extra browser process.
 3. Qualify Twin Sandbox separately with opt-in. Use the stable local callback origin and verify a real API-backed operation after restart. Qualify the browser's native save-password prompt separately; Google account password sync is not a v1 requirement.
 

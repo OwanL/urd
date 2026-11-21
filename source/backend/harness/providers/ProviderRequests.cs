@@ -7,7 +7,7 @@ namespace Urd.Core.Providers;
 
 // Tracks provider requests and drains cancellation before releasing borrowed transport and storage.
 internal sealed class ProviderRequests(
-    AsyncLock gate, ProviderStorage storage, OpenAIInferenceClient inference,
+    AsyncLock gate, ProviderStorage storage, ModelSettingsStorage modelSettings, OpenAIInferenceClient inference,
     Func<Guid, long, CancellationToken, Task<ProviderState>> getCredentials,
     Action throwIfStopping, Action<ProviderState> ensureAvailable, Action<ProviderState> requireCurrentGrant) {
   private readonly List<ProviderRequest> requests = [];
@@ -38,7 +38,17 @@ internal sealed class ProviderRequests(
     try {
       ProviderState state = await getCredentials(expectedBinding.Id, generation, request.Cancellation.Token);
       request.Cancellation.Token.ThrowIfCancellationRequested();
-      await foreach (var update in inference.GetStreamingResponseAsync(state, messages, options, request.Cancellation.Token)) {
+      IReadOnlyList<ChatMessage> input = messages as IReadOnlyList<ChatMessage> ?? messages.ToArray();
+      string? imageModel = options.ModelId is { Length: > 0 and <= 256 } modelId && !modelId.Any(char.IsControl)
+          && input.Any(message => message.Contents.Any(ContainsImage)) ? modelId : null;
+      if (imageModel is not null && modelSettings.ImagesDisabled(state.Connection.Id, imageModel))
+        throw new ProviderOperationException(ProviderFailure.ImageInputUnsupported,
+            "Image input is disabled for this model. Reload Urd and reselect the model to update this chat, or enable Images in model settings.");
+
+      await using var stream = inference.GetStreamingResponseAsync(state, input, options, request.Cancellation.Token)
+          .GetAsyncEnumerator(request.Cancellation.Token);
+      while (await ReadUpdateAsync(stream, state, imageModel, request.Cancellation.Token)) {
+        ChatResponseUpdate update = stream.Current;
         if (completion is not null)
           throw new ProviderOperationException(ProviderFailure.InvalidProviderResponse);
         if (update.FinishReason is not null)
@@ -56,6 +66,27 @@ internal sealed class ProviderRequests(
     // No executable calls or native-context completion escape before the manager accepts the result.
     yield return completion;
   }
+
+  private async ValueTask<bool> ReadUpdateAsync(IAsyncEnumerator<ChatResponseUpdate> stream, ProviderState state,
+      string? imageModel, CancellationToken cancellationToken) {
+    try {
+      return await stream.MoveNextAsync();
+    } catch (ProviderOperationException failure) when (imageModel is not null && failure.Failure == ProviderFailure.ImageInputUnsupported) {
+      using var held = await gate.AcquireAsync(cancellationToken);
+      cancellationToken.ThrowIfCancellationRequested();
+      throwIfStopping();
+      requireCurrentGrant(state);
+      modelSettings.RecordImageRejection(state.Connection.Id, imageModel);
+      throw;
+    }
+  }
+
+  private static bool ContainsImage(AIContent content) => content switch {
+    DataContent data => data.HasTopLevelMediaType("image"),
+    FunctionResultContent { Result: IReadOnlyList<AIContent> parts } => parts.OfType<DataContent>()
+        .Any(part => part.HasTopLevelMediaType("image")),
+    _ => false
+  };
 
   private async Task<(ProviderRequest Request, long Generation)> BeginRequestAsync(Guid connectionId,
       CancellationToken cancellationToken, TimeSpan? timeout = null, ProviderConnection? expectedBinding = null) {

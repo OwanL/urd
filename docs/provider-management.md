@@ -190,10 +190,16 @@ factories and explicit strict-function schema settings on the plan namespace pat
 Protocol support for a reasoning effort does not establish support by a particular model;
 current ID/name catalogs leave that compatibility unknown. No model-name heuristic fills it in.
 
-Model family and image support are explicit local settings, independent of catalog refresh and
-credentials. Unconfigured models default to `other` and `supportsImages: false`. Saved records
-survive refresh/disconnect and are deleted only with their connection. Each submission freezes
-these values; changing settings never rewrites a running execution or an existing selection.
+Unconfigured models default to family `other` and allow image input. An explicit provider
+rejection that says the model does not accept images can turn support off for that exact
+connection and model, but only after an image request and only if there is no saved model
+setting. A saved Images setting always wins. Generic request failures and bad image formats
+do not change settings, and rejected requests are not retried with the image removed.
+
+Saved settings survive refresh/disconnect and are deleted only with their connection. Each
+submission freezes its selection. If the chat still has an older selection after a rejection,
+Urd blocks another image request locally rather than dropping the image. Reload Urd and reselect
+the model to pick up the setting, or enable Images in model settings to override it.
 
 `LlmProviderContext` captures a versioned native response scoped to connection ID, binding
 generation, API and exact **requested** model ID, not the provider's resolved alias.

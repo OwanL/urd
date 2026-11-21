@@ -79,6 +79,7 @@ public sealed class ModelSelectorTests {
       LlmSelection selection = await selector.ResolveSubagentAsync(bucket, preferences.Read(), [allowed.Id]).WaitAsync(TestTimeout);
       Assert.Equal(allowed, selection.Connection);
       Assert.Equal("assigned", selection.ModelId);
+      Assert.True(selection.SupportsImages);
 
       await Assert.ThrowsAsync<AuxiliaryModelUnavailableException>(() =>
           selector.ResolveSubagentAsync(bucket, preferences.Read(), []).WaitAsync(TestTimeout));

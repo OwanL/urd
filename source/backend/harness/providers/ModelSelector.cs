@@ -102,7 +102,7 @@ public sealed class ModelSelector {
     ModelSettings? modelSettings = settings.FirstOrDefault(candidate =>
         string.Equals(candidate.ModelId, model.Id, StringComparison.Ordinal));
     return new LlmSelection(connection, model.Id, "high", modelSettings?.Family ?? ModelFamily.Other,
-        modelSettings?.SupportsImages ?? false, modelSettings?.ContextWindow ?? model.ContextWindow);
+        modelSettings?.SupportsImages ?? true, modelSettings?.ContextWindow ?? model.ContextWindow);
   }
 
   private static ProviderModel? FindModel(ProviderModelCatalog catalog, string modelId) =>

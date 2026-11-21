@@ -41,6 +41,19 @@ internal sealed class ModelSettingsStorage(Database database) {
     });
   }
 
+  internal bool ImagesDisabled(Guid connectionId, string modelId) => database.Read(transaction =>
+      database.Scalar<bool>(transaction, """
+        SELECT EXISTS(SELECT 1 FROM model_settings WHERE connection_id = $id AND model_id = $model AND supports_images = 0);
+        """, ("$id", connectionId), ("$model", modelId)));
+
+  // Positive evidence fills an unset capability only; a user's saved setting wins.
+  internal void RecordImageRejection(Guid connectionId, string modelId) => database.Write(transaction =>
+      database.Execute(transaction, """
+        INSERT INTO model_settings (connection_id, model_id, family, supports_images, context_window)
+        VALUES ($id, $model, $family, 0, NULL)
+        ON CONFLICT (connection_id, model_id) DO NOTHING;
+        """, ("$id", connectionId), ("$model", modelId), ("$family", (int)ModelFamily.Other)));
+
   private void RequireConnection(SqliteTransaction transaction, Guid connectionId) {
     if (!database.Scalar<bool>(transaction,
         "SELECT EXISTS(SELECT 1 FROM provider_connections WHERE connection_id = $id);", ("$id", connectionId)))

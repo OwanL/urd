@@ -46,7 +46,8 @@ public sealed class ProviderManager : IDisposable {
     client = new(handler, disposeHandler: false) { Timeout = Timeout.InfiniteTimeSpan };
     authentication = new(handler, issuer);
     modelProbe = new(client, usage, prices);
-    requests = new(gate, storage, new(client, connectSocket: connectSocket), GetCredentialsAsync, ThrowIfStopping, EnsureAvailable, RequireCurrentGrant);
+    requests = new(gate, storage, modelSettings, new(client, connectSocket: connectSocket), GetCredentialsAsync,
+        ThrowIfStopping, EnsureAvailable, RequireCurrentGrant);
     signIns = new(storage, authentication, gate, callbackUri, id => requests.Cancel(id));
   }
 

@@ -59,7 +59,7 @@ export function ProviderModelCatalog({
                     connectionId: connection.id,
                     modelId: model.id,
                     family: "other",
-                    supportsImages: false,
+                    supportsImages: true,
                     contextWindow: null,
                   };
                 const changed =

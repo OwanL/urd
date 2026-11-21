@@ -30,6 +30,8 @@ public sealed class ProviderOperationException : Exception {
       ClientResultException { Status: 403 } => ProviderFailure.PlanAccessDenied,
       ClientResultException when contextWindow && IsContextWindowExceededCode(details?.Code) =>
           ProviderFailure.ContextWindowExceeded,
+      ClientResultException { Status: 400 or 422 } when IsModelImageRejection(details?.Code, details?.Message) =>
+          ProviderFailure.ImageInputUnsupported,
       ClientResultException { Status: 404 or 405 or 501 } when discovery => ProviderFailure.DiscoveryUnsupported,
       ClientResultException or HttpRequestException or IOException or OperationCanceledException => ProviderFailure.ProviderUnavailable,
       _ => ProviderFailure.InvalidProviderResponse
@@ -42,9 +44,27 @@ public sealed class ProviderOperationException : Exception {
   }
 
   internal static ProviderOperationException FromProviderStreamError(string? code, string? message,
-      string? param, ProviderCredentials? credentials) =>
-      Create(IsContextWindowExceededCode(code) ? ProviderFailure.ContextWindowExceeded : ProviderFailure.ProviderUnavailable,
-          message, code, param, null, null, credentials);
+      string? param, ProviderCredentials? credentials) {
+    ProviderFailure failure = ProviderFailure.ProviderUnavailable;
+    if (IsContextWindowExceededCode(code))
+      failure = ProviderFailure.ContextWindowExceeded;
+    else if (IsModelImageRejection(code, message))
+      failure = ProviderFailure.ImageInputUnsupported;
+    return Create(failure, message, code, param, null, null, credentials);
+  }
+
+  // Do not treat malformed images, unsupported formats or generic invalid requests as model capability evidence.
+  private static bool IsModelImageRejection(string? code, string? message) {
+    if (code is "model_does_not_support_image_input" or "model_does_not_support_images")
+      return true;
+    if (code is not (null or "invalid_value" or "invalid_request_error" or "invalid_request" or "unsupported_value"))
+      return false;
+
+    return message?.Trim().TrimEnd('.') is { } text && (text.Equals("This model does not support image inputs", StringComparison.OrdinalIgnoreCase)
+        || text.Equals("This model does not support image input", StringComparison.OrdinalIgnoreCase)
+        || text.Equals("This model does not support images", StringComparison.OrdinalIgnoreCase)
+        || text.Equals("Invalid content type. image_url is only supported by certain models", StringComparison.OrdinalIgnoreCase));
+  }
 
   internal static bool IsContextWindowExceeded(ClientResultException error) =>
       IsContextWindowExceededCode(ReadErrorDetails(error).Code);
@@ -148,5 +168,6 @@ public enum ProviderFailure {
   IncompleteResponse,
   Disconnecting,
   DiscoveryUnsupported,
-  ContextWindowExceeded
+  ContextWindowExceeded,
+  ImageInputUnsupported
 }

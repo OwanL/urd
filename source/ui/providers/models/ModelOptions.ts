@@ -195,7 +195,7 @@ function mapModels(
         connection,
         modelId: model.id,
         family: modelSettings?.family ?? "other",
-        supportsImages: modelSettings?.supportsImages ?? false,
+        supportsImages: modelSettings?.supportsImages ?? true,
         contextWindow: modelSettings?.contextWindow ?? model.contextWindow ?? null,
         reasoningEffort: "high",
       },

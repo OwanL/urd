@@ -64,7 +64,7 @@ void test("cached reads publish options and discover only providers without a re
   );
   assert.equal(cached.options?.[0]?.providerLabel, "First provider");
   assert.equal(cached.options?.[0]?.selection.family, "other");
-  assert.equal(cached.options?.[0]?.selection.supportsImages, false);
+  assert.equal(cached.options?.[0]?.selection.supportsImages, true);
   assert.equal(cached.options?.[0]?.selection.contextWindow, null);
   assert.equal(cached.options?.[0]?.selection.reasoningEffort, "high");
   assert.deepEqual(
@@ -258,8 +258,8 @@ void test("configured metadata is matched by connection and model without infere
     ]),
     [
       ["anthropic", true, 16_384],
-      ["other", false, 64_000],
-      ["other", false, null],
+      ["other", true, 64_000],
+      ["other", true, null],
     ],
   );
   assert.equal(result.options?.[0]?.selection.connection, connection);

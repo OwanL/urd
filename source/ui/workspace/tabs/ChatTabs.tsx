@@ -1,5 +1,5 @@
 import type { RefObject } from "preact";
-import { useLayoutEffect, useRef, useState } from "preact/hooks";
+import { useLayoutEffect, useState } from "preact/hooks";
 import { Icon } from "../../controls/Icon.tsx";
 import { IconButton } from "../../controls/IconButton.tsx";
 import { Tooltip } from "../../controls/Tooltip.tsx";
@@ -47,14 +47,6 @@ export function ChatTabs({
   onReorder,
 }: ChatTabsProps) {
   const [announcement, setAnnouncement] = useState("");
-  const [confirmingId, setConfirmingId] = useState<string | null>(null);
-  const confirmation = useRef<HTMLDialogElement>(null);
-  const confirming = tabs.find((tab) => tab.id === confirmingId);
-  useLayoutEffect(() => {
-    const dialog = confirmation.current;
-    if (confirming && dialog && !dialog.open) dialog.showModal();
-    if (!confirming && confirmingId !== null) setConfirmingId(null);
-  }, [confirming, confirmingId]);
   const drag = useTabDrag(tabs, (id, beforeId) => {
     reorder(id, beforeId);
     focusTab(id);
@@ -68,8 +60,6 @@ export function ChatTabs({
     });
   }
   async function closeTab(id: string) {
-    confirmation.current?.close();
-    setConfirmingId(null);
     const closingTab = document.getElementById(`tab-${id}`);
     closingTab?.focus({ preventScroll: true });
     await onClose(id);
@@ -111,7 +101,7 @@ export function ChatTabs({
     onReorder(id, beforeId);
   }
 
-  const tabStrip = (
+  return (
     <div
       ref={drag.strip}
       class="chat-tabs"
@@ -220,7 +210,7 @@ export function ChatTabs({
                 onKeyDown={(event) => {
                   if (event.key === "Delete" && !event.repeat && !drag.draggedId) {
                     event.preventDefault();
-                    if (closeAvailable) setConfirmingId(id);
+                    if (closeAvailable) void closeTab(id);
                   }
                 }}
               >
@@ -282,14 +272,14 @@ export function ChatTabs({
                         "Closing chat…"
                       ) : closeAvailable ? (
                         <>
-                          Close chat <kbd>Delete</kbd>
+                          Close chat permanently <kbd>Delete</kbd>
                         </>
                       ) : (
                         "Close unavailable"
                       )
                     }
                     placement="below"
-                    onClick={() => setConfirmingId(id)}
+                    onClick={() => void closeTab(id)}
                   />
                 </>
               )}
@@ -301,37 +291,5 @@ export function ChatTabs({
         {announcement}
       </span>
     </div>
-  );
-
-  return (
-    <>
-      {tabStrip}
-      {confirming && (
-        <dialog
-          ref={confirmation}
-          class="close-chat-dialog"
-          aria-labelledby="close-chat-title"
-          aria-describedby="close-chat-description"
-          onClose={() => setConfirmingId(null)}
-        >
-          <h2 id="close-chat-title">Close “{confirming.title}”?</h2>
-          <p id="close-chat-description">
-            This permanently deletes the conversation and its draft. It can’t be reopened.
-          </p>
-          <div class="close-chat-actions">
-            <button type="button" autoFocus onClick={() => confirmation.current?.close()}>
-              Cancel
-            </button>
-            <button
-              type="button"
-              disabled={!confirming.closeAvailable}
-              onClick={() => void closeTab(confirming.id)}
-            >
-              Close permanently
-            </button>
-          </div>
-        </dialog>
-      )}
-    </>
   );
 }

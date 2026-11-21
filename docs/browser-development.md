@@ -144,8 +144,8 @@ wait for the live connection; drafts remain editable. Intentional background sus
 reported as a connection failure. Initial discovery failure offers an explicit connection retry;
 uncertain commands are never replayed by reconnecting.
 
-Closing a chat requires explicit confirmation. On confirmed closure the workspace removes
-its tab, draft and chat record. A failed or unconfirmed close is not treated as success.
+The close button and Delete request closure without a dialog. The workspace removes
+its tab, draft and chat record only once closure is confirmed.
 The workspace keeps open chats' local state in this browser tab's `sessionStorage`.
 Ordinary draft edits write only that chat's draft record. A full workspace save folds in and then removes stale draft records; a
 newer draft overlay is retained. Command journals synchronously save the complete

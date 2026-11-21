@@ -107,6 +107,9 @@ public sealed class UrdStore : IDisposable {
 
   // The manager must have fenced new work and awaited settlement of the owned execution tree.
   internal bool DeletePrimarySession(Guid sessionId, CancellationToken cancellationToken = default) =>
+      DeletePrimarySessionTree(sessionId, cancellationToken) is not null;
+
+  internal IReadOnlyList<Guid>? DeletePrimarySessionTree(Guid sessionId, CancellationToken cancellationToken = default) =>
       sessionClosure.DeletePrimary(sessionId, cancellationToken);
 
   public bool IsSetupComplete() => database.Read(transaction =>

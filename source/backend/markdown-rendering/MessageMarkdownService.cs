@@ -7,26 +7,32 @@ public sealed class MessageMarkdownService : IAsyncDisposable {
 
   public MessageMarkdownService(MessageMarkdownCacheLimits limits) => scheduler = new(limits);
 
-  public async Task<MessageMarkdownLease> OpenAsync(SessionBase session, TranscriptEntryRef entry,
+  public Task<MessageMarkdownLease> OpenAsync(SessionBase session, TranscriptEntryRef entry,
       CancellationToken cancellation = default) {
     ArgumentNullException.ThrowIfNull(session);
+    return OpenAsync(session.Transcript, entry, cancellation);
+  }
+
+  public async Task<MessageMarkdownLease> OpenAsync(SessionTranscript transcript, TranscriptEntryRef entry,
+      CancellationToken cancellation = default) {
+    ArgumentNullException.ThrowIfNull(transcript);
     ArgumentNullException.ThrowIfNull(entry);
 
-    TranscriptPositionWindow window = await session.Transcript.ReadEntryPositionAsync(
+    TranscriptPositionWindow window = await transcript.ReadEntryPositionAsync(
         entry.HistoryRevision, entry, cancellation);
     TranscriptPositionedEntry positioned = window.Entries.SingleOrDefault(candidate =>
         candidate.Descriptor.Entry == entry && candidate.Position.Entry == entry)
         ?? throw new KeyNotFoundException("The entry has no authoritative transcript position.");
-    MessageMarkdownKey key = MessageMarkdownKey.FromPositionedEntry(session.Id, positioned);
-    MessageMarkdownLease lease = await scheduler.RequestAsync(key, session, cancellation);
+    MessageMarkdownKey key = MessageMarkdownKey.FromPositionedEntry(transcript.SessionId, positioned);
+    MessageMarkdownLease lease = await scheduler.RequestAsync(key, transcript, cancellation);
 
     try {
-      await session.Transcript.ReadPositionSummaryAsync(entry.HistoryRevision, cancellation);
+      await transcript.ReadPositionSummaryAsync(entry.HistoryRevision, cancellation);
     } catch (Exception failure) {
       lease.Dispose();
       if (failure is HistoryRevisionConflictException or KeyNotFoundException) {
         try {
-          scheduler.Invalidate(session.Id);
+          scheduler.Invalidate(transcript.SessionId);
         } catch (ObjectDisposedException) {
           // Disposal already clears the cache and prevents further requests.
         }

@@ -76,28 +76,30 @@ public abstract class SessionBase {
       throw new KeyNotFoundException($"Session '{Id}' does not exist.");
   }
 
-  private protected async Task<SessionCloseStatus> DeleteIfIdleAsync(Action ensureManagerOpen, CancellationToken cancellation) {
+  private protected async Task<(SessionCloseStatus Status, IReadOnlyList<Guid>? DeletedSessions)> DeleteIfIdleAsync(
+      Action ensureManagerOpen, CancellationToken cancellation) {
     using var _ = await sessionLock.AcquireAsync(cancellation);
     ensureManagerOpen();
     cancellation.ThrowIfCancellationRequested();
     if (closed)
-      return SessionCloseStatus.NotFound;
+      return (SessionCloseStatus.NotFound, null);
     if (!CanStartWork || CurrentExecution is not null)
-      return SessionCloseStatus.Busy;
+      return (SessionCloseStatus.Busy, null);
 
     SessionSnapshot snapshot = ReadCurrentSnapshot();
     if (snapshot.UnsettledExecutionId is not null || snapshot.AdmissionFenced || snapshot.StopRequested)
-      return SessionCloseStatus.Busy;
+      return (SessionCloseStatus.Busy, null);
 
     // The session gate serializes deletion with admission, edit, and settlement. Don't tear down
     // live resources on a failed delete: the saved session would otherwise be left unusable.
-    if (!store.DeletePrimarySession(Id, CancellationToken.None))
-      return SessionCloseStatus.NotFound;
+    IReadOnlyList<Guid>? deletedSessions = store.DeletePrimarySessionTree(Id, CancellationToken.None);
+    if (deletedSessions is null)
+      return (SessionCloseStatus.NotFound, null);
 
     closed = true;
     Questions.ForgetRecipient();
     notifications.Close();
-    return SessionCloseStatus.Closed;
+    return (SessionCloseStatus.Closed, deletedSessions);
   }
 
   // Caller holds the session lock.

@@ -94,15 +94,9 @@ internal static class MarkdownRoutes {
     if (!TryGetPage(hub, streamId, out SessionEventPage page))
       return MissingPageResult(http);
 
-    PrimarySession session;
-    try {
-      session = await sessions.GetPrimaryAsync(request.SessionId);
-    } catch (InvalidOperationException) when (IsApplicationStopping(http)) {
-      return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
-    }
-
+    (SessionTranscript transcript, _) = await sessions.GetTranscriptAsync(request.SessionId, http.RequestAborted);
     MessageMarkdownLease lease = await page.MarkdownLeases.OpenAsync(leaseId,
-        cancellation => markdown.OpenAsync(session, entry, cancellation), http.RequestAborted);
+        cancellation => markdown.OpenAsync(transcript, entry, cancellation), http.RequestAborted);
     // Source facts use the server serializer's string enum contract; only render pages
     // use the Core options whose numeric enum widths are included in byte accounting.
     IResult response = Results.Ok(new { manifest = lease.Manifest, source = lease.Source });

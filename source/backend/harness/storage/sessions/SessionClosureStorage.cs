@@ -5,17 +5,17 @@ namespace Urd.Core.Storage;
 
 // Called only after the manager has fenced and joined all work owned by the session.
 internal sealed class SessionClosureStorage(Database database, SessionImageCleanup images) {
-  internal bool DeletePrimary(Guid sessionId, CancellationToken cancellationToken) => database.RunLocked(() => {
+  internal IReadOnlyList<Guid>? DeletePrimary(Guid sessionId, CancellationToken cancellationToken) => database.RunLocked(() => {
     cancellationToken.ThrowIfCancellationRequested();
     var deleted = database.Write(transaction => DeletePrimary(transaction, sessionId, cancellationToken));
     if (deleted is not { } orphaned)
-      return false;
+      return null;
 
     images.Delete(orphaned.Tool, orphaned.Markdown);
-    return true;
+    return orphaned.Sessions;
   });
 
-  private (List<string> Tool, List<string> Markdown)? DeletePrimary(SqliteTransaction transaction, Guid sessionId,
+  private (List<string> Tool, List<string> Markdown, List<Guid> Sessions)? DeletePrimary(SqliteTransaction transaction, Guid sessionId,
       CancellationToken cancellationToken) {
     if (!database.Scalar<bool>(transaction, """
         SELECT EXISTS(SELECT 1 FROM sessions WHERE session_id = $session AND kind = $primary);
@@ -37,13 +37,14 @@ internal sealed class SessionClosureStorage(Database database, SessionImageClean
         """))
       throw new InvalidOperationException("Closure must await execution settlement.");
 
+    List<Guid> sessions = database.Query(transaction, "SELECT session_id FROM closing_sessions;", row => row.Guid("session_id"));
     images.CollectCandidates(transaction);
     CompactUsage(transaction, sessionId);
     DeleteHistory(transaction);
     var orphaned = images.ReadOrphans(transaction);
     database.Execute(transaction, "DROP TABLE closing_sessions;");
     cancellationToken.ThrowIfCancellationRequested();
-    return orphaned;
+    return (orphaned.Tool, orphaned.Markdown, sessions);
   }
 
   private void CompactUsage(SqliteTransaction transaction, Guid sessionId) => database.Execute(transaction, """

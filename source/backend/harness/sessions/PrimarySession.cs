@@ -16,7 +16,7 @@ public sealed partial class PrimarySession : SessionBase {
           modelSelector, subagents) {
   }
 
-  internal Task<SessionCloseStatus> CloseIfIdleAsync(Action ensureManagerOpen, CancellationToken cancellation) =>
+  internal Task<(SessionCloseStatus Status, IReadOnlyList<Guid>? DeletedSessions)> CloseIfIdleAsync(Action ensureManagerOpen, CancellationToken cancellation) =>
       DeleteIfIdleAsync(ensureManagerOpen, cancellation);
 
   // Returns a saved acceptance/refusal, without waiting for the LLM answer.

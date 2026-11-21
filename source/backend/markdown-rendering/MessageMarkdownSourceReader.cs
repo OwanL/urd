@@ -8,11 +8,13 @@ namespace Urd.Core.MarkdownRendering;
 // Captures and revalidates guarded content bounds; assembly is unscheduled and
 // outside the session/database gates. The Markdown scheduler owns worker admission.
 internal static class MessageMarkdownSourceReader {
-  internal static async Task<MessageMarkdownSource> ReadAsync(SessionBase session, MessageMarkdownKey key,
+  internal static Task<MessageMarkdownSource> ReadAsync(SessionBase session, MessageMarkdownKey key,
+      CancellationToken cancellation = default) => ReadAsync(session.Transcript, key, cancellation);
+
+  internal static async Task<MessageMarkdownSource> ReadAsync(SessionTranscript transcript, MessageMarkdownKey key,
       CancellationToken cancellation = default) {
-    if (session.Id != key.SessionId)
+    if (transcript.SessionId != key.SessionId)
       throw new ArgumentException("The session does not match the markdown key.", nameof(key));
-    SessionTranscript transcript = session.Transcript;
     MessageContentExtent extent = await transcript.CaptureContentExtentAsync(key.Message, key.TextFacts, cancellation);
     MessageMarkdownSource source = AssembleSource(cursor => transcript.ReadContentSegment(extent, cursor), extent, cancellation);
     await transcript.ValidateContentExtentAsync(extent, cancellation);

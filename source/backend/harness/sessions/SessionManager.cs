@@ -97,9 +97,11 @@ public sealed partial class SessionManager : IAsyncDisposable, ISubagentRunner, 
     if (session is null)
       return SessionCloseStatus.NotFound;
 
-    SessionCloseStatus result = await session.CloseIfIdleAsync(registry.ThrowIfShuttingDown, cancellation);
+    (SessionCloseStatus result, IReadOnlyList<Guid>? deletedSessions) =
+        await session.CloseIfIdleAsync(registry.ThrowIfShuttingDown, cancellation);
     if (result == SessionCloseStatus.Closed) {
-      Notify(SessionClosed, session.Id);
+      foreach (Guid deletedSession in deletedSessions!)
+        Notify(SessionClosed, deletedSession);
       // Keep ownership until process cleanup succeeds, so racing shutdown can join it too.
       await session.KillProcessesAsync();
       await registry.UntrackPrimaryAsync(sessionId);

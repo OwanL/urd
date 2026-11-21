@@ -18,6 +18,8 @@ public sealed class SessionTranscript {
     this.sessionLock = sessionLock;
   }
 
+  internal Guid SessionId => sessionId;
+
   public Task<MessageContentPage> ReadContentAsync(
       MessageContentCursor cursor, CancellationToken cancellation = default) =>
       ReadUnderLockAsync(() => store.Content.Read(sessionId, cursor), cancellation);

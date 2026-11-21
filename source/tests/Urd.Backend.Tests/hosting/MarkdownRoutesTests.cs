@@ -140,6 +140,54 @@ public sealed class MarkdownRoutesTests {
   }
 
   [Fact]
+  public async Task RetainedChildMarkdownUsesReadOnlyTranscript() {
+    using var database = new TemporaryDatabase();
+    (Guid sessionId, TranscriptEntryRef entry) = Seed(database, child: true);
+    await using var server = new RunningServer(RunningServer.OptionsFor(database));
+    await server.WaitForReadyAsync();
+    using var stream = await OpenStreamAsync(server.Client);
+    Guid streamId = await ReadStreamIdAsync(stream);
+    string PathForLease() => $"/api/events/{streamId}/markdown/{Guid.NewGuid()}";
+    string body = JsonSerializer.Serialize(new { sessionId, entry }, inputJson);
+    string path = PathForLease();
+    JsonElement opened = await PostJsonAsync(server.Client, path, body);
+    Guid generation = opened.GetProperty("manifest").GetProperty("generation").GetGuid();
+    await AssertStatusAsync(server.Client, HttpMethod.Get,
+        $"{path}/pieces?generation={generation}&index=0", HttpStatusCode.OK);
+    await AssertStatusAsync(server.Client, HttpMethod.Post, $"/api/sessions/{sessionId}/close", HttpStatusCode.NotFound, "{}");
+    await AssertStatusAsync(server.Client, HttpMethod.Post, PathForLease(), HttpStatusCode.NotFound,
+        JsonSerializer.Serialize(new { sessionId = Guid.NewGuid(), entry }, inputJson));
+    await AssertStatusAsync(server.Client, HttpMethod.Post, PathForLease(), HttpStatusCode.NotFound,
+        JsonSerializer.Serialize(new { sessionId, entry = entry with { EntryId = Guid.NewGuid() } }, inputJson));
+    database.ForceHistoryRevision(1);
+    await AssertStatusAsync(server.Client, HttpMethod.Post, PathForLease(), HttpStatusCode.Conflict, body);
+  }
+
+  [Theory]
+  [InlineData(1)]
+  [InlineData(2)]
+  public async Task ClosingParentRevokesRetainedChildHistory(int depth) {
+    using var database = new TemporaryDatabase();
+    (Guid sessionId, TranscriptEntryRef entry) = Seed(database, child: true, depth: depth);
+    Guid parentId = sessionId;
+    using (UrdStore store = UrdStore.Open(database.Path)) {
+      for (int i = 0; i < depth; i++)
+        parentId = store.Sessions.Read(parentId)!.ParentSessionId!.Value;
+    }
+    await using var server = new RunningServer(RunningServer.OptionsFor(database));
+    await server.WaitForReadyAsync();
+    using var stream = await OpenStreamAsync(server.Client);
+    Guid streamId = await ReadStreamIdAsync(stream);
+    string path = $"/api/events/{streamId}/markdown/{Guid.NewGuid()}";
+    JsonElement lease = await PostJsonAsync(server.Client, path, JsonSerializer.Serialize(new { sessionId, entry }, inputJson));
+    Guid generation = lease.GetProperty("manifest").GetProperty("generation").GetGuid();
+    string pieces = $"{path}/pieces?generation={generation}&index=0";
+    await AssertStatusAsync(server.Client, HttpMethod.Get, pieces, HttpStatusCode.OK);
+    await AssertStatusAsync(server.Client, HttpMethod.Post, $"/api/sessions/{parentId}/close", HttpStatusCode.NoContent, "{}");
+    await AssertStatusAsync(server.Client, HttpMethod.Get, pieces, HttpStatusCode.Gone);
+  }
+
+  [Fact]
   public async Task ClosingSessionRevokesHistoryAlreadyOpenOnAnotherPage() {
     using var database = new TemporaryDatabase();
     (Guid sessionId, TranscriptEntryRef entry) = Seed(database);
@@ -230,9 +278,11 @@ public sealed class MarkdownRoutesTests {
     public void StopApplication() => throw new NotSupportedException();
   }
 
-  private static (Guid SessionId, TranscriptEntryRef Entry) Seed(TemporaryDatabase database) {
+  private static (Guid SessionId, TranscriptEntryRef Entry) Seed(TemporaryDatabase database, bool child = false, int depth = 1) {
     using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
+    for (int i = 0; child && i < depth; i++)
+      session = store.Sessions.CreateSubagent(Guid.NewGuid(), session, "spawn").Id;
     Guid run = Guid.NewGuid();
     var identity = new ExecutionIdentity(session, run, 0);
     string text = string.Join("\n\n", Enumerable.Range(0, 130).Select(i => $"[item{i}](https://example.invalid/{i})"));

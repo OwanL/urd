@@ -37,9 +37,12 @@ internal sealed class MessageMarkdownScheduler : IAsyncDisposable {
 
   // The caller supplies exact committed extents; capture happens only on a miss.
   internal Task<MessageMarkdownLease> RequestAsync(MessageMarkdownKey key, SessionBase session,
+      CancellationToken cancellation = default) => RequestAsync(key, session.Transcript, cancellation);
+
+  internal Task<MessageMarkdownLease> RequestAsync(MessageMarkdownKey key, SessionTranscript transcript,
       CancellationToken cancellation = default) {
-    if (session.Id != key.SessionId) throw new ArgumentException("The session does not match the markdown key.", nameof(session));
-    return RequestAsync(key, token => MessageMarkdownSourceReader.ReadAsync(session, key, token), cancellation);
+    if (transcript.SessionId != key.SessionId) throw new ArgumentException("The session does not match the markdown key.", nameof(transcript));
+    return RequestAsync(key, token => MessageMarkdownSourceReader.ReadAsync(transcript, key, token), cancellation);
   }
 
   internal Task<MessageMarkdownLease> RequestAsync(MessageMarkdownKey key,

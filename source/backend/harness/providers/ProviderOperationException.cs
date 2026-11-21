@@ -40,6 +40,9 @@ public sealed class ProviderOperationException : Exception {
     if (details is not null)
       return Create(failure, details.Message, details.Code, details.Param, details.RequestId, details.Status, credentials);
 
+    if (error is ResponsesSocketStream.ReceiveException receiveError)
+      return new(failure, receiveError.Message);
+
     return new(failure, FormatMessage(failure, null, null, null, null, null, error.GetType().Name, credentials), null);
   }
 

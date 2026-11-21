@@ -107,7 +107,7 @@ public sealed class ChatGptSocketRunTests {
       using var response = await turn.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
       if (failure == "receive") {
         using Stream stream = await response.Content.ReadAsStreamAsync();
-        await Assert.ThrowsAsync<IOException>(async () => await stream.ReadExactlyAsync(new byte[128]));
+        await Assert.ThrowsAnyAsync<IOException>(async () => await stream.ReadExactlyAsync(new byte[128]));
       }
     }
     run.EndTurn(false);
@@ -145,7 +145,7 @@ public sealed class ChatGptSocketRunTests {
       using var frame = JsonDocument.Parse(socket.Frames[1]);
       Assert.False(frame.RootElement.TryGetProperty("previous_response_id", out _));
       using Stream stream = await response.Content.ReadAsStreamAsync();
-      await Assert.ThrowsAsync<IOException>(() => stream.CopyToAsync(Stream.Null));
+      await Assert.ThrowsAnyAsync<IOException>(() => stream.CopyToAsync(Stream.Null));
     }
     run.EndTurn(false);
     Assert.True(socket.Disposed.Task.IsCompleted);

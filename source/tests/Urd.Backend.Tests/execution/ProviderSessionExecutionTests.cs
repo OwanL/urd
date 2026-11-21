@@ -8,7 +8,9 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.AI;
 using SkiaSharp;
 using Urd.Backend.Tests.Support;
+using Urd.Core.Compaction;
 using Urd.Core.Execution;
+using Urd.Core.Preferences;
 using Urd.Core.Providers;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
@@ -321,6 +323,8 @@ public sealed class ProviderSessionExecutionTests {
       Assert.Empty(transport.Requests);
       if (failBeforeCompletion) {
         Assert.Equal(ExecutionOutcome.Failed, result.Outcome);
+        Assert.Contains("Responses WebSocket transport read failed.", (await session.ReadSnapshotAsync()).LastSettlement?.Error,
+            StringComparison.Ordinal);
         Assert.Equal(0, effects);
         Assert.Empty(StoredTools.Read(database));
         Assert.Empty(ReadProviderResponses(database));
@@ -375,6 +379,87 @@ public sealed class ProviderSessionExecutionTests {
       UserMessageReceipt receipt = await target.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, text, selection));
       Assert.Equal(MessageAcceptance.Accepted, receipt.Acceptance);
       return await target.WaitForExecutionFinishAsync(Assert.IsType<Guid>(receipt.ExecutionId)).WaitAsync(TestTimeout);
+    }
+  }
+
+  [Theory]
+  [InlineData(false)]
+  [InlineData(true)]
+  public async Task ChatGptCompactionRetiresTheOldSocketBeforeSendingCompactedHistory(bool handshakeFails) {
+    using var database = new TemporaryDatabase();
+    using var identity = new FakeOpenAIIdentity();
+    using var store = UrdStore.Open(database.Path);
+    var preferences = new PreferenceManager(store);
+    const string summary = "Earlier history summary";
+    string call = ProviderModelStreams.Call.Replace("\"name\":\"lookup\"", "\"namespace\":\"urd\",\"name\":\"lookup\"");
+    string initialStream = ProviderModelStreams.Responses([ProviderModelStreams.Message, call]);
+    string finalStream = ProviderModelStreams.Responses().Replace("resp_fixture", "resp_after_compaction");
+    using var summaryHandler = new ScriptedOpenAIHandler(ProviderModelStreams.Responses().Replace("hello", summary));
+    using var fallbackHandler = new ScriptedOpenAIHandler(finalStream);
+    using var transport = new ChatGptLoopTransport(identity, summaryHandler, fallbackHandler);
+    using var oldSocket = new LoopSocket([initialStream], closeWhenExhausted: true);
+    using var freshSocket = new LoopSocket([finalStream]);
+    int handshakes = 0;
+    bool retiredBeforeHandshake = false;
+    Task<WebSocket> Connect(string token, Guid sessionId, CancellationToken cancellation) {
+      cancellation.ThrowIfCancellationRequested();
+      if (++handshakes == 1)
+        return Task.FromResult<WebSocket>(oldSocket);
+      retiredBeforeHandshake = oldSocket.Disposed;
+      return handshakeFails ? Task.FromException<WebSocket>(new WebSocketException()) : Task.FromResult<WebSocket>(freshSocket);
+    }
+    using var manager = new ProviderManager(store, () => FakeOpenAIIdentity.Callback, transport, FakeOpenAIIdentity.Issuer,
+        connectSocket: Connect);
+    ProviderConnection connection = await manager.AddChatGptAsync("Synthetic ChatGPT");
+    ProviderSignIn signIn = await manager.BeginSignInAsync(connection.Id);
+    Uri callback = new(await identity.AuthorizeAsync(signIn.AuthorizationUrl!));
+    await manager.CompleteSignInAsync(FakeOpenAIIdentity.Parse(callback.Query)["state"], callback.AbsoluteUri).WaitAsync(TestTimeout);
+    using IChatClient client = manager.CreateChatClient(connection);
+    int effects = 0;
+    var tools = new ToolCatalog([new TestAgentTool("lookup", (_, _, _) => {
+      Interlocked.Increment(ref effects);
+      preferences.SetCompactionTriggerTokenCount(8_192);
+      return Task.FromResult(new ToolOutput(ToolOutputText, []));
+    })]);
+    var session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid(), Path.GetDirectoryName(database.Path)!),
+        store, _ => client, tools);
+    try {
+      var selection = new LlmSelection(connection, "fixture-model", null, ModelFamily.Other, false);
+      string removedText = new('x', 50_000);
+      UserMessageReceipt receipt = await session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, removedText, selection));
+      Assert.Equal(MessageAcceptance.Accepted, receipt.Acceptance);
+      SessionExecutionResult result = await session.WaitForExecutionFinishAsync(Assert.IsType<Guid>(receipt.ExecutionId)).WaitAsync(TestTimeout);
+
+      SavedHistoryCompaction boundary = Assert.IsType<SavedHistoryCompaction>(store.Compactions.ReadContext(session.Id, 0).PreviousCompaction);
+      Assert.Equal(CompactionReason.Threshold, (await session.ReadCompactionAsync(boundary.Id, 0))?.Reason);
+      Assert.True(result.Outcome == ExecutionOutcome.Completed, (await session.ReadSnapshotAsync()).LastSettlement?.Error);
+      Assert.Equal(2, handshakes);
+      Assert.True(retiredBeforeHandshake);
+      Assert.Single(oldSocket.Requests);
+      Assert.Equal(1, effects);
+      Assert.Single(StoredTools.Read(database));
+      Assert.Contains("Summarize the removed conversation history", transport.Requests[0].Body, StringComparison.Ordinal);
+      JsonObject compacted;
+      if (handshakeFails) {
+        Assert.Empty(freshSocket.Requests);
+        Assert.Equal(2, transport.Requests.Count);
+        compacted = JsonNode.Parse(transport.Requests[1].Body)!.AsObject();
+      } else {
+        Assert.Single(transport.Requests);
+        compacted = Assert.Single(freshSocket.Requests);
+      }
+      Assert.Null(compacted["previous_response_id"]);
+      string input = compacted["input"]!.ToJsonString();
+      Assert.Contains(summary, input, StringComparison.Ordinal);
+      Assert.DoesNotContain(removedText[..128], input, StringComparison.Ordinal);
+      Assert.Contains(compacted["input"]!.AsArray(), item => (string?)item!["type"] == "function_call" &&
+          (string?)item["call_id"] == "call_fixture");
+      Assert.Contains(compacted["input"]!.AsArray(), item => (string?)item!["type"] == "function_call_output" &&
+          (string?)item["call_id"] == "call_fixture");
+    } finally {
+      await session.StopAcceptingUserMessagesAsync();
+      await session.StopExecutionAsync().WaitAsync(TestTimeout);
+      await manager.ShutdownAsync().WaitAsync(TestTimeout);
     }
   }
 
@@ -826,11 +911,13 @@ public sealed class ProviderSessionExecutionTests {
 
   private sealed class LoopSocket : WebSocket {
     private readonly Queue<byte[]> frames;
+    private readonly bool closeWhenExhausted;
     private int offset;
     internal List<JsonObject> Requests { get; } = [];
     internal bool Disposed { get; private set; }
 
-    internal LoopSocket(string[] streams) {
+    internal LoopSocket(string[] streams, bool closeWhenExhausted = false) {
+      this.closeWhenExhausted = closeWhenExhausted;
       frames = new(streams.SelectMany(stream => stream.Split("\n\n", StringSplitOptions.RemoveEmptyEntries))
           .Select(@event => @event.Split('\n').Single(line => line.StartsWith("data: ", StringComparison.Ordinal))[6..])
           .Select(json => Encoding.UTF8.GetBytes(json)));
@@ -853,8 +940,11 @@ public sealed class ProviderSessionExecutionTests {
     }
     public override Task<WebSocketReceiveResult> ReceiveAsync(ArraySegment<byte> buffer, CancellationToken cancellationToken) {
       cancellationToken.ThrowIfCancellationRequested();
-      if (frames.Count == 0)
+      if (frames.Count == 0) {
+        if (closeWhenExhausted)
+          return Task.FromResult(new WebSocketReceiveResult(0, WebSocketMessageType.Close, true));
         throw new WebSocketException("Synthetic interrupted response");
+      }
       byte[] frame = frames.Peek();
       int count = Math.Min(buffer.Count, frame.Length - offset);
       frame.AsSpan(offset, count).CopyTo(buffer.AsSpan());

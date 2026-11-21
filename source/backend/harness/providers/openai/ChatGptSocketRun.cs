@@ -88,6 +88,13 @@ internal sealed class ChatGptSocketRun : IDisposable {
       Reset();
   }
 
+  // Rebuilt history cannot use the old continuation. Preserve any handshake-driven HTTP fallback.
+  internal void RetireConnection() {
+    if (turnOpen)
+      throw new InvalidOperationException("Cannot retire a socket during an open turn.");
+    Reset();
+  }
+
   public void Dispose() {
     if (disposed)
       return;

@@ -14,7 +14,18 @@ internal sealed class ResponsesSocketStream(WebSocket socket, Action<JsonElement
   private string? responseId;
   private bool terminal;
   private bool failed;
+  private ReceiveFailure? receiveFailure;
   private bool disposed;
+
+  internal enum ReceiveFailure { PeerClosed, TransportRead, InvalidEvent }
+
+  internal sealed class ReceiveException(ReceiveFailure failure) : IOException(failure switch {
+    ReceiveFailure.PeerClosed => "Responses WebSocket peer closed the connection.",
+    ReceiveFailure.TransportRead => "Responses WebSocket transport read failed.",
+    _ => "Invalid or unexpected Responses WebSocket stream event."
+  }) {
+    internal ReceiveFailure Failure { get; } = failure;
+  }
 
   public override bool CanRead => !disposed;
   public override bool CanSeek => false;
@@ -33,7 +44,7 @@ internal sealed class ResponsesSocketStream(WebSocket socket, Action<JsonElement
     if (buffer.IsEmpty)
       return 0;
     if (failed)
-      throw new IOException("Invalid Responses WebSocket stream.");
+      throw receiveFailure is { } failure ? new ReceiveException(failure) : new IOException("Invalid Responses WebSocket stream.");
     while (pendingOffset == pending.Length) {
       if (terminal)
         return 0;
@@ -50,7 +61,9 @@ internal sealed class ResponsesSocketStream(WebSocket socket, Action<JsonElement
       using var message = new MemoryStream();
       ValueWebSocketReceiveResult result;
       do {
-        result = await socket.ReceiveAsync(receiveBuffer.AsMemory(), cancellationToken).ConfigureAwait(false);
+        result = await ReceiveFrame(cancellationToken).ConfigureAwait(false);
+        if (result.MessageType == WebSocketMessageType.Close)
+          throw new ReceiveException(ReceiveFailure.PeerClosed);
         if (result.MessageType != WebSocketMessageType.Text || message.Length + result.Count > MaximumMessageBytes)
           throw new IOException();
         await message.WriteAsync(receiveBuffer.AsMemory(0, result.Count), cancellationToken).ConfigureAwait(false);
@@ -102,10 +115,23 @@ internal sealed class ResponsesSocketStream(WebSocket socket, Action<JsonElement
     } catch (OperationCanceledException) {
       failed = true;
       throw;
+    } catch (ReceiveException error) {
+      failed = true;
+      receiveFailure = error.Failure;
+      throw;
     } catch (Exception error) when (error is WebSocketException or JsonException or IOException or InvalidOperationException or ArgumentException) {
       failed = true;
       // Provider payloads and close descriptions must not escape through exceptions.
-      throw new IOException("Invalid Responses WebSocket stream.");
+      receiveFailure = ReceiveFailure.InvalidEvent;
+      throw new ReceiveException(receiveFailure.Value);
+    }
+  }
+
+  private async ValueTask<ValueWebSocketReceiveResult> ReceiveFrame(CancellationToken cancellationToken) {
+    try {
+      return await socket.ReceiveAsync(receiveBuffer.AsMemory(), cancellationToken).ConfigureAwait(false);
+    } catch (Exception error) when (error is WebSocketException or IOException or InvalidOperationException or ArgumentException) {
+      throw new ReceiveException(ReceiveFailure.TransportRead);
     }
   }
 

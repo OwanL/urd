@@ -65,7 +65,7 @@ public sealed class ResponsesSocketStreamTests {
   [InlineData("{\"type\":\"response.completed\",\"response\":null}")]
   public async Task InvalidMessagesAreSanitized(string message) {
     using var stream = new ResponsesSocketStream(new ScriptedSocket(Frame.Text(message)), _ => { });
-    IOException error = await Assert.ThrowsAsync<IOException>(async () => await stream.ReadExactlyAsync(new byte[10]));
+    IOException error = await Assert.ThrowsAnyAsync<IOException>(async () => await stream.ReadExactlyAsync(new byte[10]));
     Assert.DoesNotContain("secret", error.ToString());
     Assert.Null(error.InnerException);
   }
@@ -80,8 +80,33 @@ public sealed class ResponsesSocketStreamTests {
         new ScriptedSocket(Frame.Text("{\"type\":\"response.created\",\"response\":{\"id\":\"ok\"}}"), Frame.Text(message));
     bool completed = false;
     using var stream = new ResponsesSocketStream(socket, _ => completed = true);
-    await Assert.ThrowsAsync<IOException>(() => stream.CopyToAsync(Stream.Null));
+    await Assert.ThrowsAnyAsync<IOException>(() => stream.CopyToAsync(Stream.Null));
     Assert.False(completed);
+  }
+
+  [Theory]
+  [InlineData("close", "Responses WebSocket peer closed the connection.")]
+  [InlineData("transport", "Responses WebSocket transport read failed.")]
+  [InlineData("invalid", "Invalid or unexpected Responses WebSocket stream event.")]
+  public async Task ReceiveFailuresExposeOnlySafeDiagnostic(string scenario, string diagnostic) {
+    var socket = scenario switch {
+      "close" => new ScriptedSocket(new Frame([], true, WebSocketMessageType.Close)),
+      "transport" => new ScriptedSocket { ReceiveError = new WebSocketException("transport secret") },
+      _ => new ScriptedSocket(Frame.Text("invalid payload secret"))
+    };
+    using var stream = new ResponsesSocketStream(socket, _ => { });
+    IOException error = await Assert.ThrowsAnyAsync<IOException>(async () => await stream.ReadExactlyAsync(new byte[10]));
+    Assert.Equal(diagnostic, error.Message);
+    Assert.Null(error.InnerException);
+    ProviderOperationException providerError = ProviderOperationException.FromProviderError(error);
+    Assert.Equal(ProviderFailure.ProviderUnavailable, providerError.Failure);
+    Assert.Contains(diagnostic, providerError.Message);
+    Assert.DoesNotContain("secret", providerError.ToString());
+    Assert.Null(providerError.InnerException);
+    int receives = socket.Receives;
+    IOException repeated = await Assert.ThrowsAnyAsync<IOException>(async () => await stream.ReadExactlyAsync(new byte[10]));
+    Assert.Equal(diagnostic, repeated.Message);
+    Assert.Equal(receives, socket.Receives);
   }
 
   [Fact]
@@ -89,14 +114,14 @@ public sealed class ResponsesSocketStreamTests {
     var socket = new ScriptedSocket(new(Encoding.UTF8.GetBytes("{\"type\":"), false),
         new([], true, WebSocketMessageType.Close));
     using var stream = new ResponsesSocketStream(socket, _ => { });
-    await Assert.ThrowsAsync<IOException>(async () => await stream.ReadExactlyAsync(new byte[10]));
+    await Assert.ThrowsAnyAsync<IOException>(async () => await stream.ReadExactlyAsync(new byte[10]));
   }
 
   [Fact]
   public async Task OversizedMessageIsRejected() {
     var socket = new ScriptedSocket(new Frame(new byte[ResponsesSocketStream.MaximumMessageBytes + 1], true));
     using var stream = new ResponsesSocketStream(socket, _ => { });
-    await Assert.ThrowsAsync<IOException>(async () => await stream.ReadExactlyAsync(new byte[10]));
+    await Assert.ThrowsAnyAsync<IOException>(async () => await stream.ReadExactlyAsync(new byte[10]));
   }
 
   [Fact]
@@ -116,8 +141,9 @@ public sealed class ResponsesSocketStreamTests {
     private int index;
     private int offset;
     public int Receives { get; private set; }
+    public Exception? ReceiveError { get; init; }
     public override WebSocketCloseStatus? CloseStatus => null;
-    public override string? CloseStatusDescription => null;
+    public override string? CloseStatusDescription => "close secret";
     public override WebSocketState State => WebSocketState.Open;
     public override string? SubProtocol => null;
     public override void Abort() { }
@@ -128,6 +154,8 @@ public sealed class ResponsesSocketStreamTests {
     public override Task<WebSocketReceiveResult> ReceiveAsync(ArraySegment<byte> buffer, CancellationToken cancellationToken) {
       cancellationToken.ThrowIfCancellationRequested();
       Receives++;
+      if (ReceiveError is not null)
+        throw ReceiveError;
       Frame frame = frames[index];
       int count = Math.Min(buffer.Count, frame.Bytes.Length - offset);
       frame.Bytes.AsSpan(offset, count).CopyTo(buffer.AsSpan());

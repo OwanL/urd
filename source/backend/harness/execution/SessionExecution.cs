@@ -156,6 +156,7 @@ internal sealed class SessionExecution : IDisposable {
       }
       if (!saved)
         throw new OperationCanceledException("The compaction boundary was rejected.");
+      socketRun?.RetireConnection();
       ModelHistory compactedHistory = await recorder.ReadModelHistoryAsync(requestId);
       if (reason != CompactionReason.Manual)
         automaticBoundary = compactedHistory.PreviousCompaction?.Id;

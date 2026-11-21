@@ -179,6 +179,10 @@ A main conversation run now tries one authenticated Responses WebSocket. The SDK
 still builds the full request from durable history. On the same socket, Urd sends
 only appended input if the prior request configuration, input and completed output
 match the rebuilt prefix. Otherwise it sends full input without a previous ID.
+Once a compaction boundary is saved, Urd retires the run's socket and continuation.
+The next conversation request opens a fresh socket and sends the full compacted
+context. Compaction spends time on separate summary and selection calls, and an idle
+socket can still report `Open` after its peer has closed it.
 Reopen starts from durable history, not a socket handle. Auxiliary calls and other
 routes stay on HTTP. Handshake failure before inference selects HTTP for the run;
 an uncertain send or interrupted stream is never automatically replayed over HTTP.

@@ -113,6 +113,42 @@ not a switch to enable writes. Do not infer subscription deductions from API
 equivalent costs. A cross-route comparison needs the same model, prefix length,
 workload and reasoning effort, and a positive control that actually records a hit.
 
+#### Transport and session header comparison — 2026-11-21
+
+The follow-up used synthetic Luna conversations (~16k and ~41k input tokens),
+independent prefixes, low reasoning, `store:false`, and native history replay.
+These were protocol probes, not instrumented Urd or Pie sessions. A hit here
+means the provider reported positive `cached_tokens` on a follow-up; cold first
+turns are excluded. HTTP and full-history WebSocket requests sent the prior
+input and output again. Only the delta arm sent `previous_response_id`.
+
+| Public ChatGPT plan route | Follow-ups with reads |
+| --- | ---: |
+| HTTP, no session header | 1/9 |
+| HTTP, stable `session-id` header | 11/11 |
+| HTTP, `session-id` changed every request | 0/4 |
+| HTTP, body `prompt_cache_key` only (~41k) | 0/2 |
+| One WebSocket, full history | 5/6 |
+| One WebSocket, continuation delta | 4/4 |
+| New WebSocket each turn, full history | 0/2 |
+
+Positive controls: on the Codex backend, both full-history HTTP and same-socket
+continuation reported 41,216 cached tokens on both ~41k follow-ups. On the
+public route, an ~16k four-call namespaced lookup loop was included in the HTTP
+rows above: 15,616 / 15,744 / 15,744 cached tokens with a stable header, zero
+on all three without it. A separate Luna request with explicit breakpoint
+configuration was rejected (`400 invalid_parameter`, `prompt_cache_options`);
+it is not a cache miss and was not retried.
+
+This favors testing a stable, opaque, conversation-scoped HTTP `session-id`
+before introducing connection-local continuation state. It is the spelling used
+by [Codex](https://github.com/openai/codex/blob/66618f0512ccd43ebd9784f3f0af3f9e93ca6d0c/codex-rs/codex-api/src/requests/headers.rs#L25-L33),
+not a documented affinity guarantee in the [plan route contract](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations).
+Do not infer equivalent allowance deductions or model-wide savings from one
+account's Luna token counts. Verify the actual Urd SDK request and observe
+Astra/Sol use before generalizing. No transport change is needed for replay
+correctness, and none was made for these experiments.
+
 ### Local Ollama: compatible Chat Completions
 
 Qualified the existing Ollama **0.40.13** service at `http://127.0.0.1:11434/v1` with

@@ -1,39 +1,24 @@
 # System guidance
 
 Edit the text returned by `GetText` in these files. Prompt wording belongs here,
-not in the context builder. Applicable built-in instructions always bypass pruning.
+not in the context builder. These blocks apply to primary and subagent sessions,
+not to auxiliary calls such as pruning, title generation, or compaction. Pruning
+does not select or remove built-in instructions.
 
 | File | Applies to | Order |
 | --- | --- | --- |
-| `BaseGuidance.cs` | All sessions | 0 |
+| `SharedAgentGuidance.cs` | Primary and subagent sessions | 0 |
 | `DefaultWorkingGuidance.cs` | Primary sessions | 10 |
-| `WorkingPreferencesGuidance.cs` | Primary sessions | 20 |
-| `ToolUsageGuidance.cs` | Sessions with a working directory | 50 |
-| `DocumentationGuidance.cs` | All sessions | 60 |
-| `PrimaryGuidance.cs` | Primary sessions | 100 |
-| `SubagentGuidance.cs` | Subagents | 100 |
-| `SubagentPreferencesGuidance.cs` | Subagents | 110 |
+| `DocumentationGuidance.cs` | Primary and subagent sessions | 60 |
+| `PrimarySessionGuidance.cs` | Primary sessions | 100 |
+| `SubagentSessionGuidance.cs` | Subagents | 100 |
 | `WorkingDirectoryGuidance.cs` | Sessions with a working directory | 200 |
-| `SkillsGuidance.cs` | Sessions with a working directory and skills | 220 |
+| `SelectedSkillsGuidance.cs` | Sessions with a working directory and skills | 220 |
 | `AssignmentGuidance.cs` | Sessions with an assignment | 300 |
 
-## Guidance copied from Pie
-
-The working defaults/preferences, child guidance and tool-use/documentation rules
-were selected from Pie's `harness/agent-instructions/` and
-`harness/pi/packages/coding-agent/src/core/`. Source paths are recorded on each class.
-Retained text is word-for-word, including spelling and punctuation. Overlapping
-advice has been removed: defaults hold common rules, and preferences retain distinct
-requirements. These are local editable copies, not a runtime dependency or automatic
-synchronization with Pie.
-
-Omissions include Pie/Pi identity and documentation paths, skill/resource recovery,
-session coordination, subagent dispatch, unavailable clarification/computer-control
-tools, timers and unsupported image-presentation workflows. The Pie-naming sentence
-in the defaults preamble and the Pie-specific repository-layout sentence were omitted. The implicit push-approval
-example was omitted while retaining its preceding intent sentence; explicit consent
-limits remain. Primary preferences are not included in child sessions. Child guidance
-is composed for `Subagent` inputs; it does not add a delegation runtime.
+File-tool usage belongs in the tool descriptions and parameter schemas. The
+selected-skills block passes names, descriptions, and paths to the agent so it
+can load skill instructions on demand.
 
 ## Add a block
 
@@ -57,7 +42,7 @@ internal sealed class ExampleGuidance : StartingContextContribution {
 }
 ```
 
-Omit `AppliesTo` to include a block in every session. `GetText` receives the session
+Omit `AppliesTo` to include a block in both primary and subagent sessions. `GetText` receives the session
 inputs, so guidance can include working-directory or assignment facts. Return null
 or whitespace to omit the block. Each included block becomes one system message.
 Guidance failures stop composition rather than silently dropping instructions.
@@ -69,7 +54,7 @@ instances are created per builder, not shared globally.
 `runtime/` contains the base type, input/output records, discovery and builder.
 The builder also accepts supplied contributions. Parameterized-only classes are not
 auto-created: `DiscoveredInstructionDocument` carries loaded text/path/scope, with no
-file I/O in its constructor or rendering. `SkillsGuidance` formats the supplied selection.
+file I/O in its constructor or rendering. `SelectedSkillsGuidance` formats the supplied selection.
 
 Sessions retain exact saved instruction/tool snapshots for each initial or successful
 compaction boundary. Ordinary requests, reopening and model/preference changes do not
@@ -134,7 +119,7 @@ does not grant tool authority.
 
 ## Skills
 
-`SkillsGuidance` formats selected skills by name, description and path, using Pi's wording;
+`SelectedSkillsGuidance` formats selected skills by name, description and path, using Pi's wording;
 the model reads a skill's file when a task matches. Project `SKILL.md` files are found under
 the working directory without Git. Project and packaged skills are both candidates, including
 same-name entries. When a project skill is selected, the packaged same-name entry is omitted;

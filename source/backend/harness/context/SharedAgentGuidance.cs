@@ -1,7 +1,7 @@
 namespace Urd.Core.Context;
 
-// Shared identity and behavior for every session.
-internal sealed class BaseGuidance : StartingContextContribution {
+// Shared by primary and subagent sessions, not auxiliary calls such as pruning.
+internal sealed class SharedAgentGuidance : StartingContextContribution {
   public override int Order => 0;
 
   public override string? GetText(StartingContextInput input) => """

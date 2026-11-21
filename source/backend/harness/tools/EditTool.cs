@@ -8,7 +8,7 @@ internal sealed class EditTool(FileMutationQueue files) : AgentTool {
   public override string Name => "edit";
   public override ToolRelevance RelevantWhen => ToolRelevance.Always;
   public override string Description => """
-    Replace exact, unique, non-overlapping text in one file. Edits match the original snapshot; no fuzzy matching.
+    Replace exact, unique, non-overlapping text in one file. Batch separate replacements in one call; combine nearby changes into one replacement if their match text would overlap. Edits match the original snapshot; no fuzzy matching.
     """;
   public override JsonElement ParametersSchema { get; } = ToolSchema.Parse("""
     {
@@ -22,7 +22,7 @@ internal sealed class EditTool(FileMutationQueue files) : AgentTool {
           "items": {
             "type": "object",
             "properties": {
-              "oldText": { "type": "string", "minLength": 1, "description": "Exact text that is unique in the original file. CRLF and LF are equivalent." },
+              "oldText": { "type": "string", "minLength": 1, "description": "Use the smallest exact text that is unique in the original file. CRLF and LF are equivalent." },
               "newText": { "type": "string", "description": "Replacement text" }
             },
             "required": ["oldText", "newText"]

@@ -321,7 +321,7 @@ naming decisions, not permission to refactor source code.
 
 ```text
 context/
-  SkillsGuidance.cs                 change: format supplied skills; no discovery
+  SelectedSkillsGuidance.cs         change: format supplied skills; no discovery
   runtime/
     StartingContextBuilder.cs       rename/extend StartingContextManager: discover → protect → prune → compose
     StartingContext.cs              change: carry selected resources into composition
@@ -429,7 +429,7 @@ contains original retained items plus outcome/diagnostics; model-facing IDs stay
 internal selection detail. Do not silently equate a failed keep-all fallback with a
 successful decision to keep every item.
 
-`SkillsGuidance` must format the selected skill list instead of rediscovering everything.
+`SelectedSkillsGuidance` formats the selected skill list instead of rediscovering everything.
 Settings and preparation use `InstructionResourceDiscovery`; the shared registered tool
 catalog remains the tool source. If shared execution or bucket resolution lands through another
 feature first, reuse it; these are responsibility boundaries, not competing implementations.

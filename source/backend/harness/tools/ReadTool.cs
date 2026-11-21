@@ -7,7 +7,7 @@ namespace Urd.Core.Tools;
 internal sealed class ReadTool(FileMutationQueue files) : AgentTool {
   public override string Name => "read";
   public override ToolRelevance RelevantWhen => ToolRelevance.Always;
-  public override string Description => "Read UTF-8 text or a supported image; use offset/limit to page through large text files.";
+  public override string Description => "Read UTF-8 text or a supported image. Prefer this to shell commands for inspecting file contents. Use offset/limit to page through large text files.";
   public override JsonElement ParametersSchema { get; } = ToolSchema.Parse("""
     {
       "type": "object",

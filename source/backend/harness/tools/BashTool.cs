@@ -9,7 +9,7 @@ internal sealed class BashTool(ChatProcesses processes, GitBash bash, IReadOnlyD
   public override string Name => "bash";
   public override ToolRelevance RelevantWhen => ToolRelevance.Always;
   public override string Description => $"""
-    Run a Git Bash command in the working directory. Optional timeout; no default timeout.
+    Run a Git Bash command in the working directory, including directory listings and scoped file searches. Optional timeout; no default timeout.
     Long output is truncated and saved to a temp file.
     """;
   public override JsonElement ParametersSchema => schema;

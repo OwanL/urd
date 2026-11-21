@@ -33,7 +33,7 @@ public sealed class StartingContextBuilderTests {
   }
 
   [Fact]
-  public void ImportedGuidanceKeepsPrimaryPreferencesSeparateFromChildInstructions() {
+  public void SessionGuidanceKeepsPrimaryWorkflowAndSubagentHandoffSeparate() {
     var manager = CreateManager();
     var input = new StartingContextInput(SessionKind.Primary, ModelFamily.Other, null, null);
 
@@ -43,13 +43,14 @@ public sealed class StartingContextBuilderTests {
     string subagentText = InstructionText(subagent);
 
     Assert.Contains("# Default working guidance", primaryText, StringComparison.Ordinal);
-    Assert.Contains("# Working preferences", primaryText, StringComparison.Ordinal);
-    Assert.DoesNotContain("# Shared child guidance", primaryText, StringComparison.Ordinal);
-    Assert.Contains("# Shared child guidance", subagentText, StringComparison.Ordinal);
-    Assert.Contains("final report", subagentText, StringComparison.OrdinalIgnoreCase);
+    Assert.Contains("Ask before materially expanding scope.", primaryText, StringComparison.Ordinal);
+    Assert.DoesNotContain("# Working preferences", primaryText, StringComparison.Ordinal);
     Assert.DoesNotContain("final report", primaryText, StringComparison.OrdinalIgnoreCase);
     Assert.DoesNotContain("# Default working guidance", subagentText, StringComparison.Ordinal);
-    Assert.DoesNotContain("# Working preferences", subagentText, StringComparison.Ordinal);
+    ChatMessage handoff = Assert.Single(subagent.Instructions,
+        message => message.Text.Contains("final report", StringComparison.OrdinalIgnoreCase));
+    Assert.Contains("Stay within its scope", handoff.Text, StringComparison.Ordinal);
+    Assert.Contains("Start with a plain-language outcome sentence", handoff.Text, StringComparison.Ordinal);
   }
 
   [Fact]
@@ -77,8 +78,7 @@ public sealed class StartingContextBuilderTests {
     Assert.DoesNotContain("Working directory:", InstructionText(withoutDirectory), StringComparison.Ordinal);
     Assert.DoesNotContain("Assignment context:", InstructionText(withoutDirectory), StringComparison.Ordinal);
     Assert.Contains(workingDirectory, InstructionText(withDirectory), StringComparison.Ordinal);
-    Assert.DoesNotContain("Tool guidance:", InstructionText(withoutDirectory), StringComparison.Ordinal);
-    Assert.Contains("Tool guidance:", InstructionText(withDirectory), StringComparison.Ordinal);
+    Assert.DoesNotContain("Tool guidance:", InstructionText(withDirectory), StringComparison.Ordinal);
   }
 
   [Fact]

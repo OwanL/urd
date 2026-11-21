@@ -5,6 +5,7 @@ import type { TranscriptHistoryPage } from "../../sessions/transcript/Messages.t
 import { MessageEditingContext } from "../message-editing/EditableMessage.tsx";
 import { Transcript, type ReadingPosition } from "../transcript/Transcript.tsx";
 import type { TranscriptDisplay } from "../transcript/TranscriptDisplay.ts";
+import type { TranscriptNavigationState } from "../transcript/navigation/TranscriptNavigationStorage.ts";
 import { SubagentNavigationContext, type SubagentLink } from "./SubagentNavigation.ts";
 import "./subagent-view.css";
 
@@ -20,9 +21,10 @@ interface SubagentViewProps {
 }
 
 const positions = new Map<string, ReadingPosition>();
+const transcriptPositions = new Map<string, TranscriptNavigationState>();
 const pollInterval = 1000;
 
-function rememberPosition(id: string, position: ReadingPosition) {
+function rememberPosition<T>(positions: Map<string, T>, id: string, position: T) {
   positions.delete(id);
   positions.set(id, position);
   if (positions.size > 32) positions.delete(positions.keys().next().value!);
@@ -152,7 +154,11 @@ export function SubagentView({
               notice={String(current.notice)}
               visible={connected && visible}
               position={positions.get(id)}
-              onPositionChange={(position) => rememberPosition(id, position)}
+              onPositionChange={(position) => rememberPosition(positions, id, position)}
+              transcriptPosition={transcriptPositions.get(id)}
+              onTranscriptPositionChange={(position) =>
+                rememberPosition(transcriptPositions, id, position)
+              }
             />
           </MessageEditingContext.Provider>
         </SubagentNavigationContext.Provider>

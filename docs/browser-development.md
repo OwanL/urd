@@ -339,7 +339,7 @@ The narrow choice column sizes to its content so Specific model remains fully re
 
 Execution feedback belongs in the scrollable transcript, directly after the latest entries,
 not in a separate footer above the composer. Followers stay at the tail; readers keep their
-position when feedback changes. The Context control reveals **Compact now** on hover or keyboard
+position when feedback changes. The Context control reveals **Compact** on hover or keyboard
 focus and starts compaction directly; its descriptive tooltip retains context details and feedback,
 also reachable from More when context indicators overflow. It is enabled only when the session is
 truly idle, including after background tools and cleanup finish, and a model is selected. It

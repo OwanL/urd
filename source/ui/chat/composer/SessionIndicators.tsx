@@ -60,7 +60,7 @@ export function SessionIndicators({
     ? "Check compaction"
     : compacting
       ? "Compacting…"
-      : "Compact now";
+      : "Compact";
   const compactStatus = compacting ? "Compacting…" : compactionMessage;
   const contextAccessibleLabel = `Context window: ${contextLabel}${contextDetail ? `, ${contextDetail.toLowerCase()}` : ""}`;
   const ratio = contextUsage && contextWindow ? contextUsage.usedTokens / contextWindow : 0;

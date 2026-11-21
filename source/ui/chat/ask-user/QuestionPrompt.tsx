@@ -1,7 +1,6 @@
 import { useId, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Icon } from "../../controls/Icon.tsx";
 import { IconButton } from "../../controls/IconButton.tsx";
-import { Popover } from "../../controls/Popover.tsx";
 import type { UserQuestion } from "../../sessions/inputs/UserQuestion.ts";
 
 interface QuestionPromptProps {
@@ -20,15 +19,12 @@ export function QuestionPrompt({
   onAnswer,
 }: QuestionPromptProps) {
   const [editing, setEditing] = useState(Boolean(draft));
-  const [showContext, setShowContext] = useState(false);
-  const contextButton = useRef<HTMLButtonElement>(null);
   const customButton = useRef<HTMLButtonElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
   const focusEditor = useRef(false);
-  const contextId = useId();
   const editorId = useId();
   const hasChoices = question.answers.length > 0;
-  const hasContext = Boolean(question.context?.trim() || question.sourceTitle);
+  const context = question.context?.trim();
   const showEditor = !hasChoices || editing;
 
   useLayoutEffect(() => {
@@ -40,20 +36,16 @@ export function QuestionPrompt({
     <>
       <div class="user-question-line">
         <div class="user-question-heading">
-          <span class="user-question-text">{question.question}</span>
-          {hasContext && (
-            <button
-              ref={contextButton}
-              class="user-question-context-button"
-              type="button"
-              aria-haspopup="dialog"
-              aria-expanded={showContext}
-              aria-controls={showContext ? contextId : undefined}
-              onClick={() => setShowContext((open) => !open)}
-            >
-              Context
-            </button>
-          )}
+          <div class="user-question-title">
+            <span class="user-question-text">{question.question}</span>
+            {question.sourceTitle && (
+              <span class="user-question-source">
+                <Icon name="subagents" />
+                <span>{question.sourceTitle}</span>
+              </span>
+            )}
+          </div>
+          {context && <div class="user-question-context">{context}</div>}
         </div>
         {hasChoices && (
           <div class="user-question-options">
@@ -115,24 +107,6 @@ export function QuestionPrompt({
             disabled={disabled || !draft.trim()}
           />
         </form>
-      )}
-      {showContext && (
-        <Popover
-          anchor={contextButton}
-          id={contextId}
-          class="user-question-context"
-          label="Question context"
-          placement="above"
-          onClose={() => setShowContext(false)}
-        >
-          {question.sourceTitle && (
-            <div class="user-question-source">
-              <Icon name="subagents" />
-              {question.sourceTitle}
-            </div>
-          )}
-          {question.context}
-        </Popover>
       )}
     </>
   );

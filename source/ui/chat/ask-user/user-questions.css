@@ -18,7 +18,7 @@
 }
 
 .user-question-line,
-.user-question-heading,
+.user-question-title,
 .user-question-options {
   display: flex;
   flex-wrap: wrap;
@@ -26,12 +26,19 @@
 }
 
 .user-question-line {
-  gap: 2px 14px;
+  gap: 4px 14px;
 }
 
 .user-question-heading {
-  gap: 0 8px;
   min-width: 0;
+}
+
+.user-question-title {
+  gap: 0 8px;
+}
+
+.user-question-heading:has(.user-question-context) {
+  flex-basis: 100%;
 }
 
 .user-question-text {
@@ -73,15 +80,8 @@
 }
 
 .user-question-other,
-.user-question-context-button,
 .user-question-pages button {
   color: var(--text-secondary);
-}
-
-.user-question-context-button {
-  font-size: 12px;
-  text-decoration: underline;
-  text-underline-offset: 2px;
 }
 
 .user-questions button:hover:not(:disabled) {
@@ -113,7 +113,8 @@
 }
 
 .user-question-context {
-  padding: 10px 12px;
+  max-width: 80ch;
+  color: var(--text-secondary);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -121,8 +122,11 @@
 .user-question-source {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
+  min-width: 0;
   color: var(--text-secondary);
+  overflow-wrap: anywhere;
+  font-size: 12px;
 }
 
 .user-question-source .icon {

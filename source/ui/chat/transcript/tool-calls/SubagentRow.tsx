@@ -57,18 +57,12 @@ export function SubagentRow({
     <div ref={row} class="subagent-row" data-subagent-row="" data-tool-call-id={tool.callId}>
       {presentation.heading !== null && <h3 class="subagent-heading">{presentation.heading}</h3>}
       {child && navigate ? (
-        <button
-          type="button"
-          class="subagent-title subagent-title-link"
-          aria-label={`Open subagent transcript: ${title}`}
-          onClick={(event) => navigate(child, event.currentTarget)}
-        >
-          <Icon name="subagents" />
+        <button type="button" class="subagent-title" title={title} onClick={() => navigate(child)}>
           <span>{title}</span>
           <Icon name="chevron" />
         </button>
       ) : (
-        <div class="subagent-title">
+        <div class="subagent-title" title={title}>
           <span>{title}</span>
         </div>
       )}

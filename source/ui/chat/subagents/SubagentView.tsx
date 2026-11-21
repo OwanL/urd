@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { RequestError } from "../../http/RequestError.ts";
 import type { SessionClient } from "../../sessions/SessionClient.ts";
 import type { TranscriptHistoryPage } from "../../sessions/transcript/Messages.ts";
@@ -49,15 +49,9 @@ export function SubagentView({
     notice: number;
     history: TranscriptHistoryPage | null;
   } | null>(null);
-  const [error, setError] = useState<{ message: string; canRetry: boolean } | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [visible, setVisible] = useState(() => !document.hidden);
-  const [retry, setRetry] = useState(0);
-  const heading = useRef<HTMLHeadingElement>(null);
   const notice = useRef(0);
-
-  useLayoutEffect(() => {
-    heading.current?.focus({ preventScroll: true });
-  }, [id]);
 
   useEffect(() => {
     const change = () => setVisible(!document.hidden);
@@ -69,7 +63,6 @@ export function SubagentView({
     if (!id || !connected || !visible) return;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
-    let failures = 0;
     setError(null);
     async function read() {
       try {
@@ -94,18 +87,17 @@ export function SubagentView({
           notice: ++notice.current,
           history,
         });
-        failures = 0;
         setError(null);
         if (result.live) timer = setTimeout(() => void read(), pollInterval);
       } catch (failure) {
         if (controller.signal.aborted) return;
-        const missing = failure instanceof RequestError && failure.status === 404;
-        const canRetry = missing || ++failures > 3;
-        setError({
-          message: missing ? "Subagent unavailable." : "Unable to load subagent.",
-          canRetry,
-        });
-        if (!canRetry) timer = setTimeout(() => void read(), pollInterval * 2 ** failures);
+        if (failure instanceof RequestError && failure.status === 404) {
+          setView(null);
+          setError("Subagent unavailable.");
+          return;
+        }
+        setError(failure instanceof Error ? failure.message : "Unable to load subagent.");
+        timer = setTimeout(() => void read(), pollInterval);
       }
     }
     void read();
@@ -113,58 +105,36 @@ export function SubagentView({
       controller.abort();
       clearTimeout(timer);
     };
-  }, [client, id, child?.parentId, connected, visible, display, retry]);
+  }, [client, id, child?.parentId, connected, visible, display]);
 
   const current = view?.id === id ? view : null;
   return (
     <section id="chat-view" class="subagent-view" role="tabpanel" aria-labelledby={`tab-${rootId}`}>
-      <header class="subagent-view-header">
-        <button class="subagent-back" type="button" onClick={() => onNavigate(path.slice(0, -1))}>
-          ← Back
+      <nav class="subagent-breadcrumb" aria-label="Conversation path">
+        <button type="button" onClick={() => onNavigate([])}>
+          {rootTitle || rootId}
         </button>
-        <div class="subagent-view-titles">
-          <nav class="subagent-breadcrumb" aria-label="Conversation path">
-            <button type="button" onClick={() => onNavigate([])}>
-              {rootTitle || rootId}
-            </button>
-            {path.slice(0, -1).map((item, index) => (
-              <span class="subagent-breadcrumb-item" key={item.id}>
-                <span aria-hidden="true">/</span>
-                <button type="button" onClick={() => onNavigate(path.slice(0, index + 1))}>
-                  {item.title || item.id}
-                </button>
-              </span>
-            ))}
-          </nav>
-          <h2 ref={heading} tabIndex={-1}>
-            {current?.title || child?.title || id}
-          </h2>
-        </div>
-      </header>
+        {path.map((item, index) => (
+          <span class="subagent-breadcrumb-item" key={item.id}>
+            <span aria-hidden="true">/</span>
+            {index === path.length - 1 ? (
+              <span aria-current="page">{current?.title || item.title || item.id}</span>
+            ) : (
+              <button type="button" onClick={() => onNavigate(path.slice(0, index + 1))}>
+                {item.title || item.id}
+              </button>
+            )}
+          </span>
+        ))}
+      </nav>
       {!connected && (
         <p class="subagent-view-status" role="status">
           Disconnected.
         </p>
       )}
       {connected && error && (
-        <div class="subagent-view-status">
-          <span role="status">{error.message}</span>
-          {error.canRetry && (
-            <button
-              type="button"
-              onClick={() => {
-                heading.current?.focus({ preventScroll: true });
-                setRetry((value) => value + 1);
-              }}
-            >
-              Retry
-            </button>
-          )}
-        </div>
-      )}
-      {connected && !error && !current && (
         <p class="subagent-view-status" role="status">
-          Loading subagent…
+          {error}
         </p>
       )}
       {id && current && (

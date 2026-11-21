@@ -7,76 +7,26 @@
   width: 100%;
 }
 
-.subagent-view-header {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-  padding: 6px 12px 8px;
-  border-bottom: 1px solid var(--border-subtle);
-}
-
-.subagent-back {
-  flex: none;
-  min-height: 36px;
-  padding: 4px 9px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 6px;
-  background: var(--surface-input);
-}
-
-.subagent-back:hover {
-  background: var(--surface-hover);
-}
-
-.subagent-view-titles {
-  min-width: 0;
-  flex: 1;
-}
-
-.subagent-view-titles h2 {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
-  margin: 0;
-  color: var(--text-primary);
-  font-size: 15px;
-  line-height: 1.4;
-  overflow-wrap: anywhere;
-}
-
-.subagent-view-titles h2:focus-visible,
-.subagent-view-header button:focus-visible {
-  outline: 2px solid currentColor;
-  outline-offset: 2px;
-}
-
 .subagent-breadcrumb {
   display: flex;
+  flex: none;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
-  min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: thin;
+  padding: 8px 12px;
   color: var(--text-secondary);
-  font-size: 12px;
-  white-space: nowrap;
+  font-size: 13px;
+  overflow-wrap: anywhere;
 }
 
 .subagent-breadcrumb-item {
   display: inline-flex;
-  flex: none;
   align-items: center;
   gap: 6px;
+  min-width: 0;
 }
 
 .subagent-breadcrumb button {
-  overflow: hidden;
-  flex: none;
-  max-width: min(160px, 46vw);
-  min-height: 28px;
   border: 0;
   padding: 4px;
   background: transparent;
@@ -84,8 +34,6 @@
   font: inherit;
   cursor: pointer;
   text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .subagent-breadcrumb button:hover {
@@ -93,12 +41,13 @@
   text-decoration: underline;
 }
 
+.subagent-breadcrumb button:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
 .subagent-view-status {
-  display: flex;
   flex: none;
-  align-items: center;
-  gap: 8px;
-  min-height: 28px;
   margin: 4px 16px;
   color: var(--text-secondary);
   font-size: 12px;

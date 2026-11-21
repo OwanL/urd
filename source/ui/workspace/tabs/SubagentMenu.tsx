@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import type { SubagentLink } from "../../chat/subagents/SubagentNavigation.ts";
 import { Icon } from "../../controls/Icon.tsx";
 import { Popover } from "../../controls/Popover.tsx";
-import { Tooltip } from "../../controls/Tooltip.tsx";
 import { subagentPaths } from "./SubagentPaths.ts";
 import "./subagent-menu.css";
 
@@ -19,131 +18,171 @@ export function SubagentMenu({
   busy: boolean;
   dragging: boolean;
   load: (rootId: string, signal: AbortSignal) => Promise<readonly SubagentLink[]>;
-  onOpen: (rootId: string, path: readonly SubagentLink[], opener: HTMLButtonElement | null) => void;
+  onOpen: (rootId: string, path: readonly SubagentLink[]) => void;
 }) {
   const anchor = useRef<HTMLButtonElement>(null);
-  const [open, setOpen] = useState(false);
-  const [focused, setFocused] = useState(false);
-  const [paths, setPaths] = useState<SubagentLink[][]>([]);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const [requested, setRequested] = useState(false);
+  const [explicit, setExplicit] = useState(false);
+  const [links, setLinks] = useState<readonly SubagentLink[]>([]);
   const [failed, setFailed] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [pageVisible, setPageVisible] = useState(() => !document.hidden);
-
-  const close = useCallback(() => {
-    setOpen(false);
-    setPaths([]);
-    setFailed(false);
-    setLoaded(false);
-  }, []);
-
-  useLayoutEffect(() => {
-    if (!busy && !open && focused && document.activeElement === anchor.current)
-      document.getElementById(`tab-${rootId}`)?.focus({ preventScroll: true });
-  }, [busy, open, focused, rootId]);
+  const paths = subagentPaths(rootId, links);
+  const visible = requested && (explicit || paths.length > 0);
 
   useEffect(() => {
-    if (!open || !pageVisible || document.hidden || dragging) return;
+    if (!requested || !pageVisible || dragging) return;
     const controller = new AbortController();
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const publish = (next: SubagentLink[][], unavailable: boolean) => {
-      const item = document.activeElement;
-      const key = item instanceof HTMLElement ? item.dataset.agentPath : undefined;
-      const surface = item?.closest<HTMLElement>(".tab-subagents-popover");
-      if (
-        key &&
-        surface?.parentElement?.contains(anchor.current) &&
-        !next.some((p) => pathKey(p) === key)
-      )
-        surface.focus({ preventScroll: true });
-      setPaths(next);
-      setFailed(unavailable);
-      setLoaded(true);
-    };
+    void load(rootId, controller.signal).then(
+      (result) => {
+        if (controller.signal.aborted) return;
+        setLinks(result);
+        setFailed(false);
+        setLoaded(true);
+      },
+      () => {
+        if (controller.signal.aborted) return;
+        setFailed(true);
+        setLoaded(true);
+      },
+    );
+    return () => controller.abort();
+  }, [requested, pageVisible, dragging, rootId, load]);
+
+  useEffect(() => {
+    if (!visible || !busy || !loaded || !pageVisible || dragging) return;
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout>;
     const refresh = async () => {
       try {
         const result = await load(rootId, controller.signal);
-        if (controller.signal.aborted) return;
-        publish(subagentPaths(rootId, result), false);
+        if (!controller.signal.aborted) {
+          setLinks(result);
+          setFailed(false);
+        }
       } catch {
-        if (controller.signal.aborted) return;
-        publish([], true);
+        if (!controller.signal.aborted) setFailed(true);
       }
-      if (busy) timer = setTimeout(() => void refresh(), 2000);
+      if (!controller.signal.aborted) timer = setTimeout(() => void refresh(), 2000);
     };
-    void refresh();
+    timer = setTimeout(() => void refresh(), 2000);
     return () => {
       controller.abort();
       clearTimeout(timer);
     };
-  }, [open, pageVisible, dragging, busy, rootId, load]);
+  }, [visible, busy, loaded, pageVisible, dragging, rootId, load]);
+
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const close = useCallback(() => {
+    clearTimeout(timer.current);
+    setRequested(false);
+    setExplicit(false);
+    setLinks([]);
+    setFailed(false);
+    setLoaded(false);
+  }, []);
+  const leave = useCallback(() => {
+    if (explicit) return;
+    clearTimeout(timer.current);
+    timer.current = setTimeout(close, 250);
+  }, [explicit, close]);
+  const enter = () => {
+    clearTimeout(timer.current);
+  };
 
   useEffect(() => {
-    if (!open) return;
-    const visibilityChanged = () => setPageVisible(!document.hidden);
+    const visibilityChanged = () => {
+      setPageVisible(!document.hidden);
+      if (document.hidden) close();
+    };
     document.addEventListener("visibilitychange", visibilityChanged);
-    visibilityChanged();
     return () => document.removeEventListener("visibilitychange", visibilityChanged);
-  }, [open]);
+  }, [close]);
 
   useEffect(() => {
-    if (dragging && open) close();
-  }, [dragging, open, close]);
+    if (dragging) close();
+  }, [dragging, close]);
 
-  if (!busy && !open && !focused) return null;
+  useEffect(() => {
+    const titleButton = anchor.current?.closest(".chat-tab")?.querySelector('[role="tab"]');
+    if (!titleButton) return;
+    const hover = (event: Event) => {
+      const pointer = event as PointerEvent;
+      if (pointer.pointerType === "touch" || pointer.buttons || document.hidden || dragging) return;
+      enter();
+      setRequested(true);
+    };
+    titleButton.addEventListener("pointerenter", hover);
+    titleButton.addEventListener("pointerleave", leave);
+    titleButton.addEventListener("pointerdown", close);
+    return () => {
+      titleButton.removeEventListener("pointerenter", hover);
+      titleButton.removeEventListener("pointerleave", leave);
+      titleButton.removeEventListener("pointerdown", close);
+    };
+  }, [dragging, leave, close]);
 
   return (
-    <span class="tab-subagents">
-      <Tooltip content="Live agents" placement="below" disabled={open || dragging}>
-        <button
-          ref={anchor}
-          type="button"
-          class="tab-subagents-button"
-          aria-label={`Agents in ${title}`}
-          aria-haspopup="dialog"
-          aria-expanded={open}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
-          onClick={() => (open ? close() : setOpen(true))}
-        >
-          <Icon name="subagents" />
-        </button>
-      </Tooltip>
-      {open && (
+    <span
+      class="tab-subagents"
+      onPointerEnter={(event) => {
+        if (event.pointerType === "touch" || event.buttons || document.hidden || dragging) return;
+        enter();
+        setRequested(true);
+      }}
+      onPointerLeave={leave}
+    >
+      <button
+        ref={anchor}
+        type="button"
+        class="tab-subagents-button"
+        aria-label={`Agents in ${title}`}
+        aria-haspopup="dialog"
+        aria-expanded={visible}
+        onClick={() => {
+          if (explicit) close();
+          else {
+            enter();
+            setExplicit(true);
+            setRequested(true);
+          }
+        }}
+      >
+        <Icon name="chevron" />
+      </button>
+      {visible && (
         <Popover
           anchor={anchor}
           class="tab-subagents-popover"
           label={`Agents in ${title}`}
+          autoFocus={explicit}
           onClose={close}
         >
-          <div class="tab-subagents-heading">Live agents</div>
-          {paths.map((path) => (
-            <button
-              type="button"
-              class="tab-subagent-entry"
-              key={pathKey(path)}
-              data-agent-path={pathKey(path)}
-              style={{ paddingLeft: `${10 + Math.min(path.length - 1, 3) * 16}px` }}
-              aria-label={path.map((item) => item.title).join(" / ")}
-              onClick={() => {
-                close();
-                onOpen(rootId, path, anchor.current);
-              }}
-            >
-              {path.length > 1 && <span class="tab-subagent-elbow" aria-hidden="true" />}
-              <span>{path[path.length - 1]!.title}</span>
-            </button>
-          ))}
-          {paths.length === 0 && (
-            <div class="tab-subagent-empty" role="status">
-              {!loaded ? "Loading…" : failed ? "Agents unavailable" : "No live agents"}
-            </div>
-          )}
+          <div onPointerEnter={enter} onPointerLeave={leave}>
+            {paths.map((path) => (
+              <button
+                type="button"
+                class="tab-subagent-entry"
+                key={path.map((item) => item.id).join("/")}
+                style={{ paddingLeft: `${10 + (path.length - 1) * 16}px` }}
+                onClick={() => {
+                  close();
+                  onOpen(rootId, path);
+                }}
+              >
+                {path.length > 1 && <span class="tab-subagent-elbow" aria-hidden="true" />}
+                {path[path.length - 1]!.title}
+              </button>
+            ))}
+            {explicit && paths.length === 0 && (
+              <div class="tab-subagent-empty">
+                {!loaded ? "Loading…" : failed ? "Agents unavailable" : "No agents"}
+              </div>
+            )}
+          </div>
         </Popover>
       )}
     </span>
   );
-}
-
-function pathKey(path: readonly SubagentLink[]): string {
-  return path.map((item) => item.id).join("/");
 }

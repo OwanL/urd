@@ -73,7 +73,8 @@ internal static class Program {
       Func<MessageMarkdownService>? createMarkdown = null, bool warmInstructions = false) {
     ArgumentNullException.ThrowIfNull(options);
     ArgumentNullException.ThrowIfNull(onReady);
-    PlaywrightConfig playwright = PlaywrightConfig.Read();
+    bool playwrightSupported = PlaywrightConfig.Supported;
+    IReadOnlyList<Uri> localBrowserOrigins = playwrightSupported ? PlaywrightConfig.ReadLocalOrigins() : [];
     Directory.CreateDirectory(options.DataRoot);
     // Keep the file, not a stale PID. The OS releases exclusive ownership when this handle/process exits.
     var directoryLock = new FileStream(Path.Combine(options.DataRoot, "urd.lock"),
@@ -109,10 +110,10 @@ internal static class Program {
           : null;
       manager = new SessionManager(store, client is { } supplied ? _ => supplied : providers.CreateChatClient,
           tools, preferences, new ModelSelector(providers));
-      if (playwright.Enabled)
+      if (playwrightSupported)
         manager.ConfigurePlaywright(options.DataRoot,
             () => Volatile.Read(ref servedOrigin)?.Port ?? 0,
-            playwright.LocalOrigins);
+            localBrowserOrigins);
       eventHub = new SessionEventHub(manager);
       // Initial local limits reuse the exercised workload; transient parser memory is separate.
       markdown = createMarkdown?.Invoke() ?? new MessageMarkdownService(new(
@@ -121,7 +122,7 @@ internal static class Program {
       manager.SessionClosed += markdown.CloseSession;
       app = CreateApplication(options, manager, providers, eventHub, markdown, preferences, store,
           () => Volatile.Read(ref servedOrigin));
-      app.MapSessionBrowserSignInRoutes(manager, playwright.Enabled);
+      app.MapSessionBrowserSignInRoutes(manager, playwrightSupported);
       var shutdownRequested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
       using var lifetimeStop = app.Lifetime.ApplicationStopping.Register(() => shutdownRequested.TrySetResult());
       using var callerStop = stopping.Register(app.Lifetime.StopApplication);

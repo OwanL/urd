@@ -50,9 +50,13 @@
 }
 
 @media (max-width: 480px) {
-  .browser-sign-in { margin-inline: 8px; }
+  .browser-sign-in {
+    margin-inline: 8px;
+  }
 }
 
 @media (pointer: coarse) {
-  .browser-sign-in button { min-height: 40px; }
+  .browser-sign-in button {
+    min-height: 40px;
+  }
 }

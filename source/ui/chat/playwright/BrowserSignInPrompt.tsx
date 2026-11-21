@@ -10,7 +10,12 @@ interface BrowserSignInPromptProps {
   notice: string | null;
 }
 
-export function BrowserSignInPrompt({ client, sessionId, connected, notice }: BrowserSignInPromptProps) {
+export function BrowserSignInPrompt({
+  client,
+  sessionId,
+  connected,
+  notice,
+}: BrowserSignInPromptProps) {
   const [handoff, setHandoff] = useState<BrowserSignIn | null>(null);
   const [sending, setSending] = useState(false);
   const [readFailed, setReadFailed] = useState(false);
@@ -18,14 +23,15 @@ export function BrowserSignInPrompt({ client, sessionId, connected, notice }: Br
   const refresh = useRef<() => void>(() => {});
   const revision = useRef(0);
   const gate = useRef(false);
-  const generation = useRef(0);
+  const generation = useRef({ value: 0 });
 
   useEffect(() => {
     let disposed = false;
+    const currentGeneration = generation.current;
     let reading = false;
     let dirty = false;
     const controller = new AbortController();
-    generation.current++;
+    currentGeneration.value++;
     gate.current = false;
     setSending(false);
     setHandoff(null);
@@ -55,7 +61,7 @@ export function BrowserSignInPrompt({ client, sessionId, connected, notice }: Br
     refresh.current = () => void read();
     return () => {
       disposed = true;
-      generation.current++;
+      currentGeneration.value++;
       controller.abort();
       refresh.current = () => {};
     };
@@ -67,19 +73,20 @@ export function BrowserSignInPrompt({ client, sessionId, connected, notice }: Br
 
   async function act(action: BrowserSignInAction) {
     if (!handoff || !connected || gate.current) return;
-    const started = generation.current;
+    const started = generation.current.value;
     gate.current = true;
     revision.current++;
     setSending(true);
     setActionError(null);
     try {
       await client.browserSignInAction(sessionId, handoff.id, action);
-      if (started === generation.current)
+      if (started === generation.current.value)
         setHandoff(action === "open" ? { ...handoff, stage: "opening" } : null);
     } catch {
-      if (started === generation.current) setActionError("Action not confirmed. Check the current sign-in state.");
+      if (started === generation.current.value)
+        setActionError("Action not confirmed. Check the current sign-in state.");
     } finally {
-      if (started === generation.current) {
+      if (started === generation.current.value) {
         revision.current++;
         gate.current = false;
         setSending(false);
@@ -100,16 +107,28 @@ export function BrowserSignInPrompt({ client, sessionId, connected, notice }: Br
           </div>
           <div class="browser-sign-in-actions">
             {handoff.stage === "requested" && (
-              <button type="button" disabled={!connected || sending} onClick={() => void act("open")}>
+              <button
+                type="button"
+                disabled={!connected || sending}
+                onClick={() => void act("open")}
+              >
                 Sign in
               </button>
             )}
             {handoff.stage === "visible" && (
-              <button type="button" disabled={!connected || sending} onClick={() => void act("continue")}>
+              <button
+                type="button"
+                disabled={!connected || sending}
+                onClick={() => void act("continue")}
+              >
                 Continue
               </button>
             )}
-            <button type="button" disabled={!connected || sending} onClick={() => void act("cancel")}>
+            <button
+              type="button"
+              disabled={!connected || sending}
+              onClick={() => void act("cancel")}
+            >
               Cancel
             </button>
           </div>
@@ -117,12 +136,18 @@ export function BrowserSignInPrompt({ client, sessionId, connected, notice }: Br
       )}
       {readFailed && (
         <div class="browser-sign-in-error" role="alert">
-          Couldn’t load sign-in. <button type="button" disabled={!connected || sending} onClick={() => refresh.current()}>Retry</button>
+          Couldn’t load sign-in.{" "}
+          <button type="button" disabled={!connected || sending} onClick={() => refresh.current()}>
+            Retry
+          </button>
         </div>
       )}
       {actionError && (
         <div class="browser-sign-in-error" role="alert">
-          {actionError} <button type="button" onClick={() => setActionError(null)}>Dismiss</button>
+          {actionError}{" "}
+          <button type="button" onClick={() => setActionError(null)}>
+            Dismiss
+          </button>
         </div>
       )}
     </section>

@@ -12,6 +12,9 @@ public sealed partial class SessionManager {
     playwright = new PlaywrightAutomation(this, dataRoot, hostPort, localOrigins);
   }
 
+  // LAN and authenticated browsing cannot own this host at the same time.
+  public IDisposable? PausePlaywrightForLan() => playwright?.PauseForLan();
+
   public async Task<BrowserSignInView?> ReadBrowserSignInAsync(Guid sessionId, CancellationToken cancellation = default) {
     PrimarySession session = await registry.RunOpenAsync(() => FindPrimary(sessionId, rejectChild: true)
         ?? throw new KeyNotFoundException($"Session '{sessionId}' does not exist."), cancellation);

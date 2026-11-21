@@ -1,18 +1,19 @@
 # Playwright browser automation
 
-Status: local Windows preview. The native tool, shared profile and chat handoff are implemented and locally tested with synthetic sessions. Twin Sandbox and real identity providers have not been qualified.
+Status: enabled by default on Windows. The native tool, shared profile and chat handoff are implemented and locally tested with synthetic sessions. Twin Sandbox and real identity providers have not been qualified.
 
 ## Try it locally
 
-Start a build containing this feature from a PowerShell session with:
+Start Urd normally. Playwright is available in primary chats, and Chromium is launched on demand. If Chromium is not cached, Urd provisions it on first use.
+
+Public sites need no setup. For local development, give the host the exact origins to allow, for example from PowerShell:
 
 ```powershell
-$env:URD_PLAYWRIGHT = '1'
 $env:URD_PLAYWRIGHT_LOCAL_ORIGINS = 'http://localhost:3000'
 .\Start.exe
 ```
 
-The second variable is optional for public sites. Supply comma-separated exact loopback origins for local development; the scheme, hostname, and port must match the URLs the app actually uses. Use the exact callback origin already registered with your identity provider. Chromium is provisioned on first use if it is not cached. LAN hosting is unavailable while the preview is enabled. If the browser is busy, finish or stop the other chat’s browser task first.
+Supply comma-separated origins if needed. Use the exact scheme, hostname, and port registered as the callback origin with your identity provider. Playwright pauses while unauthenticated LAN hosting is active. If a browser task is still running, finish or stop it before enabling LAN hosting.
 
 ## One browser profile
 

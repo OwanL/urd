@@ -2,16 +2,11 @@ using System.Net;
 
 namespace Urd.Server;
 
-internal sealed record PlaywrightConfig(bool OptedIn, IReadOnlyList<Uri> LocalOrigins) {
-  internal bool Enabled => OptedIn && OperatingSystem.IsWindows();
+internal static class PlaywrightConfig {
+  internal static bool Supported => OperatingSystem.IsWindows();
 
-  internal static PlaywrightConfig Read() {
-    bool optedIn = Environment.GetEnvironmentVariable("URD_PLAYWRIGHT") == "1";
-    if (!optedIn)
-      return new(false, []);
-
-    return new(true, ParseLocalOrigins(Environment.GetEnvironmentVariable("URD_PLAYWRIGHT_LOCAL_ORIGINS")));
-  }
+  internal static IReadOnlyList<Uri> ReadLocalOrigins() =>
+      ParseLocalOrigins(Environment.GetEnvironmentVariable("URD_PLAYWRIGHT_LOCAL_ORIGINS"));
 
   internal static IReadOnlyList<Uri> ParseLocalOrigins(string? value) {
     if (string.IsNullOrWhiteSpace(value))

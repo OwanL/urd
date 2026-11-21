@@ -6,12 +6,26 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.DependencyInjection;
+using Urd.Backend.Tests.Support;
 using Urd.Server;
 using Xunit;
 
 namespace Urd.Backend.Tests.Hosting;
 
 public sealed class PlaywrightHostingTests {
+  [Fact]
+  public async Task WindowsHostOffersPlaywrightWithoutLaunchingBrowser() {
+    using var database = new TemporaryDatabase();
+    await using var server = new RunningServer(RunningServer.OptionsForIsolatedWorkspace(database));
+    await server.WaitForReadyAsync();
+    using var response = await HttpTest.RequestAsync(server.Client, HttpMethod.Get, "/api/preferences/resources");
+    response.EnsureSuccessStatusCode();
+    using var resources = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+    var tools = resources.RootElement.GetProperty("tools").EnumerateArray();
+    Assert.Equal(OperatingSystem.IsWindows(), tools.Any(tool => tool.GetProperty("name").GetString() == "playwright"));
+    Assert.False(Directory.Exists(Path.Combine(Path.GetDirectoryName(database.Path)!, "playwright-profile")));
+  }
+
   [Fact]
   public void LocalOriginSettingsAllowExactLoopbackOrigins() {
     IReadOnlyList<Uri> origins = PlaywrightConfig.ParseLocalOrigins("http://localhost:3000/, https://[::1]:3443");

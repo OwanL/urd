@@ -11,11 +11,30 @@ internal sealed class PlaywrightAutomation(SessionManager sessions, string dataR
   private Guid? execution;
   private PlaywrightRun? run;
   private bool operating;
+  private bool lanHosting;
+
+  internal IDisposable PauseForLan() {
+    lock (gate) {
+      if (operating || execution is not null)
+        throw new InvalidOperationException("Finish or stop the browser task before enabling LAN hosting.");
+      if (lanHosting)
+        throw new InvalidOperationException("Playwright is already paused for LAN hosting.");
+      lanHosting = true;
+      return new LanPause(this);
+    }
+  }
+
+  private void ResumeAfterLan() {
+    lock (gate)
+      lanHosting = false;
+  }
 
   public async Task<ToolOutput> RunAsync(Guid executionId, Func<PlaywrightRun, CancellationToken, Task<ToolOutput>> operation,
       CancellationToken cancellation) {
     cancellation.ThrowIfCancellationRequested();
     lock (gate) {
+      if (lanHosting)
+        return new ToolOutput("Playwright is unavailable while unauthenticated LAN hosting is active.", [], IsError: true);
       if (operating || execution is { } owner && owner != executionId)
         return new ToolOutput("The shared browser is busy. Wait for the current browser task to finish.", [], IsError: true);
       operating = true;
@@ -70,5 +89,11 @@ internal sealed class PlaywrightAutomation(SessionManager sessions, string dataR
       await network.DisposeAsync();
       throw;
     }
+  }
+
+  private sealed class LanPause(PlaywrightAutomation automation) : IDisposable {
+    private PlaywrightAutomation? owner = automation;
+
+    public void Dispose() => Interlocked.Exchange(ref owner, null)?.ResumeAfterLan();
   }
 }

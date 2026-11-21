@@ -78,9 +78,17 @@ export class SessionClient {
     );
   }
 
-  async getBrowserSignIn(sessionId: string, signal?: AbortSignal): Promise<{ handoff: BrowserSignIn | null }> {
+  async getBrowserSignIn(
+    sessionId: string,
+    signal?: AbortSignal,
+  ): Promise<{ handoff: BrowserSignIn | null }> {
     try {
-      return await requestJson(this.url(`/${encodeURIComponent(sessionId)}/browser-sign-in`), "GET", undefined, signal);
+      return await requestJson(
+        this.url(`/${encodeURIComponent(sessionId)}/browser-sign-in`),
+        "GET",
+        undefined,
+        signal,
+      );
     } catch (failure) {
       if (failure instanceof RequestError && failure.status === 404) return { handoff: null };
       throw failure;
@@ -89,7 +97,9 @@ export class SessionClient {
 
   browserSignInAction(sessionId: string, id: string, action: BrowserSignInAction): Promise<void> {
     return requestEmpty(
-      this.url(`/${encodeURIComponent(sessionId)}/browser-sign-in/${encodeURIComponent(id)}/${action}`),
+      this.url(
+        `/${encodeURIComponent(sessionId)}/browser-sign-in/${encodeURIComponent(id)}/${action}`,
+      ),
       "POST",
       {},
     );

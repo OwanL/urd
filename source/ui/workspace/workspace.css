@@ -19,49 +19,6 @@
   flex: none;
 }
 
-.workspace-options-popover {
-  --popover-max-width: 280px;
-  display: flex;
-  flex-direction: column;
-  width: min(280px, calc(100vw - 16px));
-  gap: 3px;
-  padding: 7px;
-}
-
-.workspace-options-action {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  width: 100%;
-  min-height: 36px;
-  padding: 6px 8px;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--text-primary);
-  text-align: left;
-  font-size: 12px;
-}
-
-.workspace-options-action:hover:not([aria-disabled="true"]) {
-  background: var(--surface-hover);
-}
-
-.workspace-options-action .icon {
-  width: 15px;
-  height: 15px;
-}
-
-.workspace-options-action.is-unavailable {
-  color: var(--text-secondary);
-  cursor: default;
-}
-
-.workspace-options-unavailable {
-  margin-left: auto;
-  font-size: 11px;
-}
-
 .empty-workspace {
   flex: 1;
 }

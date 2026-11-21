@@ -21,10 +21,10 @@ bucket and directory recovery.
 
 The workspace has closable, reorderable local tabs, transcript, model and reasoning
 selectors, Send, Stop and integrated [provider settings](provider-management.md#browser-settings).
-Tabs take the header's remaining width beside New chat and Workspace options. Each tab fits within
+Tabs take the header's remaining width beside New chat, Settings and Snooze. Each tab fits within
 its scroll strip; activation, title changes and strip resizing reveal the active tab without fighting
-a drag. Tabs have a preferred width of 180px and truncate long titles. Workspace options holds Settings
-and the unavailable Snooze action; Settings has Providers, General, Model buckets and Prepass tabs.
+a drag. Tabs have a preferred width of 180px and truncate long titles. Settings and the unavailable
+Snooze action are separate header buttons; Settings has Providers, General, Model buckets and Prepass tabs.
 The fresh-chat screen shows working-directory controls first, then a
 subtle separator and labeled 24h and 7d API cost totals. These are rolling 24-hour and 168-hour windows,
 not calendar days.

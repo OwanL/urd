@@ -1,9 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { IconButton } from "../controls/IconButton.tsx";
-import { Icon } from "../controls/Icon.tsx";
-import { Popover } from "../controls/Popover.tsx";
 import { Settings } from "../settings/Settings.tsx";
-import { Tooltip } from "../controls/Tooltip.tsx";
 import { ProviderClient } from "../providers/ProviderClient.ts";
 import { PreferencesClient } from "../preferences/PreferencesClient.ts";
 import { preferenceSaveBlocks, usePreferences } from "../preferences/usePreferences.ts";
@@ -113,7 +110,6 @@ export function Workspace({
     setSettingsOpen(true);
   };
   const settingsAnchor = useRef<HTMLButtonElement>(null);
-  const [optionsOpen, setOptionsOpen] = useState(false);
   const newChatButton = useRef<HTMLButtonElement>(null);
   const { lastSelection, chats } = workspace.state;
   const tabs = navigation.ready ? workspace.state.tabs : noTabs;
@@ -209,57 +205,26 @@ export function Workspace({
             if (connected) void create();
           }}
         />
-        <Tooltip
-          content="Workspace options"
+        <IconButton
+          buttonRef={settingsAnchor}
+          icon="settings"
+          label="Settings"
           placement="below"
-          disabled={optionsOpen || settingsOpen}
-        >
-          <button
-            ref={settingsAnchor}
-            type="button"
-            class="icon-button workspace-options-trigger"
-            aria-label="Workspace options"
-            aria-haspopup="dialog"
-            aria-expanded={optionsOpen || settingsOpen}
-            onClick={() => {
-              if (settingsOpen) setSettingsOpen(false);
-              else setOptionsOpen((open) => !open);
-            }}
-          >
-            <Icon name="more" />
-          </button>
-        </Tooltip>
+          aria-haspopup="dialog"
+          aria-expanded={settingsOpen}
+          onClick={() => {
+            if (settingsOpen) setSettingsOpen(false);
+            else openSettings();
+          }}
+        />
+        <IconButton
+          icon="moon"
+          label="Snooze"
+          hint="Snooze — not available yet"
+          placement="below"
+          aria-disabled="true"
+        />
       </header>
-      {optionsOpen && (
-        <Popover
-          anchor={settingsAnchor}
-          class="workspace-options-popover"
-          label="Workspace options"
-          placement="below"
-          onClose={() => setOptionsOpen(false)}
-        >
-          <button
-            type="button"
-            class="workspace-options-action"
-            onClick={() => {
-              setOptionsOpen(false);
-              openSettings();
-            }}
-          >
-            <Icon name="settings" />
-            <span>Settings</span>
-          </button>
-          <button
-            type="button"
-            class="workspace-options-action is-unavailable"
-            aria-disabled="true"
-          >
-            <Icon name="moon" />
-            <span>Snooze</span>
-            <span class="workspace-options-unavailable">Not available yet</span>
-          </button>
-        </Popover>
-      )}
       <Settings
         open={settingsOpen}
         anchor={settingsAnchor}

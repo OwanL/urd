@@ -1,7 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
 import type { PromptCacheSummary, PromptCacheTotals } from "../../usage/Usage.ts";
 import { UsageClient } from "../../usage/UsageClient.ts";
-import { promptCacheCoverage, promptCacheText } from "./PromptCachePresentation.ts";
+import { promptCacheText } from "./PromptCachePresentation.ts";
 
 // Tooltip mounts this content only while open.
 export function PromptCacheDetails({
@@ -32,7 +32,7 @@ export function PromptCacheDetails({
 
   return (
     <div class="prompt-cache-details">
-      <span>Prompt cache</span>
+      <span>Cache</span>
       {summary && (
         <dl class="prompt-cache-rows">
           <PromptCacheRow label="Last turn" totals={summary.lastTurn} />
@@ -49,14 +49,10 @@ export function PromptCacheDetails({
 }
 
 function PromptCacheRow({ label, totals }: { label: string; totals: PromptCacheTotals | null }) {
-  const coverage = promptCacheCoverage(totals);
   return (
     <div class="prompt-cache-row">
       <dt>{label}</dt>
-      <dd>
-        {promptCacheText(totals)}
-        {coverage && <span class="tooltip-detail">{coverage}</span>}
-      </dd>
+      <dd>{promptCacheText(totals)}</dd>
     </div>
   );
 }

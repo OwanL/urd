@@ -133,7 +133,7 @@ and private/no-store response rules.
 
 The composer's Context window tooltip shows **Last turn** and **Session** cache
 percentages with uncached input counts. It reads on open, not with the cost chip's
-polling. Partial coverage lists the number of requests used for the calculation.
+polling. Results based on only some requests are marked partial.
 
 `GET /api/usage/prompt-cache?sessionId=<guid>` reads the session's settled
 conversation requests, including tool-loop follow-ups and settled requests in active,

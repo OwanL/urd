@@ -7,13 +7,8 @@ export function promptCacheText(totals: PromptCacheTotals | null): string {
   if (totals.reportedRequests === 0) return "Not reported";
 
   const uncached = totals.inputTokens - totals.cachedInputTokens;
-  return `${formatCacheShare(totals.cachedInputTokens, totals.inputTokens)} cached · ${formatUsageCount(uncached)} uncached`;
-}
-
-export function promptCacheCoverage(totals: PromptCacheTotals | null): string | null {
-  if (!totals || totals.reportedRequests === 0 || totals.reportedRequests === totals.totalRequests)
-    return null;
-  return `${formatUsageCount(totals.reportedRequests)} of ${formatUsageCount(totals.totalRequests)} requests reported`;
+  const partial = totals.reportedRequests < totals.totalRequests ? " (partial)" : "";
+  return `${formatCacheShare(totals.cachedInputTokens, totals.inputTokens)} cached · ${formatUsageCount(uncached)} uncached${partial}`;
 }
 
 function formatCacheShare(cached: number, input: number): string {

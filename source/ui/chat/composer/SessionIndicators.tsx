@@ -73,6 +73,10 @@ export function SessionIndicators({
   const compactAction = compactStatus ?? (onCheckCompaction ? "Check compaction" : "Compact");
   const actionAvailable =
     compactionStatus === null && (canCompact || onCheckCompaction !== undefined);
+  const compactionHelp =
+    !compactStatus && !actionAvailable && compactionUnavailableReason !== compactionMessage
+      ? compactionUnavailableReason
+      : null;
   const contextAccessibleLabel = `Context window: ${contextLabel}${contextDetail ? `, ${contextDetail.toLowerCase()}` : ""}`;
   const ratio = contextUsage && contextWindow ? contextUsage.usedTokens / contextWindow : 0;
   const incomplete = workingTime?.hasUnknownDuration || (fenced && Boolean(startedAt));
@@ -103,20 +107,12 @@ export function SessionIndicators({
         </span>
         <Tooltip
           dismissOnClick={false}
-          disabled={compactionStatus === "queued"}
+          disabled={
+            compactionStatus === "queued" ||
+            (!usageActive && !compactStatus && !compactionMessage && !compactionHelp)
+          }
           content={
             <div class="session-context-details">
-              <span>Context window</span>
-              <span class="tooltip-detail">{contextLabel}</span>
-              {contextDetail && <span class="tooltip-detail">{contextDetail}</span>}
-              {compactStatus && <span class="tooltip-detail">{compactStatus}</span>}
-              {compactionMessage && <span class="tooltip-detail">{compactionMessage}</span>}
-              {!compactStatus &&
-                !actionAvailable &&
-                compactionUnavailableReason &&
-                compactionUnavailableReason !== compactionMessage && (
-                  <span class="tooltip-detail">{compactionUnavailableReason}</span>
-                )}
               {usageActive && (
                 <PromptCacheDetails
                   key={sessionId}
@@ -124,6 +120,9 @@ export function SessionIndicators({
                   refreshKey={usageRefresh}
                 />
               )}
+              {compactStatus && <span class="tooltip-detail">{compactStatus}</span>}
+              {compactionMessage && <span class="tooltip-detail">{compactionMessage}</span>}
+              {compactionHelp && <span class="tooltip-detail">{compactionHelp}</span>}
             </div>
           }
         >

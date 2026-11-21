@@ -1,9 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  promptCacheCoverage,
-  promptCacheText,
-} from "../../../chat/composer/PromptCachePresentation.ts";
+import { promptCacheText } from "../../../chat/composer/PromptCachePresentation.ts";
 
 void test("cache percentages use the token totals and keep partial coverage explicit", () => {
   const totals = {
@@ -12,8 +9,11 @@ void test("cache percentages use the token totals and keep partial coverage expl
     reportedRequests: 45,
     totalRequests: 46,
   };
-  assert.equal(promptCacheText(totals), "95.9% cached · 132,026 uncached");
-  assert.equal(promptCacheCoverage(totals), "45 of 46 requests reported");
+  assert.equal(promptCacheText(totals), "95.9% cached · 132,026 uncached (partial)");
+  assert.equal(
+    promptCacheText({ ...totals, totalRequests: 45 }),
+    "95.9% cached · 132,026 uncached",
+  );
 });
 
 void test("reported zero is distinct from missing cache data and no activity", () => {
@@ -23,8 +23,6 @@ void test("reported zero is distinct from missing cache data and no activity", (
   assert.equal(promptCacheText(missing), "Not reported");
   assert.equal(promptCacheText({ ...missing, totalRequests: 0 }), "No recorded requests");
   assert.equal(promptCacheText(null), "No completed turn");
-  assert.equal(promptCacheCoverage(cold), null);
-  assert.equal(promptCacheCoverage(missing), null);
 });
 
 void test("rounded percentages do not turn a small miss or hit into an exact one", () => {

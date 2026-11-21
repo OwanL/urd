@@ -136,10 +136,10 @@
   align-items: stretch;
   font-size: 12px;
 }
-.prompt-cache-details {
-  margin-top: 5px;
-  padding-top: 5px;
-  border-top: 1px solid var(--border-subtle);
+.prompt-cache-details:not(:last-child) {
+  margin-bottom: 5px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--border-subtle);
 }
 .prompt-cache-rows {
   display: grid;

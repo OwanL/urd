@@ -28,7 +28,7 @@ internal sealed class StartingResourcePruner(
       IReadOnlyList<DiscoveredInstructionDocument> candidates, int protectedCount,
       CancellationToken cancellation, string? indexWarning = null) =>
       PruneAsync(candidates, protectedCount, AuxiliaryModelPurpose.Instructions, "instructions",
-          $"{InstructionPruningGuidance.Text}\n{FileManifestGuidance.Text}",
+          InstructionPruningGuidance.Text,
           indexWarning,
           document => document.Identity,
           documents => InstructionManifest(documents),
@@ -39,7 +39,7 @@ internal sealed class StartingResourcePruner(
       IReadOnlyList<DiscoveredSkill> candidates, int protectedCount, CancellationToken cancellation,
       string? indexWarning = null) =>
       PruneAsync(candidates, protectedCount, AuxiliaryModelPurpose.Skills, "skills",
-          $"{SkillPruningGuidance.Text}\n{FileManifestGuidance.Text}",
+          SkillPruningGuidance.Text,
           indexWarning,
           skill => skill.Identity,
           skills => SkillManifest(skills),
@@ -168,7 +168,7 @@ internal sealed class StartingResourcePruner(
   }
 
   private ChatMessage[] CreateSelectorInput(string categoryBrief, object[] metadata) => [
-    new(ChatRole.System, $"{categoryBrief}\n{ResourceSelectionGuidance.Text}"),
+    new(ChatRole.System, $"{categoryBrief}\n{SharedPruningGuidance.Text}"),
     new(ChatRole.User, $"""
         Task:
         {taskInput}

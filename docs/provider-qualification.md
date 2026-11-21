@@ -90,6 +90,29 @@ failure mode. Native fidelity and already-sent wire representation retain their 
 coverage; this live check observes saved envelopes/results and successful continuation rather
 than recording raw authenticated traffic.
 
+### ChatGPT plan: prompt-cache check — 2026-11-21
+
+A bounded, synthetic `gpt-6-luna` check used the public Responses endpoint with
+Urd's ChatGPT authorization, `store:false`, encrypted reasoning and full history
+replay. The probe bypassed Urd's session loop; no tools ran. Each follow-up
+retained the prior input and appended the native output and another short user
+message. Only returned usage counts and diagnostic classifications were examined.
+
+- Four consecutive requests (~2,150–2,200 input tokens) reported zero cache
+  reads and zero writes. All three follow-ups requested a comparison against the
+  preceding response; all returned `unavailable`, not a classified miss reason.
+- Six interleaved calls compared no key with a stable `prompt_cache_key` (three
+  calls per arm, ~15,800 input tokens each). Each arm had its own synthetic
+  prefix to avoid warming the other. All six returned zero reads and zero writes.
+
+A stable key was accepted but did not restore reuse in this test. It does not
+establish a plan-wide restriction, a cacheable-length threshold, or the cause
+of misses on other models. [OpenAI's caching guide](https://developers.openai.com/api/docs/guides/prompt-caching)
+documents automatic routing from GPT-5.6 onward; a key separates accounting,
+not a switch to enable writes. Do not infer subscription deductions from API
+equivalent costs. A cross-route comparison needs the same model, prefix length,
+workload and reasoning effort, and a positive control that actually records a hit.
+
 ### Local Ollama: compatible Chat Completions
 
 Qualified the existing Ollama **0.40.13** service at `http://127.0.0.1:11434/v1` with

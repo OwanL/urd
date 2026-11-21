@@ -149,6 +149,31 @@ account's Luna token counts. Verify the actual Urd SDK request and observe
 Astra/Sol use before generalizing. No transport change is needed for replay
 correctness, and none was made for these experiments.
 
+Ordinary Urd conversations now set `session-id` on the built-in ChatGPT route
+using the durable session GUID, including across reopen. Child sessions use their
+own GUIDs. Auxiliary calls, probes, API-key and custom routes are unchanged.
+
+#### Warm follow-up latency: HTTP vs WebSocket delta
+
+A direct Luna protocol benchmark compared full-history HTTP with continuation on
+one WebSocket. Both sent a stable session header. Three independent pairs of chats
+(one ~16k and two ~41k synthetic prefixes) each ran one cold request and three
+serial follow-ups per arm, alternating arm order. All 18 warm responses reported
+cache reads. Timing starts before encoding the request and ends at the first
+nonempty output text delta or the completed event; it excludes UI and tool time.
+
+| Warm latency, 9 follow-ups per arm | HTTP | WebSocket |
+| --- | ---: | ---: |
+| Median first visible text | 1.994 s | 0.918 s |
+| Median completion | 2.075 s | 1.016 s |
+
+WebSocket completion was faster in 7/9 pairs. Mean paired saving was 0.85 s;
+20 similar serial follow-ups would save about 17 s before connection setup
+(0.84–0.92 s per socket here). The continuation frame was 284 bytes versus
+74–196 kB of HTTP JSON, before any transport encoding. This measures the combined
+transport and continuation path, not proof that upload alone caused the difference.
+Retest real tool loops including reconnection before making WebSockets the default.
+
 ### Local Ollama: compatible Chat Completions
 
 Qualified the existing Ollama **0.40.13** service at `http://127.0.0.1:11434/v1` with

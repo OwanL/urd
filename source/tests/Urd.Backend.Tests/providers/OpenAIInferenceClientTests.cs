@@ -34,6 +34,30 @@ public sealed class OpenAIInferenceClientTests {
     Assert.Equal([ChatRole.System, ChatRole.System, ChatRole.User], history.Select(message => message.Role));
   }
 
+  [Fact]
+  public async Task OpenAIApiKeyRouteDoesNotSendSessionIdentity() {
+    Guid sessionId = Guid.NewGuid();
+    var options = Options();
+    options.AdditionalProperties = new() { [OpenAIInferenceClient.SessionIdProperty] = sessionId };
+    var state = new ProviderState(
+        new(Guid.NewGuid(), "OpenAI", ProviderRoute.OpenAI, LlmApi.OpenAIResponses,
+            new Uri("https://api.openai.com/v1/"), AuthenticationMethod.ApiKey),
+        7, 2, null, new("synthetic-key", null, null, null, null, []), false, null);
+    using var handler = new ScriptedOpenAIHandler(Responses([Message]));
+    using var http = new HttpClient(handler);
+
+    await foreach (var _ in new OpenAIInferenceClient(http).GetStreamingResponseAsync(
+        state, History(), options, default)) { /* Drain before reading the wire. */ }
+
+    ScriptedOpenAIRequest request = Assert.Single(handler.Requests);
+    Assert.Equal("Bearer synthetic-key", request.Authorization);
+    Assert.Empty(request.SessionIds!);
+    using var document = JsonDocument.Parse(request.Body);
+    Assert.DoesNotContain(OpenAIInferenceClient.SessionIdProperty, document.RootElement.GetRawText(), StringComparison.OrdinalIgnoreCase);
+    Assert.DoesNotContain("session-id", request.Body, StringComparison.OrdinalIgnoreCase);
+    Assert.DoesNotContain(sessionId.ToString(), request.Body, StringComparison.OrdinalIgnoreCase);
+  }
+
   [Theory]
   [InlineData("response.failed", ProviderFailure.ProviderUnavailable)]
   [InlineData("response.incomplete", ProviderFailure.IncompleteResponse)]

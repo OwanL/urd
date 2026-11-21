@@ -78,6 +78,7 @@ public sealed class ProviderSessionExecutionTests {
       Assert.Equal(1, effects);
       Assert.Equal(2, initialHandler.Requests.Count);
       Assert.All(initialHandler.Requests, request => Assert.Null(request.Authorization));
+      Assert.All(first.Requests.Concat(done.Requests), request => Assert.Empty(request.SessionIds!));
       startingInstructions = WireInstructions(api, initialHandler.Requests[0]);
       Assert.NotEmpty(startingInstructions);
       Assert.Equal(startingInstructions, WireInstructions(api, initialHandler.Requests[1]));
@@ -117,6 +118,7 @@ public sealed class ProviderSessionExecutionTests {
       Assert.Equal(2, StoredExecutions.Read(database).Count);
       Assert.All(StoredExecutions.Read(database), execution => Assert.Equal(ExecutionOutcome.Completed, execution.Outcome));
       Assert.Equal(2, done.StreamDisposals);
+      Assert.All(done.Requests, request => Assert.Empty(request.SessionIds!));
       await AssertPublicTextAsync(reopened.Session, "hello", "done", "done");
     }
     Assert.Equal(1, reopenedHandler.DisposeCalls);
@@ -144,6 +146,7 @@ public sealed class ProviderSessionExecutionTests {
     using var store = UrdStore.Open(database.Path);
     using var manager = new ProviderManager(store, () => FakeOpenAIIdentity.Callback, transport, FakeOpenAIIdentity.Issuer);
     PrimarySession? session = null;
+    SubagentSession? child = null;
     IChatClient? client = null;
     try {
       ProviderConnection connection = await manager.AddChatGptAsync("Synthetic ChatGPT");
@@ -210,8 +213,35 @@ public sealed class ProviderSessionExecutionTests {
       Assert.Equal("call_fixture", (string?)resultInput["call_id"]);
       Assert.Contains(ToolOutputText, resultInput["output"]!.ToJsonString(), StringComparison.Ordinal);
       Assert.Equal("followup", WireText(JsonSerializer.SerializeToElement(inputs[2][^1]!["content"])));
+      Assert.All(first.Requests.Concat(done.Requests), request => AssertSessionHeader(request, record.Id));
+
+      await session.StopAcceptingUserMessagesAsync();
+      await session.StopExecutionAsync().WaitAsync(TestTimeout);
+      SessionRecord otherRecord = store.Sessions.CreatePrimary(Guid.NewGuid(), Path.GetDirectoryName(database.Path)!);
+      Assert.NotEqual(record.Id, otherRecord.Id);
+      session = new(otherRecord, store, _ => activeClient, tools);
+      await Send(session, "other", selection);
+      Assert.Equal(4, transport.Requests.Count);
+      AssertSessionHeader(done.Requests[^1], otherRecord.Id);
+
+      await session.StopAcceptingUserMessagesAsync();
+      await session.StopExecutionAsync().WaitAsync(TestTimeout);
+      session = null;
+      SessionRecord childRecord = store.Sessions.CreateSubagent(Guid.NewGuid(), record.Id, "owning-call");
+      Assert.NotEqual(record.Id, childRecord.Id);
+      child = new(Assert.IsType<SessionRecord>(store.Sessions.Read(childRecord.Id)), store, _ => activeClient, tools);
+      Guid childExecution = await child.StartAssignmentAsync("child task", null, selection).WaitAsync(TestTimeout);
+      Assert.Equal(ExecutionOutcome.Completed,
+          (await child.WaitForExecutionFinishAsync(childExecution).WaitAsync(TestTimeout)).Outcome);
+      Assert.Equal(5, transport.Requests.Count);
+      AssertSessionHeader(done.Requests[^1], childRecord.Id);
+      Assert.DoesNotContain(record.Id.ToString(), done.Requests[^1].SessionIds!);
     } finally {
       try {
+        if (child is not null) {
+          await child.StopAcceptingUserMessagesAsync();
+          await child.StopExecutionAsync().WaitAsync(TestTimeout);
+        }
         if (session is not null) {
           await session.StopAcceptingUserMessagesAsync();
           await session.StopExecutionAsync().WaitAsync(TestTimeout);
@@ -393,6 +423,12 @@ public sealed class ProviderSessionExecutionTests {
     Assert.Equal(settlement, Assert.Single(history.Settlements));
     Assert.Equal(settlement.Error, Assert.Single(StoredExecutions.ReadRequests(database)).Error);
     Assert.Single(handler.Requests);
+  }
+
+  private static void AssertSessionHeader(ScriptedOpenAIRequest request, Guid sessionId) {
+    Assert.Equal(sessionId.ToString(), Assert.Single(request.SessionIds!));
+    Assert.DoesNotContain(sessionId.ToString(), request.Body, StringComparison.OrdinalIgnoreCase);
+    Assert.DoesNotContain("session-id", request.Body, StringComparison.OrdinalIgnoreCase);
   }
 
   private static string ToolResponse(LlmApi api, bool background = false) {

@@ -4,7 +4,7 @@ namespace Urd.Core.Providers;
 
 // Scoped to one SDK stream. Response headers and native updates count as progress,
 // even if neither produces visible assistant text.
-internal sealed class InferenceStreamProgress(ProviderCancellation stop, TimeSpan timeout) : PipelinePolicy {
+internal sealed class InferenceStreamProgress(ProviderCancellation stop, TimeSpan timeout, Guid? sessionId = null) : PipelinePolicy {
   private bool receivedHeaders;
   private bool receivedUpdate;
 
@@ -26,14 +26,21 @@ internal sealed class InferenceStreamProgress(ProviderCancellation stop, TimeSpa
   }
 
   public override void Process(PipelineMessage message, IReadOnlyList<PipelinePolicy> pipeline, int currentIndex) {
+    AddSessionHeader(message);
     ProcessNext(message, pipeline, currentIndex);
     RecordHeaders();
   }
 
   public override async ValueTask ProcessAsync(PipelineMessage message, IReadOnlyList<PipelinePolicy> pipeline,
       int currentIndex) {
+    AddSessionHeader(message);
     await ProcessNextAsync(message, pipeline, currentIndex).ConfigureAwait(false);
     RecordHeaders();
+  }
+
+  private void AddSessionHeader(PipelineMessage message) {
+    if (sessionId is { } id)
+      message.Request.Headers.Set("session-id", id.ToString("D"));
   }
 
   private void RecordHeaders() {

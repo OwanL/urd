@@ -15,13 +15,16 @@ namespace Urd.Core.Providers;
 
 // One streaming exchange. The manager owns credentials, cancellation and the borrowed transport.
 internal sealed class OpenAIInferenceClient(HttpClient httpClient, TimeSpan? readTimeout = null) {
+  internal const string SessionIdProperty = "urd.conversation.session-id";
   private static readonly TimeSpan defaultReadTimeout = TimeSpan.FromMinutes(2);
 
   internal async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(ProviderState state,
       IEnumerable<ChatMessage> messages, ChatOptions options,
       [EnumeratorCancellation] CancellationToken cancellationToken) {
     using var readStop = new ProviderCancellation(Timeout.InfiniteTimeSpan, cancellationToken);
-    var progress = new InferenceStreamProgress(readStop, readTimeout ?? defaultReadTimeout);
+    Guid? sessionId = TakeSessionId(ref options);
+    var progress = new InferenceStreamProgress(readStop, readTimeout ?? defaultReadTimeout,
+        state.Connection.Route == ProviderRoute.ChatGpt ? sessionId : null);
     IChatClient client;
     IReadOnlyList<ChatMessage> history;
     ChatOptions wireOptions;
@@ -102,6 +105,16 @@ internal sealed class OpenAIInferenceClient(HttpClient httpClient, TimeSpan? rea
       // Calls and the positive finish are published only after native iteration AND cleanup.
       yield return final;
     }
+  }
+
+  private static Guid? TakeSessionId(ref ChatOptions options) {
+    if (options.AdditionalProperties?.TryGetValue(SessionIdProperty, out object? value) != true)
+      return null;
+
+    options = options.Clone();
+    options.AdditionalProperties = new(options.AdditionalProperties!);
+    options.AdditionalProperties.Remove(SessionIdProperty);
+    return value is Guid id ? id : null;
   }
 
   private static RequestContextEstimate? TakeContextEstimate(ref ChatOptions options) {

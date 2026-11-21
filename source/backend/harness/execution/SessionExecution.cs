@@ -356,7 +356,8 @@ internal sealed class SessionExecution : IDisposable {
             ? new ReasoningOptions { Effort = effort } : null,
         Tools = [.. offeredTools],
         AdditionalProperties = new() {
-          [UsageContext.PropertyName] = new UsageContext(session.Id, ExecutionId, "conversation")
+          [UsageContext.PropertyName] = new UsageContext(session.Id, ExecutionId, "conversation"),
+          [OpenAIInferenceClient.SessionIdProperty] = session.Id
         }
       };
       List<ChatMessage> input = [.. context.Instructions, .. request.Messages];

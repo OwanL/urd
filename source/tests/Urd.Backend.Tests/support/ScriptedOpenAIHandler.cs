@@ -16,7 +16,8 @@ internal sealed class ScriptedOpenAIHandler(string response, string contentType 
 
   protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) {
     string body = request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync(cancellationToken);
-    Requests.Add(new(request.Method, request.RequestUri!, request.Headers.Authorization?.ToString(), body));
+    Requests.Add(new(request.Method, request.RequestUri!, request.Headers.Authorization?.ToString(), body,
+        request.Headers.TryGetValues("session-id", out var values) ? values.ToArray() : []));
     var stream = new ScriptStream(Encoding.UTF8.GetBytes(response), this);
     return new HttpResponseMessage(status) {
       RequestMessage = request,
@@ -55,4 +56,5 @@ internal sealed class ScriptedOpenAIHandler(string response, string contentType 
   }
 }
 
-internal sealed record ScriptedOpenAIRequest(HttpMethod Method, Uri Uri, string? Authorization, string Body);
+internal sealed record ScriptedOpenAIRequest(HttpMethod Method, Uri Uri, string? Authorization, string Body,
+    string[]? SessionIds = null);

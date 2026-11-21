@@ -103,16 +103,16 @@ internal sealed class InstructionResourceDiscovery {
 
   private static DiscoveredSkill? ReadSkill(string file, string? workingDirectory = null) {
     Dictionary<string, string> fields;
+    long sizeBytes;
     try {
-      if (workingDirectory is null) {
-        fields = SkillFrontmatter.Read(file);
-      } else {
-        using FileStream? stream = OpenProjectFile(file, workingDirectory);
-        if (stream is null)
-          return null;
-        using var reader = new StreamReader(stream);
-        fields = SkillFrontmatter.Read(reader);
-      }
+      using FileStream? stream = workingDirectory is null
+          ? File.OpenRead(file)
+          : OpenProjectFile(file, workingDirectory);
+      if (stream is null)
+        return null;
+      sizeBytes = stream.Length;
+      using var reader = new StreamReader(stream);
+      fields = SkillFrontmatter.Read(reader);
     } catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) {
       return null;
     }
@@ -120,7 +120,7 @@ internal sealed class InstructionResourceDiscovery {
       return null;
 
     string name = fields.GetValueOrDefault("name") ?? Path.GetFileName(Path.GetDirectoryName(file)!);
-    return new(name, description, Path.GetFullPath(file));
+    return new(name, description, Path.GetFullPath(file)) { SizeBytes = sizeBytes };
   }
 
   // Validate the opened object, not the pathname that may have changed since indexing.

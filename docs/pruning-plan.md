@@ -62,12 +62,23 @@ preferences. Existing role/scope applicability and ordering still apply. Additio
 instruction documents remain pruning candidates unless protected; an `AGENTS.md` or
 append-system resource is not automatically protected merely because of its format.
 
-**Instruction input decision (2026-11-15):** supply the instruction pruner with the
-full contents of every unprotected candidate document upfront, not just paths or
-summaries requiring follow-up reads. For a confirmed instruction-context overflow,
-retry with the largest unprotected files omitted first (by UTF-8 body size)
-and surface a cumulative warning. Protected documents remain excluded. This does not
-select full skill-body loading or change the other categories' input contracts.
+**Selector payload decision (2026-11-21; supersedes the 2026-11-15 full-body
+instruction-input requirement):** keep mandatory candidate catalog fields, paths and
+opaque candidate IDs, but include at most 16 KiB per selector of optional serialized text
+and reference fields. Each serialized text or reference string is limited to 2 KiB.
+These limits cover only optional candidate text/references, including their JSON field
+overhead; mandatory catalog metadata, paths and IDs, selector instructions and task
+input are outside the budget, so this is not a total prompt cap. A reference identifies
+only an identical text field on another candidate, never its whole file. Omitted text
+is not evidence of irrelevance. Skill files remain individually selectable by exact
+path/ID. The selector may inspect a file with the existing optional `read` tool; it
+accepts path/offset/limit, returns bounded pages, and multiple independent reads may
+be batched in one response.
+After selection, skills remain listed by name, description and path in starting context;
+their bodies are loaded on demand by the main agent when relevant, not injected by
+pruning. A confirmed instruction-context overflow still retries with the largest
+unprotected files omitted first (by UTF-8 body size) and surfaces a cumulative warning.
+Protected documents remain excluded.
 
 A historical Windows test with a scripted provider rejected the first selection request for
 1,900 files (1,226,256 UTF-8 bytes of file bodies). The retry omitted the largest file;
@@ -471,7 +482,8 @@ followed by the new user message for manual post-compaction continuation. Omit r
 continuation context from post-compaction pruning inputs. Do not copy the main system
 instructions and thereby reintroduce protected documents.
 Candidate payloads are skill name/description with paths grouped by identical metadata,
-existing tool declarations, and full unprotected instruction text with source/scope.
+existing tool declarations, and unprotected instruction catalog fields with source/scope
+and path IDs; optional text/references follow the 2026-11-21 selector payload decision.
 Every skill file remains independently selectable by its exact path, even when it shares
 metadata with other files. Treat candidate contents as selection material. The model returns
 kept candidate IDs, not rewritten resources; the pruner validates/maps them back to the

@@ -7,14 +7,16 @@ using Urd.Core.Execution;
 using Urd.Core.Preferences;
 using Urd.Core.Providers;
 using Urd.Core.Sessions;
+using Urd.Core.Tools;
 using Urd.Core.Usage;
 using Xunit;
+using Xunit.Abstractions;
 using static Urd.Backend.Tests.Support.ScriptedResponses;
 using static Urd.Backend.Tests.Support.TestAsync;
 
 namespace Urd.Backend.Tests.Context;
 
-public sealed class StartingResourcePrunerTests {
+public sealed class StartingResourcePrunerTests(ITestOutputHelper output) {
   [Fact]
   public async Task SuccessfulPruningRetainsOriginalsInCandidateOrderAndRecordsCounts() {
     string taskInput = "Implement the selected feature.";
@@ -65,7 +67,9 @@ public sealed class StartingResourcePrunerTests {
   public async Task RepeatedSkillMetadataRetainsDistinctSelectableFiles() {
     const string sharedDescription = "Repeated skill metadata across several installations.";
     DiscoveredSkill first = Skill("first", sharedDescription) with { Name = "shared" };
-    DiscoveredSkill second = Skill("second", sharedDescription) with { Name = "shared" };
+    DiscoveredSkill second = Skill("second", sharedDescription) with {
+      Name = "shared", Path = Path.Combine(Path.GetTempPath(), "other-installation", "second.SKILL.md")
+    };
     DiscoveredSkill different = Skill("different", "Different guidance.") with { Name = "shared" };
     string answer = JsonSerializer.Serialize(new { keptIds = new[] { "s3", "s2" } });
     var client = new ScriptedChatClient(token => TextUpdates([answer], token));
@@ -78,14 +82,17 @@ public sealed class StartingResourcePrunerTests {
     Assert.False(result.IsFallback);
     Assert.Equal(new[] { different, second }, result.Retained);
     using JsonDocument candidates = ParseCandidates(client.LastRequest);
-    JsonElement group = Assert.Single(candidates.RootElement.EnumerateArray());
-    Assert.Equal(Path.GetDirectoryName(first.Path), group.GetProperty("Directory").GetString());
-    JsonElement[] files = group.GetProperty("Files").EnumerateArray().ToArray();
+    JsonElement[] groups = candidates.RootElement.EnumerateArray().ToArray();
+    Assert.Equal(new[] { Path.GetDirectoryName(first.Path), Path.GetDirectoryName(second.Path) },
+        groups.Select(group => group.GetProperty("Directory").GetString()));
+    JsonElement[] files = groups.SelectMany(group => group.GetProperty("Files").EnumerateArray()).ToArray();
     Assert.Equal(new[] { "s1", "s2", "s3" }, files.Select(file => file.GetProperty("Id").GetString()));
     Assert.Equal(new[] { first, different, second }.Select(skill => Path.GetFileName(skill.Path)),
         files.Select(file => file.GetProperty("File").GetString()));
-    Assert.Equal(new[] { first, different, second }.Select(skill => skill.Description),
-        files.Select(file => file.GetProperty("Description").GetString()));
+    Assert.Equal(first.Description, files[0].GetProperty("Description").GetString());
+    Assert.Equal(different.Description, files[1].GetProperty("Description").GetString());
+    Assert.False(files[2].TryGetProperty("Description", out _));
+    Assert.Equal("s1", files[2].GetProperty("DescriptionRef").GetString());
   }
 
   [Fact]
@@ -381,6 +388,138 @@ public sealed class StartingResourcePrunerTests {
     Assert.Same(first, Assert.Single(result.Retained));
     Assert.Equal(new[] { (State: "running", Error: (string?)indexWarning), (State: "completed", Error: (string?)indexWarning) },
         statuses.Select(status => (status.State, status.Error)).ToArray());
+  }
+
+  [Theory]
+  [InlineData(false)]
+  [InlineData(true)]
+  public async Task ManifestBudgetKeepsEveryCandidateSelectable(bool skills) {
+    string large = new('x', 3000);
+    string[] values = Enumerable.Range(0, 40).Select(index => $"{index:D2}" + new string('é', 250)).ToArray();
+    var client = new ScriptedChatClient(token => TextUpdates([skills ? "{\"keptIds\":[\"s1\",\"s43\"]}" : "{\"keptIds\":[\"i1\",\"i43\"]}"], token));
+    await using RunningParent parent = await StartParentAsync();
+    var runner = new ConversationRunner(parent.Fixture.Session.Recorder, _ => client, [], parent.Fixture.Session.WorkingDirectory);
+    var pruner = CreatePruner(runner, _ => Task.CompletedTask);
+    if (skills) {
+      DiscoveredSkill[] candidates = new[] { Skill("large", large) }.Concat(values.Select((value, index) => Skill($"skill-{index}", value)))
+          .Concat([Skill("duplicate", values[0]), Skill("large-copy", large)]).ToArray();
+      var result = await pruner.PruneAsync(candidates, 0, CancellationToken.None).WaitAsync(TestTimeout);
+      Assert.False(result.IsFallback);
+      Assert.Equal(new[] { candidates[0], candidates[^1] }, result.Retained);
+    } else {
+      DiscoveredInstructionDocument[] candidates = new[] { Instruction("large", large) }.Concat(values.Select((value, index) => Instruction($"instruction-{index}", value)))
+          .Concat([Instruction("duplicate", values[0]), Instruction("large-copy", large)]).ToArray();
+      var result = await pruner.PruneAsync(candidates, 0, CancellationToken.None).WaitAsync(TestTimeout);
+      Assert.False(result.IsFallback);
+      Assert.Equal(new[] { candidates[0], candidates[^1] }, result.Retained);
+    }
+    using JsonDocument manifest = ParseCandidates(client.LastRequest);
+    JsonElement[] files = manifest.RootElement.EnumerateArray().SelectMany(group => group.GetProperty("Files").EnumerateArray()).ToArray();
+    Assert.Equal(43, files.Length);
+    Assert.Equal(43, files.Select(file => file.GetProperty("Id").GetString()).Distinct().Count());
+    string field = skills ? "Description" : "Content";
+    string reference = field + "Ref";
+    Assert.False(files[0].TryGetProperty(field, out _));
+    Assert.Equal(skills ? "s2" : "i2", files[41].GetProperty(reference).GetString());
+    Assert.False(files[42].TryGetProperty(field, out _));
+    if (skills)
+      Assert.False(files[42].TryGetProperty(reference, out _));
+    else
+      Assert.Equal("i1", files[42].GetProperty(reference).GetString());
+    var metadataOnly = System.Text.Json.Nodes.JsonNode.Parse(manifest.RootElement.GetRawText())!.AsArray();
+    foreach (var file in metadataOnly.SelectMany(group => group!["Files"]!.AsArray())) {
+      file!.AsObject().Remove(field);
+      file.AsObject().Remove(reference);
+    }
+    int bytes = System.Text.Encoding.UTF8.GetByteCount(manifest.RootElement.GetRawText())
+        - System.Text.Encoding.UTF8.GetByteCount(metadataOnly.ToJsonString());
+    Assert.InRange(bytes, 1, 16 * 1024);
+    Assert.Contains(files, file => !file.TryGetProperty(field, out _) && !file.TryGetProperty(reference, out _));
+  }
+
+  [Theory]
+  [InlineData(false)]
+  [InlineData(true)]
+  public async Task BatchedReadsSelectFromEvidenceAndReportInputAgainstPreviousApproach(bool skills) {
+    string directory = Path.Combine(Path.GetTempPath(), $"urd-pruner-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(directory);
+    try {
+      string[] paths = Enumerable.Range(0, 30).Select(index => Path.Combine(directory,
+          $"{(index < 3 ? "audit" : "unrelated")}-{index}.md")).ToArray();
+      string[] bodies = paths.Select((_, index) => $"{(index < 2 ? "RELEVANT" : "IRRELEVANT")}-{index}\n" + new string('x', 3000)).ToArray();
+      for (int index = 0; index < paths.Length; index++)
+        await File.WriteAllTextAsync(paths[index], bodies[index]);
+      int turn = 0;
+      var readIds = new Dictionary<string, string>();
+      var client = new ScriptedChatClient((request, token) => {
+        if (Interlocked.Increment(ref turn) == 1) {
+          using JsonDocument manifest = ParseCandidates(request.Messages);
+          var calls = manifest.RootElement.EnumerateArray().SelectMany(group => group.GetProperty("Files").EnumerateArray()
+              .Where(file => file.GetProperty("File").GetString()!.StartsWith("audit-", StringComparison.Ordinal))
+              .Select(file => (Id: file.GetProperty("Id").GetString()!,
+                  Path: Path.Combine(group.GetProperty("Directory").GetString()!, file.GetProperty("File").GetString()!)))).ToArray();
+          foreach (var call in calls)
+            readIds.Add($"read-{call.Id}", call.Id);
+          return ToolBatch(token, calls.Select(call => new FunctionCallContent(
+              $"read-{call.Id}", "read", new Dictionary<string, object?> {
+                ["path"] = call.Path, ["offset"] = 1, ["limit"] = 1
+              })).ToArray());
+        }
+        FunctionResultContent[] results = request.Messages.SelectMany(message => message.Contents).OfType<FunctionResultContent>().ToArray();
+        Assert.Equal(3, results.Length);
+        string[] selected = results.Where(result => result.Result?.ToString()?.Contains("RELEVANT-", StringComparison.Ordinal) == true
+                && result.Result?.ToString()?.Contains("IRRELEVANT-", StringComparison.Ordinal) != true)
+            .Select(result => readIds[result.CallId]).ToArray();
+        return TextUpdates([JsonSerializer.Serialize(new { keptIds = selected })], token);
+      });
+      await using RunningParent parent = await StartParentAsync();
+      var runner = new ConversationRunner(parent.Fixture.Session.Recorder, _ => client, [new ReadTool(new FileMutationQueue())], directory);
+      var pruner = new StartingResourcePruner(runner, (_, _) => Task.FromResult(TestLlmSelection.DefaultResolution),
+          _ => Task.CompletedTask, "Audit the project.");
+      object[] previousManifest;
+      if (skills) {
+        DiscoveredSkill[] candidates = paths.Select((path, index) => new DiscoveredSkill($"skill-{index}",
+            index < 3 ? "Audit guidance; inspect to determine applicability." : "Unrelated workflow guidance.", path)).ToArray();
+        var result = await pruner.PruneAsync(candidates, 0, CancellationToken.None).WaitAsync(TestTimeout);
+        Assert.False(result.IsFallback);
+        Assert.Equal(candidates.Take(2), result.Retained);
+        previousManifest = candidates.Select((candidate, index) => (object)new {
+          Id = $"s{index + 1}",
+          File = Path.GetFileName(candidate.Path),
+          candidate.Name,
+          candidate.Description
+        }).ToArray();
+      } else {
+        DiscoveredInstructionDocument[] candidates = paths.Select((path, index) => new DiscoveredInstructionDocument(bodies[index], path, directory)).ToArray();
+        var result = await pruner.PruneAsync(candidates, 0, CancellationToken.None).WaitAsync(TestTimeout);
+        Assert.False(result.IsFallback);
+        Assert.Equal(candidates.Take(2), result.Retained);
+        previousManifest = candidates.Select((candidate, index) => (object)new {
+          Id = $"i{index + 1}",
+          File = Path.GetFileName(candidate.Path),
+          Content = candidate.Text,
+          candidate.Scope
+        }).ToArray();
+      }
+      Assert.Equal(2, client.Calls);
+      Assert.Equal(new[] { 0, 1 }, bodies.Select((body, index) => (body, index))
+          .Where(item => item.body.StartsWith("RELEVANT", StringComparison.Ordinal)).Select(item => item.index));
+      string initialUser = client.Requests[0][^1].Text;
+      int manifestStart = initialUser.IndexOf("Candidates:", StringComparison.Ordinal) + "Candidates:".Length;
+      string modeledPreviousUser = initialUser[..manifestStart] + JsonSerializer.Serialize(previousManifest);
+      int modeledPreviousPromptBytes = System.Text.Encoding.UTF8.GetByteCount(client.Requests[0][0].Text)
+          + System.Text.Encoding.UTF8.GetByteCount(modeledPreviousUser);
+      int selectorBytes = client.Requests.Sum(request => request.Sum(message =>
+          System.Text.Encoding.UTF8.GetByteCount(message.Text ?? "") + message.Contents.OfType<FunctionResultContent>()
+              .Sum(result => System.Text.Encoding.UTF8.GetByteCount(result.Result?.ToString() ?? "")) + message.Contents.OfType<FunctionCallContent>()
+              .Sum(call => System.Text.Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(call.Arguments)))));
+      output.WriteLine($"selector UTF-8 bytes (request-message text, serialized read-call arguments and read-result text summed across {client.Requests.Count} turns)={selectorBytes}; modeled prior one-turn prompt UTF-8 bytes (same system/task brief, {(skills ? "Id/File/Name/Description" : "Id/File/Content/Scope")} manifest)={modeledPreviousPromptBytes}");
+      if (!skills)
+        Assert.True(selectorBytes < modeledPreviousPromptBytes,
+            $"selector UTF-8 bytes={selectorBytes}, modeled prior prompt UTF-8 bytes={modeledPreviousPromptBytes}; selector turns={client.Requests.Count}, modeled prior turns=1");
+    } finally {
+      Directory.Delete(directory, recursive: true);
+    }
   }
 
   private static string[] CandidateIds(IReadOnlyList<ChatMessage> request) {

@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
 using Urd.Core.Execution;
 using Urd.Core.Preferences;
@@ -20,6 +21,8 @@ internal sealed class StartingResourcePruner(
       Combine each directory with its file name for the full path; use that path and the other fields to judge where and for which harness its guidance applies.
       Drop guidance clearly meant only for another harness unless the task requires following that harness's workflow.
       A directory name alone does not make otherwise portable guidance irrelevant.
+      An absent body or description without a reference was omitted, not evidence of irrelevance. SizeBytes may be null when unknown. Inspect files when needed using the existing read tool with path, offset (1-indexed line), and limit (lines); make multiple read calls in the same response when useful, and follow continuation offsets. Keep a candidate if uncertainty remains.
+      ContentRef and DescriptionRef refer only to the identical text field of another candidate ID, not to the candidate or its whole file; the referenced text may itself be omitted. Equal descriptions do not imply equal skill bodies.
       """;
 
   private readonly ConversationRunner runner = runner ?? throw new ArgumentNullException(nameof(runner));
@@ -40,9 +43,7 @@ internal sealed class StartingResourcePruner(
           """,
           indexWarning,
           document => document.Identity,
-          documents => documents.GroupBy(item => System.IO.Path.GetDirectoryName(item.Item.Path) ?? "")
-              .Select(group => new DirectoryCandidates(group.Key, group.Select(item => (object)new InstructionCandidate(
-                  item.Id, System.IO.Path.GetFileName(item.Item.Path), item.Item.Text, item.Item.Scope)).ToArray())).ToArray(),
+          documents => InstructionManifest(documents),
           document => new(document.Identity, System.IO.Path.GetFileName(document.Path), document.Path),
           document => Encoding.UTF8.GetByteCount(document.Text), cancellation);
 
@@ -52,15 +53,13 @@ internal sealed class StartingResourcePruner(
       PruneAsync(candidates, protectedCount, AuxiliaryModelPurpose.Skills, "skills",
           $"""
           Select the specialized skills that are relevant to the task. Keep a skill when its instructions may materially help.
-          Each file has a separate opaque candidate ID; combine its directory and file name to see its full path.
+          Each file has a separate opaque candidate ID; combine its directory and file name to see its full path. The directory identifies the skill's source, not a strict applicability scope; packaged skills can be useful elsewhere.
           Choose by name, description and path when sufficient; inspect a file only when it could change what you keep.
           {FileGuidanceScope}
           """,
           indexWarning,
           skill => skill.Identity,
-          skills => skills.GroupBy(item => System.IO.Path.GetDirectoryName(item.Item.Path) ?? "")
-              .Select(group => new DirectoryCandidates(group.Key, group.Select(item => (object)new SkillCandidate(
-                  item.Id, System.IO.Path.GetFileName(item.Item.Path), item.Item.Name, item.Item.Description)).ToArray())).ToArray(),
+          skills => SkillManifest(skills),
           skill => new(skill.Identity, skill.Name, skill.Path),
           null, cancellation);
 
@@ -245,8 +244,70 @@ internal sealed class StartingResourcePruner(
   private static InvalidDataException InvalidResult() =>
       new("The pruning response must contain exactly one keptIds string array.");
 
+  private const int InlineTextBudget = 16 * 1024;
+  private const int MaxInlineTextBytes = 2 * 1024;
+
+  private static object[] InstructionManifest(IEnumerable<(DiscoveredInstructionDocument Item, string Id)> candidates) {
+    var items = candidates.ToArray();
+    var text = AllocateText(items.Select(item => (item.Id, item.Item.Text)), "Content", "ContentRef", referenceOmitted: true);
+    return items.GroupBy(item => System.IO.Path.GetDirectoryName(item.Item.Path) ?? "")
+        .Select(group => new DirectoryCandidates(group.Key, group.Select(item => {
+          var inline = text[item.Id];
+          return (object)new InstructionCandidate(item.Id, System.IO.Path.GetFileName(item.Item.Path),
+              Encoding.UTF8.GetByteCount(item.Item.Text), item.Item.Scope, inline.Text, inline.Reference);
+        }).ToArray())).ToArray();
+  }
+
+  private static object[] SkillManifest(IEnumerable<(DiscoveredSkill Item, string Id)> candidates) {
+    var items = candidates.ToArray();
+    var text = AllocateText(items.Select(item => (item.Id, item.Item.Description)), "Description", "DescriptionRef", referenceOmitted: false);
+    return items.GroupBy(item => System.IO.Path.GetDirectoryName(item.Item.Path) ?? "")
+        .Select(group => new DirectoryCandidates(group.Key, group.Select(item => {
+          var inline = text[item.Id];
+          return (object)new SkillCandidate(item.Id, System.IO.Path.GetFileName(item.Item.Path),
+              item.Item.SizeBytes, item.Item.Name, inline.Text, inline.Reference);
+        }).ToArray())).ToArray();
+  }
+
+  // Each optional property adds a comma, quoted name, colon and serialized value.
+  // Text length is a lower bound on serialized bytes, so oversized bodies need no serialization.
+  private static Dictionary<string, (string? Text, string? Reference)> AllocateText(
+      IEnumerable<(string Id, string Text)> candidates, string textProperty, string referenceProperty, bool referenceOmitted) {
+    var items = candidates.Select((item, index) => (item.Id, item.Text, Index: index,
+        Bytes: item.Text.Length > MaxInlineTextBytes ? int.MaxValue : SerializedStringBytes(item.Text))).ToArray();
+    var result = new Dictionary<string, (string? Text, string? Reference)>(StringComparer.Ordinal);
+    var first = new Dictionary<string, string>(StringComparer.Ordinal);
+    int remaining = InlineTextBudget;
+    foreach (var item in items.OrderBy(item => item.Bytes).ThenBy(item => item.Index)) {
+      if (first.TryGetValue(item.Text, out string? reference)) {
+        int cost = referenceProperty.Length + 4 + SerializedStringBytes(reference);
+        if (cost <= remaining) {
+          result.Add(item.Id, (null, reference));
+          remaining -= cost;
+        } else {
+          result.Add(item.Id, (null, null));
+        }
+      } else {
+        int cost = item.Bytes == int.MaxValue ? int.MaxValue : textProperty.Length + 4 + item.Bytes;
+        bool include = item.Bytes <= MaxInlineTextBytes && cost <= remaining;
+        result.Add(item.Id, include ? (item.Text, null) : (null, null));
+        if (include)
+          remaining -= cost;
+        if (include || referenceOmitted)
+          first.Add(item.Text, item.Id);
+      }
+    }
+    return result;
+  }
+
+  private static int SerializedStringBytes(string value) => Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(value));
+
   private sealed record DirectoryCandidates(string Directory, object[] Files);
-  private sealed record InstructionCandidate(string Id, string File, string Content, string Scope);
-  private sealed record SkillCandidate(string Id, string File, string Name, string Description);
+  private sealed record InstructionCandidate(string Id, string File, long SizeBytes, string Scope,
+      [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Content,
+      [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ContentRef);
+  private sealed record SkillCandidate(string Id, string File, long? SizeBytes, string Name,
+      [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Description,
+      [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? DescriptionRef);
   private sealed record ToolCandidate(string Id, string Type, string Name, string? Description, JsonElement Schema);
 }

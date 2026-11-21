@@ -1,3 +1,4 @@
+using System.Text;
 using Urd.Core.Context;
 using Xunit;
 
@@ -60,19 +61,25 @@ public sealed class InstructionResourceDiscoveryTests : IDisposable {
 
   [Fact]
   public async Task DiscoversProjectAndPackagedSkillsIncludingDuplicateNames() {
-    Write("skills/diagnose/SKILL.md", Skill("diagnose", "Project diagnose."));
+    string projectSkillText = Skill("diagnose", "Project diagnose λ.");
+    string packagedSkillText = Skill("notes", "Take notes λ.");
+    Write("skills/diagnose/SKILL.md", projectSkillText);
     Write("a/b/deploy/SKILL.md", Skill("deploy", ">\n  Deploy the\n  service."));
     Write("untracked/SKILL.md", Skill("untracked", "Not versioned."));
     WritePackaged("diagnose/SKILL.md", Skill("diagnose", "Packaged diagnose."));
-    WritePackaged("notes/SKILL.md", Skill("notes", "Take notes."));
+    WritePackaged("notes/SKILL.md", packagedSkillText);
     WritePackaged("broken/SKILL.md", "no frontmatter");
     await using var catalog = CreateCatalog();
     var discovery = new InstructionResourceDiscovery(catalog, Packaged);
     DiscoveredInstructionResources resources = await discovery.FindAsync(Project, CancellationToken.None);
 
     Assert.Equal(
-      [("deploy", "Deploy the service."), ("diagnose", "Packaged diagnose."), ("diagnose", "Project diagnose."), ("notes", "Take notes."), ("untracked", "Not versioned.")],
+      [("deploy", "Deploy the service."), ("diagnose", "Packaged diagnose."), ("diagnose", "Project diagnose λ."), ("notes", "Take notes λ."), ("untracked", "Not versioned.")],
       resources.Skills.Select(skill => (skill.Name, skill.Description)).Order());
+    Assert.Equal((long)Encoding.UTF8.GetByteCount(projectSkillText),
+        resources.Skills.Single(skill => skill.Description == "Project diagnose λ.").SizeBytes!.Value);
+    Assert.Equal((long)Encoding.UTF8.GetByteCount(packagedSkillText),
+        resources.Skills.Single(skill => skill.Description == "Take notes λ.").SizeBytes!.Value);
     Assert.Equal(Path.GetFullPath(Path.Combine(Project, "a", "b", "deploy", "SKILL.md")),
         resources.Skills.Single(skill => skill.Name == "deploy").Identity);
 

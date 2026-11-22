@@ -23,6 +23,7 @@ export function QuestionPrompt({
   const field = useRef<HTMLTextAreaElement>(null);
   const focusEditor = useRef(false);
   const composing = useRef(false);
+  const questionId = useId();
   const editorId = useId();
   const hasChoices = question.answers.length > 0;
   const context = question.context?.trim();
@@ -34,54 +35,53 @@ export function QuestionPrompt({
   }
 
   useLayoutEffect(() => {
-    if (editing && focusEditor.current) field.current?.focus({ preventScroll: true });
+    if (editing && focusEditor.current) field.current?.focus();
     focusEditor.current = false;
   }, [editing]);
 
   return (
     <>
-      <div class="user-question-line">
-        <div class="user-question-heading">
-          <div class="user-question-title">
-            <span class="user-question-text">{question.question}</span>
-            {question.sourceTitle && (
-              <span class="user-question-source">
-                <Icon name="subagents" />
-                <span>{question.sourceTitle}</span>
-              </span>
-            )}
-          </div>
-          {context && <div class="user-question-context">{context}</div>}
+      <div class="user-question-heading">
+        <div class="user-question-title">
+          <h2 id={questionId}>{question.question}</h2>
+          {question.sourceTitle && (
+            <span class="user-question-source">
+              <Icon name="subagents" />
+              <span>{question.sourceTitle}</span>
+            </span>
+          )}
         </div>
-        {hasChoices && (
-          <div class="user-question-options">
-            {question.answers.map((option) => (
-              <button
-                key={option}
-                type="button"
-                disabled={disabled}
-                onClick={() => onAnswer(option)}
-              >
-                {option}
-              </button>
-            ))}
-            <button
-              ref={customButton}
-              class="user-question-other"
-              type="button"
-              aria-label="Other answer"
-              aria-expanded={editing}
-              aria-controls={editing ? editorId : undefined}
-              onClick={() => {
-                focusEditor.current = !editing;
-                setEditing(!editing);
-              }}
-            >
-              Other…
-            </button>
-          </div>
-        )}
+        {context && <p class="user-question-context">{context}</p>}
       </div>
+      {hasChoices && (
+        <div class="user-question-options" role="group" aria-labelledby={questionId}>
+          {question.answers.map((option) => (
+            <button
+              class="user-question-choice"
+              key={option}
+              type="button"
+              disabled={disabled}
+              onClick={() => onAnswer(option)}
+            >
+              {option}
+            </button>
+          ))}
+          <button
+            ref={customButton}
+            class="user-question-custom"
+            type="button"
+            aria-expanded={editing}
+            aria-controls={editing ? editorId : undefined}
+            onClick={() => {
+              focusEditor.current = !editing;
+              setEditing(!editing);
+            }}
+          >
+            <Icon name={editing ? "close" : "edit"} />
+            {editing ? "Hide reply" : "Write a reply"}
+          </button>
+        </div>
+      )}
       {showEditor && (
         <form
           id={editorId}
@@ -93,8 +93,9 @@ export function QuestionPrompt({
         >
           <textarea
             ref={field}
-            aria-label="Custom answer"
-            placeholder="Custom answer"
+            aria-label="Reply"
+            aria-describedby={questionId}
+            placeholder="Type a reply"
             rows={1}
             maxLength={8000}
             value={draft}
@@ -113,11 +114,22 @@ export function QuestionPrompt({
               } else if (event.key === "Escape" && hasChoices) {
                 event.stopPropagation();
                 setEditing(false);
-                customButton.current?.focus({ preventScroll: true });
+                customButton.current?.focus();
               }
             }}
           />
-          <IconButton type="submit" icon="send" label="Submit answer" disabled={!canSubmit} />
+          <IconButton
+            class="user-question-send"
+            type="submit"
+            icon="send"
+            label="Send reply"
+            hint={
+              <>
+                Send reply <kbd>Enter</kbd>
+              </>
+            }
+            disabled={!canSubmit}
+          />
         </form>
       )}
     </>

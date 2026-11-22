@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "preact/hooks";
+import { IconButton } from "../../controls/IconButton.tsx";
 import { RequestError } from "../../http/RequestError.ts";
 import type { SessionClient } from "../../sessions/SessionClient.ts";
 import type { UserQuestion } from "../../sessions/inputs/UserQuestion.ts";
@@ -143,13 +144,21 @@ export function UserQuestions({ client, sessionId, connected, notice }: UserQues
           />
           {questions.length > 1 && (
             <div class="user-question-pages">
-              <button type="button" aria-label="Previous question" onClick={() => move(-1)}>
-                ‹
-              </button>
-              {selectedIndex + 1} / {questions.length}
-              <button type="button" aria-label="Next question" onClick={() => move(1)}>
-                ›
-              </button>
+              <IconButton
+                class="user-question-previous"
+                icon="chevron"
+                label="Previous question"
+                onClick={() => move(-1)}
+              />
+              <span>
+                {selectedIndex + 1} / {questions.length}
+              </span>
+              <IconButton
+                class="user-question-next"
+                icon="chevron"
+                label="Next question"
+                onClick={() => move(1)}
+              />
             </div>
           )}
         </div>
